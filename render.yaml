@@ -1,0 +1,15 @@
+# Render Blueprint (optional). Prefer setting these in the Dashboard if Blueprint is not used.
+
+services:
+  - type: web
+    name: creolab-crm
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm install && npm run build --workspace=@creolab/web
+    startCommand: API_PORT=$PORT npm run start --workspace=@creolab/api
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "22"

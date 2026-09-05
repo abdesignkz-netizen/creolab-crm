@@ -2,6 +2,8 @@ import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import path from "node:path";
 import type { PrismaClient } from "@creolab/db";
 import {
   assignTaskSchema,
@@ -612,6 +614,24 @@ export function createApp(prisma: PrismaClient) {
     }
     res.status(202).json({ accepted: true });
   });
+
+  // Кабинет (Vite build) с того же origin — для Render / одного домена crm.creolab.kz
+  const webDist = path.resolve(process.cwd(), "apps/web/dist");
+  if (existsSync(webDist)) {
+    app.use(express.static(webDist, { index: false, maxAge: "1h" }));
+    app.get(/^(?!\/api\/|\/public\/|\/health$|\/ready$).*/, (_req, res) => {
+      res.sendFile(path.join(webDist, "index.html"));
+    });
+  } else {
+    app.get("/", (_req, res) => {
+      res
+        .status(200)
+        .type("html")
+        .send(
+          "<!doctype html><html><body style='font-family:sans-serif;padding:2rem'><h1>CREOLAB CRM API</h1><p>Кабинет ещё не собран. В Render Build Command должен быть: <code>npm install &amp;&amp; npm run build --workspace=@creolab/web</code></p><p><a href='/health'>/health</a></p></body></html>",
+        );
+    });
+  }
 
   app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     if (error && typeof error === "object" && "name" in error && error.name === "ZodError") {
