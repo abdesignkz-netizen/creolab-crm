@@ -41,7 +41,19 @@ const TASK_TYPES = [
   ["other", "Другое"],
 ] as const;
 
-const QUICK_SEGMENTS = [
+const QUICK_SEGMENTS: Array<{
+  id: string;
+  label: string;
+  body: {
+    datePreset?: string;
+    dateField?: string;
+    serviceCategories?: string[];
+    needsReply?: boolean;
+    missingNextAction?: boolean;
+    hot?: boolean;
+    hasOverdueTask?: boolean;
+  };
+}> = [
   { id: "today", label: "Все новые сегодня", body: { datePreset: "today", dateField: "lastContact" } },
   { id: "yesterday", label: "Все новые вчера", body: { datePreset: "yesterday", dateField: "lastContact" } },
   { id: "week", label: "За 7 дней", body: { datePreset: "last_7_days" } },
@@ -52,7 +64,7 @@ const QUICK_SEGMENTS = [
   { id: "next", label: "Нет следующего действия", body: { missingNextAction: true } },
   { id: "hot", label: "Горячие", body: { hot: true } },
   { id: "overdue", label: "Просроченная задача", body: { hasOverdueTask: true } },
-] as const;
+];
 
 const SERVICE_OPTIONS = [
   { id: "WEB", label: "Разработка сайта" },
