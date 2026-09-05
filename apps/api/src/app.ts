@@ -616,8 +616,13 @@ export function createApp(prisma: PrismaClient) {
   });
 
   // Кабинет (Vite build) с того же origin — для Render / одного домена crm.creolab.kz
-  const webDist = path.resolve(process.cwd(), "apps/web/dist");
-  if (existsSync(webDist)) {
+  const webDistCandidates = [
+    path.resolve(process.cwd(), "apps/web/dist"),
+    path.resolve(process.cwd(), "../web/dist"),
+    path.resolve(process.cwd(), "../../apps/web/dist"),
+  ];
+  const webDist = webDistCandidates.find((dir) => existsSync(path.join(dir, "index.html")));
+  if (webDist) {
     app.use(express.static(webDist, { index: false, maxAge: "1h" }));
     app.get(/^(?!\/api\/|\/public\/|\/health$|\/ready$).*/, (_req, res) => {
       res.sendFile(path.join(webDist, "index.html"));
