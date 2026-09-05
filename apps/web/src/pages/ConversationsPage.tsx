@@ -1,0 +1,367 @@
+import { useEffect, useState } from "react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { api } from "../lib/api";
+
+const FILTERS = [
+  ["all", "Все"],
+  ["unread", "Непрочитанные"],
+  ["needs_reply", "Нужен ответ"],
+  ["waiting_client", "Ждём клиента"],
+  ["ai", "AI"],
+  ["human", "У менеджера"],
+  ["today", "Сегодня"],
+  ["overdue", "Просроченные"],
+  ["no_topic", "Без темы"],
+] as const;
+
+function relativeLabel(minutes: number | null | undefined) {
+  if (minutes == null) return null;
+  if (minutes < 60) return `${minutes} мин назад`;
+  if (minutes < 60 * 24) return `${Math.floor(minutes / 60)} ч назад`;
+  return `${Math.floor(minutes / (60 * 24))} дн назад`;
+}
+
+export function ConversationsPage() {
+  const navigate = useNavigate();
+  const { id: selectedId } = useParams();
+  const [searchParams] = useSearchParams();
+  const [filter, setFilter] = useState<string>("all");
+  const [q, setQ] = useState("");
+  const [items, setItems] = useState<any[]>([]);
+  const [error, setError] = useState("");
+  const [workspace, setWorkspace] = useState<any>(null);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [showContext, setShowContext] = useState(false);
+  const focusReply = searchParams.get("focus") === "reply";
+
+  async function loadList() {
+    try {
+      const data: any = await api.conversations({ filter, q });
+      setItems(data.items || []);
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Ошибка");
+    }
+  }
+
+  async function loadWorkspace(id: string) {
+    try {
+      const data = await api.conversation(id);
+      setWorkspace(data);
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Диалог недоступен");
+      setWorkspace(null);
+    }
+  }
+
+  useEffect(() => {
+    loadList();
+  }, [filter]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => loadList(), 250);
+    return () => clearTimeout(timer);
+  }, [q]);
+
+  useEffect(() => {
+    if (selectedId) loadWorkspace(selectedId);
+    else setWorkspace(null);
+  }, [selectedId]);
+
+  const listPane = (
+    <div className="conv-list-pane">
+      <div className="page-head">
+        <h2>Диалоги</h2>
+      </div>
+      <input
+        className="conv-search"
+        value={q}
+        onChange={(event) => setQ(event.target.value)}
+        placeholder="Имя, телефон, компания, тема или сообщение"
+      />
+      <div className="chip-row">
+        {FILTERS.map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            className={filter === value ? "chip active" : "chip"}
+            onClick={() => setFilter(value)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {items.length === 0 ? (
+        <p className="empty">Пока нет диалогов. Новые обращения из подключённых каналов появятся здесь автоматически.</p>
+      ) : null}
+      <div className="conv-list">
+        {items.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            className={`conv-row ${selectedId === item.id ? "active" : ""} ${item.unread ? "unread" : ""}`}
+            onClick={() => navigate(`/conversations/${item.id}`)}
+          >
+            <div className="conv-row-top">
+              <b>{item.title}</b>
+              <span className="muted">{item.lastMessageLabel?.split(", ").pop() || item.lastMessageLabel}</span>
+            </div>
+            {item.phone ? <div className="muted">{item.phone}</div> : null}
+            <div className="conv-topic">{item.topic}</div>
+            <div className="muted">{item.sourceLine}</div>
+            <div className="conv-preview">«{item.lastMessagePreview}»</div>
+            <div className="conv-meta">
+              <span>
+                {[item.businessStatus, item.needsReply ? "Нужен ответ" : null, item.waitLabel]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </span>
+              <span className="badge">{item.modeLabel}</span>
+            </div>
+            {item.urgent ? <span className="urgent-dot" title="Срочно" /> : null}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  const chatPane = workspace ? (
+    <div className="conv-chat-pane">
+      <div className="conv-header">
+        <div>
+          <b>{workspace.client?.name || "Диалог"}</b>
+          <div className="muted">
+            {[workspace.client?.phone, workspace.conversation.sourceLine].filter(Boolean).join(" · ")}
+          </div>
+          <div className="conv-topic">{workspace.conversation.topic}</div>
+          {workspace.currentRequest ? (
+            <div className="muted">
+              По заявке: {workspace.currentRequest.title} · {workspace.currentRequest.statusLabel}
+            </div>
+          ) : (
+            <div className="muted">Заявка не определена</div>
+          )}
+        </div>
+        <div className="conv-header-actions">
+          <span className="badge">{workspace.conversation.modeLabel}</span>
+          <div className="muted">Ответственный: {workspace.conversation.assigneeName || "Не назначен"}</div>
+          <div className="actions">
+            {workspace.client?.id ? (
+              <Link className="btn secondary" to={`/contacts/${workspace.client.id}`}>
+                Карточка клиента
+              </Link>
+            ) : null}
+            <button type="button" className="btn secondary mobile-only" onClick={() => setShowContext(true)}>
+              Информация
+            </button>
+            {workspace.conversation.mode !== "human" ? (
+              <button
+                className="btn"
+                type="button"
+                onClick={() => api.takeConversation(workspace.conversation.id).then(() => loadWorkspace(workspace.conversation.id)).then(loadList)}
+              >
+                Передать менеджеру
+              </button>
+            ) : (
+              <button
+                className="btn secondary"
+                type="button"
+                onClick={() => api.returnToAi(workspace.conversation.id).then(() => loadWorkspace(workspace.conversation.id)).then(loadList)}
+              >
+                Вернуть AI
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="conv-context-strip">
+        <span>Первое обращение: {workspace.client?.firstContactLabel || "—"}</span>
+        <span>Последнее: {workspace.conversation.lastMessageLabel || "—"}</span>
+        <span>Последним написал: {workspace.conversation.lastWriterLabel}</span>
+        {workspace.conversation.needsReply ? (
+          <span className="warn-text">{workspace.conversation.waitLabel || "Нужен ответ"}</span>
+        ) : (
+          <span>Ждём клиента</span>
+        )}
+      </div>
+
+      {workspace.conversation.attentionReason && workspace.conversation.mode === "human" ? (
+        <div className="panel soft">
+          <b>Требуется менеджер</b>
+          <div className="muted">{workspace.conversation.attentionReason}</div>
+        </div>
+      ) : null}
+
+      <div className="conv-messages">
+        {workspace.messages.map((message: any) => (
+          <div
+            key={message.id}
+            className={`bubble ${message.direction === "inbound" || message.senderKind === "client" ? "in" : "out"}`}
+          >
+            <div className="bubble-meta">
+              <span>{message.actorLabel}</span>
+              <span>{message.createdLabel}</span>
+            </div>
+            <div>{message.text}</div>
+            {message.deliveryLabel ? <div className="muted tiny">{message.deliveryLabel}</div> : null}
+          </div>
+        ))}
+      </div>
+
+      <form
+        className="conv-composer"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          if (!text.trim()) return;
+          setBusy(true);
+          try {
+            await api.sendMessage(workspace.conversation.id, text.trim(), crypto.randomUUID());
+            setText("");
+            await loadWorkspace(workspace.conversation.id);
+            await loadList();
+          } catch (err) {
+            setError(err instanceof Error ? err.message : "Не отправилось");
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        <textarea
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+          autoFocus={focusReply}
+          placeholder={
+            workspace.conversation.mode === "human"
+              ? "Написать сообщение..."
+              : "Сначала передайте диалог менеджеру, затем отвечайте"
+          }
+          disabled={workspace.conversation.mode !== "human" || busy}
+        />
+        <button className="btn" disabled={workspace.conversation.mode !== "human" || busy}>
+          Отправить
+        </button>
+      </form>
+    </div>
+  ) : (
+    <div className="conv-chat-pane empty-pane">
+      <p className="muted">Выберите диалог слева</p>
+    </div>
+  );
+
+  const contextPane = workspace ? (
+    <aside className={`conv-context-pane ${showContext ? "open" : ""}`}>
+      <div className="page-head mobile-only">
+        <b>Контекст</b>
+        <button type="button" className="btn secondary" onClick={() => setShowContext(false)}>
+          Закрыть
+        </button>
+      </div>
+
+      <div className="panel soft">
+        <b>Сейчас</b>
+        <div>{workspace.control.situationLabel}</div>
+        <div className="muted">{workspace.control.waitLabel}</div>
+        {workspace.deal ? (
+          <div className="muted">
+            Сделка: {workspace.deal.title}
+            {workspace.deal.stage ? ` · ${workspace.deal.stage}` : ""}
+          </div>
+        ) : null}
+        {workspace.control.nextAction ? (
+          <div>
+            Следующее действие: {workspace.control.nextAction.title}
+            {workspace.control.nextAction.dueLabel ? ` · ${workspace.control.nextAction.dueLabel}` : ""}
+          </div>
+        ) : (
+          <div className="muted">Нет следующего действия</div>
+        )}
+        {workspace.control.overdue ? <div className="warn-text">Просрочено: {workspace.control.overdueTitle}</div> : null}
+      </div>
+
+      <div className="panel soft">
+        <b>Кратко</b>
+        <p>{workspace.client?.summary}</p>
+      </div>
+
+      <div className="panel soft">
+        <b>Клиент</b>
+        <div>{workspace.client?.name}</div>
+        <div className="muted">{workspace.client?.phone || "Телефон не указан"}</div>
+        {workspace.client?.companyName ? <div className="muted">{workspace.client.companyName}</div> : null}
+        {workspace.client?.id ? <Link to={`/contacts/${workspace.client.id}`}>Открыть карточку</Link> : null}
+      </div>
+
+      <div className="panel soft">
+        <b>Интерес / заявка</b>
+        <div>{workspace.conversation.topic}</div>
+        {workspace.currentRequest ? (
+          <>
+            <div className="muted">{workspace.currentRequest.statusLabel}</div>
+            {workspace.currentRequest.budgetLabel ? <div className="muted">Бюджет: {workspace.currentRequest.budgetLabel}</div> : null}
+            {workspace.currentRequest.desiredDeadline ? <div className="muted">Срок: {workspace.currentRequest.desiredDeadline}</div> : null}
+          </>
+        ) : (
+          <div className="muted">Заявка не определена</div>
+        )}
+      </div>
+
+      <div className="panel soft">
+        <b>Источник</b>
+        <div>{workspace.conversation.sourceLine}</div>
+        {workspace.attribution.utmCampaign ? (
+          <details>
+            <summary className="muted">Детали UTM</summary>
+            <div className="muted">Campaign: {workspace.attribution.utmCampaign}</div>
+            {workspace.attribution.landingPage ? <div className="muted">Landing: {workspace.attribution.landingPage}</div> : null}
+          </details>
+        ) : null}
+      </div>
+
+      {workspace.deal ? (
+        <div className="panel soft">
+          <b>Сделка</b>
+          <div>{workspace.deal.title}</div>
+          <div className="muted">
+            {workspace.deal.stage || workspace.deal.outcome}
+            {workspace.deal.amountMinor != null ? ` · ${Number(workspace.deal.amountMinor).toLocaleString("ru-RU")} ${workspace.deal.currency || "KZT"}` : ""}
+          </div>
+        </div>
+      ) : null}
+
+      <div className="panel soft">
+        <b>Определено из разговора</b>
+        <div className="muted">Услуга: {workspace.extracted.service || "не указана"}</div>
+        <div className="muted">Бюджет: {workspace.extracted.budget || "не определён"}</div>
+        <div className="muted">Срок: {workspace.extracted.deadline || "не указан"}</div>
+        <div className="muted">Компания: {workspace.extracted.company || "не указана"}</div>
+        <div className="muted">Город: {workspace.extracted.city || "не указан"}</div>
+      </div>
+
+      <div className="actions">
+        <Link className="btn secondary" to="/tasks">
+          Создать задачу
+        </Link>
+      </div>
+    </aside>
+  ) : (
+    <aside className="conv-context-pane desktop-only" />
+  );
+
+  return (
+    <section className={`conversations-layout ${selectedId ? "has-selection" : ""}`}>
+      {error ? <p className="error">{error}</p> : null}
+      {listPane}
+      {chatPane}
+      {contextPane}
+      {showContext ? <div className="conv-backdrop mobile-only" onClick={() => setShowContext(false)} /> : null}
+    </section>
+  );
+}
+
+/** Combined route: /conversations and /conversations/:id use same layout */
+export function ConversationsRoute() {
+  return <ConversationsPage />;
+}

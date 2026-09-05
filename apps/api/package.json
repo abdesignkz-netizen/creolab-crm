@@ -1,0 +1,31 @@
+{
+  "name": "@creolab/api",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "test": "CRM_USE_PGLITE=1 CRM_PGLITE_DIR=/tmp/creolab-crm-api-test node --import tsx --test --test-concurrency=1 src/**/*.test.ts ../../packages/contracts/src/**/*.test.ts"
+  },
+  "dependencies": {
+    "@creolab/contracts": "0.1.0",
+    "@creolab/db": "0.1.0",
+    "@creolab/integrations": "0.1.0",
+    "argon2": "^0.43.1",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.2",
+    "express": "^5.1.0",
+    "jose": "^6.1.0",
+    "xlsx": "^0.18.5",
+    "zod": "^4.1.5"
+  },
+  "devDependencies": {
+    "@types/cookie-parser": "^1.4.9",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.3.1",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}

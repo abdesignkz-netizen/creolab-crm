@@ -1,0 +1,28 @@
+{
+  "name": "@creolab/db",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "postinstall": "prisma generate --schema prisma/schema.prisma",
+    "generate": "prisma generate --schema prisma/schema.prisma",
+    "push": "prisma db push --schema prisma/schema.prisma",
+    "migrate": "prisma migrate dev --schema prisma/schema.prisma",
+    "seed": "tsx src/seed.ts",
+    "sql:diff": "prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script > prisma/init.sql"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.3.7",
+    "@prisma/client": "^6.15.0",
+    "argon2": "^0.43.1",
+    "pglite-prisma-adapter": "^0.6.1"
+  },
+  "devDependencies": {
+    "prisma": "^6.15.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}

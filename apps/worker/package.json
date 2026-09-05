@@ -1,0 +1,17 @@
+{
+  "name": "@creolab/worker",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "start": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@creolab/db": "0.1.0",
+    "dotenv": "^17.2.2"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}

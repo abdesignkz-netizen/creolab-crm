@@ -1,0 +1,24 @@
+{
+  "name": "creolab-ai-crm",
+  "private": true,
+  "version": "0.1.0",
+  "description": "CREOLAB AI CRM — независимое ядро с подключаемыми источниками заявок",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=@creolab/api",
+    "dev:web": "npm run dev --workspace=@creolab/web",
+    "dev:worker": "npm run dev --workspace=@creolab/worker",
+    "dev:mobile": "npm run start --workspace=@creolab/mobile",
+    "db:generate": "npm run generate --workspace=@creolab/db",
+    "db:push": "npm run push --workspace=@creolab/db",
+    "db:seed": "npm run seed --workspace=@creolab/db",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

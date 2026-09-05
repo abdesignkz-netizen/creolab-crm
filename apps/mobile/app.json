@@ -1,0 +1,34 @@
+{
+  "expo": {
+    "name": "CREOLAB CRM",
+    "slug": "creolab-ai-crm",
+    "scheme": "creolabcrm",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "backgroundColor": "#F4F1EA"
+    },
+    "ios": {
+      "bundleIdentifier": "kz.creolab.crm.dev",
+      "supportsTablet": true,
+      "associatedDomains": ["applinks:crm.creolab.kz"]
+    },
+    "android": {
+      "package": "kz.creolab.crm.dev",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [{ "scheme": "https", "host": "crm.creolab.kz" }],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ]
+    },
+    "plugins": ["expo-router", "expo-secure-store"],
+    "extra": {
+      "apiBaseUrl": "http://127.0.0.1:4100"
+    }
+  }
+}

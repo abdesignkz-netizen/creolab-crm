@@ -1,0 +1,36 @@
+openapi: 3.0.3
+info:
+  title: CREOLAB AI CRM API
+  version: "1.0.0"
+servers:
+  - url: http://localhost:4100
+paths:
+  /health:
+    get:
+      summary: Liveness
+      responses:
+        "200":
+          description: OK
+  /api/v1/auth/login:
+    post:
+      summary: Вход email/пароль, телефон не нужен
+  /api/v1/inquiries:
+    get:
+      summary: Список заявок текущей компании
+    post:
+      summary: Ручная заявка, телефон обязателен
+  /public/forms/{publicKey}/submissions:
+    post:
+      summary: Публичная форма
+  /api/v1/integrations/{integrationId}/events:
+    post:
+      summary: Подписанный webhook inquiry.created
+  /api/v1/incomplete-intakes/{id}/complete:
+    post:
+      summary: Уточнить телефон и создать одну заявку
+  /api/v1/conversations/{id}/take:
+    post:
+      summary: Взять диалог, синхронизировать режим с ботом
+  /api/v1/ai/sandbox:
+    post:
+      summary: Песочница, без отправки в WhatsApp
