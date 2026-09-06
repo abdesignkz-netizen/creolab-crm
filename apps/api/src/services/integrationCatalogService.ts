@@ -152,6 +152,7 @@ export async function listIntegrationCatalog(prisma: PrismaClient, auth: AuthCon
         integrationId: row?.id || null,
         submitUrl: form ? `${apiBase}/public/forms/${form.publicKey}/submissions` : null,
         publicKey: form?.publicKey || null,
+        testMode: Boolean(row?.testMode),
         available: true,
       });
       continue;
@@ -300,6 +301,39 @@ export async function listInboundEventLog(
       attempts: e.attempts,
     })),
   };
+}
+
+export async function setIntegrationTestMode(
+  prisma: PrismaClient,
+  auth: AuthContext,
+  integrationId: string,
+  testMode: boolean,
+) {
+  const membership = requireTenant(auth);
+  const integration = await prisma.integration.findFirst({
+    where: { id: integrationId, tenantId: membership.tenantId },
+  });
+  if (!integration) throw new ApiError(404, "not_found", "Интеграция не найдена");
+  const updated = await prisma.integration.update({
+    where: { id: integration.id },
+    data: { testMode: Boolean(testMode) },
+  });
+  return {
+    id: updated.id,
+    testMode: updated.testMode,
+    note: updated.testMode
+      ? "Тестовый режим: новые заявки помечаются как тестовые."
+      : "Боевой режим: новые заявки обычные.",
+  };
+}
+
+/** Turn off seed/demo testMode for website forms so live leads are normal. */
+export async function promoteWebsiteFormsToLive(prisma: PrismaClient) {
+  const result = await prisma.integration.updateMany({
+    where: { type: "form", testMode: true },
+    data: { testMode: false },
+  });
+  return { updated: result.count };
 }
 
 export async function runIntegrationHealthCheck(prisma: PrismaClient, auth: AuthContext, integrationId: string) {

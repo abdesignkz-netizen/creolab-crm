@@ -885,6 +885,13 @@ export function createApp(prisma: PrismaClient) {
     res.json(await runIntegrationHealthCheck(prisma, await requireAuth(req), req.params.id));
   });
 
+  app.post("/api/v1/integrations/:id/test-mode", json, async (req, res) => {
+    const { setIntegrationTestMode } = await import("./services/integrationCatalogService.ts");
+    res.json(
+      await setIntegrationTestMode(prisma, await requireAuth(req), req.params.id, Boolean(req.body?.testMode)),
+    );
+  });
+
   app.get("/api/v1/integrations/whatsapp-seller/health", async (req, res) => {
     res.json(await sellerHealthFor(prisma, await requireAuth(req)));
   });

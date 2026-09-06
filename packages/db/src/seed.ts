@@ -187,7 +187,7 @@ export async function seedDatabase() {
         type: "form",
         name: "Форма сайта CREOLAB",
         status: "active",
-        testMode: true,
+        testMode: false,
         publicKey: formPublicKey,
         assignmentJson: { kind: "owner" },
         mappingJson: {
@@ -215,6 +215,11 @@ export async function seedDatabase() {
         allowedDomains: ["https://creolab.kz", "http://localhost:5173"],
         antispamJson: { honeypot: "website" },
       },
+    });
+  } else if (formIntegration.testMode) {
+    formIntegration = await prisma.integration.update({
+      where: { id: formIntegration.id },
+      data: { testMode: false },
     });
   }
 

@@ -323,6 +323,11 @@ export function createApiClient(options: ClientOptions) {
     integrationEvents: () => request("/api/v1/integrations/events"),
     integrationHealthCheck: (id: string) =>
       request(`/api/v1/integrations/${id}/health-check`, { method: "POST" }),
+    setIntegrationTestMode: (id: string, testMode: boolean) =>
+      request(`/api/v1/integrations/${id}/test-mode`, {
+        method: "POST",
+        body: JSON.stringify({ testMode }),
+      }),
     sellerHealth: () => request("/api/v1/integrations/whatsapp-seller/health"),
     knowledge: () => request("/api/v1/knowledge/current"),
     sandbox: (message: string) =>

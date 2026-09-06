@@ -165,7 +165,51 @@ export function IntegrationsPage() {
               скрытыми полями. Файлы (multipart) — на следующем этапе.
             </p>
           ) : null}
-          <p className="muted">Телефон обязателен. Тестовые заявки помечаются isTest и не должны портить аналитику продаж.</p>
+          <p className="muted">
+            Режим заявок:{" "}
+            {formCard?.testMode || setup?.form?.testMode ? (
+              <b>тестовый</b>
+            ) : (
+              <b>обычный (боевой)</b>
+            )}
+            . Телефон обязателен.
+          </p>
+          {(formCard?.integrationId || setup?.form?.integrationId) && (formCard?.testMode || setup?.form?.testMode) ? (
+            <button
+              type="button"
+              className="btn"
+              onClick={async () => {
+                try {
+                  const id = formCard?.integrationId || setup?.form?.integrationId;
+                  const result = (await api.setIntegrationTestMode(id, false)) as any;
+                  setNote(result.note || "Заявки теперь обычные");
+                  await load();
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : "Не удалось сменить режим");
+                }
+              }}
+            >
+              Сделать заявки обычными
+            </button>
+          ) : null}
+          {(formCard?.integrationId || setup?.form?.integrationId) && !(formCard?.testMode || setup?.form?.testMode) ? (
+            <button
+              type="button"
+              className="btn secondary"
+              onClick={async () => {
+                try {
+                  const id = formCard?.integrationId || setup?.form?.integrationId;
+                  const result = (await api.setIntegrationTestMode(id, true)) as any;
+                  setNote(result.note || "Включён тестовый режим");
+                  await load();
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : "Не удалось сменить режим");
+                }
+              }}
+            >
+              Включить тестовый режим
+            </button>
+          ) : null}
         </div>
       ) : null}
 

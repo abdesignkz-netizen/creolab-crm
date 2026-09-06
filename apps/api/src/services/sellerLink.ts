@@ -465,6 +465,8 @@ export async function integrationSetup(prisma: PrismaClient, auth: AuthContext) 
                 ? "Подключено · событий ещё нет"
                 : "Ошибка",
           mapping: form.integration.mappingJson,
+          testMode: Boolean(form.integration.testMode),
+          integrationId: form.integrationId,
         }
       : { connected: false },
     webhook: webhook
