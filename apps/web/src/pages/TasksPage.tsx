@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type DragEvent, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import { CampaignMassPanel } from "./CampaignMassPanel";
@@ -19,6 +19,61 @@ type PickerClient = {
   dealId?: string | null;
   conversationId?: string | null;
 };
+
+type PendingAttachment = {
+  localId: string;
+  fileName: string;
+  mimeType: string;
+  contentBase64: string;
+  documentType: string;
+  sizeBytes: number;
+};
+
+function formatBytes(n: number) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function readFileBase64(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || "");
+      resolve(result.includes(",") ? result.split(",")[1] : result);
+    };
+    reader.onerror = () => reject(new Error("Не удалось прочитать файл"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function guessDocumentType(file: File) {
+  const name = file.name.toLowerCase();
+  if (file.type.startsWith("image/")) return "image";
+  if (name.includes("кп") || name.includes("offer") || name.includes("proposal") || name.includes("коммерч")) {
+    return "proposal";
+  }
+  if (name.includes("договор") || name.includes("contract")) return "contract";
+  if (name.includes("счет") || name.includes("счёт") || name.includes("invoice")) return "invoice";
+  if (name.includes("презентац") || name.includes("ppt")) return "presentation";
+  return "document";
+}
+
+async function filesToPending(files: FileList | File[]): Promise<PendingAttachment[]> {
+  const out: PendingAttachment[] = [];
+  for (const file of Array.from(files)) {
+    const contentBase64 = await readFileBase64(file);
+    out.push({
+      localId: `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(36).slice(2, 8)}`,
+      fileName: file.name,
+      mimeType: file.type || "application/octet-stream",
+      contentBase64,
+      documentType: guessDocumentType(file),
+      sizeBytes: file.size,
+    });
+  }
+  return out;
+}
 
 const GROUP_TITLE: Record<string, string> = {
   overdue: "Просрочено",
@@ -186,7 +241,9 @@ export function TasksPage() {
     message?: string;
     command?: string;
     whoMode?: "contacts" | "phones" | "segment" | "import";
+    pendingAttachments?: PendingAttachment[];
   }>({});
+  const [cmdPendingFiles, setCmdPendingFiles] = useState<PendingAttachment[]>([]);
 
   const [whatsappReady, setWhatsappReady] = useState<boolean | null>(null);
 
@@ -515,6 +572,32 @@ export function TasksPage() {
     setError("");
   }
 
+  async function onCmdAttachFiles(files: FileList | File[]) {
+    try {
+      const pending = await filesToPending(files);
+      setCmdPendingFiles((prev) => [...prev, ...pending].slice(0, 20));
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось прочитать файл");
+    }
+  }
+
+  function onCmdDrop(event: DragEvent) {
+    event.preventDefault();
+    if (event.dataTransfer.files?.length) void onCmdAttachFiles(event.dataTransfer.files);
+  }
+
+  async function uploadPendingToTask(taskId: string, files: PendingAttachment[]) {
+    for (const file of files) {
+      await api.addTaskAttachment(taskId, {
+        fileName: file.fileName,
+        mimeType: file.mimeType,
+        contentBase64: file.contentBase64,
+        documentType: file.documentType,
+      });
+    }
+  }
+
   async function onParseCommand() {
     if (!commandText.trim()) return;
     if (cmdWhoMode === "contact" && cmdSelectedContacts.length === 0) {
@@ -543,6 +626,7 @@ export function TasksPage() {
               : undefined,
         command: commandText,
         message: commandDraft,
+        pendingAttachments: cmdPendingFiles,
       });
       setError("");
       return;
@@ -586,6 +670,7 @@ export function TasksPage() {
             data.command?.taskType === "proposal"
               ? "{{firstName}}, добрый день! Направляем коммерческое предложение. Во вложении — условия и варианты работы."
               : commandDraft,
+          pendingAttachments: cmdPendingFiles,
         });
       }
       setShowCreate(true);
@@ -616,7 +701,16 @@ export function TasksPage() {
         executionMode: commandParse.command?.executionMode || "execute",
         ownerMembershipId: ownerId || undefined,
       });
-      setCommandTaskId(created.task?.id || null);
+      const rootTaskId = created.task?.id as string | undefined;
+      if (rootTaskId && cmdPendingFiles.length) {
+        const childIds = ((created.task?.childTasks || []) as Array<{ id: string }>).map((c) => c.id);
+        const targetIds = childIds.length ? childIds : [rootTaskId];
+        for (const tid of targetIds) {
+          await uploadPendingToTask(tid, cmdPendingFiles);
+        }
+        setCmdPendingFiles([]);
+      }
+      setCommandTaskId(rootTaskId || null);
       if (created.task?.contactId) {
         setCommandSelectedIds([created.task.contactId]);
       } else if (created.task?.childTasks?.length) {
@@ -763,6 +857,7 @@ export function TasksPage() {
           initialMessage={campaignSeed.message || ""}
           commandText={campaignSeed.command || commandText}
           initialWhoMode={campaignSeed.whoMode}
+          initialPendingAttachments={campaignSeed.pendingAttachments || []}
           onClose={() => {
             setShowCampaignPanel(false);
             setComposeMode("command");
@@ -820,6 +915,7 @@ export function TasksPage() {
                         phones: value === "list" ? cmdPhones.map((p) => p.phone).join("\n") : undefined,
                         command: commandText,
                         message: commandDraft,
+                        pendingAttachments: cmdPendingFiles,
                         segment:
                           value === "group"
                             ? {
@@ -1015,6 +1111,70 @@ export function TasksPage() {
             </div>
           </div>
 
+          <div
+            className="command-step"
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={onCmdDrop}
+          >
+            <div className="command-step-label">
+              3. Вложения{cmdPendingFiles.length ? ` · ${cmdPendingFiles.length}` : ""}
+            </div>
+            <div className="actions">
+              <label className="btn secondary">
+                + Файл
+                <input
+                  type="file"
+                  hidden
+                  multiple
+                  accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.webp,.txt,.zip,application/pdf,image/*"
+                  onChange={(event) => event.target.files && void onCmdAttachFiles(event.target.files)}
+                />
+              </label>
+              <label className="btn secondary">
+                + Документ
+                <input
+                  type="file"
+                  hidden
+                  multiple
+                  accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
+                  onChange={(event) => event.target.files && void onCmdAttachFiles(event.target.files)}
+                />
+              </label>
+              <label className="btn secondary">
+                + Фото
+                <input
+                  type="file"
+                  hidden
+                  multiple
+                  accept=".jpg,.jpeg,.png,.webp,image/*"
+                  onChange={(event) => event.target.files && void onCmdAttachFiles(event.target.files)}
+                />
+              </label>
+            </div>
+            <p className="muted">Перетащите файлы сюда. PDF, DOC/X, XLS/X, PPT/X, JPG/PNG/WEBP — как в рассылке.</p>
+            {cmdPendingFiles.length ? (
+              <div className="picker-list">
+                {cmdPendingFiles.map((file) => (
+                  <div key={file.localId} className="picker-item">
+                    <div>
+                      <b>{file.fileName}</b>
+                      <div className="muted">
+                        {formatBytes(file.sizeBytes)} · {file.documentType}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn secondary"
+                      onClick={() => setCmdPendingFiles((prev) => prev.filter((item) => item.localId !== file.localId))}
+                    >
+                      Удалить
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+
           <div className="actions">
             <button
               type="button"
@@ -1042,6 +1202,7 @@ export function TasksPage() {
                 setCmdPhonesUnresolved([]);
                 setBatchResult(null);
                 setCommandTaskId(null);
+                setCmdPendingFiles([]);
               }}
             >
               Очистить
@@ -1154,6 +1315,10 @@ export function TasksPage() {
                   Сообщение клиенту
                   <textarea value={commandDraft} onChange={(event) => setCommandDraft(event.target.value)} rows={3} />
                 </label>
+              ) : null}
+
+              {cmdPendingFiles.length ? (
+                <p className="muted">К задаче будет прикреплено файлов: {cmdPendingFiles.length}</p>
               ) : null}
 
               <div className="actions">

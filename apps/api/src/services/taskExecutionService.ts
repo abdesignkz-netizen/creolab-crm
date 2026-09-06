@@ -25,7 +25,7 @@ const ALLOWED_MIME = new Set([
   "application/octet-stream",
 ]);
 
-const DOC_TYPES = new Set(["proposal", "contract", "invoice", "presentation", "document", "other"]);
+const DOC_TYPES = new Set(["proposal", "contract", "invoice", "presentation", "document", "image", "other"]);
 
 const CALL_RESULTS = ["reached", "no_answer", "callback_later", "refused", "agreed", "other"] as const;
 const PROPOSAL_RESULTS = ["sent", "waiting_reply", "needs_changes", "agreed", "refused"] as const;

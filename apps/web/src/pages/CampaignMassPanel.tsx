@@ -61,6 +61,7 @@ export function CampaignMassPanel({
   initialMessage = "",
   commandText = "",
   initialWhoMode,
+  initialPendingAttachments = [],
   onClose,
 }: {
   initialPhoneText?: string;
@@ -69,6 +70,13 @@ export function CampaignMassPanel({
   initialMessage?: string;
   commandText?: string;
   initialWhoMode?: "contacts" | "phones" | "segment" | "import";
+  initialPendingAttachments?: Array<{
+    fileName: string;
+    mimeType: string;
+    contentBase64: string;
+    documentType: string;
+    sizeBytes?: number;
+  }>;
   onClose?: () => void;
 }) {
   const [whoMode, setWhoMode] = useState<"contacts" | "phones" | "segment" | "import">(
@@ -89,6 +97,7 @@ export function CampaignMassPanel({
   const [error, setError] = useState("");
   const [showAll, setShowAll] = useState(false);
   const [attachments, setAttachments] = useState<any[]>([]);
+  const [queuedUploads, setQueuedUploads] = useState(initialPendingAttachments);
   const [contactIds, setContactIds] = useState(initialContactIds);
   const [segment, setSegment] = useState<SegmentBody | null>(initialSegment || null);
   const [segmentPreview, setSegmentPreview] = useState<{ total: number; clients: any[] } | null>(null);
@@ -201,7 +210,18 @@ export function CampaignMassPanel({
       const created: any = await api.createCampaign(body);
       setCampaignId(created.campaign.id);
       setCampaign(created.campaign);
-      setAttachments([]);
+      if (queuedUploads.length) {
+        for (const file of queuedUploads) {
+          await api.addCampaignAttachment(created.campaign.id, {
+            fileName: file.fileName,
+            mimeType: file.mimeType,
+            contentBase64: file.contentBase64,
+            documentType: file.documentType || "document",
+          });
+        }
+        setQueuedUploads([]);
+      }
+      await refreshCampaign(created.campaign.id);
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось создать рассылку");
@@ -218,12 +238,28 @@ export function CampaignMassPanel({
   }
 
   async function onAttachFiles(files: FileList | File[]) {
-    if (!campaignId) {
-      setError("Сначала создайте черновик рассылки");
-      return;
-    }
     setBusy(true);
     try {
+      if (!campaignId) {
+        const next = [];
+        for (const file of Array.from(files)) {
+          const contentBase64 = await readFileBase64(file);
+          next.push({
+            fileName: file.name,
+            mimeType: file.type || "application/octet-stream",
+            contentBase64,
+            documentType: file.type.startsWith("image/")
+              ? "image"
+              : file.name.toLowerCase().includes("кп") || file.name.toLowerCase().includes("offer")
+                ? "proposal"
+                : "document",
+            sizeBytes: file.size,
+          });
+        }
+        setQueuedUploads((prev) => [...prev, ...next].slice(0, 20));
+        setError("");
+        return;
+      }
       for (const file of Array.from(files)) {
         const contentBase64 = await readFileBase64(file);
         await api.addCampaignAttachment(campaignId, {
@@ -561,7 +597,12 @@ export function CampaignMassPanel({
       </div>
 
       <div className="command-step" onDragOver={(event) => event.preventDefault()} onDrop={onDrop}>
-        <div className="command-step-label">Вложения{attachments.length ? ` · ${attachments.length}` : ""}</div>
+        <div className="command-step-label">
+          Вложения
+          {attachments.length || queuedUploads.length
+            ? ` · ${attachments.length + queuedUploads.length}`
+            : ""}
+        </div>
         <div className="actions">
           <label className="btn secondary">
             + Файл
@@ -601,7 +642,32 @@ export function CampaignMassPanel({
             <span className="muted">Черновик · {campaignId.slice(0, 8)}</span>
           )}
         </div>
-        <p className="muted">Перетащите файлы сюда. PDF, DOC/X, XLS/X, PPT/X, JPG/PNG/WEBP.</p>
+        <p className="muted">
+          Перетащите файлы сюда. PDF, DOC/X, XLS/X, PPT/X, JPG/PNG/WEBP.
+          {!campaignId ? " Можно прикрепить до черновика — загрузим при создании." : ""}
+        </p>
+        {queuedUploads.length ? (
+          <div className="picker-list">
+            {queuedUploads.map((file, index) => (
+              <div key={`${file.fileName}-${index}`} className="picker-item">
+                <div>
+                  <b>{file.fileName}</b>
+                  <div className="muted">
+                    в очереди · {file.documentType}
+                    {file.sizeBytes ? ` · ${formatBytes(file.sizeBytes)}` : ""}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="btn secondary"
+                  onClick={() => setQueuedUploads((prev) => prev.filter((_, i) => i !== index))}
+                >
+                  Удалить
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
         {attachments.length ? (
           <div className="picker-list">
             {attachments.map((file) => (

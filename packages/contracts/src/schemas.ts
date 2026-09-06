@@ -127,7 +127,7 @@ export const taskAttachmentSchema = z.object({
   fileName: z.string().trim().min(1).max(200),
   mimeType: z.string().trim().min(1).max(120),
   contentBase64: z.string().min(1),
-  documentType: z.enum(["proposal", "contract", "invoice", "presentation", "document", "other"]).optional(),
+  documentType: z.enum(["proposal", "contract", "invoice", "presentation", "document", "image", "other"]).optional(),
 });
 
 export const completeTaskResultSchema = z.object({
