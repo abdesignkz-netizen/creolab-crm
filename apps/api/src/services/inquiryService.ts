@@ -131,6 +131,92 @@ export async function findOrCreateContactWithPhone(
   return contact.id;
 }
 
+async function findOrCreateContactOptionalPhone(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  args: {
+    name?: string;
+    phoneRaw?: string;
+    phoneNormalized?: string;
+    source: string;
+    contactId?: string;
+    companyName?: string;
+    forceNewContact?: boolean;
+  },
+) {
+  if (args.contactId && !args.forceNewContact) {
+    const existing = await tx.contact.findFirst({
+      where: { id: args.contactId, tenantId },
+    });
+    if (!existing) throw new ApiError(404, "not_found", "Клиент не найден");
+    await tx.contact.update({
+      where: { id: existing.id },
+      data: {
+        lastSeenAt: new Date(),
+        name: args.name || undefined,
+        companyName: args.companyName || undefined,
+      },
+    });
+    return existing.id;
+  }
+  if (args.phoneNormalized && !args.forceNewContact) {
+    return findOrCreateContactWithPhone(
+      tx,
+      tenantId,
+      args.name,
+      args.phoneRaw || args.phoneNormalized,
+      args.phoneNormalized,
+      args.source,
+    );
+  }
+  const contact = await tx.contact.create({
+    data: {
+      tenantId,
+      name: args.name || null,
+      companyName: args.companyName || null,
+      language: "unknown",
+      lifecycleStatus: "new",
+      lastContactAt: new Date(),
+    },
+  });
+  await writeActivity(tx, {
+    tenantId,
+    contactId: contact.id,
+    type: "contact.created",
+    title: "Создан клиент",
+    description: `Источник: ${args.source}`,
+    actorType: "system",
+    metadata: { source: args.source },
+  });
+  return contact.id;
+}
+
+async function recordStatusChange(
+  tx: Prisma.TransactionClient,
+  args: {
+    tenantId: string;
+    inquiryId: string;
+    fromStatus?: string | null;
+    toStatus: string;
+    changedByType?: string;
+    changedById?: string | null;
+    note?: string | null;
+  },
+) {
+  if (args.fromStatus === args.toStatus) return;
+  await tx.inquiryStatusHistory.create({
+    data: {
+      tenantId: args.tenantId,
+      inquiryId: args.inquiryId,
+      fromStatus: args.fromStatus || null,
+      toStatus: args.toStatus,
+      changedByType: args.changedByType || "system",
+      changedById: args.changedById || null,
+      note: args.note || null,
+    },
+  });
+}
+
 async function createInquiryTx(
   tx: Prisma.TransactionClient,
   args: {
@@ -139,44 +225,75 @@ async function createInquiryTx(
     source: string;
     inboundEventId?: string | null;
     name?: string;
-    phoneRaw: string;
-    phoneNormalized: string;
-    phoneSource: string;
+    phoneRaw?: string;
+    phoneNormalized?: string;
+    phoneSource?: string;
     subject?: string | null;
     description?: string | null;
     raw?: unknown;
     assigneeMembershipId?: string | null;
     test?: boolean;
+    contactId?: string;
+    forceNewContact?: boolean;
+    companyName?: string | null;
+    service?: string | null;
+    serviceCategory?: string | null;
+    sourceChannel?: string | null;
+    sourceType?: string | null;
   },
 ) {
-  const contactId = await findOrCreateContactWithPhone(
-    tx,
-    args.tenantId,
-    args.name,
-    args.phoneRaw,
-    args.phoneNormalized,
-    args.phoneSource,
-  );
+  const phoneRaw = args.phoneRaw || "";
+  const phoneNormalized = args.phoneNormalized || "";
+  const contactId = await findOrCreateContactOptionalPhone(tx, args.tenantId, {
+    name: args.name,
+    phoneRaw,
+    phoneNormalized,
+    source: args.phoneSource || args.source,
+    contactId: args.contactId,
+    companyName: args.companyName || undefined,
+    forceNewContact: args.forceNewContact,
+  });
+  const sourceChannel =
+    args.sourceChannel ||
+    (args.source === "whatsapp"
+      ? "whatsapp"
+      : args.source === "form"
+        ? "website_form"
+        : args.source === "manual"
+          ? "manual"
+          : args.source);
   const inquiry = await tx.inquiry.create({
     data: {
       tenantId: args.tenantId,
       integrationId: args.integrationId || null,
       source: args.source,
-      sourceType: args.source,
-      sourceChannel: args.source === "whatsapp" ? "whatsapp" : args.source === "form" ? "website" : args.source,
+      sourceType: args.sourceType || args.source,
+      sourceChannel,
       inboundEventId: args.inboundEventId || null,
       contactId,
-      phoneRaw: args.phoneRaw,
-      phoneNormalized: args.phoneNormalized,
-      phoneSource: args.phoneSource,
+      phoneRaw,
+      phoneNormalized,
+      phoneSource: args.phoneSource || args.source,
       subject: args.subject || null,
       description: args.description || null,
-      service: args.subject || null,
+      service: args.service || args.subject || null,
+      serviceCategory: args.serviceCategory || null,
+      companyName: args.companyName || null,
       rawFieldsJson: (args.raw || {}) as Prisma.InputJsonValue,
       assigneeMembershipId: args.assigneeMembershipId || null,
       test: Boolean(args.test),
-      nextStep: "Принять заявку",
+      nextStep: "Связаться с клиентом",
+      needsReply: true,
+      firstContactAt: new Date(),
     },
+  });
+  await recordStatusChange(tx, {
+    tenantId: args.tenantId,
+    inquiryId: inquiry.id,
+    fromStatus: null,
+    toStatus: "new",
+    changedByType: "system",
+    note: "Создана заявка",
   });
   await tx.contact.update({
     where: { id: contactId },
@@ -185,9 +302,11 @@ async function createInquiryTx(
       lastContactAt: new Date(),
       ownerMembershipId: args.assigneeMembershipId || undefined,
       lifecycleStatus: "new",
+      companyName: args.companyName || undefined,
       attributionJson: {
-        sourceType: args.source,
+        sourceType: args.sourceType || args.source,
         source: args.source,
+        sourceChannel,
       },
     },
   });
@@ -195,7 +314,7 @@ async function createInquiryTx(
     data: {
       tenantId: args.tenantId,
       type: "process_inquiry",
-      title: `Обработать заявку: ${inquiry.subject || args.name || "без темы"}`,
+      title: `Связаться с клиентом: ${inquiry.subject || args.name || "заявка"}`,
       inquiryId: inquiry.id,
       contactId,
       ownerMembershipId: args.assigneeMembershipId || null,
@@ -221,7 +340,7 @@ async function createInquiryTx(
     "inquiry",
     inquiry.id,
     "Новая заявка",
-    inquiry.subject || "Поступила заявка с обязательным телефоном",
+    inquiry.subject || "Поступила новая заявка",
   );
   await writeOutbox(tx, args.tenantId, "inquiry.created", "inquiry", inquiry.id, {
     inquiryId: inquiry.id,
@@ -233,28 +352,90 @@ async function createInquiryTx(
 export async function createManualInquiry(
   prisma: PrismaClient,
   auth: AuthContext,
-  input: { name: string; phone: string; subject?: string; message?: string; service?: string },
+  input: {
+    name: string;
+    phone?: string;
+    company?: string;
+    subject?: string;
+    message?: string;
+    service?: string;
+    serviceCategory?: string;
+    sourceChannel?: string;
+    sourceType?: string;
+    contactId?: string;
+    forceNewContact?: boolean;
+  },
 ) {
   const membership = requireTenant(auth);
-  const phone = validateClientPhone(input.phone, membership.tenant.defaultRegion);
-  if (!phone.ok) {
-    throw new ApiError(422, phone.code, phone.message, { phone: phone.message });
+  let phoneRaw = "";
+  let phoneNormalized = "";
+  if (input.phone && input.phone.trim()) {
+    const phone = validateClientPhone(input.phone, membership.tenant.defaultRegion);
+    if (!phone.ok) {
+      throw new ApiError(422, phone.code, phone.message, { phone: phone.message });
+    }
+    phoneRaw = phone.raw;
+    phoneNormalized = phone.normalized;
   }
-  const assignee = await defaultAssignee(prisma, membership.tenantId);
+  const assignee = membership.id;
   return prisma.$transaction((tx) =>
     createInquiryTx(tx, {
       tenantId: membership.tenantId,
       source: "manual",
       name: input.name,
-      phoneRaw: phone.raw,
-      phoneNormalized: phone.normalized,
-      phoneSource: "manual",
+      phoneRaw,
+      phoneNormalized,
+      phoneSource: phoneNormalized ? "manual" : "none",
       subject: input.subject || input.service,
       description: input.message,
+      service: input.service || input.subject,
+      serviceCategory: input.serviceCategory,
+      companyName: input.company,
+      sourceChannel: input.sourceChannel || "manual",
+      sourceType: input.sourceType || "manual",
+      contactId: input.contactId,
+      forceNewContact: input.forceNewContact,
       raw: input,
       assigneeMembershipId: assignee,
     }),
   );
+}
+
+export async function lookupContactByPhone(prisma: PrismaClient, auth: AuthContext, phoneInput: string) {
+  const membership = requireTenant(auth);
+  const phone = validateClientPhone(phoneInput, membership.tenant.defaultRegion);
+  if (!phone.ok) {
+    throw new ApiError(422, phone.code, phone.message, { phone: phone.message });
+  }
+  const method = await prisma.contactMethod.findFirst({
+    where: { tenantId: membership.tenantId, type: "phone", normalizedValue: phone.normalized },
+    include: {
+      contact: {
+        include: {
+          _count: { select: { inquiries: true } },
+        },
+      },
+    },
+    orderBy: { createdAt: "asc" },
+  });
+  if (!method) return { found: false as const, phone: phone.raw };
+  const lastInquiry = await prisma.inquiry.findFirst({
+    where: { tenantId: membership.tenantId, contactId: method.contactId },
+    orderBy: { receivedAt: "desc" },
+  });
+  return {
+    found: true as const,
+    phone: phone.raw,
+    contact: {
+      id: method.contact.id,
+      name: method.contact.name || [method.contact.firstName, method.contact.lastName].filter(Boolean).join(" ") || "Без имени",
+      companyName: method.contact.companyName,
+      inquiryCount: method.contact._count.inquiries,
+      lastContactAt: method.contact.lastContactAt,
+      lastInquiryAt: lastInquiry?.receivedAt || null,
+      lastInquirySubject: lastInquiry?.subject || null,
+    },
+  };
 }
 
 export async function submitPublicForm(
@@ -514,10 +695,15 @@ export async function convertInquiryToDeal(prisma: PrismaClient, auth: AuthConte
     });
     if (!inquiry) throw new ApiError(404, "not_found", "Заявка не найдена");
     if (inquiry.dealId) {
-      return tx.deal.findFirstOrThrow({ where: { id: inquiry.dealId, tenantId: membership.tenantId } });
+      return tx.deal.findFirstOrThrow({
+        where: { id: inquiry.dealId, tenantId: membership.tenantId },
+        include: { stage: true },
+      });
     }
-    const hasPhone = inquiry.contact.methods.some((item) => item.type === "phone" && item.normalizedValue);
-    if (!inquiry.phoneNormalized || !hasPhone) {
+    const hasPhone =
+      Boolean(inquiry.phoneNormalized) ||
+      inquiry.contact.methods.some((item) => item.type === "phone" && item.normalizedValue);
+    if (!hasPhone) {
       throw new ApiError(422, "needs_phone", "Нельзя создать сделку без телефона клиента");
     }
     const stage = await tx.dealStage.findFirst({
@@ -532,13 +718,40 @@ export async function convertInquiryToDeal(prisma: PrismaClient, auth: AuthConte
         stageId: stage.id,
         title: title || inquiry.subject || "Сделка",
         description: inquiry.description,
-        assigneeMembershipId: inquiry.assigneeMembershipId,
+        assigneeMembershipId: inquiry.assigneeMembershipId || membership.id,
         nextAction: "Связаться с клиентом",
       },
     });
+    const fromStatus = inquiry.status;
     await tx.inquiry.update({
       where: { id: inquiry.id },
-      data: { status: "converted", dealId: deal.id },
+      data: {
+        status: "converted",
+        dealId: deal.id,
+        convertedAt: new Date(),
+        nextStep: "Вести сделку",
+        needsReply: false,
+      },
+    });
+    await recordStatusChange(tx, {
+      tenantId: membership.tenantId,
+      inquiryId: inquiry.id,
+      fromStatus,
+      toStatus: "converted",
+      changedByType: "user",
+      changedById: auth.user.id,
+      note: `Создана сделка «${deal.title}»`,
+    });
+    await writeActivity(tx, {
+      tenantId: membership.tenantId,
+      contactId: inquiry.contactId,
+      inquiryId: inquiry.id,
+      type: "inquiry.converted",
+      title: "Создана сделка по заявке",
+      description: deal.title,
+      actorType: "user",
+      actorId: auth.user.id,
+      metadata: { dealId: deal.id },
     });
     await tx.auditEvent.create({
       data: {
@@ -550,33 +763,515 @@ export async function convertInquiryToDeal(prisma: PrismaClient, auth: AuthConte
         changesJson: { inquiryId },
       },
     });
-    return deal;
+    return tx.deal.findFirstOrThrow({
+      where: { id: deal.id, tenantId: membership.tenantId },
+      include: { stage: true },
+    });
   });
+}
+
+const inquiryListInclude = {
+  contact: {
+    include: {
+      methods: true,
+      _count: { select: { inquiries: true } },
+    },
+  },
+  assignee: { include: { user: true } },
+  deal: { include: { stage: true } },
+  tasks: {
+    where: { status: { in: ["open", "planned"] } },
+    orderBy: { dueAt: "asc" as const },
+    take: 3,
+  },
+  conversation: {
+    include: {
+      connection: true,
+      _count: { select: { messages: true } },
+    },
+  },
+} satisfies Prisma.InquiryInclude;
+
+const CHANNEL_ALIASES: Record<string, string[]> = {
+  manual: ["manual"],
+  website_form: ["website_form", "website", "form"],
+  website_ai: ["website_ai"],
+  whatsapp: ["whatsapp"],
+  telegram: ["telegram"],
+  instagram: ["instagram"],
+  phone: ["phone", "phone_call"],
+  api: ["api", "webhook"],
+  other: ["other"],
+};
+
+function buildInquiryWhere(
+  tenantId: string,
+  query: Record<string, string | undefined>,
+): Prisma.InquiryWhereInput {
+  const where: Prisma.InquiryWhereInput = {
+    tenantId,
+    archived: false,
+  };
+  const filter = query.filter || "all";
+  const q = (query.q || "").trim();
+  const andParts: Prisma.InquiryWhereInput[] = [];
+
+  if (query.status) where.status = query.status;
+  if (query.source) where.source = query.source;
+
+  const startOfDay = (d: Date) => {
+    const x = new Date(d);
+    x.setHours(0, 0, 0, 0);
+    return x;
+  };
+
+  switch (filter) {
+    case "new":
+      where.status = "new";
+      break;
+    case "needs_reply":
+      where.needsReply = true;
+      where.status = { in: ["new", "qualification", "qualified", "in_progress", "waiting_client", "waiting_manager", "proposal", "accepted"] };
+      break;
+    case "in_progress":
+      where.status = { in: ["in_progress", "accepted", "qualification", "qualified"] };
+      break;
+    case "waiting_client":
+      where.status = "waiting_client";
+      break;
+    case "unassigned":
+      where.assigneeMembershipId = null;
+      where.status = { notIn: ["converted", "lost", "cancelled", "closed", "invalid", "spam", "duplicate"] };
+      break;
+    case "no_phone":
+      where.phoneNormalized = "";
+      break;
+    case "qualified":
+      where.status = { in: ["qualified", "proposal"] };
+      break;
+    case "in_deal":
+    case "converted":
+      where.status = "converted";
+      break;
+    case "lost":
+      where.status = { in: ["lost", "invalid", "spam"] };
+      break;
+    case "today":
+      where.receivedAt = { gte: startOfDay(new Date()) };
+      break;
+    case "needs_clarification":
+      andParts.push({
+        OR: [
+          { phoneNormalized: "" },
+          { AND: [{ subject: null }, { service: null }, { serviceCategory: null }] },
+        ],
+      });
+      where.status = { notIn: ["converted", "lost", "cancelled", "closed", "invalid", "spam", "duplicate"] };
+      break;
+    default:
+      break;
+  }
+
+  if (query.sourceChannel) {
+    const channels = CHANNEL_ALIASES[query.sourceChannel] || [query.sourceChannel];
+    andParts.push({
+      OR: [{ sourceChannel: { in: channels } }, { source: { in: channels } }],
+    });
+  }
+
+  if (query.serviceCategory) {
+    andParts.push({
+      OR: [
+        { serviceCategory: query.serviceCategory },
+        { service: { contains: query.serviceCategory, mode: "insensitive" } },
+      ],
+    });
+  }
+
+  if (q) {
+    andParts.push({
+      OR: [
+        { subject: { contains: q, mode: "insensitive" } },
+        { description: { contains: q, mode: "insensitive" } },
+        { service: { contains: q, mode: "insensitive" } },
+        { serviceCategory: { contains: q, mode: "insensitive" } },
+        { companyName: { contains: q, mode: "insensitive" } },
+        { phoneRaw: { contains: q, mode: "insensitive" } },
+        { phoneNormalized: { contains: q.replace(/\D+/g, ""), mode: "insensitive" } },
+        { id: { equals: q } },
+        { contact: { name: { contains: q, mode: "insensitive" } } },
+        { contact: { companyName: { contains: q, mode: "insensitive" } } },
+      ],
+    });
+  }
+
+  if (andParts.length) where.AND = andParts;
+  return where;
 }
 
 export async function listInquiries(prisma: PrismaClient, auth: AuthContext, query: Record<string, string | undefined>) {
   const membership = requireTenant(auth);
-  const take = Math.min(100, Number(query.limit || 30));
-  return prisma.inquiry.findMany({
-    where: {
-      tenantId: membership.tenantId,
-      archived: false,
-      status: query.status || undefined,
-      source: query.source || undefined,
-    },
-    include: { contact: { include: { methods: true } } },
-    orderBy: { receivedAt: "desc" },
-    take,
+  const take = Math.min(100, Number(query.limit || 50));
+  const where = buildInquiryWhere(membership.tenantId, query);
+  const sort = query.sort || "attention";
+
+  let orderBy: Prisma.InquiryOrderByWithRelationInput[] = [{ needsReply: "desc" }, { receivedAt: "desc" }];
+  if (sort === "newest") orderBy = [{ receivedAt: "desc" }];
+  if (sort === "oldest") orderBy = [{ receivedAt: "asc" }];
+  if (sort === "needs_reply") orderBy = [{ needsReply: "desc" }, { receivedAt: "desc" }];
+  if (sort === "activity") orderBy = [{ receivedAt: "desc" }];
+
+  // Normalize legacy accepted → treated as in_progress in DTO only; migrate lazily on list
+  await prisma.inquiry.updateMany({
+    where: { tenantId: membership.tenantId, status: "accepted" },
+    data: { status: "in_progress" },
   });
+  await prisma.inquiry.updateMany({
+    where: { tenantId: membership.tenantId, status: "closed" },
+    data: { status: "cancelled" },
+  });
+
+  const [items, countsRaw, channelRaw, categoryRaw, intakes] = await Promise.all([
+    prisma.inquiry.findMany({
+      where,
+      include: inquiryListInclude,
+      orderBy,
+      take,
+    }),
+    prisma.inquiry.groupBy({
+      by: ["status"],
+      where: { tenantId: membership.tenantId, archived: false },
+      _count: { _all: true },
+    }),
+    prisma.inquiry.groupBy({
+      by: ["sourceChannel"],
+      where: { tenantId: membership.tenantId, archived: false },
+      _count: { _all: true },
+    }),
+    prisma.inquiry.groupBy({
+      by: ["serviceCategory"],
+      where: { tenantId: membership.tenantId, archived: false },
+      _count: { _all: true },
+    }),
+    prisma.incompleteIntake.findMany({
+      where: { tenantId: membership.tenantId, status: "pending" },
+      orderBy: { receivedAt: "desc" },
+      take: 50,
+    }),
+  ]);
+
+  const statusCounts = Object.fromEntries(countsRaw.map((row) => [row.status, row._count._all]));
+  const allCount = countsRaw.reduce((sum, row) => sum + row._count._all, 0);
+
+  const sourceCounts: Record<string, number> = {};
+  for (const row of channelRaw) {
+    const raw = row.sourceChannel || "other";
+    const key =
+      Object.entries(CHANNEL_ALIASES).find(([, aliases]) => aliases.includes(raw))?.[0] ||
+      (raw === "website" || raw === "form" ? "website_form" : raw === "webhook" ? "api" : raw);
+    sourceCounts[key] = (sourceCounts[key] || 0) + row._count._all;
+  }
+
+  const categoryCounts: Record<string, number> = {};
+  for (const row of categoryRaw) {
+    const key = row.serviceCategory || "other";
+    categoryCounts[key] = (categoryCounts[key] || 0) + row._count._all;
+  }
+
+  const [
+    needsReplyCount,
+    unassignedCount,
+    noPhoneCount,
+    todayCount,
+    clarificationCount,
+  ] = await Promise.all([
+    prisma.inquiry.count({
+      where: buildInquiryWhere(membership.tenantId, { filter: "needs_reply" }),
+    }),
+    prisma.inquiry.count({
+      where: buildInquiryWhere(membership.tenantId, { filter: "unassigned" }),
+    }),
+    prisma.inquiry.count({
+      where: buildInquiryWhere(membership.tenantId, { filter: "no_phone" }),
+    }),
+    prisma.inquiry.count({
+      where: buildInquiryWhere(membership.tenantId, { filter: "today" }),
+    }),
+    prisma.inquiry.count({
+      where: buildInquiryWhere(membership.tenantId, { filter: "needs_clarification" }),
+    }),
+  ]);
+
+  const { mapInquiryListItem, intakeReasonLabel, relativeDayLabel } = await import("./inquiryPresentation.ts");
+
+  return {
+    items: items.map((item) => mapInquiryListItem(item, membership.tenant.timezone)),
+    counts: {
+      all: allCount,
+      new: (statusCounts.new || 0),
+      needs_reply: needsReplyCount,
+      in_progress: (statusCounts.in_progress || 0) + (statusCounts.accepted || 0) + (statusCounts.qualification || 0) + (statusCounts.qualified || 0),
+      waiting_client: statusCounts.waiting_client || 0,
+      unassigned: unassignedCount,
+      no_phone: noPhoneCount,
+      qualified: (statusCounts.qualified || 0) + (statusCounts.proposal || 0),
+      converted: statusCounts.converted || 0,
+      lost: (statusCounts.lost || 0) + (statusCounts.invalid || 0) + (statusCounts.spam || 0),
+      today: todayCount,
+      needs_clarification: clarificationCount + intakes.length,
+    },
+    sourceCounts,
+    categoryCounts,
+    clarification: [
+      ...intakes.map((item) => ({
+        kind: "intake" as const,
+        id: item.id,
+        title: intakeReasonLabel(item.reason),
+        detail:
+          item.reason === "missing_phone" || item.reason === "invalid_phone"
+            ? "Клиент оставил обращение, но контактный номер не указан или некорректен."
+            : "Нужна ручная проверка входящего обращения.",
+        receivedAt: item.receivedAt,
+        receivedLabel: relativeDayLabel(item.receivedAt, membership.tenant.timezone),
+        reason: item.reason,
+        canCompletePhone: true,
+      })),
+      ...items
+        .map((item) => mapInquiryListItem(item, membership.tenant.timezone))
+        .filter((item) => item.needsClarification)
+        .map((item) => ({
+          kind: "inquiry" as const,
+          id: item.id,
+          title: item.issues[0]?.label || "Требует уточнения",
+          detail: item.issues[0]?.detail || "",
+          receivedAt: item.receivedAt,
+          receivedLabel: item.receivedLabel,
+          reason: item.issues[0]?.code || "other",
+          canCompletePhone: !item.hasPhone,
+          inquiryId: item.id,
+        })),
+    ],
+  };
+}
+
+export async function getInquiry(prisma: PrismaClient, auth: AuthContext, inquiryId: string) {
+  const membership = requireTenant(auth);
+  const inquiry = await prisma.inquiry.findFirst({
+    where: { id: inquiryId, tenantId: membership.tenantId },
+    include: {
+      ...inquiryListInclude,
+      statusHistory: { orderBy: { changedAt: "desc" }, take: 40 },
+      tasks: { orderBy: { createdAt: "desc" }, take: 20 },
+    },
+  });
+  if (!inquiry) throw new ApiError(404, "not_found", "Заявка не найдена");
+  const activities = await prisma.activity.findMany({
+    where: { tenantId: membership.tenantId, inquiryId: inquiry.id },
+    orderBy: { createdAt: "desc" },
+    take: 40,
+  });
+  const { mapInquiryDetail } = await import("./inquiryPresentation.ts");
+  return mapInquiryDetail({ ...inquiry, activities }, membership.tenant.timezone);
+}
+
+export async function takeInquiry(prisma: PrismaClient, auth: AuthContext, inquiryId: string) {
+  const membership = requireTenant(auth);
+  return prisma.$transaction(async (tx) => {
+    const inquiry = await tx.inquiry.findFirst({
+      where: { id: inquiryId, tenantId: membership.tenantId },
+    });
+    if (!inquiry) throw new ApiError(404, "not_found", "Заявка не найдена");
+    const fromStatus = inquiry.status;
+    const updated = await tx.inquiry.update({
+      where: { id: inquiry.id },
+      data: {
+        status: "in_progress",
+        assigneeMembershipId: membership.id,
+        nextStep: inquiry.nextStep || "Связаться с клиентом",
+      },
+    });
+    await recordStatusChange(tx, {
+      tenantId: membership.tenantId,
+      inquiryId: inquiry.id,
+      fromStatus,
+      toStatus: "in_progress",
+      changedByType: "user",
+      changedById: auth.user.id,
+      note: "Взята в работу",
+    });
+    await writeActivity(tx, {
+      tenantId: membership.tenantId,
+      contactId: inquiry.contactId,
+      inquiryId: inquiry.id,
+      type: "inquiry.taken",
+      title: "Заявка взята в работу",
+      description: auth.user.name,
+      actorType: "user",
+      actorId: auth.user.id,
+    });
+    return updated;
+  }).then(() => getInquiry(prisma, auth, inquiryId));
+}
+
+export async function updateInquiry(
+  prisma: PrismaClient,
+  auth: AuthContext,
+  inquiryId: string,
+  input: Record<string, unknown>,
+) {
+  const membership = requireTenant(auth);
+  await prisma.$transaction(async (tx) => {
+    const inquiry = await tx.inquiry.findFirst({
+      where: { id: inquiryId, tenantId: membership.tenantId },
+    });
+    if (!inquiry) throw new ApiError(404, "not_found", "Заявка не найдена");
+
+    const data: Prisma.InquiryUncheckedUpdateInput = {};
+    if ("subject" in input) data.subject = input.subject as string | null;
+    if ("description" in input) data.description = input.description as string | null;
+    if ("service" in input) data.service = input.service as string | null;
+    if ("serviceCategory" in input) data.serviceCategory = input.serviceCategory as string | null;
+    if ("serviceSubcategory" in input) data.serviceSubcategory = input.serviceSubcategory as string | null;
+    if ("companyName" in input) data.companyName = input.companyName as string | null;
+    if ("city" in input) data.city = input.city as string | null;
+    if ("desiredDeadline" in input) data.desiredDeadline = input.desiredDeadline as string | null;
+    if ("budgetMin" in input) data.budgetMin = input.budgetMin as number | null;
+    if ("budgetMax" in input) data.budgetMax = input.budgetMax as number | null;
+    if ("nextStep" in input) data.nextStep = input.nextStep as string | null;
+    if ("needsReply" in input) data.needsReply = Boolean(input.needsReply);
+    if ("aiSummary" in input) data.aiSummary = input.aiSummary as string | null;
+    if ("assigneeMembershipId" in input) {
+      data.assigneeMembershipId = (input.assigneeMembershipId as string | null) || null;
+    }
+    if (typeof input.phone === "string" && input.phone.trim()) {
+      const phone = validateClientPhone(input.phone, membership.tenant.defaultRegion);
+      if (!phone.ok) throw new ApiError(422, phone.code, phone.message, { phone: phone.message });
+      data.phoneRaw = phone.raw;
+      data.phoneNormalized = phone.normalized;
+      data.phoneSource = "manual";
+      data.phoneConfirmed = true;
+      const existingMethod = await tx.contactMethod.findFirst({
+        where: { tenantId: membership.tenantId, contactId: inquiry.contactId, type: "phone" },
+      });
+      if (existingMethod) {
+        await tx.contactMethod.update({
+          where: { id: existingMethod.id },
+          data: { rawValue: phone.raw, normalizedValue: phone.normalized, source: "manual", confirmed: true },
+        });
+      } else {
+        await tx.contactMethod.create({
+          data: {
+            tenantId: membership.tenantId,
+            contactId: inquiry.contactId,
+            type: "phone",
+            rawValue: phone.raw,
+            normalizedValue: phone.normalized,
+            source: "manual",
+            primary: true,
+            confirmed: true,
+          },
+        });
+      }
+    }
+    if (typeof input.status === "string" && input.status !== inquiry.status) {
+      data.status = input.status;
+      if (input.status === "qualified") data.qualifiedAt = new Date();
+      if (input.status === "converted") data.convertedAt = new Date();
+      if (input.status === "lost") data.lostAt = new Date();
+      if (input.status === "cancelled" || input.status === "invalid" || input.status === "spam") {
+        data.closedAt = new Date();
+      }
+      await recordStatusChange(tx, {
+        tenantId: membership.tenantId,
+        inquiryId: inquiry.id,
+        fromStatus: inquiry.status,
+        toStatus: input.status,
+        changedByType: "user",
+        changedById: auth.user.id,
+      });
+    }
+    await tx.inquiry.update({ where: { id: inquiry.id }, data });
+    await writeActivity(tx, {
+      tenantId: membership.tenantId,
+      contactId: inquiry.contactId,
+      inquiryId: inquiry.id,
+      type: "inquiry.updated",
+      title: "Заявка обновлена",
+      actorType: "user",
+      actorId: auth.user.id,
+      metadata: input,
+    });
+  });
+  return getInquiry(prisma, auth, inquiryId);
+}
+
+export async function loseInquiry(
+  prisma: PrismaClient,
+  auth: AuthContext,
+  inquiryId: string,
+  input: { reason: string; comment?: string; classification?: string },
+) {
+  const membership = requireTenant(auth);
+  const classification = input.classification || "lost";
+  const toStatus = classification === "lost" ? "lost" : classification;
+  await prisma.$transaction(async (tx) => {
+    const inquiry = await tx.inquiry.findFirst({
+      where: { id: inquiryId, tenantId: membership.tenantId },
+    });
+    if (!inquiry) throw new ApiError(404, "not_found", "Заявка не найдена");
+    await tx.inquiry.update({
+      where: { id: inquiry.id },
+      data: {
+        status: toStatus,
+        lostReason: input.reason,
+        lostComment: input.comment || null,
+        classification: toStatus,
+        lostAt: toStatus === "lost" ? new Date() : inquiry.lostAt,
+        closedAt: new Date(),
+        needsReply: false,
+        nextStep: null,
+      },
+    });
+    await recordStatusChange(tx, {
+      tenantId: membership.tenantId,
+      inquiryId: inquiry.id,
+      fromStatus: inquiry.status,
+      toStatus,
+      changedByType: "user",
+      changedById: auth.user.id,
+      note: input.reason,
+    });
+    await writeActivity(tx, {
+      tenantId: membership.tenantId,
+      contactId: inquiry.contactId,
+      inquiryId: inquiry.id,
+      type: "inquiry.lost",
+      title: toStatus === "lost" ? "Заявка потеряна" : `Заявка закрыта: ${toStatus}`,
+      description: input.comment || input.reason,
+      actorType: "user",
+      actorId: auth.user.id,
+    });
+  });
+  return getInquiry(prisma, auth, inquiryId);
 }
 
 export async function listIncomplete(prisma: PrismaClient, auth: AuthContext) {
   const membership = requireTenant(auth);
-  return prisma.incompleteIntake.findMany({
+  const { intakeReasonLabel, relativeDayLabel } = await import("./inquiryPresentation.ts");
+  const items = await prisma.incompleteIntake.findMany({
     where: { tenantId: membership.tenantId, status: "pending" },
     orderBy: { receivedAt: "desc" },
     take: 50,
   });
+  return items.map((item) => ({
+    ...item,
+    reasonLabel: intakeReasonLabel(item.reason),
+    receivedLabel: relativeDayLabel(item.receivedAt, membership.tenant.timezone),
+    detail:
+      item.reason === "missing_phone" || item.reason === "invalid_phone"
+        ? "Клиент оставил обращение, но контактный номер не указан или некорректен."
+        : "Нужна ручная проверка входящего обращения.",
+  }));
 }
 
 export { sha256 };

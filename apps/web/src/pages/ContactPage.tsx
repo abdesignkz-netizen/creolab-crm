@@ -158,6 +158,11 @@ export function ContactPage() {
                   {currentRequest.budgetLabel ? ` · Бюджет: ${currentRequest.budgetLabel}` : " · Бюджет пока не определён"}
                   {currentRequest.desiredDeadline ? ` · Срок: ${currentRequest.desiredDeadline}` : ""}
                 </div>
+                <div className="actions" style={{ marginTop: 10 }}>
+                  <Link className="btn secondary" to={`/requests/${currentRequest.id}`}>
+                    Открыть заявку
+                  </Link>
+                </div>
               </>
             ) : (
               <p className="muted">Активной заявки нет. <button className="linkish" onClick={() => navigate("/inquiries")}>Добавить</button></p>
@@ -372,7 +377,7 @@ export function ContactPage() {
                 <b>{item.title}</b>
                 <div className="muted">{item.receivedLabel} · {item.statusLabel}</div>
               </div>
-              <Link to="/inquiries">Открыть</Link>
+              <Link to={`/requests/${item.id}`}>Открыть</Link>
             </div>
           ))}
         </div>

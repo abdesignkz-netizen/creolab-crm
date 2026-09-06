@@ -4,7 +4,7 @@ import { api } from "../lib/api";
 
 const ACTION_LABEL: Record<string, string> = {
   complete_phone: "Дописать телефон",
-  accept_inquiry: "Принять заявку",
+  accept_inquiry: "Взять в работу",
   open_inquiry: "Открыть заявку",
   take_conversation: "Забрать себе",
   reply_human: "Ответить",
@@ -18,8 +18,9 @@ const ACTION_LABEL: Record<string, string> = {
 };
 
 function sourceHref(item: any) {
-  if (item.kind === "needs_phone") return "/inquiries";
+  if (item.kind === "needs_phone") return "/inquiries?filter=needs_clarification";
   if (item.kind.startsWith("inquiry_") || item.kind === "missing_next_action") {
+    if (item.entityId && String(item.kind).includes("inquiry")) return `/requests/${item.entityId}`;
     return item.links?.contactId ? `/contacts/${item.links.contactId}` : "/inquiries";
   }
   if (item.kind === "contact_needs_reply") return `/contacts/${item.entityId}`;
@@ -131,7 +132,12 @@ export function SituationPage() {
 
   return (
     <section>
-      <h2>Ситуация</h2>
+      <div className="page-head">
+        <div>
+          <p className="page-kicker">Сегодня</p>
+          <h2>Ситуация</h2>
+        </div>
+      </div>
       <div className="freshness">
         <span>Бот: {botLabel(seller)}</span>
         <span>Синк: {syncLabel(seller.lastSyncAt)}</span>
@@ -160,10 +166,11 @@ export function SituationPage() {
         <div className="card"><span className="muted">Просрочено</span><strong>{data.metrics.overdue}</strong></div>
       </div>
 
-      <div className="actions" style={{ marginTop: 16 }}>
+      <div className="segmented" role="tablist" aria-label="Фильтр ситуации">
         {(["all", "mine", "unassigned"] as const).map((value) => (
           <button
             key={value}
+            type="button"
             className={scope === value ? "btn" : "btn secondary"}
             onClick={() => setScope(value)}
           >
@@ -211,7 +218,7 @@ export function SituationPage() {
                 disabled={busyId === item.id}
                 onClick={() => {
                   if (item.nextAction === "accept_inquiry") return run(item, () => api.acceptInquiry(item.entityId));
-                  if (item.nextAction === "open_inquiry") return navigate("/inquiries");
+                  if (item.nextAction === "open_inquiry") return navigate(`/requests/${item.entityId}`);
                   if (item.nextAction === "take_conversation") return run(item, () => api.takeConversation(item.entityId));
                   if (item.nextAction === "reply_human") return navigate(`/conversations/${item.entityId}?focus=reply`);
                   if (item.nextAction === "return_to_ai" || item.nextAction === "resume_paused") {

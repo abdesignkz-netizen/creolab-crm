@@ -687,7 +687,10 @@ export function TasksPage() {
   return (
     <section>
       <div className="page-head">
-        <h2>Задачи</h2>
+        <div>
+          <p className="page-kicker">Операции</p>
+          <h2>Задачи</h2>
+        </div>
         <div className="actions">
           <button
             type="button"

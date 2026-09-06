@@ -83,6 +83,39 @@ async function applyAdditiveSchema(pglite: PGlite) {
     ALTER TABLE "Inquiry" ADD COLUMN IF NOT EXISTS "lostComment" TEXT;
     ALTER TABLE "Inquiry" ADD COLUMN IF NOT EXISTS "fieldMetaJson" JSONB DEFAULT '{}';
     ALTER TABLE "Inquiry" ADD COLUMN IF NOT EXISTS "serviceCategory" TEXT;
+    ALTER TABLE "Inquiry" ADD COLUMN IF NOT EXISTS "serviceSubcategory" TEXT;
+    ALTER TABLE "Inquiry" ADD COLUMN IF NOT EXISTS "companyName" TEXT;
+    ALTER TABLE "Inquiry" ADD COLUMN IF NOT EXISTS "city" TEXT;
+    ALTER TABLE "Inquiry" ADD COLUMN IF NOT EXISTS "aiSummary" TEXT;
+    ALTER TABLE "Inquiry" ADD COLUMN IF NOT EXISTS "classification" TEXT;
+    ALTER TABLE "Inquiry" ADD COLUMN IF NOT EXISTS "needsReply" BOOLEAN DEFAULT true;
+    ALTER TABLE "Inquiry" ADD COLUMN IF NOT EXISTS "firstContactAt" TIMESTAMP(3);
+    ALTER TABLE "Inquiry" ADD COLUMN IF NOT EXISTS "qualifiedAt" TIMESTAMP(3);
+    ALTER TABLE "Inquiry" ADD COLUMN IF NOT EXISTS "convertedAt" TIMESTAMP(3);
+    ALTER TABLE "Inquiry" ADD COLUMN IF NOT EXISTS "lostAt" TIMESTAMP(3);
+    ALTER TABLE "Inquiry" ADD COLUMN IF NOT EXISTS "closedAt" TIMESTAMP(3);
+    ALTER TABLE "Inquiry" ALTER COLUMN "phoneRaw" SET DEFAULT '';
+    ALTER TABLE "Inquiry" ALTER COLUMN "phoneNormalized" SET DEFAULT '';
+    ALTER TABLE "Inquiry" ALTER COLUMN "phoneSource" SET DEFAULT 'unknown';
+    CREATE INDEX IF NOT EXISTS "Inquiry_tenantId_needsReply_receivedAt_idx"
+      ON "Inquiry"("tenantId", "needsReply", "receivedAt");
+
+    CREATE TABLE IF NOT EXISTS "InquiryStatusHistory" (
+      "id" TEXT NOT NULL,
+      "tenantId" TEXT NOT NULL,
+      "inquiryId" TEXT NOT NULL,
+      "fromStatus" TEXT,
+      "toStatus" TEXT NOT NULL,
+      "changedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "changedByType" TEXT NOT NULL DEFAULT 'system',
+      "changedById" TEXT,
+      "note" TEXT,
+      CONSTRAINT "InquiryStatusHistory_pkey" PRIMARY KEY ("id")
+    );
+    CREATE INDEX IF NOT EXISTS "InquiryStatusHistory_tenantId_inquiryId_changedAt_idx"
+      ON "InquiryStatusHistory"("tenantId", "inquiryId", "changedAt");
+    CREATE INDEX IF NOT EXISTS "InquiryStatusHistory_inquiryId_changedAt_idx"
+      ON "InquiryStatusHistory"("inquiryId", "changedAt");
 
     ALTER TABLE "Note" ADD COLUMN IF NOT EXISTS "pinned" BOOLEAN DEFAULT false;
 

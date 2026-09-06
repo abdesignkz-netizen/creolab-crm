@@ -35,6 +35,7 @@ model Tenant {
   contactPermissions   ContactPermission[]
   inquiries            Inquiry[]
   incompleteIntakes    IncompleteIntake[]
+  inquiryStatusHistory InquiryStatusHistory[]
   conversations        Conversation[]
   conversationReads    ConversationReadState[]
   messages             Message[]
@@ -370,9 +371,9 @@ model Inquiry {
   source             String
   inboundEventId     String?
   contactId          String
-  phoneRaw           String
-  phoneNormalized    String
-  phoneSource        String
+  phoneRaw           String   @default("")
+  phoneNormalized    String   @default("")
+  phoneSource        String   @default("unknown")
   phoneConfirmed     Boolean  @default(false)
   subject            String?
   description        String?
@@ -390,6 +391,10 @@ model Inquiry {
   test               Boolean  @default(false)
   service            String?
   serviceCategory    String?
+  serviceSubcategory String?
+  companyName        String?
+  city               String?
+  aiSummary          String?
   budgetMin          Int?
   budgetMax          Int?
   currency           String   @default("KZT")
@@ -406,8 +411,15 @@ model Inquiry {
   referrer           String?
   lostReason         String?
   lostComment        String?
+  classification     String?
   fieldMetaJson      Json     @default("{}")
+  needsReply         Boolean  @default(true)
   receivedAt         DateTime @default(now())
+  firstContactAt     DateTime?
+  qualifiedAt        DateTime?
+  convertedAt        DateTime?
+  lostAt             DateTime?
+  closedAt           DateTime?
   completedAt        DateTime?
   version            Int      @default(1)
   tenant             Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -418,11 +430,30 @@ model Inquiry {
   deal               Deal?    @relation("InquiryDeal", fields: [tenantId, dealId], references: [tenantId, id])
   tasks              Task[]
   incompleteFrom     IncompleteIntake?
+  statusHistory      InquiryStatusHistory[]
 
   @@unique([tenantId, id])
   @@unique([tenantId, dealId])
   @@index([tenantId, receivedAt])
   @@index([tenantId, status, assigneeMembershipId])
+  @@index([tenantId, needsReply, receivedAt])
+}
+
+model InquiryStatusHistory {
+  id            String   @id @default(uuid())
+  tenantId      String
+  inquiryId     String
+  fromStatus    String?
+  toStatus      String
+  changedAt     DateTime @default(now())
+  changedByType String   @default("system")
+  changedById   String?
+  note          String?
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  inquiry       Inquiry  @relation(fields: [tenantId, inquiryId], references: [tenantId, id], onDelete: Cascade)
+
+  @@index([tenantId, inquiryId, changedAt])
+  @@index([inquiryId, changedAt])
 }
 
 model IncompleteIntake {

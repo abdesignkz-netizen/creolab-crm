@@ -19,6 +19,8 @@ import {
   campaignAttachmentSchema,
   createCampaignSchema,
   loginSchema,
+  lookupInquiryContactSchema,
+  loseInquirySchema,
   nextActionSchema,
   parseContactImportSchema,
   parsePhoneListSchema,
@@ -30,6 +32,7 @@ import {
   taskAttachmentSchema,
   updateCampaignSchema,
   updateContactSchema,
+  updateInquirySchema,
   updateTaskSchema,
 } from "@creolab/contracts";
 import { config } from "./config.ts";
@@ -46,10 +49,15 @@ import {
   completeIntake,
   convertInquiryToDeal,
   createManualInquiry,
+  getInquiry,
   ingestIntegrationEvent,
   listIncomplete,
   listInquiries,
+  lookupContactByPhone,
+  loseInquiry,
   submitPublicForm,
+  takeInquiry,
+  updateInquiry,
 } from "./services/inquiryService.ts";
 import {
   addConversationMessage,
@@ -238,7 +246,12 @@ export function createApp(prisma: PrismaClient) {
   });
 
   app.get("/api/v1/inquiries", async (req, res) => {
-    res.json({ items: await listInquiries(prisma, await requireAuth(req), req.query as Record<string, string>) });
+    res.json(await listInquiries(prisma, await requireAuth(req), req.query as Record<string, string>));
+  });
+
+  app.post("/api/v1/inquiries/lookup-contact", json, async (req, res) => {
+    const input = lookupInquiryContactSchema.parse(req.body);
+    res.json(await lookupContactByPhone(prisma, await requireAuth(req), input.phone));
   });
 
   app.post("/api/v1/inquiries", json, async (req, res) => {
@@ -248,15 +261,26 @@ export function createApp(prisma: PrismaClient) {
     res.status(201).json(inquiry);
   });
 
+  app.get("/api/v1/inquiries/:id", async (req, res) => {
+    res.json(await getInquiry(prisma, await requireAuth(req), req.params.id));
+  });
+
+  app.patch("/api/v1/inquiries/:id", json, async (req, res) => {
+    const input = updateInquirySchema.parse(req.body || {});
+    res.json(await updateInquiry(prisma, await requireAuth(req), req.params.id, input));
+  });
+
+  app.post("/api/v1/inquiries/:id/take", async (req, res) => {
+    res.json(await takeInquiry(prisma, await requireAuth(req), req.params.id));
+  });
+
+  app.post("/api/v1/inquiries/:id/lose", json, async (req, res) => {
+    const input = loseInquirySchema.parse(req.body || {});
+    res.json(await loseInquiry(prisma, await requireAuth(req), req.params.id, input));
+  });
+
   app.post("/api/v1/inquiries/:id/accept", async (req, res) => {
-    const auth = await requireAuth(req);
-    if (!auth.activeMembership) throw new ApiError(403, "no_tenant", "Нет активной компании");
-    const updated = await prisma.inquiry.updateMany({
-      where: { id: req.params.id, tenantId: auth.activeMembership.tenantId },
-      data: { status: "accepted" },
-    });
-    if (!updated.count) throw new ApiError(404, "not_found", "Заявка не найдена");
-    res.json({ ok: true });
+    res.json(await takeInquiry(prisma, await requireAuth(req), req.params.id));
   });
 
   app.post("/api/v1/inquiries/:id/convert-to-deal", json, async (req, res) => {

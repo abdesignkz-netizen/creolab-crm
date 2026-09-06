@@ -10,15 +10,87 @@ export const LIFECYCLE_LABEL: Record<string, string> = {
 export const INQUIRY_STATUS_LABEL: Record<string, string> = {
   new: "Новая",
   qualification: "Квалификация",
-  qualified: "Квалифицирован",
+  qualified: "Квалифицирована",
   accepted: "В работе",
   in_progress: "В работе",
   waiting_client: "Ждём клиента",
   waiting_manager: "Нужен ответ менеджера",
-  converted: "Конвертирована",
-  closed: "Закрыта",
+  proposal: "КП отправлено",
+  converted: "Конвертирована в сделку",
+  closed: "Отменена",
+  cancelled: "Отменена",
   lost: "Потеряна",
+  invalid: "Некорректная",
+  spam: "Спам",
+  duplicate: "Дубликат",
 };
+
+export const INQUIRY_ACTIVE_STATUSES = [
+  "new",
+  "qualification",
+  "qualified",
+  "accepted",
+  "in_progress",
+  "waiting_client",
+  "waiting_manager",
+  "proposal",
+] as const;
+
+export const SERVICE_CATEGORY_LABEL: Record<string, string> = {
+  web: "Сайты",
+  presentation: "Презентации",
+  branding: "Брендинг",
+  advertising: "Реклама",
+  ai: "AI",
+  other: "Другое",
+};
+
+export const SOURCE_CHANNEL_LABEL: Record<string, string> = {
+  whatsapp: "WhatsApp",
+  website_form: "Форма сайта",
+  website: "Форма сайта",
+  website_ai: "Website AI",
+  telegram: "Telegram",
+  instagram: "Instagram",
+  phone: "Звонок",
+  phone_call: "Звонок",
+  manual: "Ручное добавление",
+  api: "API",
+  form: "Форма сайта",
+  other: "Другое",
+};
+
+export const SOURCE_ATTR_LABEL: Record<string, string> = {
+  google_ads: "Google Ads",
+  instagram: "Instagram",
+  organic: "Organic",
+  referral: "Referral",
+  direct: "Direct",
+  other: "Другое",
+};
+
+export const INTAKE_REASON_LABEL: Record<string, string> = {
+  missing_phone: "Обращение без телефона",
+  needs_phone: "Нет телефона",
+  no_contact: "Нет доступного способа связи",
+  missing_service: "Не определена услуга",
+  missing_subject: "Неизвестна тема",
+  unlinked_client: "Клиент не связан",
+  ai_review: "Нужна ручная проверка AI",
+  possible_duplicate: "Дубликат под вопросом",
+};
+
+export const INQUIRY_LOST_REASONS = [
+  { value: "expensive", label: "Дорого" },
+  { value: "no_reply", label: "Не отвечает" },
+  { value: "no_budget", label: "Нет бюджета" },
+  { value: "competitor", label: "Выбрал конкурента" },
+  { value: "changed_mind", label: "Передумал" },
+  { value: "wrong_inquiry", label: "Ошибочное обращение" },
+  { value: "spam", label: "Спам" },
+  { value: "not_our_service", label: "Не наша услуга" },
+  { value: "other", label: "Другое" },
+] as const;
 
 export const TEMP_LABEL: Record<string, string> = {
   hot: "Горячий",

@@ -13,6 +13,8 @@ import { ContactPage } from "./pages/ContactPage";
 import { ControlPage } from "./pages/ControlPage";
 import { ConversationsPage } from "./pages/ConversationsPage";
 import { IntegrationsPage } from "./pages/IntegrationsPage";
+import { RequestDetailPage } from "./pages/RequestDetailPage";
+import { RequestsPage } from "./pages/RequestsPage";
 import { SituationPage } from "./pages/SituationPage";
 import { TasksPage } from "./pages/TasksPage";
 
@@ -79,14 +81,16 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
     ["/settings", "Настройки"],
   ] as const;
 
-  const desktopLinks = [
+  const workLinks = [
     ["/today", "Ситуация"],
-    ["/control", "Управление"],
-    ["/inquiries", "Заявки"],
     ["/conversations", "Диалоги"],
-    ["/deals", "Сделки"],
     ["/tasks", "Задачи"],
     ["/contacts", "Клиенты"],
+    ["/inquiries", "Заявки"],
+    ["/deals", "Сделки"],
+  ] as const;
+  const systemLinks = [
+    ["/control", "Управление"],
     ["/integrations", "Интеграции"],
     ["/stats", "Статистика"],
     ["/settings", "Настройки"],
@@ -96,6 +100,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
     "/today": "Ситуация",
     "/control": "Управление",
     "/inquiries": "Заявки",
+    "/requests": "Заявка",
     "/conversations": "Диалоги",
     "/deals": "Сделки",
     "/tasks": "Задачи",
@@ -197,11 +202,23 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
 
       <aside className="nav desktop-nav">
         <div className="nav-brand">
-          <h1>CREOLAB CRM</h1>
-          <p>{me.activeTenant?.tenant?.name || "Нет компании"}</p>
+          <div className="brand-mark" aria-hidden>
+            C
+          </div>
+          <div>
+            <h1>CREOLAB</h1>
+            <p>{me.activeTenant?.tenant?.name || "Нет компании"}</p>
+          </div>
         </div>
         <nav className="nav-links">
-          {desktopLinks.map(([to, label]) => (
+          <p className="nav-section">Работа</p>
+          {workLinks.map(([to, label]) => (
+            <NavLink key={to} to={to} className={({ isActive }) => (isActive ? "active" : "")}>
+              {label}
+            </NavLink>
+          ))}
+          <p className="nav-section">Система</p>
+          {systemLinks.map(([to, label]) => (
             <NavLink key={to} to={to} className={({ isActive }) => (isActive ? "active" : "")}>
               {label}
               {to === "/settings" && unreadNotices > 0 ? (
@@ -296,132 +313,65 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
 }
 
 function Login() {
-  const navigate = useNavigate();
   const [error, setError] = useState("");
   return (
     <div className="login">
-      <form
-        className="panel"
-        onSubmit={async (event) => {
-          event.preventDefault();
-          const form = new FormData(event.currentTarget);
-          try {
-            const result = (await api.login(String(form.get("email")), String(form.get("password")))) as any;
-            const tenantId =
-              result.user?.activeTenant?.tenant?.id || result.user?.memberships?.[0]?.tenant?.id;
-            if (tenantId) setTenant(tenantId);
-            // Полная перезагрузка: App заново вызовет /me с cookie и снимет boot=anon
-            window.location.assign("/today");
-          } catch (err) {
-            const message = err instanceof Error ? err.message : "Ошибка входа";
-            setError(
-              message === "Failed to fetch" || message === "HTTP 500"
-                ? "Нет связи с API на порту 4100. Запустите npm run dev в папке CRM и откройте http://127.0.0.1:4180."
-                : message,
-            );
-          }
-        }}
-      >
-        <h2>Вход в CRM</h2>
-        <p className="muted">Телефон для входа не нужен. WhatsApp не обязателен.</p>
-        <label>
-          Email
-          <input name="email" type="email" required defaultValue="owner@creolab.example" />
-        </label>
-        <label>
-          Пароль
-          <input name="password" type="password" required defaultValue="ChangeMeLocal1!" />
-        </label>
-        {error ? <p className="error">{error}</p> : null}
-        <button className="btn">Войти</button>
-      </form>
+      <div className="login-stage">
+        <div className="login-brand">
+          <div className="brand-mark" aria-hidden>
+            C
+          </div>
+          <h1 className="brand-wordmark">CREOLAB</h1>
+          <p>CRM для продаж и диалогов — спокойный рабочий контур команды.</p>
+        </div>
+        <form
+          className="panel"
+          onSubmit={async (event) => {
+            event.preventDefault();
+            const form = new FormData(event.currentTarget);
+            try {
+              const result = (await api.login(String(form.get("email")), String(form.get("password")))) as any;
+              const tenantId =
+                result.user?.activeTenant?.tenant?.id || result.user?.memberships?.[0]?.tenant?.id;
+              if (tenantId) setTenant(tenantId);
+              // Полная перезагрузка: App заново вызовет /me с cookie и снимет boot=anon
+              window.location.assign("/today");
+            } catch (err) {
+              const message = err instanceof Error ? err.message : "Ошибка входа";
+              setError(
+                message === "Failed to fetch" || message === "HTTP 500"
+                  ? "Нет связи с API на порту 4100. Запустите npm run dev в папке CRM и откройте http://127.0.0.1:4180."
+                  : message,
+              );
+            }
+          }}
+        >
+          <h2>Вход</h2>
+          <p className="muted">Email и пароль. WhatsApp для входа не нужен.</p>
+          <label>
+            Email
+            <input name="email" type="email" required defaultValue="owner@creolab.example" autoComplete="username" />
+          </label>
+          <label>
+            Пароль
+            <input
+              name="password"
+              type="password"
+              required
+              defaultValue="ChangeMeLocal1!"
+              autoComplete="current-password"
+            />
+          </label>
+          {error ? <p className="error">{error}</p> : null}
+          <button className="btn">Войти</button>
+        </form>
+      </div>
     </div>
   );
 }
 
 function Today() {
   return <SituationPage />;
-}
-
-function Inquiries() {
-  const [state] = useQuery(() => Promise.all([api.inquiries(), api.incomplete()]));
-  const [phoneError, setPhoneError] = useState("");
-  if (state.status !== "ready" || !state.data) {
-    return <StateView state={state} onRetry={() => location.reload()} empty="Заявок нет. Создайте вручную или откройте форму." />;
-  }
-  const [inquiries, intakes] = state.data as [any, any];
-  return (
-    <section>
-      <h2>Заявки</h2>
-      <form
-        className="panel"
-        onSubmit={async (event) => {
-          event.preventDefault();
-          const form = new FormData(event.currentTarget);
-          try {
-            await api.createInquiry({
-              name: form.get("name"),
-              phone: form.get("phone"),
-              subject: form.get("subject"),
-              message: form.get("message"),
-            });
-            setPhoneError("");
-            location.reload();
-          } catch (err: any) {
-            setPhoneError(err.body?.field_errors?.phone || err.message);
-          }
-        }}
-      >
-        <b>Новая заявка без WhatsApp</b>
-        <label>Имя<input name="name" required /></label>
-        <label>Телефон<input name="phone" required placeholder="+7 701 000 00 03" /></label>
-        <label>Тема<input name="subject" /></label>
-        <label>Задача<textarea name="message" /></label>
-        {phoneError ? <p className="error">{phoneError}</p> : null}
-        <button className="btn">Сохранить</button>
-      </form>
-      <h3>Требует уточнения телефона</h3>
-      {intakes.items.map((item: any) => (
-        <div className="row" key={item.id}>
-          <div>
-            <b>{item.reason}</b>
-            <div className="muted">{new Date(item.receivedAt).toLocaleString("ru-RU")}</div>
-          </div>
-          <CompleteIntake id={item.id} />
-        </div>
-      ))}
-      <h3>Полноценные заявки</h3>
-      {inquiries.items.map((item: any) => (
-        <div className="row" key={item.id}>
-          <div>
-            <b>{item.subject || item.contact?.name}</b>
-            <div className="muted">{item.phoneRaw} · {item.source} · {item.status}</div>
-          </div>
-          <div className="actions">
-            <button className="btn secondary" onClick={() => api.acceptInquiry(item.id).then(() => location.reload())}>Принять</button>
-            <button className="btn" onClick={() => api.convertInquiry(item.id).then(() => location.reload())}>В сделку</button>
-          </div>
-        </div>
-      ))}
-    </section>
-  );
-}
-
-function CompleteIntake({ id }: { id: string }) {
-  return (
-    <form
-      onSubmit={async (event) => {
-        event.preventDefault();
-        const form = new FormData(event.currentTarget);
-        await api.completeIntake(id, { phone: form.get("phone"), name: form.get("name") });
-        location.reload();
-      }}
-    >
-      <input name="name" placeholder="Имя" />
-      <input name="phone" required placeholder="+7..." />
-      <button className="btn">Оформить</button>
-    </form>
-  );
 }
 
 function SimpleList({ title, load, render }: { title: string; load: () => Promise<any>; render: (item: any) => ReactNode }) {
@@ -643,7 +593,9 @@ export function App() {
                 <Route path="/today" element={<Today />} />
                 <Route path="/control" element={<ControlPage />} />
                 <Route path="/integrations" element={<IntegrationsPage />} />
-                <Route path="/inquiries" element={<Inquiries />} />
+                <Route path="/inquiries" element={<RequestsPage />} />
+                <Route path="/requests" element={<Navigate to="/inquiries" replace />} />
+                <Route path="/requests/:requestId" element={<RequestDetailPage />} />
                 <Route path="/conversations" element={<ConversationsPage />} />
                 <Route path="/conversations/:id" element={<ConversationsPage />} />
                 <Route path="/deals" element={<SimpleList title="Сделки" load={() => api.deals()} render={(item) => (

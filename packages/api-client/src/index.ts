@@ -45,13 +45,31 @@ export function createApiClient(options: ClientOptions) {
     },
     snoozeSituation: (body: { itemId: string; until: string; reason?: string }) =>
       request("/api/v1/situation/snooze", { method: "POST", body: JSON.stringify(body) }),
-    inquiries: () => request("/api/v1/inquiries"),
+    inquiries: (query?: Record<string, string | number | undefined>) => {
+      const params = new URLSearchParams();
+      Object.entries(query || {}).forEach(([key, value]) => {
+        if (value != null && value !== "") params.set(key, String(value));
+      });
+      const qs = params.toString();
+      return request(`/api/v1/inquiries${qs ? `?${qs}` : ""}`);
+    },
+    inquiry: (id: string) => request(`/api/v1/inquiries/${id}`),
     incomplete: () => request("/api/v1/incomplete-intakes"),
     createInquiry: (body: unknown) =>
       request("/api/v1/inquiries", { method: "POST", body: JSON.stringify(body) }),
-    acceptInquiry: (id: string) => request(`/api/v1/inquiries/${id}/accept`, { method: "POST" }),
-    convertInquiry: (id: string) =>
-      request(`/api/v1/inquiries/${id}/convert-to-deal`, { method: "POST", body: "{}" }),
+    lookupInquiryContact: (phone: string) =>
+      request("/api/v1/inquiries/lookup-contact", { method: "POST", body: JSON.stringify({ phone }) }),
+    updateInquiry: (id: string, body: unknown) =>
+      request(`/api/v1/inquiries/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+    takeInquiry: (id: string) => request(`/api/v1/inquiries/${id}/take`, { method: "POST" }),
+    loseInquiry: (id: string, body: unknown) =>
+      request(`/api/v1/inquiries/${id}/lose`, { method: "POST", body: JSON.stringify(body) }),
+    acceptInquiry: (id: string) => request(`/api/v1/inquiries/${id}/take`, { method: "POST" }),
+    convertInquiry: (id: string, body?: unknown) =>
+      request(`/api/v1/inquiries/${id}/convert-to-deal`, {
+        method: "POST",
+        body: JSON.stringify(body || {}),
+      }),
     completeIntake: (id: string, body: unknown) =>
       request(`/api/v1/incomplete-intakes/${id}/complete`, { method: "POST", body: JSON.stringify(body) }),
     contacts: (query: Record<string, string> = {}) => {

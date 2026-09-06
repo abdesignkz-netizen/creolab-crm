@@ -138,7 +138,10 @@ export function ConversationsPage() {
           <div className="conv-topic">{workspace.conversation.topic}</div>
           {workspace.currentRequest ? (
             <div className="muted">
-              По заявке: {workspace.currentRequest.title} · {workspace.currentRequest.statusLabel}
+              Заявка:{" "}
+              <Link to={`/requests/${workspace.currentRequest.id}`}>
+                {workspace.currentRequest.title} · {workspace.currentRequest.statusLabel}
+              </Link>
             </div>
           ) : (
             <div className="muted">Заявка не определена</div>
@@ -299,6 +302,9 @@ export function ConversationsPage() {
         <div>{workspace.conversation.topic}</div>
         {workspace.currentRequest ? (
           <>
+            <div>
+              <Link to={`/requests/${workspace.currentRequest.id}`}>{workspace.currentRequest.title || workspace.conversation.topic}</Link>
+            </div>
             <div className="muted">{workspace.currentRequest.statusLabel}</div>
             {workspace.currentRequest.budgetLabel ? <div className="muted">Бюджет: {workspace.currentRequest.budgetLabel}</div> : null}
             {workspace.currentRequest.desiredDeadline ? <div className="muted">Срок: {workspace.currentRequest.desiredDeadline}</div> : null}

@@ -179,12 +179,26 @@ CREATE TABLE "Contact" (
     "id" TEXT NOT NULL,
     "tenantId" TEXT NOT NULL,
     "name" TEXT,
+    "firstName" TEXT,
+    "lastName" TEXT,
+    "middleName" TEXT,
     "companyName" TEXT,
+    "jobTitle" TEXT,
+    "city" TEXT,
+    "country" TEXT,
     "language" TEXT NOT NULL DEFAULT 'unknown',
     "ownerMembershipId" TEXT,
     "summary" TEXT,
+    "lifecycleStatus" TEXT NOT NULL DEFAULT 'new',
+    "leadTemperature" TEXT NOT NULL DEFAULT 'unknown',
+    "leadScore" INTEGER,
+    "archivedAt" TIMESTAMP(3),
     "firstSeenAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "lastSeenAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "lastInboundMessageAt" TIMESTAMP(3),
+    "lastOutboundMessageAt" TIMESTAMP(3),
+    "lastContactAt" TIMESTAMP(3),
+    "attributionJson" JSONB NOT NULL DEFAULT '{}',
     "version" INTEGER NOT NULL DEFAULT 1,
 
     CONSTRAINT "Contact_pkey" PRIMARY KEY ("id")
@@ -258,9 +272,9 @@ CREATE TABLE "Inquiry" (
     "source" TEXT NOT NULL,
     "inboundEventId" TEXT,
     "contactId" TEXT NOT NULL,
-    "phoneRaw" TEXT NOT NULL,
-    "phoneNormalized" TEXT NOT NULL,
-    "phoneSource" TEXT NOT NULL,
+    "phoneRaw" TEXT NOT NULL DEFAULT '',
+    "phoneNormalized" TEXT NOT NULL DEFAULT '',
+    "phoneSource" TEXT NOT NULL DEFAULT 'unknown',
     "phoneConfirmed" BOOLEAN NOT NULL DEFAULT false,
     "subject" TEXT,
     "description" TEXT,
@@ -276,11 +290,56 @@ CREATE TABLE "Inquiry" (
     "attentionReason" TEXT,
     "nextStep" TEXT,
     "test" BOOLEAN NOT NULL DEFAULT false,
+    "service" TEXT,
+    "serviceCategory" TEXT,
+    "serviceSubcategory" TEXT,
+    "companyName" TEXT,
+    "city" TEXT,
+    "aiSummary" TEXT,
+    "budgetMin" INTEGER,
+    "budgetMax" INTEGER,
+    "currency" TEXT NOT NULL DEFAULT 'KZT',
+    "desiredDeadline" TEXT,
+    "sourceType" TEXT,
+    "sourceChannel" TEXT,
+    "sourceIntegration" TEXT,
+    "utmSource" TEXT,
+    "utmMedium" TEXT,
+    "utmCampaign" TEXT,
+    "utmContent" TEXT,
+    "utmTerm" TEXT,
+    "landingPage" TEXT,
+    "referrer" TEXT,
+    "lostReason" TEXT,
+    "lostComment" TEXT,
+    "classification" TEXT,
+    "fieldMetaJson" JSONB NOT NULL DEFAULT '{}',
+    "needsReply" BOOLEAN NOT NULL DEFAULT true,
     "receivedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "firstContactAt" TIMESTAMP(3),
+    "qualifiedAt" TIMESTAMP(3),
+    "convertedAt" TIMESTAMP(3),
+    "lostAt" TIMESTAMP(3),
+    "closedAt" TIMESTAMP(3),
     "completedAt" TIMESTAMP(3),
     "version" INTEGER NOT NULL DEFAULT 1,
 
     CONSTRAINT "Inquiry_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "InquiryStatusHistory" (
+    "id" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL,
+    "inquiryId" TEXT NOT NULL,
+    "fromStatus" TEXT,
+    "toStatus" TEXT NOT NULL,
+    "changedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "changedByType" TEXT NOT NULL DEFAULT 'system',
+    "changedById" TEXT,
+    "note" TEXT,
+
+    CONSTRAINT "InquiryStatusHistory_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -379,10 +438,17 @@ CREATE TABLE "Attachment" (
     "messageId" TEXT,
     "storageKey" TEXT NOT NULL,
     "fileName" TEXT NOT NULL,
+    "originalFileName" TEXT,
     "mimeType" TEXT NOT NULL,
     "sizeBytes" INTEGER NOT NULL,
     "checksum" TEXT,
+    "documentType" TEXT NOT NULL DEFAULT 'document',
     "status" TEXT NOT NULL DEFAULT 'stored',
+    "uploadedById" TEXT,
+    "sendState" TEXT NOT NULL DEFAULT 'pending',
+    "sendError" TEXT,
+    "providerMessageId" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "Attachment_pkey" PRIMARY KEY ("id")
 );
@@ -467,10 +533,101 @@ CREATE TABLE "Task" (
     "source" TEXT NOT NULL DEFAULT 'manual',
     "status" TEXT NOT NULL DEFAULT 'open',
     "dedupeKey" TEXT,
+    "targetType" TEXT NOT NULL DEFAULT 'none',
+    "parentTaskId" TEXT,
+    "segmentSnapshotJson" JSONB NOT NULL DEFAULT '{}',
+    "executionStatus" TEXT NOT NULL DEFAULT 'none',
+    "messageDraft" TEXT,
+    "resultCode" TEXT,
+    "resultText" TEXT,
+    "completionSource" TEXT,
+    "confirmedAt" TIMESTAMP(3),
+    "sentAt" TIMESTAMP(3),
+    "rawCommandText" TEXT,
+    "parsedCommandJson" JSONB NOT NULL DEFAULT '{}',
+    "commandStatus" TEXT NOT NULL DEFAULT 'none',
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "completedAt" TIMESTAMP(3),
 
     CONSTRAINT "Task_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "ExecutionConfirmation" (
+    "id" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL,
+    "taskId" TEXT NOT NULL,
+    "contactId" TEXT,
+    "inquiryId" TEXT,
+    "dealId" TEXT,
+    "conversationId" TEXT,
+    "channel" TEXT NOT NULL,
+    "destination" TEXT,
+    "messageSnapshot" TEXT,
+    "attachmentSnapshotsJson" JSONB NOT NULL DEFAULT '[]',
+    "contentHash" TEXT NOT NULL,
+    "confirmedById" TEXT,
+    "confirmedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "voidedAt" TIMESTAMP(3),
+
+    CONSTRAINT "ExecutionConfirmation_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Campaign" (
+    "id" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL,
+    "title" TEXT NOT NULL,
+    "channel" TEXT NOT NULL DEFAULT 'whatsapp',
+    "status" TEXT NOT NULL DEFAULT 'draft',
+    "source" TEXT NOT NULL DEFAULT 'manual',
+    "messageDraft" TEXT,
+    "messageMode" TEXT NOT NULL DEFAULT 'manual',
+    "createMissingClients" BOOLEAN NOT NULL DEFAULT true,
+    "scheduledAt" TIMESTAMP(3),
+    "startedAt" TIMESTAMP(3),
+    "completedAt" TIMESTAMP(3),
+    "pausedAt" TIMESTAMP(3),
+    "confirmedAt" TIMESTAMP(3),
+    "confirmedById" TEXT,
+    "contentHash" TEXT,
+    "messageSnapshot" TEXT,
+    "attachmentSnapshotsJson" JSONB NOT NULL DEFAULT '[]',
+    "recipientSnapshotJson" JSONB NOT NULL DEFAULT '[]',
+    "statsJson" JSONB NOT NULL DEFAULT '{}',
+    "segmentSnapshotJson" JSONB NOT NULL DEFAULT '{}',
+    "rawCommandText" TEXT,
+    "parsedCommandJson" JSONB NOT NULL DEFAULT '{}',
+    "createdByMembershipId" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Campaign_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "CampaignRecipient" (
+    "id" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL,
+    "campaignId" TEXT NOT NULL,
+    "contactId" TEXT,
+    "phoneRaw" TEXT,
+    "phoneNormalized" TEXT,
+    "displayName" TEXT,
+    "status" TEXT NOT NULL DEFAULT 'pending',
+    "skipReason" TEXT,
+    "error" TEXT,
+    "textSendState" TEXT NOT NULL DEFAULT 'none',
+    "filesSendState" TEXT NOT NULL DEFAULT 'none',
+    "providerMessageId" TEXT,
+    "sentAt" TIMESTAMP(3),
+    "deliveredAt" TIMESTAMP(3),
+    "readAt" TIMESTAMP(3),
+    "repliedAt" TIMESTAMP(3),
+    "conversationId" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "CampaignRecipient_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -498,10 +655,48 @@ CREATE TABLE "Note" (
     "authorUserId" TEXT,
     "text" TEXT NOT NULL,
     "internal" BOOLEAN NOT NULL DEFAULT true,
+    "pinned" BOOLEAN NOT NULL DEFAULT false,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "contactId" TEXT,
 
     CONSTRAINT "Note_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Tag" (
+    "id" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "Tag_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "ContactTag" (
+    "id" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL,
+    "contactId" TEXT NOT NULL,
+    "tagId" TEXT NOT NULL,
+
+    CONSTRAINT "ContactTag_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Activity" (
+    "id" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL,
+    "contactId" TEXT NOT NULL,
+    "inquiryId" TEXT,
+    "type" TEXT NOT NULL,
+    "title" TEXT NOT NULL,
+    "description" TEXT,
+    "actorType" TEXT NOT NULL DEFAULT 'system',
+    "actorId" TEXT,
+    "metadataJson" JSONB NOT NULL DEFAULT '{}',
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "Activity_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -745,6 +940,19 @@ CREATE TABLE "SupportSession" (
     CONSTRAINT "SupportSession_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
+CREATE TABLE "SituationSnooze" (
+    "id" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL,
+    "itemId" TEXT NOT NULL,
+    "until" TIMESTAMP(3) NOT NULL,
+    "byUserId" TEXT NOT NULL,
+    "reason" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "SituationSnooze_pkey" PRIMARY KEY ("id")
+);
+
 -- CreateIndex
 CREATE UNIQUE INDEX "Tenant_slug_key" ON "Tenant"("slug");
 
@@ -806,6 +1014,9 @@ CREATE INDEX "RoutingRule_tenantId_priority_idx" ON "RoutingRule"("tenantId", "p
 CREATE INDEX "Contact_tenantId_lastSeenAt_idx" ON "Contact"("tenantId", "lastSeenAt");
 
 -- CreateIndex
+CREATE INDEX "Contact_tenantId_lifecycleStatus_archivedAt_idx" ON "Contact"("tenantId", "lifecycleStatus", "archivedAt");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "Contact_tenantId_id_key" ON "Contact"("tenantId", "id");
 
 -- CreateIndex
@@ -833,10 +1044,19 @@ CREATE INDEX "Inquiry_tenantId_receivedAt_idx" ON "Inquiry"("tenantId", "receive
 CREATE INDEX "Inquiry_tenantId_status_assigneeMembershipId_idx" ON "Inquiry"("tenantId", "status", "assigneeMembershipId");
 
 -- CreateIndex
+CREATE INDEX "Inquiry_tenantId_needsReply_receivedAt_idx" ON "Inquiry"("tenantId", "needsReply", "receivedAt");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "Inquiry_tenantId_id_key" ON "Inquiry"("tenantId", "id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Inquiry_tenantId_dealId_key" ON "Inquiry"("tenantId", "dealId");
+
+-- CreateIndex
+CREATE INDEX "InquiryStatusHistory_tenantId_inquiryId_changedAt_idx" ON "InquiryStatusHistory"("tenantId", "inquiryId", "changedAt");
+
+-- CreateIndex
+CREATE INDEX "InquiryStatusHistory_inquiryId_changedAt_idx" ON "InquiryStatusHistory"("inquiryId", "changedAt");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "IncompleteIntake_inquiryId_key" ON "IncompleteIntake"("inquiryId");
@@ -899,16 +1119,52 @@ CREATE INDEX "PaymentRecord_tenantId_dealId_confirmedAt_idx" ON "PaymentRecord"(
 CREATE INDEX "Task_tenantId_status_dueAt_idx" ON "Task"("tenantId", "status", "dueAt");
 
 -- CreateIndex
+CREATE INDEX "Task_tenantId_parentTaskId_idx" ON "Task"("tenantId", "parentTaskId");
+
+-- CreateIndex
+CREATE INDEX "Task_tenantId_targetType_status_idx" ON "Task"("tenantId", "targetType", "status");
+
+-- CreateIndex
+CREATE INDEX "Task_tenantId_executionStatus_idx" ON "Task"("tenantId", "executionStatus");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "Task_tenantId_id_key" ON "Task"("tenantId", "id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Task_tenantId_dedupeKey_key" ON "Task"("tenantId", "dedupeKey");
 
 -- CreateIndex
+CREATE INDEX "ExecutionConfirmation_tenantId_taskId_confirmedAt_idx" ON "ExecutionConfirmation"("tenantId", "taskId", "confirmedAt");
+
+-- CreateIndex
+CREATE INDEX "Campaign_tenantId_status_scheduledAt_idx" ON "Campaign"("tenantId", "status", "scheduledAt");
+
+-- CreateIndex
+CREATE INDEX "Campaign_tenantId_createdAt_idx" ON "Campaign"("tenantId", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "CampaignRecipient_tenantId_campaignId_status_idx" ON "CampaignRecipient"("tenantId", "campaignId", "status");
+
+-- CreateIndex
+CREATE INDEX "CampaignRecipient_tenantId_phoneNormalized_idx" ON "CampaignRecipient"("tenantId", "phoneNormalized");
+
+-- CreateIndex
+CREATE INDEX "CampaignRecipient_tenantId_contactId_idx" ON "CampaignRecipient"("tenantId", "contactId");
+
+-- CreateIndex
 CREATE INDEX "ScheduledAction_tenantId_state_dueAt_idx" ON "ScheduledAction"("tenantId", "state", "dueAt");
 
 -- CreateIndex
 CREATE INDEX "Note_tenantId_parentType_parentId_idx" ON "Note"("tenantId", "parentType", "parentId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Tag_tenantId_name_key" ON "Tag"("tenantId", "name");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "ContactTag_tenantId_contactId_tagId_key" ON "ContactTag"("tenantId", "contactId", "tagId");
+
+-- CreateIndex
+CREATE INDEX "Activity_tenantId_contactId_createdAt_idx" ON "Activity"("tenantId", "contactId", "createdAt");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "KnowledgeVersion_tenantId_version_key" ON "KnowledgeVersion"("tenantId", "version");
@@ -958,6 +1214,12 @@ CREATE INDEX "AuditEvent_tenantId_createdAt_idx" ON "AuditEvent"("tenantId", "cr
 -- CreateIndex
 CREATE UNIQUE INDEX "IdempotencyRecord_scope_actorKey_key_key" ON "IdempotencyRecord"("scope", "actorKey", "key");
 
+-- CreateIndex
+CREATE INDEX "SituationSnooze_tenantId_until_idx" ON "SituationSnooze"("tenantId", "until");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "SituationSnooze_tenantId_itemId_key" ON "SituationSnooze"("tenantId", "itemId");
+
 -- AddForeignKey
 ALTER TABLE "TenantPlan" ADD CONSTRAINT "TenantPlan_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
@@ -1004,6 +1266,9 @@ ALTER TABLE "RoutingRule" ADD CONSTRAINT "RoutingRule_tenantId_fkey" FOREIGN KEY
 ALTER TABLE "Contact" ADD CONSTRAINT "Contact_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "Contact" ADD CONSTRAINT "Contact_tenantId_ownerMembershipId_fkey" FOREIGN KEY ("tenantId", "ownerMembershipId") REFERENCES "Membership"("tenantId", "id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "ContactMethod" ADD CONSTRAINT "ContactMethod_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -1047,6 +1312,12 @@ ALTER TABLE "Inquiry" ADD CONSTRAINT "Inquiry_tenantId_conversationId_fkey" FORE
 
 -- AddForeignKey
 ALTER TABLE "Inquiry" ADD CONSTRAINT "Inquiry_tenantId_dealId_fkey" FOREIGN KEY ("tenantId", "dealId") REFERENCES "Deal"("tenantId", "id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "InquiryStatusHistory" ADD CONSTRAINT "InquiryStatusHistory_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "InquiryStatusHistory" ADD CONSTRAINT "InquiryStatusHistory_tenantId_inquiryId_fkey" FOREIGN KEY ("tenantId", "inquiryId") REFERENCES "Inquiry"("tenantId", "id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "IncompleteIntake" ADD CONSTRAINT "IncompleteIntake_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -1151,6 +1422,24 @@ ALTER TABLE "Task" ADD CONSTRAINT "Task_tenantId_dealId_fkey" FOREIGN KEY ("tena
 ALTER TABLE "Task" ADD CONSTRAINT "Task_tenantId_ownerMembershipId_fkey" FOREIGN KEY ("tenantId", "ownerMembershipId") REFERENCES "Membership"("tenantId", "id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "Task" ADD CONSTRAINT "Task_parentTaskId_fkey" FOREIGN KEY ("parentTaskId") REFERENCES "Task"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ExecutionConfirmation" ADD CONSTRAINT "ExecutionConfirmation_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ExecutionConfirmation" ADD CONSTRAINT "ExecutionConfirmation_taskId_fkey" FOREIGN KEY ("taskId") REFERENCES "Task"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Campaign" ADD CONSTRAINT "Campaign_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "CampaignRecipient" ADD CONSTRAINT "CampaignRecipient_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "CampaignRecipient" ADD CONSTRAINT "CampaignRecipient_campaignId_fkey" FOREIGN KEY ("campaignId") REFERENCES "Campaign"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "ScheduledAction" ADD CONSTRAINT "ScheduledAction_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -1158,6 +1447,24 @@ ALTER TABLE "Note" ADD CONSTRAINT "Note_tenantId_fkey" FOREIGN KEY ("tenantId") 
 
 -- AddForeignKey
 ALTER TABLE "Note" ADD CONSTRAINT "Note_tenantId_contactId_fkey" FOREIGN KEY ("tenantId", "contactId") REFERENCES "Contact"("tenantId", "id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Tag" ADD CONSTRAINT "Tag_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ContactTag" ADD CONSTRAINT "ContactTag_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ContactTag" ADD CONSTRAINT "ContactTag_tenantId_contactId_fkey" FOREIGN KEY ("tenantId", "contactId") REFERENCES "Contact"("tenantId", "id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ContactTag" ADD CONSTRAINT "ContactTag_tagId_fkey" FOREIGN KEY ("tagId") REFERENCES "Tag"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Activity" ADD CONSTRAINT "Activity_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Activity" ADD CONSTRAINT "Activity_tenantId_contactId_fkey" FOREIGN KEY ("tenantId", "contactId") REFERENCES "Contact"("tenantId", "id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "KnowledgeVersion" ADD CONSTRAINT "KnowledgeVersion_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -1222,21 +1529,6 @@ ALTER TABLE "AuditEvent" ADD CONSTRAINT "AuditEvent_tenantId_fkey" FOREIGN KEY (
 -- AddForeignKey
 ALTER TABLE "SupportSession" ADD CONSTRAINT "SupportSession_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
--- CreateTable
-CREATE TABLE "SituationSnooze" (
-    "id" TEXT NOT NULL,
-    "tenantId" TEXT NOT NULL,
-    "itemId" TEXT NOT NULL,
-    "until" TIMESTAMP(3) NOT NULL,
-    "byUserId" TEXT NOT NULL,
-    "reason" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "SituationSnooze_pkey" PRIMARY KEY ("id")
-);
-
-CREATE UNIQUE INDEX "SituationSnooze_tenantId_itemId_key" ON "SituationSnooze"("tenantId", "itemId");
-CREATE INDEX "SituationSnooze_tenantId_until_idx" ON "SituationSnooze"("tenantId", "until");
-
+-- AddForeignKey
 ALTER TABLE "SituationSnooze" ADD CONSTRAINT "SituationSnooze_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 

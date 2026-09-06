@@ -8,19 +8,69 @@ export const loginSchema = z.object({
 
 export const createInquirySchema = z.object({
   name: z.string().trim().min(1).max(160),
-  phone: z.string().min(1),
+  phone: z.string().trim().max(40).optional().or(z.literal("")),
+  company: z.string().trim().max(200).optional(),
   subject: z.string().trim().max(200).optional(),
   message: z.string().trim().max(4000).optional(),
   service: z.string().trim().max(200).optional(),
+  serviceCategory: z.string().trim().max(80).optional(),
+  sourceChannel: z.string().trim().max(80).optional(),
+  sourceType: z.string().trim().max(80).optional(),
+  contactId: z.string().uuid().optional(),
+  forceNewContact: z.boolean().optional(),
+});
+
+export const lookupInquiryContactSchema = z.object({
+  phone: z.string().min(1),
+});
+
+export const updateInquirySchema = z.object({
+  status: z
+    .enum([
+      "new",
+      "qualification",
+      "qualified",
+      "in_progress",
+      "waiting_client",
+      "proposal",
+      "converted",
+      "lost",
+      "cancelled",
+      "invalid",
+      "spam",
+      "duplicate",
+    ])
+    .optional(),
+  subject: z.string().trim().max(200).nullable().optional(),
+  description: z.string().trim().max(4000).nullable().optional(),
+  service: z.string().trim().max(200).nullable().optional(),
+  serviceCategory: z.string().trim().max(80).nullable().optional(),
+  serviceSubcategory: z.string().trim().max(80).nullable().optional(),
+  companyName: z.string().trim().max(200).nullable().optional(),
+  city: z.string().trim().max(120).nullable().optional(),
+  desiredDeadline: z.string().trim().max(120).nullable().optional(),
+  budgetMin: z.number().int().nullable().optional(),
+  budgetMax: z.number().int().nullable().optional(),
+  nextStep: z.string().trim().max(400).nullable().optional(),
+  assigneeMembershipId: z.string().uuid().nullable().optional(),
+  needsReply: z.boolean().optional(),
+  aiSummary: z.string().trim().max(4000).nullable().optional(),
+  phone: z.string().trim().max(40).optional(),
+});
+
+export const loseInquirySchema = z.object({
+  reason: z.string().trim().min(1).max(80),
+  comment: z.string().trim().max(1000).optional(),
+  classification: z.enum(["lost", "invalid", "spam", "duplicate"]).default("lost"),
+});
+
+export const convertDealSchema = z.object({
+  title: z.string().trim().max(200).optional(),
 });
 
 export const completeIntakeSchema = z.object({
   phone: z.string().min(1),
   name: z.string().trim().max(160).optional(),
-});
-
-export const convertDealSchema = z.object({
-  title: z.string().trim().max(200).optional(),
 });
 
 export const conversationModeSchema = z.object({
