@@ -11,6 +11,15 @@ import {
   minutesAgo,
   needsReply as contactNeedsReply,
 } from "./contactLabels.ts";
+import { AI_PROCESS_LABEL, type AiProcessStatus } from "./requestAutomationService.ts";
+import { MODE_LABEL } from "./aiAutomationSettings.ts";
+
+function readAutomationBlock(fieldMetaJson: unknown) {
+  if (!fieldMetaJson || typeof fieldMetaJson !== "object") return null;
+  const automation = (fieldMetaJson as { automation?: Record<string, unknown> }).automation;
+  if (!automation || typeof automation !== "object") return null;
+  return automation;
+}
 
 export function statusLabel(status: string) {
   return INQUIRY_STATUS_LABEL[status] || status;
@@ -105,13 +114,26 @@ type InquiryLike = {
     outcome?: string | null;
     stage?: { name?: string | null } | null;
   } | null;
-  tasks?: Array<{ id: string; title: string; status: string; dueAt?: Date | null }>;
+  tasks?: Array<{
+    id: string;
+    title: string;
+    status: string;
+    dueAt?: Date | null;
+    type?: string;
+    executionStatus?: string | null;
+    purpose?: string | null;
+    briefingText?: string | null;
+    contextSnapshotJson?: unknown;
+    preparationHintsJson?: unknown;
+  }>;
   conversation?: {
     id: string;
+    mode?: string | null;
     updatedAt?: Date;
     connection?: { channelType?: string | null } | null;
     _count?: { messages?: number };
   } | null;
+  fieldMetaJson?: unknown;
 };
 
 export function clarificationIssues(inquiry: InquiryLike) {
@@ -194,6 +216,9 @@ export function mapInquiryListItem(inquiry: InquiryLike, timeZone = "Asia/Almaty
         : null;
   const openTask = (inquiry.tasks || []).find((t) => t.status === "open" || t.status === "planned");
   const issues = clarificationIssues(inquiry);
+  const automation = readAutomationBlock(inquiry.fieldMetaJson);
+  const aiStatus = (typeof automation?.status === "string" ? automation.status : "none") as AiProcessStatus;
+  const aiMode = typeof automation?.mode === "string" ? automation.mode : null;
 
   return {
     id: inquiry.id,
@@ -230,6 +255,12 @@ export function mapInquiryListItem(inquiry: InquiryLike, timeZone = "Asia/Almaty
     issues,
     needsClarification: issues.some((i) => i.code === "no_contact" || i.code === "missing_service" || i.code === "unlinked_client"),
     attentionReason: inquiry.attentionReason || null,
+    aiProcess: {
+      mode: aiMode,
+      modeLabel: aiMode && aiMode in MODE_LABEL ? MODE_LABEL[aiMode as keyof typeof MODE_LABEL] : null,
+      status: aiStatus,
+      statusLabel: AI_PROCESS_LABEL[aiStatus] || AI_PROCESS_LABEL.none,
+    },
   };
 }
 
@@ -253,6 +284,20 @@ export function mapInquiryDetail(inquiry: InquiryLike & {
 }, timeZone = "Asia/Almaty") {
   const list = mapInquiryListItem(inquiry, timeZone);
   const checklist = qualificationChecklist(inquiry);
+  const automation = readAutomationBlock(inquiry.fieldMetaJson);
+  const analysis =
+    automation?.analysis && typeof automation.analysis === "object"
+      ? (automation.analysis as {
+          knownFields?: Array<{ key: string; label: string; value?: string | null }>;
+          missingFields?: Array<{ key: string; label: string }>;
+          taskTitle?: string;
+          taskObjective?: string;
+          expectedOutcome?: string;
+          recommendedAction?: string;
+        })
+      : null;
+  const processTask = (inquiry.tasks || []).find((t) => t.type === "process_inquiry" && t.status === "open");
+
   return {
     ...list,
     serviceSubcategory: inquiry.serviceSubcategory || null,
@@ -267,6 +312,26 @@ export function mapInquiryDetail(inquiry: InquiryLike & {
     utmCampaign: inquiry.utmCampaign || null,
     utmSource: inquiry.utmSource || null,
     qualification: checklist,
+    automation: {
+      ...list.aiProcess,
+      reason: typeof automation?.reason === "string" ? automation.reason : null,
+      analysisError: typeof automation?.analysisError === "string" ? automation.analysisError : null,
+      handoffReason: typeof automation?.handoffReason === "string" ? automation.handoffReason : null,
+      taskTitle: analysis?.taskTitle || processTask?.title || null,
+      taskObjective: analysis?.taskObjective || processTask?.purpose || null,
+      expectedOutcome: analysis?.expectedOutcome || null,
+      recommendedAction: analysis?.recommendedAction || null,
+      knownFields: analysis?.knownFields || [],
+      missingFields: analysis?.missingFields || [],
+      canStart:
+        list.aiProcess.status === "awaiting_confirm" ||
+        list.aiProcess.status === "analyzed" ||
+        list.aiProcess.status === "none" ||
+        list.aiProcess.status === "paused" ||
+        list.aiProcess.status === "failed",
+      canTakeover: list.aiProcess.status === "in_progress" || list.aiProcess.status === "queued" || list.aiProcess.status === "waiting_client",
+      canReturnAi: list.aiProcess.status === "paused" || list.aiProcess.status === "needs_human",
+    },
     control: {
       status: list.statusLabel,
       assigneeName: list.assigneeName,
@@ -289,6 +354,7 @@ export function mapInquiryDetail(inquiry: InquiryLike & {
       ? {
           id: inquiry.conversation.id,
           channel: inquiry.conversation.connection?.channelType || "chat",
+          mode: inquiry.conversation.mode || null,
           updatedAt: inquiry.conversation.updatedAt || null,
           messageCount: inquiry.conversation._count?.messages ?? null,
         }
@@ -308,6 +374,7 @@ export function mapInquiryDetail(inquiry: InquiryLike & {
       title: t.title,
       status: t.status,
       dueAt: t.dueAt || null,
+      executionStatus: t.executionStatus || null,
     })),
     timeline: [
       ...(inquiry.statusHistory || []).map((h) => ({

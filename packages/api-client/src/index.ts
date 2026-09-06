@@ -88,6 +88,16 @@ export function createApiClient(options: ClientOptions) {
         method: "POST",
         body: JSON.stringify(body || {}),
       }),
+    inquiryAiPreview: (id: string) => request(`/api/v1/inquiries/${id}/ai-preview`),
+    startInquiryAi: (id: string) => request(`/api/v1/inquiries/${id}/ai/start`, { method: "POST" }),
+    takeoverInquiryAi: (id: string, body?: unknown) =>
+      request(`/api/v1/inquiries/${id}/ai/takeover`, { method: "POST", body: JSON.stringify(body || {}) }),
+    returnInquiryAi: (id: string) => request(`/api/v1/inquiries/${id}/ai/return`, { method: "POST" }),
+    retryInquiryAiAnalysis: (id: string) =>
+      request(`/api/v1/inquiries/${id}/ai/retry-analysis`, { method: "POST" }),
+    aiAutomationSettings: () => request("/api/v1/settings/ai-automation"),
+    updateAiAutomationSettings: (body: unknown) =>
+      request("/api/v1/settings/ai-automation", { method: "PATCH", body: JSON.stringify(body) }),
     completeIntake: (id: string, body: unknown) =>
       request(`/api/v1/incomplete-intakes/${id}/complete`, { method: "POST", body: JSON.stringify(body) }),
     contacts: (query: Record<string, string> = {}) => {
@@ -272,7 +282,46 @@ export function createApiClient(options: ClientOptions) {
       const qs = params.toString();
       return request(`/api/v1/analytics/drilldown${qs ? `?${qs}` : ""}`);
     },
+    companies: (query: Record<string, string | undefined> = {}) => {
+      const params = new URLSearchParams();
+      Object.entries(query).forEach(([key, value]) => {
+        if (value != null && value !== "") params.set(key, value);
+      });
+      const qs = params.toString();
+      return request(`/api/v1/companies${qs ? `?${qs}` : ""}`);
+    },
+    companyOverview: (id: string) => request(`/api/v1/companies/${id}/overview`),
+    company: (id: string) => request(`/api/v1/companies/${id}`),
+    createCompany: (body: unknown) =>
+      request("/api/v1/companies", { method: "POST", body: JSON.stringify(body) }),
+    updateCompany: (id: string, body: unknown) =>
+      request(`/api/v1/companies/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+    companyDuplicates: (query: Record<string, string | undefined> = {}) => {
+      const params = new URLSearchParams();
+      Object.entries(query).forEach(([key, value]) => {
+        if (value != null && value !== "") params.set(key, value);
+      });
+      const qs = params.toString();
+      return request(`/api/v1/companies/duplicates${qs ? `?${qs}` : ""}`);
+    },
+    companiesMigratePreview: () => request("/api/v1/companies/migrate-preview", { method: "POST" }),
+    linkCompanyContact: (companyId: string, body: unknown) =>
+      request(`/api/v1/companies/${companyId}/contacts`, { method: "POST", body: JSON.stringify(body) }),
+    updateCompanyContact: (companyId: string, linkId: string, body: unknown) =>
+      request(`/api/v1/companies/${companyId}/contacts/${linkId}`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+    unlinkCompanyContact: (companyId: string, linkId: string) =>
+      request(`/api/v1/companies/${companyId}/contacts/${linkId}`, { method: "DELETE" }),
+    contactCompanies: (contactId: string) => request(`/api/v1/contacts/${contactId}/companies`),
+    addDealContact: (dealId: string, body: unknown) =>
+      request(`/api/v1/deals/${dealId}/contacts`, { method: "POST", body: JSON.stringify(body) }),
     integrations: () => request("/api/v1/integrations"),
+    integrationCatalog: () => request("/api/v1/integrations/catalog"),
+    integrationEvents: () => request("/api/v1/integrations/events"),
+    integrationHealthCheck: (id: string) =>
+      request(`/api/v1/integrations/${id}/health-check`, { method: "POST" }),
     sellerHealth: () => request("/api/v1/integrations/whatsapp-seller/health"),
     knowledge: () => request("/api/v1/knowledge/current"),
     sandbox: (message: string) =>

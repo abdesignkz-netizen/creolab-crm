@@ -315,6 +315,47 @@ input:focus, textarea:focus, select:focus {
 }
 .check-row input { width: auto; min-height: auto; }
 
+.radio-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.radio-row input { width: auto; min-height: auto; margin-top: 4px; }
+
+.request-gap {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+@media (max-width: 720px) {
+  .request-gap { grid-template-columns: 1fr; }
+}
+
+.integ-section-title {
+  margin: 24px 0 12px;
+  font-size: 1.05rem;
+}
+.integ-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.integ-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+
+p.ok {
+  color: var(--ok, #1b7f4e);
+  background: color-mix(in srgb, var(--ok, #1b7f4e) 12%, transparent);
+  padding: 10px 12px;
+  border-radius: var(--radius);
+}
+
 fieldset.field-block {
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -1895,3 +1936,38 @@ button.linkish {
 }
 .stats-quality-hint { margin: 10px 0 0; font-size: 12.5px; }
 .stats-campaign-funnel { margin-top: 12px; }
+
+/* ——— Companies ——— */
+.companies-page, .company-page { display: grid; gap: 14px; }
+.companies-search { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.companies-search input { min-width: min(280px, 100%); }
+.companies-list { display: grid; gap: 8px; }
+.company-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  text-decoration: none;
+  color: inherit;
+}
+.company-row:hover { border-color: var(--line-strong); }
+.company-row-meta {
+  display: grid;
+  gap: 2px;
+  text-align: right;
+  font-size: 12.5px;
+  min-width: 160px;
+}
+.company-timeline { display: grid; gap: 10px; }
+.company-timeline-item {
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+.company-task-list { margin: 0; padding-left: 18px; }
+@media (max-width: 700px) {
+  .company-row { flex-direction: column; }
+  .company-row-meta { text-align: left; }
+}

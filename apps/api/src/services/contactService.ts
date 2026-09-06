@@ -30,6 +30,7 @@ export async function writeActivity(
   args: {
     tenantId: string;
     contactId: string;
+    companyId?: string | null;
     inquiryId?: string | null;
     dealId?: string | null;
     type: string;
@@ -44,6 +45,7 @@ export async function writeActivity(
     data: {
       tenantId: args.tenantId,
       contactId: args.contactId,
+      companyId: args.companyId || null,
       inquiryId: args.inquiryId || null,
       dealId: args.dealId || null,
       type: args.type,
@@ -397,6 +399,22 @@ export async function getContactOverview(prisma: PrismaClient, auth: AuthContext
   });
   if (!contact) throw new ApiError(404, "not_found", "Клиент не найден");
 
+  const companyLinks = await prisma.companyContact.findMany({
+    where: { tenantId: tid, contactId, isActive: true },
+    include: {
+      company: {
+        select: {
+          id: true,
+          name: true,
+          city: true,
+          industry: true,
+          lifecycleStatus: true,
+        },
+      },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
   const phone = primaryPhone(contact.methods);
   const email = primaryEmail(contact.methods);
   const currentInquiry =
@@ -540,6 +558,16 @@ export async function getContactOverview(prisma: PrismaClient, auth: AuthContext
       archivedAt: contact.archivedAt,
       version: contact.version,
     },
+    companies: companyLinks.map((l) => ({
+      linkId: l.id,
+      position: l.position,
+      department: l.department,
+      isPrimary: l.isPrimary,
+      isDecisionMaker: l.isDecisionMaker,
+      isBillingContact: l.isBillingContact,
+      company: l.company,
+      href: `/companies/${l.company.id}`,
+    })),
     attribution,
     currentRequest: currentInquiry
       ? {

@@ -464,6 +464,9 @@ export function RequestsPage() {
               <div className="request-cell">
                 <div>{item.sourceLine}</div>
                 <div className="client-meta" style={{ marginTop: 4 }}>
+                  {item.aiProcess?.status && item.aiProcess.status !== "none" ? (
+                    <span className="badge">{item.aiProcess.statusLabel}</span>
+                  ) : null}
                   {item.needsReply ? (
                     <span className="badge warn">
                       Нужен ответ{item.waitingMinutes != null ? ` · ${item.waitingMinutes} мин` : ""}

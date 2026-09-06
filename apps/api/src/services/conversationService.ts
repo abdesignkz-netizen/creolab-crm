@@ -157,6 +157,12 @@ export async function listConversationsBoard(
         include: {
           methods: true,
           owner: { include: { user: true } },
+          companyContacts: {
+            where: { isActive: true },
+            include: { company: { select: { id: true, name: true } } },
+            take: 3,
+            orderBy: { isPrimary: "desc" },
+          },
           inquiries: {
             where: { archived: false },
             orderBy: { receivedAt: "desc" },
@@ -244,7 +250,11 @@ export async function listConversationsBoard(
         id: conversation.id,
         title: title === "Без имени" ? phone?.rawValue || "Неизвестный клиент" : title,
         phone: phone?.rawValue || null,
-        companyName: contact?.companyName || null,
+        companyName: contact?.companyContacts?.[0]?.company?.name || contact?.companyName || null,
+        companyId: contact?.companyContacts?.[0]?.company?.id || null,
+        companyHref: contact?.companyContacts?.[0]?.company
+          ? `/companies/${contact.companyContacts[0].company.id}`
+          : null,
         topic: topic || "Тема не определена",
         service: linkedInquiry?.service || null,
         channel,
@@ -325,6 +335,12 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
         include: {
           methods: true,
           owner: { include: { user: true } },
+          companyContacts: {
+            where: { isActive: true },
+            include: { company: { select: { id: true, name: true } } },
+            take: 3,
+            orderBy: { isPrimary: "desc" },
+          },
           inquiries: { where: { archived: false }, orderBy: { receivedAt: "desc" }, take: 20 },
           deals: { orderBy: { createdAt: "desc" }, take: 10, include: { stage: true, assignee: { include: { user: true } } } },
           tasks: {
@@ -403,7 +419,7 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
     service: linkedInquiry?.service || null,
     budget: linkedInquiry ? budgetLabel(linkedInquiry) : null,
     deadline: linkedInquiry?.desiredDeadline || null,
-    company: contact?.companyName || null,
+    company: contact?.companyContacts?.[0]?.company?.name || contact?.companyName || null,
     city: contact?.city || null,
   };
 
@@ -446,7 +462,11 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
           id: contact.id,
           name: title,
           phone: phone?.rawValue || null,
-          companyName: contact.companyName,
+          companyName: contact.companyContacts?.[0]?.company?.name || contact.companyName,
+          companyId: contact.companyContacts?.[0]?.company?.id || null,
+          companyHref: contact.companyContacts?.[0]?.company
+            ? `/companies/${contact.companyContacts[0].company.id}`
+            : null,
           city: contact.city,
           firstContactAt: contact.firstSeenAt,
           firstContactLabel: formatWhen(contact.firstSeenAt, timeZone),

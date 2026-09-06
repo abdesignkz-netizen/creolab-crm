@@ -168,6 +168,30 @@ export function SituationPage() {
         </div>
       </div>
 
+      {data.aiManager?.newRequests ? (
+        <div className="sit-kpi-grid" style={{ marginBottom: 12 }}>
+          <Kpi label="AI обрабатывает заявки" value={data.aiManager.newRequests.processing} to="/inquiries" />
+          <Kpi label="Ожидают менеджера" value={data.aiManager.newRequests.needsHuman} to="/inquiries" />
+          <Kpi label="Ошибка AI-обработки" value={data.aiManager.newRequests.analysisFailed} to="/inquiries" />
+        </div>
+      ) : null}
+
+      {(data.integrationAlerts || []).length > 0 ? (
+        <div className="banner warn" style={{ marginBottom: 12 }}>
+          <div>
+            {(data.integrationAlerts as any[]).map((a) => (
+              <div key={a.id}>
+                <b>{a.title}</b>
+                <div className="muted">{a.detail}</div>
+              </div>
+            ))}
+          </div>
+          <Link className="btn secondary" to="/integrations">
+            Интеграции
+          </Link>
+        </div>
+      ) : null}
+
       {data.freshness?.warning ? (
         <div className="banner warn">
           <span>{data.freshness.warning}</span>

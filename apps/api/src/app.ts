@@ -38,6 +38,11 @@ import {
   updateContactSchema,
   updateInquirySchema,
   updateTaskSchema,
+  createCompanySchema,
+  updateCompanySchema,
+  companyContactSchema,
+  updateCompanyContactSchema,
+  dealContactSchema,
 } from "@creolab/contracts";
 import { config } from "./config.ts";
 import { ApiError, errorBody } from "./errors.ts";
@@ -86,6 +91,20 @@ import {
   waitTask,
 } from "./services/domainService.ts";
 import { getAnalyticsDashboard, getAnalyticsDrilldown, getAnalyticsTrend } from "./services/analyticsService.ts";
+import {
+  addDealContact,
+  createCompany,
+  findCompanyDuplicates,
+  getCompanyContacts,
+  getCompanyOverview,
+  getContactCompanies,
+  linkContactToCompany,
+  listCompanies,
+  suggestCompaniesFromCompanyName,
+  unlinkCompanyContact,
+  updateCompany,
+  updateCompanyContact,
+} from "./services/companyService.ts";
 import {
   addContactNote,
   addContactTag,
@@ -196,7 +215,32 @@ export function createApp(prisma: PrismaClient) {
   });
 
   const json = express.json({ limit: "200kb" });
+  const urlencoded = express.urlencoded({ extended: true, limit: "200kb" });
   const rawJson = express.raw({ type: "application/json", limit: "200kb" });
+
+  // Public form: JSON + urlencoded (HTML forms). Multipart later for files.
+  app.post("/public/forms/:publicKey/submissions", json, urlencoded, async (req, res) => {
+    rateLimit(`form:${req.params.publicKey}:${req.ip}`, 20);
+    res.setHeader("Access-Control-Allow-Origin", req.get("origin") || "*");
+    res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Submission-Id");
+    const result = await submitPublicForm(prisma, req.params.publicKey, req.body || {}, {
+      origin: req.get("origin") || undefined,
+      submissionId: String(req.header("x-submission-id") || req.body?.submission_id || ""),
+    });
+    res.status(result.duplicate ? 200 : 202).json({
+      ok: true,
+      receipt: result.receipt,
+      duplicate: result.duplicate,
+    });
+  });
+
+  app.options("/public/forms/:publicKey/submissions", (_req, res) => {
+    res.setHeader("Access-Control-Allow-Origin", _req.get("origin") || "*");
+    res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Submission-Id");
+    res.status(204).end();
+  });
 
   async function requireAuth(req: express.Request): Promise<AuthContext> {
     const tenantHeader = String(req.header("x-tenant-id") || req.query.tenantId || "");
@@ -308,6 +352,104 @@ export function createApp(prisma: PrismaClient) {
     const auth = await requireAuth(req);
     const deal = await convertInquiryToDeal(prisma, auth, req.params.id, req.body?.title);
     res.json(deal);
+  });
+
+  app.get("/api/v1/settings/ai-automation", async (req, res) => {
+    const { getAIAutomationSettings } = await import("./services/aiAutomationSettingsService.ts");
+    res.json(await getAIAutomationSettings(prisma, await requireAuth(req)));
+  });
+
+  app.patch("/api/v1/settings/ai-automation", json, async (req, res) => {
+    const { updateAIAutomationSettings } = await import("./services/aiAutomationSettingsService.ts");
+    res.json(await updateAIAutomationSettings(prisma, await requireAuth(req), req.body || {}));
+  });
+
+  app.get("/api/v1/inquiries/:id/ai-preview", async (req, res) => {
+    const auth = await requireAuth(req);
+    const membership = auth.activeMembership;
+    if (!membership) {
+      const { ApiError } = await import("./errors.ts");
+      throw new ApiError(403, "no_tenant", "Нет активной компании");
+    }
+    const { getInquiryAutomationPreview } = await import("./services/requestAutomationService.ts");
+    const preview = await getInquiryAutomationPreview(prisma, membership.tenantId, req.params.id);
+    if (!preview) {
+      const { ApiError } = await import("./errors.ts");
+      throw new ApiError(404, "not_found", "Заявка не найдена");
+    }
+    res.json(preview);
+  });
+
+  app.post("/api/v1/inquiries/:id/ai/start", async (req, res) => {
+    const auth = await requireAuth(req);
+    const membership = auth.activeMembership;
+    if (!membership) {
+      const { ApiError } = await import("./errors.ts");
+      throw new ApiError(403, "no_tenant", "Нет активной компании");
+    }
+    const { processNewRequestAutomation, startAiManagerForInquiry } = await import(
+      "./services/requestAutomationService.ts"
+    );
+    const inquiry = await prisma.inquiry.findFirst({
+      where: { id: req.params.id, tenantId: membership.tenantId },
+    });
+    if (!inquiry) {
+      const { ApiError } = await import("./errors.ts");
+      throw new ApiError(404, "not_found", "Заявка не найдена");
+    }
+    const meta =
+      inquiry.fieldMetaJson && typeof inquiry.fieldMetaJson === "object"
+        ? (inquiry.fieldMetaJson as { automation?: { status?: string } }).automation
+        : null;
+    if (!meta?.status || meta.status === "none" || meta.status === "analyzed" || meta.status === "failed") {
+      await processNewRequestAutomation(prisma, membership.tenantId, inquiry.id, {
+        forceMode: "CONFIRM",
+        forceStart: true,
+      });
+    } else {
+      await startAiManagerForInquiry(prisma, membership.tenantId, inquiry.id);
+    }
+    res.json(await getInquiry(prisma, auth, inquiry.id));
+  });
+
+  app.post("/api/v1/inquiries/:id/ai/takeover", json, async (req, res) => {
+    const auth = await requireAuth(req);
+    const membership = auth.activeMembership;
+    if (!membership) {
+      const { ApiError } = await import("./errors.ts");
+      throw new ApiError(403, "no_tenant", "Нет активной компании");
+    }
+    const { handoffInquiryToHuman } = await import("./services/requestAutomationService.ts");
+    await handoffInquiryToHuman(prisma, membership.tenantId, req.params.id, {
+      userId: auth.user.id,
+      membershipId: membership.id,
+      reason: typeof req.body?.reason === "string" ? req.body.reason : "HUMAN_TAKEOVER",
+    });
+    res.json(await getInquiry(prisma, auth, req.params.id));
+  });
+
+  app.post("/api/v1/inquiries/:id/ai/return", async (req, res) => {
+    const auth = await requireAuth(req);
+    const membership = auth.activeMembership;
+    if (!membership) {
+      const { ApiError } = await import("./errors.ts");
+      throw new ApiError(403, "no_tenant", "Нет активной компании");
+    }
+    const { returnInquiryToAi } = await import("./services/requestAutomationService.ts");
+    await returnInquiryToAi(prisma, membership.tenantId, req.params.id);
+    res.json(await getInquiry(prisma, auth, req.params.id));
+  });
+
+  app.post("/api/v1/inquiries/:id/ai/retry-analysis", async (req, res) => {
+    const auth = await requireAuth(req);
+    const membership = auth.activeMembership;
+    if (!membership) {
+      const { ApiError } = await import("./errors.ts");
+      throw new ApiError(403, "no_tenant", "Нет активной компании");
+    }
+    const { processNewRequestAutomation } = await import("./services/requestAutomationService.ts");
+    await processNewRequestAutomation(prisma, membership.tenantId, req.params.id, { forceMode: "ASSIST" });
+    res.json(await getInquiry(prisma, auth, req.params.id));
   });
 
   app.get("/api/v1/incomplete-intakes", async (req, res) => {
@@ -644,6 +786,72 @@ export function createApp(prisma: PrismaClient) {
     res.json(await getAnalyticsDrilldown(prisma, await requireAuth(req), req.query as Record<string, string>));
   });
 
+  app.get("/api/v1/companies", async (req, res) => {
+    res.json(await listCompanies(prisma, await requireAuth(req), req.query as Record<string, string>));
+  });
+
+  app.post("/api/v1/companies", json, async (req, res) => {
+    const input = createCompanySchema.parse(req.body || {});
+    res.status(201).json(await createCompany(prisma, await requireAuth(req), input));
+  });
+
+  app.get("/api/v1/companies/duplicates", async (req, res) => {
+    res.json(
+      await findCompanyDuplicates(prisma, await requireAuth(req), {
+        name: String(req.query.name || ""),
+        bin: req.query.bin ? String(req.query.bin) : undefined,
+        website: req.query.website ? String(req.query.website) : undefined,
+        email: req.query.email ? String(req.query.email) : undefined,
+        phone: req.query.phone ? String(req.query.phone) : undefined,
+      }),
+    );
+  });
+
+  app.post("/api/v1/companies/migrate-preview", async (req, res) => {
+    res.json(await suggestCompaniesFromCompanyName(prisma, await requireAuth(req)));
+  });
+
+  app.get("/api/v1/companies/:id/overview", async (req, res) => {
+    res.json(await getCompanyOverview(prisma, await requireAuth(req), req.params.id));
+  });
+
+  app.get("/api/v1/companies/:id", async (req, res) => {
+    const overview = await getCompanyOverview(prisma, await requireAuth(req), req.params.id);
+    res.json(overview.company);
+  });
+
+  app.patch("/api/v1/companies/:id", json, async (req, res) => {
+    const input = updateCompanySchema.parse(req.body || {});
+    res.json(await updateCompany(prisma, await requireAuth(req), req.params.id, input));
+  });
+
+  app.get("/api/v1/companies/:id/contacts", async (req, res) => {
+    res.json(await getCompanyContacts(prisma, await requireAuth(req), req.params.id));
+  });
+
+  app.post("/api/v1/companies/:id/contacts", json, async (req, res) => {
+    const input = companyContactSchema.parse(req.body || {});
+    res.status(201).json(await linkContactToCompany(prisma, await requireAuth(req), req.params.id, input));
+  });
+
+  app.patch("/api/v1/companies/:id/contacts/:linkId", json, async (req, res) => {
+    const input = updateCompanyContactSchema.parse(req.body || {});
+    res.json(await updateCompanyContact(prisma, await requireAuth(req), req.params.id, req.params.linkId, input));
+  });
+
+  app.delete("/api/v1/companies/:id/contacts/:linkId", async (req, res) => {
+    res.json(await unlinkCompanyContact(prisma, await requireAuth(req), req.params.id, req.params.linkId));
+  });
+
+  app.get("/api/v1/contacts/:id/companies", async (req, res) => {
+    res.json(await getContactCompanies(prisma, await requireAuth(req), req.params.id));
+  });
+
+  app.post("/api/v1/deals/:id/contacts", json, async (req, res) => {
+    const input = dealContactSchema.parse(req.body || {});
+    res.status(201).json(await addDealContact(prisma, await requireAuth(req), req.params.id, input));
+  });
+
   app.get("/api/v1/integrations", async (req, res) => {
     res.json({ items: await listIntegrations(prisma, await requireAuth(req)) });
   });
@@ -654,6 +862,21 @@ export function createApp(prisma: PrismaClient) {
 
   app.get("/api/v1/integrations/setup", async (req, res) => {
     res.json(await integrationSetup(prisma, await requireAuth(req)));
+  });
+
+  app.get("/api/v1/integrations/catalog", async (req, res) => {
+    const { listIntegrationCatalog } = await import("./services/integrationCatalogService.ts");
+    res.json(await listIntegrationCatalog(prisma, await requireAuth(req)));
+  });
+
+  app.get("/api/v1/integrations/events", async (req, res) => {
+    const { listInboundEventLog } = await import("./services/integrationCatalogService.ts");
+    res.json(await listInboundEventLog(prisma, await requireAuth(req), { limit: Number(req.query.limit) || 50 }));
+  });
+
+  app.post("/api/v1/integrations/:id/health-check", async (req, res) => {
+    const { runIntegrationHealthCheck } = await import("./services/integrationCatalogService.ts");
+    res.json(await runIntegrationHealthCheck(prisma, await requireAuth(req), req.params.id));
   });
 
   app.get("/api/v1/integrations/whatsapp-seller/health", async (req, res) => {
@@ -690,18 +913,6 @@ export function createApp(prisma: PrismaClient) {
 
   app.get("/api/v1/admin/tenants", async (req, res) => {
     res.json({ items: await platformTenants(prisma, await requireAuth(req)) });
-  });
-
-  app.post("/public/forms/:publicKey/submissions", json, async (req, res) => {
-    rateLimit(`form:${req.params.publicKey}:${req.ip}`, 20);
-    const result = await submitPublicForm(prisma, req.params.publicKey, req.body || {}, {
-      origin: req.get("origin") || undefined,
-      submissionId: String(req.header("x-submission-id") || req.body?.submission_id || ""),
-    });
-    res.status(result.duplicate ? 200 : 202).json({
-      ok: true,
-      receipt: result.receipt,
-    });
   });
 
   app.post("/api/v1/integrations/:integrationId/events", rawJson, async (req, res) => {

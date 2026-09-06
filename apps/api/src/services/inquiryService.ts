@@ -240,6 +240,16 @@ async function createInquiryTx(
     serviceCategory?: string | null;
     sourceChannel?: string | null;
     sourceType?: string | null;
+    city?: string | null;
+    desiredDeadline?: string | null;
+    landingPage?: string | null;
+    referrer?: string | null;
+    utmSource?: string | null;
+    utmMedium?: string | null;
+    utmCampaign?: string | null;
+    utmContent?: string | null;
+    utmTerm?: string | null;
+    fieldMeta?: Record<string, unknown> | null;
   },
 ) {
   const phoneRaw = args.phoneRaw || "";
@@ -279,7 +289,17 @@ async function createInquiryTx(
       service: args.service || args.subject || null,
       serviceCategory: args.serviceCategory || null,
       companyName: args.companyName || null,
+      city: args.city || null,
+      desiredDeadline: args.desiredDeadline || null,
+      landingPage: args.landingPage || null,
+      referrer: args.referrer || null,
+      utmSource: args.utmSource || null,
+      utmMedium: args.utmMedium || null,
+      utmCampaign: args.utmCampaign || null,
+      utmContent: args.utmContent || null,
+      utmTerm: args.utmTerm || null,
       rawFieldsJson: (args.raw || {}) as Prisma.InputJsonValue,
+      fieldMetaJson: (args.fieldMeta || {}) as Prisma.InputJsonValue,
       assigneeMembershipId: args.assigneeMembershipId || null,
       test: Boolean(args.test),
       nextStep: "Связаться с клиентом",
@@ -307,6 +327,8 @@ async function createInquiryTx(
         sourceType: args.sourceType || args.source,
         source: args.source,
         sourceChannel,
+        utmSource: args.utmSource || null,
+        landingPage: args.landingPage || null,
       },
     },
   });
@@ -327,10 +349,10 @@ async function createInquiryTx(
     contactId,
     inquiryId: inquiry.id,
     type: "inquiry.created",
-    title: "Получена новая заявка",
+    title: args.test ? "Получена тестовая заявка" : "Получена новая заявка",
     description: inquiry.subject || inquiry.description || null,
     actorType: "system",
-    metadata: { source: args.source },
+    metadata: { source: args.source, test: Boolean(args.test) },
   });
   await notify(
     tx,
@@ -339,7 +361,7 @@ async function createInquiryTx(
     "inquiry.created",
     "inquiry",
     inquiry.id,
-    "Новая заявка",
+    args.test ? "Тестовая заявка" : "Новая заявка",
     inquiry.subject || "Поступила новая заявка",
   );
   await writeOutbox(tx, args.tenantId, "inquiry.created", "inquiry", inquiry.id, {
@@ -378,7 +400,7 @@ export async function createManualInquiry(
     phoneNormalized = phone.normalized;
   }
   const assignee = membership.id;
-  return prisma.$transaction((tx) =>
+  const inquiry = await prisma.$transaction((tx) =>
     createInquiryTx(tx, {
       tenantId: membership.tenantId,
       source: "manual",
@@ -399,6 +421,9 @@ export async function createManualInquiry(
       assigneeMembershipId: assignee,
     }),
   );
+  const { enqueueInquiryAutomation } = await import("./inquiryAutomationQueue.ts");
+  await enqueueInquiryAutomation(prisma, membership.tenantId, inquiry.id);
+  return inquiry;
 }
 
 export async function lookupContactByPhone(prisma: PrismaClient, auth: AuthContext, phoneInput: string) {
@@ -451,21 +476,43 @@ export async function submitPublicForm(
   if (!form || !form.active || form.integration.status !== "active") {
     throw new ApiError(404, "not_found", "Форма недоступна");
   }
+  // honeypot — silent success, no lead
   if (body.website) {
     return { receipt: "ok", duplicate: false };
   }
-  const phone = validateClientPhone(body.phone, "KZ");
+
+  const { normalizeLeadFromFormPayload } = await import("./leadNormalizationService.ts");
+  const { touchIntegrationSuccess } = await import("./integrationCatalogService.ts");
+  const lead = normalizeLeadFromFormPayload({
+    body,
+    mappingJson: form.integration.mappingJson,
+    integrationId: form.integrationId,
+    entryChannel: "website_form",
+    isTest: form.integration.testMode,
+  });
+
+  const phone = validateClientPhone(lead.phone, "KZ");
   if (!phone.ok) {
     throw new ApiError(422, phone.code, phone.message, { phone: phone.message });
   }
-  const name = String(body.name || "").trim();
+  const name = String(lead.name || "").trim();
   if (!name) {
     throw new ApiError(422, "invalid", "Укажите имя", { name: "Укажите имя" });
   }
-  const eventKey = meta.submissionId || `form:${hashPayload({ publicKey, name, phone: phone.normalized, message: body.message })}`;
-  const payloadHash = hashPayload({ name, phone: phone.normalized, message: body.message, service: body.service });
 
-  return prisma.$transaction(async (tx) => {
+  const eventKey =
+    meta.submissionId ||
+    lead.externalLeadId ||
+    `form:${hashPayload({ publicKey, name, phone: phone.normalized, message: lead.message })}`;
+  const payloadHash = hashPayload({
+    name,
+    phone: phone.normalized,
+    message: lead.message,
+    service: lead.service,
+    mappingVersion: lead.mappingVersion,
+  });
+
+  const result = await prisma.$transaction(async (tx) => {
     const existing = await tx.inboundEvent.findUnique({
       where: { integrationId_externalEventKey: { integrationId: form.integrationId, externalEventKey: eventKey } },
     });
@@ -473,7 +520,7 @@ export async function submitPublicForm(
       if (existing.payloadHash !== payloadHash) {
         throw new ApiError(409, "conflict", "Тот же ключ с другим содержимым");
       }
-      return { receipt: existing.id, duplicate: true };
+      return { receipt: existing.id, inquiryId: null as string | null, duplicate: true };
     }
     const inbound = await tx.inboundEvent.create({
       data: {
@@ -482,7 +529,12 @@ export async function submitPublicForm(
         externalEventKey: eventKey,
         payloadHash,
         rawJson: body as Prisma.InputJsonValue,
-        test: form.integration.testMode,
+        normalizedJson: lead as unknown as Prisma.InputJsonValue,
+        provider: "website_form",
+        eventType: "LEAD_SUBMISSION",
+        status: "PROCESSING",
+        test: Boolean(lead.isTest || form.integration.testMode),
+        occurredAt: new Date(),
       },
     });
     const assignee = await defaultAssignee(tx as unknown as PrismaClient, form.tenantId);
@@ -495,18 +547,42 @@ export async function submitPublicForm(
       phoneRaw: phone.raw,
       phoneNormalized: phone.normalized,
       phoneSource: "form",
-      subject: String(body.service || body.subject || "Заявка с сайта"),
-      description: String(body.message || ""),
+      subject: lead.service || lead.pageTitle || "Заявка с сайта",
+      description: lead.message || "",
+      companyName: lead.company || null,
+      city: lead.city || null,
+      desiredDeadline: lead.deadline || null,
+      landingPage: lead.landingPage || lead.pageUrl || null,
+      referrer: lead.referrer || null,
+      utmSource: lead.utm?.source || null,
+      utmMedium: lead.utm?.medium || null,
+      utmCampaign: lead.utm?.campaign || null,
+      utmContent: lead.utm?.content || null,
+      utmTerm: lead.utm?.term || null,
       raw: body,
+      fieldMeta: {
+        mappingVersion: lead.mappingVersion,
+        customFields: lead.customFields || {},
+        normalizedLead: true,
+      },
       assigneeMembershipId: assignee,
-      test: form.integration.testMode,
+      test: Boolean(lead.isTest || form.integration.testMode),
+      sourceChannel: "website_form",
+      sourceType: lead.acquisitionSource || "website_form",
     });
     await tx.inboundEvent.update({
       where: { id: inbound.id },
-      data: { processedAt: new Date() },
+      data: { processedAt: new Date(), status: "PROCESSED" },
     });
+    await touchIntegrationSuccess(tx, form.integrationId);
     return { receipt: inbound.id, inquiryId: inquiry.id, duplicate: false };
   });
+
+  if (result.inquiryId && !result.duplicate) {
+    const { enqueueInquiryAutomation } = await import("./inquiryAutomationQueue.ts");
+    void enqueueInquiryAutomation(prisma, form.tenantId, result.inquiryId);
+  }
+  return result;
 }
 
 export async function ingestIntegrationEvent(
@@ -524,9 +600,16 @@ export async function ingestIntegrationEvent(
     throw new ApiError(401, "invalid_signature", "Подпись или время отклонены");
   }
   const bearer = String(headers.authorization || "").replace(/^Bearer\s+/i, "");
-  const bearerOk = Boolean(
-    bearer && integration.secretHash && safeEqual(sha256(bearer), integration.secretHash),
+  const bearerHash = bearer ? sha256(bearer) : "";
+  const primaryOk = Boolean(bearer && integration.secretHash && safeEqual(bearerHash, integration.secretHash));
+  const previousOk = Boolean(
+    bearer &&
+      integration.previousSecretHash &&
+      integration.previousSecretExpiresAt &&
+      integration.previousSecretExpiresAt.getTime() > Date.now() &&
+      safeEqual(bearerHash, integration.previousSecretHash),
   );
+  const bearerOk = primaryOk || previousOk;
   if (headers.signature) {
     if (!bearerOk) {
       throw new ApiError(401, "invalid_signature", "Подпись или время отклонены");
@@ -551,7 +634,7 @@ export async function ingestIntegrationEvent(
   const phone = validateClientPhone(phoneMethod?.value, "KZ");
   const assignee = await defaultAssignee(prisma, integration.tenantId);
 
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const existing = await tx.inboundEvent.findUnique({
       where: {
         integrationId_externalEventKey: {
@@ -564,7 +647,7 @@ export async function ingestIntegrationEvent(
       if (existing.payloadHash !== payloadHash) {
         throw new ApiError(409, "conflict", "Тот же event_id с другим содержимым");
       }
-      return { disposition: "duplicate", event_id: existing.id };
+      return { disposition: "duplicate" as const, event_id: existing.id };
     }
     const inbound = await tx.inboundEvent.create({
       data: {
@@ -573,11 +656,19 @@ export async function ingestIntegrationEvent(
         externalEventKey: parsed.event_id,
         payloadHash,
         rawJson: parsed as Prisma.InputJsonValue,
+        provider: "webhook_api",
+        eventType: "LEAD_SUBMISSION",
+        status: "PROCESSING",
         test: integration.testMode,
+        occurredAt: parsed.occurred_at ? new Date(parsed.occurred_at) : new Date(),
       },
     });
 
     if (!phone.ok) {
+      await tx.inboundEvent.update({
+        where: { id: inbound.id },
+        data: { status: "PROCESSED", processedAt: new Date() },
+      });
       const intake = await tx.incompleteIntake.create({
         data: {
           tenantId: integration.tenantId,
@@ -619,23 +710,58 @@ export async function ingestIntegrationEvent(
       };
     }
 
+    const { normalizeLeadFromWebhookPayload } = await import("./leadNormalizationService.ts");
+    const { touchIntegrationSuccess } = await import("./integrationCatalogService.ts");
+    const lead = normalizeLeadFromWebhookPayload({
+      parsed,
+      mappingJson: integration.mappingJson,
+      integrationId,
+      isTest: integration.testMode,
+    });
+
     const inquiry = await createInquiryTx(tx, {
       tenantId: integration.tenantId,
       integrationId,
       source: "webhook",
       inboundEventId: inbound.id,
-      name: parsed.contact.name,
+      name: lead.name || parsed.contact.name,
       phoneRaw: phone.raw,
       phoneNormalized: phone.normalized,
       phoneSource: "webhook",
-      subject: parsed.inquiry.subject,
-      description: parsed.inquiry.message,
+      subject: lead.service || parsed.inquiry.subject,
+      description: lead.message || parsed.inquiry.message,
+      companyName: lead.company,
+      landingPage: lead.landingPage,
+      referrer: lead.referrer,
+      utmSource: lead.utm?.source || null,
+      utmMedium: lead.utm?.medium || null,
+      utmCampaign: lead.utm?.campaign || null,
+      utmContent: lead.utm?.content || null,
+      utmTerm: lead.utm?.term || null,
       raw: parsed,
+      fieldMeta: { mappingVersion: lead.mappingVersion, normalizedLead: true },
       assigneeMembershipId: assignee,
       test: integration.testMode,
+      sourceChannel: "webhook",
+      sourceType: lead.acquisitionSource || "webhook",
     });
-    return { disposition: "inquiry", inquiry_id: inquiry.id, event_id: inbound.id };
+    await tx.inboundEvent.update({
+      where: { id: inbound.id },
+      data: {
+        processedAt: new Date(),
+        status: "PROCESSED",
+        normalizedJson: lead as unknown as Prisma.InputJsonValue,
+      },
+    });
+    await touchIntegrationSuccess(tx, integrationId);
+    return { disposition: "inquiry", inquiry_id: inquiry.id, event_id: inbound.id, tenantId: integration.tenantId };
   });
+
+  if (result.disposition === "inquiry" && "inquiry_id" in result && result.inquiry_id) {
+    const { enqueueInquiryAutomation } = await import("./inquiryAutomationQueue.ts");
+    void enqueueInquiryAutomation(prisma, result.tenantId, result.inquiry_id);
+  }
+  return result;
 }
 
 export async function completeIntake(
@@ -682,6 +808,10 @@ export async function completeIntake(
       where: { tenantId: membership.tenantId, dedupeKey: `intake-phone:${intake.id}`, status: "open" },
       data: { status: "done", completedAt: new Date() },
     });
+    return inquiry;
+  }).then(async (inquiry) => {
+    const { enqueueInquiryAutomation } = await import("./inquiryAutomationQueue.ts");
+    await enqueueInquiryAutomation(prisma, membership.tenantId, inquiry.id);
     return inquiry;
   });
 }

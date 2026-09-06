@@ -374,3 +374,45 @@ export const integrationEventSchema = z.object({
 
 export type LoginInput = z.infer<typeof loginSchema>;
 export type CreateInquiryInput = z.infer<typeof createInquirySchema>;
+
+export const createCompanySchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  legalName: z.string().trim().max(300).nullable().optional(),
+  shortName: z.string().trim().max(120).nullable().optional(),
+  bin: z.string().trim().max(20).nullable().optional(),
+  industry: z.string().trim().max(120).nullable().optional(),
+  website: z.string().trim().max(300).nullable().optional(),
+  email: z.string().trim().max(200).nullable().optional(),
+  phone: z.string().trim().max(40).nullable().optional(),
+  country: z.string().trim().max(80).nullable().optional(),
+  city: z.string().trim().max(120).nullable().optional(),
+  address: z.string().trim().max(400).nullable().optional(),
+  description: z.string().trim().max(4000).nullable().optional(),
+  lifecycleStatus: z
+    .enum(["PROSPECT", "CUSTOMER", "INACTIVE_CUSTOMER", "PARTNER", "ARCHIVED"])
+    .optional(),
+  assigneeMembershipId: z.string().uuid().nullable().optional(),
+  initialSource: z.string().trim().max(120).nullable().optional(),
+  bankDetailsJson: z.record(z.string(), z.unknown()).nullable().optional(),
+  forceCreate: z.boolean().optional(),
+});
+
+export const updateCompanySchema = createCompanySchema.partial().omit({ forceCreate: true });
+
+export const companyContactSchema = z.object({
+  contactId: z.string().uuid(),
+  position: z.string().trim().max(160).nullable().optional(),
+  department: z.string().trim().max(160).nullable().optional(),
+  isPrimary: z.boolean().optional(),
+  isDecisionMaker: z.boolean().optional(),
+  isBillingContact: z.boolean().optional(),
+  isActive: z.boolean().optional(),
+});
+
+export const updateCompanyContactSchema = companyContactSchema.partial().omit({ contactId: true });
+
+export const dealContactSchema = z.object({
+  contactId: z.string().uuid(),
+  role: z.string().trim().max(120).nullable().optional(),
+  isPrimary: z.boolean().optional(),
+});

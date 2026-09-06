@@ -351,6 +351,131 @@ async function applyAdditiveSchema(pglite: PGlite) {
     CREATE INDEX IF NOT EXISTS "Agreement_tenantId_contactId_status_idx" ON "Agreement"("tenantId", "contactId", "status");
     CREATE INDEX IF NOT EXISTS "Agreement_tenantId_type_status_idx" ON "Agreement"("tenantId", "type", "status");
     CREATE UNIQUE INDEX IF NOT EXISTS "Task_agreementId_key" ON "Task"("agreementId");
+
+    CREATE TABLE IF NOT EXISTS "Company" (
+      "id" TEXT NOT NULL,
+      "tenantId" TEXT NOT NULL,
+      "name" TEXT NOT NULL,
+      "legalName" TEXT,
+      "shortName" TEXT,
+      "nameNormalized" TEXT,
+      "bin" TEXT,
+      "industry" TEXT,
+      "website" TEXT,
+      "email" TEXT,
+      "phone" TEXT,
+      "phoneNormalized" TEXT,
+      "country" TEXT,
+      "city" TEXT,
+      "address" TEXT,
+      "description" TEXT,
+      "lifecycleStatus" TEXT NOT NULL DEFAULT 'PROSPECT',
+      "assigneeMembershipId" TEXT,
+      "initialSource" TEXT,
+      "bankDetailsJson" JSONB NOT NULL DEFAULT '{}',
+      "firstContactAt" TIMESTAMP(3),
+      "lastActivityAt" TIMESTAMP(3),
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "archivedAt" TIMESTAMP(3),
+      "version" INTEGER NOT NULL DEFAULT 1,
+      CONSTRAINT "Company_pkey" PRIMARY KEY ("id")
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS "Company_tenantId_id_key" ON "Company"("tenantId", "id");
+    CREATE INDEX IF NOT EXISTS "Company_tenantId_name_idx" ON "Company"("tenantId", "name");
+    CREATE INDEX IF NOT EXISTS "Company_tenantId_nameNormalized_idx" ON "Company"("tenantId", "nameNormalized");
+    CREATE INDEX IF NOT EXISTS "Company_tenantId_bin_idx" ON "Company"("tenantId", "bin");
+    CREATE INDEX IF NOT EXISTS "Company_tenantId_lastActivityAt_idx" ON "Company"("tenantId", "lastActivityAt");
+    CREATE INDEX IF NOT EXISTS "Company_tenantId_assigneeMembershipId_idx" ON "Company"("tenantId", "assigneeMembershipId");
+    CREATE INDEX IF NOT EXISTS "Company_tenantId_lifecycleStatus_archivedAt_idx" ON "Company"("tenantId", "lifecycleStatus", "archivedAt");
+
+    CREATE TABLE IF NOT EXISTS "CompanyContact" (
+      "id" TEXT NOT NULL,
+      "tenantId" TEXT NOT NULL,
+      "companyId" TEXT NOT NULL,
+      "contactId" TEXT NOT NULL,
+      "position" TEXT,
+      "department" TEXT,
+      "isPrimary" BOOLEAN NOT NULL DEFAULT false,
+      "isDecisionMaker" BOOLEAN NOT NULL DEFAULT false,
+      "isBillingContact" BOOLEAN NOT NULL DEFAULT false,
+      "isActive" BOOLEAN NOT NULL DEFAULT true,
+      "startedAt" TIMESTAMP(3),
+      "endedAt" TIMESTAMP(3),
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "CompanyContact_pkey" PRIMARY KEY ("id")
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS "CompanyContact_tenantId_id_key" ON "CompanyContact"("tenantId", "id");
+    CREATE UNIQUE INDEX IF NOT EXISTS "CompanyContact_tenantId_companyId_contactId_key" ON "CompanyContact"("tenantId", "companyId", "contactId");
+    CREATE INDEX IF NOT EXISTS "CompanyContact_tenantId_contactId_idx" ON "CompanyContact"("tenantId", "contactId");
+    CREATE INDEX IF NOT EXISTS "CompanyContact_tenantId_companyId_isPrimary_idx" ON "CompanyContact"("tenantId", "companyId", "isPrimary");
+
+    CREATE TABLE IF NOT EXISTS "DealContact" (
+      "id" TEXT NOT NULL,
+      "tenantId" TEXT NOT NULL,
+      "dealId" TEXT NOT NULL,
+      "contactId" TEXT NOT NULL,
+      "role" TEXT,
+      "isPrimary" BOOLEAN NOT NULL DEFAULT false,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "DealContact_pkey" PRIMARY KEY ("id")
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS "DealContact_tenantId_id_key" ON "DealContact"("tenantId", "id");
+    CREATE UNIQUE INDEX IF NOT EXISTS "DealContact_tenantId_dealId_contactId_key" ON "DealContact"("tenantId", "dealId", "contactId");
+    CREATE INDEX IF NOT EXISTS "DealContact_tenantId_contactId_idx" ON "DealContact"("tenantId", "contactId");
+
+    CREATE TABLE IF NOT EXISTS "CompanyTag" (
+      "id" TEXT NOT NULL,
+      "tenantId" TEXT NOT NULL,
+      "companyId" TEXT NOT NULL,
+      "tagId" TEXT NOT NULL,
+      CONSTRAINT "CompanyTag_pkey" PRIMARY KEY ("id")
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS "CompanyTag_tenantId_companyId_tagId_key" ON "CompanyTag"("tenantId", "companyId", "tagId");
+
+    ALTER TABLE "Inquiry" ADD COLUMN IF NOT EXISTS "companyId" TEXT;
+    ALTER TABLE "Deal" ADD COLUMN IF NOT EXISTS "companyId" TEXT;
+    ALTER TABLE "Task" ADD COLUMN IF NOT EXISTS "companyId" TEXT;
+    ALTER TABLE "Activity" ADD COLUMN IF NOT EXISTS "companyId" TEXT;
+    CREATE INDEX IF NOT EXISTS "Inquiry_tenantId_companyId_idx" ON "Inquiry"("tenantId", "companyId");
+    CREATE INDEX IF NOT EXISTS "Deal_tenantId_companyId_idx" ON "Deal"("tenantId", "companyId");
+    CREATE INDEX IF NOT EXISTS "Task_tenantId_companyId_idx" ON "Task"("tenantId", "companyId");
+    CREATE INDEX IF NOT EXISTS "Activity_tenantId_companyId_createdAt_idx" ON "Activity"("tenantId", "companyId", "createdAt");
+
+    ALTER TABLE "Integration" ADD COLUMN IF NOT EXISTS "connectionStatus" TEXT DEFAULT 'pending';
+    ALTER TABLE "Integration" ADD COLUMN IF NOT EXISTS "healthStatus" TEXT DEFAULT 'UNKNOWN';
+    ALTER TABLE "Integration" ADD COLUMN IF NOT EXISTS "lastSuccessAt" TIMESTAMP(3);
+    ALTER TABLE "Integration" ADD COLUMN IF NOT EXISTS "lastErrorAt" TIMESTAMP(3);
+    ALTER TABLE "Integration" ADD COLUMN IF NOT EXISTS "lastErrorCode" TEXT;
+    ALTER TABLE "Integration" ADD COLUMN IF NOT EXISTS "previousSecretHash" TEXT;
+    ALTER TABLE "Integration" ADD COLUMN IF NOT EXISTS "previousSecretExpiresAt" TIMESTAMP(3);
+    ALTER TABLE "Integration" ADD COLUMN IF NOT EXISTS "automationMode" TEXT;
+    CREATE INDEX IF NOT EXISTS "Integration_tenantId_connectionStatus_healthStatus_idx"
+      ON "Integration"("tenantId", "connectionStatus", "healthStatus");
+
+    ALTER TABLE "InboundEvent" ADD COLUMN IF NOT EXISTS "provider" TEXT DEFAULT 'unknown';
+    ALTER TABLE "InboundEvent" ADD COLUMN IF NOT EXISTS "eventType" TEXT DEFAULT 'LEAD_SUBMISSION';
+    ALTER TABLE "InboundEvent" ADD COLUMN IF NOT EXISTS "status" TEXT DEFAULT 'RECEIVED';
+    ALTER TABLE "InboundEvent" ADD COLUMN IF NOT EXISTS "attempts" INTEGER DEFAULT 0;
+    ALTER TABLE "InboundEvent" ADD COLUMN IF NOT EXISTS "lastError" TEXT;
+    ALTER TABLE "InboundEvent" ADD COLUMN IF NOT EXISTS "occurredAt" TIMESTAMP(3);
+    CREATE INDEX IF NOT EXISTS "InboundEvent_tenantId_status_receivedAt_idx" ON "InboundEvent"("tenantId", "status", "receivedAt");
+    CREATE INDEX IF NOT EXISTS "InboundEvent_tenantId_eventType_receivedAt_idx" ON "InboundEvent"("tenantId", "eventType", "receivedAt");
+
+    UPDATE "Integration" SET "connectionStatus" = CASE
+      WHEN "status" = 'active' THEN 'CONNECTED'
+      WHEN "status" = 'pending' THEN 'PENDING'
+      ELSE COALESCE(NULLIF("connectionStatus", ''), 'DISCONNECTED')
+    END
+    WHERE "connectionStatus" IS NULL OR "connectionStatus" = 'pending';
+
+    UPDATE "Integration" SET "healthStatus" = CASE
+      WHEN "lastError" IS NOT NULL AND "lastError" <> '' THEN 'ERROR'
+      WHEN "lastEventAt" IS NULL THEN 'NO_EVENTS_YET'
+      ELSE 'HEALTHY'
+    END
+    WHERE "healthStatus" IS NULL OR "healthStatus" = 'UNKNOWN';
   `);
 }
 

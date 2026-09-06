@@ -432,12 +432,22 @@ export async function addSellerInstruction(
 export async function integrationSetup(prisma: PrismaClient, auth: AuthContext) {
   const membership = requireTenant(auth);
   const [form, webhook, seller, telegram] = await Promise.all([
-    prisma.formDefinition.findFirst({ where: { tenantId: membership.tenantId, active: true } }),
+    prisma.formDefinition.findFirst({
+      where: { tenantId: membership.tenantId, active: true },
+      include: { integration: true },
+    }),
     prisma.integration.findFirst({ where: { tenantId: membership.tenantId, type: "webhook" } }),
     sellerHealthFor(prisma, auth),
     prisma.telegramBinding.findFirst({ where: { userId: auth.user.id, revokedAt: null } }),
   ]);
   const apiBase = config.apiBaseUrl;
+  const formHealth = form
+    ? form.integration.lastError
+      ? "ERROR"
+      : form.integration.lastEventAt
+        ? "HEALTHY"
+        : "NO_EVENTS_YET"
+    : "UNKNOWN";
   return {
     whatsapp: seller,
     form: form
@@ -446,6 +456,15 @@ export async function integrationSetup(prisma: PrismaClient, auth: AuthContext) 
           name: form.name,
           publicKey: form.publicKey,
           submitUrl: `${apiBase}/public/forms/${form.publicKey}/submissions`,
+          connectionStatus: "CONNECTED",
+          healthStatus: formHealth,
+          healthLabel:
+            formHealth === "HEALTHY"
+              ? "Работает"
+              : formHealth === "NO_EVENTS_YET"
+                ? "Подключено · событий ещё нет"
+                : "Ошибка",
+          mapping: form.integration.mappingJson,
         }
       : { connected: false },
     webhook: webhook
@@ -453,12 +472,23 @@ export async function integrationSetup(prisma: PrismaClient, auth: AuthContext) 
           connected: webhook.status === "active",
           id: webhook.id,
           eventsUrl: `${apiBase}/api/v1/integrations/${webhook.id}/events`,
+          connectionStatus: webhook.status === "active" ? "CONNECTED" : "PENDING",
+          healthStatus: webhook.lastError
+            ? "ERROR"
+            : webhook.lastEventAt
+              ? "HEALTHY"
+              : "NO_EVENTS_YET",
+          healthLabel: webhook.lastError
+            ? "Ошибка"
+            : webhook.lastEventAt
+              ? "Работает"
+              : "Подключено · событий ещё нет",
         }
       : { connected: false },
     telegram: {
       siteLeads: {
         connected: false,
-        note: "Заявки сайта CREOLAB сейчас уходят в Telegram через бот /api/lead. Это не кабинет сотрудника.",
+        note: "Клиентский Telegram-бот — отдельный этап (сообщения ≠ заявки).",
       },
       employee: {
         connected: Boolean(telegram),
@@ -468,9 +498,11 @@ export async function integrationSetup(prisma: PrismaClient, auth: AuthContext) 
           : "Для уведомлений сотрудника задайте TELEGRAM_BOT_TOKEN и TELEGRAM_BOT_USERNAME в .env CRM.",
       },
     },
-    instagram: {
-      connected: false,
-      note: "Следующее расширение. В первой версии — WhatsApp, форма и серверный webhook.",
+    placeholders: {
+      instagramDirect: { connected: false, note: "Этап 4 · OAuth Professional Account" },
+      metaLeadForms: { connected: false, note: "Этап 5 · отдельно от Instagram Direct" },
+      googleForms: { connected: false, note: "Этап 6 · Pub/Sub + watch renewal" },
+      tiktokLeads: { connected: false, note: "Только после capability check аккаунта" },
     },
   };
 }
@@ -485,15 +517,31 @@ export async function rotateWebhookSecret(prisma: PrismaClient, auth: AuthContex
   });
   if (!integration) throw new ApiError(404, "not_found", "Webhook не найден");
   const secret = `whsec_${randomBytes(16).toString("hex")}`;
+  const previousHash = integration.secretHash;
   await prisma.integration.update({
     where: { id: integration.id },
-    data: { secretHash: sha256(secret) },
+    data: {
+      secretHash: sha256(secret),
+      previousSecretHash: previousHash || null,
+      previousSecretExpiresAt: previousHash ? new Date(Date.now() + 24 * 60 * 60 * 1000) : null,
+      connectionStatus: "CONNECTED",
+      healthStatus: deriveHealthOrKeep(integration),
+    },
   });
   return {
     secret,
     eventsUrl: `${config.apiBaseUrl}/api/v1/integrations/${integration.id}/events`,
-    note: "Секрет показывается один раз. Сохраните его на стороне отправителя.",
+    previousSecretValidHours: previousHash ? 24 : 0,
+    note: previousHash
+      ? "Новый секрет активен. Старый ещё действует 24 часа — успейте обновить отправителя."
+      : "Секрет показывается один раз. Сохраните его на стороне отправителя.",
   };
+}
+
+function deriveHealthOrKeep(integration: { lastEventAt: Date | null; lastError: string | null }) {
+  if (integration.lastError) return "ERROR";
+  if (!integration.lastEventAt) return "NO_EVENTS_YET";
+  return "HEALTHY";
 }
 
 export async function beginTelegramLink(prisma: PrismaClient, auth: AuthContext) {

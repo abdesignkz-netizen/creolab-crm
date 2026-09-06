@@ -1,0 +1,160 @@
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import { api } from "../lib/api";
+
+const MODE_HELP: Record<string, string> = {
+  MANUAL: "Заявка сохраняется. Без AI-анализа и без AI-задачи.",
+  ASSIST: "AI анализирует заявку и показывает подсказку. Клиенту не пишет.",
+  CONFIRM: "AI готовит задачу и ждёт кнопку «Начать обработку».",
+  AUTO: "AI анализирует, создаёт задачу и сам начинает контакт, если канал доступен.",
+};
+
+export function AiAutomationSettingsPage() {
+  const [data, setData] = useState<any>(null);
+  const [error, setError] = useState("");
+  const [hint, setHint] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [mode, setMode] = useState("CONFIRM");
+  const [processRepeat, setProcessRepeat] = useState(true);
+  const [sla, setSla] = useState(15);
+  const [scheduleMode, setScheduleMode] = useState("always");
+
+  async function load() {
+    try {
+      const next = (await api.aiAutomationSettings()) as {
+        defaultMode: string;
+        processRepeatRequests: boolean;
+        firstContactSlaMinutes: number;
+        scheduleMode: string;
+        modes?: Array<{ mode: string; label: string }>;
+        sourceModes?: Record<string, string>;
+        serviceModes?: Record<string, string>;
+        allowProactiveOutbound?: boolean;
+      };
+      setData(next);
+      setMode(next.defaultMode);
+      setProcessRepeat(Boolean(next.processRepeatRequests));
+      setSla(Number(next.firstContactSlaMinutes) || 15);
+      setScheduleMode(next.scheduleMode || "always");
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось загрузить");
+    }
+  }
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  async function save() {
+    setBusy(true);
+    setHint("");
+    try {
+      const result = (await api.updateAiAutomationSettings({
+        defaultMode: mode,
+        processRepeatRequests: processRepeat,
+        firstContactSlaMinutes: sla,
+        scheduleMode,
+      })) as { message?: string };
+      setHint(result.message || "Сохранено");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Ошибка сохранения");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!data && !error) return <div className="state">Загрузка настроек…</div>;
+
+  return (
+    <section>
+      <div className="page-head">
+        <div>
+          <p className="page-kicker">
+            <Link to="/settings">Настройки</Link> · AI Manager
+          </p>
+          <h2>Новые заявки</h2>
+          <p className="muted">Уровень автоматизации для входящих Request. Уже запущенные AI-задачи не меняются.</p>
+        </div>
+      </div>
+
+      {error ? <p className="error">{error}</p> : null}
+      {hint ? <p className="ok">{hint}</p> : null}
+
+      <div className="panel">
+        <b>Режим по умолчанию</b>
+        <div className="stack" style={{ marginTop: 12, gap: 10 }}>
+          {(data?.modes || []).map((item: { mode: string; label: string }) => (
+            <label key={item.mode} className="radio-row">
+              <input
+                type="radio"
+                name="aiMode"
+                checked={mode === item.mode}
+                onChange={() => setMode(item.mode)}
+              />
+              <span>
+                <b>{item.label}</b>
+                <div className="muted">{MODE_HELP[item.mode]}</div>
+              </span>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <div className="panel">
+        <label className="check-row">
+          <input type="checkbox" checked={processRepeat} onChange={(e) => setProcessRepeat(e.target.checked)} />
+          <span>Автоматически обрабатывать повторные заявки</span>
+        </label>
+        <label>
+          Первичный контакт
+          <select value={sla} onChange={(e) => setSla(Number(e.target.value))}>
+            {[5, 10, 15, 30, 60].map((m) => (
+              <option key={m} value={m}>
+                до {m} минут
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Автообработка
+          <select value={scheduleMode} onChange={(e) => setScheduleMode(e.target.value)}>
+            <option value="always">Всегда</option>
+            <option value="working_hours">Только рабочее время</option>
+            <option value="custom">По расписанию</option>
+          </select>
+        </label>
+      </div>
+
+      <button type="button" className="linkish" onClick={() => setShowAdvanced((v) => !v)}>
+        {showAdvanced ? "Скрыть дополнительные настройки" : "Дополнительные настройки"}
+      </button>
+
+      {showAdvanced ? (
+        <div className="panel soft">
+          <p className="muted">
+            Безопасный default: «AI после подтверждения». Исключения по источникам (Manual → Ручной, API →
+            AI-подсказки) уже в backend. Полный автомат для Website Form включайте осознанно через режим или
+            sourceModes.
+          </p>
+          <pre className="code">{JSON.stringify({
+            sourceModes: data?.sourceModes,
+            serviceModes: data?.serviceModes,
+            allowProactiveOutbound: data?.allowProactiveOutbound,
+          }, null, 2)}</pre>
+        </div>
+      ) : null}
+
+      <div className="actions">
+        <button className="btn" disabled={busy} onClick={() => void save()}>
+          Сохранить
+        </button>
+        <Link className="btn secondary" to="/settings">
+          Назад
+        </Link>
+      </div>
+    </section>
+  );
+}

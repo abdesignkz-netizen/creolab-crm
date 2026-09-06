@@ -168,3 +168,51 @@ suggestedDealStage только: need_identified|proposal_sent|negotiation|contr
   }
 }
 
+
+export async function refineRequestAnalysisWithLlm(
+  input: Record<string, unknown>,
+  draft: Record<string, unknown>,
+) {
+  const apiKey = process.env.OPENAI_API_KEY || process.env.ANYMODEL_API_KEY;
+  const baseUrl = process.env.ANYMODEL_BASE_URL || process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
+  const model = process.env.ANYMODEL_MODEL || process.env.OPENAI_MODEL || "gpt-4o-mini";
+  if (!apiKey) return null;
+
+  try {
+    const response = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0,
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content: `Ты CRM Request Analyst. Анализируй новую заявку. Верни JSON RequestAnalysis:
+serviceCategory (web|presentation|advertising|branding|ai|other|null), serviceSubcategory,
+detectedNeed, budgetMin, budgetMax, deadline, city, company,
+knownFields[{key,label,value}], missingFields[{key,label}],
+urgency (normal|high|urgent), recommendedAction, taskTitle, taskObjective, expectedOutcome,
+qualificationQuestions[], confidence (HIGH|MEDIUM|LOW), evidence[].
+Приоритет: текст клиента > поля формы > landing > кампания.
+Не придумывай бюджет/срок/город/компанию, если их нет в данных.
+taskTitle должен быть конкретным, не «Обработать новую заявку».`,
+          },
+          { role: "user", content: JSON.stringify({ input, draft }) },
+        ],
+      }),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!response.ok) return null;
+    const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    const content = data.choices?.[0]?.message?.content;
+    if (!content) return null;
+    return JSON.parse(content) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}

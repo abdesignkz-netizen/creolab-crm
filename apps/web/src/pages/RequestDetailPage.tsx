@@ -111,6 +111,21 @@ export function RequestDetailPage() {
               Взять в работу
             </button>
           ) : null}
+          {data.automation?.canStart && !closed ? (
+            <button className="btn" disabled={busy} onClick={() => run(() => api.startInquiryAi(data.id))}>
+              {data.automation.status === "awaiting_confirm" ? "Начать обработку" : "Передать AI Manager"}
+            </button>
+          ) : null}
+          {data.automation?.canTakeover ? (
+            <button className="btn secondary" disabled={busy} onClick={() => run(() => api.takeoverInquiryAi(data.id))}>
+              Забрать себе
+            </button>
+          ) : null}
+          {data.automation?.canReturnAi ? (
+            <button className="btn secondary" disabled={busy} onClick={() => run(() => api.returnInquiryAi(data.id))}>
+              Передать обратно AI
+            </button>
+          ) : null}
           {data.conversationId ? (
             <Link className="btn secondary" to={`/conversations/${data.conversationId}`}>
               Написать
@@ -235,6 +250,72 @@ export function RequestDetailPage() {
 
       <div className="request-grid">
         <div className="request-main-col">
+          {data.automation ? (
+            <div className="panel">
+              <h3>Обработка заявки</h3>
+              <div className="kv">
+                <div>
+                  <dt>Режим</dt>
+                  <dd>{data.automation.modeLabel || data.automation.mode || "—"}</dd>
+                </div>
+                <div>
+                  <dt>Исполнитель</dt>
+                  <dd>
+                    {data.automation.status === "none" || data.automation.status === "analyzed"
+                      ? "Менеджер"
+                      : "AI Manager"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Статус</dt>
+                  <dd>
+                    <span className="badge">{data.automation.statusLabel}</span>
+                  </dd>
+                </div>
+                <div>
+                  <dt>Задача</dt>
+                  <dd>{data.automation.taskTitle || "—"}</dd>
+                </div>
+                <div>
+                  <dt>Следующее действие</dt>
+                  <dd>{data.automation.taskObjective || data.nextStep || "—"}</dd>
+                </div>
+              </div>
+              {data.automation.reason ? <p className="muted">{data.automation.reason}</p> : null}
+              {data.automation.analysisError ? (
+                <div className="actions">
+                  <p className="error">AI-анализ не выполнен: {data.automation.analysisError}</p>
+                  <button className="btn secondary" disabled={busy} onClick={() => run(() => api.retryInquiryAiAnalysis(data.id))}>
+                    Повторить анализ
+                  </button>
+                </div>
+              ) : null}
+              {(data.automation.knownFields?.length || data.automation.missingFields?.length) ? (
+                <div className="request-gap" style={{ marginTop: 12 }}>
+                  <div>
+                    <b>Уже известно</b>
+                    <ul>
+                      {(data.automation.knownFields || []).map((f: any) => (
+                        <li key={f.key}>
+                          ✓ {f.label}
+                          {f.value ? `: ${f.value}` : ""}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div>
+                    <b>Нужно выяснить</b>
+                    <ul>
+                      {(data.automation.missingFields || []).map((f: any) => (
+                        <li key={f.key}>□ {f.label}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
           <div className="panel">
             <h3>Кратко</h3>
             <p>{data.aiSummary || data.description || "Описание пока не заполнено."}</p>

@@ -161,6 +161,10 @@ function dealInclude() {
   return {
     stage: true,
     contact: { include: { methods: true } },
+    company: { select: { id: true, name: true } },
+    dealContacts: {
+      include: { contact: { select: { id: true, name: true, firstName: true, lastName: true } } },
+    },
     assignee: { include: { user: { select: { name: true, email: true } } } },
     payments: true,
     tasks: {
@@ -265,6 +269,25 @@ function serializeDeal(deal: any, ops: ReturnType<typeof parseOpsSettings>, curr
             [deal.contact.firstName, deal.contact.lastName].filter(Boolean).join(" "),
         }
       : null,
+    company: deal.company
+      ? {
+          id: deal.company.id,
+          name: deal.company.name,
+          href: `/companies/${deal.company.id}`,
+        }
+      : null,
+    dealContacts: Array.isArray(deal.dealContacts)
+      ? deal.dealContacts.map((dc: any) => ({
+          id: dc.id,
+          role: dc.role,
+          isPrimary: dc.isPrimary,
+          contactId: dc.contactId,
+          name:
+            dc.contact?.name ||
+            [dc.contact?.firstName, dc.contact?.lastName].filter(Boolean).join(" ") ||
+            null,
+        }))
+      : [],
     assigneeMembershipId: deal.assigneeMembershipId,
     assigneeName,
     inquiryId: deal.inquiryId,

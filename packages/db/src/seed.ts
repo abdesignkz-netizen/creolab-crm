@@ -190,7 +190,12 @@ export async function seedDatabase() {
         testMode: true,
         publicKey: formPublicKey,
         assignmentJson: { kind: "owner" },
-        mappingJson: { name: "name", phone: "phone", message: "message", service: "service" },
+        mappingJson: {
+          version: 1,
+          fields: { name: "name", phone: "phone", message: "message", service: "service", company: "company" },
+        },
+        connectionStatus: "CONNECTED",
+        healthStatus: "NO_EVENTS_YET",
       },
     });
     await prisma.formDefinition.create({
@@ -226,7 +231,9 @@ export async function seedDatabase() {
         status: "active",
         testMode: true,
         secretHash: hashToken(secret),
-        mappingJson: { phone: "contact.methods.phone" },
+        mappingJson: { version: 1, fields: { phone: "phone" } },
+        connectionStatus: "CONNECTED",
+        healthStatus: "NO_EVENTS_YET",
       },
     });
     console.log("Seed webhook uses SEED_WEBHOOK_SECRET or local placeholder. Hash only is stored.");

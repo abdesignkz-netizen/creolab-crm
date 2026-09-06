@@ -20,6 +20,12 @@ async function processOutbox() {
       if (payload.campaignId) {
         await processCampaignQueue(prisma, payload.campaignId).catch((error: unknown) => console.error("campaign outbox", error));
       }
+    } else if (event.type === "inquiry.automation") {
+      const payload = (event.payloadJson || {}) as { inquiryId?: string; tenantId?: string };
+      const { processInquiryAutomationJob } = await import("../../api/src/services/inquiryAutomationQueue.ts");
+      await processInquiryAutomationJob(prisma, payload).catch((error: unknown) =>
+        console.error("inquiry.automation outbox", error),
+      );
     }
     await prisma.outboxEvent.update({
       where: { id: event.id },

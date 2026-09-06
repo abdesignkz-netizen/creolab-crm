@@ -14,6 +14,8 @@ import {
   startNotificationPolling,
 } from "./lib/browserNotifications";
 import { ClientsPage } from "./pages/ClientsPage";
+import { CompaniesPage } from "./pages/CompaniesPage";
+import { CompanyPage } from "./pages/CompanyPage";
 import { ContactPage } from "./pages/ContactPage";
 import { ControlPage } from "./pages/ControlPage";
 import { ConversationsPage } from "./pages/ConversationsPage";
@@ -21,6 +23,7 @@ import { DealDetailPage, DealsPage } from "./pages/DealsPage";
 import { IntegrationsPage } from "./pages/IntegrationsPage";
 import { RequestDetailPage } from "./pages/RequestDetailPage";
 import { RequestsPage } from "./pages/RequestsPage";
+import { AiAutomationSettingsPage } from "./pages/AiAutomationSettingsPage";
 import { SituationPage } from "./pages/SituationPage";
 import { StatsPage } from "./pages/StatsPage";
 import { TasksPage } from "./pages/TasksPage";
@@ -93,6 +96,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
     ["/conversations", "Диалоги"],
     ["/tasks", "Задачи"],
     ["/contacts", "Клиенты"],
+    ["/companies", "Компании"],
     ["/inquiries", "Заявки"],
     ["/deals", "Сделки"],
   ] as const;
@@ -112,6 +116,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
     "/deals": "Сделки",
     "/tasks": "Задачи",
     "/contacts": "Клиенты",
+    "/companies": "Компании",
     "/integrations": "Интеграции",
     "/stats": "Статистика",
     "/settings": "Настройки",
@@ -484,6 +489,9 @@ function Settings() {
       <p>
         <a href="/control">Управлять ИИ, диалогами и задачами →</a>
       </p>
+      <p>
+        <a href="/settings/ai-automation">AI Manager → Новые заявки →</a>
+      </p>
 
       <div className="panel">
         <b>Уведомления браузера</b>
@@ -731,8 +739,11 @@ export function App() {
                 <Route path="/contacts" element={<ClientsPage />} />
                 <Route path="/contacts/:id" element={<ContactPage />} />
                 <Route path="/clients/:id" element={<ContactPage />} />
+                <Route path="/companies" element={<CompaniesPage />} />
+                <Route path="/companies/:id" element={<CompanyPage />} />
                 <Route path="/stats" element={<StatsPage />} />
                 <Route path="/settings" element={<Settings />} />
+                <Route path="/settings/ai-automation" element={<AiAutomationSettingsPage />} />
                 <Route path="/admin" element={<Admin />} />
                 <Route path="*" element={<Navigate to="/today" />} />
               </Routes>

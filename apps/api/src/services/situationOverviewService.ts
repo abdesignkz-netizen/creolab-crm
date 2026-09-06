@@ -834,6 +834,54 @@ export async function getSituationOverview(
           ? "AI Manager · активен"
           : "AI Manager · ошибка интеграции"
         : "AI Manager · не подключён",
+      newRequests: {
+        processing: await prisma.task.count({
+          where: {
+            tenantId: tid,
+            type: "process_inquiry",
+            status: "open",
+            source: "ai_automation",
+            executionStatus: { in: ["in_progress", "queued"] },
+          },
+        }),
+        awaitingConfirm: await prisma.task.count({
+          where: {
+            tenantId: tid,
+            type: "process_inquiry",
+            status: "open",
+            executionStatus: "awaiting_confirm",
+          },
+        }),
+        needsHuman: await prisma.task.count({
+          where: {
+            tenantId: tid,
+            type: "process_inquiry",
+            status: "open",
+            executionStatus: { in: ["needs_human", "failed"] },
+          },
+        }),
+        analysisFailed: await prisma.inquiry.count({
+          where: { tenantId: tid, attentionReason: "AI_ANALYSIS_FAILED", status: { notIn: ["lost", "converted", "cancelled"] } },
+        }),
+      },
     },
+    integrationAlerts: (
+      await prisma.integration.findMany({
+        where: {
+          tenantId: tid,
+          OR: [
+            { healthStatus: { in: ["ERROR", "TOKEN_EXPIRED"] } },
+            { lastError: { not: null } },
+          ],
+        },
+        select: { id: true, name: true, type: true, healthStatus: true, lastError: true, lastErrorCode: true },
+        take: 5,
+      })
+    ).map((i) => ({
+      id: i.id,
+      title: i.healthStatus === "TOKEN_EXPIRED" ? `${i.name}: требуется повторная авторизация` : `${i.name}: ошибка интеграции`,
+      detail: i.lastError || i.lastErrorCode || i.healthStatus,
+      href: "/integrations",
+    })),
   };
 }

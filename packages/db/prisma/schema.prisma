@@ -69,6 +69,10 @@ model Tenant {
   campaigns            Campaign[]
   campaignRecipients   CampaignRecipient[]
   agreements           Agreement[]
+  companies            Company[]
+  companyContacts      CompanyContact[]
+  companyTags          CompanyTag[]
+  dealContacts         DealContact[]
 
   @@unique([id])
 }
@@ -133,6 +137,7 @@ model Membership {
   assignedDeals        Deal[]                  @relation("DealAssignee")
   assignedTasks        Task[]                  @relation("TaskOwner")
   ownedContacts        Contact[]               @relation("ContactOwner")
+  assignedCompanies    Company[]               @relation("CompanyAssignee")
   notifications        Notification[]
 
   @@unique([tenantId, userId])
@@ -187,12 +192,20 @@ model Integration {
   type             String
   name             String
   status           String   @default("pending")
+  connectionStatus String   @default("pending")
+  healthStatus     String   @default("UNKNOWN")
   schemaJson       Json     @default("{}")
   mappingJson      Json     @default("{}")
   assignmentJson   Json     @default("{}")
   credentialId     String?
   lastEventAt      DateTime?
+  lastSuccessAt    DateTime?
+  lastErrorAt      DateTime?
   lastError        String?
+  lastErrorCode    String?
+  previousSecretHash String?
+  previousSecretExpiresAt DateTime?
+  automationMode   String?
   testMode         Boolean  @default(true)
   publicKey        String?  @unique
   secretHash       String?
@@ -205,6 +218,7 @@ model Integration {
 
   @@unique([tenantId, id])
   @@index([tenantId, type, status])
+  @@index([tenantId, connectionStatus, healthStatus])
 }
 
 model ChannelConnection {
@@ -295,6 +309,8 @@ model Contact {
   tags        ContactTag[]
   activities  Activity[]
   agreements  Agreement[]
+  companyContacts CompanyContact[]
+  dealContacts    DealContact[]
 
   @@unique([tenantId, id])
   @@index([tenantId, lastSeenAt])
@@ -396,6 +412,7 @@ model Inquiry {
   serviceCategory    String?
   serviceSubcategory String?
   companyName        String?
+  companyId          String?
   city               String?
   aiSummary          String?
   budgetMin          Int?
@@ -431,6 +448,7 @@ model Inquiry {
   assignee           Membership? @relation("InquiryAssignee", fields: [tenantId, assigneeMembershipId], references: [tenantId, id])
   conversation       Conversation? @relation(fields: [tenantId, conversationId], references: [tenantId, id])
   deal               Deal?    @relation("InquiryDeal", fields: [tenantId, dealId], references: [tenantId, id])
+  company            Company? @relation(fields: [tenantId, companyId], references: [tenantId, id])
   tasks              Task[]
   incompleteFrom     IncompleteIntake?
   statusHistory      InquiryStatusHistory[]
@@ -441,6 +459,7 @@ model Inquiry {
   @@index([tenantId, receivedAt])
   @@index([tenantId, status, assigneeMembershipId])
   @@index([tenantId, needsReply, receivedAt])
+  @@index([tenantId, companyId])
 }
 
 model InquiryStatusHistory {
@@ -623,6 +642,7 @@ model Deal {
   id                   String    @id @default(uuid())
   tenantId             String
   contactId            String
+  companyId            String?
   inquiryId            String?   @unique
   stageId              String
   outcome              String    @default("open")
@@ -649,6 +669,7 @@ model Deal {
   version              Int       @default(1)
   tenant               Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   contact              Contact   @relation(fields: [tenantId, contactId], references: [tenantId, id])
+  company              Company?  @relation(fields: [tenantId, companyId], references: [tenantId, id])
   stage                DealStage @relation(fields: [tenantId, stageId], references: [tenantId, id])
   assignee             Membership? @relation("DealAssignee", fields: [tenantId, assigneeMembershipId], references: [tenantId, id])
   inquiry              Inquiry?  @relation("InquiryDeal")
@@ -658,11 +679,13 @@ model Deal {
   stageHistory         DealStageHistory[]
   activities           Activity[]
   agreements           Agreement[]
+  dealContacts         DealContact[]
 
   @@unique([tenantId, id])
   @@index([tenantId, outcome, stageId])
   @@index([tenantId, paymentStatus])
   @@index([tenantId, stageEnteredAt])
+  @@index([tenantId, companyId])
 }
 
 model DealStageHistory {
@@ -724,6 +747,7 @@ model Task {
   inquiryId          String?
   conversationId     String?
   dealId             String?
+  companyId          String?
   incompleteIntakeId String?
   agreementId        String?   @unique
   ownerMembershipId  String?
@@ -758,6 +782,7 @@ model Task {
   contact            Contact?  @relation(fields: [tenantId, contactId], references: [tenantId, id])
   inquiry            Inquiry?  @relation(fields: [tenantId, inquiryId], references: [tenantId, id])
   deal               Deal?     @relation(fields: [tenantId, dealId], references: [tenantId, id])
+  company            Company?  @relation(fields: [tenantId, companyId], references: [tenantId, id])
   agreement          Agreement? @relation(fields: [agreementId], references: [id])
   owner              Membership? @relation("TaskOwner", fields: [tenantId, ownerMembershipId], references: [tenantId, id])
   parentTask         Task?     @relation("TaskChildren", fields: [parentTaskId], references: [id])
@@ -770,6 +795,7 @@ model Task {
   @@index([tenantId, parentTaskId])
   @@index([tenantId, targetType, status])
   @@index([tenantId, executionStatus])
+  @@index([tenantId, companyId])
 }
 
 model Agreement {
@@ -938,6 +964,93 @@ model Note {
   @@index([tenantId, parentType, parentId])
 }
 
+model Company {
+  id                   String    @id @default(uuid())
+  tenantId             String
+  name                 String
+  legalName            String?
+  shortName            String?
+  nameNormalized       String?
+  bin                  String?
+  industry             String?
+  website              String?
+  email                String?
+  phone                String?
+  phoneNormalized      String?
+  country              String?
+  city                 String?
+  address              String?
+  description          String?
+  lifecycleStatus      String    @default("PROSPECT")
+  assigneeMembershipId String?
+  initialSource        String?
+  bankDetailsJson      Json      @default("{}")
+  firstContactAt       DateTime?
+  lastActivityAt       DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  archivedAt           DateTime?
+  version              Int       @default(1)
+  tenant               Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  assignee             Membership? @relation("CompanyAssignee", fields: [tenantId, assigneeMembershipId], references: [tenantId, id])
+  contacts             CompanyContact[]
+  tags                 CompanyTag[]
+  inquiries            Inquiry[]
+  deals                Deal[]
+  tasks                Task[]
+  activities           Activity[]
+
+  @@unique([tenantId, id])
+  @@index([tenantId, name])
+  @@index([tenantId, nameNormalized])
+  @@index([tenantId, bin])
+  @@index([tenantId, lastActivityAt])
+  @@index([tenantId, assigneeMembershipId])
+  @@index([tenantId, lifecycleStatus, archivedAt])
+}
+
+model CompanyContact {
+  id               String    @id @default(uuid())
+  tenantId         String
+  companyId        String
+  contactId        String
+  position         String?
+  department       String?
+  isPrimary        Boolean   @default(false)
+  isDecisionMaker  Boolean   @default(false)
+  isBillingContact Boolean   @default(false)
+  isActive         Boolean   @default(true)
+  startedAt        DateTime?
+  endedAt          DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  tenant           Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company          Company   @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  contact          Contact   @relation(fields: [tenantId, contactId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, companyId, contactId])
+  @@index([tenantId, contactId])
+  @@index([tenantId, companyId, isPrimary])
+}
+
+model DealContact {
+  id        String   @id @default(uuid())
+  tenantId  String
+  dealId    String
+  contactId String
+  role      String?
+  isPrimary Boolean  @default(false)
+  createdAt DateTime @default(now())
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  deal      Deal     @relation(fields: [tenantId, dealId], references: [tenantId, id], onDelete: Cascade)
+  contact   Contact  @relation(fields: [tenantId, contactId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, dealId, contactId])
+  @@index([tenantId, contactId])
+}
+
 model Tag {
   id        String   @id @default(uuid())
   tenantId  String
@@ -945,6 +1058,7 @@ model Tag {
   createdAt DateTime @default(now())
   tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   contacts  ContactTag[]
+  companies CompanyTag[]
 
   @@unique([tenantId, name])
 }
@@ -961,10 +1075,23 @@ model ContactTag {
   @@unique([tenantId, contactId, tagId])
 }
 
+model CompanyTag {
+  id        String @id @default(uuid())
+  tenantId  String
+  companyId String
+  tagId     String
+  tenant    Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company   Company @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  tag       Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, companyId, tagId])
+}
+
 model Activity {
   id          String   @id @default(uuid())
   tenantId    String
   contactId   String
+  companyId   String?
   inquiryId   String?
   dealId      String?
   type        String
@@ -976,10 +1103,12 @@ model Activity {
   createdAt   DateTime @default(now())
   tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   contact     Contact  @relation(fields: [tenantId, contactId], references: [tenantId, id], onDelete: Cascade)
+  company     Company? @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: SetNull)
   deal        Deal?    @relation(fields: [dealId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, contactId, createdAt])
   @@index([tenantId, dealId, createdAt])
+  @@index([tenantId, companyId, createdAt])
 }
 
 model KnowledgeVersion {
@@ -1046,22 +1175,30 @@ model AIExecution {
 }
 
 model InboundEvent {
-  id              String    @id @default(uuid())
-  tenantId        String
-  integrationId   String
+  id               String    @id @default(uuid())
+  tenantId         String
+  integrationId    String
   externalEventKey String
-  payloadHash     String
-  rawJson         Json
-  normalizedJson  Json      @default("{}")
-  receivedAt      DateTime  @default(now())
-  processedAt     DateTime?
-  historical      Boolean   @default(false)
-  test            Boolean   @default(false)
-  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  integration     Integration @relation(fields: [tenantId, integrationId], references: [tenantId, id], onDelete: Cascade)
+  provider         String    @default("unknown")
+  eventType        String    @default("LEAD_SUBMISSION")
+  payloadHash      String
+  rawJson          Json
+  normalizedJson   Json      @default("{}")
+  status           String    @default("RECEIVED")
+  attempts         Int       @default(0)
+  lastError        String?
+  occurredAt       DateTime?
+  receivedAt       DateTime  @default(now())
+  processedAt      DateTime?
+  historical       Boolean   @default(false)
+  test             Boolean   @default(false)
+  tenant           Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  integration      Integration @relation(fields: [tenantId, integrationId], references: [tenantId, id], onDelete: Cascade)
 
   @@unique([integrationId, externalEventKey])
   @@index([tenantId, receivedAt])
+  @@index([tenantId, status, receivedAt])
+  @@index([tenantId, eventType, receivedAt])
 }
 
 model OutboxEvent {

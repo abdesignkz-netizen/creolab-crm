@@ -10,6 +10,15 @@ export function ContactPage() {
   const [tab, setTab] = useState<"history" | "requests" | "conversations" | "deals" | "tasks">("history");
   const [menuOpen, setMenuOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [companyLinkOpen, setCompanyLinkOpen] = useState(false);
+  const [companySearch, setCompanySearch] = useState("");
+  const [companyHits, setCompanyHits] = useState<any[]>([]);
+  const [linkPosition, setLinkPosition] = useState("");
+  const [linkPrimary, setLinkPrimary] = useState(false);
+  const [linkLpr, setLinkLpr] = useState(false);
+  const [linkBilling, setLinkBilling] = useState(false);
+  const [newCompanyName, setNewCompanyName] = useState("");
+  const [linkBusy, setLinkBusy] = useState(false);
 
   async function load() {
     if (!id) return;
@@ -24,6 +33,17 @@ export function ContactPage() {
   useEffect(() => {
     load();
   }, [id]);
+
+  useEffect(() => {
+    if (!companyLinkOpen) return;
+    const t = setTimeout(() => {
+      api
+        .companies({ q: companySearch.trim() || undefined })
+        .then((res: any) => setCompanyHits(res.items || []))
+        .catch(() => setCompanyHits([]));
+    }, companySearch.trim() ? 220 : 0);
+    return () => clearTimeout(t);
+  }, [companySearch, companyLinkOpen]);
 
   if (!data && !error) return <div className="state">Загрузка…</div>;
   if (!data) {
@@ -176,11 +196,43 @@ export function ContactPage() {
               <div><dt>Фамилия</dt><dd>{client.lastName || "Не указано"}</dd></div>
               <div><dt>Телефон</dt><dd>{client.phone || "Не указано"}</dd></div>
               <div><dt>Email</dt><dd>{client.email || "Не указано"}</dd></div>
-              <div><dt>Компания</dt><dd>{client.companyName || "Не указано"}</dd></div>
+              <div><dt>Компания (текст)</dt><dd>{client.companyName || "Не указано"}</dd></div>
               <div><dt>Должность</dt><dd>{client.jobTitle || "Не указано"}</dd></div>
               <div><dt>Город</dt><dd>{client.city || "Не указано"}</dd></div>
               <div><dt>Язык</dt><dd>{client.language === "unknown" ? "Не указано" : client.language}</dd></div>
             </dl>
+          </div>
+
+          <div className="card">
+            <b>Компания</b>
+            {(data.companies || []).length ? (
+              (data.companies || []).map((item: any) => (
+                <div key={item.linkId} style={{ marginTop: 10 }}>
+                  <Link to={item.href}>
+                    <b>{item.company.name}</b>
+                  </Link>
+                  <div className="muted">
+                    {[
+                      item.position,
+                      item.isPrimary ? "Основной контакт" : null,
+                      item.isDecisionMaker ? "ЛПР" : null,
+                      item.isBillingContact ? "Финансовый" : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <p className="muted" style={{ marginTop: 8 }}>
+                Компания не указана
+              </p>
+            )}
+            <div className="actions" style={{ marginTop: 10 }}>
+              <button type="button" className="btn secondary" onClick={() => setCompanyLinkOpen(true)}>
+                Связать с компанией
+              </button>
+            </div>
           </div>
 
           <div className="card">
@@ -487,6 +539,110 @@ export function ContactPage() {
             <button type="button" className="btn secondary" onClick={() => setEditOpen(false)}>Отмена</button>
           </div>
         </form>
+      ) : null}
+
+      {companyLinkOpen ? (
+        <div className="stats-modal-backdrop" onClick={() => setCompanyLinkOpen(false)}>
+          <div className="stats-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Связать с компанией</h3>
+            <label>
+              Поиск компании
+              <input
+                value={companySearch}
+                onChange={(e) => setCompanySearch(e.target.value)}
+                placeholder="Название или БИН"
+              />
+            </label>
+            <label>
+              Должность
+              <input value={linkPosition} onChange={(e) => setLinkPosition(e.target.value)} />
+            </label>
+            <label>
+              <input type="checkbox" checked={linkPrimary} onChange={(e) => setLinkPrimary(e.target.checked)} />{" "}
+              Основной контакт
+            </label>
+            <label>
+              <input type="checkbox" checked={linkLpr} onChange={(e) => setLinkLpr(e.target.checked)} /> ЛПР
+            </label>
+            <label>
+              <input type="checkbox" checked={linkBilling} onChange={(e) => setLinkBilling(e.target.checked)} />{" "}
+              Финансовый контакт
+            </label>
+            <div className="picker-list">
+              {companyHits.map((hit) => (
+                <button
+                  key={hit.id}
+                  type="button"
+                  className="picker-item"
+                  disabled={linkBusy}
+                  onClick={async () => {
+                    setLinkBusy(true);
+                    try {
+                      await api.linkCompanyContact(hit.id, {
+                        contactId: client.id,
+                        position: linkPosition || client.jobTitle || null,
+                        isPrimary: linkPrimary,
+                        isDecisionMaker: linkLpr,
+                        isBillingContact: linkBilling,
+                      });
+                      setCompanyLinkOpen(false);
+                      await load();
+                    } catch (err) {
+                      setError(err instanceof Error ? err.message : "Ошибка");
+                    } finally {
+                      setLinkBusy(false);
+                    }
+                  }}
+                >
+                  <b>{hit.name}</b>
+                  <div className="muted">{[hit.city, hit.industry].filter(Boolean).join(" · ")}</div>
+                </button>
+              ))}
+            </div>
+            <hr />
+            <label>
+              Или создать компанию
+              <input
+                value={newCompanyName}
+                onChange={(e) => setNewCompanyName(e.target.value)}
+                placeholder={client.companyName || "Название"}
+              />
+            </label>
+            <button
+              type="button"
+              className="btn"
+              disabled={linkBusy || !(newCompanyName || client.companyName)}
+              onClick={async () => {
+                setLinkBusy(true);
+                try {
+                  const created: any = await api.createCompany({
+                    name: newCompanyName || client.companyName,
+                    forceCreate: true,
+                    city: client.city || undefined,
+                  });
+                  await api.linkCompanyContact(created.id, {
+                    contactId: client.id,
+                    position: linkPosition || client.jobTitle || null,
+                    isPrimary: true,
+                    isDecisionMaker: linkLpr,
+                    isBillingContact: linkBilling,
+                  });
+                  setCompanyLinkOpen(false);
+                  await load();
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : "Ошибка");
+                } finally {
+                  setLinkBusy(false);
+                }
+              }}
+            >
+              + Создать компанию и связать
+            </button>
+            <button type="button" className="btn secondary" onClick={() => setCompanyLinkOpen(false)}>
+              Закрыть
+            </button>
+          </div>
+        </div>
       ) : null}
     </section>
   );
