@@ -1,30 +1,9 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { PeriodSelector, type PeriodPreset } from "../components/PeriodSelector";
 import { api } from "../lib/api";
 
 type Scope = "all" | "mine" | "unassigned";
-type PeriodPreset =
-  | "today"
-  | "yesterday"
-  | "last_7"
-  | "last_30"
-  | "this_month"
-  | "last_month"
-  | "this_year"
-  | "all"
-  | "custom";
-
-const PERIODS: { id: PeriodPreset; label: string }[] = [
-  { id: "today", label: "Сегодня" },
-  { id: "yesterday", label: "Вчера" },
-  { id: "last_7", label: "7 дней" },
-  { id: "last_30", label: "30 дней" },
-  { id: "this_month", label: "Этот месяц" },
-  { id: "last_month", label: "Прошлый месяц" },
-  { id: "this_year", label: "Этот год" },
-  { id: "all", label: "Всё время" },
-  { id: "custom", label: "Период" },
-];
 
 const ACTION_LABEL: Record<string, string> = {
   complete_phone: "Дописать контакт",
@@ -200,18 +179,15 @@ export function SituationPage() {
       {error ? <p className="error">{error}</p> : null}
 
       <div className="sit-toolbar">
-        <div className="sit-periods" role="tablist" aria-label="Период">
-          {PERIODS.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              className={period === p.id ? "btn sit-chip" : "btn secondary sit-chip"}
-              onClick={() => setPeriod(p.id)}
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
+        <PeriodSelector
+          period={period}
+          onPeriodChange={setPeriod}
+          dateFrom={dateFrom}
+          dateTo={dateTo}
+          onDateFromChange={setDateFrom}
+          onDateToChange={setDateTo}
+          activeLabel={data.period?.label}
+        />
         <div className="sit-toolbar-side">
           <div className="segmented sit-scope">
             {(
@@ -240,19 +216,6 @@ export function SituationPage() {
           </button>
         </div>
       </div>
-
-      {period === "custom" ? (
-        <div className="sit-custom-range">
-          <label>
-            С
-            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
-          </label>
-          <label>
-            По
-            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
-          </label>
-        </div>
-      ) : null}
 
       <div className="sit-brief">
         <b>Кратко</b>

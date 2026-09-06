@@ -12,6 +12,101 @@ import {
   parseOpsSettings,
   stageDurationLabel,
 } from "./dealPipeline.ts";
+import { resolvePeriodRange, periodLabel, type PeriodPreset } from "./periodRange.ts";
+
+type DealTimeMode = "now" | "period";
+type DealPeriodBasis = "created" | "activity" | "closed";
+type DealFocus = "all" | "stalled" | "needs_reply" | "no_next_action";
+
+function dateRangeFilter(from: Date | null, to: Date | null) {
+  if (!from && !to) return undefined;
+  return {
+    ...(from ? { gte: from } : {}),
+    ...(to ? { lt: to } : {}),
+  };
+}
+
+async function findDealIdsWithActivity(
+  prisma: PrismaClient,
+  tid: string,
+  from: Date | null,
+  to: Date | null,
+) {
+  const range = dateRangeFilter(from, to);
+  const ids = new Set<string>();
+
+  const [activities, histories, tasks, agreements, contacts] = await Promise.all([
+    prisma.activity.findMany({
+      where: {
+        tenantId: tid,
+        dealId: { not: null },
+        ...(range ? { createdAt: range } : {}),
+      },
+      select: { dealId: true },
+      take: 3000,
+    }),
+    prisma.dealStageHistory.findMany({
+      where: {
+        tenantId: tid,
+        ...(range ? { enteredAt: range } : {}),
+      },
+      select: { dealId: true },
+      take: 3000,
+    }),
+    prisma.task.findMany({
+      where: {
+        tenantId: tid,
+        dealId: { not: null },
+        OR: range
+          ? [{ createdAt: range }, { completedAt: range }, { confirmedAt: range }, { sentAt: range }]
+          : undefined,
+      },
+      select: { dealId: true },
+      take: 3000,
+    }),
+    prisma.agreement.findMany({
+      where: {
+        tenantId: tid,
+        dealId: { not: null },
+        OR: range
+          ? [{ createdAt: range }, { updatedAt: range }, { scheduledAt: range }, { completedAt: range }]
+          : undefined,
+      },
+      select: { dealId: true },
+      take: 2000,
+    }),
+    range
+      ? prisma.contact.findMany({
+          where: {
+            tenantId: tid,
+            OR: [
+              { lastInboundMessageAt: range },
+              { lastOutboundMessageAt: range },
+              { lastContactAt: range },
+            ],
+          },
+          select: { id: true },
+          take: 2000,
+        })
+      : Promise.resolve([] as Array<{ id: string }>),
+  ]);
+
+  for (const row of activities) if (row.dealId) ids.add(row.dealId);
+  for (const row of histories) ids.add(row.dealId);
+  for (const row of tasks) if (row.dealId) ids.add(row.dealId);
+  for (const row of agreements) if (row.dealId) ids.add(row.dealId);
+
+  if (contacts.length) {
+    const byContact = await prisma.deal.findMany({
+      where: { tenantId: tid, contactId: { in: contacts.map((c) => c.id) } },
+      select: { id: true },
+      take: 3000,
+    });
+    for (const row of byContact) ids.add(row.id);
+  }
+
+  return [...ids];
+}
 
 function requireTenant(auth: AuthContext) {
   if (!auth.activeMembership) throw new ApiError(403, "no_tenant", "Нет активной компании");
@@ -189,17 +284,62 @@ function serializeDeal(deal: any, ops: ReturnType<typeof parseOpsSettings>, curr
 export async function getDealBoard(
   prisma: PrismaClient,
   auth: AuthContext,
-  query: { scope?: string; includeClosed?: string } = {},
+  query: {
+    scope?: string;
+    includeClosed?: string;
+    timeMode?: string;
+    period?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    basis?: string;
+    focus?: string;
+  } = {},
 ) {
   const membership = requireTenant(auth);
   const tid = membership.tenantId;
   const currency = membership.tenant.currency || "KZT";
+  const timeZone = membership.tenant.timezone || "Asia/Almaty";
   const tenant = await prisma.tenant.findUnique({ where: { id: tid } });
   const ops = parseOpsSettings(tenant?.settingsJson);
   const stages = await ensureDealPipelineStages(prisma, tid);
   const scope = query.scope === "mine" || query.scope === "unassigned" ? query.scope : "all";
-  const includeClosed = query.includeClosed === "1" || query.includeClosed === "true";
+  const timeMode: DealTimeMode = query.timeMode === "period" ? "period" : "now";
+  const basis: DealPeriodBasis =
+    query.basis === "activity" || query.basis === "closed" ? query.basis : "created";
+  const focus: DealFocus =
+    query.focus === "stalled" || query.focus === "needs_reply" || query.focus === "no_next_action"
+      ? query.focus
+      : "all";
+  const includeClosed =
+    query.includeClosed === "1" ||
+    query.includeClosed === "true" ||
+    timeMode === "period";
   const now = new Date();
+
+  const allowed: PeriodPreset[] = [
+    "today",
+    "yesterday",
+    "last_7",
+    "last_30",
+    "this_month",
+    "last_month",
+    "this_year",
+    "all",
+    "custom",
+  ];
+  const periodPreset = (
+    allowed.includes(query.period as PeriodPreset) ? query.period : "today"
+  ) as PeriodPreset;
+
+  let from: Date | null = null;
+  let to: Date | null = null;
+  let periodLabelText = "Сейчас";
+  if (timeMode === "period") {
+    const range = resolvePeriodRange(timeZone, periodPreset, query.dateFrom, query.dateTo, now);
+    from = range.from;
+    to = range.to;
+    periodLabelText = periodLabel(periodPreset, from, to, timeZone);
+  }
 
   const assigneeWhere =
     scope === "mine"
@@ -208,12 +348,35 @@ export async function getDealBoard(
         ? { assigneeMembershipId: null }
         : {};
 
+  const createdRange = dateRangeFilter(from, to);
+  let idFilter: string[] | null = null;
+
+  if (timeMode === "period" && basis === "activity") {
+    idFilter = await findDealIdsWithActivity(prisma, tid, from, to);
+  }
+
+  const where: Record<string, unknown> = {
+    tenantId: tid,
+    ...assigneeWhere,
+  };
+
+  if (timeMode === "now") {
+    where.outcome = { in: ["open", "on_hold"] };
+  } else if (basis === "created") {
+    if (createdRange) where.createdAt = createdRange;
+  } else if (basis === "closed") {
+    where.outcome = { in: ["won", "lost"] };
+    if (createdRange) where.closedAt = createdRange;
+  } else if (basis === "activity") {
+    where.id = { in: idFilter?.length ? idFilter : ["__none__"] };
+  }
+
+  if (!includeClosed && timeMode === "now") {
+    where.outcome = { in: ["open", "on_hold"] };
+  }
+
   const deals = await prisma.deal.findMany({
-    where: {
-      tenantId: tid,
-      ...assigneeWhere,
-      ...(includeClosed ? {} : { outcome: { in: ["open", "on_hold"] } }),
-    },
+    where: where as never,
     include: dealInclude(),
     orderBy: [{ stageEnteredAt: "desc" }, { createdAt: "desc" }],
     take: 500,
@@ -234,14 +397,27 @@ export async function getDealBoard(
   });
   const contactById = new Map(contacts.map((c) => [c.id, c]));
 
+  const serializedAll = deals.map((d) =>
+    serializeDeal({ ...d, contact: contactById.get(d.contactId) || d.contact }, ops, currency, now),
+  );
+
+  const focusFilter = (d: (typeof serializedAll)[number]) => {
+    if (focus === "stalled") return Boolean(d.flags.stalled);
+    if (focus === "needs_reply") return Boolean(d.flags.needsReply);
+    if (focus === "no_next_action") return Boolean(d.flags.noNextAction);
+    return true;
+  };
+
+  const forKanban = serializedAll.filter((d) => {
+    if (timeMode === "now") return d.outcome === "open" && focusFilter(d);
+    if (basis === "closed") return (d.outcome === "won" || d.outcome === "lost") && focusFilter(d);
+    return focusFilter(d);
+  });
+
   const columns = stages
     .filter((s) => PIPELINE_STAGES.some((p) => p.systemKey === s.systemKey))
     .map((stage) => {
-      const items = deals
-        .filter((d) => d.stageId === stage.id && d.outcome === "open")
-        .map((d) =>
-          serializeDeal({ ...d, contact: contactById.get(d.contactId) || d.contact }, ops, currency, now),
-        );
+      const items = forKanban.filter((d) => d.stageId === stage.id);
       let sum = 0;
       let known = 0;
       let weighted = 0;
@@ -267,7 +443,7 @@ export async function getDealBoard(
       };
     });
 
-  const openSerialized = columns.flatMap((c) => c.deals);
+  const openSerialized = forKanban.filter((d) => d.outcome === "open");
   let pipelineSum = 0;
   let pipelineKnown = 0;
   let weightedSum = 0;
@@ -284,34 +460,140 @@ export async function getDealBoard(
   );
   const expectedPayments = expectedList.reduce((acc, d) => acc + (d.amount || 0), 0);
 
+  const wonInView = serializedAll.filter((d) => d.outcome === "won");
+  const lostInView = serializedAll.filter((d) => d.outcome === "lost");
+  let soldSum = 0;
+  let soldKnown = 0;
+  for (const d of wonInView) {
+    if (d.amount != null) {
+      soldSum += d.amount;
+      soldKnown += 1;
+    }
+  }
+
+  const createdInPeriod =
+    timeMode === "period" && basis === "created"
+      ? serializedAll.length
+      : timeMode === "period"
+        ? (
+            await prisma.deal.count({
+              where: {
+                tenantId: tid,
+                ...assigneeWhere,
+                ...(createdRange ? { createdAt: createdRange } : {}),
+              },
+            })
+          )
+        : null;
+
+  const closedWonCount =
+    timeMode === "period"
+      ? basis === "closed"
+        ? wonInView.length
+        : await prisma.deal.count({
+            where: {
+              tenantId: tid,
+              ...assigneeWhere,
+              outcome: "won",
+              ...(createdRange ? { closedAt: createdRange } : {}),
+            },
+          })
+      : null;
+  const closedLostCount =
+    timeMode === "period"
+      ? basis === "closed"
+        ? lostInView.length
+        : await prisma.deal.count({
+            where: {
+              tenantId: tid,
+              ...assigneeWhere,
+              outcome: "lost",
+              ...(createdRange ? { closedAt: createdRange } : {}),
+            },
+          })
+      : null;
+
+  let periodSold = soldSum;
+  let periodSoldKnown = soldKnown;
+  if (timeMode === "period" && basis !== "closed") {
+    const wonDeals = await prisma.deal.findMany({
+      where: {
+        tenantId: tid,
+        ...assigneeWhere,
+        outcome: "won",
+        ...(createdRange ? { closedAt: createdRange } : {}),
+      },
+      select: { offerAmountMinor: true, wonAmountMinor: true },
+      take: 2000,
+    });
+    periodSold = 0;
+    periodSoldKnown = 0;
+    for (const d of wonDeals) {
+      const n = amountNumber(d.wonAmountMinor ?? d.offerAmountMinor);
+      if (n != null) {
+        periodSold += n;
+        periodSoldKnown += 1;
+      }
+    }
+  }
+
   return {
     asOf: now.toISOString(),
     currency,
+    timeMode,
+    basis: timeMode === "period" ? basis : null,
+    focus,
+    period: {
+      preset: timeMode === "period" ? periodPreset : null,
+      label: periodLabelText,
+      from: from?.toISOString() || null,
+      to: to?.toISOString() || null,
+    },
     ops: {
       stalledDealDays: ops.stalledDealDays,
       proposalFollowUpThresholdDays: ops.proposalFollowUpThresholdDays,
       stageSlaDays: ops.stageSlaDays,
     },
-    summary: {
-      activeDeals: openSerialized.length,
-      pipelineAmount: pipelineKnown ? pipelineSum : null,
-      pipelineAmountLabel: formatMoney(pipelineKnown ? pipelineSum : null, currency),
-      weightedPipeline: pipelineKnown ? weightedSum : null,
-      weightedPipelineLabel: formatMoney(pipelineKnown ? weightedSum : null, currency),
-      amountKnownCount: pipelineKnown,
-      amountKnownOf: openSerialized.length,
-      expectedPayments: expectedList.length ? expectedPayments : null,
-      expectedPaymentsLabel: formatMoney(expectedList.length ? expectedPayments : null, currency),
-      stalledCount: openSerialized.filter((d) => d.flags.stalled).length,
-      noNextActionCount: openSerialized.filter((d) => d.flags.noNextAction).length,
-    },
+    summary:
+      timeMode === "now"
+        ? {
+            mode: "now" as const,
+            activeDeals: openSerialized.length,
+            pipelineAmount: pipelineKnown ? pipelineSum : null,
+            pipelineAmountLabel: formatMoney(pipelineKnown ? pipelineSum : null, currency),
+            weightedPipeline: pipelineKnown ? weightedSum : null,
+            weightedPipelineLabel: formatMoney(pipelineKnown ? weightedSum : null, currency),
+            amountKnownCount: pipelineKnown,
+            amountKnownOf: openSerialized.length,
+            expectedPayments: expectedList.length ? expectedPayments : null,
+            expectedPaymentsLabel: formatMoney(expectedList.length ? expectedPayments : null, currency),
+            stalledCount: openSerialized.filter((d) => d.flags.stalled).length,
+            noNextActionCount: openSerialized.filter((d) => d.flags.noNextAction).length,
+            needsReplyCount: openSerialized.filter((d) => d.flags.needsReply).length,
+          }
+        : {
+            mode: "period" as const,
+            createdDeals: createdInPeriod,
+            wonDeals: closedWonCount,
+            lostDeals: closedLostCount,
+            soldAmount: periodSoldKnown ? periodSold : null,
+            soldAmountLabel: formatMoney(periodSoldKnown ? periodSold : null, currency),
+            dealsInView: forKanban.length,
+            activityDeals: basis === "activity" ? forKanban.length : null,
+          },
     columns,
-    onHold: deals.filter((d) => d.outcome === "on_hold").map((d) => serializeDeal(d, ops, currency, now)),
-    closed: includeClosed
-      ? deals
-          .filter((d) => d.outcome === "won" || d.outcome === "lost")
-          .map((d) => serializeDeal(d, ops, currency, now))
-      : [],
+    onHold:
+      timeMode === "now"
+        ? deals.filter((d) => d.outcome === "on_hold").map((d) => serializeDeal(d, ops, currency, now))
+        : [],
+    closed:
+      timeMode === "period" && basis === "closed"
+        ? forKanban
+        : includeClosed && timeMode === "now"
+          ? deals
+              .filter((d) => d.outcome === "won" || d.outcome === "lost")
+              .map((d) => serializeDeal(d, ops, currency, now))
+          : [],
     lostReasons: [...LOST_REASONS],
     paymentStatuses: [...PAYMENT_STATUSES],
   };

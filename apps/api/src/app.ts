@@ -85,6 +85,7 @@ import {
   todayQueue,
   waitTask,
 } from "./services/domainService.ts";
+import { getAnalyticsDashboard, getAnalyticsDrilldown, getAnalyticsTrend } from "./services/analyticsService.ts";
 import {
   addContactNote,
   addContactTag,
@@ -629,6 +630,18 @@ export function createApp(prisma: PrismaClient) {
 
   app.get("/api/v1/stats/summary", async (req, res) => {
     res.json(await statsSummary(prisma, await requireAuth(req)));
+  });
+
+  app.get("/api/v1/analytics/dashboard", async (req, res) => {
+    res.json(await getAnalyticsDashboard(prisma, await requireAuth(req), req.query as Record<string, string>));
+  });
+
+  app.get("/api/v1/analytics/trend", async (req, res) => {
+    res.json(await getAnalyticsTrend(prisma, await requireAuth(req), req.query as Record<string, string>));
+  });
+
+  app.get("/api/v1/analytics/drilldown", async (req, res) => {
+    res.json(await getAnalyticsDrilldown(prisma, await requireAuth(req), req.query as Record<string, string>));
   });
 
   app.get("/api/v1/integrations", async (req, res) => {

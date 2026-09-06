@@ -1,8 +1,12 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { PeriodSelector, type PeriodPreset } from "../components/PeriodSelector";
 import { api } from "../lib/api";
 
 type Scope = "all" | "mine" | "unassigned";
+type TimeMode = "now" | "period";
+type PeriodBasis = "created" | "activity" | "closed";
+type Focus = "all" | "stalled" | "needs_reply" | "no_next_action";
 
 function Flag({ on, label }: { on?: boolean; label: string }) {
   if (!on) return null;
@@ -11,15 +15,36 @@ function Flag({ on, label }: { on?: boolean; label: string }) {
 
 export function DealsPage() {
   const navigate = useNavigate();
+  const [timeMode, setTimeMode] = useState<TimeMode>("now");
+  const [period, setPeriod] = useState<PeriodPreset>("today");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [basis, setBasis] = useState<PeriodBasis>("created");
   const [scope, setScope] = useState<Scope>("all");
+  const [focus, setFocus] = useState<Focus>("all");
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [dragId, setDragId] = useState<string | null>(null);
 
-  async function load(nextScope = scope) {
+  async function load() {
     try {
-      setData(await api.deals({ scope: nextScope }));
+      if (timeMode === "period" && period === "custom" && (!dateFrom || !dateTo)) {
+        setError("Укажите даты С и По");
+        return;
+      }
+      setData(
+        await api.deals({
+          scope,
+          view: "board",
+          timeMode,
+          period: timeMode === "period" ? period : undefined,
+          dateFrom: timeMode === "period" && period === "custom" ? dateFrom : undefined,
+          dateTo: timeMode === "period" && period === "custom" ? dateTo : undefined,
+          basis: timeMode === "period" ? basis : undefined,
+          focus: timeMode === "now" ? focus : undefined,
+        }),
+      );
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Ошибка");
@@ -28,10 +53,10 @@ export function DealsPage() {
 
   useEffect(() => {
     void load();
-  }, [scope]);
+  }, [scope, timeMode, period, dateFrom, dateTo, basis, focus]);
 
   async function onDrop(stageId: string) {
-    if (!dragId || busy) return;
+    if (!dragId || busy || timeMode !== "now") return;
     setBusy(true);
     try {
       await api.changeDealStage(dragId, { stageId });
@@ -65,51 +90,151 @@ export function DealsPage() {
           <p className="page-kicker">Воронка продаж</p>
           <h2>Сделки</h2>
         </div>
+        {data.period?.label ? <span className="muted">{data.period.label}</span> : null}
       </div>
 
       {error ? <p className="error">{error}</p> : null}
 
-      <div className="sit-kpi-grid deals-summary">
-        <div className="sit-kpi">
-          <span className="muted">Активные</span>
-          <strong>{s.activeDeals}</strong>
-        </div>
-        <div className="sit-kpi">
-          <span className="muted">Потенциальный pipeline</span>
-          <strong>{s.pipelineAmountLabel || "—"}</strong>
-          {s.amountKnownOf ? (
-            <span className="kpi-hint">
-              сумма у {s.amountKnownCount} из {s.amountKnownOf}
-            </span>
-          ) : null}
-        </div>
-        <div className="sit-kpi">
-          <span className="muted">Взвешенный прогноз</span>
-          <strong>{s.weightedPipelineLabel || "—"}</strong>
-        </div>
-        <div className="sit-kpi">
-          <span className="muted">Ожидаемые оплаты</span>
-          <strong>{s.expectedPaymentsLabel || "—"}</strong>
-        </div>
-      </div>
-
-      <div className="segmented sit-scope" style={{ width: "fit-content" }}>
+      <div className="segmented sit-scope" style={{ width: "fit-content", marginBottom: 10 }}>
         {(
           [
-            ["all", "Все"],
-            ["mine", "Мои"],
-            ["unassigned", "Без ответственного"],
+            ["now", "Сейчас"],
+            ["period", "За период"],
           ] as const
         ).map(([value, label]) => (
           <button
             key={value}
             type="button"
-            className={scope === value ? "btn" : "btn secondary"}
-            onClick={() => setScope(value)}
+            className={timeMode === value ? "btn" : "btn secondary"}
+            onClick={() => {
+              setTimeMode(value);
+              if (value === "now") setFocus("all");
+            }}
           >
             {label}
           </button>
         ))}
+      </div>
+
+      {timeMode === "period" ? (
+        <>
+          <PeriodSelector
+            period={period}
+            onPeriodChange={setPeriod}
+            dateFrom={dateFrom}
+            dateTo={dateTo}
+            onDateFromChange={setDateFrom}
+            onDateToChange={setDateTo}
+            activeLabel={data.period?.label}
+          />
+          <div className="segmented sit-scope" style={{ width: "fit-content", marginTop: 8 }}>
+            {(
+              [
+                ["created", "Созданные"],
+                ["activity", "С активностью"],
+                ["closed", "Закрытые"],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                className={basis === value ? "btn" : "btn secondary"}
+                onClick={() => setBasis(value)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </>
+      ) : null}
+
+      <div className="sit-kpi-grid deals-summary" style={{ marginTop: 12 }}>
+        {s.mode === "period" ? (
+          <>
+            <div className="sit-kpi">
+              <span className="muted">Создано сделок</span>
+              <strong>{s.createdDeals ?? "—"}</strong>
+            </div>
+            <div className="sit-kpi">
+              <span className="muted">Закрыто успешно</span>
+              <strong>{s.wonDeals ?? "—"}</strong>
+            </div>
+            <div className="sit-kpi">
+              <span className="muted">Потеряно</span>
+              <strong>{s.lostDeals ?? "—"}</strong>
+            </div>
+            <div className="sit-kpi">
+              <span className="muted">Продано</span>
+              <strong>{s.soldAmountLabel || "—"}</strong>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="sit-kpi">
+              <span className="muted">Активные</span>
+              <strong>{s.activeDeals}</strong>
+            </div>
+            <div className="sit-kpi">
+              <span className="muted">Потенциальный pipeline</span>
+              <strong>{s.pipelineAmountLabel || "—"}</strong>
+              {s.amountKnownOf ? (
+                <span className="kpi-hint">
+                  сумма у {s.amountKnownCount} из {s.amountKnownOf}
+                </span>
+              ) : null}
+            </div>
+            <div className="sit-kpi">
+              <span className="muted">Взвешенный прогноз</span>
+              <strong>{s.weightedPipelineLabel || "—"}</strong>
+            </div>
+            <div className="sit-kpi">
+              <span className="muted">Ожидаемые оплаты</span>
+              <strong>{s.expectedPaymentsLabel || "—"}</strong>
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="deals-filters-row">
+        <div className="segmented sit-scope" style={{ width: "fit-content" }}>
+          {(
+            [
+              ["all", "Все"],
+              ["mine", "Мои"],
+              ["unassigned", "Без ответственного"],
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              className={scope === value ? "btn" : "btn secondary"}
+              onClick={() => setScope(value)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {timeMode === "now" ? (
+          <div className="segmented sit-scope" style={{ width: "fit-content" }}>
+            {(
+              [
+                ["all", "Все фокусы"],
+                ["stalled", "Зависшие"],
+                ["needs_reply", "Нужен ответ"],
+                ["no_next_action", "Без следующего шага"],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                className={focus === value ? "btn" : "btn secondary"}
+                onClick={() => setFocus(value)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        ) : null}
       </div>
 
       <div className="deal-kanban">
@@ -117,7 +242,9 @@ export function DealsPage() {
           <div
             key={col.stageId}
             className="deal-column"
-            onDragOver={(e) => e.preventDefault()}
+            onDragOver={(e) => {
+              if (timeMode === "now") e.preventDefault();
+            }}
             onDrop={() => void onDrop(col.stageId)}
           >
             <div className="deal-column-head">
@@ -131,7 +258,7 @@ export function DealsPage() {
                 <article
                   key={deal.id}
                   className={`deal-card${dragId === deal.id ? " dragging" : ""}`}
-                  draggable
+                  draggable={timeMode === "now" && deal.outcome === "open"}
                   onDragStart={() => setDragId(deal.id)}
                   onDragEnd={() => setDragId(null)}
                   onClick={() => navigate(`/deals/${deal.id}`)}
@@ -142,12 +269,16 @@ export function DealsPage() {
                     <span>{deal.amountLabel || "сумма не указана"}</span>
                     <span>{deal.probability}%</span>
                   </div>
-                  <div className="muted">На этапе: {deal.stageDurationLabel}</div>
+                  {deal.outcome === "won" || deal.outcome === "lost" ? (
+                    <div className="deal-flag">{deal.outcome === "won" ? "WON" : "LOST"}</div>
+                  ) : (
+                    <div className="muted">На этапе: {deal.stageDurationLabel}</div>
+                  )}
                   {deal.nextAction ? (
                     <div className="deal-next">След.: {deal.nextAction}</div>
-                  ) : (
+                  ) : deal.outcome === "open" ? (
                     <div className="deal-next warn">Нет следующего шага</div>
-                  )}
+                  ) : null}
                   {deal.assigneeName ? <div className="muted">{deal.assigneeName}</div> : null}
                   <div className="deal-flags">
                     <Flag on={deal.flags?.needsReply} label="Нужен ответ" />
@@ -198,7 +329,7 @@ export function DealDetailPage() {
   async function load() {
     if (!dealId) return;
     try {
-      const [detail, boardData] = await Promise.all([api.deal(dealId), api.deals()]);
+      const [detail, boardData] = await Promise.all([api.deal(dealId), api.deals({ timeMode: "now" })]);
       setData(detail);
       setBoard(boardData);
       const d = (detail as any).deal;

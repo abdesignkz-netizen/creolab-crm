@@ -111,11 +111,29 @@ export function createApiClient(options: ClientOptions) {
     removeContactTag: (id: string, tagId: string) =>
       request(`/api/v1/contacts/${id}/tags/${tagId}`, { method: "DELETE" }),
     contactActivities: (id: string) => request(`/api/v1/contacts/${id}/activities`),
-    deals: (query: { scope?: string; includeClosed?: boolean; view?: "board" | "list" } = {}) => {
+    deals: (
+      query: {
+        scope?: string;
+        includeClosed?: boolean;
+        view?: "board" | "list";
+        timeMode?: "now" | "period";
+        period?: string;
+        dateFrom?: string;
+        dateTo?: string;
+        basis?: "created" | "activity" | "closed";
+        focus?: "all" | "stalled" | "needs_reply" | "no_next_action";
+      } = {},
+    ) => {
       const params = new URLSearchParams();
       if (query.scope) params.set("scope", query.scope);
       if (query.includeClosed) params.set("includeClosed", "true");
       if (query.view) params.set("view", query.view);
+      if (query.timeMode) params.set("timeMode", query.timeMode);
+      if (query.period) params.set("period", query.period);
+      if (query.dateFrom) params.set("dateFrom", query.dateFrom);
+      if (query.dateTo) params.set("dateTo", query.dateTo);
+      if (query.basis) params.set("basis", query.basis);
+      if (query.focus && query.focus !== "all") params.set("focus", query.focus);
       const suffix = params.toString() ? `?${params}` : "";
       return request(`/api/v1/deals${suffix}`);
     },
@@ -230,6 +248,30 @@ export function createApiClient(options: ClientOptions) {
     notifications: () => request("/api/v1/notifications"),
     markNotificationRead: (id: string) => request(`/api/v1/notifications/${id}/read`, { method: "POST" }),
     stats: () => request("/api/v1/stats/summary"),
+    analyticsDashboard: (query: Record<string, string | undefined> = {}) => {
+      const params = new URLSearchParams();
+      Object.entries(query).forEach(([key, value]) => {
+        if (value != null && value !== "") params.set(key, value);
+      });
+      const qs = params.toString();
+      return request(`/api/v1/analytics/dashboard${qs ? `?${qs}` : ""}`);
+    },
+    analyticsTrend: (query: Record<string, string | undefined> = {}) => {
+      const params = new URLSearchParams();
+      Object.entries(query).forEach(([key, value]) => {
+        if (value != null && value !== "") params.set(key, value);
+      });
+      const qs = params.toString();
+      return request(`/api/v1/analytics/trend${qs ? `?${qs}` : ""}`);
+    },
+    analyticsDrilldown: (query: Record<string, string | undefined> = {}) => {
+      const params = new URLSearchParams();
+      Object.entries(query).forEach(([key, value]) => {
+        if (value != null && value !== "") params.set(key, value);
+      });
+      const qs = params.toString();
+      return request(`/api/v1/analytics/drilldown${qs ? `?${qs}` : ""}`);
+    },
     integrations: () => request("/api/v1/integrations"),
     sellerHealth: () => request("/api/v1/integrations/whatsapp-seller/health"),
     knowledge: () => request("/api/v1/knowledge/current"),

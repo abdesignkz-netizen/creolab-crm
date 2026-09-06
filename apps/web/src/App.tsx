@@ -22,6 +22,7 @@ import { IntegrationsPage } from "./pages/IntegrationsPage";
 import { RequestDetailPage } from "./pages/RequestDetailPage";
 import { RequestsPage } from "./pages/RequestsPage";
 import { SituationPage } from "./pages/SituationPage";
+import { StatsPage } from "./pages/StatsPage";
 import { TasksPage } from "./pages/TasksPage";
 
 type LoadState<T> = { status: "loading" | "ready" | "error" | "empty"; data?: T; error?: string };
@@ -730,7 +731,7 @@ export function App() {
                 <Route path="/contacts" element={<ClientsPage />} />
                 <Route path="/contacts/:id" element={<ContactPage />} />
                 <Route path="/clients/:id" element={<ContactPage />} />
-                <Route path="/stats" element={<Stats />} />
+                <Route path="/stats" element={<StatsPage />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/admin" element={<Admin />} />
                 <Route path="*" element={<Navigate to="/today" />} />
@@ -743,21 +744,7 @@ export function App() {
   );
 }
 
-function Stats() {
-  const [state] = useQuery(() => api.stats() as Promise<any>);
-  if (state.status !== "ready" || !state.data) return <StateView state={state} onRetry={() => location.reload()} empty="Нет данных за день" />;
-  return (
-    <section>
-      <h2>Статистика</h2>
-      <p>Заявки сегодня: {state.data.inquiriesToday}</p>
-      <p>{state.data.conversionLabel}: {state.data.conversionClosed ?? "—"}</p>
-      <pre className="card">{JSON.stringify(state.data.paymentsByCurrency, null, 2)}</pre>
-    </section>
-  );
-}
-
-function Admin() {
-  const [state] = useQuery(() => api.adminTenants() as Promise<any>);
+function Admin() {  const [state] = useQuery(() => api.adminTenants() as Promise<any>);
   if (state.status !== "ready" || !state.data) return <StateView state={state} onRetry={() => location.reload()} empty="Нет компаний" />;
   return (
     <section>
