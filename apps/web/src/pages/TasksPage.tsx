@@ -757,14 +757,50 @@ export function TasksPage() {
           total: 1,
           success: result.success ? 1 : 0,
           failed: result.success ? 0 : 1,
+          textOk: result.textOk,
+          textError: result.textError,
+          files: result.files || [],
+          retryFilesAvailable: Boolean(result.retryFilesAvailable),
+          taskId: commandTaskId,
         });
-        if (result.nextActions?.length) {
+        if (result.success && result.nextActions?.length) {
           setNextPanel({ taskId: commandTaskId, actions: result.nextActions });
+          setCommandTaskId(null);
         }
       }
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Отправка не удалась");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onRetryCommandFiles() {
+    const taskId = batchResult?.taskId || commandTaskId;
+    if (!taskId) return;
+    setBusy(true);
+    try {
+      const result: any = await api.executeTask(taskId, { retryFailedFilesOnly: true });
+      setBatchResult({
+        total: 1,
+        success: result.success ? 1 : 0,
+        failed: result.success ? 0 : 1,
+        textOk: result.textOk ?? true,
+        textError: result.textError,
+        files: result.files || [],
+        retryFilesAvailable: Boolean(result.retryFilesAvailable),
+        taskId,
+      });
+      if (result.success) {
+        if (result.nextActions?.length) {
+          setNextPanel({ taskId, actions: result.nextActions });
+        }
+        setCommandTaskId(null);
+      }
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Повтор отправки файла не удался");
     } finally {
       setBusy(false);
     }
@@ -1388,6 +1424,23 @@ export function TasksPage() {
                       <p>
                         Успешно: {batchResult.success} · Ошибка: {batchResult.failed} · Всего: {batchResult.total}
                       </p>
+                      {batchResult.textOk === false ? (
+                        <p className="error">Текст не отправлен: {batchResult.textError || "ошибка"}</p>
+                      ) : batchResult.textOk ? (
+                        <p className="muted">Текст отправлен ✓</p>
+                      ) : null}
+                      {(batchResult.files || []).map((f: any) => (
+                        <p key={f.id || f.fileName} className={f.ok ? "muted" : "error"}>
+                          {f.fileName}: {f.ok ? "✓" : `✕ ${f.error || "ошибка"}`}
+                        </p>
+                      ))}
+                      {batchResult.retryFilesAvailable ? (
+                        <div className="actions" style={{ marginTop: 8 }}>
+                          <button type="button" className="btn" disabled={busy} onClick={onRetryCommandFiles}>
+                            Повторить отправку файла
+                          </button>
+                        </div>
+                      ) : null}
                     </>
                   )}
                 </div>

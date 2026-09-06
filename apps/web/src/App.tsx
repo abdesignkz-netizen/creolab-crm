@@ -72,6 +72,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
   const location = useLocation();
   const tenantId = me.activeTenant?.tenant?.id;
   const [unreadNotices, setUnreadNotices] = useState(0);
+  const [navBadges, setNavBadges] = useState<Record<string, number>>({});
   const [notifyBanner, setNotifyBanner] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
 
@@ -106,6 +107,17 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
     ["/stats", "Статистика"],
     ["/settings", "Настройки"],
   ] as const;
+
+  function badgeCount(path: string) {
+    const n = Number(navBadges[path] || 0);
+    return n > 0 ? n : 0;
+  }
+
+  function formatBadge(n: number) {
+    return n > 9 ? "9+" : String(n);
+  }
+
+  const moreBadgeTotal = moreLinks.reduce((sum, [path]) => sum + badgeCount(path), 0);
 
   const titleMap: Record<string, string> = {
     "/today": "Ситуация",
@@ -149,6 +161,30 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
 
   useEffect(() => {
     if (!tenantId) return;
+    let cancelled = false;
+    async function loadBadges() {
+      try {
+        const data = (await api.navBadges()) as { badges?: Record<string, number> };
+        if (cancelled) return;
+        const badges = data.badges || {};
+        setNavBadges(badges);
+        setUnreadNotices(Number(badges["/settings"] || 0));
+      } catch {
+        // silently keep previous badges
+      }
+    }
+    void loadBadges();
+    const timer = window.setInterval(() => {
+      if (!cancelled) void loadBadges();
+    }, 30_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [tenantId, location.pathname]);
+
+  useEffect(() => {
+    if (!tenantId) return;
     const permission = currentBrowserPermission();
     const wantsNotifications = getBrowserNotificationPreference();
     const dismissed = isNotificationBannerDismissed();
@@ -178,7 +214,10 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
           createdAt: item.createdAt,
         }));
       },
-      onUnreadCount: setUnreadNotices,
+      onUnreadCount: (count) => {
+        setUnreadNotices(count);
+        setNavBadges((prev) => ({ ...prev, "/settings": count }));
+      },
       onNavigate: (url) => navigate(url),
     });
     return stop;
@@ -229,22 +268,33 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
         </div>
         <nav className="nav-links">
           <p className="nav-section">Работа</p>
-          {workLinks.map(([to, label]) => (
-            <NavLink key={to} to={to} className={({ isActive }) => (isActive ? "active" : "")}>
-              {label}
-            </NavLink>
-          ))}
+          {workLinks.map(([to, label]) => {
+            const count = badgeCount(to);
+            return (
+              <NavLink key={to} to={to} className={({ isActive }) => (isActive ? "active" : "")}>
+                <span className="nav-link-label">{label}</span>
+                {count > 0 ? (
+                  <span className="nav-badge" title="Требует внимания">
+                    {formatBadge(count)}
+                  </span>
+                ) : null}
+              </NavLink>
+            );
+          })}
           <p className="nav-section">Система</p>
-          {systemLinks.map(([to, label]) => (
-            <NavLink key={to} to={to} className={({ isActive }) => (isActive ? "active" : "")}>
-              {label}
-              {to === "/settings" && unreadNotices > 0 ? (
-                <span className="nav-badge" title="Непрочитанные уведомления">
-                  {unreadNotices > 9 ? "9+" : unreadNotices}
-                </span>
-              ) : null}
-            </NavLink>
-          ))}
+          {systemLinks.map(([to, label]) => {
+            const count = badgeCount(to);
+            return (
+              <NavLink key={to} to={to} className={({ isActive }) => (isActive ? "active" : "")}>
+                <span className="nav-link-label">{label}</span>
+                {count > 0 ? (
+                  <span className="nav-badge" title={to === "/settings" ? "Непрочитанные уведомления" : "Требует внимания"}>
+                    {formatBadge(count)}
+                  </span>
+                ) : null}
+              </NavLink>
+            );
+          })}
           {me.user.platformAdmin ? <NavLink to="/admin">Кабинет платформы</NavLink> : null}
         </nav>
         <button className="btn secondary nav-logout" onClick={logout}>
@@ -316,14 +366,15 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
         <div className="more-sheet-handle" />
         <b className="more-sheet-title">Ещё</b>
         <nav className="more-sheet-links">
-          {moreLinks.map(([to, label]) => (
-            <NavLink key={to} to={to} className={({ isActive }) => (isActive ? "active" : "")} onClick={() => setMoreOpen(false)}>
-              {label}
-              {to === "/settings" && unreadNotices > 0 ? (
-                <span className="nav-badge">{unreadNotices > 9 ? "9+" : unreadNotices}</span>
-              ) : null}
-            </NavLink>
-          ))}
+          {moreLinks.map(([to, label]) => {
+            const count = badgeCount(to);
+            return (
+              <NavLink key={to} to={to} className={({ isActive }) => (isActive ? "active" : "")} onClick={() => setMoreOpen(false)}>
+                <span className="nav-link-label">{label}</span>
+                {count > 0 ? <span className="nav-badge">{formatBadge(count)}</span> : null}
+              </NavLink>
+            );
+          })}
           {me.user.platformAdmin ? (
             <NavLink to="/admin" onClick={() => setMoreOpen(false)}>
               Кабинет платформы
@@ -336,18 +387,27 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
       </div>
 
       <nav className="mobile-tabbar" aria-label="Основная навигация">
-        {primaryTabs.map((tab) => (
-          <NavLink key={tab.to} to={tab.to} className={({ isActive }) => (isActive ? `tab active tab-${tab.icon}` : `tab tab-${tab.icon}`)}>
-            <span className={`tab-icon icon-${tab.icon}`} aria-hidden />
-            <span className="tab-label">{tab.label}</span>
-          </NavLink>
-        ))}
+        {primaryTabs.map((tab) => {
+          const count = badgeCount(tab.to);
+          return (
+            <NavLink key={tab.to} to={tab.to} className={({ isActive }) => (isActive ? `tab active tab-${tab.icon}` : `tab tab-${tab.icon}`)}>
+              <span className="tab-icon-wrap">
+                <span className={`tab-icon icon-${tab.icon}`} aria-hidden />
+                {count > 0 ? <span className="tab-badge">{formatBadge(count)}</span> : null}
+              </span>
+              <span className="tab-label">{tab.label}</span>
+            </NavLink>
+          );
+        })}
         <button
           type="button"
           className={`tab tab-more ${moreActive || moreOpen ? "active" : ""}`}
           onClick={() => setMoreOpen((v) => !v)}
         >
-          <span className="tab-icon icon-more" aria-hidden />
+          <span className="tab-icon-wrap">
+            <span className="tab-icon icon-more" aria-hidden />
+            {moreBadgeTotal > 0 ? <span className="tab-badge">{formatBadge(moreBadgeTotal)}</span> : null}
+          </span>
           <span className="tab-label">Ещё</span>
         </button>
       </nav>

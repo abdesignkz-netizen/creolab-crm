@@ -23,6 +23,7 @@ export const config = {
   whatsappSellerUrl: process.env.WHATSAPP_SELLER_URL || "",
   whatsappSellerSecret: process.env.WHATSAPP_SELLER_SECRET || "",
   crmBridgeSecret: process.env.CRM_BRIDGE_SECRET || "",
+  storageDir: process.env.STORAGE_DIR || "",
 };
 
 export const isDemoTestRuntime = config.nodeEnv !== "production";

@@ -96,19 +96,24 @@ export class WhatsAppSellerBridge {
     return Boolean(this.baseUrl && this.secret);
   }
 
-  private async request<T>(path: string, init?: RequestInit): Promise<T> {
+  private async request<T>(path: string, init?: RequestInit & { timeoutMs?: number }): Promise<T> {
+    const { timeoutMs, ...fetchInit } = init || {};
     const response = await fetch(`${this.baseUrl.replace(/\/$/, "")}${path}`, {
-      ...init,
+      ...fetchInit,
       headers: {
         Authorization: `Bearer ${this.secret}`,
         "Content-Type": "application/json",
-        ...(init?.headers || {}),
+        ...(fetchInit.headers || {}),
       },
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(timeoutMs ?? 15000),
     });
     const data = (await response.json().catch(() => ({}))) as T & { error?: string };
     if (!response.ok) {
-      throw new Error(data.error || `Seller bridge HTTP ${response.status}`);
+      const statusHint =
+        response.status === 413
+          ? "Файл слишком большой для WhatsApp-бота (увеличьте лимит JSON на стороне бота)."
+          : null;
+      throw new Error(data.error || statusHint || `Seller bridge HTTP ${response.status}`);
     }
     return data;
   }
@@ -151,11 +156,13 @@ export class WhatsAppSellerBridge {
       idempotencyKey?: string;
     },
   ) {
+    // File upload via Green API often exceeds the default 15s text timeout.
     return this.request<{ ok: boolean; idMessage?: string | null; sender?: string }>(
       `/internal/crm/leads/${encodeURIComponent(leadId)}/files`,
       {
         method: "POST",
         body: JSON.stringify(input),
+        timeoutMs: 90000,
       },
     );
   }

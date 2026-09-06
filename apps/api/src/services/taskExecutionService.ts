@@ -2,6 +2,7 @@ import type { PrismaClient } from "@creolab/db";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { config } from "../config.ts";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { writeActivity } from "./contactService.ts";
@@ -38,6 +39,9 @@ function tenantId(auth: AuthContext) {
 }
 
 function uploadsRoot() {
+  if (config.storageDir) {
+    return path.resolve(config.storageDir, "uploads");
+  }
   return path.resolve(process.cwd(), "data", "uploads");
 }
 
@@ -198,8 +202,8 @@ export async function addTaskAttachment(
 
   const safeName = input.fileName.replace(/[^\w.\-а-яА-ЯёЁ ]+/g, "_").slice(0, 180) || "file.bin";
   const attachmentId = randomUUID();
-  const storageKey = path.join(tid, id, `${attachmentId}-${safeName}`);
-  const abs = path.join(uploadsRoot(), storageKey);
+  const storageKey = path.posix.join(tid, id, `${attachmentId}-${safeName}`);
+  const abs = path.join(uploadsRoot(), ...storageKey.split("/"));
   await mkdir(path.dirname(abs), { recursive: true });
   await writeFile(abs, buffer);
   const checksum = createHash("sha256").update(buffer).digest("hex");
@@ -246,7 +250,7 @@ export async function removeTaskAttachment(prisma: PrismaClient, auth: AuthConte
   });
   if (!attachment) throw new ApiError(404, "not_found", "Файл не найден");
   await prisma.attachment.delete({ where: { id: attachmentId } });
-  const abs = path.join(uploadsRoot(), attachment.storageKey);
+  const abs = path.join(uploadsRoot(), ...attachment.storageKey.split("/"));
   await unlink(abs).catch(() => {});
   await invalidateExecution(prisma, tid, taskId);
   return { ok: true };
@@ -496,7 +500,7 @@ export async function executeTask(
 
   for (const file of filesToSend) {
     try {
-      const abs = path.join(uploadsRoot(), file.storageKey);
+      const abs = path.join(uploadsRoot(), ...file.storageKey.split("/"));
       const result = await sendViaProvider(prisma, tid, {
         sellerLeadId: conversation.sellerLeadId,
         file: {
@@ -569,7 +573,10 @@ export async function executeTask(
         inquiryId: task.inquiryId,
         type: "task.send_failed",
         title: "Отправка не завершена",
-        description: [textOk ? "Сообщение отправлено ✓" : `Сообщение не отправлено ✕ ${textError || ""}`, ...fileResults.map((f) => (f.ok ? `${f.fileName} ✓` : `${f.fileName} ✕`))].join("\n"),
+        description: [
+          textOk ? "Сообщение отправлено ✓" : `Сообщение не отправлено ✕ ${textError || ""}`,
+          ...fileResults.map((f) => (f.ok ? `${f.fileName} ✓` : `${f.fileName} ✕ ${f.error || ""}`)),
+        ].join("\n"),
         actorType: "system",
         actorId: auth.user.id,
         metadata: { taskId: id, textOk, fileResults },

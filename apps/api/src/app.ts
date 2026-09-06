@@ -158,6 +158,7 @@ import {
 import { analyzeAndApplyConversation } from "./services/conversationContextApplyService.ts";
 import { analyzeConversationContext, listAgreementsForConversation } from "./services/conversationContextService.ts";
 import { getSituation, snoozeSituation } from "./services/situationService.ts";
+import { getNavBadges } from "./services/navBadgesService.ts";
 import {
   addSellerInstruction,
   beginTelegramLink,
@@ -215,6 +216,7 @@ export function createApp(prisma: PrismaClient) {
   });
 
   const json = express.json({ limit: "200kb" });
+  const jsonLarge = express.json({ limit: "30mb" });
   const urlencoded = express.urlencoded({ extended: true, limit: "200kb" });
   const rawJson = express.raw({ type: "application/json", limit: "200kb" });
 
@@ -303,6 +305,10 @@ export function createApp(prisma: PrismaClient) {
 
   app.get("/api/v1/situation/overview", async (req, res) => {
     res.json(await getSituationOverview(prisma, await requireAuth(req), req.query as Record<string, string>));
+  });
+
+  app.get("/api/v1/nav-badges", async (req, res) => {
+    res.json(await getNavBadges(prisma, await requireAuth(req)));
   });
 
   app.post("/api/v1/situation/snooze", json, async (req, res) => {
@@ -594,7 +600,7 @@ export function createApp(prisma: PrismaClient) {
     res.json(await updateTaskDraft(prisma, await requireAuth(req), req.params.id, input));
   });
 
-  app.post("/api/v1/tasks/:id/attachments", json, async (req, res) => {
+  app.post("/api/v1/tasks/:id/attachments", jsonLarge, async (req, res) => {
     const input = taskAttachmentSchema.parse(req.body);
     res.status(201).json(await addTaskAttachment(prisma, await requireAuth(req), req.params.id, input));
   });
@@ -645,7 +651,7 @@ export function createApp(prisma: PrismaClient) {
     res.json(await updateCampaign(prisma, await requireAuth(req), req.params.id, input));
   });
 
-  app.post("/api/v1/campaigns/:id/attachments", json, async (req, res) => {
+  app.post("/api/v1/campaigns/:id/attachments", jsonLarge, async (req, res) => {
     const input = campaignAttachmentSchema.parse(req.body);
     res.status(201).json(await addCampaignAttachment(prisma, await requireAuth(req), req.params.id, input));
   });

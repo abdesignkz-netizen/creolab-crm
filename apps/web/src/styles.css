@@ -680,8 +680,37 @@ fieldset.field-block legend { padding: 0 6px; font-weight: 600; }
   font-weight: 700;
   line-height: 1;
   cursor: pointer;
+  flex-shrink: 0;
+}
+.nav-link-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .nav-badge-spacer { width: 28px; height: 28px; }
+.tab-icon-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.tab-badge {
+  position: absolute;
+  top: -6px;
+  right: -10px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  pointer-events: none;
+}
 .notify-banner {
   flex-wrap: wrap;
   align-items: flex-start;
