@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { NavLink, Navigate, Route, Routes, useNavigate } from "react-router-dom";
+import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { api, setTenant } from "./lib/api";
 import {
   currentBrowserPermission,
@@ -57,10 +57,29 @@ function StateView({ state, onRetry, empty }: { state: LoadState<unknown>; onRet
 
 function Shell({ me, children }: { me: any; children: ReactNode }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const tenantId = me.activeTenant?.tenant?.id;
   const [unreadNotices, setUnreadNotices] = useState(0);
   const [notifyBanner, setNotifyBanner] = useState(false);
-  const links = [
+  const [moreOpen, setMoreOpen] = useState(false);
+
+  const primaryTabs = [
+    { to: "/today", label: "Ситуация", icon: "home" },
+    { to: "/conversations", label: "Диалоги", icon: "chat" },
+    { to: "/tasks", label: "Задачи", icon: "tasks" },
+    { to: "/contacts", label: "Клиенты", icon: "people" },
+  ] as const;
+
+  const moreLinks = [
+    ["/control", "Управление"],
+    ["/inquiries", "Заявки"],
+    ["/deals", "Сделки"],
+    ["/integrations", "Интеграции"],
+    ["/stats", "Статистика"],
+    ["/settings", "Настройки"],
+  ] as const;
+
+  const desktopLinks = [
     ["/today", "Ситуация"],
     ["/control", "Управление"],
     ["/inquiries", "Заявки"],
@@ -71,7 +90,25 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
     ["/integrations", "Интеграции"],
     ["/stats", "Статистика"],
     ["/settings", "Настройки"],
-  ];
+  ] as const;
+
+  const titleMap: Record<string, string> = {
+    "/today": "Ситуация",
+    "/control": "Управление",
+    "/inquiries": "Заявки",
+    "/conversations": "Диалоги",
+    "/deals": "Сделки",
+    "/tasks": "Задачи",
+    "/contacts": "Клиенты",
+    "/integrations": "Интеграции",
+    "/stats": "Статистика",
+    "/settings": "Настройки",
+    "/admin": "Платформа",
+  };
+  const pageTitle =
+    Object.entries(titleMap).find(([path]) => location.pathname === path || location.pathname.startsWith(`${path}/`))?.[1] ||
+    "CREOLAB CRM";
+  const moreActive = moreLinks.some(([path]) => location.pathname === path || location.pathname.startsWith(`${path}/`));
 
   useEffect(() => {
     if (!tenantId) return;
@@ -125,32 +162,62 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
     return stop;
   }, [tenantId, navigate]);
 
+  useEffect(() => {
+    setMoreOpen(false);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    const onResize = () => {
+      if (window.innerWidth > 767) setMoreOpen(false);
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  async function logout() {
+    await api.request("/api/v1/auth/logout", { method: "POST", body: "{}" });
+    navigate("/login");
+  }
+
   return (
-    <div className="app-shell">
-      <aside className="nav">
-        <h1>CREOLAB CRM</h1>
-        <p>{me.activeTenant?.tenant?.name || "Нет компании"}</p>
-        {links.map(([to, label]) => (
-          <NavLink key={to} to={to} className={({ isActive }) => (isActive ? "active" : "")}>
-            {label}
-            {to === "/settings" && unreadNotices > 0 ? (
-              <span className="nav-badge" title="Непрочитанные уведомления">
-                {unreadNotices > 9 ? "9+" : unreadNotices}
-              </span>
-            ) : null}
-          </NavLink>
-        ))}
-        {me.user.platformAdmin ? <NavLink to="/admin">Кабинет платформы</NavLink> : null}
-        <button
-          className="btn secondary"
-          onClick={async () => {
-            await api.request("/api/v1/auth/logout", { method: "POST", body: "{}" });
-            navigate("/login");
-          }}
-        >
+    <div className={`app-shell ${moreOpen ? "more-open" : ""}`}>
+      <header className="mobile-topbar">
+        <div className="mobile-topbar-title">
+          <b>{pageTitle}</b>
+          <span className="muted">{me.activeTenant?.tenant?.name || "Нет компании"}</span>
+        </div>
+        {unreadNotices > 0 ? (
+          <button type="button" className="nav-badge" onClick={() => navigate("/settings")} title="Уведомления">
+            {unreadNotices > 9 ? "9+" : unreadNotices}
+          </button>
+        ) : (
+          <span className="nav-badge-spacer" />
+        )}
+      </header>
+
+      <aside className="nav desktop-nav">
+        <div className="nav-brand">
+          <h1>CREOLAB CRM</h1>
+          <p>{me.activeTenant?.tenant?.name || "Нет компании"}</p>
+        </div>
+        <nav className="nav-links">
+          {desktopLinks.map(([to, label]) => (
+            <NavLink key={to} to={to} className={({ isActive }) => (isActive ? "active" : "")}>
+              {label}
+              {to === "/settings" && unreadNotices > 0 ? (
+                <span className="nav-badge" title="Непрочитанные уведомления">
+                  {unreadNotices > 9 ? "9+" : unreadNotices}
+                </span>
+              ) : null}
+            </NavLink>
+          ))}
+          {me.user.platformAdmin ? <NavLink to="/admin">Кабинет платформы</NavLink> : null}
+        </nav>
+        <button className="btn secondary nav-logout" onClick={logout}>
           Выйти
         </button>
       </aside>
+
       <main className="main">
         {notifyBanner ? (
           <div className="banner warn notify-banner">
@@ -182,6 +249,48 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
         ) : null}
         {children}
       </main>
+
+      {moreOpen ? <button type="button" className="nav-backdrop" aria-label="Закрыть" onClick={() => setMoreOpen(false)} /> : null}
+
+      <div className={`more-sheet ${moreOpen ? "open" : ""}`} role="dialog" aria-label="Ещё разделы">
+        <div className="more-sheet-handle" />
+        <b className="more-sheet-title">Ещё</b>
+        <nav className="more-sheet-links">
+          {moreLinks.map(([to, label]) => (
+            <NavLink key={to} to={to} className={({ isActive }) => (isActive ? "active" : "")} onClick={() => setMoreOpen(false)}>
+              {label}
+              {to === "/settings" && unreadNotices > 0 ? (
+                <span className="nav-badge">{unreadNotices > 9 ? "9+" : unreadNotices}</span>
+              ) : null}
+            </NavLink>
+          ))}
+          {me.user.platformAdmin ? (
+            <NavLink to="/admin" onClick={() => setMoreOpen(false)}>
+              Кабинет платформы
+            </NavLink>
+          ) : null}
+        </nav>
+        <button type="button" className="btn secondary" onClick={logout}>
+          Выйти
+        </button>
+      </div>
+
+      <nav className="mobile-tabbar" aria-label="Основная навигация">
+        {primaryTabs.map((tab) => (
+          <NavLink key={tab.to} to={tab.to} className={({ isActive }) => (isActive ? `tab active tab-${tab.icon}` : `tab tab-${tab.icon}`)}>
+            <span className={`tab-icon icon-${tab.icon}`} aria-hidden />
+            <span className="tab-label">{tab.label}</span>
+          </NavLink>
+        ))}
+        <button
+          type="button"
+          className={`tab tab-more ${moreActive || moreOpen ? "active" : ""}`}
+          onClick={() => setMoreOpen((v) => !v)}
+        >
+          <span className="tab-icon icon-more" aria-hidden />
+          <span className="tab-label">Ещё</span>
+        </button>
+      </nav>
     </div>
   );
 }
