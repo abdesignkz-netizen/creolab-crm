@@ -638,7 +638,29 @@ fieldset.field-block legend { padding: 0 6px; font-weight: 600; }
   cursor: pointer;
 }
 .nav-badge-spacer { width: 28px; height: 28px; }
-.notify-banner { flex-wrap: wrap; }
+.notify-banner {
+  flex-wrap: wrap;
+  align-items: flex-start;
+  position: relative;
+  z-index: 5;
+}
+.notify-banner-copy {
+  display: grid;
+  gap: 4px;
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.notify-banner-copy b { font-weight: 650; }
+.notify-banner .actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+.notify-actions {
+  flex-wrap: wrap;
+  gap: 8px;
+}
 .task-form label { display: grid; gap: 6px; margin-bottom: 10px; }
 .confirm-panel .kv { display: grid; gap: 8px; margin: 12px 0; }
 .confirm-panel .kv > div { display: grid; grid-template-columns: 120px 1fr; gap: 8px; }
@@ -1196,7 +1218,22 @@ fieldset.field-block legend { padding: 0 6px; font-weight: 600; }
   .row { display: grid; gap: 10px; }
   .actions { display: flex; flex-wrap: wrap; gap: 8px; }
   .actions .btn, .btn { min-height: 44px; }
-  .notify-banner .actions { width: 100%; }
+  .notify-banner {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .notify-banner .actions {
+    width: 100%;
+  }
+  .notify-banner .actions .btn {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .notify-actions .btn {
+    flex: 1 1 auto;
+    min-width: calc(50% - 4px);
+  }
   .cards { grid-template-columns: 1fr 1fr; gap: 10px; }
   .card strong { font-size: 24px; }
   .page-head h2, h1, h2 { font-size: 1.35rem; }

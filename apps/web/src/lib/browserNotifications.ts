@@ -1,10 +1,37 @@
 const STORAGE_ENABLED = "creolab.browserNotifications.enabled";
 const STORAGE_SEEN = "creolab.browserNotifications.seen";
+const STORAGE_DISMISSED = "creolab.browserNotifications.bannerDismissed";
 
 export type BrowserPermission = NotificationPermission | "unsupported";
 
+export function isSecureNotificationContext() {
+  if (typeof window === "undefined") return false;
+  return window.isSecureContext || location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1";
+}
+
+export function hasNotificationApi() {
+  return typeof window !== "undefined" && "Notification" in window;
+}
+
 export function browserNotificationsSupported() {
-  return typeof window !== "undefined" && "Notification" in window && "serviceWorker" in navigator;
+  return hasNotificationApi() && isSecureNotificationContext();
+}
+
+/** iOS Safari supports web notifications mainly for Home Screen / PWA apps. */
+export function isLikelyIosSafari() {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  const iOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const webkit = /WebKit/.test(ua);
+  const notOther = !/CriOS|FxiOS|EdgiOS|OPiOS|DuckDuckGo/.test(ua);
+  return iOS && webkit && notOther;
+}
+
+export function isStandaloneDisplayMode() {
+  if (typeof window === "undefined") return false;
+  const media = window.matchMedia?.("(display-mode: standalone)")?.matches;
+  const iosStandalone = Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
+  return Boolean(media || iosStandalone);
 }
 
 export function getBrowserNotificationPreference(): boolean {
@@ -18,6 +45,23 @@ export function getBrowserNotificationPreference(): boolean {
 export function setBrowserNotificationPreference(enabled: boolean) {
   try {
     localStorage.setItem(STORAGE_ENABLED, enabled ? "1" : "0");
+    if (enabled) localStorage.removeItem(STORAGE_DISMISSED);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function isNotificationBannerDismissed(): boolean {
+  try {
+    return localStorage.getItem(STORAGE_DISMISSED) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function dismissNotificationBanner() {
+  try {
+    localStorage.setItem(STORAGE_DISMISSED, "1");
   } catch {
     /* ignore */
   }
@@ -29,24 +73,51 @@ export function currentBrowserPermission(): BrowserPermission {
 }
 
 export async function registerNotificationWorker() {
-  if (!browserNotificationsSupported()) return null;
+  if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return null;
+  if (!isSecureNotificationContext()) return null;
   try {
-    return await navigator.serviceWorker.register("/sw.js");
+    return await navigator.serviceWorker.register("/sw.js", { scope: "/" });
   } catch {
     return null;
   }
 }
 
+/**
+ * Must be called directly from a user gesture (click).
+ * Do not await anything before Notification.requestPermission — mobile browsers drop the prompt.
+ */
 export async function requestBrowserNotificationPermission(): Promise<BrowserPermission> {
   if (!browserNotificationsSupported()) return "unsupported";
-  await registerNotificationWorker();
+
   if (Notification.permission === "granted") {
     setBrowserNotificationPreference(true);
+    void registerNotificationWorker();
     return "granted";
   }
   if (Notification.permission === "denied") return "denied";
-  const result = await Notification.requestPermission();
-  if (result === "granted") setBrowserNotificationPreference(true);
+
+  let result: NotificationPermission;
+  try {
+    // Keep this call first in the gesture chain (no awaits before it).
+    // Support both Promise and legacy callback forms.
+    result = await new Promise<NotificationPermission>((resolve, reject) => {
+      try {
+        const maybe = Notification.requestPermission((permission) => resolve(permission));
+        if (maybe && typeof (maybe as PromiseLike<NotificationPermission>).then === "function") {
+          void Promise.resolve(maybe).then(resolve, reject);
+        }
+      } catch (err) {
+        reject(err);
+      }
+    });
+  } catch {
+    return currentBrowserPermission();
+  }
+
+  if (result === "granted") {
+    setBrowserNotificationPreference(true);
+    void registerNotificationWorker();
+  }
   return result;
 }
 
@@ -80,13 +151,14 @@ export async function showBrowserNotification(input: {
   tag: string;
   url?: string;
   requireInteraction?: boolean;
+  force?: boolean;
 }) {
   if (!browserNotificationsSupported()) return false;
   if (Notification.permission !== "granted") return false;
-  if (!getBrowserNotificationPreference()) return false;
+  if (!input.force && !getBrowserNotificationPreference()) return false;
 
-  // Tab is open and visible — skip OS toast; in-app UI is enough.
-  if (document.visibilityState === "visible" && document.hasFocus()) return false;
+  // Tab is open and visible — skip OS toast unless forced (settings test).
+  if (!input.force && document.visibilityState === "visible" && document.hasFocus()) return false;
 
   const payload = {
     type: "SHOW_NOTIFICATION",
@@ -100,8 +172,8 @@ export async function showBrowserNotification(input: {
   };
 
   try {
-    const reg = await navigator.serviceWorker.ready;
-    if (reg.active) {
+    const reg = await navigator.serviceWorker?.ready;
+    if (reg?.active) {
       reg.active.postMessage(payload);
       return true;
     }
@@ -153,7 +225,13 @@ export function startNotificationPolling(opts: {
   async function tick() {
     if (cancelled) return;
     if (!getBrowserNotificationPreference()) {
-      opts.onUnreadCount?.(0);
+      // Still report unread for badge, but skip OS toasts.
+      try {
+        const items = await opts.load();
+        opts.onUnreadCount?.(items.filter((item) => !item.readAt).length);
+      } catch {
+        opts.onUnreadCount?.(0);
+      }
       return;
     }
     try {
@@ -163,7 +241,6 @@ export function startNotificationPolling(opts: {
 
       const fresh = unread.filter((item) => !seen.has(item.id));
       if (!primed) {
-        // First poll: remember current unread, don't spam historical toasts.
         for (const item of unread) seen.add(item.id);
         primed = true;
         saveSeenNotificationIds(opts.tenantId, seen);

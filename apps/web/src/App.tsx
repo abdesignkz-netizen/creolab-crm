@@ -3,9 +3,14 @@ import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "reac
 import { api, setTenant } from "./lib/api";
 import {
   currentBrowserPermission,
+  dismissNotificationBanner,
   getBrowserNotificationPreference,
+  isLikelyIosSafari,
+  isNotificationBannerDismissed,
+  isStandaloneDisplayMode,
   requestBrowserNotificationPermission,
   setBrowserNotificationPreference,
+  showBrowserNotification,
   startNotificationPolling,
 } from "./lib/browserNotifications";
 import { ClientsPage } from "./pages/ClientsPage";
@@ -138,11 +143,16 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
   useEffect(() => {
     if (!tenantId) return;
     const permission = currentBrowserPermission();
-    if (permission === "default" && getBrowserNotificationPreference()) {
-      setNotifyBanner(true);
-    }
-    if (permission === "granted" && getBrowserNotificationPreference()) {
+    const wantsNotifications = getBrowserNotificationPreference();
+    const dismissed = isNotificationBannerDismissed();
+    if (permission === "granted" && wantsNotifications) {
       setNotifyBanner(false);
+    } else if (permission === "default" && !dismissed) {
+      setNotifyBanner(true);
+    } else if (permission === "unsupported" && isLikelyIosSafari() && !isStandaloneDisplayMode() && !dismissed) {
+      setNotifyBanner(true);
+    } else if (permission === "denied" && !dismissed) {
+      setNotifyBanner(true);
     }
     const stop = startNotificationPolling({
       tenantId,
@@ -238,15 +248,32 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
       <main className="main">
         {notifyBanner ? (
           <div className="banner warn notify-banner">
-            <span>Включите уведомления браузера — новые заявки и важные события придут даже при свёрнутом окне.</span>
+            <div className="notify-banner-copy">
+              <b>Уведомления</b>
+              <span>
+                {currentBrowserPermission() === "denied"
+                  ? "Разрешение запрещено в браузере. Откройте настройки сайта и разрешите уведомления, затем нажмите «Включить»."
+                  : isLikelyIosSafari() && !isStandaloneDisplayMode()
+                    ? "На iPhone: Поделиться → На экран «Домой», откройте CRM с иконки, затем включите уведомления."
+                    : "Включите уведомления — новые заявки и важные события придут даже при свёрнутом окне."}
+              </span>
+            </div>
             <div className="actions">
               <button
                 type="button"
                 className="btn"
-                onClick={async () => {
-                  const result = await requestBrowserNotificationPermission();
-                  if (result === "granted") setNotifyBanner(false);
-                  else if (result === "denied") setNotifyBanner(false);
+                onClick={() => {
+                  void (async () => {
+                    const result = await requestBrowserNotificationPermission();
+                    if (result === "granted") {
+                      setNotifyBanner(false);
+                      return;
+                    }
+                    if (result === "denied" || result === "unsupported") {
+                      // Keep banner so user sees guidance; don't mark dismissed.
+                      return;
+                    }
+                  })();
                 }}
               >
                 Включить
@@ -255,7 +282,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
                 type="button"
                 className="btn secondary"
                 onClick={() => {
-                  setBrowserNotificationPreference(false);
+                  dismissNotificationBanner();
                   setNotifyBanner(false);
                 }}
               >
@@ -394,6 +421,8 @@ function Settings() {
   const [permission, setPermission] = useState(currentBrowserPermission());
   const [enabled, setEnabled] = useState(getBrowserNotificationPreference());
   const [noticeError, setNoticeError] = useState("");
+  const [notifyHint, setNotifyHint] = useState("");
+  const [testBusy, setTestBusy] = useState(false);
 
   async function loadNotices() {
     try {
@@ -407,6 +436,8 @@ function Settings() {
 
   useEffect(() => {
     void loadNotices();
+    setPermission(currentBrowserPermission());
+    setEnabled(getBrowserNotificationPreference());
   }, []);
 
   if (state.status !== "ready") {
@@ -421,6 +452,8 @@ function Settings() {
         : permission === "unsupported"
           ? "не поддерживаются этим браузером"
           : "ещё не запрошены";
+
+  const iosHint = isLikelyIosSafari() && !isStandaloneDisplayMode();
 
   return (
     <section>
@@ -438,21 +471,43 @@ function Settings() {
           Новые заявки, обращения без телефона и диалоги, где нужен человек. Работают при свёрнутом окне CRM, пока
           браузер запущен.
         </p>
+        {iosHint ? (
+          <p className="banner warn" style={{ marginTop: 8 }}>
+            На iPhone/iPad откройте сайт через «Поделиться → На экран Домой», затем снова нажмите «Разрешить уведомления».
+          </p>
+        ) : null}
         <p>
           Статус: <b>{permissionLabel}</b>
           {enabled ? " · включены в кабинете" : " · выключены в кабинете"}
         </p>
-        <div className="actions">
+        {notifyHint ? <p className={permission === "denied" ? "error" : "muted"}>{notifyHint}</p> : null}
+        <div className="actions notify-actions">
           <button
             type="button"
             className="btn"
-            onClick={async () => {
-              const result = await requestBrowserNotificationPermission();
-              setPermission(result);
-              if (result === "granted") {
-                setEnabled(true);
-                setBrowserNotificationPreference(true);
-              }
+            onClick={() => {
+              setNotifyHint("");
+              void (async () => {
+                const result = await requestBrowserNotificationPermission();
+                setPermission(result);
+                if (result === "granted") {
+                  setEnabled(true);
+                  setBrowserNotificationPreference(true);
+                  setNotifyHint("Уведомления включены.");
+                  return;
+                }
+                if (result === "denied") {
+                  setNotifyHint("Браузер запретил уведомления. Разрешите их в настройках сайта и обновите страницу.");
+                  return;
+                }
+                if (result === "unsupported") {
+                  setNotifyHint(
+                    iosHint
+                      ? "Добавьте CRM на экран Домой и откройте с иконки — затем повторите."
+                      : "Этот браузер не поддерживает уведомления. Откройте CRM в Chrome или Safari (HTTPS).",
+                  );
+                }
+              })();
             }}
           >
             {permission === "granted" ? "Разрешение уже есть" : "Разрешить уведомления"}
@@ -464,6 +519,7 @@ function Settings() {
               const next = !enabled;
               setBrowserNotificationPreference(next);
               setEnabled(next);
+              setNotifyHint(next ? "Уведомления кабинета включены." : "Уведомления кабинета выключены.");
             }}
           >
             {enabled ? "Выключить в кабинете" : "Включить в кабинете"}
@@ -471,31 +527,28 @@ function Settings() {
           <button
             type="button"
             className="btn secondary"
-            disabled={permission !== "granted"}
-            onClick={async () => {
-              const { showBrowserNotification } = await import("./lib/browserNotifications");
-              // force show even if tab focused
-              const prev = document.visibilityState;
-              await navigator.serviceWorker?.ready;
-              const reg = await navigator.serviceWorker?.getRegistration();
-              if (reg?.active) {
-                reg.active.postMessage({
-                  type: "SHOW_NOTIFICATION",
-                  title: "CREOLAB CRM",
-                  body: "Тестовое уведомление. Так будут приходить новые заявки.",
-                  tag: `test-${Date.now()}`,
-                  url: "/settings",
-                  icon: "/favicon.svg",
-                });
-              } else {
-                await showBrowserNotification({
-                  title: "CREOLAB CRM",
-                  body: "Тестовое уведомление. Так будут приходить новые заявки.",
-                  tag: `test-${Date.now()}`,
-                  url: "/settings",
-                });
-              }
-              void prev;
+            disabled={permission !== "granted" || testBusy}
+            onClick={() => {
+              setTestBusy(true);
+              setNotifyHint("");
+              void (async () => {
+                try {
+                  const ok = await showBrowserNotification({
+                    title: "CREOLAB CRM",
+                    body: "Тестовое уведомление. Так будут приходить новые заявки.",
+                    tag: `test-${Date.now()}`,
+                    url: "/settings",
+                    force: true,
+                  });
+                  setNotifyHint(
+                    ok
+                      ? "Тест отправлен. Если не видно — проверьте Центр уведомлений / Не беспокоить."
+                      : "Не удалось показать уведомление. Нажмите «Разрешить уведомления» ещё раз.",
+                  );
+                } finally {
+                  setTestBusy(false);
+                }
+              })();
             }}
           >
             Проверить
