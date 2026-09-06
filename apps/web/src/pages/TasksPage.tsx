@@ -188,14 +188,23 @@ export function TasksPage() {
     whoMode?: "contacts" | "phones" | "segment" | "import";
   }>({});
 
+  const [whatsappReady, setWhatsappReady] = useState<boolean | null>(null);
+
   async function load() {
     try {
-      const [data, profile, memberData] = await Promise.all([api.tasks(), api.me(), api.workspaceMembers()]);
+      const [data, profile, memberData, setup] = await Promise.all([
+        api.tasks(),
+        api.me(),
+        api.workspaceMembers(),
+        api.integrationSetup().catch(() => null),
+      ]);
       setItems((data as { items: any[] }).items);
       setMe(profile);
       setMembers((memberData as { items: any[] }).items);
       const mid = (profile as any)?.activeTenant?.membershipId || (memberData as { items: any[] }).items.find((m) => m.isMe)?.id;
       if (mid && !ownerId) setOwnerId(mid);
+      const wa = (setup as any)?.whatsapp;
+      setWhatsappReady(Boolean(wa?.configured && wa?.reachable !== false));
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Ошибка");
@@ -731,6 +740,16 @@ export function TasksPage() {
           </button>
         ))}
       </div>
+
+      {whatsappReady === false ? (
+        <div className="banner warn">
+          <span>
+            WhatsApp-бот не подключён или недоступен. Создавать и закрывать задачи можно, а отправка сообщений/КП из задачи —
+            только после подключения в{" "}
+            <Link to="/integrations">Интеграциях</Link>. Для рассылки по списку номеров используйте «Массовая отправка».
+          </span>
+        </div>
+      ) : null}
 
       {showCreate && (composeMode === "campaign" || showCampaignPanel) ? (
         <CampaignMassPanel
@@ -1612,6 +1631,10 @@ export function TasksPage() {
               Подготовить отправку
             </button>
           </div>
+          <p className="muted" style={{ marginTop: 8 }}>
+            Отправка идёт через WhatsApp-диалог клиента (sellerLead). Если диалога нет — сначала синхронизируйте бота в Интеграциях
+            или используйте «Массовая отправка» по номеру.
+          </p>
         </div>
       ) : null}
 
@@ -1834,6 +1857,32 @@ export function TasksPage() {
                           Подготовить отправку
                         </button>
                       ) : null}
+                      {SENDABLE.has(item.type) && item.targetType === "group" ? (
+                        <button
+                          className="btn"
+                          type="button"
+                          onClick={() => {
+                            const ids = (item.children || [])
+                              .map((child: any) => child.contactId)
+                              .filter(Boolean);
+                            if (!ids.length) {
+                              setError("В группе нет клиентов для рассылки");
+                              return;
+                            }
+                            setComposeMode("campaign");
+                            setShowCampaignPanel(true);
+                            setShowCreate(true);
+                            setCampaignSeed({
+                              whoMode: "contacts",
+                              contactIds: ids,
+                              message: item.messageDraft || "",
+                              command: item.title,
+                            });
+                          }}
+                        >
+                          Массовая отправка группе
+                        </button>
+                      ) : null}
                       {MANUAL_COMPLETE.has(item.type) ? (
                         <button className="btn secondary" type="button" onClick={() => setCompleteOpen(item.id)}>
                           Завершить
@@ -1849,19 +1898,18 @@ export function TasksPage() {
                           Вернуть
                         </button>
                       ) : null}
-                      {!SENDABLE.has(item.type) ? (
-                        <button
-                          className="btn"
-                          onClick={() =>
-                            api
-                              .completeTask(item.id)
-                              .then(load)
-                              .catch((err) => setError(err instanceof Error ? err.message : "Нельзя закрыть"))
-                          }
-                        >
-                          Сделано
-                        </button>
-                      ) : null}
+                      <button
+                        className="btn secondary"
+                        type="button"
+                        onClick={() =>
+                          api
+                            .completeTask(item.id)
+                            .then(load)
+                            .catch((err) => setError(err instanceof Error ? err.message : "Нельзя закрыть"))
+                        }
+                      >
+                        Сделано
+                      </button>
                       <button className="btn danger" onClick={() => api.cancelTask(item.id).then(load).catch((err) => setError(err.message))}>
                         Отменить
                       </button>

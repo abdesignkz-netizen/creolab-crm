@@ -77,13 +77,44 @@ h1, h2, h3, .card strong, .client-row-title, .nav h1 {
 }
 .main { padding: 28px 32px; }
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
-.card, .row, form.panel {
+.card, .row, .panel, form.panel {
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
 }
 .card { padding: 16px; margin-top: 14px; }
+.panel {
+  padding: 18px;
+  margin-top: 14px;
+}
+.panel.soft {
+  background: var(--bg-elevated);
+  box-shadow: none;
+}
+.panel.task-form, form.panel.task-form, .command-compose {
+  max-width: none;
+}
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+  font-weight: 500;
+}
+.check-row input {
+  width: auto;
+  min-height: auto;
+}
+fieldset.field-block {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  margin: 12px 0;
+}
+fieldset.field-block legend {
+  padding: 0 6px;
+}
 .code {
   overflow: auto;
   padding: 12px;
@@ -112,7 +143,7 @@ h1, h2, h3, .card strong, .client-row-title, .nav h1 {
   font-weight: 500;
 }
 .status { font-size: 13px; }
-form.panel { padding: 18px; display: grid; gap: 10px; max-width: 520px; }
+form.panel { padding: 18px; display: grid; gap: 10px; max-width: 640px; }
 label { display: grid; gap: 6px; font-size: 14px; font-weight: 500; }
 input, textarea, select {
   border: 1px solid var(--line);
