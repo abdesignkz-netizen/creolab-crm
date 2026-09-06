@@ -198,9 +198,11 @@ function Login() {
           const form = new FormData(event.currentTarget);
           try {
             const result = (await api.login(String(form.get("email")), String(form.get("password")))) as any;
-            const tenantId = result.user.activeTenant?.tenant?.id;
+            const tenantId =
+              result.user?.activeTenant?.tenant?.id || result.user?.memberships?.[0]?.tenant?.id;
             if (tenantId) setTenant(tenantId);
-            navigate("/today");
+            // Полная перезагрузка: App заново вызовет /me с cookie и снимет boot=anon
+            window.location.assign("/today");
           } catch (err) {
             const message = err instanceof Error ? err.message : "Ошибка входа";
             setError(
