@@ -1,15 +1,24 @@
 # Render Blueprint (optional). Prefer setting these in the Dashboard if Blueprint is not used.
+# Persistent Disk requires a paid plan (Starter+). Free instances wipe local files on every deploy/restart.
 
 services:
   - type: web
     name: creolab-crm
     runtime: node
-    plan: free
+    plan: starter
     region: frankfurt
     buildCommand: npm install && npm run build --workspace=@creolab/web
     startCommand: API_PORT=$PORT npm run start --workspace=@creolab/api
+    disk:
+      name: creolab-crm-files
+      mountPath: /var/data
+      sizeGB: 5
     envVars:
       - key: NODE_ENV
         value: production
       - key: NODE_VERSION
         value: "22"
+      - key: STORAGE_DIR
+        value: /var/data/files
+      - key: STORAGE_PERSISTENT
+        value: "1"

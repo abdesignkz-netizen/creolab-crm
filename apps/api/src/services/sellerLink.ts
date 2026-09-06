@@ -6,6 +6,7 @@ import { config } from "../config.ts";
 import { ApiError } from "../errors.ts";
 import { sha256 } from "../lib/hash.ts";
 import { decryptSecret, encryptSecret } from "../lib/secretBox.ts";
+import { fileStorageStatus } from "../lib/storage.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { can } from "../lib/types.ts";
 import { analyzeAndApplyConversation } from "./conversationContextApplyService.ts";
@@ -450,6 +451,7 @@ export async function integrationSetup(prisma: PrismaClient, auth: AuthContext) 
     : "UNKNOWN";
   return {
     whatsapp: seller,
+    fileStorage: fileStorageStatus(),
     form: form
       ? {
           connected: true,

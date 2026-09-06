@@ -569,8 +569,22 @@ export async function setConversationMode(
 ) {
   const tid = tenantId(auth);
   return prisma.$transaction(async (tx) => {
-    const current = await tx.conversation.findFirst({ where: { id, tenantId: tid } });
+    const current = await tx.conversation.findFirst({
+      where: { id, tenantId: tid },
+      include: { assignee: { include: { user: true } } },
+    });
     if (!current) throw new ApiError(404, "not_found", "Диалог не найден");
+
+    if (
+      mode === "human" &&
+      current.mode === "human" &&
+      current.assigneeMembershipId &&
+      current.assigneeMembershipId !== auth.activeMembership?.id
+    ) {
+      const holder = current.assignee?.user?.name || "другой сотрудник";
+      throw new ApiError(409, "already_taken", `Уже забрал ${holder}`);
+    }
+
     const sameOwnerTake =
       mode === "human" && current.mode === "human" && current.assigneeMembershipId === auth.activeMembership?.id;
     const alreadySameMode = current.mode === mode && (mode !== "human" || sameOwnerTake);

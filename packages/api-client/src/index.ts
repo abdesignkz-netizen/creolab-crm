@@ -241,6 +241,10 @@ export function createApiClient(options: ClientOptions) {
     addInstruction: (id: string, text: string) =>
       request(`/api/v1/conversations/${id}/instruction`, { method: "POST", body: JSON.stringify({ text }) }),
     controlBoard: () => request("/api/v1/workspace/control"),
+    managementOverview: () => request("/api/v1/management/overview"),
+    setAiManagerPause: (paused: boolean) =>
+      request("/api/v1/management/ai-pause", { method: "POST", body: JSON.stringify({ paused }) }),
+    claimAllAiConversations: () => request("/api/v1/management/claim-all-ai", { method: "POST", body: "{}" }),
     integrationSetup: () => request("/api/v1/integrations/setup"),
     connectWhatsApp: (sellerUrl: string, secret: string) =>
       request("/api/v1/integrations/whatsapp-seller/connect", {

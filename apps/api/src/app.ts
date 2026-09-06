@@ -46,6 +46,7 @@ import {
 } from "@creolab/contracts";
 import { config } from "./config.ts";
 import { ApiError, errorBody } from "./errors.ts";
+import { fileStorageStatus } from "./lib/storage.ts";
 import {
   authFromAccessToken,
   authFromSessionToken,
@@ -160,6 +161,11 @@ import { analyzeConversationContext, listAgreementsForConversation } from "./ser
 import { getSituation, snoozeSituation } from "./services/situationService.ts";
 import { getNavBadges } from "./services/navBadgesService.ts";
 import {
+  claimAllAiConversations,
+  getManagementOverview,
+  setAiManagerRuntimePause,
+} from "./services/managementOverviewService.ts";
+import {
   addSellerInstruction,
   beginTelegramLink,
   connectWhatsAppSeller,
@@ -204,10 +210,16 @@ export function createApp(prisma: PrismaClient) {
   });
 
   app.get("/health", (_req, res) => {
+    const storage = fileStorageStatus();
     res.json({
       status: "ok",
       service: "creolab-ai-crm",
       whatsappRequired: false,
+      storage: {
+        storePathKind: storage.storePathKind,
+        storageDirSet: Boolean(storage.storageDir),
+        warning: storage.warning,
+      },
     });
   });
   app.get("/ready", async (_req, res) => {
@@ -864,6 +876,18 @@ export function createApp(prisma: PrismaClient) {
 
   app.get("/api/v1/workspace/control", async (req, res) => {
     res.json(await controlBoard(prisma, await requireAuth(req)));
+  });
+
+  app.get("/api/v1/management/overview", async (req, res) => {
+    res.json(await getManagementOverview(prisma, await requireAuth(req)));
+  });
+
+  app.post("/api/v1/management/ai-pause", json, async (req, res) => {
+    res.json(await setAiManagerRuntimePause(prisma, await requireAuth(req), Boolean(req.body?.paused)));
+  });
+
+  app.post("/api/v1/management/claim-all-ai", json, async (req, res) => {
+    res.json(await claimAllAiConversations(prisma, await requireAuth(req)));
   });
 
   app.get("/api/v1/integrations/setup", async (req, res) => {

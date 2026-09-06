@@ -55,6 +55,7 @@ export function IntegrationsPage() {
       </div>
       {error ? <p className="error">{error}</p> : null}
       {note ? <p className="ok">{note}</p> : null}
+      {setup?.fileStorage?.warning ? <p className="error">{setup.fileStorage.warning}</p> : null}
 
       <h3 className="integ-section-title">Приём заявок и обращений</h3>
       <div className="integ-grid">

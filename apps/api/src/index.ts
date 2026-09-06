@@ -1,12 +1,19 @@
 import { createPrismaClient } from "@creolab/db";
 import { config } from "./config.ts";
 import { createApp } from "./app.ts";
+import { ensureUploadsRoot } from "./lib/storage.ts";
 import { promoteWebsiteFormsToLive } from "./services/integrationCatalogService.ts";
 
 const prisma = await createPrismaClient();
 const promoted = await promoteWebsiteFormsToLive(prisma);
 if (promoted.updated > 0) {
   console.log(`Website form integrations switched to live mode: ${promoted.updated}`);
+}
+const storage = await ensureUploadsRoot();
+if (storage.warning) {
+  console.warn(`[storage] ${storage.warning}`);
+} else {
+  console.log(`[storage] uploads at ${storage.uploadsRoot} (${storage.storePathKind})`);
 }
 const app = createApp(prisma);
 

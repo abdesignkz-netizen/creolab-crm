@@ -4,6 +4,7 @@ import path from "node:path";
 import { validateClientPhone } from "@creolab/contracts";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
+import { resolveUploadPath } from "../lib/storage.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { writeActivity } from "./contactService.ts";
 import { hashExecutionContent, sendViaProvider } from "./messagingProvider.ts";
@@ -333,10 +334,10 @@ export async function addCampaignAttachment(
   }
   const buf = Buffer.from(input.contentBase64, "base64");
   if (buf.length > MAX_FILE_BYTES) throw new ApiError(422, "too_large", "Файл больше 15 МБ");
-  const dir = path.join(process.cwd(), ".data", "uploads", membership.tenantId, "campaigns", campaignId);
-  await mkdir(dir, { recursive: true });
-  const storageKey = path.join(dir, `${randomUUID()}-${input.fileName}`);
-  await writeFile(storageKey, buf);
+  const storageKey = path.posix.join(membership.tenantId, "campaigns", campaignId, `${randomUUID()}-${input.fileName}`);
+  const abs = resolveUploadPath(storageKey);
+  await mkdir(path.dirname(abs), { recursive: true });
+  await writeFile(abs, buf);
   const checksum = createHash("sha256").update(buf).digest("hex");
   const row = await prisma.attachment.create({
     data: {
@@ -725,7 +726,7 @@ async function sendOneRecipient(
           file: {
             fileName: file.fileName,
             mimeType: file.mimeType,
-            filePath: file.storageKey,
+            filePath: resolveUploadPath(file.storageKey),
             caption: file.documentType === "proposal" ? text || undefined : undefined,
           },
           idempotencyKey: `campaign:${campaign.id}:recipient:${recipient.id}:file:${file.id}`,

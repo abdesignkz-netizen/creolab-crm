@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { access, readFile } from "node:fs/promises";
 import { ApiError } from "../errors.ts";
+import { missingFileMessage } from "../lib/storage.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { resolveSellerBridge } from "./sellerLink.ts";
 
@@ -19,7 +20,7 @@ function mapBridgeError(error: unknown, kind: "text" | "file"): never {
     );
   }
   if (/ENOENT|no such file|не найден/i.test(raw)) {
-    throw new ApiError(422, "file_missing", "Файл не найден на сервере. Прикрепите КП заново и повторите отправку.");
+    throw new ApiError(422, "file_missing", missingFileMessage());
   }
   if (error instanceof ApiError) throw error;
   throw new ApiError(502, "bridge_error", raw || "Ошибка WhatsApp-моста");
@@ -59,11 +60,7 @@ export async function sendViaProvider(
       try {
         await access(input.file.filePath, fsConstants.R_OK);
       } catch {
-        throw new ApiError(
-          422,
-          "file_missing",
-          "Файл не найден на сервере. Прикрепите КП заново и повторите отправку.",
-        );
+        throw new ApiError(422, "file_missing", missingFileMessage());
       }
       contentBase64 = (await readFile(input.file.filePath)).toString("base64");
     }
