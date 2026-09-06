@@ -275,7 +275,7 @@ export function TasksPage() {
   }, []);
 
   useEffect(() => {
-    if (!searchQ.trim() || selectedClient) {
+    if (selectedClient) {
       setSearchHits([]);
       return;
     }
@@ -284,12 +284,12 @@ export function TasksPage() {
         .searchContacts(searchQ.trim())
         .then((data: any) => setSearchHits(data.clients || []))
         .catch(() => setSearchHits([]));
-    }, 220);
+    }, searchQ.trim() ? 220 : 0);
     return () => clearTimeout(timer);
   }, [searchQ, selectedClient]);
 
   useEffect(() => {
-    if (cmdWhoMode !== "contact" || !cmdSearchQ.trim()) {
+    if (cmdWhoMode !== "contact") {
       setCmdSearchHits([]);
       return;
     }
@@ -298,7 +298,7 @@ export function TasksPage() {
         .searchContacts(cmdSearchQ.trim())
         .then((data: any) => setCmdSearchHits(data.clients || []))
         .catch(() => setCmdSearchHits([]));
-    }, 220);
+    }, cmdSearchQ.trim() ? 220 : 0);
     return () => clearTimeout(timer);
   }, [cmdSearchQ, cmdWhoMode]);
 
@@ -964,45 +964,54 @@ export function TasksPage() {
                   </div>
                 ) : null}
                 <label>
-                  Добавить клиента
+                  Найти или выбрать клиента
                   <input
                     value={cmdSearchQ}
                     onChange={(event) => setCmdSearchQ(event.target.value)}
                     placeholder="Имя, телефон или компания"
+                    autoComplete="off"
                   />
                 </label>
                 {cmdSearchHits.length > 0 ? (
-                  <div className="picker-list">
-                    {cmdSearchHits.map((hit) => {
-                      const already = cmdSelectedContacts.some((item) => item.id === hit.id);
-                      return (
-                        <button
-                          key={hit.id}
-                          type="button"
-                          className="picker-item"
-                          disabled={already}
-                          onClick={() => {
-                            if (already) return;
-                            setCmdSelectedContacts((prev) => [...prev, hit].slice(0, 30));
-                            setCmdSearchQ("");
-                            setCmdSearchHits([]);
-                            setCommandParse(null);
-                            setError("");
-                          }}
-                        >
-                          <b>{hit.name}</b>
-                          <div className="muted">
-                            {[hit.phone, hit.interest, hit.statusLabel].filter(Boolean).join(" · ")}
-                            {already ? " · уже выбран" : ""}
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
+                  <>
+                    <div className="muted" style={{ marginTop: 8 }}>
+                      {cmdSearchQ.trim()
+                        ? `Найдено: ${cmdSearchHits.length}`
+                        : "Клиенты CRM — нажмите, чтобы выбрать"}
+                    </div>
+                    <div className="picker-list" role="listbox" aria-label="Клиенты CRM">
+                      {cmdSearchHits.map((hit) => {
+                        const already = cmdSelectedContacts.some((item) => item.id === hit.id);
+                        return (
+                          <button
+                            key={hit.id}
+                            type="button"
+                            className="picker-item"
+                            disabled={already}
+                            onClick={() => {
+                              if (already) return;
+                              setCmdSelectedContacts((prev) => [...prev, hit].slice(0, 30));
+                              setCmdSearchQ("");
+                              setCommandParse(null);
+                              setError("");
+                            }}
+                          >
+                            <b>{hit.name}</b>
+                            <div className="muted">
+                              {[hit.phone, hit.companyName, hit.interest, hit.statusLabel]
+                                .filter(Boolean)
+                                .join(" · ")}
+                              {already ? " · уже выбран" : ""}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
                 ) : cmdSearchQ.trim() ? (
-                  <p className="muted">Никого не нашли. Попробуйте другой запрос или режим «По номерам».</p>
+                  <p className="muted">Никого не нашли. Попробуйте другой запрос или режим «По номеру».</p>
                 ) : (
-                  <p className="muted">Можно выбрать несколько клиентов подряд.</p>
+                  <p className="muted">Загрузка клиентов…</p>
                 )}
               </div>
             ) : null}
@@ -1452,34 +1461,43 @@ export function TasksPage() {
           <div className="field-block">
             {!selectedClient ? (
               <label>
-                Клиент
+                Найти или выбрать клиента
                 <input
                   value={searchQ}
                   onChange={(event) => setSearchQ(event.target.value)}
-                  placeholder="Имя, телефон, компания или задача клиента"
+                  placeholder="Имя, телефон, компания"
+                  autoComplete="off"
                 />
               </label>
             ) : null}
             {!selectedClient && searchHits.length > 0 ? (
-              <div className="picker-list">
-                {searchHits.map((hit) => (
-                  <button
-                    key={hit.id}
-                    type="button"
-                    className="picker-item"
-                    onClick={() => {
-                      setSelectedClient(hit);
-                      setSearchQ("");
-                    }}
-                  >
-                    <b>{hit.name}</b>
-                    <div className="muted">
-                      {[hit.phone, hit.interest, hit.statusLabel].filter(Boolean).join(" · ")}
-                    </div>
-                    {hit.lastContactLabel ? <div className="muted">Последний контакт: {hit.lastContactLabel}</div> : null}
-                  </button>
-                ))}
-              </div>
+              <>
+                <div className="muted" style={{ marginTop: 8 }}>
+                  {searchQ.trim() ? `Найдено: ${searchHits.length}` : "Клиенты CRM — нажмите, чтобы выбрать"}
+                </div>
+                <div className="picker-list" role="listbox" aria-label="Клиенты CRM">
+                  {searchHits.map((hit) => (
+                    <button
+                      key={hit.id}
+                      type="button"
+                      className="picker-item"
+                      onClick={() => {
+                        setSelectedClient(hit);
+                        setSearchQ("");
+                      }}
+                    >
+                      <b>{hit.name}</b>
+                      <div className="muted">
+                        {[hit.phone, hit.companyName, hit.interest, hit.statusLabel].filter(Boolean).join(" · ")}
+                      </div>
+                      {hit.lastContactLabel ? <div className="muted">Последний контакт: {hit.lastContactLabel}</div> : null}
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : null}
+            {!selectedClient && !searchHits.length ? (
+              <p className="muted">{searchQ.trim() ? "Никого не нашли." : "Загрузка клиентов…"}</p>
             ) : null}
 
             {selectedClient ? (

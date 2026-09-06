@@ -337,7 +337,9 @@ export async function previewContactSegment(prisma: PrismaClient, auth: AuthCont
 }
 
 export async function searchContactsForPicker(prisma: PrismaClient, auth: AuthContext, q: string) {
-  return previewContactSegment(prisma, auth, { q, limit: 20 });
+  const query = String(q || "").trim();
+  // Empty query → recent CRM clients for picker browse
+  return previewContactSegment(prisma, auth, { q: query || undefined, limit: query ? 20 : 40 });
 }
 
 export async function listWorkspaceMembers(prisma: PrismaClient, auth: AuthContext) {
