@@ -200,6 +200,12 @@ export function createApiClient(options: ClientOptions) {
       return request(`/api/v1/conversations${suffix}`);
     },
     conversation: (id: string) => request(`/api/v1/conversations/${id}`),
+    analyzeConversationContext: (id: string, body: { dryRun?: boolean; useLlm?: boolean } = {}) =>
+      request(`/api/v1/conversations/${id}/analyze-context`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    conversationAgreements: (id: string) => request(`/api/v1/conversations/${id}/agreements`),
     takeConversation: (id: string) => request(`/api/v1/conversations/${id}/take`, { method: "POST" }),
     returnToAi: (id: string) => request(`/api/v1/conversations/${id}/return-to-ai`, { method: "POST" }),
     pauseConversation: (id: string) => request(`/api/v1/conversations/${id}/pause`, { method: "POST", body: "{}" }),

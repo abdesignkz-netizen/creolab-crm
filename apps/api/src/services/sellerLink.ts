@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import type { PrismaClient } from "@creolab/db";
 import { crmModeToSeller, sellerModeToCrm, validateClientPhone } from "@creolab/contracts";
 import { WhatsAppSellerBridge } from "@creolab/integrations";
@@ -8,7 +8,52 @@ import { sha256 } from "../lib/hash.ts";
 import { decryptSecret, encryptSecret } from "../lib/secretBox.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { can } from "../lib/types.ts";
+import { analyzeAndApplyConversation } from "./conversationContextApplyService.ts";
 import { getSituation, isConversationCommand } from "./situationService.ts";
+
+function historyScopedId(leadId: string, item: { role: string; content: string; at?: string }) {
+  const raw = `${leadId}|${item.role}|${item.at || ""}|${item.content}`;
+  return `seller:${createHash("sha1").update(raw).digest("hex")}`;
+}
+
+async function upsertLeadHistory(
+  prisma: PrismaClient,
+  tid: string,
+  conversationId: string,
+  leadId: string,
+  history: Array<{ role: string; content: string; at?: string }>,
+) {
+  const slice = (history || []).slice(-40);
+  if (!slice.length) return 0;
+  let added = 0;
+  for (const item of slice) {
+    const connectionScopedId = historyScopedId(leadId, item);
+    const existing = await prisma.message.findFirst({
+      where: { tenantId: tid, connectionScopedId },
+    });
+    if (existing) continue;
+    await prisma.message.create({
+      data: {
+        tenantId: tid,
+        conversationId,
+        senderKind: item.role === "assistant" ? "ai" : "client",
+        direction: item.role === "assistant" ? "outbound" : "inbound",
+        text: item.content,
+        historical: true,
+        connectionScopedId,
+        createdAt: item.at ? new Date(item.at) : new Date(),
+      },
+    });
+    added += 1;
+  }
+  if (added) {
+    await prisma.conversation.update({
+      where: { id: conversationId },
+      data: { messageRevision: { increment: added }, updatedAt: new Date() },
+    });
+  }
+  return added;
+}
 
 function requireTenant(auth: AuthContext) {
   if (!auth.activeMembership) throw new ApiError(403, "no_tenant", "Нет активной компании");
@@ -201,6 +246,8 @@ export async function syncSellerLeads(prisma: PrismaClient, auth: AuthContext) {
   let imported = 0;
   let updated = 0;
   let needsPhone = 0;
+  let messagesAdded = 0;
+  const analyzeIds: string[] = [];
   for (const lead of leads) {
     const phone = validateClientPhone(lead.clientPhone, membership.tenant.defaultRegion);
     if (!phone.ok) {
@@ -265,6 +312,15 @@ export async function syncSellerLeads(prisma: PrismaClient, auth: AuthContext) {
           connectionId: connection?.id || existing.connectionId,
         },
       });
+      const added = await upsertLeadHistory(
+        prisma,
+        membership.tenantId,
+        existing.id,
+        lead.leadId,
+        lead.conversationHistory || [],
+      );
+      messagesAdded += added;
+      if (added > 0) analyzeIds.push(existing.id);
       updated += 1;
     } else {
       const conversation = await prisma.conversation.create({
@@ -279,20 +335,15 @@ export async function syncSellerLeads(prisma: PrismaClient, auth: AuthContext) {
           attentionReason: mode === "human" ? "human" : mode === "paused" ? "paused" : null,
         },
       });
-      const history = (lead.conversationHistory || []).slice(-30);
-      if (history.length) {
-        await prisma.message.createMany({
-          data: history.map((item) => ({
-            tenantId: membership.tenantId,
-            conversationId: conversation.id,
-            senderKind: item.role === "assistant" ? "ai" : "client",
-            direction: item.role === "assistant" ? "outbound" : "inbound",
-            text: item.content,
-            historical: true,
-            createdAt: item.at ? new Date(item.at) : new Date(),
-          })),
-        });
-      }
+      const added = await upsertLeadHistory(
+        prisma,
+        membership.tenantId,
+        conversation.id,
+        lead.leadId,
+        lead.conversationHistory || [],
+      );
+      messagesAdded += added;
+      if (added > 0) analyzeIds.push(conversation.id);
       imported += 1;
     }
   }
@@ -302,10 +353,23 @@ export async function syncSellerLeads(prisma: PrismaClient, auth: AuthContext) {
       data: { lastEventAt: new Date(), lastError: null, status: "active" },
     });
   }
+
+  let contextApplied = 0;
+  for (const conversationId of [...new Set(analyzeIds)].slice(0, 25)) {
+    try {
+      await analyzeAndApplyConversation(prisma, auth, conversationId, { useLlm: true });
+      contextApplied += 1;
+    } catch {
+      /* analysis is best-effort during sync */
+    }
+  }
+
   return {
     imported,
     updated,
     needsPhone,
+    messagesAdded,
+    contextApplied,
     total: leads.length,
     note:
       leads.length === 0

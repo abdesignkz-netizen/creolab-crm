@@ -1693,10 +1693,67 @@ fieldset.field-block legend { padding: 0 6px; font-weight: 600; }
 .deal-stage-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .deal-detail .actions { flex-wrap: wrap; }
 
+.task-row-main { display: grid; gap: 8px; min-width: 0; }
+.task-row-title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.task-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px 12px;
+  font-size: 13px;
+}
+.task-meta-grid .muted,
+.task-who .muted,
+.task-about > .muted {
+  display: block;
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+.task-who,
+.task-about {
+  font-size: 13px;
+}
+.task-about ul {
+  margin: 0;
+  padding-left: 1.1em;
+}
+.task-about-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 4px;
+  font-size: 12.5px;
+}
+.task-desc { font-size: 12.5px; }
+.task-row-overdue {
+  border-left: 3px solid #c45c26;
+}
+.task-briefing,
+.task-briefing-card {
+  display: grid;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 13px;
+}
+.task-briefing-card {
+  padding: 10px 12px;
+  background: var(--soft, #f6f7f8);
+  border-radius: 8px;
+  margin-bottom: 10px;
+}
+.task-briefing .muted,
+.task-briefing-card .muted {
+  display: block;
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+
 @media (max-width: 900px) {
   .deal-kanban {
     grid-auto-flow: row;
     grid-auto-columns: unset;
     grid-template-columns: 1fr;
+  }
+  .task-meta-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

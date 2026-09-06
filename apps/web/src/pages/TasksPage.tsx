@@ -184,9 +184,11 @@ export function TasksPage() {
   const [taskDetail, setTaskDetail] = useState<any>(null);
   const [preview, setPreview] = useState<any>(null);
   const [execResult, setExecResult] = useState<any>(null);
-  const [nextPanel, setNextPanel] = useState<{ taskId: string; actions: any[] } | null>(null);
+  const [nextPanel, setNextPanel] = useState<{ taskId: string; actions: any[]; note?: string } | null>(null);
   const [completeOpen, setCompleteOpen] = useState<string | null>(null);
+  const [completeTaskType, setCompleteTaskType] = useState<string>("call");
   const [resultCode, setResultCode] = useState("reached");
+  const [resultText, setResultText] = useState("");
   const [docType, setDocType] = useState("proposal");
   const [busy, setBusy] = useState(false);
 
@@ -1739,6 +1741,59 @@ export function TasksPage() {
         <div className="panel task-form">
           <b>Подготовка отправки</b>
           <div className="muted">{taskDetail.title}</div>
+          {taskDetail.briefing ? (
+            <div className="task-briefing-card">
+              {taskDetail.briefing.basisLabel ? <div className="muted">{taskDetail.briefing.basisLabel}</div> : null}
+              {taskDetail.briefing.client ? (
+                <div>
+                  <span className="muted">Клиент</span>
+                  <div>
+                    {taskDetail.briefing.client.name}
+                    {taskDetail.briefing.client.phone ? ` · ${taskDetail.briefing.client.phone}` : ""}
+                    {taskDetail.briefing.client.companyName ? ` · ${taskDetail.briefing.client.companyName}` : ""}
+                  </div>
+                </div>
+              ) : null}
+              {taskDetail.briefing.purpose ? (
+                <div>
+                  <span className="muted">Цель</span>
+                  <div>{taskDetail.briefing.purpose}</div>
+                </div>
+              ) : null}
+              {taskDetail.briefing.briefingText ? (
+                <div>
+                  <span className="muted">Перед встречей</span>
+                  <div>{taskDetail.briefing.briefingText}</div>
+                </div>
+              ) : null}
+              {(taskDetail.briefing.preparationHints || []).length ? (
+                <div>
+                  <span className="muted">Что подготовить</span>
+                  <ul>
+                    {taskDetail.briefing.preparationHints.map((h: string) => (
+                      <li key={h}>{h}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {(taskDetail.briefing.sourceMessages || []).length ? (
+                <div>
+                  <span className="muted">Последняя переписка</span>
+                  <div className="picker-list">
+                    {taskDetail.briefing.sourceMessages.map((m: any) => (
+                      <div key={m.id} className="picker-item">
+                        <b>{m.actorLabel}</b>
+                        <div className="muted">{m.text}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {taskDetail.briefing.conversationId ? (
+                    <Link to={`/conversations/${taskDetail.briefing.conversationId}`}>Открыть весь диалог</Link>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           <label>
             Сообщение
             <textarea value={messageDraft} onChange={(event) => setMessageDraft(event.target.value)} rows={5} />
@@ -1868,7 +1923,9 @@ export function TasksPage() {
       {nextPanel ? (
         <div className="panel task-form">
           <b>Что дальше?</b>
-          <p className="muted">Задача выполнена. Выберите следующий шаг или закройте.</p>
+          <p className="muted">
+            {nextPanel.note || "Задача выполнена. Подтвердите следующий шаг — AI только предлагает."}
+          </p>
           <div className="chip-row">
             {nextPanel.actions.map((action) => (
               <button
@@ -1886,6 +1943,7 @@ export function TasksPage() {
                 }
               >
                 {action.title}
+                {action.requiresConfirm ? " · нужно подтверждение" : ""}
               </button>
             ))}
             <button type="button" className="chip" onClick={() => setNextPanel(null)}>
@@ -1900,14 +1958,44 @@ export function TasksPage() {
           <b>Завершить задачу</b>
           <label>
             Результат
-            <select value={resultCode} onChange={(event) => setResultCode(event.target.value)}>
-              <option value="reached">Дозвонился</option>
-              <option value="no_answer">Не ответил</option>
-              <option value="callback_later">Перезвонить позже</option>
-              <option value="refused">Клиент отказался</option>
-              <option value="agreed">Договорились</option>
-              <option value="other">Другое</option>
+            <select
+              value={resultCode}
+              onChange={(event) => setResultCode(event.target.value)}
+            >
+              {completeTaskType === "meeting" || completeTaskType === "call" ? (
+                <>
+                  <option value="agreed">Договорились</option>
+                  <option value="needs_estimate">Нужен расчёт</option>
+                  <option value="send_proposal">Отправить КП</option>
+                  <option value="send_contract">Отправить договор</option>
+                  <option value="client_thinking">Клиент думает</option>
+                  <option value="callback_later">Перезвонить</option>
+                  <option value="reschedule">Перенести встречу</option>
+                  <option value="reached">Дозвонился / состоялось</option>
+                  <option value="no_answer">Не ответил / не состоялось</option>
+                  <option value="refused">Отказ</option>
+                  <option value="other">Другое</option>
+                </>
+              ) : (
+                <>
+                  <option value="reached">Дозвонился</option>
+                  <option value="no_answer">Не ответил</option>
+                  <option value="callback_later">Перезвонить позже</option>
+                  <option value="refused">Клиент отказался</option>
+                  <option value="agreed">Договорились</option>
+                  <option value="other">Другое</option>
+                </>
+              )}
             </select>
+          </label>
+          <label>
+            Комментарий
+            <textarea
+              rows={3}
+              value={resultText}
+              onChange={(event) => setResultText(event.target.value)}
+              placeholder="Например: обсудили структуру, клиент попросил финальное КП завтра до обеда"
+            />
           </label>
           <div className="actions">
             <button type="button" className="btn secondary" onClick={() => setCompleteOpen(null)}>
@@ -1918,10 +2006,15 @@ export function TasksPage() {
               className="btn"
               onClick={() =>
                 api
-                  .completeTaskResult(completeOpen, { resultCode })
+                  .completeTaskResult(completeOpen, { resultCode, resultText: resultText || undefined })
                   .then((data: any) => {
                     setCompleteOpen(null);
-                    setNextPanel({ taskId: completeOpen, actions: data.suggestedNextActions || [] });
+                    setResultText("");
+                    setNextPanel({
+                      taskId: completeOpen,
+                      actions: data.suggestedNextActions || data.aiSuggestion?.items || [],
+                      note: data.aiSuggestion?.note,
+                    });
                     return load();
                   })
                   .catch((err) => setError(err.message))
@@ -1952,31 +2045,116 @@ export function TasksPage() {
           <div key={group.key}>
             <h3>{GROUP_TITLE[group.key]}</h3>
             {group.items.map((item) => (
-              <div className="row" key={item.id}>
-                <div>
-                  <b>{item.title}</b>
-                  <div className="muted">
-                    {item.status} · {TASK_TYPES.find(([id]) => id === item.type)?.[1] || item.type}
-                    {item.owner?.user?.name ? ` · ${item.owner.user.name}` : ""}
-                    {item.dueAt ? ` · до ${new Date(item.dueAt).toLocaleString("ru-RU")}` : ""}
+              <div className={`row task-row${item.overdue ? " task-row-overdue" : ""}`} key={item.id}>
+                <div className="task-row-main">
+                  <div className="task-row-title">
+                    <b>{item.title}</b>
+                    {item.overdue ? <span className="deal-flag">Просрочено</span> : null}
                   </div>
-                  <div className="muted">
-                    {item.targetType === "group" ? (
-                      <>
-                        Группа · {(item.segmentSnapshotJson as any)?.label || item.contextLabel}
-                        {item.progress ? ` · выполнено ${item.progress.label}` : ""}
-                      </>
-                    ) : item.contact ? (
-                      <>
-                        <Link to={`/contacts/${item.contact.id}`}>
-                          {item.contact.name || [item.contact.firstName, item.contact.lastName].filter(Boolean).join(" ")}
-                        </Link>
-                        {item.inquiry?.subject ? ` · ${item.inquiry.subject}` : ""}
-                      </>
-                    ) : (
-                      item.contextLabel
-                    )}
+                  <div className="task-meta-grid">
+                    <div>
+                      <span className="muted">Тип</span>
+                      <div>{item.typeLabel || TASK_TYPES.find(([id]) => id === item.type)?.[1] || item.type}</div>
+                    </div>
+                    <div>
+                      <span className="muted">Статус</span>
+                      <div>{item.statusLabel || item.status}</div>
+                    </div>
+                    <div>
+                      <span className="muted">Срок</span>
+                      <div>{item.dueAt ? new Date(item.dueAt).toLocaleString("ru-RU") : "Без срока"}</div>
+                    </div>
+                    <div>
+                      <span className="muted">Ответственный</span>
+                      <div>{item.assigneeName || item.owner?.user?.name || "Не назначен"}</div>
+                    </div>
                   </div>
+                  <div className="task-who">
+                    <span className="muted">Кому</span>
+                    <div>
+                      {item.targetType === "group" ? (
+                        <>
+                          Группа
+                          {item.progress ? ` · выполнено ${item.progress.label}` : ""}
+                          {(item.segmentSnapshotJson as any)?.label
+                            ? ` · ${(item.segmentSnapshotJson as any).label}`
+                            : item.contextLabel
+                              ? ` · ${item.contextLabel}`
+                              : ""}
+                        </>
+                      ) : item.contact?.id || item.whoName ? (
+                        <>
+                          {item.contact?.id ? (
+                            <Link to={`/contacts/${item.contact.id}`}>
+                              {item.whoName ||
+                                item.contact.name ||
+                                [item.contact.firstName, item.contact.lastName].filter(Boolean).join(" ") ||
+                                "Клиент"}
+                            </Link>
+                          ) : (
+                            <b>{item.whoName || "Клиент"}</b>
+                          )}
+                          {item.whoPhone ? <span className="muted"> · {item.whoPhone}</span> : null}
+                        </>
+                      ) : (
+                        <span className="muted">{item.contextLabel || "Без привязки к клиенту"}</span>
+                      )}
+                    </div>
+                  </div>
+                  {(item.aboutLines || []).length ? (
+                    <div className="task-about">
+                      <span className="muted">По поводу</span>
+                      <ul>
+                        {(item.aboutLines as string[]).map((line: string) => (
+                          <li key={line}>{line}</li>
+                        ))}
+                      </ul>
+                      <div className="task-about-links">
+                        {item.inquiryId ? <Link to={`/requests/${item.inquiryId}`}>Открыть заявку</Link> : null}
+                        {item.dealId ? <Link to={`/deals/${item.dealId}`}>Открыть сделку</Link> : null}
+                        {item.conversationId ? (
+                          <Link to={`/conversations/${item.conversationId}`}>Открыть диалог</Link>
+                        ) : null}
+                        {(item.contactId || item.contact?.id) ? (
+                          <Link to={`/contacts/${item.contactId || item.contact.id}`}>Карточка клиента</Link>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : null}
+                  {item.descriptionPreview ? (
+                    <div className="task-desc muted">Описание: {item.descriptionPreview}</div>
+                  ) : null}
+                  {item.messagePreview ? (
+                    <div className="task-desc muted">Сообщение: {item.messagePreview}</div>
+                  ) : null}
+                  {item.briefingText || item.purpose || item.source === "context_engine" ? (
+                    <div className="task-briefing">
+                      {item.purpose ? (
+                        <div>
+                          <span className="muted">Цель</span>
+                          <div>{item.purpose}</div>
+                        </div>
+                      ) : null}
+                      {item.briefingText ? (
+                        <div>
+                          <span className="muted">Перед контактом</span>
+                          <div>{item.briefingText}</div>
+                        </div>
+                      ) : null}
+                      {item.source === "context_engine" ? (
+                        <div className="muted">Основание: создано автоматически из договорённости в WhatsApp</div>
+                      ) : null}
+                      {item.commandStatus === "needs_confirmation" ? (
+                        <div className="warn-text">Нужно подтверждение перед внешней отправкой</div>
+                      ) : null}
+                      {item.conversationId ? (
+                        <Link to={`/conversations/${item.conversationId}`}>Открыть весь диалог</Link>
+                      ) : null}
+                      <button type="button" className="btn secondary" onClick={() => openTaskEditor(item.id)}>
+                        Полный briefing
+                      </button>
+                    </div>
+                  ) : null}
                   {item.targetType === "group" && item.children?.length ? (
                     <div style={{ marginTop: 8 }}>
                       <button
@@ -1994,7 +2172,13 @@ export function TasksPage() {
                                 {child.status === "done" ? "✓ " : "○ "}
                                 {child.contactName || "Клиент"}
                               </b>
+                              <div className="muted">{child.statusLabel || child.status}</div>
                               <div className="actions" style={{ marginTop: 6 }}>
+                                {child.contactId ? (
+                                  <Link className="btn secondary" to={`/contacts/${child.contactId}`}>
+                                    Клиент
+                                  </Link>
+                                ) : null}
                                 {child.status === "open" || child.status === "waiting" ? (
                                   <button
                                     className="btn"
@@ -2052,7 +2236,16 @@ export function TasksPage() {
                         </button>
                       ) : null}
                       {MANUAL_COMPLETE.has(item.type) ? (
-                        <button className="btn secondary" type="button" onClick={() => setCompleteOpen(item.id)}>
+                        <button
+                          className="btn secondary"
+                          type="button"
+                          onClick={() => {
+                            setCompleteOpen(item.id);
+                            setCompleteTaskType(item.type);
+                            setResultCode(item.type === "meeting" || item.type === "call" ? "agreed" : "reached");
+                            setResultText("");
+                          }}
+                        >
                           Завершить
                         </button>
                       ) : null}
@@ -2082,7 +2275,9 @@ export function TasksPage() {
                         Отменить
                       </button>
                     </>
-                  ) : null}
+                  ) : (
+                    <span className="muted">{item.statusLabel || item.status}</span>
+                  )}
                 </div>
               </div>
             ))}

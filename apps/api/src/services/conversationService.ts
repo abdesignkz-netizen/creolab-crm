@@ -12,6 +12,14 @@ import {
   whoWroteLast,
   budgetLabel,
 } from "./contactLabels.ts";
+import {
+  AGREEMENT_STATUS_LABEL,
+  AGREEMENT_TYPE_LABEL,
+  WAITING_FOR_LABEL,
+  type AgreementStatus,
+  type AgreementType,
+  type WaitingFor,
+} from "./conversationContextTypes.ts";
 
 const ACTIVE_INQUIRY = ["new", "accepted", "qualification", "qualified", "in_progress", "waiting_client", "waiting_manager"];
 
@@ -363,6 +371,17 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
   const acquisition = acquisitionLabel(linkedInquiry);
   const topic = topicFromInquiry(linkedInquiry);
 
+  const agreements = await prisma.agreement.findMany({
+    where: {
+      tenantId: tid,
+      OR: [{ conversationId: conversation.id }, ...(contact?.id ? [{ contactId: contact.id }] : [])],
+      status: { in: ["DETECTED", "NEEDS_CLARIFICATION", "CONFIRMED", "SCHEDULED", "RESCHEDULED"] },
+    },
+    include: { task: true },
+    orderBy: [{ scheduledAt: "asc" }, { updatedAt: "desc" }],
+    take: 10,
+  });
+
   const title = contact
     ? displayName(contact) === "Без имени"
       ? phone?.rawValue || "Неизвестный клиент"
@@ -370,6 +389,7 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
     : "Неизвестный клиент";
 
   const summary =
+    conversation.contextSummary ||
     contact?.summary ||
     [
       topic ? `Интерес: ${topic}.` : null,
@@ -386,6 +406,8 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
     company: contact?.companyName || null,
     city: contact?.city || null,
   };
+
+  const waitingFor = (conversation.waitingFor || "NONE") as WaitingFor;
 
   return {
     asOf: now.toISOString(),
@@ -404,12 +426,20 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
       lastMessageLabel: formatWhen(last?.createdAt || conversation.updatedAt, timeZone),
       lastWriter: lastWho,
       lastWriterLabel: lastWho === "client" ? "Клиент" : lastWho === "ai" ? "AI" : "Менеджер",
-      needsReply: Boolean(waitingReply),
+      needsReply: Boolean(waitingReply) || waitingFor === "MANAGER",
       waitMinutes,
-      waitLabel: waitingReply && waitMinutes != null ? `Ждёт ответа: ${waitMinutes} мин` : null,
+      waitLabel:
+        waitingFor !== "NONE"
+          ? WAITING_FOR_LABEL[waitingFor]
+          : waitingReply && waitMinutes != null
+            ? `Ждёт ответа: ${waitMinutes} мин`
+            : null,
+      waitingFor,
+      waitingForLabel: WAITING_FOR_LABEL[waitingFor],
       attentionReason: conversation.attentionReason,
       assigneeName: conversation.assignee?.user?.name || contact?.owner?.user?.name || null,
       topic: topic || "Тема не определена",
+      contextSummary: conversation.contextSummary,
     },
     client: contact
       ? {
@@ -454,8 +484,28 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
           amountMinor: deal.offerAmountMinor,
           currency: deal.currency,
           assigneeName: deal.assignee?.user?.name || null,
+          nextAction: deal.nextAction || null,
+          nextActionAt: deal.nextActionAt || null,
         }
       : null,
+    agreements: agreements.map((a) => ({
+      id: a.id,
+      type: a.type,
+      typeLabel: AGREEMENT_TYPE_LABEL[a.type as AgreementType] || a.type,
+      status: a.status,
+      statusLabel: AGREEMENT_STATUS_LABEL[a.status as AgreementStatus] || a.status,
+      title: a.title,
+      scheduledAt: a.scheduledAt,
+      scheduledLabel: formatWhen(a.scheduledAt, timeZone),
+      meetingProvider: a.meetingProvider,
+      meetingUrl: a.meetingUrl,
+      locationName: a.locationName,
+      address: a.address,
+      clarificationNeeded: a.clarificationNeeded,
+      taskId: a.task?.id || null,
+      confidenceUserLabel:
+        a.status === "NEEDS_CLARIFICATION" ? "Нужно уточнить" : a.status === "CONFIRMED" || a.status === "SCHEDULED" ? "Подтверждено" : "Обнаружено",
+    })),
     control: {
       nextAction: nextTask
         ? {
@@ -468,8 +518,15 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
         : null,
       overdue: Boolean(overdueTask),
       overdueTitle: overdueTask?.title || null,
-      needsReply: Boolean(waitingReply),
-      waitLabel: waitingReply && waitMinutes != null ? `Ждёт ответа: ${waitMinutes} мин` : waitingReply ? "Нужен ответ" : "Ждём клиента",
+      needsReply: Boolean(waitingReply) || waitingFor === "MANAGER",
+      waitLabel:
+        waitingFor !== "NONE"
+          ? WAITING_FOR_LABEL[waitingFor]
+          : waitingReply && waitMinutes != null
+            ? `Ждёт ответа: ${waitMinutes} мин`
+            : waitingReply
+              ? "Нужен ответ"
+              : "Ждём клиента",
       situationLabel: waitingReply
         ? "Клиент написал последним"
         : conversation.mode === "human"

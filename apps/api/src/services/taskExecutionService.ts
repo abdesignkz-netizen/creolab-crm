@@ -7,6 +7,8 @@ import type { AuthContext } from "../lib/types.ts";
 import { writeActivity } from "./contactService.ts";
 import { displayName, formatWhen } from "./contactLabels.ts";
 import { hashExecutionContent, sendViaProvider } from "./messagingProvider.ts";
+import { analyzeTaskResultNextActions, MEETING_RESULTS } from "./taskResultAnalysisService.ts";
+import { syncAgreementToCalendar } from "./calendarAdapter.ts";
 
 const SENDABLE_TYPES = new Set(["proposal", "message", "send_documents", "prepare_estimate", "follow_up"]);
 
@@ -47,6 +49,7 @@ async function taskInTenant(prisma: PrismaClient, auth: AuthContext, id: string)
       contact: { include: { methods: true } },
       inquiry: true,
       deal: true,
+      agreement: true,
     },
   });
   if (!task) throw new ApiError(404, "not_found", "Задача не найдена");
@@ -81,6 +84,34 @@ function primaryPhone(methods: Array<{ type: string; rawValue: string; primary: 
 }
 
 function suggestedNextActions(taskType: string, resultCode?: string | null) {
+  if (taskType === "meeting") {
+    if (resultCode === "send_proposal") {
+      return [{ type: "proposal", title: "Отправить КП", dueOffsetHours: 4, requiresConfirm: true }];
+    }
+    if (resultCode === "send_contract") {
+      return [{ type: "send_documents", title: "Отправить договор", dueOffsetHours: 4, requiresConfirm: true }];
+    }
+    if (resultCode === "needs_estimate") {
+      return [{ type: "prepare_estimate", title: "Подготовить расчёт", dueOffsetHours: 24 }];
+    }
+    if (resultCode === "client_thinking") {
+      return [{ type: "wait_client", title: "Ждать решения клиента", dueOffsetHours: 72 }];
+    }
+    if (resultCode === "callback_later") {
+      return [{ type: "call", title: "Перезвонить", dueOffsetHours: 24 }];
+    }
+    if (resultCode === "reschedule") {
+      return [{ type: "meeting", title: "Перенести встречу", dueOffsetHours: 4 }];
+    }
+    if (resultCode === "refused") {
+      return [{ type: "other", title: "Зафиксировать отказ (вручную)", dueOffsetHours: null, requiresConfirm: true }];
+    }
+    return [
+      { type: "proposal", title: "Отправить КП", dueOffsetHours: 4, requiresConfirm: true },
+      { type: "follow_up", title: "Связаться завтра", dueOffsetHours: 24 },
+      { type: "wait_client", title: "Ждать клиента", dueOffsetHours: null },
+    ];
+  }
   if (taskType === "proposal" || taskType === "send_documents") {
     return [
       { type: "follow_up", title: "Напомнить завтра", dueOffsetHours: 24 },
@@ -92,9 +123,9 @@ function suggestedNextActions(taskType: string, resultCode?: string | null) {
     if (resultCode === "no_answer") {
       return [{ type: "call", title: "Перезвонить завтра", dueOffsetHours: 24 }];
     }
-    if (resultCode === "reached") {
+    if (resultCode === "reached" || resultCode === "agreed") {
       return [
-        { type: "proposal", title: "Отправить КП", dueOffsetHours: 4 },
+        { type: "proposal", title: "Отправить КП", dueOffsetHours: 4, requiresConfirm: true },
         { type: "follow_up", title: "Связаться завтра", dueOffsetHours: 24 },
       ];
     }
@@ -580,6 +611,7 @@ export async function completeTaskWithResult(
     resultText?: string;
     nextAction?: { type: string; title: string; dueAt?: string } | null;
     skipNext?: boolean;
+    confirmAiSuggestion?: boolean;
   },
 ) {
   const { tid, task } = await taskInTenant(prisma, auth, id);
@@ -599,15 +631,26 @@ export async function completeTaskWithResult(
       completionSource: "user",
       resultCode: input.resultCode,
       resultText: input.resultText || null,
+      completionResult: input.resultCode,
       executionStatus: task.executionStatus === "sent" ? "sent" : task.executionStatus,
     },
   });
+
+  if (task.agreementId) {
+    await prisma.agreement.update({
+      where: { id: task.agreementId },
+      data: { status: "COMPLETED", completedAt: new Date() },
+    });
+    const agr = await prisma.agreement.findFirst({ where: { id: task.agreementId } });
+    if (agr) await syncAgreementToCalendar(agr).catch(() => null);
+  }
 
   if (task.contactId) {
     await writeActivity(prisma, {
       tenantId: tid,
       contactId: task.contactId,
       inquiryId: task.inquiryId,
+      dealId: task.dealId,
       type: "task.completed",
       title: "Задача завершена",
       description: input.resultText || input.resultCode,
@@ -617,8 +660,18 @@ export async function completeTaskWithResult(
     });
   }
 
+  const analyzed = await analyzeTaskResultNextActions({
+    taskType: task.type,
+    resultCode: input.resultCode,
+    resultText: input.resultText,
+    contactName: task.contact ? displayName(task.contact) : null,
+    inquiryTitle: task.inquiry?.subject || task.inquiry?.service || null,
+  });
+
   let createdNext = null;
+  // Explicit nextAction from UI (manager confirmed) — create immediately
   if (input.nextAction && !input.skipNext) {
+    const needsHitl = ["proposal", "send_documents"].includes(input.nextAction.type);
     createdNext = await prisma.task.create({
       data: {
         tenantId: tid,
@@ -633,6 +686,9 @@ export async function completeTaskWithResult(
         source: "system",
         targetType: task.contactId ? "client" : "none",
         priority: "normal",
+        purpose: "Следующий шаг после результата",
+        executionStatus: needsHitl ? "prepared" : "none",
+        commandStatus: needsHitl ? "needs_confirmation" : "none",
       },
     });
     if (task.contactId) {
@@ -640,20 +696,40 @@ export async function completeTaskWithResult(
         tenantId: tid,
         contactId: task.contactId,
         inquiryId: task.inquiryId,
+        dealId: task.dealId,
         type: "task.next_action_created",
         title: "Создано следующее действие",
         description: createdNext.title,
         actorType: "user",
         actorId: auth.user.id,
-        metadata: { taskId: createdNext.id, fromTaskId: id },
+        metadata: { taskId: createdNext.id, fromTaskId: id, confirmed: true },
       });
     }
   }
 
+  const fallback = suggestedNextActions(task.type, input.resultCode);
+  const suggestedNextActionsMerged = analyzed.suggestions.length
+    ? analyzed.suggestions.map((s) => ({
+        type: s.type,
+        title: s.title,
+        dueOffsetHours: s.dueOffsetHours ?? null,
+        dueAt: s.dueAt || null,
+        purpose: s.purpose,
+        requiresConfirm: s.requiresConfirm,
+        reason: s.reason,
+        suggestedDealStage: s.suggestedDealStage,
+      }))
+    : fallback;
+
   return {
     task: updated,
     nextTask: createdNext,
-    suggestedNextActions: suggestedNextActions(task.type, input.resultCode),
+    suggestedNextActions: suggestedNextActionsMerged,
+    aiSuggestion: {
+      source: analyzed.source,
+      note: "AI предлагает следующий шаг. Подтвердите, чтобы создать задачу.",
+      items: suggestedNextActionsMerged,
+    },
   };
 }
 
@@ -679,6 +755,9 @@ export async function createNextActionFromSuggestion(
       ownerMembershipId: task.ownerMembershipId || auth.activeMembership?.id,
       source: "system",
       targetType: task.contactId ? "client" : "none",
+      executionStatus: ["proposal", "send_documents"].includes(input.type) ? "prepared" : "none",
+      commandStatus: ["proposal", "send_documents"].includes(input.type) ? "needs_confirmation" : "none",
+      purpose: "Подтверждённый следующий шаг",
     },
   });
   if (task.contactId) {
@@ -697,4 +776,4 @@ export async function createNextActionFromSuggestion(
   return next;
 }
 
-export { CALL_RESULTS, PROPOSAL_RESULTS, SENDABLE_TYPES };
+export { CALL_RESULTS, PROPOSAL_RESULTS, SENDABLE_TYPES, MEETING_RESULTS };

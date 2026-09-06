@@ -135,6 +135,8 @@ import {
   setDealOnHold,
   updateDeal,
 } from "./services/dealService.ts";
+import { analyzeAndApplyConversation } from "./services/conversationContextApplyService.ts";
+import { analyzeConversationContext, listAgreementsForConversation } from "./services/conversationContextService.ts";
 import { getSituation, snoozeSituation } from "./services/situationService.ts";
 import {
   addSellerInstruction,
@@ -574,6 +576,25 @@ export function createApp(prisma: PrismaClient) {
 
   app.get("/api/v1/conversations/:id", async (req, res) => {
     res.json(await getConversationWorkspace(prisma, await requireAuth(req), req.params.id));
+  });
+
+  app.post("/api/v1/conversations/:id/analyze-context", json, async (req, res) => {
+    const dryRun = Boolean((req.body as { dryRun?: boolean } | undefined)?.dryRun);
+    const useLlm = (req.body as { useLlm?: boolean } | undefined)?.useLlm;
+    res.json(
+      await analyzeAndApplyConversation(prisma, await requireAuth(req), req.params.id, {
+        dryRun,
+        useLlm: useLlm !== false,
+      }),
+    );
+  });
+
+  app.get("/api/v1/conversations/:id/context-preview", async (req, res) => {
+    res.json(await analyzeConversationContext(prisma, await requireAuth(req), req.params.id, { useLlm: true }));
+  });
+
+  app.get("/api/v1/conversations/:id/agreements", async (req, res) => {
+    res.json({ items: await listAgreementsForConversation(prisma, await requireAuth(req), req.params.id) });
   });
 
   app.post("/api/v1/conversations/:id/take", async (req, res) => {

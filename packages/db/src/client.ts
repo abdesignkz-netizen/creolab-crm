@@ -296,6 +296,61 @@ async function applyAdditiveSchema(pglite: PGlite) {
 
     ALTER TABLE "Task" ADD COLUMN IF NOT EXISTS "recurrenceRule" TEXT;
     ALTER TABLE "Task" ADD COLUMN IF NOT EXISTS "completionResult" TEXT;
+    ALTER TABLE "Task" ADD COLUMN IF NOT EXISTS "agreementId" TEXT;
+    ALTER TABLE "Task" ADD COLUMN IF NOT EXISTS "contextSnapshotJson" JSONB DEFAULT '{}';
+    ALTER TABLE "Task" ADD COLUMN IF NOT EXISTS "sourceMessageIdsJson" JSONB DEFAULT '[]';
+    ALTER TABLE "Task" ADD COLUMN IF NOT EXISTS "purpose" TEXT;
+    ALTER TABLE "Task" ADD COLUMN IF NOT EXISTS "briefingText" TEXT;
+    ALTER TABLE "Task" ADD COLUMN IF NOT EXISTS "preparationHintsJson" JSONB DEFAULT '[]';
+
+    ALTER TABLE "Conversation" ADD COLUMN IF NOT EXISTS "waitingFor" TEXT DEFAULT 'NONE';
+    ALTER TABLE "Conversation" ADD COLUMN IF NOT EXISTS "contextSummary" TEXT;
+    ALTER TABLE "Conversation" ADD COLUMN IF NOT EXISTS "lastContextAnalyzedAt" TIMESTAMP(3);
+    ALTER TABLE "Conversation" ADD COLUMN IF NOT EXISTS "lastAnalyzedMessageId" TEXT;
+
+    CREATE TABLE IF NOT EXISTS "Agreement" (
+      "id" TEXT NOT NULL,
+      "tenantId" TEXT NOT NULL,
+      "contactId" TEXT,
+      "inquiryId" TEXT,
+      "dealId" TEXT,
+      "conversationId" TEXT,
+      "type" TEXT NOT NULL,
+      "title" TEXT NOT NULL,
+      "summary" TEXT,
+      "purpose" TEXT,
+      "status" TEXT NOT NULL DEFAULT 'DETECTED',
+      "scheduledAt" TIMESTAMP(3),
+      "scheduledEndAt" TIMESTAMP(3),
+      "previousScheduledAt" TIMESTAMP(3),
+      "responsibleMembershipId" TEXT,
+      "locationName" TEXT,
+      "address" TEXT,
+      "meetingProvider" TEXT,
+      "meetingUrl" TEXT,
+      "meetingId" TEXT,
+      "meetingPassword" TEXT,
+      "phone" TEXT,
+      "sourceMessageIdsJson" JSONB NOT NULL DEFAULT '[]',
+      "contextSnapshotJson" JSONB NOT NULL DEFAULT '{}',
+      "remindersJson" JSONB NOT NULL DEFAULT '[]',
+      "confidence" TEXT NOT NULL DEFAULT 'MEDIUM',
+      "detectedBy" TEXT NOT NULL DEFAULT 'context_engine',
+      "clarificationNeeded" TEXT,
+      "dedupeKey" TEXT,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "completedAt" TIMESTAMP(3),
+      "cancelledAt" TIMESTAMP(3),
+      CONSTRAINT "Agreement_pkey" PRIMARY KEY ("id")
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS "Agreement_tenantId_id_key" ON "Agreement"("tenantId", "id");
+    CREATE UNIQUE INDEX IF NOT EXISTS "Agreement_tenantId_dedupeKey_key" ON "Agreement"("tenantId", "dedupeKey");
+    CREATE INDEX IF NOT EXISTS "Agreement_tenantId_status_scheduledAt_idx" ON "Agreement"("tenantId", "status", "scheduledAt");
+    CREATE INDEX IF NOT EXISTS "Agreement_tenantId_conversationId_status_idx" ON "Agreement"("tenantId", "conversationId", "status");
+    CREATE INDEX IF NOT EXISTS "Agreement_tenantId_contactId_status_idx" ON "Agreement"("tenantId", "contactId", "status");
+    CREATE INDEX IF NOT EXISTS "Agreement_tenantId_type_status_idx" ON "Agreement"("tenantId", "type", "status");
+    CREATE UNIQUE INDEX IF NOT EXISTS "Task_agreementId_key" ON "Task"("agreementId");
   `);
 }
 

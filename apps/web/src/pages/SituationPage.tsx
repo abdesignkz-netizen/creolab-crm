@@ -450,7 +450,30 @@ export function SituationPage() {
               ))}
             </div>
           ) : null}
-          {today.nearest?.length === 0 ? <p className="empty">На сегодня задач нет</p> : null}
+          {data.agreements?.byType?.length ? (
+            <div className="sit-type-row">
+              {data.agreements.byType.map((t: any) => (
+                <span key={t.type} className="sit-type-chip">
+                  {t.label} · {t.count}
+                </span>
+              ))}
+            </div>
+          ) : null}
+          {(data.agreements?.today || []).map((agr: any) => (
+            <Link className="sit-list-row" key={agr.id} to={agr.href || "/tasks"}>
+              <div>
+                <b>{agr.title}</b>
+                <div className="muted">
+                  {[agr.contactName, agr.inquiryTitle, agr.dealStage].filter(Boolean).join(" · ")}
+                </div>
+                {agr.attention ? <div className="warn-text">{agr.attention}</div> : null}
+              </div>
+              <span className="muted">{agr.scheduledAt ? timeShort(agr.scheduledAt) : ""}</span>
+            </Link>
+          ))}
+          {today.nearest?.length === 0 && !(data.agreements?.today || []).length ? (
+            <p className="empty">На сегодня задач нет</p>
+          ) : null}
           {today.nearest?.map((task: any) => (
             <Link className="sit-list-row" key={task.id} to="/tasks">
               <div>

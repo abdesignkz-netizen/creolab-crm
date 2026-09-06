@@ -68,6 +68,7 @@ model Tenant {
   executionConfirmations ExecutionConfirmation[]
   campaigns            Campaign[]
   campaignRecipients   CampaignRecipient[]
+  agreements           Agreement[]
 
   @@unique([id])
 }
@@ -293,6 +294,7 @@ model Contact {
   notes       Note[]
   tags        ContactTag[]
   activities  Activity[]
+  agreements  Agreement[]
 
   @@unique([tenantId, id])
   @@index([tenantId, lastSeenAt])
@@ -432,6 +434,7 @@ model Inquiry {
   tasks              Task[]
   incompleteFrom     IncompleteIntake?
   statusHistory      InquiryStatusHistory[]
+  agreements         Agreement[]
 
   @@unique([tenantId, id])
   @@unique([tenantId, dealId])
@@ -496,6 +499,10 @@ model Conversation {
   needsAttention     Boolean  @default(false)
   attentionReason    String?
   sellerLeadId       String?
+  waitingFor         String   @default("NONE")
+  contextSummary     String?
+  lastContextAnalyzedAt DateTime?
+  lastAnalyzedMessageId String?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
   tenant             Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -508,10 +515,12 @@ model Conversation {
   incompleteIntakes  IncompleteIntake[]
   dealLinks          DealConversation[]
   outboundOps        OutboundOperation[]
+  agreements         Agreement[]
 
   @@unique([tenantId, id])
   @@index([tenantId, updatedAt])
   @@index([tenantId, mode, status])
+  @@index([tenantId, waitingFor])
 }
 
 model ConversationReadState {
@@ -648,6 +657,7 @@ model Deal {
   tasks                Task[]
   stageHistory         DealStageHistory[]
   activities           Activity[]
+  agreements           Agreement[]
 
   @@unique([tenantId, id])
   @@index([tenantId, outcome, stageId])
@@ -715,6 +725,7 @@ model Task {
   conversationId     String?
   dealId             String?
   incompleteIntakeId String?
+  agreementId        String?   @unique
   ownerMembershipId  String?
   dueAt              DateTime?
   priority           String    @default("normal")
@@ -724,6 +735,11 @@ model Task {
   targetType         String    @default("none")
   parentTaskId       String?
   segmentSnapshotJson Json     @default("{}")
+  contextSnapshotJson Json     @default("{}")
+  sourceMessageIdsJson Json    @default("[]")
+  purpose            String?
+  briefingText       String?
+  preparationHintsJson Json    @default("[]")
   executionStatus    String    @default("none")
   messageDraft       String?
   resultCode         String?
@@ -742,6 +758,7 @@ model Task {
   contact            Contact?  @relation(fields: [tenantId, contactId], references: [tenantId, id])
   inquiry            Inquiry?  @relation(fields: [tenantId, inquiryId], references: [tenantId, id])
   deal               Deal?     @relation(fields: [tenantId, dealId], references: [tenantId, id])
+  agreement          Agreement? @relation(fields: [agreementId], references: [id])
   owner              Membership? @relation("TaskOwner", fields: [tenantId, ownerMembershipId], references: [tenantId, id])
   parentTask         Task?     @relation("TaskChildren", fields: [parentTaskId], references: [id])
   childTasks         Task[]    @relation("TaskChildren")
@@ -753,6 +770,55 @@ model Task {
   @@index([tenantId, parentTaskId])
   @@index([tenantId, targetType, status])
   @@index([tenantId, executionStatus])
+}
+
+model Agreement {
+  id                       String    @id @default(uuid())
+  tenantId                 String
+  contactId                String?
+  inquiryId                String?
+  dealId                   String?
+  conversationId           String?
+  type                     String
+  title                    String
+  summary                  String?
+  purpose                  String?
+  status                   String    @default("DETECTED")
+  scheduledAt              DateTime?
+  scheduledEndAt           DateTime?
+  previousScheduledAt      DateTime?
+  responsibleMembershipId  String?
+  locationName             String?
+  address                  String?
+  meetingProvider          String?
+  meetingUrl               String?
+  meetingId                String?
+  meetingPassword          String?
+  phone                    String?
+  sourceMessageIdsJson     Json      @default("[]")
+  contextSnapshotJson      Json      @default("{}")
+  remindersJson            Json      @default("[]")
+  confidence               String    @default("MEDIUM")
+  detectedBy               String    @default("context_engine")
+  clarificationNeeded      String?
+  dedupeKey                String?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+  completedAt              DateTime?
+  cancelledAt              DateTime?
+  tenant                   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contact                  Contact?  @relation(fields: [tenantId, contactId], references: [tenantId, id])
+  inquiry                  Inquiry?  @relation(fields: [tenantId, inquiryId], references: [tenantId, id])
+  deal                     Deal?     @relation(fields: [tenantId, dealId], references: [tenantId, id])
+  conversation             Conversation? @relation(fields: [tenantId, conversationId], references: [tenantId, id])
+  task                     Task?
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, dedupeKey])
+  @@index([tenantId, status, scheduledAt])
+  @@index([tenantId, conversationId, status])
+  @@index([tenantId, contactId, status])
+  @@index([tenantId, type, status])
 }
 
 model ExecutionConfirmation {

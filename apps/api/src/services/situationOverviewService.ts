@@ -16,6 +16,72 @@ export type PeriodPreset =
   | "all"
   | "custom";
 
+function mapAgreementSit(a: {
+  id: string;
+  type: string;
+  title: string;
+  status: string;
+  scheduledAt: Date | null;
+  clarificationNeeded: string | null;
+  meetingUrl: string | null;
+  locationName: string | null;
+  address: string | null;
+  contact: { id: string; name: string | null; firstName: string | null; lastName: string | null } | null;
+  inquiry: { id: string; subject: string | null; service: string | null } | null;
+  deal: { id: string; title: string; stage: { name: string } | null } | null;
+  task: { id: string; status: string } | null;
+}) {
+  const contactName =
+    a.contact?.name || [a.contact?.firstName, a.contact?.lastName].filter(Boolean).join(" ") || null;
+  return {
+    id: a.id,
+    type: a.type,
+    title: a.title,
+    status: a.status,
+    scheduledAt: a.scheduledAt?.toISOString() || null,
+    clarificationNeeded: a.clarificationNeeded,
+    meetingUrl: a.meetingUrl,
+    locationName: a.locationName,
+    address: a.address,
+    contactName,
+    inquiryTitle: a.inquiry?.subject || a.inquiry?.service || null,
+    dealTitle: a.deal?.title || null,
+    dealStage: a.deal?.stage?.name || null,
+    taskId: a.task?.id || null,
+    href: a.task?.id ? "/tasks" : a.contact?.id ? `/contacts/${a.contact.id}` : "/today",
+    attention:
+      a.clarificationNeeded ||
+      (a.type === "ONLINE_MEETING" && !a.meetingUrl
+        ? "Ссылка на встречу не добавлена"
+        : a.type === "OFFLINE_MEETING" && !a.address && !a.locationName
+          ? "Не указано место"
+          : null),
+  };
+}
+
+function summarizeAgreementTypes(
+  items: Array<{ type: string }>,
+): Array<{ type: string; label: string; count: number }> {
+  const labels: Record<string, string> = {
+    CALL: "Телефонные созвоны",
+    ONLINE_MEETING: "Онлайн-встречи",
+    OFFLINE_MEETING: "Личные встречи",
+    FOLLOW_UP: "Follow-up",
+    SEND_PROPOSAL: "Отправить КП",
+    SEND_CONTRACT: "Отправить договор",
+    PAYMENT_PROMISE: "Проверить оплату",
+  };
+  const map = new Map<string, number>();
+  for (const item of items) {
+    map.set(item.type, (map.get(item.type) || 0) + 1);
+  }
+  return [...map.entries()].map(([type, count]) => ({
+    type,
+    label: labels[type] || type,
+    count,
+  }));
+}
+
 const BUSINESS_ACTIVITY_TYPES = [
   "inquiry.created",
   "inquiry.converted",
@@ -25,6 +91,10 @@ const BUSINESS_ACTIVITY_TYPES = [
   "deal.created",
   "payment.confirm",
   "task.completed",
+  "task.auto_created",
+  "agreement.upserted",
+  "agreement.rescheduled",
+  "agreement.cancelled",
   "conversation.escalated",
 ];
 
@@ -340,6 +410,8 @@ export async function getSituationOverview(
 
   const todayParts = zonedYmd(now, timeZone);
   const startToday = zonedLocalToUtc(timeZone, todayParts.year, todayParts.month, todayParts.day);
+  const tomorrowParts = addDaysYmd(todayParts, 1);
+  const startTomorrow = zonedLocalToUtc(timeZone, tomorrowParts.year, tomorrowParts.month, tomorrowParts.day);
 
   const [
     board,
@@ -518,6 +590,21 @@ export async function getSituationOverview(
     ]),
   ]);
 
+  const activeAgreements = await prisma.agreement.findMany({
+    where: {
+      tenantId: tid,
+      status: { in: ["DETECTED", "NEEDS_CLARIFICATION", "CONFIRMED", "SCHEDULED", "RESCHEDULED"] },
+    },
+    include: {
+      contact: { select: { id: true, name: true, firstName: true, lastName: true } },
+      inquiry: { select: { id: true, subject: true, service: true } },
+      deal: { include: { stage: true } },
+      task: { select: { id: true, status: true } },
+    },
+    orderBy: [{ scheduledAt: "asc" }, { updatedAt: "desc" }],
+    take: 100,
+  });
+
   const inquiriesCount = periodInquiries.length;
 
   let wonAmount = 0;
@@ -652,20 +739,40 @@ export async function getSituationOverview(
     typeCounts.set(bucket, (typeCounts.get(bucket) || 0) + 1);
   }
 
-  const attentionItems = board.items.slice(0, onlyImportant ? 12 : 15).map((item) => ({
-    ...item,
-    group: attentionGroup(item.kind),
-    href:
-      item.kind === "needs_phone"
-        ? "/inquiries?filter=needs_clarification"
-        : item.kind.startsWith("inquiry_") || item.kind === "missing_next_action"
-          ? `/requests/${item.entityId}`
-          : item.kind === "contact_needs_reply"
-            ? `/contacts/${item.entityId}`
-            : item.kind.startsWith("conversation_")
-              ? `/conversations/${item.entityId}`
-              : "/tasks",
-  }));
+  const attentionItems = [
+    ...board.items.slice(0, onlyImportant ? 12 : 15).map((item) => ({
+      ...item,
+      group: attentionGroup(item.kind),
+      href:
+        item.kind === "needs_phone"
+          ? "/inquiries?filter=needs_clarification"
+          : item.kind.startsWith("inquiry_") || item.kind === "missing_next_action"
+            ? `/requests/${item.entityId}`
+            : item.kind === "contact_needs_reply"
+              ? `/contacts/${item.entityId}`
+              : item.kind.startsWith("conversation_")
+                ? `/conversations/${item.entityId}`
+                : "/tasks",
+    })),
+    ...activeAgreements
+      .filter((a) => a.status === "NEEDS_CLARIFICATION" || a.clarificationNeeded || (a.type === "ONLINE_MEETING" && !a.meetingUrl))
+      .slice(0, 5)
+      .map((a) => {
+        const mapped = mapAgreementSit(a);
+        return {
+          id: `agreement:${a.id}`,
+          kind: "agreement_attention",
+          title: mapped.attention || a.title,
+          subtitle: a.title,
+          entityId: a.id,
+          entityType: "agreement",
+          group: "needs_clarification",
+          href: mapped.href,
+          urgency: "high",
+          ownerMembershipId: null,
+        };
+      }),
+  ];
 
   const attentionSummary = {
     needsReply: board.items.filter((i) => i.kind === "contact_needs_reply" || i.kind === "conversation_human").length,
@@ -675,7 +782,9 @@ export async function getSituationOverview(
     needsHuman: board.metrics.needsHuman,
     noContact: board.metrics.blocked,
     unassigned: board.items.filter((i) => !i.ownerMembershipId).length,
-    needsClarification: board.items.filter((i) => i.kind === "needs_phone" || i.kind === "inquiry_new").length,
+    needsClarification:
+      board.items.filter((i) => i.kind === "needs_phone" || i.kind === "inquiry_new").length +
+      activeAgreements.filter((a) => a.status === "NEEDS_CLARIFICATION" || a.clarificationNeeded).length,
     proposalWithoutReply,
   };
 
@@ -823,6 +932,18 @@ export async function getSituationOverview(
           contactName: t.contact?.name || null,
           href: "/tasks",
         })),
+    },
+    agreements: {
+      today: activeAgreements.filter((a) => a.scheduledAt && a.scheduledAt >= startToday && a.scheduledAt < startTomorrow).map(mapAgreementSit),
+      upcoming: activeAgreements
+        .filter((a) => a.scheduledAt && a.scheduledAt >= startTomorrow)
+        .slice(0, 8)
+        .map(mapAgreementSit),
+      needsClarification: activeAgreements.filter((a) => a.status === "NEEDS_CLARIFICATION" || a.clarificationNeeded).map(mapAgreementSit),
+      byType: summarizeAgreementTypes(activeAgreements.filter((a) => a.scheduledAt && a.scheduledAt >= startToday && a.scheduledAt < startTomorrow)),
+      overdue: activeAgreements
+        .filter((a) => a.scheduledAt && a.scheduledAt < now && ["CONFIRMED", "SCHEDULED", "RESCHEDULED"].includes(a.status))
+        .map(mapAgreementSit),
     },
     importantDeals: importantDeals.slice(0, 8),
     recentInquiries: recentInquiries.map((inq) => ({

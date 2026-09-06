@@ -267,6 +267,9 @@ export function ConversationsPage() {
         <b>Сейчас</b>
         <div>{workspace.control.situationLabel}</div>
         <div className="muted">{workspace.control.waitLabel}</div>
+        {workspace.conversation.waitingForLabel ? (
+          <div className="muted">{workspace.conversation.waitingForLabel}</div>
+        ) : null}
         {workspace.deal ? (
           <div className="muted">
             Сделка: {workspace.deal.title}
@@ -282,7 +285,56 @@ export function ConversationsPage() {
           <div className="muted">Нет следующего действия</div>
         )}
         {workspace.control.overdue ? <div className="warn-text">Просрочено: {workspace.control.overdueTitle}</div> : null}
+        <button
+          type="button"
+          className="btn secondary"
+          style={{ marginTop: 8 }}
+          disabled={busy}
+          onClick={() => {
+            setBusy(true);
+            api
+              .analyzeConversationContext(workspace.conversation.id)
+              .then(() => loadWorkspace(workspace.conversation.id))
+              .then(loadList)
+              .catch((err: Error) => setError(err.message))
+              .finally(() => setBusy(false));
+          }}
+        >
+          Понять контекст
+        </button>
       </div>
+
+      {(workspace.agreements || []).length ? (
+        <div className="panel soft">
+          <b>Договорённости</b>
+          {workspace.agreements.map((agr: any) => (
+            <div key={agr.id} style={{ marginTop: 8 }}>
+              <div>
+                <b>{agr.typeLabel}</b>
+                <span className="muted"> · {agr.confidenceUserLabel || agr.statusLabel}</span>
+              </div>
+              <div className="muted">{agr.scheduledLabel || agr.title}</div>
+              {agr.meetingProvider ? <div className="muted">{agr.meetingProvider}</div> : null}
+              {agr.meetingUrl ? (
+                <a href={agr.meetingUrl} target="_blank" rel="noreferrer">
+                  Открыть встречу
+                </a>
+              ) : agr.type === "ONLINE_MEETING" ? (
+                <div className="warn-text">Ссылка на встречу не добавлена</div>
+              ) : null}
+              {agr.locationName || agr.address ? (
+                <div className="muted">
+                  {[agr.locationName, agr.address].filter(Boolean).join(" · ")}
+                </div>
+              ) : null}
+              {agr.clarificationNeeded ? <div className="warn-text">{agr.clarificationNeeded}</div> : null}
+              {agr.taskId ? (
+                <Link to="/tasks">Открыть задачу</Link>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       <div className="panel soft">
         <b>Кратко</b>

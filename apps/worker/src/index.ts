@@ -1,5 +1,7 @@
 import dotenv from "dotenv";
 import { createPrismaClient } from "@creolab/db";
+import { createStaffNotification, deliverPendingPush } from "../../api/src/services/notificationService.ts";
+import { AGREEMENT_TYPE_LABEL, type AgreementType } from "../../api/src/services/conversationContextTypes.ts";
 
 dotenv.config();
 
@@ -25,6 +27,91 @@ async function processOutbox() {
     });
   }
   return due.length;
+}
+
+function reminderLabel(offsetMinutes: number, type: string, title: string, extras: string[]) {
+  const when =
+    offsetMinutes >= 1440
+      ? `Через ${Math.round(offsetMinutes / 1440)} дн.`
+      : offsetMinutes >= 60
+        ? `Через ${Math.round(offsetMinutes / 60)} ч.`
+        : `Через ${offsetMinutes} мин.`;
+  const typeLabel = AGREEMENT_TYPE_LABEL[type as AgreementType] || type;
+  return {
+    title: `${when} ${typeLabel.toLowerCase()}`,
+    body: [title, ...extras].filter(Boolean).join(" · "),
+  };
+}
+
+async function processAgreementReminder(item: {
+  id: string;
+  tenantId: string;
+  parentId: string;
+  type: string;
+  payloadJson: unknown;
+}) {
+  const payload = (item.payloadJson || {}) as {
+    offsetMinutes?: number;
+    channel?: string;
+    agreementId?: string;
+  };
+  const agreementId = payload.agreementId || item.parentId;
+  const agreement = await prisma.agreement.findFirst({
+    where: { id: agreementId, tenantId: item.tenantId },
+    include: {
+      contact: true,
+      task: true,
+    },
+  });
+  if (!agreement || ["CANCELLED", "COMPLETED", "MISSED"].includes(agreement.status)) {
+    await prisma.scheduledAction.update({
+      where: { id: item.id },
+      data: { state: "canceled", cancelReason: "agreement_inactive" },
+    });
+    return;
+  }
+
+  const extras: string[] = [];
+  if (agreement.type === "ONLINE_MEETING") {
+    extras.push(agreement.meetingUrl ? "Открыть ссылку" : "Ссылка не добавлена");
+  }
+  if (agreement.type === "OFFLINE_MEETING") {
+    extras.push([agreement.locationName, agreement.address].filter(Boolean).join(" · ") || "Адрес не указан");
+  }
+  if (agreement.contact?.name) extras.push(agreement.contact.name);
+
+  const offsetMinutes = payload.offsetMinutes || Number(String(item.type).replace("agreement_reminder_", "")) || 60;
+  const copy = reminderLabel(offsetMinutes, agreement.type, agreement.title, extras);
+
+  const membershipId =
+    agreement.responsibleMembershipId ||
+    agreement.task?.ownerMembershipId ||
+    (
+      await prisma.membership.findFirst({
+        where: { tenantId: item.tenantId, active: true },
+        orderBy: { createdAt: "asc" },
+      })
+    )?.id ||
+    null;
+
+  const notification = await createStaffNotification(prisma, {
+    tenantId: item.tenantId,
+    membershipId,
+    type: "agreement.reminder",
+    entityType: "agreement",
+    entityId: agreement.id,
+    title: copy.title,
+    body: copy.body,
+    priority: offsetMinutes <= 60 ? "high" : "normal",
+    episodeKey: `agreement.reminder:${agreement.id}:${offsetMinutes}`,
+    channels: ["in_app", "web_push"],
+  });
+
+  if (notification) {
+    await deliverPendingPush(prisma, notification.id).catch((error) => console.error("push", error));
+  }
+
+  await prisma.scheduledAction.update({ where: { id: item.id }, data: { state: "done" } });
 }
 
 async function processScheduled() {
@@ -54,6 +141,16 @@ async function processScheduled() {
       await prisma.scheduledAction.update({ where: { id: item.id }, data: { state: "done" } });
       continue;
     }
+    if (item.type.startsWith("agreement_reminder")) {
+      await processAgreementReminder(item).catch(async (error) => {
+        console.error("agreement reminder", error);
+        await prisma.scheduledAction.update({
+          where: { id: item.id },
+          data: { state: "failed", cancelReason: error instanceof Error ? error.message : "error" },
+        });
+      });
+      continue;
+    }
     await prisma.scheduledAction.update({
       where: { id: item.id },
       data: { state: "done" },
@@ -68,7 +165,7 @@ async function resumeRunningCampaigns() {
   }
 }
 
-console.log("CRM worker started. Outbox + scheduled + campaign queue.");
+console.log("CRM worker started. Outbox + scheduled + campaign queue + agreement reminders.");
 
 setInterval(() => {
   processOutbox().catch((error) => console.error("outbox", error));

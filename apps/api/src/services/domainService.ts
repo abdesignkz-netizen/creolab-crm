@@ -3,6 +3,7 @@ import { crmModeToSeller } from "@creolab/contracts";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { can } from "../lib/types.ts";
+import { INQUIRY_STATUS_LABEL } from "./contactLabels.ts";
 import { resolveSellerBridge } from "./sellerLink.ts";
 import { resolveContactLinks } from "./segmentService.ts";
 import { getSituation } from "./situationService.ts";
@@ -93,14 +94,54 @@ function taskContextLabel(item: {
   return "Без привязки";
 }
 
+const TASK_STATUS_LABEL: Record<string, string> = {
+  open: "Открыта",
+  waiting: "В ожидании",
+  done: "Сделано",
+  canceled: "Отменена",
+};
+
+const TASK_TYPE_LABEL: Record<string, string> = {
+  call: "Позвонить",
+  message: "Написать",
+  follow_up: "Напомнить",
+  meeting: "Встреча",
+  proposal: "Отправить КП",
+  send_documents: "Отправить документы",
+  prepare_estimate: "Подготовить расчёт",
+  wait_client: "Ждать клиента",
+  payment: "Проверить оплату",
+  process_inquiry: "Обработать обращение",
+  other: "Другое",
+};
+
+function contactDisplayName(contact?: {
+  name?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+} | null) {
+  if (!contact) return null;
+  return [contact.firstName, contact.lastName].filter(Boolean).join(" ").trim() || contact.name || null;
+}
+
+function primaryPhoneFromMethods(
+  methods?: Array<{ type: string; rawValue: string; normalizedValue: string; primary: boolean }> | null,
+) {
+  if (!methods?.length) return null;
+  const phones = methods.filter((m) => m.type === "phone");
+  const primary = phones.find((m) => m.primary) || phones[0];
+  return primary?.rawValue || primary?.normalizedValue || null;
+}
+
 export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
   const tid = tenantId(auth);
+  const now = new Date();
   const items = await prisma.task.findMany({
     where: { tenantId: tid, parentTaskId: null },
     include: {
-      inquiry: true,
-      deal: true,
-      contact: true,
+      inquiry: { include: { contact: { include: { methods: true } } } },
+      deal: { include: { stage: true, contact: { include: { methods: true } } } },
+      contact: { include: { methods: true } },
       owner: { include: { user: true } },
       childTasks: {
         include: { contact: true },
@@ -114,7 +155,7 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
   const conversations = conversationIds.length
     ? await prisma.conversation.findMany({
         where: { tenantId: tid, id: { in: conversationIds } },
-        include: { contact: true },
+        include: { contact: { include: { methods: true } } },
       })
     : [];
   const byId = new Map(conversations.map((item) => [item.id, item]));
@@ -122,10 +163,52 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
     const conversation = item.conversationId ? byId.get(item.conversationId) || null : null;
     const childTotal = item.childTasks.length;
     const childDone = item.childTasks.filter((child) => child.status === "done").length;
+    const resolvedContact = item.contact || item.inquiry?.contact || item.deal?.contact || conversation?.contact || null;
+    const contactName = contactDisplayName(resolvedContact);
+    const phone =
+      primaryPhoneFromMethods(resolvedContact?.methods) ||
+      item.inquiry?.phoneRaw ||
+      item.inquiry?.phoneNormalized ||
+      null;
+    const overdue =
+      Boolean(item.dueAt && item.dueAt < now && item.status !== "done" && item.status !== "canceled");
+    const aboutParts: string[] = [];
+    if (item.inquiry) {
+      aboutParts.push(
+        `Заявка: ${item.inquiry.subject || item.inquiry.service || item.inquiry.companyName || "без темы"}` +
+          (item.inquiry.status ? ` (${INQUIRY_STATUS_LABEL[item.inquiry.status] || item.inquiry.status})` : ""),
+      );
+      if (item.inquiry.city) aboutParts.push(`Город: ${item.inquiry.city}`);
+    }
+    if (item.deal) {
+      aboutParts.push(
+        `Сделка: ${item.deal.title}` + (item.deal.stage?.name ? ` · ${item.deal.stage.name}` : ""),
+      );
+    }
+    if (conversation && !item.inquiry && !item.deal) {
+      aboutParts.push("Диалог WhatsApp");
+    }
+    if (item.targetType === "group") {
+      aboutParts.push(`Группа · ${childDone} из ${childTotal}`);
+    }
+    if (!aboutParts.length && !contactName) aboutParts.push("Без привязки к клиенту");
+
     return {
       ...item,
+      contact: resolvedContact || item.contact,
       conversation,
       contextLabel: taskContextLabel({ ...item, conversation }),
+      statusLabel: TASK_STATUS_LABEL[item.status] || item.status,
+      typeLabel: TASK_TYPE_LABEL[item.type] || item.type,
+      assigneeName: item.owner?.user?.name || item.owner?.user?.email || null,
+      whoName: contactName,
+      whoPhone: phone,
+      aboutLines: aboutParts,
+      descriptionPreview: item.description ? String(item.description).slice(0, 180) : null,
+      messagePreview: item.messageDraft ? String(item.messageDraft).slice(0, 180) : null,
+      purpose: item.purpose || null,
+      briefingText: item.briefingText || null,
+      overdue,
       progress:
         item.targetType === "group"
           ? { done: childDone, total: childTotal, label: `${childDone} из ${childTotal}` }
@@ -134,6 +217,7 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
         id: child.id,
         title: child.title,
         status: child.status,
+        statusLabel: TASK_STATUS_LABEL[child.status] || child.status,
         contactId: child.contactId,
         contactName:
           [child.contact?.firstName, child.contact?.lastName].filter(Boolean).join(" ").trim() ||
@@ -153,9 +237,10 @@ export async function getTask(prisma: PrismaClient, auth: AuthContext, id: strin
     where: { id, tenantId: tid },
     include: {
       inquiry: true,
-      deal: true,
+      deal: { include: { stage: true } },
       contact: { include: { methods: true } },
       owner: { include: { user: true } },
+      agreement: true,
       childTasks: { include: { contact: true }, orderBy: { createdAt: "asc" } },
     },
   });
@@ -164,10 +249,104 @@ export async function getTask(prisma: PrismaClient, auth: AuthContext, id: strin
     where: { tenantId: tid, parentType: "task", parentId: id },
     orderBy: { createdAt: "asc" },
   });
+
+  const sourceIds = Array.isArray(item.sourceMessageIdsJson)
+    ? (item.sourceMessageIdsJson as string[])
+    : [];
+  let sourceMessages: Array<{
+    id: string;
+    text: string | null;
+    senderKind: string;
+    direction: string;
+    createdAt: Date;
+  }> = [];
+  if (sourceIds.length) {
+    sourceMessages = await prisma.message.findMany({
+      where: { tenantId: tid, id: { in: sourceIds } },
+      orderBy: { createdAt: "asc" },
+    });
+  } else if (item.conversationId) {
+    sourceMessages = await prisma.message.findMany({
+      where: { tenantId: tid, conversationId: item.conversationId },
+      orderBy: { createdAt: "desc" },
+      take: 8,
+    });
+    sourceMessages.reverse();
+  }
+
+  const phone =
+    item.contact?.methods?.find((m) => m.type === "phone" && m.primary) ||
+    item.contact?.methods?.find((m) => m.type === "phone") ||
+    null;
+
   return {
     ...item,
     attachments,
     isSendable: ["proposal", "message", "send_documents", "prepare_estimate", "follow_up"].includes(item.type),
+    briefing: {
+      purpose: item.purpose,
+      briefingText: item.briefingText,
+      preparationHints: Array.isArray(item.preparationHintsJson) ? item.preparationHintsJson : [],
+      facts: (item.contextSnapshotJson as { facts?: Record<string, unknown> } | null)?.facts || {},
+      client: item.contact
+        ? {
+            id: item.contact.id,
+            name:
+              [item.contact.firstName, item.contact.lastName].filter(Boolean).join(" ").trim() ||
+              item.contact.name ||
+              "Клиент",
+            phone: phone?.rawValue || null,
+            companyName: item.contact.companyName,
+          }
+        : null,
+      inquiry: item.inquiry
+        ? {
+            id: item.inquiry.id,
+            title: item.inquiry.subject || item.inquiry.service || "Заявка",
+            status: item.inquiry.status,
+          }
+        : null,
+      deal: item.deal
+        ? {
+            id: item.deal.id,
+            title: item.deal.title,
+            stage: item.deal.stage?.name || null,
+            amountMinor: item.deal.offerAmountMinor,
+            currency: item.deal.currency,
+          }
+        : null,
+      agreement: item.agreement
+        ? {
+            id: item.agreement.id,
+            type: item.agreement.type,
+            status: item.agreement.status,
+            scheduledAt: item.agreement.scheduledAt,
+            meetingUrl: item.agreement.meetingUrl,
+            meetingProvider: item.agreement.meetingProvider,
+            locationName: item.agreement.locationName,
+            address: item.agreement.address,
+            clarificationNeeded: item.agreement.clarificationNeeded,
+          }
+        : null,
+      sourceMessages: sourceMessages.map((m) => ({
+        id: m.id,
+        text: m.text,
+        actorLabel:
+          m.senderKind === "client" || m.direction === "inbound"
+            ? "Клиент"
+            : m.senderKind === "ai"
+              ? "AI Manager"
+              : "Менеджер",
+        createdAt: m.createdAt,
+      })),
+      conversationId: item.conversationId,
+      basisLabel:
+        item.source === "context_engine"
+          ? "Создано автоматически из договорённости в WhatsApp"
+          : item.source === "ai_command"
+            ? "Создано из команды"
+            : null,
+    },
   };
 }
 
