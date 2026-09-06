@@ -254,30 +254,39 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
                 {currentBrowserPermission() === "denied"
                   ? "Разрешение запрещено в браузере. Откройте настройки сайта и разрешите уведомления, затем нажмите «Включить»."
                   : isLikelyIosSafari() && !isStandaloneDisplayMode()
-                    ? "На iPhone: Поделиться → На экран «Домой», откройте CRM с иконки, затем включите уведомления."
+                    ? "На iPhone уведомления работают только с иконки: Поделиться → На экран «Домой», откройте CRM с иконки, затем Настройки → Разрешить."
                     : "Включите уведомления — новые заявки и важные события придут даже при свёрнутом окне."}
               </span>
             </div>
             <div className="actions">
-              <button
-                type="button"
-                className="btn"
-                onClick={() => {
-                  void (async () => {
-                    const result = await requestBrowserNotificationPermission();
-                    if (result === "granted") {
-                      setNotifyBanner(false);
-                      return;
-                    }
-                    if (result === "denied" || result === "unsupported") {
-                      // Keep banner so user sees guidance; don't mark dismissed.
-                      return;
-                    }
-                  })();
-                }}
-              >
-                Включить
-              </button>
+              {isLikelyIosSafari() && !isStandaloneDisplayMode() ? (
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => {
+                    dismissNotificationBanner();
+                    setNotifyBanner(false);
+                    navigate("/settings");
+                  }}
+                >
+                  Как включить
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => {
+                    void (async () => {
+                      const result = await requestBrowserNotificationPermission();
+                      if (result === "granted") {
+                        setNotifyBanner(false);
+                      }
+                    })();
+                  }}
+                >
+                  Включить
+                </button>
+              )}
               <button
                 type="button"
                 className="btn secondary"
@@ -421,7 +430,8 @@ function Settings() {
   const [permission, setPermission] = useState(currentBrowserPermission());
   const [enabled, setEnabled] = useState(getBrowserNotificationPreference());
   const [noticeError, setNoticeError] = useState("");
-  const [notifyHint, setNotifyHint] = useState("");
+  const [notifyHint, setNotifyHint] = useState<{ tone: "ok" | "warn" | "error"; text: string } | null>(null);
+  const [permitBusy, setPermitBusy] = useState(false);
   const [testBusy, setTestBusy] = useState(false);
 
   async function loadNotices() {
@@ -444,16 +454,24 @@ function Settings() {
     return <StateView state={state} onRetry={() => location.reload()} empty="Нет настроек" />;
   }
 
+  const iosNeedsHomeScreen = isLikelyIosSafari() && !isStandaloneDisplayMode();
+  const canRequestPermission = permission === "default" || permission === "granted";
+  const canTest = permission === "granted";
+
   const permissionLabel =
     permission === "granted"
       ? "разрешены"
       : permission === "denied"
         ? "запрещены в браузере"
-        : permission === "unsupported"
-          ? "не поддерживаются этим браузером"
-          : "ещё не запрошены";
+        : iosNeedsHomeScreen
+          ? "нужен экран «Домой» (сейчас открыто в Safari)"
+          : permission === "unsupported"
+            ? "не поддерживаются этим браузером"
+            : "ещё не запрошены";
 
-  const iosHint = isLikelyIosSafari() && !isStandaloneDisplayMode();
+  function setFeedback(tone: "ok" | "warn" | "error", text: string) {
+    setNotifyHint({ tone, text });
+  }
 
   return (
     <section>
@@ -471,47 +489,84 @@ function Settings() {
           Новые заявки, обращения без телефона и диалоги, где нужен человек. Работают при свёрнутом окне CRM, пока
           браузер запущен.
         </p>
-        {iosHint ? (
-          <p className="banner warn" style={{ marginTop: 8 }}>
-            На iPhone/iPad откройте сайт через «Поделиться → На экран Домой», затем снова нажмите «Разрешить уведомления».
-          </p>
+
+        {iosNeedsHomeScreen ? (
+          <div className="notify-steps">
+            <b>На iPhone уведомления работают только с иконки</b>
+            <ol>
+              <li>Нажмите кнопку «Поделиться» внизу Safari</li>
+              <li>Выберите «На экран „Домой“» → «Добавить»</li>
+              <li>Закройте эту вкладку и откройте CRM с новой иконки</li>
+              <li>Внутри приложения нажмите «Разрешить уведомления»</li>
+            </ol>
+          </div>
         ) : null}
+
         <p>
           Статус: <b>{permissionLabel}</b>
           {enabled ? " · включены в кабинете" : " · выключены в кабинете"}
         </p>
-        {notifyHint ? <p className={permission === "denied" ? "error" : "muted"}>{notifyHint}</p> : null}
+
+        {notifyHint ? <div className={`notify-feedback ${notifyHint.tone}`}>{notifyHint.text}</div> : null}
+
         <div className="actions notify-actions">
-          <button
-            type="button"
-            className="btn"
-            onClick={() => {
-              setNotifyHint("");
-              void (async () => {
-                const result = await requestBrowserNotificationPermission();
-                setPermission(result);
-                if (result === "granted") {
-                  setEnabled(true);
-                  setBrowserNotificationPreference(true);
-                  setNotifyHint("Уведомления включены.");
-                  return;
-                }
-                if (result === "denied") {
-                  setNotifyHint("Браузер запретил уведомления. Разрешите их в настройках сайта и обновите страницу.");
-                  return;
-                }
-                if (result === "unsupported") {
-                  setNotifyHint(
-                    iosHint
-                      ? "Добавьте CRM на экран Домой и откройте с иконки — затем повторите."
-                      : "Этот браузер не поддерживает уведомления. Откройте CRM в Chrome или Safari (HTTPS).",
+          {iosNeedsHomeScreen ? (
+            <button
+              type="button"
+              className="btn"
+              onClick={() => {
+                setPermission(currentBrowserPermission());
+                if (isStandaloneDisplayMode()) {
+                  setFeedback("ok", "Открыто с иконки — теперь нажмите «Разрешить уведомления».");
+                } else {
+                  setFeedback(
+                    "warn",
+                    "Пока открыто во вкладке Safari. Добавьте на экран «Домой» и зайдите с иконки — иначе iPhone не даст уведомления.",
                   );
                 }
-              })();
-            }}
-          >
-            {permission === "granted" ? "Разрешение уже есть" : "Разрешить уведомления"}
-          </button>
+              }}
+            >
+              Я открыл с иконки — проверить
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn"
+              disabled={permitBusy || permission === "granted"}
+              onClick={() => {
+                setPermitBusy(true);
+                setNotifyHint(null);
+                void (async () => {
+                  try {
+                    const result = await requestBrowserNotificationPermission();
+                    setPermission(result);
+                    if (result === "granted") {
+                      setEnabled(true);
+                      setBrowserNotificationPreference(true);
+                      setFeedback("ok", "Готово: уведомления разрешены. Можно нажать «Проверить».");
+                      return;
+                    }
+                    if (result === "denied") {
+                      setFeedback(
+                        "error",
+                        "Браузер запретил уведомления. В настройках сайта разрешите их и обновите страницу.",
+                      );
+                      return;
+                    }
+                    setFeedback(
+                      "warn",
+                      "Этот браузер не поддерживает уведомления. Откройте CRM в Chrome или Safari по HTTPS.",
+                    );
+                  } finally {
+                    setPermitBusy(false);
+                  }
+                })();
+              }}
+            >
+              {permitBusy ? "Запрашиваем…" : permission === "granted" ? "Уже разрешено ✓" : "Разрешить уведомления"}
+            </button>
+          )}
+
           <button
             type="button"
             className="btn secondary"
@@ -519,18 +574,30 @@ function Settings() {
               const next = !enabled;
               setBrowserNotificationPreference(next);
               setEnabled(next);
-              setNotifyHint(next ? "Уведомления кабинета включены." : "Уведомления кабинета выключены.");
+              setFeedback("ok", next ? "Включены в кабинете." : "Выключены в кабинете (тосты не приходят).");
             }}
           >
             {enabled ? "Выключить в кабинете" : "Включить в кабинете"}
           </button>
+
           <button
             type="button"
             className="btn secondary"
-            disabled={permission !== "granted" || testBusy}
+            disabled={testBusy}
             onClick={() => {
+              if (!canTest) {
+                setFeedback(
+                  "warn",
+                  iosNeedsHomeScreen
+                    ? "Сначала откройте CRM с экрана «Домой», затем разрешите уведомления — после этого «Проверить» отправит тест."
+                    : permission === "denied"
+                      ? "Сначала разрешите уведомления в настройках сайта браузера."
+                      : "Сначала нажмите «Разрешить уведомления» и согласитесь в диалоге браузера.",
+                );
+                return;
+              }
               setTestBusy(true);
-              setNotifyHint("");
+              setNotifyHint(null);
               void (async () => {
                 try {
                   const ok = await showBrowserNotification({
@@ -540,9 +607,10 @@ function Settings() {
                     url: "/settings",
                     force: true,
                   });
-                  setNotifyHint(
+                  setFeedback(
+                    ok ? "ok" : "error",
                     ok
-                      ? "Тест отправлен. Если не видно — проверьте Центр уведомлений / Не беспокоить."
+                      ? "Тест отправлен. Если не видно — откройте Центр уведомлений или выключите «Не беспокоить»."
                       : "Не удалось показать уведомление. Нажмите «Разрешить уведомления» ещё раз.",
                   );
                 } finally {
@@ -551,9 +619,13 @@ function Settings() {
               })();
             }}
           >
-            Проверить
+            {testBusy ? "Отправляем…" : "Проверить"}
           </button>
         </div>
+
+        {!canTest && !iosNeedsHomeScreen && canRequestPermission ? (
+          <p className="muted notify-help">«Проверить» станет доступен после разрешения уведомлений.</p>
+        ) : null}
         {permission === "denied" ? (
           <p className="error">Разрешите уведомления в настройках сайта браузера, затем обновите страницу.</p>
         ) : null}

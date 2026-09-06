@@ -352,7 +352,10 @@ fieldset.field-block legend { padding: 0 6px; font-weight: 600; }
   transition: background 0.12s ease, box-shadow 0.12s ease;
 }
 .btn:hover { background: var(--accent-strong); filter: none; }
-.btn:active { transform: none; }
+.btn:active {
+  transform: scale(0.98);
+  filter: brightness(0.92);
+}
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn.secondary {
   background: #fff;
@@ -661,6 +664,46 @@ fieldset.field-block legend { padding: 0 6px; font-weight: 600; }
   flex-wrap: wrap;
   gap: 8px;
 }
+.notify-steps {
+  margin: 10px 0 12px;
+  padding: 12px 14px;
+  background: var(--warn-soft);
+  border: 1px solid #f6e0a8;
+  border-radius: var(--radius);
+  color: #8a4b00;
+  display: grid;
+  gap: 8px;
+}
+.notify-steps ol {
+  margin: 0;
+  padding-left: 1.2em;
+  display: grid;
+  gap: 6px;
+}
+.notify-steps li { line-height: 1.35; }
+.notify-feedback {
+  margin: 8px 0 4px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  font-weight: 600;
+  line-height: 1.35;
+}
+.notify-feedback.ok {
+  background: #e6f6ef;
+  color: #0b5f45;
+  border: 1px solid #b7e4d0;
+}
+.notify-feedback.warn {
+  background: var(--warn-soft);
+  color: #8a4b00;
+  border: 1px solid #f6e0a8;
+}
+.notify-feedback.error {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border: 1px solid #f0c2bc;
+}
+.notify-help { margin-top: 8px; }
 .task-form label { display: grid; gap: 6px; margin-bottom: 10px; }
 .confirm-panel .kv { display: grid; gap: 8px; margin: 12px 0; }
 .confirm-panel .kv > div { display: grid; grid-template-columns: 120px 1fr; gap: 8px; }
