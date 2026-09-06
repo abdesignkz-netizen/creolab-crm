@@ -44,6 +44,7 @@ model Tenant {
   deals                Deal[]
   dealConversations    DealConversation[]
   dealStages           DealStage[]
+  dealStageHistories   DealStageHistory[]
   payments             PaymentRecord[]
   tasks                Task[]
   scheduledActions     ScheduledAction[]
@@ -594,49 +595,84 @@ model Attachment {
 }
 
 model DealStage {
-  id           String  @id @default(uuid())
-  tenantId     String
-  name         String
-  sortOrder    Int
-  systemKey    String
-  tenant       Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  deals        Deal[]
+  id                 String  @id @default(uuid())
+  tenantId           String
+  name               String
+  sortOrder          Int
+  systemKey          String
+  defaultProbability Int     @default(10)
+  isTerminal         Boolean @default(false)
+  tenant             Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  deals              Deal[]
 
   @@unique([tenantId, id])
+  @@unique([tenantId, systemKey])
   @@index([tenantId, sortOrder])
 }
 
 model Deal {
-  id                 String    @id @default(uuid())
-  tenantId           String
-  contactId          String
-  inquiryId          String?   @unique
-  stageId            String
-  outcome            String    @default("open")
-  title              String
-  description        String?
-  offerAmountMinor   Decimal?  @db.Decimal(18, 0)
-  currency           String    @default("KZT")
+  id                   String    @id @default(uuid())
+  tenantId             String
+  contactId            String
+  inquiryId            String?   @unique
+  stageId              String
+  outcome              String    @default("open")
+  title                String
+  description          String?
+  offerAmountMinor     Decimal?  @db.Decimal(18, 0)
+  currency             String    @default("KZT")
+  probability          Int       @default(10)
+  paymentStatus        String    @default("NOT_INVOICED")
+  fulfillmentStatus    String    @default("NOT_STARTED")
   assigneeMembershipId String?
-  nextAction         String?
-  nextActionAt       DateTime?
-  lossReason         String?
-  createdAt          DateTime  @default(now())
-  expectedCloseAt    DateTime?
-  closedAt           DateTime?
+  nextAction           String?
+  nextActionAt         DateTime?
+  lossReason           String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @default(now()) @updatedAt
+  stageEnteredAt       DateTime  @default(now())
+  expectedCloseAt      DateTime?
+  closedAt             DateTime?
+  wonAt                DateTime?
+  lostAt               DateTime?
+  wonAmountMinor       Decimal?  @db.Decimal(18, 0)
   historicalMissingPhone Boolean @default(false)
-  version            Int       @default(1)
-  tenant             Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  contact            Contact   @relation(fields: [tenantId, contactId], references: [tenantId, id])
-  stage              DealStage @relation(fields: [tenantId, stageId], references: [tenantId, id])
-  assignee           Membership? @relation("DealAssignee", fields: [tenantId, assigneeMembershipId], references: [tenantId, id])
-  inquiry            Inquiry?  @relation("InquiryDeal")
-  conversations      DealConversation[]
-  payments           PaymentRecord[]
-  tasks              Task[]
+  version              Int       @default(1)
+  tenant               Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contact              Contact   @relation(fields: [tenantId, contactId], references: [tenantId, id])
+  stage                DealStage @relation(fields: [tenantId, stageId], references: [tenantId, id])
+  assignee             Membership? @relation("DealAssignee", fields: [tenantId, assigneeMembershipId], references: [tenantId, id])
+  inquiry              Inquiry?  @relation("InquiryDeal")
+  conversations        DealConversation[]
+  payments             PaymentRecord[]
+  tasks                Task[]
+  stageHistory         DealStageHistory[]
+  activities           Activity[]
 
   @@unique([tenantId, id])
   @@index([tenantId, outcome, stageId])
+  @@index([tenantId, paymentStatus])
+  @@index([tenantId, stageEnteredAt])
+}
+
+model DealStageHistory {
+  id            String    @id @default(uuid())
+  tenantId      String
+  dealId        String
+  fromStageId   String?
+  fromSystemKey String?
+  toStageId     String
+  toSystemKey   String
+  enteredAt     DateTime  @default(now())
+  leftAt        DateTime?
+  changedByType String    @default("system")
+  changedById   String?
+  note          String?
+  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  deal          Deal      @relation(fields: [tenantId, dealId], references: [tenantId, id], onDelete: Cascade)
+
+  @@index([tenantId, dealId, enteredAt])
+  @@index([dealId, enteredAt])
 }
 
 model DealConversation {
@@ -698,6 +734,8 @@ model Task {
   rawCommandText     String?
   parsedCommandJson  Json      @default("{}")
   commandStatus      String    @default("none")
+  recurrenceRule     String?
+  completionResult   String?
   createdAt          DateTime  @default(now())
   completedAt        DateTime?
   tenant             Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -862,6 +900,7 @@ model Activity {
   tenantId    String
   contactId   String
   inquiryId   String?
+  dealId      String?
   type        String
   title       String
   description String?
@@ -871,8 +910,10 @@ model Activity {
   createdAt   DateTime @default(now())
   tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   contact     Contact  @relation(fields: [tenantId, contactId], references: [tenantId, id], onDelete: Cascade)
+  deal        Deal?    @relation(fields: [dealId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, contactId, createdAt])
+  @@index([tenantId, dealId, createdAt])
 }
 
 model KnowledgeVersion {

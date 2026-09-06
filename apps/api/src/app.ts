@@ -26,6 +26,10 @@ import {
   parsePhoneListSchema,
   parseTaskCommandSchema,
   paymentSchema,
+  changeDealStageSchema,
+  updateDealSchema,
+  markDealWonSchema,
+  markDealLostSchema,
   segmentPreviewSchema,
   sendMessageSchema,
   snoozeSituationSchema,
@@ -121,6 +125,16 @@ import {
   updateCampaign,
 } from "./services/campaignService.ts";
 import { parseContactImportFile } from "./services/contactImportParse.ts";
+import { getSituationOverview } from "./services/situationOverviewService.ts";
+import {
+  changeDealStage,
+  getDeal,
+  getDealBoard,
+  markDealLost,
+  markDealWon,
+  setDealOnHold,
+  updateDeal,
+} from "./services/dealService.ts";
 import { getSituation, snoozeSituation } from "./services/situationService.ts";
 import {
   addSellerInstruction,
@@ -240,6 +254,10 @@ export function createApp(prisma: PrismaClient) {
     res.json(await getSituation(prisma, await requireAuth(req), req.query as Record<string, string>));
   });
 
+  app.get("/api/v1/situation/overview", async (req, res) => {
+    res.json(await getSituationOverview(prisma, await requireAuth(req), req.query as Record<string, string>));
+  });
+
   app.post("/api/v1/situation/snooze", json, async (req, res) => {
     const input = snoozeSituationSchema.parse(req.body);
     res.json(await snoozeSituation(prisma, await requireAuth(req), input));
@@ -353,7 +371,41 @@ export function createApp(prisma: PrismaClient) {
   });
 
   app.get("/api/v1/deals", async (req, res) => {
-    res.json({ items: await listDeals(prisma, await requireAuth(req)) });
+    const q = req.query as Record<string, string>;
+    if (q.view === "list") {
+      res.json({ items: await listDeals(prisma, await requireAuth(req)) });
+      return;
+    }
+    res.json(await getDealBoard(prisma, await requireAuth(req), q));
+  });
+
+  app.get("/api/v1/deals/:id", async (req, res) => {
+    res.json(await getDeal(prisma, await requireAuth(req), req.params.id));
+  });
+
+  app.patch("/api/v1/deals/:id", json, async (req, res) => {
+    const input = updateDealSchema.parse(req.body || {});
+    res.json(await updateDeal(prisma, await requireAuth(req), req.params.id, input));
+  });
+
+  app.post("/api/v1/deals/:id/stage", json, async (req, res) => {
+    const input = changeDealStageSchema.parse(req.body || {});
+    res.json(await changeDealStage(prisma, await requireAuth(req), req.params.id, input));
+  });
+
+  app.post("/api/v1/deals/:id/won", json, async (req, res) => {
+    const input = markDealWonSchema.parse(req.body || {});
+    res.json(await markDealWon(prisma, await requireAuth(req), req.params.id, input));
+  });
+
+  app.post("/api/v1/deals/:id/lost", json, async (req, res) => {
+    const input = markDealLostSchema.parse(req.body || {});
+    res.json(await markDealLost(prisma, await requireAuth(req), req.params.id, input));
+  });
+
+  app.post("/api/v1/deals/:id/hold", json, async (req, res) => {
+    const hold = Boolean(req.body?.hold ?? true);
+    res.json(await setDealOnHold(prisma, await requireAuth(req), req.params.id, hold));
   });
 
   app.post("/api/v1/deals/:id/payments", json, async (req, res) => {

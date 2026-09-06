@@ -31,6 +31,7 @@ export async function writeActivity(
     tenantId: string;
     contactId: string;
     inquiryId?: string | null;
+    dealId?: string | null;
     type: string;
     title: string;
     description?: string | null;
@@ -44,6 +45,7 @@ export async function writeActivity(
       tenantId: args.tenantId,
       contactId: args.contactId,
       inquiryId: args.inquiryId || null,
+      dealId: args.dealId || null,
       type: args.type,
       title: args.title,
       description: args.description || null,
@@ -386,11 +388,11 @@ export async function getContactOverview(prisma: PrismaClient, auth: AuthContext
         orderBy: { updatedAt: "desc" },
         take: 20,
         include: {
-          messages: { orderBy: { createdAt: "desc" }, take: 1 },
+          messages: { orderBy: { createdAt: "desc" }, take: 40 },
         },
       },
       notes: { orderBy: [{ pinned: "desc" }, { createdAt: "desc" }], take: 30 },
-      activities: { orderBy: { createdAt: "desc" }, take: 40 },
+      activities: { orderBy: { createdAt: "desc" }, take: 60 },
     },
   });
   if (!contact) throw new ApiError(404, "not_found", "Клиент не найден");
@@ -422,8 +424,15 @@ export async function getContactOverview(prisma: PrismaClient, auth: AuthContext
   const aiMode =
     conversationMode === "human" ? "HUMAN" : conversationMode === "paused" ? "DISABLED" : conversationMode === "ai" ? "AUTO" : "UNKNOWN";
 
+  const HIDDEN_ACTIVITY = new Set([
+    "webhook_received",
+    "provider_message_synced",
+    "cache_invalidated",
+  ]);
   const timeline = [
-    ...contact.activities.map((item) => ({
+    ...contact.activities
+      .filter((item) => !HIDDEN_ACTIVITY.has(item.type) && !item.type.startsWith("system."))
+      .map((item) => ({
       id: item.id,
       at: item.createdAt,
       kind: "activity" as const,
@@ -433,19 +442,29 @@ export async function getContactOverview(prisma: PrismaClient, auth: AuthContext
       actorType: item.actorType,
     })),
     ...contact.conversations.flatMap((conversation) =>
-      conversation.messages.map((message) => ({
+      conversation.messages
+        .filter((message) => !message.internal || Boolean(message.text))
+        .map((message) => ({
         id: message.id,
         at: message.createdAt,
         kind: "message" as const,
         type: message.direction === "inbound" ? "message.inbound" : "message.outbound",
-        title: message.internal ? "Внутренняя заметка" : message.senderKind === "client" ? "Клиент" : message.senderKind === "ai" ? "AI" : "Менеджер",
+        title: message.internal
+          ? "Внутренняя заметка"
+          : message.senderKind === "client"
+            ? "Клиент"
+            : message.senderKind === "ai"
+              ? "AI"
+              : message.senderKind === "staff" || message.senderKind === "user"
+                ? "Менеджер"
+                : "Система",
         description: message.text,
         actorType: message.senderKind,
       })),
     ),
   ]
     .sort((a, b) => b.at.getTime() - a.at.getTime())
-    .slice(0, 60)
+    .slice(0, 80)
     .map((item) => ({ ...item, atLabel: formatWhen(item.at, timeZone) }));
 
   const overdueTask = openTasks.find((item) => item.dueAt && item.dueAt.getTime() < now.getTime());

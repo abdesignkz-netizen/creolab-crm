@@ -257,6 +257,45 @@ async function applyAdditiveSchema(pglite: PGlite) {
     CREATE INDEX IF NOT EXISTS "CampaignRecipient_tenantId_campaignId_status_idx" ON "CampaignRecipient"("tenantId", "campaignId", "status");
     CREATE INDEX IF NOT EXISTS "CampaignRecipient_tenantId_phoneNormalized_idx" ON "CampaignRecipient"("tenantId", "phoneNormalized");
     CREATE INDEX IF NOT EXISTS "CampaignRecipient_tenantId_contactId_idx" ON "CampaignRecipient"("tenantId", "contactId");
+
+    ALTER TABLE "DealStage" ADD COLUMN IF NOT EXISTS "defaultProbability" INTEGER DEFAULT 10;
+    ALTER TABLE "DealStage" ADD COLUMN IF NOT EXISTS "isTerminal" BOOLEAN DEFAULT false;
+
+    ALTER TABLE "Deal" ADD COLUMN IF NOT EXISTS "probability" INTEGER DEFAULT 10;
+    ALTER TABLE "Deal" ADD COLUMN IF NOT EXISTS "paymentStatus" TEXT DEFAULT 'NOT_INVOICED';
+    ALTER TABLE "Deal" ADD COLUMN IF NOT EXISTS "fulfillmentStatus" TEXT DEFAULT 'NOT_STARTED';
+    ALTER TABLE "Deal" ADD COLUMN IF NOT EXISTS "updatedAt" TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP;
+    ALTER TABLE "Deal" ADD COLUMN IF NOT EXISTS "stageEnteredAt" TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP;
+    ALTER TABLE "Deal" ADD COLUMN IF NOT EXISTS "wonAt" TIMESTAMP(3);
+    ALTER TABLE "Deal" ADD COLUMN IF NOT EXISTS "lostAt" TIMESTAMP(3);
+    ALTER TABLE "Deal" ADD COLUMN IF NOT EXISTS "wonAmountMinor" DECIMAL(18,0);
+
+    CREATE TABLE IF NOT EXISTS "DealStageHistory" (
+      "id" TEXT NOT NULL,
+      "tenantId" TEXT NOT NULL,
+      "dealId" TEXT NOT NULL,
+      "fromStageId" TEXT,
+      "fromSystemKey" TEXT,
+      "toStageId" TEXT NOT NULL,
+      "toSystemKey" TEXT NOT NULL,
+      "enteredAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "leftAt" TIMESTAMP(3),
+      "changedByType" TEXT NOT NULL DEFAULT 'system',
+      "changedById" TEXT,
+      "note" TEXT,
+      CONSTRAINT "DealStageHistory_pkey" PRIMARY KEY ("id")
+    );
+    CREATE INDEX IF NOT EXISTS "DealStageHistory_tenantId_dealId_enteredAt_idx"
+      ON "DealStageHistory"("tenantId", "dealId", "enteredAt");
+    CREATE INDEX IF NOT EXISTS "DealStageHistory_dealId_enteredAt_idx"
+      ON "DealStageHistory"("dealId", "enteredAt");
+
+    ALTER TABLE "Activity" ADD COLUMN IF NOT EXISTS "dealId" TEXT;
+    CREATE INDEX IF NOT EXISTS "Activity_tenantId_dealId_createdAt_idx"
+      ON "Activity"("tenantId", "dealId", "createdAt");
+
+    ALTER TABLE "Task" ADD COLUMN IF NOT EXISTS "recurrenceRule" TEXT;
+    ALTER TABLE "Task" ADD COLUMN IF NOT EXISTS "completionResult" TEXT;
   `);
 }
 

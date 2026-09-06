@@ -300,6 +300,45 @@ export const paymentSchema = z.object({
   comment: z.string().max(500).optional(),
 });
 
+export const changeDealStageSchema = z.object({
+  stageId: z.string().uuid().optional(),
+  systemKey: z.string().min(1).max(64).optional(),
+  note: z.string().max(500).optional(),
+}).refine((v) => Boolean(v.stageId || v.systemKey), { message: "Укажите stageId или systemKey" });
+
+export const updateDealSchema = z.object({
+  title: z.string().trim().min(1).max(200).optional(),
+  description: z.string().max(5000).nullable().optional(),
+  offerAmountMinor: z.number().int().nonnegative().nullable().optional(),
+  currency: z.string().min(1).max(8).optional(),
+  probability: z.number().int().min(0).max(100).optional(),
+  paymentStatus: z
+    .enum([
+      "NOT_REQUIRED",
+      "NOT_INVOICED",
+      "INVOICED",
+      "PARTIALLY_PAID",
+      "PAID",
+      "OVERDUE",
+      "CANCELLED",
+    ])
+    .optional(),
+  fulfillmentStatus: z.enum(["NOT_STARTED", "IN_PROGRESS", "DELIVERED", "COMPLETED"]).optional(),
+  nextAction: z.string().max(500).nullable().optional(),
+  nextActionAt: z.string().datetime().nullable().optional(),
+  expectedCloseAt: z.string().datetime().nullable().optional(),
+  assigneeMembershipId: z.string().uuid().nullable().optional(),
+});
+
+export const markDealWonSchema = z.object({
+  wonAmountMinor: z.number().int().nonnegative().nullable().optional(),
+});
+
+export const markDealLostSchema = z.object({
+  lossReason: z.string().trim().min(1).max(120),
+  note: z.string().max(1000).optional(),
+});
+
 export const integrationEventSchema = z.object({
   schema_version: z.number().int().default(1),
   event_id: z.string().min(1).max(120),

@@ -1,0 +1,881 @@
+import type { PrismaClient } from "@creolab/db";
+import { ApiError } from "../errors.ts";
+import type { AuthContext } from "../lib/types.ts";
+import { getSituation, type SituationItem, type SituationScope } from "./situationService.ts";
+import { ensureDealPipelineStages } from "./dealService.ts";
+import { PIPELINE_STAGES, parseOpsSettings } from "./dealPipeline.ts";
+
+export type PeriodPreset =
+  | "today"
+  | "yesterday"
+  | "last_7"
+  | "last_30"
+  | "this_month"
+  | "last_month"
+  | "this_year"
+  | "all"
+  | "custom";
+
+const BUSINESS_ACTIVITY_TYPES = [
+  "inquiry.created",
+  "inquiry.converted",
+  "inquiry.lost",
+  "deal.won",
+  "deal.lost",
+  "deal.created",
+  "payment.confirm",
+  "task.completed",
+  "conversation.escalated",
+];
+
+function requireTenant(auth: AuthContext) {
+  if (!auth.activeMembership) throw new ApiError(403, "no_tenant", "Нет активной компании");
+  return auth.activeMembership;
+}
+
+function pad(n: number) {
+  return String(n).padStart(2, "0");
+}
+
+function zonedYmd(date: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  return {
+    year: Number(parts.find((p) => p.type === "year")?.value),
+    month: Number(parts.find((p) => p.type === "month")?.value),
+    day: Number(parts.find((p) => p.type === "day")?.value),
+  };
+}
+
+function zonedLocalToUtc(
+  timeZone: string,
+  year: number,
+  month: number,
+  day: number,
+  hour = 0,
+  minute = 0,
+  second = 0,
+) {
+  const utcGuess = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(utcGuess);
+  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+  const asUtc = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute"), get("second"));
+  return new Date(utcGuess.getTime() - (asUtc - utcGuess.getTime()));
+}
+
+function addDaysYmd(ymd: { year: number; month: number; day: number }, days: number) {
+  const utc = new Date(Date.UTC(ymd.year, ymd.month - 1, ymd.day + days));
+  return { year: utc.getUTCFullYear(), month: utc.getUTCMonth() + 1, day: utc.getUTCDate() };
+}
+
+function periodLabel(preset: PeriodPreset, from: Date | null, to: Date | null, timeZone: string) {
+  const labels: Record<PeriodPreset, string> = {
+    today: "Сегодня",
+    yesterday: "Вчера",
+    last_7: "7 дней",
+    last_30: "30 дней",
+    this_month: "Этот месяц",
+    last_month: "Прошлый месяц",
+    this_year: "Этот год",
+    all: "Всё время",
+    custom: "Период",
+  };
+  if (preset === "custom" && from && to) {
+    const a = zonedYmd(from, timeZone);
+    const b = zonedYmd(new Date(to.getTime() - 1), timeZone);
+    return `${pad(a.day)}.${pad(a.month)}.${a.year} — ${pad(b.day)}.${pad(b.month)}.${b.year}`;
+  }
+  return labels[preset];
+}
+
+export function resolvePeriodRange(
+  timeZone: string,
+  preset: PeriodPreset,
+  customFrom?: string,
+  customTo?: string,
+  now = new Date(),
+): { from: Date | null; to: Date | null; previousFrom: Date | null; previousTo: Date | null } {
+  const today = zonedYmd(now, timeZone);
+  const startToday = zonedLocalToUtc(timeZone, today.year, today.month, today.day);
+  const tomorrow = addDaysYmd(today, 1);
+  const startTomorrow = zonedLocalToUtc(timeZone, tomorrow.year, tomorrow.month, tomorrow.day);
+
+  if (preset === "all") {
+    return { from: null, to: null, previousFrom: null, previousTo: null };
+  }
+
+  if (preset === "custom") {
+    if (!customFrom || !customTo) {
+      throw new ApiError(422, "invalid_period", "Укажите даты С и По");
+    }
+    const [fy, fm, fd] = customFrom.split("-").map(Number);
+    const [ty, tm, td] = customTo.split("-").map(Number);
+    if (![fy, fm, fd, ty, tm, td].every((n) => Number.isFinite(n))) {
+      throw new ApiError(422, "invalid_period", "Некорректные даты периода");
+    }
+    const from = zonedLocalToUtc(timeZone, fy, fm, fd);
+    const next = addDaysYmd({ year: ty, month: tm, day: td }, 1);
+    const to = zonedLocalToUtc(timeZone, next.year, next.month, next.day);
+    const ms = to.getTime() - from.getTime();
+    return { from, to, previousFrom: new Date(from.getTime() - ms), previousTo: from };
+  }
+
+  if (preset === "today") {
+    const y = addDaysYmd(today, -1);
+    return {
+      from: startToday,
+      to: startTomorrow,
+      previousFrom: zonedLocalToUtc(timeZone, y.year, y.month, y.day),
+      previousTo: startToday,
+    };
+  }
+  if (preset === "yesterday") {
+    const y = addDaysYmd(today, -1);
+    const from = zonedLocalToUtc(timeZone, y.year, y.month, y.day);
+    const p = addDaysYmd(today, -2);
+    return {
+      from,
+      to: startToday,
+      previousFrom: zonedLocalToUtc(timeZone, p.year, p.month, p.day),
+      previousTo: from,
+    };
+  }
+  if (preset === "last_7") {
+    const fromYmd = addDaysYmd(today, -6);
+    const from = zonedLocalToUtc(timeZone, fromYmd.year, fromYmd.month, fromYmd.day);
+    const prevFromYmd = addDaysYmd(today, -13);
+    return {
+      from,
+      to: startTomorrow,
+      previousFrom: zonedLocalToUtc(timeZone, prevFromYmd.year, prevFromYmd.month, prevFromYmd.day),
+      previousTo: from,
+    };
+  }
+  if (preset === "last_30") {
+    const fromYmd = addDaysYmd(today, -29);
+    const from = zonedLocalToUtc(timeZone, fromYmd.year, fromYmd.month, fromYmd.day);
+    const prevFromYmd = addDaysYmd(today, -59);
+    return {
+      from,
+      to: startTomorrow,
+      previousFrom: zonedLocalToUtc(timeZone, prevFromYmd.year, prevFromYmd.month, prevFromYmd.day),
+      previousTo: from,
+    };
+  }
+  if (preset === "this_month") {
+    const from = zonedLocalToUtc(timeZone, today.year, today.month, 1);
+    const prevMonth = today.month === 1 ? { year: today.year - 1, month: 12 } : { year: today.year, month: today.month - 1 };
+    const previousFrom = zonedLocalToUtc(timeZone, prevMonth.year, prevMonth.month, 1);
+    return { from, to: startTomorrow, previousFrom, previousTo: from };
+  }
+  if (preset === "last_month") {
+    const prevMonth = today.month === 1 ? { year: today.year - 1, month: 12 } : { year: today.year, month: today.month - 1 };
+    const from = zonedLocalToUtc(timeZone, prevMonth.year, prevMonth.month, 1);
+    const to = zonedLocalToUtc(timeZone, today.year, today.month, 1);
+    const prevPrev =
+      prevMonth.month === 1 ? { year: prevMonth.year - 1, month: 12 } : { year: prevMonth.year, month: prevMonth.month - 1 };
+    const previousFrom = zonedLocalToUtc(timeZone, prevPrev.year, prevPrev.month, 1);
+    return { from, to, previousFrom, previousTo: from };
+  }
+
+  const from = zonedLocalToUtc(timeZone, today.year, 1, 1);
+  const previousFrom = zonedLocalToUtc(timeZone, today.year - 1, 1, 1);
+  return { from, to: startTomorrow, previousFrom, previousTo: from };
+}
+
+function amountNumber(value: { toString(): string } | null | undefined): number | null {
+  if (value == null) return null;
+  const n = Number(value.toString());
+  return Number.isFinite(n) ? n : null;
+}
+
+function formatMoneyKzt(amount: number | null, currency: string) {
+  if (amount == null) return null;
+  return `${Math.round(amount).toLocaleString("ru-RU")} ${currency === "KZT" ? "₸" : currency}`;
+}
+
+function delta(current: number, previous: number | null) {
+  if (previous == null) return null;
+  return current - previous;
+}
+
+function buildBrief(facts: {
+  periodLabel: string;
+  inquiries: number;
+  dealsCreated: number;
+  wonDeals: number;
+  wonAmountLabel: string | null;
+  activeDeals: number;
+  needsReply: number;
+  overdueTasks: number;
+  contractStage: number;
+  noNextAction: number;
+}) {
+  const bits: string[] = [];
+  bits.push(
+    `${facts.periodLabel}: ${facts.inquiries} обращений, ${facts.dealsCreated} новых сделок, ${facts.wonDeals} продаж` +
+      (facts.wonAmountLabel ? ` на ${facts.wonAmountLabel}` : "") +
+      ".",
+  );
+  bits.push(
+    `Сейчас в работе ${facts.activeDeals} сделок` +
+      (facts.contractStage ? `, из них ${facts.contractStage} на согласовании` : "") +
+      ".",
+  );
+  if (facts.needsReply || facts.overdueTasks || facts.noNextAction) {
+    const alerts: string[] = [];
+    if (facts.needsReply) alerts.push(`${facts.needsReply} ждут ответа`);
+    if (facts.overdueTasks) alerts.push(`${facts.overdueTasks} задач просрочено`);
+    if (facts.noNextAction) alerts.push(`${facts.noNextAction} без следующего шага`);
+    bits.push(`Требует внимания: ${alerts.join(", ")}.`);
+  } else {
+    bits.push("Критических действий сейчас нет.");
+  }
+  return bits.join(" ");
+}
+
+function taskTypeBucket(type: string, title: string) {
+  const t = `${type} ${title}`.toLowerCase();
+  if (/звон|call|phone/.test(t)) return "Позвонить";
+  if (/кп|proposal|коммерч|презентац/.test(t)) return "Отправить КП";
+  if (/оплат|payment/.test(t)) return "Проверить оплату";
+  if (/встреч|meeting/.test(t)) return "Встреча";
+  if (/писат|whatsapp|telegram|сообщ|message|reply/.test(t)) return "Написать";
+  return "Другое";
+}
+
+function attentionGroup(kind: SituationItem["kind"]): string {
+  if (kind === "contact_needs_reply" || kind === "conversation_human") return "needs_reply";
+  if (kind === "task_overdue") return "overdue";
+  if (kind === "missing_next_action") return "no_next_action";
+  if (kind === "conversation_attention" || kind === "conversation_paused") return "needs_human";
+  if (kind === "needs_phone") return "no_contact";
+  if (kind.startsWith("inquiry_")) return "inquiry";
+  return "other";
+}
+
+export async function getSituationOverview(
+  prisma: PrismaClient,
+  auth: AuthContext,
+  query: Record<string, string | undefined> = {},
+) {
+  const membership = requireTenant(auth);
+  const tid = membership.tenantId;
+  const timeZone = membership.tenant.timezone || "Asia/Almaty";
+  const currency = membership.tenant.currency || "KZT";
+  const now = new Date();
+  const tenantRow = await prisma.tenant.findUnique({ where: { id: tid } });
+  const ops = parseOpsSettings(tenantRow?.settingsJson);
+  await ensureDealPipelineStages(prisma, tid);
+
+  const presetRaw = String(query.period || query.periodPreset || "today");
+  const allowed: PeriodPreset[] = [
+    "today",
+    "yesterday",
+    "last_7",
+    "last_30",
+    "this_month",
+    "last_month",
+    "this_year",
+    "all",
+    "custom",
+  ];
+  const preset = (allowed.includes(presetRaw as PeriodPreset) ? presetRaw : "today") as PeriodPreset;
+  const scope = (query.scope === "mine" || query.scope === "unassigned" ? query.scope : "all") as SituationScope;
+  const onlyImportant = query.onlyImportant === "1" || query.onlyImportant === "true";
+
+  const range = resolvePeriodRange(timeZone, preset, query.dateFrom || query.from, query.dateTo || query.to, now);
+  const { from, to, previousFrom, previousTo } = range;
+
+  const assigneeDeal =
+    scope === "mine"
+      ? { assigneeMembershipId: membership.id }
+      : scope === "unassigned"
+        ? { assigneeMembershipId: null }
+        : {};
+  const assigneeInquiry =
+    scope === "mine"
+      ? { assigneeMembershipId: membership.id }
+      : scope === "unassigned"
+        ? { assigneeMembershipId: null }
+        : {};
+  const assigneeTask =
+    scope === "mine"
+      ? { ownerMembershipId: membership.id }
+      : scope === "unassigned"
+        ? { ownerMembershipId: null }
+        : {};
+  const ownerContact =
+    scope === "mine"
+      ? { ownerMembershipId: membership.id }
+      : scope === "unassigned"
+        ? { ownerMembershipId: null }
+        : {};
+
+  const periodReceived =
+    from || to ? { receivedAt: { ...(from ? { gte: from } : {}), ...(to ? { lt: to } : {}) } } : {};
+  const periodCreated =
+    from || to ? { createdAt: { ...(from ? { gte: from } : {}), ...(to ? { lt: to } : {}) } } : {};
+  const periodClosed =
+    from || to ? { closedAt: { ...(from ? { gte: from } : {}), ...(to ? { lt: to } : {}) } } : {};
+  const periodFirstSeen =
+    from || to ? { firstSeenAt: { ...(from ? { gte: from } : {}), ...(to ? { lt: to } : {}) } } : {};
+  const periodConfirmed =
+    from || to ? { confirmedAt: { ...(from ? { gte: from } : {}), ...(to ? { lt: to } : {}) } } : {};
+  const periodActivity =
+    from || to ? { createdAt: { ...(from ? { gte: from } : {}), ...(to ? { lt: to } : {}) } } : {};
+
+  const todayParts = zonedYmd(now, timeZone);
+  const startToday = zonedLocalToUtc(timeZone, todayParts.year, todayParts.month, todayParts.day);
+
+  const [
+    board,
+    stages,
+    openDeals,
+    periodInquiries,
+    prevInquiriesCount,
+    newClients,
+    prevNewClients,
+    dealsCreated,
+    prevDealsCreated,
+    wonDeals,
+    prevWonDeals,
+    lostDeals,
+    intakesPending,
+    openTasks,
+    doneTodayTasks,
+    recentActivities,
+    recentInquiries,
+    paymentsPeriod,
+    paymentsPrev,
+    waitingClientInquiries,
+    allTimeCounts,
+  ] = await Promise.all([
+    getSituation(prisma, auth, { scope, includeSnoozed: false }),
+    prisma.dealStage.findMany({ where: { tenantId: tid }, orderBy: { sortOrder: "asc" } }),
+    prisma.deal.findMany({
+      where: { tenantId: tid, outcome: "open", ...assigneeDeal },
+      include: {
+        stage: true,
+        contact: true,
+        tasks: { where: { status: { in: ["open", "waiting"] } }, select: { id: true, dueAt: true, status: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 500,
+    }),
+    prisma.inquiry.findMany({
+      where: { tenantId: tid, test: false, archived: false, ...assigneeInquiry, ...periodReceived },
+      select: {
+        id: true,
+        status: true,
+        receivedAt: true,
+        lostReason: true,
+        contactId: true,
+        subject: true,
+        service: true,
+        sourceChannel: true,
+        source: true,
+        needsReply: true,
+        contact: { select: { name: true, firstName: true, lastName: true } },
+      },
+      orderBy: { receivedAt: "desc" },
+      take: 2000,
+    }),
+    previousFrom && previousTo
+      ? prisma.inquiry.count({
+          where: {
+            tenantId: tid,
+            test: false,
+            archived: false,
+            ...assigneeInquiry,
+            receivedAt: { gte: previousFrom, lt: previousTo },
+          },
+        })
+      : Promise.resolve(null as number | null),
+    prisma.contact.count({
+      where: { tenantId: tid, archivedAt: null, ...ownerContact, ...periodFirstSeen },
+    }),
+    previousFrom && previousTo
+      ? prisma.contact.count({
+          where: {
+            tenantId: tid,
+            archivedAt: null,
+            ...ownerContact,
+            firstSeenAt: { gte: previousFrom, lt: previousTo },
+          },
+        })
+      : Promise.resolve(null as number | null),
+    prisma.deal.count({
+      where: { tenantId: tid, ...assigneeDeal, ...periodCreated },
+    }),
+    previousFrom && previousTo
+      ? prisma.deal.count({
+          where: { tenantId: tid, ...assigneeDeal, createdAt: { gte: previousFrom, lt: previousTo } },
+        })
+      : Promise.resolve(null as number | null),
+    prisma.deal.findMany({
+      where: { tenantId: tid, outcome: "won", ...assigneeDeal, ...periodClosed },
+      select: {
+        id: true,
+        offerAmountMinor: true,
+        title: true,
+        closedAt: true,
+        currency: true,
+        contact: { select: { name: true } },
+      },
+      orderBy: { closedAt: "desc" },
+      take: 500,
+    }),
+    previousFrom && previousTo
+      ? prisma.deal.findMany({
+          where: {
+            tenantId: tid,
+            outcome: "won",
+            ...assigneeDeal,
+            closedAt: { gte: previousFrom, lt: previousTo },
+          },
+          select: { offerAmountMinor: true },
+        })
+      : Promise.resolve([] as { offerAmountMinor: { toString(): string } | null }[]),
+    prisma.deal.findMany({
+      where: { tenantId: tid, outcome: "lost", ...assigneeDeal, ...periodClosed },
+      select: { id: true, lossReason: true },
+      take: 500,
+    }),
+    prisma.incompleteIntake.count({ where: { tenantId: tid, status: "pending" } }),
+    prisma.task.findMany({
+      where: { tenantId: tid, status: { in: ["open", "waiting"] }, ...assigneeTask },
+      include: { contact: { select: { name: true } } },
+      orderBy: [{ dueAt: "asc" }, { createdAt: "asc" }],
+      take: 300,
+    }),
+    prisma.task.count({
+      where: {
+        tenantId: tid,
+        status: "done",
+        ...assigneeTask,
+        completedAt: { gte: startToday },
+      },
+    }),
+    prisma.activity.findMany({
+      where: {
+        tenantId: tid,
+        type: { in: BUSINESS_ACTIVITY_TYPES },
+        ...periodActivity,
+      },
+      include: { contact: { select: { id: true, name: true } } },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+    }),
+    prisma.inquiry.findMany({
+      where: { tenantId: tid, test: false, archived: false, ...assigneeInquiry },
+      include: { contact: { select: { id: true, name: true, firstName: true, lastName: true } } },
+      orderBy: { receivedAt: "desc" },
+      take: 8,
+    }),
+    prisma.paymentRecord.findMany({
+      where: { tenantId: tid, status: "confirmed", ...periodConfirmed },
+      select: { amountMinor: true, currency: true },
+      take: 2000,
+    }),
+    previousFrom && previousTo
+      ? prisma.paymentRecord.findMany({
+          where: {
+            tenantId: tid,
+            status: "confirmed",
+            confirmedAt: { gte: previousFrom, lt: previousTo },
+          },
+          select: { amountMinor: true },
+        })
+      : Promise.resolve([] as { amountMinor: { toString(): string } }[]),
+    prisma.inquiry.count({
+      where: {
+        tenantId: tid,
+        archived: false,
+        test: false,
+        status: "waiting_client",
+        ...assigneeInquiry,
+      },
+    }),
+    Promise.all([
+      prisma.inquiry.count({ where: { tenantId: tid, test: false, archived: false } }),
+      prisma.contact.count({ where: { tenantId: tid, archivedAt: null } }),
+      prisma.deal.count({ where: { tenantId: tid } }),
+      prisma.deal.count({ where: { tenantId: tid, outcome: "won" } }),
+    ]),
+  ]);
+
+  const inquiriesCount = periodInquiries.length;
+
+  let wonAmount = 0;
+  let wonAmountKnown = 0;
+  for (const deal of wonDeals) {
+    const amount = amountNumber(deal.offerAmountMinor);
+    if (amount != null) {
+      wonAmount += amount;
+      wonAmountKnown += 1;
+    }
+  }
+  let prevWonAmount = 0;
+  for (const deal of prevWonDeals) {
+    const amount = amountNumber(deal.offerAmountMinor);
+    if (amount != null) prevWonAmount += amount;
+  }
+
+  const lostReasonMap = new Map<string, number>();
+  for (const deal of lostDeals) {
+    const key = (deal.lossReason || "Другое").trim() || "Другое";
+    lostReasonMap.set(key, (lostReasonMap.get(key) || 0) + 1);
+  }
+
+  const stageByKey = new Map(stages.map((s) => [s.systemKey, s]));
+  const pipelineKeys = new Set(PIPELINE_STAGES.map((p) => p.systemKey));
+  const pipelineNow = stages
+    .filter((stage) => pipelineKeys.has(stage.systemKey))
+    .map((stage) => ({
+      systemKey: stage.systemKey,
+      name: stage.name,
+      count: openDeals.filter((d) => d.stageId === stage.id).length,
+      href: "/deals",
+    }));
+
+  const negotiationKey = stageByKey.has("contract")
+    ? "contract"
+    : stageByKey.has("negotiation")
+      ? "negotiation"
+      : stages.find((s) => /договор|соглас/i.test(s.name))?.systemKey || "contract";
+  const negotiationStageIds = new Set(stages.filter((s) => s.systemKey === negotiationKey || s.systemKey === "contract").map((s) => s.id));
+  const proposalStageIds = new Set(stages.filter((s) => s.systemKey === "proposal_sent").map((s) => s.id));
+
+  let pipelineAmount = 0;
+  let pipelineAmountKnown = 0;
+  let weightedPipeline = 0;
+  const stalledCutoff = new Date(now.getTime() - ops.stalledDealDays * 86400000);
+  const proposalCutoff = new Date(now.getTime() - ops.proposalFollowUpThresholdDays * 86400000);
+
+  const waitingClientDeals: typeof openDeals = [];
+  const noNextActionDeals: typeof openDeals = [];
+  const stalledDealsList: typeof openDeals = [];
+  const contractDeals: typeof openDeals = [];
+  const importantDeals: Array<{
+    id: string;
+    title: string;
+    amount: number | null;
+    amountLabel: string | null;
+    stageName: string;
+    contactName: string | null;
+    reason: string;
+    href: string;
+  }> = [];
+
+  for (const deal of openDeals) {
+    const amount = amountNumber(deal.offerAmountMinor);
+    const probability = (deal as { probability?: number }).probability ?? deal.stage?.defaultProbability ?? 10;
+    if (amount != null) {
+      pipelineAmount += amount;
+      pipelineAmountKnown += 1;
+      weightedPipeline += Math.round((amount * probability) / 100);
+    }
+    const onContract = negotiationStageIds.has(deal.stageId);
+    if (onContract) contractDeals.push(deal);
+
+    const hasFutureTask = deal.tasks.some((t) => t.dueAt && t.dueAt.getTime() >= now.getTime());
+    const hasOpenTask = deal.tasks.length > 0;
+    const waiting =
+      Boolean(deal.nextAction && /жд[её]м|клиент|waiting/i.test(deal.nextAction)) ||
+      (deal.nextActionAt != null && deal.nextActionAt > now);
+    if (waiting) waitingClientDeals.push(deal);
+
+    if (!deal.nextAction && !hasOpenTask) noNextActionDeals.push(deal);
+
+    const stageEntered = (deal as { stageEnteredAt?: Date }).stageEnteredAt || deal.createdAt;
+    const lastTouch = deal.nextActionAt || stageEntered;
+    const stalled = lastTouch < stalledCutoff && !hasFutureTask && !waiting;
+    if (stalled) stalledDealsList.push(deal);
+
+    const onProposalTooLong =
+      proposalStageIds.has(deal.stageId) && stageEntered < proposalCutoff && !waiting;
+
+    const reasons: string[] = [];
+    if (onContract) reasons.push("На договоре");
+    if (onProposalTooLong) reasons.push(`КП без ответа >${ops.proposalFollowUpThresholdDays} дн.`);
+    if (stalled) reasons.push(`Нет активности ${ops.stalledDealDays}+ дн.`);
+    if (!deal.nextAction && !hasOpenTask) reasons.push("Нет следующего действия");
+    if (deal.nextActionAt && deal.nextActionAt < now) reasons.push("Просрочен follow-up");
+    if (amount != null && amount >= ops.largeDealAmountMinor) reasons.push("Крупная сумма");
+    if (waiting) reasons.push("Ждём клиента");
+    if (reasons.length) {
+      importantDeals.push({
+        id: deal.id,
+        title: deal.title,
+        amount,
+        amountLabel: formatMoneyKzt(amount, deal.currency || currency),
+        stageName: deal.stage?.name || "Сделка",
+        contactName: deal.contact?.name || null,
+        reason: reasons.slice(0, 2).join(" · "),
+        href: `/deals/${deal.id}`,
+      });
+    }
+  }
+
+  const proposalWithoutReply = openDeals.filter((deal) => {
+    const stageEntered = (deal as { stageEnteredAt?: Date }).stageEnteredAt || deal.createdAt;
+    return proposalStageIds.has(deal.stageId) && stageEntered < proposalCutoff;
+  }).length;
+
+  importantDeals.sort((a, b) => (b.amount || 0) - (a.amount || 0));
+
+  const overdueTasks = openTasks.filter((t) => t.dueAt && t.dueAt < now);
+  const remainingToday = openTasks.filter((t) => {
+    if (!t.dueAt) return false;
+    const y = zonedYmd(t.dueAt, timeZone);
+    return y.year === todayParts.year && y.month === todayParts.month && y.day === todayParts.day;
+  });
+  const dueTodayFuture = remainingToday.filter((t) => t.dueAt && t.dueAt >= now);
+
+  const typeCounts = new Map<string, number>();
+  for (const task of remainingToday) {
+    const bucket = taskTypeBucket(task.type, task.title);
+    typeCounts.set(bucket, (typeCounts.get(bucket) || 0) + 1);
+  }
+
+  const attentionItems = board.items.slice(0, onlyImportant ? 12 : 15).map((item) => ({
+    ...item,
+    group: attentionGroup(item.kind),
+    href:
+      item.kind === "needs_phone"
+        ? "/inquiries?filter=needs_clarification"
+        : item.kind.startsWith("inquiry_") || item.kind === "missing_next_action"
+          ? `/requests/${item.entityId}`
+          : item.kind === "contact_needs_reply"
+            ? `/contacts/${item.entityId}`
+            : item.kind.startsWith("conversation_")
+              ? `/conversations/${item.entityId}`
+              : "/tasks",
+  }));
+
+  const attentionSummary = {
+    needsReply: board.items.filter((i) => i.kind === "contact_needs_reply" || i.kind === "conversation_human").length,
+    overdueTasks: board.metrics.overdue,
+    noNextAction: board.items.filter((i) => i.kind === "missing_next_action").length + noNextActionDeals.length,
+    stalledDeals: stalledDealsList.length,
+    needsHuman: board.metrics.needsHuman,
+    noContact: board.metrics.blocked,
+    unassigned: board.items.filter((i) => !i.ownerMembershipId).length,
+    needsClarification: board.items.filter((i) => i.kind === "needs_phone" || i.kind === "inquiry_new").length,
+    proposalWithoutReply,
+  };
+
+  let paidAmount = 0;
+  for (const p of paymentsPeriod) {
+    const n = amountNumber(p.amountMinor);
+    if (n != null) paidAmount += n;
+  }
+  let prevPaid = 0;
+  for (const p of paymentsPrev) {
+    const n = amountNumber(p.amountMinor);
+    if (n != null) prevPaid += n;
+  }
+  const showPayments = paymentsPeriod.length > 0 || paymentsPrev.length > 0;
+
+  const label = periodLabel(preset, from, to, timeZone);
+  const wonAmountLabel = formatMoneyKzt(wonAmountKnown ? wonAmount : null, currency);
+  const pipelineAmountLabel = formatMoneyKzt(pipelineAmountKnown ? pipelineAmount : null, currency);
+
+  const result = {
+    approaches: inquiriesCount,
+    inquiries: inquiriesCount,
+    newClients,
+    requests: inquiriesCount,
+    dealsCreated,
+    contractsReached: contractDeals.filter((d) => (!from && !to) || (d.createdAt >= (from || d.createdAt) && d.createdAt < (to || new Date(8.64e15)))).length,
+    wonDeals: wonDeals.length,
+    lostDeals: lostDeals.length,
+    wonAmount: wonAmountKnown ? wonAmount : null,
+    wonAmountLabel,
+    wonAmountKnownCount: wonAmountKnown,
+    wonAmountTotalDeals: wonDeals.length,
+    lostReasons: [...lostReasonMap.entries()]
+      .map(([reason, count]) => ({ reason, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 6),
+    deltas: {
+      inquiries: delta(inquiriesCount, prevInquiriesCount),
+      newClients: delta(newClients, prevNewClients),
+      dealsCreated: delta(dealsCreated, prevDealsCreated),
+      wonDeals: delta(wonDeals.length, prevWonDeals.length),
+      wonAmount: previousFrom ? delta(wonAmount, prevWonAmount) : null,
+    },
+    hrefs: {
+      inquiries: "/inquiries",
+      clients: "/contacts",
+      deals: "/deals",
+      won: "/deals",
+      lost: "/deals",
+    },
+  };
+
+  const current = {
+    activeDeals: openDeals.length,
+    activePipelineAmount: pipelineAmountKnown ? pipelineAmount : null,
+    activePipelineAmountLabel: pipelineAmountLabel,
+    weightedPipeline: pipelineAmountKnown ? weightedPipeline : null,
+    weightedPipelineLabel: formatMoneyKzt(pipelineAmountKnown ? weightedPipeline : null, currency),
+    amountKnownCount: pipelineAmountKnown,
+    amountKnownOf: openDeals.length,
+    contractStage: contractDeals.length,
+    waitingClient: waitingClientDeals.length + waitingClientInquiries,
+    waitingClientDeals: waitingClientDeals.length,
+    waitingClientInquiries,
+    needsReply: attentionSummary.needsReply,
+    noNextAction: attentionSummary.noNextAction,
+    overdueTasks: attentionSummary.overdueTasks,
+    stalledDeals: stalledDealsList.length,
+    proposalWithoutReply,
+    intakesPending,
+    hrefs: {
+      deals: "/deals",
+      tasksOverdue: "/tasks",
+      conversations: "/conversations",
+      inquiriesWaiting: "/inquiries?filter=waiting_client",
+      proposalFollowUp: "/deals",
+    },
+  };
+
+  const brief = buildBrief({
+    periodLabel: label,
+    inquiries: result.inquiries,
+    dealsCreated: result.dealsCreated,
+    wonDeals: result.wonDeals,
+    wonAmountLabel: result.wonAmountLabel,
+    activeDeals: current.activeDeals,
+    needsReply: current.needsReply,
+    overdueTasks: current.overdueTasks,
+    contractStage: current.contractStage,
+    noNextAction: current.noNextAction,
+  });
+
+  const recentWins = wonDeals.slice(0, 5).map((d) => ({
+    id: d.id,
+    kind: "won" as const,
+    title: d.title,
+    contactName: d.contact?.name || null,
+    amountLabel: formatMoneyKzt(amountNumber(d.offerAmountMinor), d.currency || currency),
+    at: d.closedAt?.toISOString() || null,
+    href: "/deals",
+  }));
+
+  return {
+    asOf: now.toISOString(),
+    currency,
+    period: {
+      preset,
+      label,
+      from: from?.toISOString() || null,
+      to: to?.toISOString() || null,
+    },
+    scope,
+    onlyImportant,
+    brief,
+    result,
+    current,
+    pipeline: {
+      stages: pipelineNow,
+      note: "Стадии открытых сделок прямо сейчас",
+    },
+    attention: {
+      summary: attentionSummary,
+      items: onlyImportant
+        ? attentionItems.filter((i) =>
+            ["needs_reply", "overdue", "no_next_action", "needs_human", "no_contact"].includes(i.group),
+          )
+        : attentionItems,
+      emptyLabel: "Критических действий сейчас нет.",
+    },
+    todayTasks: {
+      totalDueToday: remainingToday.length,
+      doneToday: doneTodayTasks,
+      remaining: Math.max(0, remainingToday.length),
+      overdue: overdueTasks.length,
+      byType: [...typeCounts.entries()].map(([type, count]) => ({ type, count })),
+      nearest: [...overdueTasks, ...dueTodayFuture, ...openTasks.filter((t) => !remainingToday.includes(t) && !overdueTasks.includes(t))]
+        .slice(0, 10)
+        .map((t) => ({
+          id: t.id,
+          title: t.title,
+          type: t.type,
+          typeLabel: taskTypeBucket(t.type, t.title),
+          dueAt: t.dueAt?.toISOString() || null,
+          overdue: Boolean(t.dueAt && t.dueAt < now),
+          contactName: t.contact?.name || null,
+          href: "/tasks",
+        })),
+    },
+    importantDeals: importantDeals.slice(0, 8),
+    recentInquiries: recentInquiries.map((inq) => ({
+      id: inq.id,
+      title: inq.subject || inq.service || "Заявка",
+      contactName:
+        inq.contact?.name || [inq.contact?.firstName, inq.contact?.lastName].filter(Boolean).join(" ") || "Клиент",
+      receivedAt: inq.receivedAt.toISOString(),
+      source: inq.sourceChannel || inq.source,
+      status: inq.status,
+      needsReply: inq.needsReply,
+      href: `/requests/${inq.id}`,
+    })),
+    recentResults: recentWins,
+    recentEvents: recentActivities.map((a) => ({
+      id: a.id,
+      type: a.type,
+      title: a.title,
+      description: a.description,
+      contactId: a.contactId,
+      contactName: a.contact?.name || null,
+      createdAt: a.createdAt.toISOString(),
+      href: a.contactId ? `/contacts/${a.contactId}` : "/today",
+    })),
+    payments: showPayments
+      ? {
+          paidInPeriod: paidAmount,
+          paidInPeriodLabel: formatMoneyKzt(paidAmount, currency),
+          paidDelta: previousFrom ? delta(paidAmount, prevPaid) : null,
+          count: paymentsPeriod.length,
+        }
+      : null,
+    allTime:
+      preset === "all"
+        ? {
+            inquiries: allTimeCounts[0],
+            clients: allTimeCounts[1],
+            deals: allTimeCounts[2],
+            won: allTimeCounts[3],
+          }
+        : null,
+    freshness: board.freshness,
+    aiManager: {
+      status: board.freshness.seller.configured
+        ? board.freshness.seller.reachable
+          ? "active"
+          : "error"
+        : "offline",
+      label: board.freshness.seller.configured
+        ? board.freshness.seller.reachable
+          ? "AI Manager · активен"
+          : "AI Manager · ошибка интеграции"
+        : "AI Manager · не подключён",
+    },
+  };
+}

@@ -115,16 +115,37 @@ export async function seedDatabase() {
   };
 
   for (const tenant of [creolab, demo]) {
-    const existing = await prisma.dealStage.count({ where: { tenantId: tenant.id } });
-    if (!existing) {
-      await prisma.dealStage.createMany({
-        data: [
-          { tenantId: tenant.id, name: "Новая заявка", sortOrder: 1, systemKey: "new" },
-          { tenantId: tenant.id, name: "Выясняем задачу", sortOrder: 2, systemKey: "qualification" },
-          { tenantId: tenant.id, name: "Предложение отправлено", sortOrder: 3, systemKey: "proposal_sent" },
-          { tenantId: tenant.id, name: "Согласование", sortOrder: 4, systemKey: "negotiation" },
-        ],
-      });
+    const pipeline = [
+      { systemKey: "new", name: "Новая", sortOrder: 1, defaultProbability: 10 },
+      { systemKey: "in_progress", name: "В работе", sortOrder: 2, defaultProbability: 20 },
+      { systemKey: "need_identified", name: "Потребность выявлена", sortOrder: 3, defaultProbability: 35 },
+      { systemKey: "proposal_sent", name: "КП отправлено", sortOrder: 4, defaultProbability: 50 },
+      { systemKey: "negotiation", name: "Переговоры", sortOrder: 5, defaultProbability: 70 },
+      { systemKey: "contract", name: "Договор", sortOrder: 6, defaultProbability: 85 },
+      { systemKey: "invoiced", name: "Счёт выставлен", sortOrder: 7, defaultProbability: 90 },
+    ];
+    for (const def of pipeline) {
+      const row = await prisma.dealStage.findFirst({ where: { tenantId: tenant.id, systemKey: def.systemKey } });
+      if (row) {
+        await prisma.dealStage.update({
+          where: { id: row.id },
+          data: {
+            name: def.name,
+            sortOrder: def.sortOrder,
+            defaultProbability: def.defaultProbability,
+          },
+        });
+      } else {
+        await prisma.dealStage.create({
+          data: {
+            tenantId: tenant.id,
+            systemKey: def.systemKey,
+            name: def.name,
+            sortOrder: def.sortOrder,
+            defaultProbability: def.defaultProbability,
+          },
+        });
+      }
     }
     const knowledge = await prisma.knowledgeVersion.findFirst({
       where: { tenantId: tenant.id, status: "published" },

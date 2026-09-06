@@ -43,6 +43,24 @@ export function createApiClient(options: ClientOptions) {
       const suffix = params.toString() ? `?${params}` : "";
       return request(`/api/v1/situation${suffix}`);
     },
+    situationOverview: (
+      query: {
+        period?: string;
+        dateFrom?: string;
+        dateTo?: string;
+        scope?: "all" | "mine" | "unassigned";
+        onlyImportant?: boolean;
+      } = {},
+    ) => {
+      const params = new URLSearchParams();
+      if (query.period) params.set("period", query.period);
+      if (query.dateFrom) params.set("dateFrom", query.dateFrom);
+      if (query.dateTo) params.set("dateTo", query.dateTo);
+      if (query.scope) params.set("scope", query.scope);
+      if (query.onlyImportant) params.set("onlyImportant", "true");
+      const suffix = params.toString() ? `?${params}` : "";
+      return request(`/api/v1/situation/overview${suffix}`);
+    },
     snoozeSituation: (body: { itemId: string; until: string; reason?: string }) =>
       request("/api/v1/situation/snooze", { method: "POST", body: JSON.stringify(body) }),
     inquiries: (query?: Record<string, string | number | undefined>) => {
@@ -93,7 +111,27 @@ export function createApiClient(options: ClientOptions) {
     removeContactTag: (id: string, tagId: string) =>
       request(`/api/v1/contacts/${id}/tags/${tagId}`, { method: "DELETE" }),
     contactActivities: (id: string) => request(`/api/v1/contacts/${id}/activities`),
-    deals: () => request("/api/v1/deals"),
+    deals: (query: { scope?: string; includeClosed?: boolean; view?: "board" | "list" } = {}) => {
+      const params = new URLSearchParams();
+      if (query.scope) params.set("scope", query.scope);
+      if (query.includeClosed) params.set("includeClosed", "true");
+      if (query.view) params.set("view", query.view);
+      const suffix = params.toString() ? `?${params}` : "";
+      return request(`/api/v1/deals${suffix}`);
+    },
+    deal: (id: string) => request(`/api/v1/deals/${id}`),
+    updateDeal: (id: string, body: unknown) =>
+      request(`/api/v1/deals/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+    changeDealStage: (id: string, body: unknown) =>
+      request(`/api/v1/deals/${id}/stage`, { method: "POST", body: JSON.stringify(body) }),
+    markDealWon: (id: string, body: unknown = {}) =>
+      request(`/api/v1/deals/${id}/won`, { method: "POST", body: JSON.stringify(body) }),
+    markDealLost: (id: string, body: unknown) =>
+      request(`/api/v1/deals/${id}/lost`, { method: "POST", body: JSON.stringify(body) }),
+    holdDeal: (id: string, hold = true) =>
+      request(`/api/v1/deals/${id}/hold`, { method: "POST", body: JSON.stringify({ hold }) }),
+    addDealPayment: (id: string, body: unknown) =>
+      request(`/api/v1/deals/${id}/payments`, { method: "POST", body: JSON.stringify(body) }),
     tasks: () => request("/api/v1/tasks"),
     task: (id: string) => request(`/api/v1/tasks/${id}`),
     createTask: (body: unknown) => request("/api/v1/tasks", { method: "POST", body: JSON.stringify(body) }),

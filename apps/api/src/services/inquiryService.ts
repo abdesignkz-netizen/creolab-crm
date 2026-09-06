@@ -710,6 +710,7 @@ export async function convertInquiryToDeal(prisma: PrismaClient, auth: AuthConte
       where: { tenantId: membership.tenantId, systemKey: "new" },
     });
     if (!stage) throw new ApiError(500, "misconfigured", "Воронка не настроена");
+    const now = new Date();
     const deal = await tx.deal.create({
       data: {
         tenantId: membership.tenantId,
@@ -720,6 +721,23 @@ export async function convertInquiryToDeal(prisma: PrismaClient, auth: AuthConte
         description: inquiry.description,
         assigneeMembershipId: inquiry.assigneeMembershipId || membership.id,
         nextAction: "Связаться с клиентом",
+        probability: stage.defaultProbability ?? 10,
+        paymentStatus: "NOT_INVOICED",
+        stageEnteredAt: now,
+      },
+    });
+    await tx.dealStageHistory.create({
+      data: {
+        tenantId: membership.tenantId,
+        dealId: deal.id,
+        fromStageId: null,
+        fromSystemKey: null,
+        toStageId: stage.id,
+        toSystemKey: stage.systemKey,
+        enteredAt: now,
+        changedByType: "user",
+        changedById: auth.user.id,
+        note: "Создана из заявки",
       },
     });
     const fromStatus = inquiry.status;
@@ -728,7 +746,7 @@ export async function convertInquiryToDeal(prisma: PrismaClient, auth: AuthConte
       data: {
         status: "converted",
         dealId: deal.id,
-        convertedAt: new Date(),
+        convertedAt: now,
         nextStep: "Вести сделку",
         needsReply: false,
       },
@@ -746,8 +764,21 @@ export async function convertInquiryToDeal(prisma: PrismaClient, auth: AuthConte
       tenantId: membership.tenantId,
       contactId: inquiry.contactId,
       inquiryId: inquiry.id,
+      dealId: deal.id,
+      type: "deal.created",
+      title: "Создана сделка",
+      description: deal.title,
+      actorType: "user",
+      actorId: auth.user.id,
+      metadata: { dealId: deal.id, fromInquiryId: inquiry.id },
+    });
+    await writeActivity(tx, {
+      tenantId: membership.tenantId,
+      contactId: inquiry.contactId,
+      inquiryId: inquiry.id,
+      dealId: deal.id,
       type: "inquiry.converted",
-      title: "Создана сделка по заявке",
+      title: "Заявка конвертирована в сделку",
       description: deal.title,
       actorType: "user",
       actorId: auth.user.id,

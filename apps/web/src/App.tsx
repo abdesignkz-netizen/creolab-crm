@@ -17,6 +17,7 @@ import { ClientsPage } from "./pages/ClientsPage";
 import { ContactPage } from "./pages/ContactPage";
 import { ControlPage } from "./pages/ControlPage";
 import { ConversationsPage } from "./pages/ConversationsPage";
+import { DealDetailPage, DealsPage } from "./pages/DealsPage";
 import { IntegrationsPage } from "./pages/IntegrationsPage";
 import { RequestDetailPage } from "./pages/RequestDetailPage";
 import { RequestsPage } from "./pages/RequestsPage";
@@ -723,9 +724,8 @@ export function App() {
                 <Route path="/requests/:requestId" element={<RequestDetailPage />} />
                 <Route path="/conversations" element={<ConversationsPage />} />
                 <Route path="/conversations/:id" element={<ConversationsPage />} />
-                <Route path="/deals" element={<SimpleList title="Сделки" load={() => api.deals()} render={(item) => (
-                  <div className="row" key={item.id}><div><b>{item.title}</b><div className="muted">{item.contact?.name} · {item.stage?.name} · {item.outcome}</div></div></div>
-                )} />} />
+                <Route path="/deals" element={<DealsPage />} />
+                <Route path="/deals/:dealId" element={<DealDetailPage />} />
                 <Route path="/tasks" element={<TasksPage />} />
                 <Route path="/contacts" element={<ClientsPage />} />
                 <Route path="/contacts/:id" element={<ContactPage />} />
