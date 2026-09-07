@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { nameWithPhone, phoneText } from "../lib/contactDisplay";
+import { formatDurationMinutes, formatWaitSince } from "../lib/duration";
 import { api } from "../lib/api";
 import { CALLS_ENABLED } from "../lib/featureFlags";
 import { tip } from "../lib/tip";
@@ -87,7 +88,7 @@ export function RequestDetailPage() {
             <span className="badge">{data.statusLabel}</span>
             {data.needsReply ? (
               <span className="badge warn">
-                Нужен ответ{data.waitingMinutes != null ? ` · ${data.waitingMinutes} мин` : ""}
+                Нужен ответ{data.waitingMinutes != null ? ` · ${formatWaitSince(data.waitingMinutes)}` : ""}
               </span>
             ) : null}
             {data.hasDeal ? <span className="badge">Сделка создана</span> : null}
@@ -472,7 +473,7 @@ export function RequestDetailPage() {
                 <dt>Нужен ответ</dt>
                 <dd>
                   {data.needsReply
-                    ? `Да${data.waitingMinutes != null ? ` · ${data.waitingMinutes} мин` : ""}`
+                    ? `Да${data.waitingMinutes != null ? ` · ${formatDurationMinutes(data.waitingMinutes)}` : ""}`
                     : "Нет"}
                 </dd>
               </div>

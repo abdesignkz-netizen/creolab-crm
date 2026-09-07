@@ -3,6 +3,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { PeriodSelector, type PeriodPreset } from "../components/PeriodSelector";
 import { nameWithPhone } from "../lib/contactDisplay";
+import { formatDurationMinutes } from "../lib/duration";
 import { api } from "../lib/api";
 
 type Scope = "all" | "mine" | "unassigned";
@@ -28,10 +29,7 @@ function deltaText(value: number | null | undefined) {
 }
 
 function ageLabel(minutes?: number | null) {
-  if (minutes == null || !Number.isFinite(minutes)) return "срок не указан";
-  if (minutes < 60) return `${minutes} мин`;
-  if (minutes < 1440) return `${Math.round(minutes / 60)} ч`;
-  return `${Math.round(minutes / 1440)} дн.`;
+  return formatDurationMinutes(minutes) || "срок не указан";
 }
 
 function timeShort(iso: string | null | undefined) {

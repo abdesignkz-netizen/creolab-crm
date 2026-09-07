@@ -10,6 +10,7 @@ import { fileStorageStatus } from "../lib/storage.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { can } from "../lib/types.ts";
 import { analyzeAndApplyConversation } from "./conversationContextApplyService.ts";
+import { ensureWhatsAppInquiry } from "./inquiryService.ts";
 import { getSituation, isConversationCommand } from "./situationService.ts";
 
 function historyScopedId(leadId: string, item: { role: string; content: string; at?: string }) {
@@ -281,10 +282,22 @@ export async function applySellerLeadSync(
     },
   });
 
+  const inquiry = await ensureWhatsAppInquiry(prisma, {
+    tenantId: args.tenantId,
+    contactId,
+    conversationId: target.id,
+    leadId: args.lead.leadId,
+    name: args.lead.clientName || contact.name,
+    phoneRaw: phone.raw,
+    phoneNormalized: phone.normalized,
+  });
+
   return {
     skipped: null,
     conversationId: target.id,
     contactId,
+    inquiryId: inquiry.inquiry.id,
+    inquiryCreated: inquiry.created,
     phone: phone.normalized,
     added,
     moved,
@@ -660,6 +673,63 @@ export async function connectWhatsAppSeller(
 }
 
 const runningSyncs = new WeakMap<PrismaClient, Map<string, Promise<unknown>>>();
+
+export async function ingestSellerBridgeEvent(prisma: PrismaClient, payload: unknown) {
+  const body = payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
+  const leadId = String(body.leadId || "").trim();
+  const type = String(body.type || "");
+  if (!leadId) return { accepted: true, handled: false as const, reason: "no_lead" };
+  if (type && type !== "lead.created" && type !== "lead.updated") {
+    return { accepted: true, handled: false as const, reason: "ignored_type" };
+  }
+
+  const integrations = await prisma.integration.findMany({
+    where: { type: "whatsapp_seller" },
+    include: { tenant: { select: { id: true, defaultRegion: true } } },
+  });
+  const results: Array<Record<string, unknown>> = [];
+  for (const integration of integrations) {
+    const resolved = await resolveSellerBridge(prisma, integration.tenantId);
+    if (!resolved.bridge) continue;
+    let lead: {
+      leadId: string;
+      clientPhone: string | null;
+      clientName?: string | null;
+      aiMode?: string | null;
+      conversationHistory?: Array<{ role: string; content: string; at?: string }>;
+    } | undefined;
+    try {
+      const listed = await resolved.bridge.listLeads();
+      lead = listed.leads.find((item) => item.leadId === leadId);
+    } catch (error) {
+      results.push({
+        tenantId: integration.tenantId,
+        error: error instanceof Error ? error.message : "bridge_failed",
+      });
+      continue;
+    }
+    if (!lead) continue;
+    const connection = resolved.integration
+      ? await prisma.channelConnection.findFirst({
+          where: { tenantId: integration.tenantId, integrationId: resolved.integration.id },
+        })
+      : null;
+    const synced = await applySellerLeadSync(prisma, {
+      tenantId: integration.tenantId,
+      defaultRegion: integration.tenant.defaultRegion || "KZ",
+      lead,
+      connectionId: connection?.id || null,
+    });
+    results.push({ tenantId: integration.tenantId, ...synced });
+    if (resolved.integration) {
+      await prisma.integration.update({
+        where: { id: resolved.integration.id },
+        data: { lastEventAt: new Date(), lastError: null, status: "active" },
+      });
+    }
+  }
+  return { accepted: true, handled: results.some((item) => !item.error && !item.skipped), results };
+}
 
 export async function syncSellerLeads(prisma: PrismaClient, auth: AuthContext) {
   const tid = requireTenant(auth).tenantId;

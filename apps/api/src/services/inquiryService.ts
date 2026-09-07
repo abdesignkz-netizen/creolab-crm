@@ -5,8 +5,11 @@ import { ApiError } from "../errors.ts";
 import { hmacSha256Hex, safeEqual, sha256 } from "../lib/hash.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { writeActivity } from "./contactService.ts";
+import { inferClientInterest } from "./contactInterestService.ts";
 import { periodLabel, resolvePeriodRange, type PeriodPreset } from "./periodRange.ts";
 import { pagination } from "./pagination.ts";
+
+const ACTIVE_WHATSAPP_INQUIRY = ["new", "accepted", "in_progress", "waiting_client", "waiting_manager", "qualification"];
 
 function hashPayload(value: unknown) {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -252,6 +255,8 @@ async function createInquiryTx(
     utmContent?: string | null;
     utmTerm?: string | null;
     fieldMeta?: Record<string, unknown> | null;
+    conversationId?: string | null;
+    needsReply?: boolean;
   },
 ) {
   const phoneRaw = args.phoneRaw || "";
@@ -304,8 +309,9 @@ async function createInquiryTx(
       fieldMetaJson: (args.fieldMeta || {}) as Prisma.InputJsonValue,
       assigneeMembershipId: args.assigneeMembershipId || null,
       test: Boolean(args.test),
+      conversationId: args.conversationId || null,
       nextStep: "Связаться с клиентом",
-      needsReply: true,
+      needsReply: args.needsReply !== false,
       firstContactAt: new Date(),
     },
   });
@@ -317,15 +323,20 @@ async function createInquiryTx(
     changedByType: "system",
     note: "Создана заявка",
   });
+  const currentContact = await tx.contact.findUniqueOrThrow({ where: { id: contactId } });
+  const now = new Date();
   await tx.contact.update({
     where: { id: contactId },
     data: {
-      lastSeenAt: new Date(),
-      lastContactAt: new Date(),
+      lastSeenAt: currentContact.lastSeenAt || now,
+      lastContactAt: currentContact.lastContactAt || now,
       ownerMembershipId: args.assigneeMembershipId || undefined,
-      lifecycleStatus: "new",
+      lifecycleStatus: currentContact.lifecycleStatus === "customer" ? currentContact.lifecycleStatus : "new",
       companyName: args.companyName || undefined,
       attributionJson: {
+        ...((currentContact.attributionJson && typeof currentContact.attributionJson === "object"
+          ? currentContact.attributionJson
+          : {}) as Record<string, unknown>),
         sourceType: args.sourceType || args.source,
         source: args.source,
         sourceChannel,
@@ -371,6 +382,78 @@ async function createInquiryTx(
     contactId,
   });
   return inquiry;
+}
+
+export async function ensureWhatsAppInquiry(
+  prisma: PrismaClient,
+  args: {
+    tenantId: string;
+    contactId: string;
+    conversationId: string;
+    leadId?: string | null;
+    name?: string | null;
+    phoneRaw?: string | null;
+    phoneNormalized?: string | null;
+  },
+) {
+  const existing = await prisma.inquiry.findFirst({
+    where: {
+      tenantId: args.tenantId,
+      archived: false,
+      OR: [
+        { conversationId: args.conversationId },
+        { contactId: args.contactId, source: "whatsapp", status: { in: ACTIVE_WHATSAPP_INQUIRY } },
+      ],
+    },
+    orderBy: { receivedAt: "desc" },
+  });
+  if (existing) {
+    if (!existing.conversationId || existing.conversationId !== args.conversationId) {
+      await prisma.inquiry.update({
+        where: { id: existing.id },
+        data: { conversationId: args.conversationId },
+      });
+    }
+    return { inquiry: existing, created: false as const };
+  }
+
+  const messages = await prisma.message.findMany({
+    where: { tenantId: args.tenantId, conversationId: args.conversationId, internal: false },
+    orderBy: { createdAt: "asc" },
+    take: 40,
+    select: { id: true, text: true, direction: true, senderKind: true, internal: true, createdAt: true },
+  });
+  const inbound = messages.filter((item) => item.direction === "inbound" && item.senderKind === "client");
+  const last = messages.at(-1);
+  const needsReply = last ? last.direction === "inbound" && last.senderKind === "client" : inbound.length > 0;
+  const interest = inferClientInterest(messages);
+  const assignee = await defaultAssignee(prisma, args.tenantId);
+  const integration = await prisma.integration.findFirst({
+    where: { tenantId: args.tenantId, type: "whatsapp_seller" },
+    select: { id: true },
+  });
+  const inquiry = await prisma.$transaction((tx) =>
+    createInquiryTx(tx, {
+      tenantId: args.tenantId,
+      integrationId: integration?.id,
+      source: "whatsapp",
+      sourceChannel: "whatsapp",
+      sourceType: "whatsapp",
+      name: args.name || undefined,
+      phoneRaw: args.phoneRaw || "",
+      phoneNormalized: args.phoneNormalized || "",
+      phoneSource: "whatsapp",
+      contactId: args.contactId,
+      conversationId: args.conversationId,
+      subject: interest?.text || "Заявка из WhatsApp",
+      description: inbound.map((item) => item.text).filter(Boolean).slice(-6).join("\n\n") || null,
+      raw: { sellerLeadId: args.leadId || null },
+      fieldMeta: { sellerLeadId: args.leadId || null, fromWhatsAppAi: true },
+      assigneeMembershipId: assignee,
+      needsReply,
+    }),
+  );
+  return { inquiry, created: true as const };
 }
 
 export async function createManualInquiry(

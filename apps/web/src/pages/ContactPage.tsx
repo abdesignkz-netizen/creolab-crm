@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { nameWithPhone, phoneText } from "../lib/contactDisplay";
+import { formatWaitSince } from "../lib/duration";
 import { api } from "../lib/api";
 import { CALLS_ENABLED } from "../lib/featureFlags";
 import { tip } from "../lib/tip";
@@ -76,7 +77,11 @@ export function ContactPage() {
             {client.temperatureLabel && client.leadTemperature !== "unknown" ? (
               <span className="badge">{client.temperatureLabel}</span>
             ) : null}
-            {control.needsReply ? <span className="badge warn">Нужен ответ · {control.waitMinutes} мин</span> : null}
+            {control.needsReply ? (
+              <span className="badge warn">
+                Нужен ответ{control.waitMinutes != null ? ` · ${formatWaitSince(control.waitMinutes)}` : ""}
+              </span>
+            ) : null}
             {control.overdue ? <span className="badge danger">Просрочка</span> : null}
             {control.missingNextAction ? <span className="badge warn">Нет следующего действия</span> : null}
           </div>

@@ -242,4 +242,30 @@ describe("seller lead sync rematch by phone", () => {
     const byPhone = await findExistingWhatsAppConversation(prisma, tenantId, other.id);
     assert.equal(byPhone?.id, live.id);
   });
+
+  it("creates a new CRM inquiry from a WhatsApp AI lead", async () => {
+    const lead = {
+      leadId: "LEAD-inquiry-sync",
+      clientPhone: "77074120099",
+      clientName: "Жаным Тест",
+      aiMode: "AUTO",
+      conversationHistory: [
+        { role: "user", content: "Здравствуйте, хочу презентацию для школы", at: "2026-09-08T00:00:00.000Z" },
+        { role: "assistant", content: "Расскажите формат", at: "2026-09-08T00:00:10.000Z" },
+      ],
+    };
+    const first = await applySellerLeadSync(prisma, { tenantId, defaultRegion: "KZ", lead, connectionId: null });
+    assert.equal(first.skipped, null);
+    assert.equal(first.inquiryCreated, true);
+    assert.ok(first.inquiryId);
+    const inquiry = await prisma.inquiry.findFirst({ where: { id: first.inquiryId! } });
+    assert.equal(inquiry?.source, "whatsapp");
+    assert.equal(inquiry?.status, "new");
+    assert.equal(inquiry?.conversationId, first.conversationId);
+    assert.match(inquiry?.subject || "", /презентац/i);
+    const repeat = await applySellerLeadSync(prisma, { tenantId, defaultRegion: "KZ", lead, connectionId: null });
+    assert.equal(repeat.inquiryCreated, false);
+    assert.equal(repeat.inquiryId, first.inquiryId);
+    assert.equal(await prisma.inquiry.count({ where: { conversationId: first.conversationId } }), 1);
+  });
 });

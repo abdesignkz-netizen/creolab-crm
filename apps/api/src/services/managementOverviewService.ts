@@ -1,5 +1,5 @@
 import type { PrismaClient } from "@creolab/db";
-import { crmModeToSeller } from "@creolab/contracts";
+import { crmModeToSeller, formatDurationMinutes } from "@creolab/contracts";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { digitsOnly, displayName, formatPhoneDisplay, formatWhen } from "./contactLabels.ts";
@@ -86,10 +86,7 @@ function waitLabel(from: Date | null | undefined, now: Date) {
   if (!from) return null;
   const mins = Math.max(0, Math.floor((now.getTime() - from.getTime()) / 60000));
   if (mins < 1) return "сейчас";
-  if (mins < 60) return `${mins} мин`;
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  return m ? `${h} ч ${m} мин` : `${h} ч`;
+  return formatDurationMinutes(mins);
 }
 
 function reasonLabel(code: string | null | undefined) {

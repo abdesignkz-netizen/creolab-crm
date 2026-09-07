@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { PERIOD_OPTIONS, formatCustomPeriodLabel } from "../lib/period";
 import { tip } from "../lib/tip";
+import { formatWaitSince } from "../lib/duration";
 import { api } from "../lib/api";
 import { Pagination } from "../components/Pagination";
 
@@ -206,7 +207,11 @@ export function ClientsPage() {
             <div className="client-meta">
               <span className="badge">{item.lifecycleLabel}</span>
               {item.inquiryStatusLabel ? <span className="badge">{item.inquiryStatusLabel}</span> : null}
-              {item.needsReply ? <span className="badge warn">Нужен ответ</span> : null}
+              {item.needsReply ? (
+                <span className="badge warn">
+                  Нужен ответ{item.waitMinutes != null ? ` · ${formatWaitSince(item.waitMinutes)}` : ""}
+                </span>
+              ) : null}
               {item.overdue ? <span className="badge danger">Просрочено</span> : null}
               {item.activeDeal ? <span className="badge">Сделка</span> : null}
             </div>

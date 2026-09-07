@@ -17,13 +17,6 @@ const FILTERS = [
   ["no_topic", "Без темы"],
 ] as const;
 
-function relativeLabel(minutes: number | null | undefined) {
-  if (minutes == null) return null;
-  if (minutes < 60) return `${minutes} мин назад`;
-  if (minutes < 60 * 24) return `${Math.floor(minutes / 60)} ч назад`;
-  return `${Math.floor(minutes / (60 * 24))} дн назад`;
-}
-
 export function ConversationsPage() {
   const listVersion = useRequestVersion();
   const workspaceVersion = useRequestVersion();

@@ -2,6 +2,7 @@ import { useRequestVersion } from "../lib/useUrlState";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { PeriodSelector, type PeriodPreset } from "../components/PeriodSelector";
+import { formatWaitSince } from "../lib/duration";
 import { api } from "../lib/api";
 import { Pagination } from "../components/Pagination";
 
@@ -621,7 +622,7 @@ export function RequestsPage() {
                   ) : null}
                   {item.needsReply ? (
                     <span className="badge warn">
-                      Нужен ответ{item.waitingMinutes != null ? ` · ${item.waitingMinutes} мин` : ""}
+                      Нужен ответ{item.waitingMinutes != null ? ` · ${formatWaitSince(item.waitingMinutes)}` : ""}
                     </span>
                   ) : null}
                   {item.hasDeal ? <span className="badge">Сделка</span> : null}

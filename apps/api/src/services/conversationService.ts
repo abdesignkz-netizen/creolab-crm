@@ -1,3 +1,4 @@
+import { formatWaitReply, formatWaitSince } from "@creolab/contracts";
 import { resolvePeriodRange } from "./periodRange.ts";
 import { inferClientInterest } from "./contactInterestService.ts";
 import type { Prisma, PrismaClient } from "@creolab/db";
@@ -276,7 +277,7 @@ export async function listConversationsBoard(
           lastWho === "client" ? "Клиент" : lastWho === "ai" ? "AI" : lastWho === "team" ? "Менеджер" : "Неизвестно",
         needsReply: Boolean(waitingReply),
         waitMinutes,
-        waitLabel: waitingReply && waitMinutes != null ? `Ждёт ${waitMinutes} мин` : null,
+        waitLabel: waitingReply ? formatWaitSince(waitMinutes) : null,
         businessStatus,
         inquiryStatus: linkedInquiry?.status || null,
         inquiryStatusLabel: linkedInquiry ? INQUIRY_STATUS_LABEL[linkedInquiry.status] || linkedInquiry.status : null,
@@ -459,8 +460,8 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
       waitLabel:
         waitingFor !== "NONE"
           ? WAITING_FOR_LABEL[waitingFor]
-          : waitingReply && waitMinutes != null
-            ? `Ждёт ответа: ${waitMinutes} мин`
+          : waitingReply
+            ? formatWaitReply(waitMinutes)
             : null,
       waitingFor,
       waitingForLabel: WAITING_FOR_LABEL[waitingFor],
@@ -558,11 +559,9 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
       waitLabel:
         waitingFor !== "NONE"
           ? WAITING_FOR_LABEL[waitingFor]
-          : waitingReply && waitMinutes != null
-            ? `Ждёт ответа: ${waitMinutes} мин`
-            : waitingReply
-              ? "Нужен ответ"
-              : "Ждём клиента",
+          : waitingReply
+            ? formatWaitReply(waitMinutes) || "Нужен ответ"
+            : "Ждём клиента",
       situationLabel: waitingReply
         ? "Клиент написал последним"
         : conversation.mode === "human"

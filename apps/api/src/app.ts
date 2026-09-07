@@ -171,6 +171,7 @@ import {
   beginTelegramLink,
   connectWhatsAppSeller,
   controlBoard,
+  ingestSellerBridgeEvent,
   integrationSetup,
   rotateWebhookSecret,
   sellerHealthFor,
@@ -983,7 +984,8 @@ export function createApp(prisma: PrismaClient) {
     if (!config.crmBridgeSecret || secret !== config.crmBridgeSecret) {
       throw new ApiError(401, "unauthorized", "Мост не принят");
     }
-    res.status(202).json({ accepted: true });
+    const result = await ingestSellerBridgeEvent(prisma, req.body);
+    res.status(202).json(result);
   });
 
   // Кабинет (Vite build) с того же origin — для Render / одного домена crm.creolab.kz

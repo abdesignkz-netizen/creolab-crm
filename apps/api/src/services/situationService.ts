@@ -1,3 +1,4 @@
+import { formatDurationMinutes } from "@creolab/contracts";
 import type { PrismaClient } from "@creolab/db";
 import { WhatsAppSellerBridge } from "@creolab/integrations";
 import { ApiError } from "../errors.ts";
@@ -382,7 +383,7 @@ export async function getSituation(
         kind: "contact_needs_reply",
         entityId: contact.id,
         title: contact.name || contact.firstName || "Клиент ждёт ответа",
-        reason: `Клиент ждёт ${ageMinutes(inbound!, now)} мин`,
+        reason: `Клиент ждёт ${formatDurationMinutes(ageMinutes(inbound!, now))}`,
         nextAction: "open_contact",
         severity: "high",
         ownerMembershipId: contact.ownerMembershipId,
