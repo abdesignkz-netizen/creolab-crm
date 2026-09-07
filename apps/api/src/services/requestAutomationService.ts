@@ -86,10 +86,42 @@ function buildInstruction(args: {
 }
 
 async function findWhatsAppConversation(prisma: PrismaClient, tenantId: string, contactId: string) {
-  return prisma.conversation.findFirst({
+  const own = await prisma.conversation.findFirst({
     where: {
       tenantId,
       contactId,
+      sellerLeadId: { not: null },
+    },
+    orderBy: { updatedAt: "desc" },
+    include: {
+      connection: true,
+      messages: { orderBy: { createdAt: "desc" }, take: 1 },
+    },
+  });
+  if (own) return own;
+
+  const phones = await prisma.contactMethod.findMany({
+    where: { tenantId, contactId, type: "phone" },
+    select: { normalizedValue: true },
+  });
+  const normalized = phones.map((item) => item.normalizedValue).filter(Boolean);
+  if (!normalized.length) return null;
+
+  const sibling = await prisma.contactMethod.findFirst({
+    where: {
+      tenantId,
+      type: "phone",
+      normalizedValue: { in: normalized },
+      contactId: { not: contactId },
+    },
+    orderBy: { createdAt: "asc" },
+  });
+  if (!sibling) return null;
+
+  return prisma.conversation.findFirst({
+    where: {
+      tenantId,
+      contactId: sibling.contactId,
       sellerLeadId: { not: null },
     },
     orderBy: { updatedAt: "desc" },

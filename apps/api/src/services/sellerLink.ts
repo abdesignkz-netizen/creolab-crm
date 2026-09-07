@@ -25,14 +25,24 @@ async function upsertLeadHistory(
   history: Array<{ role: string; content: string; at?: string }>,
 ) {
   const slice = (history || []).slice(-40);
-  if (!slice.length) return 0;
+  if (!slice.length) return { added: 0, moved: 0 };
   let added = 0;
+  let moved = 0;
   for (const item of slice) {
     const connectionScopedId = historyScopedId(leadId, item);
     const existing = await prisma.message.findFirst({
       where: { tenantId: tid, connectionScopedId },
     });
-    if (existing) continue;
+    if (existing) {
+      if (existing.conversationId !== conversationId) {
+        await prisma.message.update({
+          where: { id: existing.id },
+          data: { conversationId },
+        });
+        moved += 1;
+      }
+      continue;
+    }
     await prisma.message.create({
       data: {
         tenantId: tid,
@@ -47,13 +57,197 @@ async function upsertLeadHistory(
     });
     added += 1;
   }
-  if (added) {
+  if (added || moved) {
     await prisma.conversation.update({
       where: { id: conversationId },
-      data: { messageRevision: { increment: added }, updatedAt: new Date() },
+      data: { messageRevision: { increment: added + moved }, updatedAt: new Date() },
     });
   }
-  return added;
+  return { added, moved };
+}
+
+async function findOrCreateContactByPhone(
+  prisma: PrismaClient,
+  tenantId: string,
+  phone: { raw: string; normalized: string },
+  name?: string | null,
+) {
+  const method = await prisma.contactMethod.findFirst({
+    where: { tenantId, type: "phone", normalizedValue: phone.normalized },
+    orderBy: { createdAt: "asc" },
+  });
+  if (method) {
+    if (name) {
+      const current = await prisma.contact.findFirst({ where: { id: method.contactId, tenantId } });
+      if (current && (!current.name || current.name === "Без имени" || current.name === ".")) {
+        await prisma.contact.update({ where: { id: current.id }, data: { name } });
+      }
+    }
+    return method.contactId;
+  }
+  const contact = await prisma.contact.create({
+    data: {
+      tenantId,
+      name: name || null,
+      methods: {
+        create: {
+          type: "phone",
+          rawValue: phone.raw,
+          normalizedValue: phone.normalized,
+          source: "whatsapp_seller",
+          primary: true,
+        },
+      },
+    },
+  });
+  return contact.id;
+}
+
+async function bindSellerIdentity(
+  prisma: PrismaClient,
+  tenantId: string,
+  contactId: string,
+  leadId: string,
+  connectionId: string | null,
+) {
+  const byLead = await prisma.externalIdentity.findFirst({
+    where: { tenantId, type: "seller_lead", externalId: leadId },
+  });
+  if (byLead && byLead.contactId !== contactId) {
+    await prisma.externalIdentity.update({
+      where: { id: byLead.id },
+      data: { contactId, connectionId: connectionId || byLead.connectionId },
+    });
+    return;
+  }
+  if (byLead) return;
+
+  const byContact = await prisma.externalIdentity.findFirst({
+    where: { tenantId, contactId, type: "seller_lead" },
+  });
+  if (byContact) {
+    await prisma.externalIdentity.update({
+      where: { id: byContact.id },
+      data: { externalId: leadId, connectionId: connectionId || byContact.connectionId },
+    });
+    return;
+  }
+
+  await prisma.externalIdentity.create({
+    data: {
+      tenantId,
+      contactId,
+      connectionId,
+      type: "seller_lead",
+      externalId: leadId,
+      confirmed: true,
+    },
+  });
+}
+
+export async function applySellerLeadSync(
+  prisma: PrismaClient,
+  args: {
+    tenantId: string;
+    defaultRegion: string;
+    lead: {
+      leadId: string;
+      clientPhone: string | null;
+      clientName?: string | null;
+      aiMode?: string | null;
+      conversationHistory?: Array<{ role: string; content: string; at?: string }>;
+    };
+    connectionId: string | null;
+  },
+) {
+  const phone = validateClientPhone(args.lead.clientPhone, args.defaultRegion);
+  if (!phone.ok) {
+    return { skipped: "needs_phone" as const };
+  }
+
+  const contactId = await findOrCreateContactByPhone(
+    prisma,
+    args.tenantId,
+    { raw: phone.raw, normalized: phone.normalized },
+    args.lead.clientName,
+  );
+  await bindSellerIdentity(prisma, args.tenantId, contactId, args.lead.leadId, args.connectionId);
+
+  const convByLeadId = await prisma.conversation.findFirst({
+    where: { tenantId: args.tenantId, sellerLeadId: args.lead.leadId },
+    include: { contact: { include: { methods: true } } },
+  });
+  const convByContact = await prisma.conversation.findFirst({
+    where: {
+      tenantId: args.tenantId,
+      contactId,
+      OR: [{ sellerLeadId: { not: null } }, { id: convByLeadId?.id || "__none__" }],
+    },
+    orderBy: { updatedAt: "desc" },
+  });
+
+  const leadPhoneOnOldConv = convByLeadId?.contact?.methods.find((m) => m.type === "phone")?.normalizedValue;
+  const leadIdBoundToWrongContact = Boolean(
+    convByLeadId && (convByLeadId.contactId !== contactId || (leadPhoneOnOldConv && leadPhoneOnOldConv !== phone.normalized)),
+  );
+
+  let target = leadIdBoundToWrongContact ? convByContact && convByContact.contactId === contactId ? convByContact : null : convByLeadId || convByContact;
+  if (target && target.contactId && target.contactId !== contactId) {
+    target = null;
+  }
+
+  const mode = sellerModeToCrm(args.lead.aiMode);
+  if (!target) {
+    target = await prisma.conversation.create({
+      data: {
+        tenantId: args.tenantId,
+        connectionId: args.connectionId,
+        contactId,
+        sellerLeadId: args.lead.leadId,
+        mode,
+        status: "open",
+        needsAttention: mode !== "ai",
+        attentionReason: mode === "human" ? "human" : mode === "paused" ? "paused" : null,
+      },
+    });
+  } else {
+    await prisma.conversation.update({
+      where: { id: target.id },
+      data: {
+        mode,
+        needsAttention: mode !== "ai",
+        attentionReason: mode === "human" ? "human" : mode === "paused" ? "paused" : null,
+        contactId,
+        connectionId: args.connectionId || target.connectionId,
+        sellerLeadId: args.lead.leadId,
+      },
+    });
+  }
+
+  if (leadIdBoundToWrongContact && convByLeadId && convByLeadId.id !== target.id) {
+    await prisma.conversation.update({
+      where: { id: convByLeadId.id },
+      data: { sellerLeadId: null, attentionReason: "seller_lead_rematched" },
+    });
+  }
+
+  const { added, moved } = await upsertLeadHistory(
+    prisma,
+    args.tenantId,
+    target.id,
+    args.lead.leadId,
+    args.lead.conversationHistory || [],
+  );
+
+  return {
+    skipped: null,
+    conversationId: target.id,
+    contactId,
+    added,
+    moved,
+    rematched: leadIdBoundToWrongContact,
+    created: !convByLeadId && !convByContact,
+  };
 }
 
 function requireTenant(auth: AuthContext) {
@@ -248,104 +442,25 @@ export async function syncSellerLeads(prisma: PrismaClient, auth: AuthContext) {
   let updated = 0;
   let needsPhone = 0;
   let messagesAdded = 0;
+  let rematched = 0;
   const analyzeIds: string[] = [];
   for (const lead of leads) {
-    const phone = validateClientPhone(lead.clientPhone, membership.tenant.defaultRegion);
-    if (!phone.ok) {
+    const result = await applySellerLeadSync(prisma, {
+      tenantId: membership.tenantId,
+      defaultRegion: membership.tenant.defaultRegion,
+      lead,
+      connectionId: connection?.id || null,
+    });
+    if (result.skipped === "needs_phone") {
       needsPhone += 1;
       continue;
     }
-    const identity = await prisma.externalIdentity.findFirst({
-      where: {
-        tenantId: membership.tenantId,
-        type: "seller_lead",
-        externalId: lead.leadId,
-      },
-    });
-    let contactId = identity?.contactId;
-    if (!contactId) {
-      const method = await prisma.contactMethod.findFirst({
-        where: { tenantId: membership.tenantId, type: "phone", normalizedValue: phone.normalized },
-      });
-      if (method) {
-        contactId = method.contactId;
-      } else {
-        const contact = await prisma.contact.create({
-          data: {
-            tenantId: membership.tenantId,
-            name: lead.clientName || null,
-            methods: {
-              create: {
-                type: "phone",
-                rawValue: phone.raw,
-                normalizedValue: phone.normalized,
-                source: "whatsapp_seller",
-                primary: true,
-              },
-            },
-          },
-        });
-        contactId = contact.id;
-      }
-      await prisma.externalIdentity.create({
-        data: {
-          tenantId: membership.tenantId,
-          contactId,
-          connectionId: connection?.id,
-          type: "seller_lead",
-          externalId: lead.leadId,
-          confirmed: true,
-        },
-      });
-    }
-    const existing = await prisma.conversation.findFirst({
-      where: { tenantId: membership.tenantId, sellerLeadId: lead.leadId },
-    });
-    const mode = sellerModeToCrm(lead.aiMode);
-    if (existing) {
-      await prisma.conversation.update({
-        where: { id: existing.id },
-        data: {
-          mode,
-          needsAttention: mode !== "ai",
-          attentionReason: mode === "human" ? "human" : mode === "paused" ? "paused" : null,
-          contactId,
-          connectionId: connection?.id || existing.connectionId,
-        },
-      });
-      const added = await upsertLeadHistory(
-        prisma,
-        membership.tenantId,
-        existing.id,
-        lead.leadId,
-        lead.conversationHistory || [],
-      );
-      messagesAdded += added;
-      if (added > 0) analyzeIds.push(existing.id);
-      updated += 1;
-    } else {
-      const conversation = await prisma.conversation.create({
-        data: {
-          tenantId: membership.tenantId,
-          connectionId: connection?.id,
-          contactId,
-          sellerLeadId: lead.leadId,
-          mode,
-          status: "open",
-          needsAttention: mode !== "ai",
-          attentionReason: mode === "human" ? "human" : mode === "paused" ? "paused" : null,
-        },
-      });
-      const added = await upsertLeadHistory(
-        prisma,
-        membership.tenantId,
-        conversation.id,
-        lead.leadId,
-        lead.conversationHistory || [],
-      );
-      messagesAdded += added;
-      if (added > 0) analyzeIds.push(conversation.id);
-      imported += 1;
+    messagesAdded += result.added + result.moved;
+    if (result.rematched) rematched += 1;
+    if (result.created) imported += 1;
+    else updated += 1;
+    if (result.added > 0 || result.moved > 0 || result.rematched) {
+      analyzeIds.push(result.conversationId);
     }
   }
   if (resolved.integration) {
@@ -368,6 +483,7 @@ export async function syncSellerLeads(prisma: PrismaClient, auth: AuthContext) {
   return {
     imported,
     updated,
+    rematched,
     needsPhone,
     messagesAdded,
     contextApplied,

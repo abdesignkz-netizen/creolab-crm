@@ -28,7 +28,9 @@ function requireTenant(auth: AuthContext) {
   return auth.activeMembership;
 }
 
-function primaryPhone(methods: Array<{ type: string; rawValue: string; primary: boolean }>) {
+function primaryPhone(
+  methods: Array<{ type: string; rawValue: string; normalizedValue?: string | null; primary: boolean }>,
+) {
   const phones = methods.filter((item) => item.type === "phone");
   return phones.find((item) => item.primary) || phones[0] || null;
 }
@@ -197,11 +199,15 @@ export async function listConversationsBoard(
     .map((conversation) => {
       const contact = conversation.contact;
       const phone = contact ? primaryPhone(contact.methods) : null;
+      const contactPhoneNorm = phone?.normalizedValue || null;
+      const inquiryBelongsHere = (item: { conversationId?: string | null; phoneNormalized?: string | null }) =>
+        item.conversationId === conversation.id ||
+        (contactPhoneNorm && item.phoneNormalized === contactPhoneNorm);
       const linkedInquiry =
         conversation.inquiries[0] ||
         contact?.inquiries.find((item) => item.conversationId === conversation.id) ||
-        contact?.inquiries.find((item) => ACTIVE_INQUIRY.includes(item.status)) ||
-        contact?.inquiries[0] ||
+        contact?.inquiries.find((item) => inquiryBelongsHere(item) && ACTIVE_INQUIRY.includes(item.status)) ||
+        contact?.inquiries.find((item) => inquiryBelongsHere(item)) ||
         null;
       const deal = contact?.deals[0] || null;
       const last = conversation.messages[0] || null;
@@ -361,12 +367,16 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
 
   const contact = conversation.contact;
   const phone = contact ? primaryPhone(contact.methods) : null;
+  const contactPhone = contact ? primaryPhone(contact.methods)?.normalizedValue : null;
+  const inquiryMatchesContact = (item: { phoneNormalized?: string | null; conversationId?: string | null }) =>
+    item.conversationId === conversation.id ||
+    (contactPhone && item.phoneNormalized === contactPhone);
   const linkedInquiry =
     conversation.inquiries.find((item) => ACTIVE_INQUIRY.includes(item.status)) ||
     conversation.inquiries[0] ||
     contact?.inquiries.find((item) => item.conversationId === conversation.id) ||
-    contact?.inquiries.find((item) => ACTIVE_INQUIRY.includes(item.status)) ||
-    contact?.inquiries[0] ||
+    contact?.inquiries.find((item) => inquiryMatchesContact(item) && ACTIVE_INQUIRY.includes(item.status)) ||
+    contact?.inquiries.find((item) => inquiryMatchesContact(item)) ||
     null;
   const deal = contact?.deals.find((item) => item.outcome === "open") || contact?.deals[0] || null;
   const last = conversation.messages[conversation.messages.length - 1] || null;
