@@ -35,6 +35,57 @@ function formatBytes(n: number) {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function isInternalBriefingText(text: string) {
+  return /Уже известно:|Уточнить:|следующий коммерческий шаг/i.test(text);
+}
+
+function resolveOutboundDraft(detail: any): string {
+  const stored = String(detail?.messageDraft || "").trim();
+  if (stored && !isInternalBriefingText(stored)) return stored;
+  const fromSnap = String(detail?.contextSnapshotJson?.clientMessageDraft || "").trim();
+  if (fromSnap) return fromSnap;
+
+  const known = Array.isArray(detail?.contextSnapshotJson?.knownFields)
+    ? detail.contextSnapshotJson.knownFields
+    : [];
+  const questions = Array.isArray(detail?.contextSnapshotJson?.qualificationQuestions)
+    ? detail.contextSnapshotJson.qualificationQuestions
+    : [];
+  const name = detail?.briefing?.client?.name || "";
+  const firstName = String(name).trim().split(/\s+/)[0];
+  const greeting =
+    firstName && !/^(клиент|lead|test|тест|\+?\d)/i.test(firstName)
+      ? `Здравствуйте, ${firstName}!`
+      : "Здравствуйте!";
+  const knownBits = known
+    .filter((f: any) => f?.key !== "phone" && f?.value)
+    .slice(0, 3)
+    .map((f: any) => `${String(f.label || "").toLowerCase()} — ${f.value}`);
+  const serviceHint =
+    known.find((f: any) => f?.key === "service")?.value ||
+    detail?.briefing?.inquiry?.title ||
+    "вашу заявку";
+  const contextLine = [
+    `Получили вашу заявку${serviceHint ? ` (${serviceHint})` : ""}.`,
+    knownBits.length ? `Уже учли: ${knownBits.join("; ")}.` : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const ask =
+    questions.length > 0
+      ? ["Чтобы подготовить предложение, уточните пожалуйста:", ...questions.slice(0, 3).map((q: string, i: number) => `${i + 1}. ${q}`)].join(
+          "\n",
+        )
+      : null;
+  if (ask || knownBits.length) {
+    return [greeting, contextLine, ask].filter(Boolean).join("\n\n");
+  }
+
+  const desc = String(detail?.description || "").trim();
+  if (desc && !isInternalBriefingText(desc)) return desc;
+  return stored || "";
+}
+
 function readFileBase64(file: File) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -192,7 +243,7 @@ export function TasksPage() {
   const [docType, setDocType] = useState("proposal");
   const [busy, setBusy] = useState(false);
 
-  const SENDABLE = new Set(["proposal", "message", "send_documents", "prepare_estimate", "follow_up"]);
+  const SENDABLE = new Set(["proposal", "message", "send_documents", "prepare_estimate", "follow_up", "process_inquiry"]);
   const MANUAL_COMPLETE = new Set(["call", "meeting", "payment", "wait_client", "process_inquiry", "other"]);
 
   const [targetMode, setTargetMode] = useState<TargetMode>("client");
@@ -594,7 +645,7 @@ export function TasksPage() {
       const detail = await api.task(taskId);
       setActiveTaskId(taskId);
       setTaskDetail(detail);
-      setMessageDraft((detail as any).messageDraft || (detail as any).description || "");
+      setMessageDraft(resolveOutboundDraft(detail));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось открыть задачу");
     } finally {

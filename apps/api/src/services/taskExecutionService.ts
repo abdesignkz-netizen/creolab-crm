@@ -12,7 +12,14 @@ import { analyzeTaskResultNextActions, MEETING_RESULTS } from "./taskResultAnaly
 import { syncAgreementToCalendar } from "./calendarAdapter.ts";
 import { resolveSellerBridge } from "./sellerLink.ts";
 
-const SENDABLE_TYPES = new Set(["proposal", "message", "send_documents", "prepare_estimate", "follow_up"]);
+const SENDABLE_TYPES = new Set([
+  "proposal",
+  "message",
+  "send_documents",
+  "prepare_estimate",
+  "follow_up",
+  "process_inquiry",
+]);
 
 const ALLOWED_MIME = new Set([
   "application/pdf",
@@ -358,7 +365,7 @@ export async function removeTaskAttachment(prisma: PrismaClient, auth: AuthConte
 
 export async function prepareTaskExecution(prisma: PrismaClient, auth: AuthContext, id: string) {
   const { tid, task } = await taskInTenant(prisma, auth, id);
-  if (!SENDABLE_TYPES.has(task.type) && task.type !== "other") {
+  if (!SENDABLE_TYPES.has(task.type)) {
     throw new ApiError(422, "invalid", "Этот тип задачи не отправляется через канал");
   }
   if (!task.contactId) throw new ApiError(422, "invalid", "Выберите клиента");

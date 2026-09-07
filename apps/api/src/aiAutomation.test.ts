@@ -124,6 +124,22 @@ describe("Request analysis heuristic", () => {
     assert.notEqual(analysis.taskTitle, "Обработать новую заявку");
   });
 
+  it("builds client WhatsApp draft instead of internal briefing", () => {
+    const analysis = analyzeRequestHeuristic({
+      name: "аппап",
+      description: "Нужен сайт для строительства",
+      serviceCategory: "web",
+      budgetMin: 77777,
+      budgetMax: 77777,
+      phoneNormalized: "77777777777",
+    });
+    assert.match(analysis.taskObjective, /Бюджет — 77777/);
+    assert.match(analysis.taskObjective, /Услуга — web/);
+    assert.doesNotMatch(analysis.clientMessageDraft, /^Уже известно:/);
+    assert.match(analysis.clientMessageDraft, /Здравствуйте/i);
+    assert.match(analysis.clientMessageDraft, /заявку/i);
+  });
+
   it("detects presentation from free text", () => {
     const analysis = analyzeRequestHeuristic({
       description: "Нужна инвестиционная презентация",

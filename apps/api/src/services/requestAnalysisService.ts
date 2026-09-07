@@ -14,7 +14,10 @@ export type RequestAnalysis = {
   urgency: "normal" | "high" | "urgent";
   recommendedAction: string;
   taskTitle: string;
+  /** Internal CRM briefing for the manager — not WhatsApp copy */
   taskObjective: string;
+  /** Ready-to-send first WhatsApp message for the client */
+  clientMessageDraft: string;
   expectedOutcome: string;
   qualificationQuestions: string[];
   confidence: "HIGH" | "MEDIUM" | "LOW";
@@ -232,21 +235,18 @@ export function analyzeRequestHeuristic(input: AnalyzeInput): RequestAnalysis {
             : "заявку";
 
   const knownSummary = knownFields
-    .filter((f) => f.key !== "phone" && f.key !== "service")
-    .map((f) => f.value || f.label)
-    .slice(0, 4)
+    .filter((f) => f.key !== "phone")
+    .map((f) => (f.value ? `${f.label} — ${f.value}` : f.label))
     .join(", ");
 
-  const missingSummary = missingFields
-    .slice(0, 4)
-    .map((f) => f.label.toLowerCase())
-    .join(", ");
+  const missingSummary = missingFields.map((f) => f.label.toLowerCase()).join(", ");
 
   const taskTitle = `Квалифицировать заявку${companyPart} на ${serviceLabel}`.replace(/\s+/g, " ").trim();
+  const expectedOutcome = "Квалифицировать потребность и определить следующий коммерческий шаг.";
   const taskObjective = [
     knownSummary ? `Уже известно: ${knownSummary}.` : null,
     missingSummary ? `Уточнить: ${missingSummary}.` : null,
-    "Определить следующий коммерческий шаг.",
+    `Цель: ${expectedOutcome}`,
   ]
     .filter(Boolean)
     .join(" ");
@@ -259,7 +259,19 @@ export function analyzeRequestHeuristic(input: AnalyzeInput): RequestAnalysis {
     if (f.key === "functionality") return "Какой функционал критичен для запуска?";
     if (f.key === "materials") return "Есть ли готовые материалы (тексты, фото, брендбук)?";
     if (f.key === "budget") return "Какой ориентировочный бюджет рассматриваете?";
-    return `Уточнить: ${f.label.toLowerCase()}?`;
+    if (f.key === "site_type") return "Какой тип сайта нужен: корпоративный, лендинг или интернет-магазин?";
+    if (f.key === "audience") return "Кто ваша целевая аудитория?";
+    if (f.key === "structure") return "Какой примерно объём/структура (сколько страниц или разделов)?";
+    if (f.key === "deadline") return "К какому сроку нужен результат?";
+    return `Уточните, пожалуйста: ${f.label.toLowerCase()}?`;
+  });
+
+  const clientMessageDraft = buildClientMessageDraft({
+    contactName: input.name,
+    serviceLabel,
+    company,
+    knownFields,
+    qualificationQuestions,
   });
 
   return {
@@ -277,11 +289,48 @@ export function analyzeRequestHeuristic(input: AnalyzeInput): RequestAnalysis {
     recommendedAction: taskObjective,
     taskTitle,
     taskObjective,
-    expectedOutcome: "Квалифицировать потребность и определить следующий коммерческий шаг.",
+    clientMessageDraft,
+    expectedOutcome,
     qualificationQuestions,
     confidence: fromClient || category ? "MEDIUM" : "LOW",
     evidence,
   };
+}
+
+function buildClientMessageDraft(args: {
+  contactName?: string | null;
+  serviceLabel: string;
+  company: string | null;
+  knownFields: RequestAnalysis["knownFields"];
+  qualificationQuestions: string[];
+}) {
+  const firstName = String(args.contactName || "")
+    .trim()
+    .split(/\s+/)[0];
+  const greeting = firstName && !/^(клиент|lead|test|тест|\+?\d)/i.test(firstName)
+    ? `Здравствуйте, ${firstName}!`
+    : "Здравствуйте!";
+
+  const knownBits = args.knownFields
+    .filter((f) => f.key !== "phone" && f.value)
+    .slice(0, 3)
+    .map((f) => `${f.label.toLowerCase()} — ${f.value}`);
+
+  const contextLine = [
+    `Получили вашу заявку на ${args.serviceLabel}${args.company ? ` (${args.company})` : ""}.`,
+    knownBits.length ? `Уже учли: ${knownBits.join("; ")}.` : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const questions = args.qualificationQuestions.slice(0, 3);
+  const askBlock = questions.length
+    ? ["Чтобы подготовить предложение, уточните пожалуйста:", ...questions.map((q, i) => `${i + 1}. ${q}`)].join(
+        "\n",
+      )
+    : "Напишите, пожалуйста, детали задачи — подготовим следующий шаг.";
+
+  return [greeting, contextLine, askBlock].filter(Boolean).join("\n\n");
 }
 
 export async function analyzeRequestWithOptionalLlm(input: AnalyzeInput): Promise<RequestAnalysis> {
@@ -311,6 +360,7 @@ export async function analyzeRequestWithOptionalLlm(input: AnalyzeInput): Promis
       evidence: Array.isArray(refined.evidence) ? (refined.evidence as string[]) : draft.evidence,
       taskTitle: typeof refined.taskTitle === "string" ? refined.taskTitle : draft.taskTitle,
       taskObjective: typeof refined.taskObjective === "string" ? refined.taskObjective : draft.taskObjective,
+      clientMessageDraft: draft.clientMessageDraft,
       expectedOutcome:
         typeof refined.expectedOutcome === "string" ? refined.expectedOutcome : draft.expectedOutcome,
       recommendedAction:

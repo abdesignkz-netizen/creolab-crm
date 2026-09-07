@@ -268,7 +268,7 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
         dueAt: child.dueAt,
         executionStatus: child.executionStatus,
       })),
-      isSendable: ["proposal", "message", "send_documents", "prepare_estimate", "follow_up"].includes(item.type),
+      isSendable: ["proposal", "message", "send_documents", "prepare_estimate", "follow_up", "process_inquiry"].includes(item.type),
       needsFileRetry,
       failedFiles,
       executionStatus: item.executionStatus,
@@ -327,7 +327,7 @@ export async function getTask(prisma: PrismaClient, auth: AuthContext, id: strin
   return {
     ...item,
     attachments,
-    isSendable: ["proposal", "message", "send_documents", "prepare_estimate", "follow_up"].includes(item.type),
+    isSendable: ["proposal", "message", "send_documents", "prepare_estimate", "follow_up", "process_inquiry"].includes(item.type),
     briefing: {
       purpose: item.purpose,
       briefingText: item.briefingText,

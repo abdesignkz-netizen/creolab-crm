@@ -278,6 +278,7 @@ export async function processNewRequestAutomation(
         data: {
           title: analysis.taskTitle,
           description: analysis.taskObjective,
+          messageDraft: analysis.clientMessageDraft,
           purpose: analysis.expectedOutcome,
           briefingText: analysis.detectedNeed,
           preparationHintsJson: [
@@ -301,6 +302,7 @@ export async function processNewRequestAutomation(
             automationMode: decision.mode,
             aiStatus: nextExec,
             qualificationQuestions: analysis.qualificationQuestions,
+            clientMessageDraft: analysis.clientMessageDraft,
           } as Prisma.InputJsonValue,
         },
       });
