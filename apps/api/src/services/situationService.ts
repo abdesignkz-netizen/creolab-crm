@@ -4,6 +4,8 @@ import { WhatsAppSellerBridge } from "@creolab/integrations";
 import { ApiError } from "../errors.ts";
 import { decryptSecret } from "../lib/secretBox.ts";
 import type { AuthContext } from "../lib/types.ts";
+import { CONTACT_PHONE_SELECT, displayName, phoneFromContact } from "./contactLabels.ts";
+import { inquiryInterest, loadConversationInterests } from "./contactInterestService.ts";
 
 export type SituationKind =
   | "needs_phone"
@@ -37,6 +39,9 @@ export type SituationItem = {
   kind: SituationKind;
   entityId: string;
   title: string;
+  contactName: string | null;
+  phone: string | null;
+  interest: string | null;
   reason: string;
   nextAction: SituationNextAction;
   severity: "critical" | "high" | "normal" | "low";
@@ -201,26 +206,58 @@ export async function getSituation(
   const [intakes, inquiries, conversations, tasks, snoozes, seller, contacts] = await Promise.all([
     prisma.incompleteIntake.findMany({
       where: { tenantId: tid, status: "pending" },
-      include: { contact: true },
+      include: { contact: { select: CONTACT_PHONE_SELECT } },
     }),
     prisma.inquiry.findMany({
       where: { tenantId: tid, archived: false, test: false, status: { in: ["new", "accepted", "in_progress", "waiting_client", "waiting_manager"] } },
-      include: { contact: true },
+      include: { contact: { select: CONTACT_PHONE_SELECT } },
     }),
     prisma.conversation.findMany({
       where: { tenantId: tid, status: "open" },
-      include: { contact: true },
+      include: { contact: { select: CONTACT_PHONE_SELECT } },
     }),
     prisma.task.findMany({
       where: { tenantId: tid, status: { in: ["open", "waiting"] } },
+      include: {
+        contact: { select: CONTACT_PHONE_SELECT },
+        inquiry: { select: { subject: true, service: true, phoneRaw: true, phoneNormalized: true, contactId: true } },
+      },
     }),
     prisma.situationSnooze.findMany({ where: { tenantId: tid } }),
     tenantSellerFreshness(prisma, tid),
     prisma.contact.findMany({
       where: { tenantId: tid, archivedAt: null },
+      include: { methods: { select: { type: true, rawValue: true, normalizedValue: true, primary: true } } },
       take: 200,
     }),
   ]);
+
+  const interestContactIds = [
+    ...inquiries.map((item) => item.contactId),
+    ...conversations.map((item) => item.contactId),
+    ...contacts.map((item) => item.id),
+    ...tasks.map((item) => item.contactId || item.inquiry?.contactId),
+  ].filter((id): id is string => Boolean(id));
+  const conversationInterests = await loadConversationInterests(prisma, tid, [...new Set(interestContactIds)]);
+  const inquiryByContact = new Map<string, (typeof inquiries)[number]>();
+  const inquiryByConversation = new Map<string, (typeof inquiries)[number]>();
+  for (const inquiry of inquiries) {
+    if (!inquiryByContact.has(inquiry.contactId)) inquiryByContact.set(inquiry.contactId, inquiry);
+    if (inquiry.conversationId) inquiryByConversation.set(inquiry.conversationId, inquiry);
+  }
+
+  const resolveInterest = (
+    contactId?: string | null,
+    conversationId?: string | null,
+    inquiry?: { subject?: string | null; service?: string | null } | null,
+  ) => {
+    const linked =
+      inquiry ||
+      (conversationId ? inquiryByConversation.get(conversationId) : undefined) ||
+      (contactId ? inquiryByContact.get(contactId) : undefined) ||
+      null;
+    return inquiryInterest(linked)?.text || (contactId ? conversationInterests.get(contactId)?.text : null) || null;
+  };
 
   const snoozeByItem = new Map(snoozes.map((row) => [row.itemId, row]));
   const inquiryIds = new Set(inquiries.map((item) => item.id));
@@ -229,7 +266,7 @@ export async function getSituation(
   const items: SituationItem[] = [];
 
   for (const intake of intakes) {
-    const raw = (intake.rawFieldsJson || {}) as { contact?: { name?: string } };
+    const raw = (intake.rawFieldsJson || {}) as { contact?: { name?: string }; inquiry?: { subject?: string } };
     const title = intake.contact?.name || raw.contact?.name || "Обращение без телефона";
     const task = tasks.find((row) => row.incompleteIntakeId === intake.id || row.dedupeKey === `intake-phone:${intake.id}`);
     items.push({
@@ -237,6 +274,9 @@ export async function getSituation(
       kind: "needs_phone",
       entityId: intake.id,
       title,
+      contactName: intake.contact ? displayName(intake.contact) : raw.contact?.name || null,
+      phone: phoneFromContact(intake.contact),
+      interest: raw.inquiry?.subject || resolveInterest(intake.contactId, intake.conversationId),
       reason: "Нет телефона — нельзя принять заявку и написать клиенту",
       nextAction: "complete_phone",
       severity: "critical",
@@ -264,6 +304,9 @@ export async function getSituation(
       kind,
       entityId: inquiry.id,
       title: inquiry.subject || inquiry.contact?.name || "Заявка",
+      contactName: inquiry.contact ? displayName(inquiry.contact) : null,
+      phone: phoneFromContact(inquiry.contact, inquiry),
+      interest: resolveInterest(inquiry.contactId, inquiry.conversationId, inquiry),
       reason: kind === "inquiry_new" ? "Новая заявка, ещё не принята" : "Принята, нет следующего шага",
       nextAction: kind === "inquiry_new" ? "accept_inquiry" : "open_inquiry",
       severity: kind === "inquiry_new" ? "high" : "normal",
@@ -301,6 +344,9 @@ export async function getSituation(
       kind,
       entityId: conversation.id,
       title: conversation.contact?.name || (conversation.sellerLeadId ? "Диалог WhatsApp" : "Диалог"),
+      contactName: conversation.contact ? displayName(conversation.contact) : null,
+      phone: phoneFromContact(conversation.contact, { externalThreadId: conversation.externalThreadId }),
+      interest: resolveInterest(conversation.contactId, conversation.id),
       reason:
         kind === "conversation_human"
           ? "Клиент ждёт ответ менеджера"
@@ -353,6 +399,9 @@ export async function getSituation(
       kind,
       entityId: task.id,
       title: task.title,
+      contactName: task.contact ? displayName(task.contact) : null,
+      phone: phoneFromContact(task.contact, task.inquiry),
+      interest: resolveInterest(task.contactId || task.inquiry?.contactId, task.conversationId, task.inquiry),
       reason: overdue ? "Срок прошёл" : dueToday ? "Срок сегодня" : "Высокий приоритет без ответственного",
       nextAction: unassignedHot ? "assign_owner" : "complete_task",
       severity: overdue || unassignedHot ? "high" : "normal",
@@ -383,6 +432,9 @@ export async function getSituation(
         kind: "contact_needs_reply",
         entityId: contact.id,
         title: contact.name || contact.firstName || "Клиент ждёт ответа",
+        contactName: displayName(contact),
+        phone: phoneFromContact(contact),
+        interest: resolveInterest(contact.id),
         reason: `Клиент ждёт ${formatDurationMinutes(ageMinutes(inbound!, now))}`,
         nextAction: "open_contact",
         severity: "high",
@@ -411,6 +463,9 @@ export async function getSituation(
       kind: "missing_next_action",
       entityId: inquiry.id,
       title: inquiry.subject || inquiry.contact?.name || "Заявка без шага",
+      contactName: inquiry.contact ? displayName(inquiry.contact) : null,
+      phone: phoneFromContact(inquiry.contact, inquiry),
+      interest: resolveInterest(inquiry.contactId, inquiry.conversationId, inquiry),
       reason: "Нет следующего действия",
       nextAction: "create_next_action",
       severity: "normal",

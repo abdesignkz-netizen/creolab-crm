@@ -371,7 +371,11 @@ export function SituationPage() {
           visibleAttention.map((item: any) => (
             <div className={`row severity-${item.severity} sit-attn-row`} key={item.id}>
               <div>
-                <b>{item.title}</b>
+                <b>{nameWithPhone(item.contactName || item.title, item.phone)}</b>
+                {item.interest ? <div className="muted">{item.interest}</div> : null}
+                {item.contactName && item.title && item.title !== item.contactName && item.title !== item.interest ? (
+                  <div className="muted">{item.title}</div>
+                ) : null}
                 <div className="muted">{item.reason}</div>
                 <div className="muted">
                   {ACTION_LABEL[item.nextAction] || item.nextAction}
