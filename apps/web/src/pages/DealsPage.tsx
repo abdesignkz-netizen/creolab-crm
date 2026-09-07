@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { PeriodSelector, type PeriodPreset } from "../components/PeriodSelector";
 import { api } from "../lib/api";
+import { tip } from "../lib/tip";
 
 type Scope = "all" | "mine" | "unassigned";
 type TimeMode = "now" | "period";
@@ -490,16 +491,22 @@ export function DealDetailPage() {
           </select>
         </label>
         <div className="actions">
-          <button type="button" className="btn" disabled={busy} onClick={() => void save()}>
+          <button
+            type="button"
+            className="btn"
+            disabled={busy}
+            {...tip("Сохранить сумму, вероятность, следующий шаг и статус оплаты")}
+            onClick={() => void save()}
+          >
             Сохранить
           </button>
           {d.contact?.id ? (
-            <Link className="btn secondary" to={`/contacts/${d.contact.id}`}>
+            <Link className="btn secondary" to={`/contacts/${d.contact.id}`} {...tip("Открыть карточку клиента")}>
               Клиент
             </Link>
           ) : null}
           {d.inquiryId ? (
-            <Link className="btn secondary" to={`/requests/${d.inquiryId}`}>
+            <Link className="btn secondary" to={`/requests/${d.inquiryId}`} {...tip("Открыть исходную заявку")}>
               Заявка
             </Link>
           ) : null}
@@ -538,7 +545,13 @@ export function DealDetailPage() {
             <input value={payComment} onChange={(e) => setPayComment(e.target.value)} placeholder="необязательно" />
           </label>
           <div className="actions">
-            <button type="button" className="btn" disabled={busy} onClick={() => void confirmPayment()}>
+            <button
+              type="button"
+              className="btn"
+              disabled={busy}
+              {...tip("Зафиксировать платёж и обновить статус оплаты сделки")}
+              onClick={() => void confirmPayment()}
+            >
               Подтвердить оплату
             </button>
           </div>
@@ -574,6 +587,7 @@ export function DealDetailPage() {
           type="button"
           className="btn"
           disabled={busy || d.outcome === "won"}
+          {...tip("Отметить сделку выигранной (WON)")}
           onClick={() => {
             setBusy(true);
             void api
@@ -589,6 +603,11 @@ export function DealDetailPage() {
           type="button"
           className="btn secondary"
           disabled={busy}
+          {...tip(
+            d.outcome === "on_hold"
+              ? "Вернуть сделку с паузы в активную воронку"
+              : "Поставить сделку на паузу (ON HOLD)",
+          )}
           onClick={() => {
             setBusy(true);
             void api
@@ -600,7 +619,7 @@ export function DealDetailPage() {
         >
           {d.outcome === "on_hold" ? "Снять с hold" : "ON HOLD"}
         </button>
-        <select value={lossReason} onChange={(e) => setLossReason(e.target.value)}>
+        <select value={lossReason} onChange={(e) => setLossReason(e.target.value)} title="Причина проигрыша">
           {(board?.lostReasons || ["Дорого", "Другое"]).map((r: string) => (
             <option key={r} value={r}>
               {r}
@@ -611,6 +630,7 @@ export function DealDetailPage() {
           type="button"
           className="btn danger"
           disabled={busy || d.outcome === "lost"}
+          {...tip("Отметить сделку проигранной с выбранной причиной")}
           onClick={() => {
             setBusy(true);
             void api
@@ -625,6 +645,7 @@ export function DealDetailPage() {
         <button
           type="button"
           className="btn secondary"
+          {...tip("Создать задачу, привязанную к этой сделке и клиенту")}
           onClick={() =>
             navigate(
               `/tasks?dealId=${d.id}${d.contact?.id || d.contactId ? `&contactId=${d.contact?.id || d.contactId}` : ""}`,

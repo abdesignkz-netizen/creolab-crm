@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { api, setTenant } from "./lib/api";
+import { tip } from "./lib/tip";
 import {
   currentBrowserPermission,
   dismissNotificationBanner,
@@ -298,7 +299,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
           })}
           {me.user.platformAdmin ? <NavLink to="/admin">Кабинет платформы</NavLink> : null}
         </nav>
-        <button className="btn secondary nav-logout" onClick={logout}>
+        <button className="btn secondary nav-logout" onClick={logout} {...tip("Завершить сеанс в этом браузере")}>
           Выйти
         </button>
       </aside>
@@ -382,7 +383,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
             </NavLink>
           ) : null}
         </nav>
-        <button type="button" className="btn secondary" onClick={logout}>
+        <button type="button" className="btn secondary" onClick={logout} {...tip("Завершить сеанс в этом браузере")}>
           Выйти
         </button>
       </div>

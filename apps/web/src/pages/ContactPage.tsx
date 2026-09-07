@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../lib/api";
+import { tip } from "../lib/tip";
 
 export function ContactPage() {
   const { id } = useParams();
@@ -80,29 +81,55 @@ export function ContactPage() {
         </div>
         <div className="actions sticky-actions">
           {conversations[0] ? (
-            <Link className="btn" to={`/conversations/${conversations[0].id}?focus=reply`}>Написать</Link>
+            <Link
+              className="btn"
+              to={`/conversations/${conversations[0].id}?focus=reply`}
+              {...tip("Открыть WhatsApp-диалог и ответить клиенту")}
+            >
+              Написать
+            </Link>
           ) : (
-            <button className="btn secondary" disabled title="Нет диалога">Написать</button>
+            <button className="btn secondary" disabled {...tip("Нет связанного диалога WhatsApp")}>
+              Написать
+            </button>
           )}
           {tel ? (
-            <a className="btn secondary" href={`tel:+${tel}`}>Позвонить</a>
+            <a className="btn secondary" href={`tel:+${tel}`} {...tip("Позвонить с телефона")}>
+              Позвонить
+            </a>
           ) : (
-            <button className="btn secondary" disabled>Позвонить</button>
+            <button className="btn secondary" disabled {...tip("Телефон не указан")}>
+              Позвонить
+            </button>
           )}
-          <Link className="btn secondary" to={`/tasks?contactId=${client.id}`}>
+          <Link className="btn secondary" to={`/tasks?contactId=${client.id}`} {...tip("Создать задачу по этому клиенту")}>
             + Задача
           </Link>
           {currentRequest ? (
-            <Link className="btn secondary" to={`/requests/${currentRequest.id}`}>
+            <Link
+              className="btn secondary"
+              to={`/requests/${currentRequest.id}`}
+              {...tip("Открыть текущую заявку клиента")}
+            >
               + Сделка / заявка
             </Link>
           ) : (
-            <Link className="btn secondary" to={`/inquiries?contact=${client.id}`}>
+            <Link
+              className="btn secondary"
+              to={`/inquiries?contact=${client.id}`}
+              {...tip("Создать новую заявку с уже выбранным клиентом")}
+            >
               + Заявка
             </Link>
           )}
           <div className="menu-wrap">
-            <button className="btn secondary" onClick={() => setMenuOpen((value) => !value)}>•••</button>
+            <button
+              className="btn secondary"
+              {...tip("Дополнительные действия: редактировать, теги, архив")}
+              onClick={() => setMenuOpen((value) => !value)}
+            >
+              •••
+            </button>
             {menuOpen ? (
               <div className="menu">
                 <button onClick={() => { setEditOpen(true); setMenuOpen(false); }}>Редактировать</button>

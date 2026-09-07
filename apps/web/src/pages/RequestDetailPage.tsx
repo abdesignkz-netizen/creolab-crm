@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../lib/api";
+import { tip } from "../lib/tip";
 
 const LOST_REASONS = [
   { value: "expensive", label: "Дорого" },
@@ -112,47 +113,85 @@ export function RequestDetailPage() {
             </button>
           ) : null}
           {data.automation?.canStart && !closed ? (
-            <button className="btn" disabled={busy} onClick={() => run(() => api.startInquiryAi(data.id))}>
+            <button
+              className="btn"
+              disabled={busy}
+              {...tip(
+                data.automation.status === "awaiting_confirm"
+                  ? "AI начнёт писать клиенту по этой заявке"
+                  : "Передать заявку AI Manager для квалификации и первого контакта",
+              )}
+              onClick={() => run(() => api.startInquiryAi(data.id))}
+            >
               {data.automation.status === "awaiting_confirm" ? "Начать обработку" : "Передать AI Manager"}
             </button>
           ) : null}
           {data.automation?.canTakeover ? (
-            <button className="btn secondary" disabled={busy} onClick={() => run(() => api.takeoverInquiryAi(data.id))}>
+            <button
+              className="btn secondary"
+              disabled={busy}
+              {...tip("Остановить AI и вести заявку вручную")}
+              onClick={() => run(() => api.takeoverInquiryAi(data.id))}
+            >
               Забрать себе
             </button>
           ) : null}
           {data.automation?.canReturnAi ? (
-            <button className="btn secondary" disabled={busy} onClick={() => run(() => api.returnInquiryAi(data.id))}>
+            <button
+              className="btn secondary"
+              disabled={busy}
+              {...tip("Снова отдать заявку AI Manager")}
+              onClick={() => run(() => api.returnInquiryAi(data.id))}
+            >
               Передать обратно AI
             </button>
           ) : null}
           {data.conversationId ? (
-            <Link className="btn secondary" to={`/conversations/${data.conversationId}`}>
+            <Link
+              className="btn secondary"
+              to={`/conversations/${data.conversationId}`}
+              {...tip("Открыть WhatsApp-диалог по заявке")}
+            >
               Написать
             </Link>
           ) : data.contactId ? (
-            <Link className="btn secondary" to={`/contacts/${data.contactId}`}>
+            <Link className="btn secondary" to={`/contacts/${data.contactId}`} {...tip("Открыть карточку клиента")}>
               Написать
             </Link>
           ) : null}
           {canCall ? (
-            <a className="btn secondary" href={`tel:${String(data.phone).replace(/\s+/g, "")}`}>
+            <a
+              className="btn secondary"
+              href={`tel:${String(data.phone).replace(/\s+/g, "")}`}
+              {...tip("Позвонить клиенту")}
+            >
               Позвонить
             </a>
           ) : null}
           <Link
             className="btn secondary"
             to={`/tasks?inquiryId=${data.id}${data.contactId ? `&contactId=${data.contactId}` : ""}${data.conversationId ? `&conversationId=${data.conversationId}` : ""}${data.dealId ? `&dealId=${data.dealId}` : ""}`}
+            {...tip("Создать задачу с уже привязанной заявкой и клиентом")}
           >
             Создать задачу
           </Link>
           {!data.hasDeal && !closed ? (
-            <button className="btn" disabled={busy} onClick={() => setShowDealConfirm(true)}>
+            <button
+              className="btn"
+              disabled={busy}
+              {...tip("Перевести заявку в сделку воронки")}
+              onClick={() => setShowDealConfirm(true)}
+            >
               Создать сделку
             </button>
           ) : null}
           {!closed ? (
-            <button className="btn secondary" disabled={busy} onClick={() => setShowLose(true)}>
+            <button
+              className="btn secondary"
+              disabled={busy}
+              {...tip("Отметить заявку потерянной с указанием причины")}
+              onClick={() => setShowLose(true)}
+            >
               Потеряна…
             </button>
           ) : null}

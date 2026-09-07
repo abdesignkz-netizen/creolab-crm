@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api } from "../lib/api";
+import { tip } from "../lib/tip";
 
 const FILTERS = [
   ["all", "Все"],
@@ -161,17 +162,27 @@ export function ConversationsPage() {
           <div className="muted">Ответственный: {workspace.conversation.assigneeName || "Не назначен"}</div>
           <div className="actions">
             {workspace.client?.id ? (
-              <Link className="btn secondary" to={`/contacts/${workspace.client.id}`}>
+              <Link
+                className="btn secondary"
+                to={`/contacts/${workspace.client.id}`}
+                {...tip("Открыть карточку клиента 360°")}
+              >
                 Карточка клиента
               </Link>
             ) : null}
-            <button type="button" className="btn secondary mobile-only" onClick={() => setShowContext(true)}>
+            <button
+              type="button"
+              className="btn secondary mobile-only"
+              {...tip("Заявка, сделка и договорённости по диалогу")}
+              onClick={() => setShowContext(true)}
+            >
               Информация
             </button>
             {workspace.conversation.mode !== "human" ? (
               <button
                 className="btn"
                 type="button"
+                {...tip("AI перестанет отвечать — диалог забираете вы")}
                 onClick={() => api.takeConversation(workspace.conversation.id).then(() => loadWorkspace(workspace.conversation.id)).then(loadList)}
               >
                 Передать менеджеру
@@ -180,6 +191,7 @@ export function ConversationsPage() {
               <button
                 className="btn secondary"
                 type="button"
+                {...tip("Вернуть диалог AI Manager — бот снова отвечает сам")}
                 onClick={() => api.returnToAi(workspace.conversation.id).then(() => loadWorkspace(workspace.conversation.id)).then(loadList)}
               >
                 Вернуть AI
@@ -253,7 +265,15 @@ export function ConversationsPage() {
           }
           disabled={workspace.conversation.mode !== "human" || busy}
         />
-        <button className="btn" disabled={workspace.conversation.mode !== "human" || busy}>
+        <button
+          className="btn"
+          disabled={workspace.conversation.mode !== "human" || busy}
+          {...tip(
+            workspace.conversation.mode !== "human"
+              ? "Сначала нажмите «Передать менеджеру» — иначе сообщение не уйдёт"
+              : "Отправить сообщение клиенту в WhatsApp",
+          )}
+        >
           Отправить
         </button>
       </form>
@@ -412,6 +432,7 @@ export function ConversationsPage() {
         <Link
           className="btn secondary"
           to={`/tasks?conversationId=${workspace.conversation.id}${workspace.client?.id ? `&contactId=${workspace.client.id}` : ""}${workspace.deal?.id ? `&dealId=${workspace.deal.id}` : ""}`}
+          {...tip("Создать задачу по этому диалогу с уже выбранным клиентом")}
         >
           Создать задачу
         </Link>

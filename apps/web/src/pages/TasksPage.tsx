@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type DragEvent, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../lib/api";
+import { tip } from "../lib/tip";
 import { CampaignMassPanel } from "./CampaignMassPanel";
 
 type Filter = "open" | "waiting" | "overdue" | "mine" | "all";
@@ -1057,6 +1058,7 @@ export function TasksPage() {
           <button
             type="button"
             className={showCreate && composeMode === "command" ? "btn" : "btn secondary"}
+            {...tip("Опишите задачу своими словами — система разберёт, кому и что отправить")}
             onClick={() => {
               setComposeMode("command");
               setShowCampaignPanel(false);
@@ -1068,6 +1070,7 @@ export function TasksPage() {
           <button
             type="button"
             className={showCreate && (composeMode === "campaign" || showCampaignPanel) ? "btn" : "btn secondary"}
+            {...tip("Рассылка одного сообщения или файла списку номеров / сегменту CRM")}
             onClick={() => {
               setComposeMode("campaign");
               setShowCampaignPanel(true);
@@ -1080,6 +1083,7 @@ export function TasksPage() {
           <button
             type="button"
             className={showCreate && composeMode === "manual" ? "btn" : "btn secondary"}
+            {...tip("Создать задачу вручную: тип, клиент, срок, текст")}
             onClick={() => {
               setComposeMode("manual");
               setShowCampaignPanel(false);
@@ -1100,7 +1104,22 @@ export function TasksPage() {
             ["all", "Все"],
           ] as const
         ).map(([value, label]) => (
-          <button key={value} className={filter === value ? "btn" : "btn secondary"} onClick={() => setFilter(value)}>
+          <button
+            key={value}
+            className={filter === value ? "btn" : "btn secondary"}
+            {...tip(
+              value === "open"
+                ? "Задачи в работе прямо сейчас"
+                : value === "waiting"
+                  ? "Ждёте ответа клиента или внешней реакции"
+                  : value === "overdue"
+                    ? "Срок уже прошёл — нужно действие"
+                    : value === "mine"
+                      ? "Назначены на вас"
+                      : "Все задачи без фильтра",
+            )}
+            onClick={() => setFilter(value)}
+          >
             {label} · {filterCounts[value]}
           </button>
         ))}
@@ -2148,10 +2167,21 @@ export function TasksPage() {
             </div>
           ) : null}
           <div className="actions">
-            <button type="button" className="btn secondary" onClick={() => { setActiveTaskId(null); setTaskDetail(null); }}>
+            <button
+              type="button"
+              className="btn secondary"
+              {...tip("Закрыть панель без отправки")}
+              onClick={() => { setActiveTaskId(null); setTaskDetail(null); }}
+            >
               Закрыть
             </button>
-            <button type="button" className="btn" disabled={busy} onClick={onPrepare}>
+            <button
+              type="button"
+              className="btn"
+              disabled={busy}
+              {...tip("Проверить канал и показать подтверждение перед отправкой в WhatsApp")}
+              onClick={onPrepare}
+            >
               Подготовить отправку
             </button>
           </div>
@@ -2460,8 +2490,13 @@ export function TasksPage() {
                       {item.conversationId ? (
                         <Link to={`/conversations/${item.conversationId}`}>Открыть весь диалог</Link>
                       ) : null}
-                      <button type="button" className="btn secondary" onClick={() => openTaskEditor(item.id)}>
-                        Полный briefing
+                      <button
+                        type="button"
+                        className="btn secondary"
+                        {...tip("Показать цель, что известно и черновик сообщения клиенту")}
+                        onClick={() => openTaskEditor(item.id)}
+                      >
+                        Брифинг и сообщение
                       </button>
                     </div>
                   ) : null}
@@ -2528,7 +2563,16 @@ export function TasksPage() {
                   {item.status === "open" || item.status === "waiting" ? (
                     <>
                       {SENDABLE.has(item.type) && item.targetType !== "group" ? (
-                        <button className="btn" type="button" onClick={() => openTaskEditor(item.id)}>
+                        <button
+                          className="btn"
+                          type="button"
+                          {...tip(
+                            item.needsFileRetry
+                              ? "Открыть задачу, чтобы повторить отправку файла"
+                              : "Открыть черновик и отправить сообщение/файл клиенту в WhatsApp",
+                          )}
+                          onClick={() => openTaskEditor(item.id)}
+                        >
                           {item.needsFileRetry ? "Открыть задачу" : "Подготовить отправку"}
                         </button>
                       ) : null}
@@ -2536,6 +2580,7 @@ export function TasksPage() {
                         <button
                           className="btn"
                           type="button"
+                          {...tip("Открыть массовую рассылку по клиентам этой групповой задачи")}
                           onClick={() => {
                             const ids = (item.children || [])
                               .map((child: any) => child.contactId)
@@ -2562,6 +2607,7 @@ export function TasksPage() {
                         <button
                           className="btn secondary"
                           type="button"
+                          {...tip("Закрыть задачу с результатом (дозвон, итог встречи и т.п.) и получить следующий шаг")}
                           onClick={() => {
                             setCompleteOpen(item.id);
                             setCompleteTaskType(item.type);
@@ -2569,22 +2615,31 @@ export function TasksPage() {
                             setResultText("");
                           }}
                         >
-                          Завершить
+                          С результатом
                         </button>
                       ) : null}
                       {item.status === "open" ? (
-                        <button className="btn secondary" onClick={() => api.waitTask(item.id).then(load).catch((err) => setError(err.message))}>
-                          Жду
+                        <button
+                          className="btn secondary"
+                          {...tip("Отложить: ждёте ответа клиента. Задача уйдёт во вкладку «Жду»")}
+                          onClick={() => api.waitTask(item.id).then(load).catch((err) => setError(err.message))}
+                        >
+                          Жду ответа
                         </button>
                       ) : null}
                       {item.status === "waiting" ? (
-                        <button className="btn secondary" onClick={() => api.reopenTask(item.id).then(load).catch((err) => setError(err.message))}>
-                          Вернуть
+                        <button
+                          className="btn secondary"
+                          {...tip("Вернуть задачу из ожидания обратно в открытые")}
+                          onClick={() => api.reopenTask(item.id).then(load).catch((err) => setError(err.message))}
+                        >
+                          Вернуть в работу
                         </button>
                       ) : null}
                       <button
                         className="btn secondary"
                         type="button"
+                        {...tip("Сразу отметить задачу выполненной без заполнения результата")}
                         onClick={() =>
                           api
                             .completeTask(item.id)
@@ -2592,9 +2647,13 @@ export function TasksPage() {
                             .catch((err) => setError(err instanceof Error ? err.message : "Нельзя закрыть"))
                         }
                       >
-                        Сделано
+                        Готово
                       </button>
-                      <button className="btn danger" onClick={() => api.cancelTask(item.id).then(load).catch((err) => setError(err.message))}>
+                      <button
+                        className="btn danger"
+                        {...tip("Отменить задачу — она больше не будет в работе")}
+                        onClick={() => api.cancelTask(item.id).then(load).catch((err) => setError(err.message))}
+                      >
                         Отменить
                       </button>
                     </>
