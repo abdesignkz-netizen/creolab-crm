@@ -178,7 +178,7 @@ export function TasksPage() {
   const [me, setMe] = useState<any>(null);
   const [members, setMembers] = useState<any[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [showCreate, setShowCreate] = useState(true);
+  const [showCreate, setShowCreate] = useState(false);
   const [messageDraft, setMessageDraft] = useState("");
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [taskDetail, setTaskDetail] = useState<any>(null);
@@ -1005,7 +1005,7 @@ export function TasksPage() {
         <div className="actions">
           <button
             type="button"
-            className={composeMode === "command" ? "btn" : "btn secondary"}
+            className={showCreate && composeMode === "command" ? "btn" : "btn secondary"}
             onClick={() => {
               setComposeMode("command");
               setShowCampaignPanel(false);
@@ -1016,7 +1016,7 @@ export function TasksPage() {
           </button>
           <button
             type="button"
-            className={composeMode === "campaign" || showCampaignPanel ? "btn" : "btn secondary"}
+            className={showCreate && (composeMode === "campaign" || showCampaignPanel) ? "btn" : "btn secondary"}
             onClick={() => {
               setComposeMode("campaign");
               setShowCampaignPanel(true);
@@ -1028,7 +1028,7 @@ export function TasksPage() {
           </button>
           <button
             type="button"
-            className={composeMode === "manual" ? "btn" : "btn secondary"}
+            className={showCreate && composeMode === "manual" ? "btn" : "btn secondary"}
             onClick={() => {
               setComposeMode("manual");
               setShowCampaignPanel(false);
