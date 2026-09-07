@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../lib/api";
+import { CALLS_ENABLED } from "../lib/featureFlags";
 import { tip } from "../lib/tip";
 
 const LOST_REASONS = [
@@ -159,7 +160,7 @@ export function RequestDetailPage() {
               Написать
             </Link>
           ) : null}
-          {canCall ? (
+          {CALLS_ENABLED && canCall ? (
             <a
               className="btn secondary"
               href={`tel:${String(data.phone).replace(/\s+/g, "")}`}

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type DragEvent, type FormEvent } from "re
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../lib/api";
 import { tip } from "../lib/tip";
+import { CALLS_ENABLED } from "../lib/featureFlags";
 import { CampaignMassPanel } from "./CampaignMassPanel";
 
 type Filter = "open" | "waiting" | "overdue" | "mine" | "all";
@@ -148,6 +149,10 @@ const TASK_TYPES = [
   ["other", "Другое"],
 ] as const;
 
+const CREATE_TASK_TYPES = CALLS_ENABLED
+  ? TASK_TYPES
+  : TASK_TYPES.filter(([id]) => id !== "call");
+
 const QUICK_SEGMENTS: Array<{
   id: string;
   label: string;
@@ -248,7 +253,7 @@ export function TasksPage() {
   const MANUAL_COMPLETE = new Set(["call", "meeting", "payment", "wait_client", "process_inquiry", "other"]);
 
   const [targetMode, setTargetMode] = useState<TargetMode>("client");
-  const [type, setType] = useState("call");
+  const [type, setType] = useState(CALLS_ENABLED ? "call" : "message");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [dueAt, setDueAt] = useState("");
@@ -1388,7 +1393,7 @@ export function TasksPage() {
             <div className="chip-row">
               {[
                 "Уточни, актуальна ли заявка.",
-                "Позвони и обсуди детали.",
+                ...(CALLS_ENABLED ? ["Позвони и обсуди детали."] : []),
                 "Напиши и уточни по оплате.",
                 "Отправь КП.",
               ].map((example) => (
@@ -1714,7 +1719,7 @@ export function TasksPage() {
               }
             }}
           >
-            {TASK_TYPES.map(([id, label]) => (
+            {CREATE_TASK_TYPES.map(([id, label]) => (
               <option key={id} value={id}>
                 {label}
               </option>

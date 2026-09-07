@@ -1,3 +1,5 @@
+import { CALLS_ENABLED } from "../lib/featureFlags.ts";
+
 /**
  * Optional LLM client. Used only to refine StructuredCommand JSON
  * or ConversationAnalysis JSON. Never calls sendMessage / messaging providers.
@@ -7,6 +9,13 @@ export async function refineCommandWithLlm(rawText: string, ruleParsed: Record<s
   const baseUrl = process.env.ANYMODEL_BASE_URL || process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
   const model = process.env.ANYMODEL_MODEL || process.env.OPENAI_MODEL || "gpt-4o-mini";
   if (!apiKey) return null;
+
+  const taskTypes = CALLS_ENABLED
+    ? "proposal|message|call|follow_up|send_documents|other"
+    : "proposal|message|follow_up|send_documents|other";
+  const callHint = CALLS_ENABLED
+    ? ""
+    : " Звонки отключены: «позвони/созвонись» → taskType message.";
 
   try {
     const response = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
@@ -23,7 +32,7 @@ export async function refineCommandWithLlm(rawText: string, ruleParsed: Record<s
           {
             role: "system",
             content:
-              "Ты парсер CRM-команд. Верни JSON с полями: taskType (proposal|message|call|follow_up|send_documents|other), executionMode (execute|prepare_only), serviceCategories (WEB|PRESENTATION|ADVERTISING|BRANDING|AI[]), datePreset (today|yesterday|last_3_days|last_7_days|last_30_days|null), needsReply (bool), excludeWon (bool), proposalSentDaysAgo (number|null), clientNameQuery (string|null), intent (string), riskLevel (0-4). «скажи/напиши/сообщи что …» = taskType message. «отправь КП» = proposal. «отправь файл/документ» = send_documents. Не выдумывай факты. Не отправляй сообщения.",
+              `Ты парсер CRM-команд. Верни JSON с полями: taskType (${taskTypes}), executionMode (execute|prepare_only), serviceCategories (WEB|PRESENTATION|ADVERTISING|BRANDING|AI[]), datePreset (today|yesterday|last_3_days|last_7_days|last_30_days|null), needsReply (bool), excludeWon (bool), proposalSentDaysAgo (number|null), clientNameQuery (string|null), intent (string), riskLevel (0-4). «скажи/напиши/сообщи что …» = taskType message. «отправь КП» = proposal. «отправь файл/документ» = send_documents.${callHint} Не выдумывай факты. Не отправляй сообщения.`,
           },
           {
             role: "user",

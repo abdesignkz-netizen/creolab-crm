@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
+import { CALLS_ENABLED } from "../lib/featureFlags.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { refineCommandWithLlm } from "./llmClient.ts";
 import { SERVICE_CATEGORIES, previewContactSegment, searchContactsForPicker } from "./segmentService.ts";
@@ -102,9 +103,17 @@ function parseRules(rawText: string): StructuredCommand {
     intent = "send_document";
     riskLevel = executionMode === "prepare_only" ? 1 : 3;
   } else if (/позвон|перезвон|созвон/.test(text)) {
-    taskType = "call";
-    intent = "call";
-    riskLevel = 2;
+    if (CALLS_ENABLED) {
+      taskType = "call";
+      intent = "call";
+      riskLevel = 2;
+    } else {
+      // Calls temporarily disabled — fall back to a WhatsApp follow-up message.
+      taskType = "message";
+      intent = "message";
+      riskLevel = 2;
+      ambiguities.push("Звонки временно отключены — создаём задачу «Написать»");
+    }
   } else if (/напомн/.test(text) && !isMessageVerb) {
     taskType = "follow_up";
     intent = "follow_up";
@@ -247,6 +256,11 @@ function mergeLlm(base: StructuredCommand, llm: Record<string, unknown> | null):
   if (!llm) return base;
   const next = { ...base, filters: { ...base.filters } };
   if (typeof llm.taskType === "string" && llm.taskType) next.taskType = llm.taskType;
+  if (!CALLS_ENABLED && next.taskType === "call") {
+    next.taskType = "message";
+    next.intent = "message";
+    next.ambiguities = [...(next.ambiguities || []), "Звонки временно отключены — создаём задачу «Написать»"];
+  }
   if (llm.executionMode === "prepare_only" || llm.executionMode === "execute") next.executionMode = llm.executionMode;
   if (Array.isArray(llm.serviceCategories)) next.filters.serviceCategories = llm.serviceCategories.map(String);
   if (typeof llm.datePreset === "string") next.filters.datePreset = llm.datePreset;

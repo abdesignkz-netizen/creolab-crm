@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../lib/api";
+import { CALLS_ENABLED } from "../lib/featureFlags";
 import { tip } from "../lib/tip";
 
 export function ContactPage() {
@@ -93,15 +94,16 @@ export function ContactPage() {
               Написать
             </button>
           )}
-          {tel ? (
+          {CALLS_ENABLED && tel ? (
             <a className="btn secondary" href={`tel:+${tel}`} {...tip("Позвонить с телефона")}>
               Позвонить
             </a>
-          ) : (
+          ) : null}
+          {CALLS_ENABLED && !tel ? (
             <button className="btn secondary" disabled {...tip("Телефон не указан")}>
               Позвонить
             </button>
-          )}
+          ) : null}
           <Link className="btn secondary" to={`/tasks?contactId=${client.id}`} {...tip("Создать задачу по этому клиенту")}>
             + Задача
           </Link>

@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@creolab/db";
 import { crmModeToSeller } from "@creolab/contracts";
 import { ApiError } from "../errors.ts";
+import { CALLS_ENABLED } from "../lib/featureFlags.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { can } from "../lib/types.ts";
 import { INQUIRY_STATUS_LABEL } from "./contactLabels.ts";
@@ -414,6 +415,9 @@ export async function createTask(
     segmentSnapshot?: Record<string, unknown>;
   },
 ) {
+  if (!CALLS_ENABLED && input.type === "call") {
+    throw new ApiError(422, "calls_disabled", "Звонки временно отключены. Создайте задачу «Написать».");
+  }
   const tid = tenantId(auth);
   const targetType = input.targetType || (input.contactId || input.clientIds?.length ? "client" : "none");
   const ownerMembershipId = input.ownerMembershipId || auth.activeMembership?.id;
