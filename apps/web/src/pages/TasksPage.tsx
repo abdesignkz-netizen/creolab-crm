@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type DragEvent, type FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../lib/api";
 import { CampaignMassPanel } from "./CampaignMassPanel";
 
@@ -248,6 +248,7 @@ export function TasksPage() {
   const [cmdPendingFiles, setCmdPendingFiles] = useState<PendingAttachment[]>([]);
 
   const [whatsappReady, setWhatsappReady] = useState<boolean | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   async function load() {
     try {
@@ -273,6 +274,57 @@ export function TasksPage() {
   useEffect(() => {
     load();
   }, []);
+
+  useEffect(() => {
+    const openId = searchParams.get("open");
+    const fromInquiry = searchParams.get("inquiryId");
+    if (!openId && !fromInquiry) return;
+
+    let cancelled = false;
+
+    async function applyDeepLinks() {
+      if (openId) {
+        await openTaskEditor(openId);
+      }
+      if (fromInquiry) {
+        setShowCreate(true);
+        setComposeMode("manual");
+        setTargetMode("client");
+        setInquiryId(fromInquiry);
+        try {
+          const inquiry: any = await api.inquiry(fromInquiry);
+          if (cancelled) return;
+          if (inquiry?.contactId) {
+            setSelectedClient({
+              id: inquiry.contactId,
+              name: inquiry.contact?.name || inquiry.contactName || "Клиент",
+              phone: inquiry.contact?.phone || inquiry.phoneNormalized || inquiry.phoneRaw || null,
+              companyName: inquiry.contact?.companyName || inquiry.companyName || null,
+              inquiryId: inquiry.id,
+              dealId: inquiry.dealId || null,
+              conversationId: inquiry.conversationId || null,
+            });
+          }
+          if (inquiry?.dealId) setDealId(inquiry.dealId);
+          if (inquiry?.conversationId) setConversationId(inquiry.conversationId);
+        } catch {
+          // keep inquiryId prefilled even if detail fetch fails
+        }
+      }
+      if (cancelled) return;
+      const next = new URLSearchParams(searchParams);
+      next.delete("open");
+      next.delete("inquiryId");
+      setSearchParams(next, { replace: true });
+    }
+
+    void applyDeepLinks();
+    return () => {
+      cancelled = true;
+    };
+    // Intentional: consume query once on mount / when params change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams.get("open"), searchParams.get("inquiryId")]);
 
   useEffect(() => {
     if (selectedClient) {
@@ -525,6 +577,12 @@ export function TasksPage() {
         setActiveTaskId(null);
         setTaskDetail(null);
         await load();
+      } else {
+        // Keep editor + confirm panel open for retry; refresh attachment send states.
+        if ((result as any).note) setError("");
+        const detail = await api.task(activeTaskId);
+        setTaskDetail(detail);
+        await load();
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Отправка не удалась");
@@ -543,10 +601,53 @@ export function TasksPage() {
         setNextPanel({ taskId: activeTaskId, actions: (result as any).nextActions || [] });
         setActiveTaskId(null);
         setPreview(null);
+        setTaskDetail(null);
+        await load();
+      } else {
+        const detail = await api.task(activeTaskId);
+        setTaskDetail(detail);
         await load();
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Повтор не удался");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function retryFilesFromList(taskId: string) {
+    setBusy(true);
+    setError("");
+    try {
+      const result: any = await api.executeTask(taskId, { retryFailedFilesOnly: true });
+      if (result.success) {
+        setNextPanel({ taskId, actions: result.nextActions || [] });
+        await load();
+        return;
+      }
+      // Open editor with last result so retry stays visible.
+      await openTaskEditor(taskId);
+      setExecResult(result);
+      setPreview({
+        actionLabel: "Повтор отправки файла",
+        client: { name: "Клиент", phone: null },
+        request: null,
+        channel: "WhatsApp",
+        message: "Текст уже отправлен. Повторяем только файл.",
+        attachments: (result.files || []).map((f: any) => ({
+          id: f.id,
+          fileName: f.fileName,
+          documentType: "document",
+          sizeLabel: "",
+        })),
+      });
+      await load();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Повтор не удался";
+      setError(message);
+      if (/подтверд|stale|confirm/i.test(message)) {
+        await openTaskEditor(taskId);
+      }
     } finally {
       setBusy(false);
     }
@@ -1959,13 +2060,22 @@ export function TasksPage() {
             <p className="muted">Без вложений</p>
           )}
           {execResult && !(execResult as any).success ? (
-            <div className="error">
-              {(execResult as any).textOk ? "Сообщение отправлено ✓" : "Сообщение не отправлено ✕"}
+            <div className={(execResult as any).partial || (execResult as any).textOk ? "task-partial" : "error"}>
+              {(execResult as any).note ? <div>{(execResult as any).note}</div> : null}
+              <div>
+                {(execResult as any).textOk ? "Сообщение отправлено ✓" : "Сообщение не отправлено ✕"}
+                {(execResult as any).textError ? ` · ${(execResult as any).textError}` : ""}
+              </div>
               {(execResult as any).files?.map((f: any) => (
                 <div key={f.id}>
                   {f.fileName}: {f.ok ? "✓" : `✕ ${f.error || ""}`}
                 </div>
               ))}
+              {(execResult as any).retryFilesAvailable ? (
+                <div className="muted" style={{ marginTop: 6 }}>
+                  Задача остаётся открытой, пока файл не уйдёт.
+                </div>
+              ) : null}
             </div>
           ) : null}
           <div className="actions">
@@ -2273,11 +2383,24 @@ export function TasksPage() {
                   ) : null}
                 </div>
                 <div className="actions">
+                  {item.needsFileRetry ? (
+                    <div className="task-partial-inline">
+                      <span>Текст ушёл · файл не отправлен</span>
+                      <button
+                        type="button"
+                        className="btn"
+                        disabled={busy}
+                        onClick={() => void retryFilesFromList(item.id)}
+                      >
+                        Повторить файл
+                      </button>
+                    </div>
+                  ) : null}
                   {item.status === "open" || item.status === "waiting" ? (
                     <>
                       {SENDABLE.has(item.type) && item.targetType !== "group" ? (
                         <button className="btn" type="button" onClick={() => openTaskEditor(item.id)}>
-                          Подготовить отправку
+                          {item.needsFileRetry ? "Открыть задачу" : "Подготовить отправку"}
                         </button>
                       ) : null}
                       {SENDABLE.has(item.type) && item.targetType === "group" ? (

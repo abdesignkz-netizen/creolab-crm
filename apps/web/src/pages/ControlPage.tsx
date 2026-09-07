@@ -262,7 +262,7 @@ export function ControlPage() {
                     Открыть диалог
                   </Link>
                   {item.dealId ? (
-                    <Link className="btn secondary" to={`/deals?focus=${item.dealId}`}>
+                    <Link className="btn secondary" to={`/deals/${item.dealId}`}>
                       Открыть сделку
                     </Link>
                   ) : null}

@@ -60,14 +60,34 @@ export function RequestsPage() {
   const sourceChannel = params.get("source") || "";
   const serviceCategory = params.get("category") || "";
   const q = params.get("q") || "";
+  const companyId = params.get("company") || "";
   const [query, setQuery] = useState(q);
   const [data, setData] = useState<ListResponse | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-  const [showCreate, setShowCreate] = useState(false);
+  const [showCreate, setShowCreate] = useState(Boolean(companyId));
   const [createError, setCreateError] = useState("");
   const [lookup, setLookup] = useState<any>(null);
   const [forceNew, setForceNew] = useState(false);
+  const [companyPrefill, setCompanyPrefill] = useState("");
+
+  useEffect(() => {
+    if (!companyId) return;
+    let cancelled = false;
+    setShowCreate(true);
+    void api
+      .company(companyId)
+      .then((company: any) => {
+        if (cancelled) return;
+        setCompanyPrefill(company?.name || company?.legalName || "");
+      })
+      .catch(() => {
+        if (!cancelled) setCompanyPrefill("");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId]);
 
   async function load(
     nextFilter = filter,
@@ -376,7 +396,12 @@ export function RequestsPage() {
           ) : null}
           <label>
             Компания
-            <input name="company" placeholder="необязательно" />
+            <input
+              key={companyPrefill || "company-empty"}
+              name="company"
+              placeholder="необязательно"
+              defaultValue={companyPrefill}
+            />
           </label>
           <label>
             Что интересует

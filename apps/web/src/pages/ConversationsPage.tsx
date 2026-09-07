@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api } from "../lib/api";
 
@@ -34,6 +34,7 @@ export function ConversationsPage() {
   const [busy, setBusy] = useState(false);
   const [showContext, setShowContext] = useState(false);
   const focusReply = searchParams.get("focus") === "reply";
+  const replyRef = useRef<HTMLTextAreaElement | null>(null);
 
   async function loadList() {
     try {
@@ -69,6 +70,14 @@ export function ConversationsPage() {
     if (selectedId) loadWorkspace(selectedId);
     else setWorkspace(null);
   }, [selectedId]);
+
+  useEffect(() => {
+    if (!focusReply || !workspace) return;
+    const node = replyRef.current;
+    if (!node) return;
+    node.focus();
+    node.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [focusReply, workspace?.conversation?.id]);
 
   const listPane = (
     <div className="conv-list-pane">
@@ -233,6 +242,7 @@ export function ConversationsPage() {
         }}
       >
         <textarea
+          ref={replyRef}
           value={text}
           onChange={(event) => setText(event.target.value)}
           autoFocus={focusReply}

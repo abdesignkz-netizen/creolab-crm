@@ -519,11 +519,11 @@ export async function executeTask(
     }
   }
 
-  const filesOk = fileResults.every((item) => item.ok) && (attachments.length === 0 || fileResults.length > 0 || attachments.every((a) => a.sendState === "sent"));
   const allFilesSent =
     attachments.length === 0 ||
     (await listTaskAttachments(prisma, tid, id)).every((item) => item.sendState === "sent");
   const success = textOk && allFilesSent;
+  const partial = Boolean(textOk && !allFilesSent);
 
   if (success) {
     await prisma.task.update({
@@ -557,22 +557,22 @@ export async function executeTask(
   } else {
     await prisma.task.update({
       where: { id },
-      data: { executionStatus: "failed", status: "open" },
+      data: { executionStatus: partial ? "partial" : "failed", status: "open" },
     });
     if (task.contactId) {
       await writeActivity(prisma, {
         tenantId: tid,
         contactId: task.contactId,
         inquiryId: task.inquiryId,
-        type: "task.send_failed",
-        title: "Отправка не завершена",
+        type: partial ? "task.send_partial" : "task.send_failed",
+        title: partial ? "Текст ушёл, файл не отправлен" : "Отправка не завершена",
         description: [
           textOk ? "Сообщение отправлено ✓" : `Сообщение не отправлено ✕ ${textError || ""}`,
           ...fileResults.map((f) => (f.ok ? `${f.fileName} ✓` : `${f.fileName} ✕ ${f.error || ""}`)),
         ].join("\n"),
         actorType: "system",
         actorId: auth.user.id,
-        metadata: { taskId: id, textOk, fileResults },
+        metadata: { taskId: id, textOk, partial, fileResults },
       });
     }
   }
@@ -592,13 +592,17 @@ export async function executeTask(
 
   return {
     success,
+    partial,
     textOk,
     textError,
     files: fileResults,
     allFilesSent,
-    retryFilesAvailable: !allFilesSent,
+    retryFilesAvailable: !allFilesSent && textOk,
     nextActions: success ? suggestedNextActions(task.type, "sent") : [],
-    status: success ? "done" : "failed",
+    status: success ? "done" : partial ? "partial" : "failed",
+    note: partial
+      ? "Текст в WhatsApp ушёл, файл — нет. Задача остаётся открытой: нажмите «Повторить отправку файла»."
+      : null,
   };
 }
 

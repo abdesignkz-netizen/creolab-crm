@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { PeriodSelector, type PeriodPreset } from "../components/PeriodSelector";
 import { api } from "../lib/api";
 
@@ -8,6 +8,8 @@ type TimeMode = "now" | "period";
 type PeriodBasis = "created" | "activity" | "closed";
 type Focus = "all" | "stalled" | "needs_reply" | "no_next_action";
 
+const FOCUS_VALUES = new Set<Focus>(["all", "stalled", "needs_reply", "no_next_action"]);
+
 function Flag({ on, label }: { on?: boolean; label: string }) {
   if (!on) return null;
   return <span className="deal-flag">{label}</span>;
@@ -15,6 +17,7 @@ function Flag({ on, label }: { on?: boolean; label: string }) {
 
 export function DealsPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [timeMode, setTimeMode] = useState<TimeMode>("now");
   const [period, setPeriod] = useState<PeriodPreset>("today");
   const [dateFrom, setDateFrom] = useState("");
@@ -26,6 +29,17 @@ export function DealsPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [dragId, setDragId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const focusParam = searchParams.get("focus");
+    if (!focusParam) return;
+    if (FOCUS_VALUES.has(focusParam as Focus)) {
+      setFocus(focusParam as Focus);
+      return;
+    }
+    // Legacy/deep link: /deals?focus=<dealId> → card
+    navigate(`/deals/${focusParam}`, { replace: true });
+  }, [searchParams, navigate]);
 
   async function load() {
     try {

@@ -159,6 +159,25 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
       })
     : [];
   const byId = new Map(conversations.map((item) => [item.id, item]));
+  const taskIds = items.map((item) => item.id);
+  const failedAttachments = taskIds.length
+    ? await prisma.attachment.findMany({
+        where: {
+          tenantId: tid,
+          parentType: "task",
+          parentId: { in: taskIds },
+          sendState: "failed",
+        },
+        select: { parentId: true, fileName: true, sendError: true },
+      })
+    : [];
+  const failedByTask = new Map<string, Array<{ fileName: string; sendError: string | null }>>();
+  for (const row of failedAttachments) {
+    const list = failedByTask.get(row.parentId) || [];
+    list.push({ fileName: row.fileName, sendError: row.sendError });
+    failedByTask.set(row.parentId, list);
+  }
+
   return items.map((item) => {
     const conversation = item.conversationId ? byId.get(item.conversationId) || null : null;
     const childTotal = item.childTasks.length;
@@ -172,6 +191,9 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
       null;
     const overdue =
       Boolean(item.dueAt && item.dueAt < now && item.status !== "done" && item.status !== "canceled");
+    const failedFiles = failedByTask.get(item.id) || [];
+    const needsFileRetry =
+      failedFiles.length > 0 || item.executionStatus === "partial";
     const aboutParts: string[] = [];
     if (item.inquiry) {
       aboutParts.push(
@@ -227,6 +249,9 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
         executionStatus: child.executionStatus,
       })),
       isSendable: ["proposal", "message", "send_documents", "prepare_estimate", "follow_up"].includes(item.type),
+      needsFileRetry,
+      failedFiles,
+      executionStatus: item.executionStatus,
     };
   });
 }

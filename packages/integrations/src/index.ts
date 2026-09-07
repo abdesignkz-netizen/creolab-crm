@@ -156,13 +156,13 @@ export class WhatsAppSellerBridge {
       idempotencyKey?: string;
     },
   ) {
-    // File upload via Green API often exceeds the default 15s text timeout.
+    // File upload via Green API: bot allows ~100s; CRM must wait longer to receive the error body.
     return this.request<{ ok: boolean; idMessage?: string | null; sender?: string }>(
       `/internal/crm/leads/${encodeURIComponent(leadId)}/files`,
       {
         method: "POST",
         body: JSON.stringify(input),
-        timeoutMs: 90000,
+        timeoutMs: Number(process.env.WHATSAPP_FILE_BRIDGE_TIMEOUT_MS || 120000),
       },
     );
   }
