@@ -85,6 +85,7 @@ export function SituationPage() {
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState("");
   const [meMissing, setMeMissing] = useState(false);
+  const [badgeHint, setBadgeHint] = useState("");
 
   async function load() {
     const request = ++requestVersion.current;
@@ -101,15 +102,20 @@ export function SituationPage() {
         setError("Укажите даты С и По");
         return;
       }
-      const result = await api.situationOverview({
+      const [result, badges] = await Promise.all([
+        api.situationOverview({
           period,
           scope,
           onlyImportant,
           dateFrom: period === "custom" ? dateFrom : undefined,
           dateTo: period === "custom" ? dateTo : undefined,
-        });
+        }),
+        api.navBadges().catch(() => null),
+      ]);
       if (request !== requestVersion.current) return;
       setData(result);
+      const hints = (badges as { hints?: Record<string, string> } | null)?.hints || {};
+      setBadgeHint(hints["/today"] || "");
       setError("");
     } catch (err) {
       if (request !== requestVersion.current) return;
@@ -175,6 +181,7 @@ export function SituationPage() {
         <div>
           <p className="page-kicker">Оперативный центр</p>
           <h2>Ситуация</h2>
+          {badgeHint ? <p className="muted sit-badge-explain">{badgeHint}</p> : null}
         </div>
         <div className="sit-meta">
           <span className={data.aiManager?.status === "error" ? "error" : "muted"}>{data.aiManager?.label}</span>

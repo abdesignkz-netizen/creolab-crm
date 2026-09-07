@@ -1704,6 +1704,7 @@ fieldset.field-block legend { padding: 0 6px; font-weight: 600; }
 /* ——— Situation command center ——— */
 .situation-page { display: grid; gap: 14px; }
 .sit-head { align-items: flex-start; }
+.sit-badge-explain { margin: 6px 0 0; max-width: 42rem; line-height: 1.4; }
 .sit-meta { display: flex; flex-wrap: wrap; gap: 10px 14px; justify-content: flex-end; font-size: 12.5px; }
 .sit-toolbar {
   display: flex;
@@ -1953,6 +1954,24 @@ fieldset.field-block legend { padding: 0 6px; font-weight: 600; }
 .task-desc { font-size: 12.5px; }
 .task-row-overdue {
   border-left: 3px solid #c45c26;
+}
+.task-row-done {
+  opacity: 0.92;
+  border-left: 3px solid #2f7d4a;
+}
+.task-row-canceled {
+  border-left-color: #8a8f99;
+  opacity: 0.78;
+}
+.deal-flag-done {
+  background: #e7f4ec;
+  color: #1f6b3a;
+}
+.task-done-log { margin-top: 8px; }
+.task-done-date {
+  font-size: 15px;
+  font-weight: 650;
+  margin: 16px 0 8px;
 }
 .task-briefing,
 .task-briefing-card {

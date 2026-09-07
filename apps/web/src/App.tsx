@@ -77,6 +77,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
   const tenantId = me.activeTenant?.tenant?.id;
   const [unreadNotices, setUnreadNotices] = useState(0);
   const [navBadges, setNavBadges] = useState<Record<string, number>>({});
+  const [navHints, setNavHints] = useState<Record<string, string>>({});
   const [notifyBanner, setNotifyBanner] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const moreSheetRef = useRef<HTMLDivElement>(null);
@@ -117,6 +118,10 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
   function badgeCount(path: string) {
     const n = Number(navBadges[path] || 0);
     return n > 0 ? n : 0;
+  }
+
+  function badgeHint(path: string, fallback = "Требует внимания") {
+    return navHints[path] || fallback;
   }
 
   function formatBadge(n: number) {
@@ -170,10 +175,11 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
     let cancelled = false;
     async function loadBadges() {
       try {
-        const data = (await api.navBadges()) as { badges?: Record<string, number> };
+        const data = (await api.navBadges()) as { badges?: Record<string, number>; hints?: Record<string, string> };
         if (cancelled) return;
         const badges = data.badges || {};
         setNavBadges(badges);
+        setNavHints(data.hints || {});
         setUnreadNotices(Number(badges["/settings"] || 0));
       } catch {
         // silently keep previous badges
@@ -291,11 +297,17 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
           <p className="nav-section">Работа</p>
           {workLinks.map(([to, label]) => {
             const count = badgeCount(to);
+            const hint = badgeHint(to);
             return (
-              <NavLink key={to} to={to} className={({ isActive }) => (isActive ? "active" : "")}>
+              <NavLink
+                key={to}
+                to={to}
+                className={({ isActive }) => (isActive ? "active" : "")}
+                aria-label={count > 0 ? `${label}. ${hint}` : label}
+              >
                 <span className="nav-link-label"><NavIcon to={to} />{label}</span>
                 {count > 0 ? (
-                  <span className="nav-badge" title="Требует внимания">
+                  <span className="nav-badge" {...tip(hint)}>
                     {formatBadge(count)}
                   </span>
                 ) : null}
@@ -305,11 +317,17 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
           <p className="nav-section">Система</p>
           {systemLinks.map(([to, label]) => {
             const count = badgeCount(to);
+            const hint = badgeHint(to, to === "/settings" ? "Непрочитанные уведомления" : "Требует внимания");
             return (
-              <NavLink key={to} to={to} className={({ isActive }) => (isActive ? "active" : "")}>
+              <NavLink
+                key={to}
+                to={to}
+                className={({ isActive }) => (isActive ? "active" : "")}
+                aria-label={count > 0 ? `${label}. ${hint}` : label}
+              >
                 <span className="nav-link-label"><NavIcon to={to} />{label}</span>
                 {count > 0 ? (
-                  <span className="nav-badge" title={to === "/settings" ? "Непрочитанные уведомления" : "Требует внимания"}>
+                  <span className="nav-badge" {...tip(hint)}>
                     {formatBadge(count)}
                   </span>
                 ) : null}
@@ -400,10 +418,17 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
         <nav className="more-sheet-links">
           {moreLinks.map(([to, label]) => {
             const count = badgeCount(to);
+            const hint = badgeHint(to);
             return (
-              <NavLink key={to} to={to} className={({ isActive }) => (isActive ? "active" : "")} onClick={() => setMoreOpen(false)}>
+              <NavLink
+                key={to}
+                to={to}
+                className={({ isActive }) => (isActive ? "active" : "")}
+                aria-label={count > 0 ? `${label}. ${hint}` : label}
+                onClick={() => setMoreOpen(false)}
+              >
                 <span className="nav-link-label"><NavIcon to={to} />{label}</span>
-                {count > 0 ? <span className="nav-badge">{formatBadge(count)}</span> : null}
+                {count > 0 ? <span className="nav-badge" {...tip(hint)}>{formatBadge(count)}</span> : null}
               </NavLink>
             );
           })}
@@ -421,11 +446,17 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
       <nav className="mobile-tabbar" aria-label="Основная навигация">
         {primaryTabs.map((tab) => {
           const count = badgeCount(tab.to);
+          const hint = badgeHint(tab.to);
           return (
-            <NavLink key={tab.to} to={tab.to} className={({ isActive }) => (isActive ? `tab active tab-${tab.icon}` : `tab tab-${tab.icon}`)}>
+            <NavLink
+              key={tab.to}
+              to={tab.to}
+              className={({ isActive }) => (isActive ? `tab active tab-${tab.icon}` : `tab tab-${tab.icon}`)}
+              aria-label={count > 0 ? `${tab.label}. ${hint}` : tab.label}
+            >
               <span className="tab-icon-wrap">
                 <span className={`tab-icon icon-${tab.icon}`} aria-hidden />
-                {count > 0 ? <span className="tab-badge">{formatBadge(count)}</span> : null}
+                {count > 0 ? <span className="tab-badge" {...tip(hint)}>{formatBadge(count)}</span> : null}
               </span>
               <span className="tab-label">{tab.label}</span>
             </NavLink>

@@ -122,6 +122,44 @@ const TASK_STATUS_LABEL: Record<string, string> = {
   canceled: "Отменена",
 };
 
+const TASK_RESULT_LABEL: Record<string, string> = {
+  sent: "Отправлено",
+  reached: "Дозвонились",
+  no_answer: "Не ответил",
+  callback_later: "Перезвонить",
+  refused: "Отказ",
+  agreed: "Договорились",
+  waiting_reply: "Ждём ответа",
+  needs_changes: "Нужны правки",
+  needs_estimate: "Нужен расчёт",
+  send_proposal: "Отправить КП",
+  send_contract: "Отправить договор",
+  client_thinking: "Клиент думает",
+  reschedule: "Перенести",
+  other: "Другое",
+};
+
+function taskDoneAt(item: { status: string; completedAt?: Date | null; sentAt?: Date | null; updatedAt: Date }) {
+  if (item.status !== "done" && item.status !== "canceled") return null;
+  return item.completedAt || item.sentAt || item.updatedAt;
+}
+
+function taskDoneSummary(item: {
+  status: string;
+  resultCode?: string | null;
+  resultText?: string | null;
+  executionStatus?: string | null;
+  sentAt?: Date | null;
+}) {
+  if (item.status === "canceled") return "Отменена";
+  const result = item.resultCode ? TASK_RESULT_LABEL[item.resultCode] || null : null;
+  const sent = item.executionStatus === "sent" || Boolean(item.sentAt) || item.resultCode === "sent";
+  if (sent && result && result !== "Отправлено") return `Отправлено · ${result}`;
+  if (sent) return "Отправлено";
+  if (result) return result;
+  return "Сделано";
+}
+
 const TASK_TYPE_LABEL: Record<string, string> = {
   call: "Позвонить",
   message: "Написать",
@@ -252,6 +290,9 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
       purpose: item.purpose || null,
       briefingText: item.briefingText || null,
       overdue,
+      doneAt: taskDoneAt(item),
+      resultLabel: item.resultCode ? TASK_RESULT_LABEL[item.resultCode] || null : null,
+      doneSummary: item.status === "done" || item.status === "canceled" ? taskDoneSummary(item) : null,
       progress:
         item.targetType === "group"
           ? { done: childDone, total: childTotal, label: `${childDone} из ${childTotal}` }

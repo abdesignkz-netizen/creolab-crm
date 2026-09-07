@@ -7,6 +7,25 @@ function requireTenant(auth: AuthContext) {
   return auth.activeMembership;
 }
 
+function ruCount(n: number, one: string, few: string, many: string) {
+  const n10 = n % 10;
+  const n100 = n % 100;
+  const word = n10 === 1 && n100 !== 11 ? one : n10 >= 2 && n10 <= 4 && (n100 < 12 || n100 > 14) ? few : many;
+  return `${n} ${word}`;
+}
+
+function joinRu(parts: string[]) {
+  if (parts.length <= 1) return parts[0] || "";
+  if (parts.length === 2) return `${parts[0]} и ${parts[1]}`;
+  return `${parts.slice(0, -1).join(", ")} и ${parts[parts.length - 1]}`;
+}
+
+export function badgeHint(total: number, parts: string[], empty = "") {
+  if (total <= 0) return empty;
+  if (!parts.length) return `${total} требуют внимания`;
+  return `${ruCount(total, "пункт требует внимания", "пункта требуют внимания", "пунктов требуют внимания")}: ${joinRu(parts)}`;
+}
+
 /**
  * Lightweight attention counts for sidebar / mobile nav badges.
  * Keys are route paths used in App shell navigation.
@@ -129,6 +148,48 @@ export async function getNavBadges(prisma: PrismaClient, auth: AuthContext) {
   const control = conversationsHuman;
   const situation = conversationsAttention + tasksOverdue + inquiriesAttention + incompleteIntakes;
 
+  const situationParts = [
+    conversationsAttention
+      ? ruCount(conversationsAttention, "диалог без ответа", "диалога без ответа", "диалогов без ответа")
+      : "",
+    tasksOverdue
+      ? ruCount(tasksOverdue, "просроченная задача", "просроченные задачи", "просроченных задач")
+      : "",
+    inquiriesAttention
+      ? ruCount(inquiriesAttention, "новая или ждущая заявка", "новые или ждущие заявки", "новых или ждущих заявок")
+      : "",
+    incompleteIntakes
+      ? ruCount(incompleteIntakes, "обращение без телефона", "обращения без телефона", "обращений без телефона")
+      : "",
+  ].filter(Boolean);
+
+  const hints: Record<string, string> = {
+    "/today": badgeHint(situation, situationParts),
+    "/conversations": conversations
+      ? ruCount(conversations, "диалог без ответа", "диалога без ответа", "диалогов без ответа")
+      : "",
+    "/tasks": tasks ? ruCount(tasks, "просроченная задача", "просроченные задачи", "просроченных задач") : "",
+    "/contacts": contactsNeedsReply
+      ? `${ruCount(contactsNeedsReply, "клиент ждёт", "клиента ждут", "клиентов ждут")} ответа`
+      : "",
+    "/companies": companiesAttention
+      ? `${ruCount(companiesAttention, "компания", "компании", "компаний")} с просроченной задачей или новой заявкой`
+      : "",
+    "/inquiries": inquiries
+      ? `${ruCount(inquiries, "заявка", "заявки", "заявок")} новые, без ответа или без телефона`
+      : "",
+    "/deals": dealsAttention
+      ? `${ruCount(dealsAttention, "сделка", "сделки", "сделок")} с просроченной задачей`
+      : "",
+    "/control": control ? `${ruCount(control, "диалог", "диалога", "диалогов")} у менеджера, не у AI` : "",
+    "/integrations": integrationsIssues
+      ? `${ruCount(integrationsIssues, "интеграция", "интеграции", "интеграций")} с ошибкой`
+      : "",
+    "/settings": notificationsUnread
+      ? ruCount(notificationsUnread, "непрочитанное уведомление", "непрочитанных уведомления", "непрочитанных уведомлений")
+      : "",
+  };
+
   return {
     asOf: now.toISOString(),
     badges: {
@@ -144,5 +205,9 @@ export async function getNavBadges(prisma: PrismaClient, auth: AuthContext) {
       "/stats": 0,
       "/settings": notificationsUnread,
     } as Record<string, number>,
+    hints,
+    parts: {
+      "/today": situationParts,
+    },
   };
 }

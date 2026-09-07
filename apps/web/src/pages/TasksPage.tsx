@@ -7,7 +7,7 @@ import { tip } from "../lib/tip";
 import { CALLS_ENABLED } from "../lib/featureFlags";
 import { CampaignMassPanel } from "./CampaignMassPanel";
 
-type Filter = "open" | "waiting" | "overdue" | "mine" | "all";
+type Filter = "open" | "waiting" | "overdue" | "mine" | "done" | "all";
 type TargetMode = "client" | "group" | "none";
 
 type PickerClient = {
@@ -215,6 +215,58 @@ function dueGroup(item: any, now: Date) {
   return "later";
 }
 
+function isClosedTask(item: { status?: string }) {
+  return item.status === "done" || item.status === "canceled";
+}
+
+function startOfDay(value: Date) {
+  return new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime();
+}
+
+function taskDoneAt(item: any) {
+  const raw = item.doneAt || item.completedAt || item.sentAt || item.updatedAt;
+  return raw ? new Date(raw) : new Date(0);
+}
+
+function doneDateLabel(value: Date, now: Date) {
+  const day = startOfDay(value);
+  const today = startOfDay(now);
+  if (day === today) return "Сегодня";
+  if (day === today - 86400000) return "Вчера";
+  return value.toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
+}
+
+function groupDoneByDate(list: any[], now: Date) {
+  const buckets = new Map<number, { key: number; title: string; items: any[] }>();
+  for (const item of list) {
+    const at = taskDoneAt(item);
+    const key = startOfDay(at);
+    const bucket = buckets.get(key) || { key, title: doneDateLabel(at, now), items: [] };
+    bucket.items.push(item);
+    buckets.set(key, bucket);
+  }
+  return [...buckets.values()]
+    .sort((a, b) => b.key - a.key)
+    .map((bucket) => ({
+      ...bucket,
+      items: [...bucket.items].sort((a, b) => taskDoneAt(b).getTime() - taskDoneAt(a).getTime()),
+    }));
+}
+
+function taskResultLine(item: any) {
+  const text = String(item.resultText || "").trim();
+  if (item.doneSummary && text && !String(item.doneSummary).includes(text)) {
+    return `${item.doneSummary}: ${text}`;
+  }
+  if (item.doneSummary) return item.doneSummary;
+  if (item.resultLabel && text) return `${item.resultLabel}: ${text}`;
+  if (text) return text;
+  if (item.resultLabel) return item.resultLabel;
+  if (item.status === "canceled") return "Отменена";
+  if (item.status === "done") return "Сделано";
+  return null;
+}
+
 function suggestedTitle(type: string, mode: TargetMode, client?: PickerClient | null, groupCount?: number, segmentLabel?: string) {
   const typeLabel = TASK_TYPES.find(([id]) => id === type)?.[1] || "Задача";
   if (mode === "client" && client) {
@@ -233,7 +285,7 @@ function toggleValue(list: string[], value: string) {
 export function TasksPage() {
   const [items, setItems] = useState<any[]>([]);
   const [error, setError] = useState("");
-  const [filter, setFilter] = useUrlState<Filter>("filter", "open", ["open", "waiting", "overdue", "mine", "all"]);
+  const [filter, setFilter] = useUrlState<Filter>("filter", "open", ["open", "waiting", "overdue", "mine", "done", "all"]);
   const [me, setMe] = useState<any>(null);
   const [members, setMembers] = useState<any[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -560,6 +612,7 @@ export function TasksPage() {
   const now = new Date();
   const visible = items.filter((item) => {
     if (filter === "all") return true;
+    if (filter === "done") return isClosedTask(item);
     if (filter === "waiting") return item.status === "waiting";
     if (filter === "overdue") {
       return item.dueAt && new Date(item.dueAt) < now && item.status !== "done" && item.status !== "canceled";
@@ -568,10 +621,15 @@ export function TasksPage() {
     return item.status === "open";
   });
 
+  const activeItems = visible.filter((item) => !isClosedTask(item));
+  const doneItems = visible.filter((item) => isClosedTask(item));
   const groups = ["overdue", "today", "later", "none"].map((key) => ({
     key,
-    items: visible.filter((item) => dueGroup(item, now) === key),
+    items: activeItems.filter((item) => dueGroup(item, now) === key),
   }));
+  const doneGroups = groupDoneByDate(doneItems, now);
+  const showActiveGroups = filter !== "done";
+  const showDoneGroups = filter === "done" || filter === "all";
 
   async function submitTask(event: FormEvent) {
     event.preventDefault();
@@ -1051,6 +1109,7 @@ export function TasksPage() {
       (item) => item.dueAt && new Date(item.dueAt) < now && item.status !== "done" && item.status !== "canceled",
     ).length,
     mine: items.filter((item) => item.ownerMembershipId === membershipId && ["open", "waiting"].includes(item.status)).length,
+    done: items.filter((item) => isClosedTask(item)).length,
     all: items.length,
   };
 
@@ -1108,6 +1167,7 @@ export function TasksPage() {
             ["waiting", "Жду"],
             ["overdue", "Просроченные"],
             ["mine", "Мои"],
+            ["done", "Сделанные"],
             ["all", "Все"],
           ] as const
         ).map(([value, label]) => (
@@ -1123,7 +1183,9 @@ export function TasksPage() {
                     ? "Срок уже прошёл — нужно действие"
                     : value === "mine"
                       ? "Назначены на вас"
-                      : "Все задачи без фильтра",
+                      : value === "done"
+                        ? "Что уже сделано, по датам"
+                        : "Все задачи: сначала работа, затем сделанное по датам",
             )}
             onClick={() => setFilter(value)}
           >
@@ -2382,11 +2444,14 @@ export function TasksPage() {
                 ? "Просроченных задач нет."
                 : filter === "mine"
                   ? "У вас нет активных задач."
-                  : "Задач пока нет."}
+                  : filter === "done"
+                    ? "Сделанных задач пока нет."
+                    : "Задач пока нет."}
         </p>
       ) : null}
 
-      {groups.map((group) =>
+      {showActiveGroups
+        ? groups.map((group) =>
         group.items.length === 0 ? null : (
           <div key={group.key}>
             <h3>{GROUP_TITLE[group.key]}</h3>
@@ -2671,7 +2736,76 @@ export function TasksPage() {
             ))}
           </div>
         ),
-      )}
+      )
+        : null}
+
+      {showDoneGroups && doneGroups.length ? (
+        <div className="task-done-log">
+          {filter === "all" && activeItems.length ? <h3>Уже сделано</h3> : null}
+          {doneGroups.map((group) => (
+            <div key={`done-${group.key}`}>
+              <h3 className={filter === "all" && activeItems.length ? "task-done-date" : undefined}>{group.title}</h3>
+              {group.items.map((item) => {
+                const result = taskResultLine(item);
+                const when = taskDoneAt(item);
+                return (
+                  <div className={`row task-row task-row-done${item.status === "canceled" ? " task-row-canceled" : ""}`} key={item.id}>
+                    <div className="task-row-main">
+                      <div className="task-row-title">
+                        <b>{item.title}</b>
+                        <span className={`deal-flag ${item.status === "canceled" ? "" : "deal-flag-done"}`}>
+                          {item.status === "canceled" ? "Отменена" : "Сделано"}
+                        </span>
+                      </div>
+                      <div className="task-meta-grid">
+                        <div>
+                          <span className="muted">Тип</span>
+                          <div>{item.typeLabel || TASK_TYPES.find(([id]) => id === item.type)?.[1] || item.type}</div>
+                        </div>
+                        <div>
+                          <span className="muted">Результат</span>
+                          <div>{result || item.statusLabel || "Сделано"}</div>
+                        </div>
+                        <div>
+                          <span className="muted">Когда</span>
+                          <div>
+                            {when.getTime()
+                              ? when.toLocaleString("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })
+                              : "—"}
+                          </div>
+                        </div>
+                        <div>
+                          <span className="muted">Ответственный</span>
+                          <div>{item.assigneeName || item.owner?.user?.name || "Не назначен"}</div>
+                        </div>
+                      </div>
+                      <div className="task-who">
+                        <span className="muted">Кому</span>
+                        <div>
+                          {item.contact?.id || item.whoName ? (
+                            <>
+                              {item.contact?.id ? (
+                                <Link to={`/contacts/${item.contact.id}`}>
+                                  {item.whoName || item.contact.name || "Клиент"}
+                                </Link>
+                              ) : (
+                                <b>{item.whoName || "Клиент"}</b>
+                              )}
+                              <span className="muted"> · {phoneText(item.whoPhone)}</span>
+                            </>
+                          ) : (
+                            <span className="muted">{item.contextLabel || "Без привязки к клиенту"}</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      ) : null}
     </section>
   );
 }
