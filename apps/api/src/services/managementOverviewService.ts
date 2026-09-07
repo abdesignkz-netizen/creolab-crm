@@ -2,7 +2,7 @@ import type { PrismaClient } from "@creolab/db";
 import { crmModeToSeller } from "@creolab/contracts";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
-import { displayName, formatWhen } from "./contactLabels.ts";
+import { digitsOnly, displayName, formatPhoneDisplay, formatWhen } from "./contactLabels.ts";
 import { WAITING_FOR_LABEL, type WaitingFor } from "./conversationContextTypes.ts";
 import { setConversationMode } from "./domainService.ts";
 import { resolveSellerBridge, sellerHealthFor } from "./sellerLink.ts";
@@ -49,6 +49,37 @@ export function getAiRuntimeState(settingsJson: unknown) {
     pausedAt: typeof runtime.pausedAt === "string" ? runtime.pausedAt : null,
     pausedByUserId: typeof runtime.pausedByUserId === "string" ? runtime.pausedByUserId : null,
   };
+}
+
+function primaryPhoneFromMethods(
+  methods?: Array<{ type: string; rawValue?: string | null; normalizedValue?: string | null; primary?: boolean }> | null,
+) {
+  if (!methods?.length) return null;
+  const phones = methods.filter((item) => item.type === "phone");
+  const primary = phones.find((item) => item.primary) || phones[0];
+  if (!primary) return null;
+  return primary.rawValue || formatPhoneDisplay(primary.normalizedValue) || null;
+}
+
+function phoneFromThreadId(value?: string | null) {
+  if (!value) return null;
+  const digits = digitsOnly(value);
+  if (digits.length < 10 || digits.length > 15) return null;
+  return formatPhoneDisplay(digits);
+}
+
+function resolvePhone(
+  contact?: { methods?: Array<{ type: string; rawValue?: string | null; normalizedValue?: string | null; primary?: boolean }> | null } | null,
+  inquiry?: { phoneRaw?: string | null; phoneNormalized?: string | null } | null,
+  conversation?: { externalThreadId?: string | null } | null,
+) {
+  return (
+    primaryPhoneFromMethods(contact?.methods) ||
+    inquiry?.phoneRaw ||
+    formatPhoneDisplay(inquiry?.phoneNormalized) ||
+    phoneFromThreadId(conversation?.externalThreadId) ||
+    null
+  );
 }
 
 function waitLabel(from: Date | null | undefined, now: Date) {
@@ -134,6 +165,7 @@ function mapConversationCard(
     id: item.id,
     contactId: item.contactId,
     contactName: item.contact ? displayName(item.contact) : "Клиент",
+    phone: resolvePhone(item.contact, inquiry, item),
     companyName: company?.name || inquiry?.companyName || null,
     topic: inquiry?.subject || inquiry?.service || inquiry?.serviceCategory || "Диалог WhatsApp",
     budgetLabel: budgetText(inquiry),
@@ -180,7 +212,7 @@ export async function getManagementOverview(prisma: PrismaClient, auth: AuthCont
         ],
       },
       include: {
-        contact: true,
+        contact: { include: { methods: true } },
         inquiry: true,
         deal: true,
       },
@@ -275,6 +307,7 @@ export async function getManagementOverview(prisma: PrismaClient, auth: AuthCont
           ? "Отправить документы"
           : "Подтвердить отправку",
     contactName: task.contact ? displayName(task.contact) : null,
+    phone: resolvePhone(task.contact, task.inquiry),
     companyName: task.inquiry?.companyName || null,
     topic: task.inquiry?.subject || task.inquiry?.service || null,
     channel: "WhatsApp",

@@ -1,9 +1,13 @@
 import type { PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
+import { displayName, formatPhoneDisplay } from "./contactLabels.ts";
 import { PIPELINE_STAGES, amountNumber, formatMoney } from "./dealPipeline.ts";
 import {
   addDaysYmd,
+  enumerateBucketKeys,
+  formatBucketLabel,
+  isoWeekKeyFromYmd,
   periodLabel,
   resolvePeriodRange,
   type PeriodPreset,
@@ -21,7 +25,7 @@ function inquirySourceLabel(row: {
 
 export type AnalyticsCompareMode = "previous" | "last_month" | "last_year" | "none";
 export type FunnelMode = "cohort" | "events";
-export type TrendMetric = "inquiries" | "deals" | "won" | "revenue" | "conversion";
+export type TrendMetric = "inquiries" | "clients" | "deals" | "won" | "revenue" | "conversion";
 
 function requireTenant(auth: AuthContext) {
   if (!auth.activeMembership) throw new ApiError(403, "no_tenant", "Нет активной компании");
@@ -176,6 +180,7 @@ async function metricBundle(
           tenantId: tid,
           archivedAt: null,
           ...(received ? { firstSeenAt: received } : {}),
+          ...(inquiryExtra.assigneeMembershipId ? { ownerMembershipId: inquiryExtra.assigneeMembershipId } : {}),
         },
       }),
       prisma.deal.findMany({
@@ -309,11 +314,7 @@ function bucketKey(date: Date, granularity: "hour" | "day" | "week" | "month", t
   if (granularity === "hour") return `${y}-${m}-${d}T${h}`;
   if (granularity === "day") return `${y}-${m}-${d}`;
   if (granularity === "month") return `${y}-${m}`;
-  // week: ISO-ish by Thursday of week
-  const local = new Date(`${y}-${m}-${d}T12:00:00Z`);
-  const day = local.getUTCDay() || 7;
-  local.setUTCDate(local.getUTCDate() - day + 1);
-  return `${local.getUTCFullYear()}-W${String(Math.ceil(local.getUTCDate() / 7)).padStart(2, "0")}-${local.getUTCMonth() + 1}`;
+  return isoWeekKeyFromYmd({ year: Number(y), month: Number(m), day: Number(d) });
 }
 
 function chooseGranularity(preset: PeriodPreset, from: Date | null, to: Date | null): "hour" | "day" | "week" | "month" {
@@ -342,7 +343,7 @@ async function buildTrend(
 ) {
   const granularity = chooseGranularity(preset, from, to);
   const received = rangeFilter(from, to);
-  const [inquiries, deals, won] = await Promise.all([
+  const [inquiries, deals, won, newClients] = await Promise.all([
     prisma.inquiry.findMany({
       where: { ...inquiryExtra, ...(received ? { receivedAt: received } : {}) } as never,
       select: { receivedAt: true },
@@ -358,15 +359,26 @@ async function buildTrend(
       select: { closedAt: true, offerAmountMinor: true, wonAmountMinor: true },
       take: 8000,
     }),
+    prisma.contact.findMany({
+      where: {
+        tenantId: tid,
+        archivedAt: null,
+        ...(received ? { firstSeenAt: received } : {}),
+        ...(inquiryExtra.assigneeMembershipId ? { ownerMembershipId: inquiryExtra.assigneeMembershipId } : {}),
+      },
+      select: { firstSeenAt: true },
+      take: 8000,
+    }),
   ]);
 
-  const map = new Map<string, { inquiries: number; deals: number; won: number; revenue: number }>();
+  const map = new Map<string, { inquiries: number; clients: number; deals: number; won: number; revenue: number }>();
   const touch = (key: string) => {
-    if (!map.has(key)) map.set(key, { inquiries: 0, deals: 0, won: 0, revenue: 0 });
+    if (!map.has(key)) map.set(key, { inquiries: 0, clients: 0, deals: 0, won: 0, revenue: 0 });
     return map.get(key)!;
   };
 
   for (const row of inquiries) touch(bucketKey(row.receivedAt, granularity, timeZone)).inquiries += 1;
+  for (const row of newClients) touch(bucketKey(row.firstSeenAt, granularity, timeZone)).clients += 1;
   for (const row of deals) touch(bucketKey(row.createdAt, granularity, timeZone)).deals += 1;
   for (const row of won) {
     if (!row.closedAt) continue;
@@ -376,27 +388,33 @@ async function buildTrend(
     if (n != null) b.revenue += n;
   }
 
-  const points = [...map.entries()]
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([key, v]) => ({
+  const keys = enumerateBucketKeys(from, to, granularity, timeZone, [...map.keys()]);
+  const points = keys.map((key) => {
+    const v = map.get(key) || { inquiries: 0, clients: 0, deals: 0, won: 0, revenue: 0 };
+    const conversion = pct(v.won, v.inquiries);
+    return {
       key,
-      label: key,
+      label: formatBucketLabel(key, granularity),
       inquiries: v.inquiries,
+      clients: v.clients,
       deals: v.deals,
       won: v.won,
       revenue: v.revenue,
-      conversion: pct(v.won, v.inquiries),
+      conversion,
       value:
         metric === "inquiries"
           ? v.inquiries
-          : metric === "deals"
-            ? v.deals
-            : metric === "won"
-              ? v.won
-              : metric === "revenue"
-                ? v.revenue
-                : pct(v.won, v.inquiries) || 0,
-    }));
+          : metric === "clients"
+            ? v.clients
+            : metric === "deals"
+              ? v.deals
+              : metric === "won"
+                ? v.won
+                : metric === "revenue"
+                  ? v.revenue
+                  : conversion || 0,
+    };
+  });
 
   return { granularity, metric, points };
 }
@@ -811,6 +829,23 @@ export async function getAnalyticsDashboard(prisma: PrismaClient, auth: AuthCont
     dataQuality: stage2.dataQuality,
     empty: current.inquiryCount === 0 && current.dealsCreated === 0 && current.won === 0,
   };
+}
+
+function phoneFromMethods(
+  methods?: Array<{ type: string; rawValue?: string | null; normalizedValue?: string | null; primary?: boolean }> | null,
+) {
+  if (!methods?.length) return null;
+  const phones = methods.filter((item) => item.type === "phone" || item.type === "whatsapp");
+  const primary = phones.find((item) => item.primary) || phones[0];
+  if (!primary) return null;
+  return primary.rawValue || formatPhoneDisplay(primary.normalizedValue) || null;
+}
+
+function contactPhone(
+  contact?: { methods?: Array<{ type: string; rawValue?: string | null; normalizedValue?: string | null; primary?: boolean }> | null } | null,
+  inquiry?: { phoneRaw?: string | null; phoneNormalized?: string | null } | null,
+) {
+  return phoneFromMethods(contact?.methods) || inquiry?.phoneRaw || formatPhoneDisplay(inquiry?.phoneNormalized) || null;
 }
 
 function contactName(contact?: { name?: string | null; firstName?: string | null; lastName?: string | null } | null) {
@@ -1339,7 +1374,7 @@ export async function getAnalyticsTrend(
   const preset = parsePreset(query.period);
   const range = resolvePeriodRange(timeZone, preset, query.dateFrom, query.dateTo);
   const { inquiryExtra, dealExtra } = buildFilters(query, tid);
-  const metric = (["inquiries", "deals", "won", "revenue", "conversion"].includes(String(query.metric))
+  const metric = (["inquiries", "clients", "deals", "won", "revenue", "conversion"].includes(String(query.metric))
     ? query.metric
     : "inquiries") as TrendMetric;
   return buildTrend(prisma, tid, range.from, range.to, preset, timeZone, inquiryExtra, dealExtra, metric);
@@ -1347,6 +1382,7 @@ export async function getAnalyticsTrend(
 
 export type DrillEntity =
   | "inquiries"
+  | "clients"
   | "deals"
   | "won"
   | "lost"
@@ -1370,7 +1406,13 @@ function dealRow(
     wonAmountMinor?: { toString(): string } | null;
     lossReason?: string | null;
     assigneeMembershipId?: string | null;
-    contact?: { name?: string | null; firstName?: string | null; lastName?: string | null } | null;
+    contact?: {
+      name?: string | null;
+      firstName?: string | null;
+      lastName?: string | null;
+      methods?: Array<{ type: string; rawValue?: string | null; normalizedValue?: string | null; primary?: boolean }>;
+    } | null;
+    inquiry?: { phoneRaw?: string | null; phoneNormalized?: string | null } | null;
     stage?: { name?: string | null } | null;
   },
   currency: string,
@@ -1382,6 +1424,7 @@ function dealRow(
     id: d.id,
     date: (d.closedAt || d.createdAt).toISOString(),
     client: contactName(d.contact),
+    phone: contactPhone(d.contact, d.inquiry),
     title: d.title,
     amount,
     amountLabel: formatMoney(amount, currency),
@@ -1416,6 +1459,7 @@ export async function getAnalyticsDrilldown(
 
   const titleMap: Record<string, string> = {
     inquiries: "Обращения",
+    clients: "Уникальные клиенты",
     deals: "Созданные сделки",
     won: "Продажи (WON)",
     lost: "Потери (LOST)",
@@ -1429,6 +1473,42 @@ export async function getAnalyticsDrilldown(
     manager_leads: `Менеджер → лиды`,
   };
 
+  if (entity === "clients") {
+    const rows = await prisma.contact.findMany({
+      where: {
+        tenantId: tid,
+        archivedAt: null,
+        ...(received ? { firstSeenAt: received } : {}),
+        ...(inquiryExtra.assigneeMembershipId ? { ownerMembershipId: inquiryExtra.assigneeMembershipId } : {}),
+      },
+      include: {
+        methods: true,
+        owner: { include: { user: { select: { name: true } } } },
+      },
+      orderBy: { firstSeenAt: "desc" },
+      take: 500,
+    });
+    return {
+      entity,
+      key,
+      title: titleMap.clients,
+      total: rows.length,
+      items: rows.map((c) => ({
+        kind: "contact" as const,
+        id: c.id,
+        date: c.firstSeenAt.toISOString(),
+        client: displayName(c),
+        phone: phoneFromMethods(c.methods),
+        title: c.companyName || "Клиент",
+        status: c.lifecycleStatus || "—",
+        source: null,
+        manager: c.owner?.user?.name || "—",
+        href: `/contacts/${c.id}`,
+        amountLabel: null,
+      })),
+    };
+  }
+
   if (entity === "inquiries" || entity === "source_inquiries" || entity === "manager_leads") {
     const rows = await prisma.inquiry.findMany({
       where: {
@@ -1441,7 +1521,7 @@ export async function getAnalyticsDrilldown(
           : {}),
       } as never,
       include: {
-        contact: { select: { name: true, firstName: true, lastName: true } },
+        contact: { select: { name: true, firstName: true, lastName: true, methods: true } },
         assignee: { include: { user: { select: { name: true } } } },
       },
       orderBy: { receivedAt: "desc" },
@@ -1461,6 +1541,7 @@ export async function getAnalyticsDrilldown(
         id: r.id,
         date: r.receivedAt.toISOString(),
         client: contactName(r.contact),
+        phone: contactPhone(r.contact, r),
         title: r.service || r.serviceCategory || "Обращение",
         status: r.status,
         source: inquirySourceLabel(r),
@@ -1493,7 +1574,7 @@ export async function getAnalyticsDrilldown(
   const deals = await prisma.deal.findMany({
     where: dealWhereBase as never,
     include: {
-      contact: { select: { name: true, firstName: true, lastName: true } },
+      contact: { select: { name: true, firstName: true, lastName: true, methods: true } },
       stage: { select: { name: true } },
       inquiry: {
         select: {
@@ -1502,6 +1583,8 @@ export async function getAnalyticsDrilldown(
           sourceType: true,
           service: true,
           serviceCategory: true,
+          phoneRaw: true,
+          phoneNormalized: true,
         },
       },
     },

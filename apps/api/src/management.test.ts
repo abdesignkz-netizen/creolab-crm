@@ -50,6 +50,17 @@ describe("Management overview", () => {
     assert.ok(Array.isArray(body.aiConversations));
     assert.ok(Array.isArray(body.humanConversations));
     assert.ok(Array.isArray(body.problems));
+    for (const item of [
+      ...body.interventions,
+      ...body.waitingForManager,
+      ...body.aiConversations,
+      ...body.humanConversations,
+    ]) {
+      assert.ok("phone" in item);
+    }
+    for (const item of body.pendingApprovals) {
+      assert.ok("phone" in item);
+    }
   });
 
   it("runtime pause does not change permanent AI settings", async () => {
@@ -77,5 +88,71 @@ describe("Management overview", () => {
       body: JSON.stringify({ paused: false }),
     });
     assert.equal(resume.status, 200);
+  });
+
+  it("includes contact phones on conversations and pending approvals", async () => {
+    const tenant = await prisma.tenant.findFirst({ where: { slug: "creolab" } });
+    assert.ok(tenant);
+    const contact = await prisma.contact.create({
+      data: {
+        tenantId: tenant.id,
+        name: "Без имени",
+        methods: {
+          create: {
+            type: "phone",
+            rawValue: "+7 700 099 07 87",
+            normalizedValue: "77000990787",
+            source: "whatsapp_seller",
+            primary: true,
+          },
+        },
+      },
+    });
+    const inquiry = await prisma.inquiry.create({
+      data: {
+        tenantId: tenant.id,
+        source: "whatsapp",
+        contactId: contact.id,
+        phoneRaw: "+7 700 099 07 87",
+        phoneNormalized: "77000990787",
+        subject: "Диалог WhatsApp",
+        status: "new",
+      },
+    });
+    const conversation = await prisma.conversation.create({
+      data: {
+        tenantId: tenant.id,
+        contactId: contact.id,
+        mode: "ai",
+        status: "open",
+        sellerLeadId: "LEAD-mgmt-phone",
+        externalThreadId: "77000990787",
+      },
+    });
+    await prisma.task.create({
+      data: {
+        tenantId: tenant.id,
+        type: "proposal",
+        title: "Отправить КП",
+        contactId: contact.id,
+        inquiryId: inquiry.id,
+        conversationId: conversation.id,
+        status: "open",
+        executionStatus: "awaiting_confirm",
+        source: "test",
+      },
+    });
+
+    const res = await fetch(`${base}/api/v1/management/overview`, { headers: { cookie } });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    const card = [...body.aiConversations, ...body.waitingForManager, ...body.interventions].find(
+      (item: { id: string }) => item.id === conversation.id,
+    );
+    assert.ok(card);
+    assert.match(String(card.phone), /700 099 07 87/);
+    const approval = body.pendingApprovals.find((item: { id: string; phone?: string }) => item.phone?.includes("700"));
+    assert.ok(approval);
+    assert.match(String(approval.phone), /700 099 07 87/);
   });
 });

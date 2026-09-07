@@ -11,6 +11,10 @@ type Filter =
   | "approvals"
   | "problems";
 
+function phoneText(item: { phone?: string | null }) {
+  return item.phone || "Нет телефона";
+}
+
 export function ControlPage() {
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState("");
@@ -230,6 +234,7 @@ export function ControlPage() {
                   <b>
                     {[item.companyName, item.contactName].filter(Boolean).join(" · ")}
                   </b>
+                  <div className="muted">{phoneText(item)}</div>
                   <div className="muted">
                     {[item.topic, item.budgetLabel, item.stageLabel].filter(Boolean).join(" · ")}
                   </div>
@@ -289,6 +294,7 @@ export function ControlPage() {
                     {item.contactName}
                     {item.companyName ? ` · ${item.companyName}` : ""}
                   </b>
+                  <div className="muted">{phoneText(item)}</div>
                   <div className="muted">
                     Ждёт {item.waitLabel || "—"} · {item.reasonLabel}
                   </div>
@@ -330,7 +336,7 @@ export function ControlPage() {
                     {item.contactName ? ` · ${item.contactName}` : ""}
                   </b>
                   <div className="muted">
-                    {[item.companyName, item.topic, item.channel].filter(Boolean).join(" · ")}
+                    {[phoneText(item), item.companyName, item.topic, item.channel].filter(Boolean).join(" · ")}
                   </div>
                 </div>
                 <div className="actions">
@@ -369,7 +375,7 @@ export function ControlPage() {
               ).map((item: any) => (
                 <Link key={item.id} className="mgmt-row" to={`/conversations/${item.id}`}>
                   <span>{item.contactName}</span>
-                  <span className="muted">{item.companyName || "—"}</span>
+                  <span className="muted">{phoneText(item)}</span>
                   <span className="muted">{item.topic}</span>
                   <span className="muted">{item.stageLabel || item.modeLabel}</span>
                   <span className="muted">{item.activityLabel || "—"}</span>
@@ -393,7 +399,7 @@ export function ControlPage() {
               {(data.humanConversations || []).map((item: any) => (
                 <div className="mgmt-row" key={item.id}>
                   <Link to={`/conversations/${item.id}`}>{item.contactName}</Link>
-                  <span className="muted">{item.companyName || "—"}</span>
+                  <span className="muted">{phoneText(item)}</span>
                   <span className="muted">{item.topic}</span>
                   <span className="muted">{item.assigneeName || "—"}</span>
                   <span className="muted">{item.activityLabel || "—"}</span>

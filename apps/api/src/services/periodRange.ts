@@ -59,6 +59,158 @@ export function addDaysYmd(ymd: { year: number; month: number; day: number }, da
   return { year: utc.getUTCFullYear(), month: utc.getUTCMonth() + 1, day: utc.getUTCDate() };
 }
 
+export type TrendGranularity = "hour" | "day" | "week" | "month";
+
+export function compareYmd(
+  a: { year: number; month: number; day: number },
+  b: { year: number; month: number; day: number },
+) {
+  return a.year - b.year || a.month - b.month || a.day - b.day;
+}
+
+export function isoWeekKeyFromYmd(ymd: { year: number; month: number; day: number }) {
+  const utc = new Date(Date.UTC(ymd.year, ymd.month - 1, ymd.day));
+  const day = utc.getUTCDay() || 7;
+  utc.setUTCDate(utc.getUTCDate() + 4 - day);
+  const yearStart = new Date(Date.UTC(utc.getUTCFullYear(), 0, 1));
+  const week = Math.ceil(((utc.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+  return `${utc.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
+}
+
+export function formatBucketLabel(key: string, granularity: TrendGranularity) {
+  if (granularity === "hour") {
+    const match = key.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2})$/);
+    if (!match) return key;
+    return `${Number(match[3])}.${match[2]} ${match[4]}:00`;
+  }
+  if (granularity === "day") {
+    const [year, month, day] = key.split("-").map(Number);
+    if (!year || !month || !day) return key;
+    return new Date(Date.UTC(year, month - 1, day)).toLocaleDateString("ru-RU", {
+      day: "numeric",
+      month: "short",
+      timeZone: "UTC",
+    });
+  }
+  if (granularity === "week") {
+    return key.replace("-W", " · нед. ");
+  }
+  if (granularity === "month") {
+    const [year, month] = key.split("-").map(Number);
+    if (!year || !month) return key;
+    return new Date(Date.UTC(year, month - 1, 1)).toLocaleDateString("ru-RU", {
+      month: "short",
+      year: "numeric",
+      timeZone: "UTC",
+    });
+  }
+  return key;
+}
+
+export function enumerateBucketKeys(
+  from: Date | null,
+  to: Date | null,
+  granularity: TrendGranularity,
+  timeZone: string,
+  existingKeys: string[] = [],
+) {
+  if (!from || !to) {
+    return fillKeysBetween(existingKeys, granularity);
+  }
+  const last = zonedYmd(new Date(to.getTime() - 1), timeZone);
+  if (granularity === "hour") {
+    const keys: string[] = [];
+    let cursor = from.getTime();
+    const end = to.getTime();
+    while (cursor < end) {
+      const mid = new Date(cursor + 30 * 60 * 1000);
+      const parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        hourCycle: "h23",
+      }).formatToParts(mid);
+      const get = (type: string) => parts.find((part) => part.type === type)?.value || "00";
+      keys.push(`${get("year")}-${get("month")}-${get("day")}T${get("hour")}`);
+      cursor += 3600_000;
+      if (keys.length > 72) break;
+    }
+    return keys;
+  }
+  if (granularity === "month") {
+    const keys: string[] = [];
+    let ymd = zonedYmd(from, timeZone);
+    while (ymd.year < last.year || (ymd.year === last.year && ymd.month <= last.month)) {
+      keys.push(`${ymd.year}-${pad(ymd.month)}`);
+      ymd = ymd.month === 12 ? { year: ymd.year + 1, month: 1, day: 1 } : { year: ymd.year, month: ymd.month + 1, day: 1 };
+      if (keys.length > 120) break;
+    }
+    return keys;
+  }
+  if (granularity === "week") {
+    const keys: string[] = [];
+    const seen = new Set<string>();
+    let ymd = zonedYmd(from, timeZone);
+    while (compareYmd(ymd, last) <= 0) {
+      const key = isoWeekKeyFromYmd(ymd);
+      if (!seen.has(key)) {
+        seen.add(key);
+        keys.push(key);
+      }
+      ymd = addDaysYmd(ymd, 1);
+      if (keys.length > 80) break;
+    }
+    return keys;
+  }
+  const keys: string[] = [];
+  let ymd = zonedYmd(from, timeZone);
+  while (compareYmd(ymd, last) <= 0) {
+    keys.push(`${ymd.year}-${pad(ymd.month)}-${pad(ymd.day)}`);
+    ymd = addDaysYmd(ymd, 1);
+    if (keys.length > 400) break;
+  }
+  return keys;
+}
+
+function fillKeysBetween(existingKeys: string[], granularity: TrendGranularity) {
+  const sorted = [...new Set(existingKeys)].sort();
+  if (sorted.length < 2) return sorted;
+  if (granularity === "day" && /^\d{4}-\d{2}-\d{2}$/.test(sorted[0])) {
+    const [sy, sm, sd] = sorted[0].split("-").map(Number);
+    const [ey, em, ed] = sorted[sorted.length - 1].split("-").map(Number);
+    const keys: string[] = [];
+    let cur = { year: sy, month: sm, day: sd };
+    const last = { year: ey, month: em, day: ed };
+    while (compareYmd(cur, last) <= 0) {
+      keys.push(`${cur.year}-${pad(cur.month)}-${pad(cur.day)}`);
+      cur = addDaysYmd(cur, 1);
+      if (keys.length > 400) break;
+    }
+    return keys;
+  }
+  if (granularity === "month" && /^\d{4}-\d{2}$/.test(sorted[0])) {
+    const [sy, sm] = sorted[0].split("-").map(Number);
+    const [ey, em] = sorted[sorted.length - 1].split("-").map(Number);
+    const keys: string[] = [];
+    let year = sy;
+    let month = sm;
+    while (year < ey || (year === ey && month <= em)) {
+      keys.push(`${year}-${pad(month)}`);
+      if (month === 12) {
+        year += 1;
+        month = 1;
+      } else {
+        month += 1;
+      }
+      if (keys.length > 120) break;
+    }
+    return keys;
+  }
+  return sorted;
+}
+
 export function periodLabel(preset: PeriodPreset, from: Date | null, to: Date | null, timeZone: string) {
   const labels: Record<PeriodPreset, string> = {
     today: "Сегодня",

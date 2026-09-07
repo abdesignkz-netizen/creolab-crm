@@ -152,6 +152,20 @@ export function digitsOnly(value: string) {
   return value.replace(/\D+/g, "");
 }
 
+export function formatPhoneDisplay(value?: string | null) {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const digits = digitsOnly(trimmed);
+  if (digits.length === 11 && digits.startsWith("7")) {
+    return `+7 ${digits.slice(1, 4)} ${digits.slice(4, 7)} ${digits.slice(7, 9)} ${digits.slice(9, 11)}`;
+  }
+  if (digits.length === 10) {
+    return `+7 ${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6, 8)} ${digits.slice(8, 10)}`;
+  }
+  return trimmed;
+}
+
 export function formatWhen(value: Date | string | null | undefined, timeZone = "Asia/Almaty") {
   if (!value) return null;
   const date = typeof value === "string" ? new Date(value) : value;

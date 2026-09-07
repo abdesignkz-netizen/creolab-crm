@@ -17,7 +17,7 @@ type TabId =
   | "ai"
   | "campaigns";
 type CompareMode = "previous" | "last_month" | "last_year" | "none";
-type TrendMetric = "inquiries" | "deals" | "won" | "revenue" | "conversion";
+type TrendMetric = "inquiries" | "clients" | "deals" | "won" | "revenue" | "conversion";
 type BarMetric = "inquiries" | "won" | "revenue" | "conversion";
 
 const TABS: { id: TabId; label: string }[] = [
@@ -36,11 +36,30 @@ const TABS: { id: TabId; label: string }[] = [
 
 const TREND_METRICS: { id: TrendMetric; label: string }[] = [
   { id: "inquiries", label: "Обращения" },
+  { id: "clients", label: "Клиенты" },
   { id: "deals", label: "Сделки" },
   { id: "won", label: "Продажи" },
   { id: "revenue", label: "Выручка" },
   { id: "conversion", label: "Конверсия" },
 ];
+
+function formatChartValue(value: number, metric: TrendMetric) {
+  if (metric === "conversion") return `${value}%`;
+  if (metric === "revenue") return value.toLocaleString("ru-RU");
+  return String(value);
+}
+
+function yAxisTicks(max: number) {
+  const raw = Math.max(max / 4, 1);
+  const pow = Math.pow(10, Math.floor(Math.log10(raw)));
+  const n = raw / pow;
+  const nice = n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10;
+  const step = nice * pow;
+  const ticks: number[] = [];
+  for (let v = 0; v <= max + step * 0.01; v += step) ticks.push(Math.round(v * 10) / 10);
+  if (ticks[ticks.length - 1] < max) ticks.push(Math.round((ticks[ticks.length - 1] + step) * 10) / 10);
+  return ticks;
+}
 
 function deltaLabel(value: number | null | undefined, unit: "%" | "pp" = "%") {
   if (value == null) return null;
@@ -60,47 +79,118 @@ function LineChart({
   points,
   comparePoints,
   label,
+  metric,
 }: {
   points: { label: string; value: number }[];
   comparePoints?: { value: number }[] | null;
   label: string;
+  metric: TrendMetric;
 }) {
+  const [hover, setHover] = useState<number | null>(null);
   if (!points.length) {
     return <p className="empty">Пока недостаточно данных для графика.</p>;
   }
-  const w = 640;
-  const h = 220;
-  const pad = 28;
+  const w = 720;
+  const h = 260;
+  const padL = 48;
+  const padR = 16;
+  const padT = 20;
+  const padB = 44;
   const values = [...points.map((p) => p.value), ...(comparePoints || []).map((p) => p.value)];
   const max = Math.max(...values, 1);
-  const stepX = points.length > 1 ? (w - pad * 2) / (points.length - 1) : 0;
-  const toY = (v: number) => h - pad - (v / max) * (h - pad * 2);
-  const path = points
-    .map((p, i) => `${i === 0 ? "M" : "L"} ${pad + i * stepX} ${toY(p.value)}`)
-    .join(" ");
+  const ticks = yAxisTicks(max);
+  const scaleMax = Math.max(max, ticks[ticks.length - 1] || 1);
+  const innerW = w - padL - padR;
+  const innerH = h - padT - padB;
+  const stepX = points.length > 1 ? innerW / (points.length - 1) : innerW / 2;
+  const toX = (i: number) => padL + (points.length > 1 ? i * stepX : innerW / 2);
+  const toY = (v: number) => padT + innerH - (v / scaleMax) * innerH;
+  const path = points.map((p, i) => `${i === 0 ? "M" : "L"} ${toX(i)} ${toY(p.value)}`).join(" ");
+  const area = `${path} L ${toX(points.length - 1)} ${toY(0)} L ${toX(0)} ${toY(0)} Z`;
   const comparePath =
     comparePoints && comparePoints.length
       ? comparePoints
           .slice(0, points.length)
-          .map((p, i) => `${i === 0 ? "M" : "L"} ${pad + i * stepX} ${toY(p.value)}`)
+          .map((p, i) => `${i === 0 ? "M" : "L"} ${toX(i)} ${toY(p.value)}`)
           .join(" ")
       : null;
+  const labelEvery = Math.max(1, Math.ceil(points.length / 8));
 
   return (
     <div className="stats-chart-wrap">
       <svg viewBox={`0 0 ${w} ${h}`} className="stats-line-chart" role="img" aria-label={label}>
-        <line x1={pad} y1={h - pad} x2={w - pad} y2={h - pad} className="stats-axis" />
-        <line x1={pad} y1={pad} x2={pad} y2={h - pad} className="stats-axis" />
+        {ticks.map((tick) => (
+          <g key={`tick-${tick}`}>
+            <line x1={padL} y1={toY(tick)} x2={w - padR} y2={toY(tick)} className="stats-grid" />
+            <text x={padL - 8} y={toY(tick) + 4} textAnchor="end" className="stats-tick">
+              {formatChartValue(tick, metric)}
+            </text>
+          </g>
+        ))}
+        <line x1={padL} y1={h - padB} x2={w - padR} y2={h - padB} className="stats-axis" />
+        <line x1={padL} y1={padT} x2={padL} y2={h - padB} className="stats-axis" />
+        <path d={area} className="stats-area" />
         {comparePath ? <path d={comparePath} className="stats-line-compare" fill="none" /> : null}
         <path d={path} className="stats-line" fill="none" />
-        {points.map((p, i) => (
-          <circle key={p.label + i} cx={pad + i * stepX} cy={toY(p.value)} r={3} className="stats-dot" />
-        ))}
+        {points.map((p, i) => {
+          const showLabel = i === 0 || i === points.length - 1 || i % labelEvery === 0;
+          return (
+            <g key={p.label + i}>
+              <circle
+                cx={toX(i)}
+                cy={toY(p.value)}
+                r={hover === i ? 5 : 3.5}
+                className="stats-dot"
+                onMouseEnter={() => setHover(i)}
+                onMouseLeave={() => setHover(null)}
+              >
+                <title>
+                  {p.label}: {formatChartValue(p.value, metric)}
+                </title>
+              </circle>
+              {points.length <= 16 ? (
+                <text x={toX(i)} y={toY(p.value) - 8} textAnchor="middle" className="stats-dot-value">
+                  {formatChartValue(p.value, metric)}
+                </text>
+              ) : null}
+              {showLabel ? (
+                <text x={toX(i)} y={h - padB + 16} textAnchor="middle" className="stats-tick">
+                  {p.label}
+                </text>
+              ) : null}
+            </g>
+          );
+        })}
       </svg>
       <div className="stats-chart-legend muted">
         <span>● Текущий период</span>
         {comparePath ? <span>○ Сравнение</span> : null}
+        {hover != null ? (
+          <span>
+            {points[hover].label}: {formatChartValue(points[hover].value, metric)}
+          </span>
+        ) : null}
       </div>
+      {points.length <= 31 ? (
+        <div className="stats-day-table-wrap">
+          <table className="stats-day-table">
+            <thead>
+              <tr>
+                {points.map((p, i) => (
+                  <th key={`h-${p.label}-${i}`}>{p.label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                {points.map((p, i) => (
+                  <td key={`v-${p.label}-${i}`}>{formatChartValue(p.value, metric)}</td>
+                ))}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -291,13 +381,15 @@ export function StatsPage() {
           const value =
             metric === "inquiries"
               ? p.inquiries
-              : metric === "deals"
-                ? p.deals
-                : metric === "won"
-                  ? p.won
-                  : metric === "revenue"
-                    ? p.revenue
-                    : p.conversion || 0;
+              : metric === "clients"
+                ? p.clients
+                : metric === "deals"
+                  ? p.deals
+                  : metric === "won"
+                    ? p.won
+                    : metric === "revenue"
+                      ? p.revenue
+                      : p.conversion || 0;
           return { value: Number(value) || 0 };
         })
       : null;
@@ -426,7 +518,7 @@ export function StatsPage() {
             </div>
             <div className="sit-kpi-grid stats-kpi-grid">
               <KpiCard label="Обращения" value={o.inquiries} delta={o.deltas?.inquiries} onClick={() => void openDrill("inquiries")} />
-              <KpiCard label="Уникальные клиенты" value={o.clients} />
+              <KpiCard label="Уникальные клиенты" value={o.clients} onClick={() => void openDrill("clients")} />
               <KpiCard label="Заявки" value={o.requests} onClick={() => void openDrill("inquiries")} />
               <KpiCard label="Создано сделок" value={o.dealsCreated} onClick={() => void openDrill("deals")} />
               <KpiCard label="Договоры" value={o.contracts} />
@@ -464,6 +556,7 @@ export function StatsPage() {
             <LineChart
               points={trendPoints}
               comparePoints={comparePoints}
+              metric={trendMetric}
               label={`Динамика: ${TREND_METRICS.find((m) => m.id === trendMetric)?.label}`}
             />
           </div>
@@ -630,7 +723,7 @@ export function StatsPage() {
               </button>
             ))}
           </div>
-          <LineChart points={trendPoints} comparePoints={comparePoints} label="Продажи по времени" />
+          <LineChart points={trendPoints} comparePoints={comparePoints} metric={trendMetric} label="Продажи по времени" />
         </div>
       ) : null}
 
@@ -1069,6 +1162,7 @@ export function StatsPage() {
                   <tr>
                     <th>Дата</th>
                     <th>Клиент</th>
+                    <th>Телефон</th>
                     <th>Название</th>
                     <th>Сумма</th>
                     <th>Статус</th>
@@ -1081,6 +1175,7 @@ export function StatsPage() {
                     <tr key={`${item.kind}-${item.id}`}>
                       <td>{item.date ? new Date(item.date).toLocaleDateString("ru-RU") : "—"}</td>
                       <td>{item.client}</td>
+                      <td>{item.phone || "Нет телефона"}</td>
                       <td>{item.title}</td>
                       <td>{item.amountLabel || "—"}</td>
                       <td>{item.status || item.source || "—"}</td>

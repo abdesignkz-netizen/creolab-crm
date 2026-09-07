@@ -2056,12 +2056,21 @@ fieldset.field-block legend { padding: 0 6px; font-weight: 600; }
   background: #f8f9fa;
 }
 .stats-chart-wrap { overflow-x: auto; }
-.stats-line-chart { width: 100%; max-width: 720px; height: auto; }
+.stats-line-chart { width: 100%; max-width: 100%; height: auto; }
 .stats-axis { stroke: #d0d4d8; stroke-width: 1; }
+.stats-grid { stroke: #eef1f3; stroke-width: 1; }
+.stats-tick { fill: #6b7280; font-size: 11px; }
+.stats-dot-value { fill: #1f2937; font-size: 11px; font-weight: 600; }
 .stats-line { stroke: #1f6feb; stroke-width: 2.5; }
 .stats-line-compare { stroke: #9aa3ad; stroke-width: 2; stroke-dasharray: 5 4; }
-.stats-dot { fill: #1f6feb; }
-.stats-chart-legend { display: flex; gap: 14px; font-size: 12px; margin-top: 6px; }
+.stats-area { fill: rgba(31, 111, 235, 0.1); }
+.stats-dot { fill: #1f6feb; cursor: pointer; }
+.stats-chart-legend { display: flex; gap: 14px; font-size: 12px; margin-top: 6px; flex-wrap: wrap; }
+.stats-day-table-wrap { overflow-x: auto; margin-top: 10px; }
+.stats-day-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.stats-day-table th,
+.stats-day-table td { padding: 4px 8px; text-align: center; border-top: 1px solid var(--line); white-space: nowrap; }
+.stats-day-table th { color: #6b7280; font-weight: 500; }
 .stats-bars { display: grid; gap: 8px; }
 .stats-bar-row {
   display: grid;
