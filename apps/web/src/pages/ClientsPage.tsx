@@ -172,7 +172,7 @@ export function ClientsPage() {
               <b>{item.name}</b>
               {item.companyName ? <span className="muted"> · {item.companyName}</span> : null}
             </div>
-            <div className="muted">{item.phone || "Телефон не указан"}</div>
+            <div className="muted">{item.phone || "Нет телефона"}</div>
             <div className="client-meta">
               <span className="badge">{item.lifecycleLabel}</span>
               {item.inquiryStatusLabel ? <span className="badge">{item.inquiryStatusLabel}</span> : null}

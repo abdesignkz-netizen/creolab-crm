@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type DragEvent, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { nameWithPhone, phoneText } from "../lib/contactDisplay";
 import { api } from "../lib/api";
 import { tip } from "../lib/tip";
 import { CALLS_ENABLED } from "../lib/featureFlags";
@@ -2073,8 +2074,7 @@ export function TasksPage() {
                 <div>
                   <span className="muted">Клиент</span>
                   <div>
-                    {taskDetail.briefing.client.name}
-                    {taskDetail.briefing.client.phone ? ` · ${taskDetail.briefing.client.phone}` : ""}
+                    {nameWithPhone(taskDetail.briefing.client.name, taskDetail.briefing.client.phone)}
                     {taskDetail.briefing.client.companyName ? ` · ${taskDetail.briefing.client.companyName}` : ""}
                   </div>
                 </div>
@@ -2439,7 +2439,7 @@ export function TasksPage() {
                           ) : (
                             <b>{item.whoName || "Клиент"}</b>
                           )}
-                          {item.whoPhone ? <span className="muted"> · {item.whoPhone}</span> : null}
+                          <span className="muted"> · {phoneText(item.whoPhone)}</span>
                         </>
                       ) : (
                         <span className="muted">{item.contextLabel || "Без привязки к клиенту"}</span>
@@ -2520,7 +2520,7 @@ export function TasksPage() {
                             <div key={child.id} className="picker-item">
                               <b>
                                 {child.status === "done" ? "✓ " : "○ "}
-                                {child.contactName || "Клиент"}
+                                {nameWithPhone(child.contactName, child.phone)}
                               </b>
                               <div className="muted">{child.statusLabel || child.status}</div>
                               <div className="actions" style={{ marginTop: 6 }}>

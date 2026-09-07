@@ -166,6 +166,33 @@ export function formatPhoneDisplay(value?: string | null) {
   return trimmed;
 }
 
+export function phoneFromContact(
+  contact?: {
+    methods?: Array<{ type: string; rawValue?: string | null; normalizedValue?: string | null; primary?: boolean }> | null;
+  } | null,
+  extras?: { phoneRaw?: string | null; phoneNormalized?: string | null; externalThreadId?: string | null } | null,
+) {
+  const methods = contact?.methods || [];
+  const phones = methods.filter((item) => item.type === "phone" || item.type === "whatsapp");
+  const primary = phones.find((item) => item.primary) || phones[0];
+  if (primary?.rawValue) return primary.rawValue;
+  if (primary?.normalizedValue) return formatPhoneDisplay(primary.normalizedValue);
+  if (extras?.phoneRaw) return extras.phoneRaw;
+  if (extras?.phoneNormalized) return formatPhoneDisplay(extras.phoneNormalized);
+  if (extras?.externalThreadId) {
+    const digits = digitsOnly(extras.externalThreadId);
+    if (digits.length >= 10 && digits.length <= 15) return formatPhoneDisplay(digits);
+  }
+  return null;
+}
+
+export const CONTACT_PHONE_SELECT = {
+  name: true,
+  firstName: true,
+  lastName: true,
+  methods: { select: { type: true, rawValue: true, normalizedValue: true, primary: true } },
+} as const;
+
 export function formatWhen(value: Date | string | null | undefined, timeZone = "Asia/Almaty") {
   if (!value) return null;
   const date = typeof value === "string" ? new Date(value) : value;

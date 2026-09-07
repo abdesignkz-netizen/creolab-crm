@@ -1,7 +1,7 @@
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
-import { digitsOnly, displayName, formatWhen } from "./contactLabels.ts";
+import { CONTACT_PHONE_SELECT, digitsOnly, displayName, formatWhen, phoneFromContact } from "./contactLabels.ts";
 import { amountNumber, formatMoney } from "./dealPipeline.ts";
 import { writeActivity } from "./contactService.ts";
 
@@ -603,7 +603,7 @@ export async function getCompanyOverview(prisma: PrismaClient, auth: AuthContext
     getCompanyContacts(prisma, auth, companyId),
     prisma.inquiry.findMany({
       where: { tenantId: tid, companyId, archived: false },
-      include: { contact: { select: { name: true, firstName: true, lastName: true } } },
+      include: { contact: { select: CONTACT_PHONE_SELECT } },
       orderBy: { receivedAt: "desc" },
       take: 50,
     }),
@@ -611,9 +611,9 @@ export async function getCompanyOverview(prisma: PrismaClient, auth: AuthContext
       where: { tenantId: tid, companyId },
       include: {
         stage: true,
-        contact: { select: { name: true, firstName: true, lastName: true } },
+        contact: { select: CONTACT_PHONE_SELECT },
         dealContacts: {
-          include: { contact: { select: { id: true, name: true, firstName: true, lastName: true } } },
+          include: { contact: { select: { id: true, ...CONTACT_PHONE_SELECT } } },
         },
       },
       orderBy: { updatedAt: "desc" },
@@ -630,7 +630,7 @@ export async function getCompanyOverview(prisma: PrismaClient, auth: AuthContext
     }),
     prisma.activity.findMany({
       where: { tenantId: tid, companyId },
-      include: { contact: { select: { name: true, firstName: true, lastName: true } } },
+      include: { contact: { select: CONTACT_PHONE_SELECT } },
       orderBy: { createdAt: "desc" },
       take: 40,
     }),
@@ -675,7 +675,7 @@ export async function getCompanyOverview(prisma: PrismaClient, auth: AuthContext
     contactIds.length && activities.length < 10
       ? await prisma.activity.findMany({
           where: { tenantId: tid, contactId: { in: contactIds }, companyId: null },
-          include: { contact: { select: { name: true, firstName: true, lastName: true } } },
+          include: { contact: { select: CONTACT_PHONE_SELECT } },
           orderBy: { createdAt: "desc" },
           take: 20,
         })
@@ -692,6 +692,7 @@ export async function getCompanyOverview(prisma: PrismaClient, auth: AuthContext
       createdAt: a.createdAt.toISOString(),
       createdLabel: formatWhen(a.createdAt, timeZone),
       contactName: contactLabel(a.contact),
+      phone: phoneFromContact(a.contact),
       contactId: a.contactId,
     }));
 
@@ -746,6 +747,7 @@ export async function getCompanyOverview(prisma: PrismaClient, auth: AuthContext
       title: i.subject || i.service || "Заявка",
       status: i.status,
       contactName: contactLabel(i.contact),
+      phone: phoneFromContact(i.contact, i),
       source: i.utmSource || i.sourceChannel || i.source,
       receivedAt: i.receivedAt.toISOString(),
       receivedLabel: formatWhen(i.receivedAt, timeZone),
@@ -763,8 +765,11 @@ export async function getCompanyOverview(prisma: PrismaClient, auth: AuthContext
         amount,
         amountLabel: formatMoney(amount, d.currency || currency),
         contactName: contactLabel(d.contact),
+        phone: phoneFromContact(d.contact),
         primaryContactName: primary ? contactLabel(primary.contact) : null,
+        primaryContactPhone: primary ? phoneFromContact(primary.contact) : null,
         decisionMakerName: lpr ? contactLabel(lpr.contact) : null,
+        decisionMakerPhone: lpr ? phoneFromContact(lpr.contact) : null,
         href: `/deals/${d.id}`,
       };
     }),

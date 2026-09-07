@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { nameWithPhone, phoneText } from "../lib/contactDisplay";
 import { api } from "../lib/api";
 import { CALLS_ENABLED } from "../lib/featureFlags";
 import { tip } from "../lib/tip";
@@ -98,8 +99,8 @@ export function RequestDetailPage() {
 
       <div className="request-hero panel">
         <div>
-          <b>{data.contactName}</b>
-          <div className="muted">{data.phone || "Нет телефона"}</div>
+          <b>{nameWithPhone(data.contactName, data.phone)}</b>
+          <div className="muted">{phoneText(data.phone)}</div>
           {data.companyName ? <div>{data.companyName}</div> : null}
           <div className="muted" style={{ marginTop: 8 }}>
             Источник: {data.sourceLine}
@@ -205,7 +206,7 @@ export function RequestDetailPage() {
           <div className="kv">
             <div>
               <dt>Клиент</dt>
-              <dd>{data.contactName}</dd>
+              <dd>{nameWithPhone(data.contactName, data.phone)}</dd>
             </div>
             <div>
               <dt>Услуга</dt>

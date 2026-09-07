@@ -7,6 +7,7 @@ import {
   digitsOnly,
   displayName,
   formatWhen,
+  phoneFromContact,
   minutesAgo,
   needsReply,
   whoWroteLast,
@@ -255,7 +256,11 @@ export async function listConversationsBoard(
       return {
         id: conversation.id,
         title: title === "Без имени" ? phone?.rawValue || "Неизвестный клиент" : title,
-        phone: phone?.rawValue || null,
+        phone: phoneFromContact(contact, {
+          phoneRaw: phone?.rawValue,
+          phoneNormalized: phone?.normalizedValue,
+          externalThreadId: conversation.externalThreadId,
+        }),
         companyName: contact?.companyContacts?.[0]?.company?.name || contact?.companyName || null,
         companyId: contact?.companyContacts?.[0]?.company?.id || null,
         companyHref: contact?.companyContacts?.[0]?.company
@@ -471,7 +476,11 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
       ? {
           id: contact.id,
           name: title,
-          phone: phone?.rawValue || null,
+          phone: phoneFromContact(contact, {
+            phoneRaw: phone?.rawValue,
+            phoneNormalized: phone?.normalizedValue,
+            externalThreadId: conversation.externalThreadId,
+          }),
           companyName: contact.companyContacts?.[0]?.company?.name || contact.companyName,
           companyId: contact.companyContacts?.[0]?.company?.id || null,
           companyHref: contact.companyContacts?.[0]?.company

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { nameWithPhone, phoneText } from "../lib/contactDisplay";
 import { api } from "../lib/api";
 
 export function CompanyPage() {
@@ -157,7 +158,7 @@ export function CompanyPage() {
           {(data.contacts || []).map((person: any) => (
             <div key={person.linkId} className="company-row">
               <div>
-                <b>{person.name}</b>
+                <b>{nameWithPhone(person.name, person.phone)}</b>
                 <div className="muted">
                   {[person.position, person.department].filter(Boolean).join(" · ")}
                 </div>
@@ -170,7 +171,7 @@ export function CompanyPage() {
                     .filter(Boolean)
                     .join(" · ")}
                 </div>
-                <div className="muted">{[person.phone, person.email].filter(Boolean).join(" · ")}</div>
+                <div className="muted">{[phoneText(person.phone), person.email].filter(Boolean).join(" · ")}</div>
                 {person.lastContactLabel ? (
                   <div className="muted">Последний контакт: {person.lastContactLabel}</div>
                 ) : null}
@@ -208,9 +209,14 @@ export function CompanyPage() {
                   </td>
                   <td>{d.amountLabel || "—"}</td>
                   <td className="muted">
-                    {[d.primaryContactName, d.decisionMakerName ? `ЛПР: ${d.decisionMakerName}` : null]
+                    {[
+                      nameWithPhone(d.primaryContactName || d.contactName, d.primaryContactPhone || d.phone),
+                      d.decisionMakerName
+                        ? `ЛПР: ${nameWithPhone(d.decisionMakerName, d.decisionMakerPhone)}`
+                        : null,
+                    ]
                       .filter(Boolean)
-                      .join(" · ") || d.contactName}
+                      .join(" · ")}
                   </td>
                 </tr>
               ))}
@@ -240,7 +246,7 @@ export function CompanyPage() {
                     <Link to={r.href}>{r.title}</Link>
                     <div className="muted">{r.status}</div>
                   </td>
-                  <td>{r.contactName}</td>
+                  <td>{nameWithPhone(r.contactName, r.phone)}</td>
                   <td>{r.source || "—"}</td>
                   <td>{r.receivedLabel}</td>
                 </tr>
@@ -307,7 +313,7 @@ export function CompanyPage() {
               <div className="muted">{a.createdLabel}</div>
               <b>{a.title}</b>
               <div className="muted">
-                {a.contactName}
+                {a.contactName || a.phone ? nameWithPhone(a.contactName, a.phone) : ""}
                 {a.description ? ` · ${a.description}` : ""}
               </div>
             </div>

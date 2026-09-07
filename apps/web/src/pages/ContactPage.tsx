@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { nameWithPhone, phoneText } from "../lib/contactDisplay";
 import { api } from "../lib/api";
 import { CALLS_ENABLED } from "../lib/featureFlags";
 import { tip } from "../lib/tip";
@@ -65,9 +66,9 @@ export function ContactPage() {
       <div className="page-head">
         <div>
           <Link className="muted" to="/contacts">← Клиенты</Link>
-          <h2>{client.name}</h2>
+          <h2>{nameWithPhone(client.name, client.phone)}</h2>
           <div className="muted">
-            {client.phone || "Телефон не указан"}
+            {phoneText(client.phone)}
             {client.companyName ? ` · ${client.companyName}` : ""}
           </div>
           <div className="client-meta">

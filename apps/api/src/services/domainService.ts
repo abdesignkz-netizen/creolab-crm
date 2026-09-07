@@ -4,7 +4,7 @@ import { ApiError } from "../errors.ts";
 import { CALLS_ENABLED } from "../lib/featureFlags.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { can } from "../lib/types.ts";
-import { INQUIRY_STATUS_LABEL } from "./contactLabels.ts";
+import { INQUIRY_STATUS_LABEL, displayName, phoneFromContact } from "./contactLabels.ts";
 import { resolveSellerBridge } from "./sellerLink.ts";
 import { resolveContactLinks } from "./segmentService.ts";
 import { getSituation } from "./situationService.ts";
@@ -165,7 +165,7 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
       contact: { include: { methods: true } },
       owner: { include: { user: true } },
       childTasks: {
-        include: { contact: true },
+        include: { contact: { include: { methods: true } } },
         orderBy: { createdAt: "asc" },
       },
     },
@@ -262,10 +262,8 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
         status: child.status,
         statusLabel: TASK_STATUS_LABEL[child.status] || child.status,
         contactId: child.contactId,
-        contactName:
-          [child.contact?.firstName, child.contact?.lastName].filter(Boolean).join(" ").trim() ||
-          child.contact?.name ||
-          null,
+        contactName: child.contact ? displayName(child.contact) : null,
+        phone: phoneFromContact(child.contact),
         dueAt: child.dueAt,
         executionStatus: child.executionStatus,
       })),

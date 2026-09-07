@@ -3,6 +3,7 @@ import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { getSituation, type SituationItem, type SituationScope } from "./situationService.ts";
 import { ensureDealPipelineStages } from "./dealService.ts";
+import { CONTACT_PHONE_SELECT, displayName, phoneFromContact } from "./contactLabels.ts";
 import { PIPELINE_STAGES, parseOpsSettings } from "./dealPipeline.ts";
 import {
   addDaysYmd,
@@ -26,13 +27,18 @@ function mapAgreementSit(a: {
   meetingUrl: string | null;
   locationName: string | null;
   address: string | null;
-  contact: { id: string; name: string | null; firstName: string | null; lastName: string | null } | null;
+  contact: {
+    id: string;
+    name: string | null;
+    firstName: string | null;
+    lastName: string | null;
+    methods?: Array<{ type: string; rawValue?: string | null; normalizedValue?: string | null; primary?: boolean }>;
+  } | null;
   inquiry: { id: string; subject: string | null; service: string | null } | null;
   deal: { id: string; title: string; stage: { name: string } | null } | null;
   task: { id: string; status: string } | null;
 }) {
-  const contactName =
-    a.contact?.name || [a.contact?.firstName, a.contact?.lastName].filter(Boolean).join(" ") || null;
+  const contactName = a.contact ? displayName(a.contact) : null;
   return {
     id: a.id,
     type: a.type,
@@ -44,6 +50,7 @@ function mapAgreementSit(a: {
     locationName: a.locationName,
     address: a.address,
     contactName,
+    phone: phoneFromContact(a.contact),
     inquiryTitle: a.inquiry?.subject || a.inquiry?.service || null,
     dealTitle: a.deal?.title || null,
     dealStage: a.deal?.stage?.name || null,
@@ -279,7 +286,7 @@ export async function getSituationOverview(
       where: { tenantId: tid, outcome: "open", ...assigneeDeal },
       include: {
         stage: true,
-        contact: true,
+        contact: { include: { methods: true } },
         tasks: { where: { status: { in: ["open", "waiting"] } }, select: { id: true, dueAt: true, status: true } },
       },
       orderBy: { createdAt: "desc" },
@@ -298,7 +305,9 @@ export async function getSituationOverview(
         sourceChannel: true,
         source: true,
         needsReply: true,
-        contact: { select: { name: true, firstName: true, lastName: true } },
+        phoneRaw: true,
+        phoneNormalized: true,
+        contact: { select: CONTACT_PHONE_SELECT },
       },
       orderBy: { receivedAt: "desc" },
       take: 2000,
@@ -343,7 +352,7 @@ export async function getSituationOverview(
         title: true,
         closedAt: true,
         currency: true,
-        contact: { select: { name: true } },
+        contact: { select: CONTACT_PHONE_SELECT },
       },
       orderBy: { closedAt: "desc" },
       take: 500,
@@ -367,7 +376,7 @@ export async function getSituationOverview(
     prisma.incompleteIntake.count({ where: { tenantId: tid, status: "pending" } }),
     prisma.task.findMany({
       where: { tenantId: tid, status: { in: ["open", "waiting"] }, ...assigneeTask },
-      include: { contact: { select: { name: true } } },
+      include: { contact: { select: CONTACT_PHONE_SELECT } },
       orderBy: [{ dueAt: "asc" }, { createdAt: "asc" }],
       take: 300,
     }),
@@ -385,13 +394,13 @@ export async function getSituationOverview(
         type: { in: BUSINESS_ACTIVITY_TYPES },
         ...periodActivity,
       },
-      include: { contact: { select: { id: true, name: true } } },
+      include: { contact: { select: { id: true, ...CONTACT_PHONE_SELECT } } },
       orderBy: { createdAt: "desc" },
       take: 20,
     }),
     prisma.inquiry.findMany({
       where: { tenantId: tid, test: false, archived: false, ...assigneeInquiry },
-      include: { contact: { select: { id: true, name: true, firstName: true, lastName: true } } },
+      include: { contact: { select: { id: true, ...CONTACT_PHONE_SELECT } } },
       orderBy: { receivedAt: "desc" },
       take: 8,
     }),
@@ -433,7 +442,7 @@ export async function getSituationOverview(
       status: { in: ["DETECTED", "NEEDS_CLARIFICATION", "CONFIRMED", "SCHEDULED", "RESCHEDULED"] },
     },
     include: {
-      contact: { select: { id: true, name: true, firstName: true, lastName: true } },
+      contact: { select: { id: true, ...CONTACT_PHONE_SELECT } },
       inquiry: { select: { id: true, subject: true, service: true } },
       deal: { include: { stage: true } },
       task: { select: { id: true, status: true } },
@@ -501,6 +510,7 @@ export async function getSituationOverview(
     amountLabel: string | null;
     stageName: string;
     contactName: string | null;
+    phone: string | null;
     reason: string;
     href: string;
   }> = [];
@@ -548,7 +558,8 @@ export async function getSituationOverview(
         amount,
         amountLabel: formatMoneyKzt(amount, deal.currency || currency),
         stageName: deal.stage?.name || "Сделка",
-        contactName: deal.contact?.name || null,
+        contactName: deal.contact ? displayName(deal.contact) : null,
+        phone: phoneFromContact(deal.contact),
         reason: reasons.slice(0, 2).join(" · "),
         href: `/deals/${deal.id}`,
       });
@@ -718,7 +729,8 @@ export async function getSituationOverview(
     id: d.id,
     kind: "won" as const,
     title: d.title,
-    contactName: d.contact?.name || null,
+    contactName: d.contact ? displayName(d.contact) : null,
+    phone: phoneFromContact(d.contact),
     amountLabel: formatMoneyKzt(amountNumber(d.offerAmountMinor), d.currency || currency),
     at: d.closedAt?.toISOString() || null,
     href: "/deals",
@@ -766,7 +778,8 @@ export async function getSituationOverview(
           typeLabel: taskTypeBucket(t.type, t.title),
           dueAt: t.dueAt?.toISOString() || null,
           overdue: Boolean(t.dueAt && t.dueAt < now),
-          contactName: t.contact?.name || null,
+          contactName: t.contact ? displayName(t.contact) : null,
+          phone: phoneFromContact(t.contact),
           href: "/tasks",
         })),
     },
@@ -786,8 +799,8 @@ export async function getSituationOverview(
     recentInquiries: recentInquiries.map((inq) => ({
       id: inq.id,
       title: inq.subject || inq.service || "Заявка",
-      contactName:
-        inq.contact?.name || [inq.contact?.firstName, inq.contact?.lastName].filter(Boolean).join(" ") || "Клиент",
+      contactName: inq.contact ? displayName(inq.contact) : "Клиент",
+      phone: phoneFromContact(inq.contact, inq),
       receivedAt: inq.receivedAt.toISOString(),
       source: inq.sourceChannel || inq.source,
       status: inq.status,
@@ -801,7 +814,8 @@ export async function getSituationOverview(
       title: a.title,
       description: a.description,
       contactId: a.contactId,
-      contactName: a.contact?.name || null,
+      contactName: a.contact ? displayName(a.contact) : null,
+      phone: phoneFromContact(a.contact),
       createdAt: a.createdAt.toISOString(),
       href: a.contactId ? `/contacts/${a.contactId}` : "/today",
     })),

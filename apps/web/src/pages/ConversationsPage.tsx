@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { nameWithPhone, phoneText } from "../lib/contactDisplay";
 import { api } from "../lib/api";
 import { tip } from "../lib/tip";
 
@@ -118,7 +119,7 @@ export function ConversationsPage() {
               <b>{item.title}</b>
               <span className="muted">{item.lastMessageLabel?.split(", ").pop() || item.lastMessageLabel}</span>
             </div>
-            {item.phone ? <div className="muted">{item.phone}</div> : null}
+            <div className="muted">{phoneText(item.phone)}</div>
             <div className="conv-topic">{item.topic}</div>
             <div className="muted">{item.sourceLine}</div>
             <div className="conv-preview">«{item.lastMessagePreview}»</div>
@@ -141,9 +142,9 @@ export function ConversationsPage() {
     <div className="conv-chat-pane">
       <div className="conv-header">
         <div>
-          <b>{workspace.client?.name || "Диалог"}</b>
+          <b>{nameWithPhone(workspace.client?.name || "Диалог", workspace.client?.phone)}</b>
           <div className="muted">
-            {[workspace.client?.phone, workspace.conversation.sourceLine].filter(Boolean).join(" · ")}
+            {[phoneText(workspace.client?.phone), workspace.conversation.sourceLine].filter(Boolean).join(" · ")}
           </div>
           <div className="conv-topic">{workspace.conversation.topic}</div>
           {workspace.currentRequest ? (
@@ -374,7 +375,7 @@ export function ConversationsPage() {
       <div className="panel soft">
         <b>Клиент</b>
         <div>{workspace.client?.name}</div>
-        <div className="muted">{workspace.client?.phone || "Телефон не указан"}</div>
+        <div className="muted">{phoneText(workspace.client?.phone)}</div>
         {workspace.client?.companyName ? <div className="muted">{workspace.client.companyName}</div> : null}
         {workspace.client?.id ? <Link to={`/contacts/${workspace.client.id}`}>Открыть карточку</Link> : null}
       </div>

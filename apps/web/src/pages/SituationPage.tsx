@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { PeriodSelector, type PeriodPreset } from "../components/PeriodSelector";
+import { nameWithPhone } from "../lib/contactDisplay";
 import { api } from "../lib/api";
 
 type Scope = "all" | "mine" | "unassigned";
@@ -451,7 +452,9 @@ export function SituationPage() {
               <div>
                 <b>{agr.title}</b>
                 <div className="muted">
-                  {[agr.contactName, agr.inquiryTitle, agr.dealStage].filter(Boolean).join(" · ")}
+                  {[nameWithPhone(agr.contactName, agr.phone), agr.inquiryTitle, agr.dealStage]
+                    .filter(Boolean)
+                    .join(" · ")}
                 </div>
                 {agr.attention ? <div className="warn-text">{agr.attention}</div> : null}
               </div>
@@ -467,7 +470,7 @@ export function SituationPage() {
                 <b>{task.title}</b>
                 <div className="muted">
                   {task.typeLabel}
-                  {task.contactName ? ` · ${task.contactName}` : ""}
+                  {task.contactName || task.phone ? ` · ${nameWithPhone(task.contactName, task.phone)}` : ""}
                   {task.overdue ? " · просрочено" : ""}
                 </div>
               </div>
@@ -486,6 +489,7 @@ export function SituationPage() {
             <Link className="sit-list-row" key={deal.id} to="/deals">
               <div>
                 <b>{deal.title}</b>
+                <div className="muted">{nameWithPhone(deal.contactName, deal.phone)}</div>
                 <div className="muted">
                   {deal.stageName}
                   {deal.amountLabel ? ` · ${deal.amountLabel}` : ""}
@@ -505,7 +509,7 @@ export function SituationPage() {
           {data.recentInquiries?.map((inq: any) => (
             <Link className="sit-list-row" key={inq.id} to={inq.href}>
               <div>
-                <b>{inq.contactName}</b>
+                <b>{nameWithPhone(inq.contactName, inq.phone)}</b>
                 <div className="muted">
                   {inq.title}
                   {inq.source ? ` · ${inq.source}` : ""}
@@ -526,7 +530,10 @@ export function SituationPage() {
                 <Link className="sit-list-row" key={`win-${item.id}`} to={item.href}>
                   <div>
                     <b>Продажа{item.amountLabel ? ` · ${item.amountLabel}` : ""}</b>
-                    <div className="muted">{item.title}</div>
+                    <div className="muted">
+                      {nameWithPhone(item.contactName, item.phone)}
+                      {item.title ? ` · ${item.title}` : ""}
+                    </div>
                   </div>
                   <span className="muted">{timeShort(item.at)}</span>
                 </Link>
@@ -536,7 +543,11 @@ export function SituationPage() {
             <Link className="sit-list-row" key={ev.id} to={ev.href}>
               <div>
                 <b>{ev.title}</b>
-                <div className="muted">{ev.contactName || ev.description || ev.type}</div>
+                <div className="muted">
+                  {ev.contactName || ev.phone
+                    ? nameWithPhone(ev.contactName, ev.phone)
+                    : ev.description || ev.type}
+                </div>
               </div>
               <span className="muted">{timeShort(ev.createdAt)}</span>
             </Link>

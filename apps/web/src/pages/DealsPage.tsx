@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { PeriodSelector, type PeriodPreset } from "../components/PeriodSelector";
+import { nameWithPhone } from "../lib/contactDisplay";
 import { api } from "../lib/api";
 import { tip } from "../lib/tip";
 
@@ -289,7 +290,7 @@ export function DealsPage() {
                   onClick={() => navigate(`/deals/${deal.id}`)}
                 >
                   <b>{deal.title}</b>
-                  <div className="muted">{deal.contact?.name || "Клиент"}</div>
+                  <div className="muted">{nameWithPhone(deal.contact?.name, deal.contact?.phone)}</div>
                   <div className="deal-card-meta">
                     <span>{deal.amountLabel || "сумма не указана"}</span>
                     <span>{deal.probability}%</span>
@@ -327,7 +328,7 @@ export function DealsPage() {
             <Link key={deal.id} className="sit-list-row" to={`/deals/${deal.id}`}>
               <div>
                 <b>{deal.title}</b>
-                <div className="muted">{deal.contact?.name}</div>
+                <div className="muted">{nameWithPhone(deal.contact?.name, deal.contact?.phone)}</div>
               </div>
               <span className="muted">{deal.amountLabel || "—"}</span>
             </Link>
@@ -441,7 +442,7 @@ export function DealDetailPage() {
           </p>
           <h2>{d.title}</h2>
           <p className="muted">
-            {d.contact?.name} · {d.stage?.name} · {d.outcome}
+            {nameWithPhone(d.contact?.name, d.contact?.phone)} · {d.stage?.name} · {d.outcome}
           </p>
         </div>
       </div>

@@ -12,6 +12,7 @@ import {
   parseOpsSettings,
   stageDurationLabel,
 } from "./dealPipeline.ts";
+import { displayName, phoneFromContact } from "./contactLabels.ts";
 import { resolvePeriodRange, periodLabel, type PeriodPreset } from "./periodRange.ts";
 
 type DealTimeMode = "now" | "period";
@@ -264,9 +265,8 @@ function serializeDeal(deal: any, ops: ReturnType<typeof parseOpsSettings>, curr
     contact: deal.contact
       ? {
           id: deal.contact.id,
-          name:
-            deal.contact.name ||
-            [deal.contact.firstName, deal.contact.lastName].filter(Boolean).join(" "),
+          name: displayName(deal.contact),
+          phone: phoneFromContact(deal.contact),
         }
       : null,
     company: deal.company
