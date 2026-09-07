@@ -9,6 +9,7 @@ export function useUrlState<T extends string>(key: string, fallback: T, allowed?
   const setValue = useCallback((next: SetStateAction<T>) => {
     setParams((previous) => {
       const result = new URLSearchParams(previous);
+      if (key !== "offset") result.delete("offset");
       const current = (previous.get(key) || fallback) as T;
       const resolved = typeof next === "function" ? next(current) : next;
       if (resolved === fallback) result.delete(key);

@@ -3,8 +3,13 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { PeriodSelector, type PeriodPreset } from "../components/PeriodSelector";
 import { api } from "../lib/api";
+import { Pagination } from "../components/Pagination";
 
 type ListResponse = {
+  total: number;
+  offset: number;
+  limit: number;
+  hasMore: boolean;
   items: any[];
   counts: Record<string, number>;
   sourceCounts?: Record<string, number>;
@@ -84,6 +89,7 @@ export function RequestsPage() {
     : "all";
   const dateFrom = params.get("from") || "";
   const dateTo = params.get("to") || "";
+  const offset = params.get("offset") || "0";
   const [query, setQuery] = useState(q);
   const [data, setData] = useState<ListResponse | null>(null);
   const [error, setError] = useState("");
@@ -94,6 +100,7 @@ export function RequestsPage() {
   const [forceNew, setForceNew] = useState(false);
   const [companyPrefill, setCompanyPrefill] = useState("");
   const [contactPrefill, setContactPrefill] = useState<{ name: string; phone: string }>({ name: "", phone: "" });
+  useEffect(() => setQuery(q), [q]);
 
   useEffect(() => {
     if (!companyId) return;
@@ -160,6 +167,7 @@ export function RequestsPage() {
   ) {
     const request = ++requestVersion.current;
     if (nextPeriod === "custom" && (!nextFrom || !nextTo)) {
+      setError("Укажите даты С и По");
       setLoading(false);
       return;
     }
@@ -176,6 +184,7 @@ export function RequestsPage() {
         dateFrom: nextPeriod === "custom" ? nextFrom : undefined,
         dateTo: nextPeriod === "custom" ? nextTo : undefined,
         limit: 80,
+        offset,
       })) as ListResponse;
       if (request !== requestVersion.current) return;
       setData(result);
@@ -190,7 +199,7 @@ export function RequestsPage() {
 
   useEffect(() => {
     void load(filter, q, sourceChannel, serviceCategory, period, dateFrom, dateTo);
-  }, [filter, q, sourceChannel, serviceCategory, period, dateFrom, dateTo, params.get("scope"), params.get("test")]);
+  }, [filter, q, sourceChannel, serviceCategory, period, dateFrom, dateTo, offset, params.get("scope"), params.get("test")]);
 
   const counts = data?.counts || {};
   const sourceCounts = data?.sourceCounts || {};
@@ -198,6 +207,7 @@ export function RequestsPage() {
 
   function patchParams(patch: Record<string, string | null>) {
     const nextParams = new URLSearchParams(params);
+    if (!("offset" in patch)) nextParams.delete("offset");
     Object.entries(patch).forEach(([key, value]) => {
       if (!value) nextParams.delete(key);
       else nextParams.set(key, value);
@@ -221,7 +231,10 @@ export function RequestsPage() {
     patchParams({
       source: null,
       category: null,
-      filter: filter === "all" ? null : filter,
+      filter: null,
+      q: null,
+      scope: null,
+      test: null,
       period: null,
       from: null,
       to: null,
@@ -449,7 +462,8 @@ export function RequestsPage() {
         ) : null}
       </div>
 
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <p className="error" role="alert">{error}</p> : null}
+      {data ? <Pagination total={data.total} offset={data.offset} limit={data.limit} loading={loading} onChange={next => patchParams({ offset: next ? String(next) : null })} /> : null}
 
       {showCreate ? (
         <form className="panel request-create" onSubmit={createRequest}>
@@ -628,26 +642,37 @@ export function RequestsPage() {
           </Link>
         ))}
       </div>
+      {data && (data.hasMore || data.offset > 0) ? <Pagination total={data.total} offset={data.offset} limit={data.limit} loading={loading} onChange={next => patchParams({ offset: next ? String(next) : null })} /> : null}
     </section>
   );
 }
 
 function CompleteIntakeInline({ id, onDone }: { id: string; onDone: () => void }) {
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
   return (
     <form
       className="inline-form"
       onSubmit={async (event) => {
         event.preventDefault();
         const form = new FormData(event.currentTarget);
-        await api.completeIntake(id, { phone: form.get("phone"), name: form.get("name") });
-        onDone();
+        if (busy) return;
+        setBusy(true);
+        setError("");
+        try {
+          await api.completeIntake(id, { phone: form.get("phone"), name: form.get("name") });
+          onDone();
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Не удалось сохранить контакт");
+        } finally { setBusy(false); }
       }}
     >
       <input name="name" placeholder="Имя" />
       <input name="phone" required placeholder="+7..." />
-      <button className="btn" type="submit">
-        Сохранить
+      <button className="btn" type="submit" disabled={busy}>
+        {busy ? "Сохранение…" : "Сохранить"}
       </button>
+      {error ? <span className="error" role="alert">{error}</span> : null}
     </form>
   );
 }

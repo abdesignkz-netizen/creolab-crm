@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { api, setTenant } from "./lib/api";
 import { NavIcon } from "./components/NavIcon";
@@ -15,20 +15,21 @@ import {
   showBrowserNotification,
   startNotificationPolling,
 } from "./lib/browserNotifications";
-import { ClientsPage } from "./pages/ClientsPage";
-import { CompaniesPage } from "./pages/CompaniesPage";
-import { CompanyPage } from "./pages/CompanyPage";
-import { ContactPage } from "./pages/ContactPage";
-import { ControlPage } from "./pages/ControlPage";
-import { ConversationsPage } from "./pages/ConversationsPage";
-import { DealDetailPage, DealsPage } from "./pages/DealsPage";
-import { IntegrationsPage } from "./pages/IntegrationsPage";
-import { RequestDetailPage } from "./pages/RequestDetailPage";
-import { RequestsPage } from "./pages/RequestsPage";
-import { AiAutomationSettingsPage } from "./pages/AiAutomationSettingsPage";
-import { SituationPage } from "./pages/SituationPage";
-import { StatsPage } from "./pages/StatsPage";
-import { TasksPage } from "./pages/TasksPage";
+const ClientsPage = lazy(() => import("./pages/ClientsPage").then(m => ({ default: m.ClientsPage })));
+const CompaniesPage = lazy(() => import("./pages/CompaniesPage").then(m => ({ default: m.CompaniesPage })));
+const CompanyPage = lazy(() => import("./pages/CompanyPage").then(m => ({ default: m.CompanyPage })));
+const ContactPage = lazy(() => import("./pages/ContactPage").then(m => ({ default: m.ContactPage })));
+const ControlPage = lazy(() => import("./pages/ControlPage").then(m => ({ default: m.ControlPage })));
+const ConversationsPage = lazy(() => import("./pages/ConversationsPage").then(m => ({ default: m.ConversationsPage })));
+const DealsPage = lazy(() => import("./pages/DealsPage").then(m => ({ default: m.DealsPage })));
+const DealDetailPage = lazy(() => import("./pages/DealsPage").then(m => ({ default: m.DealDetailPage })));
+const IntegrationsPage = lazy(() => import("./pages/IntegrationsPage").then(m => ({ default: m.IntegrationsPage })));
+const RequestDetailPage = lazy(() => import("./pages/RequestDetailPage").then(m => ({ default: m.RequestDetailPage })));
+const RequestsPage = lazy(() => import("./pages/RequestsPage").then(m => ({ default: m.RequestsPage })));
+const AiAutomationSettingsPage = lazy(() => import("./pages/AiAutomationSettingsPage").then(m => ({ default: m.AiAutomationSettingsPage })));
+const SituationPage = lazy(() => import("./pages/SituationPage").then(m => ({ default: m.SituationPage })));
+const StatsPage = lazy(() => import("./pages/StatsPage").then(m => ({ default: m.StatsPage })));
+const TasksPage = lazy(() => import("./pages/TasksPage").then(m => ({ default: m.TasksPage })));
 
 type LoadState<T> = { status: "loading" | "ready" | "error" | "empty"; data?: T; error?: string };
 
@@ -142,7 +143,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
   const pageTitle =
     Object.entries(titleMap).find(([path]) => location.pathname === path || location.pathname.startsWith(`${path}/`))?.[1] ||
     "CREOLAB CRM";
-  const moreActive = moreLinks.some(([path]) => location.pathname === path || location.pathname.startsWith(`${path}/`));
+  const moreActive = location.pathname.startsWith("/requests/") || moreLinks.some(([path]) => location.pathname === path || location.pathname.startsWith(`${path}/`));
 
   useEffect(() => {
     if (!tenantId) return;
@@ -231,8 +232,10 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
   useEffect(() => {
     if (!moreOpen) return;
     const previous = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     moreSheetRef.current?.querySelector<HTMLElement>("a, button")?.focus();
-    return () => { if (previous?.isConnected) previous.focus(); };
+    return () => { document.body.style.overflow = previousOverflow; if (previous?.isConnected) previous.focus(); };
   }, [moreOpen]);
 
   useEffect(() => {
@@ -393,7 +396,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
         else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
       }}>
         <div className="more-sheet-handle" />
-        <b className="more-sheet-title">Ещё</b>
+        <div className="more-sheet-heading"><b className="more-sheet-title">Ещё</b><button type="button" className="btn secondary" onClick={() => setMoreOpen(false)}>Закрыть</button></div>
         <nav className="more-sheet-links">
           {moreLinks.map(([to, label]) => {
             const count = badgeCount(to);
@@ -431,6 +434,8 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
         <button
           type="button"
           className={`tab tab-more ${moreActive || moreOpen ? "active" : ""}`}
+          aria-expanded={moreOpen}
+          aria-haspopup="dialog"
           onClick={() => setMoreOpen((v) => !v)}
         >
           <span className="tab-icon-wrap">
@@ -825,6 +830,7 @@ export function App() {
             <Navigate to="/login" />
           ) : (
             <Shell me={me}>
+              <Suspense fallback={<div className="state" role="status">Загрузка раздела…</div>}>
               <Routes>
                 <Route path="/today" element={<Today />} />
                 <Route path="/control" element={<ControlPage />} />
@@ -848,6 +854,7 @@ export function App() {
                 <Route path="/admin" element={<Admin />} />
                 <Route path="*" element={<Navigate to="/today" />} />
               </Routes>
+              </Suspense>
             </Shell>
           )
         }

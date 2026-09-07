@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
-import { Link, useFocusEffect } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { api } from "../src/lib/api";
 
 const ACTION_LABEL: Record<string, string> = {
@@ -19,7 +19,8 @@ const ACTION_LABEL: Record<string, string> = {
 export default function TodayScreen() {
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState("");
-  const [phone, setPhone] = useState("");
+  const [phones, setPhones] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
 
   async function load() {
     try {
@@ -37,12 +38,14 @@ export default function TodayScreen() {
   );
 
   async function run(action: () => Promise<unknown>) {
+    if (busy) return;
+    setBusy(true);
     try {
       await action();
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не выполнено");
-    }
+    } finally { setBusy(false); }
   }
 
   if (error && !data) {
@@ -76,22 +79,26 @@ export default function TodayScreen() {
           {item.nextAction === "complete_phone" ? (
             <>
               <TextInput
-                value={phone}
-                onChangeText={setPhone}
+                value={phones[item.id] || ""}
+                onChangeText={value => setPhones(previous => ({ ...previous, [item.id]: value }))}
+                keyboardType="phone-pad"
                 placeholder="+7..."
                 style={{ borderWidth: 1, padding: 12, minHeight: 44 }}
               />
               <Pressable
                 style={{ backgroundColor: "#0F6E6A", padding: 12 }}
-                onPress={() => run(() => api.completeIntake(item.entityId, { phone }))}
+                disabled={busy}
+                onPress={() => run(() => api.completeIntake(item.entityId, { phone: phones[item.id] || "" }))}
               >
                 <Text style={{ color: "#fff" }}>{ACTION_LABEL.complete_phone}</Text>
               </Pressable>
             </>
-          ) : (
+          ) : ["accept_inquiry", "take_conversation", "complete_task", "assign_owner", "resume_paused", "return_to_ai", "open_inquiry"].includes(item.nextAction) ? (
             <Pressable
               style={{ backgroundColor: "#0F6E6A", padding: 12 }}
+              disabled={busy}
               onPress={() => {
+                if (item.nextAction === "open_inquiry") { router.push("/inbox"); return; }
                 if (item.nextAction === "accept_inquiry") return run(() => api.acceptInquiry(item.entityId));
                 if (item.nextAction === "take_conversation") return run(() => api.takeConversation(item.entityId));
                 if (item.nextAction === "complete_task") return run(() => api.completeTask(item.entityId));
@@ -103,13 +110,9 @@ export default function TodayScreen() {
             >
               <Text style={{ color: "#fff" }}>{ACTION_LABEL[item.nextAction] || "Открыть"}</Text>
             </Pressable>
-          )}
+          ) : <Text style={{ color: "#6E6E78" }}>Продолжите это действие в веб-версии CRM.</Text>}
         </View>
       ))}
-      <Link href="/inbox">Входящие</Link>
-      <Link href="/deals">Сделки</Link>
-      <Link href="/tasks">Задачи</Link>
-      <Link href="/more">Ещё</Link>
     </ScrollView>
   );
 }

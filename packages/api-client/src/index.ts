@@ -1,6 +1,6 @@
 export type ClientOptions = {
   baseUrl: string;
-  getToken?: () => string | null;
+  getToken?: () => string | null | Promise<string | null>;
   getTenantId?: () => string | null;
 };
 
@@ -8,7 +8,7 @@ export function createApiClient(options: ClientOptions) {
   async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const headers = new Headers(init.headers);
     headers.set("Content-Type", "application/json");
-    const token = options.getToken?.();
+    const token = await options.getToken?.();
     if (token) headers.set("Authorization", `Bearer ${token}`);
     const tenantId = options.getTenantId?.();
     if (tenantId) headers.set("x-tenant-id", tenantId);

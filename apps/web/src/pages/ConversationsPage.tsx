@@ -36,6 +36,7 @@ export function ConversationsPage() {
   const [filter, setFilter] = useUrlState("filter", "all", FILTERS.map(([value]) => value));
   const [q, setQ] = useState("");
   const [items, setItems] = useState<any[]>([]);
+  const [listLoading, setListLoading] = useState(true);
   const [error, setError] = useState("");
   const [workspace, setWorkspace] = useState<any>(null);
   const [text, setText] = useState("");
@@ -46,6 +47,7 @@ export function ConversationsPage() {
 
   async function loadList() {
     const request = ++listVersion.current;
+    setListLoading(true);
     try {
       const data: any = await api.conversations({ filter, q });
       if (request !== listVersion.current) return;
@@ -54,6 +56,8 @@ export function ConversationsPage() {
     } catch (err) {
       if (request !== listVersion.current) return;
       setError(err instanceof Error ? err.message : "Ошибка");
+    } finally {
+      if (request === listVersion.current) setListLoading(false);
     }
   }
 
@@ -92,6 +96,7 @@ export function ConversationsPage() {
     workspaceVersion.current += 1;
     setWorkspace(null);
     setText("");
+    setShowContext(false);
     if (selectedId) loadWorkspace(selectedId);
     else setWorkspace(null);
   }, [selectedId]);
@@ -103,6 +108,15 @@ export function ConversationsPage() {
     node.focus();
     node.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [focusReply, workspace?.conversation?.id]);
+
+  async function changeMode(action: () => Promise<unknown>) {
+    const id = selectedId;
+    if (busy || !id) return;
+    setBusy(true);
+    try { await action(); if (selectedRef.current === id) await loadWorkspace(id); await loadList(); }
+    catch (err) { if (selectedRef.current === id) setError(err instanceof Error ? err.message : "Не удалось изменить режим"); }
+    finally { setBusy(false); }
+  }
 
   const listPane = (
     <div className="conv-list-pane">
@@ -127,8 +141,9 @@ export function ConversationsPage() {
           </button>
         ))}
       </div>
-      {items.length === 0 ? (
-        <p className="empty">Пока нет диалогов. Новые обращения из подключённых каналов появятся здесь автоматически.</p>
+      {listLoading ? <p className="muted" role="status">Загрузка диалогов…</p> : null}
+      {!listLoading && items.length === 0 ? (
+        <p className="empty">{q || filter !== "all" ? "По выбранным условиям диалоги не найдены." : "Пока нет диалогов. Новые обращения из подключённых каналов появятся здесь автоматически."}</p>
       ) : null}
       <div className="conv-list">
         {items.map((item) => (
@@ -136,7 +151,7 @@ export function ConversationsPage() {
             key={item.id}
             type="button"
             className={`conv-row ${selectedId === item.id ? "active" : ""} ${item.unread ? "unread" : ""}`}
-            onClick={() => navigate(`/conversations/${item.id}`)}
+            onClick={() => navigate(`/conversations/${item.id}?${searchParams}`)}
           >
             <div className="conv-row-top">
               <b>{item.title}</b>
@@ -165,9 +180,10 @@ export function ConversationsPage() {
     <div className="conv-chat-pane">
       <div className="conv-header">
         <div>
+          <Link className="btn secondary conversation-back" to={`/conversations?${searchParams}`}>← Диалоги</Link>
           <b>{nameWithPhone(workspace.client?.name || "Диалог", workspace.client?.phone)}</b>
           <div className="muted">
-            {[phoneText(workspace.client?.phone), workspace.conversation.sourceLine].filter(Boolean).join(" · ")}
+            {workspace.conversation.sourceLine}
           </div>
           <div className="conv-topic">{workspace.conversation.topic}</div>
           {workspace.currentRequest ? (
@@ -207,7 +223,8 @@ export function ConversationsPage() {
                 className="btn"
                 type="button"
                 {...tip("AI перестанет отвечать — диалог забираете вы")}
-                onClick={() => api.takeConversation(workspace.conversation.id).then(() => loadWorkspace(workspace.conversation.id)).then(loadList)}
+                disabled={busy}
+                onClick={() => changeMode(() => api.takeConversation(workspace.conversation.id))}
               >
                 Передать менеджеру
               </button>
@@ -216,7 +233,8 @@ export function ConversationsPage() {
                 className="btn secondary"
                 type="button"
                 {...tip("Вернуть диалог AI Manager — бот снова отвечает сам")}
-                onClick={() => api.returnToAi(workspace.conversation.id).then(() => loadWorkspace(workspace.conversation.id)).then(loadList)}
+                disabled={busy}
+                onClick={() => changeMode(() => api.returnToAi(workspace.conversation.id))}
               >
                 Вернуть AI
               </button>
@@ -302,7 +320,7 @@ export function ConversationsPage() {
         />
         <button
           className="btn"
-          disabled={workspace.conversation.mode !== "human" || busy}
+          disabled={workspace.conversation.mode !== "human" || busy || !text.trim()}
           {...tip(
             workspace.conversation.mode !== "human"
               ? "Сначала нажмите «Передать менеджеру» — иначе сообщение не уйдёт"
@@ -479,7 +497,7 @@ export function ConversationsPage() {
 
   return (
     <section className={`conversations-layout ${selectedId ? "has-selection" : ""}`}>
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <p className="error" style={{ gridColumn: "1 / -1" }} role="alert">{error}</p> : null}
       {listPane}
       {chatPane}
       {contextPane}

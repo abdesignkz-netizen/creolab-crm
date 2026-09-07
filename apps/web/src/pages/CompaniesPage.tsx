@@ -1,10 +1,12 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
+import { useRequestVersion } from "../lib/useUrlState";
 
 type Scope = "all" | "mine" | "unassigned";
 
 export function CompaniesPage() {
+  const requestVersion = useRequestVersion();
   const [scope, setScope] = useState<Scope>("all");
   const [q, setQ] = useState("");
   const [lifecycleStatus, setLifecycleStatus] = useState("");
@@ -27,6 +29,7 @@ export function CompaniesPage() {
   });
 
   async function load() {
+    const version = ++requestVersion.current;
     try {
       setLoading(true);
       const data: any = await api.companies({
@@ -34,12 +37,14 @@ export function CompaniesPage() {
         q: q.trim() || undefined,
         lifecycleStatus: lifecycleStatus || undefined,
       });
+      if (version !== requestVersion.current) return;
       setItems(data.items || []);
       setError("");
     } catch (err) {
+      if (version !== requestVersion.current) return;
       setError(err instanceof Error ? err.message : "Ошибка");
     } finally {
-      setLoading(false);
+      if (version === requestVersion.current) setLoading(false);
     }
   }
 

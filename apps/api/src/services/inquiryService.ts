@@ -6,6 +6,7 @@ import { hmacSha256Hex, safeEqual, sha256 } from "../lib/hash.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { writeActivity } from "./contactService.ts";
 import { periodLabel, resolvePeriodRange, type PeriodPreset } from "./periodRange.ts";
+import { pagination } from "./pagination.ts";
 
 function hashPayload(value: unknown) {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -1096,7 +1097,7 @@ function buildInquiryWhere(
         { serviceCategory: { contains: q, mode: "insensitive" } },
         { companyName: { contains: q, mode: "insensitive" } },
         { phoneRaw: { contains: q, mode: "insensitive" } },
-        { phoneNormalized: { contains: q.replace(/\D+/g, ""), mode: "insensitive" } },
+        ...(q.replace(/\D+/g, "") ? [{ phoneNormalized: { contains: q.replace(/\D+/g, "") } }] : []),
         { id: { equals: q } },
         { contact: { name: { contains: q, mode: "insensitive" } } },
         { contact: { companyName: { contains: q, mode: "insensitive" } } },
@@ -1111,7 +1112,7 @@ function buildInquiryWhere(
 export async function listInquiries(prisma: PrismaClient, auth: AuthContext, query: Record<string, string | undefined>) {
   const membership = requireTenant(auth);
   const timeZone = membership.tenant.timezone || "Asia/Almaty";
-  const take = Math.min(100, Number(query.limit || 50));
+  const { take, skip } = pagination(query);
   query = { ...query, ...(query.scope === "mine" ? { assignee: membership.id } : query.scope === "unassigned" ? { assignee: "unassigned" } : {}) };
   const where = buildInquiryWhere(membership.tenantId, query, timeZone);
   const sort = query.sort || "attention";
@@ -1142,6 +1143,7 @@ export async function listInquiries(prisma: PrismaClient, auth: AuthContext, que
   if (sort === "oldest") orderBy = [{ receivedAt: "asc" }];
   if (sort === "needs_reply") orderBy = [{ needsReply: "desc" }, { receivedAt: "desc" }];
   if (sort === "activity") orderBy = [{ receivedAt: "desc" }];
+  orderBy.push({ id: "asc" });
 
   // Normalize legacy accepted → treated as in_progress in DTO only; migrate lazily on list
   await prisma.inquiry.updateMany({
@@ -1153,18 +1155,16 @@ export async function listInquiries(prisma: PrismaClient, auth: AuthContext, que
     data: { status: "cancelled" },
   });
 
-  const periodBase = {
-    period: query.period,
-    dateFrom: query.dateFrom,
-    dateTo: query.dateTo,
-  };
+  // Facet counts keep the search, owner, period and other selected constraints.
+  const periodBase = { ...query, filter: "all", status: undefined };
 
-  const [items, countsRaw, channelRaw, categoryRaw, intakes] = await Promise.all([
+  const [items, countsRaw, channelRaw, categoryRaw, intakes, total] = await Promise.all([
     prisma.inquiry.findMany({
       where,
       include: inquiryListInclude,
       orderBy,
       take,
+      skip,
     }),
     prisma.inquiry.groupBy({
       by: ["status"],
@@ -1173,12 +1173,12 @@ export async function listInquiries(prisma: PrismaClient, auth: AuthContext, que
     }),
     prisma.inquiry.groupBy({
       by: ["sourceChannel"],
-      where: buildInquiryWhere(membership.tenantId, { ...periodBase, filter: "all" }, timeZone),
+      where: buildInquiryWhere(membership.tenantId, { ...periodBase, sourceChannel: undefined, source: undefined }, timeZone),
       _count: { _all: true },
     }),
     prisma.inquiry.groupBy({
       by: ["serviceCategory"],
-      where: buildInquiryWhere(membership.tenantId, { ...periodBase, filter: "all" }, timeZone),
+      where: buildInquiryWhere(membership.tenantId, { ...periodBase, serviceCategory: undefined }, timeZone),
       _count: { _all: true },
     }),
     prisma.incompleteIntake.findMany({
@@ -1197,6 +1197,7 @@ export async function listInquiries(prisma: PrismaClient, auth: AuthContext, que
       orderBy: { receivedAt: "desc" },
       take: 50,
     }),
+    prisma.inquiry.count({ where }),
   ]);
 
   const statusCounts = Object.fromEntries(countsRaw.map((row) => [row.status, row._count._all]));
@@ -1245,6 +1246,10 @@ export async function listInquiries(prisma: PrismaClient, auth: AuthContext, que
 
   return {
     items: items.map((item) => mapInquiryListItem(item, membership.tenant.timezone)),
+    total,
+    offset: skip,
+    limit: take,
+    hasMore: skip + items.length < total,
     period: {
       preset: period,
       label: periodLabel(period, range.from, range.to, timeZone),
@@ -1263,7 +1268,7 @@ export async function listInquiries(prisma: PrismaClient, auth: AuthContext, que
       converted: statusCounts.converted || 0,
       lost: (statusCounts.lost || 0) + (statusCounts.invalid || 0) + (statusCounts.spam || 0),
       today: todayCount,
-      needs_clarification: clarificationCount + intakes.length,
+      needs_clarification: clarificationCount,
     },
     sourceCounts,
     categoryCounts,

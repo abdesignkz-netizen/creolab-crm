@@ -4,6 +4,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { PERIOD_OPTIONS, formatCustomPeriodLabel } from "../lib/period";
 import { tip } from "../lib/tip";
 import { api } from "../lib/api";
+import { Pagination } from "../components/Pagination";
 
 const FILTERS = [
   ["all", "Все"],
@@ -31,9 +32,12 @@ export function ClientsPage() {
   const [dateTo] = useUrlState<string>("to", "");
   const [owner] = useUrlState<string>("owner", "");
   const [creating, setCreating] = useState(false);
+  const [offset, setOffset] = useUrlState<string>("offset", "0");
+  const [loading, setLoading] = useState(true);
 
   async function load(next: { filter?: string; q?: string; status?: string; source?: string } = {}) {
     const request = ++requestVersion.current;
+    setLoading(true);
     try {
       const query: Record<string, string> = {
         filter: next.filter ?? filter,
@@ -41,6 +45,7 @@ export function ClientsPage() {
         period,
         dateFrom,
         dateTo,
+        offset,
       };
       const queryText = next.q ?? q;
       if (queryText) query.q = queryText;
@@ -55,12 +60,14 @@ export function ClientsPage() {
     } catch (err) {
       if (request !== requestVersion.current) return;
       setError(err instanceof Error ? err.message : "Ошибка");
+    } finally {
+      if (request === requestVersion.current) setLoading(false);
     }
   }
 
   useEffect(() => {
     load();
-  }, [filter, q, status, source, period, dateFrom, dateTo, owner]);
+  }, [filter, q, status, source, period, dateFrom, dateTo, owner, offset]);
 
   useEffect(() => setDraft(q), [q]);
 
@@ -187,6 +194,7 @@ export function ClientsPage() {
       {!data ? <div className="state">Загрузка…</div> : null}
       {data && data.items.length === 0 ? <p className="empty">Клиентов нет. Создайте вручную или дождитесь заявки.</p> : null}
 
+      {data ? <Pagination total={data.total} offset={data.offset} limit={data.limit} loading={loading} onChange={next => setOffset(String(next))} /> : null}
       {data?.items.map((item: any) => (
         <Link className="client-row" key={item.id} to={`/contacts/${item.id}`}>
           <div className="client-row-main">
@@ -236,6 +244,7 @@ export function ClientsPage() {
           </div>
         </Link>
       ))}
+      {data && (data.hasMore || data.offset > 0) ? <Pagination total={data.total} offset={data.offset} limit={data.limit} loading={loading} onChange={next => setOffset(String(next))} /> : null}
     </section>
   );
 }

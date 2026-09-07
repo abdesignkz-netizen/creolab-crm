@@ -182,7 +182,7 @@ export function SituationPage() {
         </div>
       </div>
 
-      {data.aiManager?.newRequests ? (
+      {data.aiManager?.newRequests && Object.values(data.aiManager.newRequests).some(value => Number(value) > 0) ? (
         <div className="sit-kpi-grid" style={{ marginBottom: 12 }}>
           <Kpi label="AI обрабатывает заявки" value={data.aiManager.newRequests.processing} to="/inquiries?filter=ai_processing" />
           <Kpi label="Ожидают менеджера" value={data.aiManager.newRequests.needsHuman} to="/inquiries?filter=ai_needs_human" />
@@ -268,7 +268,6 @@ export function SituationPage() {
         <div className="sit-kpi-grid">
           <Kpi label="Обращения" value={r.inquiries} delta={r.deltas?.inquiries} to={path("/inquiries", { test: "false" }, true)} />
           <Kpi label="Новые клиенты" value={r.newClients} delta={r.deltas?.newClients} to={path("/contacts", { owner: scope === "mine" ? "me" : scope === "unassigned" ? "unassigned" : "" }, true)} />
-          <Kpi label="Заявки" value={r.requests} to={path("/inquiries", { test: "false" }, true)} />
           <Kpi label="Сделки" value={r.dealsCreated} delta={r.deltas?.dealsCreated} to={path("/deals", { timeMode: "period", basis: "created" }, true)} />
           <Kpi label="Продажи" value={r.wonDeals} delta={r.deltas?.wonDeals} to={path("/deals", { timeMode: "period", basis: "closed", outcome: "won" }, true)} emphasize />
           <Kpi
@@ -311,7 +310,7 @@ export function SituationPage() {
           <span className="muted">Текущее состояние, не период</span>
         </div>
         <div className="sit-kpi-grid sit-kpi-grid-current">
-          <Kpi label="Активные сделки" value={c.activeDeals} to="/deals" emphasize />
+          <Kpi label="Активные сделки" value={c.activeDeals} to={path("/deals")} emphasize />
           <Kpi
             label="В работе"
             value={c.activePipelineAmountLabel || "—"}
@@ -320,12 +319,12 @@ export function SituationPage() {
                 ? `сумма известна у ${c.amountKnownCount} из ${c.amountKnownOf}`
                 : undefined
             }
-            to="/deals"
+            to={path("/deals")}
             emphasize
           />
-          <Kpi label="Взвешенный прогноз" value={c.weightedPipelineLabel || "—"} to="/deals" />
+          <Kpi label="Взвешенный прогноз" value={c.weightedPipelineLabel || "—"} to={path("/deals")} />
           <Kpi label="На договоре" value={c.contractStage} to={path("/deals", { stage: "contract" })} />
-          <Kpi label="Заявки ждут клиента" value={c.waitingClientInquiries} to={c.hrefs?.inquiriesWaiting || "/inquiries"} />
+          <Kpi label="Заявки ждут клиента" value={c.waitingClientInquiries} to={path("/inquiries", {filter: "waiting_client", test: "false"})} />
           <Kpi label="Нужен ответ" value={c.needsReply} to="/contacts?filter=needs_reply" />
           <Kpi label="Без след. шага" value={nextActionItems.length} to={noNextHref} />
           <Kpi label="Просрочено" value={c.overdueTasks} to="/tasks?filter=overdue" />

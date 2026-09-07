@@ -253,9 +253,15 @@ export function resolvePeriodRange(
     }
     const [fy, fm, fd] = customFrom.split("-").map(Number);
     const [ty, tm, td] = customTo.split("-").map(Number);
-    if (![fy, fm, fd, ty, tm, td].every((n) => Number.isFinite(n))) {
+    const validDate = (text: string, y: number, m: number, d: number) => {
+      const parsed = new Date(Date.UTC(y, m - 1, d));
+      return /^\d{4}-\d{2}-\d{2}$/.test(text) && y >= 1000 && y <= 9999 &&
+        parsed.getUTCFullYear() === y && parsed.getUTCMonth() === m - 1 && parsed.getUTCDate() === d;
+    };
+    if (!validDate(customFrom, fy, fm, fd) || !validDate(customTo, ty, tm, td)) {
       throw new ApiError(422, "invalid_period", "Некорректные даты периода");
     }
+    if (customFrom > customTo) throw new ApiError(422, "invalid_period", "Дата С должна быть не позже даты По");
     const from = zonedLocalToUtc(timeZone, fy, fm, fd);
     const next = addDaysYmd({ year: ty, month: tm, day: td }, 1);
     const to = zonedLocalToUtc(timeZone, next.year, next.month, next.day);

@@ -564,7 +564,7 @@ export function TasksPage() {
     if (filter === "overdue") {
       return item.dueAt && new Date(item.dueAt) < now && item.status !== "done" && item.status !== "canceled";
     }
-    if (filter === "mine") return item.ownerMembershipId === membershipId && item.status !== "done";
+    if (filter === "mine") return item.ownerMembershipId === membershipId && ["open", "waiting"].includes(item.status);
     return item.status === "open";
   });
 
@@ -1050,7 +1050,7 @@ export function TasksPage() {
     overdue: items.filter(
       (item) => item.dueAt && new Date(item.dueAt) < now && item.status !== "done" && item.status !== "canceled",
     ).length,
-    mine: items.filter((item) => item.ownerMembershipId === membershipId && item.status !== "done").length,
+    mine: items.filter((item) => item.ownerMembershipId === membershipId && ["open", "waiting"].includes(item.status)).length,
     all: items.length,
   };
 

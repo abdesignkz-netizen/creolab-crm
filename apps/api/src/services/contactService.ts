@@ -20,6 +20,7 @@ import {
 
 import { resolvePeriodRange, zonedYmd, type PeriodPreset } from "./periodRange.ts";
 import { inquiryInterest, loadConversationInterests } from "./contactInterestService.ts";
+import { pagination } from "./pagination.ts";
 
 const ACTIVE_INQUIRY: readonly string[] = INQUIRY_ACTIVE_STATUSES;
 const CLOSED_INQUIRY = ["converted", "closed", "lost"];
@@ -175,7 +176,7 @@ export async function listContactsBoard(
     }
   }
   const filter = String(query.filter || "all");
-  const take = Math.min(100, Number(query.limit || 50) || 50);
+  const { take, skip } = pagination(query);
 
   const where: Prisma.ContactWhereInput = {
     tenantId: tid,
@@ -217,8 +218,45 @@ export async function listContactsBoard(
     where.inquiries = { some: { OR: [{ source: query.source }, { sourceType: query.source }] } };
   }
 
-  const contacts = await prisma.contact.findMany({
+  // Compute filters on lightweight candidates across the whole selection. Only
+  // the requested page loads the expensive card relations and message context.
+  const candidates = await prisma.contact.findMany({
     where,
+    select: {
+      id: true, lifecycleStatus: true, lastContactAt: true, lastSeenAt: true,
+      lastInboundMessageAt: true, lastOutboundMessageAt: true,
+      inquiries: { where: { archived: false, status: { in: [...ACTIVE_INQUIRY] } }, orderBy: [{ receivedAt: "desc" }, { id: "asc" }], take: 1 },
+      tasks: { where: { status: { in: ["open", "waiting"] } }, orderBy: { dueAt: { sort: "asc", nulls: "last" } }, take: 1, select: { dueAt: true } },
+      _count: { select: {
+        inquiries: { where: { archived: false } },
+        tasks: { where: { status: { in: ["open", "waiting"] } } },
+        deals: { where: { outcome: "open" } },
+      } },
+    },
+    orderBy: [{ lastSeenAt: "desc" }, { firstSeenAt: "desc" }, { id: "asc" }],
+  });
+  const flags = (contact: typeof candidates[number]) => ({
+    needsReply: needsReply(contact),
+    overdue: Boolean(contact.tasks[0]?.dueAt && contact.tasks[0].dueAt < now),
+    missingNextAction: Boolean(contact.inquiries.length && !contact._count.tasks && !contact.inquiries[0].nextStep),
+  });
+  const matching = candidates.filter(contact => {
+    const state = flags(contact);
+    if (filter === "new") return contact.lifecycleStatus === "new";
+    if (filter === "in_progress") return ["in_progress", "active"].includes(contact.lifecycleStatus);
+    if (filter === "needs_reply") return state.needsReply;
+    if (filter === "today") return JSON.stringify(zonedYmd(contact.lastContactAt || contact.lastSeenAt, timeZone)) === JSON.stringify(zonedYmd(now, timeZone));
+    if (filter === "overdue") return state.overdue;
+    if (filter === "no_next") return state.missingNextAction;
+    if (filter === "has_inquiry") return contact.inquiries.length > 0;
+    if (filter === "has_deal") return contact._count.deals > 0;
+    if (filter === "lost") return contact.lifecycleStatus === "lost";
+    return true;
+  });
+  const page = matching.slice(skip, skip + take);
+  const byId = new Map(page.map(contact => [contact.id, contact]));
+  const contacts = await prisma.contact.findMany({
+    where: { tenantId: tid, id: { in: page.map(contact => contact.id) } },
     include: {
       methods: true,
       owner: { include: { user: true } },
@@ -246,12 +284,11 @@ export async function listContactsBoard(
         include: { messages: { orderBy: { createdAt: "desc" }, take: 1 } },
       },
     },
-    orderBy: [{ lastSeenAt: "desc" }, { firstSeenAt: "desc" }],
-    take: 120,
+    orderBy: [{ lastSeenAt: "desc" }, { firstSeenAt: "desc" }, { id: "asc" }],
   });
 
   const conversationInterests = await loadConversationInterests(prisma, tid, contacts.filter((contact) => {
-    const inquiry = contact.inquiries.find((item) => ACTIVE_INQUIRY.includes(item.status)) || contact.inquiries[0];
+    const inquiry = byId.get(contact.id)?.inquiries[0] || contact.inquiries[0];
     return !inquiryInterest(inquiry);
   }).map((contact) => contact.id));
 
@@ -259,7 +296,7 @@ export async function listContactsBoard(
     .map((contact) => {
       const phone = primaryPhone(contact.methods);
       const currentInquiry =
-        contact.inquiries.find((item) => ACTIVE_INQUIRY.includes(item.status)) || contact.inquiries[0] || null;
+        byId.get(contact.id)?.inquiries[0] || contact.inquiries[0] || null;
       const interest = inquiryInterest(currentInquiry) || conversationInterests.get(contact.id);
       const nextTask = nextOpenTask(contact.tasks);
       const overdueStrict = contact.tasks.some(
@@ -268,7 +305,7 @@ export async function listContactsBoard(
       const waitingReply = needsReply(contact);
       const lastWho = whoWroteLast(contact);
       const waitMinutes = waitingReply ? minutesAgo(contact.lastInboundMessageAt, now) : null;
-      const hasActiveInquiry = contact.inquiries.some((item) => ACTIVE_INQUIRY.includes(item.status));
+      const hasActiveInquiry = Boolean(byId.get(contact.id)?.inquiries.length);
       const missingNext = hasActiveInquiry && !nextTask && !currentInquiry?.nextStep;
       const attribution = (contact.attributionJson || {}) as Record<string, string>;
       const source =
@@ -302,8 +339,8 @@ export async function listContactsBoard(
         lastContactAt: contact.lastContactAt || contact.lastSeenAt,
         firstContactLabel: formatWhen(contact.firstSeenAt, timeZone),
         lastContactLabel: formatWhen(contact.lastContactAt || contact.lastSeenAt, timeZone),
-        inquiryCount: contact.inquiries.length,
-        openTaskCount: contact.tasks.length,
+        inquiryCount: byId.get(contact.id)!._count.inquiries,
+        openTaskCount: byId.get(contact.id)!._count.tasks,
         ownerName: contact.owner?.user?.name || null,
         ownerMembershipId: contact.ownerMembershipId,
         nextAction: nextTask
@@ -338,35 +375,21 @@ export async function listContactsBoard(
         conversationId: contact.conversations[0]?.id || null,
         lastMessagePreview: contact.conversations[0]?.messages[0]?.text || null,
       };
-    })
-    .filter((item) => {
-      if (filter === "all" || filter === "archived") return true;
-      if (filter === "new") return item.lifecycleStatus === "new";
-      if (filter === "in_progress") return item.lifecycleStatus === "in_progress" || item.lifecycleStatus === "active";
-      if (filter === "needs_reply") return item.needsReply;
-      if (filter === "today") {
-        const last = item.lastContactAt ? new Date(item.lastContactAt) : null;
-        if (!last) return false;
-        return JSON.stringify(zonedYmd(last, timeZone)) === JSON.stringify(zonedYmd(now, timeZone));
-      }
-      if (filter === "overdue") return item.overdue;
-      if (filter === "no_next") return item.missingNextAction;
-      if (filter === "has_inquiry") return item.inquiryCount > 0 && ACTIVE_INQUIRY.includes(item.inquiryStatus || "");
-      if (filter === "has_deal") return Boolean(item.activeDeal);
-      if (filter === "lost") return item.lifecycleStatus === "lost";
-      return true;
-    })
-    .slice(0, take);
+    });
 
   return {
     asOf: now.toISOString(),
     filter,
     q,
+    total: matching.length,
+    offset: skip,
+    limit: take,
+    hasMore: skip + items.length < matching.length,
     metrics: {
-      total: items.length,
-      needsReply: items.filter((item) => item.needsReply).length,
-      overdue: items.filter((item) => item.overdue).length,
-      noNext: items.filter((item) => item.missingNextAction).length,
+      total: matching.length,
+      needsReply: matching.filter((item) => flags(item).needsReply).length,
+      overdue: matching.filter((item) => flags(item).overdue).length,
+      noNext: matching.filter((item) => flags(item).missingNextAction).length,
     },
     items,
   };

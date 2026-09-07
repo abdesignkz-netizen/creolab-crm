@@ -4,6 +4,7 @@
   "private": true,
   "main": "expo-router/entry",
   "scripts": {
+    "typecheck": "tsc --noEmit",
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios"

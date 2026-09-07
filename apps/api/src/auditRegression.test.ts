@@ -7,6 +7,8 @@ import { getDealBoard, ensureDealPipelineStages, flagsForDeal } from "./services
 import { listContactsBoard } from "./services/contactService.ts";
 import { getConversationWorkspace, getConversationMessages, listConversationsBoard, markConversationRead } from "./services/conversationService.ts";
 import { DEFAULT_OPS_SETTINGS } from "./services/dealPipeline.ts";
+import { listInquiries } from "./services/inquiryService.ts";
+import { resolvePeriodRange } from "./services/periodRange.ts";
 import type { AuthContext } from "./lib/types.ts";
 
 describe("CRM audit regressions", () => {
@@ -67,6 +69,62 @@ describe("CRM audit regressions", () => {
     const deal = { nextAction: "Позвонить клиенту", nextActionAt: null, stageEnteredAt: new Date(), stage: { systemKey: "proposal_sent" }, tasks: [] };
     assert.equal(flagsForDeal(deal, DEFAULT_OPS_SETTINGS, new Date()).waitingClient, false);
     assert.equal(flagsForDeal({ ...deal, nextAction: "Ждём решение клиента" }, DEFAULT_OPS_SETTINGS, new Date()).waitingClient, true);
+  });
+
+  it("text search and inquiry counters honor the same source, owner and test selection", async () => {
+    const contact = await prisma.contact.create({ data: { tenantId, name: "Проверка текстового поиска" } });
+    await prisma.inquiry.createMany({ data: [
+      { tenantId, contactId: contact.id, subject: "Уникальная презентация", source: "audit-search", sourceChannel: "manual", assigneeMembershipId: auth.activeMembership!.id, phoneNormalized: "77011110000", test: false },
+      { tenantId, contactId: contact.id, subject: "Другой запрос", source: "audit-search", sourceChannel: "manual", assigneeMembershipId: auth.activeMembership!.id, phoneNormalized: "77012220000", test: false },
+      { tenantId, contactId: contact.id, subject: "Уникальная презентация", source: "audit-search", sourceChannel: "manual", assigneeMembershipId: auth.activeMembership!.id, test: true },
+    ] });
+    const search = await listInquiries(prisma, auth, { q: "Уникальная", source: "audit-search", scope: "mine", test: "false" });
+    assert.equal(search.items.length, 1);
+    assert.equal(search.total, 1);
+    assert.equal(search.counts.all, 1);
+    assert.equal(search.counts.new, 1);
+    assert.equal(search.counts.needs_reply, 1);
+    const empty = await listInquiries(prisma, auth, { q: "Совсемнесуществующийзапрос" });
+    assert.equal(empty.total, 0);
+  });
+
+  it("inquiry pages expose every match once and sanitize invalid limits", async () => {
+    await prisma.inquiry.createMany({ data: Array.from({ length: 105 }, (_, i) => ({ tenantId, contactId: fixtureContact, source: "audit-pages", subject: `Страница ${i}`, receivedAt: new Date("2026-09-01T10:00:00Z") })) });
+    const first = await listInquiries(prisma, auth, { source: "audit-pages", limit: "80" });
+    const second = await listInquiries(prisma, auth, { source: "audit-pages", limit: "80", offset: "80" });
+    assert.equal(first.total, 105);
+    assert.equal(first.items.length, 80);
+    assert.equal(first.hasMore, true);
+    assert.equal(second.items.length, 25);
+    assert.equal(second.hasMore, false);
+    assert.equal(new Set([...first.items, ...second.items].map(i => i.id)).size, 105);
+    const invalid = await listInquiries(prisma, auth, { source: "audit-pages", limit: "NaN", offset: "-10" });
+    assert.equal(invalid.limit, 50);
+    assert.equal(invalid.offset, 0);
+  });
+
+  it("contact filters search beyond the first 120 and show actual related counts", async () => {
+    await prisma.contact.createMany({ data: Array.from({ length: 125 }, (_, i) => ({ tenantId, name: `Пагинация клиента ${i}`, lastSeenAt: new Date("2026-09-05T10:00:00Z") })) });
+    const oldest = await prisma.contact.create({ data: { tenantId, name: "Пагинация клиента старый", lastSeenAt: new Date("2025-01-01"), lastInboundMessageAt: new Date(), lastOutboundMessageAt: null } });
+    await prisma.inquiry.createMany({ data: Array.from({ length: 12 }, (_, i) => ({ tenantId, contactId: oldest.id, source: "manual", subject: `Запрос ${i}` })) });
+    const filtered = await listContactsBoard(prisma, auth, { q: "Пагинация клиента", filter: "needs_reply" });
+    assert.equal(filtered.total, 1);
+    assert.equal(filtered.items[0].id, oldest.id);
+    assert.equal(filtered.items[0].inquiryCount, 12);
+    const first = await listContactsBoard(prisma, auth, { q: "Пагинация клиента", limit: "100" });
+    const second = await listContactsBoard(prisma, auth, { q: "Пагинация клиента", limit: "100", offset: "100" });
+    assert.equal(first.metrics.total, 126);
+    assert.equal(first.hasMore, true);
+    assert.equal(second.items.length, 26);
+    assert.equal(new Set([...first.items, ...second.items].map(c => c.id)).size, 126);
+  });
+
+  it("custom periods reject reversed and impossible dates", () => {
+    assert.throws(() => resolvePeriodRange("Asia/Almaty", "custom", "2026-09-08", "2026-09-01"), /Дата С/);
+    assert.throws(() => resolvePeriodRange("Asia/Almaty", "custom", "2026-02-30", "2026-03-01"), /Некорректные/);
+    assert.throws(() => resolvePeriodRange("Asia/Almaty", "custom", "2026-13-01", "2026-13-02"), /Некорректные/);
+    const range = resolvePeriodRange("Asia/Almaty", "custom", "2026-09-08", "2026-09-08");
+    assert.equal(range.to!.getTime() - range.from!.getTime(), 86400000);
   });
 
   it("long conversation exposes latest messages and pageable history; reading does not mean answering", async () => {

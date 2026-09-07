@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
+import { useFocusEffect } from "expo-router";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { api } from "../src/lib/api";
 
@@ -11,9 +12,9 @@ export default function TasksScreen() {
     setItems(data.items);
   }
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     load().catch((err) => setError(err.message));
-  }, []);
+  }, []));
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: "#F4F1EA" }} contentContainerStyle={{ padding: 20, gap: 12 }}>
@@ -22,7 +23,7 @@ export default function TasksScreen() {
       {items.map((item) => (
         <View key={item.id} style={{ padding: 12, backgroundColor: "#FFFCF7", gap: 8 }}>
           <Text>
-            {item.title} · {item.status}
+            {item.title} · {({ open: "Открыта", waiting: "Ожидание", done: "Выполнена", canceled: "Отменена" } as Record<string, string>)[item.status] || item.status}
           </Text>
           {item.status === "open" || item.status === "waiting" ? (
             <Pressable
