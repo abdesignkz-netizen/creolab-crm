@@ -1,6 +1,28 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { PeriodSelector, type PeriodPreset } from "../components/PeriodSelector";
 import { api } from "../lib/api";
+
+type ListResponse = {
+  items: any[];
+  counts: Record<string, number>;
+  sourceCounts?: Record<string, number>;
+  categoryCounts?: Record<string, number>;
+  clarification: any[];
+  period?: { preset: string; label: string; from: string | null; to: string | null };
+};
+
+const PERIOD_PRESETS = new Set<PeriodPreset>([
+  "today",
+  "yesterday",
+  "last_7",
+  "last_30",
+  "this_month",
+  "last_month",
+  "this_year",
+  "all",
+  "custom",
+]);
 
 type ListResponse = {
   items: any[];
@@ -62,6 +84,12 @@ export function RequestsPage() {
   const q = params.get("q") || "";
   const companyId = params.get("company") || "";
   const contactId = params.get("contact") || "";
+  const periodParam = params.get("period") || "all";
+  const period: PeriodPreset = PERIOD_PRESETS.has(periodParam as PeriodPreset)
+    ? (periodParam as PeriodPreset)
+    : "all";
+  const dateFrom = params.get("from") || "";
+  const dateTo = params.get("to") || "";
   const [query, setQuery] = useState(q);
   const [data, setData] = useState<ListResponse | null>(null);
   const [error, setError] = useState("");
@@ -132,7 +160,14 @@ export function RequestsPage() {
     nextQ = q,
     nextSource = sourceChannel,
     nextCategory = serviceCategory,
+    nextPeriod = period,
+    nextFrom = dateFrom,
+    nextTo = dateTo,
   ) {
+    if (nextPeriod === "custom" && (!nextFrom || !nextTo)) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const result = (await api.inquiries({
@@ -140,6 +175,9 @@ export function RequestsPage() {
         q: nextQ,
         sourceChannel: nextSource || undefined,
         serviceCategory: nextCategory || undefined,
+        period: nextPeriod,
+        dateFrom: nextPeriod === "custom" ? nextFrom : undefined,
+        dateTo: nextPeriod === "custom" ? nextTo : undefined,
         limit: 80,
       })) as ListResponse;
       setData(result);
@@ -152,8 +190,8 @@ export function RequestsPage() {
   }
 
   useEffect(() => {
-    void load(filter, q, sourceChannel, serviceCategory);
-  }, [filter, q, sourceChannel, serviceCategory]);
+    void load(filter, q, sourceChannel, serviceCategory, period, dateFrom, dateTo);
+  }, [filter, q, sourceChannel, serviceCategory, period, dateFrom, dateTo]);
 
   const counts = data?.counts || {};
   const sourceCounts = data?.sourceCounts || {};
@@ -181,7 +219,14 @@ export function RequestsPage() {
   }
 
   function clearExtraFilters() {
-    patchParams({ source: null, category: null, filter: filter === "all" ? null : filter });
+    patchParams({
+      source: null,
+      category: null,
+      filter: filter === "all" ? null : filter,
+      period: null,
+      from: null,
+      to: null,
+    });
   }
 
   function submitSearch(event: FormEvent) {
@@ -191,6 +236,9 @@ export function RequestsPage() {
 
   const activeExtras = [
     filter !== "all" ? { key: "filter", label: FILTER_LABELS[filter] || filter } : null,
+    period !== "all"
+      ? { key: "period", label: `Период: ${data?.period?.label || period}` }
+      : null,
     sourceChannel
       ? {
           key: "source",
@@ -253,12 +301,31 @@ export function RequestsPage() {
         <div>
           <p className="page-kicker">Воронка обращений</p>
           <h2>Заявки</h2>
+          {data?.period?.label ? <p className="muted">Период: {data.period.label}</p> : null}
         </div>
         <div className="actions">
           <button type="button" className="btn" onClick={() => setShowCreate((v) => !v)}>
             {showCreate ? "Скрыть форму" : "+ Новая заявка"}
           </button>
         </div>
+      </div>
+
+      <div className="sit-toolbar" style={{ marginBottom: 12 }}>
+        <PeriodSelector
+          period={period}
+          onPeriodChange={(next) =>
+            patchParams({
+              period: next === "all" ? null : next,
+              from: next === "custom" ? dateFrom || null : null,
+              to: next === "custom" ? dateTo || null : null,
+            })
+          }
+          dateFrom={dateFrom}
+          dateTo={dateTo}
+          onDateFromChange={(value) => patchParams({ period: "custom", from: value || null })}
+          onDateToChange={(value) => patchParams({ period: "custom", to: value || null })}
+          activeLabel={data?.period?.label}
+        />
       </div>
 
       <div className="request-metrics cards">
@@ -363,6 +430,7 @@ export function RequestsPage() {
                   if (item.key === "filter") setFilter("all");
                   else if (item.key === "source") setSource("");
                   else if (item.key === "category") setCategory("");
+                  else if (item.key === "period") patchParams({ period: null, from: null, to: null });
                   else if (item.key === "q") {
                     setQuery("");
                     patchParams({ q: null });
@@ -373,7 +441,7 @@ export function RequestsPage() {
                 {item.label} ×
               </button>
             ))}
-            {(sourceChannel || serviceCategory || filter !== "all") && (
+            {(sourceChannel || serviceCategory || filter !== "all" || period !== "all") && (
               <button type="button" className="linkish" onClick={clearExtraFilters}>
                 Сбросить фильтры
               </button>

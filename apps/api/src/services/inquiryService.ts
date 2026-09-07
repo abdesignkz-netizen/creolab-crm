@@ -5,6 +5,7 @@ import { ApiError } from "../errors.ts";
 import { hmacSha256Hex, safeEqual, sha256 } from "../lib/hash.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { writeActivity } from "./contactService.ts";
+import { periodLabel, resolvePeriodRange, type PeriodPreset } from "./periodRange.ts";
 
 function hashPayload(value: unknown) {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -968,6 +969,7 @@ const CHANNEL_ALIASES: Record<string, string[]> = {
 function buildInquiryWhere(
   tenantId: string,
   query: Record<string, string | undefined>,
+  timeZone = "Asia/Almaty",
 ): Prisma.InquiryWhereInput {
   const where: Prisma.InquiryWhereInput = {
     tenantId,
@@ -1033,6 +1035,34 @@ function buildInquiryWhere(
       break;
   }
 
+  const periodRaw = String(query.period || "all");
+  const period = (
+    [
+      "today",
+      "yesterday",
+      "last_7",
+      "last_30",
+      "this_month",
+      "last_month",
+      "this_year",
+      "all",
+      "custom",
+    ] as PeriodPreset[]
+  ).includes(periodRaw as PeriodPreset)
+    ? (periodRaw as PeriodPreset)
+    : "all";
+
+  if (period !== "all") {
+    const range = resolvePeriodRange(timeZone, period, query.dateFrom, query.dateTo);
+    const receivedAt: { gte?: Date; lt?: Date } = {};
+    if (range.from) receivedAt.gte = range.from;
+    if (range.to) receivedAt.lt = range.to;
+    if (receivedAt.gte || receivedAt.lt) {
+      // Period selector wins over the legacy «Сегодня» attention filter date bound.
+      where.receivedAt = receivedAt;
+    }
+  }
+
   if (query.sourceChannel) {
     const channels = CHANNEL_ALIASES[query.sourceChannel] || [query.sourceChannel];
     andParts.push({
@@ -1072,9 +1102,31 @@ function buildInquiryWhere(
 
 export async function listInquiries(prisma: PrismaClient, auth: AuthContext, query: Record<string, string | undefined>) {
   const membership = requireTenant(auth);
+  const timeZone = membership.tenant.timezone || "Asia/Almaty";
   const take = Math.min(100, Number(query.limit || 50));
-  const where = buildInquiryWhere(membership.tenantId, query);
+  const where = buildInquiryWhere(membership.tenantId, query, timeZone);
   const sort = query.sort || "attention";
+
+  const periodRaw = String(query.period || "all");
+  const period = (
+    [
+      "today",
+      "yesterday",
+      "last_7",
+      "last_30",
+      "this_month",
+      "last_month",
+      "this_year",
+      "all",
+      "custom",
+    ] as PeriodPreset[]
+  ).includes(periodRaw as PeriodPreset)
+    ? (periodRaw as PeriodPreset)
+    : "all";
+  const range =
+    period === "all"
+      ? { from: null as Date | null, to: null as Date | null }
+      : resolvePeriodRange(timeZone, period, query.dateFrom, query.dateTo);
 
   let orderBy: Prisma.InquiryOrderByWithRelationInput[] = [{ needsReply: "desc" }, { receivedAt: "desc" }];
   if (sort === "newest") orderBy = [{ receivedAt: "desc" }];
@@ -1092,6 +1144,12 @@ export async function listInquiries(prisma: PrismaClient, auth: AuthContext, que
     data: { status: "cancelled" },
   });
 
+  const periodBase = {
+    period: query.period,
+    dateFrom: query.dateFrom,
+    dateTo: query.dateTo,
+  };
+
   const [items, countsRaw, channelRaw, categoryRaw, intakes] = await Promise.all([
     prisma.inquiry.findMany({
       where,
@@ -1101,21 +1159,32 @@ export async function listInquiries(prisma: PrismaClient, auth: AuthContext, que
     }),
     prisma.inquiry.groupBy({
       by: ["status"],
-      where: { tenantId: membership.tenantId, archived: false },
+      where: buildInquiryWhere(membership.tenantId, { ...periodBase, filter: "all" }, timeZone),
       _count: { _all: true },
     }),
     prisma.inquiry.groupBy({
       by: ["sourceChannel"],
-      where: { tenantId: membership.tenantId, archived: false },
+      where: buildInquiryWhere(membership.tenantId, { ...periodBase, filter: "all" }, timeZone),
       _count: { _all: true },
     }),
     prisma.inquiry.groupBy({
       by: ["serviceCategory"],
-      where: { tenantId: membership.tenantId, archived: false },
+      where: buildInquiryWhere(membership.tenantId, { ...periodBase, filter: "all" }, timeZone),
       _count: { _all: true },
     }),
     prisma.incompleteIntake.findMany({
-      where: { tenantId: membership.tenantId, status: "pending" },
+      where: {
+        tenantId: membership.tenantId,
+        status: "pending",
+        ...(range.from || range.to
+          ? {
+              receivedAt: {
+                ...(range.from ? { gte: range.from } : {}),
+                ...(range.to ? { lt: range.to } : {}),
+              },
+            }
+          : {}),
+      },
       orderBy: { receivedAt: "desc" },
       take: 50,
     }),
@@ -1147,19 +1216,19 @@ export async function listInquiries(prisma: PrismaClient, auth: AuthContext, que
     clarificationCount,
   ] = await Promise.all([
     prisma.inquiry.count({
-      where: buildInquiryWhere(membership.tenantId, { filter: "needs_reply" }),
+      where: buildInquiryWhere(membership.tenantId, { ...periodBase, filter: "needs_reply" }, timeZone),
     }),
     prisma.inquiry.count({
-      where: buildInquiryWhere(membership.tenantId, { filter: "unassigned" }),
+      where: buildInquiryWhere(membership.tenantId, { ...periodBase, filter: "unassigned" }, timeZone),
     }),
     prisma.inquiry.count({
-      where: buildInquiryWhere(membership.tenantId, { filter: "no_phone" }),
+      where: buildInquiryWhere(membership.tenantId, { ...periodBase, filter: "no_phone" }, timeZone),
     }),
     prisma.inquiry.count({
-      where: buildInquiryWhere(membership.tenantId, { filter: "today" }),
+      where: buildInquiryWhere(membership.tenantId, { ...periodBase, filter: "today" }, timeZone),
     }),
     prisma.inquiry.count({
-      where: buildInquiryWhere(membership.tenantId, { filter: "needs_clarification" }),
+      where: buildInquiryWhere(membership.tenantId, { ...periodBase, filter: "needs_clarification" }, timeZone),
     }),
   ]);
 
@@ -1167,6 +1236,12 @@ export async function listInquiries(prisma: PrismaClient, auth: AuthContext, que
 
   return {
     items: items.map((item) => mapInquiryListItem(item, membership.tenant.timezone)),
+    period: {
+      preset: period,
+      label: periodLabel(period, range.from, range.to, timeZone),
+      from: range.from?.toISOString() || null,
+      to: range.to?.toISOString() || null,
+    },
     counts: {
       all: allCount,
       new: (statusCounts.new || 0),
