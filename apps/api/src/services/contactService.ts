@@ -4,6 +4,7 @@ import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
 import {
   INQUIRY_STATUS_LABEL,
+  INQUIRY_ACTIVE_STATUSES,
   LIFECYCLE_LABEL,
   SOURCE_LABEL,
   TEMP_LABEL,
@@ -17,7 +18,10 @@ import {
   whoWroteLast,
 } from "./contactLabels.ts";
 
-const ACTIVE_INQUIRY = ["new", "accepted", "qualification", "qualified", "in_progress", "waiting_client", "waiting_manager"];
+import { resolvePeriodRange, zonedYmd, type PeriodPreset } from "./periodRange.ts";
+import { inquiryInterest, loadConversationInterests } from "./contactInterestService.ts";
+
+const ACTIVE_INQUIRY: readonly string[] = INQUIRY_ACTIVE_STATUSES;
 const CLOSED_INQUIRY = ["converted", "closed", "lost"];
 
 function requireTenant(auth: AuthContext) {
@@ -201,6 +205,10 @@ export async function listContactsBoard(
     ];
   }
 
+  if (query.period && query.period !== "all") {
+    const range = resolvePeriodRange(timeZone, query.period as PeriodPreset, query.dateFrom, query.dateTo, now);
+    where.firstSeenAt = { ...(range.from ? { gte: range.from } : {}), ...(range.to ? { lt: range.to } : {}) };
+  }
   if (query.status) where.lifecycleStatus = query.status;
   if (query.owner === "me") where.ownerMembershipId = membership.id;
   else if (query.owner === "unassigned") where.ownerMembershipId = null;
@@ -242,11 +250,17 @@ export async function listContactsBoard(
     take: 120,
   });
 
+  const conversationInterests = await loadConversationInterests(prisma, tid, contacts.filter((contact) => {
+    const inquiry = contact.inquiries.find((item) => ACTIVE_INQUIRY.includes(item.status)) || contact.inquiries[0];
+    return !inquiryInterest(inquiry);
+  }).map((contact) => contact.id));
+
   const items = contacts
     .map((contact) => {
       const phone = primaryPhone(contact.methods);
       const currentInquiry =
         contact.inquiries.find((item) => ACTIVE_INQUIRY.includes(item.status)) || contact.inquiries[0] || null;
+      const interest = inquiryInterest(currentInquiry) || conversationInterests.get(contact.id);
       const nextTask = nextOpenTask(contact.tasks);
       const overdueStrict = contact.tasks.some(
         (item) => item.dueAt && item.dueAt.getTime() < now.getTime() && (item.status === "open" || item.status === "waiting"),
@@ -276,7 +290,9 @@ export async function listContactsBoard(
         lifecycleLabel: LIFECYCLE_LABEL[contact.lifecycleStatus] || contact.lifecycleStatus,
         leadTemperature: contact.leadTemperature,
         temperatureLabel: TEMP_LABEL[contact.leadTemperature] || contact.leadTemperature,
-        interest: currentInquiry?.subject || currentInquiry?.service || null,
+        interest: interest?.text || null,
+        interestSource: interest?.source || null,
+        interestMessageId: interest?.messageId || null,
         inquiryStatus: currentInquiry?.status || null,
         inquiryStatusLabel: currentInquiry ? INQUIRY_STATUS_LABEL[currentInquiry.status] || currentInquiry.status : null,
         source,
@@ -331,7 +347,7 @@ export async function listContactsBoard(
       if (filter === "today") {
         const last = item.lastContactAt ? new Date(item.lastContactAt) : null;
         if (!last) return false;
-        return last.toDateString() === now.toDateString();
+        return JSON.stringify(zonedYmd(last, timeZone)) === JSON.stringify(zonedYmd(now, timeZone));
       }
       if (filter === "overdue") return item.overdue;
       if (filter === "no_next") return item.missingNextAction;
@@ -426,7 +442,7 @@ export async function getContactOverview(prisma: PrismaClient, auth: AuthContext
   const lastWho = whoWroteLast(contact);
   const attribution = {
     ...((contact.attributionJson || {}) as Record<string, unknown>),
-    sourceType: currentInquiry?.sourceType || currentInquiry?.source || null,
+    sourceType: currentInquiry?.sourceType || currentInquiry?.source || (contact.attributionJson as Record<string, string>)?.sourceType || null,
     sourceChannel: currentInquiry?.sourceChannel || null,
     sourceIntegration: currentInquiry?.sourceIntegration || null,
     utmSource: currentInquiry?.utmSource || null,
@@ -437,7 +453,10 @@ export async function getContactOverview(prisma: PrismaClient, auth: AuthContext
     landingPage: currentInquiry?.landingPage || null,
     referrer: currentInquiry?.referrer || null,
   };
-  const summary = buildSummary({ contact, inquiry: currentInquiry, nextTask, timeZone });
+  const interest = inquiryInterest(currentInquiry) || (await loadConversationInterests(prisma, tid, [contactId])).get(contactId);
+  const summary = !contact.summary?.trim() && !currentInquiry && interest
+    ? `Интерес из переписки: ${interest.text}`
+    : buildSummary({ contact, inquiry: currentInquiry, nextTask, timeZone });
   const conversationMode = contact.conversations[0]?.mode || null;
   const aiMode =
     conversationMode === "human" ? "HUMAN" : conversationMode === "paused" ? "DISABLED" : conversationMode === "ai" ? "AUTO" : "UNKNOWN";
@@ -546,6 +565,9 @@ export async function getContactOverview(prisma: PrismaClient, auth: AuthContext
       temperatureLabel: TEMP_LABEL[contact.leadTemperature] || contact.leadTemperature,
       leadScore: contact.leadScore,
       summary,
+      interest: interest?.text || null,
+      interestSource: interest?.source || null,
+      interestMessageId: interest?.messageId || null,
       firstSeenAt: contact.firstSeenAt,
       lastSeenAt: contact.lastSeenAt,
       lastInboundMessageAt: contact.lastInboundMessageAt,

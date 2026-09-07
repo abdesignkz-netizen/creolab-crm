@@ -1,3 +1,4 @@
+import { useUrlState, useRequestVersion } from "../lib/useUrlState";
 import { useEffect, useMemo, useState, type DragEvent, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { nameWithPhone, phoneText } from "../lib/contactDisplay";
@@ -232,7 +233,7 @@ function toggleValue(list: string[], value: string) {
 export function TasksPage() {
   const [items, setItems] = useState<any[]>([]);
   const [error, setError] = useState("");
-  const [filter, setFilter] = useState<Filter>("open");
+  const [filter, setFilter] = useUrlState<Filter>("filter", "open", ["open", "waiting", "overdue", "mine", "all"]);
   const [me, setMe] = useState<any>(null);
   const [members, setMembers] = useState<any[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);

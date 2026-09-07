@@ -132,12 +132,16 @@ export function createApiClient(options: ClientOptions) {
         dateFrom?: string;
         dateTo?: string;
         basis?: "created" | "activity" | "closed";
-        focus?: "all" | "stalled" | "needs_reply" | "no_next_action";
+        focus?: "all" | "stalled" | "needs_reply" | "no_next_action" | "proposal_no_reply";
+        stage?: string;
+        outcome?: string;
       } = {},
     ) => {
       const params = new URLSearchParams();
       if (query.scope) params.set("scope", query.scope);
       if (query.includeClosed) params.set("includeClosed", "true");
+      if (query.stage) params.set("stage", query.stage);
+      if (query.outcome) params.set("outcome", query.outcome);
       if (query.view) params.set("view", query.view);
       if (query.timeMode) params.set("timeMode", query.timeMode);
       if (query.period) params.set("period", query.period);
@@ -228,6 +232,8 @@ export function createApiClient(options: ClientOptions) {
       const suffix = params.toString() ? `?${params}` : "";
       return request(`/api/v1/conversations${suffix}`);
     },
+    conversationMessages: (id: string, before: string) => request(`/api/v1/conversations/${id}/messages?before=${encodeURIComponent(before)}`),
+    markConversationRead: (id: string, messageId: string) => request(`/api/v1/conversations/${id}/read`, { method: "POST", body: JSON.stringify({ messageId }) }),
     conversation: (id: string) => request(`/api/v1/conversations/${id}`),
     analyzeConversationContext: (id: string, body: { dryRun?: boolean; useLlm?: boolean } = {}) =>
       request(`/api/v1/conversations/${id}/analyze-context`, {

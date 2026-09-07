@@ -1,3 +1,4 @@
+import { useUrlState, useRequestVersion } from "../lib/useUrlState";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { PeriodSelector, type PeriodPreset } from "../components/PeriodSelector";
@@ -8,9 +9,9 @@ import { tip } from "../lib/tip";
 type Scope = "all" | "mine" | "unassigned";
 type TimeMode = "now" | "period";
 type PeriodBasis = "created" | "activity" | "closed";
-type Focus = "all" | "stalled" | "needs_reply" | "no_next_action";
+type Focus = "all" | "stalled" | "needs_reply" | "no_next_action" | "proposal_no_reply";
 
-const FOCUS_VALUES = new Set<Focus>(["all", "stalled", "needs_reply", "no_next_action"]);
+const FOCUS_VALUES = new Set<Focus>(["all", "stalled", "needs_reply", "no_next_action", "proposal_no_reply"]);
 
 const PAYMENT_STATUS_LABEL: Record<string, string> = {
   NOT_REQUIRED: "Не требуется",
@@ -28,15 +29,18 @@ function Flag({ on, label }: { on?: boolean; label: string }) {
 }
 
 export function DealsPage() {
+  const requestVersion = useRequestVersion();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const [timeMode, setTimeMode] = useState<TimeMode>("now");
-  const [period, setPeriod] = useState<PeriodPreset>("today");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
-  const [basis, setBasis] = useState<PeriodBasis>("created");
-  const [scope, setScope] = useState<Scope>("all");
-  const [focus, setFocus] = useState<Focus>("all");
+  const [timeMode, setTimeMode] = useUrlState<TimeMode>("timeMode", "now");
+  const [period, setPeriod] = useUrlState<PeriodPreset>("period", "today");
+  const [dateFrom, setDateFrom] = useUrlState<string>("from", "");
+  const [dateTo, setDateTo] = useUrlState<string>("to", "");
+  const [basis, setBasis] = useUrlState<PeriodBasis>("basis", "created");
+  const [scope, setScope] = useUrlState<Scope>("scope", "all");
+  const [focus, setFocus] = useUrlState<Focus>("focus", "all", [...FOCUS_VALUES]);
+  const [stage, setStage] = useUrlState<string>("stage", "");
+  const [outcome, setOutcome] = useUrlState<string>("outcome", "");
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -46,7 +50,6 @@ export function DealsPage() {
     const focusParam = searchParams.get("focus");
     if (!focusParam) return;
     if (FOCUS_VALUES.has(focusParam as Focus)) {
-      setFocus(focusParam as Focus);
       return;
     }
     // Legacy/deep link: /deals?focus=<dealId> → card
@@ -54,14 +57,16 @@ export function DealsPage() {
   }, [searchParams, navigate]);
 
   async function load() {
+    const request = ++requestVersion.current;
     try {
       if (timeMode === "period" && period === "custom" && (!dateFrom || !dateTo)) {
         setError("Укажите даты С и По");
         return;
       }
-      setData(
-        await api.deals({
+      const result = await api.deals({
           scope,
+          stage,
+          outcome,
           view: "board",
           timeMode,
           period: timeMode === "period" ? period : undefined,
@@ -69,17 +74,19 @@ export function DealsPage() {
           dateTo: timeMode === "period" && period === "custom" ? dateTo : undefined,
           basis: timeMode === "period" ? basis : undefined,
           focus: timeMode === "now" ? focus : undefined,
-        }),
-      );
+        });
+      if (request !== requestVersion.current) return;
+      setData(result);
       setError("");
     } catch (err) {
+      if (request !== requestVersion.current) return;
       setError(err instanceof Error ? err.message : "Ошибка");
     }
   }
 
   useEffect(() => {
     void load();
-  }, [scope, timeMode, period, dateFrom, dateTo, basis, focus]);
+  }, [scope, timeMode, period, dateFrom, dateTo, basis, focus, stage, outcome]);
 
   async function onDrop(stageId: string) {
     if (!dragId || busy || timeMode !== "now") return;
@@ -120,6 +127,10 @@ export function DealsPage() {
       </div>
 
       {error ? <p className="error">{error}</p> : null}
+      {stage || outcome ? <div className="active-filter-note">
+        <span>Отбор: {stage ? data.columns?.find((column: any) => column.systemKey === stage)?.name || stage : ""}{stage && outcome ? " · " : ""}{({ won: "Продажи", lost: "Потери", open: "Активные", on_hold: "На паузе" } as Record<string, string>)[outcome]}</span>
+        <button className="btn secondary" onClick={() => navigate(`/deals?${new URLSearchParams({ timeMode, period, from: dateFrom, to: dateTo, basis, scope })}`)}>Снять отбор</button>
+      </div> : null}
 
       <div className="segmented sit-scope" style={{ width: "fit-content", marginBottom: 10 }}>
         {(
@@ -134,7 +145,6 @@ export function DealsPage() {
             className={timeMode === value ? "btn" : "btn secondary"}
             onClick={() => {
               setTimeMode(value);
-              if (value === "now") setFocus("all");
             }}
           >
             {label}
@@ -284,6 +294,10 @@ export function DealsPage() {
                 <article
                   key={deal.id}
                   className={`deal-card${dragId === deal.id ? " dragging" : ""}`}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Открыть сделку: ${deal.title}`}
+                  onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); navigate(`/deals/${deal.id}`); } }}
                   draggable={timeMode === "now" && deal.outcome === "open"}
                   onDragStart={() => setDragId(deal.id)}
                   onDragEnd={() => setDragId(null)}
@@ -293,10 +307,10 @@ export function DealsPage() {
                   <div className="muted">{nameWithPhone(deal.contact?.name, deal.contact?.phone)}</div>
                   <div className="deal-card-meta">
                     <span>{deal.amountLabel || "сумма не указана"}</span>
-                    <span>{deal.probability}%</span>
+                    {deal.outcome === "open" ? <span>{deal.probability}%</span> : null}
                   </div>
                   {deal.outcome === "won" || deal.outcome === "lost" ? (
-                    <div className="deal-flag">{deal.outcome === "won" ? "WON" : "LOST"}</div>
+                    <div className="deal-flag">{deal.outcome === "won" ? "Продажа" : "Потеря"}</div>
                   ) : (
                     <div className="muted">На этапе: {deal.stageDurationLabel}</div>
                   )}

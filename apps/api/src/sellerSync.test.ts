@@ -142,10 +142,36 @@ describe("seller lead sync rematch by phone", () => {
       ],
       new Map([["77074129213", result.conversationId!]]),
     );
-    assert.ok(cleaned.removed >= 1);
+    assert.equal(cleaned.removed, 0);
     const gone = await prisma.message.findFirst({ where: { id: foreign.id } });
-    assert.equal(gone, null);
+    assert.ok(gone, "history missing from a limited bridge snapshot must be retained");
     const stillOnStale = await prisma.message.findMany({ where: { conversationId: conversation.id } });
-    assert.equal(stillOnStale.some((item) => item.text === "Мне нужны услуги автокрана"), false);
+    assert.equal(stillOnStale.some((item) => item.text === "Мне нужны услуги автокрана"), true);
+  });
+
+  it("isolates identical phone histories by tenant and maintains contact dates", async () => {
+    const other = await prisma.tenant.findFirstOrThrow({ where: { id: { not: tenantId } } });
+    const lead = {
+      leadId: "LEAD-dates", clientPhone: "77075551234", clientName: "Даты импорта", aiMode: "AUTO",
+      conversationHistory: [
+        { role: "user", content: "Нужен сайт", at: "2026-08-01T10:00:00Z" },
+        { role: "assistant", content: "Уточним задачу", at: "2026-08-01T10:05:00Z" },
+        { role: "user", content: "Сколько стоит?", at: "2026-08-02T10:00:00Z" },
+      ],
+    };
+    const first = await applySellerLeadSync(prisma, { tenantId, defaultRegion: "KZ", lead, connectionId: null });
+    const second = await applySellerLeadSync(prisma, { tenantId: other.id, defaultRegion: "KZ", lead, connectionId: null });
+    assert.notEqual(first.contactId, second.contactId);
+    const repeat = await applySellerLeadSync(prisma, { tenantId, defaultRegion: "KZ", lead, connectionId: null });
+    assert.equal(repeat.added, 0);
+    assert.equal(await prisma.message.count({ where: { conversationId: first.conversationId } }), 3);
+    const contact = await prisma.contact.findUniqueOrThrow({ where: { id: first.contactId } });
+    assert.equal(contact.firstSeenAt.toISOString(), "2026-08-01T10:00:00.000Z");
+    assert.equal(contact.lastContactAt?.toISOString(), "2026-08-02T10:00:00.000Z");
+    assert.equal(contact.lastInboundMessageAt?.toISOString(), "2026-08-02T10:00:00.000Z");
+    assert.equal(contact.lastOutboundMessageAt?.toISOString(), "2026-08-01T10:05:00.000Z");
+    const preserved = await reconcileImportedSellerMessages(prisma, tenantId, "KZ", [], new Map());
+    assert.equal(preserved.removed, 0);
+    assert.equal(await prisma.message.count({ where: { conversationId: first.conversationId } }), 3);
   });
 });

@@ -456,7 +456,7 @@ export async function applyConversationAnalysis(
       where: { id: contactId },
       data: {
         summary: analysis.summaryUpdate,
-        lastContactAt: lastMsg?.createdAt || new Date(),
+
       },
     });
   }

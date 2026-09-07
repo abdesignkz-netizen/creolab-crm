@@ -1,6 +1,8 @@
+import { useUrlState, useRequestVersion } from "../lib/useUrlState";
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { PeriodSelector, type PeriodPreset } from "../components/PeriodSelector";
+import { tip } from "../lib/tip";
 import { api } from "../lib/api";
 import { exportAnalyticsCsv, exportAnalyticsExcel, exportAnalyticsPdf } from "../lib/statsExport";
 
@@ -43,7 +45,17 @@ const TREND_METRICS: { id: TrendMetric; label: string }[] = [
   { id: "conversion", label: "Конверсия" },
 ];
 
-function formatChartValue(value: number, metric: TrendMetric) {
+const METRIC_HINTS: Record<TrendMetric, string> = {
+  inquiries: "Количество поступивших обращений по датам выбранного периода",
+  clients: "Количество новых клиентов по дате первого обращения",
+  deals: "Количество созданных сделок по датам выбранного периода",
+  won: "Количество сделок, отмеченных выигранными, по датам закрытия",
+  revenue: "Сумма выигранных сделок по датам закрытия",
+  conversion: "Отношение продаж к обращениям за каждую дату; сделки могут быть из более ранних обращений. Без обращений показатель не рассчитывается",
+};
+
+function formatChartValue(value: number | null, metric: TrendMetric) {
+  if (value == null) return "—";
   if (metric === "conversion") return `${value}%`;
   if (metric === "revenue") return value.toLocaleString("ru-RU");
   return String(value);
@@ -81,8 +93,8 @@ function LineChart({
   label,
   metric,
 }: {
-  points: { label: string; value: number }[];
-  comparePoints?: { value: number }[] | null;
+  points: { label: string; value: number | null }[];
+  comparePoints?: { value: number | null }[] | null;
   label: string;
   metric: TrendMetric;
 }) {
@@ -97,21 +109,21 @@ function LineChart({
   const padT = 20;
   const padB = 44;
   const values = [...points.map((p) => p.value), ...(comparePoints || []).map((p) => p.value)];
-  const max = Math.max(...values, 1);
+  const max = Math.max(...values.filter((v): v is number => v != null), 1);
   const ticks = yAxisTicks(max);
   const scaleMax = Math.max(max, ticks[ticks.length - 1] || 1);
   const innerW = w - padL - padR;
   const innerH = h - padT - padB;
   const stepX = points.length > 1 ? innerW / (points.length - 1) : innerW / 2;
   const toX = (i: number) => padL + (points.length > 1 ? i * stepX : innerW / 2);
-  const toY = (v: number) => padT + innerH - (v / scaleMax) * innerH;
-  const path = points.map((p, i) => `${i === 0 ? "M" : "L"} ${toX(i)} ${toY(p.value)}`).join(" ");
-  const area = `${path} L ${toX(points.length - 1)} ${toY(0)} L ${toX(0)} ${toY(0)} Z`;
+  const toY = (v: number | null) => padT + innerH - ((v ?? 0) / scaleMax) * innerH;
+  const path = points.map((p, i) => p.value == null ? "" : `${i === 0 || points[i - 1].value == null ? "M" : "L"} ${toX(i)} ${toY(p.value)}`).join(" ");
+  const area = points.some(p => p.value == null) ? "" : `${path} L ${toX(points.length - 1)} ${toY(0)} L ${toX(0)} ${toY(0)} Z`;
   const comparePath =
     comparePoints && comparePoints.length
       ? comparePoints
           .slice(0, points.length)
-          .map((p, i) => `${i === 0 ? "M" : "L"} ${toX(i)} ${toY(p.value)}`)
+          .map((p, i) => p.value == null ? "" : `${i === 0 || comparePoints[i - 1].value == null ? "M" : "L"} ${toX(i)} ${toY(p.value)}`)
           .join(" ")
       : null;
   const labelEvery = Math.max(1, Math.ceil(points.length / 8));
@@ -136,7 +148,7 @@ function LineChart({
           const showLabel = i === 0 || i === points.length - 1 || i % labelEvery === 0;
           return (
             <g key={p.label + i}>
-              <circle
+              {p.value != null ? <circle
                 cx={toX(i)}
                 cy={toY(p.value)}
                 r={hover === i ? 5 : 3.5}
@@ -147,8 +159,8 @@ function LineChart({
                 <title>
                   {p.label}: {formatChartValue(p.value, metric)}
                 </title>
-              </circle>
-              {points.length <= 16 ? (
+              </circle> : null}
+              {points.length <= 16 && p.value != null ? (
                 <text x={toX(i)} y={toY(p.value) - 8} textAnchor="middle" className="stats-dot-value">
                   {formatChartValue(p.value, metric)}
                 </text>
@@ -162,10 +174,11 @@ function LineChart({
           );
         })}
       </svg>
+      {metric === "conversion" && points.some(p => p.value == null) ? <p className="muted">«—» — нет обращений для расчёта. Продажи могут относиться к обращениям прошлых дат.</p> : null}
       <div className="stats-chart-legend muted">
         <span>● Текущий период</span>
         {comparePath ? <span>○ Сравнение</span> : null}
-        {hover != null ? (
+        {hover != null && points[hover] ? (
           <span>
             {points[hover].label}: {formatChartValue(points[hover].value, metric)}
           </span>
@@ -261,7 +274,7 @@ function KpiCard({
   );
   if (onClick) {
     return (
-      <button type="button" className="sit-kpi stats-kpi-btn" onClick={onClick}>
+      <button type="button" className="sit-kpi stats-kpi-btn" {...tip(`Показать записи показателя «${label}»`)} onClick={onClick}>
         {inner}
       </button>
     );
@@ -270,10 +283,11 @@ function KpiCard({
 }
 
 export function StatsPage() {
-  const [tab, setTab] = useState<TabId>("overview");
-  const [period, setPeriod] = useState<PeriodPreset>("this_month");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  const requestVersion = useRequestVersion();
+  const [tab, setTab] = useUrlState<TabId>("tab", "overview", TABS.map(t => t.id));
+  const [period, setPeriod] = useUrlState<PeriodPreset>("period", "this_month");
+  const [dateFrom, setDateFrom] = useUrlState<string>("from", "");
+  const [dateTo, setDateTo] = useUrlState<string>("to", "");
   const [compare, setCompare] = useState<CompareMode>("previous");
   const [funnelMode, setFunnelMode] = useState<"events" | "cohort">("events");
   const [trendMetric, setTrendMetric] = useState<TrendMetric>("inquiries");
@@ -335,6 +349,7 @@ export function StatsPage() {
   }
 
   async function load() {
+    const request = ++requestVersion.current;
     try {
       if (period === "custom" && (!dateFrom || !dateTo)) {
         setError("Укажите даты С и По");
@@ -346,13 +361,15 @@ export function StatsPage() {
         api.analyticsDashboard(query),
         api.analyticsTrend({ ...query, metric: trendMetric }),
       ]);
+      if (request !== requestVersion.current) return;
       setData(dash);
       setTrend(tr);
       setError("");
     } catch (err) {
+      if (request !== requestVersion.current) return;
       setError(err instanceof Error ? err.message : "Ошибка загрузки");
     } finally {
-      setLoading(false);
+      if (request === requestVersion.current) setLoading(false);
     }
   }
 
@@ -372,7 +389,7 @@ export function StatsPage() {
 
   const trendPoints = (trend?.points || data?.trend?.points || []).map((p: any) => ({
     label: p.label,
-    value: Number(p.value) || 0,
+    value: p.value == null ? null : Number(p.value),
   }));
   const comparePoints =
     compare !== "none" && data?.trendCompare?.points
@@ -389,8 +406,8 @@ export function StatsPage() {
                     ? p.won
                     : metric === "revenue"
                       ? p.revenue
-                      : p.conversion || 0;
-          return { value: Number(value) || 0 };
+                      : p.conversion;
+          return { value: value == null ? null : Number(value) };
         })
       : null;
 
@@ -518,7 +535,7 @@ export function StatsPage() {
             </div>
             <div className="sit-kpi-grid stats-kpi-grid">
               <KpiCard label="Обращения" value={o.inquiries} delta={o.deltas?.inquiries} onClick={() => void openDrill("inquiries")} />
-              <KpiCard label="Уникальные клиенты" value={o.clients} onClick={() => void openDrill("clients")} />
+              <KpiCard label="Новые клиенты" value={o.clients} onClick={() => void openDrill("clients")} />
               <KpiCard label="Заявки" value={o.requests} onClick={() => void openDrill("inquiries")} />
               <KpiCard label="Создано сделок" value={o.dealsCreated} onClick={() => void openDrill("deals")} />
               <KpiCard label="Договоры" value={o.contracts} />
@@ -531,7 +548,7 @@ export function StatsPage() {
             {data.dataQuality ? (
               <p className="muted stats-quality-hint">
                 Качество данных: без телефона {data.dataQuality.noPhone}, без источника {data.dataQuality.noSource}, без
-                ответственного {data.dataQuality.noOwner}, LOST без причины {data.dataQuality.lostNoReason}, без next
+                ответственного {data.dataQuality.noOwner}, потерь без причины {data.dataQuality.lostNoReason}, без next
                 action {data.dataQuality.openNoNextAction}
               </p>
             ) : null}
@@ -546,6 +563,7 @@ export function StatsPage() {
                     key={m.id}
                     type="button"
                     className={trendMetric === m.id ? "btn sit-chip" : "btn secondary sit-chip"}
+                    {...tip(METRIC_HINTS[m.id])}
                     onClick={() => setTrendMetric(m.id)}
                   >
                     {m.label}
@@ -569,7 +587,7 @@ export function StatsPage() {
               <p className="stats-funnel-mini">
                 {(data.funnel?.steps || []).map((s: any) => s.count).join(" → ")}
               </p>
-              {data.biggestLoss ? (
+              {data.biggestLoss?.lost > 0 ? (
                 <p className="muted">
                   Самая большая потеря: {data.biggestLoss.from} → {data.biggestLoss.to} ({data.biggestLoss.lost})
                 </p>
@@ -717,6 +735,7 @@ export function StatsPage() {
                 key={m}
                 type="button"
                 className={trendMetric === m ? "btn sit-chip" : "btn secondary sit-chip"}
+                {...tip(METRIC_HINTS[m])}
                 onClick={() => setTrendMetric(m)}
               >
                 {m === "won" ? "Количество продаж" : "Сумма продаж"}
@@ -744,6 +763,7 @@ export function StatsPage() {
                   key={id}
                   type="button"
                   className={sourceBar === id ? "btn sit-chip" : "btn secondary sit-chip"}
+                  {...tip(METRIC_HINTS[id])}
                   onClick={() => setSourceBar(id)}
                 >
                   {label}
@@ -811,6 +831,7 @@ export function StatsPage() {
                   key={id}
                   type="button"
                   className={serviceBar === id ? "btn sit-chip" : "btn secondary sit-chip"}
+                  {...tip(METRIC_HINTS[id])}
                   onClick={() => setServiceBar(id)}
                 >
                   {label}

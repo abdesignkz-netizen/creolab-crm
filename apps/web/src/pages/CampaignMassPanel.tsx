@@ -260,7 +260,7 @@ export function CampaignMassPanel({
     setBusy(true);
     try {
       if (!campaignId) {
-        const next = [];
+        const next: typeof queuedUploads = [];
         for (const file of Array.from(files)) {
           const contentBase64 = await readFileBase64(file);
           const mimeType = guessMimeType(file);

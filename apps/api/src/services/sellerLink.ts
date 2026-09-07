@@ -22,12 +22,10 @@ function historyScopedIdByPhone(phone: string, item: { role: string; content: st
   return `sellerp:${createHash("sha1").update(raw).digest("hex")}`;
 }
 
-function historyFingerprint(role: string, content: string) {
-  return `${role}\n${String(content || "").trim()}`;
-}
-
-function senderRole(senderKind: string) {
-  return senderKind === "ai" ? "assistant" : "user";
+function validHistoryDate(value?: string) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date : null;
 }
 
 async function upsertLeadHistory(
@@ -43,10 +41,11 @@ async function upsertLeadHistory(
   let added = 0;
   let moved = 0;
   for (const item of slice) {
-    const phoneScopedId = historyScopedIdByPhone(phone, item);
+    const oldPhoneScopedId = historyScopedIdByPhone(phone, item);
+    const phoneScopedId = `${tid}:${oldPhoneScopedId}`;
     const legacyScopedId = historyScopedId(leadId, item);
     const existing = await prisma.message.findFirst({
-      where: { tenantId: tid, connectionScopedId: { in: [phoneScopedId, legacyScopedId] } },
+      where: { tenantId: tid, connectionScopedId: { in: [phoneScopedId, oldPhoneScopedId, legacyScopedId] } },
     });
     if (existing) {
       const patch: { conversationId?: string; connectionScopedId?: string } = {};
@@ -58,8 +57,10 @@ async function upsertLeadHistory(
       }
       continue;
     }
-    await prisma.message.create({
-      data: {
+    await prisma.message.upsert({
+      where: { connectionScopedId: phoneScopedId },
+      update: {},
+      create: {
         tenantId: tid,
         conversationId,
         senderKind: item.role === "assistant" ? "ai" : "client",
@@ -67,7 +68,7 @@ async function upsertLeadHistory(
         text: item.content,
         historical: true,
         connectionScopedId: phoneScopedId,
-        createdAt: item.at ? new Date(item.at) : new Date(),
+        createdAt: validHistoryDate(item.at) || new Date(),
       },
     });
     added += 1;
@@ -257,6 +258,29 @@ export async function applySellerLeadSync(
     args.lead.conversationHistory || [],
   );
 
+  const dates = await prisma.message.findMany({
+    where: { tenantId: args.tenantId, conversation: { contactId }, internal: false },
+    select: { createdAt: true, direction: true }, orderBy: { createdAt: "asc" },
+  });
+  const contact = await prisma.contact.findUniqueOrThrow({ where: { id: contactId } });
+  const earliest = dates[0]?.createdAt;
+  const latest = dates.at(-1)?.createdAt;
+  const latestInbound = dates.filter((m) => m.direction === "inbound").at(-1)?.createdAt;
+  const latestOutbound = dates.filter((m) => m.direction === "outbound").at(-1)?.createdAt;
+  const later = (a: Date | null, b?: Date) => !a || (b && b > a) ? b || a : a;
+  const attribution = (contact.attributionJson || {}) as Record<string, unknown>;
+  await prisma.contact.update({
+    where: { id: contactId },
+    data: {
+      firstSeenAt: earliest && earliest < contact.firstSeenAt ? earliest : contact.firstSeenAt,
+      lastSeenAt: later(contact.lastSeenAt, latest) || contact.lastSeenAt,
+      lastContactAt: later(contact.lastContactAt, latest),
+      lastInboundMessageAt: later(contact.lastInboundMessageAt, latestInbound),
+      lastOutboundMessageAt: later(contact.lastOutboundMessageAt, latestOutbound),
+      attributionJson: { source: "whatsapp", sourceType: "whatsapp", ...attribution },
+    },
+  });
+
   return {
     skipped: null,
     conversationId: target.id,
@@ -280,85 +304,10 @@ export async function reconcileImportedSellerMessages(
   }>,
   conversationByPhone: Map<string, string>,
 ) {
-  const fingerprintsByPhone = new Map<string, Set<string>>();
-  const ownersByFingerprint = new Map<string, Set<string>>();
-  for (const lead of leads) {
-    const phone = validateClientPhone(lead.clientPhone, defaultRegion);
-    if (!phone.ok) continue;
-    const fps = new Set<string>();
-    for (const item of lead.conversationHistory || []) {
-      const fp = historyFingerprint(item.role === "assistant" ? "assistant" : "user", item.content);
-      fps.add(fp);
-      const owners = ownersByFingerprint.get(fp) || new Set<string>();
-      owners.add(phone.normalized);
-      ownersByFingerprint.set(fp, owners);
-    }
-    fingerprintsByPhone.set(phone.normalized, fps);
-  }
-
-  const conversations = await prisma.conversation.findMany({
-    where: {
-      tenantId,
-      OR: [{ sellerLeadId: { not: null } }, { messages: { some: { historical: true } } }],
-    },
-    include: {
-      contact: { include: { methods: { where: { type: "phone" } } } },
-      messages: {
-        where: { historical: true, senderKind: { in: ["client", "ai"] } },
-      },
-    },
-  });
-
-  let removed = 0;
-  let moved = 0;
-  for (const conversation of conversations) {
-    const convPhone =
-      conversation.externalThreadId ||
-      conversation.contact?.methods.find((item) => item.primary)?.normalizedValue ||
-      conversation.contact?.methods[0]?.normalizedValue ||
-      null;
-    const own = convPhone ? fingerprintsByPhone.get(convPhone) : undefined;
-
-    for (const message of conversation.messages) {
-      const fp = historyFingerprint(senderRole(message.senderKind), message.text || "");
-      const owners = [...(ownersByFingerprint.get(fp) || [])];
-      const belongsHere = Boolean(convPhone && own?.has(fp));
-      if (belongsHere) continue;
-
-      const uniqueOther = owners.filter((phone) => phone !== convPhone);
-      if (uniqueOther.length === 1) {
-        const targetId = conversationByPhone.get(uniqueOther[0]);
-        if (targetId && targetId !== conversation.id) {
-          const duplicate = await prisma.message.findFirst({
-            where: {
-              tenantId,
-              conversationId: targetId,
-              senderKind: message.senderKind,
-              text: message.text,
-              id: { not: message.id },
-            },
-          });
-          if (duplicate) {
-            await prisma.message.delete({ where: { id: message.id } });
-          } else {
-            await prisma.message.update({
-              where: { id: message.id },
-              data: { conversationId: targetId },
-            });
-          }
-          moved += 1;
-          continue;
-        }
-      }
-
-      if (!belongsHere) {
-        await prisma.message.delete({ where: { id: message.id } });
-        removed += 1;
-      }
-    }
-  }
-
-  return { removed, moved };
+  // A bounded snapshot is not evidence of deletion or ownership. Identical
+  // greetings can belong to different clients. Only exact legacy IDs are moved
+  // by upsertLeadHistory; all other stored history must be retained.
+  return { removed: 0, moved: 0 };
 }
 
 function requireTenant(auth: AuthContext) {
@@ -537,7 +486,20 @@ export async function connectWhatsAppSeller(
   return { ok: true, reachable, note, integrationId: integration.id };
 }
 
+const runningSyncs = new WeakMap<PrismaClient, Map<string, Promise<unknown>>>();
+
 export async function syncSellerLeads(prisma: PrismaClient, auth: AuthContext) {
+  const tid = requireTenant(auth).tenantId;
+  let jobs = runningSyncs.get(prisma);
+  if (!jobs) { jobs = new Map(); runningSyncs.set(prisma, jobs); }
+  const running = jobs.get(tid);
+  if (running) return running;
+  const job = syncSellerLeadsOnce(prisma, auth);
+  jobs.set(tid, job);
+  try { return await job; } finally { jobs.delete(tid); }
+}
+
+async function syncSellerLeadsOnce(prisma: PrismaClient, auth: AuthContext) {
   const membership = requireTenant(auth);
   const resolved = await resolveSellerBridge(prisma, membership.tenantId);
   if (!resolved.bridge) {

@@ -2,7 +2,7 @@ import type { PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { getSituation, type SituationItem, type SituationScope } from "./situationService.ts";
-import { ensureDealPipelineStages } from "./dealService.ts";
+import { ensureDealPipelineStages, flagsForDeal } from "./dealService.ts";
 import { CONTACT_PHONE_SELECT, displayName, phoneFromContact } from "./contactLabels.ts";
 import { PIPELINE_STAGES, parseOpsSettings } from "./dealPipeline.ts";
 import {
@@ -490,7 +490,7 @@ export async function getSituationOverview(
     : stageByKey.has("negotiation")
       ? "negotiation"
       : stages.find((s) => /договор|соглас/i.test(s.name))?.systemKey || "contract";
-  const negotiationStageIds = new Set(stages.filter((s) => s.systemKey === negotiationKey || s.systemKey === "contract").map((s) => s.id));
+  const negotiationStageIds = new Set(stages.filter((s) => s.systemKey === "contract").map((s) => s.id));
   const proposalStageIds = new Set(stages.filter((s) => s.systemKey === "proposal_sent").map((s) => s.id));
 
   let pipelineAmount = 0;
@@ -529,15 +529,14 @@ export async function getSituationOverview(
     const hasFutureTask = deal.tasks.some((t) => t.dueAt && t.dueAt.getTime() >= now.getTime());
     const hasOpenTask = deal.tasks.length > 0;
     const waiting =
-      Boolean(deal.nextAction && /жд[её]м|клиент|waiting/i.test(deal.nextAction)) ||
-      (deal.nextActionAt != null && deal.nextActionAt > now);
+      flagsForDeal(deal, ops, now).waitingClient;
     if (waiting) waitingClientDeals.push(deal);
 
     if (!deal.nextAction && !hasOpenTask) noNextActionDeals.push(deal);
 
     const stageEntered = (deal as { stageEnteredAt?: Date }).stageEnteredAt || deal.createdAt;
     const lastTouch = deal.nextActionAt || stageEntered;
-    const stalled = lastTouch < stalledCutoff && !hasFutureTask && !waiting;
+    const stalled = flagsForDeal(deal, ops, now).stalled;
     if (stalled) stalledDealsList.push(deal);
 
     const onProposalTooLong =
@@ -568,7 +567,7 @@ export async function getSituationOverview(
 
   const proposalWithoutReply = openDeals.filter((deal) => {
     const stageEntered = (deal as { stageEnteredAt?: Date }).stageEnteredAt || deal.createdAt;
-    return proposalStageIds.has(deal.stageId) && stageEntered < proposalCutoff;
+    return flagsForDeal(deal, ops, now).proposalWithoutReply;
   }).length;
 
   importantDeals.sort((a, b) => (b.amount || 0) - (a.amount || 0));
@@ -588,7 +587,7 @@ export async function getSituationOverview(
   }
 
   const attentionItems = [
-    ...board.items.slice(0, onlyImportant ? 12 : 15).map((item) => ({
+    ...board.items.map((item) => ({
       ...item,
       group: attentionGroup(item.kind),
       href:
@@ -600,7 +599,13 @@ export async function getSituationOverview(
               ? `/contacts/${item.entityId}`
               : item.kind.startsWith("conversation_")
                 ? `/conversations/${item.entityId}`
-                : "/tasks",
+                : item.links.taskId ? `/tasks?open=${item.links.taskId}` : "/tasks",
+    })),
+    ...noNextActionDeals.map(deal => ({
+      id: `deal-next:${deal.id}`, kind: "missing_next_action", group: "no_next_action", entityId: deal.id,
+      title: deal.title, reason: "В сделке нет следующего действия", nextAction: "create_next_action",
+      severity: "normal", ownerMembershipId: deal.assigneeMembershipId, links: { dealId: deal.id, contactId: deal.contactId },
+      href: `/deals/${deal.id}`, ageMinutes: Math.max(0, Math.floor((now.getTime() - deal.stageEnteredAt.getTime()) / 60000)),
     })),
     ...activeAgreements
       .filter((a) => a.status === "NEEDS_CLARIFICATION" || a.clarificationNeeded || (a.type === "ONLINE_MEETING" && !a.meetingUrl))

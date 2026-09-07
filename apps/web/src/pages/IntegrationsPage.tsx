@@ -78,7 +78,7 @@ export function IntegrationsPage() {
                     className="btn secondary"
                     onClick={async () => {
                       try {
-                        const result = await api.integrationHealthCheck(card.integrationId);
+                        const result = await api.integrationHealthCheck(card.integrationId) as { healthLabel: string };
                         setHealth(result);
                         setNote(`Проверка «${card.title}»: ${result.healthLabel}`);
                       } catch (err) {

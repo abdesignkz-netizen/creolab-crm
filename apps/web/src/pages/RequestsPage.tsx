@@ -1,3 +1,4 @@
+import { useRequestVersion } from "../lib/useUrlState";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { PeriodSelector, type PeriodPreset } from "../components/PeriodSelector";
@@ -23,14 +24,6 @@ const PERIOD_PRESETS = new Set<PeriodPreset>([
   "all",
   "custom",
 ]);
-
-type ListResponse = {
-  items: any[];
-  counts: Record<string, number>;
-  sourceCounts?: Record<string, number>;
-  categoryCounts?: Record<string, number>;
-  clarification: any[];
-};
 
 const STATUS_FILTERS: Array<{ key: string; label: string }> = [
   { key: "all", label: "Все" },
@@ -71,11 +64,12 @@ const SOURCE_OPTIONS = [
   { value: "other", label: "Другое" },
 ];
 
-const FILTER_LABELS: Record<string, string> = Object.fromEntries(
+const FILTER_LABELS: Record<string, string> = { ai_processing: "AI обрабатывает", ai_needs_human: "Ожидают менеджера", ai_failed: "Ошибка AI-обработки", ...Object.fromEntries(
   [...STATUS_FILTERS, ...ATTENTION_FILTERS].map((item) => [item.key, item.label]),
-);
+) };
 
 export function RequestsPage() {
+  const requestVersion = useRequestVersion();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const filter = params.get("filter") || "all";
@@ -164,6 +158,7 @@ export function RequestsPage() {
     nextFrom = dateFrom,
     nextTo = dateTo,
   ) {
+    const request = ++requestVersion.current;
     if (nextPeriod === "custom" && (!nextFrom || !nextTo)) {
       setLoading(false);
       return;
@@ -172,6 +167,8 @@ export function RequestsPage() {
     try {
       const result = (await api.inquiries({
         filter: nextFilter,
+        scope: params.get("scope") || undefined,
+        test: params.get("test") || undefined,
         q: nextQ,
         sourceChannel: nextSource || undefined,
         serviceCategory: nextCategory || undefined,
@@ -180,18 +177,20 @@ export function RequestsPage() {
         dateTo: nextPeriod === "custom" ? nextTo : undefined,
         limit: 80,
       })) as ListResponse;
+      if (request !== requestVersion.current) return;
       setData(result);
       setError("");
     } catch (err) {
+      if (request !== requestVersion.current) return;
       setError(err instanceof Error ? err.message : "Ошибка загрузки");
     } finally {
-      setLoading(false);
+      if (request === requestVersion.current) setLoading(false);
     }
   }
 
   useEffect(() => {
     void load(filter, q, sourceChannel, serviceCategory, period, dateFrom, dateTo);
-  }, [filter, q, sourceChannel, serviceCategory, period, dateFrom, dateTo]);
+  }, [filter, q, sourceChannel, serviceCategory, period, dateFrom, dateTo, params.get("scope"), params.get("test")]);
 
   const counts = data?.counts || {};
   const sourceCounts = data?.sourceCounts || {};

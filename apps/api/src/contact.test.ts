@@ -56,6 +56,42 @@ describe("Contact 360", () => {
     assert.ok(body.items.some((item: { phoneNormalized?: string }) => item.phoneNormalized === "77010000001"));
   });
 
+  it("интерес из закрытой переписки виден без заявки в списке и карточке", async () => {
+    const created = await fetch(`${base}/api/v1/contacts`, {
+      method: "POST", headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({ name: `Interest regression ${Date.now()}`, source: "manual" }),
+    });
+    assert.equal(created.status, 201);
+    const { client } = await created.json();
+    const contact = await prisma.contact.findUniqueOrThrow({ where: { id: client.id } });
+    const conversation = await prisma.conversation.create({
+      data: { tenantId: contact.tenantId, contactId: client.id, status: "closed", mode: "human" },
+    });
+    const evidence = await prisma.message.create({
+      data: { tenantId: contact.tenantId, conversationId: conversation.id, direction: "inbound", senderKind: "client", text: "Нужна презентация для инвесторов", historical: true },
+    });
+    await prisma.message.create({
+      data: { tenantId: contact.tenantId, conversationId: conversation.id, direction: "outbound", senderKind: "staff", text: "Также можем разработать сайт" },
+    });
+    const response = await fetch(`${base}/api/v1/contacts?q=${encodeURIComponent(client.name)}`, { headers: { cookie } });
+    const { items } = await response.json();
+    assert.equal(items.length, 1);
+    assert.equal(items[0].interest, "Нужна презентация для инвесторов");
+    assert.equal(items[0].interestSource, "conversation");
+    assert.equal(items[0].interestMessageId, evidence.id);
+    const overview = await fetch(`${base}/api/v1/contacts/${client.id}/overview`, { headers: { cookie } });
+    assert.equal((await overview.json()).client.interest, items[0].interest);
+    assert.equal(await prisma.inquiry.count({ where: { contactId: client.id } }), 0);
+    await prisma.inquiry.create({
+      data: { tenantId: contact.tenantId, contactId: client.id, source: "manual", subject: "Согласованный брендинг" },
+    });
+    const withInquiry = await fetch(`${base}/api/v1/contacts?q=${encodeURIComponent(client.name)}`, { headers: { cookie } });
+    const updated = (await withInquiry.json()).items[0];
+    assert.equal(updated.interest, "Согласованный брендинг");
+    assert.equal(updated.interestSource, "inquiry");
+    assert.equal(updated.interestMessageId, null);
+  });
+
   it("создание клиента и overview отвечают на ключевые вопросы", async () => {
     const created = await fetch(`${base}/api/v1/contacts`, {
       method: "POST",

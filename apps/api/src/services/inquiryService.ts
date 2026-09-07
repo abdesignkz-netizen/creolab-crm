@@ -979,14 +979,10 @@ function buildInquiryWhere(
   const q = (query.q || "").trim();
   const andParts: Prisma.InquiryWhereInput[] = [];
 
+  if (query.assignee) where.assigneeMembershipId = query.assignee === "unassigned" ? null : query.assignee;
+  if (query.test === "false") where.test = false;
   if (query.status) where.status = query.status;
   if (query.source) where.source = query.source;
-
-  const startOfDay = (d: Date) => {
-    const x = new Date(d);
-    x.setHours(0, 0, 0, 0);
-    return x;
-  };
 
   switch (filter) {
     case "new":
@@ -1019,8 +1015,20 @@ function buildInquiryWhere(
     case "lost":
       where.status = { in: ["lost", "invalid", "spam"] };
       break;
-    case "today":
-      where.receivedAt = { gte: startOfDay(new Date()) };
+    case "today": {
+      const today = resolvePeriodRange(timeZone, "today");
+      where.receivedAt = { gte: today.from!, lt: today.to! };
+      break;
+    }
+    case "ai_processing":
+      where.tasks = { some: { type: "process_inquiry", status: "open", source: "ai_automation", executionStatus: { in: ["in_progress", "queued"] } } };
+      break;
+    case "ai_needs_human":
+      where.tasks = { some: { type: "process_inquiry", status: "open", executionStatus: { in: ["needs_human", "failed"] } } };
+      break;
+    case "ai_failed":
+      where.attentionReason = "AI_ANALYSIS_FAILED";
+      where.status = { notIn: ["lost", "converted", "cancelled"] };
       break;
     case "needs_clarification":
       andParts.push({
@@ -1104,6 +1112,7 @@ export async function listInquiries(prisma: PrismaClient, auth: AuthContext, que
   const membership = requireTenant(auth);
   const timeZone = membership.tenant.timezone || "Asia/Almaty";
   const take = Math.min(100, Number(query.limit || 50));
+  query = { ...query, ...(query.scope === "mine" ? { assignee: membership.id } : query.scope === "unassigned" ? { assignee: "unassigned" } : {}) };
   const where = buildInquiryWhere(membership.tenantId, query, timeZone);
   const sort = query.sort || "attention";
 

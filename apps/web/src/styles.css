@@ -492,19 +492,12 @@ fieldset.field-block legend { padding: 0 6px; font-weight: 600; }
 }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-/* Hover tips — use data-tip="…" on buttons/links */
-[data-tip] {
-  position: relative;
-}
-[data-tip]::after {
-  content: attr(data-tip);
-  position: absolute;
-  left: 50%;
-  bottom: calc(100% + 8px);
-  transform: translateX(-50%) translateY(4px);
-  z-index: 80;
+/* Render outside panels so hints stay visible near scroll and viewport edges. */
+.hover-hint {
+  position: fixed;
+  z-index: 10000;
   width: max-content;
-  max-width: min(280px, 70vw);
+  max-width: min(320px, calc(100vw - 16px));
   padding: 7px 10px;
   border-radius: 6px;
   background: #202124;
@@ -514,40 +507,10 @@ fieldset.field-block legend { padding: 0 6px; font-weight: 600; }
   line-height: 1.35;
   text-align: left;
   white-space: normal;
+  overflow-wrap: anywhere;
   pointer-events: none;
-  opacity: 0;
-  visibility: hidden;
-  transition: opacity 0.12s ease, transform 0.12s ease, visibility 0.12s;
   box-shadow: 0 4px 14px rgba(32, 33, 36, 0.28);
 }
-[data-tip]::before {
-  content: "";
-  position: absolute;
-  left: 50%;
-  bottom: calc(100% + 2px);
-  transform: translateX(-50%);
-  border: 6px solid transparent;
-  border-top-color: #202124;
-  pointer-events: none;
-  opacity: 0;
-  visibility: hidden;
-  transition: opacity 0.12s ease, visibility 0.12s;
-  z-index: 81;
-}
-@media (hover: hover) and (pointer: fine) {
-  [data-tip]:hover::after,
-  [data-tip]:hover::before,
-  [data-tip]:focus-visible::after,
-  [data-tip]:focus-visible::before {
-    opacity: 1;
-    visibility: visible;
-  }
-  [data-tip]:hover::after,
-  [data-tip]:focus-visible::after {
-    transform: translateX(-50%) translateY(0);
-  }
-}
-/* Keep native title as touch/fallback; styled tip shows on desktop hover */
 .btn.secondary {
   background: #fff;
   color: var(--accent-strong);

@@ -1,3 +1,4 @@
+import { useUrlState, useRequestVersion } from "../lib/useUrlState";
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { nameWithPhone, phoneText } from "../lib/contactDisplay";
@@ -24,10 +25,15 @@ function relativeLabel(minutes: number | null | undefined) {
 }
 
 export function ConversationsPage() {
+  const listVersion = useRequestVersion();
+  const workspaceVersion = useRequestVersion();
   const navigate = useNavigate();
   const { id: selectedId } = useParams();
+  const selectedRef = useRef(selectedId);
+  selectedRef.current = selectedId;
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [searchParams] = useSearchParams();
-  const [filter, setFilter] = useState<string>("all");
+  const [filter, setFilter] = useUrlState("filter", "all", FILTERS.map(([value]) => value));
   const [q, setQ] = useState("");
   const [items, setItems] = useState<any[]>([]);
   const [error, setError] = useState("");
@@ -39,21 +45,35 @@ export function ConversationsPage() {
   const replyRef = useRef<HTMLTextAreaElement | null>(null);
 
   async function loadList() {
+    const request = ++listVersion.current;
     try {
       const data: any = await api.conversations({ filter, q });
+      if (request !== listVersion.current) return;
       setItems(data.items || []);
       setError("");
     } catch (err) {
+      if (request !== listVersion.current) return;
       setError(err instanceof Error ? err.message : "Ошибка");
     }
   }
 
   async function loadWorkspace(id: string) {
+    if (selectedRef.current !== id) return;
+    const request = ++workspaceVersion.current;
     try {
       const data = await api.conversation(id);
+      if (request !== workspaceVersion.current) return;
       setWorkspace(data);
+      const messages = (data as any).messages || [];
+      const lastMessage = messages[messages.length - 1];
+      if (lastMessage) {
+        await api.markConversationRead(id, lastMessage.id);
+        if (request !== workspaceVersion.current) return;
+        setItems(previous => previous.map(item => item.id === id ? { ...item, unread: false } : item));
+      }
       setError("");
     } catch (err) {
+      if (request !== workspaceVersion.current) return;
       setError(err instanceof Error ? err.message : "Диалог недоступен");
       setWorkspace(null);
     }
@@ -69,6 +89,9 @@ export function ConversationsPage() {
   }, [q]);
 
   useEffect(() => {
+    workspaceVersion.current += 1;
+    setWorkspace(null);
+    setText("");
     if (selectedId) loadWorkspace(selectedId);
     else setWorkspace(null);
   }, [selectedId]);
@@ -221,6 +244,16 @@ export function ConversationsPage() {
       ) : null}
 
       <div className="conv-messages">
+        {workspace.hasEarlierMessages ? <button type="button" className="btn secondary history-button" disabled={historyLoading} onClick={async () => {
+          const id = workspace.conversation.id;
+          setHistoryLoading(true);
+          try {
+            const page: any = await api.conversationMessages(id, workspace.messages[0].id);
+            if (selectedRef.current !== id) return;
+            setWorkspace((previous: any) => ({ ...previous, messages: [...page.messages, ...previous.messages], hasEarlierMessages: page.hasEarlierMessages }));
+          } catch (err) { if (selectedRef.current === id) setError(err instanceof Error ? err.message : "Не удалось загрузить историю"); }
+          finally { setHistoryLoading(false); }
+        }}>{historyLoading ? "Загрузка…" : "Показать более ранние сообщения"}</button> : null}
         {workspace.messages.map((message: any) => (
           <div
             key={message.id}
@@ -244,6 +277,7 @@ export function ConversationsPage() {
           setBusy(true);
           try {
             await api.sendMessage(workspace.conversation.id, text.trim(), crypto.randomUUID());
+            if (selectedRef.current !== workspace.conversation.id) return;
             setText("");
             await loadWorkspace(workspace.conversation.id);
             await loadList();

@@ -1,6 +1,7 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { api, setTenant } from "./lib/api";
+import { NavIcon } from "./components/NavIcon";
 import { tip } from "./lib/tip";
 import {
   currentBrowserPermission,
@@ -33,6 +34,7 @@ type LoadState<T> = { status: "loading" | "ready" | "error" | "empty"; data?: T;
 
 function useQuery<T>(fn: () => Promise<T>, deps: unknown[] = []) {
   const [state, setState] = useState<LoadState<T>>({ status: "loading" });
+  const [revision, setRevision] = useState(0);
   useEffect(() => {
     let cancelled = false;
     setState({ status: "loading" });
@@ -50,8 +52,8 @@ function useQuery<T>(fn: () => Promise<T>, deps: unknown[] = []) {
     return () => {
       cancelled = true;
     };
-  }, deps);
-  return [state, () => setState({ ...state })] as const;
+  }, [...deps, revision]);
+  return [state, () => setRevision((value) => value + 1)] as const;
 }
 
 function StateView({ state, onRetry, empty }: { state: LoadState<unknown>; onRetry: () => void; empty: string }) {
@@ -76,6 +78,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
   const [navBadges, setNavBadges] = useState<Record<string, number>>({});
   const [notifyBanner, setNotifyBanner] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const moreSheetRef = useRef<HTMLDivElement>(null);
 
   const primaryTabs = [
     { to: "/today", label: "Ситуация", icon: "home" },
@@ -226,6 +229,19 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
   }, [tenantId, navigate]);
 
   useEffect(() => {
+    if (!moreOpen) return;
+    const previous = document.activeElement as HTMLElement | null;
+    moreSheetRef.current?.querySelector<HTMLElement>("a, button")?.focus();
+    return () => { if (previous?.isConnected) previous.focus(); };
+  }, [moreOpen]);
+
+  useEffect(() => {
+    const dismiss = (event: KeyboardEvent) => { if (event.key === "Escape") setMoreOpen(false); };
+    window.addEventListener("keydown", dismiss);
+    return () => window.removeEventListener("keydown", dismiss);
+  }, []);
+
+  useEffect(() => {
     setMoreOpen(false);
   }, [location.pathname]);
 
@@ -274,7 +290,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
             const count = badgeCount(to);
             return (
               <NavLink key={to} to={to} className={({ isActive }) => (isActive ? "active" : "")}>
-                <span className="nav-link-label">{label}</span>
+                <span className="nav-link-label"><NavIcon to={to} />{label}</span>
                 {count > 0 ? (
                   <span className="nav-badge" title="Требует внимания">
                     {formatBadge(count)}
@@ -288,7 +304,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
             const count = badgeCount(to);
             return (
               <NavLink key={to} to={to} className={({ isActive }) => (isActive ? "active" : "")}>
-                <span className="nav-link-label">{label}</span>
+                <span className="nav-link-label"><NavIcon to={to} />{label}</span>
                 {count > 0 ? (
                   <span className="nav-badge" title={to === "/settings" ? "Непрочитанные уведомления" : "Требует внимания"}>
                     {formatBadge(count)}
@@ -305,6 +321,10 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
       </aside>
 
       <main className="main">
+        <div className="workspace-toolbar">
+          <div className="workspace-breadcrumb"><span>Рабочее пространство</span><span aria-hidden="true">/</span><span>{pageTitle}</span></div>
+          <div className="workspace-identity"><span>{me.user.name}</span><span className="workspace-avatar" aria-hidden="true">{String(me.user.name || "C").split(" ").slice(0, 2).map((part) => part[0]).join("")}</span></div>
+        </div>
         {notifyBanner ? (
           <div className="banner warn notify-banner">
             <div className="notify-banner-copy">
@@ -364,7 +384,14 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
 
       {moreOpen ? <button type="button" className="nav-backdrop" aria-label="Закрыть" onClick={() => setMoreOpen(false)} /> : null}
 
-      <div className={`more-sheet ${moreOpen ? "open" : ""}`} role="dialog" aria-label="Ещё разделы">
+      <div className={`more-sheet ${moreOpen ? "open" : ""}`} ref={moreSheetRef} role="dialog" aria-label="Ещё разделы" aria-modal={moreOpen || undefined} aria-hidden={!moreOpen} inert={!moreOpen} onKeyDown={(event) => {
+        if (event.key !== "Tab") return;
+        const controls = moreSheetRef.current?.querySelectorAll<HTMLElement>("a, button");
+        if (!controls?.length) return;
+        const first = controls[0], last = controls[controls.length - 1];
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+      }}>
         <div className="more-sheet-handle" />
         <b className="more-sheet-title">Ещё</b>
         <nav className="more-sheet-links">
@@ -372,7 +399,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
             const count = badgeCount(to);
             return (
               <NavLink key={to} to={to} className={({ isActive }) => (isActive ? "active" : "")} onClick={() => setMoreOpen(false)}>
-                <span className="nav-link-label">{label}</span>
+                <span className="nav-link-label"><NavIcon to={to} />{label}</span>
                 {count > 0 ? <span className="nav-badge">{formatBadge(count)}</span> : null}
               </NavLink>
             );
@@ -764,18 +791,30 @@ function Settings() {
 }
 
 export function App() {
+  const location = useLocation();
   const [me, setMe] = useState<any>(null);
-  const [boot, setBoot] = useState<"loading" | "anon" | "ready">("loading");
+  const [boot, setBoot] = useState<"loading" | "anon" | "ready" | "error">("loading");
+  const [bootError, setBootError] = useState("");
+  const [bootRevision, setBootRevision] = useState(0);
   useEffect(() => {
-    api
-      .me()
-      .then((data) => {
-        setMe(data);
-        setBoot("ready");
-      })
-      .catch(() => setBoot("anon"));
-  }, []);
+    let cancelled = false;
+    setBoot("loading");
+    api.me().then((data) => {
+      if (cancelled) return;
+      setMe(data);
+      setBoot("ready");
+    }).catch((error) => {
+      if (cancelled) return;
+      if (error?.status === 401) setBoot("anon");
+      else {
+        setBootError("Не удалось связаться с CRM. Проверьте соединение и повторите загрузку.");
+        setBoot("error");
+      }
+    });
+    return () => { cancelled = true; };
+  }, [bootRevision]);
   if (boot === "loading") return <div className="state">Загрузка…</div>;
+  if (boot === "error") return <div className="state"><p>{bootError}</p><button className="btn" onClick={() => setBootRevision(value => value + 1)}>Повторить</button></div>;
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
@@ -792,17 +831,17 @@ export function App() {
                 <Route path="/integrations" element={<IntegrationsPage />} />
                 <Route path="/inquiries" element={<RequestsPage />} />
                 <Route path="/requests" element={<Navigate to="/inquiries" replace />} />
-                <Route path="/requests/:requestId" element={<RequestDetailPage />} />
+                <Route path="/requests/:requestId" element={<RequestDetailPage key={location.pathname} />} />
                 <Route path="/conversations" element={<ConversationsPage />} />
                 <Route path="/conversations/:id" element={<ConversationsPage />} />
                 <Route path="/deals" element={<DealsPage />} />
-                <Route path="/deals/:dealId" element={<DealDetailPage />} />
+                <Route path="/deals/:dealId" element={<DealDetailPage key={location.pathname} />} />
                 <Route path="/tasks" element={<TasksPage />} />
                 <Route path="/contacts" element={<ClientsPage />} />
-                <Route path="/contacts/:id" element={<ContactPage />} />
-                <Route path="/clients/:id" element={<ContactPage />} />
+                <Route path="/contacts/:id" element={<ContactPage key={location.pathname} />} />
+                <Route path="/clients/:id" element={<ContactPage key={location.pathname} />} />
                 <Route path="/companies" element={<CompaniesPage />} />
-                <Route path="/companies/:id" element={<CompanyPage />} />
+                <Route path="/companies/:id" element={<CompanyPage key={location.pathname} />} />
                 <Route path="/stats" element={<StatsPage />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/settings/ai-automation" element={<AiAutomationSettingsPage />} />

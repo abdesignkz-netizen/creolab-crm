@@ -141,18 +141,8 @@ describe("Task execution", () => {
   });
 
   it("ручное завершение звонка предлагает следующий шаг", async () => {
-    const created = await fetch(`${base}/api/v1/tasks`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", cookie },
-      body: JSON.stringify({
-        type: "call",
-        title: "Позвонить клиенту",
-        targetType: "client",
-        contactId,
-        priority: "normal",
-      }),
-    });
-    const task = await created.json();
+    const contact = await prisma.contact.findUniqueOrThrow({ where: { id: contactId } });
+    const task = await prisma.task.create({ data: { tenantId: contact.tenantId, contactId, type: "call", title: "Ранее созданный звонок", targetType: "client" } });
     const done = await fetch(`${base}/api/v1/tasks/${task.id}/complete-result`, {
       method: "POST",
       headers: { "Content-Type": "application/json", cookie },
@@ -161,6 +151,7 @@ describe("Task execution", () => {
     assert.equal(done.status, 200);
     const body = await done.json();
     assert.equal(body.task.status, "done");
-    assert.ok(body.suggestedNextActions.some((item: { type: string }) => item.type === "call"));
+    assert.ok(body.suggestedNextActions.some((item: { type: string }) => ["message", "follow_up"].includes(item.type)));
+    assert.ok(body.suggestedNextActions.every((item: { type: string }) => item.type !== "call"), "disabled call types must not be offered");
   });
 });

@@ -179,7 +179,8 @@ export function ContactPage() {
         <div className="summary-grid">
           <div>
             <span className="muted">Интерес</span>
-            <div>{currentRequest?.title || "Не указано"}</div>
+            <div>{client.interest || currentRequest?.title || "Интерес пока не определён"}</div>
+            {client.interestSource === "conversation" ? <span className="badge" {...tip("Определено по сообщению клиента в переписке")}>Из переписки</span> : null}
           </div>
           <div>
             <span className="muted">Источник</span>

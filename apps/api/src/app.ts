@@ -117,7 +117,7 @@ import {
   updateContact,
 } from "./services/contactService.ts";
 import { listWorkspaceMembers, previewContactSegment, searchContactsForPicker } from "./services/segmentService.ts";
-import { getConversationWorkspace, listConversationsBoard } from "./services/conversationService.ts";
+import { getConversationWorkspace, listConversationsBoard, markConversationRead, getConversationMessages } from "./services/conversationService.ts";
 import {
   addTaskAttachment,
   completeTaskWithResult,
@@ -737,6 +737,14 @@ export function createApp(prisma: PrismaClient) {
 
   app.get("/api/v1/conversations/:id", async (req, res) => {
     res.json(await getConversationWorkspace(prisma, await requireAuth(req), req.params.id));
+  });
+
+  app.get("/api/v1/conversations/:id/messages", async (req, res) => {
+    res.json(await getConversationMessages(prisma, await requireAuth(req), req.params.id, String(req.query.before || "")));
+  });
+
+  app.post("/api/v1/conversations/:id/read", json, async (req, res) => {
+    res.json(await markConversationRead(prisma, await requireAuth(req), req.params.id, String(req.body?.messageId || "")));
   });
 
   app.post("/api/v1/conversations/:id/analyze-context", json, async (req, res) => {

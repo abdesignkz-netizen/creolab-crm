@@ -1,3 +1,5 @@
+import { resolvePeriodRange } from "./periodRange.ts";
+import { inferClientInterest } from "./contactInterestService.ts";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
@@ -122,7 +124,6 @@ export async function listConversationsBoard(
 
   if (filter === "ai") where.mode = "ai";
   if (filter === "human") where.mode = "human";
-  if (filter === "unread") where.needsAttention = true;
 
   if (q) {
     where.OR = [
@@ -185,7 +186,7 @@ export async function listConversationsBoard(
         },
       },
       assignee: { include: { user: true } },
-      messages: { orderBy: { createdAt: "desc" }, take: 1 },
+      messages: { where: { internal: false }, orderBy: { createdAt: "desc" }, take: 100 },
       inquiries: { where: { archived: false }, orderBy: { receivedAt: "desc" }, take: 3 },
       reads: {
         where: { membershipId: membership.id },
@@ -213,9 +214,7 @@ export async function listConversationsBoard(
       const deal = contact?.deals[0] || null;
       const last = conversation.messages[0] || null;
       const lastAt = lastMessageAt(conversation);
-      const waitingReply = contact
-        ? needsReply(contact)
-        : last?.direction === "inbound" || last?.senderKind === "client";
+      const waitingReply = last?.direction === "inbound" && last?.senderKind === "client";
       const lastWho =
         (last && (last.senderKind === "client" || last.direction === "inbound"
           ? "client"
@@ -225,10 +224,10 @@ export async function listConversationsBoard(
               ? "team"
               : whoWroteLast(contact || {}))) ||
         whoWroteLast(contact || {});
-      const waitMinutes = waitingReply ? minutesAgo(contact?.lastInboundMessageAt || lastAt, now) : null;
+      const waitMinutes = waitingReply ? minutesAgo(lastAt, now) : null;
       const channel = channelLabel(conversation);
       const acquisition = acquisitionLabel(linkedInquiry);
-      const topic = topicFromInquiry(linkedInquiry) || (conversation.sellerLeadId ? null : null);
+      const topic = topicFromInquiry(linkedInquiry) || inferClientInterest(conversation.messages)?.text;
       const overdueTask = contact?.tasks.some(
         (task) => task.dueAt && task.dueAt.getTime() < now.getTime() && (task.status === "open" || task.status === "waiting"),
       );
@@ -236,9 +235,7 @@ export async function listConversationsBoard(
       const title =
         contact ? displayName(contact) : phone?.rawValue || (conversation.sellerLeadId ? "Неизвестный клиент" : "Неизвестный клиент");
       const unread =
-        conversation.needsAttention ||
-        (waitingReply && conversation.mode !== "ai") ||
-        Boolean(conversation.reads[0] === undefined && last?.direction === "inbound");
+        conversation.messages.some(message => message.direction === "inbound" && message.senderKind === "client" && (!conversation.reads[0] || message.createdAt > conversation.reads[0].updatedAt));
 
       const businessStatus = deal?.stage?.name || (linkedInquiry ? INQUIRY_STATUS_LABEL[linkedInquiry.status] || linkedInquiry.status : null);
       const operationalFlags: string[] = [];
@@ -249,9 +246,8 @@ export async function listConversationsBoard(
       if (conversation.mode === "human") operationalFlags.push("human");
       if (conversation.mode === "ai") operationalFlags.push("ai");
 
-      const todayStart = new Date(now);
-      todayStart.setHours(0, 0, 0, 0);
-      const isToday = lastAt >= todayStart;
+      const today = resolvePeriodRange(timeZone, "today", undefined, undefined, now);
+      const isToday = lastAt >= today.from! && lastAt < today.to!;
 
       return {
         id: conversation.id,
@@ -364,12 +360,13 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
         },
       },
       assignee: { include: { user: true } },
-      messages: { orderBy: { createdAt: "asc" }, take: 120 },
+      messages: { orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 120 },
       inquiries: { where: { archived: false }, orderBy: { receivedAt: "desc" }, take: 10 },
     },
   });
   if (!conversation) throw new ApiError(404, "not_found", "Диалог не найден");
 
+  conversation.messages.reverse();
   const contact = conversation.contact;
   const phone = contact ? primaryPhone(contact.methods) : null;
   const contactPhone = contact ? primaryPhone(contact.methods)?.normalizedValue : null;
@@ -384,8 +381,8 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
     contact?.inquiries.find((item) => inquiryMatchesContact(item)) ||
     null;
   const deal = contact?.deals.find((item) => item.outcome === "open") || contact?.deals[0] || null;
-  const last = conversation.messages[conversation.messages.length - 1] || null;
-  const waitingReply = contact ? needsReply(contact) : last?.direction === "inbound";
+  const last = [...conversation.messages].reverse().find(message => !message.internal) || null;
+  const waitingReply = last?.direction === "inbound" && last?.senderKind === "client";
   const lastWho = last
     ? last.senderKind === "client" || last.direction === "inbound"
       ? "client"
@@ -393,14 +390,14 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
         ? "ai"
         : "team"
     : whoWroteLast(contact || {});
-  const waitMinutes = waitingReply ? minutesAgo(contact?.lastInboundMessageAt || last?.createdAt, now) : null;
+  const waitMinutes = waitingReply ? minutesAgo(last?.createdAt, now) : null;
   const nextTask = contact?.tasks[0] || null;
   const overdueTask = contact?.tasks.find(
     (task) => task.dueAt && task.dueAt.getTime() < now.getTime() && (task.status === "open" || task.status === "waiting"),
   );
   const channel = channelLabel(conversation);
   const acquisition = acquisitionLabel(linkedInquiry);
-  const topic = topicFromInquiry(linkedInquiry);
+  const topic = topicFromInquiry(linkedInquiry) || inferClientInterest(conversation.messages)?.text;
 
   const agreements = await prisma.agreement.findMany({
     where: {
@@ -581,7 +578,27 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
       sourceLine: sourceArrow(acquisition, channel),
     },
     pinnedNotes: contact?.notes?.map((item) => ({ id: item.id, text: item.text })) || [],
-    messages: conversation.messages.map((message) => ({
+    hasEarlierMessages: conversation.messages.length === 120,
+    messages: conversation.messages.map(message => messageView(message, timeZone)),
+  };
+}
+
+export async function markConversationRead(prisma: PrismaClient, auth: AuthContext, id: string, messageId: string) {
+  const { tenantId, id: membershipId } = requireTenant(auth);
+  const message = await prisma.message.findFirst({ where: { id: messageId, tenantId, conversationId: id } });
+  if (!message) throw new ApiError(404, "not_found", "Сообщение не найдено");
+  const key = { tenantId, conversationId: id, membershipId };
+  const previous = await prisma.conversationReadState.findUnique({ where: { tenantId_conversationId_membershipId: key } });
+  if (previous && previous.updatedAt >= message.createdAt) return { ok: true };
+  await prisma.conversationReadState.upsert({
+    where: { tenantId_conversationId_membershipId: key },
+    create: { ...key, lastReadCursor: message.id, updatedAt: message.createdAt },
+    update: { lastReadCursor: message.id, updatedAt: message.createdAt },
+  });
+  return { ok: true };
+}
+
+function messageView(message: any, timeZone: string) { return {
       id: message.id,
       text: message.text,
       direction: message.direction,
@@ -604,6 +621,15 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
                   ? "Ошибка"
                   : message.operationState
           : null,
-    })),
-  };
+    }; }
+
+export async function getConversationMessages(prisma: PrismaClient, auth: AuthContext, id: string, before: string) {
+  const { tenantId, tenant } = requireTenant(auth);
+  const cursor = await prisma.message.findFirst({ where: { tenantId, conversationId: id, id: before } });
+  if (!cursor) throw new ApiError(404, "not_found", "Сообщение не найдено");
+  const messages = await prisma.message.findMany({
+    where: { tenantId, conversationId: id, OR: [{ createdAt: { lt: cursor.createdAt } }, { createdAt: cursor.createdAt, id: { lt: cursor.id } }] },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 121,
+  });
+  return { hasEarlierMessages: messages.length > 120, messages: messages.slice(0, 120).reverse().map(message => messageView(message, tenant.timezone || "Asia/Almaty")) };
 }

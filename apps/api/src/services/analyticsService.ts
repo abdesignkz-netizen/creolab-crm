@@ -118,7 +118,7 @@ function compareRange(
   };
 }
 
-function buildFilters(query: AnalyticsQuery, tid: string) {
+async function buildFilters(prisma: PrismaClient, query: AnalyticsQuery, tid: string) {
   const inquiryExtra: Record<string, unknown> = { tenantId: tid, test: false, archived: false };
   const dealExtra: Record<string, unknown> = { tenantId: tid };
   if (query.assignee) {
@@ -136,7 +136,28 @@ function buildFilters(query: AnalyticsQuery, tid: string) {
   if (query.channel) inquiryExtra.sourceChannel = { contains: query.channel, mode: "insensitive" };
   if (query.city) inquiryExtra.city = { contains: query.city, mode: "insensitive" };
   if (query.campaign) inquiryExtra.utmCampaign = { contains: query.campaign, mode: "insensitive" };
+  // A source/service filter must constrain every metric, not just the inquiry count.
+  const { assigneeMembershipId, ...attribution } = inquiryExtra;
+  const hasAttribution = Object.keys(attribution).some(key => !["tenantId", "test", "archived"].includes(key));
+  // Legacy rows may have only Deal.inquiryId or only Inquiry.dealId populated.
+  const linked = await prisma.inquiry.findMany({
+    where: (hasAttribution ? attribution : { tenantId: tid, OR: [{ test: true }, { archived: true }] }) as never,
+    select: { id: true, dealId: true },
+  });
+  const linkage = { OR: [{ inquiryId: { in: linked.map(row => row.id) } }, { id: { in: linked.flatMap(row => row.dealId ? [row.dealId] : []) } }] };
+  dealExtra.AND = [hasAttribution ? linkage : { NOT: linkage }];
   return { inquiryExtra, dealExtra };
+}
+
+function contactAnalyticsFilter(tid: string, inquiryExtra: Record<string, unknown>) {
+  const { assigneeMembershipId, ...attribution } = inquiryExtra;
+  const filtered = Object.keys(attribution).some(key => !["tenantId", "test", "archived"].includes(key));
+  return {
+    tenantId: tid,
+    archivedAt: null,
+    ...(assigneeMembershipId ? { ownerMembershipId: assigneeMembershipId as string } : {}),
+    ...(filtered ? { inquiries: { some: attribution } } : {}),
+  };
 }
 
 async function metricBundle(
@@ -177,8 +198,7 @@ async function metricBundle(
       }),
       prisma.contact.count({
         where: {
-          tenantId: tid,
-          archivedAt: null,
+          ...contactAnalyticsFilter(tid, inquiryExtra),
           ...(received ? { firstSeenAt: received } : {}),
           ...(inquiryExtra.assigneeMembershipId ? { ownerMembershipId: inquiryExtra.assigneeMembershipId } : {}),
         },
@@ -223,12 +243,8 @@ async function metricBundle(
         },
         take: 5000,
       }),
-      prisma.dealStageHistory.count({
-        where: {
-          tenantId: tid,
-          toSystemKey: "contract",
-          ...(received ? { enteredAt: received } : {}),
-        },
+      prisma.deal.count({
+        where: { ...dealExtra, stageHistory: { some: { toSystemKey: "contract", ...(received ? { enteredAt: received } : {}) } } } as never,
       }),
       prisma.deal.findMany({
         where: { ...dealExtra, outcome: "open" } as never,
@@ -361,8 +377,7 @@ async function buildTrend(
     }),
     prisma.contact.findMany({
       where: {
-        tenantId: tid,
-        archivedAt: null,
+        ...contactAnalyticsFilter(tid, inquiryExtra),
         ...(received ? { firstSeenAt: received } : {}),
         ...(inquiryExtra.assigneeMembershipId ? { ownerMembershipId: inquiryExtra.assigneeMembershipId } : {}),
       },
@@ -412,7 +427,7 @@ async function buildTrend(
                 ? v.won
                 : metric === "revenue"
                   ? v.revenue
-                  : conversion || 0,
+                  : conversion,
     };
   });
 
@@ -575,7 +590,7 @@ export async function getAnalyticsDashboard(prisma: PrismaClient, auth: AuthCont
 
   const range = resolvePeriodRange(timeZone, preset, query.dateFrom, query.dateTo, now);
   const cmp = compareRange(timeZone, compareMode, range.from, range.to, now);
-  const { inquiryExtra, dealExtra } = buildFilters(query, tid);
+  const { inquiryExtra, dealExtra } = await buildFilters(prisma, query, tid);
 
   const [current, previous, funnel, trendInquiries, stageDurations, stage2] = await Promise.all([
     metricBundle(prisma, tid, range.from, range.to, inquiryExtra, dealExtra),
@@ -827,7 +842,7 @@ export async function getAnalyticsDashboard(prisma: PrismaClient, auth: AuthCont
     aiManager: stage2.aiManager,
     campaigns: stage2.campaigns,
     dataQuality: stage2.dataQuality,
-    empty: current.inquiryCount === 0 && current.dealsCreated === 0 && current.won === 0,
+    empty: current.inquiryCount === 0 && current.clients === 0 && current.dealsCreated === 0 && current.won === 0,
   };
 }
 
@@ -1373,7 +1388,7 @@ export async function getAnalyticsTrend(
   const timeZone = membership.tenant.timezone || "Asia/Almaty";
   const preset = parsePreset(query.period);
   const range = resolvePeriodRange(timeZone, preset, query.dateFrom, query.dateTo);
-  const { inquiryExtra, dealExtra } = buildFilters(query, tid);
+  const { inquiryExtra, dealExtra } = await buildFilters(prisma, query, tid);
   const metric = (["inquiries", "clients", "deals", "won", "revenue", "conversion"].includes(String(query.metric))
     ? query.metric
     : "inquiries") as TrendMetric;
@@ -1446,7 +1461,7 @@ export async function getAnalyticsDrilldown(
   const currency = membership.tenant.currency || "KZT";
   const preset = parsePreset(query.period);
   const range = resolvePeriodRange(timeZone, preset, query.dateFrom, query.dateTo);
-  const { inquiryExtra, dealExtra } = buildFilters(query, tid);
+  const { inquiryExtra, dealExtra } = await buildFilters(prisma, query, tid);
   const received = rangeFilter(range.from, range.to);
   const entity = String(query.entity || "won") as DrillEntity;
   const key = query.key || "";
@@ -1476,8 +1491,7 @@ export async function getAnalyticsDrilldown(
   if (entity === "clients") {
     const rows = await prisma.contact.findMany({
       where: {
-        tenantId: tid,
-        archivedAt: null,
+        ...contactAnalyticsFilter(tid, inquiryExtra),
         ...(received ? { firstSeenAt: received } : {}),
         ...(inquiryExtra.assigneeMembershipId ? { ownerMembershipId: inquiryExtra.assigneeMembershipId } : {}),
       },

@@ -1,3 +1,4 @@
+import { tip } from "../lib/tip";
 import { PERIOD_OPTIONS, type PeriodPreset, formatCustomPeriodLabel } from "../lib/period";
 
 type Props = {
@@ -33,6 +34,7 @@ export function PeriodSelector({
             key={p.id}
             type="button"
             className={period === p.id ? "btn sit-chip" : "btn secondary sit-chip"}
+            {...tip(p.id === "custom" ? "Выбрать начальную и конечную даты периода" : `Показать данные за период «${p.label}»`)}
             onClick={() => onPeriodChange(p.id)}
           >
             {p.id === "custom" && customHint ? customHint : p.label}

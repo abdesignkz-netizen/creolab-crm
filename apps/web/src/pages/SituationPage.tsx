@@ -1,3 +1,4 @@
+import { useUrlState, useRequestVersion } from "../lib/useUrlState";
 import { useEffect, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { PeriodSelector, type PeriodPreset } from "../components/PeriodSelector";
@@ -26,7 +27,8 @@ function deltaText(value: number | null | undefined) {
   return value > 0 ? `↑ ${value}` : `↓ ${Math.abs(value)}`;
 }
 
-function ageLabel(minutes: number) {
+function ageLabel(minutes?: number | null) {
+  if (minutes == null || !Number.isFinite(minutes)) return "срок не указан";
   if (minutes < 60) return `${minutes} мин`;
   if (minutes < 1440) return `${Math.round(minutes / 60)} ч`;
   return `${Math.round(minutes / 1440)} дн.`;
@@ -71,11 +73,13 @@ function Kpi({
 }
 
 export function SituationPage() {
+  const requestVersion = useRequestVersion();
   const navigate = useNavigate();
-  const [scope, setScope] = useState<Scope>("all");
-  const [period, setPeriod] = useState<PeriodPreset>("today");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  const [scope, setScope] = useUrlState<Scope>("scope", "all");
+  const [period, setPeriod] = useUrlState<PeriodPreset>("period", "today");
+  const [dateFrom, setDateFrom] = useUrlState<string>("from", "");
+  const [dateTo, setDateTo] = useUrlState<string>("to", "");
+  const [attentionFilter, setAttentionFilter] = useUrlState<string>("attention", "");
   const [onlyImportant, setOnlyImportant] = useState(false);
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState("");
@@ -83,8 +87,10 @@ export function SituationPage() {
   const [meMissing, setMeMissing] = useState(false);
 
   async function load() {
+    const request = ++requestVersion.current;
     try {
       const me = (await api.me()) as any;
+      if (request !== requestVersion.current) return;
       if (!me.activeTenant) {
         setMeMissing(true);
         setData(null);
@@ -95,17 +101,18 @@ export function SituationPage() {
         setError("Укажите даты С и По");
         return;
       }
-      setData(
-        await api.situationOverview({
+      const result = await api.situationOverview({
           period,
           scope,
           onlyImportant,
           dateFrom: period === "custom" ? dateFrom : undefined,
           dateTo: period === "custom" ? dateTo : undefined,
-        }),
-      );
+        });
+      if (request !== requestVersion.current) return;
+      setData(result);
       setError("");
     } catch (err) {
+      if (request !== requestVersion.current) return;
       setError(err instanceof Error ? err.message : "Ошибка");
     }
   }
@@ -155,6 +162,12 @@ export function SituationPage() {
   const c = data.current;
   const attention = data.attention;
   const today = data.todayTasks;
+  const periodParams = { period, ...(period === "custom" ? { from: dateFrom, to: dateTo } : {}), scope };
+  const path = (base: string, parameters: Record<string, string> = {}, withPeriod = false) => `${base}?${new URLSearchParams({ ...(withPeriod ? periodParams : { scope }), ...parameters })}`;
+  const nextActionItems = attention.items.filter((item: any) => item.kind === "missing_next_action");
+  const visibleAttention = attentionFilter === "no_next_action" ? nextActionItems : attention.items;
+  const noNextHref = path("/today", { ...periodParams, attention: "no_next_action" }) + "#attention";
+
 
   return (
     <section className="situation-page">
@@ -171,9 +184,9 @@ export function SituationPage() {
 
       {data.aiManager?.newRequests ? (
         <div className="sit-kpi-grid" style={{ marginBottom: 12 }}>
-          <Kpi label="AI обрабатывает заявки" value={data.aiManager.newRequests.processing} to="/inquiries" />
-          <Kpi label="Ожидают менеджера" value={data.aiManager.newRequests.needsHuman} to="/inquiries" />
-          <Kpi label="Ошибка AI-обработки" value={data.aiManager.newRequests.analysisFailed} to="/inquiries" />
+          <Kpi label="AI обрабатывает заявки" value={data.aiManager.newRequests.processing} to="/inquiries?filter=ai_processing" />
+          <Kpi label="Ожидают менеджера" value={data.aiManager.newRequests.needsHuman} to="/inquiries?filter=ai_needs_human" />
+          <Kpi label="Ошибка AI-обработки" value={data.aiManager.newRequests.analysisFailed} to="/inquiries?filter=ai_failed" />
         </div>
       ) : null}
 
@@ -253,11 +266,11 @@ export function SituationPage() {
           <span className="muted">Результат выбранного периода</span>
         </div>
         <div className="sit-kpi-grid">
-          <Kpi label="Обращения" value={r.inquiries} delta={r.deltas?.inquiries} to="/inquiries" />
-          <Kpi label="Новые клиенты" value={r.newClients} delta={r.deltas?.newClients} to="/contacts" />
-          <Kpi label="Заявки" value={r.requests} to="/inquiries" />
-          <Kpi label="Сделки" value={r.dealsCreated} delta={r.deltas?.dealsCreated} to="/deals" />
-          <Kpi label="Продажи" value={r.wonDeals} delta={r.deltas?.wonDeals} to="/deals" emphasize />
+          <Kpi label="Обращения" value={r.inquiries} delta={r.deltas?.inquiries} to={path("/inquiries", { test: "false" }, true)} />
+          <Kpi label="Новые клиенты" value={r.newClients} delta={r.deltas?.newClients} to={path("/contacts", { owner: scope === "mine" ? "me" : scope === "unassigned" ? "unassigned" : "" }, true)} />
+          <Kpi label="Заявки" value={r.requests} to={path("/inquiries", { test: "false" }, true)} />
+          <Kpi label="Сделки" value={r.dealsCreated} delta={r.deltas?.dealsCreated} to={path("/deals", { timeMode: "period", basis: "created" }, true)} />
+          <Kpi label="Продажи" value={r.wonDeals} delta={r.deltas?.wonDeals} to={path("/deals", { timeMode: "period", basis: "closed", outcome: "won" }, true)} emphasize />
           <Kpi
             label="Продано"
             value={r.wonAmountLabel || "—"}
@@ -268,14 +281,14 @@ export function SituationPage() {
                   : undefined
                 : "нет сумм"
             }
-            to="/deals"
+            to={path("/deals", { timeMode: "period", basis: "closed", outcome: "won" }, true)}
             emphasize
           />
           <Kpi
             label="Потеряно"
             value={r.lostDeals}
             hint={r.lostReasons?.[0] ? `${r.lostReasons[0].reason} · ${r.lostReasons[0].count}` : undefined}
-            to="/deals"
+            to={path("/deals", { timeMode: "period", basis: "closed", outcome: "lost" }, true)}
           />
         </div>
         {data.payments ? (
@@ -311,19 +324,19 @@ export function SituationPage() {
             emphasize
           />
           <Kpi label="Взвешенный прогноз" value={c.weightedPipelineLabel || "—"} to="/deals" />
-          <Kpi label="На договоре" value={c.contractStage} to="/deals" />
-          <Kpi label="Ждём клиента" value={c.waitingClient} to={c.hrefs?.inquiriesWaiting || "/inquiries"} />
-          <Kpi label="Нужен ответ" value={c.needsReply} to="/conversations" />
-          <Kpi label="Без след. шага" value={c.noNextAction} to="/tasks" />
-          <Kpi label="Просрочено" value={c.overdueTasks} to="/tasks" />
-          <Kpi label="Зависли" value={c.stalledDeals} to="/deals" />
-          <Kpi label="КП без ответа" value={c.proposalWithoutReply ?? 0} to="/deals" />
+          <Kpi label="На договоре" value={c.contractStage} to={path("/deals", { stage: "contract" })} />
+          <Kpi label="Заявки ждут клиента" value={c.waitingClientInquiries} to={c.hrefs?.inquiriesWaiting || "/inquiries"} />
+          <Kpi label="Нужен ответ" value={c.needsReply} to="/contacts?filter=needs_reply" />
+          <Kpi label="Без след. шага" value={nextActionItems.length} to={noNextHref} />
+          <Kpi label="Просрочено" value={c.overdueTasks} to="/tasks?filter=overdue" />
+          <Kpi label="Зависли" value={c.stalledDeals} to={path("/deals", { focus: "stalled" })} />
+          <Kpi label="КП без ответа" value={c.proposalWithoutReply ?? 0} to={path("/deals", { focus: "proposal_no_reply" })} />
         </div>
         <div className="sit-pipeline">
           <b>На стадиях сейчас</b>
           <div className="sit-pipeline-row">
             {(data.pipeline?.stages || []).map((stage: any) => (
-              <Link key={stage.systemKey} className="sit-pipe-chip" to="/deals">
+              <Link key={stage.systemKey} className="sit-pipe-chip" to={path("/deals", { stage: stage.systemKey })}>
                 <span>{stage.name}</span>
                 <strong>{stage.count}</strong>
               </Link>
@@ -332,25 +345,26 @@ export function SituationPage() {
         </div>
       </div>
 
-      <div className="sit-section sit-attention">
+      <div className="sit-section sit-attention" id="attention">
         <div className="sit-section-head">
           <h3>Требует внимания</h3>
           <span className="muted">Приоритетные действия</span>
         </div>
         <div className="sit-attn-summary">
-          <Link to="/conversations">Нужно ответить · {attention.summary.needsReply}</Link>
-          <Link to="/tasks">Просрочено · {attention.summary.overdueTasks}</Link>
-          <Link to="/deals">КП без ответа · {attention.summary.proposalWithoutReply ?? 0}</Link>
-          <Link to="/tasks">Без шага · {attention.summary.noNextAction}</Link>
-          <Link to="/deals">Зависли · {attention.summary.stalledDeals}</Link>
-          <Link to="/conversations">Нужен человек · {attention.summary.needsHuman}</Link>
+          <Link to="/contacts?filter=needs_reply">Нужно ответить · {attention.summary.needsReply}</Link>
+          <Link to="/tasks?filter=overdue">Просрочено · {attention.summary.overdueTasks}</Link>
+          <Link to={path("/deals", { focus: "proposal_no_reply" })}>КП без ответа · {attention.summary.proposalWithoutReply ?? 0}</Link>
+          <Link to={noNextHref}>Без шага · {nextActionItems.length}</Link>
+          <Link to={path("/deals", { focus: "stalled" })}>Зависли · {attention.summary.stalledDeals}</Link>
+          <Link to="/conversations?filter=human">Нужен человек · {attention.summary.needsHuman}</Link>
           <Link to="/inquiries?filter=needs_clarification">Нет контакта · {attention.summary.noContact}</Link>
         </div>
 
-        {attention.items.length === 0 ? (
+        {attentionFilter ? <button className="btn secondary" onClick={() => setAttentionFilter("")}>Показать все действия</button> : null}
+        {visibleAttention.length === 0 ? (
           <p className="empty sit-empty-ok">{attention.emptyLabel}</p>
         ) : (
-          attention.items.map((item: any) => (
+          visibleAttention.map((item: any) => (
             <div className={`row severity-${item.severity} sit-attn-row`} key={item.id}>
               <div>
                 <b>{item.title}</b>
@@ -403,7 +417,7 @@ export function SituationPage() {
                       if (item.nextAction === "instruct_ai") return navigate("/control");
                       if (item.nextAction === "open_contact") return navigate(`/contacts/${item.entityId}`);
                       if (item.nextAction === "create_next_action") {
-                        return navigate(item.links?.contactId ? `/contacts/${item.links.contactId}` : "/tasks");
+                        return navigate(`/tasks?${new URLSearchParams({ ...(item.links?.contactId ? { contactId: item.links.contactId } : {}), ...(item.links?.dealId ? { dealId: item.links.dealId } : {}), ...(item.links?.inquiryId ? { inquiryId: item.links.inquiryId } : {}) })}`);
                       }
                       return navigate(item.href || "/today");
                     }}
@@ -423,9 +437,9 @@ export function SituationPage() {
       <div className="sit-two-col sit-today-row">
         <div className="sit-section">
           <div className="sit-section-head">
-            <h3>Сегодня</h3>
+            <h3>Ближайшие задачи</h3>
             <span className="muted">
-              {today.totalDueToday} задач · выполнено {today.doneToday} · осталось {today.remaining}
+              Сегодня: {today.totalDueToday} задач · выполнено {today.doneToday} · осталось {today.remaining}
               {today.overdue ? ` · просрочено ${today.overdue}` : ""}
             </span>
           </div>
@@ -465,7 +479,7 @@ export function SituationPage() {
             <p className="empty">На сегодня задач нет</p>
           ) : null}
           {today.nearest?.map((task: any) => (
-            <Link className="sit-list-row" key={task.id} to="/tasks">
+            <Link className="sit-list-row" key={task.id} to={`/tasks?open=${task.id}`}>
               <div>
                 <b>{task.title}</b>
                 <div className="muted">
@@ -486,7 +500,7 @@ export function SituationPage() {
           </div>
           {data.importantDeals?.length === 0 ? <p className="empty">Нет сделок, требующих контроля</p> : null}
           {data.importantDeals?.map((deal: any) => (
-            <Link className="sit-list-row" key={deal.id} to="/deals">
+            <Link className="sit-list-row" key={deal.id} to={`/deals/${deal.id}`}>
               <div>
                 <b>{deal.title}</b>
                 <div className="muted">{nameWithPhone(deal.contactName, deal.phone)}</div>

@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
-    "test": "CRM_USE_PGLITE=1 CRM_PGLITE_DIR=/tmp/creolab-crm-api-test node --import tsx --test --test-concurrency=1 src/**/*.test.ts ../../packages/contracts/src/**/*.test.ts"
+    "test": "node ../../scripts/test-api.mjs"
   },
   "dependencies": {
     "@creolab/contracts": "0.1.0",

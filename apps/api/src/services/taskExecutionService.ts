@@ -1,3 +1,4 @@
+import { CALLS_ENABLED } from "../lib/featureFlags.ts";
 import type { PrismaClient } from "@creolab/db";
 import { createHash, randomUUID } from "node:crypto";
 import { copyFile, mkdir, unlink, writeFile } from "node:fs/promises";
@@ -88,7 +89,7 @@ function primaryPhone(methods: Array<{ type: string; rawValue: string; primary: 
   return phones.find((item) => item.primary) || phones[0] || null;
 }
 
-function suggestedNextActions(taskType: string, resultCode?: string | null) {
+function rawSuggestedNextActions(taskType: string, resultCode?: string | null) {
   if (taskType === "meeting") {
     if (resultCode === "send_proposal") {
       return [{ type: "proposal", title: "Отправить КП", dueOffsetHours: 4, requiresConfirm: true }];
@@ -139,6 +140,14 @@ function suggestedNextActions(taskType: string, resultCode?: string | null) {
     { type: "follow_up", title: "Напомнить завтра", dueOffsetHours: 24 },
     { type: "wait_client", title: "Ждать ответа", dueOffsetHours: null },
   ];
+}
+
+function availableNextActions<T extends { type: string; title: string }>(items: T[]) {
+  return items.map(item => !CALLS_ENABLED && item.type === "call"
+    ? { ...item, type: "message", title: "Написать клиенту" } : item);
+}
+function suggestedNextActions(taskType: string, resultCode?: string | null) {
+  return availableNextActions(rawSuggestedNextActions(taskType, resultCode));
 }
 
 export async function updateTaskDraft(
@@ -847,7 +856,7 @@ export async function completeTaskWithResult(
   }
 
   const fallback = suggestedNextActions(task.type, input.resultCode);
-  const suggestedNextActionsMerged = analyzed.suggestions.length
+  const suggestedNextActionsMerged = availableNextActions(analyzed.suggestions.length
     ? analyzed.suggestions.map((s) => ({
         type: s.type,
         title: s.title,
@@ -858,7 +867,7 @@ export async function completeTaskWithResult(
         reason: s.reason,
         suggestedDealStage: s.suggestedDealStage,
       }))
-    : fallback;
+    : fallback);
 
   return {
     task: updated,

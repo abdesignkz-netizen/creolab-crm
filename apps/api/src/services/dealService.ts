@@ -17,7 +17,7 @@ import { resolvePeriodRange, periodLabel, type PeriodPreset } from "./periodRang
 
 type DealTimeMode = "now" | "period";
 type DealPeriodBasis = "created" | "activity" | "closed";
-type DealFocus = "all" | "stalled" | "needs_reply" | "no_next_action";
+type DealFocus = "all" | "stalled" | "needs_reply" | "no_next_action" | "proposal_no_reply";
 
 function dateRangeFilter(from: Date | null, to: Date | null) {
   if (!from && !to) return undefined;
@@ -177,7 +177,7 @@ function dealInclude() {
   };
 }
 
-function flagsForDeal(
+export function flagsForDeal(
   deal: {
     nextAction: string | null;
     nextActionAt: Date | null;
@@ -201,7 +201,7 @@ function flagsForDeal(
       (!deal.contact.lastOutboundMessageAt ||
         deal.contact.lastInboundMessageAt > deal.contact.lastOutboundMessageAt),
   );
-  const waitingClient = Boolean(deal.nextAction && /жд[её]м|клиент|waiting/i.test(deal.nextAction));
+  const waitingClient = Boolean(deal.nextAction && /жд[её]м|ожидаем|ожидаю|waiting/i.test(deal.nextAction));
   const noNextAction = !deal.nextAction && !hasOpenTask;
   const daysOnStage = (now.getTime() - deal.stageEnteredAt.getTime()) / 86400000;
   const sla = ops.stageSlaDays[deal.stage.systemKey];
@@ -214,6 +214,7 @@ function flagsForDeal(
     (stalledBySilence && !hasFutureTask && !waitingClient) || overSla || (noNextAction && daysOnStage > 2);
 
   return {
+    proposalWithoutReply: deal.stage.systemKey === "proposal_sent" && daysOnStage > ops.proposalFollowUpThresholdDays,
     needsReply,
     overdueTask,
     noNextAction,
@@ -316,6 +317,8 @@ export async function getDealBoard(
     dateTo?: string;
     basis?: string;
     focus?: string;
+    outcome?: string;
+    stage?: string;
   } = {},
 ) {
   const membership = requireTenant(auth);
@@ -330,7 +333,7 @@ export async function getDealBoard(
   const basis: DealPeriodBasis =
     query.basis === "activity" || query.basis === "closed" ? query.basis : "created";
   const focus: DealFocus =
-    query.focus === "stalled" || query.focus === "needs_reply" || query.focus === "no_next_action"
+    query.focus === "stalled" || query.focus === "needs_reply" || query.focus === "no_next_action" || query.focus === "proposal_no_reply"
       ? query.focus
       : "all";
   const includeClosed =
@@ -398,6 +401,9 @@ export async function getDealBoard(
     where.outcome = { in: ["open", "on_hold"] };
   }
 
+  if (["open", "on_hold", "won", "lost"].includes(query.outcome || "")) where.outcome = query.outcome;
+  if (query.stage) where.stage = { systemKey: query.stage };
+
   const deals = await prisma.deal.findMany({
     where: where as never,
     include: dealInclude(),
@@ -421,10 +427,11 @@ export async function getDealBoard(
   const contactById = new Map(contacts.map((c) => [c.id, c]));
 
   const serializedAll = deals.map((d) =>
-    serializeDeal({ ...d, contact: contactById.get(d.contactId) || d.contact }, ops, currency, now),
+    serializeDeal({ ...d, offerAmountMinor: d.outcome === "won" ? d.wonAmountMinor ?? d.offerAmountMinor : d.offerAmountMinor, contact: { ...d.contact, ...contactById.get(d.contactId) } }, ops, currency, now),
   );
 
   const focusFilter = (d: (typeof serializedAll)[number]) => {
+    if (focus === "proposal_no_reply") return Boolean(d.flags.proposalWithoutReply);
     if (focus === "stalled") return Boolean(d.flags.stalled);
     if (focus === "needs_reply") return Boolean(d.flags.needsReply);
     if (focus === "no_next_action") return Boolean(d.flags.noNextAction);

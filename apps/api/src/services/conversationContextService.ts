@@ -1,4 +1,5 @@
 import type { PrismaClient } from "@creolab/db";
+import { inferClientInterest } from "./contactInterestService.ts";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { refineConversationContextWithLlm } from "./llmClient.ts";
@@ -278,7 +279,12 @@ function ruleAnalyze(input: {
 }): ConversationAnalysis {
   const analysis = emptyAnalysis();
   const msgs = windowMessages(input.messages);
-  if (msgs.length < 2) return analysis;
+  if (msgs.length < 2) {
+    const interest = inferClientInterest(input.messages);
+    analysis.detectedNeed = interest?.text || null;
+    analysis.facts.service = interest?.text || null;
+    return analysis;
+  }
 
   const corpus = msgs.map((m) => normalizeText(m.text || "")).join("\n");
   const last = msgs[msgs.length - 1];
@@ -309,18 +315,9 @@ function ruleAnalyze(input: {
     analysis.waitingFor = "CLIENT";
   }
 
-  if (
-    hasWord(corpus, "сайт") ||
-    hasWord(corpus, "лендинг") ||
-    hasWord(corpus, "разработк") ||
-    hasWord(corpus, "брендинг") ||
-    hasWord(corpus, "презентац") ||
-    hasWord(corpus, "реклам")
-  ) {
-    analysis.detectedNeed =
-      msgs.find((m) => /сайт|лендинг|разработк|брендинг|презентац/i.test(m.text || ""))?.text || null;
-    analysis.facts.service = analysis.detectedNeed;
-  }
+  const interest = inferClientInterest(input.messages);
+  analysis.detectedNeed = interest?.text || null;
+  analysis.facts.service = interest?.text || null;
 
   if (!input.inquiryStatus || input.inquiryStatus === "new") {
     if (msgs.length >= 3) analysis.suggestedRequestStatus = "qualification";

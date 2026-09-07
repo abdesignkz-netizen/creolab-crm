@@ -58,8 +58,8 @@ describe("Task targeting", () => {
       method: "POST",
       headers: { "Content-Type": "application/json", cookie },
       body: JSON.stringify({
-        type: "call",
-        title: "Позвонить тестовому клиенту",
+        type: "meeting",
+        title: "Встреча с тестовым клиентом",
         targetType: "client",
         contactId,
         priority: "normal",
