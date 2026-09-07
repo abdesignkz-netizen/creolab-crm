@@ -105,6 +105,32 @@ describe("Task targeting", () => {
     assert.ok(found);
     assert.equal(found.progress.total, ids.length);
     assert.ok(String(found.contextLabel).includes("/"));
+
+    const tinyPdf = Buffer.from(
+      "%PDF-1.1\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n",
+      "utf8",
+    ).toString("base64");
+    const attach = await fetch(`${base}/api/v1/tasks/${parent.id}/attachments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({
+        fileName: "KP_group.pdf",
+        mimeType: "application/pdf",
+        contentBase64: tinyPdf,
+        documentType: "proposal",
+      }),
+    });
+    assert.equal(attach.status, 201);
+
+    for (const child of parent.childTasks) {
+      const detail = await fetch(`${base}/api/v1/tasks/${child.id}`, { headers: { cookie } });
+      assert.equal(detail.status, 200);
+      const body = await detail.json();
+      assert.ok(
+        (body.attachments || []).some((a: { fileName: string }) => a.fileName.includes("KP_group")),
+        `child ${child.id} missing copied attachment`,
+      );
+    }
   });
 
   it("members endpoint для ответственного", async () => {

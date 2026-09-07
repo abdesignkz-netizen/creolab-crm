@@ -1,15 +1,16 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { validateClientPhone } from "@creolab/contracts";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
-import { resolveUploadPath } from "../lib/storage.ts";
+import { fileStorageStatus, resolveUploadPath } from "../lib/storage.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { writeActivity } from "./contactService.ts";
 import { hashExecutionContent, sendViaProvider } from "./messagingProvider.ts";
 import { parseAndMatchPhoneList, type PhoneListItem } from "./phoneListService.ts";
 import { previewContactSegment } from "./segmentService.ts";
+import { resolveSellerBridge } from "./sellerLink.ts";
 
 const ALLOWED_MIME = new Set([
   "application/pdf",
@@ -24,9 +25,39 @@ const ALLOWED_MIME = new Set([
   "image/webp",
   "text/plain",
   "application/zip",
+  "application/octet-stream",
 ]);
 
+const EXT_MIME: Record<string, string> = {
+  ".pdf": "application/pdf",
+  ".doc": "application/msword",
+  ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".xls": "application/vnd.ms-excel",
+  ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ".ppt": "application/vnd.ms-powerpoint",
+  ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".webp": "image/webp",
+  ".txt": "text/plain",
+  ".zip": "application/zip",
+};
+
 const MAX_FILE_BYTES = 15 * 1024 * 1024;
+
+function resolveCampaignMime(fileName: string, mimeType: string) {
+  const raw = String(mimeType || "").trim() || "application/octet-stream";
+  if (raw !== "application/octet-stream" && raw !== "binary/octet-stream") return raw;
+  const ext = path.extname(fileName || "").toLowerCase();
+  return EXT_MIME[ext] || raw;
+}
+
+function safeFileName(fileName: string) {
+  return String(fileName || "")
+    .replace(/[^\w.\-а-яА-ЯёЁ ]+/g, "_")
+    .slice(0, 180) || "file.bin";
+}
 const MAX_RECIPIENTS = 500;
 const SEND_CHUNK = 5;
 const SEND_DELAY_MS = 400;
@@ -241,11 +272,15 @@ export async function getCampaign(prisma: PrismaClient, auth: AuthContext, id: s
   if (!campaign) throw new ApiError(404, "not_found", "Рассылка не найдена");
   const attachments = await campaignAttachments(prisma, membership.tenantId, id);
   const previews = buildPersonalizationPreviews(campaign.messageDraft, campaign.recipients);
+  const storage = fileStorageStatus();
   return {
     ...campaign,
     attachments,
     summary: statsFromRecipients(campaign.recipients),
     personalizationPreviews: previews,
+    storageWarning: storage.warning
+      ? storage.warning.replace("задач", "задач и рассылок")
+      : null,
   };
 }
 
@@ -329,29 +364,34 @@ export async function addCampaignAttachment(
   const membership = requireTenant(auth);
   const campaign = await prisma.campaign.findFirst({ where: { id: campaignId, tenantId: membership.tenantId } });
   if (!campaign) throw new ApiError(404, "not_found", "Рассылка не найдена");
-  if (!ALLOWED_MIME.has(input.mimeType) && !input.mimeType.startsWith("image/")) {
-    throw new ApiError(422, "unsupported_type", `Формат ${input.mimeType} не поддерживается`);
+  const mimeType = resolveCampaignMime(input.fileName, input.mimeType);
+  if (!ALLOWED_MIME.has(mimeType) && !mimeType.startsWith("image/")) {
+    throw new ApiError(422, "unsupported_type", `Формат ${mimeType} не поддерживается`);
   }
   const buf = Buffer.from(input.contentBase64, "base64");
   if (buf.length > MAX_FILE_BYTES) throw new ApiError(422, "too_large", "Файл больше 15 МБ");
-  const storageKey = path.posix.join(membership.tenantId, "campaigns", campaignId, `${randomUUID()}-${input.fileName}`);
+  const safeName = safeFileName(input.fileName);
+  const attachmentId = randomUUID();
+  const storageKey = path.posix.join(membership.tenantId, "campaigns", campaignId, `${attachmentId}-${safeName}`);
   const abs = resolveUploadPath(storageKey);
   await mkdir(path.dirname(abs), { recursive: true });
   await writeFile(abs, buf);
   const checksum = createHash("sha256").update(buf).digest("hex");
   const row = await prisma.attachment.create({
     data: {
+      id: attachmentId,
       tenantId: membership.tenantId,
       parentType: "campaign",
       parentId: campaignId,
       storageKey,
-      fileName: input.fileName,
+      fileName: safeName,
       originalFileName: input.fileName,
-      mimeType: input.mimeType,
+      mimeType,
       sizeBytes: buf.length,
       checksum,
-      documentType: input.documentType || (input.mimeType.startsWith("image/") ? "image" : "document"),
+      documentType: input.documentType || (mimeType.startsWith("image/") ? "image" : "document"),
       uploadedById: auth.user.id,
+      status: "stored",
     },
   });
   await prisma.campaign.update({
@@ -367,6 +407,8 @@ export async function removeCampaignAttachment(prisma: PrismaClient, auth: AuthC
     where: { id: attachmentId, tenantId: membership.tenantId, parentType: "campaign", parentId: campaignId },
   });
   if (!att) throw new ApiError(404, "not_found", "Файл не найден");
+  const abs = resolveUploadPath(att.storageKey);
+  await unlink(abs).catch(() => {});
   await prisma.attachment.delete({ where: { id: attachmentId } });
   await prisma.campaign.update({
     where: { id: campaignId },
@@ -698,6 +740,17 @@ async function sendOneRecipient(
     }
     if (!conversation?.sellerLeadId) {
       throw new Error("Нет WhatsApp-диалога (sellerLead). Сначала синхронизируйте лиды или напишите клиенту через бота.");
+    }
+
+    await prisma.conversation.update({
+      where: { id: conversation.id },
+      data: { mode: "human", needsAttention: true, attentionReason: "taken_by_human" },
+    });
+    try {
+      const resolved = await resolveSellerBridge(prisma, campaign.tenantId);
+      if (resolved.bridge) await resolved.bridge.setMode(conversation.sellerLeadId, "HUMAN");
+    } catch {
+      // send still proceeds; bot may stay on AI until next sync
     }
 
     const contact = await prisma.contact.findFirst({ where: { id: contactId, tenantId: campaign.tenantId } });

@@ -48,7 +48,7 @@ export function fileStorageStatus() {
     storageDir: config.storageDir || null,
     warning:
       storePathKind === "ephemeral"
-        ? "Файлы задач на эфемерном диске — после рестарта Render КП пропадут. Подключите Persistent Disk и задайте STORAGE_DIR=/var/data/files."
+        ? "Файлы задач и рассылок на эфемерном диске — после рестарта Render КП пропадут. Подключите Persistent Disk и задайте STORAGE_DIR=/var/data/files."
         : null,
   };
 }

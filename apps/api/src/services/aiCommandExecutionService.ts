@@ -3,7 +3,7 @@ import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { createContact } from "./contactService.ts";
 import { createTask } from "./domainService.ts";
-import { confirmTaskExecution, executeTask, prepareTaskExecution, updateTaskDraft } from "./taskExecutionService.ts";
+import { confirmTaskExecution, executeTask, prepareTaskExecution, syncGroupAttachmentsToChildren, updateTaskDraft } from "./taskExecutionService.ts";
 import { TASK_TYPE_LABEL } from "./contactLabels.ts";
 import { searchContactsForPicker } from "./segmentService.ts";
 
@@ -167,6 +167,8 @@ export async function executeTaskBatch(prisma: PrismaClient, auth: AuthContext, 
 
   await prisma.task.update({ where: { id: parentId }, data: { commandStatus: "executing", executionStatus: "sending" } });
 
+  await syncGroupAttachmentsToChildren(prisma, auth, parentId);
+
   const results: Array<{ taskId: string; contactId: string | null; success: boolean; error?: string }> = [];
 
   for (const child of children) {
@@ -174,7 +176,6 @@ export async function executeTaskBatch(prisma: PrismaClient, auth: AuthContext, 
       if (parent.messageDraft && !child.messageDraft) {
         await updateTaskDraft(prisma, auth, child.id, { messageDraft: parent.messageDraft });
       }
-      // copy parent attachments metadata by re-prepare path
       await prepareTaskExecution(prisma, auth, child.id);
       await confirmTaskExecution(prisma, auth, child.id);
       const exec = await executeTask(prisma, auth, child.id);

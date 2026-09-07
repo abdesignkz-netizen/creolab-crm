@@ -23,7 +23,7 @@ export async function refineCommandWithLlm(rawText: string, ruleParsed: Record<s
           {
             role: "system",
             content:
-              "Ты парсер CRM-команд. Верни JSON с полями: taskType (proposal|message|call|follow_up|other), executionMode (execute|prepare_only), serviceCategories (WEB|PRESENTATION|ADVERTISING|BRANDING|AI[]), datePreset (today|yesterday|last_3_days|last_7_days|last_30_days|null), needsReply (bool), excludeWon (bool), proposalSentDaysAgo (number|null), clientNameQuery (string|null), intent (string), riskLevel (0-4). Не выдумывай факты. Не отправляй сообщения.",
+              "Ты парсер CRM-команд. Верни JSON с полями: taskType (proposal|message|call|follow_up|send_documents|other), executionMode (execute|prepare_only), serviceCategories (WEB|PRESENTATION|ADVERTISING|BRANDING|AI[]), datePreset (today|yesterday|last_3_days|last_7_days|last_30_days|null), needsReply (bool), excludeWon (bool), proposalSentDaysAgo (number|null), clientNameQuery (string|null), intent (string), riskLevel (0-4). «скажи/напиши/сообщи что …» = taskType message. «отправь КП» = proposal. «отправь файл/документ» = send_documents. Не выдумывай факты. Не отправляй сообщения.",
           },
           {
             role: "user",

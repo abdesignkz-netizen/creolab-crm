@@ -43,6 +43,28 @@ function normalize(text: string) {
   return text.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+/** Pull client-facing text from «скажи что …» / «напиши …». */
+export function extractSpokenMessage(rawText: string): string | null {
+  const text = String(rawText || "").trim();
+  if (!text) return null;
+  const patterns = [
+    /(?:скажи|скажите|сказать|напиши|напишите|написать|сообщи|сообщите|сообщить|переда|передай|передайте)\s+(?:клиенту\s+|им\s+|ему\s+|ей\s+)?что\s+(.+)/i,
+    /(?:скажи|скажите|напиши|напишите|сообщи|переда)\s+(?:клиенту\s+|им\s+)?(.+)/i,
+    /(?:отправь|отправьте|отправить)\s+(?:ему\s+|ей\s+|им\s+|клиенту\s+)?(?:сообщение|текст|смс)\s*[:\-–]?\s*(.+)/i,
+  ];
+  for (const re of patterns) {
+    const m = text.match(re);
+    if (m?.[1]) {
+      let body = m[1].trim().replace(/[.!?…]+$/u, "");
+      // Drop trailing recipient fluff if any
+      body = body.replace(/\s+(пожалуйста|pls)$/i, "").trim();
+      if (body.length < 2) continue;
+      return body.charAt(0).toUpperCase() + body.slice(1) + (/[.!?]$/.test(body) ? "" : ".");
+    }
+  }
+  return null;
+}
+
 function parseRules(rawText: string): StructuredCommand {
   const text = normalize(rawText);
   const ambiguities: string[] = [];
@@ -63,11 +85,19 @@ function parseRules(rawText: string): StructuredCommand {
     ambiguities.push("Массовая отправка: откройте режим Campaign / Массовая отправка для подтверждения.");
   }
 
+  const isMessageVerb =
+    /(?:^|\s)(скажи|скажите|сказать|напиш\w*|сообщ\w*|переда\w*|напиши|написать)(?:\s|$)/.test(text) ||
+    /отправ(ь|ьте|ить).{0,20}(сообщен|текст|смс)/.test(text) ||
+    /(?:в\s+)?(?:whatsapp|вотсап|вацап|wa)\b/.test(text);
+
   if (/\b(кп|коммерческ\w*\s+предложен\w*|proposal)\b/.test(text) || /отправ(ь|ьте|ить).{0,40}(кп|предложен)/.test(text)) {
     taskType = "proposal";
     intent = "send_proposal";
     riskLevel = executionMode === "prepare_only" ? 1 : 3;
-  } else if (/отправ(ь|ьте|ить).{0,30}(файл|документ|договор|презентац)/.test(text)) {
+  } else if (
+    /отправ(ь|ьте|ить).{0,30}(файл|документ|договор|презентац|вложен)/.test(text) &&
+    !/скажи|напиш|сообщ|переда/.test(text)
+  ) {
     taskType = "send_documents";
     intent = "send_document";
     riskLevel = executionMode === "prepare_only" ? 1 : 3;
@@ -75,15 +105,16 @@ function parseRules(rawText: string): StructuredCommand {
     taskType = "call";
     intent = "call";
     riskLevel = 2;
-  } else if (/напомн/.test(text)) {
+  } else if (/напомн/.test(text) && !isMessageVerb) {
     taskType = "follow_up";
     intent = "follow_up";
     riskLevel = 2;
-  } else if (/напиш|сообщен|уточн/.test(text)) {
+  } else if (isMessageVerb || /уточн/.test(text)) {
     taskType = "message";
     intent = "message";
     riskLevel = executionMode === "prepare_only" ? 1 : 3;
-  } else if (/найд|покаж|список|кто\s/.test(text) && !/отправ|позвон|напиш/.test(text)) {
+    confidence = "high";
+  } else if (/найд|покаж|список|кто\s/.test(text) && !/отправ|позвон|напиш|скажи/.test(text)) {
     intent = "search_clients";
     taskType = "other";
     riskLevel = 0;
@@ -125,10 +156,25 @@ function parseRules(rawText: string): StructuredCommand {
 
   let clientNameQuery: string | null = null;
   const nameMatch =
-    text.match(/(?:напиш|позвон|уточн)[а-яёa-z]*\s+([а-яёa-z]{3,})/i) ||
+    text.match(/(?:напиш|позвон|уточн|скажи|сообщи|переда)[а-яёa-z]*\s+([а-яёa-z]{3,})/i) ||
     text.match(/клиент[а-яёa-z]*\s+([а-яёa-z]{3,})/i);
-  const stop = new Set(["всем", "тем", "всем", "сегодня", "вчера", "клиентам", "новым", "этим", "им"]);
-  if (nameMatch?.[1] && !stop.has(nameMatch[1].toLowerCase()) && !/презентац|сайт|реклам|бренд/.test(nameMatch[1])) {
+  const stop = new Set([
+    "всем",
+    "тем",
+    "сегодня",
+    "вчера",
+    "клиентам",
+    "новым",
+    "этим",
+    "им",
+    "что",
+    "ему",
+    "ей",
+    "файл",
+    "доку",
+    "готов",
+  ]);
+  if (nameMatch?.[1] && !stop.has(nameMatch[1].toLowerCase()) && !/презентац|сайт|реклам|бренд|файл|готов/.test(nameMatch[1])) {
     // stem common RU case endings so «Александру» → «Александр»
     const rawName = nameMatch[1];
     const stemmed = rawName.replace(/(у|ю|ом|ой|ей|ём|е|а|я)$/i, "");
@@ -147,6 +193,7 @@ function parseRules(rawText: string): StructuredCommand {
 
   if (serviceCategories.length && datePreset && taskType !== "other") confidence = "high";
   if (clientNameQuery && taskType !== "other") confidence = "high";
+  if (taskType === "message" && extractSpokenMessage(rawText)) confidence = confidence === "low" ? "medium" : confidence;
 
   const serviceLabels = serviceCategories
     .map((id) => SERVICE_CATEGORIES.find((item) => item.id === id)?.label || id)
@@ -290,8 +337,11 @@ export async function parseTaskCommand(
     selectable = clients.filter((item) => item.conversationId || item.phone).length;
     command.targetType = clients.length > 1 ? "group" : "client";
     command.clientNameQuery = clients.length === 1 ? String(clients[0].name) : `${clients.length} клиентов`;
-    command.ambiguities = command.ambiguities.filter((item) => !/не указано, кому/i.test(item));
-    if (clients.length && command.confidence === "low" && command.taskType !== "other") command.confidence = "high";
+    command.ambiguities = command.ambiguities.filter(
+      (item) => !/не указано, кому|не удалось однозначно определить действие/i.test(item),
+    );
+    if (clients.length && command.taskType !== "other") command.confidence = "high";
+    else if (clients.length && command.confidence === "low" && command.taskType !== "other") command.confidence = "high";
   } else if (phones.length) {
     const foundClients: Array<Record<string, unknown>> = [];
     for (const phone of phones) {
@@ -383,11 +433,20 @@ export async function parseTaskCommand(
   }
 
   const status = needsClarification || command.confidence === "low" ? "needs_clarification" : "parsed";
+  const suggestedDraft =
+    command.taskType === "message"
+      ? extractSpokenMessage(text) || "Добрый день! Хотел уточнить по вашей заявке."
+      : command.taskType === "proposal"
+        ? "Добрый день! Во вложении коммерческое предложение. Готовы обсудить детали."
+        : command.taskType === "send_documents"
+          ? "Добрый день! Направляем документы во вложении."
+          : null;
 
   return {
     status,
     command,
     asCampaign,
+    suggestedDraft,
     understanding: {
       title: "CRM поняла задачу так",
       action: command.actionLabel,

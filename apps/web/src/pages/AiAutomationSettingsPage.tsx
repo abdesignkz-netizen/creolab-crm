@@ -9,6 +9,77 @@ const MODE_HELP: Record<string, string> = {
   AUTO: "AI анализирует, создаёт задачу и сам начинает контакт, если канал доступен.",
 };
 
+const DAY_OPTIONS = [
+  { value: 1, label: "Пн" },
+  { value: 2, label: "Вт" },
+  { value: 3, label: "Ср" },
+  { value: 4, label: "Чт" },
+  { value: 5, label: "Пт" },
+  { value: 6, label: "Сб" },
+  { value: 0, label: "Вс" },
+];
+
+type ScheduleWindow = { days: number[]; start: string; end: string };
+
+const DEFAULT_WORKING: ScheduleWindow = { days: [1, 2, 3, 4, 5], start: "09:00", end: "18:00" };
+const DEFAULT_CUSTOM: ScheduleWindow = { days: [1, 2, 3, 4, 5, 6], start: "10:00", end: "20:00" };
+
+function ScheduleEditor({
+  value,
+  onChange,
+  timezone,
+}: {
+  value: ScheduleWindow;
+  onChange: (next: ScheduleWindow) => void;
+  timezone: string;
+}) {
+  function toggleDay(day: number) {
+    const has = value.days.includes(day);
+    const days = has ? value.days.filter((d) => d !== day) : [...value.days, day].sort((a, b) => a - b);
+    onChange({ ...value, days: days.length ? days : value.days });
+  }
+
+  return (
+    <div className="stack" style={{ marginTop: 10, gap: 10 }}>
+      <div className="muted">Часовой пояс: {timezone}</div>
+      <div className="actions" style={{ flexWrap: "wrap" }}>
+        {DAY_OPTIONS.map((d) => (
+          <button
+            key={d.value}
+            type="button"
+            className={value.days.includes(d.value) ? "btn" : "btn secondary"}
+            onClick={() => toggleDay(d.value)}
+          >
+            {d.label}
+          </button>
+        ))}
+      </div>
+      <div className="row" style={{ gap: 12, alignItems: "end" }}>
+        <label>
+          С
+          <input
+            type="time"
+            value={value.start}
+            onChange={(e) => onChange({ ...value, start: e.target.value || value.start })}
+          />
+        </label>
+        <label>
+          До
+          <input
+            type="time"
+            value={value.end}
+            onChange={(e) => onChange({ ...value, end: e.target.value || value.end })}
+          />
+        </label>
+      </div>
+      <p className="muted">
+        Вне окна AI всё ещё анализирует и готовит задачу, но не пишет клиенту сам — дождётся
+        рабочего времени или кнопки менеджера.
+      </p>
+    </div>
+  );
+}
+
 export function AiAutomationSettingsPage() {
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState("");
@@ -19,6 +90,9 @@ export function AiAutomationSettingsPage() {
   const [processRepeat, setProcessRepeat] = useState(true);
   const [sla, setSla] = useState(15);
   const [scheduleMode, setScheduleMode] = useState("always");
+  const [workingHours, setWorkingHours] = useState<ScheduleWindow>(DEFAULT_WORKING);
+  const [customSchedule, setCustomSchedule] = useState<ScheduleWindow>(DEFAULT_CUSTOM);
+  const [timezone, setTimezone] = useState("Asia/Almaty");
 
   async function load() {
     try {
@@ -27,6 +101,9 @@ export function AiAutomationSettingsPage() {
         processRepeatRequests: boolean;
         firstContactSlaMinutes: number;
         scheduleMode: string;
+        workingHours?: ScheduleWindow;
+        customSchedule?: ScheduleWindow;
+        timezone?: string;
         modes?: Array<{ mode: string; label: string }>;
         sourceModes?: Record<string, string>;
         serviceModes?: Record<string, string>;
@@ -37,6 +114,9 @@ export function AiAutomationSettingsPage() {
       setProcessRepeat(Boolean(next.processRepeatRequests));
       setSla(Number(next.firstContactSlaMinutes) || 15);
       setScheduleMode(next.scheduleMode || "always");
+      if (next.workingHours) setWorkingHours(next.workingHours);
+      if (next.customSchedule) setCustomSchedule(next.customSchedule);
+      setTimezone(next.timezone || "Asia/Almaty");
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось загрузить");
@@ -56,6 +136,8 @@ export function AiAutomationSettingsPage() {
         processRepeatRequests: processRepeat,
         firstContactSlaMinutes: sla,
         scheduleMode,
+        workingHours,
+        customSchedule,
       })) as { message?: string };
       setHint(result.message || "Сохранено");
       await load();
@@ -126,6 +208,12 @@ export function AiAutomationSettingsPage() {
             <option value="custom">По расписанию</option>
           </select>
         </label>
+        {scheduleMode === "working_hours" ? (
+          <ScheduleEditor value={workingHours} onChange={setWorkingHours} timezone={timezone} />
+        ) : null}
+        {scheduleMode === "custom" ? (
+          <ScheduleEditor value={customSchedule} onChange={setCustomSchedule} timezone={timezone} />
+        ) : null}
       </div>
 
       <button type="button" className="linkish" onClick={() => setShowAdvanced((v) => !v)}>
@@ -143,6 +231,9 @@ export function AiAutomationSettingsPage() {
             sourceModes: data?.sourceModes,
             serviceModes: data?.serviceModes,
             allowProactiveOutbound: data?.allowProactiveOutbound,
+            scheduleMode,
+            workingHours,
+            customSchedule,
           }, null, 2)}</pre>
         </div>
       ) : null}

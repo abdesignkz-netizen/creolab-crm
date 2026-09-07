@@ -10,6 +10,16 @@ type Focus = "all" | "stalled" | "needs_reply" | "no_next_action";
 
 const FOCUS_VALUES = new Set<Focus>(["all", "stalled", "needs_reply", "no_next_action"]);
 
+const PAYMENT_STATUS_LABEL: Record<string, string> = {
+  NOT_REQUIRED: "Не требуется",
+  NOT_INVOICED: "Не выставлен",
+  INVOICED: "Счёт выставлен",
+  PARTIALLY_PAID: "Частично оплачен",
+  PAID: "Оплачен",
+  OVERDUE: "Просрочен",
+  CANCELLED: "Отменён",
+};
+
 function Flag({ on, label }: { on?: boolean; label: string }) {
   if (!on) return null;
   return <span className="deal-flag">{label}</span>;
@@ -339,6 +349,8 @@ export function DealDetailPage() {
   const [lossReason, setLossReason] = useState("Дорого");
   const [busy, setBusy] = useState(false);
   const [board, setBoard] = useState<any>(null);
+  const [payAmount, setPayAmount] = useState("");
+  const [payComment, setPayComment] = useState("");
 
   async function load() {
     if (!dealId) return;
@@ -379,6 +391,29 @@ export function DealDetailPage() {
     }
   }
 
+  async function confirmPayment() {
+    if (!dealId) return;
+    const amountMinor = Math.round(Number(String(payAmount).replace(/\s+/g, "").replace(",", ".")));
+    if (!Number.isFinite(amountMinor) || amountMinor <= 0) {
+      setError("Укажите сумму оплаты");
+      return;
+    }
+    setBusy(true);
+    try {
+      await api.addDealPayment(dealId, {
+        amountMinor,
+        comment: payComment.trim() || undefined,
+      });
+      setPayAmount("");
+      setPayComment("");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось подтвердить оплату");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (!data && !error) return <div className="state">Загрузка…</div>;
   if (!data) {
     return (
@@ -390,6 +425,11 @@ export function DealDetailPage() {
   }
 
   const d = data.deal;
+  const payments = data.payments || [];
+  const paidTotal = payments.reduce((sum: number, p: any) => sum + Number(p.amountMinor || 0), 0);
+  const dealAmount = d.amount != null ? Number(d.amount) : null;
+  const remaining =
+    dealAmount != null && Number.isFinite(dealAmount) ? Math.max(0, dealAmount - paidTotal) : null;
 
   return (
     <section className="deal-detail">
@@ -421,7 +461,7 @@ export function DealDetailPage() {
         </div>
         <div className="sit-kpi">
           <span className="muted">Оплата</span>
-          <strong>{d.paymentStatus}</strong>
+          <strong>{PAYMENT_STATUS_LABEL[d.paymentStatus] || d.paymentStatus}</strong>
         </div>
       </div>
 
@@ -444,7 +484,7 @@ export function DealDetailPage() {
           <select value={paymentStatus} onChange={(e) => setPaymentStatus(e.target.value)}>
             {(board?.paymentStatuses || ["NOT_INVOICED", "INVOICED", "PAID"]).map((s: string) => (
               <option key={s} value={s}>
-                {s}
+                {PAYMENT_STATUS_LABEL[s] || s}
               </option>
             ))}
           </select>
@@ -463,6 +503,45 @@ export function DealDetailPage() {
               Заявка
             </Link>
           ) : null}
+        </div>
+      </div>
+
+      <div className="panel">
+        <b>Платежи</b>
+        <div className="muted" style={{ marginBottom: 8 }}>
+          Оплачено: {paidTotal.toLocaleString("ru-RU")} ₸
+          {remaining != null ? ` · остаток: ${remaining.toLocaleString("ru-RU")} ₸` : ""}
+        </div>
+        {payments.length === 0 ? <p className="empty">Платежей пока нет</p> : null}
+        {payments.map((p: any) => (
+          <div className="row" key={p.id}>
+            <div>
+              <b>{Number(p.amountMinor || 0).toLocaleString("ru-RU")} {p.currency || "KZT"}</b>
+              <div className="muted">
+                {p.createdAt ? new Date(p.createdAt).toLocaleString("ru-RU") : ""}
+                {p.comment ? ` · ${p.comment}` : ""}
+              </div>
+            </div>
+          </div>
+        ))}
+        <div className="deal-edit" style={{ marginTop: 12 }}>
+          <label>
+            Сумма платежа (₸)
+            <input
+              value={payAmount}
+              onChange={(e) => setPayAmount(e.target.value)}
+              placeholder={remaining != null && remaining > 0 ? String(remaining) : "например 150000"}
+            />
+          </label>
+          <label>
+            Комментарий
+            <input value={payComment} onChange={(e) => setPayComment(e.target.value)} placeholder="необязательно" />
+          </label>
+          <div className="actions">
+            <button type="button" className="btn" disabled={busy} onClick={() => void confirmPayment()}>
+              Подтвердить оплату
+            </button>
+          </div>
         </div>
       </div>
 
@@ -543,8 +622,16 @@ export function DealDetailPage() {
         >
           LOST
         </button>
-        <button type="button" className="btn secondary" onClick={() => navigate("/tasks")}>
-          Задачи
+        <button
+          type="button"
+          className="btn secondary"
+          onClick={() =>
+            navigate(
+              `/tasks?dealId=${d.id}${d.contact?.id || d.contactId ? `&contactId=${d.contact?.id || d.contactId}` : ""}`,
+            )
+          }
+        >
+          + Задача
         </button>
       </div>
 

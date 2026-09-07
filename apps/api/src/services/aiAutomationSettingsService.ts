@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@creolab/db";
+import type { Prisma, PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
 import {
@@ -6,8 +6,12 @@ import {
   mergeAIAutomationIntoSettingsJson,
   MODE_LABEL,
   parseAIAutomationSettings,
+  parseScheduleWindow,
+  DEFAULT_CUSTOM_SCHEDULE,
+  DEFAULT_WORKING_HOURS,
   type AutomationMode,
   type AIAutomationSettings,
+  type ScheduleWindow,
 } from "./aiAutomationSettings.ts";
 
 function requireTenant(auth: AuthContext) {
@@ -21,8 +25,15 @@ export async function getAIAutomationSettings(prisma: PrismaClient, auth: AuthCo
   const membership = requireTenant(auth);
   const tenant = await prisma.tenant.findUnique({ where: { id: membership.tenantId } });
   const settings = parseAIAutomationSettings(tenant?.settingsJson);
+  // Prefer persisted tenant.workingHoursJson when present
+  const fromTenant = parseScheduleWindow(tenant?.workingHoursJson, settings.workingHours);
+  if (tenant?.workingHoursJson && typeof tenant.workingHoursJson === "object") {
+    const keys = Object.keys(tenant.workingHoursJson as object);
+    if (keys.length) settings.workingHours = fromTenant;
+  }
   return {
     ...settings,
+    timezone: tenant?.timezone || "Asia/Almaty",
     modeLabel: MODE_LABEL[settings.defaultMode],
     modes: (Object.keys(MODE_LABEL) as AutomationMode[]).map((mode) => ({
       mode,
@@ -59,6 +70,12 @@ export async function updateAIAutomationSettings(
   if (input.scheduleMode === "always" || input.scheduleMode === "working_hours" || input.scheduleMode === "custom") {
     next.scheduleMode = input.scheduleMode;
   }
+  if (input.workingHours) {
+    next.workingHours = parseScheduleWindow(input.workingHours, DEFAULT_WORKING_HOURS);
+  }
+  if (input.customSchedule) {
+    next.customSchedule = parseScheduleWindow(input.customSchedule, DEFAULT_CUSTOM_SCHEDULE);
+  }
   if (input.sourceModes && typeof input.sourceModes === "object") {
     next.sourceModes = { ...next.sourceModes, ...input.sourceModes };
   }
@@ -70,14 +87,18 @@ export async function updateAIAutomationSettings(
   }
 
   const settingsJson = mergeAIAutomationIntoSettingsJson(tenant.settingsJson, next);
+  const workingHoursJson = next.workingHours as unknown as Prisma.InputJsonValue;
   await prisma.tenant.update({
     where: { id: tenant.id },
-    data: { settingsJson },
+    data: { settingsJson, workingHoursJson },
   });
 
   return {
     ...next,
+    timezone: tenant.timezone || "Asia/Almaty",
     modeLabel: MODE_LABEL[next.defaultMode],
     message: `Режим обработки новых заявок изменён на «${MODE_LABEL[next.defaultMode]}». Новые заявки будут обрабатываться по новым правилам. Уже запущенные AI-задачи не меняются.`,
   };
 }
+
+export type { ScheduleWindow };

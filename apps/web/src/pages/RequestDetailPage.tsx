@@ -140,7 +140,10 @@ export function RequestDetailPage() {
               Позвонить
             </a>
           ) : null}
-          <Link className="btn secondary" to={`/tasks?inquiryId=${data.id}`}>
+          <Link
+            className="btn secondary"
+            to={`/tasks?inquiryId=${data.id}${data.contactId ? `&contactId=${data.contactId}` : ""}${data.conversationId ? `&conversationId=${data.conversationId}` : ""}${data.dealId ? `&dealId=${data.dealId}` : ""}`}
+          >
             Создать задачу
           </Link>
           {!data.hasDeal && !closed ? (
@@ -438,7 +441,10 @@ export function RequestDetailPage() {
                   {data.nextStep || (
                     <>
                       Нет следующего действия{" "}
-                      <Link className="linkish" to={`/tasks?inquiryId=${data.id}`}>
+                      <Link
+                        className="linkish"
+                        to={`/tasks?inquiryId=${data.id}${data.contactId ? `&contactId=${data.contactId}` : ""}`}
+                      >
                         Создать задачу
                       </Link>
                     </>
@@ -534,7 +540,10 @@ export function RequestDetailPage() {
               </div>
             ))}
             <div className="actions" style={{ marginTop: 10 }}>
-              <Link className="btn secondary" to={`/tasks?inquiryId=${data.id}`}>
+              <Link
+                className="btn secondary"
+                to={`/tasks?inquiryId=${data.id}${data.contactId ? `&contactId=${data.contactId}` : ""}${data.conversationId ? `&conversationId=${data.conversationId}` : ""}${data.dealId ? `&dealId=${data.dealId}` : ""}`}
+              >
                 + Задача
               </Link>
             </div>

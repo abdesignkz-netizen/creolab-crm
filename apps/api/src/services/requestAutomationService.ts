@@ -1,5 +1,5 @@
 import type { Prisma, PrismaClient } from "@creolab/db";
-import { parseAIAutomationSettings } from "./aiAutomationSettings.ts";
+import { parseAIAutomationSettings, isWithinAiSchedule } from "./aiAutomationSettings.ts";
 import { decideAutomationPolicy, type AutomationDecision } from "./aiAutomationPolicyService.ts";
 import { analyzeRequestWithOptionalLlm, type RequestAnalysis } from "./requestAnalysisService.ts";
 import { writeActivity } from "./contactService.ts";
@@ -155,6 +155,15 @@ export async function processNewRequestAutomation(
           typeof fieldMeta.automationOverride === "string" ? fieldMeta.automationOverride : null,
         isRepeatRequest: priorCount > 0,
       });
+
+  const withinSchedule =
+    options.forceStart ||
+    isWithinAiSchedule(new Date(), tenant?.timezone || "Asia/Almaty", settings);
+  if (!withinSchedule && (decision.autoStart || decision.allowOutbound)) {
+    decision.autoStart = false;
+    decision.allowOutbound = false;
+    decision.reason = `${decision.reason}; вне окна автообработки`;
+  }
 
   const decidedAt = new Date().toISOString();
   let analysis: RequestAnalysis | null = null;

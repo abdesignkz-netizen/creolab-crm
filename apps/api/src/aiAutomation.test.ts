@@ -6,6 +6,7 @@ import {
   DEFAULT_AI_AUTOMATION,
   MODE_FLAGS,
   applyModeToSettings,
+  isWithinAiSchedule,
   mergeAIAutomationIntoSettingsJson,
   parseAIAutomationSettings,
 } from "./services/aiAutomationSettings.ts";
@@ -38,6 +39,32 @@ describe("AI automation policy", () => {
     const settings = parseAIAutomationSettings({});
     assert.equal(settings.defaultMode, "CONFIRM");
     assert.equal(settings.autoStartAiManager, false);
+  });
+
+  it("parses schedule windows and always mode", () => {
+    const settings = parseAIAutomationSettings({
+      aiAutomation: {
+        scheduleMode: "working_hours",
+        workingHours: { days: [1, 2, 3], start: "10:00", end: "12:00" },
+      },
+    });
+    assert.equal(settings.scheduleMode, "working_hours");
+    assert.deepEqual(settings.workingHours.days, [1, 2, 3]);
+    assert.equal(isWithinAiSchedule(new Date("2026-09-07T03:00:00Z"), "Asia/Almaty", {
+      scheduleMode: "always",
+      workingHours: settings.workingHours,
+      customSchedule: settings.customSchedule,
+    }), true);
+    // Monday 2026-09-07 11:00 Almaty = 06:00 UTC
+    assert.equal(
+      isWithinAiSchedule(new Date("2026-09-07T06:00:00Z"), "Asia/Almaty", settings),
+      true,
+    );
+    // Monday 08:00 Almaty = 03:00 UTC — outside 10-12
+    assert.equal(
+      isWithinAiSchedule(new Date("2026-09-07T03:00:00Z"), "Asia/Almaty", settings),
+      false,
+    );
   });
 
   it("source rule beats global default", () => {

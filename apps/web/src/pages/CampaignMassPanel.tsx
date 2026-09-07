@@ -54,6 +54,25 @@ function readFileBase64(file: File) {
   });
 }
 
+function guessMimeType(file: File) {
+  const raw = String(file.type || "").trim();
+  if (raw && raw !== "application/octet-stream" && raw !== "binary/octet-stream") return raw;
+  const name = file.name.toLowerCase();
+  if (name.endsWith(".pdf")) return "application/pdf";
+  if (name.endsWith(".doc")) return "application/msword";
+  if (name.endsWith(".docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  if (name.endsWith(".xls")) return "application/vnd.ms-excel";
+  if (name.endsWith(".xlsx")) return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  if (name.endsWith(".ppt")) return "application/vnd.ms-powerpoint";
+  if (name.endsWith(".pptx")) return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+  if (name.endsWith(".jpg") || name.endsWith(".jpeg")) return "image/jpeg";
+  if (name.endsWith(".png")) return "image/png";
+  if (name.endsWith(".webp")) return "image/webp";
+  if (name.endsWith(".txt")) return "text/plain";
+  if (name.endsWith(".zip")) return "application/zip";
+  return raw || "application/octet-stream";
+}
+
 export function CampaignMassPanel({
   initialPhoneText = "",
   initialContactIds = [],
@@ -244,11 +263,12 @@ export function CampaignMassPanel({
         const next = [];
         for (const file of Array.from(files)) {
           const contentBase64 = await readFileBase64(file);
+          const mimeType = guessMimeType(file);
           next.push({
             fileName: file.name,
-            mimeType: file.type || "application/octet-stream",
+            mimeType,
             contentBase64,
-            documentType: file.type.startsWith("image/")
+            documentType: mimeType.startsWith("image/")
               ? "image"
               : file.name.toLowerCase().includes("кп") || file.name.toLowerCase().includes("offer")
                 ? "proposal"
@@ -262,11 +282,12 @@ export function CampaignMassPanel({
       }
       for (const file of Array.from(files)) {
         const contentBase64 = await readFileBase64(file);
+        const mimeType = guessMimeType(file);
         await api.addCampaignAttachment(campaignId, {
           fileName: file.name,
-          mimeType: file.type || "application/octet-stream",
+          mimeType,
           contentBase64,
-          documentType: file.type.startsWith("image/")
+          documentType: mimeType.startsWith("image/")
             ? "image"
             : file.name.toLowerCase().includes("кп") || file.name.toLowerCase().includes("offer")
               ? "proposal"
@@ -364,6 +385,9 @@ export function CampaignMassPanel({
       </div>
 
       {error ? <p className="error">{error}</p> : null}
+      {(campaign as any)?.storageWarning ? (
+        <p className="error">{(campaign as any).storageWarning}</p>
+      ) : null}
 
       <div className="command-step">
         <div className="command-step-label">Получатели</div>

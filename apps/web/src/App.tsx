@@ -86,6 +86,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
   const moreLinks = [
     ["/control", "Управление"],
     ["/inquiries", "Заявки"],
+    ["/companies", "Компании"],
     ["/deals", "Сделки"],
     ["/integrations", "Интеграции"],
     ["/stats", "Статистика"],

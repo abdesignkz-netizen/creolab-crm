@@ -1,6 +1,6 @@
 import type { PrismaClient } from "@creolab/db";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, unlink, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { ApiError } from "../errors.ts";
 import { resolveUploadPath } from "../lib/storage.ts";
@@ -10,6 +10,7 @@ import { displayName, formatWhen } from "./contactLabels.ts";
 import { hashExecutionContent, sendViaProvider } from "./messagingProvider.ts";
 import { analyzeTaskResultNextActions, MEETING_RESULTS } from "./taskResultAnalysisService.ts";
 import { syncAgreementToCalendar } from "./calendarAdapter.ts";
+import { resolveSellerBridge } from "./sellerLink.ts";
 
 const SENDABLE_TYPES = new Set(["proposal", "message", "send_documents", "prepare_estimate", "follow_up"]);
 
@@ -233,7 +234,113 @@ export async function addTaskAttachment(
       metadata: { taskId: id, attachmentId, documentType },
     });
   }
+
+  // Group parent: fan-out file to open child tasks so batch send has the same KP.
+  if (task.targetType === "group" && !task.parentTaskId) {
+    const children = await prisma.task.findMany({
+      where: { tenantId: tid, parentTaskId: id, status: { in: ["open", "waiting"] } },
+      select: { id: true },
+    });
+    for (const child of children) {
+      await copyParentAttachmentToChild(prisma, tid, auth.user.id, attachment, child.id);
+    }
+  }
+
   return attachment;
+}
+
+/** Copy parent attachment bytes + row onto a child task (skip if same checksum already present). */
+async function copyParentAttachmentToChild(
+  prisma: PrismaClient,
+  tid: string,
+  uploadedById: string | null | undefined,
+  parentAtt: {
+    id: string;
+    storageKey: string;
+    fileName: string;
+    originalFileName: string | null;
+    mimeType: string;
+    sizeBytes: number;
+    checksum: string | null;
+    documentType: string | null;
+  },
+  childTaskId: string,
+): Promise<{ created: boolean }> {
+  if (parentAtt.checksum) {
+    const existing = await prisma.attachment.findFirst({
+      where: {
+        tenantId: tid,
+        parentType: "task",
+        parentId: childTaskId,
+        checksum: parentAtt.checksum,
+      },
+    });
+    if (existing) return { created: false };
+  }
+
+  const src = resolveUploadPath(parentAtt.storageKey);
+  const attachmentId = randomUUID();
+  const safeName = parentAtt.fileName || "file.bin";
+  const storageKey = path.posix.join(tid, childTaskId, `${attachmentId}-${safeName}`);
+  const abs = resolveUploadPath(storageKey);
+  await mkdir(path.dirname(abs), { recursive: true });
+  try {
+    await copyFile(src, abs);
+  } catch {
+    return { created: false };
+  }
+
+  await prisma.attachment.create({
+    data: {
+      id: attachmentId,
+      tenantId: tid,
+      parentType: "task",
+      parentId: childTaskId,
+      storageKey,
+      fileName: safeName,
+      originalFileName: parentAtt.originalFileName || parentAtt.fileName,
+      mimeType: parentAtt.mimeType,
+      sizeBytes: parentAtt.sizeBytes,
+      checksum: parentAtt.checksum,
+      documentType: parentAtt.documentType || "document",
+      uploadedById: uploadedById || null,
+      status: "stored",
+      sendState: "pending",
+    },
+  });
+  return { created: true };
+}
+
+/** Ensure every open child has the parent's attachments (idempotent by checksum). */
+export async function syncGroupAttachmentsToChildren(
+  prisma: PrismaClient,
+  auth: AuthContext,
+  parentTaskId: string,
+) {
+  const tid = tenantId(auth);
+  const parent = await prisma.task.findFirst({
+    where: { id: parentTaskId, tenantId: tid },
+  });
+  if (!parent || parent.targetType !== "group" || parent.parentTaskId) {
+    return { copied: 0 };
+  }
+  const parentAtts = await listTaskAttachments(prisma, tid, parentTaskId);
+  if (!parentAtts.length) return { copied: 0 };
+
+  const children = await prisma.task.findMany({
+    where: { tenantId: tid, parentTaskId, status: { in: ["open", "waiting"] } },
+    select: { id: true },
+  });
+
+  let copied = 0;
+  for (const child of children) {
+    for (const att of parentAtts) {
+      const result = await copyParentAttachmentToChild(prisma, tid, auth.user.id, att, child.id);
+      if (result.created) copied += 1;
+    }
+    await invalidateExecution(prisma, tid, child.id);
+  }
+  return { copied };
 }
 
 export async function removeTaskAttachment(prisma: PrismaClient, auth: AuthContext, taskId: string, attachmentId: string) {
@@ -452,9 +559,28 @@ export async function executeTask(
     throw new ApiError(422, "invalid", "Диалог WhatsApp недоступен");
   }
 
-  // Ensure human mode before manager send
-  if (conversation.mode !== "human") {
-    await prisma.conversation.update({ where: { id: conversation.id }, data: { mode: "human" } });
+  // Staff send must take the dialog from AI on both CRM and the seller bot.
+  let appliedOnSeller = false;
+  let sellerError: string | null = null;
+  await prisma.conversation.update({
+    where: { id: conversation.id },
+    data: {
+      mode: "human",
+      assigneeMembershipId: auth.activeMembership?.id || conversation.assigneeMembershipId,
+      needsAttention: true,
+      attentionReason: "taken_by_human",
+    },
+  });
+  try {
+    const resolved = await resolveSellerBridge(prisma, tid);
+    if (resolved.bridge) {
+      await resolved.bridge.setMode(conversation.sellerLeadId, "HUMAN");
+      appliedOnSeller = true;
+    } else {
+      sellerError = "WhatsApp-бот не подключён — режим HUMAN только в CRM";
+    }
+  } catch (error) {
+    sellerError = error instanceof Error ? error.message : "Не удалось перевести бота в HUMAN";
   }
 
   await prisma.task.update({ where: { id }, data: { executionStatus: "sending" } });
@@ -603,6 +729,8 @@ export async function executeTask(
     note: partial
       ? "Текст в WhatsApp ушёл, файл — нет. Задача остаётся открытой: нажмите «Повторить отправку файла»."
       : null,
+    appliedOnSeller,
+    sellerError,
   };
 }
 

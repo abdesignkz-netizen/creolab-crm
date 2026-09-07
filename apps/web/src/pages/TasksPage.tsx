@@ -278,7 +278,10 @@ export function TasksPage() {
   useEffect(() => {
     const openId = searchParams.get("open");
     const fromInquiry = searchParams.get("inquiryId");
-    if (!openId && !fromInquiry) return;
+    const fromContact = searchParams.get("contactId");
+    const fromConversation = searchParams.get("conversationId");
+    const fromDeal = searchParams.get("dealId");
+    if (!openId && !fromInquiry && !fromContact && !fromConversation && !fromDeal) return;
 
     let cancelled = false;
 
@@ -286,10 +289,15 @@ export function TasksPage() {
       if (openId) {
         await openTaskEditor(openId);
       }
-      if (fromInquiry) {
+
+      const needsCompose = Boolean(fromInquiry || fromContact || fromConversation || fromDeal);
+      if (needsCompose) {
         setShowCreate(true);
         setComposeMode("manual");
         setTargetMode("client");
+      }
+
+      if (fromInquiry) {
         setInquiryId(fromInquiry);
         try {
           const inquiry: any = await api.inquiry(fromInquiry);
@@ -310,11 +318,77 @@ export function TasksPage() {
         } catch {
           // keep inquiryId prefilled even if detail fetch fails
         }
+      } else if (fromContact || fromConversation || fromDeal) {
+        if (fromDeal) setDealId(fromDeal);
+        if (fromConversation) setConversationId(fromConversation);
+        if (fromInquiry) setInquiryId(fromInquiry);
+
+        try {
+          if (fromContact) {
+            const overview: any = await api.contactOverview(fromContact);
+            if (cancelled) return;
+            const client = overview?.client || overview;
+            setSelectedClient({
+              id: fromContact,
+              name: client?.name || "Клиент",
+              phone: client?.phone || null,
+              companyName: client?.companyName || null,
+              inquiryId: overview?.currentRequest?.id || null,
+              dealId: fromDeal || overview?.deals?.[0]?.id || null,
+              conversationId: fromConversation || overview?.conversations?.[0]?.id || null,
+            });
+            if (!fromInquiry && overview?.currentRequest?.id) setInquiryId(overview.currentRequest.id);
+            if (!fromDeal && overview?.deals?.[0]?.id) setDealId(overview.deals[0].id);
+            if (!fromConversation && overview?.conversations?.[0]?.id) {
+              setConversationId(overview.conversations[0].id);
+            }
+          } else if (fromConversation) {
+            const ws: any = await api.conversation(fromConversation);
+            if (cancelled) return;
+            const contactId = ws?.client?.id || ws?.conversation?.contactId;
+            if (contactId) {
+              setSelectedClient({
+                id: contactId,
+                name: ws?.client?.name || "Клиент",
+                phone: ws?.client?.phone || null,
+                companyName: ws?.client?.companyName || null,
+                inquiryId: ws?.inquiry?.id || null,
+                dealId: fromDeal || ws?.deal?.id || null,
+                conversationId: fromConversation,
+              });
+              if (ws?.inquiry?.id) setInquiryId(ws.inquiry.id);
+              if (!fromDeal && ws?.deal?.id) setDealId(ws.deal.id);
+            }
+          } else if (fromDeal) {
+            const deal: any = await api.deal(fromDeal);
+            if (cancelled) return;
+            const contactId = deal?.contact?.id || deal?.contactId;
+            if (contactId) {
+              setSelectedClient({
+                id: contactId,
+                name: deal?.contact?.name || deal?.contactName || "Клиент",
+                phone: deal?.contact?.phone || null,
+                companyName: deal?.contact?.companyName || null,
+                dealId: fromDeal,
+                inquiryId: deal?.inquiryId || null,
+                conversationId: deal?.conversationId || null,
+              });
+              if (deal?.inquiryId) setInquiryId(deal.inquiryId);
+              if (deal?.conversationId) setConversationId(deal.conversationId);
+            }
+          }
+        } catch {
+          // keep ids from query even if detail fetch fails
+        }
       }
+
       if (cancelled) return;
       const next = new URLSearchParams(searchParams);
       next.delete("open");
       next.delete("inquiryId");
+      next.delete("contactId");
+      next.delete("conversationId");
+      next.delete("dealId");
       setSearchParams(next, { replace: true });
     }
 
@@ -324,7 +398,13 @@ export function TasksPage() {
     };
     // Intentional: consume query once on mount / when params change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams.get("open"), searchParams.get("inquiryId")]);
+  }, [
+    searchParams.get("open"),
+    searchParams.get("inquiryId"),
+    searchParams.get("contactId"),
+    searchParams.get("conversationId"),
+    searchParams.get("dealId"),
+  ]);
 
   useEffect(() => {
     if (selectedClient) {
@@ -526,13 +606,7 @@ export function TasksPage() {
     if (!activeTaskId) return;
     setBusy(true);
     try {
-      const buffer = await file.arrayBuffer();
-      const bytes = new Uint8Array(buffer);
-      let binary = "";
-      bytes.forEach((b) => {
-        binary += String.fromCharCode(b);
-      });
-      const contentBase64 = btoa(binary);
+      const contentBase64 = await readFileBase64(file);
       await api.addTaskAttachment(activeTaskId, {
         fileName: file.name,
         mimeType: file.type || "application/octet-stream",
@@ -755,11 +829,14 @@ export function TasksPage() {
         setCommandSelectedIds(ids);
       }
       setCommandDraft(
-        data.command?.taskType === "proposal"
-          ? "Добрый день! Во вложении коммерческое предложение. Готовы обсудить детали."
-          : data.command?.taskType === "message" || /уточн/i.test(commandText)
-            ? "Добрый день! Хотел уточнить, актуальна ли ещё заявка."
-            : "",
+        data.suggestedDraft ||
+          (data.command?.taskType === "proposal"
+            ? "Добрый день! Во вложении коммерческое предложение. Готовы обсудить детали."
+            : data.command?.taskType === "message" || /уточн|скажи|напиш|сообщ/i.test(commandText)
+              ? "Добрый день! Хотел уточнить, актуальна ли ещё заявка."
+              : data.command?.taskType === "send_documents"
+                ? "Добрый день! Направляем документы во вложении."
+                : ""),
       );
       if (data.asCampaign || ((data.clients?.length || 0) + unresolved.length > 5 && massIntent)) {
         setShowCampaignPanel(true);
@@ -807,9 +884,10 @@ export function TasksPage() {
       const rootTaskId = created.task?.id as string | undefined;
       if (rootTaskId && cmdPendingFiles.length) {
         const childIds = ((created.task?.childTasks || []) as Array<{ id: string }>).map((c) => c.id);
-        const targetIds = childIds.length ? childIds : [rootTaskId];
-        for (const tid of targetIds) {
-          await uploadPendingToTask(tid, cmdPendingFiles);
+        // Upload once on parent; API fans out to children for group tasks.
+        await uploadPendingToTask(rootTaskId, cmdPendingFiles);
+        if (!childIds.length) {
+          // single client task — already uploaded to root
         }
         setCmdPendingFiles([]);
       }

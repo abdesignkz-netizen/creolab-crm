@@ -339,7 +339,7 @@ export function ConversationsPage() {
               ) : null}
               {agr.clarificationNeeded ? <div className="warn-text">{agr.clarificationNeeded}</div> : null}
               {agr.taskId ? (
-                <Link to="/tasks">Открыть задачу</Link>
+                <Link to={`/tasks?open=${agr.taskId}`}>Открыть задачу</Link>
               ) : null}
             </div>
           ))}
@@ -409,7 +409,10 @@ export function ConversationsPage() {
       </div>
 
       <div className="actions">
-        <Link className="btn secondary" to="/tasks">
+        <Link
+          className="btn secondary"
+          to={`/tasks?conversationId=${workspace.conversation.id}${workspace.client?.id ? `&contactId=${workspace.client.id}` : ""}${workspace.deal?.id ? `&dealId=${workspace.deal.id}` : ""}`}
+        >
           Создать задачу
         </Link>
       </div>

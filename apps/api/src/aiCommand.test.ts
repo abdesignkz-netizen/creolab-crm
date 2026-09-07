@@ -95,6 +95,28 @@ describe("AI task commands", () => {
     assert.equal(body.understanding.title, "CRM поняла задачу так");
   });
 
+  it("парсит «скажи что файл готов» как сообщение", async () => {
+    const contact = await prisma.contact.create({
+      data: {
+        tenantId,
+        name: "Файл Готов",
+        firstName: "Файл",
+        lastName: "Готов",
+      },
+    });
+    const res = await fetch(`${base}/api/v1/tasks/parse-command`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({ text: "скажи что файл готов", contactIds: [contact.id] }),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.command.taskType, "message");
+    assert.equal(body.command.intent, "message");
+    assert.ok(!body.command.ambiguities?.some((a: string) => /не удалось однозначно/i.test(a)));
+    assert.match(String(body.suggestedDraft || ""), /файл готов/i);
+  });
+
   it("ambiguous «Александр» при нескольких → needs_clarification", async () => {
     await prisma.contact.create({
       data: {

@@ -89,8 +89,18 @@ export function ContactPage() {
           ) : (
             <button className="btn secondary" disabled>Позвонить</button>
           )}
-          <Link className="btn secondary" to="/tasks">+ Задача</Link>
-          <Link className="btn secondary" to="/inquiries">+ Сделка / заявка</Link>
+          <Link className="btn secondary" to={`/tasks?contactId=${client.id}`}>
+            + Задача
+          </Link>
+          {currentRequest ? (
+            <Link className="btn secondary" to={`/requests/${currentRequest.id}`}>
+              + Сделка / заявка
+            </Link>
+          ) : (
+            <Link className="btn secondary" to={`/inquiries?contact=${client.id}`}>
+              + Заявка
+            </Link>
+          )}
           <div className="menu-wrap">
             <button className="btn secondary" onClick={() => setMenuOpen((value) => !value)}>•••</button>
             {menuOpen ? (

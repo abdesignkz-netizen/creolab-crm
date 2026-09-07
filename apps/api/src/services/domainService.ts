@@ -43,6 +43,9 @@ export async function addPayment(
   const tid = tenantId(auth);
   const deal = await prisma.deal.findFirst({ where: { id: dealId, tenantId: tid } });
   if (!deal) throw new ApiError(404, "not_found", "Сделка не найдена");
+  if (!Number.isFinite(input.amountMinor) || input.amountMinor <= 0) {
+    throw new ApiError(422, "invalid", "Сумма оплаты должна быть больше 0");
+  }
   return prisma.$transaction(async (tx) => {
     const payment = await tx.paymentRecord.create({
       data: {
@@ -54,6 +57,23 @@ export async function addPayment(
         comment: input.comment,
       },
     });
+    const payments = await tx.paymentRecord.findMany({
+      where: { tenantId: tid, dealId },
+      select: { amountMinor: true },
+    });
+    const paid = payments.reduce((sum, row) => sum + Number(row.amountMinor || 0), 0);
+    const dealAmount = deal.offerAmountMinor != null ? Number(deal.offerAmountMinor) : null;
+    let paymentStatus = deal.paymentStatus;
+    if (deal.paymentStatus !== "NOT_REQUIRED" && deal.paymentStatus !== "CANCELLED") {
+      if (dealAmount != null && dealAmount > 0) {
+        paymentStatus = paid >= dealAmount ? "PAID" : "PARTIALLY_PAID";
+      } else if (paid > 0) {
+        paymentStatus = "PAID";
+      }
+    }
+    if (paymentStatus !== deal.paymentStatus) {
+      await tx.deal.update({ where: { id: dealId }, data: { paymentStatus } });
+    }
     await tx.auditEvent.create({
       data: {
         tenantId: tid,
@@ -61,10 +81,10 @@ export async function addPayment(
         action: "payment.confirm",
         entityType: "payment",
         entityId: payment.id,
-        changesJson: { amountMinor: input.amountMinor },
+        changesJson: { amountMinor: input.amountMinor, paymentStatus },
       },
     });
-    return payment;
+    return { ...payment, paymentStatus };
   });
 }
 

@@ -61,15 +61,17 @@ export function RequestsPage() {
   const serviceCategory = params.get("category") || "";
   const q = params.get("q") || "";
   const companyId = params.get("company") || "";
+  const contactId = params.get("contact") || "";
   const [query, setQuery] = useState(q);
   const [data, setData] = useState<ListResponse | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-  const [showCreate, setShowCreate] = useState(Boolean(companyId));
+  const [showCreate, setShowCreate] = useState(Boolean(companyId || contactId));
   const [createError, setCreateError] = useState("");
   const [lookup, setLookup] = useState<any>(null);
   const [forceNew, setForceNew] = useState(false);
   const [companyPrefill, setCompanyPrefill] = useState("");
+  const [contactPrefill, setContactPrefill] = useState<{ name: string; phone: string }>({ name: "", phone: "" });
 
   useEffect(() => {
     if (!companyId) return;
@@ -88,6 +90,42 @@ export function RequestsPage() {
       cancelled = true;
     };
   }, [companyId]);
+
+  useEffect(() => {
+    if (!contactId) return;
+    let cancelled = false;
+    setShowCreate(true);
+    void api
+      .contactOverview(contactId)
+      .then((overview: any) => {
+        if (cancelled) return;
+        const client = overview?.client || overview;
+        setContactPrefill({
+          name: client?.name || "",
+          phone: client?.phone || "",
+        });
+        if (client?.companyName) setCompanyPrefill((prev) => prev || client.companyName);
+        setLookup(
+          overview?.client
+            ? {
+                found: true,
+                contact: {
+                  id: contactId,
+                  name: client.name,
+                  inquiryCount: overview.requests?.length || 0,
+                  lastInquiryAt: overview.currentRequest?.receivedAt || null,
+                },
+              }
+            : null,
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setContactPrefill({ name: "", phone: "" });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [contactId]);
 
   async function load(
     nextFilter = filter,
@@ -351,13 +389,21 @@ export function RequestsPage() {
           <b>Новая заявка</b>
           <label>
             Клиент
-            <input name="name" required placeholder="Имя, телефон или существующий клиент" />
+            <input
+              key={contactPrefill.name || "name-empty"}
+              name="name"
+              required
+              placeholder="Имя, телефон или существующий клиент"
+              defaultValue={contactPrefill.name}
+            />
           </label>
           <label>
             Телефон
             <input
+              key={contactPrefill.phone || "phone-empty"}
               name="phone"
               placeholder="+7 ..."
+              defaultValue={contactPrefill.phone}
               onBlur={(e) => void onPhoneBlur(e.target.value)}
             />
           </label>
