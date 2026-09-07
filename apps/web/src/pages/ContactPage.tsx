@@ -262,6 +262,22 @@ export function ContactPage() {
                       .filter(Boolean)
                       .join(" · ")}
                   </div>
+                  <button
+                    type="button"
+                    className="linkish"
+                    style={{ marginTop: 4 }}
+                    onClick={async () => {
+                      if (!window.confirm(`Убрать клиента из «${item.company.name}»?`)) return;
+                      try {
+                        await api.unlinkCompanyContact(item.company.id, item.linkId);
+                        await load();
+                      } catch (err) {
+                        setError(err instanceof Error ? err.message : "Не удалось убрать из компании");
+                      }
+                    }}
+                  >
+                    Убрать из компании
+                  </button>
                 </div>
               ))
             ) : (

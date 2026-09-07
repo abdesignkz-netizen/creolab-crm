@@ -307,6 +307,7 @@ export function createApiClient(options: ClientOptions) {
       request("/api/v1/companies", { method: "POST", body: JSON.stringify(body) }),
     updateCompany: (id: string, body: unknown) =>
       request(`/api/v1/companies/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+    deleteCompany: (id: string) => request(`/api/v1/companies/${id}`, { method: "DELETE" }),
     companyDuplicates: (query: Record<string, string | undefined> = {}) => {
       const params = new URLSearchParams();
       Object.entries(query).forEach(([key, value]) => {

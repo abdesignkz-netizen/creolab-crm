@@ -2153,6 +2153,13 @@ button.linkish {
   font-size: 12.5px;
   min-width: 160px;
 }
+.company-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-start;
+  justify-content: flex-end;
+}
 .company-timeline { display: grid; gap: 10px; }
 .company-timeline-item {
   padding-bottom: 10px;

@@ -140,7 +140,52 @@ describe("Companies B2B", () => {
     const mig: any = await migrate.json();
     assert.ok(Array.isArray(mig.candidates));
 
+    const patched = await fetch(`${base}/api/v1/companies/${company.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({ city: "Астана", lifecycleStatus: "CUSTOMER" }),
+    });
+    assert.equal(patched.status, 200);
+    const patchedBody: any = await patched.json();
+    assert.equal(patchedBody.city, "Астана");
+    assert.equal(patchedBody.lifecycleStatus, "CUSTOMER");
+
+    const alexLink = (contactsBody.contacts || []).find((c: any) => c.contactId === alexId);
+    assert.ok(alexLink?.linkId);
+    const role = await fetch(`${base}/api/v1/companies/${company.id}/contacts/${alexLink.linkId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({ position: "Генеральный директор", isBillingContact: true }),
+    });
+    assert.equal(role.status, 200);
+
+    const unlinked = await fetch(`${base}/api/v1/companies/${company.id}/contacts/${alexLink.linkId}`, {
+      method: "DELETE",
+      headers: { cookie },
+    });
+    assert.equal(unlinked.status, 200);
+    const afterUnlink: any = await unlinked.json();
+    assert.equal((afterUnlink.contacts || []).some((c: any) => c.contactId === alexId), false);
+
     contactId = aliaId;
+  });
+
+  it("archives a company so it leaves the list", async () => {
+    const created = await fetch(`${base}/api/v1/companies`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({ name: "Временная компания", forceCreate: true }),
+    });
+    assert.equal(created.status, 201);
+    const company: any = await created.json();
+    const removed = await fetch(`${base}/api/v1/companies/${company.id}`, {
+      method: "DELETE",
+      headers: { cookie },
+    });
+    assert.equal(removed.status, 200);
+    const list = await fetch(`${base}/api/v1/companies`, { headers: { cookie } });
+    const body: any = await list.json();
+    assert.equal((body.items || []).some((item: any) => item.id === company.id), false);
   });
 
   it("lists companies and contact overview includes company", async () => {

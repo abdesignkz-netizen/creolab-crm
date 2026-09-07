@@ -95,6 +95,7 @@ import { getAnalyticsDashboard, getAnalyticsDrilldown, getAnalyticsTrend } from 
 import {
   addDealContact,
   createCompany,
+  deleteCompany,
   findCompanyDuplicates,
   getCompanyContacts,
   getCompanyOverview,
@@ -849,6 +850,10 @@ export function createApp(prisma: PrismaClient) {
   app.patch("/api/v1/companies/:id", json, async (req, res) => {
     const input = updateCompanySchema.parse(req.body || {});
     res.json(await updateCompany(prisma, await requireAuth(req), req.params.id, input));
+  });
+
+  app.delete("/api/v1/companies/:id", async (req, res) => {
+    res.json(await deleteCompany(prisma, await requireAuth(req), req.params.id));
   });
 
   app.get("/api/v1/companies/:id/contacts", async (req, res) => {

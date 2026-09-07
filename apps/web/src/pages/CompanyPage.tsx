@@ -1,10 +1,59 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { nameWithPhone, phoneText } from "../lib/contactDisplay";
 import { api } from "../lib/api";
 
+const LIFECYCLE_OPTIONS = [
+  ["PROSPECT", "Потенциальный клиент"],
+  ["CUSTOMER", "Клиент"],
+  ["INACTIVE_CUSTOMER", "Неактивный клиент"],
+  ["PARTNER", "Партнёр"],
+  ["ARCHIVED", "Архив"],
+] as const;
+
+type CompanyDraft = {
+  name: string;
+  legalName: string;
+  bin: string;
+  industry: string;
+  city: string;
+  website: string;
+  phone: string;
+  email: string;
+  description: string;
+  lifecycleStatus: string;
+  assigneeMembershipId: string;
+};
+
+type PersonDraft = {
+  linkId: string;
+  name: string;
+  position: string;
+  department: string;
+  isPrimary: boolean;
+  isDecisionMaker: boolean;
+  isBillingContact: boolean;
+};
+
+function draftFromCompany(c: any): CompanyDraft {
+  return {
+    name: c.name || "",
+    legalName: c.legalName || "",
+    bin: c.bin || "",
+    industry: c.industry || "",
+    city: c.city || "",
+    website: c.website || "",
+    phone: c.phone || "",
+    email: c.email || "",
+    description: c.description || "",
+    lifecycleStatus: c.lifecycleStatus || "PROSPECT",
+    assigneeMembershipId: c.assigneeMembershipId || "",
+  };
+}
+
 export function CompanyPage() {
   const { id = "" } = useParams();
+  const navigate = useNavigate();
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState("");
   const [linkOpen, setLinkOpen] = useState(false);
@@ -15,6 +64,10 @@ export function CompanyPage() {
   const [isDecisionMaker, setIsDecisionMaker] = useState(false);
   const [isBillingContact, setIsBillingContact] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editDraft, setEditDraft] = useState<CompanyDraft | null>(null);
+  const [members, setMembers] = useState<Array<{ id: string; name: string }>>([]);
+  const [personEdit, setPersonEdit] = useState<PersonDraft | null>(null);
 
   async function load() {
     try {
@@ -39,6 +92,90 @@ export function CompanyPage() {
     }, searchQ.trim() ? 220 : 0);
     return () => clearTimeout(t);
   }, [searchQ, linkOpen]);
+
+  function openEdit() {
+    if (!data?.company) return;
+    setEditDraft(draftFromCompany(data.company));
+    setEditOpen(true);
+    void api
+      .workspaceMembers()
+      .then((res: any) => setMembers(res.items || []))
+      .catch(() => setMembers([]));
+  }
+
+  async function saveCompany() {
+    if (!editDraft?.name.trim()) {
+      setError("Укажите название компании");
+      return;
+    }
+    setBusy(true);
+    try {
+      await api.updateCompany(id, {
+        name: editDraft.name.trim(),
+        legalName: editDraft.legalName.trim() || null,
+        bin: editDraft.bin.trim() || null,
+        industry: editDraft.industry.trim() || null,
+        city: editDraft.city.trim() || null,
+        website: editDraft.website.trim() || null,
+        phone: editDraft.phone.trim() || null,
+        email: editDraft.email.trim() || null,
+        description: editDraft.description.trim() || null,
+        lifecycleStatus: editDraft.lifecycleStatus,
+        assigneeMembershipId: editDraft.assigneeMembershipId || null,
+      });
+      setEditOpen(false);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось сохранить");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeCompany() {
+    if (!window.confirm("Удалить компанию из списка? Клиенты, заявки и сделки останутся.")) return;
+    setBusy(true);
+    try {
+      await api.deleteCompany(id);
+      navigate("/companies");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось удалить");
+      setBusy(false);
+    }
+  }
+
+  async function savePerson() {
+    if (!personEdit) return;
+    setBusy(true);
+    try {
+      await api.updateCompanyContact(id, personEdit.linkId, {
+        position: personEdit.position.trim() || null,
+        department: personEdit.department.trim() || null,
+        isPrimary: personEdit.isPrimary,
+        isDecisionMaker: personEdit.isDecisionMaker,
+        isBillingContact: personEdit.isBillingContact,
+      });
+      setPersonEdit(null);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось сохранить состав");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removePerson(person: any) {
+    if (!window.confirm(`Убрать «${person.name}» из состава компании? Карточка клиента останется.`)) return;
+    setBusy(true);
+    try {
+      await api.unlinkCompanyContact(id, person.linkId);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось убрать контакт");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function linkContact(contactId: string) {
     setBusy(true);
@@ -95,6 +232,12 @@ export function CompanyPage() {
           <p className="muted">Ответственный: {c.assigneeName || "—"}</p>
         </div>
         <div className="sit-toolbar-side">
+          <button type="button" className="btn secondary" onClick={openEdit}>
+            Изменить
+          </button>
+          <button type="button" className="btn danger" disabled={busy} onClick={() => void removeCompany()}>
+            Удалить
+          </button>
           <button type="button" className="btn" onClick={() => setLinkOpen(true)}>
             Добавить контакт
           </button>
@@ -176,9 +319,31 @@ export function CompanyPage() {
                   <div className="muted">Последний контакт: {person.lastContactLabel}</div>
                 ) : null}
               </div>
-              <Link className="btn secondary" to={person.href}>
-                Открыть клиента
-              </Link>
+              <div className="company-row-actions">
+                <Link className="btn secondary" to={person.href}>
+                  Открыть
+                </Link>
+                <button
+                  type="button"
+                  className="btn secondary"
+                  onClick={() =>
+                    setPersonEdit({
+                      linkId: person.linkId,
+                      name: person.name,
+                      position: person.position || "",
+                      department: person.department || "",
+                      isPrimary: Boolean(person.isPrimary),
+                      isDecisionMaker: Boolean(person.isDecisionMaker),
+                      isBillingContact: Boolean(person.isBillingContact),
+                    })
+                  }
+                >
+                  Изменить
+                </button>
+                <button type="button" className="btn danger" disabled={busy} onClick={() => void removePerson(person)}>
+                  Убрать
+                </button>
+              </div>
             </div>
           ))}
         </div>
@@ -321,6 +486,160 @@ export function CompanyPage() {
           {!data.timeline?.length ? <p className="empty">Пока нет событий</p> : null}
         </div>
       </div>
+
+      {editOpen && editDraft ? (
+        <div className="stats-modal-backdrop" onClick={() => setEditOpen(false)}>
+          <div className="stats-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Изменить компанию</h3>
+            <div className="stats-filters" style={{ gridTemplateColumns: "1fr" }}>
+              <label>
+                Название *
+                <input value={editDraft.name} onChange={(e) => setEditDraft({ ...editDraft, name: e.target.value })} />
+              </label>
+              <label>
+                Юридическое название
+                <input
+                  value={editDraft.legalName}
+                  onChange={(e) => setEditDraft({ ...editDraft, legalName: e.target.value })}
+                />
+              </label>
+              <label>
+                Статус
+                <select
+                  value={editDraft.lifecycleStatus}
+                  onChange={(e) => setEditDraft({ ...editDraft, lifecycleStatus: e.target.value })}
+                >
+                  {LIFECYCLE_OPTIONS.map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Ответственный
+                <select
+                  value={editDraft.assigneeMembershipId}
+                  onChange={(e) => setEditDraft({ ...editDraft, assigneeMembershipId: e.target.value })}
+                >
+                  <option value="">Без ответственного</option>
+                  {editDraft.assigneeMembershipId && !members.some((m) => m.id === editDraft.assigneeMembershipId) ? (
+                    <option value={editDraft.assigneeMembershipId}>
+                      {data.company.assigneeName || "Текущий ответственный"}
+                    </option>
+                  ) : null}
+                  {members.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                БИН
+                <input value={editDraft.bin} onChange={(e) => setEditDraft({ ...editDraft, bin: e.target.value })} />
+              </label>
+              <label>
+                Отрасль
+                <input
+                  value={editDraft.industry}
+                  onChange={(e) => setEditDraft({ ...editDraft, industry: e.target.value })}
+                />
+              </label>
+              <label>
+                Город
+                <input value={editDraft.city} onChange={(e) => setEditDraft({ ...editDraft, city: e.target.value })} />
+              </label>
+              <label>
+                Сайт
+                <input
+                  value={editDraft.website}
+                  onChange={(e) => setEditDraft({ ...editDraft, website: e.target.value })}
+                />
+              </label>
+              <label>
+                Телефон
+                <input value={editDraft.phone} onChange={(e) => setEditDraft({ ...editDraft, phone: e.target.value })} />
+              </label>
+              <label>
+                Email
+                <input value={editDraft.email} onChange={(e) => setEditDraft({ ...editDraft, email: e.target.value })} />
+              </label>
+              <label>
+                Комментарий
+                <textarea
+                  value={editDraft.description}
+                  onChange={(e) => setEditDraft({ ...editDraft, description: e.target.value })}
+                  rows={3}
+                />
+              </label>
+            </div>
+            <div className="row" style={{ gap: 8, marginTop: 12 }}>
+              <button type="button" className="btn" disabled={busy || !editDraft.name.trim()} onClick={() => void saveCompany()}>
+                Сохранить
+              </button>
+              <button type="button" className="btn secondary" onClick={() => setEditOpen(false)}>
+                Отмена
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {personEdit ? (
+        <div className="stats-modal-backdrop" onClick={() => setPersonEdit(null)}>
+          <div className="stats-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Состав компании</h3>
+            <p className="muted">{personEdit.name}</p>
+            <label>
+              Должность
+              <input
+                value={personEdit.position}
+                onChange={(e) => setPersonEdit({ ...personEdit, position: e.target.value })}
+              />
+            </label>
+            <label>
+              Отдел
+              <input
+                value={personEdit.department}
+                onChange={(e) => setPersonEdit({ ...personEdit, department: e.target.value })}
+              />
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={personEdit.isPrimary}
+                onChange={(e) => setPersonEdit({ ...personEdit, isPrimary: e.target.checked })}
+              />{" "}
+              Основной контакт
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={personEdit.isDecisionMaker}
+                onChange={(e) => setPersonEdit({ ...personEdit, isDecisionMaker: e.target.checked })}
+              />{" "}
+              ЛПР
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={personEdit.isBillingContact}
+                onChange={(e) => setPersonEdit({ ...personEdit, isBillingContact: e.target.checked })}
+              />{" "}
+              Финансовый контакт
+            </label>
+            <div className="row" style={{ gap: 8, marginTop: 12 }}>
+              <button type="button" className="btn" disabled={busy} onClick={() => void savePerson()}>
+                Сохранить
+              </button>
+              <button type="button" className="btn secondary" onClick={() => setPersonEdit(null)}>
+                Отмена
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {linkOpen ? (
         <div className="stats-modal-backdrop" onClick={() => setLinkOpen(false)}>

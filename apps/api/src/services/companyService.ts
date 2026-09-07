@@ -275,6 +275,30 @@ export async function updateCompany(
   return serializeCompany(company, membership.tenant.timezone || "Asia/Almaty");
 }
 
+export async function deleteCompany(prisma: PrismaClient, auth: AuthContext, companyId: string) {
+  const membership = requireTenant(auth);
+  const tid = membership.tenantId;
+  const existing = await prisma.company.findFirst({ where: { id: companyId, tenantId: tid } });
+  if (!existing) throw new ApiError(404, "not_found", "Компания не найдена");
+  assertCanViewCompany(auth, existing);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.companyContact.updateMany({
+      where: { tenantId: tid, companyId },
+      data: { isActive: false, isPrimary: false, endedAt: new Date() },
+    });
+    await tx.company.update({
+      where: { id: companyId },
+      data: {
+        archivedAt: existing.archivedAt || new Date(),
+        lifecycleStatus: "ARCHIVED",
+        lastActivityAt: new Date(),
+      },
+    });
+  });
+  return { ok: true, id: companyId };
+}
+
 export async function listCompanies(
   prisma: PrismaClient,
   auth: AuthContext,
