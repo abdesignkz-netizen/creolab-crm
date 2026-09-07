@@ -131,6 +131,13 @@ export class WhatsAppSellerBridge {
     return this.request<{ leads: SellerLead[] }>("/internal/crm/leads");
   }
 
+  ensureLead(phone: string, name?: string | null) {
+    return this.request<{ lead: SellerLead }>("/internal/crm/leads/ensure", {
+      method: "POST",
+      body: JSON.stringify({ phone, name: name || undefined }),
+    });
+  }
+
   setMode(leadId: string, mode: "AUTO" | "HUMAN" | "PAUSED") {
     return this.request(`/internal/crm/leads/${encodeURIComponent(leadId)}/mode`, {
       method: "POST",

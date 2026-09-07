@@ -11,7 +11,7 @@ import { displayName, formatWhen } from "./contactLabels.ts";
 import { hashExecutionContent, sendViaProvider } from "./messagingProvider.ts";
 import { analyzeTaskResultNextActions, MEETING_RESULTS } from "./taskResultAnalysisService.ts";
 import { syncAgreementToCalendar } from "./calendarAdapter.ts";
-import { resolveSellerBridge } from "./sellerLink.ts";
+import { resolveSellerBridge, resolveWhatsAppConversation } from "./sellerLink.ts";
 
 const SENDABLE_TYPES = new Set([
   "proposal",
@@ -399,14 +399,14 @@ export async function prepareTaskExecution(prisma: PrismaClient, auth: AuthConte
     });
   }
 
-  let conversationId = task.conversationId;
-  if (!conversationId) {
-    const withSeller = contact.conversations.find((item) => item.sellerLeadId);
-    conversationId = withSeller?.id || contact.conversations[0]?.id || null;
-  }
-  const conversation = conversationId
-    ? await prisma.conversation.findFirst({ where: { id: conversationId, tenantId: tid } })
-    : null;
+  const conversation = await resolveWhatsAppConversation(prisma, {
+    tenantId: tid,
+    contactId: contact.id,
+    preferredConversationId: task.conversationId,
+    defaultRegion: auth.activeMembership?.tenant.defaultRegion || "KZ",
+    contactName: displayName(contact),
+    healFromBot: true,
+  });
   if (!conversation?.sellerLeadId) {
     throw new ApiError(422, "invalid", "Нет WhatsApp-диалога с sellerLead. Синхронизируйте бота или выберите диалог.");
   }
@@ -568,9 +568,18 @@ export async function executeTask(
     throw new ApiError(409, "stale_confirmation", "Данные отправки изменились. Необходимо повторное подтверждение.");
   }
 
-  const conversation = confirmation.conversationId
+  let conversation = confirmation.conversationId
     ? await prisma.conversation.findFirst({ where: { id: confirmation.conversationId, tenantId: tid } })
     : null;
+  if (!conversation?.sellerLeadId && confirmation.contactId) {
+    conversation = await resolveWhatsAppConversation(prisma, {
+      tenantId: tid,
+      contactId: confirmation.contactId,
+      preferredConversationId: confirmation.conversationId,
+      defaultRegion: auth.activeMembership?.tenant.defaultRegion || "KZ",
+      healFromBot: true,
+    });
+  }
   if (!conversation?.sellerLeadId) {
     throw new ApiError(422, "invalid", "Диалог WhatsApp недоступен");
   }

@@ -355,6 +355,179 @@ export async function resolveSellerBridge(prisma: PrismaClient, tenantId: string
   };
 }
 
+function phoneLookupValues(normalized: Array<string | null | undefined>) {
+  const values = new Set<string>();
+  for (const raw of normalized) {
+    const digits = String(raw || "").replace(/\D/g, "");
+    if (!digits) continue;
+    values.add(digits);
+    if (digits.startsWith("8") && digits.length === 11) values.add(`7${digits.slice(1)}`);
+    if (digits.startsWith("7") && digits.length === 11) values.add(`8${digits.slice(1)}`);
+  }
+  return [...values];
+}
+
+export async function findExistingWhatsAppConversation(
+  prisma: PrismaClient,
+  tenantId: string,
+  contactId: string,
+  preferredConversationId?: string | null,
+) {
+  if (preferredConversationId) {
+    const preferred = await prisma.conversation.findFirst({
+      where: { id: preferredConversationId, tenantId, sellerLeadId: { not: null } },
+    });
+    if (preferred?.sellerLeadId && (!preferred.contactId || preferred.contactId === contactId)) {
+      return preferred;
+    }
+  }
+
+  const own = await prisma.conversation.findFirst({
+    where: { tenantId, contactId, sellerLeadId: { not: null } },
+    orderBy: { updatedAt: "desc" },
+  });
+  if (own) return own;
+
+  const phones = await prisma.contactMethod.findMany({
+    where: { tenantId, contactId, type: "phone" },
+    select: { normalizedValue: true },
+  });
+  const values = phoneLookupValues(phones.map((item) => item.normalizedValue));
+
+  if (values.length) {
+    const byThread = await prisma.conversation.findFirst({
+      where: { tenantId, sellerLeadId: { not: null }, externalThreadId: { in: values } },
+      orderBy: { updatedAt: "desc" },
+    });
+    if (byThread) return byThread;
+
+    const sibling = await prisma.contactMethod.findFirst({
+      where: {
+        tenantId,
+        type: "phone",
+        normalizedValue: { in: values },
+        contactId: { not: contactId },
+      },
+      orderBy: { createdAt: "asc" },
+    });
+    if (sibling) {
+      const conv = await prisma.conversation.findFirst({
+        where: { tenantId, contactId: sibling.contactId, sellerLeadId: { not: null } },
+        orderBy: { updatedAt: "desc" },
+      });
+      if (conv) return conv;
+    }
+  }
+
+  const identity = await prisma.externalIdentity.findFirst({
+    where: { tenantId, contactId, type: "seller_lead" },
+  });
+  if (identity?.externalId) {
+    const byLead = await prisma.conversation.findFirst({
+      where: { tenantId, sellerLeadId: identity.externalId },
+    });
+    if (byLead?.sellerLeadId && (!byLead.contactId || byLead.contactId === contactId)) {
+      return byLead;
+    }
+    if (byLead?.sellerLeadId && byLead.contactId && values.length) {
+      const otherPhones = await prisma.contactMethod.findMany({
+        where: { tenantId, contactId: byLead.contactId, type: "phone" },
+        select: { normalizedValue: true },
+      });
+      const otherValues = phoneLookupValues(otherPhones.map((item) => item.normalizedValue));
+      if (otherValues.some((item) => values.includes(item))) return byLead;
+    }
+  }
+
+  return null;
+}
+
+async function healWhatsAppFromBot(
+  prisma: PrismaClient,
+  args: { tenantId: string; contactId: string; defaultRegion?: string; contactName?: string | null },
+) {
+  const phones = await prisma.contactMethod.findMany({
+    where: { tenantId: args.tenantId, contactId: args.contactId, type: "phone" },
+    select: { rawValue: true, normalizedValue: true },
+  });
+  const values = phoneLookupValues(phones.map((item) => item.normalizedValue || item.rawValue));
+  if (!values.length) return null;
+
+  const resolved = await resolveSellerBridge(prisma, args.tenantId);
+  if (!resolved.bridge) return null;
+  const region = args.defaultRegion || "KZ";
+  const connection = resolved.integration
+    ? await prisma.channelConnection.findFirst({
+        where: { tenantId: args.tenantId, integrationId: resolved.integration.id },
+      })
+    : null;
+
+  const matchesPhone = (clientPhone: string | null | undefined) => {
+    const stripped = String(clientPhone || "").replace(/@(c\.us|s\.whatsapp\.net|g\.us|lid)$/i, "");
+    const parsed = validateClientPhone(stripped, region);
+    if (parsed.ok && values.includes(parsed.normalized)) return true;
+    const digits = phoneLookupValues([stripped, clientPhone]);
+    return digits.some((item) => values.includes(item));
+  };
+
+  try {
+    const { leads } = await resolved.bridge.listLeads();
+    const lead = leads.find((item) => matchesPhone(item.clientPhone));
+    if (lead) {
+      await applySellerLeadSync(prisma, {
+        tenantId: args.tenantId,
+        defaultRegion: region,
+        lead,
+        connectionId: connection?.id || null,
+      });
+      const synced = await findExistingWhatsAppConversation(prisma, args.tenantId, args.contactId);
+      if (synced?.sellerLeadId) return synced;
+    }
+  } catch (error) {
+    console.warn("[whatsapp-heal] listLeads failed", error instanceof Error ? error.message : error);
+  }
+
+  const phone = values.find((item) => item.startsWith("7") && item.length === 11) || values[0];
+  try {
+    const ensured = await resolved.bridge.ensureLead(phone, args.contactName);
+    if (ensured?.lead) {
+      await applySellerLeadSync(prisma, {
+        tenantId: args.tenantId,
+        defaultRegion: region,
+        lead: ensured.lead,
+        connectionId: connection?.id || null,
+      });
+      return findExistingWhatsAppConversation(prisma, args.tenantId, args.contactId);
+    }
+  } catch (error) {
+    console.warn("[whatsapp-heal] ensureLead failed", error instanceof Error ? error.message : error);
+  }
+
+  return null;
+}
+
+export async function resolveWhatsAppConversation(
+  prisma: PrismaClient,
+  args: {
+    tenantId: string;
+    contactId: string;
+    preferredConversationId?: string | null;
+    defaultRegion?: string;
+    contactName?: string | null;
+    healFromBot?: boolean;
+  },
+) {
+  const existing = await findExistingWhatsAppConversation(
+    prisma,
+    args.tenantId,
+    args.contactId,
+    args.preferredConversationId,
+  );
+  if (existing?.sellerLeadId) return existing;
+  if (!args.healFromBot) return existing;
+  return healWhatsAppFromBot(prisma, args);
+}
+
 export async function sellerHealthFor(prisma: PrismaClient, auth: AuthContext) {
   const membership = requireTenant(auth);
   const resolved = await resolveSellerBridge(prisma, membership.tenantId);

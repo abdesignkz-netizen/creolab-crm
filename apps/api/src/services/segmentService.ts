@@ -398,10 +398,15 @@ export async function resolveContactLinks(
 
   let conversationId = preferred?.conversationId;
   if (conversationId) {
-    const ok = contact.conversations.some((item) => item.id === conversationId);
-    if (!ok) throw new ApiError(422, "invalid", "Диалог не принадлежит клиенту");
+    const preferredConv = contact.conversations.find((item) => item.id === conversationId);
+    if (!preferredConv) throw new ApiError(422, "invalid", "Диалог не принадлежит клиенту");
+    if (!preferredConv.sellerLeadId) {
+      conversationId =
+        contact.conversations.find((item) => item.sellerLeadId)?.id || conversationId;
+    }
   } else {
-    conversationId = contact.conversations[0]?.id || undefined;
+    conversationId =
+      contact.conversations.find((item) => item.sellerLeadId)?.id || contact.conversations[0]?.id || undefined;
   }
 
   return { contact, inquiryId, dealId, conversationId };

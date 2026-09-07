@@ -154,4 +154,111 @@ describe("Task execution", () => {
     assert.ok(body.suggestedNextActions.some((item: { type: string }) => ["message", "follow_up"].includes(item.type)));
     assert.ok(body.suggestedNextActions.every((item: { type: string }) => item.type !== "call"), "disabled call types must not be offered");
   });
+
+  it("готовит отправку, если у задачи устаревший диалог без sellerLead", async () => {
+    const contact = await prisma.contact.findUniqueOrThrow({ where: { id: contactId } });
+    const stale = await prisma.conversation.create({
+      data: {
+        tenantId: contact.tenantId,
+        contactId,
+        mode: "human",
+        status: "open",
+        sellerLeadId: null,
+        attentionReason: "seller_lead_rematched",
+      },
+    });
+    const task = await prisma.task.create({
+      data: {
+        tenantId: contact.tenantId,
+        type: "message",
+        title: "Отправить сообщение — stale dialog",
+        targetType: "client",
+        contactId,
+        inquiryId,
+        conversationId: stale.id,
+        messageDraft: "Проверка отправки после rematch",
+      },
+    });
+    const prepare = await fetch(`${base}/api/v1/tasks/${task.id}/prepare-execution`, {
+      method: "POST",
+      headers: { cookie },
+    });
+    assert.equal(prepare.status, 200);
+    const preview = await prepare.json();
+    assert.equal(preview.conversationId, conversationId);
+    assert.equal(preview.sellerLeadId, "test-lead-execution");
+  });
+
+  it("готовит отправку через WhatsApp-диалог контакта с тем же номером", async () => {
+    const seed = await prisma.contact.findUniqueOrThrow({ where: { id: contactId } });
+    const phone = "77008881234";
+    const target = await prisma.contact.create({
+      data: {
+        tenantId: seed.tenantId,
+        name: "Без имени",
+        methods: {
+          create: {
+            type: "phone",
+            rawValue: phone,
+            normalizedValue: phone,
+            source: "manual",
+            primary: true,
+          },
+        },
+      },
+    });
+    const sibling = await prisma.contact.create({
+      data: {
+        tenantId: seed.tenantId,
+        name: "Тот же номер",
+        methods: {
+          create: {
+            type: "phone",
+            rawValue: phone,
+            normalizedValue: phone,
+            source: "whatsapp_seller",
+            primary: true,
+          },
+        },
+      },
+    });
+    const stale = await prisma.conversation.create({
+      data: {
+        tenantId: seed.tenantId,
+        contactId: target.id,
+        mode: "human",
+        status: "open",
+        sellerLeadId: null,
+      },
+    });
+    await prisma.conversation.create({
+      data: {
+        tenantId: seed.tenantId,
+        contactId: sibling.id,
+        mode: "ai",
+        status: "open",
+        sellerLeadId: "sibling-lead-execution",
+        externalThreadId: phone,
+      },
+    });
+    const task = await prisma.task.create({
+      data: {
+        tenantId: seed.tenantId,
+        type: "message",
+        title: "Отправить сообщение — sibling",
+        targetType: "client",
+        contactId: target.id,
+        conversationId: stale.id,
+        messageDraft: "Проверка отправки по номеру",
+      },
+    });
+    const prepare = await fetch(`${base}/api/v1/tasks/${task.id}/prepare-execution`, {
+      method: "POST",
+      headers: { cookie },
+    });
+    assert.equal(prepare.status, 200);
+    const preview = await prepare.json();
+    assert.equal(preview.sellerLeadId, "sibling-lead-execution");
+    assert.equal(preview.client.id, target.id);
+  });
 });

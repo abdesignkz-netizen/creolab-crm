@@ -10,7 +10,7 @@ import { writeActivity } from "./contactService.ts";
 import { hashExecutionContent, sendViaProvider } from "./messagingProvider.ts";
 import { parseAndMatchPhoneList, type PhoneListItem } from "./phoneListService.ts";
 import { previewContactSegment } from "./segmentService.ts";
-import { resolveSellerBridge } from "./sellerLink.ts";
+import { resolveSellerBridge, resolveWhatsAppConversation } from "./sellerLink.ts";
 
 const ALLOWED_MIME = new Set([
   "application/pdf",
@@ -727,17 +727,13 @@ async function sendOneRecipient(
     const contactId = await ensureContactForRecipient(prisma, campaign, recipient);
     if (!contactId) throw new Error("Нет клиента для отправки");
 
-    let conversation = await prisma.conversation.findFirst({
-      where: { tenantId: campaign.tenantId, contactId, sellerLeadId: { not: null } },
-      orderBy: { updatedAt: "desc" },
+    const conversation = await resolveWhatsAppConversation(prisma, {
+      tenantId: campaign.tenantId,
+      contactId,
+      defaultRegion: "KZ",
+      contactName: recipient.displayName,
+      healFromBot: true,
     });
-    if (!conversation?.sellerLeadId) {
-      // try any conversation
-      conversation = await prisma.conversation.findFirst({
-        where: { tenantId: campaign.tenantId, contactId },
-        orderBy: { updatedAt: "desc" },
-      });
-    }
     if (!conversation?.sellerLeadId) {
       throw new Error("Нет WhatsApp-диалога (sellerLead). Сначала синхронизируйте лиды или напишите клиенту через бота.");
     }

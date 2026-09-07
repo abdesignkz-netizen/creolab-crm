@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import { createPrismaClient } from "@creolab/db";
-import { applySellerLeadSync, reconcileImportedSellerMessages } from "./services/sellerLink.ts";
+import { applySellerLeadSync, findExistingWhatsAppConversation, reconcileImportedSellerMessages } from "./services/sellerLink.ts";
 
 function sellerScopedId(leadId: string, item: { role: string; content: string; at?: string }) {
   return `seller:${createHash("sha1").update(`${leadId}|${item.role}|${item.at || ""}|${item.content}`).digest("hex")}`;
@@ -173,5 +173,73 @@ describe("seller lead sync rematch by phone", () => {
     const preserved = await reconcileImportedSellerMessages(prisma, tenantId, "KZ", [], new Map());
     assert.equal(preserved.removed, 0);
     assert.equal(await prisma.message.count({ where: { conversationId: first.conversationId } }), 3);
+  });
+
+  it("does not reuse a rematched seller lead belonging to another phone", async () => {
+    const stale = await prisma.contact.create({
+      data: {
+        tenantId,
+        name: "Без имени",
+        methods: {
+          create: {
+            type: "phone",
+            rawValue: "77005550101",
+            normalizedValue: "77005550101",
+            source: "whatsapp_seller",
+            primary: true,
+          },
+        },
+      },
+    });
+    const other = await prisma.contact.create({
+      data: {
+        tenantId,
+        name: "Новый владелец лида",
+        methods: {
+          create: {
+            type: "phone",
+            rawValue: "77005550202",
+            normalizedValue: "77005550202",
+            source: "whatsapp_seller",
+            primary: true,
+          },
+        },
+      },
+    });
+    await prisma.conversation.create({
+      data: {
+        tenantId,
+        contactId: stale.id,
+        sellerLeadId: null,
+        attentionReason: "seller_lead_rematched",
+        mode: "ai",
+        status: "open",
+      },
+    });
+    const live = await prisma.conversation.create({
+      data: {
+        tenantId,
+        contactId: other.id,
+        sellerLeadId: "LEAD-rematch-wrong",
+        externalThreadId: "77005550202",
+        mode: "ai",
+        status: "open",
+      },
+    });
+    await prisma.externalIdentity.create({
+      data: {
+        tenantId,
+        contactId: stale.id,
+        type: "seller_lead",
+        externalId: "LEAD-rematch-wrong",
+        confirmed: true,
+      },
+    });
+
+    const found = await findExistingWhatsAppConversation(prisma, tenantId, stale.id);
+    assert.equal(found, null);
+
+    const byPhone = await findExistingWhatsAppConversation(prisma, tenantId, other.id);
+    assert.equal(byPhone?.id, live.id);
   });
 });

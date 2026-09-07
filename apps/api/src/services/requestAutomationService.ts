@@ -3,6 +3,7 @@ import { parseAIAutomationSettings, isWithinAiSchedule } from "./aiAutomationSet
 import { decideAutomationPolicy, type AutomationDecision } from "./aiAutomationPolicyService.ts";
 import { analyzeRequestWithOptionalLlm, type RequestAnalysis } from "./requestAnalysisService.ts";
 import { writeActivity } from "./contactService.ts";
+import { findExistingWhatsAppConversation } from "./sellerLink.ts";
 
 export type AiProcessStatus =
   | "none"
@@ -86,45 +87,10 @@ function buildInstruction(args: {
 }
 
 async function findWhatsAppConversation(prisma: PrismaClient, tenantId: string, contactId: string) {
-  const own = await prisma.conversation.findFirst({
-    where: {
-      tenantId,
-      contactId,
-      sellerLeadId: { not: null },
-    },
-    orderBy: { updatedAt: "desc" },
-    include: {
-      connection: true,
-      messages: { orderBy: { createdAt: "desc" }, take: 1 },
-    },
-  });
-  if (own) return own;
-
-  const phones = await prisma.contactMethod.findMany({
-    where: { tenantId, contactId, type: "phone" },
-    select: { normalizedValue: true },
-  });
-  const normalized = phones.map((item) => item.normalizedValue).filter(Boolean);
-  if (!normalized.length) return null;
-
-  const sibling = await prisma.contactMethod.findFirst({
-    where: {
-      tenantId,
-      type: "phone",
-      normalizedValue: { in: normalized },
-      contactId: { not: contactId },
-    },
-    orderBy: { createdAt: "asc" },
-  });
-  if (!sibling) return null;
-
+  const found = await findExistingWhatsAppConversation(prisma, tenantId, contactId);
+  if (!found) return null;
   return prisma.conversation.findFirst({
-    where: {
-      tenantId,
-      contactId: sibling.contactId,
-      sellerLeadId: { not: null },
-    },
-    orderBy: { updatedAt: "desc" },
+    where: { id: found.id, tenantId },
     include: {
       connection: true,
       messages: { orderBy: { createdAt: "desc" }, take: 1 },
