@@ -17,11 +17,25 @@ function historyScopedId(leadId: string, item: { role: string; content: string; 
   return `seller:${createHash("sha1").update(raw).digest("hex")}`;
 }
 
+function historyScopedIdByPhone(phone: string, item: { role: string; content: string; at?: string }) {
+  const raw = `${phone}|${item.role}|${item.at || ""}|${item.content}`;
+  return `sellerp:${createHash("sha1").update(raw).digest("hex")}`;
+}
+
+function historyFingerprint(role: string, content: string) {
+  return `${role}\n${String(content || "").trim()}`;
+}
+
+function senderRole(senderKind: string) {
+  return senderKind === "ai" ? "assistant" : "user";
+}
+
 async function upsertLeadHistory(
   prisma: PrismaClient,
   tid: string,
   conversationId: string,
   leadId: string,
+  phone: string,
   history: Array<{ role: string; content: string; at?: string }>,
 ) {
   const slice = (history || []).slice(-40);
@@ -29,17 +43,18 @@ async function upsertLeadHistory(
   let added = 0;
   let moved = 0;
   for (const item of slice) {
-    const connectionScopedId = historyScopedId(leadId, item);
+    const phoneScopedId = historyScopedIdByPhone(phone, item);
+    const legacyScopedId = historyScopedId(leadId, item);
     const existing = await prisma.message.findFirst({
-      where: { tenantId: tid, connectionScopedId },
+      where: { tenantId: tid, connectionScopedId: { in: [phoneScopedId, legacyScopedId] } },
     });
     if (existing) {
-      if (existing.conversationId !== conversationId) {
-        await prisma.message.update({
-          where: { id: existing.id },
-          data: { conversationId },
-        });
-        moved += 1;
+      const patch: { conversationId?: string; connectionScopedId?: string } = {};
+      if (existing.conversationId !== conversationId) patch.conversationId = conversationId;
+      if (existing.connectionScopedId !== phoneScopedId) patch.connectionScopedId = phoneScopedId;
+      if (Object.keys(patch).length) {
+        await prisma.message.update({ where: { id: existing.id }, data: patch });
+        if (patch.conversationId) moved += 1;
       }
       continue;
     }
@@ -51,7 +66,7 @@ async function upsertLeadHistory(
         direction: item.role === "assistant" ? "outbound" : "inbound",
         text: item.content,
         historical: true,
-        connectionScopedId,
+        connectionScopedId: phoneScopedId,
         createdAt: item.at ? new Date(item.at) : new Date(),
       },
     });
@@ -204,6 +219,7 @@ export async function applySellerLeadSync(
         connectionId: args.connectionId,
         contactId,
         sellerLeadId: args.lead.leadId,
+        externalThreadId: phone.normalized,
         mode,
         status: "open",
         needsAttention: mode !== "ai",
@@ -220,6 +236,7 @@ export async function applySellerLeadSync(
         contactId,
         connectionId: args.connectionId || target.connectionId,
         sellerLeadId: args.lead.leadId,
+        externalThreadId: phone.normalized,
       },
     });
   }
@@ -236,6 +253,7 @@ export async function applySellerLeadSync(
     args.tenantId,
     target.id,
     args.lead.leadId,
+    phone.normalized,
     args.lead.conversationHistory || [],
   );
 
@@ -243,11 +261,104 @@ export async function applySellerLeadSync(
     skipped: null,
     conversationId: target.id,
     contactId,
+    phone: phone.normalized,
     added,
     moved,
     rematched: leadIdBoundToWrongContact,
     created: !convByLeadId && !convByContact,
   };
+}
+
+export async function reconcileImportedSellerMessages(
+  prisma: PrismaClient,
+  tenantId: string,
+  defaultRegion: string,
+  leads: Array<{
+    leadId: string;
+    clientPhone: string | null;
+    conversationHistory?: Array<{ role: string; content: string; at?: string }>;
+  }>,
+  conversationByPhone: Map<string, string>,
+) {
+  const fingerprintsByPhone = new Map<string, Set<string>>();
+  const ownersByFingerprint = new Map<string, Set<string>>();
+  for (const lead of leads) {
+    const phone = validateClientPhone(lead.clientPhone, defaultRegion);
+    if (!phone.ok) continue;
+    const fps = new Set<string>();
+    for (const item of lead.conversationHistory || []) {
+      const fp = historyFingerprint(item.role === "assistant" ? "assistant" : "user", item.content);
+      fps.add(fp);
+      const owners = ownersByFingerprint.get(fp) || new Set<string>();
+      owners.add(phone.normalized);
+      ownersByFingerprint.set(fp, owners);
+    }
+    fingerprintsByPhone.set(phone.normalized, fps);
+  }
+
+  const conversations = await prisma.conversation.findMany({
+    where: {
+      tenantId,
+      OR: [{ sellerLeadId: { not: null } }, { messages: { some: { historical: true } } }],
+    },
+    include: {
+      contact: { include: { methods: { where: { type: "phone" } } } },
+      messages: {
+        where: { historical: true, senderKind: { in: ["client", "ai"] } },
+      },
+    },
+  });
+
+  let removed = 0;
+  let moved = 0;
+  for (const conversation of conversations) {
+    const convPhone =
+      conversation.externalThreadId ||
+      conversation.contact?.methods.find((item) => item.primary)?.normalizedValue ||
+      conversation.contact?.methods[0]?.normalizedValue ||
+      null;
+    const own = convPhone ? fingerprintsByPhone.get(convPhone) : undefined;
+
+    for (const message of conversation.messages) {
+      const fp = historyFingerprint(senderRole(message.senderKind), message.text || "");
+      const owners = [...(ownersByFingerprint.get(fp) || [])];
+      const belongsHere = Boolean(convPhone && own?.has(fp));
+      if (belongsHere) continue;
+
+      const uniqueOther = owners.filter((phone) => phone !== convPhone);
+      if (uniqueOther.length === 1) {
+        const targetId = conversationByPhone.get(uniqueOther[0]);
+        if (targetId && targetId !== conversation.id) {
+          const duplicate = await prisma.message.findFirst({
+            where: {
+              tenantId,
+              conversationId: targetId,
+              senderKind: message.senderKind,
+              text: message.text,
+              id: { not: message.id },
+            },
+          });
+          if (duplicate) {
+            await prisma.message.delete({ where: { id: message.id } });
+          } else {
+            await prisma.message.update({
+              where: { id: message.id },
+              data: { conversationId: targetId },
+            });
+          }
+          moved += 1;
+          continue;
+        }
+      }
+
+      if (!belongsHere) {
+        await prisma.message.delete({ where: { id: message.id } });
+        removed += 1;
+      }
+    }
+  }
+
+  return { removed, moved };
 }
 
 function requireTenant(auth: AuthContext) {
@@ -444,6 +555,7 @@ export async function syncSellerLeads(prisma: PrismaClient, auth: AuthContext) {
   let messagesAdded = 0;
   let rematched = 0;
   const analyzeIds: string[] = [];
+  const conversationByPhone = new Map<string, string>();
   for (const lead of leads) {
     const result = await applySellerLeadSync(prisma, {
       tenantId: membership.tenantId,
@@ -459,9 +571,20 @@ export async function syncSellerLeads(prisma: PrismaClient, auth: AuthContext) {
     if (result.rematched) rematched += 1;
     if (result.created) imported += 1;
     else updated += 1;
+    if (result.phone) conversationByPhone.set(result.phone, result.conversationId);
     if (result.added > 0 || result.moved > 0 || result.rematched) {
       analyzeIds.push(result.conversationId);
     }
+  }
+  const cleaned = await reconcileImportedSellerMessages(
+    prisma,
+    membership.tenantId,
+    membership.tenant.defaultRegion,
+    leads,
+    conversationByPhone,
+  );
+  if (cleaned.removed + cleaned.moved > 0) {
+    messagesAdded += cleaned.moved;
   }
   if (resolved.integration) {
     await prisma.integration.update({
@@ -484,6 +607,7 @@ export async function syncSellerLeads(prisma: PrismaClient, auth: AuthContext) {
     imported,
     updated,
     rematched,
+    cleaned: cleaned.removed + cleaned.moved,
     needsPhone,
     messagesAdded,
     contextApplied,

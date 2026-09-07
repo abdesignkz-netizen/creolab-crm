@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import { createPrismaClient } from "@creolab/db";
-import { applySellerLeadSync } from "./services/sellerLink.ts";
+import { applySellerLeadSync, reconcileImportedSellerMessages } from "./services/sellerLink.ts";
 
 function sellerScopedId(leadId: string, item: { role: string; content: string; at?: string }) {
   return `seller:${createHash("sha1").update(`${leadId}|${item.role}|${item.at || ""}|${item.content}`).digest("hex")}`;
@@ -125,5 +125,27 @@ describe("seller lead sync rematch by phone", () => {
       include: { methods: true },
     });
     assert.equal(newContact?.methods[0]?.normalizedValue, "77074129213");
+
+    const cleaned = await reconcileImportedSellerMessages(
+      prisma,
+      tenantId,
+      "KZ",
+      [
+        {
+          leadId: "LEAD-0001",
+          clientPhone: "77074129213",
+          conversationHistory: [
+            historyItem,
+            { role: "assistant", content: "Здравствуйте! Какой формат презентации нужен?", at: "2026-09-07T11:00:01.000Z" },
+          ],
+        },
+      ],
+      new Map([["77074129213", result.conversationId!]]),
+    );
+    assert.ok(cleaned.removed >= 1);
+    const gone = await prisma.message.findFirst({ where: { id: foreign.id } });
+    assert.equal(gone, null);
+    const stillOnStale = await prisma.message.findMany({ where: { conversationId: conversation.id } });
+    assert.equal(stillOnStale.some((item) => item.text === "Мне нужны услуги автокрана"), false);
   });
 });
