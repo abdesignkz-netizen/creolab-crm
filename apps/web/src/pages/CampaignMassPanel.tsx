@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type DragEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { nameWithPhone } from "../lib/contactDisplay";
 import { api } from "../lib/api";
 
@@ -57,16 +57,40 @@ function toDateTimeLocal(value: Date) {
   return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}T${pad(value.getHours())}:${pad(value.getMinutes())}`;
 }
 
-function datetimeLocalToIso(value: string) {
-  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(String(value || "").trim());
-  if (!match) return "";
-  return new Date(
-    Number(match[1]),
-    Number(match[2]) - 1,
-    Number(match[3]),
-    Number(match[4]),
-    Number(match[5]),
-  ).toISOString();
+function parseScheduleDate(raw: string, input?: HTMLInputElement | null): Date | null {
+  const value = String(raw || input?.value || "").trim();
+  const fromLocal = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?$/.exec(value);
+  if (fromLocal) {
+    const date = new Date(
+      Number(fromLocal[1]),
+      Number(fromLocal[2]) - 1,
+      Number(fromLocal[3]),
+      Number(fromLocal[4]),
+      Number(fromLocal[5]),
+      Number(fromLocal[6] || 0),
+    );
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/i.test(value)) {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  const fromRu = /^(\d{1,2})\.(\d{1,2})\.(\d{4})(?:[,\s]+(\d{1,2}):(\d{2}))?/.exec(value);
+  if (fromRu) {
+    const date = new Date(
+      Number(fromRu[3]),
+      Number(fromRu[2]) - 1,
+      Number(fromRu[1]),
+      Number(fromRu[4] || 0),
+      Number(fromRu[5] || 0),
+    );
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  if (input && Number.isFinite(input.valueAsNumber) && input.valueAsNumber > 0) {
+    const date = new Date(input.valueAsNumber);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  return null;
 }
 
 function readFileBase64(file: File) {
@@ -137,6 +161,7 @@ export function CampaignMassPanel({
   const [createMissing, setCreateMissing] = useState(true);
   const [whenMode, setWhenMode] = useState<"now" | "schedule">("now");
   const [scheduledAt, setScheduledAt] = useState("");
+  const scheduleInputRef = useRef<HTMLInputElement>(null);
   const [campaignId, setCampaignId] = useState<string | null>(null);
   const [campaign, setCampaign] = useState<any>(null);
   const [prepare, setPrepare] = useState<any>(null);
@@ -156,6 +181,7 @@ export function CampaignMassPanel({
   const [importMapping, setImportMapping] = useState<Record<string, string>>({});
   const [importFileMeta, setImportFileMeta] = useState<{ fileName: string; contentBase64: string } | null>(null);
 
+  const scheduleMin = useMemo(() => toDateTimeLocal(new Date()), []);
   const validPhones = useMemo(
     () =>
       (phonePreview?.items || []).filter(
@@ -285,10 +311,22 @@ export function CampaignMassPanel({
     });
   }
 
+  function resolveScheduleIso() {
+    if (whenMode !== "schedule") return { iso: null as string | null, error: "" };
+    const date = parseScheduleDate(scheduledAt, scheduleInputRef.current);
+    if (!date || date.getTime() <= Date.now()) {
+      document.getElementById("campaign-when")?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return { iso: null, error: "Укажите дату и время в будущем" };
+    }
+    const normalized = toDateTimeLocal(date);
+    if (normalized !== scheduledAt) setScheduledAt(normalized);
+    return { iso: date.toISOString(), error: "" };
+  }
+
   async function createDraft() {
-    const scheduledIso = whenMode === "schedule" ? datetimeLocalToIso(scheduledAt) : "";
-    if (whenMode === "schedule" && (!scheduledIso || new Date(scheduledIso).getTime() <= Date.now())) {
-      setError("Укажите дату и время в будущем");
+    const schedule = resolveScheduleIso();
+    if (schedule.error) {
+      setError(schedule.error);
       return;
     }
     setBusy(true);
@@ -300,7 +338,7 @@ export function CampaignMassPanel({
         messageMode,
         personalizeEach: personalizeEach && messageMode !== "file_only",
         createMissingClients: createMissing,
-        scheduledAt: whenMode === "schedule" ? scheduledIso || null : null,
+        scheduledAt: schedule.iso,
         rawCommandText: commandText || (personalizeEach || messageMode === "ai" ? message.trim() : "") || undefined,
         contactIds: whoMode === "contacts" || whoMode === "segment" ? contactIds : undefined,
         phoneListText:
@@ -453,19 +491,19 @@ export function CampaignMassPanel({
 
   async function onPrepare() {
     if (!campaignId) return;
+    const schedule = resolveScheduleIso();
+    if (schedule.error) {
+      setError(schedule.error);
+      return;
+    }
     setBusy(true);
     try {
-      const scheduledIso = whenMode === "schedule" ? datetimeLocalToIso(scheduledAt) : "";
-      if (whenMode === "schedule" && (!scheduledIso || new Date(scheduledIso).getTime() <= Date.now())) {
-        setError("Укажите дату и время в будущем");
-        return;
-      }
       await api.updateCampaign(campaignId, {
         messageDraft: messageMode === "file_only" ? "" : message,
         messageMode,
         personalizeEach: personalizeEach && messageMode !== "file_only",
         createMissingClients: createMissing,
-        scheduledAt: whenMode === "schedule" ? scheduledIso || null : null,
+        scheduledAt: schedule.iso,
         recipientDrafts:
           personalizeEach && messageMode !== "file_only"
             ? ((campaign?.recipients || []) as Array<{ id: string; status: string; messageDraft?: string | null }>)
@@ -486,18 +524,18 @@ export function CampaignMassPanel({
 
   async function onConfirmAndSend() {
     if (!campaignId) return;
-    const scheduledIso = whenMode === "schedule" ? datetimeLocalToIso(scheduledAt) : "";
-    if (whenMode === "schedule" && (!scheduledIso || new Date(scheduledIso).getTime() <= Date.now())) {
-      setError("Укажите дату и время в будущем");
+    const schedule = resolveScheduleIso();
+    if (schedule.error) {
+      setError(schedule.error);
       return;
     }
     setBusy(true);
     try {
       await api.updateCampaign(campaignId, {
-        scheduledAt: whenMode === "schedule" ? scheduledIso || null : null,
+        scheduledAt: schedule.iso,
       });
       const confirmed: any = await api.confirmCampaign(campaignId, {
-        scheduledAt: whenMode === "schedule" ? scheduledIso || null : null,
+        scheduledAt: schedule.iso,
       });
       const due = confirmed.campaign?.scheduledAt;
       const later = confirmed.campaign?.status === "scheduled" || (due && new Date(due).getTime() > Date.now());
@@ -902,6 +940,49 @@ export function CampaignMassPanel({
         )}
       </div>
 
+      <div className="command-step" id="campaign-when">
+        <div className="command-step-label">Когда</div>
+        <div className="chip-row">
+          <button
+            type="button"
+            className={whenMode === "now" ? "chip active" : "chip"}
+            onClick={() => {
+              setWhenMode("now");
+              setPrepare(null);
+            }}
+          >
+            Сейчас
+          </button>
+          <button
+            type="button"
+            className={whenMode === "schedule" ? "chip active" : "chip"}
+            onClick={() => {
+              setWhenMode("schedule");
+              setPrepare(null);
+              if (!scheduledAt) setScheduledAt(toDateTimeLocal(new Date(Date.now() + 60 * 60 * 1000)));
+            }}
+          >
+            Запланировать
+          </button>
+        </div>
+        {whenMode === "schedule" ? (
+          <label>
+            Дата и время
+            <input
+              ref={scheduleInputRef}
+              type="datetime-local"
+              step="60"
+              min={scheduleMin}
+              value={scheduledAt}
+              onChange={(event) => {
+                setScheduledAt(event.target.value);
+                setPrepare(null);
+              }}
+            />
+          </label>
+        ) : null}
+      </div>
+
       <div className="command-step" onDragOver={(event) => event.preventDefault()} onDrop={onDrop}>
         <div className="command-step-label">
           Вложения
@@ -999,45 +1080,6 @@ export function CampaignMassPanel({
               </div>
             ))}
           </div>
-        ) : null}
-      </div>
-
-      <div className="command-step">
-        <div className="command-step-label">Когда</div>
-        <div className="chip-row">
-          <button
-            type="button"
-            className={whenMode === "now" ? "chip active" : "chip"}
-            onClick={() => {
-              setWhenMode("now");
-              setPrepare(null);
-            }}
-          >
-            Сейчас
-          </button>
-          <button
-            type="button"
-            className={whenMode === "schedule" ? "chip active" : "chip"}
-            onClick={() => {
-              setWhenMode("schedule");
-              setPrepare(null);
-            }}
-          >
-            Запланировать
-          </button>
-        </div>
-        {whenMode === "schedule" ? (
-          <label>
-            Дата и время
-            <input
-              type="datetime-local"
-              value={scheduledAt}
-              onChange={(event) => {
-                setScheduledAt(event.target.value);
-                setPrepare(null);
-              }}
-            />
-          </label>
         ) : null}
       </div>
 
