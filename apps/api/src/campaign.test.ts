@@ -50,6 +50,28 @@ describe("campaign mass send foundations", () => {
     assert.notEqual(site, deck);
   });
 
+  it("не копирует команду менеджера и ярлык WhatsApp в текст клиенту", () => {
+    const unnamed = composeRecipientOffer({
+      taskText: "Уточни актуальность заявки",
+      sharedDraft: "Уточни актуальность заявки",
+      firstName: "Без имени",
+      interest: "Заявка из WhatsApp",
+    });
+    const named = composeRecipientOffer({
+      taskText: "Уточни актуальность заявки",
+      sharedDraft: "Уточни актуальность заявки",
+      firstName: "Алия",
+      interest: "Сайт",
+    });
+    assert.doesNotMatch(unnamed, /Уточни актуальность/i);
+    assert.doesNotMatch(unnamed, /Заявка из WhatsApp/i);
+    assert.doesNotMatch(unnamed, /^Без,/);
+    assert.match(unnamed, /актуальн/i);
+    assert.match(named, /Алия/);
+    assert.match(named, /сайт/i);
+    assert.notEqual(unnamed, named);
+  });
+
   it("отправка берёт индивидуальный текст, если включена персонализация", () => {
     const text = resolveRecipientSendText({
       personalizeEach: true,

@@ -10,12 +10,13 @@ import {
   composeRecipientOffer,
   firstNameOf,
   inferCampaignOfferKind,
+  looksLikeStaffCommand,
   personalize,
   recipientDraftsFingerprint,
   resolveRecipientSendText,
 } from "./campaignPersonalize.ts";
 import { extractSpokenMessage } from "./aiCommandParserService.ts";
-import { inquiryInterest, loadConversationInterests } from "./contactInterestService.ts";
+import { inquiryInterest, loadConversationInterests, pickUsableInterest } from "./contactInterestService.ts";
 import { writeActivity } from "./contactService.ts";
 import { refineCampaignRecipientDraftsWithLlm } from "./llmClient.ts";
 import { hashExecutionContent, sendViaProvider } from "./messagingProvider.ts";
@@ -919,13 +920,12 @@ async function loadRecipientOfferFacts(
     const inquiry = contact?.inquiries[0];
     const service = String(inquiry?.service || "").trim();
     const subject = String(inquiry?.subject || "").trim();
-    const genericSubject = /заявка из|whatsapp|instagram|форма/i.test(subject);
     const conversation = recipient.contactId ? conversationInterests.get(recipient.contactId) : undefined;
     return {
       id: recipient.id,
       firstName: firstNameOf(contact?.firstName || contact?.name || recipient.displayName),
       companyName: contact?.companyName || null,
-      interest: (!genericSubject && subject) || service || conversation?.text || inquiryInterest(inquiry)?.text || null,
+      interest: pickUsableInterest(conversation?.text, service, subject, inquiryInterest(inquiry)?.text),
     };
   });
 }
@@ -951,14 +951,20 @@ export async function personalizeCampaignRecipients(
 
   const attachments = await campaignAttachments(prisma, membership.tenantId, id);
   const hasFile = attachments.length > 0;
-  const taskText = campaign.rawCommandText || campaign.title || "";
+  const sharedRaw = String(campaign.messageDraft || "").trim();
+  const commandFromDraft = looksLikeStaffCommand(sharedRaw);
+  const taskText = [campaign.rawCommandText, commandFromDraft ? sharedRaw : "", campaign.title]
+    .map((value) => String(value || "").trim())
+    .filter((value, index, all) => value && all.indexOf(value) === index)
+    .join("\n");
+  const sharedDraft = commandFromDraft ? "" : sharedRaw;
   const facts = await loadRecipientOfferFacts(prisma, membership.tenantId, pending);
-  const kind = inferCampaignOfferKind(taskText, campaign.messageDraft || "");
+  const kind = inferCampaignOfferKind(taskText, sharedDraft);
   let drafts = facts.map((fact) => ({
     id: fact.id,
     text: composeRecipientOffer({
       taskText,
-      sharedDraft: campaign.messageDraft,
+      sharedDraft,
       firstName: fact.firstName,
       companyName: fact.companyName,
       interest: fact.interest,

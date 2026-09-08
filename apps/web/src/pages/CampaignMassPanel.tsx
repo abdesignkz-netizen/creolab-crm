@@ -272,14 +272,14 @@ export function CampaignMassPanel({
     setBusy(true);
     try {
       const body: any = {
-        title: commandText || "Массовая отправка",
+        title: commandText || message.trim().slice(0, 120) || "Массовая отправка",
         source: commandText ? "ai_command" : whoMode === "import" ? "import" : whoMode === "segment" ? "segment" : "manual",
         messageDraft: messageMode === "file_only" ? "" : message,
         messageMode,
         personalizeEach: personalizeEach && messageMode !== "file_only",
         createMissingClients: createMissing,
         scheduledAt: whenMode === "schedule" && scheduledAt ? new Date(scheduledAt).toISOString() : null,
-        rawCommandText: commandText || undefined,
+        rawCommandText: commandText || (personalizeEach || messageMode === "ai" ? message.trim() : "") || undefined,
         contactIds: whoMode === "contacts" || whoMode === "segment" ? contactIds : undefined,
         phoneListText:
           whoMode === "phones" || whoMode === "import"
@@ -412,7 +412,10 @@ export function CampaignMassPanel({
   async function onAiDraft() {
     setBusy(true);
     try {
-      const draft: any = await api.draftCampaignMessage(commandText || "массовая отправка", attachments.length > 0);
+      const draft: any = await api.draftCampaignMessage(
+        commandText.trim() || message.trim() || "массовая отправка",
+        attachments.length > 0,
+      );
       setMessage(draft.messageDraft);
       setMessageMode("ai");
     } catch (err) {
@@ -777,21 +780,40 @@ export function CampaignMassPanel({
               ["file_only", "Без текста — только файл"],
             ] as const
           ).map(([value, label]) => (
-            <button key={value} type="button" className={messageMode === value ? "chip active" : "chip"} onClick={() => setMessageMode(value)}>
+            <button
+              key={value}
+              type="button"
+              className={messageMode === value ? "chip active" : "chip"}
+              onClick={() => {
+                setMessageMode(value);
+                if (value === "ai") setPersonalizeEach(true);
+              }}
+            >
               {label}
             </button>
           ))}
         </div>
         {messageMode !== "file_only" ? (
           <>
-            <textarea rows={4} value={message} onChange={(event) => setMessage(event.target.value)} placeholder="{{firstName}}, добрый день! ..." />
-            {messageMode === "ai" ? (
+            <textarea
+              rows={4}
+              value={message}
+              onChange={(event) => setMessage(event.target.value)}
+              placeholder={
+                messageMode === "ai" || personalizeEach
+                  ? "Что сделать клиентам, например: уточни актуальность заявки"
+                  : "{{firstName}}, добрый день! ..."
+              }
+            />
+            {messageMode === "ai" && !personalizeEach ? (
               <button type="button" className="btn secondary" disabled={busy} onClick={onAiDraft}>
                 Сгенерировать черновик
               </button>
             ) : null}
             <p className="muted">
-              Переменные: {"{{firstName}}"}, {"{{companyName}}"}, {"{{service}}"}, {"{{managerName}}"}. Пустое имя не даст «, добрый день!».
+              {messageMode === "ai" || personalizeEach
+                ? "Это задача для CRM, не текст в WhatsApp. Сообщения клиентам появятся ниже — из имени и интереса, без выдуманных цен и сроков."
+                : `Переменные: {{firstName}}, {{companyName}}, {{service}}, {{managerName}}. Пустое имя не даст «, добрый день!».`}
             </p>
             <label className="check-row">
               <input

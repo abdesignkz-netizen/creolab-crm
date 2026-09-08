@@ -1,4 +1,5 @@
 import { extractSpokenMessage } from "./aiCommandParserService.ts";
+import { isGenericLeadLabel } from "./contactInterestService.ts";
 
 export type CampaignOfferKind = "proposal" | "documents" | "follow_up" | "message";
 
@@ -42,16 +43,37 @@ export function inferCampaignOfferKind(taskText: string, sharedDraft = ""): Camp
 }
 
 export function firstNameOf(name?: string | null) {
-  const part = String(name || "").trim().split(/\s+/)[0] || "";
-  return part || null;
+  const raw = String(name || "").trim();
+  if (!raw || /без имени|не указан|unknown/i.test(raw)) return null;
+  const part = raw.split(/\s+/)[0] || "";
+  if (!part || /^(без|клиент|контакт|unknown)$/i.test(part)) return null;
+  return part;
+}
+
+/** Imperative to the CRM/manager, not a WhatsApp text for the client. */
+export function looksLikeStaffCommand(text: string) {
+  const t = String(text || "").replace(/\s+/g, " ").trim();
+  if (!t) return false;
+  if (/\{\{\s*\w+\s*\}\}/.test(t)) return false;
+  if (/добрый день|здравствуйте|во вложении|направляем|хотели уточнить/i.test(t)) return false;
+  if (t.length > 220) return false;
+  return /^(уточни(?:ть)?|отправ(?:ь|ьте|ить)|напиши|напомни(?:ть)?|собери|разошли|позвони|перезвон\w*|скажи|подготовь|сделай|проверь|свяжись)(?:\s|$|[.,!?])/i.test(
+    t,
+  );
 }
 
 function cleanFact(value?: string | null, max = 160) {
   return String(value || "").replace(/\s+/g, " ").trim().slice(0, max);
 }
 
+function clientFacingInterest(value?: string | null) {
+  const text = cleanFact(value);
+  if (!text || isGenericLeadLabel(text)) return null;
+  return text;
+}
+
 function aboutRequest(interest?: string | null, companyName?: string | null) {
-  const interestClean = cleanFact(interest);
+  const interestClean = clientFacingInterest(interest);
   if (interestClean) return `по вашему запросу «${interestClean}»`;
   const companyClean = cleanFact(companyName, 80);
   if (companyClean) return `по заявке ${companyClean}`;
@@ -77,13 +99,17 @@ function tidy(text: string) {
 
 export function composeRecipientOffer(input: RecipientOfferInput) {
   const taskText = String(input.taskText || "").trim();
-  const sharedDraft = String(input.sharedDraft || "").trim();
+  const sharedRaw = String(input.sharedDraft || "").trim();
+  const commandLikeDraft = looksLikeStaffCommand(sharedRaw);
+  const sharedDraft = commandLikeDraft ? "" : sharedRaw;
+  const effectiveTask = [taskText, commandLikeDraft ? sharedRaw : ""].filter(Boolean).join("\n");
   const firstName = firstNameOf(input.firstName);
   const companyName = cleanFact(input.companyName, 80) || null;
-  const interest = cleanFact(input.interest) || null;
+  const interest = clientFacingInterest(input.interest);
   const hasFile = Boolean(input.hasFile);
-  const kind = inferCampaignOfferKind(taskText, sharedDraft);
-  const spoken = extractSpokenMessage(taskText);
+  const kind = inferCampaignOfferKind(effectiveTask, sharedDraft);
+  const spokenRaw = extractSpokenMessage(effectiveTask);
+  const spoken = spokenRaw && !looksLikeStaffCommand(spokenRaw) ? spokenRaw : null;
   const greeting = firstName ? `${firstName}, добрый день!` : "Добрый день!";
   const about = aboutRequest(interest, companyName);
   const fileBit = hasFile ? " Во вложении — материалы." : "";

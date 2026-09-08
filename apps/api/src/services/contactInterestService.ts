@@ -57,6 +57,21 @@ export function inquiryInterest(inquiry?: { subject?: string | null; service?: s
   return text ? { text, source: "inquiry", messageId: null } : null;
 }
 
+/** Channel/source labels are not a client request — do not put them in outbound copy. */
+export function isGenericLeadLabel(value?: string | null) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (!text) return true;
+  return /^(заявка(\s+из)?(\s+(whatsapp|instagram|telegram|ватсап|формы?))?|whatsapp|instagram|telegram|ватсап|форма|лид|lead)$/i.test(text);
+}
+
+export function pickUsableInterest(...values: Array<string | null | undefined>) {
+  for (const value of values) {
+    const text = String(value || "").replace(/\s+/g, " ").trim();
+    if (text && !isGenericLeadLabel(text)) return text;
+  }
+  return null;
+}
+
 /** One tenant-scoped batch, including closed/imported dialogs; never calls AI or writes on GET. */
 export async function loadConversationInterests(prisma: PrismaClient, tenantId: string, contactIds: string[]) {
   const result = new Map<string, ContactInterest>();
