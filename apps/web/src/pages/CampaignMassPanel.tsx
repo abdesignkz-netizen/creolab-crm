@@ -1,5 +1,15 @@
 import { useEffect, useMemo, useState, type DragEvent } from "react";
+import { nameWithPhone } from "../lib/contactDisplay";
 import { api } from "../lib/api";
+
+type PickerClient = {
+  id: string;
+  name: string;
+  phone: string | null;
+  companyName?: string | null;
+  interest?: string | null;
+  statusLabel?: string | null;
+};
 
 type PhoneItem = {
   raw: string;
@@ -119,6 +129,10 @@ export function CampaignMassPanel({
   const [attachments, setAttachments] = useState<any[]>([]);
   const [queuedUploads, setQueuedUploads] = useState(initialPendingAttachments);
   const [contactIds, setContactIds] = useState(initialContactIds);
+  const [selectedContacts, setSelectedContacts] = useState<PickerClient[]>([]);
+  const [searchQ, setSearchQ] = useState("");
+  const [searchHits, setSearchHits] = useState<PickerClient[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
   const [segment, setSegment] = useState<SegmentBody | null>(initialSegment || null);
   const [segmentPreview, setSegmentPreview] = useState<{ total: number; clients: any[] } | null>(null);
   const [importPreview, setImportPreview] = useState<any>(null);
@@ -208,6 +222,51 @@ export function CampaignMassPanel({
     if (initialPhoneText.trim()) void parsePhones(initialPhoneText);
     if (initialSegment) void runSegment(initialSegment, false);
   }, []);
+
+  useEffect(() => {
+    if (whoMode !== "contacts") return;
+    setSearchLoading(true);
+    const timer = setTimeout(() => {
+      api
+        .searchContacts(searchQ.trim())
+        .then((data: any) => setSearchHits(data.clients || []))
+        .catch(() => setSearchHits([]))
+        .finally(() => setSearchLoading(false));
+    }, searchQ.trim() ? 220 : 0);
+    return () => clearTimeout(timer);
+  }, [searchQ, whoMode]);
+
+  useEffect(() => {
+    if (!initialContactIds.length) return;
+    let cancelled = false;
+    void api
+      .searchContacts("")
+      .then((data: any) => {
+        if (cancelled) return;
+        const byId = new Map<string, PickerClient>((data.clients || []).map((item: PickerClient) => [item.id, item]));
+        setSelectedContacts(
+          initialContactIds.map((id) => byId.get(id) || { id, name: "Клиент CRM", phone: null }),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSelectedContacts(initialContactIds.map((id) => ({ id, name: "Клиент CRM", phone: null })));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  function toggleContact(hit: PickerClient) {
+    setPrepare(null);
+    setSelectedContacts((previous) => {
+      const exists = previous.some((item) => item.id === hit.id);
+      const next = exists ? previous.filter((item) => item.id !== hit.id) : [...previous, hit];
+      setContactIds(next.map((item) => item.id));
+      return next;
+    });
+  }
 
   async function createDraft() {
     setBusy(true);
@@ -456,6 +515,10 @@ export function CampaignMassPanel({
               onClick={() => {
                 setWhoMode(value);
                 setPrepare(null);
+                if (value === "contacts") {
+                  setContactIds(selectedContacts.map((item) => item.id));
+                  setSearchLoading(true);
+                }
               }}
             >
               {label}
@@ -621,20 +684,87 @@ export function CampaignMassPanel({
         ) : null}
 
         {whoMode === "contacts" ? (
-          <p className="muted">Выбрано клиентов из CRM: {contactIds.length}</p>
+          <div className="field-block">
+            {selectedContacts.length ? (
+              <div className="cmd-selected-list">
+                <div className="muted" style={{ marginBottom: 6 }}>
+                  Выбрано клиентов из CRM: {selectedContacts.length}
+                </div>
+                {selectedContacts.map((client) => (
+                  <div key={client.id} className="selected-client compact">
+                    <div>
+                      <b>{nameWithPhone(client.name, client.phone)}</b>
+                      <div className="muted">{[client.companyName, client.interest].filter(Boolean).join(" · ")}</div>
+                    </div>
+                    <button type="button" className="btn secondary" onClick={() => toggleContact(client)}>
+                      Убрать
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="muted">Выбрано клиентов из CRM: 0</p>
+            )}
+            <label>
+              Найти или выбрать клиента
+              <input
+                value={searchQ}
+                onChange={(event) => setSearchQ(event.target.value)}
+                placeholder="Имя, телефон, компания"
+                autoComplete="off"
+              />
+            </label>
+            {searchHits.length > 0 ? (
+              <>
+                <div className="muted" style={{ marginTop: 8 }}>
+                  {searchQ.trim() ? `Найдено: ${searchHits.length}` : "Клиенты CRM — нажмите, чтобы выбрать"}
+                </div>
+                <div className="picker-list" role="listbox" aria-label="Клиенты CRM">
+                  {searchHits.map((hit) => {
+                    const already = selectedContacts.some((item) => item.id === hit.id);
+                    return (
+                      <button
+                        key={hit.id}
+                        type="button"
+                        className="picker-item"
+                        disabled={already}
+                        onClick={() => {
+                          if (already) return;
+                          toggleContact(hit);
+                          setSearchQ("");
+                        }}
+                      >
+                        <b>{nameWithPhone(hit.name, hit.phone)}</b>
+                        <div className="muted">
+                          {[hit.companyName, hit.interest, hit.statusLabel].filter(Boolean).join(" · ")}
+                          {already ? " · уже выбран" : ""}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            ) : searchQ.trim() ? (
+              <p className="muted">Никого не нашли. Попробуйте другой запрос или вкладку «Список номеров».</p>
+            ) : (
+              <p className="muted">{searchLoading ? "Загрузка клиентов…" : "В CRM пока нет клиентов для выбора."}</p>
+            )}
+          </div>
         ) : null}
 
-        <fieldset className="field-block">
-          <legend className="muted">Что делать с новыми контактами?</legend>
-          <label className="check-row">
-            <input type="radio" checked={createMissing} onChange={() => setCreateMissing(true)} />
-            Создать клиентов автоматически (минимальные записи)
-          </label>
-          <label className="check-row">
-            <input type="radio" checked={!createMissing} onChange={() => setCreateMissing(false)} />
-            Отправить без создания клиента
-          </label>
-        </fieldset>
+        {whoMode === "phones" || whoMode === "import" ? (
+          <fieldset className="field-block">
+            <legend className="muted">Что делать с новыми контактами?</legend>
+            <label className="check-row">
+              <input type="radio" checked={createMissing} onChange={() => setCreateMissing(true)} />
+              Создать клиентов автоматически (минимальные записи)
+            </label>
+            <label className="check-row">
+              <input type="radio" checked={!createMissing} onChange={() => setCreateMissing(false)} />
+              Отправить без создания клиента
+            </label>
+          </fieldset>
+        ) : null}
       </div>
 
       <div className="command-step">
