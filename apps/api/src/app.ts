@@ -17,6 +17,7 @@ import {
   createFromCommandSchema,
   completeTaskResultSchema,
   campaignAttachmentSchema,
+  confirmCampaignSchema,
   createCampaignSchema,
   loginSchema,
   lookupInquiryContactSchema,
@@ -685,8 +686,9 @@ export function createApp(prisma: PrismaClient) {
     res.json(await prepareCampaign(prisma, await requireAuth(req), req.params.id));
   });
 
-  app.post("/api/v1/campaigns/:id/confirm", async (req, res) => {
-    res.json(await confirmCampaign(prisma, await requireAuth(req), req.params.id));
+  app.post("/api/v1/campaigns/:id/confirm", json, async (req, res) => {
+    const input = confirmCampaignSchema.parse(req.body || {});
+    res.json(await confirmCampaign(prisma, await requireAuth(req), req.params.id, input));
   });
 
   app.post("/api/v1/campaigns/:id/start", async (req, res) => {

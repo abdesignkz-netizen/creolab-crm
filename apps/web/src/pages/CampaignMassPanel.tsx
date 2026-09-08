@@ -52,6 +52,23 @@ function formatBytes(n: number) {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function toDateTimeLocal(value: Date) {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}T${pad(value.getHours())}:${pad(value.getMinutes())}`;
+}
+
+function datetimeLocalToIso(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(String(value || "").trim());
+  if (!match) return "";
+  return new Date(
+    Number(match[1]),
+    Number(match[2]) - 1,
+    Number(match[3]),
+    Number(match[4]),
+    Number(match[5]),
+  ).toISOString();
+}
+
 function readFileBase64(file: File) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -269,6 +286,11 @@ export function CampaignMassPanel({
   }
 
   async function createDraft() {
+    const scheduledIso = whenMode === "schedule" ? datetimeLocalToIso(scheduledAt) : "";
+    if (whenMode === "schedule" && (!scheduledIso || new Date(scheduledIso).getTime() <= Date.now())) {
+      setError("Укажите дату и время в будущем");
+      return;
+    }
     setBusy(true);
     try {
       const body: any = {
@@ -278,7 +300,7 @@ export function CampaignMassPanel({
         messageMode,
         personalizeEach: personalizeEach && messageMode !== "file_only",
         createMissingClients: createMissing,
-        scheduledAt: whenMode === "schedule" && scheduledAt ? new Date(scheduledAt).toISOString() : null,
+        scheduledAt: whenMode === "schedule" ? scheduledIso || null : null,
         rawCommandText: commandText || (personalizeEach || messageMode === "ai" ? message.trim() : "") || undefined,
         contactIds: whoMode === "contacts" || whoMode === "segment" ? contactIds : undefined,
         phoneListText:
@@ -320,6 +342,10 @@ export function CampaignMassPanel({
     setCampaign(data);
     setAttachments((data as any).attachments || []);
     if (typeof (data as any).personalizeEach === "boolean") setPersonalizeEach((data as any).personalizeEach);
+    if ((data as any).scheduledAt) {
+      setWhenMode("schedule");
+      setScheduledAt(toDateTimeLocal(new Date((data as any).scheduledAt)));
+    }
   }
 
   async function onPersonalizeOffers() {
@@ -429,12 +455,17 @@ export function CampaignMassPanel({
     if (!campaignId) return;
     setBusy(true);
     try {
+      const scheduledIso = whenMode === "schedule" ? datetimeLocalToIso(scheduledAt) : "";
+      if (whenMode === "schedule" && (!scheduledIso || new Date(scheduledIso).getTime() <= Date.now())) {
+        setError("Укажите дату и время в будущем");
+        return;
+      }
       await api.updateCampaign(campaignId, {
         messageDraft: messageMode === "file_only" ? "" : message,
         messageMode,
         personalizeEach: personalizeEach && messageMode !== "file_only",
         createMissingClients: createMissing,
-        scheduledAt: whenMode === "schedule" && scheduledAt ? new Date(scheduledAt).toISOString() : null,
+        scheduledAt: whenMode === "schedule" ? scheduledIso || null : null,
         recipientDrafts:
           personalizeEach && messageMode !== "file_only"
             ? ((campaign?.recipients || []) as Array<{ id: string; status: string; messageDraft?: string | null }>)
@@ -455,10 +486,22 @@ export function CampaignMassPanel({
 
   async function onConfirmAndSend() {
     if (!campaignId) return;
+    const scheduledIso = whenMode === "schedule" ? datetimeLocalToIso(scheduledAt) : "";
+    if (whenMode === "schedule" && (!scheduledIso || new Date(scheduledIso).getTime() <= Date.now())) {
+      setError("Укажите дату и время в будущем");
+      return;
+    }
     setBusy(true);
     try {
-      const confirmed: any = await api.confirmCampaign(campaignId);
-      if (confirmed.campaign?.status === "scheduled") {
+      await api.updateCampaign(campaignId, {
+        scheduledAt: whenMode === "schedule" ? scheduledIso || null : null,
+      });
+      const confirmed: any = await api.confirmCampaign(campaignId, {
+        scheduledAt: whenMode === "schedule" ? scheduledIso || null : null,
+      });
+      const due = confirmed.campaign?.scheduledAt;
+      const later = confirmed.campaign?.status === "scheduled" || (due && new Date(due).getTime() > Date.now());
+      if (later) {
         setCampaign(await api.campaign(campaignId));
         setPrepare(null);
         setError("");
@@ -962,17 +1005,38 @@ export function CampaignMassPanel({
       <div className="command-step">
         <div className="command-step-label">Когда</div>
         <div className="chip-row">
-          <button type="button" className={whenMode === "now" ? "chip active" : "chip"} onClick={() => setWhenMode("now")}>
+          <button
+            type="button"
+            className={whenMode === "now" ? "chip active" : "chip"}
+            onClick={() => {
+              setWhenMode("now");
+              setPrepare(null);
+            }}
+          >
             Сейчас
           </button>
-          <button type="button" className={whenMode === "schedule" ? "chip active" : "chip"} onClick={() => setWhenMode("schedule")}>
+          <button
+            type="button"
+            className={whenMode === "schedule" ? "chip active" : "chip"}
+            onClick={() => {
+              setWhenMode("schedule");
+              setPrepare(null);
+            }}
+          >
             Запланировать
           </button>
         </div>
         {whenMode === "schedule" ? (
           <label>
             Дата и время
-            <input type="datetime-local" value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} />
+            <input
+              type="datetime-local"
+              value={scheduledAt}
+              onChange={(event) => {
+                setScheduledAt(event.target.value);
+                setPrepare(null);
+              }}
+            />
           </label>
         ) : null}
       </div>

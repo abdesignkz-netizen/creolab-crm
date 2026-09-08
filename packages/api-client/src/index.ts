@@ -198,7 +198,8 @@ export function createApiClient(options: ClientOptions) {
     personalizeCampaignRecipients: (id: string, body: { useLlm?: boolean } = {}) =>
       request(`/api/v1/campaigns/${id}/personalize-recipients`, { method: "POST", body: JSON.stringify(body) }),
     prepareCampaign: (id: string) => request(`/api/v1/campaigns/${id}/prepare`, { method: "POST" }),
-    confirmCampaign: (id: string) => request(`/api/v1/campaigns/${id}/confirm`, { method: "POST" }),
+    confirmCampaign: (id: string, body: { scheduledAt?: string | null } = {}) =>
+      request(`/api/v1/campaigns/${id}/confirm`, { method: "POST", body: JSON.stringify(body) }),
     startCampaign: (id: string) => request(`/api/v1/campaigns/${id}/start`, { method: "POST" }),
     pauseCampaign: (id: string) => request(`/api/v1/campaigns/${id}/pause`, { method: "POST" }),
     cancelCampaignRemainder: (id: string) =>

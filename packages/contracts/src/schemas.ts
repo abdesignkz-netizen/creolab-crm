@@ -247,6 +247,10 @@ export const updateCampaignSchema = z.object({
     .optional(),
 });
 
+export const confirmCampaignSchema = z.object({
+  scheduledAt: z.string().datetime().nullable().optional(),
+});
+
 export const personalizeCampaignRecipientsSchema = z.object({
   useLlm: z.boolean().optional(),
 });

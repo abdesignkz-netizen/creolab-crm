@@ -79,6 +79,13 @@ function requireTenant(auth: AuthContext) {
   return auth.activeMembership;
 }
 
+export function campaignSendLater(scheduledAt: Date | string | null | undefined, now = new Date()) {
+  if (!scheduledAt) return false;
+  const due = scheduledAt instanceof Date ? scheduledAt : new Date(scheduledAt);
+  if (Number.isNaN(due.getTime())) return false;
+  return due.getTime() > now.getTime();
+}
+
 function contentHash(message: string | null, attachments: unknown[], recipientFingerprint = "") {
   return hashExecutionContent({
     message: recipientFingerprint ? `${message || ""}\n${recipientFingerprint}` : message || "",
@@ -497,11 +504,13 @@ export async function prepareCampaign(prisma: PrismaClient, auth: AuthContext, i
       sizeBytes: a.sizeBytes,
       documentType: a.documentType,
     })),
-    when: data.scheduledAt ? data.scheduledAt.toISOString() : "Сейчас",
+    when: campaignSendLater(data.scheduledAt) ? data.scheduledAt!.toISOString() : "Сейчас",
     personalizationPreviews: data.personalizationPreviews,
     createMissingClients: data.createMissingClients,
     buttons: {
-      confirm: `Подтвердить и отправить ${pending.length} контактам`,
+      confirm: campaignSendLater(data.scheduledAt)
+        ? `Подтвердить и запланировать ${pending.length} контактам`
+        : `Подтвердить и отправить ${pending.length} контактам`,
       back: "Вернуться и изменить",
     },
     recipientsPreview: pending.slice(0, 50).map((r) => ({
@@ -523,8 +532,19 @@ export async function prepareCampaign(prisma: PrismaClient, auth: AuthContext, i
   };
 }
 
-export async function confirmCampaign(prisma: PrismaClient, auth: AuthContext, id: string) {
+export async function confirmCampaign(
+  prisma: PrismaClient,
+  auth: AuthContext,
+  id: string,
+  input: { scheduledAt?: string | null } = {},
+) {
   const membership = requireTenant(auth);
+  if (input.scheduledAt !== undefined) {
+    await prisma.campaign.update({
+      where: { id },
+      data: { scheduledAt: input.scheduledAt ? new Date(input.scheduledAt) : null },
+    });
+  }
   const prepared = await prepareCampaign(prisma, auth, id);
   const campaign = await prisma.campaign.findFirst({
     where: { id, tenantId: membership.tenantId },
@@ -551,7 +571,13 @@ export async function confirmCampaign(prisma: PrismaClient, auth: AuthContext, i
     messageDraft: r.messageDraft || null,
   }));
   const hash = campaignHashInput(campaign, pending, attachmentSnapshots);
-  const status = campaign.scheduledAt && campaign.scheduledAt.getTime() > Date.now() ? "scheduled" : "awaiting_confirmation";
+  const later = campaignSendLater(campaign.scheduledAt);
+  const status = later ? "scheduled" : "awaiting_confirmation";
+
+  await prisma.scheduledAction.updateMany({
+    where: { tenantId: membership.tenantId, parentType: "campaign", parentId: id, type: "campaign_run", state: "scheduled" },
+    data: { state: "canceled", cancelReason: later ? "rescheduled" : "send_now" },
+  });
 
   const updated = await prisma.campaign.update({
     where: { id },
@@ -566,14 +592,14 @@ export async function confirmCampaign(prisma: PrismaClient, auth: AuthContext, i
     },
   });
 
-  if (status === "scheduled") {
+  if (later && campaign.scheduledAt) {
     await prisma.scheduledAction.create({
       data: {
         tenantId: membership.tenantId,
         type: "campaign_run",
         parentType: "campaign",
         parentId: id,
-        dueAt: campaign.scheduledAt!,
+        dueAt: campaign.scheduledAt,
         state: "scheduled",
         payloadJson: { campaignId: id },
       },
@@ -590,7 +616,7 @@ export async function startCampaign(prisma: PrismaClient, auth: AuthContext, id:
   if (!campaign.confirmedAt || !campaign.contentHash) {
     throw new ApiError(409, "needs_confirmation", "Сначала подтвердите рассылку");
   }
-  if (campaign.scheduledAt && campaign.scheduledAt.getTime() > Date.now()) {
+  if (campaignSendLater(campaign.scheduledAt)) {
     throw new ApiError(409, "scheduled", "Рассылка запланирована на будущее");
   }
   const attachments = await campaignAttachments(prisma, membership.tenantId, id);
@@ -659,9 +685,8 @@ export async function processCampaignQueue(prisma: PrismaClient, campaignId: str
       include: { recipients: true },
     });
     if (!campaign || campaign.status === "paused" || campaign.status === "cancelled") return;
-    if (campaign.status !== "running") {
-      await prisma.campaign.update({ where: { id: campaignId }, data: { status: "running", startedAt: campaign.startedAt || new Date() } });
-    }
+    if (campaign.status === "scheduled" && campaignSendLater(campaign.scheduledAt)) return;
+    if (campaign.status !== "running") return;
 
     const batch = await prisma.campaignRecipient.findMany({
       where: { campaignId, status: "queued" },

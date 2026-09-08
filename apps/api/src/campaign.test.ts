@@ -275,4 +275,53 @@ describe("campaign API flow", () => {
     assert.ok(messages.some((text: string) => /сайт/i.test(text)));
     assert.ok(messages.some((text: string) => /презентац/i.test(text)));
   });
+
+  it("будущая дата ставит рассылку в очередь и не отправляет сразу", async () => {
+    const due = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+    const create = await fetch(`${url}/api/v1/campaigns`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        title: "Плановая рассылка",
+        phoneListText: "+7 701 999 00 31",
+        messageDraft: "Добрый день! Плановая проверка.",
+        messageMode: "manual",
+        createMissingClients: true,
+        scheduledAt: due,
+      }),
+    });
+    const createBody = await create.text();
+    assert.equal(create.status, 201, createBody);
+    const id = JSON.parse(createBody).campaign.id as string;
+
+    const prepare = await fetch(`${url}/api/v1/campaigns/${id}/prepare`, { method: "POST", headers: { cookie } });
+    assert.equal(prepare.status, 200, await prepare.text());
+
+    const confirm = await fetch(`${url}/api/v1/campaigns/${id}/confirm`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ scheduledAt: due }),
+    });
+    const confirmBody = await confirm.text();
+    assert.equal(confirm.status, 200, confirmBody);
+    const confirmed = JSON.parse(confirmBody);
+    assert.equal(confirmed.campaign.status, "scheduled");
+
+    const start = await fetch(`${url}/api/v1/campaigns/${id}/start`, { method: "POST", headers: { cookie } });
+    assert.equal(start.status, 409);
+
+    const { processCampaignQueue } = await import("./services/campaignService.ts");
+    await processCampaignQueue(prisma, id);
+    const campaign = await prisma.campaign.findUniqueOrThrow({
+      where: { id },
+      include: { recipients: true },
+    });
+    assert.equal(campaign.status, "scheduled");
+    assert.equal(campaign.recipients.filter((row) => row.status === "sent").length, 0);
+    const action = await prisma.scheduledAction.findFirst({
+      where: { parentType: "campaign", parentId: id, type: "campaign_run", state: "scheduled" },
+    });
+    assert.ok(action);
+    assert.equal(new Date(action.dueAt).getTime(), new Date(due).getTime());
+  });
 });

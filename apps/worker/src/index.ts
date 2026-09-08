@@ -145,11 +145,19 @@ async function processScheduled() {
       continue;
     }
     if (item.type === "campaign_run") {
+      if (item.dueAt.getTime() > Date.now()) continue;
       const campaignId = item.parentId;
-      await prisma.campaign.updateMany({
+      const started = await prisma.campaign.updateMany({
         where: { id: campaignId, status: "scheduled" },
         data: { status: "running", startedAt: new Date() },
       });
+      if (started.count === 0) {
+        await prisma.scheduledAction.update({
+          where: { id: item.id },
+          data: { state: "canceled", cancelReason: "campaign_not_scheduled" },
+        });
+        continue;
+      }
       await prisma.campaignRecipient.updateMany({
         where: { campaignId, status: "pending" },
         data: { status: "queued" },
