@@ -76,8 +76,114 @@ async function voidConfirmations(prisma: PrismaClient, tid: string, taskId: stri
   });
 }
 
+export const SCHEDULED_TASK_ACTION_TYPES = ["task_run", "task_batch_run"] as const;
+const DUE_SEND_GRACE_MS = 15_000;
+
+export function taskSendDueLater(dueAt: Date | string | null | undefined, now = new Date()) {
+  if (!dueAt) return false;
+  const due = dueAt instanceof Date ? dueAt : new Date(dueAt);
+  if (Number.isNaN(due.getTime())) return false;
+  return due.getTime() > now.getTime() + DUE_SEND_GRACE_MS;
+}
+
+export async function cancelScheduledTaskSends(
+  prisma: PrismaClient,
+  tenantId: string,
+  taskId: string,
+  reason: string,
+) {
+  await prisma.scheduledAction.updateMany({
+    where: {
+      tenantId,
+      parentType: "task",
+      parentId: taskId,
+      state: "scheduled",
+      type: { in: [...SCHEDULED_TASK_ACTION_TYPES] },
+    },
+    data: { state: "canceled", cancelReason: reason },
+  });
+}
+
+export async function scheduleConfirmedTaskSend(
+  prisma: PrismaClient,
+  auth: AuthContext,
+  taskId: string,
+  options: { batch?: boolean } = {},
+) {
+  const { tid, task } = await taskInTenant(prisma, auth, taskId);
+  if (!task.dueAt || !taskSendDueLater(task.dueAt)) {
+    throw new ApiError(409, "not_scheduled", "Срок уже наступил — отправьте сейчас");
+  }
+  if (!options.batch) {
+    const confirmation = await prisma.executionConfirmation.findFirst({
+      where: { tenantId: tid, taskId, voidedAt: null },
+    });
+    if (!confirmation) {
+      throw new ApiError(409, "not_confirmed", "Сначала подтвердите отправку");
+    }
+  } else {
+    const children = await prisma.task.findMany({
+      where: { tenantId: tid, parentTaskId: taskId, status: { in: ["open", "waiting"] } },
+      select: { id: true },
+    });
+    for (const child of children) {
+      const confirmation = await prisma.executionConfirmation.findFirst({
+        where: { tenantId: tid, taskId: child.id, voidedAt: null },
+      });
+      if (!confirmation) {
+        throw new ApiError(409, "not_confirmed", "Сначала подтвердите отправку по всем получателям");
+      }
+    }
+  }
+
+  await cancelScheduledTaskSends(prisma, tid, taskId, "rescheduled");
+  const action = await prisma.scheduledAction.create({
+    data: {
+      tenantId: tid,
+      type: options.batch ? "task_batch_run" : "task_run",
+      parentType: "task",
+      parentId: taskId,
+      dueAt: task.dueAt,
+      state: "scheduled",
+      payloadJson: {
+        taskId,
+        confirmedById: auth.user.id,
+        batch: Boolean(options.batch),
+      },
+    },
+  });
+  await prisma.task.update({
+    where: { id: taskId },
+    data: {
+      executionStatus: "scheduled",
+      commandStatus: "scheduled",
+      status: "open",
+    },
+  });
+  if (options.batch) {
+    await prisma.task.updateMany({
+      where: { parentTaskId: taskId, tenantId: tid, status: { in: ["open", "waiting"] } },
+      data: { executionStatus: "scheduled" },
+    });
+  }
+  return {
+    scheduled: true,
+    success: false,
+    dueAt: task.dueAt.toISOString(),
+    scheduledActionId: action.id,
+    status: "scheduled" as const,
+    note: `Отправка запланирована на ${task.dueAt.toLocaleString("ru-RU")}. Задача остаётся в «Запланировано».`,
+    parentId: taskId,
+    total: 0,
+    failed: 0,
+    results: [] as Array<{ taskId: string; contactId: string | null; success: boolean; error?: string }>,
+    nextActions: [] as Array<{ type: string; title: string; dueOffsetHours: number | null }>,
+  };
+}
+
 async function invalidateExecution(prisma: PrismaClient, tid: string, taskId: string) {
   await voidConfirmations(prisma, tid, taskId);
+  await cancelScheduledTaskSends(prisma, tid, taskId, "content_changed");
   await prisma.task.update({
     where: { id: taskId },
     data: { executionStatus: "prepared", confirmedAt: null },
@@ -475,9 +581,11 @@ export async function prepareTaskExecution(prisma: PrismaClient, auth: AuthConte
       sendState: item.sendState,
     })),
     preparedAtLabel: formatWhen(new Date(), timeZone),
+    dueAt: task.dueAt,
+    scheduled: taskSendDueLater(task.dueAt),
     buttons: {
       back: "Вернуться и изменить",
-      confirm: "Подтвердить и отправить",
+      confirm: taskSendDueLater(task.dueAt) ? "Запланировать отправку" : "Подтвердить и отправить",
     },
   };
 }
@@ -537,7 +645,7 @@ export async function executeTask(
   prisma: PrismaClient,
   auth: AuthContext,
   id: string,
-  options: { retryFailedFilesOnly?: boolean } = {},
+  options: { retryFailedFilesOnly?: boolean; runScheduled?: boolean } = {},
 ) {
   const { tid, task } = await taskInTenant(prisma, auth, id);
   const confirmation = await prisma.executionConfirmation.findFirst({
@@ -566,6 +674,10 @@ export async function executeTask(
   if (contentHash !== confirmation.contentHash) {
     await invalidateExecution(prisma, tid, id);
     throw new ApiError(409, "stale_confirmation", "Данные отправки изменились. Необходимо повторное подтверждение.");
+  }
+
+  if (!options.runScheduled && !options.retryFailedFilesOnly && taskSendDueLater(task.dueAt)) {
+    return scheduleConfirmedTaskSend(prisma, auth, id, { batch: false });
   }
 
   let conversation = confirmation.conversationId

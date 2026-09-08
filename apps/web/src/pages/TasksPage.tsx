@@ -212,6 +212,13 @@ const SOURCE_OPTIONS = [
   { id: "manual", label: "Вручную" },
 ];
 
+function isFutureDue(value?: string | Date | null, now = Date.now()) {
+  if (!value) return false;
+  const due = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(due.getTime())) return false;
+  return due.getTime() > now + 15_000;
+}
+
 function dueGroup(item: any, now: Date) {
   if (!item.dueAt) return "none";
   const due = new Date(item.dueAt);
@@ -779,7 +786,12 @@ export function TasksPage() {
       await api.confirmTaskExecution(activeTaskId);
       const result = await api.executeTask(activeTaskId);
       setExecResult(result);
-      if ((result as any).success) {
+      if ((result as any).scheduled) {
+        setPreview(null);
+        setActiveTaskId(null);
+        setTaskDetail(null);
+        await load();
+      } else if ((result as any).success) {
         setNextPanel({ taskId: activeTaskId, actions: (result as any).nextActions || [] });
         setPreview(null);
         setActiveTaskId(null);
@@ -1063,29 +1075,54 @@ export function TasksPage() {
     try {
       const isGroup = commandSelectedIds.length > 1 || commandParse?.command?.targetType === "group";
       if (isGroup && commandSelectedIds.length > 1) {
-        const result = await api.executeTaskBatch(commandTaskId);
-        setBatchResult(result);
-        setNextPanel({
-          taskId: commandTaskId,
-          actions: (result as any).nextActions || [],
-        });
+        const result: any = await api.executeTaskBatch(commandTaskId);
+        if (result.scheduled) {
+          setBatchResult({
+            scheduled: true,
+            dueAt: result.dueAt,
+            message: result.note,
+            total: result.total || commandSelectedIds.length,
+            success: 0,
+            failed: 0,
+          });
+          setCommandTaskId(null);
+        } else {
+          setBatchResult(result);
+          setNextPanel({
+            taskId: commandTaskId,
+            actions: result.nextActions || [],
+          });
+        }
       } else {
         await api.prepareTaskExecution(commandTaskId);
         await api.confirmTaskExecution(commandTaskId);
         const result: any = await api.executeTask(commandTaskId);
-        setBatchResult({
-          total: 1,
-          success: result.success ? 1 : 0,
-          failed: result.success ? 0 : 1,
-          textOk: result.textOk,
-          textError: result.textError,
-          files: result.files || [],
-          retryFilesAvailable: Boolean(result.retryFilesAvailable),
-          taskId: commandTaskId,
-        });
-        if (result.success && result.nextActions?.length) {
-          setNextPanel({ taskId: commandTaskId, actions: result.nextActions });
+        if (result.scheduled) {
+          setBatchResult({
+            scheduled: true,
+            dueAt: result.dueAt,
+            message: result.note,
+            total: 1,
+            success: 0,
+            failed: 0,
+            taskId: commandTaskId,
+          });
           setCommandTaskId(null);
+        } else {
+          setBatchResult({
+            total: 1,
+            success: result.success ? 1 : 0,
+            failed: result.success ? 0 : 1,
+            textOk: result.textOk,
+            textError: result.textError,
+            files: result.files || [],
+            retryFilesAvailable: Boolean(result.retryFilesAvailable),
+            taskId: commandTaskId,
+          });
+          if (result.success && result.nextActions?.length) {
+            setNextPanel({ taskId: commandTaskId, actions: result.nextActions });
+            setCommandTaskId(null);
+          }
         }
       }
       await load();
@@ -1136,6 +1173,7 @@ export function TasksPage() {
     done: items.filter((item) => isClosedTask(item)).length,
     all: items.length,
   };
+  const commandWillSchedule = commandDueMode === "scheduled" && isFutureDue(commandDueAt);
 
   return (
     <section>
@@ -1588,16 +1626,21 @@ export function TasksPage() {
               </button>
             </div>
             {commandDueMode === "scheduled" ? (
-              <label>
-                Когда выполнить
-                <input
-                  type="datetime-local"
-                  value={commandDueAt}
-                  onChange={(event) => setCommandDueAt(event.target.value)}
-                />
-              </label>
+              <>
+                <label>
+                  Когда выполнить
+                  <input
+                    type="datetime-local"
+                    value={commandDueAt}
+                    onChange={(event) => setCommandDueAt(event.target.value)}
+                  />
+                </label>
+                <p className="muted">
+                  Задача сразу попадёт в «Запланировано». После подтверждения CRM отправит сообщение в это время, не раньше.
+                </p>
+              </>
             ) : (
-              <p className="muted">Задача появится сразу в открытых, без откладывания.</p>
+              <p className="muted">Задача появится сразу в открытых. После подтверждения CRM отправит сообщение сейчас.</p>
             )}
           </div>
 
@@ -1658,7 +1701,11 @@ export function TasksPage() {
                   </b>
                 </div>
               </div>
-              <p className="muted">{commandParse.understanding?.consequence}</p>
+              <p className="muted">
+                {commandWillSchedule
+                  ? "После подтверждения CRM поставит задачу в «Запланировано» и отправит сообщение в указанное время, не сразу."
+                  : commandParse.understanding?.consequence}
+              </p>
 
               {(commandParse.command?.ambiguities || []).length ? (
                 <div className="banner warn">
@@ -1793,7 +1840,7 @@ export function TasksPage() {
                       Вернуться и изменить
                     </button>
                     <button type="button" className="btn" disabled={busy} onClick={onConfirmCommandSend}>
-                      Подтвердить и отправить
+                      {commandWillSchedule ? "Запланировать отправку" : "Подтвердить и отправить"}
                     </button>
                   </div>
                 </div>
@@ -1801,7 +1848,17 @@ export function TasksPage() {
 
               {batchResult ? (
                 <div className="panel soft" style={{ marginTop: 12 }}>
-                  {batchResult.prepareOnly ? (
+                  {batchResult.scheduled ? (
+                    <>
+                      <b>Запланировано</b>
+                      <p>
+                        {batchResult.message ||
+                          (batchResult.dueAt
+                            ? `Отправка запланирована на ${new Date(batchResult.dueAt).toLocaleString("ru-RU")}`
+                            : "Задача остаётся в «Запланировано».")}
+                      </p>
+                    </>
+                  ) : batchResult.prepareOnly ? (
                     <p>{batchResult.message}</p>
                   ) : (
                     <>
@@ -2388,7 +2445,9 @@ export function TasksPage() {
               </button>
             ) : (
               <button type="button" className="btn" disabled={busy} onClick={onConfirmAndSend}>
-                Подтвердить и отправить
+                {preview.scheduled || isFutureDue(taskDetail?.dueAt)
+                  ? "Запланировать отправку"
+                  : preview.buttons?.confirm || "Подтвердить и отправить"}
               </button>
             )}
           </div>
@@ -2528,6 +2587,9 @@ export function TasksPage() {
                   <div className="task-row-title">
                     <b>{item.title}</b>
                     {item.overdue ? <span className="deal-flag">Просрочено</span> : null}
+                    {item.sendScheduled || item.executionStatus === "scheduled" ? (
+                      <span className="deal-flag">Отправка запланирована</span>
+                    ) : null}
                   </div>
                   <div className="task-meta-grid">
                     <div>

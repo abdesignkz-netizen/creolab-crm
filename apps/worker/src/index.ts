@@ -133,6 +133,17 @@ async function processScheduled() {
       });
       continue;
     }
+    if (item.type === "task_run" || item.type === "task_batch_run") {
+      const { processScheduledTask } = await import("../../api/src/services/scheduledTaskRunner.ts");
+      await processScheduledTask(prisma, item).catch(async (error: unknown) => {
+        console.error("scheduled task", error);
+        await prisma.scheduledAction.update({
+          where: { id: item.id },
+          data: { state: "failed", cancelReason: error instanceof Error ? error.message : "error" },
+        });
+      });
+      continue;
+    }
     if (item.type === "campaign_run") {
       const campaignId = item.parentId;
       await prisma.campaign.updateMany({

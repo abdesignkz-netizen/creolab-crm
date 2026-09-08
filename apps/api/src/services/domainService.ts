@@ -192,6 +192,25 @@ function primaryPhoneFromMethods(
   return primary?.rawValue || primary?.normalizedValue || null;
 }
 
+async function scheduledSendByTaskIds(prisma: PrismaClient, tenantId: string, taskIds: string[]) {
+  if (!taskIds.length) return new Map<string, Date>();
+  const rows = await prisma.scheduledAction.findMany({
+    where: {
+      tenantId,
+      parentType: "task",
+      parentId: { in: taskIds },
+      state: "scheduled",
+      type: { in: ["task_run", "task_batch_run"] },
+    },
+    orderBy: { dueAt: "desc" },
+  });
+  const map = new Map<string, Date>();
+  for (const row of rows) {
+    if (!map.has(row.parentId)) map.set(row.parentId, row.dueAt);
+  }
+  return map;
+}
+
 export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
   const tid = tenantId(auth);
   const now = new Date();
@@ -236,6 +255,7 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
     list.push({ fileName: row.fileName, sendError: row.sendError });
     failedByTask.set(row.parentId, list);
   }
+  const scheduledSendAtByTask = await scheduledSendByTaskIds(prisma, tid, taskIds);
 
   return items.map((item) => {
     const conversation = item.conversationId ? byId.get(item.conversationId) || null : null;
@@ -312,6 +332,8 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
       needsFileRetry,
       failedFiles,
       executionStatus: item.executionStatus,
+      scheduledSendAt: scheduledSendAtByTask.get(item.id) || null,
+      sendScheduled: item.executionStatus === "scheduled" || scheduledSendAtByTask.has(item.id),
     };
   });
 }
@@ -363,9 +385,12 @@ export async function getTask(prisma: PrismaClient, auth: AuthContext, id: strin
     item.contact?.methods?.find((m) => m.type === "phone" && m.primary) ||
     item.contact?.methods?.find((m) => m.type === "phone") ||
     null;
+  const scheduledSendAt = (await scheduledSendByTaskIds(prisma, tid, [id])).get(id) || null;
 
   return {
     ...item,
+    scheduledSendAt,
+    sendScheduled: item.executionStatus === "scheduled" || Boolean(scheduledSendAt),
     attachments,
     isSendable: ["proposal", "message", "send_documents", "prepare_estimate", "follow_up", "process_inquiry"].includes(item.type),
     briefing: {

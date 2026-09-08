@@ -225,4 +225,105 @@ describe("AI task commands", () => {
     assert.ok(body.task?.dueAt);
     assert.equal(new Date(body.task.dueAt).getTime(), new Date(dueAt).getTime());
   });
+
+  it("будущий срок: подтверждение планирует и не отправляет", async () => {
+    const contact = await prisma.contact.create({
+      data: { tenantId, name: "Плановая Отправка", firstName: "Плановая", lastName: "Отправка" },
+    });
+    const conversation = await prisma.conversation.create({
+      data: {
+        tenantId,
+        contactId: contact.id,
+        mode: "human",
+        status: "open",
+        sellerLeadId: "test-lead-scheduled-task",
+      },
+    });
+    const dueAt = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
+    const created = await fetch(`${base}/api/v1/tasks/from-command`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({
+        text: "Напиши и уточни по заявке",
+        parsedCommand: { taskType: "message", executionMode: "execute", riskLevel: 3 },
+        clientIds: [contact.id],
+        messageDraft: "Добрый день! Уточняем по заявке.",
+        dueAt,
+      }),
+    });
+    assert.equal(created.status, 201);
+    const createdBody = await created.json();
+    const taskId = createdBody.task.id as string;
+    const messagesBefore = await prisma.message.count({ where: { conversationId: conversation.id } });
+
+    const prepare = await fetch(`${base}/api/v1/tasks/${taskId}/prepare-execution`, {
+      method: "POST",
+      headers: { cookie },
+    });
+    assert.equal(prepare.status, 200);
+    const preview = await prepare.json();
+    assert.equal(preview.scheduled, true);
+    assert.equal(preview.buttons.confirm, "Запланировать отправку");
+
+    const confirm = await fetch(`${base}/api/v1/tasks/${taskId}/confirm-execution`, {
+      method: "POST",
+      headers: { cookie },
+    });
+    assert.equal(confirm.status, 200);
+
+    const execute = await fetch(`${base}/api/v1/tasks/${taskId}/execute`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie },
+      body: "{}",
+    });
+    assert.equal(execute.status, 200);
+    const execBody = await execute.json();
+    assert.equal(execBody.scheduled, true);
+    assert.ok(execBody.scheduledActionId);
+    assert.equal(execBody.success, false);
+
+    const task = await prisma.task.findUniqueOrThrow({ where: { id: taskId } });
+    assert.equal(task.status, "open");
+    assert.equal(task.executionStatus, "scheduled");
+    assert.equal(task.sentAt, null);
+
+    const action = await prisma.scheduledAction.findFirst({
+      where: { parentType: "task", parentId: taskId, state: "scheduled", type: "task_run" },
+    });
+    assert.ok(action);
+    assert.equal(new Date(action.dueAt).getTime(), new Date(dueAt).getTime());
+    assert.equal(await prisma.message.count({ where: { conversationId: conversation.id } }), messagesBefore);
+
+    const listed = await fetch(`${base}/api/v1/tasks/${taskId}`, { headers: { cookie } });
+    const row = await listed.json();
+    assert.equal(row.status, "open");
+    assert.equal(row.sendScheduled, true);
+  });
+
+  it("воркер не отправляет уже закрытую запланированную задачу", async () => {
+    const task = await prisma.task.create({
+      data: {
+        tenantId,
+        type: "message",
+        title: "Закрытая плановая",
+        status: "done",
+        completedAt: new Date(),
+      },
+    });
+    const action = await prisma.scheduledAction.create({
+      data: {
+        tenantId,
+        type: "task_run",
+        parentType: "task",
+        parentId: task.id,
+        dueAt: new Date(),
+        state: "scheduled",
+      },
+    });
+    const { processScheduledTask } = await import("./services/scheduledTaskRunner.ts");
+    const result = await processScheduledTask(prisma, action);
+    assert.equal(result.skipped, true);
+    const updated = await prisma.scheduledAction.findUniqueOrThrow({ where: { id: action.id } });
+    assert.equal(updated.state, "canceled");
+  });
 });
