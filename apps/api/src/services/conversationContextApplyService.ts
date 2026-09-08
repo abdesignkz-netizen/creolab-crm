@@ -402,7 +402,7 @@ export async function applyConversationAnalysis(
   options: { useLlm?: boolean; dryRun?: boolean } = {},
 ) {
   const tid = tenantId(auth);
-  const { analysis } = await analyzeConversationContext(prisma, auth, conversationId, { useLlm: options.useLlm });
+  const { analysis, llmUsed } = await analyzeConversationContext(prisma, auth, conversationId, { useLlm: options.useLlm });
 
   const conversation = await prisma.conversation.findFirst({
     where: { id: conversationId, tenantId: tid },
@@ -431,10 +431,11 @@ export async function applyConversationAnalysis(
     : null;
 
   if (options.dryRun) {
-    return { dryRun: true, analysis, applied: null };
+    return { dryRun: true, analysis, applied: null, llmUsed };
   }
 
   const lastMsg = conversation.messages[0];
+  const keepHuman = conversation.mode === "human";
   await prisma.conversation.update({
     where: { id: conversationId },
     data: {
@@ -442,12 +443,16 @@ export async function applyConversationAnalysis(
       contextSummary: analysis.summaryUpdate,
       lastContextAnalyzedAt: new Date(),
       lastAnalyzedMessageId: lastMsg?.id || null,
-      needsAttention: analysis.humanRequired || analysis.needsReply || analysis.waitingFor === "MANAGER",
-      attentionReason: analysis.humanRequired
-        ? analysis.humanReason || "human_required"
-        : analysis.needsReply
-          ? "needs_reply"
-          : conversation.attentionReason,
+      needsAttention: keepHuman
+        ? true
+        : analysis.humanRequired || analysis.needsReply || analysis.waitingFor === "MANAGER",
+      attentionReason: keepHuman
+        ? conversation.attentionReason || "human"
+        : analysis.humanRequired
+          ? analysis.humanReason || "human_required"
+          : analysis.needsReply
+            ? "needs_reply"
+            : conversation.attentionReason,
     },
   });
 
@@ -547,7 +552,7 @@ export async function applyConversationAnalysis(
     });
   }
 
-  return { dryRun: false, analysis, applied };
+  return { dryRun: false, analysis, applied, llmUsed };
 }
 
 export async function analyzeAndApplyConversation(

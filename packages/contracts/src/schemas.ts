@@ -121,6 +121,7 @@ export const updateTaskSchema = z.object({
   dealId: z.string().uuid().nullable().optional(),
   title: z.string().trim().min(1).max(200).optional(),
   description: z.string().max(2000).optional(),
+  dueAt: z.string().datetime().nullable().optional(),
 });
 
 export const taskAttachmentSchema = z.object({

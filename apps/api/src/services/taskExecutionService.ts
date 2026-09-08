@@ -281,12 +281,42 @@ export async function updateTaskDraft(
     dealId?: string;
     title?: string;
     description?: string;
+    dueAt?: string | null;
   },
 ) {
   const { tid, task } = await taskInTenant(prisma, auth, id);
   if (task.status === "done" || task.status === "canceled") {
     throw new ApiError(409, "invalid_state", "Закрытую задачу нельзя менять");
   }
+
+  let nextDue: Date | null | undefined;
+  if (input.dueAt !== undefined) {
+    if (input.dueAt == null || input.dueAt === "") {
+      nextDue = null;
+    } else {
+      nextDue = new Date(input.dueAt);
+      if (Number.isNaN(nextDue.getTime())) {
+        throw new ApiError(422, "invalid", "Некорректная дата срока");
+      }
+    }
+  }
+
+  const hadScheduledAction = await prisma.scheduledAction.findFirst({
+    where: {
+      tenantId: tid,
+      parentType: "task",
+      parentId: id,
+      state: "scheduled",
+      type: { in: [...SCHEDULED_TASK_ACTION_TYPES] },
+    },
+    select: { id: true },
+  });
+  const keepScheduled =
+    Boolean(hadScheduledAction) || task.executionStatus === "scheduled" || task.commandStatus === "scheduled";
+  if (keepScheduled && nextDue !== undefined && (!nextDue || !taskSendDueLater(nextDue))) {
+    throw new ApiError(422, "invalid", "Укажите время в будущем — иначе сообщение уйдёт сразу.");
+  }
+
   const updated = await prisma.task.update({
     where: { id },
     data: {
@@ -297,11 +327,43 @@ export async function updateTaskDraft(
       dealId: input.dealId !== undefined ? input.dealId || null : undefined,
       title: input.title,
       description: input.description,
-      executionStatus: task.executionStatus === "scheduled" || task.commandStatus === "scheduled" ? "scheduled" : "prepared",
+      dueAt: nextDue !== undefined ? nextDue : undefined,
+      executionStatus: keepScheduled ? "scheduled" : "prepared",
+      commandStatus: keepScheduled ? "scheduled" : undefined,
       confirmedAt: null,
     },
   });
+
+  if (task.targetType === "group" && (nextDue !== undefined || input.messageDraft !== undefined)) {
+    await prisma.task.updateMany({
+      where: { parentTaskId: id, tenantId: tid, status: { in: ["open", "waiting"] } },
+      data: {
+        ...(nextDue !== undefined ? { dueAt: nextDue } : {}),
+        ...(input.messageDraft !== undefined ? { messageDraft: input.messageDraft } : {}),
+        ...(keepScheduled ? { executionStatus: "scheduled", commandStatus: "scheduled" } : {}),
+      },
+    });
+  }
+
   await voidConfirmations(prisma, tid, id);
+
+  if (hadScheduledAction) {
+    await cancelScheduledTaskSends(prisma, tid, id, "edited");
+    if (task.targetType === "group") {
+      const children = await prisma.task.findMany({
+        where: { tenantId: tid, parentTaskId: id, status: { in: ["open", "waiting"] } },
+        select: { id: true },
+      });
+      for (const child of children) {
+        await confirmTaskExecution(prisma, auth, child.id);
+      }
+      await scheduleConfirmedTaskSend(prisma, auth, id, { batch: true });
+    } else if (SENDABLE_TYPES.has(task.type)) {
+      await confirmTaskExecution(prisma, auth, id);
+      await scheduleConfirmedTaskSend(prisma, auth, id, { batch: false });
+    }
+  }
+
   return updated;
 }
 

@@ -243,6 +243,67 @@ describe("seller lead sync rematch by phone", () => {
     assert.equal(byPhone?.id, live.id);
   });
 
+  it("reuses the rematched same-phone conversation and keeps CRM messages", async () => {
+    const contact = await prisma.contact.create({
+      data: {
+        tenantId,
+        name: "Тот же номер",
+        methods: {
+          create: {
+            type: "phone",
+            rawValue: "77001230011",
+            normalizedValue: "77001230011",
+            source: "whatsapp_seller",
+            primary: true,
+          },
+        },
+      },
+    });
+    const conversation = await prisma.conversation.create({
+      data: {
+        tenantId,
+        contactId: contact.id,
+        sellerLeadId: null,
+        externalThreadId: "77001230011",
+        attentionReason: "seller_lead_rematched",
+        mode: "ai",
+        status: "open",
+      },
+    });
+    await prisma.message.create({
+      data: {
+        tenantId,
+        conversationId: conversation.id,
+        senderKind: "staff",
+        direction: "outbound",
+        text: "свяжемся с вами завтра",
+      },
+    });
+
+    const result = await applySellerLeadSync(prisma, {
+      tenantId,
+      defaultRegion: "KZ",
+      connectionId: null,
+      lead: {
+        leadId: "LEAD-same-phone-reuse",
+        clientPhone: "77001230011",
+        clientName: "Тот же номер",
+        aiMode: "AUTO",
+        conversationHistory: [{ role: "user", content: "Добрый день", at: "2026-09-08T00:00:00.000Z" }],
+      },
+    });
+
+    assert.equal(result.skipped, null);
+    assert.equal(result.conversationId, conversation.id);
+    assert.equal(result.created, false);
+    const live = await prisma.conversation.findFirst({ where: { id: conversation.id } });
+    assert.equal(live?.sellerLeadId, "LEAD-same-phone-reuse");
+    const texts = (await prisma.message.findMany({ where: { conversationId: conversation.id } })).map((item) => item.text);
+    assert.ok(texts.includes("свяжемся с вами завтра"));
+    assert.ok(texts.includes("Добрый день"));
+    assert.equal(await prisma.conversation.count({ where: { tenantId, contactId: contact.id } }), 1);
+  });
+
   it("creates a new CRM inquiry from a WhatsApp AI lead", async () => {
     const lead = {
       leadId: "LEAD-inquiry-sync",

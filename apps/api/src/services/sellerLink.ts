@@ -10,6 +10,7 @@ import { fileStorageStatus } from "../lib/storage.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { can } from "../lib/types.ts";
 import { analyzeAndApplyConversation } from "./conversationContextApplyService.ts";
+import { adoptSameContactThreadMessages, listThreadConversationIds } from "./conversationThread.ts";
 import { ensureWhatsAppInquiry } from "./inquiryService.ts";
 import { getSituation, isConversationCommand } from "./situationService.ts";
 
@@ -82,6 +83,8 @@ async function upsertLeadHistory(
   }
   return { added, moved };
 }
+
+export { adoptSameContactThreadMessages, listThreadConversationIds };
 
 async function findOrCreateContactByPhone(
   prisma: PrismaClient,
@@ -194,14 +197,19 @@ export async function applySellerLeadSync(
     where: { tenantId: args.tenantId, sellerLeadId: args.lead.leadId },
     include: { contact: { include: { methods: true } } },
   });
-  const convByContact = await prisma.conversation.findFirst({
-    where: {
-      tenantId: args.tenantId,
-      contactId,
-      OR: [{ sellerLeadId: { not: null } }, { id: convByLeadId?.id || "__none__" }],
-    },
-    orderBy: { updatedAt: "desc" },
-  });
+  const convByContact =
+    (await prisma.conversation.findFirst({
+      where: { tenantId: args.tenantId, contactId, sellerLeadId: { not: null } },
+      orderBy: { updatedAt: "desc" },
+    })) ||
+    (await prisma.conversation.findFirst({
+      where: {
+        tenantId: args.tenantId,
+        contactId,
+        OR: [{ externalThreadId: phone.normalized }, { id: convByLeadId?.id || "__none__" }],
+      },
+      orderBy: { updatedAt: "desc" },
+    }));
 
   const leadPhoneOnOldConv = convByLeadId?.contact?.methods.find((m) => m.type === "phone")?.normalizedValue;
   const leadIdBoundToWrongContact = Boolean(
@@ -249,6 +257,13 @@ export async function applySellerLeadSync(
       data: { sellerLeadId: null, attentionReason: "seller_lead_rematched" },
     });
   }
+
+  const adopted = await adoptSameContactThreadMessages(
+    prisma,
+    args.tenantId,
+    { ...target, sellerLeadId: args.lead.leadId, contactId },
+    phone.normalized,
+  );
 
   const { added, moved } = await upsertLeadHistory(
     prisma,

@@ -82,6 +82,55 @@ describe("Conversations board", () => {
     assert.ok(item.topic);
   });
 
+  it("пустой живой WhatsApp-чат показывает сообщения со старого диалога того же номера", async () => {
+    const contact = await prisma.contact.findFirst({ where: { name: { contains: "Александр" } } });
+    assert.ok(contact);
+    const leftover = await prisma.conversation.create({
+      data: {
+        tenantId: contact.tenantId,
+        contactId: contact.id,
+        mode: "ai",
+        status: "open",
+        sellerLeadId: null,
+        externalThreadId: "77000001122",
+        attentionReason: "seller_lead_rematched",
+      },
+    });
+    await prisma.message.create({
+      data: {
+        tenantId: contact.tenantId,
+        conversationId: leftover.id,
+        senderKind: "staff",
+        direction: "outbound",
+        text: "свяжемся с вами завтра",
+      },
+    });
+    const live = await prisma.conversation.create({
+      data: {
+        tenantId: contact.tenantId,
+        contactId: contact.id,
+        mode: "human",
+        status: "open",
+        sellerLeadId: "LEAD-empty-live",
+        externalThreadId: "77000001122",
+        attentionReason: "human",
+      },
+    });
+
+    const list = await fetch(`${base}/api/v1/conversations`, { headers: { cookie } });
+    const listBody = await list.json();
+    assert.ok(listBody.items.some((row: { id: string }) => row.id === live.id));
+    assert.ok(!listBody.items.some((row: { id: string }) => row.id === leftover.id));
+    const liveRow = listBody.items.find((row: { id: string }) => row.id === live.id);
+    assert.match(liveRow.lastMessagePreview, /свяжемся с вами завтра/);
+
+    const workspace = await fetch(`${base}/api/v1/conversations/${live.id}`, { headers: { cookie } });
+    assert.equal(workspace.status, 200);
+    const body = await workspace.json();
+    assert.ok(body.messages.some((item: { text: string }) => item.text === "свяжемся с вами завтра"));
+    assert.equal(await prisma.message.count({ where: { conversationId: live.id, text: "свяжемся с вами завтра" } }), 1);
+  });
+
   it("workspace отдаёт переписку и контекст клиента без сырых LEAD в заголовке", async () => {
     const response = await fetch(`${base}/api/v1/conversations/${conversationId}`, { headers: { cookie } });
     assert.equal(response.status, 200);
@@ -92,5 +141,22 @@ describe("Conversations board", () => {
     assert.ok(Array.isArray(body.messages));
     assert.ok(body.control);
     assert.ok(body.conversation.sourceLine.includes("WhatsApp"));
+  });
+
+  it("кнопка понять контекст пишет краткое резюме по переписке", async () => {
+    const response = await fetch(`${base}/api/v1/conversations/${conversationId}/analyze-context`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie },
+      body: "{}",
+    });
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.dryRun, false);
+    assert.ok(body.analysis?.summaryUpdate);
+    assert.match(body.analysis.summaryUpdate, /сайт|потребност/i);
+    const workspace = await fetch(`${base}/api/v1/conversations/${conversationId}`, { headers: { cookie } });
+    const after = await workspace.json();
+    assert.ok(after.conversation.contextSummary);
+    assert.match(after.conversation.contextSummary, /сайт|потребност/i);
   });
 });

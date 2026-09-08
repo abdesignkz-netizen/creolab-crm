@@ -309,6 +309,7 @@ export function TasksPage() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [messageDraft, setMessageDraft] = useState("");
+  const [editDueAt, setEditDueAt] = useState("");
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [taskDetail, setTaskDetail] = useState<any>(null);
   const [preview, setPreview] = useState<any>(null);
@@ -753,6 +754,7 @@ export function TasksPage() {
       setActiveTaskId(taskId);
       setTaskDetail(detail);
       setMessageDraft(resolveOutboundDraft(detail));
+      setEditDueAt(detail.dueAt ? toDateTimeLocal(new Date(detail.dueAt)) : "");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось открыть задачу");
     } finally {
@@ -781,11 +783,40 @@ export function TasksPage() {
     }
   }
 
+  async function taskEditPayload() {
+    const payload: { messageDraft: string; dueAt?: string } = { messageDraft };
+    if (editDueAt) payload.dueAt = new Date(editDueAt).toISOString();
+    return payload;
+  }
+
+  async function onSaveTaskEdits() {
+    if (!activeTaskId) return;
+    if (isScheduledSend(taskDetail) && editDueAt && !isFutureDue(editDueAt)) {
+      setError("Укажите время в будущем — иначе сообщение уйдёт сразу.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await api.updateTask(activeTaskId, await taskEditPayload());
+      const detail = await api.task(activeTaskId);
+      setTaskDetail(detail);
+      setMessageDraft(resolveOutboundDraft(detail));
+      setEditDueAt(detail.dueAt ? toDateTimeLocal(new Date(detail.dueAt)) : "");
+      setPreview(null);
+      setError("");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось сохранить правки");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function onPrepare() {
     if (!activeTaskId) return;
     setBusy(true);
     try {
-      await api.updateTask(activeTaskId, { messageDraft });
+      await api.updateTask(activeTaskId, await taskEditPayload());
       const data = await api.prepareTaskExecution(activeTaskId);
       setPreview(data);
       setExecResult(null);
@@ -2288,8 +2319,13 @@ export function TasksPage() {
 
       {activeTaskId && taskDetail && !preview ? (
         <div className="panel task-form">
-          <b>Подготовка отправки</b>
+          <b>{isScheduledSend(taskDetail) ? "Изменить запланированную задачу" : "Подготовка отправки"}</b>
           <div className="muted">{taskDetail.title}</div>
+          {isScheduledSend(taskDetail) ? (
+            <p className="muted">
+              Сохраните правки — задача останется в «Запланировано», сообщение уйдёт в указанное время, не сразу.
+            </p>
+          ) : null}
           {taskDetail.briefing ? (
             <div className="task-briefing-card">
               {taskDetail.briefing.basisLabel ? <div className="muted">{taskDetail.briefing.basisLabel}</div> : null}
@@ -2347,6 +2383,10 @@ export function TasksPage() {
             <textarea value={messageDraft} onChange={(event) => setMessageDraft(event.target.value)} rows={5} />
           </label>
           <label>
+            Когда выполнить
+            <input type="datetime-local" value={editDueAt} onChange={(event) => setEditDueAt(event.target.value)} />
+          </label>
+          <label>
             Тип файла
             <select value={docType} onChange={(event) => setDocType(event.target.value)}>
               <option value="proposal">Коммерческое предложение</option>
@@ -2399,9 +2439,18 @@ export function TasksPage() {
               type="button"
               className="btn secondary"
               {...tip("Закрыть панель без отправки")}
-              onClick={() => { setActiveTaskId(null); setTaskDetail(null); }}
+              onClick={() => { setActiveTaskId(null); setTaskDetail(null); setEditDueAt(""); }}
             >
               Закрыть
+            </button>
+            <button
+              type="button"
+              className="btn secondary"
+              disabled={busy}
+              {...tip("Сохранить текст и срок. Если отправка уже запланирована, она перенесётся на новое время")}
+              onClick={() => void onSaveTaskEdits()}
+            >
+              Сохранить правки
             </button>
             <button
               type="button"
@@ -2800,7 +2849,19 @@ export function TasksPage() {
                   ) : null}
                   {item.status === "open" || item.status === "waiting" ? (
                     <>
-                      {SENDABLE.has(item.type) && item.targetType !== "group" ? (
+                      <button
+                        className={isScheduledSend(item) ? "btn" : "btn secondary"}
+                        type="button"
+                        {...tip(
+                          isScheduledSend(item)
+                            ? "Изменить текст или время отправки. Сообщение не уйдёт сразу"
+                            : "Изменить текст, срок или черновик задачи",
+                        )}
+                        onClick={() => openTaskEditor(item.id)}
+                      >
+                        Изменить
+                      </button>
+                      {SENDABLE.has(item.type) && item.targetType !== "group" && !isScheduledSend(item) ? (
                         <button
                           className="btn"
                           type="button"

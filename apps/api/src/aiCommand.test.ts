@@ -300,6 +300,72 @@ describe("AI task commands", () => {
     assert.equal(row.sendScheduled, true);
   });
 
+  it("правка запланированной задачи меняет текст и срок, но не отправляет", async () => {
+    const contact = await prisma.contact.create({
+      data: { tenantId, name: "Правка Расписания", firstName: "Правка", lastName: "Расписания" },
+    });
+    const conversation = await prisma.conversation.create({
+      data: {
+        tenantId,
+        contactId: contact.id,
+        mode: "human",
+        status: "open",
+        sellerLeadId: "test-lead-edit-scheduled-task",
+      },
+    });
+    const dueAt = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
+    const created = await fetch(`${base}/api/v1/tasks/from-command`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({
+        text: "Напиши и уточни по заявке",
+        parsedCommand: { taskType: "message", executionMode: "execute", riskLevel: 3 },
+        clientIds: [contact.id],
+        messageDraft: "Старый текст",
+        dueAt,
+      }),
+    });
+    assert.equal(created.status, 201);
+    const taskId = (await created.json()).task.id as string;
+    await fetch(`${base}/api/v1/tasks/${taskId}/prepare-execution`, { method: "POST", headers: { cookie } });
+    await fetch(`${base}/api/v1/tasks/${taskId}/confirm-execution`, { method: "POST", headers: { cookie } });
+    await fetch(`${base}/api/v1/tasks/${taskId}/execute`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie },
+      body: "{}",
+    });
+    const messagesBefore = await prisma.message.count({ where: { conversationId: conversation.id } });
+    const nextDue = new Date(Date.now() + 4 * 24 * 60 * 60 * 1000).toISOString();
+    const patched = await fetch(`${base}/api/v1/tasks/${taskId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({ messageDraft: "Новый текст после правки", dueAt: nextDue }),
+    });
+    assert.equal(patched.status, 200);
+    const task = await prisma.task.findUniqueOrThrow({ where: { id: taskId } });
+    assert.equal(task.messageDraft, "Новый текст после правки");
+    assert.equal(new Date(task.dueAt!).getTime(), new Date(nextDue).getTime());
+    assert.equal(task.status, "open");
+    assert.equal(task.sentAt, null);
+    const action = await prisma.scheduledAction.findFirst({
+      where: { parentType: "task", parentId: taskId, state: "scheduled", type: "task_run" },
+    });
+    assert.ok(action);
+    assert.equal(new Date(action.dueAt).getTime(), new Date(nextDue).getTime());
+    const confirmation = await prisma.executionConfirmation.findFirst({
+      where: { taskId, voidedAt: null },
+    });
+    assert.equal(confirmation?.messageSnapshot, "Новый текст после правки");
+    assert.equal(await prisma.message.count({ where: { conversationId: conversation.id } }), messagesBefore);
+
+    const past = await fetch(`${base}/api/v1/tasks/${taskId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({ dueAt: new Date(Date.now() - 60_000).toISOString() }),
+    });
+    assert.equal(past.status, 422);
+  });
+
   it("срок через полминуты не отправляет сразу", async () => {
     const contact = await prisma.contact.create({
       data: { tenantId, name: "Скорошная Отправка", firstName: "Скоро", lastName: "Отправка" },

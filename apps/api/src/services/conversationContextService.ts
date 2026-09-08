@@ -13,12 +13,46 @@ import {
   type WaitingFor,
   agreementTypeToTaskType,
 } from "./conversationContextTypes.ts";
+import { adoptSameContactThreadMessages, listThreadConversationIds } from "./conversationThread.ts";
 
 const ACTIVE_AGREEMENT = ["DETECTED", "NEEDS_CLARIFICATION", "CONFIRMED", "SCHEDULED", "RESCHEDULED"];
 
 function tenantId(auth: AuthContext) {
   if (!auth.activeMembership) throw new ApiError(403, "no_tenant", "Нет активной компании");
   return auth.activeMembership.tenantId;
+}
+
+function fillFallbackSummary(
+  analysis: ConversationAnalysis,
+  messages: Array<{ text?: string | null; senderKind: string; direction: string; internal?: boolean }>,
+) {
+  if (analysis.summaryUpdate) return;
+  const visible = messages.filter((item) => !item.internal && (item.text || "").trim());
+  if (!visible.length) {
+    analysis.summaryUpdate = "В диалоге нет сообщений — потребность и договорённости выделить нельзя.";
+    analysis.confidence = "LOW";
+    return;
+  }
+  const lastClient = [...visible]
+    .reverse()
+    .find((item) => item.direction === "inbound" || item.senderKind === "client")
+    ?.text?.replace(/\s+/g, " ")
+    .trim();
+  const need =
+    analysis.detectedNeed ||
+    (lastClient ? (lastClient.length > 180 ? `${lastClient.slice(0, 177)}…` : lastClient) : null);
+  const wait =
+    analysis.waitingFor === "MANAGER"
+      ? "Клиент ждёт ответа."
+      : analysis.waitingFor === "CLIENT"
+        ? "Ждём ответа клиента."
+        : "";
+  const agr = analysis.agreements.length
+    ? `Договорённости: ${analysis.agreements.map((item) => item.title || AGREEMENT_TYPE_LABEL[item.type] || item.type).join(", ")}.`
+    : "Явных договорённостей пока нет.";
+  analysis.summaryUpdate = [need ? `Потребность: ${need}.` : "Потребность по тексту пока неясна.", wait, agr]
+    .filter(Boolean)
+    .join(" ");
 }
 
 function emptyAnalysis(): ConversationAnalysis {
@@ -283,6 +317,7 @@ function ruleAnalyze(input: {
     const interest = inferClientInterest(input.messages);
     analysis.detectedNeed = interest?.text || null;
     analysis.facts.service = interest?.text || null;
+    fillFallbackSummary(analysis, input.messages);
     return analysis;
   }
 
@@ -531,7 +566,7 @@ export async function analyzeConversationContext(
   auth: AuthContext,
   conversationId: string,
   options: { useLlm?: boolean } = {},
-): Promise<{ analysis: ConversationAnalysis; conversationId: string; messageCount: number }> {
+): Promise<{ analysis: ConversationAnalysis; conversationId: string; messageCount: number; llmUsed: boolean }> {
   const tid = tenantId(auth);
   const membership = auth.activeMembership!;
   const timeZone = membership.tenant.timezone || "Asia/Almaty";
@@ -539,12 +574,23 @@ export async function analyzeConversationContext(
   const conversation = await prisma.conversation.findFirst({
     where: { id: conversationId, tenantId: tid },
     include: {
-      contact: true,
-      messages: { orderBy: { createdAt: "asc" }, take: 80 },
+      contact: { include: { methods: { where: { type: "phone" }, take: 5 } } },
       inquiries: { where: { archived: false }, orderBy: { receivedAt: "desc" }, take: 1 },
     },
   });
   if (!conversation) throw new ApiError(404, "not_found", "Диалог не найден");
+
+  const phone =
+    conversation.contact?.methods.find((item) => item.primary)?.normalizedValue ||
+    conversation.contact?.methods[0]?.normalizedValue ||
+    conversation.externalThreadId;
+  await adoptSameContactThreadMessages(prisma, tid, conversation, phone);
+  const threadIds = await listThreadConversationIds(prisma, tid, conversation, phone);
+  const messages = await prisma.message.findMany({
+    where: { tenantId: tid, conversationId: { in: threadIds }, internal: false },
+    orderBy: { createdAt: "asc" },
+    take: 80,
+  });
 
   const contactId = conversation.contactId;
   const inquiry =
@@ -583,7 +629,7 @@ export async function analyzeConversationContext(
   });
 
   let analysis = ruleAnalyze({
-    messages: conversation.messages,
+    messages,
     existingAgreements,
     inquiryStatus: inquiry?.status,
     dealStageKey: deal?.stage?.systemKey,
@@ -592,9 +638,10 @@ export async function analyzeConversationContext(
     timeZone,
   });
 
+  let llmUsed = false;
   if (options.useLlm !== false) {
     const llm = await refineConversationContextWithLlm({
-      messages: conversation.messages.slice(-20).map((m) => ({
+      messages: messages.slice(-20).map((m) => ({
         role: m.senderKind === "client" || m.direction === "inbound" ? "client" : m.senderKind === "ai" ? "ai" : "staff",
         text: m.text || "",
         at: m.createdAt.toISOString(),
@@ -611,10 +658,14 @@ export async function analyzeConversationContext(
         scheduledAt: a.scheduledAt?.toISOString() || null,
       })),
     });
-    if (llm) analysis = mergeAnalysis(analysis, llm);
+    if (llm) {
+      llmUsed = true;
+      analysis = mergeAnalysis(analysis, llm);
+    }
   }
+  fillFallbackSummary(analysis, messages);
 
-  return { analysis, conversationId, messageCount: conversation.messages.length };
+  return { analysis, conversationId, messageCount: messages.length, llmUsed };
 }
 
 function mergeAnalysis(base: ConversationAnalysis, llm: Partial<ConversationAnalysis>): ConversationAnalysis {

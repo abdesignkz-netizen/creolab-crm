@@ -35,6 +35,7 @@ export function ConversationsPage() {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [showContext, setShowContext] = useState(false);
+  const [contextNote, setContextNote] = useState("");
   const focusReply = searchParams.get("focus") === "reply";
   const replyRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -90,6 +91,7 @@ export function ConversationsPage() {
     setWorkspace(null);
     setText("");
     setShowContext(false);
+    setContextNote("");
     if (selectedId) loadWorkspace(selectedId);
     else setWorkspace(null);
   }, [selectedId]);
@@ -366,18 +368,38 @@ export function ConversationsPage() {
           className="btn secondary"
           style={{ marginTop: 8 }}
           disabled={busy}
-          onClick={() => {
+          {...tip("Проанализировать переписку и выделить потребность и договорённости")}
+          onClick={async () => {
             setBusy(true);
-            api
-              .analyzeConversationContext(workspace.conversation.id)
-              .then(() => loadWorkspace(workspace.conversation.id))
-              .then(loadList)
-              .catch((err: Error) => setError(err.message))
-              .finally(() => setBusy(false));
+            setError("");
+            setContextNote("");
+            try {
+              const result: any = await api.analyzeConversationContext(workspace.conversation.id);
+              if (selectedRef.current !== workspace.conversation.id) return;
+              await loadWorkspace(workspace.conversation.id);
+              await loadList();
+              const analysis = result?.analysis || {};
+              const parts = [
+                analysis.summaryUpdate,
+                analysis.detectedNeed && analysis.summaryUpdate && !String(analysis.summaryUpdate).includes(analysis.detectedNeed)
+                  ? `Потребность: ${analysis.detectedNeed}`
+                  : null,
+                (analysis.agreements || []).length
+                  ? `Договорённости: ${analysis.agreements.length}`
+                  : null,
+                result?.llmUsed === false ? "Разбор по правилам: языковая модель сейчас не ответила." : null,
+              ].filter(Boolean);
+              setContextNote(parts.join(" ") || "Контекст разобран, новых фактов нет.");
+            } catch (err) {
+              setError(err instanceof Error ? err.message : "Не удалось понять контекст");
+            } finally {
+              setBusy(false);
+            }
           }}
         >
-          Понять контекст
+          {busy ? "Разбираем…" : "Понять контекст"}
         </button>
+        {contextNote ? <div className="muted" style={{ marginTop: 8 }}>{contextNote}</div> : null}
       </div>
 
       {(workspace.agreements || []).length ? (
@@ -414,7 +436,7 @@ export function ConversationsPage() {
 
       <div className="panel soft">
         <b>Кратко</b>
-        <p>{workspace.client?.summary}</p>
+        <p>{workspace.conversation.contextSummary || workspace.client?.summary}</p>
       </div>
 
       <div className="panel soft">

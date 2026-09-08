@@ -654,15 +654,23 @@ export async function getContactOverview(prisma: PrismaClient, auth: AuthContext
       receivedLabel: formatWhen(item.receivedAt, timeZone),
       closed: CLOSED_INQUIRY.includes(item.status),
     })),
-    conversations: contact.conversations.map((item) => ({
-      id: item.id,
-      mode: item.mode,
-      channel: item.sellerLeadId ? "WhatsApp" : "Диалог",
-      updatedLabel: formatWhen(item.updatedAt, timeZone),
-      lastMessage: item.messages[0]?.text || null,
-      needsAttention: item.needsAttention,
-      sellerLeadId: item.sellerLeadId,
-    })),
+    conversations: (() => {
+      const hasLiveWhatsApp = contact.conversations.some((item) => item.sellerLeadId);
+      const threadLast = contact.conversations
+        .flatMap((item) => item.messages)
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
+      return contact.conversations
+        .filter((item) => item.sellerLeadId || item.attentionReason !== "seller_lead_rematched" || !hasLiveWhatsApp)
+        .map((item) => ({
+          id: item.id,
+          mode: item.mode,
+          channel: item.sellerLeadId ? "WhatsApp" : "Диалог",
+          updatedLabel: formatWhen(item.updatedAt, timeZone),
+          lastMessage: item.messages[0]?.text || threadLast?.text || null,
+          needsAttention: item.needsAttention,
+          sellerLeadId: item.sellerLeadId,
+        }));
+    })(),
     deals: contact.deals.map((item) => ({
       id: item.id,
       title: item.title,

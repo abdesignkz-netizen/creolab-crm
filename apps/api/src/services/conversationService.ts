@@ -24,6 +24,7 @@ import {
   type AgreementType,
   type WaitingFor,
 } from "./conversationContextTypes.ts";
+import { adoptSameContactThreadMessages, listThreadConversationIds } from "./conversationThread.ts";
 
 const ACTIVE_INQUIRY = ["new", "accepted", "qualification", "qualified", "in_progress", "waiting_client", "waiting_manager"];
 
@@ -93,6 +94,25 @@ function lastMessageAt(conversation: {
   messages: Array<{ createdAt: Date }>;
 }) {
   return conversation.messages[0]?.createdAt || conversation.updatedAt;
+}
+
+function isRematchedLeftover(conversation: { sellerLeadId?: string | null; attentionReason?: string | null }) {
+  return !conversation.sellerLeadId && conversation.attentionReason === "seller_lead_rematched";
+}
+
+async function loadThreadMessages(
+  prisma: PrismaClient,
+  tenantId: string,
+  conversation: { id: string; contactId?: string | null; sellerLeadId?: string | null; externalThreadId?: string | null },
+  phoneNormalized?: string | null,
+  take = 120,
+) {
+  const ids = await listThreadConversationIds(prisma, tenantId, conversation, phoneNormalized);
+  return prisma.message.findMany({
+    where: { tenantId, conversationId: { in: ids } },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take,
+  });
 }
 
 export async function listConversationsBoard(
@@ -198,8 +218,28 @@ export async function listConversationsBoard(
     take: 80,
   });
 
-  const items = conversations
+  const liveContactIds = new Set(
+    conversations.filter((item) => item.sellerLeadId && item.contactId).map((item) => item.contactId as string),
+  );
+  const visibleConversations = conversations.filter(
+    (item) => !isRematchedLeftover(item) || !item.contactId || !liveContactIds.has(item.contactId),
+  );
+  const threadMessagesByContact = new Map<string, typeof conversations[number]["messages"]>();
+  for (const item of conversations) {
+    if (!item.contactId || !item.messages.length) continue;
+    const current = threadMessagesByContact.get(item.contactId) || [];
+    threadMessagesByContact.set(item.contactId, current.concat(item.messages));
+  }
+  for (const list of threadMessagesByContact.values()) {
+    list.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.id.localeCompare(a.id));
+  }
+
+  const items = visibleConversations
     .map((conversation) => {
+      if (!conversation.messages.length && conversation.contactId) {
+        const thread = threadMessagesByContact.get(conversation.contactId);
+        if (thread?.length) conversation.messages = thread;
+      }
       const contact = conversation.contact;
       const phone = contact ? primaryPhone(contact.methods) : null;
       const contactPhoneNorm = phone?.normalizedValue || null;
@@ -361,16 +401,16 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
         },
       },
       assignee: { include: { user: true } },
-      messages: { orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 120 },
       inquiries: { where: { archived: false }, orderBy: { receivedAt: "desc" }, take: 10 },
     },
   });
   if (!conversation) throw new ApiError(404, "not_found", "Диалог не найден");
 
-  conversation.messages.reverse();
   const contact = conversation.contact;
   const phone = contact ? primaryPhone(contact.methods) : null;
   const contactPhone = contact ? primaryPhone(contact.methods)?.normalizedValue : null;
+  await adoptSameContactThreadMessages(prisma, tid, conversation, contactPhone);
+  const messages = (await loadThreadMessages(prisma, tid, conversation, contactPhone, 120)).reverse();
   const inquiryMatchesContact = (item: { phoneNormalized?: string | null; conversationId?: string | null }) =>
     item.conversationId === conversation.id ||
     (contactPhone && item.phoneNormalized === contactPhone);
@@ -382,7 +422,7 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
     contact?.inquiries.find((item) => inquiryMatchesContact(item)) ||
     null;
   const deal = contact?.deals.find((item) => item.outcome === "open") || contact?.deals[0] || null;
-  const last = [...conversation.messages].reverse().find(message => !message.internal) || null;
+  const last = [...messages].reverse().find(message => !message.internal) || null;
   const waitingReply = last?.direction === "inbound" && last?.senderKind === "client";
   const lastWho = last
     ? last.senderKind === "client" || last.direction === "inbound"
@@ -398,7 +438,7 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
   );
   const channel = channelLabel(conversation);
   const acquisition = acquisitionLabel(linkedInquiry);
-  const topic = topicFromInquiry(linkedInquiry) || inferClientInterest(conversation.messages)?.text;
+  const topic = topicFromInquiry(linkedInquiry) || inferClientInterest(messages)?.text;
 
   const agreements = await prisma.agreement.findMany({
     where: {
@@ -577,14 +617,21 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
       sourceLine: sourceArrow(acquisition, channel),
     },
     pinnedNotes: contact?.notes?.map((item) => ({ id: item.id, text: item.text })) || [],
-    hasEarlierMessages: conversation.messages.length === 120,
-    messages: conversation.messages.map(message => messageView(message, timeZone)),
+    hasEarlierMessages: messages.length === 120,
+    messages: messages.map(message => messageView(message, timeZone)),
   };
 }
 
 export async function markConversationRead(prisma: PrismaClient, auth: AuthContext, id: string, messageId: string) {
   const { tenantId, id: membershipId } = requireTenant(auth);
-  const message = await prisma.message.findFirst({ where: { id: messageId, tenantId, conversationId: id } });
+  const conversation = await prisma.conversation.findFirst({
+    where: { id, tenantId },
+    include: { contact: { include: { methods: true } } },
+  });
+  if (!conversation) throw new ApiError(404, "not_found", "Диалог не найден");
+  const phone = conversation.contact ? primaryPhone(conversation.contact.methods)?.normalizedValue : null;
+  const threadIds = await listThreadConversationIds(prisma, tenantId, conversation, phone);
+  const message = await prisma.message.findFirst({ where: { id: messageId, tenantId, conversationId: { in: threadIds } } });
   if (!message) throw new ApiError(404, "not_found", "Сообщение не найдено");
   const key = { tenantId, conversationId: id, membershipId };
   const previous = await prisma.conversationReadState.findUnique({ where: { tenantId_conversationId_membershipId: key } });
@@ -624,11 +671,23 @@ function messageView(message: any, timeZone: string) { return {
 
 export async function getConversationMessages(prisma: PrismaClient, auth: AuthContext, id: string, before: string) {
   const { tenantId, tenant } = requireTenant(auth);
-  const cursor = await prisma.message.findFirst({ where: { tenantId, conversationId: id, id: before } });
+  const conversation = await prisma.conversation.findFirst({
+    where: { id, tenantId },
+    include: { contact: { include: { methods: true } } },
+  });
+  if (!conversation) throw new ApiError(404, "not_found", "Диалог не найден");
+  const phone = conversation.contact ? primaryPhone(conversation.contact.methods)?.normalizedValue : null;
+  const threadIds = await listThreadConversationIds(prisma, tenantId, conversation, phone);
+  const cursor = await prisma.message.findFirst({ where: { tenantId, conversationId: { in: threadIds }, id: before } });
   if (!cursor) throw new ApiError(404, "not_found", "Сообщение не найдено");
   const messages = await prisma.message.findMany({
-    where: { tenantId, conversationId: id, OR: [{ createdAt: { lt: cursor.createdAt } }, { createdAt: cursor.createdAt, id: { lt: cursor.id } }] },
-    orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 121,
+    where: {
+      tenantId,
+      conversationId: { in: threadIds },
+      OR: [{ createdAt: { lt: cursor.createdAt } }, { createdAt: cursor.createdAt, id: { lt: cursor.id } }],
+    },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: 121,
   });
   return { hasEarlierMessages: messages.length > 120, messages: messages.slice(0, 120).reverse().map(message => messageView(message, tenant.timezone || "Asia/Almaty")) };
 }
