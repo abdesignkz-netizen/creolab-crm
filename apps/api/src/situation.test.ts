@@ -276,6 +276,36 @@ describe("Situation API", () => {
     assert.equal(row.kind, "conversation_human");
   });
 
+  it("overview добавляет insights, sources и team, не ломая прежние поля", async () => {
+    const response = await fetch(`${base}/api/v1/situation/overview?period=today&scope=all`, {
+      headers: { cookie },
+    });
+    assert.equal(response.status, 200);
+    const data = (await response.json()) as {
+      brief: string;
+      result: { inquiries: number; deltas: { inquiries: number | null; inquiriesPct?: number | null } };
+      current: { activeDeals: number; newInquiries?: number; inWorkInquiries?: number };
+      pipeline: { stages: Array<{ count: number }>; note: string };
+      insights?: unknown[];
+      sources?: unknown[];
+      team?: unknown[];
+      aiManager: { status: string; conversations?: { ai: number; human: number } };
+      attention: { items: unknown[] };
+    };
+    assert.equal(typeof data.brief, "string");
+    assert.equal(typeof data.result.inquiries, "number");
+    assert.equal(typeof data.current.activeDeals, "number");
+    assert.ok(Array.isArray(data.pipeline.stages));
+    assert.ok(Array.isArray(data.insights));
+    assert.ok(Array.isArray(data.sources));
+    assert.ok(Array.isArray(data.team));
+    assert.ok(data.aiManager.conversations);
+    assert.equal(typeof data.aiManager.conversations.ai, "number");
+    assert.equal(typeof data.current.newInquiries, "number");
+    assert.equal(typeof data.current.inWorkInquiries, "number");
+    assert.ok(Array.isArray(data.attention.items));
+  });
+
   it("поручение без sellerLead — 422", async () => {
     const conversation = await prisma.conversation.create({
       data: { tenantId, mode: "ai", status: "open" },

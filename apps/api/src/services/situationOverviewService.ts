@@ -126,6 +126,201 @@ function delta(current: number, previous: number | null) {
   return current - previous;
 }
 
+function deltaPercent(current: number, previous: number | null) {
+  if (previous == null || previous === 0) return null;
+  return Math.round(((current - previous) / previous) * 100);
+}
+
+const SOURCE_LABELS: Record<string, string> = {
+  manual: "Ручное добавление",
+  website_form: "Форма сайта",
+  website_ai: "Website AI",
+  whatsapp: "WhatsApp",
+  telegram: "Telegram",
+  instagram: "Instagram",
+  phone: "Звонок",
+  api: "API",
+  other: "Другое",
+};
+
+const SOURCE_ALIASES: Record<string, string[]> = {
+  manual: ["manual"],
+  website_form: ["website_form", "website", "form"],
+  website_ai: ["website_ai"],
+  whatsapp: ["whatsapp"],
+  telegram: ["telegram"],
+  instagram: ["instagram"],
+  phone: ["phone", "phone_call"],
+  api: ["api", "webhook"],
+  other: ["other"],
+};
+
+function normalizeSourceKey(raw: string | null | undefined) {
+  const value = (raw || "").trim().toLowerCase();
+  if (!value) return "unspecified";
+  const found = Object.entries(SOURCE_ALIASES).find(([, aliases]) => aliases.includes(value));
+  return found?.[0] || value;
+}
+
+function sourceLabel(key: string) {
+  if (key === "unspecified") return "Не указан";
+  return SOURCE_LABELS[key] || key;
+}
+
+function ruCount(n: number, one: string, few: string, many: string) {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return `${n} ${one}`;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${n} ${few}`;
+  return `${n} ${many}`;
+}
+
+type PipelineStageRow = { systemKey: string; name: string; count: number; href: string };
+
+function enrichPipelineStages(stages: PipelineStageRow[]) {
+  const total = stages.reduce((sum, stage) => sum + stage.count, 0);
+  const enriched = stages.map((stage, index) => {
+    const next = stages[index + 1];
+    return {
+      ...stage,
+      share: total > 0 ? Math.round((stage.count / total) * 100) : 0,
+      toNextRate: next && stage.count > 0 && next.count > 0 ? Math.round((next.count / stage.count) * 100) : null,
+      dropOff: next ? stage.count - next.count : null,
+    };
+  });
+  let biggestDrop: {
+    fromKey: string;
+    fromName: string;
+    toKey: string;
+    toName: string;
+    fromCount: number;
+    toCount: number;
+    lost: number;
+  } | null = null;
+  for (let i = 0; i < enriched.length - 1; i += 1) {
+    const lost = enriched[i].dropOff;
+    if (lost == null || lost <= 0 || enriched[i].count < 2) continue;
+    if (!biggestDrop || lost > biggestDrop.lost) {
+      biggestDrop = {
+        fromKey: enriched[i].systemKey,
+        fromName: enriched[i].name,
+        toKey: enriched[i + 1].systemKey,
+        toName: enriched[i + 1].name,
+        fromCount: enriched[i].count,
+        toCount: enriched[i + 1].count,
+        lost,
+      };
+    }
+  }
+  return { stages: enriched, biggestDrop };
+}
+
+type SituationInsight = { text: string; href?: string; tone: "critical" | "attention" | "observe" };
+
+function buildInsights(input: {
+  needsReply: number;
+  overdueTasks: number;
+  stalledDeals: number;
+  needsHuman: number;
+  newInquiries: number;
+  inquiries: number;
+  prevInquiries: number | null;
+  conversionRate: number | null;
+  prevConversionRate: number | null;
+  biggestDrop: { fromName: string; toName: string; lost: number; fromCount: number; toCount: number } | null;
+  topManager: { name: string; attention: number; average: number } | null;
+  bestSource: { label: string; rate: number; inquiries: number } | null;
+}): SituationInsight[] {
+  const insights: SituationInsight[] = [];
+  if (input.needsReply > 0) {
+    insights.push({
+      tone: "critical",
+      text: `${ruCount(input.needsReply, "клиент ждёт", "клиента ждут", "клиентов ждут")} ответа.`,
+      href: "/contacts?filter=needs_reply",
+    });
+  }
+  if (input.needsHuman > 0) {
+    insights.push({
+      tone: "critical",
+      text: `${ruCount(input.needsHuman, "диалог требует", "диалога требуют", "диалогов требуют")} вмешательства человека.`,
+      href: "/conversations?filter=human",
+    });
+  }
+  if (input.overdueTasks > 0) {
+    insights.push({
+      tone: "attention",
+      text: `${ruCount(input.overdueTasks, "просроченная задача", "просроченные задачи", "просроченных задач")}.`,
+      href: "/tasks?filter=overdue",
+    });
+  }
+  if (input.stalledDeals > 0) {
+    insights.push({
+      tone: "attention",
+      text: `${ruCount(input.stalledDeals, "сделка без активности", "сделки без активности", "сделок без активности")}.`,
+      href: "/deals?focus=stalled",
+    });
+  }
+  if (input.newInquiries > 0) {
+    insights.push({
+      tone: "attention",
+      text: `${ruCount(input.newInquiries, "заявка ещё не обработана", "заявки ещё не обработаны", "заявок ещё не обработаны")}.`,
+      href: "/inquiries?filter=new&test=false",
+    });
+  }
+  if (input.biggestDrop) {
+    insights.push({
+      tone: "observe",
+      text: `Наибольшая потеря сейчас между «${input.biggestDrop.fromName}» и «${input.biggestDrop.toName}» (${input.biggestDrop.fromCount} → ${input.biggestDrop.toCount}).`,
+      href: "#funnel",
+    });
+  }
+  if (input.prevInquiries != null && input.prevInquiries >= 3 && input.inquiries < input.prevInquiries * 0.7) {
+    const pct = Math.round((1 - input.inquiries / input.prevInquiries) * 100);
+    insights.push({
+      tone: "observe",
+      text: `Заявок на ${pct}% меньше, чем в прошлом периоде.`,
+    });
+  } else if (input.prevInquiries != null && input.prevInquiries >= 3 && input.inquiries > input.prevInquiries * 1.2) {
+    const pct = Math.round((input.inquiries / input.prevInquiries - 1) * 100);
+    insights.push({
+      tone: "observe",
+      text: `Заявок на ${pct}% больше, чем в прошлом периоде.`,
+    });
+  }
+  if (
+    input.conversionRate != null &&
+    input.prevConversionRate != null &&
+    input.prevInquiries != null &&
+    input.prevInquiries >= 5 &&
+    input.inquiries >= 5 &&
+    input.prevConversionRate - input.conversionRate >= 10
+  ) {
+    insights.push({
+      tone: "observe",
+      text: `Конверсия снизилась с ${input.prevConversionRate}% до ${input.conversionRate}%.`,
+    });
+  }
+  if (
+    input.topManager &&
+    input.topManager.attention >= 3 &&
+    input.topManager.attention >= input.topManager.average * 2
+  ) {
+    insights.push({
+      tone: "observe",
+      text: `У ${input.topManager.name} повышенная нагрузка: ${input.topManager.attention} пунктов внимания.`,
+      href: "#team",
+    });
+  }
+  if (input.bestSource && input.bestSource.inquiries >= 3 && input.bestSource.rate > 0) {
+    insights.push({
+      tone: "observe",
+      text: `Лучшая конверсия у источника «${input.bestSource.label}»: ${input.bestSource.rate}%.`,
+      href: "#sources",
+    });
+  }
+  return insights.slice(0, 5);
+}
+
 function buildBrief(facts: {
   periodLabel: string;
   inquiries: number;
@@ -307,6 +502,8 @@ export async function getSituationOverview(
         needsReply: true,
         phoneRaw: true,
         phoneNormalized: true,
+        assigneeMembershipId: true,
+        dealId: true,
         contact: { select: CONTACT_PHONE_SELECT },
       },
       orderBy: { receivedAt: "desc" },
@@ -451,6 +648,41 @@ export async function getSituationOverview(
     take: 100,
   });
 
+  const [members, conversationModes, conversationNeedsHuman, currentNewInquiries, currentInWorkInquiries] =
+    await Promise.all([
+      prisma.membership.findMany({
+        where: { tenantId: tid, active: true },
+        include: { user: { select: { name: true } } },
+        take: 50,
+      }),
+      prisma.conversation.groupBy({
+        by: ["mode"],
+        where: { tenantId: tid, status: "open" },
+        _count: { _all: true },
+      }),
+      prisma.conversation.count({
+        where: { tenantId: tid, status: "open", needsAttention: true },
+      }),
+      prisma.inquiry.count({
+        where: {
+          tenantId: tid,
+          test: false,
+          archived: false,
+          status: "new",
+          ...assigneeInquiry,
+        },
+      }),
+      prisma.inquiry.count({
+        where: {
+          tenantId: tid,
+          test: false,
+          archived: false,
+          status: { in: ["in_progress", "accepted", "qualification", "qualified"] },
+          ...assigneeInquiry,
+        },
+      }),
+    ]);
+
   const inquiriesCount = periodInquiries.length;
 
   let wonAmount = 0;
@@ -484,6 +716,7 @@ export async function getSituationOverview(
       count: openDeals.filter((d) => d.stageId === stage.id).length,
       href: "/deals",
     }));
+  const pipelineView = enrichPipelineStages(pipelineNow);
 
   const negotiationKey = stageByKey.has("contract")
     ? "contract"
@@ -663,6 +896,121 @@ export async function getSituationOverview(
   const wonAmountLabel = formatMoneyKzt(wonAmountKnown ? wonAmount : null, currency);
   const pipelineAmountLabel = formatMoneyKzt(pipelineAmountKnown ? pipelineAmount : null, currency);
 
+  const conversionRate =
+    inquiriesCount >= 3 ? Math.round((wonDeals.length / inquiriesCount) * 1000) / 10 : null;
+  const prevConversionRate =
+    prevInquiriesCount != null && prevInquiriesCount >= 3
+      ? Math.round((prevWonDeals.length / prevInquiriesCount) * 1000) / 10
+      : null;
+
+  const sourceMap = new Map<string, { inquiries: number; deals: number }>();
+  for (const inq of periodInquiries) {
+    const key = normalizeSourceKey(inq.sourceChannel || inq.source);
+    const row = sourceMap.get(key) || { inquiries: 0, deals: 0 };
+    row.inquiries += 1;
+    if (inq.dealId || inq.status === "converted") row.deals += 1;
+    sourceMap.set(key, row);
+  }
+  const sources = [...sourceMap.entries()]
+    .map(([key, row]) => ({
+      key,
+      label: sourceLabel(key),
+      inquiries: row.inquiries,
+      deals: row.deals,
+      conversionRate: row.inquiries > 0 ? Math.round((row.deals / row.inquiries) * 1000) / 10 : null,
+      href:
+        key === "unspecified"
+          ? "/inquiries?test=false"
+          : `/inquiries?source=${encodeURIComponent(key)}&test=false`,
+    }))
+    .sort((a, b) => b.inquiries - a.inquiries);
+
+  const newByOwner = new Map<string | null, number>();
+  for (const inq of periodInquiries) {
+    const key = inq.assigneeMembershipId ?? null;
+    newByOwner.set(key, (newByOwner.get(key) || 0) + 1);
+  }
+  const dealsByOwner = new Map<string | null, number>();
+  for (const deal of openDeals) {
+    const key = deal.assigneeMembershipId ?? null;
+    dealsByOwner.set(key, (dealsByOwner.get(key) || 0) + 1);
+  }
+  const attentionByOwner = new Map<string | null, number>();
+  for (const item of attentionItems) {
+    const key = ("ownerMembershipId" in item ? item.ownerMembershipId : null) ?? null;
+    attentionByOwner.set(key, (attentionByOwner.get(key) || 0) + 1);
+  }
+  const overdueByOwner = new Map<string | null, number>();
+  for (const task of overdueTasks) {
+    const key = task.ownerMembershipId ?? null;
+    overdueByOwner.set(key, (overdueByOwner.get(key) || 0) + 1);
+  }
+
+  const teamRows = members.map((member) => ({
+    membershipId: member.id,
+    name: member.user.name || "Менеджер",
+    newInquiries: newByOwner.get(member.id) || 0,
+    inWork: dealsByOwner.get(member.id) || 0,
+    attention: attentionByOwner.get(member.id) || 0,
+    overdueTasks: overdueByOwner.get(member.id) || 0,
+  }));
+  const unassignedTeam = {
+    membershipId: null as string | null,
+    name: "Без ответственного",
+    newInquiries: newByOwner.get(null) || 0,
+    inWork: dealsByOwner.get(null) || 0,
+    attention: attentionByOwner.get(null) || 0,
+    overdueTasks: overdueByOwner.get(null) || 0,
+  };
+  const teamHasWork = (row: typeof unassignedTeam) =>
+    row.newInquiries > 0 || row.inWork > 0 || row.attention > 0 || row.overdueTasks > 0;
+  const team =
+    scope === "unassigned"
+      ? teamHasWork(unassignedTeam)
+        ? [unassignedTeam]
+        : []
+      : [
+          ...(scope === "mine" ? teamRows.filter((row) => row.membershipId === membership.id) : teamRows),
+          ...(teamHasWork(unassignedTeam) && scope !== "mine" ? [unassignedTeam] : []),
+        ].filter((row) => members.length <= 6 || teamHasWork(row));
+
+  const loadedTeam = team.filter((row) => row.membershipId);
+  const attentionValues = loadedTeam.map((row) => row.attention).filter((n) => n > 0);
+  const topManager =
+    loadedTeam.length >= 2 && attentionValues.length >= 2
+      ? (() => {
+          const leader = [...loadedTeam].sort((a, b) => b.attention - a.attention)[0];
+          const average = attentionValues.reduce((sum, n) => sum + n, 0) / attentionValues.length;
+          return leader ? { name: leader.name, attention: leader.attention, average } : null;
+        })()
+      : null;
+  const bestSource = sources
+    .filter((row) => row.inquiries >= 3 && row.conversionRate != null && row.conversionRate > 0)
+    .sort((a, b) => (b.conversionRate || 0) - (a.conversionRate || 0))[0];
+
+  const insights = buildInsights({
+    needsReply: attentionSummary.needsReply,
+    overdueTasks: attentionSummary.overdueTasks,
+    stalledDeals: attentionSummary.stalledDeals,
+    needsHuman: attentionSummary.needsHuman,
+    newInquiries: currentNewInquiries,
+    inquiries: inquiriesCount,
+    prevInquiries: prevInquiriesCount,
+    conversionRate,
+    prevConversionRate,
+    biggestDrop: pipelineView.biggestDrop,
+    topManager,
+    bestSource: bestSource
+      ? { label: bestSource.label, rate: bestSource.conversionRate || 0, inquiries: bestSource.inquiries }
+      : null,
+  });
+
+  const conversationAi = conversationModes.find((row) => row.mode === "ai")?._count._all || 0;
+  const conversationHuman = conversationModes.find((row) => row.mode === "human")?._count._all || 0;
+  const whatsappInquiries = periodInquiries.filter(
+    (inq) => normalizeSourceKey(inq.sourceChannel || inq.source) === "whatsapp",
+  ).length;
+
   const result = {
     approaches: inquiriesCount,
     inquiries: inquiriesCount,
@@ -676,6 +1024,8 @@ export async function getSituationOverview(
     wonAmountLabel,
     wonAmountKnownCount: wonAmountKnown,
     wonAmountTotalDeals: wonDeals.length,
+    conversionRate,
+    conversionLabel: conversionRate != null ? `${conversionRate}%` : null,
     lostReasons: [...lostReasonMap.entries()]
       .map(([reason, count]) => ({ reason, count }))
       .sort((a, b) => b.count - a.count)
@@ -686,6 +1036,15 @@ export async function getSituationOverview(
       dealsCreated: delta(dealsCreated, prevDealsCreated),
       wonDeals: delta(wonDeals.length, prevWonDeals.length),
       wonAmount: previousFrom ? delta(wonAmount, prevWonAmount) : null,
+      inquiriesPct: deltaPercent(inquiriesCount, prevInquiriesCount),
+      newClientsPct: deltaPercent(newClients, prevNewClients),
+      dealsCreatedPct: deltaPercent(dealsCreated, prevDealsCreated),
+      wonDealsPct: deltaPercent(wonDeals.length, prevWonDeals.length),
+      wonAmountPct: previousFrom ? deltaPercent(wonAmount, prevWonAmount) : null,
+      conversionPct:
+        conversionRate != null && prevConversionRate != null
+          ? Math.round((conversionRate - prevConversionRate) * 10) / 10
+          : null,
     },
     hrefs: {
       inquiries: "/inquiries",
@@ -708,6 +1067,8 @@ export async function getSituationOverview(
     waitingClient: waitingClientDeals.length + waitingClientInquiries,
     waitingClientDeals: waitingClientDeals.length,
     waitingClientInquiries,
+    newInquiries: currentNewInquiries,
+    inWorkInquiries: currentInWorkInquiries,
     needsReply: attentionSummary.needsReply,
     noNextAction: attentionSummary.noNextAction,
     overdueTasks: attentionSummary.overdueTasks,
@@ -719,6 +1080,8 @@ export async function getSituationOverview(
       tasksOverdue: "/tasks",
       conversations: "/conversations",
       inquiriesWaiting: "/inquiries?filter=waiting_client",
+      inquiriesNew: "/inquiries?filter=new",
+      inquiriesInWork: "/inquiries?filter=in_progress",
       proposalFollowUp: "/deals",
     },
   };
@@ -759,12 +1122,16 @@ export async function getSituationOverview(
     scope,
     onlyImportant,
     brief,
+    insights,
     result,
     current,
     pipeline: {
-      stages: pipelineNow,
+      stages: pipelineView.stages,
+      biggestDrop: pipelineView.biggestDrop,
       note: "Стадии открытых сделок прямо сейчас",
     },
+    sources,
+    team,
     attention: {
       summary: attentionSummary,
       items: onlyImportant
@@ -859,6 +1226,12 @@ export async function getSituationOverview(
           ? "AI Manager · активен"
           : "AI Manager · ошибка интеграции"
         : "AI Manager · не подключён",
+      conversations: {
+        ai: conversationAi,
+        human: conversationHuman,
+        needsAttention: conversationNeedsHuman,
+      },
+      whatsappInquiries,
       newRequests: {
         processing: await prisma.task.count({
           where: {

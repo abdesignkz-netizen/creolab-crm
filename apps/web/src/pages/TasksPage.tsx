@@ -392,7 +392,14 @@ export function TasksPage() {
     const fromContact = searchParams.get("contactId");
     const fromConversation = searchParams.get("conversationId");
     const fromDeal = searchParams.get("dealId");
-    if (!openId && !fromInquiry && !fromContact && !fromConversation && !fromDeal) return;
+    const fromCommand = searchParams.get("command");
+    if (fromCommand) {
+      setCommandText(fromCommand);
+      setComposeMode("command");
+      setShowCampaignPanel(false);
+      setShowCreate(true);
+    }
+    if (!openId && !fromInquiry && !fromContact && !fromConversation && !fromDeal && !fromCommand) return;
 
     let cancelled = false;
 
@@ -500,6 +507,7 @@ export function TasksPage() {
       next.delete("contactId");
       next.delete("conversationId");
       next.delete("dealId");
+      next.delete("command");
       setSearchParams(next, { replace: true });
     }
 
@@ -515,6 +523,7 @@ export function TasksPage() {
     searchParams.get("contactId"),
     searchParams.get("conversationId"),
     searchParams.get("dealId"),
+    searchParams.get("command"),
   ]);
 
   useEffect(() => {

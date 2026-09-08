@@ -1,5 +1,5 @@
 import { useUrlState, useRequestVersion } from "../lib/useUrlState";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { PeriodSelector, type PeriodPreset } from "../components/PeriodSelector";
 import { nameWithPhone } from "../lib/contactDisplay";
@@ -23,10 +23,24 @@ const ACTION_LABEL: Record<string, string> = {
   create_next_action: "Задать шаг",
 };
 
-function deltaText(value: number | null | undefined) {
-  if (value == null || value === 0) return null;
-  return value > 0 ? `↑ ${value}` : `↓ ${Math.abs(value)}`;
+function deltaText(value: number | null | undefined, percent?: number | null) {
+  const parts: string[] = [];
+  if (percent != null && percent !== 0) parts.push(`${percent > 0 ? "+" : ""}${percent}%`);
+  if (value != null && value !== 0) parts.push(value > 0 ? `↑ ${value}` : `↓ ${Math.abs(value)}`);
+  return parts.length ? parts.join(" · ") : null;
 }
+
+const ASK_PRESETS = [
+  "Что сегодня требует моего внимания?",
+  "Какие сделки зависли?",
+  "Какие заявки не обработаны?",
+  "Что изменилось сегодня?",
+  "У кого высокая нагрузка?",
+  "Где теряются клиенты?",
+  "Сравни с прошлой неделей.",
+];
+
+const TASK_COMMAND_RE = /постав(ь|и)|создай задачу|позвон|напиш|отправ(ь|и)|уточн|follow-?up|кп\b|сообщени/i;
 
 function ageLabel(minutes?: number | null) {
   return formatDurationMinutes(minutes) || "срок не указан";
@@ -42,6 +56,7 @@ function Kpi({
   value,
   hint,
   delta,
+  deltaPercent,
   to,
   emphasize,
 }: {
@@ -49,15 +64,17 @@ function Kpi({
   value: ReactNode;
   hint?: string;
   delta?: number | null;
+  deltaPercent?: number | null;
   to?: string;
   emphasize?: boolean;
 }) {
+  const change = deltaText(delta, deltaPercent);
   const inner = (
     <>
       <span className="muted">{label}</span>
       <strong className={emphasize ? "kpi-emphasize" : undefined}>{value}</strong>
       {hint ? <span className="kpi-hint">{hint}</span> : null}
-      {deltaText(delta) ? <span className="kpi-delta">{deltaText(delta)}</span> : null}
+      {change ? <span className="kpi-delta">{change}</span> : null}
     </>
   );
   if (to) {
@@ -84,6 +101,7 @@ export function SituationPage() {
   const [busyId, setBusyId] = useState("");
   const [meMissing, setMeMissing] = useState(false);
   const [badgeHint, setBadgeHint] = useState("");
+  const [askText, setAskText] = useState("");
 
   async function load() {
     const request = ++requestVersion.current;
@@ -171,6 +189,55 @@ export function SituationPage() {
   const nextActionItems = attention.items.filter((item: any) => item.kind === "missing_next_action");
   const visibleAttention = attentionFilter === "no_next_action" ? nextActionItems : attention.items;
   const noNextHref = path("/today", { ...periodParams, attention: "no_next_action" }) + "#attention";
+  const insights = Array.isArray(data.insights) ? data.insights : [];
+  const sources = Array.isArray(data.sources) ? data.sources : [];
+  const team = Array.isArray(data.team) ? data.team : [];
+  const ai = data.aiManager || {};
+
+  function goAsk(question: string) {
+    const text = question.trim();
+    if (!text) return;
+    const q = text.toLowerCase();
+    if (TASK_COMMAND_RE.test(text) && !/что |какие |где |у кого |сравни/.test(q)) {
+      navigate(`/tasks?command=${encodeURIComponent(text)}`);
+      return;
+    }
+    if (/вниман|требует/.test(q)) {
+      document.getElementById("attention")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    if (/завис|stall|без активн/.test(q)) {
+      navigate(path("/deals", { focus: "stalled" }));
+      return;
+    }
+    if (/не обработ|новые заявк|заявки не/.test(q)) {
+      navigate(path("/inquiries", { filter: "new", test: "false" }, true));
+      return;
+    }
+    if (/нагруз|менеджер|команд/.test(q)) {
+      document.getElementById("team")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    if (/теря|воронк|этап|клиент/.test(q) && /теря|воронк|где/.test(q)) {
+      document.getElementById("funnel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    if (/недел|сравни|изменил/.test(q)) {
+      if (/недел/.test(q)) setPeriod("last_7");
+      document.getElementById("sit-result")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    if (/просроч|задач/.test(q)) {
+      navigate("/tasks?filter=overdue");
+      return;
+    }
+    document.getElementById("insights")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function onAsk(event: FormEvent) {
+    event.preventDefault();
+    goAsk(askText);
+  }
 
 
   return (
@@ -257,95 +324,6 @@ export function SituationPage() {
           >
             Только важное
           </button>
-        </div>
-      </div>
-
-      <div className="sit-brief">
-        <b>Кратко</b>
-        <p>{data.brief}</p>
-      </div>
-
-      <div className="sit-section sit-result">
-        <div className="sit-section-head">
-          <h3>За {data.period.label.toLowerCase()}</h3>
-          <span className="muted">Результат выбранного периода</span>
-        </div>
-        <div className="sit-kpi-grid">
-          <Kpi label="Обращения" value={r.inquiries} delta={r.deltas?.inquiries} to={path("/inquiries", { test: "false" }, true)} />
-          <Kpi label="Новые клиенты" value={r.newClients} delta={r.deltas?.newClients} to={path("/contacts", { owner: scope === "mine" ? "me" : scope === "unassigned" ? "unassigned" : "" }, true)} />
-          <Kpi label="Сделки" value={r.dealsCreated} delta={r.deltas?.dealsCreated} to={path("/deals", { timeMode: "period", basis: "created" }, true)} />
-          <Kpi label="Продажи" value={r.wonDeals} delta={r.deltas?.wonDeals} to={path("/deals", { timeMode: "period", basis: "closed", outcome: "won" }, true)} emphasize />
-          <Kpi
-            label="Продано"
-            value={r.wonAmountLabel || "—"}
-            hint={
-              r.wonAmountTotalDeals
-                ? r.wonAmountKnownCount < r.wonAmountTotalDeals
-                  ? `сумма у ${r.wonAmountKnownCount} из ${r.wonAmountTotalDeals}`
-                  : undefined
-                : "нет сумм"
-            }
-            to={path("/deals", { timeMode: "period", basis: "closed", outcome: "won" }, true)}
-            emphasize
-          />
-          <Kpi
-            label="Потеряно"
-            value={r.lostDeals}
-            hint={r.lostReasons?.[0] ? `${r.lostReasons[0].reason} · ${r.lostReasons[0].count}` : undefined}
-            to={path("/deals", { timeMode: "period", basis: "closed", outcome: "lost" }, true)}
-          />
-        </div>
-        {data.payments ? (
-          <p className="muted sit-pay">
-            Оплачено за период: <b>{data.payments.paidInPeriodLabel}</b>
-            {data.payments.count ? ` · ${data.payments.count} платежей` : ""}
-          </p>
-        ) : null}
-        {data.allTime ? (
-          <p className="muted">
-            Всего: {data.allTime.inquiries} обращений · {data.allTime.clients} клиентов · {data.allTime.deals} сделок ·{" "}
-            {data.allTime.won} продаж
-          </p>
-        ) : null}
-      </div>
-
-      <div className="sit-section sit-current">
-        <div className="sit-section-head">
-          <h3>Сейчас в работе</h3>
-          <span className="muted">Текущее состояние, не период</span>
-        </div>
-        <div className="sit-kpi-grid sit-kpi-grid-current">
-          <Kpi label="Активные сделки" value={c.activeDeals} to={path("/deals")} emphasize />
-          <Kpi
-            label="В работе"
-            value={c.activePipelineAmountLabel || "—"}
-            hint={
-              c.amountKnownOf
-                ? `сумма известна у ${c.amountKnownCount} из ${c.amountKnownOf}`
-                : undefined
-            }
-            to={path("/deals")}
-            emphasize
-          />
-          <Kpi label="Взвешенный прогноз" value={c.weightedPipelineLabel || "—"} to={path("/deals")} />
-          <Kpi label="На договоре" value={c.contractStage} to={path("/deals", { stage: "contract" })} />
-          <Kpi label="Заявки ждут клиента" value={c.waitingClientInquiries} to={path("/inquiries", {filter: "waiting_client", test: "false"})} />
-          <Kpi label="Нужен ответ" value={c.needsReply} to="/contacts?filter=needs_reply" />
-          <Kpi label="Без след. шага" value={nextActionItems.length} to={noNextHref} />
-          <Kpi label="Просрочено" value={c.overdueTasks} to="/tasks?filter=overdue" />
-          <Kpi label="Зависли" value={c.stalledDeals} to={path("/deals", { focus: "stalled" })} />
-          <Kpi label="КП без ответа" value={c.proposalWithoutReply ?? 0} to={path("/deals", { focus: "proposal_no_reply" })} />
-        </div>
-        <div className="sit-pipeline">
-          <b>На стадиях сейчас</b>
-          <div className="sit-pipeline-row">
-            {(data.pipeline?.stages || []).map((stage: any) => (
-              <Link key={stage.systemKey} className="sit-pipe-chip" to={path("/deals", { stage: stage.systemKey })}>
-                <span>{stage.name}</span>
-                <strong>{stage.count}</strong>
-              </Link>
-            ))}
-          </div>
         </div>
       </div>
 
@@ -442,6 +420,246 @@ export function SituationPage() {
         )}
       </div>
 
+      <form className="sit-section sit-ask" id="ask-ai" onSubmit={onAsk}>
+        <div className="sit-section-head">
+          <h3>Спросите CreoLab AI о Вашем бизнесе</h3>
+        </div>
+        <div className="sit-ask-row">
+          <input
+            className="sit-ask-input"
+            value={askText}
+            onChange={(event) => setAskText(event.target.value)}
+            placeholder="Что сегодня требует моего внимания?"
+            aria-label="Вопрос CreoLab AI"
+          />
+          <button type="submit" className="btn">
+            Спросить
+          </button>
+        </div>
+        <div className="sit-ask-presets">
+          {ASK_PRESETS.map((preset) => (
+            <button key={preset} type="button" className="sit-ask-chip" onClick={() => goAsk(preset)}>
+              {preset}
+            </button>
+          ))}
+        </div>
+        <p className="muted sit-ask-note">
+          Вопросы открывают существующие фильтры и сводку. Команды вроде «напиши» или «отправь КП» идут в текущий движок задач.
+        </p>
+      </form>
+
+      <div className="sit-brief" id="insights">
+        <b>AI-сводка</b>
+        {insights.length ? (
+          <ul className="sit-insights">
+            {insights.map((item: { text: string; href?: string; tone?: string }) => (
+              <li key={item.text} className={`sit-insight sit-insight-${item.tone || "observe"}`}>
+                {item.href?.startsWith("#") ? (
+                  <a href={item.href}>{item.text}</a>
+                ) : item.href ? (
+                  <Link to={item.href}>{item.text}</Link>
+                ) : (
+                  <span>{item.text}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p>{data.brief}</p>
+        )}
+      </div>
+
+      <div className="sit-section sit-result" id="sit-result">
+        <div className="sit-section-head">
+          <h3>За {data.period.label.toLowerCase()}</h3>
+          <span className="muted">Результат выбранного периода</span>
+        </div>
+        <div className="sit-kpi-grid">
+          <Kpi label="Обращения" value={r.inquiries} delta={r.deltas?.inquiries} deltaPercent={r.deltas?.inquiriesPct} to={path("/inquiries", { test: "false" }, true)} />
+          <Kpi label="Новые клиенты" value={r.newClients} delta={r.deltas?.newClients} deltaPercent={r.deltas?.newClientsPct} to={path("/contacts", { owner: scope === "mine" ? "me" : scope === "unassigned" ? "unassigned" : "" }, true)} />
+          <Kpi label="Сделки" value={r.dealsCreated} delta={r.deltas?.dealsCreated} deltaPercent={r.deltas?.dealsCreatedPct} to={path("/deals", { timeMode: "period", basis: "created" }, true)} />
+          <Kpi label="Продажи" value={r.wonDeals} delta={r.deltas?.wonDeals} deltaPercent={r.deltas?.wonDealsPct} to={path("/deals", { timeMode: "period", basis: "closed", outcome: "won" }, true)} emphasize />
+          <Kpi
+            label="Продано"
+            value={r.wonAmountLabel || "—"}
+            hint={
+              r.wonAmountTotalDeals
+                ? r.wonAmountKnownCount < r.wonAmountTotalDeals
+                  ? `сумма у ${r.wonAmountKnownCount} из ${r.wonAmountTotalDeals}`
+                  : undefined
+                : "нет сумм"
+            }
+            delta={r.deltas?.wonAmount}
+            deltaPercent={r.deltas?.wonAmountPct}
+            to={path("/deals", { timeMode: "period", basis: "closed", outcome: "won" }, true)}
+            emphasize
+          />
+          <Kpi
+            label="Потеряно"
+            value={r.lostDeals}
+            hint={r.lostReasons?.[0] ? `${r.lostReasons[0].reason} · ${r.lostReasons[0].count}` : undefined}
+            to={path("/deals", { timeMode: "period", basis: "closed", outcome: "lost" }, true)}
+          />
+          {r.conversionRate != null ? (
+            <Kpi
+              label="Конверсия"
+              value={r.conversionLabel}
+              hint={`${r.wonDeals} продаж из ${r.inquiries} обращений`}
+              deltaPercent={r.deltas?.conversionPct}
+              to={path("/deals", { timeMode: "period", basis: "closed", outcome: "won" }, true)}
+            />
+          ) : null}
+        </div>
+        {data.payments ? (
+          <p className="muted sit-pay">
+            Оплачено за период: <b>{data.payments.paidInPeriodLabel}</b>
+            {data.payments.count ? ` · ${data.payments.count} платежей` : ""}
+          </p>
+        ) : null}
+        {data.allTime ? (
+          <p className="muted">
+            Всего: {data.allTime.inquiries} обращений · {data.allTime.clients} клиентов · {data.allTime.deals} сделок ·{" "}
+            {data.allTime.won} продаж
+          </p>
+        ) : null}
+      </div>
+
+      <div className="sit-section sit-current">
+        <div className="sit-section-head">
+          <h3>Сейчас в работе</h3>
+          <span className="muted">Текущее состояние, не период</span>
+        </div>
+        <div className="sit-kpi-grid sit-kpi-grid-current">
+          <Kpi label="Новые заявки" value={c.newInquiries ?? 0} to={path("/inquiries", { filter: "new", test: "false" })} emphasize />
+          <Kpi label="Заявки в работе" value={c.inWorkInquiries ?? 0} to={path("/inquiries", { filter: "in_progress", test: "false" })} />
+          <Kpi label="Активные сделки" value={c.activeDeals} to={path("/deals")} emphasize />
+          <Kpi
+            label="Сумма воронки"
+            value={c.activePipelineAmountLabel || "—"}
+            hint={
+              c.amountKnownOf
+                ? `сумма известна у ${c.amountKnownCount} из ${c.amountKnownOf}`
+                : undefined
+            }
+            to={path("/deals")}
+            emphasize
+          />
+          <Kpi label="Взвешенный прогноз" value={c.weightedPipelineLabel || "—"} to={path("/deals")} />
+          <Kpi label="На договоре" value={c.contractStage} to={path("/deals", { stage: "contract" })} />
+          <Kpi label="Заявки ждут клиента" value={c.waitingClientInquiries} to={path("/inquiries", {filter: "waiting_client", test: "false"})} />
+          <Kpi label="Нужен ответ" value={c.needsReply} to="/contacts?filter=needs_reply" />
+          <Kpi label="Без след. шага" value={nextActionItems.length} to={noNextHref} />
+          <Kpi label="Просрочено" value={c.overdueTasks} to="/tasks?filter=overdue" />
+          <Kpi label="Зависли" value={c.stalledDeals} to={path("/deals", { focus: "stalled" })} />
+          <Kpi label="КП без ответа" value={c.proposalWithoutReply ?? 0} to={path("/deals", { focus: "proposal_no_reply" })} />
+        </div>
+        <div className="sit-pipeline" id="funnel">
+          <b>На стадиях сейчас</b>
+          <div className="sit-pipeline-row">
+            {(data.pipeline?.stages || []).map((stage: any) => (
+              <Link key={stage.systemKey} className="sit-pipe-chip" to={path("/deals", { stage: stage.systemKey })}>
+                <span>{stage.name}</span>
+                <strong>{stage.count}</strong>
+                {stage.toNextRate != null && stage.toNextRate > 0 ? <span className="muted">{stage.toNextRate}% далее</span> : null}
+              </Link>
+            ))}
+          </div>
+          {data.pipeline?.biggestDrop ? (
+            <p className="muted">
+              Наибольшая потеря сейчас между «{data.pipeline.biggestDrop.fromName}» и «
+              {data.pipeline.biggestDrop.toName}»: {data.pipeline.biggestDrop.fromCount} → {data.pipeline.biggestDrop.toCount}.
+            </p>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="sit-two-col sit-ops-row">
+        <div className="sit-section sit-team" id="team">
+          <div className="sit-section-head">
+            <h3>Команда</h3>
+            <span className="muted">Компактный снимок</span>
+          </div>
+          {team.length === 0 ? (
+            <p className="empty">Нет данных по менеджерам за выбранные условия.</p>
+          ) : (
+            <div className="sit-table-wrap">
+              <table className="sit-table">
+                <thead>
+                  <tr>
+                    <th>Менеджер</th>
+                    <th>Новые</th>
+                    <th>В работе</th>
+                    <th>Внимание</th>
+                    <th>Просрочено</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {team.map((row: any) => (
+                    <tr key={row.membershipId || "unassigned"}>
+                      <td>{row.name}</td>
+                      <td>{row.newInquiries}</td>
+                      <td>{row.inWork}</td>
+                      <td>{row.attention}</td>
+                      <td>{row.overdueTasks}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        <div className="sit-section sit-ai-card">
+          <div className="sit-section-head">
+            <h3>AI-менеджер</h3>
+            <span className={ai.status === "error" ? "error" : "muted"}>{ai.label}</span>
+          </div>
+          <div className="sit-kpi-grid sit-kpi-grid-ai">
+            <Kpi label="Диалоги AI" value={ai.conversations?.ai ?? 0} to="/conversations?filter=ai" />
+            <Kpi label="У менеджера" value={ai.conversations?.human ?? 0} to="/conversations?filter=human" />
+            <Kpi label="Требуют вмешательства" value={ai.conversations?.needsAttention ?? 0} to="/conversations?filter=human" emphasize />
+            <Kpi label="Заявки из WhatsApp" value={ai.whatsappInquiries ?? 0} to={path("/inquiries", { source: "whatsapp", test: "false" }, true)} />
+          </div>
+        </div>
+      </div>
+
+      <div className="sit-section sit-sources" id="sources">
+        <div className="sit-section-head">
+          <h3>Источники</h3>
+          <span className="muted">За {data.period.label.toLowerCase()}</span>
+        </div>
+        {sources.length === 0 ? (
+          <p className="empty">За выбранный период заявок нет — источники появятся после обращений.</p>
+        ) : (
+          <div className="sit-table-wrap">
+            <table className="sit-table">
+              <thead>
+                <tr>
+                  <th>Источник</th>
+                  <th>Заявки</th>
+                  <th>Сделки</th>
+                  <th>Конверсия</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sources.map((row: any) => (
+                  <tr key={row.key}>
+                    <td>
+                      <Link to={path("/inquiries", { ...(row.key === "unspecified" ? {} : { source: row.key }), test: "false" }, true)}>
+                        {row.label}
+                      </Link>
+                    </td>
+                    <td>{row.inquiries}</td>
+                    <td>{row.deals}</td>
+                    <td>{row.conversionRate != null ? `${row.conversionRate}%` : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
       <div className="sit-two-col sit-today-row">
         <div className="sit-section">
           <div className="sit-section-head">
@@ -523,7 +741,7 @@ export function SituationPage() {
         </div>
       </div>
 
-      <div className="sit-two-col sit-events-row">
+      <div className="sit-two-col sit-events-row" id="events">
         <div className="sit-section">
           <div className="sit-section-head">
             <h3>Последние обращения</h3>
