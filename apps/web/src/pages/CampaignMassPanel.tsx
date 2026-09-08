@@ -882,7 +882,7 @@ export function CampaignMassPanel({
               onChange={(event) => setMessage(event.target.value)}
               placeholder={
                 messageMode === "ai" || personalizeEach
-                  ? "Что сделать клиентам, например: уточни актуальность заявки"
+                  ? "Что сделать клиентам, например: уточнить удобное время для созвона"
                   : "{{firstName}}, добрый день! ..."
               }
             />

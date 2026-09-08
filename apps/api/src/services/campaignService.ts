@@ -7,11 +7,13 @@ import { ApiError } from "../errors.ts";
 import { fileStorageStatus, resolveUploadPath } from "../lib/storage.ts";
 import type { AuthContext } from "../lib/types.ts";
 import {
+  acceptPersonalizedDraft,
+  clientAskFromStaffTask,
   composeRecipientOffer,
-  firstNameOf,
   inferCampaignOfferKind,
   looksLikeStaffCommand,
   personalize,
+  pickPersonFirstName,
   recipientDraftsFingerprint,
   resolveRecipientSendText,
 } from "./campaignPersonalize.ts";
@@ -309,7 +311,7 @@ function buildPersonalizationPreviews(
   if (personalizeEach) {
     return pending.slice(0, 8).map((r) => ({
       label: r.displayName || "Контакт",
-      text: r.messageDraft || (template ? personalize(template, { firstName: firstNameOf(r.displayName) }) : ""),
+      text: r.messageDraft || (template ? personalize(template, { firstName: pickPersonFirstName(r.displayName) }) : ""),
     })).filter((item) => item.text);
   }
   if (!template) return [];
@@ -317,7 +319,7 @@ function buildPersonalizationPreviews(
   return [
     ...samples.map((r) => ({
       label: r.displayName || "Контакт",
-      text: personalize(template, { firstName: firstNameOf(r.displayName) }),
+      text: personalize(template, { firstName: pickPersonFirstName(r.displayName) }),
     })),
     { label: "Неизвестный контакт", text: personalize(template, { firstName: null }) },
   ];
@@ -521,7 +523,7 @@ export async function prepareCampaign(prisma: PrismaClient, auth: AuthContext, i
       status: r.status,
       message: data.personalizeEach
         ? r.messageDraft || (data.messageDraft
-          ? personalize(data.messageDraft, { firstName: firstNameOf(r.displayName) })
+          ? personalize(data.messageDraft, { firstName: pickPersonFirstName(r.displayName) })
           : null)
         : undefined,
     })),
@@ -836,7 +838,7 @@ async function sendOneRecipient(
       recipientDraft: recipient.messageDraft,
       campaignSnapshot: campaign.messageSnapshot,
       campaignDraft: campaign.messageDraft,
-      firstName: firstNameOf(contact?.firstName || contact?.name || recipient.displayName),
+      firstName: pickPersonFirstName(contact?.firstName, contact?.name, recipient.displayName),
       companyName: contact?.companyName,
       interest: inquiryInterest(inquiry)?.text || null,
     });
@@ -948,7 +950,7 @@ async function loadRecipientOfferFacts(
     const conversation = recipient.contactId ? conversationInterests.get(recipient.contactId) : undefined;
     return {
       id: recipient.id,
-      firstName: firstNameOf(contact?.firstName || contact?.name || recipient.displayName),
+      firstName: pickPersonFirstName(contact?.firstName, contact?.name, recipient.displayName),
       companyName: contact?.companyName || null,
       interest: pickUsableInterest(conversation?.text, service, subject, inquiryInterest(inquiry)?.text),
     };
@@ -978,13 +980,15 @@ export async function personalizeCampaignRecipients(
   const hasFile = attachments.length > 0;
   const sharedRaw = String(campaign.messageDraft || "").trim();
   const commandFromDraft = looksLikeStaffCommand(sharedRaw);
-  const taskText = [campaign.rawCommandText, commandFromDraft ? sharedRaw : "", campaign.title]
-    .map((value) => String(value || "").trim())
-    .filter((value, index, all) => value && all.indexOf(value) === index)
-    .join("\n");
+  const taskText =
+    [campaign.rawCommandText, commandFromDraft ? sharedRaw : ""]
+      .map((value) => String(value || "").trim())
+      .filter((value, index, all) => value && all.indexOf(value) === index)
+      .join("\n") || String(campaign.title || "").trim();
   const sharedDraft = commandFromDraft ? "" : sharedRaw;
   const facts = await loadRecipientOfferFacts(prisma, membership.tenantId, pending);
   const kind = inferCampaignOfferKind(taskText, sharedDraft);
+  const clientAsk = clientAskFromStaffTask(taskText);
   let drafts = facts.map((fact) => ({
     id: fact.id,
     text: composeRecipientOffer({
@@ -1000,6 +1004,7 @@ export async function personalizeCampaignRecipients(
   if (input.useLlm !== false) {
     const refined = await refineCampaignRecipientDraftsWithLlm({
       taskText,
+      clientAsk,
       kind,
       hasFile,
       recipients: drafts.map((row) => {
@@ -1015,7 +1020,13 @@ export async function personalizeCampaignRecipients(
     });
     if (refined?.length) {
       const byId = new Map(refined.map((row) => [row.id, row.text]));
-      drafts = drafts.map((row) => ({ id: row.id, text: byId.get(row.id) || row.text }));
+      drafts = drafts.map((row) => {
+        const next = byId.get(row.id);
+        if (!next) return row;
+        const fact = facts.find((item) => item.id === row.id);
+        if (!acceptPersonalizedDraft({ taskText, firstName: fact?.firstName, draft: next })) return row;
+        return { id: row.id, text: next };
+      });
     }
   }
 
@@ -1057,14 +1068,20 @@ export async function draftCampaignMessage(goal: string, hasFile: boolean) {
   if (spoken) {
     return { messageDraft: `{{firstName}}, добрый день! ${spoken}${fileBit}`.replace(/\s{2,}/g, " ").trim(), mode: "ai" as const };
   }
+  const ask = clientAskFromStaffTask(goal);
+  if (ask) {
+    return { messageDraft: `{{firstName}}, добрый день! ${ask}${fileBit}`.replace(/\s{2,}/g, " ").trim(), mode: "ai" as const };
+  }
   const base =
     kind === "proposal"
       ? `{{firstName}}, добрый день! По запросу {{service}} направляем коммерческое предложение.${fileBit} Если актуально, напишите — уточним детали.`
       : kind === "documents"
         ? `{{firstName}}, добрый день! Направляем документы.${fileBit} Если нужно что-то ещё — напишите.`
-        : "{{firstName}}, добрый день! Хотели уточнить, актуальна ли ещё ваша задача." +
-          fileBit +
-          " Можем подсказать по следующим шагам.";
+        : kind === "follow_up"
+          ? "{{firstName}}, добрый день! Хотели уточнить, актуальна ли ещё ваша задача." +
+            fileBit +
+            " Можем подсказать по следующим шагам."
+          : `{{firstName}}, добрый день! ${goal.replace(/\s+/g, " ").trim()}${fileBit}`;
   return { messageDraft: base.replace(/\s{2,}/g, " ").trim(), mode: "ai" as const };
 }
 

@@ -4,7 +4,7 @@ import { createPrismaClient } from "@creolab/db";
 import { createApp } from "./app.ts";
 import { parsePhoneListText } from "./services/phoneListService.ts";
 import { parseContactImportText } from "./services/contactImportService.ts";
-import { composeRecipientOffer, resolveRecipientSendText } from "./services/campaignPersonalize.ts";
+import { composeRecipientOffer, firstNameOf, pickPersonFirstName, resolveRecipientSendText } from "./services/campaignPersonalize.ts";
 
 describe("campaign mass send foundations", () => {
   it("парсит список номеров с разделителями и дублями", () => {
@@ -70,6 +70,32 @@ describe("campaign mass send foundations", () => {
     assert.match(named, /Алия/);
     assert.match(named, /сайт/i);
     assert.notEqual(unnamed, named);
+  });
+
+  it("собирает текст из задачи, а не из шаблона «актуален ли запрос»", () => {
+    const text = composeRecipientOffer({
+      taskText: "Уточнить удобное время для созвона",
+      sharedDraft: "Уточнить удобное время для созвона",
+      firstName: "Тест",
+      interest: "интересует ИИ-менеджер",
+    });
+    assert.match(text, /Тест/);
+    assert.match(text, /созвон|время/i);
+    assert.doesNotMatch(text, /актуален ли ещё запрос/i);
+    assert.doesNotMatch(text, /^Уточнить удобное/i);
+    assert.doesNotMatch(text, /^Интерес,/);
+  });
+
+  it("не берёт ярлык поля «Интерес» как имя", () => {
+    assert.equal(firstNameOf("Интерес"), null);
+    assert.equal(pickPersonFirstName("Интерес", "Тест"), "Тест");
+    const text = composeRecipientOffer({
+      taskText: "Уточнить удобное время для созвона",
+      firstName: "Интерес",
+      interest: "интересует ИИ",
+    });
+    assert.match(text, /^Добрый день!/);
+    assert.doesNotMatch(text, /^Интерес,/);
   });
 
   it("отправка берёт индивидуальный текст, если включена персонализация", () => {
@@ -274,6 +300,72 @@ describe("campaign API flow", () => {
     const messages = (preview.recipientsPreview || []).map((row: { message?: string }) => String(row.message || ""));
     assert.ok(messages.some((text: string) => /сайт/i.test(text)));
     assert.ok(messages.some((text: string) => /презентац/i.test(text)));
+  });
+
+  it("personalize из задачи про созвон не подменяет шаблоном актуальности", async () => {
+    const tenant = await prisma.tenant.findFirst({ where: { slug: "creolab" } });
+    assert.ok(tenant);
+    const contact = await prisma.contact.create({
+      data: {
+        tenantId: tenant.id,
+        name: "Тест",
+        firstName: "Интерес",
+        methods: {
+          create: {
+            type: "phone",
+            rawValue: "+7 701 111 00 24",
+            normalizedValue: "77011110024",
+            source: "manual",
+            primary: true,
+          },
+        },
+      },
+    });
+    await prisma.inquiry.create({
+      data: {
+        tenantId: tenant.id,
+        contactId: contact.id,
+        source: "manual",
+        status: "new",
+        phoneRaw: "+7 701 111 00 24",
+        phoneNormalized: "77011110024",
+        phoneSource: "manual",
+        subject: "интересует ИИ-менеджер",
+        service: "ИИ",
+      },
+    });
+
+    const create = await fetch(`${url}/api/v1/campaigns`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        title: "Созвон",
+        contactIds: [contact.id],
+        rawCommandText: "Уточнить удобное время для созвона",
+        messageDraft: "Уточнить удобное время для созвона",
+        messageMode: "ai",
+        personalizeEach: true,
+      }),
+    });
+    const createBody = await create.text();
+    assert.equal(create.status, 201, createBody);
+    const id = JSON.parse(createBody).campaign.id;
+
+    const personalize = await fetch(`${url}/api/v1/campaigns/${id}/personalize-recipients`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ useLlm: false }),
+    });
+    const personalizeBody = await personalize.text();
+    assert.equal(personalize.status, 200, personalizeBody);
+    const draft = String(
+      (JSON.parse(personalizeBody).recipients || []).find((row: { contactId: string }) => row.contactId === contact.id)
+        ?.messageDraft || "",
+    );
+    assert.match(draft, /Тест/);
+    assert.match(draft, /созвон|время/i);
+    assert.doesNotMatch(draft, /актуален ли ещё запрос/i);
+    assert.doesNotMatch(draft, /^Интерес,/);
   });
 
   it("будущая дата ставит рассылку в очередь и не отправляет сразу", async () => {

@@ -231,6 +231,7 @@ const MAX_CAMPAIGN_LLM_RECIPIENTS = 40;
 /** Adapt already-composed campaign drafts. Never sends messages; no phones or chat logs. */
 export async function refineCampaignRecipientDraftsWithLlm(input: {
   taskText: string;
+  clientAsk?: string | null;
   kind: string;
   hasFile: boolean;
   recipients: Array<{
@@ -261,12 +262,13 @@ export async function refineCampaignRecipientDraftsWithLlm(input: {
           {
             role: "system",
             content:
-              "Ты редактор CRM-рассылки. Для каждого получателя слегка адаптируй уже готовый черновик под его факты. Верни JSON { drafts: [{id, text}] }. Сохрани смысл задачи. 1–3 предложения, вежливо, на русском. Не выдумывай цены, скидки, сроки, метрики, услуги и факты, которых нет во входных данных. Не добавляй телефоны. Не отправляй сообщения.",
+              "Ты редактор CRM-рассылки. Задача менеджера — что нужно спросить или сделать, не готовый WhatsApp-текст. Сформулируй короткое сообщение клиенту именно об этой просьбе. Верни JSON { drafts: [{id, text}] }. 1–3 предложения, вежливо, на русском. Не подменяй задачу шаблоном «актуален ли ещё запрос», если менеджер просил другое (время созвона, оплату, документы и т.д.). Имя для обращения бери только из firstName; не используй ярлыки полей («Интерес», «Имя», «Компания») и не подставляй интерес вместо имени. Если имени нет — начни с «Добрый день!». Интерес и компанию можно упомянуть как контекст заявки. Не выдумывай цены, скидки, сроки, метрики, услуги и факты, которых нет во входных данных. Не добавляй телефоны. Не отправляй сообщения.",
           },
           {
             role: "user",
             content: JSON.stringify({
               task: input.taskText,
+              clientAsk: input.clientAsk || undefined,
               kind: input.kind,
               hasFile: input.hasFile,
               recipients: input.recipients,

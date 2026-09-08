@@ -32,22 +32,64 @@ export function personalize(
   return text;
 }
 
+const STAFF_VERB_RE =
+  /^(пожалуйста[,\s]+)?(уточни(?:те|ть)?|отправ(?:ь|ьте|ить)|напиш(?:и|ите|ать)|напомни(?:те|ть)?|спроси(?:те)?|собери(?:те)?|разошли(?:те)?|позвони(?:те)?|перезвон\w*|скажи(?:те)?|подготовь(?:те)?|сделай(?:те)?|проверь(?:те)?|свяжись|свяжитесь)\s+/i;
+const NOT_A_PERSON_NAME =
+  /^(без|клиент|контакт|unknown|интерес|имя|компания|телефон|email|e-mail|почта|заявка|лид|lead|service|subject|whatsapp|telegram)$/i;
+const TASK_STOP_WORDS = new Set([
+  "хотели",
+  "уточнить",
+  "уточни",
+  "напомнить",
+  "напомни",
+  "спросить",
+  "отправить",
+  "написать",
+  "напиши",
+  "пожалуйста",
+  "клиенту",
+  "клиентам",
+  "заявки",
+  "заявке",
+  "заявка",
+  "всем",
+  "этим",
+  "вашу",
+  "вашей",
+]);
+
+function isRelevanceOnlyAsk(text: string) {
+  const t = String(text || "").toLowerCase();
+  if (/созвон|звонк|удобн|оплат|встреч|слот|когда/.test(t)) return false;
+  return /актуальн/.test(t);
+}
+
 export function inferCampaignOfferKind(taskText: string, sharedDraft = ""): CampaignOfferKind {
   const text = `${taskText} ${sharedDraft}`.toLowerCase();
   if (/\b(кп|коммерческ\w*\s+предложен\w*|proposal|оффер)\b/.test(text) || /отправ.{0,40}(кп|предложен)/.test(text)) {
     return "proposal";
   }
   if (/отправ.{0,30}(файл|документ|договор|презентац|смет|вложен)/.test(text)) return "documents";
-  if (/уточн|актуальн|напомн|follow/.test(text)) return "follow_up";
+  if (isRelevanceOnlyAsk(text) || (/напомн|follow/.test(text) && !/созвон|звонк|удобн|оплат|встреч/.test(text))) {
+    return "follow_up";
+  }
   return "message";
 }
 
 export function firstNameOf(name?: string | null) {
   const raw = String(name || "").trim();
-  if (!raw || /без имени|не указан|unknown/i.test(raw)) return null;
+  if (!raw || /без имени|не указан|unknown/i.test(raw) || NOT_A_PERSON_NAME.test(raw)) return null;
   const part = raw.split(/\s+/)[0] || "";
-  if (!part || /^(без|клиент|контакт|unknown)$/i.test(part)) return null;
+  if (!part || NOT_A_PERSON_NAME.test(part)) return null;
   return part;
+}
+
+export function pickPersonFirstName(...values: Array<string | null | undefined>) {
+  for (const value of values) {
+    const name = firstNameOf(value);
+    if (name) return name;
+  }
+  return null;
 }
 
 /** Imperative to the CRM/manager, not a WhatsApp text for the client. */
@@ -97,6 +139,67 @@ function tidy(text: string) {
     .trim();
 }
 
+function primaryTaskLine(taskText: string, sharedDraft = "") {
+  const lines = `${taskText}\n${sharedDraft}`
+    .split(/\n+/)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  return lines.find((line) => looksLikeStaffCommand(line)) || lines[0] || "";
+}
+
+function infinitiveFromStaffVerb(verb: string) {
+  const v = verb.toLowerCase();
+  if (/^уточн/.test(v)) return "уточнить";
+  if (/^напомн/.test(v)) return "напомнить";
+  if (/^спроси/.test(v)) return "спросить";
+  if (/^отправ/.test(v)) return "отправить";
+  if (/^напиш/.test(v)) return "написать";
+  if (/^скаж/.test(v)) return "сказать";
+  return "уточнить";
+}
+
+/** Turn «Уточнить удобное время для созвона» into a client-facing ask. Not a canned relevance template. */
+export function clientAskFromStaffTask(taskText: string): string | null {
+  const raw = String(taskText || "").replace(/\s+/g, " ").trim();
+  if (!raw) return null;
+  if (!looksLikeStaffCommand(raw) && !STAFF_VERB_RE.test(raw)) return null;
+  const rest = raw.replace(STAFF_VERB_RE, "").replace(/[.!?]+$/u, "").trim();
+  if (!rest || rest.length < 3) return null;
+  if (isRelevanceOnlyAsk(rest) || isRelevanceOnlyAsk(raw)) return null;
+  const verb = raw.match(STAFF_VERB_RE)?.[2] || "уточнить";
+  const infinitive = infinitiveFromStaffVerb(verb);
+  if (rest.toLowerCase().startsWith(infinitive)) return `Хотели ${rest}.`;
+  if (/^(когда|куда|как|что|почему)/i.test(rest)) {
+    return `Хотели ${infinitive}, ${rest.charAt(0).toLowerCase()}${rest.slice(1)}.`;
+  }
+  return `Хотели ${infinitive} ${rest}.`;
+}
+
+export function acceptPersonalizedDraft(input: { taskText: string; firstName?: string | null; draft: string }) {
+  const draft = String(input.draft || "").trim();
+  if (!draft) return false;
+  const greeting = draft.match(/^([^,\n]{1,48}),\s*(добрый день|здравствуйте)\b/i);
+  if (greeting) {
+    const used = greeting[1].trim();
+    const allowed = firstNameOf(input.firstName);
+    if (firstNameOf(used) === null) return false;
+    if (allowed && used.toLowerCase() !== allowed.toLowerCase()) return false;
+  }
+  const ask = clientAskFromStaffTask(primaryTaskLine(input.taskText));
+  if (!ask) return true;
+  const tokens = ask
+    .toLowerCase()
+    .split(/[^а-яёa-z0-9]+/i)
+    .filter((word) => word.length >= 4 && !TASK_STOP_WORDS.has(word));
+  if (!tokens.length) return true;
+  const hay = draft.toLowerCase();
+  return tokens.some((token) => {
+    if (hay.includes(token)) return true;
+    const stem = token.slice(0, Math.min(5, token.length));
+    return stem.length >= 4 && hay.includes(stem);
+  });
+}
+
 export function composeRecipientOffer(input: RecipientOfferInput) {
   const taskText = String(input.taskText || "").trim();
   const sharedRaw = String(input.sharedDraft || "").trim();
@@ -113,6 +216,7 @@ export function composeRecipientOffer(input: RecipientOfferInput) {
   const greeting = firstName ? `${firstName}, добрый день!` : "Добрый день!";
   const about = aboutRequest(interest, companyName);
   const fileBit = hasFile ? " Во вложении — материалы." : "";
+  const staffAsk = clientAskFromStaffTask(primaryTaskLine(effectiveTask, sharedRaw));
 
   if (spoken) {
     const body = spoken.replace(/^[^.!?]+,\s*добрый день[!?.]?\s*/i, "").trim();
@@ -141,6 +245,11 @@ export function composeRecipientOffer(input: RecipientOfferInput) {
       }
     }
     return tidy(text);
+  }
+
+  if (staffAsk && kind !== "proposal" && kind !== "documents") {
+    const extra = about ? ` ${capitalize(about)}.` : "";
+    return tidy(`${greeting} ${staffAsk}${extra}${fileBit}`);
   }
 
   switch (kind) {
