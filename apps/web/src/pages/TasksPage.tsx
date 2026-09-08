@@ -745,6 +745,10 @@ export function TasksPage() {
   }
 
   async function openTaskEditor(taskId: string) {
+    if (String(taskId).startsWith("campaign:")) {
+      setError("Это запланированная рассылка. Откройте «Массовая отправка», если нужно изменить её.");
+      return;
+    }
     setBusy(true);
     setError("");
     setPreview(null);
@@ -1347,6 +1351,13 @@ export function TasksPage() {
             setShowCampaignPanel(false);
             setComposeMode("command");
             setCampaignSeed({});
+          }}
+          onScheduled={() => {
+            setFilter("scheduled");
+            setShowCampaignPanel(false);
+            setComposeMode("command");
+            setCampaignSeed({});
+            void load();
           }}
         />
       ) : null}
@@ -2677,6 +2688,7 @@ export function TasksPage() {
                     {item.sendScheduled || item.executionStatus === "scheduled" ? (
                       <span className="deal-flag">Отправка запланирована</span>
                     ) : null}
+                    {item.campaignId ? <span className="deal-flag">Рассылка</span> : null}
                   </div>
                   <div className="task-meta-grid">
                     <div>
@@ -2849,6 +2861,9 @@ export function TasksPage() {
                   ) : null}
                   {item.status === "open" || item.status === "waiting" ? (
                     <>
+                      {String(item.id).startsWith("campaign:") ? (
+                        <span className="muted">Отправка уйдёт в срок рассылки</span>
+                      ) : (
                       <button
                         className={isScheduledSend(item) ? "btn" : "btn secondary"}
                         type="button"
@@ -2861,6 +2876,7 @@ export function TasksPage() {
                       >
                         Изменить
                       </button>
+                      )}
                       {SENDABLE.has(item.type) && item.targetType !== "group" && !isScheduledSend(item) ? (
                         <button
                           className="btn"
@@ -2875,7 +2891,7 @@ export function TasksPage() {
                           {item.needsFileRetry ? "Открыть задачу" : "Подготовить отправку"}
                         </button>
                       ) : null}
-                      {SENDABLE.has(item.type) && item.targetType === "group" ? (
+                      {SENDABLE.has(item.type) && item.targetType === "group" && !item.campaignId ? (
                         <button
                           className="btn"
                           type="button"

@@ -723,6 +723,13 @@ export async function executeTask(
   options: { retryFailedFilesOnly?: boolean; runScheduled?: boolean } = {},
 ) {
   const { tid, task } = await taskInTenant(prisma, auth, id);
+  const campaignBacked =
+    task.parsedCommandJson && typeof task.parsedCommandJson === "object"
+      ? Boolean((task.parsedCommandJson as { sendViaCampaign?: boolean }).sendViaCampaign)
+      : String(task.dedupeKey || "").startsWith("campaign:");
+  if (campaignBacked) {
+    throw new ApiError(409, "scheduled", "Эту отправку выполнит рассылка в назначенное время. Не отправляйте задачу отдельно.");
+  }
   const confirmation = await prisma.executionConfirmation.findFirst({
     where: { tenantId: tid, taskId: id, voidedAt: null },
     orderBy: { confirmedAt: "desc" },

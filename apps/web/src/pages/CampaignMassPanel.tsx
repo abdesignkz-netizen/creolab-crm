@@ -133,6 +133,7 @@ export function CampaignMassPanel({
   initialWhoMode,
   initialPendingAttachments = [],
   onClose,
+  onScheduled,
 }: {
   initialPhoneText?: string;
   initialContactIds?: string[];
@@ -148,6 +149,7 @@ export function CampaignMassPanel({
     sizeBytes?: number;
   }>;
   onClose?: () => void;
+  onScheduled?: (info: { dueAt: string; recipients: number; title: string }) => void;
 }) {
   const [whoMode, setWhoMode] = useState<"contacts" | "phones" | "segment" | "import">(
     initialWhoMode || (initialContactIds.length ? "contacts" : initialSegment ? "segment" : "phones"),
@@ -167,6 +169,8 @@ export function CampaignMassPanel({
   const [prepare, setPrepare] = useState<any>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState<{ title: string; text: string; kind: "prepare" | "scheduled" | "sent" } | null>(null);
+  const confirmRef = useRef<HTMLDivElement>(null);
   const [showAll, setShowAll] = useState(false);
   const [attachments, setAttachments] = useState<any[]>([]);
   const [queuedUploads, setQueuedUploads] = useState(initialPendingAttachments);
@@ -514,7 +518,15 @@ export function CampaignMassPanel({
       const preview = await api.prepareCampaign(campaignId);
       setPrepare(preview);
       await refreshCampaign();
+      setNotice({
+        kind: "prepare",
+        title: "Проверьте рассылку",
+        text: schedule.iso
+          ? "Ниже подтвердите — тогда появится задача в «Запланировано». Пока ничего не уходит."
+          : "Ниже подтвердите отправку. Пока сообщения не ушли.",
+      });
       setError("");
+      requestAnimationFrame(() => confirmRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось подготовить");
     } finally {
@@ -539,16 +551,35 @@ export function CampaignMassPanel({
       });
       const due = confirmed.campaign?.scheduledAt;
       const later = confirmed.campaign?.status === "scheduled" || (due && new Date(due).getTime() > Date.now());
+      const recipients = Number(confirmed.preview?.recipients || confirmed.campaign?.statsJson?.total || 0);
       if (later) {
         setCampaign(await api.campaign(campaignId));
         setPrepare(null);
         setError("");
+        setNotice({
+          kind: "scheduled",
+          title: "Задача создана в «Запланировано»",
+          text: due
+            ? `Отправка ${recipients || "получателям"} запланирована на ${new Date(due).toLocaleString("ru-RU")}. Сообщения уйдут в это время, не сразу.`
+            : "Рассылка стоит в очереди. Откройте фильтр «Запланировано».",
+        });
+        onScheduled?.({
+          dueAt: String(due || ""),
+          recipients,
+          title: String(confirmed.campaign?.title || "Массовая отправка"),
+        });
+        requestAnimationFrame(() => confirmRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }));
         return;
       }
       const started: any = await api.startCampaign(campaignId);
       setCampaign(started);
       setPrepare(null);
       setError("");
+      setNotice({
+        kind: "sent",
+        title: "Рассылка запущена",
+        text: "Сообщения поставлены в очередь на отправку.",
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось запустить");
     } finally {
@@ -577,6 +608,12 @@ export function CampaignMassPanel({
       </div>
 
       {error ? <p className="error">{error}</p> : null}
+      {notice ? (
+        <div className={notice.kind === "prepare" ? "banner warn" : "banner"} id="campaign-result" ref={notice.kind === "scheduled" ? confirmRef : undefined}>
+          <b>{notice.title}</b>
+          <p>{notice.text}</p>
+        </div>
+      ) : null}
       {(campaign as any)?.storageWarning ? (
         <p className="error">{(campaign as any).storageWarning}</p>
       ) : null}
@@ -1096,7 +1133,7 @@ export function CampaignMassPanel({
       </div>
 
       {prepare ? (
-        <div className="panel soft confirm-panel">
+        <div className="panel soft confirm-panel" id="campaign-confirm" ref={confirmRef}>
           <h3>{prepare.title || "Проверьте рассылку"}</h3>
           <div className="kv">
             <div>
@@ -1181,8 +1218,17 @@ export function CampaignMassPanel({
 
       {campaign && ["running", "completed", "partially_completed", "failed", "paused", "scheduled"].includes(campaign.status) ? (
         <div className="panel soft">
-          <b>Статус: {campaign.status}</b>
+          <b>
+            {campaign.status === "scheduled"
+              ? campaign.scheduledAt
+                ? `Запланирована на ${new Date(campaign.scheduledAt).toLocaleString("ru-RU")}`
+                : "Запланирована"
+              : `Статус: ${campaign.status}`}
+          </b>
           <p>
+            {campaign.status === "scheduled"
+              ? "Задача должна быть в фильтре «Запланировано». Сообщения уйдут в это время, не сразу."
+              : null}
             Всего {(campaign.summary || campaign.statsJson)?.total ?? "—"} · отправлено{" "}
             {(campaign.summary || campaign.statsJson)?.sent ?? 0} · ошибки {(campaign.summary || campaign.statsJson)?.failed ?? 0}
           </p>

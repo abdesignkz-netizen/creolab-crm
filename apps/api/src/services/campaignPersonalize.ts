@@ -84,6 +84,20 @@ export function firstNameOf(name?: string | null) {
   return part;
 }
 
+export function campaignTaskDedupeKey(campaignId: string) {
+  return `campaign:${campaignId}`;
+}
+
+export function isCampaignBackedTask(task?: { parsedCommandJson?: unknown; dedupeKey?: string | null } | null) {
+  if (!task) return false;
+  if (String(task.dedupeKey || "").startsWith("campaign:")) return true;
+  const parsed =
+    task.parsedCommandJson && typeof task.parsedCommandJson === "object"
+      ? (task.parsedCommandJson as { sendViaCampaign?: boolean; campaignId?: string })
+      : null;
+  return Boolean(parsed?.sendViaCampaign || parsed?.campaignId);
+}
+
 export function pickPersonFirstName(...values: Array<string | null | undefined>) {
   for (const value of values) {
     const name = firstNameOf(value);

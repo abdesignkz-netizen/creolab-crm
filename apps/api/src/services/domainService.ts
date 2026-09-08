@@ -4,6 +4,7 @@ import { ApiError } from "../errors.ts";
 import { CALLS_ENABLED } from "../lib/featureFlags.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { can } from "../lib/types.ts";
+import { campaignTaskDedupeKey } from "./campaignPersonalize.ts";
 import { INQUIRY_STATUS_LABEL, displayName, phoneFromContact } from "./contactLabels.ts";
 import { resolveSellerBridge } from "./sellerLink.ts";
 import { resolveContactLinks } from "./segmentService.ts";
@@ -257,7 +258,7 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
   }
   const scheduledSendAtByTask = await scheduledSendByTaskIds(prisma, tid, taskIds);
 
-  return items.map((item) => {
+  const rows = items.map((item) => {
     const conversation = item.conversationId ? byId.get(item.conversationId) || null : null;
     const childTotal = item.childTasks.length;
     const childDone = item.childTasks.filter((child) => child.status === "done").length;
@@ -337,8 +338,121 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
         item.executionStatus === "scheduled" ||
         item.commandStatus === "scheduled" ||
         scheduledSendAtByTask.has(item.id),
+      campaignId:
+        (typeof item.parsedCommandJson === "object" && item.parsedCommandJson
+          ? (item.parsedCommandJson as { campaignId?: string }).campaignId
+          : null) ||
+        (typeof item.segmentSnapshotJson === "object" && item.segmentSnapshotJson
+          ? (item.segmentSnapshotJson as { campaignId?: string }).campaignId
+          : null) ||
+        null,
     };
   });
+
+  const knownCampaignIds = new Set(rows.map((row) => row.campaignId).filter(Boolean));
+  const queuedCampaignIds = (
+    await prisma.scheduledAction.findMany({
+      where: { tenantId: tid, parentType: "campaign", type: "campaign_run", state: "scheduled" },
+      select: { parentId: true },
+      take: 40,
+    })
+  ).map((row) => row.parentId);
+  const scheduledCampaigns = await prisma.campaign.findMany({
+    where: {
+      tenantId: tid,
+      OR: [
+        { status: "scheduled" },
+        ...(queuedCampaignIds.length ? [{ id: { in: queuedCampaignIds } }] : []),
+      ],
+    },
+    include: { recipients: { where: { status: { in: ["pending", "queued"] } }, take: 50, orderBy: { createdAt: "asc" } } },
+    take: 40,
+  });
+  for (const campaign of scheduledCampaigns) {
+    if (knownCampaignIds.has(campaign.id)) continue;
+    if (items.some((item) => item.dedupeKey === campaignTaskDedupeKey(campaign.id))) continue;
+    const pending = campaign.recipients;
+    rows.push({
+      id: campaignTaskDedupeKey(campaign.id),
+      tenantId: campaign.tenantId,
+      type: "message",
+      title: campaign.title,
+      description: `Массовая рассылка WhatsApp · ${pending.length} получателям`,
+      contactId: null,
+      inquiryId: null,
+      conversationId: null,
+      dealId: null,
+      companyId: null,
+      incompleteIntakeId: null,
+      agreementId: null,
+      ownerMembershipId: campaign.createdByMembershipId,
+      dueAt: campaign.scheduledAt,
+      priority: "normal",
+      source: campaign.source,
+      status: "open",
+      dedupeKey: campaignTaskDedupeKey(campaign.id),
+      targetType: "group",
+      parentTaskId: null,
+      segmentSnapshotJson: { label: "Массовая рассылка", campaignId: campaign.id },
+      contextSnapshotJson: {},
+      sourceMessageIdsJson: [],
+      purpose: null,
+      briefingText: null,
+      preparationHintsJson: [],
+      executionStatus: "scheduled",
+      messageDraft: campaign.messageDraft,
+      resultCode: null,
+      resultText: null,
+      completionSource: null,
+      confirmedAt: campaign.confirmedAt,
+      sentAt: null,
+      rawCommandText: campaign.rawCommandText,
+      parsedCommandJson: { campaignId: campaign.id, sendViaCampaign: true },
+      commandStatus: "scheduled",
+      recurrenceRule: null,
+      completionResult: null,
+      createdAt: campaign.createdAt,
+      completedAt: null,
+      inquiry: null,
+      deal: null,
+      contact: null,
+      owner: null,
+      conversation: null,
+      contextLabel: "Массовая рассылка",
+      statusLabel: "Открыта",
+      typeLabel: "Массовая отправка",
+      assigneeName: null,
+      whoName: null,
+      whoPhone: null,
+      aboutLines: [`Рассылка · ${pending.length} получателям`],
+      descriptionPreview: campaign.messageDraft ? String(campaign.messageDraft).slice(0, 180) : null,
+      messagePreview: campaign.messageDraft ? String(campaign.messageDraft).slice(0, 180) : null,
+      overdue: Boolean(campaign.scheduledAt && campaign.scheduledAt < now),
+      doneAt: null,
+      resultLabel: null,
+      doneSummary: null,
+      progress: { done: 0, total: pending.length, label: `0 из ${pending.length}` },
+      children: pending.map((row) => ({
+        id: row.id,
+        title: row.displayName || row.phoneRaw || "Контакт",
+        status: "open",
+        statusLabel: "Открыта",
+        contactId: row.contactId,
+        contactName: row.displayName,
+        phone: row.phoneRaw,
+        dueAt: campaign.scheduledAt,
+        executionStatus: "scheduled",
+      })),
+      isSendable: false,
+      needsFileRetry: false,
+      failedFiles: [],
+      scheduledSendAt: campaign.scheduledAt,
+      sendScheduled: true,
+      campaignId: campaign.id,
+    } as (typeof rows)[number]);
+  }
+
+  return rows;
 }
 
 export async function getTask(prisma: PrismaClient, auth: AuthContext, id: string) {

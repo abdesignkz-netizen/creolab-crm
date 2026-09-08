@@ -8,6 +8,7 @@ import { fileStorageStatus, resolveUploadPath } from "../lib/storage.ts";
 import type { AuthContext } from "../lib/types.ts";
 import {
   acceptPersonalizedDraft,
+  campaignTaskDedupeKey,
   clientAskFromStaffTask,
   composeRecipientOffer,
   inferCampaignOfferKind,
@@ -484,10 +485,12 @@ export async function prepareCampaign(prisma: PrismaClient, auth: AuthContext, i
     }
   }
 
-  await prisma.campaign.update({
-    where: { id },
-    data: { status: "ready" },
-  });
+  if (!["scheduled", "running", "completed", "partially_completed", "cancelled", "paused"].includes(data.status)) {
+    await prisma.campaign.update({
+      where: { id },
+      data: { status: "ready" },
+    });
+  }
 
   return {
     title: "Проверьте рассылку",
@@ -532,6 +535,147 @@ export async function prepareCampaign(prisma: PrismaClient, auth: AuthContext, i
       .slice(0, 50)
       .map((r) => ({ id: r.id, name: r.displayName, phone: r.phoneRaw, reason: r.skipReason })),
   };
+}
+
+async function ensureCampaignScheduleTask(
+  prisma: PrismaClient,
+  input: {
+    campaign: {
+      id: string;
+      tenantId: string;
+      title: string;
+      source?: string | null;
+      messageDraft?: string | null;
+      rawCommandText?: string | null;
+      scheduledAt: Date | null;
+      recipients: Array<{
+        id: string;
+        status: string;
+        contactId: string | null;
+        displayName: string | null;
+        messageDraft?: string | null;
+      }>;
+    };
+    ownerMembershipId?: string | null;
+    hasFile?: boolean;
+  },
+) {
+  const pending = input.campaign.recipients.filter((row) => row.status === "pending");
+  const type = input.hasFile ? "proposal" : "message";
+  const dueAt = input.campaign.scheduledAt;
+  const dedupeKey = campaignTaskDedupeKey(input.campaign.id);
+  const payload = {
+    campaignId: input.campaign.id,
+    sendViaCampaign: true,
+  };
+  const shared = {
+    title: input.campaign.title || "Массовая отправка",
+    description: `Массовая рассылка WhatsApp · ${pending.length} получателям`,
+    type,
+    dueAt,
+    status: "open" as const,
+    executionStatus: "scheduled",
+    commandStatus: "scheduled",
+    source: input.campaign.source === "ai_command" ? "ai_command" : "manual",
+    ownerMembershipId: input.ownerMembershipId || null,
+    messageDraft: input.campaign.messageDraft || null,
+    rawCommandText: input.campaign.rawCommandText || null,
+    parsedCommandJson: payload as Prisma.InputJsonValue,
+    segmentSnapshotJson: { label: "Массовая рассылка", campaignId: input.campaign.id } as Prisma.InputJsonValue,
+    completedAt: null,
+    resultCode: null,
+    resultText: null,
+  };
+  const existing = await prisma.task.findFirst({
+    where: { tenantId: input.campaign.tenantId, dedupeKey },
+  });
+  const parent = existing
+    ? await prisma.task.update({
+        where: { id: existing.id },
+        data: shared,
+      })
+    : await prisma.task.create({
+        data: {
+          tenantId: input.campaign.tenantId,
+          dedupeKey,
+          targetType: "group",
+          ...shared,
+        },
+      });
+
+  const keep = new Set<string>();
+  for (const recipient of pending.slice(0, 200)) {
+    if (!recipient.contactId) continue;
+    const childKey = `${dedupeKey}:r:${recipient.id}`;
+    keep.add(childKey);
+    const childShared = {
+      title: recipient.displayName ? `${shared.title} · ${recipient.displayName}` : shared.title,
+      description: shared.description,
+      type,
+      dueAt,
+      status: "open" as const,
+      executionStatus: "scheduled",
+      commandStatus: "scheduled",
+      source: shared.source,
+      ownerMembershipId: shared.ownerMembershipId,
+      messageDraft: recipient.messageDraft || shared.messageDraft,
+      parsedCommandJson: { ...payload, recipientId: recipient.id } as Prisma.InputJsonValue,
+    };
+    const child = await prisma.task.findFirst({
+      where: { tenantId: input.campaign.tenantId, dedupeKey: childKey },
+    });
+    if (child) {
+      await prisma.task.update({ where: { id: child.id }, data: { ...childShared, parentTaskId: parent.id } });
+    } else {
+      await prisma.task.create({
+        data: {
+          tenantId: input.campaign.tenantId,
+          parentTaskId: parent.id,
+          contactId: recipient.contactId,
+          targetType: "client",
+          dedupeKey: childKey,
+          ...childShared,
+        },
+      });
+    }
+  }
+  const stale = await prisma.task.findMany({
+    where: { tenantId: input.campaign.tenantId, parentTaskId: parent.id, dedupeKey: { notIn: [...keep] } },
+    select: { id: true },
+  });
+  if (stale.length) {
+    await prisma.task.updateMany({
+      where: { id: { in: stale.map((row) => row.id) } },
+      data: { status: "canceled", executionStatus: "canceled", completedAt: new Date() },
+    });
+  }
+  return parent;
+}
+
+async function closeCampaignScheduleTask(
+  prisma: PrismaClient,
+  tenantId: string,
+  campaignId: string,
+  status: "done" | "canceled",
+  resultCode?: string,
+) {
+  const parent = await prisma.task.findFirst({
+    where: { tenantId, dedupeKey: campaignTaskDedupeKey(campaignId) },
+    select: { id: true },
+  });
+  if (!parent) return;
+  const data = {
+    status,
+    executionStatus: status === "done" ? "sent" : "canceled",
+    commandStatus: status === "done" ? "done" : "canceled",
+    completedAt: new Date(),
+    resultCode: resultCode || (status === "done" ? "sent" : "canceled"),
+  };
+  await prisma.task.update({ where: { id: parent.id }, data });
+  await prisma.task.updateMany({
+    where: { tenantId, parentTaskId: parent.id, status: { in: ["open", "waiting"] } },
+    data,
+  });
 }
 
 export async function confirmCampaign(
@@ -594,6 +738,7 @@ export async function confirmCampaign(
     },
   });
 
+  let scheduleTask = null;
   if (later && campaign.scheduledAt) {
     await prisma.scheduledAction.create({
       data: {
@@ -606,9 +751,16 @@ export async function confirmCampaign(
         payloadJson: { campaignId: id },
       },
     });
+    scheduleTask = await ensureCampaignScheduleTask(prisma, {
+      campaign: { ...campaign, scheduledAt: campaign.scheduledAt, status: "scheduled" },
+      ownerMembershipId: membership.id,
+      hasFile: attachments.length > 0,
+    });
+  } else {
+    await closeCampaignScheduleTask(prisma, membership.tenantId, id, "canceled");
   }
 
-  return { campaign: updated, preview: prepared };
+  return { campaign: updated, preview: prepared, task: scheduleTask };
 }
 
 export async function startCampaign(prisma: PrismaClient, auth: AuthContext, id: string) {
@@ -666,6 +818,7 @@ export async function cancelCampaignRemainder(prisma: PrismaClient, auth: AuthCo
     data: { status: "cancelled", skipReason: "Отменено пользователем" },
   });
   await prisma.campaign.update({ where: { id }, data: { status: "cancelled", completedAt: new Date() } });
+  await closeCampaignScheduleTask(prisma, membership.tenantId, id, "canceled");
   return getCampaign(prisma, auth, id);
 }
 
@@ -710,6 +863,7 @@ export async function processCampaignQueue(prisma: PrismaClient, campaignId: str
         where: { id: campaignId },
         data: { status, completedAt: new Date(), statsJson: stats },
       });
+      await closeCampaignScheduleTask(prisma, campaign.tenantId, campaignId, status === "failed" ? "canceled" : "done", status);
       return;
     }
 

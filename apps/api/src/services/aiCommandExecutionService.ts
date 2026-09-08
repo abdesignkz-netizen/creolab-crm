@@ -186,6 +186,13 @@ export async function executeTaskBatch(
   if (parent.targetType !== "group") {
     throw new ApiError(422, "invalid", "Batch только для групповых задач");
   }
+  const campaignBacked =
+    parent.parsedCommandJson && typeof parent.parsedCommandJson === "object"
+      ? Boolean((parent.parsedCommandJson as { sendViaCampaign?: boolean }).sendViaCampaign)
+      : String(parent.dedupeKey || "").startsWith("campaign:");
+  if (campaignBacked) {
+    throw new ApiError(409, "scheduled", "Эту отправку выполнит рассылка в назначенное время. Не отправляйте задачу отдельно.");
+  }
 
   const children = parent.childTasks.filter((item) => item.status === "open" || item.status === "waiting");
   if (children.length > 30) {

@@ -415,5 +415,22 @@ describe("campaign API flow", () => {
     });
     assert.ok(action);
     assert.equal(new Date(action.dueAt).getTime(), new Date(due).getTime());
+
+    const task = await prisma.task.findFirst({
+      where: { dedupeKey: `campaign:${id}` },
+    });
+    assert.ok(task);
+    assert.equal(task.executionStatus, "scheduled");
+    assert.equal(task.targetType, "group");
+    assert.equal(new Date(task.dueAt || 0).getTime(), new Date(due).getTime());
+
+    const tasks = await fetch(`${url}/api/v1/tasks`, { headers: { cookie } });
+    assert.equal(tasks.status, 200);
+    const listed = await tasks.json();
+    const row = (listed.items || []).find((item: { id?: string; campaignId?: string; dedupeKey?: string }) =>
+      item.campaignId === id || item.dedupeKey === `campaign:${id}` || item.id === `campaign:${id}`,
+    );
+    assert.ok(row);
+    assert.equal(row.sendScheduled, true);
   });
 });
