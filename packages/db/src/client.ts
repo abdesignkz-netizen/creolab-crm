@@ -209,6 +209,7 @@ async function applyAdditiveSchema(pglite: PGlite) {
       "source" TEXT NOT NULL DEFAULT 'manual',
       "messageDraft" TEXT,
       "messageMode" TEXT NOT NULL DEFAULT 'manual',
+      "personalizeEach" BOOLEAN NOT NULL DEFAULT false,
       "createMissingClients" BOOLEAN NOT NULL DEFAULT true,
       "scheduledAt" TIMESTAMP(3),
       "startedAt" TIMESTAMP(3),
@@ -240,6 +241,7 @@ async function applyAdditiveSchema(pglite: PGlite) {
       "phoneRaw" TEXT,
       "phoneNormalized" TEXT,
       "displayName" TEXT,
+      "messageDraft" TEXT,
       "status" TEXT NOT NULL DEFAULT 'pending',
       "skipReason" TEXT,
       "error" TEXT,
@@ -257,6 +259,9 @@ async function applyAdditiveSchema(pglite: PGlite) {
     CREATE INDEX IF NOT EXISTS "CampaignRecipient_tenantId_campaignId_status_idx" ON "CampaignRecipient"("tenantId", "campaignId", "status");
     CREATE INDEX IF NOT EXISTS "CampaignRecipient_tenantId_phoneNormalized_idx" ON "CampaignRecipient"("tenantId", "phoneNormalized");
     CREATE INDEX IF NOT EXISTS "CampaignRecipient_tenantId_contactId_idx" ON "CampaignRecipient"("tenantId", "contactId");
+
+    ALTER TABLE "Campaign" ADD COLUMN IF NOT EXISTS "personalizeEach" BOOLEAN DEFAULT false;
+    ALTER TABLE "CampaignRecipient" ADD COLUMN IF NOT EXISTS "messageDraft" TEXT;
 
     ALTER TABLE "DealStage" ADD COLUMN IF NOT EXISTS "defaultProbability" INTEGER DEFAULT 10;
     ALTER TABLE "DealStage" ADD COLUMN IF NOT EXISTS "isTerminal" BOOLEAN DEFAULT false;

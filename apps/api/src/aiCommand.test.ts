@@ -205,4 +205,24 @@ describe("AI task commands", () => {
     // single-client tasks are not batchable; ensure no accidental send path
     assert.equal(batch.status, 422);
   });
+
+  it("from-command сохраняет указанный срок", async () => {
+    const contact = await prisma.contact.findFirst({ where: { tenantId } });
+    assert.ok(contact);
+    const dueAt = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
+    const created = await fetch(`${base}/api/v1/tasks/from-command`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({
+        text: "Уточни, актуальна ли заявка",
+        parsedCommand: { taskType: "message", executionMode: "execute", riskLevel: 1 },
+        clientIds: [contact.id],
+        dueAt,
+      }),
+    });
+    assert.equal(created.status, 201);
+    const body = await created.json();
+    assert.ok(body.task?.dueAt);
+    assert.equal(new Date(body.task.dueAt).getTime(), new Date(dueAt).getTime());
+  });
 });

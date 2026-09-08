@@ -225,3 +225,67 @@ taskTitle должен быть конкретным, не «Обработат�
     return null;
   }
 }
+
+const MAX_CAMPAIGN_LLM_RECIPIENTS = 40;
+
+/** Adapt already-composed campaign drafts. Never sends messages; no phones or chat logs. */
+export async function refineCampaignRecipientDraftsWithLlm(input: {
+  taskText: string;
+  kind: string;
+  hasFile: boolean;
+  recipients: Array<{
+    id: string;
+    firstName: string | null;
+    companyName: string | null;
+    interest: string | null;
+    draft: string;
+  }>;
+}) {
+  const apiKey = process.env.OPENAI_API_KEY || process.env.ANYMODEL_API_KEY;
+  const baseUrl = process.env.ANYMODEL_BASE_URL || process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
+  const model = process.env.ANYMODEL_MODEL || process.env.OPENAI_MODEL || "gpt-4o-mini";
+  if (!apiKey || input.recipients.length === 0 || input.recipients.length > MAX_CAMPAIGN_LLM_RECIPIENTS) return null;
+
+  try {
+    const response = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0,
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content:
+              "Ты редактор CRM-рассылки. Для каждого получателя слегка адаптируй уже готовый черновик под его факты. Верни JSON { drafts: [{id, text}] }. Сохрани смысл задачи. 1–3 предложения, вежливо, на русском. Не выдумывай цены, скидки, сроки, метрики, услуги и факты, которых нет во входных данных. Не добавляй телефоны. Не отправляй сообщения.",
+          },
+          {
+            role: "user",
+            content: JSON.stringify({
+              task: input.taskText,
+              kind: input.kind,
+              hasFile: input.hasFile,
+              recipients: input.recipients,
+            }),
+          },
+        ],
+      }),
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!response.ok) return null;
+    const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    const content = data.choices?.[0]?.message?.content;
+    if (!content) return null;
+    const parsed = JSON.parse(content) as { drafts?: Array<{ id?: string; text?: string }> };
+    const drafts = (parsed.drafts || [])
+      .map((row) => ({ id: String(row.id || ""), text: String(row.text || "").trim() }))
+      .filter((row) => row.id && row.text && row.text.length <= 4000);
+    return drafts.length ? drafts : null;
+  } catch {
+    return null;
+  }
+}

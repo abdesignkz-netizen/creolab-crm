@@ -195,6 +195,8 @@ export function createApiClient(options: ClientOptions) {
       request(`/api/v1/campaigns/${id}/attachments`, { method: "POST", body: JSON.stringify(body) }),
     removeCampaignAttachment: (id: string, attachmentId: string) =>
       request(`/api/v1/campaigns/${id}/attachments/${attachmentId}`, { method: "DELETE" }),
+    personalizeCampaignRecipients: (id: string, body: { useLlm?: boolean } = {}) =>
+      request(`/api/v1/campaigns/${id}/personalize-recipients`, { method: "POST", body: JSON.stringify(body) }),
     prepareCampaign: (id: string) => request(`/api/v1/campaigns/${id}/prepare`, { method: "POST" }),
     confirmCampaign: (id: string) => request(`/api/v1/campaigns/${id}/confirm`, { method: "POST" }),
     startCampaign: (id: string) => request(`/api/v1/campaigns/${id}/start`, { method: "POST" }),

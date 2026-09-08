@@ -106,6 +106,7 @@ export function CampaignMassPanel({
   const [excludedRaws, setExcludedRaws] = useState<string[]>([]);
   const [message, setMessage] = useState(initialMessage);
   const [messageMode, setMessageMode] = useState<"manual" | "ai" | "file_only">("manual");
+  const [personalizeEach, setPersonalizeEach] = useState(Boolean(commandText));
   const [createMissing, setCreateMissing] = useState(true);
   const [whenMode, setWhenMode] = useState<"now" | "schedule">("now");
   const [scheduledAt, setScheduledAt] = useState("");
@@ -216,6 +217,7 @@ export function CampaignMassPanel({
         source: commandText ? "ai_command" : whoMode === "import" ? "import" : whoMode === "segment" ? "segment" : "manual",
         messageDraft: messageMode === "file_only" ? "" : message,
         messageMode,
+        personalizeEach: personalizeEach && messageMode !== "file_only",
         createMissingClients: createMissing,
         scheduledAt: whenMode === "schedule" && scheduledAt ? new Date(scheduledAt).toISOString() : null,
         rawCommandText: commandText || undefined,
@@ -241,6 +243,10 @@ export function CampaignMassPanel({
         setQueuedUploads([]);
       }
       await refreshCampaign(created.campaign.id);
+      if (personalizeEach && messageMode !== "file_only") {
+        const personalized = await api.personalizeCampaignRecipients(created.campaign.id);
+        setCampaign(personalized);
+      }
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось создать рассылку");
@@ -254,6 +260,42 @@ export function CampaignMassPanel({
     const data = await api.campaign(id);
     setCampaign(data);
     setAttachments((data as any).attachments || []);
+    if (typeof (data as any).personalizeEach === "boolean") setPersonalizeEach((data as any).personalizeEach);
+  }
+
+  async function onPersonalizeOffers() {
+    if (!campaignId) {
+      setError("Сначала подготовьте черновик рассылки — затем составим тексты каждому");
+      return;
+    }
+    setBusy(true);
+    try {
+      await api.updateCampaign(campaignId, {
+        messageDraft: messageMode === "file_only" ? "" : message,
+        messageMode,
+        personalizeEach: true,
+      });
+      const data = await api.personalizeCampaignRecipients(campaignId);
+      setCampaign(data);
+      setPersonalizeEach(true);
+      setPrepare(null);
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось составить предложения");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function setRecipientDraft(id: string, messageDraft: string) {
+    setCampaign((prev: any) => {
+      if (!prev?.recipients) return prev;
+      return {
+        ...prev,
+        recipients: prev.recipients.map((row: any) => (row.id === id ? { ...row, messageDraft } : row)),
+      };
+    });
+    setPrepare(null);
   }
 
   async function onAttachFiles(files: FileList | File[]) {
@@ -328,8 +370,15 @@ export function CampaignMassPanel({
       await api.updateCampaign(campaignId, {
         messageDraft: messageMode === "file_only" ? "" : message,
         messageMode,
+        personalizeEach: personalizeEach && messageMode !== "file_only",
         createMissingClients: createMissing,
         scheduledAt: whenMode === "schedule" && scheduledAt ? new Date(scheduledAt).toISOString() : null,
+        recipientDrafts:
+          personalizeEach && messageMode !== "file_only"
+            ? ((campaign?.recipients || []) as Array<{ id: string; status: string; messageDraft?: string | null }>)
+                .filter((row) => row.status === "pending")
+                .map((row) => ({ id: row.id, messageDraft: row.messageDraft || null }))
+            : undefined,
       });
       const preview = await api.prepareCampaign(campaignId);
       setPrepare(preview);
@@ -614,6 +663,44 @@ export function CampaignMassPanel({
             <p className="muted">
               Переменные: {"{{firstName}}"}, {"{{companyName}}"}, {"{{service}}"}, {"{{managerName}}"}. Пустое имя не даст «, добрый день!».
             </p>
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={personalizeEach}
+                onChange={(event) => {
+                  setPersonalizeEach(event.target.checked);
+                  setPrepare(null);
+                }}
+              />
+              Составить разное предложение каждому получателю
+            </label>
+            {personalizeEach ? (
+              <div className="field-block">
+                <p className="muted">
+                  CRM поймёт задачу и соберёт текст из фактов клиента: имя, интерес, компания. Цены, скидки и сроки не выдумываем.
+                </p>
+                <button type="button" className="btn secondary" disabled={busy || !campaignId} onClick={() => void onPersonalizeOffers()}>
+                  {campaign?.recipients?.some((row: any) => row.messageDraft) ? "Пересобрать предложения" : "Составить предложения из задачи"}
+                </button>
+                {!campaignId ? <p className="muted">Сначала подготовьте черновик — кнопка станет активной.</p> : null}
+                {(campaign?.recipients || []).filter((row: any) => row.status === "pending").some((row: any) => row.messageDraft) ? (
+                  <div className="campaign-offer-list">
+                    {(campaign.recipients as any[])
+                      .filter((row) => row.status === "pending")
+                      .map((row) => (
+                        <label key={row.id} className="campaign-offer-item">
+                          <b>{row.displayName || row.phoneRaw || "Контакт"}</b>
+                          <textarea
+                            rows={3}
+                            value={row.messageDraft || ""}
+                            onChange={(event) => setRecipientDraft(row.id, event.target.value)}
+                          />
+                        </label>
+                      ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </>
         ) : (
           <p className="muted">Отправим только вложения — убедитесь, что канал это позволяет.</p>
@@ -782,11 +869,14 @@ export function CampaignMassPanel({
             </div>
           </div>
           {prepare.message ? <div className="message-preview">{prepare.message}</div> : null}
+          {prepare.personalizeEach ? (
+            <p className="muted">Каждому получателю уйдёт свой текст — проверьте список ниже.</p>
+          ) : null}
           {(prepare.personalizationPreviews || []).length ? (
             <div className="field-block">
-              <div className="muted">Примеры персонализации</div>
-              {(prepare.personalizationPreviews as any[]).map((item) => (
-                <div key={item.label} className="panel soft">
+              <div className="muted">{prepare.personalizeEach ? "Тексты получателям" : "Примеры персонализации"}</div>
+              {(prepare.personalizationPreviews as any[]).map((item, index) => (
+                <div key={`${item.label}-${index}`} className="panel soft">
                   <b>{item.label}</b>
                   <p>{item.text}</p>
                 </div>
@@ -798,8 +888,11 @@ export function CampaignMassPanel({
             <div className="picker-list">
               {(prepare.recipientsPreview || []).map((item: any) => (
                 <div key={item.id} className="picker-item">
-                  <b>{item.name || item.phone || "Контакт"}</b>
-                  <div className="muted">{item.phone}</div>
+                  <div>
+                    <b>{item.name || item.phone || "Контакт"}</b>
+                    <div className="muted">{item.phone}</div>
+                    {item.message ? <p className="campaign-offer-preview">{item.message}</p> : null}
+                  </div>
                 </div>
               ))}
             </div>

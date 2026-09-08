@@ -26,6 +26,7 @@ export async function createTaskFromCommand(
     messageDraft?: string;
     executionMode?: "execute" | "prepare_only";
     ownerMembershipId?: string;
+    dueAt?: string;
   },
 ) {
   let clientIds = [...new Set(input.clientIds || [])].slice(0, 30);
@@ -89,6 +90,7 @@ export async function createTaskFromCommand(
     contactId: clientIds.length === 1 ? clientIds[0] : undefined,
     clientIds: clientIds.length > 1 ? clientIds : undefined,
     ownerMembershipId: input.ownerMembershipId,
+    dueAt: input.dueAt,
     priority: "normal",
     segmentSnapshot: {
       ...(typeof input.parsedCommand.filters === "object" && input.parsedCommand.filters

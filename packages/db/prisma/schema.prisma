@@ -878,6 +878,7 @@ model Campaign {
   source                String    @default("manual")
   messageDraft          String?
   messageMode           String    @default("manual")
+  personalizeEach       Boolean   @default(false)
   createMissingClients  Boolean   @default(true)
   scheduledAt           DateTime?
   startedAt             DateTime?
@@ -911,6 +912,7 @@ model CampaignRecipient {
   phoneRaw         String?
   phoneNormalized  String?
   displayName      String?
+  messageDraft     String?
   status           String    @default("pending")
   skipReason       String?
   error            String?

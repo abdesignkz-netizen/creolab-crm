@@ -133,9 +133,14 @@ async function filesToPending(files: FileList | File[]): Promise<PendingAttachme
 const GROUP_TITLE: Record<string, string> = {
   overdue: "Просрочено",
   today: "Сегодня",
-  later: "Позже",
+  later: "Запланировано",
   none: "Без срока",
 };
+
+function toDateTimeLocal(value: Date) {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}T${pad(value.getHours())}:${pad(value.getMinutes())}`;
+}
 
 const TASK_TYPES = [
   ["call", "Позвонить"],
@@ -211,6 +216,7 @@ function dueGroup(item: any, now: Date) {
   if (!item.dueAt) return "none";
   const due = new Date(item.dueAt);
   if (due.getTime() < now.getTime() && item.status !== "done" && item.status !== "canceled") return "overdue";
+  if (due.getTime() > now.getTime()) return "later";
   if (due.toDateString() === now.toDateString()) return "today";
   return "later";
 }
@@ -333,6 +339,8 @@ export function TasksPage() {
   const [previewBusy, setPreviewBusy] = useState(false);
   const [composeMode, setComposeMode] = useState<"command" | "manual" | "campaign">("command");
   const [commandText, setCommandText] = useState("");
+  const [commandDueMode, setCommandDueMode] = useState<"now" | "scheduled">("now");
+  const [commandDueAt, setCommandDueAt] = useState("");
   const [commandParse, setCommandParse] = useState<any>(null);
   const [commandSelectedIds, setCommandSelectedIds] = useState<string[]>([]);
   const [commandDraft, setCommandDraft] = useState("");
@@ -994,6 +1002,10 @@ export function TasksPage() {
       setError("Выберите клиентов или добавьте телефоны");
       return;
     }
+    if (commandDueMode === "scheduled" && !commandDueAt) {
+      setError("Укажите дату и время срока");
+      return;
+    }
     setBusy(true);
     try {
       const nameByPhone = new Map(cmdPhones.map((item) => [item.phone, item.name]));
@@ -1006,6 +1018,7 @@ export function TasksPage() {
         messageDraft: commandDraft || undefined,
         executionMode: commandParse.command?.executionMode || "execute",
         ownerMembershipId: ownerId || undefined,
+        dueAt: commandDueMode === "scheduled" && commandDueAt ? new Date(commandDueAt).toISOString() : undefined,
       });
       const rootTaskId = created.task?.id as string | undefined;
       if (rootTaskId && cmdPendingFiles.length) {
@@ -1029,6 +1042,8 @@ export function TasksPage() {
         setBatchResult({ prepareOnly: true, message: created.nextStep || "Задача создана" });
         setCommandParse(null);
         setCommandText("");
+        setCommandDueMode("now");
+        setCommandDueAt("");
         setCmdSelectedContacts([]);
         setCmdPhones([]);
         setCmdPhonesUnresolved([]);
@@ -1549,6 +1564,43 @@ export function TasksPage() {
             ) : null}
           </div>
 
+          <div className="command-step">
+            <div className="command-step-label">4. Срок исполнения</div>
+            <div className="segmented">
+              <button
+                type="button"
+                className={commandDueMode === "now" ? "btn" : "btn secondary"}
+                onClick={() => setCommandDueMode("now")}
+              >
+                Сейчас
+              </button>
+              <button
+                type="button"
+                className={commandDueMode === "scheduled" ? "btn" : "btn secondary"}
+                onClick={() => {
+                  setCommandDueMode("scheduled");
+                  if (!commandDueAt) {
+                    setCommandDueAt(toDateTimeLocal(new Date(Date.now() + 60 * 60 * 1000)));
+                  }
+                }}
+              >
+                По дате и времени
+              </button>
+            </div>
+            {commandDueMode === "scheduled" ? (
+              <label>
+                Когда выполнить
+                <input
+                  type="datetime-local"
+                  value={commandDueAt}
+                  onChange={(event) => setCommandDueAt(event.target.value)}
+                />
+              </label>
+            ) : (
+              <p className="muted">Задача появится сразу в открытых, без откладывания.</p>
+            )}
+          </div>
+
           <div className="actions">
             <button
               type="button"
@@ -1568,6 +1620,8 @@ export function TasksPage() {
               className="btn secondary"
               onClick={() => {
                 setCommandText("");
+                setCommandDueMode("now");
+                setCommandDueAt("");
                 setCommandParse(null);
                 setCmdSelectedContacts([]);
                 setCmdPhones([]);
@@ -1597,7 +1651,11 @@ export function TasksPage() {
                 </div>
                 <div>
                   <span className="muted">Когда</span>
-                  <b>{commandParse.understanding?.when}</b>
+                  <b>
+                    {commandDueMode === "scheduled" && commandDueAt
+                      ? new Date(commandDueAt).toLocaleString("ru-RU")
+                      : commandParse.understanding?.when || "Сейчас"}
+                  </b>
                 </div>
               </div>
               <p className="muted">{commandParse.understanding?.consequence}</p>

@@ -196,6 +196,7 @@ export const createFromCommandSchema = z
     messageDraft: z.string().max(4000).optional(),
     executionMode: z.enum(["execute", "prepare_only"]).default("execute"),
     ownerMembershipId: z.string().uuid().optional(),
+    dueAt: z.string().datetime().optional(),
     asCampaign: z.boolean().optional(),
   })
   .superRefine((value, ctx) => {
@@ -215,6 +216,7 @@ export const createCampaignSchema = z.object({
   source: z.enum(["manual", "ai_command", "import", "segment"]).default("manual"),
   messageDraft: z.string().max(4000).optional(),
   messageMode: z.enum(["manual", "ai", "file_only"]).default("manual"),
+  personalizeEach: z.boolean().optional(),
   createMissingClients: z.boolean().default(true),
   scheduledAt: z.string().datetime().optional().nullable(),
   rawCommandText: z.string().max(4000).optional(),
@@ -228,10 +230,24 @@ export const updateCampaignSchema = z.object({
   title: z.string().trim().min(1).max(200).optional(),
   messageDraft: z.string().max(4000).nullable().optional(),
   messageMode: z.enum(["manual", "ai", "file_only"]).optional(),
+  personalizeEach: z.boolean().optional(),
   createMissingClients: z.boolean().optional(),
   scheduledAt: z.string().datetime().nullable().optional(),
   recipientIdsInclude: z.array(z.string().uuid()).max(500).optional(),
   recipientIdsExclude: z.array(z.string().uuid()).max(500).optional(),
+  recipientDrafts: z
+    .array(
+      z.object({
+        id: z.string().uuid(),
+        messageDraft: z.string().max(4000).nullable(),
+      }),
+    )
+    .max(500)
+    .optional(),
+});
+
+export const personalizeCampaignRecipientsSchema = z.object({
+  useLlm: z.boolean().optional(),
 });
 
 export const campaignAttachmentSchema = z.object({
@@ -267,16 +283,16 @@ export const createContactSchema = z.object({
 
 export const updateContactSchema = z
   .object({
-    name: z.string().trim().max(160).optional(),
-    firstName: z.string().trim().max(80).optional(),
-    lastName: z.string().trim().max(80).optional(),
-    middleName: z.string().trim().max(80).optional(),
-    companyName: z.string().trim().max(200).optional(),
-    jobTitle: z.string().trim().max(120).optional(),
-    city: z.string().trim().max(120).optional(),
-    country: z.string().trim().max(120).optional(),
+    name: z.string().trim().max(160).nullable().optional(),
+    firstName: z.string().trim().max(80).nullable().optional(),
+    lastName: z.string().trim().max(80).nullable().optional(),
+    middleName: z.string().trim().max(80).nullable().optional(),
+    companyName: z.string().trim().max(200).nullable().optional(),
+    jobTitle: z.string().trim().max(120).nullable().optional(),
+    city: z.string().trim().max(120).nullable().optional(),
+    country: z.string().trim().max(120).nullable().optional(),
     language: z.string().trim().max(40).optional(),
-    summary: z.string().trim().max(4000).optional(),
+    summary: z.string().trim().max(4000).nullable().optional(),
     lifecycleStatus: z.enum(["new", "in_progress", "active", "paused", "lost", "archived"]).optional(),
     leadTemperature: z.enum(["hot", "warm", "cold", "unknown"]).optional(),
     leadScore: z.number().int().min(0).max(100).nullable().optional(),

@@ -6,7 +6,18 @@ import type { Prisma, PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import { fileStorageStatus, resolveUploadPath } from "../lib/storage.ts";
 import type { AuthContext } from "../lib/types.ts";
+import {
+  composeRecipientOffer,
+  firstNameOf,
+  inferCampaignOfferKind,
+  personalize,
+  recipientDraftsFingerprint,
+  resolveRecipientSendText,
+} from "./campaignPersonalize.ts";
+import { extractSpokenMessage } from "./aiCommandParserService.ts";
+import { inquiryInterest, loadConversationInterests } from "./contactInterestService.ts";
 import { writeActivity } from "./contactService.ts";
+import { refineCampaignRecipientDraftsWithLlm } from "./llmClient.ts";
 import { hashExecutionContent, sendViaProvider } from "./messagingProvider.ts";
 import { parseAndMatchPhoneList, type PhoneListItem } from "./phoneListService.ts";
 import { previewContactSegment } from "./segmentService.ts";
@@ -67,25 +78,20 @@ function requireTenant(auth: AuthContext) {
   return auth.activeMembership;
 }
 
-function personalize(template: string, vars: { firstName?: string | null; companyName?: string | null; service?: string | null; managerName?: string | null }) {
-  let text = template;
-  const firstName = String(vars.firstName || "").trim();
-  if (/\{\{\s*firstName\s*\}\}/i.test(text)) {
-    text = text.replace(/\{\{\s*firstName\s*\}\}\s*,?\s*/gi, firstName ? `${firstName}, ` : "");
-  }
-  text = text
-    .replace(/\{\{\s*companyName\s*\}\}/gi, vars.companyName || "")
-    .replace(/\{\{\s*service\s*\}\}/gi, vars.service || "")
-    .replace(/\{\{\s*managerName\s*\}\}/gi, vars.managerName || "")
-    .replace(/\s{2,}/g, " ")
-    .trim();
-  if (/^,?\s*добрый день/i.test(text)) text = text.replace(/^,?\s*/, "");
-  if (!text) text = "Добрый день!";
-  return text;
+function contentHash(message: string | null, attachments: unknown[], recipientFingerprint = "") {
+  return hashExecutionContent({
+    message: recipientFingerprint ? `${message || ""}\n${recipientFingerprint}` : message || "",
+    attachments: attachments as Array<{ id: string; checksum?: string | null; fileName: string; sizeBytes: number }>,
+  });
 }
 
-function contentHash(message: string | null, attachments: unknown[]) {
-  return hashExecutionContent({ message: message || "", attachments });
+function campaignHashInput(
+  campaign: { messageSnapshot?: string | null; messageDraft?: string | null; personalizeEach?: boolean | null },
+  recipients: Array<{ id: string; status: string; messageDraft?: string | null }>,
+  attachments: unknown[],
+) {
+  const fingerprint = campaign.personalizeEach ? recipientDraftsFingerprint(recipients) : "";
+  return contentHash(campaign.messageSnapshot || campaign.messageDraft, attachments, fingerprint);
 }
 
 async function campaignAttachments(prisma: PrismaClient, tenantId: string, campaignId: string) {
@@ -124,6 +130,7 @@ export async function createCampaign(
     source?: string;
     messageDraft?: string;
     messageMode?: string;
+    personalizeEach?: boolean;
     createMissingClients?: boolean;
     scheduledAt?: string | null;
     rawCommandText?: string;
@@ -231,6 +238,7 @@ export async function createCampaign(
       source: input.source || "manual",
       messageDraft: input.messageDraft || null,
       messageMode: input.messageMode || "manual",
+      personalizeEach: Boolean(input.personalizeEach),
       createMissingClients: input.createMissingClients !== false,
       scheduledAt: input.scheduledAt ? new Date(input.scheduledAt) : null,
       rawCommandText: input.rawCommandText || null,
@@ -271,7 +279,7 @@ export async function getCampaign(prisma: PrismaClient, auth: AuthContext, id: s
   });
   if (!campaign) throw new ApiError(404, "not_found", "Рассылка не найдена");
   const attachments = await campaignAttachments(prisma, membership.tenantId, id);
-  const previews = buildPersonalizationPreviews(campaign.messageDraft, campaign.recipients);
+  const previews = buildPersonalizationPreviews(campaign.messageDraft, campaign.recipients, campaign.personalizeEach);
   const storage = fileStorageStatus();
   return {
     ...campaign,
@@ -284,17 +292,27 @@ export async function getCampaign(prisma: PrismaClient, auth: AuthContext, id: s
   };
 }
 
-function buildPersonalizationPreviews(template: string | null, recipients: Array<{ displayName: string | null; status: string }>) {
+function buildPersonalizationPreviews(
+  template: string | null,
+  recipients: Array<{ displayName: string | null; status: string; messageDraft?: string | null }>,
+  personalizeEach = false,
+) {
+  const pending = recipients.filter((r) => r.status === "pending");
+  if (personalizeEach) {
+    return pending.slice(0, 8).map((r) => ({
+      label: r.displayName || "Контакт",
+      text: r.messageDraft || (template ? personalize(template, { firstName: firstNameOf(r.displayName) }) : ""),
+    })).filter((item) => item.text);
+  }
   if (!template) return [];
-  const samples = recipients.filter((r) => r.status === "pending").slice(0, 2);
-  const list = [
+  const samples = pending.slice(0, 2);
+  return [
     ...samples.map((r) => ({
       label: r.displayName || "Контакт",
-      text: personalize(template, { firstName: (r.displayName || "").split(/\s+/)[0] || null }),
+      text: personalize(template, { firstName: firstNameOf(r.displayName) }),
     })),
     { label: "Неизвестный контакт", text: personalize(template, { firstName: null }) },
   ];
-  return list;
 }
 
 export async function updateCampaign(
@@ -305,10 +323,12 @@ export async function updateCampaign(
     title?: string;
     messageDraft?: string | null;
     messageMode?: string;
+    personalizeEach?: boolean;
     createMissingClients?: boolean;
     scheduledAt?: string | null;
     recipientIdsInclude?: string[];
     recipientIdsExclude?: string[];
+    recipientDrafts?: Array<{ id: string; messageDraft: string | null }>;
   },
 ) {
   const membership = requireTenant(auth);
@@ -336,6 +356,14 @@ export async function updateCampaign(
       data: { status: "pending", skipReason: null },
     });
   }
+  if (input.recipientDrafts?.length) {
+    for (const row of input.recipientDrafts) {
+      await prisma.campaignRecipient.updateMany({
+        where: { id: row.id, campaignId: id, tenantId: membership.tenantId },
+        data: { messageDraft: row.messageDraft },
+      });
+    }
+  }
 
   const updated = await prisma.campaign.update({
     where: { id },
@@ -343,6 +371,7 @@ export async function updateCampaign(
       title: input.title ?? undefined,
       messageDraft: input.messageDraft === undefined ? undefined : input.messageDraft,
       messageMode: input.messageMode ?? undefined,
+      personalizeEach: input.personalizeEach ?? undefined,
       createMissingClients: input.createMissingClients ?? undefined,
       scheduledAt: input.scheduledAt === undefined ? undefined : input.scheduledAt ? new Date(input.scheduledAt) : null,
       status: campaign.confirmedAt ? "draft" : campaign.status,
@@ -419,8 +448,19 @@ export async function removeCampaignAttachment(prisma: PrismaClient, auth: AuthC
 
 export async function prepareCampaign(prisma: PrismaClient, auth: AuthContext, id: string) {
   const data = await getCampaign(prisma, auth, id);
-  if (data.messageMode !== "file_only" && !String(data.messageDraft || "").trim() && data.attachments.length === 0) {
-    throw new ApiError(422, "invalid", "Укажите текст или прикрепите файл");
+  const pendingForText = data.recipients.filter((r) => r.status === "pending");
+  const missingOwnDrafts = pendingForText.filter((r) => !String(r.messageDraft || "").trim()).length;
+  const hasSharedDraft = Boolean(String(data.messageDraft || "").trim());
+  const hasRecipientDrafts = pendingForText.some((r) => String(r.messageDraft || "").trim());
+  if (
+    data.messageMode !== "file_only" &&
+    !hasSharedDraft &&
+    !(data.personalizeEach && hasRecipientDrafts && missingOwnDrafts === 0) &&
+    data.attachments.length === 0
+  ) {
+    throw new ApiError(422, "invalid", data.personalizeEach
+      ? "Составьте предложения каждому или укажите общий текст"
+      : "Укажите текст или прикрепите файл");
   }
   if (data.messageMode === "file_only" && data.attachments.length === 0) {
     throw new ApiError(422, "invalid", "Для режима «только файл» нужно вложение");
@@ -447,7 +487,8 @@ export async function prepareCampaign(prisma: PrismaClient, auth: AuthContext, i
     newContacts: pending.filter((r) => !r.contactId).length,
     excluded: data.recipients.filter((r) => r.status === "skipped").length,
     channel: data.channel,
-    message: data.messageDraft,
+    message: data.personalizeEach ? null : data.messageDraft,
+    personalizeEach: data.personalizeEach,
     attachments: data.attachments.map((a) => ({
       id: a.id,
       fileName: a.fileName,
@@ -468,6 +509,11 @@ export async function prepareCampaign(prisma: PrismaClient, auth: AuthContext, i
       phone: r.phoneRaw,
       contactId: r.contactId,
       status: r.status,
+      message: data.personalizeEach
+        ? r.messageDraft || (data.messageDraft
+          ? personalize(data.messageDraft, { firstName: firstNameOf(r.displayName) })
+          : null)
+        : undefined,
     })),
     excludedPreview: data.recipients
       .filter((r) => r.status === "skipped")
@@ -501,8 +547,9 @@ export async function confirmCampaign(prisma: PrismaClient, auth: AuthContext, i
     phoneRaw: r.phoneRaw,
     phoneNormalized: r.phoneNormalized,
     displayName: r.displayName,
+    messageDraft: r.messageDraft || null,
   }));
-  const hash = contentHash(campaign.messageDraft, attachmentSnapshots);
+  const hash = campaignHashInput(campaign, pending, attachmentSnapshots);
   const status = campaign.scheduledAt && campaign.scheduledAt.getTime() > Date.now() ? "scheduled" : "awaiting_confirmation";
 
   const updated = await prisma.campaign.update({
@@ -546,7 +593,8 @@ export async function startCampaign(prisma: PrismaClient, auth: AuthContext, id:
     throw new ApiError(409, "scheduled", "Рассылка запланирована на будущее");
   }
   const attachments = await campaignAttachments(prisma, membership.tenantId, id);
-  const hash = contentHash(campaign.messageSnapshot || campaign.messageDraft, campaign.attachmentSnapshotsJson as unknown[]);
+  const recipients = await prisma.campaignRecipient.findMany({ where: { campaignId: id, tenantId: membership.tenantId } });
+  const hash = campaignHashInput(campaign, recipients, campaign.attachmentSnapshotsJson as unknown[]);
   if (hash !== campaign.contentHash) {
     throw new ApiError(409, "stale_confirmation", "Параметры рассылки изменились. Проверьте рассылку повторно.");
   }
@@ -709,6 +757,7 @@ async function sendOneRecipient(
     tenantId: string;
     messageSnapshot: string | null;
     messageDraft: string | null;
+    personalizeEach?: boolean | null;
     createMissingClients: boolean;
     createdByMembershipId: string | null;
     title: string;
@@ -719,6 +768,7 @@ async function sendOneRecipient(
     phoneRaw: string | null;
     phoneNormalized: string | null;
     displayName: string | null;
+    messageDraft?: string | null;
   },
   attachments: Array<{ id: string; fileName: string; mimeType: string; storageKey: string; documentType: string }>,
 ) {
@@ -750,13 +800,20 @@ async function sendOneRecipient(
     }
 
     const contact = await prisma.contact.findFirst({ where: { id: contactId, tenantId: campaign.tenantId } });
-    const template = campaign.messageSnapshot || campaign.messageDraft || "";
-    const text = template
-      ? personalize(template, {
-          firstName: (contact?.firstName || contact?.name || recipient.displayName || "").split(/\s+/)[0] || null,
-          companyName: contact?.companyName,
-        })
-      : "";
+    const inquiry = await prisma.inquiry.findFirst({
+      where: { tenantId: campaign.tenantId, contactId, archived: false },
+      orderBy: { receivedAt: "desc" },
+      select: { subject: true, service: true },
+    });
+    const text = resolveRecipientSendText({
+      personalizeEach: campaign.personalizeEach,
+      recipientDraft: recipient.messageDraft,
+      campaignSnapshot: campaign.messageSnapshot,
+      campaignDraft: campaign.messageDraft,
+      firstName: firstNameOf(contact?.firstName || contact?.name || recipient.displayName),
+      companyName: contact?.companyName,
+      interest: inquiryInterest(inquiry)?.text || null,
+    });
 
     if (text) {
       await sendViaProvider(prisma, campaign.tenantId, {
@@ -832,13 +889,152 @@ async function sendOneRecipient(
   }
 }
 
+async function loadRecipientOfferFacts(
+  prisma: PrismaClient,
+  tenantId: string,
+  recipients: Array<{ id: string; contactId: string | null; displayName: string | null }>,
+) {
+  const contactIds = recipients.map((row) => row.contactId).filter((id): id is string => Boolean(id));
+  const contacts = contactIds.length
+    ? await prisma.contact.findMany({
+        where: { tenantId, id: { in: contactIds } },
+        select: {
+          id: true,
+          name: true,
+          firstName: true,
+          companyName: true,
+          inquiries: {
+            where: { archived: false },
+            orderBy: { receivedAt: "desc" },
+            take: 1,
+            select: { subject: true, service: true },
+          },
+        },
+      })
+    : [];
+  const contactMap = new Map(contacts.map((row) => [row.id, row]));
+  const conversationInterests = await loadConversationInterests(prisma, tenantId, contactIds);
+  return recipients.map((recipient) => {
+    const contact = recipient.contactId ? contactMap.get(recipient.contactId) : undefined;
+    const inquiry = contact?.inquiries[0];
+    const service = String(inquiry?.service || "").trim();
+    const subject = String(inquiry?.subject || "").trim();
+    const genericSubject = /заявка из|whatsapp|instagram|форма/i.test(subject);
+    const conversation = recipient.contactId ? conversationInterests.get(recipient.contactId) : undefined;
+    return {
+      id: recipient.id,
+      firstName: firstNameOf(contact?.firstName || contact?.name || recipient.displayName),
+      companyName: contact?.companyName || null,
+      interest: (!genericSubject && subject) || service || conversation?.text || inquiryInterest(inquiry)?.text || null,
+    };
+  });
+}
+
+export async function personalizeCampaignRecipients(
+  prisma: PrismaClient,
+  auth: AuthContext,
+  id: string,
+  input: { useLlm?: boolean } = {},
+) {
+  const membership = requireTenant(auth);
+  const campaign = await prisma.campaign.findFirst({
+    where: { id, tenantId: membership.tenantId },
+    include: { recipients: { orderBy: { createdAt: "asc" } } },
+  });
+  if (!campaign) throw new ApiError(404, "not_found", "Рассылка не найдена");
+  if (["running", "completed", "cancelled"].includes(campaign.status)) {
+    throw new ApiError(409, "locked", "Рассылку в этом статусе нельзя менять");
+  }
+
+  const pending = campaign.recipients.filter((row) => row.status === "pending");
+  if (!pending.length) throw new ApiError(422, "invalid", "Нет получателей для персонализации");
+
+  const attachments = await campaignAttachments(prisma, membership.tenantId, id);
+  const hasFile = attachments.length > 0;
+  const taskText = campaign.rawCommandText || campaign.title || "";
+  const facts = await loadRecipientOfferFacts(prisma, membership.tenantId, pending);
+  const kind = inferCampaignOfferKind(taskText, campaign.messageDraft || "");
+  let drafts = facts.map((fact) => ({
+    id: fact.id,
+    text: composeRecipientOffer({
+      taskText,
+      sharedDraft: campaign.messageDraft,
+      firstName: fact.firstName,
+      companyName: fact.companyName,
+      interest: fact.interest,
+      hasFile,
+    }),
+  }));
+
+  if (input.useLlm !== false) {
+    const refined = await refineCampaignRecipientDraftsWithLlm({
+      taskText,
+      kind,
+      hasFile,
+      recipients: drafts.map((row) => {
+        const fact = facts.find((item) => item.id === row.id);
+        return {
+          id: row.id,
+          firstName: fact?.firstName || null,
+          companyName: fact?.companyName || null,
+          interest: fact?.interest || null,
+          draft: row.text,
+        };
+      }),
+    });
+    if (refined?.length) {
+      const byId = new Map(refined.map((row) => [row.id, row.text]));
+      drafts = drafts.map((row) => ({ id: row.id, text: byId.get(row.id) || row.text }));
+    }
+  }
+
+  for (const row of drafts) {
+    await prisma.campaignRecipient.update({
+      where: { id: row.id },
+      data: { messageDraft: row.text },
+    });
+  }
+
+  await prisma.campaign.update({
+    where: { id },
+    data: {
+      personalizeEach: true,
+      confirmedAt: null,
+      confirmedById: null,
+      contentHash: null,
+      messageSnapshot: null,
+      status: campaign.confirmedAt ? "draft" : campaign.status,
+      parsedCommandJson: {
+        ...(typeof campaign.parsedCommandJson === "object" && campaign.parsedCommandJson
+          ? (campaign.parsedCommandJson as object)
+          : {}),
+        personalizeEach: true,
+        offerKind: kind,
+        personalizedAt: new Date().toISOString(),
+        personalizedCount: drafts.length,
+      } as Prisma.InputJsonValue,
+    },
+  });
+
+  return getCampaign(prisma, auth, id);
+}
+
 export async function draftCampaignMessage(goal: string, hasFile: boolean) {
-  const base = hasFile
-    ? "{{firstName}}, добрый день! Направляем информацию. Во вложении — материалы. Если задача актуальна, напишите — уточним детали."
-    : "{{firstName}}, добрый день! Хотели уточнить, актуальна ли ещё ваша задача. Можем подсказать по следующим шагам.";
-  // keep business meaning fixed; no invented discounts/prices
-  void goal;
-  return { messageDraft: base, mode: "ai" as const };
+  const kind = inferCampaignOfferKind(goal);
+  const spoken = extractSpokenMessage(goal);
+  const fileBit = hasFile ? " Во вложении — материалы." : "";
+  if (spoken) {
+    return { messageDraft: `{{firstName}}, добрый день! ${spoken}${fileBit}`.replace(/\s{2,}/g, " ").trim(), mode: "ai" as const };
+  }
+  const base =
+    kind === "proposal"
+      ? `{{firstName}}, добрый день! По запросу {{service}} направляем коммерческое предложение.${fileBit} Если актуально, напишите — уточним детали.`
+      : kind === "documents"
+        ? `{{firstName}}, добрый день! Направляем документы.${fileBit} Если нужно что-то ещё — напишите.`
+        : "{{firstName}}, добрый день! Хотели уточнить, актуальна ли ещё ваша задача." +
+          fileBit +
+          " Можем подсказать по следующим шагам.";
+  return { messageDraft: base.replace(/\s{2,}/g, " ").trim(), mode: "ai" as const };
 }
 
 export type { PhoneListItem };

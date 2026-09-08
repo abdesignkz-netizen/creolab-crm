@@ -24,6 +24,7 @@ import {
   nextActionSchema,
   parseContactImportSchema,
   parsePhoneListSchema,
+  personalizeCampaignRecipientsSchema,
   parseTaskCommandSchema,
   paymentSchema,
   changeDealStageSchema,
@@ -139,6 +140,7 @@ import {
   draftCampaignMessage,
   getCampaign,
   pauseCampaign,
+  personalizeCampaignRecipients,
   prepareCampaign,
   previewPhoneList,
   removeCampaignAttachment,
@@ -672,6 +674,11 @@ export function createApp(prisma: PrismaClient) {
 
   app.delete("/api/v1/campaigns/:id/attachments/:attachmentId", async (req, res) => {
     res.json(await removeCampaignAttachment(prisma, await requireAuth(req), req.params.id, req.params.attachmentId));
+  });
+
+  app.post("/api/v1/campaigns/:id/personalize-recipients", json, async (req, res) => {
+    const input = personalizeCampaignRecipientsSchema.parse(req.body || {});
+    res.json(await personalizeCampaignRecipients(prisma, await requireAuth(req), req.params.id, input));
   });
 
   app.post("/api/v1/campaigns/:id/prepare", async (req, res) => {

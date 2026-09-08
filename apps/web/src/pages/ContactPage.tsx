@@ -23,6 +23,7 @@ export function ContactPage() {
   const [linkBilling, setLinkBilling] = useState(false);
   const [newCompanyName, setNewCompanyName] = useState("");
   const [linkBusy, setLinkBusy] = useState(false);
+  const [editBusy, setEditBusy] = useState(false);
 
   async function load() {
     if (!id) return;
@@ -37,6 +38,11 @@ export function ContactPage() {
   useEffect(() => {
     load();
   }, [id]);
+
+  useEffect(() => {
+    if (!editOpen) return;
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [editOpen]);
 
   useEffect(() => {
     if (!companyLinkOpen) return;
@@ -178,6 +184,69 @@ export function ContactPage() {
       </div>
 
       {error ? <p className="error">{error}</p> : null}
+
+      {editOpen ? (
+        <form
+          className="panel contact-edit-card"
+          onSubmit={async (event) => {
+            event.preventDefault();
+            const form = new FormData(event.currentTarget);
+            const text = (key: string) => {
+              const value = String(form.get(key) || "").trim();
+              return value || null;
+            };
+            setEditBusy(true);
+            try {
+              const firstName = text("firstName");
+              const lastName = text("lastName");
+              const composedName = [firstName, lastName].filter(Boolean).join(" ");
+              await api.updateContact(client.id, {
+                firstName,
+                lastName,
+                companyName: text("companyName"),
+                jobTitle: text("jobTitle"),
+                city: text("city"),
+                summary: text("summary"),
+                leadTemperature: String(form.get("leadTemperature") || "unknown"),
+                ...(composedName ? { name: composedName } : {}),
+              });
+              setEditOpen(false);
+              setError("");
+              await load();
+            } catch (err) {
+              setError(err instanceof Error ? err.message : "Не удалось сохранить клиента");
+            } finally {
+              setEditBusy(false);
+            }
+          }}
+        >
+          <b>Редактировать клиента</b>
+          <p className="muted">Изменения применятся после сохранения. Пустые поля можно оставить — они не обязательны.</p>
+          <label>Имя<input name="firstName" defaultValue={client.firstName || ""} /></label>
+          <label>Фамилия<input name="lastName" defaultValue={client.lastName || ""} /></label>
+          <label>Компания<input name="companyName" defaultValue={client.companyName || ""} /></label>
+          <label>Должность<input name="jobTitle" defaultValue={client.jobTitle || ""} /></label>
+          <label>Город<input name="city" defaultValue={client.city || ""} /></label>
+          <label>
+            Насколько горячий клиент
+            <select name="leadTemperature" defaultValue={client.leadTemperature || "unknown"}>
+              <option value="unknown">Не указано</option>
+              <option value="hot">Горячий — готов обсуждать</option>
+              <option value="warm">Тёплый — думает</option>
+              <option value="cold">Холодный — пока не актуально</option>
+            </select>
+          </label>
+          <label>Кратко о клиенте<textarea name="summary" defaultValue={client.summary || ""} /></label>
+          <div className="actions">
+            <button type="submit" className="btn" disabled={editBusy}>
+              {editBusy ? "Сохранение…" : "Сохранить"}
+            </button>
+            <button type="button" className="btn secondary" onClick={() => setEditOpen(false)}>
+              Отмена
+            </button>
+          </div>
+        </form>
+      ) : null}
 
       <div className="summary-card">
         <p>{client.summary}</p>
@@ -560,48 +629,6 @@ export function ContactPage() {
           Score: {client.leadScore ?? "—"}
         </p>
       </details>
-
-      {editOpen ? (
-        <form
-          className="panel"
-          onSubmit={async (event) => {
-            event.preventDefault();
-            const form = new FormData(event.currentTarget);
-            await api.updateContact(client.id, {
-              firstName: form.get("firstName") || null,
-              lastName: form.get("lastName") || null,
-              companyName: form.get("companyName") || null,
-              jobTitle: form.get("jobTitle") || null,
-              city: form.get("city") || null,
-              summary: form.get("summary") || null,
-              leadTemperature: form.get("leadTemperature"),
-            });
-            setEditOpen(false);
-            await load();
-          }}
-        >
-          <b>Редактировать клиента</b>
-          <label>Имя<input name="firstName" defaultValue={client.firstName || ""} /></label>
-          <label>Фамилия<input name="lastName" defaultValue={client.lastName || ""} /></label>
-          <label>Компания<input name="companyName" defaultValue={client.companyName || ""} /></label>
-          <label>Должность<input name="jobTitle" defaultValue={client.jobTitle || ""} /></label>
-          <label>Город<input name="city" defaultValue={client.city || ""} /></label>
-          <label>
-            Температура
-            <select name="leadTemperature" defaultValue={client.leadTemperature || "unknown"}>
-              <option value="unknown">Не указано</option>
-              <option value="hot">Горячий</option>
-              <option value="warm">Тёплый</option>
-              <option value="cold">Холодный</option>
-            </select>
-          </label>
-          <label>Кратко о клиенте<textarea name="summary" defaultValue={client.summary || ""} /></label>
-          <div className="actions">
-            <button className="btn">Сохранить</button>
-            <button type="button" className="btn secondary" onClick={() => setEditOpen(false)}>Отмена</button>
-          </div>
-        </form>
-      ) : null}
 
       {companyLinkOpen ? (
         <div className="stats-modal-backdrop" onClick={() => setCompanyLinkOpen(false)}>
