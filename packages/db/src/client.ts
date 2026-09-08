@@ -21,6 +21,20 @@ function isLivePostgresUrl(url: string | undefined): boolean {
   return !/unused|55432|example\.invalid/i.test(url);
 }
 
+async function applyLivePostgresPatches(prisma: PrismaClient) {
+  const statements = [
+    `ALTER TABLE "Campaign" ADD COLUMN IF NOT EXISTS "personalizeEach" BOOLEAN DEFAULT false`,
+    `ALTER TABLE "CampaignRecipient" ADD COLUMN IF NOT EXISTS "messageDraft" TEXT`,
+  ];
+  for (const sql of statements) {
+    try {
+      await prisma.$executeRawUnsafe(sql);
+    } catch (error) {
+      console.error("[db] additive patch failed", sql, error);
+    }
+  }
+}
+
 async function applyInitSql(pglite: PGlite) {
   const check = await pglite.query("SELECT to_regclass('public.\"Tenant\"') AS t");
   const rows = (check.rows || []) as Array<{ t: string | null }>;
@@ -494,6 +508,7 @@ export async function createPrismaClient(): Promise<PrismaClient> {
     const prisma = new PrismaClient({
       datasourceUrl: databaseUrl,
     });
+    await applyLivePostgresPatches(prisma);
     globalForPrisma.prisma = prisma;
     return prisma;
   }

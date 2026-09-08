@@ -5,7 +5,7 @@ import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-cont
 import { restoreSession, useSession } from "../src/lib/api";
 
 const tabs = [
-  { name: "today", title: "Ситуация", icon: "⌂" },
+  { name: "today", title: "Главная", icon: "⌂" },
   { name: "inbox", title: "Заявки", icon: "≡" },
   { name: "deals", title: "Сделки", icon: "◇" },
   { name: "tasks", title: "Задачи", icon: "✓" },

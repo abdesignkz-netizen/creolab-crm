@@ -160,7 +160,7 @@ export function SituationPage() {
   if (meMissing) {
     return (
       <section>
-        <h2>Ситуация</h2>
+        <h2>Главная</h2>
         <p className="empty">Нет компании — войдите заново.</p>
         <Link className="btn" to="/login">
           Войти
@@ -245,7 +245,7 @@ export function SituationPage() {
       <div className="page-head sit-head">
         <div>
           <p className="page-kicker">Оперативный центр</p>
-          <h2>Ситуация</h2>
+          <h2>Главная</h2>
           {badgeHint ? <p className="muted sit-badge-explain">{badgeHint}</p> : null}
         </div>
         <div className="sit-meta">

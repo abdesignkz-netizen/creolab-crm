@@ -15,7 +15,7 @@ export default function MoreScreen() {
   return (
     <ScrollView style={{ flex: 1, backgroundColor: "#F4F1EA" }} contentContainerStyle={{ padding: 20, gap: 12 }}>
       {error ? <Text>{error}</Text> : null}
-      <Link href="/today">Ситуация</Link>
+      <Link href="/today">Главная</Link>
       {items.slice(0, 8).map((item) => (
         <Link key={item.id} href="/today">
           {item.title}

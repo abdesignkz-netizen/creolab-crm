@@ -7,7 +7,7 @@ import { tip } from "../lib/tip";
 import { CALLS_ENABLED } from "../lib/featureFlags";
 import { CampaignMassPanel } from "./CampaignMassPanel";
 
-type Filter = "open" | "waiting" | "overdue" | "mine" | "done" | "all";
+type Filter = "open" | "waiting" | "scheduled" | "overdue" | "mine" | "done" | "all";
 type TargetMode = "client" | "group" | "none";
 
 type PickerClient = {
@@ -216,10 +216,15 @@ function isFutureDue(value?: string | Date | null, now = Date.now()) {
   if (!value) return false;
   const due = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(due.getTime())) return false;
-  return due.getTime() > now + 15_000;
+  return due.getTime() > now;
+}
+
+function isScheduledSend(item: any) {
+  return Boolean(item.sendScheduled || item.executionStatus === "scheduled" || item.commandStatus === "scheduled");
 }
 
 function dueGroup(item: any, now: Date) {
+  if (isScheduledSend(item) && item.status !== "done" && item.status !== "canceled") return "later";
   if (!item.dueAt) return "none";
   const due = new Date(item.dueAt);
   if (due.getTime() < now.getTime() && item.status !== "done" && item.status !== "canceled") return "overdue";
@@ -298,7 +303,7 @@ function toggleValue(list: string[], value: string) {
 export function TasksPage() {
   const [items, setItems] = useState<any[]>([]);
   const [error, setError] = useState("");
-  const [filter, setFilter] = useUrlState<Filter>("filter", "open", ["open", "waiting", "overdue", "mine", "done", "all"]);
+  const [filter, setFilter] = useUrlState<Filter>("filter", "open", ["open", "waiting", "scheduled", "overdue", "mine", "done", "all"]);
   const [me, setMe] = useState<any>(null);
   const [members, setMembers] = useState<any[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -638,8 +643,20 @@ export function TasksPage() {
     if (filter === "all") return true;
     if (filter === "done") return isClosedTask(item);
     if (filter === "waiting") return item.status === "waiting";
+    if (filter === "scheduled") {
+      return (
+        !isClosedTask(item) &&
+        (isScheduledSend(item) || Boolean(item.dueAt && new Date(item.dueAt).getTime() > now.getTime()))
+      );
+    }
     if (filter === "overdue") {
-      return item.dueAt && new Date(item.dueAt) < now && item.status !== "done" && item.status !== "canceled";
+      return (
+        item.dueAt &&
+        new Date(item.dueAt) < now &&
+        item.status !== "done" &&
+        item.status !== "canceled" &&
+        !isScheduledSend(item)
+      );
     }
     if (filter === "mine") return item.ownerMembershipId === membershipId && ["open", "waiting"].includes(item.status);
     return item.status === "open";
@@ -1014,9 +1031,15 @@ export function TasksPage() {
       setError("Выберите клиентов или добавьте телефоны");
       return;
     }
-    if (commandDueMode === "scheduled" && !commandDueAt) {
-      setError("Укажите дату и время срока");
-      return;
+    if (commandDueMode === "scheduled") {
+      if (!commandDueAt) {
+        setError("Укажите дату и время срока");
+        return;
+      }
+      if (!isFutureDue(commandDueAt)) {
+        setError("Укажите время в будущем. Сейчас выбранный срок уже наступил — сообщение уйдёт сразу.");
+        return;
+      }
     }
     setBusy(true);
     try {
@@ -1166,14 +1189,24 @@ export function TasksPage() {
   const filterCounts = {
     open: items.filter((item) => item.status === "open").length,
     waiting: items.filter((item) => item.status === "waiting").length,
+    scheduled: items.filter(
+      (item) =>
+        !isClosedTask(item) &&
+        (isScheduledSend(item) || Boolean(item.dueAt && new Date(item.dueAt).getTime() > now.getTime())),
+    ).length,
     overdue: items.filter(
-      (item) => item.dueAt && new Date(item.dueAt) < now && item.status !== "done" && item.status !== "canceled",
+      (item) =>
+        item.dueAt &&
+        new Date(item.dueAt) < now &&
+        item.status !== "done" &&
+        item.status !== "canceled" &&
+        !isScheduledSend(item),
     ).length,
     mine: items.filter((item) => item.ownerMembershipId === membershipId && ["open", "waiting"].includes(item.status)).length,
     done: items.filter((item) => isClosedTask(item)).length,
     all: items.length,
   };
-  const commandWillSchedule = commandDueMode === "scheduled" && isFutureDue(commandDueAt);
+  const commandWillSchedule = commandDueMode === "scheduled" && Boolean(commandDueAt);
 
   return (
     <section>
@@ -1227,6 +1260,7 @@ export function TasksPage() {
           [
             ["open", "Открытые"],
             ["waiting", "Жду"],
+            ["scheduled", "Запланировано"],
             ["overdue", "Просроченные"],
             ["mine", "Мои"],
             ["done", "Сделанные"],
@@ -1241,7 +1275,9 @@ export function TasksPage() {
                 ? "Задачи в работе прямо сейчас"
                 : value === "waiting"
                   ? "Ждёте ответа клиента или внешней реакции"
-                  : value === "overdue"
+                  : value === "scheduled"
+                    ? "Отправка в выбранное время, не сразу"
+                    : value === "overdue"
                     ? "Срок уже прошёл — нужно действие"
                     : value === "mine"
                       ? "Назначены на вас"
@@ -2566,7 +2602,9 @@ export function TasksPage() {
             ? "Открытых задач нет."
             : filter === "waiting"
               ? "Задач в ожидании нет."
-              : filter === "overdue"
+              : filter === "scheduled"
+                ? "Запланированных задач нет. Выберите «По дате и времени», чтобы отправка ушла не сразу."
+                : filter === "overdue"
                 ? "Просроченных задач нет."
                 : filter === "mine"
                   ? "У вас нет активных задач."

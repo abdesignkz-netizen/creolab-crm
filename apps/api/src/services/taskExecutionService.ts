@@ -77,13 +77,23 @@ async function voidConfirmations(prisma: PrismaClient, tid: string, taskId: stri
 }
 
 export const SCHEDULED_TASK_ACTION_TYPES = ["task_run", "task_batch_run"] as const;
-const DUE_SEND_GRACE_MS = 15_000;
 
 export function taskSendDueLater(dueAt: Date | string | null | undefined, now = new Date()) {
   if (!dueAt) return false;
   const due = dueAt instanceof Date ? dueAt : new Date(dueAt);
   if (Number.isNaN(due.getTime())) return false;
-  return due.getTime() > now.getTime() + DUE_SEND_GRACE_MS;
+  return due.getTime() > now.getTime();
+}
+
+export function taskMarkedForScheduledSend(
+  task: {
+    dueAt?: Date | string | null;
+    executionStatus?: string | null;
+    commandStatus?: string | null;
+  },
+  now = new Date(),
+) {
+  return task.executionStatus === "scheduled" || task.commandStatus === "scheduled" || taskSendDueLater(task.dueAt, now);
 }
 
 export async function cancelScheduledTaskSends(
@@ -111,7 +121,10 @@ export async function scheduleConfirmedTaskSend(
   options: { batch?: boolean } = {},
 ) {
   const { tid, task } = await taskInTenant(prisma, auth, taskId);
-  if (!task.dueAt || !taskSendDueLater(task.dueAt)) {
+  if (!task.dueAt) {
+    throw new ApiError(409, "not_scheduled", "Срок не указан");
+  }
+  if (!taskMarkedForScheduledSend(task)) {
     throw new ApiError(409, "not_scheduled", "Срок уже наступил — отправьте сейчас");
   }
   if (!options.batch) {
@@ -284,7 +297,7 @@ export async function updateTaskDraft(
       dealId: input.dealId !== undefined ? input.dealId || null : undefined,
       title: input.title,
       description: input.description,
-      executionStatus: task.executionStatus === "none" ? "prepared" : "prepared",
+      executionStatus: task.executionStatus === "scheduled" || task.commandStatus === "scheduled" ? "scheduled" : "prepared",
       confirmedAt: null,
     },
   });
@@ -582,10 +595,10 @@ export async function prepareTaskExecution(prisma: PrismaClient, auth: AuthConte
     })),
     preparedAtLabel: formatWhen(new Date(), timeZone),
     dueAt: task.dueAt,
-    scheduled: taskSendDueLater(task.dueAt),
+    scheduled: taskMarkedForScheduledSend(task),
     buttons: {
       back: "Вернуться и изменить",
-      confirm: taskSendDueLater(task.dueAt) ? "Запланировать отправку" : "Подтвердить и отправить",
+      confirm: taskMarkedForScheduledSend(task) ? "Запланировать отправку" : "Подтвердить и отправить",
     },
   };
 }
@@ -676,7 +689,7 @@ export async function executeTask(
     throw new ApiError(409, "stale_confirmation", "Данные отправки изменились. Необходимо повторное подтверждение.");
   }
 
-  if (!options.runScheduled && !options.retryFailedFilesOnly && taskSendDueLater(task.dueAt)) {
+  if (!options.runScheduled && !options.retryFailedFilesOnly && taskMarkedForScheduledSend(task)) {
     return scheduleConfirmedTaskSend(prisma, auth, id, { batch: false });
   }
 

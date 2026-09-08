@@ -300,6 +300,67 @@ describe("AI task commands", () => {
     assert.equal(row.sendScheduled, true);
   });
 
+  it("срок через полминуты не отправляет сразу", async () => {
+    const contact = await prisma.contact.create({
+      data: { tenantId, name: "Скорошная Отправка", firstName: "Скоро", lastName: "Отправка" },
+    });
+    const conversation = await prisma.conversation.create({
+      data: {
+        tenantId,
+        contactId: contact.id,
+        mode: "human",
+        status: "open",
+        sellerLeadId: "test-lead-soon-scheduled-task",
+      },
+    });
+    const dueAt = new Date(Date.now() + 30_000).toISOString();
+    const created = await fetch(`${base}/api/v1/tasks/from-command`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({
+        text: "Напиши и уточни по заявке",
+        parsedCommand: { taskType: "message", executionMode: "execute", riskLevel: 3 },
+        clientIds: [contact.id],
+        messageDraft: "Добрый день! Уточняем по заявке.",
+        dueAt,
+      }),
+    });
+    assert.equal(created.status, 201);
+    const taskId = (await created.json()).task.id as string;
+    const messagesBefore = await prisma.message.count({ where: { conversationId: conversation.id } });
+    await fetch(`${base}/api/v1/tasks/${taskId}/prepare-execution`, { method: "POST", headers: { cookie } });
+    await fetch(`${base}/api/v1/tasks/${taskId}/confirm-execution`, { method: "POST", headers: { cookie } });
+    const execute = await fetch(`${base}/api/v1/tasks/${taskId}/execute`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie },
+      body: "{}",
+    });
+    assert.equal(execute.status, 200);
+    const execBody = await execute.json();
+    assert.equal(execBody.scheduled, true);
+    assert.equal(execBody.success, false);
+    const task = await prisma.task.findUniqueOrThrow({ where: { id: taskId } });
+    assert.equal(task.status, "open");
+    assert.equal(task.sentAt, null);
+    assert.equal(await prisma.message.count({ where: { conversationId: conversation.id } }), messagesBefore);
+  });
+
+  it("прошедший срок в команде не создаёт задачу", async () => {
+    const contact = await prisma.contact.findFirst({ where: { tenantId } });
+    assert.ok(contact);
+    const created = await fetch(`${base}/api/v1/tasks/from-command`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({
+        text: "Напиши клиенту",
+        parsedCommand: { taskType: "message", executionMode: "execute", riskLevel: 3 },
+        clientIds: [contact.id],
+        dueAt: new Date(Date.now() - 60_000).toISOString(),
+      }),
+    });
+    assert.equal(created.status, 422);
+  });
+
   it("воркер не отправляет уже закрытую запланированную задачу", async () => {
     const task = await prisma.task.create({
       data: {

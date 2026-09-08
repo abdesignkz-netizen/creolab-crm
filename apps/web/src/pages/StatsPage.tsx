@@ -357,14 +357,21 @@ export function StatsPage() {
         return;
       }
       setLoading(true);
-      const [dash, tr] = await Promise.all([
+      const [dashRes, trRes] = await Promise.allSettled([
         api.analyticsDashboard(query),
         api.analyticsTrend({ ...query, metric: trendMetric }),
       ]);
       if (request !== requestVersion.current) return;
-      setData(dash);
-      setTrend(tr);
-      setError("");
+      if (dashRes.status === "fulfilled") {
+        setData(dashRes.value);
+        setTrend(trRes.status === "fulfilled" ? trRes.value : dashRes.value.trend || null);
+        setError("");
+      } else if (trRes.status === "fulfilled") {
+        setTrend(trRes.value);
+        setError(dashRes.reason instanceof Error ? dashRes.reason.message : "Ошибка загрузки");
+      } else {
+        setError(dashRes.reason instanceof Error ? dashRes.reason.message : "Ошибка загрузки");
+      }
     } catch (err) {
       if (request !== requestVersion.current) return;
       setError(err instanceof Error ? err.message : "Ошибка загрузки");
@@ -412,16 +419,6 @@ export function StatsPage() {
       : null;
 
   if (loading && !data) return <div className="state">Загрузка статистики…</div>;
-  if (!data && error) {
-    return (
-      <section>
-        <p className="error">{error}</p>
-        <button type="button" className="btn" onClick={() => void load()}>
-          Повторить
-        </button>
-      </section>
-    );
-  }
 
   const o = data?.overview || {};
   const sales = data?.sales || {};
@@ -500,7 +497,14 @@ export function StatsPage() {
         </div>
       ) : null}
 
-      {error ? <p className="error">{error}</p> : null}
+      {error ? (
+        <div className="row">
+          <p className="error">{error}</p>
+          <button type="button" className="btn secondary" onClick={() => void load()}>
+            Повторить
+          </button>
+        </div>
+      ) : null}
 
       <div className="stats-tabs" role="tablist">
         {TABS.map((t) => (

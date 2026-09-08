@@ -9,6 +9,7 @@ import {
   prepareTaskExecution,
   scheduleConfirmedTaskSend,
   syncGroupAttachmentsToChildren,
+  taskMarkedForScheduledSend,
   taskSendDueLater,
   updateTaskDraft,
 } from "./taskExecutionService.ts";
@@ -75,6 +76,11 @@ export async function createTaskFromCommand(
 
   if (!clientIds.length) throw new ApiError(422, "invalid", "Выберите хотя бы одного клиента");
 
+  const dueAt = input.dueAt ? new Date(input.dueAt) : null;
+  if (input.dueAt && (Number.isNaN(dueAt?.getTime()) || !taskSendDueLater(dueAt))) {
+    throw new ApiError(422, "invalid", "Укажите время в будущем. Иначе сообщение уйдёт сразу после подтверждения.");
+  }
+
   const taskType = String(input.parsedCommand.taskType || "other");
   const executionMode = input.executionMode || (input.parsedCommand.executionMode === "prepare_only" ? "prepare_only" : "execute");
   const actionLabel = TASK_TYPE_LABEL[taskType] || String(input.parsedCommand.actionLabel || taskType);
@@ -98,7 +104,7 @@ export async function createTaskFromCommand(
     contactId: clientIds.length === 1 ? clientIds[0] : undefined,
     clientIds: clientIds.length > 1 ? clientIds : undefined,
     ownerMembershipId: input.ownerMembershipId,
-    dueAt: input.dueAt,
+    dueAt: dueAt ? dueAt.toISOString() : undefined,
     priority: "normal",
     segmentSnapshot: {
       ...(typeof input.parsedCommand.filters === "object" && input.parsedCommand.filters
@@ -113,15 +119,16 @@ export async function createTaskFromCommand(
   const parentId = created.id;
   const draft = defaultMessage || null;
 
+  const scheduled = Boolean(dueAt);
   await prisma.task.update({
     where: { id: parentId },
     data: {
       rawCommandText: input.text,
       parsedCommandJson: input.parsedCommand as object,
-      commandStatus: executionMode === "prepare_only" ? "prepared" : "prepared",
+      commandStatus: scheduled ? "scheduled" : "prepared",
       messageDraft: draft,
       source: "ai_command",
-      executionStatus: draft ? "prepared" : "none",
+      executionStatus: scheduled ? "scheduled" : draft ? "prepared" : "none",
     },
   });
 
@@ -133,7 +140,12 @@ export async function createTaskFromCommand(
     if (children.length) {
       await prisma.task.updateMany({
         where: { parentTaskId: parentId },
-        data: { messageDraft: draft, executionStatus: "prepared", source: "ai_command", commandStatus: "prepared" },
+        data: {
+          messageDraft: draft,
+          executionStatus: scheduled ? "scheduled" : "prepared",
+          source: "ai_command",
+          commandStatus: scheduled ? "scheduled" : "prepared",
+        },
       });
     } else if (created.contactId) {
       await updateTaskDraft(prisma, auth, parentId, { messageDraft: draft });
@@ -182,7 +194,7 @@ export async function executeTaskBatch(
 
   await syncGroupAttachmentsToChildren(prisma, auth, parentId);
 
-  if (!options.runScheduled && taskSendDueLater(parent.dueAt)) {
+  if (!options.runScheduled && taskMarkedForScheduledSend(parent)) {
     for (const child of children) {
       if (parent.messageDraft && !child.messageDraft) {
         await updateTaskDraft(prisma, auth, child.id, { messageDraft: parent.messageDraft });

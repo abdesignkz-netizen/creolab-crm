@@ -205,7 +205,7 @@ async function metricBundle(
       }),
       prisma.deal.findMany({
         where: { ...dealExtra, ...(received ? { createdAt: received } : {}) } as never,
-        include: { stage: true, contact: { select: { name: true } } },
+        select: { id: true, inquiryId: true },
         take: 5000,
       }),
       prisma.deal.findMany({
@@ -599,8 +599,16 @@ export async function getAnalyticsDashboard(prisma: PrismaClient, auth: AuthCont
       : metricBundle(prisma, tid, cmp.from, cmp.to, inquiryExtra, dealExtra),
     buildFunnel(prisma, tid, range.from, range.to, funnelMode, inquiryExtra, dealExtra),
     buildTrend(prisma, tid, range.from, range.to, preset, timeZone, inquiryExtra, dealExtra, "inquiries"),
-    buildStageDurations(prisma, tid, range.from, range.to),
-    buildStage2Analytics(prisma, tid, range.from, range.to, inquiryExtra, dealExtra, currency, query.assignee),
+    buildStageDurations(prisma, tid, range.from, range.to).catch((err) => {
+      console.error("analytics stageDurations", err);
+      return [];
+    }),
+    buildStage2Analytics(prisma, tid, range.from, range.to, inquiryExtra, dealExtra, currency, query.assignee).catch(
+      (err) => {
+        console.error("analytics stage2", err);
+        return emptyStage2();
+      },
+    ),
   ]);
 
   const trendCompare =
@@ -868,6 +876,58 @@ function contactName(contact?: { name?: string | null; firstName?: string | null
   return [contact.firstName, contact.lastName].filter(Boolean).join(" ").trim() || contact.name || "Без имени";
 }
 
+function emptyStage2() {
+  return {
+    managers: [] as Array<Record<string, unknown>>,
+    tasks: {
+      created: 0,
+      done: 0,
+      doneOnTime: 0,
+      doneLate: 0,
+      open: 0,
+      overdue: 0,
+      canceled: 0,
+      onTimePct: null as number | null,
+      byType: [] as Array<{ type: string; created: number; done: number; overdue: number }>,
+      meetings: { calls: 0, online: 0, offline: 0, done: 0, rescheduled: 0, cancelled: 0, missed: 0 },
+    },
+    communications: {
+      inbound: 0,
+      outbound: 0,
+      dialogs: 0,
+      avgResponseMin: null as number | null,
+      waitedOver15: 0,
+      aiHandled: 0,
+      staffHandled: 0,
+      handedToHuman: 0,
+      responseBuckets: [] as Array<{ key: string; count: number }>,
+    },
+    aiManager: {
+      dialogs: 0,
+      clients: 0,
+      qualified: 0,
+      needIdentified: 0,
+      tasksCreated: 0,
+      handedToHuman: 0,
+      dealsReached: 0,
+      won: 0,
+      funnel: { clients: 0, qualified: 0, deals: 0, won: 0 },
+      handoffReasons: [] as Array<{ reason: string; count: number }>,
+    },
+    campaigns: [] as Array<Record<string, unknown>>,
+    dataQuality: {
+      noPhone: 0,
+      noSource: 0,
+      noService: 0,
+      noOwner: 0,
+      lostNoReason: 0,
+      openNoNextAction: 0,
+      dealsNoAmount: 0,
+      sampleContacts: 0,
+    },
+  };
+}
+
 async function buildStage2Analytics(
   prisma: PrismaClient,
   tid: string,
@@ -974,26 +1034,35 @@ async function buildStage2Analytics(
         },
         take: 5000,
       }),
-      prisma.campaign.findMany({
-        where: {
-          tenantId: tid,
-          ...(created ? { createdAt: created } : {}),
-        },
-        include: {
-          recipients: {
-            select: {
-              status: true,
-              deliveredAt: true,
-              readAt: true,
-              repliedAt: true,
-              contactId: true,
-              conversationId: true,
+      prisma.campaign
+        .findMany({
+          where: {
+            tenantId: tid,
+            ...(created ? { createdAt: created } : {}),
+          },
+          select: {
+            id: true,
+            title: true,
+            createdAt: true,
+            startedAt: true,
+            recipients: {
+              select: {
+                status: true,
+                deliveredAt: true,
+                readAt: true,
+                repliedAt: true,
+                contactId: true,
+                conversationId: true,
+              },
             },
           },
-        },
-        orderBy: { createdAt: "desc" },
-        take: 100,
-      }),
+          orderBy: { createdAt: "desc" },
+          take: 100,
+        })
+        .catch((err) => {
+          console.error("analytics campaigns", err);
+          return [];
+        }),
       prisma.agreement.findMany({
         where: {
           tenantId: tid,

@@ -333,7 +333,10 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
       failedFiles,
       executionStatus: item.executionStatus,
       scheduledSendAt: scheduledSendAtByTask.get(item.id) || null,
-      sendScheduled: item.executionStatus === "scheduled" || scheduledSendAtByTask.has(item.id),
+      sendScheduled:
+        item.executionStatus === "scheduled" ||
+        item.commandStatus === "scheduled" ||
+        scheduledSendAtByTask.has(item.id),
     };
   });
 }
@@ -390,7 +393,8 @@ export async function getTask(prisma: PrismaClient, auth: AuthContext, id: strin
   return {
     ...item,
     scheduledSendAt,
-    sendScheduled: item.executionStatus === "scheduled" || Boolean(scheduledSendAt),
+    sendScheduled:
+      item.executionStatus === "scheduled" || item.commandStatus === "scheduled" || Boolean(scheduledSendAt),
     attachments,
     isSendable: ["proposal", "message", "send_documents", "prepare_estimate", "follow_up", "process_inquiry"].includes(item.type),
     briefing: {

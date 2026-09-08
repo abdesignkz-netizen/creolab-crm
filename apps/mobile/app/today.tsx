@@ -65,7 +65,7 @@ export default function TodayScreen() {
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: "#F4F1EA" }} contentContainerStyle={{ padding: 20, gap: 12 }}>
-      <Text style={{ fontSize: 24 }}>Ситуация</Text>
+      <Text style={{ fontSize: 24 }}>Главная</Text>
       {data.freshness.warning ? <Text>{data.freshness.warning}</Text> : null}
       {error ? <Text>{error}</Text> : null}
       <Text>Сейчас: {data.metrics.now}</Text>

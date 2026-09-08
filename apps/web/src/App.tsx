@@ -83,7 +83,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
   const moreSheetRef = useRef<HTMLDivElement>(null);
 
   const primaryTabs = [
-    { to: "/today", label: "Ситуация", icon: "home" },
+    { to: "/today", label: "Главная", icon: "home" },
     { to: "/conversations", label: "Диалоги", icon: "chat" },
     { to: "/tasks", label: "Задачи", icon: "tasks" },
     { to: "/contacts", label: "Клиенты", icon: "people" },
@@ -100,7 +100,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
   ] as const;
 
   const workLinks = [
-    ["/today", "Ситуация"],
+    ["/today", "Главная"],
     ["/conversations", "Диалоги"],
     ["/tasks", "Задачи"],
     ["/contacts", "Клиенты"],
@@ -131,7 +131,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
   const moreBadgeTotal = moreLinks.reduce((sum, [path]) => sum + badgeCount(path), 0);
 
   const titleMap: Record<string, string> = {
-    "/today": "Ситуация",
+    "/today": "Главная",
     "/control": "Управление",
     "/inquiries": "Заявки",
     "/requests": "Заявка",
