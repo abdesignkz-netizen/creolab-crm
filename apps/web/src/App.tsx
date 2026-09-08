@@ -86,12 +86,12 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
     { to: "/today", label: "Главная", icon: "home" },
     { to: "/conversations", label: "Диалоги", icon: "chat" },
     { to: "/tasks", label: "Задачи", icon: "tasks" },
-    { to: "/contacts", label: "Клиенты", icon: "people" },
+    { to: "/inquiries", label: "Заявки", icon: "inquiries" },
   ] as const;
 
   const moreLinks = [
     ["/control", "Управление"],
-    ["/inquiries", "Заявки"],
+    ["/contacts", "Клиенты"],
     ["/companies", "Компании"],
     ["/deals", "Сделки"],
     ["/integrations", "Интеграции"],
@@ -148,7 +148,8 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
   const pageTitle =
     Object.entries(titleMap).find(([path]) => location.pathname === path || location.pathname.startsWith(`${path}/`))?.[1] ||
     "CREOLAB CRM";
-  const moreActive = location.pathname.startsWith("/requests/") || moreLinks.some(([path]) => location.pathname === path || location.pathname.startsWith(`${path}/`));
+  const inquiriesActive = location.pathname === "/inquiries" || location.pathname.startsWith("/requests/");
+  const moreActive = moreLinks.some(([path]) => location.pathname === path || location.pathname.startsWith(`${path}/`));
 
   useEffect(() => {
     if (!tenantId) return;
@@ -451,7 +452,10 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
             <NavLink
               key={tab.to}
               to={tab.to}
-              className={({ isActive }) => (isActive ? `tab active tab-${tab.icon}` : `tab tab-${tab.icon}`)}
+              className={({ isActive }) => {
+                const active = tab.to === "/inquiries" ? inquiriesActive : isActive;
+                return active ? `tab active tab-${tab.icon}` : `tab tab-${tab.icon}`;
+              }}
               aria-label={count > 0 ? `${tab.label}. ${hint}` : tab.label}
             >
               <span className="tab-icon-wrap">

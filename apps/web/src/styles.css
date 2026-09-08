@@ -1410,6 +1410,24 @@ fieldset.field-block legend { padding: 0 6px; font-weight: 600; }
     left: 4px;
     bottom: 2px;
   }
+  .icon-inquiries::before {
+    content: "";
+    position: absolute;
+    inset: 2px 5px 3px;
+    border: 2px solid currentColor;
+    border-radius: 2px;
+  }
+  .icon-inquiries::after {
+    content: "";
+    position: absolute;
+    left: 8px;
+    right: 8px;
+    top: 8px;
+    height: 2px;
+    background: currentColor;
+    box-shadow: 0 4px 0 currentColor, 0 8px 0 currentColor;
+    border-radius: 1px;
+  }
   .icon-more::before {
     content: "";
     position: absolute;
