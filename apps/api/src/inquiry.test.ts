@@ -106,4 +106,81 @@ describe("inquiries overhaul", () => {
     assert.equal(body.found, true);
     assert.ok(body.contact?.id);
   });
+
+  it("цифра в меню совпадает с «требуют внимания» и не зависит от периода", async () => {
+    const created = await fetch(`${url}/api/v1/inquiries`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        name: "Старая заявка для бейджа",
+        phone: "+7 701 555 11 22",
+        subject: "Сайт",
+        message: "Нужен сайт, заявка не за сегодня",
+        serviceCategory: "web",
+        sourceChannel: "manual",
+      }),
+    });
+    assert.equal(created.status, 201);
+    const inquiry = await created.json();
+    const receivedAt = new Date(Date.now() - 12 * 24 * 60 * 60 * 1000);
+    await prisma.inquiry.update({
+      where: { id: inquiry.id },
+      data: { receivedAt, status: "new", archived: false },
+    });
+
+    const todayRes = await fetch(`${url}/api/v1/inquiries?period=today`, { headers: { cookie } });
+    assert.equal(todayRes.status, 200);
+    const today = await todayRes.json();
+    assert.ok(!today.items.some((item: { id: string }) => item.id === inquiry.id));
+    assert.ok((today.counts.attention || 0) >= 1);
+
+    const attentionRes = await fetch(`${url}/api/v1/inquiries?filter=attention&period=today`, { headers: { cookie } });
+    assert.equal(attentionRes.status, 200);
+    const attention = await attentionRes.json();
+    assert.ok(attention.items.some((item: { id: string }) => item.id === inquiry.id));
+    assert.equal(attention.counts.attention, today.counts.attention);
+
+    const badgesRes = await fetch(`${url}/api/v1/nav-badges`, { headers: { cookie } });
+    assert.equal(badgesRes.status, 200);
+    const badges = await badgesRes.json();
+    assert.equal(badges.badges["/inquiries"], today.counts.attention);
+    assert.equal(badges.hrefs["/inquiries"], "/inquiries?filter=attention");
+    assert.match(badges.hints["/inquiries"], /требуют внимания|требует внимания/);
+  });
+
+  it("запланированная отправка не считается просроченной в бейдже задач", async () => {
+    const meRes = await fetch(`${url}/api/v1/me`, { headers: { cookie } });
+    const me = await meRes.json();
+    const tenantId = me.activeTenant.tenant.id;
+    const ownerMembershipId = me.activeTenant.membershipId;
+    const dueAt = new Date(Date.now() - 60 * 60 * 1000);
+    const task = await prisma.task.create({
+      data: {
+        tenantId,
+        ownerMembershipId,
+        type: "send_message",
+        title: "Запланированная отправка вчера",
+        status: "open",
+        dueAt,
+        executionStatus: "scheduled",
+        commandStatus: "scheduled",
+        dedupeKey: `test-nav-scheduled-${Date.now()}`,
+      },
+    });
+    try {
+      const badges = await (await fetch(`${url}/api/v1/nav-badges`, { headers: { cookie } })).json();
+      const counted = await prisma.task.count({
+        where: {
+          tenantId,
+          parentTaskId: null,
+          status: { in: ["open", "waiting"] },
+          dueAt: { lt: new Date() },
+          NOT: { OR: [{ executionStatus: "scheduled" }, { commandStatus: "scheduled" }] },
+        },
+      });
+      assert.equal(badges.badges["/tasks"], counted);
+    } finally {
+      await prisma.task.delete({ where: { id: task.id } });
+    }
+  });
 });

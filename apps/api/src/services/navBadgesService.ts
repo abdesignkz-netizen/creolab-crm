@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
+import { inquiryNeedsActionWhere, openIntakeWhere } from "./inquiryAttention.ts";
 
 function requireTenant(auth: AuthContext) {
   if (!auth.activeMembership) throw new ApiError(403, "no_tenant", "Нет активной компании");
@@ -30,11 +31,17 @@ export function badgeHint(total: number, parts: string[], empty = "") {
  * Lightweight attention counts for sidebar / mobile nav badges.
  * Keys are route paths used in App shell navigation.
  */
+const notScheduledSend = {
+  NOT: {
+    OR: [{ executionStatus: "scheduled" }, { commandStatus: "scheduled" }],
+  },
+};
+
 export async function getNavBadges(prisma: PrismaClient, auth: AuthContext) {
   const membership = requireTenant(auth);
   const tid = membership.tenantId;
   const now = new Date();
-  const closedInquiry = ["lost", "invalid", "spam", "converted"];
+  const inquiryAction = inquiryNeedsActionWhere(tid);
 
   const [
     conversationsAttention,
@@ -60,6 +67,7 @@ export async function getNavBadges(prisma: PrismaClient, auth: AuthContext) {
         parentTaskId: null,
         status: { in: ["open", "waiting"] },
         dueAt: { lt: now },
+        ...notScheduledSend,
       },
     }),
     prisma.$queryRaw<Array<{ count: bigint }>>`
@@ -72,14 +80,7 @@ export async function getNavBadges(prisma: PrismaClient, auth: AuthContext) {
           OR "lastInboundMessageAt" > "lastOutboundMessageAt"
         )
     `.then((rows) => Number(rows[0]?.count || 0)),
-    prisma.inquiry.count({
-      where: {
-        tenantId: tid,
-        archived: false,
-        status: { notIn: closedInquiry },
-        OR: [{ status: "new" }, { needsReply: true }],
-      },
-    }),
+    prisma.inquiry.count({ where: inquiryAction }),
     prisma.deal.count({
       where: {
         tenantId: tid,
@@ -88,6 +89,7 @@ export async function getNavBadges(prisma: PrismaClient, auth: AuthContext) {
           some: {
             status: { in: ["open", "waiting"] },
             dueAt: { lt: now },
+            ...notScheduledSend,
           },
         },
       },
@@ -102,17 +104,12 @@ export async function getNavBadges(prisma: PrismaClient, auth: AuthContext) {
               some: {
                 status: { in: ["open", "waiting"] },
                 dueAt: { lt: now },
+                ...notScheduledSend,
               },
             },
           },
           {
-            inquiries: {
-              some: {
-                archived: false,
-                status: { notIn: closedInquiry },
-                OR: [{ needsReply: true }, { status: "new" }],
-              },
-            },
+            inquiries: { some: inquiryAction },
           },
         ],
       },
@@ -134,12 +131,7 @@ export async function getNavBadges(prisma: PrismaClient, auth: AuthContext) {
         resolvedAt: null,
       },
     }),
-    prisma.incompleteIntake.count({
-      where: {
-        tenantId: tid,
-        status: { in: ["pending", "open", "needs_phone"] },
-      },
-    }),
+    prisma.incompleteIntake.count({ where: openIntakeWhere(tid) }),
   ]);
 
   const conversations = conversationsAttention;
@@ -166,7 +158,7 @@ export async function getNavBadges(prisma: PrismaClient, auth: AuthContext) {
   const hints: Record<string, string> = {
     "/today": badgeHint(situation, situationParts),
     "/conversations": conversations
-      ? ruCount(conversations, "диалог без ответа", "диалога без ответа", "диалогов без ответа")
+      ? ruCount(conversations, "диалог требует внимания", "диалога требуют внимания", "диалогов требуют внимания")
       : "",
     "/tasks": tasks ? ruCount(tasks, "просроченная задача", "просроченные задачи", "просроченных задач") : "",
     "/contacts": contactsNeedsReply
@@ -176,7 +168,7 @@ export async function getNavBadges(prisma: PrismaClient, auth: AuthContext) {
       ? `${ruCount(companiesAttention, "компания", "компании", "компаний")} с просроченной задачей или новой заявкой`
       : "",
     "/inquiries": inquiries
-      ? `${ruCount(inquiries, "заявка", "заявки", "заявок")} новые, без ответа или без телефона`
+      ? `${ruCount(inquiries, "заявка требует внимания", "заявки требуют внимания", "заявок требуют внимания")}: новые, без ответа или без телефона. Не за сегодня — все открытые.`
       : "",
     "/deals": dealsAttention
       ? `${ruCount(dealsAttention, "сделка", "сделки", "сделок")} с просроченной задачей`
@@ -206,6 +198,19 @@ export async function getNavBadges(prisma: PrismaClient, auth: AuthContext) {
       "/settings": notificationsUnread,
     } as Record<string, number>,
     hints,
+    hrefs: {
+      "/today": "/today",
+      "/conversations": conversations ? "/conversations?filter=attention" : "/conversations",
+      "/tasks": tasks ? "/tasks?filter=overdue" : "/tasks",
+      "/contacts": contactsNeedsReply ? "/contacts?filter=needs_reply" : "/contacts",
+      "/companies": "/companies",
+      "/inquiries": inquiries ? "/inquiries?filter=attention" : "/inquiries",
+      "/deals": dealsAttention ? "/deals" : "/deals",
+      "/control": control ? "/control" : "/control",
+      "/integrations": "/integrations",
+      "/stats": "/stats",
+      "/settings": "/settings",
+    } as Record<string, string>,
     parts: {
       "/today": situationParts,
     },

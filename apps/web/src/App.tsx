@@ -78,6 +78,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
   const [unreadNotices, setUnreadNotices] = useState(0);
   const [navBadges, setNavBadges] = useState<Record<string, number>>({});
   const [navHints, setNavHints] = useState<Record<string, string>>({});
+  const [navHrefs, setNavHrefs] = useState<Record<string, string>>({});
   const [notifyBanner, setNotifyBanner] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const moreSheetRef = useRef<HTMLDivElement>(null);
@@ -122,6 +123,10 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
 
   function badgeHint(path: string, fallback = "Требует внимания") {
     return navHints[path] || fallback;
+  }
+
+  function navTo(path: string) {
+    return navHrefs[path] || path;
   }
 
   function formatBadge(n: number) {
@@ -176,11 +181,16 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
     let cancelled = false;
     async function loadBadges() {
       try {
-        const data = (await api.navBadges()) as { badges?: Record<string, number>; hints?: Record<string, string> };
+        const data = (await api.navBadges()) as {
+          badges?: Record<string, number>;
+          hints?: Record<string, string>;
+          hrefs?: Record<string, string>;
+        };
         if (cancelled) return;
         const badges = data.badges || {};
         setNavBadges(badges);
         setNavHints(data.hints || {});
+        setNavHrefs(data.hrefs || {});
         setUnreadNotices(Number(badges["/settings"] || 0));
       } catch {
         // silently keep previous badges
@@ -302,7 +312,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
             return (
               <NavLink
                 key={to}
-                to={to}
+                to={navTo(to)}
                 className={({ isActive }) => (isActive ? "active" : "")}
                 aria-label={count > 0 ? `${label}. ${hint}` : label}
               >
@@ -322,7 +332,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
             return (
               <NavLink
                 key={to}
-                to={to}
+                to={navTo(to)}
                 className={({ isActive }) => (isActive ? "active" : "")}
                 aria-label={count > 0 ? `${label}. ${hint}` : label}
               >
@@ -423,7 +433,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
             return (
               <NavLink
                 key={to}
-                to={to}
+                to={navTo(to)}
                 className={({ isActive }) => (isActive ? "active" : "")}
                 aria-label={count > 0 ? `${label}. ${hint}` : label}
                 onClick={() => setMoreOpen(false)}
@@ -451,7 +461,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
           return (
             <NavLink
               key={tab.to}
-              to={tab.to}
+              to={navTo(tab.to)}
               className={({ isActive }) => {
                 const active = tab.to === "/inquiries" ? inquiriesActive : isActive;
                 return active ? `tab active tab-${tab.icon}` : `tab tab-${tab.icon}`;

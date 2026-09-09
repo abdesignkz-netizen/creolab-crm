@@ -145,6 +145,10 @@ export async function listConversationsBoard(
 
   if (filter === "ai") where.mode = "ai";
   if (filter === "human") where.mode = "human";
+  if (filter === "attention") {
+    where.status = "open";
+    where.needsAttention = true;
+  }
 
   if (q) {
     where.OR = [
@@ -337,11 +341,13 @@ export async function listConversationsBoard(
         nextAction: nextTask ? { title: nextTask.title, dueAt: nextTask.dueAt, dueLabel: formatWhen(nextTask.dueAt, timeZone) } : null,
         operationalFlags,
         isToday,
+        needsAttention: Boolean(conversation.needsAttention),
         sellerLeadId: conversation.sellerLeadId,
       };
     })
     .filter((item) => {
       if (filter === "needs_reply") return item.needsReply;
+      if (filter === "attention") return item.needsAttention;
       if (filter === "waiting_client") return item.operationalFlags.includes("waiting_client");
       if (filter === "today") return item.isToday;
       if (filter === "overdue") return item.operationalFlags.includes("overdue");

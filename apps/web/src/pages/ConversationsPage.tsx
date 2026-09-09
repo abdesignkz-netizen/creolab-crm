@@ -7,6 +7,7 @@ import { tip } from "../lib/tip";
 
 const FILTERS = [
   ["all", "Все"],
+  ["attention", "Требуют внимания"],
   ["unread", "Непрочитанные"],
   ["needs_reply", "Нужен ответ"],
   ["waiting_client", "Ждём клиента"],

@@ -8,6 +8,7 @@ import { writeActivity } from "./contactService.ts";
 import { inferClientInterest } from "./contactInterestService.ts";
 import { periodLabel, resolvePeriodRange, type PeriodPreset } from "./periodRange.ts";
 import { pagination } from "./pagination.ts";
+import { inquiryNeedsActionWhere, openIntakeWhere } from "./inquiryAttention.ts";
 
 const ACTIVE_WHATSAPP_INQUIRY = ["new", "accepted", "in_progress", "waiting_client", "waiting_manager", "qualification"];
 
@@ -1076,6 +1077,12 @@ function buildInquiryWhere(
       where.needsReply = true;
       where.status = { in: ["new", "qualification", "qualified", "in_progress", "waiting_client", "waiting_manager", "proposal", "accepted"] };
       break;
+    case "attention": {
+      const attention = inquiryNeedsActionWhere(tenantId);
+      where.status = attention.status;
+      andParts.push({ OR: attention.OR });
+      break;
+    }
     case "in_progress":
       where.status = { in: ["in_progress", "accepted", "qualification", "qualified"] };
       break;
@@ -1144,7 +1151,7 @@ function buildInquiryWhere(
     ? (periodRaw as PeriodPreset)
     : "all";
 
-  if (period !== "all") {
+  if (period !== "all" && filter !== "attention") {
     const range = resolvePeriodRange(timeZone, period, query.dateFrom, query.dateTo);
     const receivedAt: { gte?: Date; lt?: Date } = {};
     if (range.from) receivedAt.gte = range.from;
@@ -1266,9 +1273,8 @@ export async function listInquiries(prisma: PrismaClient, auth: AuthContext, que
     }),
     prisma.incompleteIntake.findMany({
       where: {
-        tenantId: membership.tenantId,
-        status: "pending",
-        ...(range.from || range.to
+        ...openIntakeWhere(membership.tenantId),
+        ...(query.filter !== "attention" && (range.from || range.to)
           ? {
               receivedAt: {
                 ...(range.from ? { gte: range.from } : {}),
@@ -1307,6 +1313,8 @@ export async function listInquiries(prisma: PrismaClient, auth: AuthContext, que
     noPhoneCount,
     todayCount,
     clarificationCount,
+    attentionInquiryCount,
+    attentionIntakeCount,
   ] = await Promise.all([
     prisma.inquiry.count({
       where: buildInquiryWhere(membership.tenantId, { ...periodBase, filter: "needs_reply" }, timeZone),
@@ -1323,6 +1331,8 @@ export async function listInquiries(prisma: PrismaClient, auth: AuthContext, que
     prisma.inquiry.count({
       where: buildInquiryWhere(membership.tenantId, { ...periodBase, filter: "needs_clarification" }, timeZone),
     }),
+    prisma.inquiry.count({ where: inquiryNeedsActionWhere(membership.tenantId) }),
+    prisma.incompleteIntake.count({ where: openIntakeWhere(membership.tenantId) }),
   ]);
 
   const { mapInquiryListItem, intakeReasonLabel, relativeDayLabel } = await import("./inquiryPresentation.ts");
@@ -1352,6 +1362,9 @@ export async function listInquiries(prisma: PrismaClient, auth: AuthContext, que
       lost: (statusCounts.lost || 0) + (statusCounts.invalid || 0) + (statusCounts.spam || 0),
       today: todayCount,
       needs_clarification: clarificationCount,
+      attention: attentionInquiryCount + attentionIntakeCount,
+      attention_inquiries: attentionInquiryCount,
+      attention_intakes: attentionIntakeCount,
     },
     sourceCounts,
     categoryCounts,

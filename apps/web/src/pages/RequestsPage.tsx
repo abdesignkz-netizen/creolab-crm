@@ -32,6 +32,7 @@ const PERIOD_PRESETS = new Set<PeriodPreset>([
 ]);
 
 const STATUS_FILTERS: Array<{ key: string; label: string }> = [
+  { key: "attention", label: "Требуют внимания" },
   { key: "all", label: "Все" },
   { key: "new", label: "Новые" },
   { key: "needs_reply", label: "Нужен ответ" },
@@ -217,6 +218,10 @@ export function RequestsPage() {
   }
 
   function setFilter(next: string) {
+    if (next === "attention") {
+      patchParams({ filter: "attention", period: null, from: null, to: null });
+      return;
+    }
     patchParams({ filter: next === "all" ? null : next });
   }
 
@@ -305,6 +310,16 @@ export function RequestsPage() {
   }
 
   const clarification = useMemo(() => data?.clarification || [], [data]);
+  const shownClarification =
+    filter === "attention"
+      ? clarification.filter((item: { kind: string }) => item.kind === "intake")
+      : filter === "all" || filter === "needs_clarification"
+        ? clarification
+        : [];
+  const attentionHint =
+    counts.attention_intakes
+      ? `${counts.attention_inquiries ?? 0} заявок · ${counts.attention_intakes} без телефона`
+      : "новые, без ответа или без телефона";
 
   if (loading && !data) return <div className="state">Загрузка заявок…</div>;
 
@@ -314,7 +329,14 @@ export function RequestsPage() {
         <div>
           <p className="page-kicker">Воронка обращений</p>
           <h2>Заявки</h2>
-          {data?.period?.label ? <p className="muted">Период: {data.period.label}</p> : null}
+          {filter === "attention" ? (
+            <p className="muted">Как цифра в меню: все открытые заявки, которые ждут действия, не за период.</p>
+          ) : (
+            <p className="muted">
+              Цифра «Заявки» в меню — сколько сейчас ждут действия (новые, без ответа или без телефона)
+              {period !== "all" && data?.period?.label ? `, а не сколько пришло за период «${data.period.label}»` : ""}.
+            </p>
+          )}
         </div>
         <div className="actions">
           <button type="button" className="btn" onClick={() => setShowCreate((v) => !v)}>
@@ -331,22 +353,60 @@ export function RequestsPage() {
               period: next === "all" ? null : next,
               from: next === "custom" ? dateFrom || null : null,
               to: next === "custom" ? dateTo || null : null,
+              ...(filter === "attention" && next !== "all" ? { filter: null } : {}),
             })
           }
           dateFrom={dateFrom}
           dateTo={dateTo}
-          onDateFromChange={(value) => patchParams({ period: "custom", from: value || null })}
-          onDateToChange={(value) => patchParams({ period: "custom", to: value || null })}
+          onDateFromChange={(value) =>
+            patchParams({
+              period: "custom",
+              from: value || null,
+              ...(filter === "attention" ? { filter: null } : {}),
+            })
+          }
+          onDateToChange={(value) =>
+            patchParams({
+              period: "custom",
+              to: value || null,
+              ...(filter === "attention" ? { filter: null } : {}),
+            })
+          }
           activeLabel={data?.period?.label}
         />
       </div>
 
       <div className="request-metrics cards">
-        <div className="card"><span className="muted">Все</span><strong>{counts.all ?? 0}</strong></div>
-        <div className="card"><span className="muted">Новые</span><strong>{counts.new ?? 0}</strong></div>
-        <div className="card"><span className="muted">Нужен ответ</span><strong>{counts.needs_reply ?? 0}</strong></div>
-        <div className="card"><span className="muted">В работе</span><strong>{counts.in_progress ?? 0}</strong></div>
-        <div className="card"><span className="muted">Требует уточнения</span><strong>{counts.needs_clarification ?? 0}</strong></div>
+        <button
+          type="button"
+          className={`card ${filter === "attention" ? "active" : ""}`}
+          aria-pressed={filter === "attention"}
+          onClick={() => setFilter("attention")}
+        >
+          <span className="muted">Требуют внимания</span>
+          <strong>{counts.attention ?? 0}</strong>
+          <span className="kpi-hint">как в меню · {attentionHint}</span>
+        </button>
+        <button type="button" className={`card ${filter === "all" ? "active" : ""}`} aria-pressed={filter === "all"} onClick={() => setFilter("all")}>
+          <span className="muted">Все{period !== "all" ? " за период" : ""}</span>
+          <strong>{counts.all ?? 0}</strong>
+        </button>
+        <button type="button" className={`card ${filter === "new" ? "active" : ""}`} aria-pressed={filter === "new"} onClick={() => setFilter("new")}>
+          <span className="muted">Новые</span>
+          <strong>{counts.new ?? 0}</strong>
+        </button>
+        <button type="button" className={`card ${filter === "needs_reply" ? "active" : ""}`} aria-pressed={filter === "needs_reply"} onClick={() => setFilter("needs_reply")}>
+          <span className="muted">Нужен ответ</span>
+          <strong>{counts.needs_reply ?? 0}</strong>
+        </button>
+        <button type="button" className={`card ${filter === "in_progress" ? "active" : ""}`} aria-pressed={filter === "in_progress"} onClick={() => setFilter("in_progress")}>
+          <span className="muted">В работе</span>
+          <strong>{counts.in_progress ?? 0}</strong>
+        </button>
+        <button type="button" className={`card ${filter === "needs_clarification" ? "active" : ""}`} aria-pressed={filter === "needs_clarification"} onClick={() => setFilter("needs_clarification")}>
+          <span className="muted">Требует уточнения</span>
+          <strong>{counts.needs_clarification ?? 0}</strong>
+        </button>
       </div>
 
       <form className="search-bar" onSubmit={submitSearch}>
@@ -566,10 +626,10 @@ export function RequestsPage() {
         </form>
       ) : null}
 
-      {clarification.length > 0 && (filter === "all" || filter === "needs_clarification") ? (
+      {shownClarification.length > 0 ? (
         <div className="panel soft">
-          <h3>Требует уточнения</h3>
-          {clarification.map((item) => (
+          <h3>{filter === "attention" ? "Обращения без телефона" : "Требует уточнения"}</h3>
+          {shownClarification.map((item) => (
             <div className="row request-clarify" key={`${item.kind}-${item.id}`}>
               <div>
                 <b>{item.title}</b>
@@ -591,7 +651,11 @@ export function RequestsPage() {
       ) : null}
 
       <div className="request-list">
-        {!data?.items?.length ? <p className="empty" style={{ border: 0, margin: 0 }}>Заявок по этому фильтру нет</p> : null}
+        {!data?.items?.length && shownClarification.length === 0 ? (
+          <p className="empty" style={{ border: 0, margin: 0 }}>
+            {filter === "attention" ? "Нет заявок, которые требуют действия" : "Заявок по этому фильтру нет"}
+          </p>
+        ) : null}
         {data?.items?.length ? (
           <div className="request-list-head" aria-hidden>
             <span>Клиент</span>
