@@ -386,6 +386,17 @@ function attentionGroup(item: Pick<SituationItem, "kind" | "waitingReply">): str
   return "other";
 }
 
+const ATTENTION_WHY_LABEL: Record<string, string> = {
+  needs_reply: "Клиент ждёт ответа",
+  needs_human: "Нужен человек",
+  overdue: "Срок прошёл",
+  no_next_action: "Нет следующего шага",
+  no_contact: "Нет телефона",
+  inquiry: "Заявку не взяли",
+  needs_clarification: "Нужно уточнение",
+  other: "Нужно действие",
+};
+
 export async function getSituationOverview(
   prisma: PrismaClient,
   auth: AuthContext,
@@ -834,6 +845,7 @@ export async function getSituationOverview(
     ...board.items.map((item) => ({
       ...item,
         group: attentionGroup(item),
+        whyLabel: ATTENTION_WHY_LABEL[attentionGroup(item)] || ATTENTION_WHY_LABEL.other,
       href:
         item.kind === "needs_phone"
           ? "/inquiries?filter=needs_clarification"
@@ -846,7 +858,7 @@ export async function getSituationOverview(
                 : item.links.taskId ? `/tasks?open=${item.links.taskId}` : "/tasks",
     })),
     ...noNextActionDeals.map(deal => ({
-      id: `deal-next:${deal.id}`, kind: "missing_next_action", group: "no_next_action", entityId: deal.id,
+      id: `deal-next:${deal.id}`, kind: "missing_next_action", group: "no_next_action", whyLabel: ATTENTION_WHY_LABEL.no_next_action, entityId: deal.id,
       title: deal.title, reason: "В сделке нет следующего действия", nextAction: "create_next_action",
       contactName: deal.contact ? displayName(deal.contact) : null,
       phone: phoneFromContact(deal.contact),
@@ -864,12 +876,15 @@ export async function getSituationOverview(
           kind: "agreement_attention",
           title: mapped.attention || a.title,
           subtitle: a.title,
+          reason: mapped.attention || a.clarificationNeeded || "Нужно уточнение по договорённости",
+          nextAction: mapped.taskId ? "complete_task" : "open_contact",
           contactName: mapped.contactName,
           phone: mapped.phone,
           interest: mapped.inquiryTitle,
           entityId: a.id,
           entityType: "agreement",
           group: "needs_clarification",
+          whyLabel: ATTENTION_WHY_LABEL.needs_clarification,
           href: mapped.href,
           urgency: "high",
           ownerMembershipId: null,
@@ -1143,6 +1158,8 @@ export async function getSituationOverview(
     sources,
     team,
     attention: {
+      principle:
+        "Сюда попадает только то, где человек должен что-то сделать сейчас: ответить клиенту, забрать диалог у AI, закрыть просроченное, задать шаг или дописать телефон. Диалог уже у менеджера, если клиент не ждёт ответа, сюда не попадает.",
       summary: attentionSummary,
       items: onlyImportant
         ? attentionItems.filter((i) =>

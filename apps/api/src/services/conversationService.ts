@@ -620,25 +620,121 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
   };
 }
 
+async function markConversationViewNotifications(
+  prisma: PrismaClient,
+  tenantId: string,
+  membershipId: string,
+  conversationId: string,
+  inquiryIds: string[],
+) {
+  const now = new Date();
+  await prisma.notification.updateMany({
+    where: {
+      tenantId,
+      recipientMembershipId: membershipId,
+      readAt: null,
+      OR: [
+        { entityType: "conversation", entityId: conversationId },
+        { type: { startsWith: "conversation." }, entityId: conversationId },
+        ...(inquiryIds.length
+          ? [
+              { entityType: "inquiry", entityId: { in: inquiryIds } },
+              { type: "inquiry.created", entityId: { in: inquiryIds } },
+            ]
+          : []),
+      ],
+    },
+    data: { readAt: now, resolvedAt: now },
+  });
+}
+
+async function acknowledgeNewInquiriesAfterView(
+  prisma: PrismaClient,
+  tenantId: string,
+  userId: string,
+  inquiryIds: string[],
+) {
+  if (!inquiryIds.length) return;
+  const fresh = await prisma.inquiry.findMany({
+    where: { tenantId, id: { in: inquiryIds }, archived: false, status: "new" },
+    select: { id: true, status: true, contactId: true },
+  });
+  for (const inquiry of fresh) {
+    await prisma.inquiry.update({
+      where: { id: inquiry.id },
+      data: { status: "in_progress" },
+    });
+    await prisma.inquiryStatusHistory.create({
+      data: {
+        tenantId,
+        inquiryId: inquiry.id,
+        fromStatus: inquiry.status,
+        toStatus: "in_progress",
+        changedByType: "user",
+        changedById: userId,
+        note: "Диалог просмотрен",
+      },
+    });
+  }
+}
+
 export async function markConversationRead(prisma: PrismaClient, auth: AuthContext, id: string, messageId: string) {
-  const { tenantId, id: membershipId } = requireTenant(auth);
+  const membership = requireTenant(auth);
+  const { tenantId, id: membershipId } = membership;
   const conversation = await prisma.conversation.findFirst({
     where: { id, tenantId },
-    include: { contact: { include: { methods: true } } },
+    include: {
+      contact: { include: { methods: true } },
+      inquiries: { where: { archived: false }, select: { id: true, contactId: true } },
+    },
   });
   if (!conversation) throw new ApiError(404, "not_found", "Диалог не найден");
   const phone = conversation.contact ? primaryPhone(conversation.contact.methods)?.normalizedValue : null;
   const threadIds = await listThreadConversationIds(prisma, tenantId, conversation, phone);
-  const message = await prisma.message.findFirst({ where: { id: messageId, tenantId, conversationId: { in: threadIds } } });
-  if (!message) throw new ApiError(404, "not_found", "Сообщение не найдено");
-  const key = { tenantId, conversationId: id, membershipId };
-  const previous = await prisma.conversationReadState.findUnique({ where: { tenantId_conversationId_membershipId: key } });
-  if (previous && previous.updatedAt >= message.createdAt) return { ok: true };
-  await prisma.conversationReadState.upsert({
-    where: { tenantId_conversationId_membershipId: key },
-    create: { ...key, lastReadCursor: message.id, updatedAt: message.createdAt },
-    update: { lastReadCursor: message.id, updatedAt: message.createdAt },
-  });
+  const cursor = String(messageId || "").trim();
+  const message = cursor
+    ? await prisma.message.findFirst({ where: { id: cursor, tenantId, conversationId: { in: threadIds } } })
+    : null;
+  if (cursor && !message) throw new ApiError(404, "not_found", "Сообщение не найдено");
+  if (message) {
+    const key = { tenantId, conversationId: id, membershipId };
+    const previous = await prisma.conversationReadState.findUnique({ where: { tenantId_conversationId_membershipId: key } });
+    if (!previous || previous.updatedAt < message.createdAt) {
+      await prisma.conversationReadState.upsert({
+        where: { tenantId_conversationId_membershipId: key },
+        create: { ...key, lastReadCursor: message.id, updatedAt: message.createdAt },
+        update: { lastReadCursor: message.id, updatedAt: message.createdAt },
+      });
+    }
+  }
+  const linkedIds = [
+    ...conversation.inquiries.map((item) => item.id),
+    ...(
+      await prisma.inquiry.findMany({
+        where: { tenantId, archived: false, conversationId: id },
+        select: { id: true },
+      })
+    ).map((item) => item.id),
+  ];
+  let inquiryIds = [...new Set(linkedIds)];
+  if (!inquiryIds.length && (conversation.contactId || phone)) {
+    const latest = await prisma.inquiry.findFirst({
+      where: {
+        tenantId,
+        archived: false,
+        status: "new",
+        OR: [
+          ...(conversation.contactId ? [{ contactId: conversation.contactId }] : []),
+          ...(phone ? [{ phoneNormalized: phone }] : []),
+        ],
+      },
+      orderBy: { receivedAt: "desc" },
+      select: { id: true },
+    });
+    if (latest) inquiryIds = [latest.id];
+  }
+  await markConversationViewNotifications(prisma, tenantId, membershipId, id, inquiryIds);
+  await acknowledgeNewInquiriesAfterView(prisma, tenantId, auth.user.id, inquiryIds);
   return { ok: true };
 }
 

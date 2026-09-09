@@ -24,9 +24,31 @@ describe("Situation API", () => {
         entityId: string;
         blocked: boolean;
         nextAction: string;
+        reason?: string;
         links: { taskId?: string };
       }>;
     }>;
+  }
+
+  async function waitingHumanConversation(name: string, attentionReason = "taken_by_human") {
+    const contact = await prisma.contact.create({
+      data: {
+        tenantId,
+        name,
+        lastInboundMessageAt: new Date(),
+        lastOutboundMessageAt: new Date(Date.now() - 3600_000),
+      },
+    });
+    return prisma.conversation.create({
+      data: {
+        tenantId,
+        contactId: contact.id,
+        mode: "human",
+        status: "open",
+        needsAttention: true,
+        attentionReason,
+      },
+    });
   }
 
   async function resetDemo() {
@@ -40,6 +62,10 @@ describe("Situation API", () => {
     await prisma.inquiry.deleteMany({ where: { tenantId } });
     await prisma.incompleteIntake.deleteMany({ where: { tenantId } });
     await prisma.conversation.deleteMany({ where: { tenantId } });
+    await prisma.contact.updateMany({
+      where: { tenantId },
+      data: { lastInboundMessageAt: null, lastOutboundMessageAt: null },
+    });
     await prisma.notification.deleteMany({ where: { tenantId } });
     await prisma.channelConnection.deleteMany({ where: { tenantId, channelType: "whatsapp" } });
     await prisma.integration.deleteMany({ where: { tenantId, type: "whatsapp_seller" } });
@@ -118,11 +144,44 @@ describe("Situation API", () => {
     assert.equal(data.items.some((item) => item.entityId === conversation.id), false);
   });
 
+  it("диалог у менеджера без ожидания ответа не в приоритете", async () => {
+    const contact = await prisma.contact.create({
+      data: {
+        tenantId,
+        name: "Уже ответили ситуацию",
+        lastInboundMessageAt: new Date(Date.now() - 3600_000),
+        lastOutboundMessageAt: new Date(),
+      },
+    });
+    const conversation = await prisma.conversation.create({
+      data: {
+        tenantId,
+        contactId: contact.id,
+        mode: "human",
+        status: "open",
+        needsAttention: true,
+        attentionReason: "taken_by_human",
+      },
+    });
+    const data = await situation();
+    assert.equal(data.items.some((item) => item.entityId === conversation.id), false);
+  });
+
+  it("эскалация AI пишет причину по-русски, не код", async () => {
+    const conversation = await prisma.conversation.create({
+      data: { tenantId, mode: "ai", status: "open", needsAttention: true, attentionReason: "needs_reply" },
+    });
+    const data = await situation();
+    const row = data.items.find((item) => item.entityId === conversation.id);
+    assert.ok(row);
+    assert.equal(row.kind, "conversation_attention");
+    assert.equal((row.reason || "").includes("needs_reply"), false);
+    assert.match(row.reason || "", /клиент|человек|ответить/i);
+  });
+
   it("диалог human ранжируется выше новой заявки", async () => {
     const inquiry = await prisma.inquiry.findFirst({ where: { tenantId, status: "new" } });
-    const conversation = await prisma.conversation.create({
-      data: { tenantId, mode: "human", status: "open", needsAttention: true, attentionReason: "taken_by_human" },
-    });
+    const conversation = await waitingHumanConversation("Ждёт менеджера");
     const data = await situation();
     const human = data.items.findIndex((item) => item.entityId === conversation.id);
     const inquiryIdx = data.items.findIndex((item) => item.entityId === inquiry?.id);
@@ -164,8 +223,8 @@ describe("Situation API", () => {
     await prisma.incompleteIntake.create({
       data: { tenantId, inboundEventId: "m-intake", reason: "missing_phone", status: "pending", rawFieldsJson: {} },
     });
-    await prisma.conversation.create({ data: { tenantId, mode: "human", status: "open", needsAttention: true } });
-    await prisma.conversation.create({ data: { tenantId, mode: "human", status: "open", needsAttention: true } });
+    await waitingHumanConversation("Ждёт один");
+    await waitingHumanConversation("Ждёт два");
     await prisma.task.create({
       data: {
         tenantId,
@@ -253,9 +312,18 @@ describe("Situation API", () => {
         },
       },
     });
+    const contact = await prisma.contact.create({
+      data: {
+        tenantId,
+        name: "Take down bot",
+        lastInboundMessageAt: new Date(),
+        lastOutboundMessageAt: new Date(Date.now() - 3600_000),
+      },
+    });
     const conversation = await prisma.conversation.create({
       data: {
         tenantId,
+        contactId: contact.id,
         mode: "ai",
         status: "open",
         needsAttention: true,
@@ -359,14 +427,28 @@ describe("Situation API", () => {
     assert.equal(overviewRes.status, 200);
     const overview = (await overviewRes.json()) as {
       attention: {
+        principle?: string;
         summary: { needsReply: number; needsHuman: number; overdueTasks: number };
-        items: Array<{ group?: string; links?: { contactId?: string }; phone?: string | null }>;
+        items: Array<{
+          group?: string;
+          reason?: string;
+          whyLabel?: string;
+          links?: { contactId?: string };
+          phone?: string | null;
+        }>;
       };
     };
+    assert.match(overview.attention.principle || "", /человек должен/);
+    assert.ok(overview.attention.items.every((item) => item.reason && !/^[a-z][a-z0-9_]*$/.test(item.reason)));
+    assert.ok(overview.attention.items.some((item) => item.whyLabel));
 
     const contactsRes = await fetch(`${base}/api/v1/contacts?filter=needs_reply`, { headers: { cookie } });
     assert.equal(contactsRes.status, 200);
     const contacts = (await contactsRes.json()) as { total: number; items: Array<{ id: string }> };
+
+    const newContactsRes = await fetch(`${base}/api/v1/contacts?filter=new`, { headers: { cookie } });
+    assert.equal(newContactsRes.status, 200);
+    const newContacts = (await newContactsRes.json()) as { total: number; attention?: { new?: number } };
 
     const attentionRes = await fetch(`${base}/api/v1/conversations?filter=attention`, { headers: { cookie } });
     assert.equal(attentionRes.status, 200);
@@ -374,10 +456,12 @@ describe("Situation API", () => {
 
     const badgesRes = await fetch(`${base}/api/v1/nav-badges`, { headers: { cookie } });
     assert.equal(badgesRes.status, 200);
-    const badges = (await badgesRes.json()) as { badges: Record<string, number> };
+    const badges = (await badgesRes.json()) as { badges: Record<string, number>; hrefs?: Record<string, string> };
 
     assert.equal(overview.attention.summary.needsReply, contacts.total);
-    assert.equal(overview.attention.summary.needsReply, badges.badges["/contacts"]);
+    assert.equal(badges.badges["/contacts"], newContacts.total);
+    assert.equal(newContacts.attention?.new, newContacts.total);
+    assert.equal(badges.hrefs?.["/contacts"], newContacts.total ? "/contacts?filter=new" : "/contacts");
     assert.ok(contacts.items.some((item) => item.id === waiting.id));
     assert.ok(!contacts.items.some((item) => item.id === answered.id));
 

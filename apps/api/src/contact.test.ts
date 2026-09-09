@@ -48,6 +48,83 @@ describe("Contact 360", () => {
     assert.ok(item.name);
     assert.ok("lifecycleLabel" in item);
     assert.ok("nextAction" in item || item.nextAction === null);
+    assert.equal(typeof body.attention?.new, "number");
+    assert.equal(typeof body.attention?.needsReply, "number");
+  });
+
+  it("цифра «Клиенты» в меню — новые клиенты, фильтр «нужен ответ» отдельно", async () => {
+    const tenant = await prisma.tenant.findFirstOrThrow({ where: { slug: "creolab" } });
+    const fresh = await prisma.contact.create({
+      data: {
+        tenantId: tenant.id,
+        name: `Новый клиент ${Date.now()}`,
+        lifecycleStatus: "new",
+        lastSeenAt: new Date(Date.now() - 86400_000 * 14),
+      },
+    });
+    const veteran = await prisma.contact.create({
+      data: {
+        tenantId: tenant.id,
+        name: `Уже в работе ${Date.now()}`,
+        lifecycleStatus: "in_progress",
+        lastSeenAt: new Date(),
+      },
+    });
+    const waiting = await prisma.contact.create({
+      data: {
+        tenantId: tenant.id,
+        name: `Ждёт ответа ${Date.now()}`,
+        lifecycleStatus: "in_progress",
+        lastInboundMessageAt: new Date(),
+        lastOutboundMessageAt: new Date(Date.now() - 3600_000),
+        lastSeenAt: new Date(Date.now() - 86400_000 * 7),
+      },
+    });
+    const answered = await prisma.contact.create({
+      data: {
+        tenantId: tenant.id,
+        name: `Уже ответили ${Date.now()}`,
+        lifecycleStatus: "active",
+        lastInboundMessageAt: new Date(Date.now() - 3600_000),
+        lastOutboundMessageAt: new Date(),
+        lastSeenAt: new Date(),
+      },
+    });
+
+    const badgesRes = await fetch(`${base}/api/v1/nav-badges`, { headers: { cookie } });
+    const badges = (await badgesRes.json()) as { badges: Record<string, number>; hrefs: Record<string, string>; hints: Record<string, string> };
+    const allRes = await fetch(`${base}/api/v1/contacts?filter=all&limit=100`, { headers: { cookie } });
+    const all = (await allRes.json()) as {
+      attention: { new: number; needsReply: number };
+      items: Array<{ id: string; needsReply?: boolean; lifecycleStatus?: string }>;
+    };
+    const newRes = await fetch(`${base}/api/v1/contacts?filter=new`, { headers: { cookie } });
+    const freshList = (await newRes.json()) as { total: number; items: Array<{ id: string; lifecycleStatus?: string }> };
+    const replyRes = await fetch(`${base}/api/v1/contacts?filter=needs_reply`, { headers: { cookie } });
+    const reply = (await replyRes.json()) as { total: number; items: Array<{ id: string; needsReply?: boolean }> };
+
+    assert.equal(all.attention.new, badges.badges["/contacts"]);
+    assert.equal(freshList.total, all.attention.new);
+    assert.equal(badges.hrefs["/contacts"], "/contacts?filter=new");
+    assert.match(badges.hints["/contacts"], /новый клиент|новых клиента|новых клиентов/);
+    assert.ok(freshList.items.some((item) => item.id === fresh.id));
+    assert.ok(!freshList.items.some((item) => item.id === veteran.id));
+    assert.equal(freshList.items.every((item) => item.lifecycleStatus === "new"), true);
+
+    assert.equal(reply.total, all.attention.needsReply);
+    assert.ok(reply.items.some((item) => item.id === waiting.id));
+    assert.ok(!reply.items.some((item) => item.id === answered.id));
+    assert.equal(reply.items.every((item) => item.needsReply), true);
+
+    const newFlags = all.items.map((item) => item.lifecycleStatus === "new");
+    const firstNotNew = newFlags.indexOf(false);
+    const lastNew = newFlags.lastIndexOf(true);
+    if (firstNotNew !== -1 && lastNew !== -1) {
+      assert.ok(lastNew < firstNotNew);
+    }
+    assert.equal(all.items[0]?.lifecycleStatus, "new");
+    assert.ok(all.items.some((item) => item.id === fresh.id));
+    assert.ok(all.items.some((item) => item.id === waiting.id));
   });
 
   it("поиск по цифрам телефона находит клиента", async () => {

@@ -50,6 +50,40 @@ describe("campaign mass send foundations", () => {
     assert.notEqual(site, deck);
   });
 
+  it("не копирует «Узнать актуальность заявки» и не подставляет ярлык «интерес»", () => {
+    const unnamed = composeRecipientOffer({
+      taskText: "Узнать актуальность заявки",
+      sharedDraft: "Узнать актуальность заявки",
+      firstName: "Без имени",
+      interest: "интерес",
+      companyName: "менеджер WhatsApp",
+    });
+    const named = composeRecipientOffer({
+      taskText: "Узнать актуальность заявки",
+      sharedDraft: "Узнать актуальность заявки",
+      firstName: "Тест",
+      interest: "ИИ-менеджер для WhatsApp",
+    });
+    const fromDescription = composeRecipientOffer({
+      taskText: "Узнать актуальность заявки",
+      firstName: "Aikeka",
+      interest: "Нужен бот, который отвечает клиентам в WhatsApp",
+    });
+    assert.match(unnamed, /добрый день/i);
+    assert.match(unnamed, /хотели узнать, актуальна ли ещё ваша заявка/i);
+    assert.doesNotMatch(unnamed, /^Узнать актуальность/i);
+    assert.doesNotMatch(unnamed, /«интерес»/i);
+    assert.doesNotMatch(unnamed, /менеджер WhatsApp/i);
+    assert.match(named, /^Тест,/);
+    assert.match(named, /хотели узнать, актуальна ли ещё ваша заявка/i);
+    assert.match(named, /ИИ-менеджер/i);
+    assert.doesNotMatch(named, /^Узнать актуальность/i);
+    assert.match(fromDescription, /Aikeka/);
+    assert.match(fromDescription, /хотели узнать, актуальна ли ещё ваша заявка/i);
+    assert.match(fromDescription, /бот|WhatsApp/i);
+    assert.doesNotMatch(fromDescription, /^Узнать актуальность/i);
+  });
+
   it("не копирует команду менеджера и ярлык WhatsApp в текст клиенту", () => {
     const unnamed = composeRecipientOffer({
       taskText: "Уточни актуальность заявки",
@@ -114,6 +148,25 @@ describe("campaign mass send foundations", () => {
     });
     assert.match(remind, /макет|согласован/i);
     assert.doesNotMatch(remind, /актуальна ли ещё заявка/i);
+  });
+
+  it("составная команда берёт смысл вопроса, а не «позвони»", () => {
+    const text = composeRecipientOffer({
+      taskText: "Позвони клиенту и узнай, готов ли он к презентации",
+      firstName: "Жаным",
+      interest: "презентация для инвесторов",
+    });
+    assert.match(text, /готов/i);
+    assert.match(text, /презентац/i);
+    assert.doesNotMatch(text, /уточнить клиенту|узнай,/i);
+    assert.doesNotMatch(text, /актуальна ли ещё ваша заявка/i);
+
+    const callOnly = composeRecipientOffer({
+      taskText: "Позвони клиенту",
+      firstName: "Марат",
+    });
+    assert.match(callOnly, /созвон/i);
+    assert.doesNotMatch(callOnly, /хотели позвонить/i);
   });
 
   it("отправка берёт индивидуальный текст, если включена персонализация", () => {
@@ -384,6 +437,73 @@ describe("campaign API flow", () => {
     assert.match(draft, /созвон|время/i);
     assert.doesNotMatch(draft, /актуален ли ещё запрос/i);
     assert.doesNotMatch(draft, /^Интерес,/);
+  });
+
+  it("personalize из «Узнать актуальность» берёт текст заявки, а не команду", async () => {
+    const tenant = await prisma.tenant.findFirst({ where: { slug: "creolab" } });
+    assert.ok(tenant);
+    const contact = await prisma.contact.create({
+      data: {
+        tenantId: tenant.id,
+        name: "Aikeka",
+        firstName: "Aikeka",
+        methods: {
+          create: {
+            type: "phone",
+            rawValue: "+7 770 748 18 68",
+            normalizedValue: "77707481868",
+            source: "manual",
+            primary: true,
+          },
+        },
+      },
+    });
+    await prisma.inquiry.create({
+      data: {
+        tenantId: tenant.id,
+        contactId: contact.id,
+        source: "whatsapp",
+        status: "new",
+        phoneRaw: "+7 770 748 18 68",
+        phoneNormalized: "77707481868",
+        phoneSource: "whatsapp",
+        subject: "Заявка из WhatsApp",
+        description: "Здравствуйте\n\nНужен бот, который отвечает клиентам в WhatsApp",
+      },
+    });
+
+    const create = await fetch(`${url}/api/v1/campaigns`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        title: "Актуальность",
+        contactIds: [contact.id],
+        rawCommandText: "Узнать актуальность заявки",
+        messageDraft: "Узнать актуальность заявки",
+        messageMode: "ai",
+        personalizeEach: true,
+      }),
+    });
+    const createBody = await create.text();
+    assert.equal(create.status, 201, createBody);
+    const id = JSON.parse(createBody).campaign.id;
+
+    const personalize = await fetch(`${url}/api/v1/campaigns/${id}/personalize-recipients`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ useLlm: false }),
+    });
+    const personalizeBody = await personalize.text();
+    assert.equal(personalize.status, 200, personalizeBody);
+    const draft = String(
+      (JSON.parse(personalizeBody).recipients || []).find((row: { contactId: string }) => row.contactId === contact.id)
+        ?.messageDraft || "",
+    );
+    assert.match(draft, /Aikeka/);
+    assert.match(draft, /хотели узнать, актуальна ли ещё ваша заявка/i);
+    assert.match(draft, /бот|WhatsApp/i);
+    assert.doesNotMatch(draft, /^Узнать актуальность/i);
+    assert.doesNotMatch(draft, /«интерес»/i);
   });
 
   it("будущая дата ставит рассылку в очередь и не отправляет сразу", async () => {

@@ -1920,6 +1920,8 @@ fieldset.field-block legend { padding: 0 6px; font-weight: 600; }
   background: var(--accent-soft);
 }
 .sit-attn-row { margin: 0; }
+.sit-attn-principle { max-width: 720px; margin: 4px 0 0; line-height: 1.4; }
+.sit-attn-why { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; margin-top: 4px; font-size: 13px; }
 .sit-empty-ok { color: #0b5f45; }
 .sit-two-col {
   display: grid;
@@ -1952,16 +1954,6 @@ fieldset.field-block legend { padding: 0 6px; font-weight: 600; }
   .sit-kpi-grid-current { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .sit-two-col { grid-template-columns: 1fr; }
   .situation-page { display: flex; flex-direction: column; }
-  .sit-toolbar, .sit-custom-range { order: 0; }
-  .sit-result { order: 1; }
-  .sit-attention { order: 2; }
-  .sit-brief { order: 3; }
-  .sit-ask { order: 4; }
-  .sit-events-row { order: 5; }
-  .sit-current { order: 6; }
-  .sit-ops-row { order: 7; }
-  .sit-sources { order: 8; }
-  .sit-today-row { order: 9; }
   .sit-ask-input, .sit-ask-row .btn, .sit-ask-chip { min-height: 44px; }
 }
 

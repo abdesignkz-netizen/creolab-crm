@@ -18,6 +18,7 @@ import {
   whoWroteLast,
 } from "./contactLabels.ts";
 
+import { countContactsNeedsReply, countContactsNew } from "./attentionCounts.ts";
 import { resolvePeriodRange, zonedYmd, type PeriodPreset } from "./periodRange.ts";
 import { inquiryInterest, loadConversationInterests } from "./contactInterestService.ts";
 import { pagination } from "./pagination.ts";
@@ -206,7 +207,8 @@ export async function listContactsBoard(
     ];
   }
 
-  if (query.period && query.period !== "all") {
+  // Same population as the nav badge: do not shrink «Новые» / «Нужен ответ» by period.
+  if (filter !== "new" && filter !== "needs_reply" && query.period && query.period !== "all") {
     const range = resolvePeriodRange(timeZone, query.period as PeriodPreset, query.dateFrom, query.dateTo, now);
     where.firstSeenAt = { ...(range.from ? { gte: range.from } : {}), ...(range.to ? { lt: range.to } : {}) };
   }
@@ -220,7 +222,8 @@ export async function listContactsBoard(
 
   // Compute filters on lightweight candidates across the whole selection. Only
   // the requested page loads the expensive card relations and message context.
-  const candidates = await prisma.contact.findMany({
+  const [candidates, attentionNeedsReply, attentionNew] = await Promise.all([
+    prisma.contact.findMany({
     where,
     select: {
       id: true, lifecycleStatus: true, lastContactAt: true, lastSeenAt: true,
@@ -234,7 +237,10 @@ export async function listContactsBoard(
       } },
     },
     orderBy: [{ lastSeenAt: "desc" }, { firstSeenAt: "desc" }, { id: "asc" }],
-  });
+  }),
+    countContactsNeedsReply(prisma, tid),
+    countContactsNew(prisma, tid),
+  ]);
   const flags = (contact: typeof candidates[number]) => ({
     needsReply: needsReply(contact),
     overdue: Boolean(contact.tasks[0]?.dueAt && contact.tasks[0].dueAt < now),
@@ -253,6 +259,13 @@ export async function listContactsBoard(
     if (filter === "lost") return contact.lifecycleStatus === "lost";
     return true;
   });
+  if (filter === "all") {
+    matching.sort((a, b) => {
+      const newDelta = Number(b.lifecycleStatus === "new") - Number(a.lifecycleStatus === "new");
+      if (newDelta) return newDelta;
+      return Number(flags(b).needsReply) - Number(flags(a).needsReply);
+    });
+  }
   const page = matching.slice(skip, skip + take);
   const byId = new Map(page.map(contact => [contact.id, contact]));
   const contacts = await prisma.contact.findMany({
@@ -287,12 +300,15 @@ export async function listContactsBoard(
     orderBy: [{ lastSeenAt: "desc" }, { firstSeenAt: "desc" }, { id: "asc" }],
   });
 
+  const loaded = new Map(contacts.map((contact) => [contact.id, contact]));
   const conversationInterests = await loadConversationInterests(prisma, tid, contacts.filter((contact) => {
     const inquiry = byId.get(contact.id)?.inquiries[0] || contact.inquiries[0];
     return !inquiryInterest(inquiry);
   }).map((contact) => contact.id));
 
-  const items = contacts
+  const items = page
+    .map((candidate) => loaded.get(candidate.id))
+    .filter((contact): contact is (typeof contacts)[number] => Boolean(contact))
     .map((contact) => {
       const phone = primaryPhone(contact.methods);
       const currentInquiry =
@@ -387,9 +403,14 @@ export async function listContactsBoard(
     hasMore: skip + items.length < matching.length,
     metrics: {
       total: matching.length,
+      new: matching.filter((item) => item.lifecycleStatus === "new").length,
       needsReply: matching.filter((item) => flags(item).needsReply).length,
       overdue: matching.filter((item) => flags(item).overdue).length,
       noNext: matching.filter((item) => flags(item).missingNextAction).length,
+    },
+    attention: {
+      new: attentionNew,
+      needsReply: attentionNeedsReply,
     },
     items,
   };

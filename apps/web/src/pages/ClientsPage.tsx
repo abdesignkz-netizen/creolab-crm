@@ -17,6 +17,13 @@ const FILTERS = [
   ["no_next", "Без следующего шага"],
 ] as const;
 
+function clientsNewLabel(n: number) {
+  const n10 = n % 10;
+  const n100 = n % 100;
+  const word = n10 === 1 && n100 !== 11 ? "новый клиент" : n10 >= 2 && n10 <= 4 && (n100 < 12 || n100 > 14) ? "новых клиента" : "новых клиентов";
+  return `${n} ${word}`;
+}
+
 export function ClientsPage() {
   const requestVersion = useRequestVersion();
   const navigate = useNavigate();
@@ -72,12 +79,25 @@ export function ClientsPage() {
 
   useEffect(() => setDraft(q), [q]);
 
+  const newClients = Number(data?.attention?.new ?? data?.metrics?.new ?? 0);
+  const waitingReply = Number(data?.attention?.needsReply ?? data?.metrics?.needsReply ?? 0);
+  function openNewClients() {
+    navigate("/contacts?filter=new");
+  }
+
   return (
     <section className="clients-page">
       <div className="page-head">
         <div>
           <h2>Клиенты</h2>
-          <p className="muted">Кто · откуда · что нужно · что делать дальше</p>
+          {filter === "new" ? (
+            <p className="muted">Как цифра в меню: клиенты со статусом «Новый», ещё не взятые в работу.</p>
+          ) : (
+            <p className="muted">
+              Кто · откуда · что нужно · что делать дальше
+              {newClients > 0 ? `. Цифра в меню — ${clientsNewLabel(newClients)}.` : ""}
+            </p>
+          )}
         </div>
         <button className="btn" onClick={() => setCreating((value) => !value)}>
           + Клиент
@@ -88,6 +108,14 @@ export function ClientsPage() {
         <span>{period !== "all" ? `Первое обращение: ${period === "custom" ? formatCustomPeriodLabel(dateFrom, dateTo) : PERIOD_OPTIONS.find(option => option.id === period)?.label || period}` : ""}{owner ? ` · ${owner === "me" ? "Мои клиенты" : "Без ответственного"}` : ""}</span>
         <button className="btn secondary" onClick={() => navigate("/contacts")}>Снять отбор</button>
       </div> : null}
+      {filter !== "new" && !q && newClients > 0 ? (
+        <div className="active-filter-note">
+          <span>{clientsNewLabel(newClients)} — те же, что цифра у «Клиенты» в меню.</span>
+          <button type="button" className="btn secondary" onClick={openNewClients}>
+            Показать
+          </button>
+        </div>
+      ) : null}
       {creating ? (
         <form
           className="panel"
@@ -185,15 +213,39 @@ export function ClientsPage() {
 
       <div className="actions chip-row">
         {FILTERS.map(([value, label]) => (
-          <button key={value} className={filter === value ? "btn" : "btn secondary"} {...(value === "today" ? tip("Клиенты, с которыми был контакт сегодня") : {})} onClick={() => setFilter(value)}>
+          <button
+            key={value}
+            type="button"
+            className={filter === value ? "btn" : "btn secondary"}
+            {...(value === "today"
+              ? tip("Клиенты, с которыми был контакт сегодня")
+              : value === "new"
+                ? tip("Как цифра в меню: статус «Новый»")
+                : value === "needs_reply"
+                  ? tip("Последнее сообщение было от клиента — ещё не ответили")
+                  : {})}
+            onClick={() => (value === "new" ? openNewClients() : setFilter(value))}
+          >
             {label}
+            {value === "new" && newClients > 0 ? ` · ${newClients}` : ""}
+            {value === "needs_reply" && waitingReply > 0 ? ` · ${waitingReply}` : ""}
           </button>
         ))}
       </div>
 
       {error ? <p className="error">{error}</p> : null}
       {!data ? <div className="state">Загрузка…</div> : null}
-      {data && data.items.length === 0 ? <p className="empty">Клиентов нет. Создайте вручную или дождитесь заявки.</p> : null}
+      {data && data.items.length === 0 ? (
+        <p className="empty">
+          {filter === "new"
+            ? "Нет новых клиентов."
+            : filter === "needs_reply"
+            ? "Нет клиентов, которые ждут ответа."
+            : q || filter !== "all"
+              ? "По выбранным условиям клиенты не найдены."
+              : "Клиентов нет. Создайте вручную или дождитесь заявки."}
+        </p>
+      ) : null}
 
       {data ? <Pagination total={data.total} offset={data.offset} limit={data.limit} loading={loading} onChange={next => setOffset(String(next))} /> : null}
       {data?.items.map((item: any) => (

@@ -4,7 +4,7 @@ import type { AuthContext } from "../lib/types.ts";
 import {
   conversationsAttentionWhere,
   conversationsHumanWhere,
-  countContactsNeedsReply,
+  countContactsNew,
   countVisibleConversations,
   overdueTasksWhere,
 } from "./attentionCounts.ts";
@@ -48,7 +48,7 @@ export async function getNavBadges(prisma: PrismaClient, auth: AuthContext) {
     conversationsAttention,
     conversationsHuman,
     tasksOverdue,
-    contactsNeedsReply,
+    contactsNew,
     inquiriesAttention,
     dealsAttention,
     companiesAttention,
@@ -61,7 +61,7 @@ export async function getNavBadges(prisma: PrismaClient, auth: AuthContext) {
     prisma.task.count({
       where: overdueTasksWhere(tid, now),
     }),
-    countContactsNeedsReply(prisma, tid),
+    countContactsNew(prisma, tid),
     prisma.inquiry.count({ where: inquiryAction }),
     prisma.deal.count({
       where: {
@@ -141,8 +141,8 @@ export async function getNavBadges(prisma: PrismaClient, auth: AuthContext) {
       ? ruCount(conversations, "диалог требует внимания", "диалога требуют внимания", "диалогов требуют внимания")
       : "",
     "/tasks": tasks ? ruCount(tasks, "просроченная задача", "просроченные задачи", "просроченных задач") : "",
-    "/contacts": contactsNeedsReply
-      ? `${ruCount(contactsNeedsReply, "клиент ждёт", "клиента ждут", "клиентов ждут")} ответа`
+    "/contacts": contactsNew
+      ? ruCount(contactsNew, "новый клиент", "новых клиента", "новых клиентов")
       : "",
     "/companies": companiesAttention
       ? `${ruCount(companiesAttention, "компания", "компании", "компаний")} с просроченной задачей или новой заявкой`
@@ -168,7 +168,7 @@ export async function getNavBadges(prisma: PrismaClient, auth: AuthContext) {
       "/today": situation,
       "/conversations": conversations,
       "/tasks": tasks,
-      "/contacts": contactsNeedsReply,
+      "/contacts": contactsNew,
       "/companies": companiesAttention,
       "/inquiries": inquiries,
       "/deals": dealsAttention,
@@ -182,7 +182,7 @@ export async function getNavBadges(prisma: PrismaClient, auth: AuthContext) {
       "/today": "/today",
       "/conversations": conversations ? "/conversations?filter=attention" : "/conversations",
       "/tasks": tasks ? "/tasks?filter=overdue" : "/tasks",
-      "/contacts": contactsNeedsReply ? "/contacts?filter=needs_reply" : "/contacts",
+      "/contacts": contactsNew ? "/contacts?filter=new" : "/contacts",
       "/companies": "/companies",
       "/inquiries": inquiries ? "/inquiries?filter=attention" : "/inquiries",
       "/deals": dealsAttention ? "/deals" : "/deals",

@@ -53,3 +53,10 @@ export async function countContactsNeedsReply(prisma: PrismaClient, tenantId: st
   `;
   return Number(rows[0]?.count || 0);
 }
+
+/** Same rule as Клиенты → «Новые» and the nav badge. */
+export async function countContactsNew(prisma: PrismaClient, tenantId: string) {
+  return prisma.contact.count({
+    where: { tenantId, archivedAt: null, lifecycleStatus: "new" },
+  });
+}

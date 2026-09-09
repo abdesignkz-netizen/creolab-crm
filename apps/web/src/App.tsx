@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { api, setTenant } from "./lib/api";
 import { NavIcon } from "./components/NavIcon";
@@ -126,7 +126,27 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
   }
 
   function navTo(path: string) {
-    return navHrefs[path] || path;
+    if (badgeCount(path) > 0) {
+      return navHrefs[path] || (
+        path === "/contacts" ? "/contacts?filter=new"
+        : path === "/conversations" ? "/conversations?filter=attention"
+        : path === "/tasks" ? "/tasks?filter=overdue"
+        : path === "/inquiries" ? "/inquiries?filter=attention"
+        : path
+      );
+    }
+    return path;
+  }
+
+  function onNavClick(path: string, event: MouseEvent<HTMLAnchorElement>) {
+    const href = navTo(path);
+    const queryAt = href.indexOf("?");
+    const pathname = queryAt === -1 ? href : href.slice(0, queryAt);
+    const search = queryAt === -1 ? "" : href.slice(queryAt);
+    if (location.pathname === pathname && location.search !== search) {
+      event.preventDefault();
+      navigate(href);
+    }
   }
 
   function formatBadge(n: number) {
@@ -200,9 +220,14 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
     const timer = window.setInterval(() => {
       if (!cancelled) void loadBadges();
     }, 30_000);
+    const onAttention = () => {
+      if (!cancelled) void loadBadges();
+    };
+    window.addEventListener("creolab:attention-changed", onAttention);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
+      window.removeEventListener("creolab:attention-changed", onAttention);
     };
   }, [tenantId, location.pathname]);
 
@@ -315,6 +340,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
                 to={navTo(to)}
                 className={({ isActive }) => (isActive ? "active" : "")}
                 aria-label={count > 0 ? `${label}. ${hint}` : label}
+                onClick={(event) => onNavClick(to, event)}
               >
                 <span className="nav-link-label"><NavIcon to={to} />{label}</span>
                 {count > 0 ? (
@@ -335,6 +361,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
                 to={navTo(to)}
                 className={({ isActive }) => (isActive ? "active" : "")}
                 aria-label={count > 0 ? `${label}. ${hint}` : label}
+                onClick={(event) => onNavClick(to, event)}
               >
                 <span className="nav-link-label"><NavIcon to={to} />{label}</span>
                 {count > 0 ? (
@@ -436,7 +463,10 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
                 to={navTo(to)}
                 className={({ isActive }) => (isActive ? "active" : "")}
                 aria-label={count > 0 ? `${label}. ${hint}` : label}
-                onClick={() => setMoreOpen(false)}
+                onClick={(event) => {
+                  onNavClick(to, event);
+                  setMoreOpen(false);
+                }}
               >
                 <span className="nav-link-label"><NavIcon to={to} />{label}</span>
                 {count > 0 ? <span className="nav-badge" {...tip(hint)}>{formatBadge(count)}</span> : null}
@@ -467,6 +497,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
                 return active ? `tab active tab-${tab.icon}` : `tab tab-${tab.icon}`;
               }}
               aria-label={count > 0 ? `${tab.label}. ${hint}` : tab.label}
+              onClick={(event) => onNavClick(tab.to, event)}
             >
               <span className="tab-icon-wrap">
                 <span className={`tab-icon icon-${tab.icon}`} aria-hidden />

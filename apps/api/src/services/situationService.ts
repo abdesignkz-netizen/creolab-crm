@@ -6,6 +6,7 @@ import { decryptSecret } from "../lib/secretBox.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { CONTACT_PHONE_SELECT, digitsOnly, displayName, needsReply, phoneFromContact } from "./contactLabels.ts";
 import { inquiryInterest, loadConversationInterests } from "./contactInterestService.ts";
+import { attentionReasonLabel, STATUS_ONLY_ATTENTION } from "./attentionReasons.ts";
 import { excludeRematchedLeftovers } from "./attentionCounts.ts";
 import { openIntakeWhere } from "./inquiryAttention.ts";
 import { taskMarkedForScheduledSend } from "./taskExecutionService.ts";
@@ -159,6 +160,51 @@ function conversationBoardRank(conversation: {
   updatedAt: Date;
 }) {
   return (conversation.sellerLeadId ? 4 : 0) + (conversation.needsAttention ? 2 : 0) + (conversation.mode === "human" ? 1 : 0);
+}
+
+function conversationNeedsPriorityAction(
+  conversation: {
+    mode?: string | null;
+    needsAttention?: boolean | null;
+    attentionReason?: string | null;
+    updatedAt: Date;
+  },
+  waitingReply: boolean,
+  now: Date,
+) {
+  if (conversation.mode === "ai") return Boolean(conversation.needsAttention);
+  if (conversation.mode === "paused") {
+    return ageMinutes(conversation.updatedAt, now) >= PAUSED_SLA_MINUTES;
+  }
+  if (conversation.mode === "human") {
+    if (waitingReply) return true;
+    const reason = conversation.attentionReason || "";
+    return Boolean(conversation.needsAttention && reason && !STATUS_ONLY_ATTENTION.has(reason));
+  }
+  return false;
+}
+
+function conversationPriorityReason(
+  kind: Extract<SituationKind, "conversation_human" | "conversation_paused" | "conversation_attention">,
+  conversation: { attentionReason?: string | null },
+  waitingReply: boolean,
+  waitMinutes: number | null,
+) {
+  if (kind === "conversation_human") {
+    if (waitingReply) {
+      return waitMinutes != null
+        ? `Клиент написал, ответа нет ${formatDurationMinutes(waitMinutes)}`
+        : "Клиент написал, ответа ещё нет";
+    }
+    return attentionReasonLabel(conversation.attentionReason, "AI передал диалог менеджеру");
+  }
+  if (kind === "conversation_paused") {
+    return "Диалог на паузе больше двух часов — AI не отвечает, нужно решить";
+  }
+  if (conversation.attentionReason === "seller_lead_rematched") {
+    return "Чат отвязался от WhatsApp. Откройте актуальный диалог клиента, не этот старый.";
+  }
+  return attentionReasonLabel(conversation.attentionReason, "AI не может продолжить без человека");
 }
 
 function pickConversationsForBoard<T extends {
@@ -390,11 +436,10 @@ export async function getSituation(
   }
 
   for (const conversation of pickConversationsForBoard(conversations)) {
-    const attention = conversation.needsAttention && conversation.mode === "ai";
-    if (conversation.mode === "ai" && !attention) continue;
     const last = conversation.messages[0] || null;
     const lastFromClient = last?.direction === "inbound" && last?.senderKind === "client";
     const waitingReply = conversation.contact ? needsReply(conversation.contact) : Boolean(lastFromClient);
+    if (!conversationNeedsPriorityAction(conversation, waitingReply, now)) continue;
     const kind: SituationKind =
       conversation.mode === "human"
         ? "conversation_human"
@@ -403,6 +448,8 @@ export async function getSituation(
           : "conversation_attention";
     conversationOnBoard.add(conversation.id);
     const task = tasks.find((row) => row.conversationId === conversation.id && row.status !== "done");
+    const inboundAt = conversation.contact?.lastInboundMessageAt || (lastFromClient ? last?.createdAt : null);
+    const waitMinutes = waitingReply && inboundAt ? ageMinutes(inboundAt, now) : null;
     const nextAction: SituationNextAction =
       kind === "conversation_human" ? "reply_human" : kind === "conversation_paused" ? "resume_paused" : "take_conversation";
     items.push({
@@ -413,14 +460,7 @@ export async function getSituation(
       contactName: conversation.contact ? displayName(conversation.contact) : null,
       phone: phoneFromContact(conversation.contact, { externalThreadId: conversation.externalThreadId }),
       interest: resolveInterest(conversation.contactId, conversation.id),
-      reason:
-        kind === "conversation_human"
-          ? waitingReply
-            ? "Клиент ждёт ответ менеджера"
-            : "Диалог у менеджера"
-          : kind === "conversation_paused"
-            ? "Диалог на паузе"
-            : conversation.attentionReason || "ИИ эскалировал — нужен человек",
+      reason: conversationPriorityReason(kind, conversation, waitingReply, waitMinutes),
       nextAction,
       severity: kind === "conversation_human" ? "high" : kind === "conversation_attention" ? "high" : "normal",
       ownerMembershipId: conversation.assigneeMembershipId,

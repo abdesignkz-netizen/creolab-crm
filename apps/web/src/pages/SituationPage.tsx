@@ -302,49 +302,15 @@ export function SituationPage() {
       ) : null}
       {error ? <p className="error">{error}</p> : null}
 
-      <div className="sit-toolbar">
-        <PeriodSelector
-          period={period}
-          onPeriodChange={setPeriod}
-          dateFrom={dateFrom}
-          dateTo={dateTo}
-          onDateFromChange={setDateFrom}
-          onDateToChange={setDateTo}
-          activeLabel={data.period?.label}
-        />
-        <div className="sit-toolbar-side">
-          <div className="segmented sit-scope">
-            {(
-              [
-                ["all", "Все"],
-                ["mine", "Мои"],
-                ["unassigned", "Без ответственного"],
-              ] as const
-            ).map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                className={scope === value ? "btn" : "btn secondary"}
-                onClick={() => setScope(value)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <button
-            type="button"
-            className={onlyImportant ? "btn" : "btn secondary"}
-            onClick={() => setOnlyImportant((v) => !v)}
-          >
-            Только важное
-          </button>
-        </div>
-      </div>
-
       <div className="sit-section sit-attention" id="attention">
         <div className="sit-section-head">
-          <h3>Требует внимания</h3>
-          <span className="muted">Приоритетные действия</span>
+          <div>
+            <h3>Требует внимания</h3>
+            <p className="muted sit-attn-principle">
+              {attention.principle ||
+                "Только то, где человек должен что-то сделать сейчас: ответить клиенту, забрать диалог у AI, закрыть просроченное, задать шаг или дописать телефон. Диалог уже у менеджера без ожидания ответа сюда не попадает."}
+            </p>
+          </div>
         </div>
         <div className="sit-attn-summary">
           <Link to="/contacts?filter=needs_reply">Нужно ответить · {attention.summary.needsReply}</Link>
@@ -364,11 +330,14 @@ export function SituationPage() {
             <div className={`row severity-${item.severity} sit-attn-row`} key={item.id}>
               <div>
                 <b>{nameWithPhone(item.contactName || item.title, item.phone)}</b>
-                {item.interest ? <div className="muted">{item.interest}</div> : null}
+                {item.interest && item.interest !== item.reason ? <div className="muted">{item.interest}</div> : null}
                 {item.contactName && item.title && item.title !== item.contactName && item.title !== item.interest ? (
                   <div className="muted">{item.title}</div>
                 ) : null}
-                <div className="muted">{item.reason}</div>
+                <div className="sit-attn-why">
+                  {item.whyLabel ? <span className="badge warn">{item.whyLabel}</span> : null}
+                  {item.reason && item.reason !== item.whyLabel ? <span>{item.reason}</span> : null}
+                </div>
                 <div className="muted">
                   {ACTION_LABEL[item.nextAction] || item.nextAction}
                   {" · "}
@@ -432,6 +401,45 @@ export function SituationPage() {
             </div>
           ))
         )}
+      </div>
+
+      <div className="sit-toolbar">
+        <PeriodSelector
+          period={period}
+          onPeriodChange={setPeriod}
+          dateFrom={dateFrom}
+          dateTo={dateTo}
+          onDateFromChange={setDateFrom}
+          onDateToChange={setDateTo}
+          activeLabel={data.period?.label}
+        />
+        <div className="sit-toolbar-side">
+          <div className="segmented sit-scope">
+            {(
+              [
+                ["all", "Все"],
+                ["mine", "Мои"],
+                ["unassigned", "Без ответственного"],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                className={scope === value ? "btn" : "btn secondary"}
+                onClick={() => setScope(value)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            className={onlyImportant ? "btn" : "btn secondary"}
+            onClick={() => setOnlyImportant((v) => !v)}
+          >
+            Только важное
+          </button>
+        </div>
       </div>
 
       <form className="sit-section sit-ask" id="ask-ai" onSubmit={onAsk}>

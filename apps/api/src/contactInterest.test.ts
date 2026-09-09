@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { inferClientInterest, inquiryInterest, isGenericLeadLabel, pickUsableInterest } from "./services/contactInterestService.ts";
+import {
+  inferClientInterest,
+  inquiryInterest,
+  inquiryRequestText,
+  isGenericLeadLabel,
+  pickUsableInterest,
+} from "./services/contactInterestService.ts";
 
 function message(text: string, day = 1, extra = {}) {
   return { id: `message-${day}`, text, direction: "inbound", senderKind: "client", createdAt: new Date(`2026-09-0${day}T10:00:00Z`), ...extra };
@@ -40,8 +46,19 @@ describe("Client interest from conversation", () => {
   });
   it("does not treat WhatsApp lead labels as a client request", () => {
     assert.equal(isGenericLeadLabel("Заявка из WhatsApp"), true);
+    assert.equal(isGenericLeadLabel("интерес"), true);
+    assert.equal(isGenericLeadLabel("менеджер WhatsApp"), true);
     assert.equal(isGenericLeadLabel("Нужен сайт"), false);
+    assert.equal(isGenericLeadLabel("ИИ-менеджер для WhatsApp"), false);
     assert.equal(pickUsableInterest("Заявка из WhatsApp", "Корпоративный сайт"), "Корпоративный сайт");
     assert.equal(pickUsableInterest("Заявка из WhatsApp", ""), null);
+    assert.equal(inquiryInterest({ subject: "Заявка из WhatsApp", service: null }), null);
+    assert.equal(
+      inquiryRequestText({
+        subject: "Заявка из WhatsApp",
+        description: "Здравствуйте\n\nНужен бот, который отвечает клиентам в WhatsApp\n\nСпасибо",
+      }),
+      "Нужен бот, который отвечает клиентам в WhatsApp",
+    );
   });
 });

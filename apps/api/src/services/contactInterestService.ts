@@ -52,16 +52,22 @@ export function inferClientInterest(messages: InterestMessage[]): ContactInteres
   return null;
 }
 
-export function inquiryInterest(inquiry?: { subject?: string | null; service?: string | null } | null): ContactInterest | null {
-  const text = inquiry?.subject?.trim() || inquiry?.service?.trim();
-  return text ? { text, source: "inquiry", messageId: null } : null;
-}
+const ACK_LINE = /^(спасибо|хорошо|ок|ok|понял[аи]?|ладно|да|нет|угу|ага|👍+)[.!]?$/i;
 
-/** Channel/source labels are not a client request — do not put them in outbound copy. */
+/** Channel/source/field labels are not a client request — do not put them in outbound copy. */
 export function isGenericLeadLabel(value?: string | null) {
   const text = String(value || "").replace(/\s+/g, " ").trim();
   if (!text) return true;
-  return /^(заявка(\s+из)?(\s+(whatsapp|instagram|telegram|ватсап|формы?))?|whatsapp|instagram|telegram|ватсап|форма|лид|lead)$/i.test(text);
+  return /^(заявка(\s+из)?(\s+(whatsapp|instagram|telegram|ватсап|формы?))?|whatsapp|instagram|telegram|ватсап|форма|лид|lead|интерес|имя|компания|телефон|email|e-mail|почта|неизвестно|unknown|без темы|менеджер(\s+(whatsapp|ватсап))?)$/i.test(
+    text,
+  );
+}
+
+export function isGenericCompanyName(value?: string | null) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (!text) return true;
+  if (isGenericLeadLabel(text)) return true;
+  return /^(без компании|не указан[ао]?)$/i.test(text);
 }
 
 export function pickUsableInterest(...values: Array<string | null | undefined>) {
@@ -70,6 +76,39 @@ export function pickUsableInterest(...values: Array<string | null | undefined>) 
     if (text && !isGenericLeadLabel(text)) return text;
   }
   return null;
+}
+
+export function inquiryInterest(inquiry?: { subject?: string | null; service?: string | null } | null): ContactInterest | null {
+  const text = pickUsableInterest(inquiry?.service, inquiry?.subject);
+  return text ? { text, source: "inquiry", messageId: null } : null;
+}
+
+/** Last useful line from inquiry description / WhatsApp history, never a field label. */
+export function requestLineFromText(value?: string | null) {
+  const lines = String(value || "")
+    .split(/\n+/)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  for (const line of [...lines].reverse()) {
+    const clean = line.replace(/^(?:здравствуйте|добрый день|привет)[,! .]+/i, "").trim();
+    if (!clean || ACK_LINE.test(clean) || isGenericLeadLabel(clean) || clean.length < 3) continue;
+    return clean.length > 180 ? `${clean.slice(0, 177)}…` : clean;
+  }
+  return null;
+}
+
+export function inquiryRequestText(inquiry?: {
+  subject?: string | null;
+  service?: string | null;
+  description?: string | null;
+  aiSummary?: string | null;
+} | null) {
+  return pickUsableInterest(
+    inquiry?.service,
+    inquiry?.subject,
+    requestLineFromText(inquiry?.description),
+    requestLineFromText(inquiry?.aiSummary),
+  );
 }
 
 /** One tenant-scoped batch, including closed/imported dialogs; never calls AI or writes on GET. */

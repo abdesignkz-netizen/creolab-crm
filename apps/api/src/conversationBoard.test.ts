@@ -143,6 +143,79 @@ describe("Conversations board", () => {
     assert.ok(body.conversation.sourceLine.includes("WhatsApp"));
   });
 
+  it("просмотр диалога снимает пометку «новое» с заявки и уведомления", async () => {
+    const contact = await prisma.contact.findFirst({ where: { name: { contains: "Александр" } } });
+    assert.ok(contact);
+    const membership = await prisma.membership.findFirst({ where: { tenantId: contact.tenantId, active: true } });
+    assert.ok(membership);
+    const conversation = await prisma.conversation.create({
+      data: {
+        tenantId: contact.tenantId,
+        contactId: contact.id,
+        mode: "ai",
+        status: "open",
+        sellerLeadId: "LEAD-seen-new",
+      },
+    });
+    const message = await prisma.message.create({
+      data: {
+        tenantId: contact.tenantId,
+        conversationId: conversation.id,
+        senderKind: "client",
+        direction: "inbound",
+        text: "Хочу обсудить разработку презентации",
+      },
+    });
+    const inquiry = await prisma.inquiry.create({
+      data: {
+        tenantId: contact.tenantId,
+        contactId: contact.id,
+        conversationId: conversation.id,
+        source: "whatsapp",
+        status: "new",
+        subject: "Заявка из WhatsApp",
+        description: "Хочу обсудить разработку презентации",
+      },
+    });
+    const notice = await prisma.notification.create({
+      data: {
+        tenantId: contact.tenantId,
+        episodeKey: `inquiry.created:${inquiry.id}`,
+        recipientMembershipId: membership.id,
+        type: "inquiry.created",
+        entityType: "inquiry",
+        entityId: inquiry.id,
+        title: "Новая заявка",
+        body: "Хочу обсудить разработку презентации",
+        priority: "normal",
+      },
+    });
+
+    const before = await fetch(`${base}/api/v1/conversations`, { headers: { cookie } });
+    const beforeBody = await before.json();
+    const beforeRow = beforeBody.items.find((row: { id: string }) => row.id === conversation.id);
+    assert.equal(beforeRow?.unread, true);
+    assert.equal(beforeRow?.businessStatus, "Новая");
+
+    const read = await fetch(`${base}/api/v1/conversations/${conversation.id}/read`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({ messageId: message.id }),
+    });
+    assert.equal(read.status, 200, await read.text());
+
+    const after = await fetch(`${base}/api/v1/conversations`, { headers: { cookie } });
+    const afterBody = await after.json();
+    const afterRow = afterBody.items.find((row: { id: string }) => row.id === conversation.id);
+    assert.equal(afterRow?.unread, false);
+    assert.equal(afterRow?.businessStatus, "В работе");
+
+    const updatedInquiry = await prisma.inquiry.findFirst({ where: { id: inquiry.id } });
+    assert.equal(updatedInquiry?.status, "in_progress");
+    const updatedNotice = await prisma.notification.findFirst({ where: { id: notice.id } });
+    assert.ok(updatedNotice?.readAt);
+  });
+
   it("кнопка понять контекст пишет краткое резюме по переписке", async () => {
     const response = await fetch(`${base}/api/v1/conversations/${conversationId}/analyze-context`, {
       method: "POST",

@@ -1,5 +1,5 @@
 import { extractSpokenMessage } from "./spokenMessage.ts";
-import { isGenericLeadLabel } from "./contactInterestService.ts";
+import { isGenericCompanyName, isGenericLeadLabel } from "./contactInterestService.ts";
 
 export type CampaignOfferKind = "proposal" | "documents" | "follow_up" | "message";
 
@@ -33,7 +33,9 @@ export function personalize(
 }
 
 const STAFF_VERB_RE =
-  /^(пожалуйста[,\s]+)?(уточни(?:те|ть)?|отправ(?:ь|ьте|ить)|напиш(?:и|ите|ать)|напомни(?:те|ть)?|спроси(?:те)?|собери(?:те)?|разошли(?:те)?|позвони(?:те)?|перезвон\w*|скажи(?:те)?|подготовь(?:те)?|сделай(?:те)?|проверь(?:те)?|свяжись|свяжитесь|попроси(?:те)?|согласуй(?:те)?|нужно|надо)\s+/i;
+  /^(пожалуйста[,\s]+)?(узна(?:ть|йте)|уточни(?:те|ть)?|отправ(?:ь|ьте|ить)|напиш(?:и|ите|ать)|напомни(?:те|ть)?|спроси(?:те)?|собери(?:те)?|разошли(?:те)?|позвони(?:те)?|перезвон\w*|скажи(?:те)?|подготовь(?:те)?|сделай(?:те)?|проверь(?:те)?|свяжись|свяжитесь|попроси(?:те)?|согласуй(?:те)?|нужно|надо)\s+/i;
+const STAFF_COMMAND_START_RE =
+  /^(уточни(?:ть|те)?|узна(?:ть|йте)|отправ(?:ь|ьте|ить)|напиши(?:те)?|напомни(?:ть|те)?|собери(?:те)?|разошли(?:те)?|позвони(?:те)?|перезвон\w*|скажи(?:те)?|подготовь(?:те)?|сделай(?:те)?|проверь(?:те)?|свяжись|свяжитесь|попроси(?:те)?|согласуй(?:те)?|нужно|надо)(?:\s|$|[.,!?])/i;
 const NOT_A_PERSON_NAME =
   /^(без|клиент|контакт|unknown|интерес|имя|компания|телефон|email|e-mail|почта|заявка|лид|lead|service|subject|whatsapp|telegram)$/i;
 const TASK_STOP_WORDS = new Set([
@@ -113,9 +115,8 @@ export function looksLikeStaffCommand(text: string) {
   if (/\{\{\s*\w+\s*\}\}/.test(t)) return false;
   if (/добрый день|здравствуйте|во вложении|направляем|хотели уточнить/i.test(t)) return false;
   if (t.length > 220) return false;
-  return /^(уточни(?:ть)?|отправ(?:ь|ьте|ить)|напиши|напомни(?:ть)?|собери|разошли|позвони|перезвон\w*|скажи|подготовь|сделай|проверь|свяжись|попроси|согласуй|нужно|надо)(?:\s|$|[.,!?])/i.test(
-    t,
-  );
+  if (STAFF_COMMAND_START_RE.test(t)) return true;
+  return t.length <= 90 && /актуальн/i.test(t);
 }
 
 function cleanFact(value?: string | null, max = 160) {
@@ -128,10 +129,29 @@ function clientFacingInterest(value?: string | null) {
   return text;
 }
 
+function clientFacingCompany(value?: string | null) {
+  const text = cleanFact(value, 80);
+  if (!text || isGenericCompanyName(text)) return null;
+  return text;
+}
+
+function quotedRequest(interest?: string | null) {
+  const text = clientFacingInterest(interest);
+  if (!text) return "";
+  const body = text
+    .replace(/^(?:меня\s+)?интересует\s+/i, "")
+    .replace(/^нуж(?:ен|на|но|ны)\s+/i, "")
+    .replace(/[.!?]+$/u, "")
+    .trim();
+  if (!body || isGenericLeadLabel(body)) return "";
+  const clipped = body.length > 70 ? `${body.slice(0, 67)}…` : body;
+  return `«${clipped}»`;
+}
+
 function aboutRequest(interest?: string | null, companyName?: string | null) {
-  const interestClean = clientFacingInterest(interest);
-  if (interestClean) return `по вашему запросу «${interestClean}»`;
-  const companyClean = cleanFact(companyName, 80);
+  const quoted = quotedRequest(interest);
+  if (quoted) return `по вашему запросу ${quoted}`;
+  const companyClean = clientFacingCompany(companyName);
   if (companyClean) return `по заявке ${companyClean}`;
   return "";
 }
@@ -164,6 +184,7 @@ function primaryTaskLine(taskText: string, sharedDraft = "") {
 function infinitiveFromStaffVerb(verb: string) {
   const v = verb.toLowerCase();
   if (/^уточн/.test(v)) return "уточнить";
+  if (/^узна/.test(v)) return "узнать";
   if (/^напомн/.test(v)) return "напомнить";
   if (/^спроси/.test(v)) return "спросить";
   if (/^отправ/.test(v)) return "отправить";
@@ -175,24 +196,55 @@ function infinitiveFromStaffVerb(verb: string) {
   return "уточнить";
 }
 
-/** Turn «Уточнить удобное время для созвона» into a client-facing ask. Not a canned relevance template. */
-export function clientAskFromStaffTask(taskText: string): string | null {
-  const raw = String(taskText || "").replace(/\s+/g, " ").trim();
-  if (!raw) return null;
-  if (!looksLikeStaffCommand(raw) && !STAFF_VERB_RE.test(raw)) return null;
-  const rest = raw.replace(STAFF_VERB_RE, "").replace(/[.!?]+$/u, "").trim();
+function relevanceClientAsk(taskText: string) {
+  const verb = String(taskText || "").match(STAFF_VERB_RE)?.[2] || "";
+  const infinitive = infinitiveFromStaffVerb(verb || "уточнить");
+  if (/узна/.test(infinitive)) return "Хотели узнать, актуальна ли ещё ваша заявка.";
+  return "Хотели уточнить, актуальна ли ещё ваша заявка.";
+}
+
+function phraseFromVerbAndRest(verb: string, restRaw: string) {
+  const rest = restRaw.replace(/^[,\s]+/, "").replace(/[.!?]+$/u, "").trim();
   if (!rest || rest.length < 3) return null;
-  if (isRelevanceOnlyAsk(rest) || isRelevanceOnlyAsk(raw)) return null;
-  const verb = raw.match(STAFF_VERB_RE)?.[2] || "уточнить";
   const infinitive = infinitiveFromStaffVerb(verb);
   if (rest.toLowerCase().startsWith(infinitive)) return `Хотели ${rest}.`;
-  if (/^(когда|куда|как|что|почему)/i.test(rest)) {
+  if (/^(когда|куда|как|что|почему|готов(?:а|о|ы)?\s+ли|удобно\s+ли)/i.test(rest)) {
     return `Хотели ${infinitive}, ${rest.charAt(0).toLowerCase()}${rest.slice(1)}.`;
   }
   return `Хотели ${infinitive} ${rest}.`;
 }
 
-/** Any free-form staff note → a client-facing sentence. Never a canned «актуальна ли заявка». */
+/** «Позвони и узнай, готов ли к презентации» → ask after the last узнать/уточнить/спросить. */
+function secondaryAskFromCompoundCommand(raw: string) {
+  if (!/^(пожалуйста[,\s]+)?(позвони|перезвон|свяжись|свяжитесь|отправ|напиш|скаж|сделай|подготовь)/i.test(raw)) {
+    return null;
+  }
+  const match = raw.match(/(?:^|[\s,])и\s+(узна(?:ть|й(?:те)?)|уточни(?:ть|те)?|спроси(?:ть|те)?)\s*,?\s*(.+)$/i);
+  if (!match?.[2]) return null;
+  return phraseFromVerbAndRest(match[1], match[2]);
+}
+
+/** Turn «Уточнить удобное время для созвона» into a client-facing ask from the command meaning. */
+export function clientAskFromStaffTask(taskText: string): string | null {
+  const raw = String(taskText || "").replace(/\s+/g, " ").trim();
+  if (!raw) return null;
+  if (!looksLikeStaffCommand(raw) && !STAFF_VERB_RE.test(raw)) return null;
+  if (isRelevanceOnlyAsk(raw)) return relevanceClientAsk(raw);
+  const compound = secondaryAskFromCompoundCommand(raw);
+  if (compound) return compound;
+  if (
+    /^(пожалуйста[,\s]+)?(позвони|перезвон|свяжись|свяжитесь)/i.test(raw) &&
+    !/(узна|уточн|спроси|скаж|напиш\w*\s+что)/i.test(raw)
+  ) {
+    return "Хотели уточнить, удобно ли вам созвониться.";
+  }
+  const rest = raw.replace(STAFF_VERB_RE, "").replace(/[.!?]+$/u, "").trim();
+  if (!rest || rest.length < 3) return null;
+  const verb = raw.match(STAFF_VERB_RE)?.[2] || "уточнить";
+  return phraseFromVerbAndRest(verb, rest);
+}
+
+/** Any free-form staff note → a client-facing sentence that keeps the command meaning. */
 export function clientFacingAskFromTask(taskText: string): string | null {
   const staff = clientAskFromStaffTask(taskText);
   if (staff) return staff;
@@ -201,8 +253,8 @@ export function clientFacingAskFromTask(taskText: string): string | null {
     .trim()
     .replace(/[.!?]+$/u, "");
   if (!raw || raw.length < 3) return null;
-  if (isRelevanceOnlyAsk(raw)) return null;
   if (/добрый день|здравствуйте|хотели /i.test(raw)) return `${raw}.`.replace(/\.\.$/, ".");
+  if (isRelevanceOnlyAsk(raw)) return relevanceClientAsk(raw);
   const lowered = raw.charAt(0).toLowerCase() + raw.slice(1);
   return `Хотели уточнить: ${lowered}.`;
 }
@@ -210,6 +262,11 @@ export function clientFacingAskFromTask(taskText: string): string | null {
 export function acceptPersonalizedDraft(input: { taskText: string; firstName?: string | null; draft: string }) {
   const draft = String(input.draft || "").trim();
   if (!draft) return false;
+  if (looksLikeStaffCommand(draft)) return false;
+  if (/«\s*(интерес|имя|компания|неизвестно|whatsapp)\s*»/i.test(draft)) return false;
+  if (/\bнеизвестно\b/i.test(draft)) return false;
+  const task = String(input.taskText || "").replace(/\s+/g, " ").trim();
+  if (task && looksLikeStaffCommand(task) && draft.toLowerCase().includes(task.toLowerCase())) return false;
   const greeting = draft.match(/^([^,\n]{1,48}),\s*(добрый день|здравствуйте)\b/i);
   if (greeting) {
     const used = greeting[1].trim();
@@ -218,7 +275,9 @@ export function acceptPersonalizedDraft(input: { taskText: string; firstName?: s
     if (allowed && used.toLowerCase() !== allowed.toLowerCase()) return false;
   }
   const ask = clientFacingAskFromTask(primaryTaskLine(input.taskText));
-  if (!ask) return true;
+  if (!ask) {
+    return /добрый день|здравствуйте|хотели|направляем|во вложении/i.test(draft);
+  }
   const tokens = ask
     .toLowerCase()
     .split(/[^а-яёa-z0-9]+/i)
@@ -239,7 +298,7 @@ export function composeRecipientOffer(input: RecipientOfferInput) {
   const sharedDraft = commandLikeDraft ? "" : sharedRaw;
   const effectiveTask = [taskText, commandLikeDraft ? sharedRaw : ""].filter(Boolean).join("\n");
   const firstName = firstNameOf(input.firstName);
-  const companyName = cleanFact(input.companyName, 80) || null;
+  const companyName = clientFacingCompany(input.companyName);
   const interest = clientFacingInterest(input.interest);
   const hasFile = Boolean(input.hasFile);
   const kind = inferCampaignOfferKind(effectiveTask, sharedDraft);
@@ -250,6 +309,11 @@ export function composeRecipientOffer(input: RecipientOfferInput) {
   const fileBit = hasFile ? " Во вложении — материалы." : "";
   const staffAsk = clientFacingAskFromTask(primaryTaskLine(effectiveTask, sharedRaw));
   const relevanceOnly = isRelevanceOnlyAsk(effectiveTask) || isRelevanceOnlyAsk(sharedRaw);
+  const genericFollowUp =
+    /актуальна ли ещё ваша заявка|актуален ли ещё запрос(?!\s*«)|хотели уточнить по (вашей заявке|нашему вопросу)/i.test(
+      sharedDraft,
+    );
+  const useShared = Boolean(sharedDraft) && !(relevanceOnly && genericFollowUp);
 
   if (spoken) {
     const body = spoken.replace(/^[^.!?]+,\s*добрый день[!?.]?\s*/i, "").trim();
@@ -257,7 +321,7 @@ export function composeRecipientOffer(input: RecipientOfferInput) {
     return tidy(`${greeting} ${body}${extra}${fileBit}`);
   }
 
-  if (sharedDraft) {
+  if (useShared) {
     let text = personalize(sharedDraft, {
       firstName,
       companyName,
@@ -300,9 +364,10 @@ export function composeRecipientOffer(input: RecipientOfferInput) {
     return tidy(`${greeting} ${staffAsk}${extra}${fileBit}`);
   }
   if (relevanceOnly) {
+    const quoted = quotedRequest(interest);
     return tidy(
-      interest
-        ? `${greeting} Хотели уточнить, актуален ли ещё запрос «${interest}».${fileBit} Можем продолжить.`
+      quoted
+        ? `${greeting} Хотели уточнить, актуален ли ещё ваш запрос ${quoted}.${fileBit} Можем продолжить.`
         : `${greeting} Хотели уточнить, актуальна ли ещё ваша заявка.${fileBit} Можем продолжить.`,
     );
   }

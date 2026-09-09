@@ -65,11 +65,21 @@ export function ConversationsPage() {
       setWorkspace(data);
       const messages = (data as any).messages || [];
       const lastMessage = messages[messages.length - 1];
-      if (lastMessage) {
-        await api.markConversationRead(id, lastMessage.id);
-        if (request !== workspaceVersion.current) return;
-        setItems(previous => previous.map(item => item.id === id ? { ...item, unread: false } : item));
-      }
+      await api.markConversationRead(id, lastMessage?.id || "");
+      if (request !== workspaceVersion.current) return;
+      setItems((previous) =>
+        previous.map((item) =>
+          item.id === id
+            ? {
+                ...item,
+                unread: false,
+                businessStatus: item.businessStatus === "Новая" ? "В работе" : item.businessStatus,
+                inquiryStatusLabel: item.inquiryStatusLabel === "Новая" ? "В работе" : item.inquiryStatusLabel,
+              }
+            : item,
+        ),
+      );
+      window.dispatchEvent(new Event("creolab:attention-changed"));
       setError("");
     } catch (err) {
       if (request !== workspaceVersion.current) return;
@@ -159,7 +169,7 @@ export function ConversationsPage() {
             <div className="conv-preview">«{item.lastMessagePreview}»</div>
             <div className="conv-meta">
               <span>
-                {[item.businessStatus, item.needsReply ? "Нужен ответ" : null, item.waitLabel]
+                {[item.unread ? "Новое" : null, item.businessStatus, item.needsReply ? "Нужен ответ" : null, item.waitLabel]
                   .filter(Boolean)
                   .join(" · ")}
               </span>

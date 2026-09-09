@@ -323,9 +323,9 @@ export async function composeClientMessageWithLlm(input: {
   const instruction = String(input.instruction || "").trim();
   if (!apiKey || !instruction) return null;
 
-  const unknown = (value?: string | null) => {
+  const fact = (value?: string | null, empty = "нет — не выдумывай и не подставляй ярлык поля") => {
     const text = String(value || "").replace(/\s+/g, " ").trim();
-    return text || "неизвестно";
+    return text || empty;
   };
   const history = Array.isArray(input.history) && input.history.length
     ? input.history
@@ -343,15 +343,16 @@ export async function composeClientMessageWithLlm(input: {
     "Не пиши типовые фразы вроде «актуальна ли заявка», «готов ли обсудить шаги», «задайте пару вопросов», если менеджер просил о другом.",
     "Если просят напомнить о согласовании, подтверждении, запуске, файле, макете, оплате или удобном времени — пиши именно об этом.",
     "Опирайся на историю переписки и контекст заявки, а не на общий сценарий продаж.",
+    "Не копируй задачу менеджера дословно и не пиши её клиенту как приказ.",
     "Не начинай мини-бриф и не предлагай услуги, если задача другая.",
     "Пиши на «Вы», коротко, как живой менеджер.",
-    "Имя для обращения бери только из поля «Имя клиента». Не используй ярлыки полей.",
+    "Имя для обращения бери только из поля «Имя клиента». Не используй ярлыки полей («Интерес», «Имя», «Компания»).",
     "Не упоминай менеджера, lead, команды и что текст составлен по инструкции.",
     "Не пиши, что не можешь отправить. Не проси скопировать текст.",
-    `Имя клиента: ${unknown(input.firstName)}`,
-    `Компания: ${unknown(input.companyName)}`,
-    `Услуга / запрос: ${unknown(input.interest)}`,
-    `Последнее от клиента: ${unknown(input.lastClientMessage)}`,
+    `Имя клиента: ${fact(input.firstName, "нет — начни с «Добрый день!» без имени")}`,
+    `Компания: ${fact(input.companyName)}`,
+    `Контекст заявки: ${fact(input.interest, "нет конкретного запроса — не пиши слово «интерес» и не выдумывай услугу")}`,
+    `Последнее от клиента: ${fact(input.lastClientMessage)}`,
     "",
     "История переписки:",
     history,

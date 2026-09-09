@@ -8,7 +8,13 @@ import {
   looksLikeStaffCommand,
   pickPersonFirstName,
 } from "./campaignPersonalize.ts";
-import { inquiryInterest, loadConversationInterests, pickUsableInterest } from "./contactInterestService.ts";
+import {
+  inquiryRequestText,
+  isGenericCompanyName,
+  loadConversationInterests,
+  pickUsableInterest,
+  requestLineFromText,
+} from "./contactInterestService.ts";
 import { composeClientMessageWithLlm, refineCampaignRecipientDraftsWithLlm } from "./llmClient.ts";
 
 export type ContactComposeFact = {
@@ -60,7 +66,7 @@ export async function loadContactComposeFacts(
         where: { archived: false },
         orderBy: { receivedAt: "desc" },
         take: 1,
-        select: { subject: true, service: true },
+        select: { subject: true, service: true, description: true, companyName: true, aiSummary: true },
       },
     },
   });
@@ -102,17 +108,20 @@ export async function loadContactComposeFacts(
   return ids.map((contactId) => {
     const contact = contactMap.get(contactId);
     const inquiry = contact?.inquiries[0];
+    const lastClient = lastClientByContact.get(contactId) || null;
+    const inquiryCompany = String(inquiry?.companyName || "").trim();
     return {
       contactId,
       firstName: pickPersonFirstName(contact?.firstName, contact?.name),
-      companyName: contact?.companyName || null,
+      companyName:
+        (inquiryCompany && !isGenericCompanyName(inquiryCompany) ? inquiryCompany : null) ||
+        (contact?.companyName && !isGenericCompanyName(contact.companyName) ? contact.companyName : null),
       interest: pickUsableInterest(
         conversationInterests.get(contactId)?.text,
-        inquiry?.service,
-        inquiry?.subject,
-        inquiryInterest(inquiry)?.text,
+        inquiryRequestText(inquiry),
+        requestLineFromText(lastClient),
       ),
-      lastClientMessage: lastClientByContact.get(contactId) || null,
+      lastClientMessage: lastClient,
       history: historyByContact.get(contactId) || [],
     };
   });

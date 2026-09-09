@@ -19,7 +19,7 @@ import {
   resolveRecipientSendText,
 } from "./campaignPersonalize.ts";
 import { extractSpokenMessage } from "./spokenMessage.ts";
-import { inquiryInterest, loadConversationInterests, pickUsableInterest } from "./contactInterestService.ts";
+import { inquiryRequestText, isGenericCompanyName, loadConversationInterests, pickUsableInterest } from "./contactInterestService.ts";
 import { writeActivity } from "./contactService.ts";
 import { refineCampaignRecipientDraftsWithLlm } from "./llmClient.ts";
 import { hashExecutionContent, sendViaProvider } from "./messagingProvider.ts";
@@ -985,7 +985,7 @@ async function sendOneRecipient(
     const inquiry = await prisma.inquiry.findFirst({
       where: { tenantId: campaign.tenantId, contactId, archived: false },
       orderBy: { receivedAt: "desc" },
-      select: { subject: true, service: true },
+      select: { subject: true, service: true, description: true, companyName: true, aiSummary: true },
     });
     const text = resolveRecipientSendText({
       personalizeEach: campaign.personalizeEach,
@@ -993,8 +993,8 @@ async function sendOneRecipient(
       campaignSnapshot: campaign.messageSnapshot,
       campaignDraft: campaign.messageDraft,
       firstName: pickPersonFirstName(contact?.firstName, contact?.name, recipient.displayName),
-      companyName: contact?.companyName,
-      interest: inquiryInterest(inquiry)?.text || null,
+      companyName: (!isGenericCompanyName(inquiry?.companyName) && inquiry?.companyName) || contact?.companyName,
+      interest: inquiryRequestText(inquiry),
     });
 
     if (text) {
@@ -1089,7 +1089,7 @@ async function loadRecipientOfferFacts(
             where: { archived: false },
             orderBy: { receivedAt: "desc" },
             take: 1,
-            select: { subject: true, service: true },
+            select: { subject: true, service: true, description: true, companyName: true, aiSummary: true },
           },
         },
       })
@@ -1099,14 +1099,15 @@ async function loadRecipientOfferFacts(
   return recipients.map((recipient) => {
     const contact = recipient.contactId ? contactMap.get(recipient.contactId) : undefined;
     const inquiry = contact?.inquiries[0];
-    const service = String(inquiry?.service || "").trim();
-    const subject = String(inquiry?.subject || "").trim();
     const conversation = recipient.contactId ? conversationInterests.get(recipient.contactId) : undefined;
+    const inquiryCompany = String(inquiry?.companyName || "").trim();
     return {
       id: recipient.id,
       firstName: pickPersonFirstName(contact?.firstName, contact?.name, recipient.displayName),
-      companyName: contact?.companyName || null,
-      interest: pickUsableInterest(conversation?.text, service, subject, inquiryInterest(inquiry)?.text),
+      companyName:
+        (inquiryCompany && !isGenericCompanyName(inquiryCompany) ? inquiryCompany : null) ||
+        (contact?.companyName && !isGenericCompanyName(contact.companyName) ? contact.companyName : null),
+      interest: pickUsableInterest(conversation?.text, inquiryRequestText(inquiry)),
     };
   });
 }
@@ -1231,7 +1232,9 @@ export async function draftCampaignMessage(goal: string, hasFile: boolean) {
       ? `{{firstName}}, добрый день! По запросу {{service}} направляем коммерческое предложение.${fileBit} Если актуально, напишите — уточним детали.`
       : kind === "documents"
         ? `{{firstName}}, добрый день! Направляем документы.${fileBit} Если нужно что-то ещё — напишите.`
-        : `{{firstName}}, добрый день! ${goal.replace(/\s+/g, " ").trim()}${fileBit}`;
+        : kind === "follow_up"
+          ? `{{firstName}}, добрый день! Хотели уточнить, актуальна ли ещё ваша заявка.${fileBit}`
+          : `{{firstName}}, добрый день! ${goal.replace(/\s+/g, " ").trim()}${fileBit}`;
   return { messageDraft: base.replace(/\s{2,}/g, " ").trim(), mode: "ai" as const };
 }
 

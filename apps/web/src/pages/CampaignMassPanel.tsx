@@ -930,7 +930,7 @@ export function CampaignMassPanel({
             ) : null}
             <p className="muted">
               {messageMode === "ai" || personalizeEach
-                ? "Это задача для CRM, не текст в WhatsApp. Сообщения клиентам появятся ниже — из имени и интереса, без выдуманных цен и сроков."
+                ? "Это задача для CRM, не текст в WhatsApp. В письмо пойдёт смысл команды, а факты — из заявки, без копирования приказа и без выдуманных цен."
                 : `Переменные: {{firstName}}, {{companyName}}, {{service}}, {{managerName}}. Пустое имя не даст «, добрый день!».`}
             </p>
             <label className="check-row">
@@ -947,7 +947,7 @@ export function CampaignMassPanel({
             {personalizeEach ? (
               <div className="field-block">
                 <p className="muted">
-                  CRM поймёт задачу и соберёт текст из фактов клиента: имя, интерес, компания. Цены, скидки и сроки не выдумываем.
+                  CRM возьмёт суть вашей команды и подставит факты заявки: имя, что просил клиент, компания. Цены, скидки и сроки не выдумываем.
                 </p>
                 <button type="button" className="btn secondary" disabled={busy || !campaignId} onClick={() => void onPersonalizeOffers()}>
                   {campaign?.recipients?.some((row: any) => row.messageDraft) ? "Пересобрать предложения" : "Составить предложения из задачи"}
