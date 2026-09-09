@@ -18,7 +18,7 @@ import {
   recipientDraftsFingerprint,
   resolveRecipientSendText,
 } from "./campaignPersonalize.ts";
-import { extractSpokenMessage } from "./aiCommandParserService.ts";
+import { extractSpokenMessage } from "./spokenMessage.ts";
 import { inquiryInterest, loadConversationInterests, pickUsableInterest } from "./contactInterestService.ts";
 import { writeActivity } from "./contactService.ts";
 import { refineCampaignRecipientDraftsWithLlm } from "./llmClient.ts";

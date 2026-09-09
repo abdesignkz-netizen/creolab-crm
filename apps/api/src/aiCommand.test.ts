@@ -117,6 +117,43 @@ describe("AI task commands", () => {
     assert.match(String(body.suggestedDraft || ""), /файл готов/i);
   });
 
+  it("parse-command составляет текст из сути задачи, а не шаблон «актуальна ли заявка»", async () => {
+    const contact = await prisma.contact.create({
+      data: {
+        tenantId,
+        name: "Айбек Созвон",
+        firstName: "Айбек",
+        lastName: "Созвон",
+        companyName: "Nomad Steel",
+      },
+    });
+    await prisma.inquiry.create({
+      data: {
+        tenantId,
+        contactId: contact.id,
+        source: "manual",
+        status: "new",
+        phoneRaw: "+7 700 222 33 44",
+        phoneNormalized: "77002223344",
+        phoneSource: "manual",
+        subject: "ИИ-менеджер для WhatsApp",
+        service: "ИИ-менеджер",
+      },
+    });
+    const res = await fetch(`${base}/api/v1/tasks/parse-command`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({ text: "Уточнить удобное время для созвона", contactIds: [contact.id] }),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.command.taskType, "message");
+    assert.match(String(body.suggestedDraft || ""), /созвон|время/i);
+    assert.match(String(body.suggestedDraft || ""), /Айбек/i);
+    assert.doesNotMatch(String(body.suggestedDraft || ""), /актуальна ли ещё заявка/i);
+    assert.doesNotMatch(String(body.suggestedDraft || ""), /^Уточнить удобное/i);
+  });
+
   it("ambiguous «Александр» при нескольких → needs_clarification", async () => {
     await prisma.contact.create({
       data: {
@@ -427,6 +464,58 @@ describe("AI task commands", () => {
     assert.equal(created.status, 422);
   });
 
+  it("from-command без черновика пишет про созвон, не про актуальность заявки", async () => {
+    const contact = await prisma.contact.create({
+      data: { tenantId, name: "Марат Время", firstName: "Марат", lastName: "Время" },
+    });
+    const created = await fetch(`${base}/api/v1/tasks/from-command`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({
+        text: "Уточнить удобное время для созвона",
+        parsedCommand: { taskType: "message", executionMode: "execute", riskLevel: 3 },
+        clientIds: [contact.id],
+      }),
+    });
+    assert.equal(created.status, 201);
+    const body = await created.json();
+    const draft = String(body.task?.messageDraft || body.messageDraft || "");
+    assert.match(draft, /созвон|время/i);
+    assert.doesNotMatch(draft, /актуальна ли ещё заявка|по нашему вопросу/i);
+    assert.doesNotMatch(draft, /^Уточнить удобное/i);
+  });
+
+  it("from-command для группы пишет разный текст под имя клиента", async () => {
+    const alia = await prisma.contact.create({
+      data: { tenantId, name: "Алия Группа", firstName: "Алия", lastName: "Группа" },
+    });
+    const marat = await prisma.contact.create({
+      data: { tenantId, name: "Марат Группа", firstName: "Марат", lastName: "Группа" },
+    });
+    const created = await fetch(`${base}/api/v1/tasks/from-command`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({
+        text: "Уточни по оплате",
+        parsedCommand: { taskType: "message", executionMode: "execute", riskLevel: 3 },
+        clientIds: [alia.id, marat.id],
+        messageDraft: "Уточни по оплате",
+      }),
+    });
+    assert.equal(created.status, 201);
+    const body = await created.json();
+    const children = (body.task?.childTasks || []) as Array<{ contactId: string; messageDraft?: string | null }>;
+    assert.equal(children.length, 2);
+    const aliaDraft = String(children.find((row) => row.contactId === alia.id)?.messageDraft || "");
+    const maratDraft = String(children.find((row) => row.contactId === marat.id)?.messageDraft || "");
+    assert.match(aliaDraft, /Алия/);
+    assert.match(maratDraft, /Марат/);
+    assert.match(aliaDraft, /оплат/i);
+    assert.match(maratDraft, /оплат/i);
+    assert.doesNotMatch(aliaDraft, /Уточни по оплате/i);
+    assert.notEqual(aliaDraft, maratDraft);
+  });
+
   it("воркер не отправляет уже закрытую запланированную задачу", async () => {
     const task = await prisma.task.create({
       data: {
@@ -452,5 +541,72 @@ describe("AI task commands", () => {
     assert.equal(result.skipped, true);
     const updated = await prisma.scheduledAction.findUniqueOrThrow({ where: { id: action.id } });
     assert.equal(updated.state, "canceled");
+  });
+
+  it("просроченный срок при запланированной отправке не помечает задачу как просроченную", async () => {
+    const contact = await prisma.contact.create({
+      data: { tenantId, name: "План Просрочка", firstName: "План", lastName: "Просрочка" },
+    });
+    const dueAt = new Date(Date.now() - 60_000);
+    const task = await prisma.task.create({
+      data: {
+        tenantId,
+        type: "message",
+        title: "Плановая просрочка",
+        status: "open",
+        dueAt,
+        executionStatus: "scheduled",
+        commandStatus: "scheduled",
+        contactId: contact.id,
+      },
+    });
+    await prisma.scheduledAction.create({
+      data: {
+        tenantId,
+        type: "task_run",
+        parentType: "task",
+        parentId: task.id,
+        dueAt,
+        state: "scheduled",
+      },
+    });
+    const listed = await fetch(`${base}/api/v1/tasks`, { headers: { cookie } });
+    assert.equal(listed.status, 200);
+    const body = await listed.json();
+    const row = (body.items || []).find((item: { id: string }) => item.id === task.id);
+    assert.ok(row);
+    assert.equal(row.sendScheduled, true);
+    assert.equal(row.overdue, false);
+    await prisma.scheduledAction.updateMany({
+      where: { parentType: "task", parentId: task.id, state: "scheduled" },
+      data: { state: "canceled", cancelReason: "test_cleanup" },
+    });
+  });
+
+  it("фоновые джобы не трогают отправку с будущим сроком", async () => {
+    const task = await prisma.task.create({
+      data: {
+        tenantId,
+        type: "message",
+        title: "Будущая плановая",
+        status: "open",
+        dueAt: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000),
+        executionStatus: "scheduled",
+      },
+    });
+    const action = await prisma.scheduledAction.create({
+      data: {
+        tenantId,
+        type: "task_run",
+        parentType: "task",
+        parentId: task.id,
+        dueAt: task.dueAt!,
+        state: "scheduled",
+      },
+    });
+    const { processDueScheduledActions } = await import("./services/backgroundJobs.ts");
+    await processDueScheduledActions(prisma);
+    const updated = await prisma.scheduledAction.findUniqueOrThrow({ where: { id: action.id } });
+    assert.equal(updated.state, "scheduled");
   });
 });

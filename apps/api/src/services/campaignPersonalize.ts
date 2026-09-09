@@ -1,4 +1,4 @@
-import { extractSpokenMessage } from "./aiCommandParserService.ts";
+import { extractSpokenMessage } from "./spokenMessage.ts";
 import { isGenericLeadLabel } from "./contactInterestService.ts";
 
 export type CampaignOfferKind = "proposal" | "documents" | "follow_up" | "message";

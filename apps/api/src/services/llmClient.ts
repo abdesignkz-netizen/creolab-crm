@@ -1,5 +1,20 @@
 import { CALLS_ENABLED } from "../lib/featureFlags.ts";
 
+const DEFAULT_ANYMODEL_BASE_URL = "https://anymodel.org/v1";
+
+function llmConfig() {
+  const anyModelKey = String(process.env.ANYMODEL_API_KEY || "").trim();
+  const openAiKey = String(process.env.OPENAI_API_KEY || "").trim();
+  const apiKey = openAiKey || anyModelKey;
+  const useAnyModel = Boolean(anyModelKey) && !openAiKey;
+  const baseUrl =
+    process.env.ANYMODEL_BASE_URL ||
+    process.env.OPENAI_BASE_URL ||
+    (useAnyModel ? DEFAULT_ANYMODEL_BASE_URL : "https://api.openai.com/v1");
+  const model = process.env.ANYMODEL_MODEL || process.env.OPENAI_MODEL || "gpt-4o-mini";
+  return { apiKey, baseUrl: baseUrl.replace(/\/$/, ""), model };
+}
+
 /**
  * Optional LLM client. Used only to refine StructuredCommand JSON
  * or ConversationAnalysis JSON. Never calls sendMessage / messaging providers.
@@ -262,7 +277,7 @@ export async function refineCampaignRecipientDraftsWithLlm(input: {
           {
             role: "system",
             content:
-              "Ты редактор CRM-рассылки. Задача менеджера — что нужно спросить или сделать, не готовый WhatsApp-текст. Сформулируй короткое сообщение клиенту именно об этой просьбе. Верни JSON { drafts: [{id, text}] }. 1–3 предложения, вежливо, на русском. Не подменяй задачу шаблоном «актуален ли ещё запрос», если менеджер просил другое (время созвона, оплату, документы и т.д.). Имя для обращения бери только из firstName; не используй ярлыки полей («Интерес», «Имя», «Компания») и не подставляй интерес вместо имени. Если имени нет — начни с «Добрый день!». Интерес и компанию можно упомянуть как контекст заявки. Не выдумывай цены, скидки, сроки, метрики, услуги и факты, которых нет во входных данных. Не добавляй телефоны. Не отправляй сообщения.",
+              "Ты пишешь исходящие WhatsApp-сообщения клиентам CREOLAB. Главное — выполни задачу менеджера по смыслу, не шаблоном. Не пиши «актуальна ли заявка» / «актуален ли ещё запрос», если менеджер просил другое (время созвона, оплату, файл, документы и т.д.). Верни JSON { drafts: [{id, text}] }. 1–3 предложения, на «Вы», как живой менеджер. Имя только из firstName; не используй ярлыки полей («Интерес», «Имя», «Компания»). Если имени нет — «Добрый день!». Интерес и компанию — как контекст заявки. Не выдумывай цены, скидки, сроки и факты. Не упоминай менеджера, CRM и что текст составлен по инструкции. Не отправляй сообщения.",
           },
           {
             role: "user",
@@ -287,6 +302,87 @@ export async function refineCampaignRecipientDraftsWithLlm(input: {
       .map((row) => ({ id: String(row.id || ""), text: String(row.text || "").trim() }))
       .filter((row) => row.id && row.text && row.text.length <= 4000);
     return drafts.length ? drafts : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Same compose rules as WhatsApp ИИ-менеджер `composeClientMessage`
+ * (AnyModel/OpenAI chat completions). Does not call that repo.
+ */
+export async function composeClientMessageWithLlm(input: {
+  instruction: string;
+  firstName?: string | null;
+  companyName?: string | null;
+  interest?: string | null;
+  lastClientMessage?: string | null;
+  history?: Array<{ role: string; content: string }>;
+}) {
+  const { apiKey, baseUrl, model } = llmConfig();
+  const instruction = String(input.instruction || "").trim();
+  if (!apiKey || !instruction) return null;
+
+  const unknown = (value?: string | null) => {
+    const text = String(value || "").replace(/\s+/g, " ").trim();
+    return text || "неизвестно";
+  };
+  const history = Array.isArray(input.history) && input.history.length
+    ? input.history
+        .slice(-40)
+        .map((item, index) => {
+          const role = item.role === "assistant" ? "мы уже отправили клиенту" : item.role === "user" ? "клиент" : item.role || "unknown";
+          return `${index + 1}. [${role}]: ${item.content || ""}`;
+        })
+        .join("\n")
+    : "История диалога пуста.";
+
+  const prompt = [
+    "Ты пишешь одно исходящее WhatsApp-сообщение клиенту CREOLAB.",
+    "Главное — выполни задачу менеджера по смыслу. Не подменяй её шаблоном.",
+    "Не пиши типовые фразы вроде «актуальна ли заявка», «готов ли обсудить шаги», «задайте пару вопросов», если менеджер просил о другом.",
+    "Если просят напомнить о согласовании, подтверждении, запуске, файле, макете, оплате или удобном времени — пиши именно об этом.",
+    "Опирайся на историю переписки и контекст заявки, а не на общий сценарий продаж.",
+    "Не начинай мини-бриф и не предлагай услуги, если задача другая.",
+    "Пиши на «Вы», коротко, как живой менеджер.",
+    "Имя для обращения бери только из поля «Имя клиента». Не используй ярлыки полей.",
+    "Не упоминай менеджера, lead, команды и что текст составлен по инструкции.",
+    "Не пиши, что не можешь отправить. Не проси скопировать текст.",
+    `Имя клиента: ${unknown(input.firstName)}`,
+    `Компания: ${unknown(input.companyName)}`,
+    `Услуга / запрос: ${unknown(input.interest)}`,
+    `Последнее от клиента: ${unknown(input.lastClientMessage)}`,
+    "",
+    "История переписки:",
+    history,
+    "",
+    `Задача менеджера: ${instruction}`,
+    "",
+    "Верни только текст сообщения клиенту, без кавычек и без пояснений.",
+  ].join("\n");
+
+  try {
+    const response = await fetch(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0.2,
+        messages: [{ role: "user", content: prompt }],
+      }),
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!response.ok) return null;
+    const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    const text = String(data.choices?.[0]?.message?.content || "")
+      .trim()
+      .replace(/^["«]|["»]$/g, "");
+    if (!text || text.length > 4000) return null;
+    if (/^не могу|^я не могу|скопируйте текст|задача менеджера/i.test(text)) return null;
+    return text;
   } catch {
     return null;
   }

@@ -14,6 +14,7 @@ import {
   updateTaskDraft,
 } from "./taskExecutionService.ts";
 import { TASK_TYPE_LABEL } from "./contactLabels.ts";
+import { composeCommandDraftsForContacts, wantsClientMessageDraft } from "./commandComposeService.ts";
 import { searchContactsForPicker } from "./segmentService.ts";
 
 function tenantId(auth: AuthContext) {
@@ -88,13 +89,17 @@ export async function createTaskFromCommand(
   const title =
     clientIds.length === 1 ? `${actionLabel}` : `${actionLabel} — ${clientIds.length} клиентов`;
 
-  const defaultMessage =
-    input.messageDraft ||
-    (taskType === "proposal"
-      ? "Добрый день! Во вложении коммерческое предложение. Готовы обсудить детали."
-      : taskType === "message"
-        ? "Добрый день! Хотел уточнить по нашему вопросу."
-        : undefined);
+  const composed = wantsClientMessageDraft(taskType)
+    ? await composeCommandDraftsForContacts({
+        prisma,
+        tenantId: tenantId(auth),
+        taskText: input.text,
+        contactIds: clientIds,
+        userDraft: input.messageDraft,
+      })
+    : [];
+  const draftByContact = new Map(composed.map((row) => [row.contactId, row.text]));
+  const defaultMessage = composed[0]?.text || (String(input.messageDraft || "").trim() || undefined);
 
   const created = await createTask(prisma, auth, {
     type: taskType === "send_documents" ? "send_documents" : taskType,
@@ -136,20 +141,22 @@ export async function createTaskFromCommand(
     where: { tenantId: tenantId(auth), parentTaskId: parentId },
   });
 
-  if (draft) {
-    if (children.length) {
-      await prisma.task.updateMany({
-        where: { parentTaskId: parentId },
+  if (children.length) {
+    for (const child of children) {
+      const childDraft = (child.contactId && draftByContact.get(child.contactId)) || draft;
+      if (!childDraft) continue;
+      await prisma.task.update({
+        where: { id: child.id },
         data: {
-          messageDraft: draft,
+          messageDraft: childDraft,
           executionStatus: scheduled ? "scheduled" : "prepared",
           source: "ai_command",
           commandStatus: scheduled ? "scheduled" : "prepared",
         },
       });
-    } else if (created.contactId) {
-      await updateTaskDraft(prisma, auth, parentId, { messageDraft: draft });
     }
+  } else if (draft && created.contactId) {
+    await updateTaskDraft(prisma, auth, parentId, { messageDraft: draft });
   }
 
   const full = await prisma.task.findFirst({

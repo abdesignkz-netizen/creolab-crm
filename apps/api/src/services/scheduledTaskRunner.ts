@@ -107,6 +107,10 @@ export async function processScheduledTask(prisma: PrismaClient, action: Schedul
       where: { id: action.id },
       data: { state: "failed", cancelReason: error instanceof Error ? error.message : "error" },
     });
+    await prisma.task.updateMany({
+      where: { id: task.id, tenantId: action.tenantId, status: { in: ["open", "waiting"] } },
+      data: { executionStatus: "failed" },
+    });
     throw error;
   }
 }

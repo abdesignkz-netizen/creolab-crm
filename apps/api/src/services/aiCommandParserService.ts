@@ -2,9 +2,13 @@ import type { PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import { CALLS_ENABLED } from "../lib/featureFlags.ts";
 import type { AuthContext } from "../lib/types.ts";
+import { composeCommandClientDraft } from "./commandComposeService.ts";
 import { refineCommandWithLlm } from "./llmClient.ts";
 import { SERVICE_CATEGORIES, previewContactSegment, searchContactsForPicker } from "./segmentService.ts";
+import { extractSpokenMessage } from "./spokenMessage.ts";
 import { TASK_TYPE_LABEL } from "./contactLabels.ts";
+
+export { extractSpokenMessage } from "./spokenMessage.ts";
 
 export type StructuredCommand = {
   rawText: string;
@@ -45,27 +49,6 @@ function normalize(text: string) {
 }
 
 /** Pull client-facing text from «скажи что …» / «напиши …». */
-export function extractSpokenMessage(rawText: string): string | null {
-  const text = String(rawText || "").trim();
-  if (!text) return null;
-  const patterns = [
-    /(?:скажи|скажите|сказать|напиши|напишите|написать|сообщи|сообщите|сообщить|переда|передай|передайте)\s+(?:клиенту\s+|им\s+|ему\s+|ей\s+)?что\s+(.+)/i,
-    /(?:скажи|скажите|напиши|напишите|сообщи|переда)\s+(?:клиенту\s+|им\s+)?(.+)/i,
-    /(?:отправь|отправьте|отправить)\s+(?:ему\s+|ей\s+|им\s+|клиенту\s+)?(?:сообщение|текст|смс)\s*[:\-–]?\s*(.+)/i,
-  ];
-  for (const re of patterns) {
-    const m = text.match(re);
-    if (m?.[1]) {
-      let body = m[1].trim().replace(/[.!?…]+$/u, "");
-      // Drop trailing recipient fluff if any
-      body = body.replace(/\s+(пожалуйста|pls)$/i, "").trim();
-      if (body.length < 2) continue;
-      return body.charAt(0).toUpperCase() + body.slice(1) + (/[.!?]$/.test(body) ? "" : ".");
-    }
-  }
-  return null;
-}
-
 function parseRules(rawText: string): StructuredCommand {
   const text = normalize(rawText);
   const ambiguities: string[] = [];
@@ -447,14 +430,17 @@ export async function parseTaskCommand(
   }
 
   const status = needsClarification || command.confidence === "low" ? "needs_clarification" : "parsed";
-  const suggestedDraft =
-    command.taskType === "message"
-      ? extractSpokenMessage(text) || "Добрый день! Хотел уточнить по вашей заявке."
-      : command.taskType === "proposal"
-        ? "Добрый день! Во вложении коммерческое предложение. Готовы обсудить детали."
-        : command.taskType === "send_documents"
-          ? "Добрый день! Направляем документы во вложении."
-          : null;
+  const preview = clients[0];
+  const suggestedDraft = await composeCommandClientDraft({
+    prisma,
+    tenantId: auth.activeMembership.tenantId,
+    taskText: text,
+    taskType: command.taskType,
+    contactId: typeof preview?.id === "string" ? preview.id : null,
+    firstName: typeof preview?.name === "string" ? preview.name : null,
+    companyName: typeof preview?.companyName === "string" ? preview.companyName : null,
+    interest: typeof preview?.interest === "string" ? preview.interest : null,
+  });
 
   return {
     status,

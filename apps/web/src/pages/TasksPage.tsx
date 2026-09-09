@@ -1026,16 +1026,8 @@ export function TasksPage() {
       } else {
         setCommandSelectedIds(ids);
       }
-      setCommandDraft(
-        data.suggestedDraft ||
-          (data.command?.taskType === "proposal"
-            ? "Добрый день! Во вложении коммерческое предложение. Готовы обсудить детали."
-            : data.command?.taskType === "message" || /уточн|скажи|напиш|сообщ/i.test(commandText)
-              ? "Добрый день! Хотел уточнить, актуальна ли ещё заявка."
-              : data.command?.taskType === "send_documents"
-                ? "Добрый день! Направляем документы во вложении."
-                : ""),
-      );
+      const nextDraft = String(data.suggestedDraft || "").trim();
+      setCommandDraft(nextDraft);
       if (data.asCampaign || ((data.clients?.length || 0) + unresolved.length > 5 && massIntent)) {
         setShowCampaignPanel(true);
         setComposeMode("campaign");
@@ -1044,10 +1036,7 @@ export function TasksPage() {
           contactIds: ids,
           phones: unresolved.length ? unresolved.join("\n") : hasPhoneBlob ? commandText : undefined,
           command: commandText,
-          message:
-            data.command?.taskType === "proposal"
-              ? "{{firstName}}, добрый день! Направляем коммерческое предложение. Во вложении — условия и варианты работы."
-              : commandDraft,
+          message: nextDraft,
           pendingAttachments: cmdPendingFiles,
         });
       }
@@ -1592,11 +1581,12 @@ export function TasksPage() {
                 setCommandParse(null);
               }}
               rows={3}
-              placeholder='Например: «Уточни, актуальна ли заявка» или «Отправь КП»'
+              placeholder='Например: «Уточни удобное время для созвона» или «Отправь КП»'
             />
+            <p className="muted">Это задание для CRM. Текст клиенту соберём из сути задачи и заявки, не из шаблона.</p>
             <div className="chip-row">
               {[
-                "Уточни, актуальна ли заявка.",
+                "Уточни удобное время для созвона.",
                 ...(CALLS_ENABLED ? ["Позвони и обсуди детали."] : []),
                 "Напиши и уточни по оплате.",
                 "Отправь КП.",
@@ -2684,7 +2674,7 @@ export function TasksPage() {
                 <div className="task-row-main">
                   <div className="task-row-title">
                     <b>{item.title}</b>
-                    {item.overdue ? <span className="deal-flag">Просрочено</span> : null}
+                    {item.overdue && !isScheduledSend(item) ? <span className="deal-flag">Просрочено</span> : null}
                     {item.sendScheduled || item.executionStatus === "scheduled" ? (
                       <span className="deal-flag">Отправка запланирована</span>
                     ) : null}

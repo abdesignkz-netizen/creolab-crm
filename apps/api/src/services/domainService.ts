@@ -200,7 +200,7 @@ async function scheduledSendByTaskIds(prisma: PrismaClient, tenantId: string, ta
       tenantId,
       parentType: "task",
       parentId: { in: taskIds },
-      state: "scheduled",
+      state: { in: ["scheduled", "running"] },
       type: { in: ["task_run", "task_batch_run"] },
     },
     orderBy: { dueAt: "desc" },
@@ -269,8 +269,12 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
       item.inquiry?.phoneRaw ||
       item.inquiry?.phoneNormalized ||
       null;
+    const sendScheduled =
+      item.executionStatus === "scheduled" ||
+      item.commandStatus === "scheduled" ||
+      scheduledSendAtByTask.has(item.id);
     const overdue =
-      Boolean(item.dueAt && item.dueAt < now && item.status !== "done" && item.status !== "canceled");
+      Boolean(item.dueAt && item.dueAt < now && item.status !== "done" && item.status !== "canceled" && !sendScheduled);
     const failedFiles = failedByTask.get(item.id) || [];
     const needsFileRetry =
       failedFiles.length > 0 || item.executionStatus === "partial";
@@ -334,10 +338,7 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
       failedFiles,
       executionStatus: item.executionStatus,
       scheduledSendAt: scheduledSendAtByTask.get(item.id) || null,
-      sendScheduled:
-        item.executionStatus === "scheduled" ||
-        item.commandStatus === "scheduled" ||
-        scheduledSendAtByTask.has(item.id),
+      sendScheduled,
       campaignId:
         (typeof item.parsedCommandJson === "object" && item.parsedCommandJson
           ? (item.parsedCommandJson as { campaignId?: string }).campaignId
@@ -352,7 +353,7 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
   const knownCampaignIds = new Set(rows.map((row) => row.campaignId).filter(Boolean));
   const queuedCampaignIds = (
     await prisma.scheduledAction.findMany({
-      where: { tenantId: tid, parentType: "campaign", type: "campaign_run", state: "scheduled" },
+      where: { tenantId: tid, parentType: "campaign", type: "campaign_run", state: { in: ["scheduled", "running"] } },
       select: { parentId: true },
       take: 40,
     })
@@ -427,7 +428,7 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
       aboutLines: [`Рассылка · ${pending.length} получателям`],
       descriptionPreview: campaign.messageDraft ? String(campaign.messageDraft).slice(0, 180) : null,
       messagePreview: campaign.messageDraft ? String(campaign.messageDraft).slice(0, 180) : null,
-      overdue: Boolean(campaign.scheduledAt && campaign.scheduledAt < now),
+      overdue: false,
       doneAt: null,
       resultLabel: null,
       doneSummary: null,

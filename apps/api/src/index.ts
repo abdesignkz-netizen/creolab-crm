@@ -20,4 +20,5 @@ const app = createApp(prisma);
 app.listen(config.port, () => {
   console.log(`CREOLAB AI CRM API http://127.0.0.1:${config.port}`);
   console.log("WhatsApp не требуется для заявок и кабинета.");
+  void import("./services/backgroundJobs.ts").then(({ startBackgroundJobs }) => startBackgroundJobs(prisma));
 });
