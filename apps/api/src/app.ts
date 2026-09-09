@@ -35,6 +35,7 @@ import {
   segmentPreviewSchema,
   sendMessageSchema,
   snoozeSituationSchema,
+  askSituationSchema,
   taskAttachmentSchema,
   updateCampaignSchema,
   updateContactSchema,
@@ -151,6 +152,7 @@ import {
 } from "./services/campaignService.ts";
 import { parseContactImportFile } from "./services/contactImportParse.ts";
 import { getSituationOverview } from "./services/situationOverviewService.ts";
+import { askSituation } from "./services/situationAskService.ts";
 import {
   changeDealStage,
   getDeal,
@@ -331,6 +333,11 @@ export function createApp(prisma: PrismaClient) {
   app.post("/api/v1/situation/snooze", json, async (req, res) => {
     const input = snoozeSituationSchema.parse(req.body);
     res.json(await snoozeSituation(prisma, await requireAuth(req), input));
+  });
+
+  app.post("/api/v1/situation/ask", json, async (req, res) => {
+    const input = askSituationSchema.parse(req.body);
+    res.json(await askSituation(prisma, await requireAuth(req), input));
   });
 
   app.get("/api/v1/inquiries", async (req, res) => {

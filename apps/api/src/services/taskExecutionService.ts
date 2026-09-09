@@ -11,9 +11,10 @@ import { displayName, formatWhen } from "./contactLabels.ts";
 import { hashExecutionContent, sendViaProvider } from "./messagingProvider.ts";
 import { analyzeTaskResultNextActions, MEETING_RESULTS } from "./taskResultAnalysisService.ts";
 import { syncAgreementToCalendar } from "./calendarAdapter.ts";
+import { parseDateTimeInput } from "./periodRange.ts";
 import { resolveSellerBridge, resolveWhatsAppConversation } from "./sellerLink.ts";
 
-const SENDABLE_TYPES = new Set([
+export const SENDABLE_TYPES = new Set([
   "proposal",
   "message",
   "send_documents",
@@ -93,7 +94,8 @@ export function taskMarkedForScheduledSend(
   },
   now = new Date(),
 ) {
-  return task.executionStatus === "scheduled" || task.commandStatus === "scheduled" || taskSendDueLater(task.dueAt, now);
+  if (!taskSendDueLater(task.dueAt, now)) return false;
+  return task.executionStatus === "scheduled" || task.commandStatus === "scheduled";
 }
 
 export async function cancelScheduledTaskSends(
@@ -294,7 +296,7 @@ export async function updateTaskDraft(
     if (input.dueAt == null || input.dueAt === "") {
       nextDue = null;
     } else {
-      nextDue = new Date(input.dueAt);
+      nextDue = parseDateTimeInput(input.dueAt, auth.activeMembership?.tenant?.timezone || "Asia/Almaty");
       if (Number.isNaN(nextDue.getTime())) {
         throw new ApiError(422, "invalid", "Некорректная дата срока");
       }
@@ -580,14 +582,29 @@ export async function prepareTaskExecution(prisma: PrismaClient, auth: AuthConte
     });
   }
 
-  const conversation = await resolveWhatsAppConversation(prisma, {
-    tenantId: tid,
-    contactId: contact.id,
-    preferredConversationId: task.conversationId,
-    defaultRegion: auth.activeMembership?.tenant.defaultRegion || "KZ",
-    contactName: displayName(contact),
-    healFromBot: true,
-  });
+  let conversation =
+    (task.conversationId
+      ? contact.conversations.find((row) => row.id === task.conversationId && row.sellerLeadId) ||
+        (await prisma.conversation.findFirst({
+          where: { id: task.conversationId, tenantId: tid, sellerLeadId: { not: null } },
+        }))
+      : null) ||
+    contact.conversations.find((row) => row.sellerLeadId) ||
+    null;
+  if (!conversation?.sellerLeadId) {
+    try {
+      conversation = await resolveWhatsAppConversation(prisma, {
+        tenantId: tid,
+        contactId: contact.id,
+        preferredConversationId: task.conversationId,
+        defaultRegion: auth.activeMembership?.tenant.defaultRegion || "KZ",
+        contactName: displayName(contact),
+        healFromBot: true,
+      });
+    } catch {
+      conversation = conversation;
+    }
+  }
   if (!conversation?.sellerLeadId) {
     throw new ApiError(422, "invalid", "Нет WhatsApp-диалога с sellerLead. Синхронизируйте бота или выберите диалог.");
   }
@@ -604,7 +621,7 @@ export async function prepareTaskExecution(prisma: PrismaClient, auth: AuthConte
   await prisma.task.update({
     where: { id },
     data: {
-      executionStatus: "prepared",
+      executionStatus: taskMarkedForScheduledSend(task) ? "scheduled" : "prepared",
       conversationId: conversation.id,
       inquiryId: inquiry?.id || task.inquiryId,
     },
@@ -876,6 +893,7 @@ export async function executeTask(
       data: {
         status: "done",
         executionStatus: "sent",
+        commandStatus: "sent",
         sentAt: new Date(),
         completedAt: new Date(),
         completionSource: "system",
@@ -902,7 +920,11 @@ export async function executeTask(
   } else {
     await prisma.task.update({
       where: { id },
-      data: { executionStatus: partial ? "partial" : "failed", status: "open" },
+      data: {
+        executionStatus: partial ? "partial" : "failed",
+        commandStatus: partial ? "partial" : "failed",
+        status: "open",
+      },
     });
     if (task.contactId) {
       await writeActivity(prisma, {
@@ -973,6 +995,7 @@ export async function completeTaskWithResult(
       throw new ApiError(422, "inquiry_open", "Сначала примите или отклоните заявку, затем закройте задачу");
     }
   }
+  await cancelScheduledTaskSends(prisma, tid, id, "task_done");
 
   const updated = await prisma.task.update({
     where: { id },
@@ -1032,7 +1055,9 @@ export async function completeTaskWithResult(
         inquiryId: task.inquiryId,
         conversationId: task.conversationId,
         dealId: task.dealId,
-        dueAt: input.nextAction.dueAt ? new Date(input.nextAction.dueAt) : null,
+        dueAt: input.nextAction.dueAt
+          ? parseDateTimeInput(input.nextAction.dueAt, auth.activeMembership?.tenant?.timezone || "Asia/Almaty")
+          : null,
         ownerMembershipId: task.ownerMembershipId || auth.activeMembership?.id,
         source: "system",
         targetType: task.contactId ? "client" : "none",
@@ -1127,4 +1152,4 @@ export async function createNextActionFromSuggestion(
   return next;
 }
 
-export { CALL_RESULTS, PROPOSAL_RESULTS, SENDABLE_TYPES, MEETING_RESULTS };
+export { CALL_RESULTS, PROPOSAL_RESULTS, MEETING_RESULTS };

@@ -21,20 +21,12 @@ export async function countVisibleConversations(prisma: PrismaClient, where: Pri
   return excludeRematchedLeftovers(rows).length;
 }
 
-/** Same exclusion as the Задачи nav badge and the overdue filter on /tasks. */
-export const notScheduledSend = {
-  NOT: {
-    OR: [{ executionStatus: "scheduled" }, { commandStatus: "scheduled" }],
-  },
-};
-
 export function overdueTasksWhere(tenantId: string, now: Date): Prisma.TaskWhereInput {
   return {
     tenantId,
     parentTaskId: null,
     status: { in: ["open", "waiting"] },
     dueAt: { lt: now },
-    ...notScheduledSend,
   };
 }
 

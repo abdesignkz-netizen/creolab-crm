@@ -148,37 +148,58 @@ describe("inquiries overhaul", () => {
     assert.match(badges.hints["/inquiries"], /требуют внимания|требует внимания/);
   });
 
-  it("запланированная отправка не считается просроченной в бейдже задач", async () => {
+  it("будущая запланированная отправка не считается просроченной в бейдже задач", async () => {
     const meRes = await fetch(`${url}/api/v1/me`, { headers: { cookie } });
     const me = await meRes.json();
     const tenantId = me.activeTenant.tenant.id;
     const ownerMembershipId = me.activeTenant.membershipId;
-    const dueAt = new Date(Date.now() - 60 * 60 * 1000);
+    const { overdueTasksWhere } = await import("./services/attentionCounts.ts");
+    const future = await prisma.task.create({
+      data: {
+        tenantId,
+        ownerMembershipId,
+        type: "message",
+        title: "Запланированная отправка завтра",
+        status: "open",
+        dueAt: new Date(Date.now() + 60 * 60 * 1000),
+        executionStatus: "scheduled",
+        commandStatus: "scheduled",
+        dedupeKey: `test-nav-scheduled-future-${Date.now()}`,
+      },
+    });
+    try {
+      const before = await prisma.task.count({ where: overdueTasksWhere(tenantId, new Date()) });
+      const badges = await (await fetch(`${url}/api/v1/nav-badges`, { headers: { cookie } })).json();
+      assert.equal(badges.badges["/tasks"], before);
+    } finally {
+      await prisma.task.delete({ where: { id: future.id } });
+    }
+  });
+
+  it("наступивший срок запланированной отправки считается в бейдже задач", async () => {
+    const meRes = await fetch(`${url}/api/v1/me`, { headers: { cookie } });
+    const me = await meRes.json();
+    const tenantId = me.activeTenant.tenant.id;
+    const ownerMembershipId = me.activeTenant.membershipId;
+    const { overdueTasksWhere } = await import("./services/attentionCounts.ts");
     const task = await prisma.task.create({
       data: {
         tenantId,
         ownerMembershipId,
-        type: "send_message",
+        type: "message",
         title: "Запланированная отправка вчера",
         status: "open",
-        dueAt,
+        dueAt: new Date(Date.now() - 60 * 60 * 1000),
         executionStatus: "scheduled",
         commandStatus: "scheduled",
-        dedupeKey: `test-nav-scheduled-${Date.now()}`,
+        dedupeKey: `test-nav-scheduled-past-${Date.now()}`,
       },
     });
     try {
+      const counted = await prisma.task.count({ where: overdueTasksWhere(tenantId, new Date()) });
       const badges = await (await fetch(`${url}/api/v1/nav-badges`, { headers: { cookie } })).json();
-      const counted = await prisma.task.count({
-        where: {
-          tenantId,
-          parentTaskId: null,
-          status: { in: ["open", "waiting"] },
-          dueAt: { lt: new Date() },
-          NOT: { OR: [{ executionStatus: "scheduled" }, { commandStatus: "scheduled" }] },
-        },
-      });
       assert.equal(badges.badges["/tasks"], counted);
+      assert.ok(counted >= 1);
     } finally {
       await prisma.task.delete({ where: { id: task.id } });
     }

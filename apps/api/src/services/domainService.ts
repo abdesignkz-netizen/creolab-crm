@@ -10,6 +10,7 @@ import { resolveSellerBridge } from "./sellerLink.ts";
 import { resolveContactLinks } from "./segmentService.ts";
 import { getSituation } from "./situationService.ts";
 import { getConversationWorkspace, listConversationsBoard } from "./conversationService.ts";
+import { parseDateTimeInput } from "./periodRange.ts";
 
 function tenantId(auth: AuthContext) {
   if (!auth.activeMembership) throw new ApiError(403, "no_tenant", "Нет активной компании");
@@ -269,10 +270,12 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
       item.inquiry?.phoneRaw ||
       item.inquiry?.phoneNormalized ||
       null;
+    const dueLater = Boolean(item.dueAt && item.dueAt.getTime() > now.getTime());
     const sendScheduled =
-      item.executionStatus === "scheduled" ||
-      item.commandStatus === "scheduled" ||
-      scheduledSendAtByTask.has(item.id);
+      dueLater &&
+      (item.executionStatus === "scheduled" ||
+        item.commandStatus === "scheduled" ||
+        scheduledSendAtByTask.has(item.id));
     const overdue =
       Boolean(item.dueAt && item.dueAt < now && item.status !== "done" && item.status !== "canceled" && !sendScheduled);
     const failedFiles = failedByTask.get(item.id) || [];
@@ -373,6 +376,7 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
     if (knownCampaignIds.has(campaign.id)) continue;
     if (items.some((item) => item.dedupeKey === campaignTaskDedupeKey(campaign.id))) continue;
     const pending = campaign.recipients;
+    const campaignDueLater = Boolean(campaign.scheduledAt && campaign.scheduledAt.getTime() > Date.now());
     rows.push({
       id: campaignTaskDedupeKey(campaign.id),
       tenantId: campaign.tenantId,
@@ -428,7 +432,7 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
       aboutLines: [`Рассылка · ${pending.length} получателям`],
       descriptionPreview: campaign.messageDraft ? String(campaign.messageDraft).slice(0, 180) : null,
       messagePreview: campaign.messageDraft ? String(campaign.messageDraft).slice(0, 180) : null,
-      overdue: false,
+      overdue: Boolean(campaign.scheduledAt && !campaignDueLater),
       doneAt: null,
       resultLabel: null,
       doneSummary: null,
@@ -448,7 +452,7 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
       needsFileRetry: false,
       failedFiles: [],
       scheduledSendAt: campaign.scheduledAt,
-      sendScheduled: true,
+      sendScheduled: campaignDueLater,
       campaignId: campaign.id,
     } as (typeof rows)[number]);
   }
@@ -509,7 +513,8 @@ export async function getTask(prisma: PrismaClient, auth: AuthContext, id: strin
     ...item,
     scheduledSendAt,
     sendScheduled:
-      item.executionStatus === "scheduled" || item.commandStatus === "scheduled" || Boolean(scheduledSendAt),
+      Boolean(item.dueAt && item.dueAt.getTime() > new Date().getTime()) &&
+      (item.executionStatus === "scheduled" || item.commandStatus === "scheduled" || Boolean(scheduledSendAt)),
     attachments,
     isSendable: ["proposal", "message", "send_documents", "prepare_estimate", "follow_up", "process_inquiry"].includes(item.type),
     briefing: {
@@ -608,7 +613,13 @@ export async function createTask(
     const owner = await prisma.membership.findFirst({ where: { id: ownerMembershipId, tenantId: tid, active: true } });
     if (!owner) throw new ApiError(422, "invalid", "Ответственный не найден");
   }
-  const dueAt = input.dueAt ? new Date(input.dueAt) : null;
+  let dueAt: Date | null = null;
+  if (input.dueAt) {
+    dueAt = parseDateTimeInput(input.dueAt, auth.activeMembership?.tenant?.timezone || "Asia/Almaty");
+    if (Number.isNaN(dueAt.getTime())) {
+      throw new ApiError(422, "invalid", "Некорректная дата срока");
+    }
+  }
 
   if (targetType === "group") {
     const clientIds = [...new Set(input.clientIds || [])];

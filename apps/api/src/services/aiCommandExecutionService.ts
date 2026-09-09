@@ -8,6 +8,7 @@ import {
   executeTask,
   prepareTaskExecution,
   scheduleConfirmedTaskSend,
+  SENDABLE_TYPES,
   syncGroupAttachmentsToChildren,
   taskMarkedForScheduledSend,
   taskSendDueLater,
@@ -15,6 +16,7 @@ import {
 } from "./taskExecutionService.ts";
 import { TASK_TYPE_LABEL } from "./contactLabels.ts";
 import { composeCommandDraftsForContacts, wantsClientMessageDraft } from "./commandComposeService.ts";
+import { parseDateTimeInput } from "./periodRange.ts";
 import { searchContactsForPicker } from "./segmentService.ts";
 
 function tenantId(auth: AuthContext) {
@@ -77,7 +79,8 @@ export async function createTaskFromCommand(
 
   if (!clientIds.length) throw new ApiError(422, "invalid", "Выберите хотя бы одного клиента");
 
-  const dueAt = input.dueAt ? new Date(input.dueAt) : null;
+  const timeZone = auth.activeMembership?.tenant?.timezone || "Asia/Almaty";
+  const dueAt = input.dueAt ? parseDateTimeInput(input.dueAt, timeZone) : null;
   if (input.dueAt && (Number.isNaN(dueAt?.getTime()) || !taskSendDueLater(dueAt))) {
     throw new ApiError(422, "invalid", "Укажите время в будущем. Иначе сообщение уйдёт сразу после подтверждения.");
   }
@@ -124,7 +127,7 @@ export async function createTaskFromCommand(
   const parentId = created.id;
   const draft = defaultMessage || null;
 
-  const scheduled = Boolean(dueAt);
+  const scheduled = Boolean(dueAt) && SENDABLE_TYPES.has(taskType);
   await prisma.task.update({
     where: { id: parentId },
     data: {

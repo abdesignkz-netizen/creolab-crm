@@ -54,6 +54,27 @@ export function zonedLocalToUtc(
   return new Date(utcGuess.getTime() - (asUtc - utcGuess.getTime()));
 }
 
+/** ISO with Z/offset stays absolute. Naive `YYYY-MM-DDTHH:mm` is the tenant's local clock, not the server's. */
+export function parseDateTimeInput(value: string | Date | null | undefined, timeZone = "Asia/Almaty") {
+  if (value instanceof Date) return value;
+  const raw = String(value || "").trim();
+  if (!raw) return new Date(NaN);
+  if (/[zZ]|[+-]\d{2}:?\d{2}$/.test(raw)) return new Date(raw);
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (match) {
+    return zonedLocalToUtc(
+      timeZone,
+      Number(match[1]),
+      Number(match[2]),
+      Number(match[3]),
+      Number(match[4]),
+      Number(match[5]),
+      Number(match[6] || 0),
+    );
+  }
+  return new Date(raw);
+}
+
 export function addDaysYmd(ymd: { year: number; month: number; day: number }, days: number) {
   const utc = new Date(Date.UTC(ymd.year, ymd.month - 1, ymd.day + days));
   return { year: utc.getUTCFullYear(), month: utc.getUTCMonth() + 1, day: utc.getUTCDate() };

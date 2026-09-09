@@ -131,7 +131,8 @@ async function processAgreementReminder(
 
 export async function processDueScheduledActions(prisma: PrismaClient) {
   const { processCampaignQueue } = await import("./campaignService.ts");
-  const { processScheduledTask } = await import("./scheduledTaskRunner.ts");
+  const { processScheduledTask, recoverDueScheduledTaskSends } = await import("./scheduledTaskRunner.ts");
+  await recoverDueScheduledTaskSends(prisma);
   const due = await prisma.scheduledAction.findMany({
     where: { state: "scheduled", dueAt: { lte: new Date() } },
     take: 20,

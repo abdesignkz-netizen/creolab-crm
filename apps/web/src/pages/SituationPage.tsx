@@ -40,8 +40,6 @@ const ASK_PRESETS = [
   "Сравни с прошлой неделей.",
 ];
 
-const TASK_COMMAND_RE = /постав(ь|и)|создай задачу|позвон|напиш|отправ(ь|и)|уточн|follow-?up|кп\b|сообщени/i;
-
 function ageLabel(minutes?: number | null) {
   return formatDurationMinutes(minutes) || "срок не указан";
 }
@@ -102,6 +100,15 @@ export function SituationPage() {
   const [meMissing, setMeMissing] = useState(false);
   const [badgeHint, setBadgeHint] = useState("");
   const [askText, setAskText] = useState("");
+  const [askBusy, setAskBusy] = useState(false);
+  const [askAnswer, setAskAnswer] = useState<{
+    question: string;
+    headline: string;
+    bullets: Array<{ text: string; href?: string }>;
+    links: Array<{ label: string; href: string }>;
+    usedLlm?: boolean;
+    command?: boolean;
+  } | null>(null);
 
   async function load() {
     const request = ++requestVersion.current;
@@ -196,49 +203,54 @@ export function SituationPage() {
   const team = Array.isArray(data.team) ? data.team : [];
   const ai = data.aiManager || {};
 
-  function goAsk(question: string) {
+  async function goAsk(question: string) {
     const text = question.trim();
     if (!text) return;
-    const q = text.toLowerCase();
-    if (TASK_COMMAND_RE.test(text) && !/что |какие |где |у кого |сравни/.test(q)) {
-      navigate(`/tasks?command=${encodeURIComponent(text)}`);
-      return;
+    setAskText(text);
+    setAskBusy(true);
+    setError("");
+    try {
+      const answer = (await api.situationAsk({
+        text,
+        period,
+        scope,
+        onlyImportant,
+        dateFrom: period === "custom" ? dateFrom : undefined,
+        dateTo: period === "custom" ? dateTo : undefined,
+      })) as {
+        question: string;
+        headline: string;
+        bullets?: Array<{ text: string; href?: string }>;
+        links?: Array<{ label: string; href: string }>;
+        usedLlm?: boolean;
+        command?: boolean;
+        suggestedPeriod?: PeriodPreset | null;
+      };
+      if (answer.command) {
+        navigate(`/tasks?command=${encodeURIComponent(text)}`);
+        return;
+      }
+      if (answer.suggestedPeriod && answer.suggestedPeriod !== period) {
+        setPeriod(answer.suggestedPeriod);
+      }
+      setAskAnswer({
+        question: answer.question || text,
+        headline: answer.headline,
+        bullets: answer.bullets || [],
+        links: answer.links || [],
+        usedLlm: answer.usedLlm,
+      });
+      requestAnimationFrame(() => document.getElementById("ask-ai")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось ответить");
+    } finally {
+      setAskBusy(false);
     }
-    if (/вниман|требует/.test(q)) {
-      document.getElementById("attention")?.scrollIntoView({ behavior: "smooth", block: "start" });
-      return;
-    }
-    if (/завис|stall|без активн/.test(q)) {
-      navigate(path("/deals", { focus: "stalled" }));
-      return;
-    }
-    if (/не обработ|новые заявк|заявки не/.test(q)) {
-      navigate(path("/inquiries", { filter: "new", test: "false" }, true));
-      return;
-    }
-    if (/нагруз|менеджер|команд/.test(q)) {
-      document.getElementById("team")?.scrollIntoView({ behavior: "smooth", block: "start" });
-      return;
-    }
-    if (/теря|воронк|этап|клиент/.test(q) && /теря|воронк|где/.test(q)) {
-      document.getElementById("funnel")?.scrollIntoView({ behavior: "smooth", block: "start" });
-      return;
-    }
-    if (/недел|сравни|изменил/.test(q)) {
-      if (/недел/.test(q)) setPeriod("last_7");
-      document.getElementById("sit-result")?.scrollIntoView({ behavior: "smooth", block: "start" });
-      return;
-    }
-    if (/просроч|задач/.test(q)) {
-      navigate("/tasks?filter=overdue");
-      return;
-    }
-    document.getElementById("insights")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   function onAsk(event: FormEvent) {
     event.preventDefault();
-    goAsk(askText);
+    void goAsk(askText);
   }
 
 
@@ -434,19 +446,61 @@ export function SituationPage() {
             placeholder="Что сегодня требует моего внимания?"
             aria-label="Вопрос CreoLab AI"
           />
-          <button type="submit" className="btn">
-            Спросить
+          <button type="submit" className="btn" disabled={askBusy}>
+            {askBusy ? "Думаю…" : "Спросить"}
           </button>
         </div>
         <div className="sit-ask-presets">
           {ASK_PRESETS.map((preset) => (
-            <button key={preset} type="button" className="sit-ask-chip" onClick={() => goAsk(preset)}>
+            <button
+              key={preset}
+              type="button"
+              className="sit-ask-chip"
+              disabled={askBusy}
+              onClick={() => void goAsk(preset)}
+            >
               {preset}
             </button>
           ))}
         </div>
+        {askAnswer ? (
+          <div className="sit-ask-answer">
+            <div className="muted sit-ask-question">{askAnswer.question}</div>
+            <p>{askAnswer.headline}</p>
+            {askAnswer.bullets.length ? (
+              <ul className="sit-insights">
+                {askAnswer.bullets.map((item) => (
+                  <li key={item.text}>
+                    {item.href?.startsWith("#") ? (
+                      <a href={item.href}>{item.text}</a>
+                    ) : item.href ? (
+                      <Link to={item.href}>{item.text}</Link>
+                    ) : (
+                      <span>{item.text}</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {askAnswer.links.length ? (
+              <div className="sit-ask-links">
+                {askAnswer.links.map((link) =>
+                  link.href.startsWith("#") ? (
+                    <a key={link.href} className="btn secondary" href={link.href}>
+                      {link.label}
+                    </a>
+                  ) : (
+                    <Link key={link.href} className="btn secondary" to={link.href}>
+                      {link.label}
+                    </Link>
+                  ),
+                )}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         <p className="muted sit-ask-note">
-          Вопросы открывают существующие фильтры и сводку. Команды вроде «напиши» или «отправь КП» идут в текущий движок задач.
+          AI смотрит текущие заявки, сделки, задачи и диалоги и отвечает по смыслу вопроса. Команды вроде «напиши» или «отправь КП» открывают постановку задачи.
         </p>
       </form>
 

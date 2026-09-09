@@ -6,7 +6,6 @@ import {
   conversationsHumanWhere,
   countContactsNeedsReply,
   countVisibleConversations,
-  notScheduledSend,
   overdueTasksWhere,
 } from "./attentionCounts.ts";
 import { inquiryNeedsActionWhere, openIntakeWhere } from "./inquiryAttention.ts";
@@ -72,7 +71,6 @@ export async function getNavBadges(prisma: PrismaClient, auth: AuthContext) {
           some: {
             status: { in: ["open", "waiting"] },
             dueAt: { lt: now },
-            ...notScheduledSend,
           },
         },
       },
@@ -87,7 +85,6 @@ export async function getNavBadges(prisma: PrismaClient, auth: AuthContext) {
               some: {
                 status: { in: ["open", "waiting"] },
                 dueAt: { lt: now },
-                ...notScheduledSend,
               },
             },
           },

@@ -28,7 +28,7 @@ export function formatDateTimeRu(value: string | Date | null | undefined, timeZo
   const raw = typeof value === "string" ? value.trim() : "";
   const date =
     raw && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(raw) && !/[zZ]|[+-]\d{2}:?\d{2}$/.test(raw)
-      ? parseDateTimeLocal(raw)
+      ? parseDateTimeLocalInput(raw, timeZone)
       : new Date(value);
   if (Number.isNaN(date.getTime())) return "";
   return new Intl.DateTimeFormat("ru-RU", {
@@ -41,11 +41,44 @@ export function formatDateTimeRu(value: string | Date | null | undefined, timeZo
   }).format(date);
 }
 
-function parseDateTimeLocal(value: string) {
-  const [datePart, timePart = "00:00"] = value.split("T");
-  const [year, month, day] = datePart.split("-").map(Number);
-  const [hour, minute] = timePart.split(":").map(Number);
-  return new Date(year, (month || 1) - 1, day || 1, hour || 0, minute || 0);
+/** Naive `YYYY-MM-DDTHH:mm` as the company clock. ISO with Z/offset stays absolute. */
+export function parseDateTimeLocalInput(value: string | Date | null | undefined, timeZone = "Asia/Almaty") {
+  if (value instanceof Date) return value;
+  const raw = String(value || "").trim();
+  if (!raw) return new Date(NaN);
+  if (/[zZ]|[+-]\d{2}:?\d{2}$/.test(raw)) return new Date(raw);
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (!match) return new Date(raw);
+  if (timeZone === "Asia/Almaty") {
+    return new Date(`${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6] || "00"}+05:00`);
+  }
+  return new Date(yearMonthDayLocalFallback(match));
+}
+
+function yearMonthDayLocalFallback(match: RegExpMatchArray) {
+  return new Date(
+    Number(match[1]),
+    Number(match[2]) - 1,
+    Number(match[3]),
+    Number(match[4]),
+    Number(match[5]),
+    Number(match[6] || 0),
+  );
+}
+
+/** Format an instant for `<input type="datetime-local">` in the company timezone. */
+export function toDateTimeLocalValue(value: Date, timeZone = "Asia/Almaty") {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(value);
+  const get = (type: string) => parts.find((part) => part.type === type)?.value || "00";
+  return `${get("year")}-${get("month")}-${get("day")}T${get("hour")}:${get("minute")}`;
 }
 
 /** Format a datetime-local value exactly as the user typed it, without UTC shift. */

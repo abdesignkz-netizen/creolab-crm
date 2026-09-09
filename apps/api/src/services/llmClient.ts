@@ -387,3 +387,78 @@ export async function composeClientMessageWithLlm(input: {
     return null;
   }
 }
+
+export type SituationAskLlmAnswer = {
+  headline: string;
+  bullets: Array<{ text: string; href?: string }>;
+  links: Array<{ label: string; href: string }>;
+  intent: string;
+};
+
+/** Answers a manager question from a CRM snapshot. Must not invent counts or names. */
+export async function answerSituationAskWithLlm(
+  question: string,
+  snapshot: Record<string, unknown>,
+): Promise<SituationAskLlmAnswer | null> {
+  const { apiKey, baseUrl, model } = llmConfig();
+  if (!apiKey) return null;
+  try {
+    const response = await fetch(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0,
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content:
+              "Ты аналитик CRM CREOLAB для руководителя. Ответь на вопрос менеджера только фактами из JSON. Не выдумывай цифры, имена, сделки и заявки. Если в фактах нет ответа — так и скажи и предложи ближайший список. Пиши по-русски, коротко, по делу. Верни JSON: headline (1–2 предложения), bullets[{text, href?}], links[{label, href}], intent (attention|deals|inquiries|tasks|team|funnel|period|clients|other). href только внутренние пути CRM, начинающиеся с / или #.",
+          },
+          {
+            role: "user",
+            content: `Вопрос: ${question}\nФакты CRM: ${JSON.stringify(snapshot)}`,
+          },
+        ],
+      }),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!response.ok) return null;
+    const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    const content = data.choices?.[0]?.message?.content;
+    if (!content) return null;
+    const parsed = JSON.parse(content) as Partial<SituationAskLlmAnswer>;
+    const headline = String(parsed.headline || "").trim();
+    if (!headline) return null;
+    const bullets = Array.isArray(parsed.bullets)
+      ? parsed.bullets
+          .map((row) => ({
+            text: String(row?.text || "").trim(),
+            href: row?.href ? String(row.href) : undefined,
+          }))
+          .filter((row) => row.text)
+          .slice(0, 8)
+      : [];
+    const links = Array.isArray(parsed.links)
+      ? parsed.links
+          .map((row) => ({
+            label: String(row?.label || "").trim(),
+            href: String(row?.href || "").trim(),
+          }))
+          .filter((row) => row.label && row.href)
+          .slice(0, 6)
+      : [];
+    return {
+      headline,
+      bullets,
+      links,
+      intent: String(parsed.intent || "other"),
+    };
+  } catch {
+    return null;
+  }
+}

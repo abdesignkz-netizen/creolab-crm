@@ -401,4 +401,54 @@ describe("Situation API", () => {
     });
     assert.equal(response.status, 422);
   });
+
+  it("ask понимает вопрос руководителя и отвечает цифрами из CRM", async () => {
+    const { classifySituationQuestion } = await import("./services/situationAskService.ts");
+    assert.equal(classifySituationQuestion("Что сегодня требует моего внимания?").intent, "attention");
+    assert.equal(classifySituationQuestion("Какие заявки не обработаны?").intent, "inquiries");
+    assert.equal(classifySituationQuestion("Напиши клиенту что файл готов").command, true);
+
+    const empty = await fetch(`${base}/api/v1/situation/ask`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({ text: "я" }),
+    });
+    assert.equal(empty.status, 422);
+
+    const attention = await fetch(`${base}/api/v1/situation/ask`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({ text: "Что сегодня требует моего внимания?", period: "today", scope: "all" }),
+    });
+    assert.equal(attention.status, 200);
+    const attentionBody = (await attention.json()) as {
+      command: boolean;
+      headline: string;
+      bullets: unknown[];
+      links: Array<{ href: string }>;
+    };
+    assert.equal(attentionBody.command, false);
+    assert.match(attentionBody.headline, /вниман|критическ|задач|заявок|ответа/i);
+    assert.ok(attentionBody.links.some((link) => link.href.includes("/tasks") || link.href.includes("attention") || link.href.includes("/contacts")));
+
+    const inquiries = await fetch(`${base}/api/v1/situation/ask`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({ text: "Какие заявки не обработаны?", period: "today" }),
+    });
+    assert.equal(inquiries.status, 200);
+    const inquiriesBody = (await inquiries.json()) as { headline: string; links: Array<{ href: string }> };
+    assert.match(inquiriesBody.headline, /новых|обращен/i);
+    assert.ok(inquiriesBody.links.some((link) => link.href.includes("/inquiries")));
+
+    const command = await fetch(`${base}/api/v1/situation/ask`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({ text: "Напиши клиенту что файл готов" }),
+    });
+    assert.equal(command.status, 200);
+    const commandBody = (await command.json()) as { command: boolean; intent: string };
+    assert.equal(commandBody.command, true);
+    assert.equal(commandBody.intent, "command");
+  });
 });

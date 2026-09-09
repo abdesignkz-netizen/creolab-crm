@@ -1827,6 +1827,17 @@ fieldset.field-block legend { padding: 0 6px; font-weight: 600; }
 }
 .sit-ask-chip:hover { border-color: var(--line-strong); }
 .sit-ask-note { margin: 0; }
+.sit-ask-answer {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #f7f9fc;
+}
+.sit-ask-answer p { margin: 0; line-height: 1.45; }
+.sit-ask-question { font-size: 12.5px; }
+.sit-ask-links { display: flex; flex-wrap: wrap; gap: 6px; }
 .sit-table-wrap { overflow-x: auto; }
 .sit-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .sit-table th, .sit-table td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); }

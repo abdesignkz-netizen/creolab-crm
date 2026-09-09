@@ -1,5 +1,11 @@
 import { z } from "zod";
 
+/** ISO with offset/Z, or naive `YYYY-MM-DDTHH:mm` as the company clock. */
+export const dateTimeInput = z
+  .string()
+  .trim()
+  .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})?$/, "Invalid datetime");
+
 export const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
@@ -105,7 +111,7 @@ export const createTaskSchema = z.object({
   conversationId: z.string().uuid().optional(),
   contactId: z.string().uuid().optional(),
   dealId: z.string().uuid().optional(),
-  dueAt: z.string().datetime().optional(),
+  dueAt: dateTimeInput.optional(),
   priority: z.enum(["low", "normal", "high"]).default("normal"),
   ownerMembershipId: z.string().uuid().optional(),
   targetType: z.enum(["client", "group", "none"]).default("none"),
@@ -121,7 +127,7 @@ export const updateTaskSchema = z.object({
   dealId: z.string().uuid().nullable().optional(),
   title: z.string().trim().min(1).max(200).optional(),
   description: z.string().max(2000).optional(),
-  dueAt: z.string().datetime().nullable().optional(),
+  dueAt: dateTimeInput.nullable().optional(),
 });
 
 export const taskAttachmentSchema = z.object({
@@ -139,7 +145,7 @@ export const completeTaskResultSchema = z.object({
     .object({
       type: z.string().min(1),
       title: z.string().trim().min(1).max(200),
-      dueAt: z.string().datetime().optional(),
+      dueAt: dateTimeInput.optional(),
     })
     .nullable()
     .optional(),
@@ -197,7 +203,7 @@ export const createFromCommandSchema = z
     messageDraft: z.string().max(4000).optional(),
     executionMode: z.enum(["execute", "prepare_only"]).default("execute"),
     ownerMembershipId: z.string().uuid().optional(),
-    dueAt: z.string().datetime().optional(),
+    dueAt: dateTimeInput.optional(),
     asCampaign: z.boolean().optional(),
   })
   .superRefine((value, ctx) => {
@@ -219,7 +225,7 @@ export const createCampaignSchema = z.object({
   messageMode: z.enum(["manual", "ai", "file_only"]).default("manual"),
   personalizeEach: z.boolean().optional(),
   createMissingClients: z.boolean().default(true),
-  scheduledAt: z.string().datetime().optional().nullable(),
+  scheduledAt: dateTimeInput.optional().nullable(),
   rawCommandText: z.string().max(4000).optional(),
   contactIds: z.array(z.string().uuid()).max(500).optional(),
   phoneListText: z.string().max(100_000).optional(),
@@ -233,7 +239,7 @@ export const updateCampaignSchema = z.object({
   messageMode: z.enum(["manual", "ai", "file_only"]).optional(),
   personalizeEach: z.boolean().optional(),
   createMissingClients: z.boolean().optional(),
-  scheduledAt: z.string().datetime().nullable().optional(),
+  scheduledAt: dateTimeInput.nullable().optional(),
   recipientIdsInclude: z.array(z.string().uuid()).max(500).optional(),
   recipientIdsExclude: z.array(z.string().uuid()).max(500).optional(),
   recipientDrafts: z
@@ -248,7 +254,7 @@ export const updateCampaignSchema = z.object({
 });
 
 export const confirmCampaignSchema = z.object({
-  scheduledAt: z.string().datetime().nullable().optional(),
+  scheduledAt: dateTimeInput.nullable().optional(),
 });
 
 export const personalizeCampaignRecipientsSchema = z.object({
@@ -276,6 +282,15 @@ export const snoozeSituationSchema = z.object({
   itemId: z.string().min(3).max(120),
   until: z.string().datetime(),
   reason: z.string().trim().max(400).optional(),
+});
+
+export const askSituationSchema = z.object({
+  text: z.string().trim().min(2).max(500),
+  period: z.enum(["today", "yesterday", "last_7", "last_30", "this_month", "last_month", "this_year", "all", "custom"]).optional(),
+  dateFrom: z.string().optional(),
+  dateTo: z.string().optional(),
+  scope: z.enum(["all", "mine", "unassigned"]).optional(),
+  onlyImportant: z.boolean().optional(),
 });
 
 export const createContactSchema = z.object({

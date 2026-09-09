@@ -63,6 +63,14 @@ export function createApiClient(options: ClientOptions) {
     },
     snoozeSituation: (body: { itemId: string; until: string; reason?: string }) =>
       request("/api/v1/situation/snooze", { method: "POST", body: JSON.stringify(body) }),
+    situationAsk: (body: {
+      text: string;
+      period?: string;
+      dateFrom?: string;
+      dateTo?: string;
+      scope?: "all" | "mine" | "unassigned";
+      onlyImportant?: boolean;
+    }) => request("/api/v1/situation/ask", { method: "POST", body: JSON.stringify(body) }),
     navBadges: () => request("/api/v1/nav-badges"),
     inquiries: (query?: Record<string, string | number | undefined>) => {
       const params = new URLSearchParams();

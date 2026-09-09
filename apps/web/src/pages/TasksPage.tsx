@@ -6,7 +6,7 @@ import { api } from "../lib/api";
 import { tip } from "../lib/tip";
 import { CALLS_ENABLED } from "../lib/featureFlags";
 import { CampaignMassPanel } from "./CampaignMassPanel";
-import { formatDateTimeLocalInput, formatDateTimeRu } from "../lib/period";
+import { formatDateTimeLocalInput, formatDateTimeRu, parseDateTimeLocalInput, toDateTimeLocalValue } from "../lib/period";
 
 type Filter = "open" | "waiting" | "scheduled" | "overdue" | "mine" | "done" | "all";
 type TargetMode = "client" | "group" | "none";
@@ -100,8 +100,7 @@ const GROUP_TITLE: Record<string, string> = {
 };
 
 function toDateTimeLocal(value: Date) {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}T${pad(value.getHours())}:${pad(value.getMinutes())}`;
+  return toDateTimeLocalValue(value);
 }
 
 const TASK_TYPES = [
@@ -176,12 +175,14 @@ const SOURCE_OPTIONS = [
 
 function isFutureDue(value?: string | Date | null, now = Date.now()) {
   if (!value) return false;
-  const due = value instanceof Date ? value : new Date(value);
+  const due = value instanceof Date ? value : parseDateTimeLocalInput(value);
   if (Number.isNaN(due.getTime())) return false;
   return due.getTime() > now;
 }
 
-function isScheduledSend(item: any) {
+function isScheduledSend(item: any, now = Date.now()) {
+  if (item.status === "done" || item.status === "canceled") return false;
+  if (item.dueAt && new Date(item.dueAt).getTime() <= now) return false;
   return Boolean(item.sendScheduled || item.executionStatus === "scheduled" || item.commandStatus === "scheduled");
 }
 
@@ -659,7 +660,7 @@ export function TasksPage() {
         type,
         title: finalTitle,
         description: description || undefined,
-        dueAt: dueAt ? new Date(dueAt).toISOString() : undefined,
+        dueAt: dueAt || undefined,
         priority,
         ownerMembershipId: ownerId || undefined,
         targetType: targetMode,
@@ -751,7 +752,7 @@ export function TasksPage() {
 
   async function taskEditPayload() {
     const payload: { messageDraft: string; dueAt?: string } = { messageDraft };
-    if (editDueAt) payload.dueAt = new Date(editDueAt).toISOString();
+    if (editDueAt) payload.dueAt = editDueAt;
     return payload;
   }
 
@@ -1039,7 +1040,7 @@ export function TasksPage() {
         messageDraft: commandDraft || undefined,
         executionMode: commandParse.command?.executionMode || "execute",
         ownerMembershipId: ownerId || undefined,
-        dueAt: commandDueMode === "scheduled" && commandDueAt ? new Date(commandDueAt).toISOString() : undefined,
+        dueAt: commandDueMode === "scheduled" && commandDueAt ? commandDueAt : undefined,
       });
       const rootTaskId = created.task?.id as string | undefined;
       if (rootTaskId && cmdPendingFiles.length) {
@@ -2618,8 +2619,9 @@ export function TasksPage() {
                   <div className="task-row-title">
                     <b>{item.title}</b>
                     {item.overdue && !isScheduledSend(item) ? <span className="deal-flag">Просрочено</span> : null}
-                    {item.sendScheduled || item.executionStatus === "scheduled" ? (
-                      <span className="deal-flag">Отправка запланирована</span>
+                    {isScheduledSend(item) ? <span className="deal-flag">Отправка запланирована</span> : null}
+                    {item.executionStatus === "failed" && !isScheduledSend(item) ? (
+                      <span className="deal-flag">Отправка не удалась</span>
                     ) : null}
                     {item.campaignId ? <span className="deal-flag">Рассылка</span> : null}
                   </div>
@@ -2634,7 +2636,7 @@ export function TasksPage() {
                     </div>
                     <div>
                       <span className="muted">Срок</span>
-                      <div>{item.dueAt ? new Date(item.dueAt).toLocaleString("ru-RU") : "Без срока"}</div>
+                      <div>{item.dueAt ? formatDateTimeRu(item.dueAt) : "Без срока"}</div>
                     </div>
                     <div>
                       <span className="muted">Ответственный</span>

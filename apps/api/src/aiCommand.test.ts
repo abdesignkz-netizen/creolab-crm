@@ -284,6 +284,55 @@ describe("AI task commands", () => {
     assert.equal(new Date(body.task.dueAt).getTime(), new Date(dueAt).getTime());
   });
 
+  it("срок без метки scheduled не держит отправку", async () => {
+    const { taskMarkedForScheduledSend } = await import("./services/taskExecutionService.ts");
+    const future = new Date(Date.now() + 60 * 60 * 1000);
+    const past = new Date(Date.now() - 60 * 1000);
+    assert.equal(taskMarkedForScheduledSend({ dueAt: future, executionStatus: "prepared" }), false);
+    assert.equal(taskMarkedForScheduledSend({ dueAt: future, executionStatus: "scheduled" }), true);
+    assert.equal(
+      taskMarkedForScheduledSend({ dueAt: future, executionStatus: "confirmed", commandStatus: "scheduled" }),
+      true,
+    );
+    assert.equal(
+      taskMarkedForScheduledSend({ dueAt: past, executionStatus: "scheduled", commandStatus: "scheduled" }),
+      false,
+    );
+  });
+
+  it("наивный срок из команды считается по часовому поясу компании", async () => {
+    const contact = await prisma.contact.findFirst({ where: { tenantId } });
+    assert.ok(contact);
+    const { parseDateTimeInput } = await import("./services/periodRange.ts");
+    const when = new Date(Date.now() + 3 * 60 * 60 * 1000);
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Almaty",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(when);
+    const get = (type: string) => parts.find((part) => part.type === type)?.value || "00";
+    const naive = `${get("year")}-${get("month")}-${get("day")}T${get("hour")}:${get("minute")}`;
+    const created = await fetch(`${base}/api/v1/tasks/from-command`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({
+        text: "Напиши клиенту завтра",
+        parsedCommand: { taskType: "message", executionMode: "execute", riskLevel: 3 },
+        clientIds: [contact.id],
+        messageDraft: "Добрый день!",
+        dueAt: naive,
+      }),
+    });
+    assert.equal(created.status, 201, await created.clone().text());
+    const body = await created.json();
+    const expected = parseDateTimeInput(naive, "Asia/Almaty");
+    assert.equal(new Date(body.task.dueAt).getTime(), expected.getTime());
+  });
+
   it("будущий срок: подтверждение планирует и не отправляет", async () => {
     const contact = await prisma.contact.create({
       data: { tenantId, name: "Плановая Отправка", firstName: "Плановая", lastName: "Отправка" },
@@ -564,7 +613,7 @@ describe("AI task commands", () => {
     assert.equal(updated.state, "canceled");
   });
 
-  it("просроченный срок при запланированной отправке не помечает задачу как просроченную", async () => {
+  it("наступивший срок запланированной отправки больше не прячется в «Запланировано»", async () => {
     const contact = await prisma.contact.create({
       data: { tenantId, name: "План Просрочка", firstName: "План", lastName: "Просрочка" },
     });
@@ -596,12 +645,55 @@ describe("AI task commands", () => {
     const body = await listed.json();
     const row = (body.items || []).find((item: { id: string }) => item.id === task.id);
     assert.ok(row);
-    assert.equal(row.sendScheduled, true);
-    assert.equal(row.overdue, false);
+    assert.equal(row.sendScheduled, false);
+    assert.equal(row.overdue, true);
     await prisma.scheduledAction.updateMany({
       where: { parentType: "task", parentId: task.id, state: "scheduled" },
       data: { state: "canceled", cancelReason: "test_cleanup" },
     });
+    await prisma.task.update({
+      where: { id: task.id },
+      data: { executionStatus: "failed", commandStatus: "failed" },
+    });
+  });
+
+  it("фоновые джобы подхватывают наступившую отправку без готового scheduledAction", async () => {
+    const contact = await prisma.contact.create({
+      data: { tenantId, name: "Догонка Плана", firstName: "Догонка", lastName: "Плана" },
+    });
+    const conversation = await prisma.conversation.create({
+      data: {
+        tenantId,
+        contactId: contact.id,
+        mode: "human",
+        status: "open",
+        sellerLeadId: "test-lead-recover-scheduled-task",
+      },
+    });
+    const dueAt = new Date(Date.now() - 120_000);
+    const task = await prisma.task.create({
+      data: {
+        tenantId,
+        type: "message",
+        title: "Догонка плановой",
+        status: "open",
+        dueAt,
+        executionStatus: "scheduled",
+        commandStatus: "scheduled",
+        contactId: contact.id,
+        conversationId: conversation.id,
+        messageDraft: "Добрый день! Уточняем по оплате.",
+      },
+    });
+    const { processDueScheduledActions } = await import("./services/backgroundJobs.ts");
+    await processDueScheduledActions(prisma);
+    const action = await prisma.scheduledAction.findFirst({
+      where: { parentType: "task", parentId: task.id, type: "task_run" },
+    });
+    assert.ok(action);
+    assert.notEqual(action.state, "scheduled");
+    const updated = await prisma.task.findUniqueOrThrow({ where: { id: task.id } });
+    assert.notEqual(updated.executionStatus, "scheduled");
   });
 
   it("фоновые джобы не трогают отправку с будущим сроком", async () => {
@@ -627,6 +719,34 @@ describe("AI task commands", () => {
     });
     const { processDueScheduledActions } = await import("./services/backgroundJobs.ts");
     await processDueScheduledActions(prisma);
+    const updated = await prisma.scheduledAction.findUniqueOrThrow({ where: { id: action.id } });
+    assert.equal(updated.state, "scheduled");
+  });
+
+  it("застрявшая running-отправка с наступившим сроком снова ставится в очередь", async () => {
+    const task = await prisma.task.create({
+      data: {
+        tenantId,
+        type: "message",
+        title: "Застрявшая плановая",
+        status: "open",
+        dueAt: new Date(Date.now() - 5 * 60_000),
+        executionStatus: "scheduled",
+        commandStatus: "scheduled",
+      },
+    });
+    const action = await prisma.scheduledAction.create({
+      data: {
+        tenantId,
+        type: "task_run",
+        parentType: "task",
+        parentId: task.id,
+        dueAt: new Date(Date.now() - 5 * 60_000),
+        state: "running",
+      },
+    });
+    const { recoverDueScheduledTaskSends } = await import("./services/scheduledTaskRunner.ts");
+    await recoverDueScheduledTaskSends(prisma);
     const updated = await prisma.scheduledAction.findUniqueOrThrow({ where: { id: action.id } });
     assert.equal(updated.state, "scheduled");
   });

@@ -8,6 +8,7 @@ import { CONTACT_PHONE_SELECT, digitsOnly, displayName, needsReply, phoneFromCon
 import { inquiryInterest, loadConversationInterests } from "./contactInterestService.ts";
 import { excludeRematchedLeftovers } from "./attentionCounts.ts";
 import { openIntakeWhere } from "./inquiryAttention.ts";
+import { taskMarkedForScheduledSend } from "./taskExecutionService.ts";
 
 export type SituationKind =
   | "needs_phone"
@@ -454,6 +455,7 @@ export async function getSituation(
     }
     if (task.conversationId && conversationOnBoard.has(task.conversationId)) continue;
 
+    if (taskMarkedForScheduledSend(task, now)) continue;
     const overdue = Boolean(task.dueAt && task.dueAt.getTime() < now.getTime());
     const dueToday = Boolean(task.dueAt && !overdue && isSameZonedDay(task.dueAt, now, timeZone));
     const waitingQuiet = task.status === "waiting" && !overdue;
