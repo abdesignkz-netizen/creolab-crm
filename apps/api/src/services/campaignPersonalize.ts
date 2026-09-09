@@ -33,7 +33,7 @@ export function personalize(
 }
 
 const STAFF_VERB_RE =
-  /^(пожалуйста[,\s]+)?(уточни(?:те|ть)?|отправ(?:ь|ьте|ить)|напиш(?:и|ите|ать)|напомни(?:те|ть)?|спроси(?:те)?|собери(?:те)?|разошли(?:те)?|позвони(?:те)?|перезвон\w*|скажи(?:те)?|подготовь(?:те)?|сделай(?:те)?|проверь(?:те)?|свяжись|свяжитесь)\s+/i;
+  /^(пожалуйста[,\s]+)?(уточни(?:те|ть)?|отправ(?:ь|ьте|ить)|напиш(?:и|ите|ать)|напомни(?:те|ть)?|спроси(?:те)?|собери(?:те)?|разошли(?:те)?|позвони(?:те)?|перезвон\w*|скажи(?:те)?|подготовь(?:те)?|сделай(?:те)?|проверь(?:те)?|свяжись|свяжитесь|попроси(?:те)?|согласуй(?:те)?|нужно|надо)\s+/i;
 const NOT_A_PERSON_NAME =
   /^(без|клиент|контакт|unknown|интерес|имя|компания|телефон|email|e-mail|почта|заявка|лид|lead|service|subject|whatsapp|telegram)$/i;
 const TASK_STOP_WORDS = new Set([
@@ -113,7 +113,7 @@ export function looksLikeStaffCommand(text: string) {
   if (/\{\{\s*\w+\s*\}\}/.test(t)) return false;
   if (/добрый день|здравствуйте|во вложении|направляем|хотели уточнить/i.test(t)) return false;
   if (t.length > 220) return false;
-  return /^(уточни(?:ть)?|отправ(?:ь|ьте|ить)|напиши|напомни(?:ть)?|собери|разошли|позвони|перезвон\w*|скажи|подготовь|сделай|проверь|свяжись)(?:\s|$|[.,!?])/i.test(
+  return /^(уточни(?:ть)?|отправ(?:ь|ьте|ить)|напиши|напомни(?:ть)?|собери|разошли|позвони|перезвон\w*|скажи|подготовь|сделай|проверь|свяжись|попроси|согласуй|нужно|надо)(?:\s|$|[.,!?])/i.test(
     t,
   );
 }
@@ -169,6 +169,9 @@ function infinitiveFromStaffVerb(verb: string) {
   if (/^отправ/.test(v)) return "отправить";
   if (/^напиш/.test(v)) return "написать";
   if (/^скаж/.test(v)) return "сказать";
+  if (/^попрос/.test(v)) return "попросить";
+  if (/^соглас/.test(v)) return "согласовать";
+  if (/^нужно|^надо/.test(v)) return "уточнить";
   return "уточнить";
 }
 
@@ -189,6 +192,21 @@ export function clientAskFromStaffTask(taskText: string): string | null {
   return `Хотели ${infinitive} ${rest}.`;
 }
 
+/** Any free-form staff note → a client-facing sentence. Never a canned «актуальна ли заявка». */
+export function clientFacingAskFromTask(taskText: string): string | null {
+  const staff = clientAskFromStaffTask(taskText);
+  if (staff) return staff;
+  const raw = String(taskText || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[.!?]+$/u, "");
+  if (!raw || raw.length < 3) return null;
+  if (isRelevanceOnlyAsk(raw)) return null;
+  if (/добрый день|здравствуйте|хотели /i.test(raw)) return `${raw}.`.replace(/\.\.$/, ".");
+  const lowered = raw.charAt(0).toLowerCase() + raw.slice(1);
+  return `Хотели уточнить: ${lowered}.`;
+}
+
 export function acceptPersonalizedDraft(input: { taskText: string; firstName?: string | null; draft: string }) {
   const draft = String(input.draft || "").trim();
   if (!draft) return false;
@@ -199,7 +217,7 @@ export function acceptPersonalizedDraft(input: { taskText: string; firstName?: s
     if (firstNameOf(used) === null) return false;
     if (allowed && used.toLowerCase() !== allowed.toLowerCase()) return false;
   }
-  const ask = clientAskFromStaffTask(primaryTaskLine(input.taskText));
+  const ask = clientFacingAskFromTask(primaryTaskLine(input.taskText));
   if (!ask) return true;
   const tokens = ask
     .toLowerCase()
@@ -230,7 +248,8 @@ export function composeRecipientOffer(input: RecipientOfferInput) {
   const greeting = firstName ? `${firstName}, добрый день!` : "Добрый день!";
   const about = aboutRequest(interest, companyName);
   const fileBit = hasFile ? " Во вложении — материалы." : "";
-  const staffAsk = clientAskFromStaffTask(primaryTaskLine(effectiveTask, sharedRaw));
+  const staffAsk = clientFacingAskFromTask(primaryTaskLine(effectiveTask, sharedRaw));
+  const relevanceOnly = isRelevanceOnlyAsk(effectiveTask) || isRelevanceOnlyAsk(sharedRaw);
 
   if (spoken) {
     const body = spoken.replace(/^[^.!?]+,\s*добрый день[!?.]?\s*/i, "").trim();
@@ -261,31 +280,33 @@ export function composeRecipientOffer(input: RecipientOfferInput) {
     return tidy(text);
   }
 
-  if (staffAsk && kind !== "proposal" && kind !== "documents") {
+  const askIsJustSend =
+    Boolean(staffAsk) &&
+    /отправ|направ|кп|предложен|документ/i.test(staffAsk) &&
+    !/бюджет|оплат|созвон|врем|макет|реквизит|соглас|счёт|счет/i.test(staffAsk);
+
+  if (kind === "proposal" && (!staffAsk || askIsJustSend)) {
+    return tidy(
+      `${greeting} ${about ? `${capitalize(about)} ` : ""}направляем коммерческое предложение.${fileBit} Если актуально, напишите — уточним детали.`,
+    );
+  }
+  if (kind === "documents" && (!staffAsk || askIsJustSend)) {
+    return tidy(
+      `${greeting} ${about ? `${capitalize(about)} ` : ""}направляем документы.${fileBit} Если нужно что-то ещё — напишите.`,
+    );
+  }
+  if (staffAsk) {
     const extra = about ? ` ${capitalize(about)}.` : "";
     return tidy(`${greeting} ${staffAsk}${extra}${fileBit}`);
   }
-
-  switch (kind) {
-    case "proposal":
-      return tidy(
-        `${greeting} ${about ? `${capitalize(about)} ` : ""}направляем коммерческое предложение.${fileBit} Если актуально, напишите — уточним детали.`,
-      );
-    case "documents":
-      return tidy(
-        `${greeting} ${about ? `${capitalize(about)} ` : ""}направляем документы.${fileBit} Если нужно что-то ещё — напишите.`,
-      );
-    case "follow_up":
-      return tidy(
-        interest
-          ? `${greeting} Хотели уточнить, актуален ли ещё запрос «${interest}».${fileBit} Можем продолжить.`
-          : `${greeting} Хотели уточнить, актуальна ли ещё ваша заявка.${fileBit} Можем продолжить.`,
-      );
-    default:
-      return tidy(
-        `${greeting}${about ? ` Пишем ${about}.` : " Пишем по вашей заявке."}${fileBit} Если вопрос ещё открыт, напишите — подскажем следующий шаг.`,
-      );
+  if (relevanceOnly) {
+    return tidy(
+      interest
+        ? `${greeting} Хотели уточнить, актуален ли ещё запрос «${interest}».${fileBit} Можем продолжить.`
+        : `${greeting} Хотели уточнить, актуальна ли ещё ваша заявка.${fileBit} Можем продолжить.`,
+    );
   }
+  return tidy(`${greeting}${about ? ` ${capitalize(about)}.` : ""}${fileBit}`.trim());
 }
 
 export function recipientDraftsFingerprint(

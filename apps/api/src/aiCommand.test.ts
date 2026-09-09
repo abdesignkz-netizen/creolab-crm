@@ -154,6 +154,27 @@ describe("AI task commands", () => {
     assert.doesNotMatch(String(body.suggestedDraft || ""), /^Уточнить удобное/i);
   });
 
+  it("свободная команда без шаблонного глагола всё равно даёт текст клиенту по смыслу", async () => {
+    const contact = await prisma.contact.create({
+      data: {
+        tenantId,
+        name: "Марат Реквизиты",
+        firstName: "Марат",
+        lastName: "Реквизиты",
+      },
+    });
+    const res = await fetch(`${base}/api/v1/tasks/parse-command`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({ text: "Попроси прислать реквизиты для счёта", contactIds: [contact.id] }),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.command.taskType, "message");
+    assert.match(String(body.suggestedDraft || ""), /реквизит|сч[её]т/i);
+    assert.doesNotMatch(String(body.suggestedDraft || ""), /актуальна ли ещё заявка|подскажем следующий шаг/i);
+  });
+
   it("ambiguous «Александр» при нескольких → needs_clarification", async () => {
     await prisma.contact.create({
       data: {

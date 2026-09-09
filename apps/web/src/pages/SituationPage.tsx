@@ -187,7 +187,9 @@ export function SituationPage() {
   const periodParams = { period, ...(period === "custom" ? { from: dateFrom, to: dateTo } : {}), scope };
   const path = (base: string, parameters: Record<string, string> = {}, withPeriod = false) => `${base}?${new URLSearchParams({ ...(withPeriod ? periodParams : { scope }), ...parameters })}`;
   const nextActionItems = attention.items.filter((item: any) => item.kind === "missing_next_action");
-  const visibleAttention = attentionFilter === "no_next_action" ? nextActionItems : attention.items;
+  const visibleAttention = attentionFilter
+    ? attention.items.filter((item: any) => item.group === attentionFilter)
+    : attention.items;
   const noNextHref = path("/today", { ...periodParams, attention: "no_next_action" }) + "#attention";
   const insights = Array.isArray(data.insights) ? data.insights : [];
   const sources = Array.isArray(data.sources) ? data.sources : [];
@@ -336,10 +338,10 @@ export function SituationPage() {
           <Link to="/contacts?filter=needs_reply">Нужно ответить · {attention.summary.needsReply}</Link>
           <Link to="/tasks?filter=overdue">Просрочено · {attention.summary.overdueTasks}</Link>
           <Link to={path("/deals", { focus: "proposal_no_reply" })}>КП без ответа · {attention.summary.proposalWithoutReply ?? 0}</Link>
-          <Link to={noNextHref}>Без шага · {nextActionItems.length}</Link>
+          <Link to={noNextHref}>Без шага · {attention.summary.noNextAction ?? nextActionItems.length}</Link>
           <Link to={path("/deals", { focus: "stalled" })}>Зависли · {attention.summary.stalledDeals}</Link>
-          <Link to="/conversations?filter=human">Нужен человек · {attention.summary.needsHuman}</Link>
-          <Link to="/inquiries?filter=needs_clarification">Нет контакта · {attention.summary.noContact}</Link>
+          <Link to="/conversations?filter=attention">Нужен человек · {attention.summary.needsHuman}</Link>
+          <Link to={path("/today", { ...periodParams, attention: "no_contact" }) + "#attention"}>Нет контакта · {attention.summary.noContact}</Link>
         </div>
 
         {attentionFilter ? <button className="btn secondary" onClick={() => setAttentionFilter("")}>Показать все действия</button> : null}
@@ -617,7 +619,7 @@ export function SituationPage() {
           <div className="sit-kpi-grid sit-kpi-grid-ai">
             <Kpi label="Диалоги AI" value={ai.conversations?.ai ?? 0} to="/conversations?filter=ai" />
             <Kpi label="У менеджера" value={ai.conversations?.human ?? 0} to="/conversations?filter=human" />
-            <Kpi label="Требуют вмешательства" value={ai.conversations?.needsAttention ?? 0} to="/conversations?filter=human" emphasize />
+            <Kpi label="Требуют вмешательства" value={ai.conversations?.needsAttention ?? 0} to="/conversations?filter=attention" emphasize />
             <Kpi label="Заявки из WhatsApp" value={ai.whatsappInquiries ?? 0} to={path("/inquiries", { source: "whatsapp", test: "false" }, true)} />
           </div>
         </div>

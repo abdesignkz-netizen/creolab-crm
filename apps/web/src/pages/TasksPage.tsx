@@ -6,6 +6,7 @@ import { api } from "../lib/api";
 import { tip } from "../lib/tip";
 import { CALLS_ENABLED } from "../lib/featureFlags";
 import { CampaignMassPanel } from "./CampaignMassPanel";
+import { formatDateTimeLocalInput, formatDateTimeRu } from "../lib/period";
 
 type Filter = "open" | "waiting" | "scheduled" | "overdue" | "mine" | "done" | "all";
 type TargetMode = "client" | "group" | "none";
@@ -48,46 +49,7 @@ function resolveOutboundDraft(detail: any): string {
   if (stored && !isInternalBriefingText(stored)) return stored;
   const fromSnap = String(detail?.contextSnapshotJson?.clientMessageDraft || "").trim();
   if (fromSnap) return fromSnap;
-
-  const known = Array.isArray(detail?.contextSnapshotJson?.knownFields)
-    ? detail.contextSnapshotJson.knownFields
-    : [];
-  const questions = Array.isArray(detail?.contextSnapshotJson?.qualificationQuestions)
-    ? detail.contextSnapshotJson.qualificationQuestions
-    : [];
-  const name = detail?.briefing?.client?.name || "";
-  const firstName = String(name).trim().split(/\s+/)[0];
-  const greeting =
-    firstName && !/^(клиент|lead|test|тест|\+?\d)/i.test(firstName)
-      ? `Здравствуйте, ${firstName}!`
-      : "Здравствуйте!";
-  const knownBits = known
-    .filter((f: any) => f?.key !== "phone" && f?.value)
-    .slice(0, 3)
-    .map((f: any) => `${String(f.label || "").toLowerCase()} — ${f.value}`);
-  const serviceHint =
-    known.find((f: any) => f?.key === "service")?.value ||
-    detail?.briefing?.inquiry?.title ||
-    "вашу заявку";
-  const contextLine = [
-    `Получили вашу заявку${serviceHint ? ` (${serviceHint})` : ""}.`,
-    knownBits.length ? `Уже учли: ${knownBits.join("; ")}.` : null,
-  ]
-    .filter(Boolean)
-    .join(" ");
-  const ask =
-    questions.length > 0
-      ? ["Чтобы подготовить предложение, уточните пожалуйста:", ...questions.slice(0, 3).map((q: string, i: number) => `${i + 1}. ${q}`)].join(
-          "\n",
-        )
-      : null;
-  if (ask || knownBits.length) {
-    return [greeting, contextLine, ask].filter(Boolean).join("\n\n");
-  }
-
-  const desc = String(detail?.description || "").trim();
-  if (desc && !isInternalBriefingText(desc)) return desc;
-  return stored || "";
+  return "";
 }
 
 function readFileBase64(file: File) {
@@ -1581,29 +1543,9 @@ export function TasksPage() {
                 setCommandParse(null);
               }}
               rows={3}
-              placeholder='Например: «Уточни удобное время для созвона» или «Отправь КП»'
+              placeholder="Любая задача своими словами: попросить реквизиты, согласовать макет, напомнить про оплату…"
             />
-            <p className="muted">Это задание для CRM. Текст клиенту соберём из сути задачи и заявки, не из шаблона.</p>
-            <div className="chip-row">
-              {[
-                "Уточни удобное время для созвона.",
-                ...(CALLS_ENABLED ? ["Позвони и обсуди детали."] : []),
-                "Напиши и уточни по оплате.",
-                "Отправь КП.",
-              ].map((example) => (
-                <button
-                  key={example}
-                  type="button"
-                  className="chip"
-                  onClick={() => {
-                    setCommandText(example);
-                    setCommandParse(null);
-                  }}
-                >
-                  {example}
-                </button>
-              ))}
-            </div>
+            <p className="muted">Пишите как есть. ИИ соберёт текст клиенту из вашей команды и заявки — не из готовых шаблонов.</p>
           </div>
 
           <div
@@ -1764,7 +1706,7 @@ export function TasksPage() {
                   <span className="muted">Когда</span>
                   <b>
                     {commandDueMode === "scheduled" && commandDueAt
-                      ? new Date(commandDueAt).toLocaleString("ru-RU")
+                      ? formatDateTimeLocalInput(commandDueAt)
                       : commandParse.understanding?.when || "Сейчас"}
                   </b>
                 </div>
@@ -1857,10 +1799,12 @@ export function TasksPage() {
 
               {commandParse.command?.riskLevel >= 3 ||
               commandParse.command?.taskType === "proposal" ||
-              commandParse.command?.taskType === "message" ? (
+              commandParse.command?.taskType === "message" ||
+              commandDraft ? (
                 <label>
                   Сообщение клиенту
                   <textarea value={commandDraft} onChange={(event) => setCommandDraft(event.target.value)} rows={3} />
+                  <span className="muted">ИИ составил из вашей команды. Можно править перед постановкой.</span>
                 </label>
               ) : null}
 
@@ -1920,10 +1864,9 @@ export function TasksPage() {
                     <>
                       <b>Запланировано</b>
                       <p>
-                        {batchResult.message ||
-                          (batchResult.dueAt
-                            ? `Отправка запланирована на ${new Date(batchResult.dueAt).toLocaleString("ru-RU")}`
-                            : "Задача остаётся в «Запланировано».")}
+                        {batchResult.dueAt
+                          ? `Отправка запланирована на ${formatDateTimeRu(batchResult.dueAt)}. Задача остаётся в «Запланировано».`
+                          : batchResult.message || "Задача остаётся в «Запланировано»."}
                       </p>
                     </>
                   ) : batchResult.prepareOnly ? (

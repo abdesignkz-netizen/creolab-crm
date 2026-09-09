@@ -185,7 +185,7 @@ export async function scheduleConfirmedTaskSend(
     dueAt: task.dueAt.toISOString(),
     scheduledActionId: action.id,
     status: "scheduled" as const,
-    note: `Отправка запланирована на ${task.dueAt.toLocaleString("ru-RU")}. Задача остаётся в «Запланировано».`,
+    note: `Отправка запланирована на ${formatWhen(task.dueAt, auth.activeMembership?.tenant?.timezone || "Asia/Almaty")}. Задача остаётся в «Запланировано».`,
     parentId: taskId,
     total: 0,
     failed: 0,

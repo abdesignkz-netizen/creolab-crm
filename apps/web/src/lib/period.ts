@@ -22,6 +22,39 @@ export const PERIOD_OPTIONS: { id: PeriodPreset; label: string }[] = [
 ];
 
 /** Short display for custom ranges, e.g. "1 авг. — 31 авг." */
+/** Show an instant in the company timezone. ISO from API must not use the server clock locale. */
+export function formatDateTimeRu(value: string | Date | null | undefined, timeZone = "Asia/Almaty") {
+  if (!value) return "";
+  const raw = typeof value === "string" ? value.trim() : "";
+  const date =
+    raw && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(raw) && !/[zZ]|[+-]\d{2}:?\d{2}$/.test(raw)
+      ? parseDateTimeLocal(raw)
+      : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("ru-RU", {
+    timeZone,
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function parseDateTimeLocal(value: string) {
+  const [datePart, timePart = "00:00"] = value.split("T");
+  const [year, month, day] = datePart.split("-").map(Number);
+  const [hour, minute] = timePart.split(":").map(Number);
+  return new Date(year, (month || 1) - 1, day || 1, hour || 0, minute || 0);
+}
+
+/** Format a datetime-local value exactly as the user typed it, without UTC shift. */
+export function formatDateTimeLocalInput(value: string) {
+  const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  if (!match) return formatDateTimeRu(value);
+  return `${match[3]}.${match[2]}.${match[1]}, ${match[4]}:${match[5]}`;
+}
+
 export function formatCustomPeriodLabel(dateFrom: string, dateTo: string) {
   if (!dateFrom || !dateTo) return "Период";
   const a = new Date(`${dateFrom}T12:00:00`);

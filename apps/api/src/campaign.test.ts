@@ -98,6 +98,24 @@ describe("campaign mass send foundations", () => {
     assert.doesNotMatch(text, /^Интерес,/);
   });
 
+  it("свободная команда не подменяется шаблоном актуальности", () => {
+    const text = composeRecipientOffer({
+      taskText: "Попроси прислать реквизиты для счёта",
+      firstName: "Марат",
+      interest: "Презентация",
+    });
+    assert.match(text, /Марат/);
+    assert.match(text, /реквизит|сч[её]т/i);
+    assert.doesNotMatch(text, /актуальна ли ещё заявка|актуален ли ещё запрос|подскажем следующий шаг/i);
+
+    const remind = composeRecipientOffer({
+      taskText: "Напомни про согласование макета до пятницы",
+      firstName: "Алия",
+    });
+    assert.match(remind, /макет|согласован/i);
+    assert.doesNotMatch(remind, /актуальна ли ещё заявка/i);
+  });
+
   it("отправка берёт индивидуальный текст, если включена персонализация", () => {
     const text = resolveRecipientSendText({
       personalizeEach: true,

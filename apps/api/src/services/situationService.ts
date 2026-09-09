@@ -4,8 +4,10 @@ import { WhatsAppSellerBridge } from "@creolab/integrations";
 import { ApiError } from "../errors.ts";
 import { decryptSecret } from "../lib/secretBox.ts";
 import type { AuthContext } from "../lib/types.ts";
-import { CONTACT_PHONE_SELECT, displayName, phoneFromContact } from "./contactLabels.ts";
+import { CONTACT_PHONE_SELECT, digitsOnly, displayName, needsReply, phoneFromContact } from "./contactLabels.ts";
 import { inquiryInterest, loadConversationInterests } from "./contactInterestService.ts";
+import { excludeRematchedLeftovers } from "./attentionCounts.ts";
+import { openIntakeWhere } from "./inquiryAttention.ts";
 
 export type SituationKind =
   | "needs_phone"
@@ -60,6 +62,7 @@ export type SituationItem = {
   };
   blocked: boolean;
   snoozedUntil: string | null;
+  waitingReply?: boolean;
 };
 
 export type SituationScope = "all" | "mine" | "unassigned";
@@ -135,6 +138,56 @@ function processInquiryKey(inquiryId: string) {
   return `inquiry-process:${inquiryId}`;
 }
 
+function conversationDedupKey(conversation: {
+  id: string;
+  contactId?: string | null;
+  contact?: Parameters<typeof phoneFromContact>[0];
+  externalThreadId?: string | null;
+}) {
+  if (conversation.contactId) return `contact:${conversation.contactId}`;
+  const phone = phoneFromContact(conversation.contact, { externalThreadId: conversation.externalThreadId });
+  const digits = digitsOnly(phone || "");
+  if (digits) return `phone:${digits}`;
+  return `id:${conversation.id}`;
+}
+
+function conversationBoardRank(conversation: {
+  sellerLeadId?: string | null;
+  needsAttention?: boolean | null;
+  mode?: string | null;
+  updatedAt: Date;
+}) {
+  return (conversation.sellerLeadId ? 4 : 0) + (conversation.needsAttention ? 2 : 0) + (conversation.mode === "human" ? 1 : 0);
+}
+
+function pickConversationsForBoard<T extends {
+  id: string;
+  contactId?: string | null;
+  sellerLeadId?: string | null;
+  attentionReason?: string | null;
+  needsAttention?: boolean | null;
+  mode?: string | null;
+  updatedAt: Date;
+  contact?: Parameters<typeof phoneFromContact>[0];
+  externalThreadId?: string | null;
+}>(conversations: T[]) {
+  const visible = excludeRematchedLeftovers(conversations);
+  const bestByKey = new Map<string, T>();
+  for (const conversation of visible) {
+    const key = conversationDedupKey(conversation);
+    const previous = bestByKey.get(key);
+    if (!previous) {
+      bestByKey.set(key, conversation);
+      continue;
+    }
+    const rank = conversationBoardRank(conversation) - conversationBoardRank(previous);
+    if (rank > 0 || (rank === 0 && conversation.updatedAt.getTime() > previous.updatedAt.getTime())) {
+      bestByKey.set(key, conversation);
+    }
+  }
+  return [...bestByKey.values()];
+}
+
 async function tenantSellerFreshness(prisma: PrismaClient, tenantId: string) {
   const integration = await prisma.integration.findFirst({
     where: { tenantId, type: "whatsapp_seller" },
@@ -205,7 +258,7 @@ export async function getSituation(
 
   const [intakes, inquiries, conversations, tasks, snoozes, seller, contacts] = await Promise.all([
     prisma.incompleteIntake.findMany({
-      where: { tenantId: tid, status: "pending" },
+      where: openIntakeWhere(tid),
       include: { contact: { select: CONTACT_PHONE_SELECT } },
     }),
     prisma.inquiry.findMany({
@@ -214,7 +267,16 @@ export async function getSituation(
     }),
     prisma.conversation.findMany({
       where: { tenantId: tid, status: "open" },
-      include: { contact: { select: CONTACT_PHONE_SELECT } },
+      include: {
+        contact: {
+          select: {
+            ...CONTACT_PHONE_SELECT,
+            lastInboundMessageAt: true,
+            lastOutboundMessageAt: true,
+          },
+        },
+        messages: { where: { internal: false }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 1 },
+      },
     }),
     prisma.task.findMany({
       where: { tenantId: tid, status: { in: ["open", "waiting"] } },
@@ -326,9 +388,12 @@ export async function getSituation(
     });
   }
 
-  for (const conversation of conversations) {
+  for (const conversation of pickConversationsForBoard(conversations)) {
     const attention = conversation.needsAttention && conversation.mode === "ai";
     if (conversation.mode === "ai" && !attention) continue;
+    const last = conversation.messages[0] || null;
+    const lastFromClient = last?.direction === "inbound" && last?.senderKind === "client";
+    const waitingReply = conversation.contact ? needsReply(conversation.contact) : Boolean(lastFromClient);
     const kind: SituationKind =
       conversation.mode === "human"
         ? "conversation_human"
@@ -349,7 +414,9 @@ export async function getSituation(
       interest: resolveInterest(conversation.contactId, conversation.id),
       reason:
         kind === "conversation_human"
-          ? "Клиент ждёт ответ менеджера"
+          ? waitingReply
+            ? "Клиент ждёт ответ менеджера"
+            : "Диалог у менеджера"
           : kind === "conversation_paused"
             ? "Диалог на паузе"
             : conversation.attentionReason || "ИИ эскалировал — нужен человек",
@@ -372,6 +439,7 @@ export async function getSituation(
       },
       blocked: false,
       snoozedUntil: null,
+      waitingReply,
     });
   }
 
@@ -421,32 +489,31 @@ export async function getSituation(
     });
   }
 
-  const contactIdsOnBoard = new Set(items.map((item) => item.links.contactId).filter(Boolean));
   for (const contact of contacts) {
     const inbound = contact.lastInboundMessageAt;
-    const outbound = contact.lastOutboundMessageAt;
-    const waiting = Boolean(inbound && (!outbound || inbound.getTime() > outbound.getTime()));
-    if (waiting && !contactIdsOnBoard.has(contact.id) && !items.some((item) => item.links.contactId === contact.id && item.kind.startsWith("conversation_"))) {
-      items.push({
-        id: `contact_needs_reply:${contact.id}`,
-        kind: "contact_needs_reply",
-        entityId: contact.id,
-        title: contact.name || contact.firstName || "Клиент ждёт ответа",
-        contactName: displayName(contact),
-        phone: phoneFromContact(contact),
-        interest: resolveInterest(contact.id),
-        reason: `Клиент ждёт ${formatDurationMinutes(ageMinutes(inbound!, now))}`,
-        nextAction: "open_contact",
-        severity: "high",
-        ownerMembershipId: contact.ownerMembershipId,
-        dueAt: null,
-        ageMinutes: ageMinutes(inbound!, now),
-        freshness: "unknown",
-        links: { contactId: contact.id },
-        blocked: false,
-        snoozedUntil: null,
-      });
-    }
+    const waiting = needsReply(contact);
+    if (!waiting) continue;
+    if (items.some((item) => item.links.contactId === contact.id && item.waitingReply)) continue;
+    items.push({
+      id: `contact_needs_reply:${contact.id}`,
+      entityId: contact.id,
+      kind: "contact_needs_reply",
+      title: contact.name || contact.firstName || "Клиент ждёт ответа",
+      contactName: displayName(contact),
+      phone: phoneFromContact(contact),
+      interest: resolveInterest(contact.id),
+      reason: `Клиент ждёт ${formatDurationMinutes(ageMinutes(inbound!, now))}`,
+      nextAction: "open_contact",
+      severity: "high",
+      ownerMembershipId: contact.ownerMembershipId,
+      dueAt: null,
+      ageMinutes: ageMinutes(inbound!, now),
+      freshness: "unknown",
+      links: { contactId: contact.id },
+      blocked: false,
+      snoozedUntil: null,
+      waitingReply: true,
+    });
   }
 
   for (const inquiry of inquiries) {

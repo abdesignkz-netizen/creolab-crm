@@ -24,6 +24,7 @@ import {
   type AgreementType,
   type WaitingFor,
 } from "./conversationContextTypes.ts";
+import { excludeRematchedLeftovers } from "./attentionCounts.ts";
 import { adoptSameContactThreadMessages, listThreadConversationIds } from "./conversationThread.ts";
 
 const ACTIVE_INQUIRY = ["new", "accepted", "qualification", "qualified", "in_progress", "waiting_client", "waiting_manager"];
@@ -94,10 +95,6 @@ function lastMessageAt(conversation: {
   messages: Array<{ createdAt: Date }>;
 }) {
   return conversation.messages[0]?.createdAt || conversation.updatedAt;
-}
-
-function isRematchedLeftover(conversation: { sellerLeadId?: string | null; attentionReason?: string | null }) {
-  return !conversation.sellerLeadId && conversation.attentionReason === "seller_lead_rematched";
 }
 
 async function loadThreadMessages(
@@ -222,12 +219,7 @@ export async function listConversationsBoard(
     take: 80,
   });
 
-  const liveContactIds = new Set(
-    conversations.filter((item) => item.sellerLeadId && item.contactId).map((item) => item.contactId as string),
-  );
-  const visibleConversations = conversations.filter(
-    (item) => !isRematchedLeftover(item) || !item.contactId || !liveContactIds.has(item.contactId),
-  );
+  const visibleConversations = excludeRematchedLeftovers(conversations);
   const threadMessagesByContact = new Map<string, typeof conversations[number]["messages"]>();
   for (const item of conversations) {
     if (!item.contactId || !item.messages.length) continue;

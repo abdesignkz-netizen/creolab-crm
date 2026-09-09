@@ -112,8 +112,11 @@ function parseRules(rawText: string): StructuredCommand {
     riskLevel = 0;
     confidence = "high";
   } else {
-    ambiguities.push("Не удалось однозначно определить действие");
-    confidence = "low";
+    // Любая свободная формулировка — написать клиенту по смыслу, не шаблон.
+    taskType = "message";
+    intent = "message";
+    riskLevel = executionMode === "prepare_only" ? 1 : 3;
+    confidence = "medium";
   }
 
   const serviceCategories: string[] = [];

@@ -306,6 +306,90 @@ describe("Situation API", () => {
     assert.ok(Array.isArray(data.attention.items));
   });
 
+  it("цифры «нужно ответить» и «нужен человек» совпадают со страницами, куда ведут ссылки", async () => {
+    await resetDemo();
+    const waiting = await prisma.contact.create({
+      data: {
+        tenantId,
+        name: "Ждёт ответа",
+        lastInboundMessageAt: new Date(),
+        lastOutboundMessageAt: new Date(Date.now() - 3600_000),
+      },
+    });
+    await prisma.conversation.create({
+      data: {
+        tenantId,
+        contactId: waiting.id,
+        mode: "human",
+        status: "open",
+        needsAttention: true,
+        attentionReason: "seller_lead_rematched",
+      },
+    });
+    await prisma.conversation.create({
+      data: {
+        tenantId,
+        contactId: waiting.id,
+        sellerLeadId: "lead-waiting-1",
+        mode: "human",
+        status: "open",
+        needsAttention: true,
+      },
+    });
+    const answered = await prisma.contact.create({
+      data: {
+        tenantId,
+        name: "Уже ответили",
+        lastInboundMessageAt: new Date(Date.now() - 3600_000),
+        lastOutboundMessageAt: new Date(),
+      },
+    });
+    await prisma.conversation.create({
+      data: {
+        tenantId,
+        contactId: answered.id,
+        sellerLeadId: "lead-answered-1",
+        mode: "human",
+        status: "open",
+        needsAttention: false,
+      },
+    });
+
+    const overviewRes = await fetch(`${base}/api/v1/situation/overview?period=today&scope=all`, { headers: { cookie } });
+    assert.equal(overviewRes.status, 200);
+    const overview = (await overviewRes.json()) as {
+      attention: {
+        summary: { needsReply: number; needsHuman: number; overdueTasks: number };
+        items: Array<{ group?: string; links?: { contactId?: string }; phone?: string | null }>;
+      };
+    };
+
+    const contactsRes = await fetch(`${base}/api/v1/contacts?filter=needs_reply`, { headers: { cookie } });
+    assert.equal(contactsRes.status, 200);
+    const contacts = (await contactsRes.json()) as { total: number; items: Array<{ id: string }> };
+
+    const attentionRes = await fetch(`${base}/api/v1/conversations?filter=attention`, { headers: { cookie } });
+    assert.equal(attentionRes.status, 200);
+    const attentionDialogs = (await attentionRes.json()) as { items: Array<{ id: string }> };
+
+    const badgesRes = await fetch(`${base}/api/v1/nav-badges`, { headers: { cookie } });
+    assert.equal(badgesRes.status, 200);
+    const badges = (await badgesRes.json()) as { badges: Record<string, number> };
+
+    assert.equal(overview.attention.summary.needsReply, contacts.total);
+    assert.equal(overview.attention.summary.needsReply, badges.badges["/contacts"]);
+    assert.ok(contacts.items.some((item) => item.id === waiting.id));
+    assert.ok(!contacts.items.some((item) => item.id === answered.id));
+
+    const replyItems = overview.attention.items.filter((item) => item.group === "needs_reply");
+    const replyKeys = replyItems.map((item) => item.links?.contactId || item.phone).filter(Boolean);
+    assert.equal(new Set(replyKeys).size, replyKeys.length);
+
+    assert.equal(overview.attention.summary.needsHuman, attentionDialogs.items.length);
+    assert.equal(overview.attention.summary.needsHuman, badges.badges["/conversations"]);
+    assert.equal(overview.attention.summary.overdueTasks, badges.badges["/tasks"]);
+  });
+
   it("поручение без sellerLead — 422", async () => {
     const conversation = await prisma.conversation.create({
       data: { tenantId, mode: "ai", status: "open" },

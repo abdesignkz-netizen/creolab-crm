@@ -151,7 +151,7 @@ export function ConversationsPage() {
           >
             <div className="conv-row-top">
               <b>{item.title}</b>
-              <span className="muted">{item.lastMessageLabel?.split(", ").pop() || item.lastMessageLabel}</span>
+              <span className="muted conv-row-when">{item.lastMessageLabel || ""}</span>
             </div>
             <div className="muted">{phoneText(item.phone)}</div>
             <div className="conv-topic">{item.topic}</div>

@@ -2,6 +2,7 @@ import type { PrismaClient } from "@creolab/db";
 import {
   acceptPersonalizedDraft,
   clientAskFromStaffTask,
+  clientFacingAskFromTask,
   composeRecipientOffer,
   inferCampaignOfferKind,
   looksLikeStaffCommand,
@@ -19,10 +20,11 @@ export type ContactComposeFact = {
   history: Array<{ role: "user" | "assistant"; content: string }>;
 };
 
-const CLIENT_TEXT_TYPES = new Set(["message", "proposal", "send_documents", "follow_up"]);
+const CLIENT_TEXT_TYPES = new Set(["message", "proposal", "send_documents", "follow_up", "other"]);
 
 export function wantsClientMessageDraft(taskType?: string | null) {
-  return CLIENT_TEXT_TYPES.has(String(taskType || ""));
+  const type = String(taskType || "");
+  return !type || CLIENT_TEXT_TYPES.has(type);
 }
 
 export function isGenericTemplateDraft(text: string) {
@@ -250,7 +252,7 @@ export async function composeCommandDraftsForContacts(input: {
 
   const refined = await refineCampaignRecipientDraftsWithLlm({
     taskText,
-    clientAsk: clientAskFromStaffTask(taskText),
+    clientAsk: clientFacingAskFromTask(taskText) || clientAskFromStaffTask(taskText),
     kind: inferCampaignOfferKind(taskText, sharedDraft),
     hasFile: Boolean(input.hasFile),
     recipients: drafts.map((row) => {

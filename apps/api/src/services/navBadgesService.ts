@@ -1,6 +1,14 @@
 import type { PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
+import {
+  conversationsAttentionWhere,
+  conversationsHumanWhere,
+  countContactsNeedsReply,
+  countVisibleConversations,
+  notScheduledSend,
+  overdueTasksWhere,
+} from "./attentionCounts.ts";
 import { inquiryNeedsActionWhere, openIntakeWhere } from "./inquiryAttention.ts";
 
 function requireTenant(auth: AuthContext) {
@@ -31,12 +39,6 @@ export function badgeHint(total: number, parts: string[], empty = "") {
  * Lightweight attention counts for sidebar / mobile nav badges.
  * Keys are route paths used in App shell navigation.
  */
-const notScheduledSend = {
-  NOT: {
-    OR: [{ executionStatus: "scheduled" }, { commandStatus: "scheduled" }],
-  },
-};
-
 export async function getNavBadges(prisma: PrismaClient, auth: AuthContext) {
   const membership = requireTenant(auth);
   const tid = membership.tenantId;
@@ -55,31 +57,12 @@ export async function getNavBadges(prisma: PrismaClient, auth: AuthContext) {
     notificationsUnread,
     incompleteIntakes,
   ] = await Promise.all([
-    prisma.conversation.count({
-      where: { tenantId: tid, status: "open", needsAttention: true },
-    }),
-    prisma.conversation.count({
-      where: { tenantId: tid, status: "open", mode: "human" },
-    }),
+    countVisibleConversations(prisma, conversationsAttentionWhere(tid)),
+    countVisibleConversations(prisma, conversationsHumanWhere(tid)),
     prisma.task.count({
-      where: {
-        tenantId: tid,
-        parentTaskId: null,
-        status: { in: ["open", "waiting"] },
-        dueAt: { lt: now },
-        ...notScheduledSend,
-      },
+      where: overdueTasksWhere(tid, now),
     }),
-    prisma.$queryRaw<Array<{ count: bigint }>>`
-      SELECT COUNT(*)::bigint AS count
-      FROM "Contact"
-      WHERE "tenantId" = ${tid}
-        AND "lastInboundMessageAt" IS NOT NULL
-        AND (
-          "lastOutboundMessageAt" IS NULL
-          OR "lastInboundMessageAt" > "lastOutboundMessageAt"
-        )
-    `.then((rows) => Number(rows[0]?.count || 0)),
+    countContactsNeedsReply(prisma, tid),
     prisma.inquiry.count({ where: inquiryAction }),
     prisma.deal.count({
       where: {

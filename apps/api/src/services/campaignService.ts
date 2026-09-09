@@ -9,7 +9,7 @@ import type { AuthContext } from "../lib/types.ts";
 import {
   acceptPersonalizedDraft,
   campaignTaskDedupeKey,
-  clientAskFromStaffTask,
+  clientFacingAskFromTask,
   composeRecipientOffer,
   inferCampaignOfferKind,
   looksLikeStaffCommand,
@@ -1142,7 +1142,7 @@ export async function personalizeCampaignRecipients(
   const sharedDraft = commandFromDraft ? "" : sharedRaw;
   const facts = await loadRecipientOfferFacts(prisma, membership.tenantId, pending);
   const kind = inferCampaignOfferKind(taskText, sharedDraft);
-  const clientAsk = clientAskFromStaffTask(taskText);
+  const clientAsk = clientFacingAskFromTask(taskText);
   let drafts = facts.map((fact) => ({
     id: fact.id,
     text: composeRecipientOffer({
@@ -1222,7 +1222,7 @@ export async function draftCampaignMessage(goal: string, hasFile: boolean) {
   if (spoken) {
     return { messageDraft: `{{firstName}}, добрый день! ${spoken}${fileBit}`.replace(/\s{2,}/g, " ").trim(), mode: "ai" as const };
   }
-  const ask = clientAskFromStaffTask(goal);
+  const ask = clientFacingAskFromTask(goal);
   if (ask) {
     return { messageDraft: `{{firstName}}, добрый день! ${ask}${fileBit}`.replace(/\s{2,}/g, " ").trim(), mode: "ai" as const };
   }
@@ -1231,11 +1231,7 @@ export async function draftCampaignMessage(goal: string, hasFile: boolean) {
       ? `{{firstName}}, добрый день! По запросу {{service}} направляем коммерческое предложение.${fileBit} Если актуально, напишите — уточним детали.`
       : kind === "documents"
         ? `{{firstName}}, добрый день! Направляем документы.${fileBit} Если нужно что-то ещё — напишите.`
-        : kind === "follow_up"
-          ? "{{firstName}}, добрый день! Хотели уточнить, актуальна ли ещё ваша задача." +
-            fileBit +
-            " Можем подсказать по следующим шагам."
-          : `{{firstName}}, добрый день! ${goal.replace(/\s+/g, " ").trim()}${fileBit}`;
+        : `{{firstName}}, добрый день! ${goal.replace(/\s+/g, " ").trim()}${fileBit}`;
   return { messageDraft: base.replace(/\s{2,}/g, " ").trim(), mode: "ai" as const };
 }
 

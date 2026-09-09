@@ -961,7 +961,8 @@ fieldset.field-block legend { padding: 0 6px; font-weight: 600; }
   background: var(--accent-soft);
 }
 .conv-row.unread b { font-weight: 700; }
-.conv-row-top { display: flex; justify-content: space-between; gap: 8px; }
+.conv-row-top { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.conv-row-when { white-space: nowrap; flex-shrink: 0; }
 .conv-topic { font-size: 14px; margin-top: 2px; }
 .conv-preview {
   color: var(--muted);

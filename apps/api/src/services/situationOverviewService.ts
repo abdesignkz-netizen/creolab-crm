@@ -2,7 +2,15 @@ import type { PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { getSituation, type SituationItem, type SituationScope } from "./situationService.ts";
+import {
+  conversationsAttentionWhere,
+  conversationsHumanWhere,
+  countContactsNeedsReply,
+  countVisibleConversations,
+  overdueTasksWhere,
+} from "./attentionCounts.ts";
 import { ensureDealPipelineStages, flagsForDeal } from "./dealService.ts";
+import { openIntakeWhere } from "./inquiryAttention.ts";
 import { CONTACT_PHONE_SELECT, displayName, phoneFromContact } from "./contactLabels.ts";
 import { PIPELINE_STAGES, parseOpsSettings } from "./dealPipeline.ts";
 import {
@@ -243,7 +251,7 @@ function buildInsights(input: {
     insights.push({
       tone: "critical",
       text: `${ruCount(input.needsHuman, "диалог требует", "диалога требуют", "диалогов требуют")} вмешательства человека.`,
-      href: "/conversations?filter=human",
+      href: "/conversations?filter=attention",
     });
   }
   if (input.overdueTasks > 0) {
@@ -366,13 +374,15 @@ function taskTypeBucket(type: string, title: string) {
   return "Другое";
 }
 
-function attentionGroup(kind: SituationItem["kind"]): string {
-  if (kind === "contact_needs_reply" || kind === "conversation_human") return "needs_reply";
-  if (kind === "task_overdue") return "overdue";
-  if (kind === "missing_next_action") return "no_next_action";
-  if (kind === "conversation_attention" || kind === "conversation_paused") return "needs_human";
-  if (kind === "needs_phone") return "no_contact";
-  if (kind.startsWith("inquiry_")) return "inquiry";
+function attentionGroup(item: Pick<SituationItem, "kind" | "waitingReply">): string {
+  if (item.kind === "contact_needs_reply" || (item.kind.startsWith("conversation_") && item.waitingReply)) {
+    return "needs_reply";
+  }
+  if (item.kind === "task_overdue") return "overdue";
+  if (item.kind === "missing_next_action") return "no_next_action";
+  if (item.kind.startsWith("conversation_")) return "needs_human";
+  if (item.kind === "needs_phone") return "no_contact";
+  if (item.kind.startsWith("inquiry_")) return "inquiry";
   return "other";
 }
 
@@ -570,7 +580,7 @@ export async function getSituationOverview(
       select: { id: true, lossReason: true },
       take: 500,
     }),
-    prisma.incompleteIntake.count({ where: { tenantId: tid, status: "pending" } }),
+    prisma.incompleteIntake.count({ where: openIntakeWhere(tid) }),
     prisma.task.findMany({
       where: { tenantId: tid, status: { in: ["open", "waiting"] }, ...assigneeTask },
       include: { contact: { select: CONTACT_PHONE_SELECT } },
@@ -648,7 +658,7 @@ export async function getSituationOverview(
     take: 100,
   });
 
-  const [members, conversationModes, conversationNeedsHuman, currentNewInquiries, currentInWorkInquiries] =
+  const [members, conversationModes, conversationNeedsHuman, currentNewInquiries, currentInWorkInquiries, contactsNeedsReply, tasksOverdueCount, conversationsHumanVisible] =
     await Promise.all([
       prisma.membership.findMany({
         where: { tenantId: tid, active: true },
@@ -660,9 +670,7 @@ export async function getSituationOverview(
         where: { tenantId: tid, status: "open" },
         _count: { _all: true },
       }),
-      prisma.conversation.count({
-        where: { tenantId: tid, status: "open", needsAttention: true },
-      }),
+      countVisibleConversations(prisma, conversationsAttentionWhere(tid)),
       prisma.inquiry.count({
         where: {
           tenantId: tid,
@@ -681,6 +689,9 @@ export async function getSituationOverview(
           ...assigneeInquiry,
         },
       }),
+      countContactsNeedsReply(prisma, tid),
+      prisma.task.count({ where: overdueTasksWhere(tid, now) }),
+      countVisibleConversations(prisma, conversationsHumanWhere(tid)),
     ]);
 
   const inquiriesCount = periodInquiries.length;
@@ -822,7 +833,7 @@ export async function getSituationOverview(
   const attentionItems = [
     ...board.items.map((item) => ({
       ...item,
-      group: attentionGroup(item.kind),
+        group: attentionGroup(item),
       href:
         item.kind === "needs_phone"
           ? "/inquiries?filter=needs_clarification"
@@ -867,12 +878,12 @@ export async function getSituationOverview(
   ];
 
   const attentionSummary = {
-    needsReply: board.items.filter((i) => i.kind === "contact_needs_reply" || i.kind === "conversation_human").length,
-    overdueTasks: board.metrics.overdue,
+    needsReply: contactsNeedsReply,
+    overdueTasks: tasksOverdueCount,
     noNextAction: board.items.filter((i) => i.kind === "missing_next_action").length + noNextActionDeals.length,
     stalledDeals: stalledDealsList.length,
-    needsHuman: board.metrics.needsHuman,
-    noContact: board.metrics.blocked,
+    needsHuman: conversationNeedsHuman,
+    noContact: intakesPending,
     unassigned: board.items.filter((i) => !i.ownerMembershipId).length,
     needsClarification:
       board.items.filter((i) => i.kind === "needs_phone" || i.kind === "inquiry_new").length +
@@ -1006,7 +1017,6 @@ export async function getSituationOverview(
   });
 
   const conversationAi = conversationModes.find((row) => row.mode === "ai")?._count._all || 0;
-  const conversationHuman = conversationModes.find((row) => row.mode === "human")?._count._all || 0;
   const whatsappInquiries = periodInquiries.filter(
     (inq) => normalizeSourceKey(inq.sourceChannel || inq.source) === "whatsapp",
   ).length;
@@ -1228,7 +1238,7 @@ export async function getSituationOverview(
         : "AI Manager · не подключён",
       conversations: {
         ai: conversationAi,
-        human: conversationHuman,
+        human: conversationsHumanVisible,
         needsAttention: conversationNeedsHuman,
       },
       whatsappInquiries,
