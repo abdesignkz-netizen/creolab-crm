@@ -366,6 +366,53 @@ describe("Conversations board", () => {
     assert.ok(afterCount < beforeCount);
   });
 
+  it("просмотр диалога, где клиент ждёт ответа, сразу снимает точку и цифру", async () => {
+    const contact = await prisma.contact.findFirst({ where: { name: { contains: "Александр" } } });
+    assert.ok(contact);
+    const conversation = await prisma.conversation.create({
+      data: {
+        tenantId: contact.tenantId,
+        contactId: contact.id,
+        mode: "ai",
+        status: "open",
+        sellerLeadId: "LEAD-seen-waiting",
+        needsAttention: true,
+        attentionReason: "needs_reply",
+      },
+    });
+    await prisma.message.create({
+      data: {
+        tenantId: contact.tenantId,
+        conversationId: conversation.id,
+        senderKind: "client",
+        direction: "inbound",
+        text: "Хочу обсудить разработку презентации",
+        createdAt: new Date(Date.now() - 8 * 3600_000),
+      },
+    });
+    const beforeBadges = await fetch(`${base}/api/v1/nav-badges`, { headers: { cookie } });
+    const beforeCount = Number(((await beforeBadges.json()) as { badges: Record<string, number> }).badges["/conversations"] || 0);
+
+    const opened = await fetch(`${base}/api/v1/conversations/${conversation.id}`, { headers: { cookie } });
+    assert.equal(opened.status, 200, await opened.text());
+
+    const after = await prisma.conversation.findFirst({ where: { id: conversation.id } });
+    assert.equal(after?.needsAttention, false);
+
+    const list = await fetch(`${base}/api/v1/conversations`, { headers: { cookie } });
+    const row = ((await list.json()) as { items: Array<{ id: string; unread: boolean; urgent: boolean; needsAttention: boolean; needsReply: boolean }> }).items.find(
+      (item) => item.id === conversation.id,
+    );
+    assert.equal(row?.unread, false);
+    assert.equal(row?.urgent, false);
+    assert.equal(row?.needsAttention, false);
+    assert.equal(row?.needsReply, true);
+
+    const afterBadges = await fetch(`${base}/api/v1/nav-badges`, { headers: { cookie } });
+    const afterCount = Number(((await afterBadges.json()) as { badges: Record<string, number> }).badges["/conversations"] || 0);
+    assert.ok(afterCount < beforeCount);
+  });
+
   it("кнопка понять контекст пишет краткое резюме по переписке", async () => {
     const response = await fetch(`${base}/api/v1/conversations/${conversationId}/analyze-context`, {
       method: "POST",

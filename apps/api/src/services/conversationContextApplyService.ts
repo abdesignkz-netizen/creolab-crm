@@ -443,7 +443,6 @@ export async function applyConversationAnalysis(
       contextSummary: analysis.summaryUpdate,
       lastContextAnalyzedAt: new Date(),
       lastAnalyzedMessageId: lastMsg?.id || null,
-      needsAttention: Boolean(analysis.humanRequired || analysis.needsReply || analysis.waitingFor === "MANAGER"),
       attentionReason: analysis.humanRequired
         ? analysis.humanReason || "human_required"
         : analysis.needsReply || analysis.waitingFor === "MANAGER"

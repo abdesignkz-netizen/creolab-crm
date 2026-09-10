@@ -63,26 +63,26 @@ export function ConversationsPage() {
       const data = await api.conversation(id);
       if (request !== workspaceVersion.current) return;
       setWorkspace(data);
-      const messages = (data as any).messages || [];
-      const lastMessage = messages[messages.length - 1];
-      await api.markConversationRead(id, lastMessage?.id || "");
-      if (request !== workspaceVersion.current) return;
       setItems((previous) => {
         const next = previous.map((item) =>
           item.id === id
             ? {
                 ...item,
                 unread: false,
-                urgent: Boolean(item.needsReply && item.urgent),
-                needsAttention: Boolean(item.needsReply),
+                urgent: false,
+                needsAttention: false,
                 businessStatus: item.businessStatus === "Новая" ? "В работе" : item.businessStatus,
                 inquiryStatusLabel: item.inquiryStatusLabel === "Новая" ? "В работе" : item.inquiryStatusLabel,
               }
             : item,
         );
-        return filter === "attention" ? next.filter((item) => item.id !== id || item.needsAttention) : next;
+        return filter === "attention" ? next.filter((item) => item.id !== id) : next;
       });
       window.dispatchEvent(new Event("creolab:attention-changed"));
+      const messages = (data as any).messages || [];
+      const lastMessage = messages[messages.length - 1];
+      await api.markConversationRead(id, lastMessage?.id || "");
+      if (request !== workspaceVersion.current) return;
       setError("");
     } catch (err) {
       if (request !== workspaceVersion.current) return;

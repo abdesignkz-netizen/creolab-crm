@@ -42,6 +42,7 @@ async function upsertLeadHistory(
   if (!slice.length) return { added: 0, moved: 0 };
   let added = 0;
   let moved = 0;
+  let inboundAdded = false;
   for (const item of slice) {
     const oldPhoneScopedId = historyScopedIdByPhone(phone, item);
     const phoneScopedId = `${tid}:${oldPhoneScopedId}`;
@@ -74,11 +75,16 @@ async function upsertLeadHistory(
       },
     });
     added += 1;
+    if (item.role !== "assistant") inboundAdded = true;
   }
   if (added || moved) {
     await prisma.conversation.update({
       where: { id: conversationId },
-      data: { messageRevision: { increment: added + moved }, updatedAt: new Date() },
+      data: {
+        messageRevision: { increment: added + moved },
+        updatedAt: new Date(),
+        ...(inboundAdded ? { needsAttention: true, attentionReason: "needs_reply" } : {}),
+      },
     });
   }
   return { added, moved };
