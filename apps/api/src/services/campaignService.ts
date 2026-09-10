@@ -972,7 +972,7 @@ async function sendOneRecipient(
 
     await prisma.conversation.update({
       where: { id: conversation.id },
-      data: { mode: "human", needsAttention: true, attentionReason: "taken_by_human" },
+      data: { mode: "human", needsAttention: false, attentionReason: "taken_by_human" },
     });
     try {
       const resolved = await resolveSellerBridge(prisma, campaign.tenantId);

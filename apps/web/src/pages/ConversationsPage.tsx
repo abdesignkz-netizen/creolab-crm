@@ -67,18 +67,21 @@ export function ConversationsPage() {
       const lastMessage = messages[messages.length - 1];
       await api.markConversationRead(id, lastMessage?.id || "");
       if (request !== workspaceVersion.current) return;
-      setItems((previous) =>
-        previous.map((item) =>
+      setItems((previous) => {
+        const next = previous.map((item) =>
           item.id === id
             ? {
                 ...item,
                 unread: false,
+                urgent: Boolean(item.needsReply && item.urgent),
+                needsAttention: Boolean(item.needsReply),
                 businessStatus: item.businessStatus === "Новая" ? "В работе" : item.businessStatus,
                 inquiryStatusLabel: item.inquiryStatusLabel === "Новая" ? "В работе" : item.inquiryStatusLabel,
               }
             : item,
-        ),
-      );
+        );
+        return filter === "attention" ? next.filter((item) => item.id !== id || item.needsAttention) : next;
+      });
       window.dispatchEvent(new Event("creolab:attention-changed"));
       setError("");
     } catch (err) {

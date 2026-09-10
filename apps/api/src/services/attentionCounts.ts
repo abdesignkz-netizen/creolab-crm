@@ -18,7 +18,22 @@ export async function countVisibleConversations(prisma: PrismaClient, where: Pri
     where,
     select: { id: true, contactId: true, sellerLeadId: true, attentionReason: true },
   });
-  return excludeRematchedLeftovers(rows).length;
+  const leftoverContactIds = [
+    ...new Set(rows.filter(isRematchedLeftover).map((item) => item.contactId).filter((id): id is string => Boolean(id))),
+  ];
+  const liveContactIds = new Set(
+    rows.filter((item) => item.sellerLeadId && item.contactId).map((item) => item.contactId as string),
+  );
+  if (leftoverContactIds.length) {
+    const live = await prisma.conversation.findMany({
+      where: { contactId: { in: leftoverContactIds }, sellerLeadId: { not: null } },
+      select: { contactId: true },
+    });
+    for (const item of live) {
+      if (item.contactId) liveContactIds.add(item.contactId);
+    }
+  }
+  return rows.filter((item) => !isRematchedLeftover(item) || !item.contactId || !liveContactIds.has(item.contactId)).length;
 }
 
 export function overdueTasksWhere(tenantId: string, now: Date): Prisma.TaskWhereInput {
@@ -31,7 +46,14 @@ export function overdueTasksWhere(tenantId: string, now: Date): Prisma.TaskWhere
 }
 
 export function conversationsAttentionWhere(tenantId: string): Prisma.ConversationWhereInput {
-  return { tenantId, status: "open", needsAttention: true };
+  return {
+    tenantId,
+    status: "open",
+    needsAttention: true,
+    NOT: {
+      AND: [{ sellerLeadId: null }, { attentionReason: "seller_lead_rematched" }],
+    },
+  };
 }
 
 export function conversationsHumanWhere(tenantId: string): Prisma.ConversationWhereInput {

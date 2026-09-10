@@ -842,8 +842,8 @@ export async function setConversationMode(
         mode,
         controlVersion: modeChanged ? { increment: 1 } : undefined,
         assigneeMembershipId: mode === "human" ? auth.activeMembership?.id : current.assigneeMembershipId,
-        needsAttention: mode !== "ai",
-        attentionReason: mode === "human" ? "taken_by_human" : mode === "paused" ? "paused" : null,
+        needsAttention: mode === "ai" ? false : current.needsAttention,
+        attentionReason: mode === "human" ? "taken_by_human" : mode === "paused" ? "paused" : current.attentionReason,
       },
     });
     if (mode === "human" && auth.activeMembership) {

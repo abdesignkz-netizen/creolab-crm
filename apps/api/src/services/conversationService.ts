@@ -325,7 +325,7 @@ export async function listConversationsBoard(
         assigneeName: conversation.assignee?.user?.name || contact?.owner?.user?.name || null,
         attentionReason: conversation.attentionReason,
         unread: Boolean(unread),
-        urgent: Boolean(overdueTask || (waitingReply && (waitMinutes || 0) >= 60) || conversation.mode === "human"),
+        urgent: Boolean(overdueTask || (waitingReply && (waitMinutes || 0) >= 60)),
         startedAt: conversation.createdAt,
         startedLabel: formatWhen(conversation.createdAt, timeZone),
         contactId: contact?.id || null,
@@ -410,6 +410,7 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
   const contactPhone = contact ? primaryPhone(contact.methods)?.normalizedValue : null;
   await adoptSameContactThreadMessages(prisma, tid, conversation, contactPhone);
   const threadIds = await listThreadConversationIds(prisma, tid, conversation, contactPhone);
+  await acknowledgeConversationAttention(prisma, tid, conversation, threadIds);
   const relatedNotices = await relatedInquiriesForConversationView(prisma, tid, conversation, threadIds, contactPhone);
   await markRelatedStaffNotifications(prisma, {
     tenantId: tid,
@@ -629,6 +630,51 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
   };
 }
 
+async function acknowledgeConversationAttention(
+  prisma: PrismaClient,
+  tenantId: string,
+  conversation: {
+    id: string;
+    contactId?: string | null;
+    mode?: string | null;
+    needsAttention?: boolean | null;
+    attentionReason?: string | null;
+  },
+  threadIds: string[],
+) {
+  const last = await prisma.message.findFirst({
+    where: { tenantId, conversationId: { in: threadIds }, internal: false },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    select: { direction: true, senderKind: true },
+  });
+  const waitingReply = last?.direction === "inbound" && last?.senderKind === "client";
+  const keepAiEscalate = conversation.mode === "ai" && Boolean(conversation.needsAttention);
+  const keepAttention = waitingReply || keepAiEscalate;
+  await prisma.conversation.update({
+    where: { id: conversation.id },
+    data: {
+      needsAttention: keepAttention,
+      attentionReason: waitingReply
+        ? conversation.attentionReason || "needs_reply"
+        : keepAiEscalate
+          ? conversation.attentionReason
+          : null,
+    },
+  });
+  if (conversation.contactId) {
+    await prisma.conversation.updateMany({
+      where: {
+        tenantId,
+        contactId: conversation.contactId,
+        id: { not: conversation.id },
+        attentionReason: "seller_lead_rematched",
+        needsAttention: true,
+      },
+      data: { needsAttention: false },
+    });
+  }
+}
+
 async function relatedInquiriesForConversationView(
   prisma: PrismaClient,
   tenantId: string,
@@ -742,6 +788,7 @@ export async function markConversationRead(prisma: PrismaClient, auth: AuthConte
     conversationIds: threadIds,
     inquiryIds: noticeInquiryIds.length ? noticeInquiryIds : acknowledgeIds,
   });
+  await acknowledgeConversationAttention(prisma, tenantId, conversation, threadIds);
   await acknowledgeNewInquiriesAfterView(prisma, tenantId, auth.user.id, acknowledgeIds);
   return { ok: true };
 }

@@ -443,15 +443,13 @@ export async function applyConversationAnalysis(
       contextSummary: analysis.summaryUpdate,
       lastContextAnalyzedAt: new Date(),
       lastAnalyzedMessageId: lastMsg?.id || null,
-      needsAttention: keepHuman
-        ? true
-        : analysis.humanRequired || analysis.needsReply || analysis.waitingFor === "MANAGER",
-      attentionReason: keepHuman
-        ? conversation.attentionReason || "human"
-        : analysis.humanRequired
-          ? analysis.humanReason || "human_required"
-          : analysis.needsReply
-            ? "needs_reply"
+      needsAttention: Boolean(analysis.humanRequired || analysis.needsReply || analysis.waitingFor === "MANAGER"),
+      attentionReason: analysis.humanRequired
+        ? analysis.humanReason || "human_required"
+        : analysis.needsReply || analysis.waitingFor === "MANAGER"
+          ? "needs_reply"
+          : keepHuman
+            ? conversation.attentionReason || "human"
             : conversation.attentionReason,
     },
   });

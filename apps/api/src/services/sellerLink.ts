@@ -232,17 +232,25 @@ export async function applySellerLeadSync(
         externalThreadId: phone.normalized,
         mode,
         status: "open",
-        needsAttention: mode !== "ai",
+        needsAttention: false,
         attentionReason: mode === "human" ? "human" : mode === "paused" ? "paused" : null,
       },
     });
   } else {
+    const becameHumanFromAi = target.mode === "ai" && mode !== "ai";
     await prisma.conversation.update({
       where: { id: target.id },
       data: {
         mode,
-        needsAttention: mode !== "ai",
-        attentionReason: mode === "human" ? "human" : mode === "paused" ? "paused" : null,
+        needsAttention: mode === "ai" ? false : becameHumanFromAi ? true : target.needsAttention,
+        attentionReason:
+          mode === "ai"
+            ? null
+            : becameHumanFromAi
+              ? mode === "paused"
+                ? "paused"
+                : "human"
+              : target.attentionReason,
         contactId,
         connectionId: args.connectionId || target.connectionId,
         sellerLeadId: args.lead.leadId,
