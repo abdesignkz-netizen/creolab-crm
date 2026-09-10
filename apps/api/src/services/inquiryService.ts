@@ -9,6 +9,7 @@ import { inferClientInterest } from "./contactInterestService.ts";
 import { periodLabel, resolvePeriodRange, type PeriodPreset } from "./periodRange.ts";
 import { pagination } from "./pagination.ts";
 import { inquiryNeedsActionWhere, openIntakeWhere } from "./inquiryAttention.ts";
+import { markRelatedStaffNotifications } from "./notificationService.ts";
 
 const ACTIVE_WHATSAPP_INQUIRY = ["new", "accepted", "in_progress", "waiting_client", "waiting_manager", "qualification"];
 
@@ -1411,6 +1412,12 @@ export async function getInquiry(prisma: PrismaClient, auth: AuthContext, inquir
     },
   });
   if (!inquiry) throw new ApiError(404, "not_found", "Заявка не найдена");
+  await markRelatedStaffNotifications(prisma, {
+    tenantId: membership.tenantId,
+    membershipId: membership.id,
+    conversationIds: inquiry.conversationId ? [inquiry.conversationId] : [],
+    inquiryIds: [inquiry.id],
+  });
   const activities = await prisma.activity.findMany({
     where: { tenantId: membership.tenantId, inquiryId: inquiry.id },
     orderBy: { createdAt: "desc" },

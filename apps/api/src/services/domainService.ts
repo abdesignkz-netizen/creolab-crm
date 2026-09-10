@@ -994,16 +994,31 @@ export async function listNotifications(prisma: PrismaClient, auth: AuthContext)
     orderBy: { createdAt: "desc" },
     take: 50,
   });
+  const inquiryIds = items
+    .filter((item) => item.entityType === "inquiry" || item.type.startsWith("inquiry."))
+    .map((item) => item.entityId);
+  const conversationsByInquiry = new Map<string, string>();
+  if (inquiryIds.length) {
+    const inquiries = await prisma.inquiry.findMany({
+      where: { tenantId: tenantId(auth), id: { in: inquiryIds } },
+      select: { id: true, conversationId: true },
+    });
+    for (const inquiry of inquiries) {
+      if (inquiry.conversationId) conversationsByInquiry.set(inquiry.id, inquiry.conversationId);
+    }
+  }
   return items.map((item) => ({
     ...item,
-    href: notificationHref(item.type, item.entityType, item.entityId),
+    href: notificationHref(item.type, item.entityType, item.entityId, conversationsByInquiry.get(item.entityId)),
   }));
 }
 
-function notificationHref(type: string, entityType: string, entityId: string) {
-  if (type === "inquiry.created" || entityType === "inquiry") return "/inquiries";
-  if (type === "needs_phone" || entityType === "incomplete_intake") return "/today";
+function notificationHref(type: string, entityType: string, entityId: string, conversationId?: string) {
   if (type.startsWith("conversation.") || entityType === "conversation") return `/conversations/${entityId}`;
+  if (type === "inquiry.created" || entityType === "inquiry") {
+    return conversationId ? `/conversations/${conversationId}` : `/requests/${entityId}`;
+  }
+  if (type === "needs_phone" || entityType === "incomplete_intake") return "/today";
   if (entityType === "task") return "/tasks";
   if (entityType === "contact") return `/contacts/${entityId}`;
   return "/today";

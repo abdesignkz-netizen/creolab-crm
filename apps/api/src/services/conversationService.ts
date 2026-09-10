@@ -26,6 +26,7 @@ import {
 } from "./conversationContextTypes.ts";
 import { excludeRematchedLeftovers } from "./attentionCounts.ts";
 import { adoptSameContactThreadMessages, listThreadConversationIds } from "./conversationThread.ts";
+import { markRelatedStaffNotifications } from "./notificationService.ts";
 
 const ACTIVE_INQUIRY = ["new", "accepted", "qualification", "qualified", "in_progress", "waiting_client", "waiting_manager"];
 
@@ -408,6 +409,14 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
   const phone = contact ? primaryPhone(contact.methods) : null;
   const contactPhone = contact ? primaryPhone(contact.methods)?.normalizedValue : null;
   await adoptSameContactThreadMessages(prisma, tid, conversation, contactPhone);
+  const threadIds = await listThreadConversationIds(prisma, tid, conversation, contactPhone);
+  const relatedNotices = await relatedInquiriesForConversationView(prisma, tid, conversation, threadIds, contactPhone);
+  await markRelatedStaffNotifications(prisma, {
+    tenantId: tid,
+    membershipId: membership.id,
+    conversationIds: threadIds,
+    inquiryIds: relatedNotices.map((item) => item.id),
+  });
   const messages = (await loadThreadMessages(prisma, tid, conversation, contactPhone, 120)).reverse();
   const inquiryMatchesContact = (item: { phoneNormalized?: string | null; conversationId?: string | null }) =>
     item.conversationId === conversation.id ||
@@ -620,31 +629,29 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
   };
 }
 
-async function markConversationViewNotifications(
+async function relatedInquiriesForConversationView(
   prisma: PrismaClient,
   tenantId: string,
-  membershipId: string,
-  conversationId: string,
-  inquiryIds: string[],
+  conversation: { id: string; contactId?: string | null; inquiries: Array<{ id: string }> },
+  threadIds: string[],
+  phone: string | null,
 ) {
-  const now = new Date();
-  await prisma.notification.updateMany({
+  const linkedIds = conversation.inquiries.map((item) => item.id);
+  return prisma.inquiry.findMany({
     where: {
       tenantId,
-      recipientMembershipId: membershipId,
-      readAt: null,
+      archived: false,
       OR: [
-        { entityType: "conversation", entityId: conversationId },
-        { type: { startsWith: "conversation." }, entityId: conversationId },
-        ...(inquiryIds.length
-          ? [
-              { entityType: "inquiry", entityId: { in: inquiryIds } },
-              { type: "inquiry.created", entityId: { in: inquiryIds } },
-            ]
+        { conversationId: { in: threadIds } },
+        ...(linkedIds.length ? [{ id: { in: linkedIds } }] : []),
+        ...(conversation.contactId
+          ? [{ contactId: conversation.contactId, source: "whatsapp", status: { in: ACTIVE_INQUIRY } }]
           : []),
+        ...(phone ? [{ phoneNormalized: phone, source: "whatsapp", status: { in: ACTIVE_INQUIRY } }] : []),
       ],
     },
-    data: { readAt: now, resolvedAt: now },
+    select: { id: true, status: true },
+    take: 40,
   });
 }
 
@@ -694,8 +701,10 @@ export async function markConversationRead(prisma: PrismaClient, auth: AuthConte
   const cursor = String(messageId || "").trim();
   const message = cursor
     ? await prisma.message.findFirst({ where: { id: cursor, tenantId, conversationId: { in: threadIds } } })
-    : null;
-  if (cursor && !message) throw new ApiError(404, "not_found", "Сообщение не найдено");
+    : await prisma.message.findFirst({
+        where: { tenantId, conversationId: { in: threadIds }, internal: false },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      });
   if (message) {
     const key = { tenantId, conversationId: id, membershipId };
     const previous = await prisma.conversationReadState.findUnique({ where: { tenantId_conversationId_membershipId: key } });
@@ -707,17 +716,11 @@ export async function markConversationRead(prisma: PrismaClient, auth: AuthConte
       });
     }
   }
-  const linkedIds = [
-    ...conversation.inquiries.map((item) => item.id),
-    ...(
-      await prisma.inquiry.findMany({
-        where: { tenantId, archived: false, conversationId: id },
-        select: { id: true },
-      })
-    ).map((item) => item.id),
-  ];
-  let inquiryIds = [...new Set(linkedIds)];
-  if (!inquiryIds.length && (conversation.contactId || phone)) {
+  const related = await relatedInquiriesForConversationView(prisma, tenantId, conversation, threadIds, phone);
+  const noticeInquiryIds = [...new Set(related.map((item) => item.id))];
+  const freshInquiryIds = related.filter((item) => item.status === "new").map((item) => item.id);
+  let acknowledgeIds = freshInquiryIds;
+  if (!acknowledgeIds.length && (conversation.contactId || phone)) {
     const latest = await prisma.inquiry.findFirst({
       where: {
         tenantId,
@@ -731,10 +734,15 @@ export async function markConversationRead(prisma: PrismaClient, auth: AuthConte
       orderBy: { receivedAt: "desc" },
       select: { id: true },
     });
-    if (latest) inquiryIds = [latest.id];
+    if (latest) acknowledgeIds = [latest.id];
   }
-  await markConversationViewNotifications(prisma, tenantId, membershipId, id, inquiryIds);
-  await acknowledgeNewInquiriesAfterView(prisma, tenantId, auth.user.id, inquiryIds);
+  await markRelatedStaffNotifications(prisma, {
+    tenantId,
+    membershipId,
+    conversationIds: threadIds,
+    inquiryIds: noticeInquiryIds.length ? noticeInquiryIds : acknowledgeIds,
+  });
+  await acknowledgeNewInquiriesAfterView(prisma, tenantId, auth.user.id, acknowledgeIds);
   return { ok: true };
 }
 

@@ -60,6 +60,50 @@ export async function createStaffNotification(
   return notification;
 }
 
+/** Mark in-app notices for the opened conversation or inquiry so they do not stay «новое». */
+export async function markRelatedStaffNotifications(
+  prisma: PrismaClient | Prisma.TransactionClient,
+  args: {
+    tenantId: string;
+    membershipId: string;
+    conversationIds?: string[];
+    inquiryIds?: string[];
+  },
+) {
+  const conversationIds = [...new Set((args.conversationIds || []).map((id) => String(id || "").trim()).filter(Boolean))];
+  const inquiryIds = [...new Set((args.inquiryIds || []).map((id) => String(id || "").trim()).filter(Boolean))];
+  if (!conversationIds.length && !inquiryIds.length) return 0;
+
+  const or: Prisma.NotificationWhereInput[] = [];
+  if (conversationIds.length) {
+    or.push({ entityType: "conversation", entityId: { in: conversationIds } });
+    or.push({ type: { startsWith: "conversation." }, entityId: { in: conversationIds } });
+    or.push({
+      episodeKey: {
+        in: conversationIds.flatMap((id) => [`conversation.needs_human:${id}`, `conversation:${id}`]),
+      },
+    });
+  }
+  if (inquiryIds.length) {
+    or.push({ entityType: "inquiry", entityId: { in: inquiryIds } });
+    or.push({ type: { startsWith: "inquiry." }, entityId: { in: inquiryIds } });
+    or.push({
+      episodeKey: { in: inquiryIds.flatMap((id) => [`inquiry.created:${id}`, `inquiry:${id}`]) },
+    });
+  }
+
+  const result = await prisma.notification.updateMany({
+    where: {
+      tenantId: args.tenantId,
+      recipientMembershipId: args.membershipId,
+      readAt: null,
+      OR: or,
+    },
+    data: { readAt: new Date(), resolvedAt: new Date() },
+  });
+  return result.count;
+}
+
 export async function deliverPendingPush(
   prisma: PrismaClient,
   notificationId: string,

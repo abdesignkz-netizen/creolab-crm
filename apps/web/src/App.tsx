@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
-import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { api, setTenant } from "./lib/api";
 import { NavIcon } from "./components/NavIcon";
 import { tip } from "./lib/tip";
@@ -625,6 +625,11 @@ function Settings() {
     void loadNotices();
     setPermission(currentBrowserPermission());
     setEnabled(getBrowserNotificationPreference());
+    const onAttention = () => {
+      void loadNotices();
+    };
+    window.addEventListener("creolab:attention-changed", onAttention);
+    return () => window.removeEventListener("creolab:attention-changed", onAttention);
   }, []);
 
   if (state.status !== "ready") {
@@ -831,15 +836,28 @@ function Settings() {
               </div>
             </div>
             <div className="actions">
-              <a className="btn secondary" href={item.href || "/today"}>
+              <Link
+                className="btn secondary"
+                to={item.href || "/today"}
+                onClick={() => {
+                  if (item.readAt) return;
+                  void api
+                    .markNotificationRead(item.id)
+                    .then(() => {
+                      window.dispatchEvent(new Event("creolab:attention-changed"));
+                    })
+                    .catch(() => undefined);
+                }}
+              >
                 Открыть
-              </a>
+              </Link>
               {!item.readAt ? (
                 <button
                   type="button"
                   className="btn"
                   onClick={async () => {
                     await api.markNotificationRead(item.id);
+                    window.dispatchEvent(new Event("creolab:attention-changed"));
                     await loadNotices();
                   }}
                 >
