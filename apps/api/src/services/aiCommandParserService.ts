@@ -3,6 +3,11 @@ import { ApiError } from "../errors.ts";
 import { CALLS_ENABLED } from "../lib/featureFlags.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { composeCommandClientDraft } from "./commandComposeService.ts";
+import {
+  detectDocumentCommand,
+  DOCUMENT_ACTION_LABEL,
+  resolveDocumentDeals,
+} from "./documentCommandService.ts";
 import { refineCommandWithLlm } from "./llmClient.ts";
 import { SERVICE_CATEGORIES, previewContactSegment, searchContactsForPicker } from "./segmentService.ts";
 import { extractSpokenMessage } from "./spokenMessage.ts";
@@ -29,6 +34,7 @@ export type StructuredCommand = {
     statuses?: string[];
   };
   clientNameQuery?: string | null;
+  documentAction?: string;
   ambiguities: string[];
   understandingLabel: string;
 };
@@ -42,6 +48,7 @@ const WHITELIST = new Set([
   "send_proposal",
   "send_document",
   "prepare_only",
+  "document_action",
 ]);
 
 function normalize(text: string) {
@@ -74,7 +81,14 @@ function parseRules(rawText: string): StructuredCommand {
     /отправ(ь|ьте|ить).{0,20}(сообщен|текст|смс)/.test(text) ||
     /(?:в\s+)?(?:whatsapp|вотсап|вацап|wa)\b/.test(text);
 
-  if (/\b(кп|коммерческ\w*\s+предложен\w*|proposal)\b/.test(text) || /отправ(ь|ьте|ить).{0,40}(кп|предложен)/.test(text)) {
+  const documentCommand = detectDocumentCommand(rawText);
+  if (documentCommand) {
+    taskType = "document";
+    intent = "document_action";
+    executionMode = documentCommand.prepareOnly ? "prepare_only" : executionMode;
+    riskLevel = documentCommand.action.startsWith("send_") || documentCommand.action === "close_deal" ? 3 : 1;
+    confidence = "high";
+  } else if (/\b(кп|коммерческ\w*\s+предложен\w*|proposal)\b/.test(text) || /отправ(ь|ьте|ить).{0,40}(кп|предложен)/.test(text)) {
     taskType = "proposal";
     intent = "send_proposal";
     riskLevel = executionMode === "prepare_only" ? 1 : 3;
@@ -179,7 +193,15 @@ function parseRules(rawText: string): StructuredCommand {
   let targetType: "client" | "group" | "none" = "group";
   if (clientNameQuery) targetType = "client";
   if (intent === "search_clients") targetType = "group";
-  if (!clientNameQuery && !datePreset && !serviceCategories.length && !needsReply && !excludeWon && proposalSentDaysAgo == null) {
+  if (
+    intent !== "document_action" &&
+    !clientNameQuery &&
+    !datePreset &&
+    !serviceCategories.length &&
+    !needsReply &&
+    !excludeWon &&
+    proposalSentDaysAgo == null
+  ) {
     if (intent !== "search_clients") {
       ambiguities.push("Не указано, кому относится задача");
       confidence = "low";
@@ -193,7 +215,10 @@ function parseRules(rawText: string): StructuredCommand {
   const serviceLabels = serviceCategories
     .map((id) => SERVICE_CATEGORIES.find((item) => item.id === id)?.label || id)
     .join(", ");
-  const actionLabel = TASK_TYPE_LABEL[taskType] || taskType;
+  const actionLabel =
+    intent === "document_action" && documentCommand
+      ? DOCUMENT_ACTION_LABEL[documentCommand.action]
+      : TASK_TYPE_LABEL[taskType] || taskType;
   const whenLabel =
     proposalSentDaysAgo != null
       ? `кому отправляли КП ${proposalSentDaysAgo === 1 ? "вчера" : `${proposalSentDaysAgo} дн. назад`}`
@@ -205,7 +230,7 @@ function parseRules(rawText: string): StructuredCommand {
 
   const understandingLabel = [
     actionLabel,
-    clientNameQuery ? `клиент «${clientNameQuery}»` : "группа клиентов",
+    intent === "document_action" ? "документ сделки" : clientNameQuery ? `клиент «${clientNameQuery}»` : "группа клиентов",
     serviceLabels || null,
     whenLabel,
     needsReply ? "не ответили" : null,
@@ -233,6 +258,7 @@ function parseRules(rawText: string): StructuredCommand {
       proposalSentDaysAgo,
     },
     clientNameQuery,
+    documentAction: documentCommand?.action,
     ambiguities,
     understandingLabel,
   };
@@ -240,6 +266,11 @@ function parseRules(rawText: string): StructuredCommand {
 
 function mergeLlm(base: StructuredCommand, llm: Record<string, unknown> | null): StructuredCommand {
   if (!llm) return base;
+  if (base.intent === "document_action") {
+    const next = { ...base, filters: { ...base.filters } };
+    if (typeof llm.clientNameQuery === "string" && llm.clientNameQuery.trim()) next.clientNameQuery = llm.clientNameQuery;
+    return next;
+  }
   const next = { ...base, filters: { ...base.filters } };
   if (typeof llm.taskType === "string" && llm.taskType) next.taskType = llm.taskType;
   if (!CALLS_ENABLED && next.taskType === "call") {
@@ -411,8 +442,31 @@ export async function parseTaskCommand(
     selectable = clients.filter((item) => item.conversationId || item.phone).length;
   }
 
+  const documentDeals =
+    command.intent === "document_action"
+      ? await resolveDocumentDeals(prisma, auth, {
+          text,
+          contactIds,
+          clientNameQuery: command.clientNameQuery,
+        })
+      : [];
+  if (command.intent === "document_action") {
+    command.ambiguities = command.ambiguities.filter((item) => !/не указано, кому|укажите клиента/i.test(item));
+    if (!documentDeals.length) {
+      command.ambiguities.push("Укажите сделку или клиента с открытой сделкой");
+      command.confidence = "low";
+      needsClarification = true;
+    } else if (documentDeals.length > 1) {
+      command.ambiguities.push(`Найдено ${documentDeals.length} сделок. Выберите нужную.`);
+      command.confidence = "medium";
+      needsClarification = true;
+    } else {
+      command.confidence = "high";
+    }
+  }
+
   const pendingPhones = phonesUnresolved.length;
-  if (total === 0 && !pendingPhones && command.intent !== "search_clients") {
+  if (total === 0 && !pendingPhones && command.intent !== "search_clients" && command.intent !== "document_action") {
     if (!contactIds.length && !phones.length) {
       command.ambiguities.push("Укажите клиента или телефон — или уточните группу в команде");
     } else if (!pendingPhones) {
@@ -422,10 +476,12 @@ export async function parseTaskCommand(
 
   const recipientCount = total + pendingPhones;
   const massSend =
+    command.intent !== "document_action" &&
     recipientCount > 1 &&
     ["send_proposal", "send_document", "message"].includes(command.intent) &&
     command.executionMode !== "prepare_only";
-  const asCampaign = massSend || recipientCount > 30 || Boolean(opts.phoneListText?.trim());
+  const asCampaign =
+    command.intent === "document_action" ? false : massSend || recipientCount > 30 || Boolean(opts.phoneListText?.trim());
 
   if (recipientCount > 30 && !asCampaign && command.riskLevel >= 3) {
     command.ambiguities.push(`Слишком много получателей (${recipientCount}). Используйте массовую отправку (Campaign).`);
@@ -434,16 +490,19 @@ export async function parseTaskCommand(
 
   const status = needsClarification || command.confidence === "low" ? "needs_clarification" : "parsed";
   const preview = clients[0];
-  const suggestedDraft = await composeCommandClientDraft({
-    prisma,
-    tenantId: auth.activeMembership.tenantId,
-    taskText: text,
-    taskType: command.taskType,
-    contactId: typeof preview?.id === "string" ? preview.id : null,
-    firstName: typeof preview?.name === "string" ? preview.name : null,
-    companyName: typeof preview?.companyName === "string" ? preview.companyName : null,
-    interest: typeof preview?.interest === "string" ? preview.interest : null,
-  });
+  const suggestedDraft =
+    command.intent === "document_action"
+      ? ""
+      : await composeCommandClientDraft({
+          prisma,
+          tenantId: auth.activeMembership.tenantId,
+          taskText: text,
+          taskType: command.taskType,
+          contactId: typeof preview?.id === "string" ? preview.id : null,
+          firstName: typeof preview?.name === "string" ? preview.name : null,
+          companyName: typeof preview?.companyName === "string" ? preview.companyName : null,
+          interest: typeof preview?.interest === "string" ? preview.interest : null,
+        });
 
   return {
     status,
@@ -454,7 +513,13 @@ export async function parseTaskCommand(
       title: "CRM поняла задачу так",
       action: command.actionLabel,
       who:
-        pendingPhones && !clients.length
+        command.intent === "document_action"
+          ? documentDeals.length === 1
+            ? `Сделка «${documentDeals[0]!.title}»`
+            : documentDeals.length
+              ? `${documentDeals.length} сделок`
+              : "Сделка не выбрана"
+          : pendingPhones && !clients.length
           ? pendingPhones === 1
             ? `Новый клиент · ${phonesUnresolved[0]}`
             : `${pendingPhones} новых номеров`
@@ -467,13 +532,25 @@ export async function parseTaskCommand(
         command.filters.serviceCategories
           ?.map((id) => SERVICE_CATEGORIES.find((item) => item.id === id)?.label || id)
           .join(", ") || "Любой интерес",
-      found: recipientCount,
-      canExecute: asCampaign ? Math.min(recipientCount, 500) : Math.min((selectable || total) + pendingPhones, 30),
+      found: command.intent === "document_action" ? documentDeals.length : recipientCount,
+      canExecute:
+        command.intent === "document_action"
+          ? documentDeals.length === 1
+            ? 1
+            : 0
+          : asCampaign
+            ? Math.min(recipientCount, 500)
+            : Math.min((selectable || total) + pendingPhones, 30),
       needsClarification: clients.length && needsClarification ? clients.length : Math.max(0, total - (selectable || total)),
       when: command.executionMode === "prepare_only" ? "Только подготовка" : "Сейчас (после подтверждения)",
-      executor: "CRM / AI Manager",
+      executor: command.intent === "document_action" ? "Контур документов" : "CRM / AI Manager",
       label: command.understandingLabel,
-      consequence: asCampaign
+      consequence:
+        command.intent === "document_action"
+          ? command.documentAction === "send_esf" || command.documentAction === "send_avr"
+            ? "После подтверждения CRM вызовет официальную отправку в ИС ЭСФ. WhatsApp не трогаем."
+            : "CRM выполнит действие в контуре документов сделки, не создавая задачу WhatsApp."
+        : asCampaign
         ? "Это массовая отправка: откроется Campaign с проверкой получателей и подтверждением."
         : command.riskLevel >= 3
           ? "После подтверждения CRM отправит сообщение клиенту через WhatsApp."
@@ -481,8 +558,16 @@ export async function parseTaskCommand(
             ? "После подтверждения CRM создаст задачу звонка ответственному."
             : "CRM подготовит действие без внешней отправки.",
     },
+    document:
+      command.intent === "document_action"
+        ? {
+            action: command.documentAction,
+            actionLabel: command.actionLabel,
+            deals: documentDeals.map((row) => ({ id: row.id, title: row.title, href: `/deals/${row.id}` })),
+          }
+        : null,
     clients: clients.slice(0, asCampaign ? 500 : 30),
-    total: recipientCount,
+    total: command.intent === "document_action" ? documentDeals.length : recipientCount,
     phoneUnresolved,
     phonesUnresolved,
   };

@@ -840,7 +840,11 @@ export async function updateContact(
     "leadTemperature",
   ] as const) {
     if (key in input) {
-      data[key] = input[key] === "" ? null : (input[key] as string);
+      const value = input[key];
+      if (value != null && typeof value !== "string") throw new ApiError(422, "invalid", `Поле ${key} должно быть строкой`);
+      if (key === "language" || key === "leadTemperature") data[key] = value || "unknown";
+      else if (key === "lifecycleStatus") data[key] = value || "new";
+      else data[key] = value || null;
     }
   }
   if ("ownerMembershipId" in input) {

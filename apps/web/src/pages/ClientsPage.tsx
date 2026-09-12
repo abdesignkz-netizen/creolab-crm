@@ -1,3 +1,4 @@
+import { notifySaved } from "../components/SaveNotice";
 import { useUrlState, useRequestVersion } from "../lib/useUrlState";
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -130,6 +131,7 @@ export function ClientsPage() {
                 comment: form.get("comment") || undefined,
                 companyName: form.get("companyName") || undefined,
               })) as any;
+              notifySaved("Клиент создан");
               navigate(`/contacts/${created.client.id}`);
             } catch (err) {
               setError(err instanceof Error ? err.message : "Не создано");

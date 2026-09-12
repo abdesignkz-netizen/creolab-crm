@@ -1,3 +1,4 @@
+import { notifySaved } from "../components/SaveNotice";
 import { useRequestVersion } from "../lib/useUrlState";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -303,6 +304,7 @@ export function RequestsPage() {
         forceNewContact: forceNew,
       })) as { id: string };
       setShowCreate(false);
+      notifySaved("Заявка создана");
       navigate(`/requests/${created.id}`);
     } catch (err: any) {
       setCreateError(err.body?.field_errors?.phone || err.message || "Не удалось создать");
@@ -713,8 +715,10 @@ export function RequestsPage() {
 }
 
 function CompleteIntakeInline({ id, onDone }: { id: string; onDone: () => void }) {
+  const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  if (saved) return <p className="ok">Контакт сохранён</p>;
   return (
     <form
       className="inline-form"
@@ -726,6 +730,8 @@ function CompleteIntakeInline({ id, onDone }: { id: string; onDone: () => void }
         setError("");
         try {
           await api.completeIntake(id, { phone: form.get("phone"), name: form.get("name") });
+          setSaved(true);
+          notifySaved("Контакт сохранён");
           onDone();
         } catch (err) {
           setError(err instanceof Error ? err.message : "Не удалось сохранить контакт");

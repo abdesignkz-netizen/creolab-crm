@@ -1,3 +1,4 @@
+import { notifySaved } from "../components/SaveNotice";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { nameWithPhone, phoneText } from "../lib/contactDisplay";
@@ -24,6 +25,8 @@ export function ContactPage() {
   const [newCompanyName, setNewCompanyName] = useState("");
   const [linkBusy, setLinkBusy] = useState(false);
   const [editBusy, setEditBusy] = useState(false);
+  const [noteOpen, setNoteOpen] = useState(true);
+  const [noteBusy, setNoteBusy] = useState(false);
 
   async function load() {
     if (!id) return;
@@ -152,6 +155,7 @@ export function ContactPage() {
                     const text = prompt("Внутренняя заметка");
                     if (!text) return;
                     await api.addContactNote(client.id, { text });
+                    notifySaved("Заметка сохранена");
                     await load();
                     setMenuOpen(false);
                   }}
@@ -211,6 +215,7 @@ export function ContactPage() {
                 ...(composedName ? { name: composedName } : {}),
               });
               setEditOpen(false);
+              notifySaved("Данные клиента сохранены");
               setError("");
               await load();
             } catch (err) {
@@ -400,8 +405,11 @@ export function ContactPage() {
                   <select
                     value={control.ownerMembershipId || ""}
                     onChange={async (event) => {
-                      await api.updateContact(client.id, { ownerMembershipId: event.target.value || null });
-                      await load();
+                      try {
+                        await api.updateContact(client.id, { ownerMembershipId: event.target.value || null });
+                        notifySaved("Ответственный сохранён");
+                        await load();
+                      } catch (err) { setError(err instanceof Error ? err.message : "Не удалось сохранить ответственного"); }
                     }}
                   >
                     <option value="">Не назначен</option>
@@ -442,8 +450,11 @@ export function ContactPage() {
             <select
               value={client.lifecycleStatus}
               onChange={async (event) => {
-                await api.updateContact(client.id, { lifecycleStatus: event.target.value });
-                await load();
+                try {
+                  await api.updateContact(client.id, { lifecycleStatus: event.target.value });
+                  notifySaved("Статус клиента сохранён");
+                  await load();
+                } catch (err) { setError(err instanceof Error ? err.message : "Не удалось сохранить статус"); }
               }}
             >
               <option value="new">Новый</option>
@@ -529,25 +540,34 @@ export function ContactPage() {
                 </div>
               </div>
             ))}
-            <form
+            {!noteOpen ? <button type="button" className="btn secondary" onClick={() => setNoteOpen(true)}>Добавить заметку</button> : <form
               className="inline-form"
               onSubmit={async (event) => {
                 event.preventDefault();
-                const form = new FormData(event.currentTarget);
-                await api.addContactNote(client.id, {
-                  text: String(form.get("text")),
-                  pinned: Boolean(form.get("pinned")),
-                });
-                event.currentTarget.reset();
-                await load();
+                if (noteBusy) return;
+                const formElement = event.currentTarget;
+                const form = new FormData(formElement);
+                setNoteBusy(true);
+                setError("");
+                try {
+                  await api.addContactNote(client.id, {
+                    text: String(form.get("text")), pinned: Boolean(form.get("pinned")),
+                  });
+                  formElement.reset();
+                  setNoteOpen(false);
+                  notifySaved("Заметка сохранена");
+                  await load();
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : "Не удалось сохранить заметку");
+                } finally { setNoteBusy(false); }
               }}
             >
               <input name="text" required placeholder="Внутренняя заметка" />
               <label className="check">
                 <input type="checkbox" name="pinned" /> Закрепить
               </label>
-              <button className="btn">Сохранить</button>
-            </form>
+              <button className="btn" disabled={noteBusy}>{noteBusy ? "Сохраняем…" : "Сохранить"}</button>
+            </form>}
           </div>
         </div>
       ) : null}

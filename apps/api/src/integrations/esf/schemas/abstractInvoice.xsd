@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<xs:schema version="1.0" targetNamespace="abstractInvoice.esf" xmlns:a="abstractInvoice.esf" xmlns:tns="abstractInvoice.esf" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+
+  <xs:element name="invoice" type="tns:AbstractInvoice"/>
+
+  <xs:complexType name="AbstractInvoice" abstract="true">
+    <xs:annotation>
+      <xs:documentation>Базовая информация об ЭСФ для всех версий ЭСФ в системе</xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="date" type="xs:string" minOccurs="1">
+        <xs:annotation>
+          <xs:documentation>Дата выписки ЭСФ (A 2)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="invoiceType" type="tns:InvoiceType" minOccurs="1">
+        <xs:annotation>
+          <xs:documentation>Тип ЭСФ</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="num" minOccurs="1">
+        <xs:annotation>
+          <xs:documentation>Исходящий номер ЭСФ в бухгалтерии отправителя (A 1)</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="xs:string">
+            <xs:pattern value="[0-9]{1,30}"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="operatorFullname" minOccurs="1">
+        <xs:annotation>
+          <xs:documentation>ФИО оператора отправившего ЭСФ </xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="xs:string">
+            <xs:maxLength value="200"/>
+            <xs:minLength value="0"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="relatedInvoice" type="tns:RelatedInvoice" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Служит для связки исправленного/дополнительного ЭСФ с основным</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="turnoverDate" type="xs:string" minOccurs="1">
+        <xs:annotation>
+          <xs:documentation>Дата совершения оборота (A 3)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="RelatedInvoice">
+    <xs:annotation>
+      <xs:documentation>Служит для связки исправленного/дополнительного ЭСФ с основным</xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="date" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>Дата выписки ЭСФ (A 4.1, A 5.1)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="num">
+        <xs:annotation>
+          <xs:documentation>Исходящий номер ЭСФ в бухгалтерии отправителя (A 4.2, A 5.2)</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="xs:string">
+            <xs:pattern value="[0-9]{1,30}"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="registrationNumber" type="xs:string" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Регистрационный номер ЭСФ на которую ссылается данная ЭСФ</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="AbstractProductShare">
+    <xs:sequence/>
+  </xs:complexType>
+
+  <xs:complexType name="AbstractCustomer" abstract="true">
+    <xs:sequence/>
+  </xs:complexType>
+
+  <xs:complexType name="AbstractProduct">
+    <xs:sequence/>
+  </xs:complexType>
+
+  <xs:simpleType name="InvoiceType">
+    <xs:annotation>
+      <xs:documentation>Тип ЭСФ</xs:documentation>
+    </xs:annotation>
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="ORDINARY_INVOICE">
+        <xs:annotation>
+          <xs:documentation>Основной ЭСФ</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="FIXED_INVOICE">
+        <xs:annotation>
+          <xs:documentation>Исправленный ЭСФ (A 4)</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="ADDITIONAL_INVOICE">
+        <xs:annotation>
+          <xs:documentation>Дополнительный ЭСФ (A 5)</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+    </xs:restriction>
+  </xs:simpleType>
+</xs:schema>

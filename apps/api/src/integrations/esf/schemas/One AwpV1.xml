@@ -1,0 +1,44 @@
+<v1:awp xmlns:v1="v1.awp" xmlns:aawp="abstractAwp.awp">
+    <date>12.09.2026</date>
+    <number>123</number>
+    <performedDate>12.09.2026</performedDate>
+    <contract>
+        <isContract>false</isContract>
+    </contract>
+    <recipients>
+        <recipient>
+            <tin>123456789011</tin>
+            <name>ИП УЭЙН</name>
+            <nonResident>false</nonResident>
+        </recipient>
+    </recipients>
+    <senders>
+        <sender>
+            <address>Казахстан,г.Атырау</address>
+            <tin>123456789021</tin>
+            <certificateNum>1399478</certificateNum>
+            <certificateSeries>13788</certificateSeries>
+            <name>ТОО "АСЕМ-2"</name>
+        </sender>
+    </senders>
+    <worksPerformed>
+        <currencyCode>KZT</currencyCode>
+        <totalNdsAmount>123</totalNdsAmount>
+        <totalSumWithTax>12423</totalSumWithTax>
+        <totalSumWithoutTax>12300</totalSumWithoutTax>
+        <totalTurnoverSize>12300</totalTurnoverSize>
+        <works>
+            <work>
+                <measureUnitCode>123</measureUnitCode>
+                <name>test</name>
+                <ndsAmount>123</ndsAmount>
+                <ndsRate>1</ndsRate>
+                <quantity>123</quantity>
+                <sumWithTax>12423</sumWithTax>
+                <sumWithoutTax>12300</sumWithoutTax>
+                <turnoverSize>12300</turnoverSize>
+                <unitPriceWithoutTax>100</unitPriceWithoutTax>
+            </work>
+        </works>
+    </worksPerformed>
+</v1:awp>

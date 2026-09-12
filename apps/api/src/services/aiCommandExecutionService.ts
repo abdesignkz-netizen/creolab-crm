@@ -59,10 +59,10 @@ export async function createTaskFromCommand(
         phone,
         source: "ai_command",
       });
-      return created.id;
+      return created.client.id;
     } catch (error) {
       if (error instanceof ApiError && error.code === "duplicate_phone") {
-        const details = error.details as { phone?: string } | undefined;
+        const details = error.fieldErrors;
         if (details?.phone) return String(details.phone);
       }
       throw error;

@@ -1,0 +1,59 @@
+Official ИС ЭСФ fragments only. Do not invent elements or SOAP operations.
+
+Source (outside this repo): /Users/ashat/Downloads/esf-sdk-2025/Документация ЭСФ SDK/
+
+XSD:
+  api-wsdl/xsd/Awp/AwpV1.xsd
+  — SOAP dump of AwpXsdService.queryAwpXsd (three schemas inside xsdList).
+  Extracted here as AwpV1.xsd, AbstractAwp.xsd, RegistrationType.xsd.
+  Dump artifact: kbe element ended with "&gt;" instead of ">". Restored to well-formed XSD.
+  Empty <xs:import/> wired to RegistrationType.xsd; abstractAwp import wired to AbstractAwp.xsd.
+
+WSDL operations used in this POC:
+  SessionService.createSession / closeSession / currentSessionStatus
+    api-wsdl/SessionService.wsdl
+    soap:address https://esf.gov.kz:8443/esf-web/ws/api1/SessionService
+  AwpWebService.uploadAwp / queryAwpStatusById / queryAwpById
+    api-wsdl/AwpWebService.wsdl
+  LocalService.generateSignature (AWP bodies)
+    sdk/soapui/ESF-AWP-SDK-soapui-project.xml
+    endpoint http://localhost:6666/LocalService
+
+TEST base from SoapUI definitionCache:
+  https://test3.esf.kgd.gov.kz:8443/esf-web
+
+AVR XML sample (SoapUI Upload AWP TestCase):
+  root <v1:awp xmlns:v1="v1.awp" xmlns:aawp="abstractAwp.awp">
+  dates via Groovy SimpleDateFormat("dd.MM.yyyy")
+  isContract / nonResident as "true" | "false"
+  version AwpV1
+  signatureType COMPANY
+
+SoapUI work sample also has <number> inside <work>. That child is NOT in AwpV1.xsd
+and is not emitted by this mapper.
+
+Signing is official LocalService / Kalkan (XML body + detached signature string).
+This is not NCALayer kz.gov.pki.knca.basics CMS used for CRM contracts.
+
+Phase 8 invoice (ЭСФ):
+  api-wsdl/xsd/Invoice/InvoiceV2.xsd
+  api-wsdl/xsd/Invoice/abstractInvoice.xsd
+  api-wsdl/xsd/Invoice/InvoiceContainer.xsd
+  Official sample: sdk/XML templates/One InvoiceV2.xml
+  UploadInvoiceService.syncInvoice
+    api-wsdl/UploadInvoiceService.wsdl
+    soap:address https://esf.gov.kz:8443/esf-web/ws/api1/UploadInvoiceService
+    version InvoiceV2 (EsfXsdService.queryInvoiceXsd SoapUI)
+  InvoiceService.queryInvoiceById
+    api-wsdl/InvoiceService.wsdl
+    InvoiceStatus enum from the same WSDL (no CONFIRMED; success is DELIVERED)
+  LocalService.generateSignature for invoices
+    sdk/soapui/ESF-SDK-soapui-project.xml
+    esf:signatureRequest / invoiceBodies / invoiceBody / version InvoiceV2
+    Java sample unmarshals invoiceBody as AbstractInvoice, not invoiceContainer.
+
+catalogTruId (G 18) is required by InvoiceV2.xsd. CRM does not invent a catalog id.
+truOriginCode pattern [1-6]. Code 6 is official «работа, услуга» (G 2).
+invoice num pattern [0-9]{1,30} — digits from CRM ESF number.
+customer/countryCode is required; domestic default KZ.
+seller iik/bik only if they match official patterns.

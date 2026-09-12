@@ -210,7 +210,9 @@ function primaryPhone(methods: Array<{ type: string; rawValue: string; primary: 
   return phones.find((item) => item.primary) || phones[0] || null;
 }
 
-function rawSuggestedNextActions(taskType: string, resultCode?: string | null) {
+function rawSuggestedNextActions(taskType: string, resultCode?: string | null): Array<{
+  type: string; title: string; dueOffsetHours: number | null; requiresConfirm?: boolean;
+}> {
   if (taskType === "meeting") {
     if (resultCode === "send_proposal") {
       return [{ type: "proposal", title: "Отправить КП", dueOffsetHours: 4, requiresConfirm: true }];
@@ -277,10 +279,10 @@ export async function updateTaskDraft(
   id: string,
   input: {
     messageDraft?: string;
-    contactId?: string;
-    inquiryId?: string;
-    conversationId?: string;
-    dealId?: string;
+    contactId?: string | null;
+    inquiryId?: string | null;
+    conversationId?: string | null;
+    dealId?: string | null;
     title?: string;
     description?: string;
     dueAt?: string | null;

@@ -1,4 +1,5 @@
 import type { Prisma, PrismaClient } from "@creolab/db";
+import { normalizeKzTaxId } from "@creolab/contracts";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { CONTACT_PHONE_SELECT, digitsOnly, displayName, formatWhen, phoneFromContact } from "./contactLabels.ts";
@@ -60,6 +61,14 @@ export type CompanyInput = {
   legalName?: string | null;
   shortName?: string | null;
   bin?: string | null;
+  iin?: string | null;
+  legalAddress?: string | null;
+  vatPayer?: boolean | null;
+  directorName?: string | null;
+  directorPosition?: string | null;
+  iban?: string | null;
+  bankName?: string | null;
+  bik?: string | null;
   industry?: string | null;
   website?: string | null;
   email?: string | null;
@@ -92,6 +101,14 @@ function serializeCompany(
     legalName: string | null;
     shortName: string | null;
     bin: string | null;
+    iin?: string | null;
+    legalAddress?: string | null;
+    vatPayer?: boolean | null;
+    directorName?: string | null;
+    directorPosition?: string | null;
+    iban?: string | null;
+    bankName?: string | null;
+    bik?: string | null;
     industry: string | null;
     website: string | null;
     email: string | null;
@@ -118,6 +135,14 @@ function serializeCompany(
     legalName: company.legalName,
     shortName: company.shortName,
     bin: company.bin,
+    iin: company.iin ?? null,
+    legalAddress: company.legalAddress ?? null,
+    vatPayer: company.vatPayer ?? null,
+    directorName: company.directorName ?? null,
+    directorPosition: company.directorPosition ?? null,
+    iban: company.iban ?? null,
+    bankName: company.bankName ?? null,
+    bik: company.bik ?? null,
     industry: company.industry,
     website: company.website,
     email: company.email,
@@ -206,7 +231,15 @@ export async function createCompany(prisma: PrismaClient, auth: AuthContext, inp
       legalName: input.legalName?.trim() || null,
       shortName: input.shortName?.trim() || null,
       nameNormalized: normalizeCompanyName(name),
-      bin: input.bin?.replace(/\D/g, "") || null,
+      bin: normalizeKzTaxId(input.bin) ,
+      iin: normalizeKzTaxId(input.iin),
+      legalAddress: input.legalAddress?.trim() || null,
+      vatPayer: input.vatPayer ?? null,
+      directorName: input.directorName?.trim() || null,
+      directorPosition: input.directorPosition?.trim() || null,
+      iban: input.iban?.trim() || null,
+      bankName: input.bankName?.trim() || null,
+      bik: input.bik?.trim() || null,
       industry: input.industry?.trim() || null,
       website: input.website?.trim() || null,
       email: input.email?.trim() || null,
@@ -251,7 +284,15 @@ export async function updateCompany(
       ...(name != null ? { name, nameNormalized: normalizeCompanyName(name) } : {}),
       ...(input.legalName !== undefined ? { legalName: input.legalName?.trim() || null } : {}),
       ...(input.shortName !== undefined ? { shortName: input.shortName?.trim() || null } : {}),
-      ...(input.bin !== undefined ? { bin: input.bin?.replace(/\D/g, "") || null } : {}),
+      ...(input.bin !== undefined ? { bin: normalizeKzTaxId(input.bin) } : {}),
+      ...(input.iin !== undefined ? { iin: normalizeKzTaxId(input.iin) } : {}),
+      ...(input.legalAddress !== undefined ? { legalAddress: input.legalAddress?.trim() || null } : {}),
+      ...(input.vatPayer !== undefined ? { vatPayer: input.vatPayer } : {}),
+      ...(input.directorName !== undefined ? { directorName: input.directorName?.trim() || null } : {}),
+      ...(input.directorPosition !== undefined ? { directorPosition: input.directorPosition?.trim() || null } : {}),
+      ...(input.iban !== undefined ? { iban: input.iban?.trim() || null } : {}),
+      ...(input.bankName !== undefined ? { bankName: input.bankName?.trim() || null } : {}),
+      ...(input.bik !== undefined ? { bik: input.bik?.trim() || null } : {}),
       ...(input.industry !== undefined ? { industry: input.industry?.trim() || null } : {}),
       ...(input.website !== undefined ? { website: input.website?.trim() || null } : {}),
       ...(input.email !== undefined ? { email: input.email?.trim() || null } : {}),

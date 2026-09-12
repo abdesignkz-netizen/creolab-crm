@@ -139,4 +139,21 @@ describe("Task targeting", () => {
     const body = await response.json();
     assert.ok(body.items.some((item: { isMe: boolean }) => item.isMe));
   });
+  it("создаёт задачу из команды для нового телефона и привязывает созданный контакт", async () => {
+    const response = await fetch(`${base}/api/v1/tasks/from-command`, {
+      method: "POST", headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({ text: "Запланировать встречу с новым клиентом", phone: "+77019998877", contactName: "Новый контакт из команды", parsedCommand: { taskType: "meeting" }, executionMode: "prepare_only" }),
+    });
+    const body = await response.json();
+    assert.equal(response.status, 201, JSON.stringify(body));
+    assert.ok(body.task.contactId);
+    assert.equal(body.task.contact.name, "Новый контакт из команды");
+    const second = await fetch(`${base}/api/v1/tasks/from-command`, {
+      method: "POST", headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({ text: "Ещё одна встреча", phone: "+77019998877", parsedCommand: { taskType: "meeting" }, executionMode: "prepare_only" }),
+    });
+    assert.equal(second.status, 201);
+    assert.equal((await second.json()).task.contactId, body.task.contactId);
+  });
+
 });

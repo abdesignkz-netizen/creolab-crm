@@ -25,6 +25,9 @@ async function applyLivePostgresPatches(prisma: PrismaClient) {
   const statements = [
     `ALTER TABLE "Campaign" ADD COLUMN IF NOT EXISTS "personalizeEach" BOOLEAN DEFAULT false`,
     `ALTER TABLE "CampaignRecipient" ADD COLUMN IF NOT EXISTS "messageDraft" TEXT`,
+    ...DOCUMENT_DOMAIN_SQL.split(";")
+      .map((s) => s.trim())
+      .filter(Boolean),
   ];
   for (const sql of statements) {
     try {
@@ -495,8 +498,297 @@ async function applyAdditiveSchema(pglite: PGlite) {
       ELSE 'HEALTHY'
     END
     WHERE "healthStatus" IS NULL OR "healthStatus" = 'UNKNOWN';
+
+    ${DOCUMENT_DOMAIN_SQL}
   `);
 }
+
+const DOCUMENT_DOMAIN_SQL = `
+    ALTER TABLE "Company" ADD COLUMN IF NOT EXISTS "iin" TEXT;
+    ALTER TABLE "Company" ADD COLUMN IF NOT EXISTS "legalAddress" TEXT;
+    ALTER TABLE "Company" ADD COLUMN IF NOT EXISTS "vatPayer" BOOLEAN;
+    ALTER TABLE "Company" ADD COLUMN IF NOT EXISTS "directorName" TEXT;
+    ALTER TABLE "Company" ADD COLUMN IF NOT EXISTS "directorPosition" TEXT;
+    ALTER TABLE "Company" ADD COLUMN IF NOT EXISTS "iban" TEXT;
+    ALTER TABLE "Company" ADD COLUMN IF NOT EXISTS "bankName" TEXT;
+    ALTER TABLE "Company" ADD COLUMN IF NOT EXISTS "bik" TEXT;
+
+    CREATE TABLE IF NOT EXISTS "TenantLegalProfile" (
+      "id" TEXT NOT NULL,
+      "tenantId" TEXT NOT NULL,
+      "legalName" TEXT,
+      "shortName" TEXT,
+      "bin" TEXT,
+      "iin" TEXT,
+      "legalAddress" TEXT,
+      "actualAddress" TEXT,
+      "iban" TEXT,
+      "bankName" TEXT,
+      "bik" TEXT,
+      "vatPayer" BOOLEAN,
+      "vatRegistrationNumber" TEXT,
+      "defaultVatMode" TEXT,
+      "defaultVatRate" DECIMAL(5,2),
+      "directorName" TEXT,
+      "directorPosition" TEXT,
+      "email" TEXT,
+      "phone" TEXT,
+      "country" TEXT DEFAULT 'KZ',
+      "currency" TEXT DEFAULT 'KZT',
+      "documentsEnabled" BOOLEAN NOT NULL DEFAULT true,
+      "contractSigningEnabled" BOOLEAN NOT NULL DEFAULT false,
+      "esfIntegrationEnabled" BOOLEAN NOT NULL DEFAULT false,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "TenantLegalProfile_pkey" PRIMARY KEY ("id")
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS "TenantLegalProfile_tenantId_key" ON "TenantLegalProfile"("tenantId");
+    CREATE UNIQUE INDEX IF NOT EXISTS "TenantLegalProfile_tenantId_id_key" ON "TenantLegalProfile"("tenantId", "id");
+
+    CREATE TABLE IF NOT EXISTS "DealItem" (
+      "id" TEXT NOT NULL,
+      "tenantId" TEXT NOT NULL,
+      "dealId" TEXT NOT NULL,
+      "name" TEXT NOT NULL,
+      "description" TEXT,
+      "quantity" DECIMAL(12,3) NOT NULL,
+      "unit" TEXT NOT NULL DEFAULT 'услуга',
+      "unitPrice" DECIMAL(18,2) NOT NULL,
+      "amountWithoutVat" DECIMAL(18,2) NOT NULL,
+      "vatRate" DECIMAL(5,2) NOT NULL,
+      "vatAmount" DECIMAL(18,2) NOT NULL,
+      "totalAmount" DECIMAL(18,2) NOT NULL,
+      "sortOrder" INTEGER NOT NULL DEFAULT 0,
+      "catalogItemId" TEXT,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "DealItem_pkey" PRIMARY KEY ("id")
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS "DealItem_tenantId_id_key" ON "DealItem"("tenantId", "id");
+    CREATE INDEX IF NOT EXISTS "DealItem_tenantId_dealId_sortOrder_idx" ON "DealItem"("tenantId", "dealId", "sortOrder");
+
+    CREATE TABLE IF NOT EXISTS "Contract" (
+      "id" TEXT NOT NULL,
+      "tenantId" TEXT NOT NULL,
+      "dealId" TEXT NOT NULL,
+      "companyId" TEXT,
+      "number" TEXT NOT NULL,
+      "date" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "subject" TEXT,
+      "amountWithoutVat" DECIMAL(18,2) NOT NULL,
+      "vatRate" DECIMAL(5,2),
+      "vatAmount" DECIMAL(18,2) NOT NULL,
+      "totalAmount" DECIMAL(18,2) NOT NULL,
+      "currency" TEXT NOT NULL DEFAULT 'KZT',
+      "paymentTerms" TEXT,
+      "completionTerms" TEXT,
+      "status" TEXT NOT NULL DEFAULT 'DRAFT',
+      "templateId" TEXT,
+      "originalFileId" TEXT,
+      "generatedFileId" TEXT,
+      "finalSignedFileId" TEXT,
+      "signedAt" TIMESTAMP(3),
+      "createdByUserId" TEXT,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "Contract_pkey" PRIMARY KEY ("id")
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS "Contract_tenantId_id_key" ON "Contract"("tenantId", "id");
+    CREATE UNIQUE INDEX IF NOT EXISTS "Contract_tenantId_number_key" ON "Contract"("tenantId", "number");
+    CREATE INDEX IF NOT EXISTS "Contract_tenantId_dealId_status_idx" ON "Contract"("tenantId", "dealId", "status");
+
+    CREATE TABLE IF NOT EXISTS "ContractVersion" (
+      "id" TEXT NOT NULL,
+      "tenantId" TEXT NOT NULL,
+      "contractId" TEXT NOT NULL,
+      "version" INTEGER NOT NULL,
+      "fileId" TEXT,
+      "sha256" TEXT,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "ContractVersion_pkey" PRIMARY KEY ("id")
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS "ContractVersion_tenantId_id_key" ON "ContractVersion"("tenantId", "id");
+    CREATE UNIQUE INDEX IF NOT EXISTS "ContractVersion_tenantId_contractId_version_key" ON "ContractVersion"("tenantId", "contractId", "version");
+
+    CREATE TABLE IF NOT EXISTS "Invoice" (
+      "id" TEXT NOT NULL,
+      "tenantId" TEXT NOT NULL,
+      "dealId" TEXT NOT NULL,
+      "contractId" TEXT,
+      "companyId" TEXT,
+      "number" TEXT NOT NULL,
+      "date" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "dueDate" TIMESTAMP(3),
+      "currency" TEXT NOT NULL DEFAULT 'KZT',
+      "amountWithoutVat" DECIMAL(18,2) NOT NULL,
+      "vatRate" DECIMAL(5,2),
+      "vatAmount" DECIMAL(18,2) NOT NULL,
+      "totalAmount" DECIMAL(18,2) NOT NULL,
+      "status" TEXT NOT NULL DEFAULT 'DRAFT',
+      "pdfFileId" TEXT,
+      "createdByUserId" TEXT,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "Invoice_pkey" PRIMARY KEY ("id")
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS "Invoice_tenantId_id_key" ON "Invoice"("tenantId", "id");
+    CREATE UNIQUE INDEX IF NOT EXISTS "Invoice_tenantId_number_key" ON "Invoice"("tenantId", "number");
+    CREATE INDEX IF NOT EXISTS "Invoice_tenantId_dealId_status_idx" ON "Invoice"("tenantId", "dealId", "status");
+
+    CREATE TABLE IF NOT EXISTS "InvoiceItem" (
+      "id" TEXT NOT NULL,
+      "tenantId" TEXT NOT NULL,
+      "invoiceId" TEXT NOT NULL,
+      "dealItemId" TEXT,
+      "name" TEXT NOT NULL,
+      "description" TEXT,
+      "quantity" DECIMAL(12,3) NOT NULL,
+      "unit" TEXT NOT NULL DEFAULT 'услуга',
+      "unitPrice" DECIMAL(18,2) NOT NULL,
+      "amountWithoutVat" DECIMAL(18,2) NOT NULL,
+      "vatRate" DECIMAL(5,2) NOT NULL,
+      "vatAmount" DECIMAL(18,2) NOT NULL,
+      "totalAmount" DECIMAL(18,2) NOT NULL,
+      "sortOrder" INTEGER NOT NULL DEFAULT 0,
+      CONSTRAINT "InvoiceItem_pkey" PRIMARY KEY ("id")
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS "InvoiceItem_tenantId_id_key" ON "InvoiceItem"("tenantId", "id");
+    CREATE INDEX IF NOT EXISTS "InvoiceItem_tenantId_invoiceId_sortOrder_idx" ON "InvoiceItem"("tenantId", "invoiceId", "sortOrder");
+
+    CREATE TABLE IF NOT EXISTS "ElectronicDocument" (
+      "id" TEXT NOT NULL,
+      "tenantId" TEXT NOT NULL,
+      "type" TEXT NOT NULL,
+      "dealId" TEXT NOT NULL,
+      "contractId" TEXT,
+      "companyId" TEXT,
+      "invoiceId" TEXT,
+      "number" TEXT NOT NULL,
+      "documentDate" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "amountWithoutVat" DECIMAL(18,2) NOT NULL,
+      "vatAmount" DECIMAL(18,2) NOT NULL,
+      "totalAmount" DECIMAL(18,2) NOT NULL,
+      "currency" TEXT NOT NULL DEFAULT 'KZT',
+      "status" TEXT NOT NULL DEFAULT 'DRAFT',
+      "externalSystem" TEXT,
+      "externalId" TEXT,
+      "externalNumber" TEXT,
+      "externalStatus" TEXT,
+      "sourceDataJson" JSONB NOT NULL DEFAULT '{}',
+      "xmlStorageKey" TEXT,
+      "signedXmlStorageKey" TEXT,
+      "createdByUserId" TEXT,
+      "signedByUserId" TEXT,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "validatedAt" TIMESTAMP(3),
+      "signedAt" TIMESTAMP(3),
+      "sentAt" TIMESTAMP(3),
+      "acceptedAt" TIMESTAMP(3),
+      "errorCode" TEXT,
+      "errorMessage" TEXT,
+      CONSTRAINT "ElectronicDocument_pkey" PRIMARY KEY ("id")
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS "ElectronicDocument_tenantId_id_key" ON "ElectronicDocument"("tenantId", "id");
+    CREATE UNIQUE INDEX IF NOT EXISTS "ElectronicDocument_tenantId_type_number_key" ON "ElectronicDocument"("tenantId", "type", "number");
+    CREATE INDEX IF NOT EXISTS "ElectronicDocument_tenantId_dealId_type_status_idx" ON "ElectronicDocument"("tenantId", "dealId", "type", "status");
+
+    CREATE TABLE IF NOT EXISTS "ContractTemplate" (
+      "id" TEXT NOT NULL,
+      "tenantId" TEXT NOT NULL,
+      "name" TEXT NOT NULL,
+      "body" TEXT NOT NULL,
+      "isDefault" BOOLEAN NOT NULL DEFAULT false,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "ContractTemplate_pkey" PRIMARY KEY ("id")
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS "ContractTemplate_tenantId_id_key" ON "ContractTemplate"("tenantId", "id");
+    CREATE INDEX IF NOT EXISTS "ContractTemplate_tenantId_isDefault_idx" ON "ContractTemplate"("tenantId", "isDefault");
+
+    ALTER TABLE "Contract" ADD COLUMN IF NOT EXISTS "verificationPublicId" TEXT;
+    CREATE UNIQUE INDEX IF NOT EXISTS "Contract_verificationPublicId_key" ON "Contract"("verificationPublicId");
+
+    CREATE TABLE IF NOT EXISTS "SignatureRequest" (
+      "id" TEXT NOT NULL,
+      "tenantId" TEXT NOT NULL,
+      "contractId" TEXT NOT NULL,
+      "contractVersionId" TEXT,
+      "signerType" TEXT NOT NULL,
+      "signerUserId" TEXT,
+      "signerCompanyId" TEXT,
+      "signerName" TEXT,
+      "signerIin" TEXT,
+      "signerBin" TEXT,
+      "order" INTEGER NOT NULL,
+      "status" TEXT NOT NULL DEFAULT 'PENDING',
+      "tokenHash" TEXT,
+      "expiresAt" TIMESTAMP(3),
+      "openedAt" TIMESTAMP(3),
+      "signedAt" TIMESTAMP(3),
+      "declinedAt" TIMESTAMP(3),
+      "declineReason" TEXT,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "SignatureRequest_pkey" PRIMARY KEY ("id")
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS "SignatureRequest_tenantId_id_key" ON "SignatureRequest"("tenantId", "id");
+    CREATE UNIQUE INDEX IF NOT EXISTS "SignatureRequest_tokenHash_key" ON "SignatureRequest"("tokenHash");
+    CREATE INDEX IF NOT EXISTS "SignatureRequest_tenantId_contractId_status_idx" ON "SignatureRequest"("tenantId", "contractId", "status");
+
+    CREATE TABLE IF NOT EXISTS "DocumentSignature" (
+      "id" TEXT NOT NULL,
+      "tenantId" TEXT NOT NULL,
+      "contractId" TEXT NOT NULL,
+      "contractVersionId" TEXT,
+      "signatureRequestId" TEXT,
+      "signerName" TEXT,
+      "signerIin" TEXT,
+      "signerBin" TEXT,
+      "certificateSerial" TEXT,
+      "certificateIssuer" TEXT,
+      "certificateValidFrom" TIMESTAMP(3),
+      "certificateValidTo" TIMESTAMP(3),
+      "signatureFormat" TEXT NOT NULL DEFAULT 'CMS_DETACHED',
+      "signatureFileId" TEXT,
+      "documentHash" TEXT NOT NULL,
+      "signedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "verificationStatus" TEXT NOT NULL,
+      "verificationDetails" JSONB NOT NULL DEFAULT '{}',
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "DocumentSignature_pkey" PRIMARY KEY ("id")
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS "DocumentSignature_tenantId_id_key" ON "DocumentSignature"("tenantId", "id");
+    CREATE INDEX IF NOT EXISTS "DocumentSignature_tenantId_contractId_idx" ON "DocumentSignature"("tenantId", "contractId");
+    CREATE INDEX IF NOT EXISTS "DocumentSignature_tenantId_signatureRequestId_idx" ON "DocumentSignature"("tenantId", "signatureRequestId");
+
+    ALTER TABLE "TenantLegalProfile" ADD COLUMN IF NOT EXISTS "defaultCatalogTruId" TEXT;
+    ALTER TABLE "DealItem" ADD COLUMN IF NOT EXISTS "catalogTruId" TEXT;
+
+    CREATE TABLE IF NOT EXISTS "EsfConnection" (
+      "id" TEXT NOT NULL,
+      "tenantId" TEXT NOT NULL,
+      "environment" TEXT NOT NULL,
+      "status" TEXT NOT NULL DEFAULT 'NOT_CONNECTED',
+      "sessionId" TEXT,
+      "sessionCreatedAt" TIMESTAMP(3),
+      "sessionExpiresAt" TIMESTAMP(3),
+      "organizationBin" TEXT,
+      "signerIin" TEXT,
+      "authCertificatePem" TEXT,
+      "authCertificateSerial" TEXT,
+      "authCertificateValidFrom" TIMESTAMP(3),
+      "authCertificateValidTo" TIMESTAMP(3),
+      "lastConnectedAt" TIMESTAMP(3),
+      "lastErrorCode" TEXT,
+      "lastErrorMessage" TEXT,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "EsfConnection_pkey" PRIMARY KEY ("id")
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS "EsfConnection_tenantId_environment_key" ON "EsfConnection"("tenantId", "environment");
+    CREATE UNIQUE INDEX IF NOT EXISTS "EsfConnection_tenantId_id_key" ON "EsfConnection"("tenantId", "id");
+    CREATE INDEX IF NOT EXISTS "EsfConnection_tenantId_status_idx" ON "EsfConnection"("tenantId", "status");
+`;
 
 export async function createPrismaClient(): Promise<PrismaClient> {
   if (globalForPrisma.prisma) {

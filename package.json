@@ -16,7 +16,8 @@
     "db:push": "npm run push --workspace=@creolab/db",
     "db:seed": "npm run seed --workspace=@creolab/db",
     "test": "npm run test --workspaces --if-present",
-    "lint": "npm run lint --workspaces --if-present"
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "engines": {
     "node": ">=22"

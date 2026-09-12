@@ -1,3 +1,11 @@
+export type TaskDetailResponse = Record<string, unknown> & { id: string; dueAt: string | null };
+export type AnalyticsTrendResponse = {
+  granularity: string;
+  metric: string;
+  points: Array<{ label: string; value: number | null }>;
+};
+export type AnalyticsDashboardResponse = Record<string, unknown> & { trend: AnalyticsTrendResponse };
+
 export type ClientOptions = {
   baseUrl: string;
   getToken?: () => string | null | Promise<string | null>;
@@ -107,6 +115,22 @@ export function createApiClient(options: ClientOptions) {
     aiAutomationSettings: () => request("/api/v1/settings/ai-automation"),
     updateAiAutomationSettings: (body: unknown) =>
       request("/api/v1/settings/ai-automation", { method: "PATCH", body: JSON.stringify(body) }),
+    legalProfile: () => request("/api/v1/settings/legal-profile"),
+    updateLegalProfile: (body: unknown) =>
+      request("/api/v1/settings/legal-profile", { method: "PATCH", body: JSON.stringify(body) }),
+    esfPreflight: () => request("/api/v1/settings/esf-preflight"),
+    esfConnection: () => request("/api/v1/integrations/esf"),
+    esfAuthTicket: (iin: string) => request("/api/v1/integrations/esf/auth-ticket", { method: "POST", body: JSON.stringify({ iin }) }),
+    esfConnect: (body: unknown) =>
+      request("/api/v1/integrations/esf/connect", { method: "POST", body: JSON.stringify(body) }),
+    esfDisconnect: () => request("/api/v1/integrations/esf/disconnect", { method: "POST" }),
+    esfNcaLayerPoc: () => request("/api/v1/integrations/esf/ncalayer-poc"),
+    esfNcaLayerLegacySign: () =>
+      request("/api/v1/integrations/esf/ncalayer-poc/legacy-sign", { method: "POST", body: JSON.stringify({}) }),
+    esfPocAvrPayload: () =>
+      request("/api/v1/integrations/esf/ncalayer-poc/avr-payload", { method: "POST", body: JSON.stringify({}) }),
+    esfPocAvrSend: (body: unknown) =>
+      request("/api/v1/integrations/esf/ncalayer-poc/avr-send", { method: "POST", body: JSON.stringify(body) }),
     completeIntake: (id: string, body: unknown) =>
       request(`/api/v1/incomplete-intakes/${id}/complete`, { method: "POST", body: JSON.stringify(body) }),
     contacts: (query: Record<string, string> = {}) => {
@@ -161,8 +185,92 @@ export function createApiClient(options: ClientOptions) {
       return request(`/api/v1/deals${suffix}`);
     },
     deal: (id: string) => request(`/api/v1/deals/${id}`),
+    createDeal: (body: unknown, idempotencyKey?: string) =>
+      request("/api/v1/deals", {
+        method: "POST",
+        body: JSON.stringify(body),
+        headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,
+      }),
     updateDeal: (id: string, body: unknown) =>
       request(`/api/v1/deals/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+    addDealItem: (dealId: string, body: unknown) =>
+      request(`/api/v1/deals/${dealId}/items`, { method: "POST", body: JSON.stringify(body) }),
+    updateDealItem: (dealId: string, itemId: string, body: unknown) =>
+      request(`/api/v1/deals/${dealId}/items/${itemId}`, { method: "PATCH", body: JSON.stringify(body) }),
+    deleteDealItem: (dealId: string, itemId: string) =>
+      request(`/api/v1/deals/${dealId}/items/${itemId}`, { method: "DELETE" }),
+    dealDocuments: (dealId: string) => request(`/api/v1/deals/${dealId}/documents`),
+    createDocumentFromCommand: (body: unknown) =>
+      request("/api/v1/documents/from-command", { method: "POST", body: JSON.stringify(body) }),
+    documents: (query: Record<string, string | undefined> = {}) => {
+      const params = new URLSearchParams();
+      for (const [key, value] of Object.entries(query)) {
+        if (value) params.set(key, value);
+      }
+      const qs = params.toString();
+      return request(`/api/v1/documents${qs ? `?${qs}` : ""}`);
+    },
+    contractReadiness: (dealId: string) => request(`/api/v1/deals/${dealId}/contract-readiness`),
+    createContractDraft: (dealId: string, body: unknown = {}) =>
+      request(`/api/v1/deals/${dealId}/contracts`, { method: "POST", body: JSON.stringify(body) }),
+    generateContract: (contractId: string, body: unknown = {}) =>
+      request(`/api/v1/contracts/${contractId}/generate`, { method: "POST", body: JSON.stringify(body) }),
+    contractPdfUrl: (contractId: string) => `/api/v1/contracts/${contractId}/pdf`,
+    sendContractForSign: (contractId: string) =>
+      request(`/api/v1/contracts/${contractId}/send-for-sign`, { method: "POST", body: JSON.stringify({}) }),
+    contractSigning: (contractId: string) => request(`/api/v1/contracts/${contractId}/signing`),
+    signSignatureRequest: (requestId: string, cmsBase64: string) =>
+      request(`/api/v1/signature-requests/${requestId}/sign`, {
+        method: "POST",
+        body: JSON.stringify({ cmsBase64 }),
+      }),
+    declineSignatureRequest: (requestId: string, reason?: string) =>
+      request(`/api/v1/signature-requests/${requestId}/decline`, {
+        method: "POST",
+        body: JSON.stringify({ reason: reason || null }),
+      }),
+    publicSign: (token: string) => request(`/public/sign/${encodeURIComponent(token)}`),
+    publicSignPdfUrl: (token: string) => `/public/sign/${encodeURIComponent(token)}/pdf`,
+    publicSubmitSign: (token: string, cmsBase64: string) =>
+      request(`/public/sign/${encodeURIComponent(token)}/sign`, {
+        method: "POST",
+        body: JSON.stringify({ cmsBase64 }),
+      }),
+    publicDeclineSign: (token: string, reason?: string) =>
+      request(`/public/sign/${encodeURIComponent(token)}/decline`, {
+        method: "POST",
+        body: JSON.stringify({ reason: reason || null }),
+      }),
+    publicVerify: (verificationId: string) => request(`/public/verify/${encodeURIComponent(verificationId)}`),
+    invoiceReadiness: (dealId: string) => request(`/api/v1/deals/${dealId}/invoice-readiness`),
+    createInvoiceDraft: (dealId: string, body: unknown = {}) =>
+      request(`/api/v1/deals/${dealId}/invoices`, { method: "POST", body: JSON.stringify(body) }),
+    generateInvoice: (invoiceId: string, body: unknown = {}) =>
+      request(`/api/v1/invoices/${invoiceId}/generate`, { method: "POST", body: JSON.stringify(body) }),
+    invoicePdfUrl: (invoiceId: string) => `/api/v1/invoices/${invoiceId}/pdf`,
+    avrReadiness: (dealId: string) => request(`/api/v1/deals/${dealId}/avr-readiness`),
+    esfInvoiceReadiness: (dealId: string) => request(`/api/v1/deals/${dealId}/esf-invoice-readiness`),
+    dealCloseReadiness: (dealId: string) => request(`/api/v1/deals/${dealId}/close-readiness`),
+    syncDealEsf: (dealId: string) =>
+      request(`/api/v1/deals/${dealId}/esf-sync`, { method: "POST", body: JSON.stringify({}) }),
+    createElectronicDocumentDraft: (dealId: string, body: unknown) =>
+      request(`/api/v1/deals/${dealId}/electronic-documents`, { method: "POST", body: JSON.stringify(body) }),
+    validateElectronicDocument: (documentId: string) =>
+      request(`/api/v1/electronic-documents/${documentId}/validate`, { method: "POST", body: JSON.stringify({}) }),
+    previewElectronicDocumentEsf: (documentId: string) =>
+      request(`/api/v1/electronic-documents/${documentId}/esf-preview`, { method: "POST", body: JSON.stringify({}) }),
+    sendElectronicDocumentEsf: (documentId: string) =>
+      request(`/api/v1/electronic-documents/${documentId}/esf-send`, { method: "POST", body: JSON.stringify({}) }),
+    esfPayloadToSign: (documentId: string) =>
+      request(`/api/v1/electronic-documents/${documentId}/esf-payload`, { method: "POST", body: JSON.stringify({}) }),
+    sendElectronicDocumentEsfSigned: (documentId: string, body: unknown, idempotencyKey?: string) =>
+      request(`/api/v1/electronic-documents/${documentId}/esf-send-signed`, {
+        method: "POST",
+        body: JSON.stringify(body),
+        headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,
+      }),
+    refreshElectronicDocumentEsf: (documentId: string) =>
+      request(`/api/v1/electronic-documents/${documentId}/esf-refresh`, { method: "POST", body: JSON.stringify({}) }),
     changeDealStage: (id: string, body: unknown) =>
       request(`/api/v1/deals/${id}/stage`, { method: "POST", body: JSON.stringify(body) }),
     markDealWon: (id: string, body: unknown = {}) =>
@@ -174,7 +282,7 @@ export function createApiClient(options: ClientOptions) {
     addDealPayment: (id: string, body: unknown) =>
       request(`/api/v1/deals/${id}/payments`, { method: "POST", body: JSON.stringify(body) }),
     tasks: () => request("/api/v1/tasks"),
-    task: (id: string) => request(`/api/v1/tasks/${id}`),
+    task: (id: string) => request<TaskDetailResponse>(`/api/v1/tasks/${id}`),
     createTask: (body: unknown) => request("/api/v1/tasks", { method: "POST", body: JSON.stringify(body) }),
     parseTaskCommand: (body: {
       text: string;
@@ -286,7 +394,7 @@ export function createApiClient(options: ClientOptions) {
         if (value != null && value !== "") params.set(key, value);
       });
       const qs = params.toString();
-      return request(`/api/v1/analytics/dashboard${qs ? `?${qs}` : ""}`);
+      return request<AnalyticsDashboardResponse>(`/api/v1/analytics/dashboard${qs ? `?${qs}` : ""}`);
     },
     analyticsTrend: (query: Record<string, string | undefined> = {}) => {
       const params = new URLSearchParams();
@@ -294,7 +402,7 @@ export function createApiClient(options: ClientOptions) {
         if (value != null && value !== "") params.set(key, value);
       });
       const qs = params.toString();
-      return request(`/api/v1/analytics/trend${qs ? `?${qs}` : ""}`);
+      return request<AnalyticsTrendResponse>(`/api/v1/analytics/trend${qs ? `?${qs}` : ""}`);
     },
     analyticsDrilldown: (query: Record<string, string | undefined> = {}) => {
       const params = new URLSearchParams();

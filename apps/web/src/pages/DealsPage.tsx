@@ -1,3 +1,4 @@
+import { notifySaved } from "../components/SaveNotice";
 import { useUrlState, useRequestVersion } from "../lib/useUrlState";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -5,6 +6,7 @@ import { PeriodSelector, type PeriodPreset } from "../components/PeriodSelector"
 import { nameWithPhone } from "../lib/contactDisplay";
 import { api } from "../lib/api";
 import { tip } from "../lib/tip";
+import { DealDocumentsPanel } from "./DealDocumentsPanel";
 
 type Scope = "all" | "mine" | "unassigned";
 type TimeMode = "now" | "period";
@@ -45,6 +47,15 @@ export function DealsPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [dragId, setDragId] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createTitle, setCreateTitle] = useState("");
+  const [contactQ, setContactQ] = useState("");
+  const [contactHits, setContactHits] = useState<any[]>([]);
+  const [pickedContact, setPickedContact] = useState<any>(null);
+  const [pickedCompanyId, setPickedCompanyId] = useState("");
+  const [contactCompanies, setContactCompanies] = useState<any[]>([]);
+  const [createError, setCreateError] = useState("");
+  const [createBusy, setCreateBusy] = useState(false);
 
   useEffect(() => {
     const focusParam = searchParams.get("focus");
@@ -88,6 +99,59 @@ export function DealsPage() {
     void load();
   }, [scope, timeMode, period, dateFrom, dateTo, basis, focus, stage, outcome]);
 
+  useEffect(() => {
+    if (!createOpen) return;
+    const t = setTimeout(() => {
+      api
+        .searchContacts(contactQ.trim())
+        .then((res: any) => setContactHits(res.clients || []))
+        .catch(() => setContactHits([]));
+    }, contactQ.trim() ? 220 : 0);
+    return () => clearTimeout(t);
+  }, [contactQ, createOpen]);
+
+  useEffect(() => {
+    if (!pickedContact?.id) {
+      setContactCompanies([]);
+      setPickedCompanyId("");
+      return;
+    }
+    void api
+      .contactCompanies(pickedContact.id)
+      .then((res: any) => {
+        const list = res.companies || res.items || [];
+        setContactCompanies(list);
+        setPickedCompanyId(list[0]?.company?.id || "");
+      })
+      .catch(() => setContactCompanies([]));
+  }, [pickedContact?.id]);
+
+  async function createDeal() {
+    if (!createTitle.trim() || !pickedContact?.id) {
+      setCreateError("Укажите название и клиента");
+      return;
+    }
+    setCreateBusy(true);
+    setCreateError("");
+    try {
+      const created: any = await api.createDeal({
+        title: createTitle.trim(),
+        contactId: pickedContact.id,
+        companyId: pickedCompanyId || null,
+      });
+      const id = created.deal?.id || created.id;
+      setCreateOpen(false);
+      setCreateTitle("");
+      setPickedContact(null);
+      notifySaved("Сделка создана");
+      navigate(`/deals/${id}`);
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : "Не удалось создать сделку");
+    } finally {
+      setCreateBusy(false);
+    }
+  }
+
   async function onDrop(stageId: string) {
     if (!dragId || busy || timeMode !== "now") return;
     setBusy(true);
@@ -123,7 +187,12 @@ export function DealsPage() {
           <p className="page-kicker">Воронка продаж</p>
           <h2>Сделки</h2>
         </div>
-        {data.period?.label ? <span className="muted">{data.period.label}</span> : null}
+        <div className="sit-toolbar-side">
+          {data.period?.label ? <span className="muted">{data.period.label}</span> : null}
+          <button type="button" className="btn" onClick={() => setCreateOpen(true)}>
+            Новая сделка
+          </button>
+        </div>
       </div>
 
       {error ? <p className="error">{error}</p> : null}
@@ -349,6 +418,81 @@ export function DealsPage() {
           ))}
         </div>
       ) : null}
+
+      {createOpen ? (
+        <div className="stats-modal-backdrop" onClick={() => setCreateOpen(false)}>
+          <div className="stats-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Новая сделка</h3>
+            <p className="muted">Без заявки. Клиент обязателен, компанию можно указать позже.</p>
+            {createError ? <p className="error">{createError}</p> : null}
+            <label>
+              Название
+              <input value={createTitle} onChange={(e) => setCreateTitle(e.target.value)} placeholder="Сайт для…" />
+            </label>
+            <label>
+              Клиент
+              <input
+                value={pickedContact ? pickedContact.name || "" : contactQ}
+                onChange={(e) => {
+                  setPickedContact(null);
+                  setContactQ(e.target.value);
+                }}
+                placeholder="Имя или телефон"
+              />
+            </label>
+            {!pickedContact ? (
+              <div className="picker-list" style={{ marginTop: 8 }}>
+                {contactHits.map((hit) => (
+                  <button
+                    key={hit.id}
+                    type="button"
+                    className="picker-item"
+                    onClick={() => {
+                      setPickedContact(hit);
+                      setContactQ("");
+                      if (!createTitle.trim()) setCreateTitle(hit.name || "");
+                    }}
+                  >
+                    <b>{hit.name}</b>
+                    <div className="muted">{[hit.phone, hit.companyName].filter(Boolean).join(" · ")}</div>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="muted">Клиент: {pickedContact.name}</p>
+            )}
+            {contactCompanies.length ? (
+              <label>
+                Компания
+                <select value={pickedCompanyId} onChange={(e) => setPickedCompanyId(e.target.value)}>
+                  <option value="">Без компании</option>
+                  {contactCompanies.map((row: any) => {
+                    const company = row.company || row;
+                    return (
+                      <option key={company.id} value={company.id}>
+                        {company.name}
+                      </option>
+                    );
+                  })}
+                </select>
+              </label>
+            ) : null}
+            <div className="row" style={{ gap: 8, marginTop: 12 }}>
+              <button
+                type="button"
+                className="btn"
+                disabled={createBusy || !createTitle.trim() || !pickedContact}
+                onClick={() => void createDeal()}
+              >
+                {createBusy ? "Создаём…" : "Создать"}
+              </button>
+              <button type="button" className="btn secondary" onClick={() => setCreateOpen(false)}>
+                Отмена
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -367,13 +511,46 @@ export function DealDetailPage() {
   const [board, setBoard] = useState<any>(null);
   const [payAmount, setPayAmount] = useState("");
   const [payComment, setPayComment] = useState("");
+  const [itemName, setItemName] = useState("");
+  const [itemQty, setItemQty] = useState("1");
+  const [itemPrice, setItemPrice] = useState("");
+  const [itemVat, setItemVat] = useState("");
+  const [docs, setDocs] = useState<any>(null);
+  const [readiness, setReadiness] = useState<any>(null);
+  const [invoiceReadiness, setInvoiceReadiness] = useState<any>(null);
+  const [avrReadiness, setAvrReadiness] = useState<any>(null);
+  const [esfInvoiceReadiness, setEsfInvoiceReadiness] = useState<any>(null);
+  const [closeReadiness, setCloseReadiness] = useState<any>(null);
+  const [companyQ, setCompanyQ] = useState("");
+  const [companyHits, setCompanyHits] = useState<any[]>([]);
+  const [signing, setSigning] = useState<any>(null);
+  const [buyerLink, setBuyerLink] = useState("");
+  const [esfPreview, setEsfPreview] = useState<any>(null);
+  const [esfInvoicePreview, setEsfInvoicePreview] = useState<any>(null);
 
   async function load() {
     if (!dealId) return;
     try {
-      const [detail, boardData] = await Promise.all([api.deal(dealId), api.deals({ timeMode: "now" })]);
+      const [detail, boardData, documents, contractReady, invoiceReady, avrReady, esfReady, closeReady] = await Promise.all([
+        api.deal(dealId),
+        api.deals({ timeMode: "now" }),
+        api.dealDocuments(dealId).catch(() => null),
+        api.contractReadiness(dealId).catch(() => null),
+        api.invoiceReadiness(dealId).catch(() => null),
+        api.avrReadiness(dealId).catch(() => null),
+        api.esfInvoiceReadiness(dealId).catch(() => null),
+        api.dealCloseReadiness(dealId).catch(() => null),
+      ]);
       setData(detail);
       setBoard(boardData);
+      setDocs(documents);
+      setReadiness(contractReady);
+      setInvoiceReadiness(invoiceReady);
+      setAvrReadiness(avrReady);
+      setEsfInvoiceReadiness(esfReady);
+      setCloseReadiness(closeReady);
+      const contractId = (documents as any)?.contracts?.[0]?.id;
+      setSigning(contractId ? await api.contractSigning(contractId).catch(() => null) : null);
       const d = (detail as any).deal;
       setAmount(d.amount != null ? String(d.amount) : "");
       setProbability(String(d.probability ?? 10));
@@ -389,16 +566,32 @@ export function DealDetailPage() {
     void load();
   }, [dealId]);
 
+  useEffect(() => {
+    const t = setTimeout(() => {
+      api
+        .companies({ q: companyQ.trim() || undefined })
+        .then((res: any) => setCompanyHits(res.items || []))
+        .catch(() => setCompanyHits([]));
+    }, companyQ.trim() ? 220 : 0);
+    return () => clearTimeout(t);
+  }, [companyQ]);
+
+  const [editing, setEditing] = useState(true);
+
   async function save() {
-    if (!dealId) return;
+    if (!dealId || busy) return;
     setBusy(true);
     try {
       await api.updateDeal(dealId, {
-        offerAmountMinor: amount === "" ? null : Number(amount),
+        ...((data as any)?.deal?.amountFromItems
+          ? {}
+          : { offerAmountMinor: amount === "" ? null : Number(amount) }),
         probability: Number(probability),
         nextAction: nextAction || null,
         paymentStatus,
       });
+      setEditing(false);
+      notifySaved("Изменения сделки сохранены");
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не сохранено");
@@ -453,6 +646,8 @@ export function DealDetailPage() {
         <div>
           <p className="page-kicker">
             <Link to="/deals">Сделки</Link>
+            {" · "}
+            <Link to="/documents">Документы</Link>
           </p>
           <h2>{d.title}</h2>
           <p className="muted">
@@ -481,11 +676,194 @@ export function DealDetailPage() {
         </div>
       </div>
 
-      <div className="panel deal-edit">
+      <div className="panel">
+        <b>Позиции</b>
+        <p className="muted">Они же попадут в договор, счёт, АВР и ЭСФ.</p>
+        {(d.items || []).length === 0 ? <p className="empty">Позиций пока нет</p> : null}
+        {(d.items || []).map((item: any) => (
+          <div className="row" key={item.id}>
+            <div>
+              <b>{item.name}</b>
+              <div className="muted">
+                {item.quantity} {item.unit} × {Number(item.unitPrice).toLocaleString("ru-RU")} ₸
+                {item.vatRate ? ` · НДС ${item.vatRate}%` : " · без НДС"}
+              </div>
+            </div>
+            <div>
+              <b>{Number(item.totalAmount).toLocaleString("ru-RU")} ₸</b>
+              <div>
+                <button
+                  type="button"
+                  className="btn secondary"
+                  disabled={busy}
+                  onClick={() => {
+                    setBusy(true);
+                    void api
+                      .deleteDealItem(d.id, item.id)
+                      .then(() => load())
+                      .catch((err) => setError(err instanceof Error ? err.message : "Не удалось удалить"))
+                      .finally(() => setBusy(false));
+                  }}
+                >
+                  Удалить
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
+        {d.itemTotals ? (
+          <p>
+            Итого: <b>{Number(d.itemTotals.totalAmount).toLocaleString("ru-RU")} ₸</b>
+            {d.itemTotals.vatAmount ? ` · НДС ${Number(d.itemTotals.vatAmount).toLocaleString("ru-RU")} ₸` : ""}
+          </p>
+        ) : null}
+        <div className="deal-edit" style={{ marginTop: 12 }}>
+          <label>
+            Услуга
+            <input value={itemName} onChange={(e) => setItemName(e.target.value)} placeholder="Разработка сайта" />
+          </label>
+          <label>
+            Кол-во
+            <input value={itemQty} onChange={(e) => setItemQty(e.target.value)} />
+          </label>
+          <label>
+            Цена без НДС (₸)
+            <input value={itemPrice} onChange={(e) => setItemPrice(e.target.value)} />
+          </label>
+          <label>
+            НДС % (пусто = из настроек)
+            <input value={itemVat} onChange={(e) => setItemVat(e.target.value)} placeholder="необязательно" />
+          </label>
+          <div className="actions">
+            <button
+              type="button"
+              className="btn"
+              disabled={busy || !itemName.trim() || !itemPrice}
+              onClick={() => {
+                setBusy(true);
+                void api
+                  .addDealItem(d.id, {
+                    name: itemName.trim(),
+                    quantity: Number(String(itemQty).replace(",", ".")) || 1,
+                    unitPrice: Number(String(itemPrice).replace(/\s+/g, "").replace(",", ".")),
+                    ...(itemVat.trim() ? { vatRate: Number(String(itemVat).replace(",", ".")) } : {}),
+                  })
+                  .then(() => {
+                    setItemName("");
+                    setItemPrice("");
+                    setItemVat("");
+                    return load();
+                  })
+                  .catch((err) => setError(err instanceof Error ? err.message : "Не удалось добавить позицию"))
+                  .finally(() => setBusy(false));
+              }}
+            >
+              Добавить позицию
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="panel">
+        <b>Покупатель для договора</b>
+        <p className="muted">
+          {d.company ? (
+            <>
+              Компания: <Link to={`/companies/${d.company.id}`}>{d.company.name}</Link>
+            </>
+          ) : (
+            "Компания не указана — без неё PDF не собрать."
+          )}
+        </p>
+        <label>
+          Найти компанию
+          <input value={companyQ} onChange={(e) => setCompanyQ(e.target.value)} placeholder="Название или БИН" />
+        </label>
+        {companyHits.length ? (
+          <div className="picker-list" style={{ marginTop: 8 }}>
+            {companyHits.slice(0, 8).map((company: any) => (
+              <button
+                key={company.id}
+                type="button"
+                className="picker-item"
+                disabled={busy}
+                onClick={() => {
+                  setBusy(true);
+                  void api
+                    .updateDeal(d.id, { companyId: company.id })
+                    .then(() => {
+                      setCompanyQ("");
+                      return load();
+                    })
+                    .catch((err) => setError(err instanceof Error ? err.message : "Не удалось привязать компанию"))
+                    .finally(() => setBusy(false));
+                }}
+              >
+                <b>{company.name}</b>
+                <div className="muted">{[company.legalName, company.bin].filter(Boolean).join(" · ")}</div>
+              </button>
+            ))}
+          </div>
+        ) : null}
+        {d.company ? (
+          <div className="actions" style={{ marginTop: 8 }}>
+            <button
+              type="button"
+              className="btn secondary"
+              disabled={busy}
+              onClick={() => {
+                setBusy(true);
+                void api
+                  .updateDeal(d.id, { companyId: null })
+                  .then(() => load())
+                  .catch((err) => setError(err instanceof Error ? err.message : "Не удалось отвязать компанию"))
+                  .finally(() => setBusy(false));
+              }}
+            >
+              Отвязать компанию
+            </button>
+          </div>
+        ) : null}
+      </div>
+
+      <DealDocumentsPanel
+        deal={d}
+        docs={docs}
+        readiness={readiness}
+        invoiceReadiness={invoiceReadiness}
+        avrReadiness={avrReadiness}
+        esfInvoiceReadiness={esfInvoiceReadiness}
+        closeReadiness={closeReadiness}
+        setReadiness={setReadiness}
+        setInvoiceReadiness={setInvoiceReadiness}
+        setAvrReadiness={setAvrReadiness}
+        setEsfInvoiceReadiness={setEsfInvoiceReadiness}
+        busy={busy}
+        setBusy={setBusy}
+        setError={setError}
+        load={load}
+        signing={signing}
+        buyerLink={buyerLink}
+        setBuyerLink={setBuyerLink}
+        esfPreview={esfPreview}
+        setEsfPreview={setEsfPreview}
+        esfInvoicePreview={esfInvoicePreview}
+        setEsfInvoicePreview={setEsfInvoicePreview}
+      />
+
+      {!editing ? <div className="panel saved-editor-summary">
+        <b>Данные сделки</b>
+        <button type="button" className="btn secondary" autoFocus onClick={() => setEditing(true)}>Редактировать сделку</button>
+      </div> : <div className="panel deal-edit">
         <b>Редактирование</b>
         <label>
           Сумма (₸)
-          <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="пусто = неизвестна" />
+          <input
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder="пусто = неизвестна"
+            disabled={Boolean(d.amountFromItems)}
+          />
         </label>
         <label>
           Вероятность %
@@ -526,7 +904,7 @@ export function DealDetailPage() {
             </Link>
           ) : null}
         </div>
-      </div>
+      </div>}
 
       <div className="panel">
         <b>Платежи</b>

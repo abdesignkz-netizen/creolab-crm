@@ -1,11 +1,13 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { notifySaved } from "../components/SaveNotice";
+import { Link, useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import { useRequestVersion } from "../lib/useUrlState";
 
 type Scope = "all" | "mine" | "unassigned";
 
 export function CompaniesPage() {
+  const navigate = useNavigate();
   const requestVersion = useRequestVersion();
   const [scope, setScope] = useState<Scope>("all");
   const [q, setQ] = useState("");
@@ -74,7 +76,8 @@ export function CompaniesPage() {
         email: "",
         description: "",
       });
-      window.location.href = `/companies/${created.id}`;
+      notifySaved("Компания создана");
+      navigate(`/companies/${created.id}`);
     } catch (err: any) {
       if (err?.status === 409) {
         const details = err.body?.details || err.body;

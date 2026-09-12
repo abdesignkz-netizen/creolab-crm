@@ -1,0 +1,1187 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<xs:schema version="1.0" targetNamespace="v2.esf" xmlns:tns="v2.esf" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:v2="v2.esf" xmlns:ns1="abstractInvoice.esf">
+
+  <xs:import namespace="abstractInvoice.esf"/>
+
+  <xs:element name="invoice" type="tns:InvoiceV2"/>
+
+  <xs:complexType name="InvoiceV2">
+    <xs:annotation>
+      <xs:documentation>ЭСФ</xs:documentation>
+    </xs:annotation>
+    <xs:complexContent>
+      <xs:extension base="ns1:AbstractInvoice">
+        <xs:sequence>
+          <xs:element name="addInf" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Дополнительные сведения (K 43)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="consignee" type="tns:Consignee" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Реквизиты грузополучателя (D 26)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="consignor" type="tns:Consignor" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Реквизиты грузоотправителя (D 25)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="customerAgentAddress" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Реквизиты поверенного (оператора) покупателя. Адрес места нахождения (J 41)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="customerAgentDocDate" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Документ-Дата (J 42.2)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="customerAgentDocNum" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Документ-Номер (J 42.1)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="customerAgentName" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Реквизиты поверенного (оператора) покупателя. Поверенный (J 40)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="customerAgentTin" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Реквизиты поверенного (оператора) покупателя. БИН (J 39)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="customerParticipants" minOccurs="0">
+            <xs:complexType>
+              <xs:sequence>
+                <xs:element name="participant" type="tns:Participant" maxOccurs="unbounded">
+                  <xs:annotation>
+                    <xs:documentation>Получатель (УСД) (H)</xs:documentation>
+                  </xs:annotation>
+                </xs:element>
+              </xs:sequence>
+            </xs:complexType>
+          </xs:element>
+          <xs:element name="customers">
+            <xs:complexType>
+              <xs:sequence>
+                <xs:element name="customer" type="tns:Customer" maxOccurs="unbounded">
+                  <xs:annotation>
+                    <xs:documentation>Получатель (C)</xs:documentation>
+                  </xs:annotation>
+                </xs:element>
+              </xs:sequence>
+            </xs:complexType>
+          </xs:element>
+          <xs:element name="datePaper" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Дата выписки на бумажном носителе (2.1)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="deliveryDocDate" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Дата документа, подтверждающего поставку товаров (работ, услуг) (F 32.2)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="deliveryDocDate2" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Дата документа, подтверждающего поставку товаров (работ, услуг) (F 32.4)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="deliveryDocNum" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Номер документа, подтверждающего поставку товаров (работ, услуг) (F 32.1)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="deliveryDocNum2" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Номер документа, подтверждающего поставку товаров (работ, услуг) (F 32.3)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="deliveryTerm" type="tns:DeliveryTerm" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Условия поставки (E)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="productSet" type="tns:ProductSet" minOccurs="1">
+            <xs:annotation>
+              <xs:documentation>Товары (работы, услуги) (G)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="publicOffice" type="tns:PublicOffice" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Реквизиты государственного учреждения (F)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="reasonPaper" type="tns:PaperReasonType" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Причина выписки на бумажном носителе (2.1)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="sellerAgentAddress" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Адрес места нахождения (I 37)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="sellerAgentDocDate" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Документ-Дата (I 38.2)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="sellerAgentDocNum" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Документ-Номер (I 38.1)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="sellerAgentName" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Поверенный (I 36)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="sellerAgentTin" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>БИН (I 35)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="sellerParticipants" minOccurs="0">
+            <xs:complexType>
+              <xs:sequence>
+                <xs:element name="participant" type="tns:Participant" maxOccurs="unbounded">
+                  <xs:annotation>
+                    <xs:documentation>Поставщик (УСД) (H)</xs:documentation>
+                  </xs:annotation>
+                </xs:element>
+              </xs:sequence>
+            </xs:complexType>
+          </xs:element>
+          <xs:element name="sellers">
+            <xs:complexType>
+              <xs:sequence>
+                <xs:element name="seller" type="tns:Seller" maxOccurs="unbounded">
+                  <xs:annotation>
+                    <xs:documentation>Поставщик (B)</xs:documentation>
+                  </xs:annotation>
+                </xs:element>
+              </xs:sequence>
+            </xs:complexType>
+          </xs:element>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+
+  <xs:complexType name="Consignee">
+    <xs:annotation>
+      <xs:documentation>Реквизиты грузополучателя (D 26)</xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="address" type="xs:string" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Адрес (D 26.3)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="countryCode" type="xs:string" minOccurs="1">
+        <xs:annotation>
+          <xs:documentation>Код страны (D 26.4)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="name" type="xs:string" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Наименование (D 26.2)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="tin" type="xs:string" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>ИИН/БИН (D 26.1)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="Consignor">
+    <xs:annotation>
+      <xs:documentation>Реквизиты грузоотправителя (D 25)</xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="address" type="xs:string" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Адрес (D 25.3)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="name" type="xs:string" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Наименование (D 25.2)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="tin" type="xs:string" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>ИИН/БИН (D 25.1)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="Participant">
+    <xs:annotation>
+      <xs:documentation>УСД (H)</xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="productShares">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="share" type="tns:ProductShare" minOccurs="1" maxOccurs="unbounded">
+              <xs:annotation>
+                <xs:documentation>Информация по товарам (работам, услугам)</xs:documentation>
+              </xs:annotation>
+            </xs:element>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="reorganizedTin" type="xs:string" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>БИН реорганизованного лица (H 34.2)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="tin" type="xs:string" minOccurs="1">
+        <xs:annotation>
+          <xs:documentation>ИИН/БИН участника совместной деятельности (H 34.1)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="ProductShare">
+    <xs:annotation>
+      <xs:documentation>Информация по товарам (работам, услугам)</xs:documentation>
+    </xs:annotation>
+    <xs:complexContent>
+      <xs:extension base="ns1:AbstractProductShare">
+        <xs:sequence>
+          <xs:element name="additional" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Дополнительные данные (H 19)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="additionalUnitNomenclature" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Дополнительная единица измерения (H 20)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="exciseAmount" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Акциз-Сумма (H 10)</xs:documentation>
+            </xs:annotation>
+            <xs:simpleType>
+              <xs:restriction base="xs:decimal">
+                <xs:fractionDigits value="2"/>
+                <xs:totalDigits value="17"/>
+              </xs:restriction>
+            </xs:simpleType>
+          </xs:element>
+          <xs:element name="ndsAmount" minOccurs="1">
+            <xs:annotation>
+              <xs:documentation>НДС-Сумма (H 13)</xs:documentation>
+            </xs:annotation>
+            <xs:simpleType>
+              <xs:restriction base="xs:decimal">
+                <xs:fractionDigits value="2"/>
+                <xs:totalDigits value="17"/>
+              </xs:restriction>
+            </xs:simpleType>
+          </xs:element>
+          <xs:element name="ndsRate" type="xs:int" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>НДС-Ставка (G 12)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="priceWithTax" minOccurs="1">
+            <xs:annotation>
+              <xs:documentation>Стоимость ТРУ с учетом НДС (H 15)</xs:documentation>
+            </xs:annotation>
+            <xs:simpleType>
+              <xs:restriction base="xs:decimal">
+                <xs:fractionDigits value="2"/>
+                <xs:totalDigits value="17"/>
+              </xs:restriction>
+            </xs:simpleType>
+          </xs:element>
+          <xs:element name="priceWithoutTax" minOccurs="1">
+            <xs:annotation>
+              <xs:documentation>Стоимость ТРУ без учета НДС (H 7)</xs:documentation>
+            </xs:annotation>
+            <xs:simpleType>
+              <xs:restriction base="xs:decimal">
+                <xs:fractionDigits value="2"/>
+                <xs:totalDigits value="17"/>
+              </xs:restriction>
+            </xs:simpleType>
+          </xs:element>
+          <xs:element name="productNumber">
+            <xs:annotation>
+              <xs:documentation>Номер продукта (товара, услуги)</xs:documentation>
+            </xs:annotation>
+            <xs:simpleType>
+              <xs:restriction base="xs:int">
+                <xs:maxInclusive value="200"/>
+                <xs:minInclusive value="1"/>
+              </xs:restriction>
+            </xs:simpleType>
+          </xs:element>
+          <xs:element name="productNumberInSnt" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Номер продукта (товара, услуги) из СНТ (H 1)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="quantitativeQuantity" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Количество товара в количественной единице измерения (H 6/1</xs:documentation>
+            </xs:annotation>
+            <xs:simpleType>
+              <xs:restriction base="xs:decimal">
+                <xs:fractionDigits value="6"/>
+                <xs:totalDigits value="18"/>
+              </xs:restriction>
+            </xs:simpleType>
+          </xs:element>
+          <xs:element name="quantity" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Кол-во (объем) (H 6)</xs:documentation>
+            </xs:annotation>
+            <xs:simpleType>
+              <xs:restriction base="xs:decimal">
+                <xs:fractionDigits value="6"/>
+                <xs:totalDigits value="18"/>
+              </xs:restriction>
+            </xs:simpleType>
+          </xs:element>
+          <xs:element name="turnoverSize" minOccurs="1">
+            <xs:annotation>
+              <xs:documentation>Размер оборота по реализации (H 11)</xs:documentation>
+            </xs:annotation>
+            <xs:simpleType>
+              <xs:restriction base="xs:decimal">
+                <xs:fractionDigits value="2"/>
+                <xs:totalDigits value="17"/>
+              </xs:restriction>
+            </xs:simpleType>
+          </xs:element>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+
+  <xs:complexType name="Customer">
+    <xs:annotation>
+      <xs:documentation>Реквищиты получателя (C)</xs:documentation>
+    </xs:annotation>
+    <xs:complexContent>
+      <xs:extension base="ns1:AbstractCustomer">
+        <xs:sequence>
+          <xs:element name="address" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Адрес (C 18)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="branchTin" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>БИН филиала, выписавшего ЭСФ за голову</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="countryCode" type="xs:string" minOccurs="1">
+            <xs:annotation>
+              <xs:documentation>Код страны получателя. Обязательно заполняется если установлен статус CustomerType.NONRESIDENT и SellerType.EXPORTER (C 18.1)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="name" type="xs:string" minOccurs="1">
+            <xs:annotation>
+              <xs:documentation>Наименование получателя (C 17)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="reorganizedTin" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>БИН реорганизованного лица (B 16.1)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="shareParticipation" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Доля участия (С 17.1)</xs:documentation>
+            </xs:annotation>
+            <xs:simpleType>
+              <xs:restriction base="xs:decimal">
+                <xs:fractionDigits value="6"/>
+                <xs:totalDigits value="18"/>
+              </xs:restriction>
+            </xs:simpleType>
+          </xs:element>
+          <xs:element name="statuses" minOccurs="0">
+            <xs:complexType>
+              <xs:sequence>
+                <xs:element name="status" type="tns:CustomerType" maxOccurs="unbounded">
+                  <xs:annotation>
+                    <xs:documentation>Категория получателя (С 20)</xs:documentation>
+                  </xs:annotation>
+                </xs:element>
+              </xs:sequence>
+            </xs:complexType>
+          </xs:element>
+          <xs:element name="tin" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>ИИН/БИН (C 16)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="trailer" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Дополнительные сведения (C 19)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+
+  <xs:complexType name="DeliveryTerm">
+    <xs:annotation>
+      <xs:documentation>Условия поставки (E)</xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="accountNumber" type="xs:string" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Учетный номер</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="contractDate" type="xs:string" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Дата договора(контракт) на поставку товаров (работ, услуг) (E 27.4)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="contractNum" type="xs:string" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Номер договора(контракт) на поставку товаров (работ, услуг) (E 27.3)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="deliveryConditionCode" type="xs:string" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Условия поставки (E 31.1)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="destination" type="xs:string" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Пункт назначения поставляемых товаров (работ, услуг) (E 31)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="hasContract" type="xs:boolean">
+        <xs:annotation>
+          <xs:documentation>Договор/без договора (E 27.1 - true, E27.2 - false)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="term" type="xs:string" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Условия оплаты по договору (E 28)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="transportTypeCode" type="xs:string" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Способ отправления (E 29)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="warrant" type="xs:string" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Номер доверенности на поставку товаров (работ, услуг) (E 30.1)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="warrantDate" type="xs:string" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Дата доверенности на поставку товаров (работ, услуг) (E 30.2)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="ProductSet">
+    <xs:annotation>
+      <xs:documentation>Данные по товарам, работам, услугам (G)</xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="currencyCode" type="xs:string" minOccurs="1">
+        <xs:annotation>
+          <xs:documentation>Код валюты (G 33.1)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="currencyRate" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Курс валюты (G 33.2)</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="xs:decimal">
+            <xs:fractionDigits value="6"/>
+            <xs:totalDigits value="18"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="ndsRateType" type="tns:NdsRateType" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Тип НДС ('Без НДС – не РК')</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="products">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="product" type="tns:Product" minOccurs="1" maxOccurs="unbounded">
+              <xs:annotation>
+                <xs:documentation>Данные по ТРУ</xs:documentation>
+              </xs:annotation>
+            </xs:element>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="totalExciseAmount" minOccurs="1">
+        <xs:annotation>
+          <xs:documentation>Итоговая Акциз-Сумма (G 10)</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="xs:decimal">
+            <xs:fractionDigits value="2"/>
+            <xs:totalDigits value="17"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="totalNdsAmount" minOccurs="1">
+        <xs:annotation>
+          <xs:documentation>Итоговая НДС-Сумма (G 13)</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="xs:decimal">
+            <xs:fractionDigits value="2"/>
+            <xs:totalDigits value="17"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="totalPriceWithTax" minOccurs="1">
+        <xs:annotation>
+          <xs:documentation>Итоговая стоимость ТРУ с учетом НДС (G 14)</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="xs:decimal">
+            <xs:fractionDigits value="2"/>
+            <xs:totalDigits value="17"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="totalPriceWithoutTax" minOccurs="1">
+        <xs:annotation>
+          <xs:documentation>Итоговая стоимость ТРУ без учета НДС (G 8)</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="xs:decimal">
+            <xs:fractionDigits value="2"/>
+            <xs:totalDigits value="17"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="totalTurnoverSize" minOccurs="1">
+        <xs:annotation>
+          <xs:documentation>Итоговый размер оборота по реализации (G 11)</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="xs:decimal">
+            <xs:fractionDigits value="2"/>
+            <xs:totalDigits value="17"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="Product">
+    <xs:annotation>
+      <xs:documentation>Товар (работа, услуга)</xs:documentation>
+    </xs:annotation>
+    <xs:complexContent>
+      <xs:extension base="ns1:AbstractProduct">
+        <xs:sequence>
+          <xs:element name="additional" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Дополнительные данные (G 19)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="additionalUnitNomenclature" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Дополнительная единица измерения (G 20)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="catalogTruId" type="xs:string" minOccurs="1">
+            <xs:annotation>
+              <xs:documentation>Идентификатор товара, работ, услуг (G 18)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="description" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Наименование ТРУ (G 3)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="exciseAmount" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Акциз-Сумма (G 10)</xs:documentation>
+            </xs:annotation>
+            <xs:simpleType>
+              <xs:restriction base="xs:decimal">
+                <xs:fractionDigits value="2"/>
+                <xs:totalDigits value="17"/>
+              </xs:restriction>
+            </xs:simpleType>
+          </xs:element>
+          <xs:element name="exciseRate" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Акциз-Ставка (G 9)</xs:documentation>
+            </xs:annotation>
+            <xs:simpleType>
+              <xs:restriction base="xs:decimal">
+                <xs:fractionDigits value="2"/>
+                <xs:minInclusive value="0"/>
+                <xs:totalDigits value="14"/>
+              </xs:restriction>
+            </xs:simpleType>
+          </xs:element>
+          <xs:element name="gtinCode" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Код товара (GTIN) (G 17/1)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="kpvedCode" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Классификатор продукции по видам экономической деятельности</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="ndsAmount" minOccurs="1">
+            <xs:annotation>
+              <xs:documentation>НДС-Сумма (G 13)</xs:documentation>
+            </xs:annotation>
+            <xs:simpleType>
+              <xs:restriction base="xs:decimal">
+                <xs:fractionDigits value="2"/>
+                <xs:totalDigits value="17"/>
+              </xs:restriction>
+            </xs:simpleType>
+          </xs:element>
+          <xs:element name="ndsRate" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>НДС-Ставка (G 12)</xs:documentation>
+            </xs:annotation>
+            <xs:simpleType>
+              <xs:restriction base="xs:int">
+                <xs:maxInclusive value="100"/>
+                <xs:minInclusive value="0"/>
+              </xs:restriction>
+            </xs:simpleType>
+          </xs:element>
+          <xs:element name="priceWithTax" minOccurs="1">
+            <xs:annotation>
+              <xs:documentation>Стоимость ТРУ с учетом НДС (G 15)</xs:documentation>
+            </xs:annotation>
+            <xs:simpleType>
+              <xs:restriction base="xs:decimal">
+                <xs:fractionDigits value="2"/>
+                <xs:totalDigits value="17"/>
+              </xs:restriction>
+            </xs:simpleType>
+          </xs:element>
+          <xs:element name="priceWithoutTax" minOccurs="1">
+            <xs:annotation>
+              <xs:documentation>Стоимость ТРУ без косвенных налогов (G 8)</xs:documentation>
+            </xs:annotation>
+            <xs:simpleType>
+              <xs:restriction base="xs:decimal">
+                <xs:fractionDigits value="2"/>
+                <xs:totalDigits value="17"/>
+              </xs:restriction>
+            </xs:simpleType>
+          </xs:element>
+          <xs:element name="productDeclaration" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Декларации на товары, заявления в рамках ТС, СТ-1 или СТ-KZ (G 16)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="productNumberInDeclaration" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Номер товарной позиции из заявления в рамках ТС или Декларации на товары (G 17)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="productNumberInSnt" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Номер продукта (товара, услуги) из СНТ (G 1)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="quantitativeQuantity" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Количество товара в количественной единице измерения (G 6/2)</xs:documentation>
+            </xs:annotation>
+            <xs:simpleType>
+              <xs:restriction base="xs:decimal">
+                <xs:fractionDigits value="6"/>
+                <xs:totalDigits value="18"/>
+              </xs:restriction>
+            </xs:simpleType>
+          </xs:element>
+          <xs:element name="quantitativeUnitNomenclature" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Количественная единица измерения (G 5/1)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="quantity" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Кол-во (объем) (G 6)</xs:documentation>
+            </xs:annotation>
+            <xs:simpleType>
+              <xs:restriction base="xs:decimal">
+                <xs:fractionDigits value="6"/>
+                <xs:totalDigits value="18"/>
+              </xs:restriction>
+            </xs:simpleType>
+          </xs:element>
+          <xs:element name="tnvedName" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Наименование товаров по классификатору ТН ВЭД ЕАЭС (G 3/1)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="truOriginCode" minOccurs="1">
+            <xs:annotation>
+              <xs:documentation>Признак происхождения ТРУ (G 2)</xs:documentation>
+            </xs:annotation>
+            <xs:simpleType>
+              <xs:restriction base="xs:string">
+                <xs:pattern value="[1-6]"/>
+              </xs:restriction>
+            </xs:simpleType>
+          </xs:element>
+          <xs:element name="turnoverAdjustment" type="xs:int" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Основание корректировки оборота (G 11/1)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="turnoverCode" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Оборот по реализации (G 14)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="turnoverSize" minOccurs="1">
+            <xs:annotation>
+              <xs:documentation>Размер оборота по реализации (облагаемый/необлагаемый оборот) (G 11)</xs:documentation>
+            </xs:annotation>
+            <xs:simpleType>
+              <xs:restriction base="xs:decimal">
+                <xs:fractionDigits value="2"/>
+                <xs:totalDigits value="17"/>
+              </xs:restriction>
+            </xs:simpleType>
+          </xs:element>
+          <xs:element name="unitCode" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Код товара (ТНВД ЕАЭС) (G 4)</xs:documentation>
+            </xs:annotation>
+            <xs:simpleType>
+              <xs:restriction base="xs:string">
+                <xs:pattern value="[0-9]{1,10}"/>
+              </xs:restriction>
+            </xs:simpleType>
+          </xs:element>
+          <xs:element name="unitNomenclature" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Ед.изм (G 5)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="unitPrice" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Цена (тариф) за единицу ТРУ без косвенных налогов (G 7)</xs:documentation>
+            </xs:annotation>
+            <xs:simpleType>
+              <xs:restriction base="xs:decimal">
+                <xs:fractionDigits value="6"/>
+                <xs:totalDigits value="18"/>
+              </xs:restriction>
+            </xs:simpleType>
+          </xs:element>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+
+  <xs:complexType name="PublicOffice">
+    <xs:annotation>
+      <xs:documentation>Реквизиты государственного учреждения (C1)</xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="bik" minOccurs="1">
+        <xs:annotation>
+          <xs:documentation>БИК (C1 24)</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="xs:string">
+            <xs:pattern value="KKMFKZ2A|NBRKKZKX"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="iik" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>ИИК (C1 21)</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="xs:string">
+            <xs:pattern value="[0-9A-Z]{20}"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="payPurpose" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Назначение платежа (C1 23)</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="xs:string">
+            <xs:pattern value="[^\s:][^:\n\r\t]*"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="productCode" type="xs:string" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Код товаров (работ, услуг) (C1 22)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="Seller">
+    <xs:annotation>
+      <xs:documentation>Реквизиты поставщика (B)</xs:documentation>
+    </xs:annotation>
+    <xs:complexContent>
+      <xs:extension base="ns1:AbstractCustomer">
+        <xs:sequence>
+          <xs:element name="address" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Адрес (B 8)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="bank" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Наименование банка (B1 15)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="bik" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>БИК (B1 14)</xs:documentation>
+            </xs:annotation>
+            <xs:simpleType>
+              <xs:restriction base="xs:string">
+                <xs:pattern value="[0-9A-Z]{8}"/>
+              </xs:restriction>
+            </xs:simpleType>
+          </xs:element>
+          <xs:element name="branchTin" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>БИН филиала, выписавшего ЭСФ за голову</xs:documentation>
+            </xs:annotation>
+            <xs:simpleType>
+              <xs:restriction base="xs:string">
+                <xs:pattern value="[0-9]{8,20}"/>
+              </xs:restriction>
+            </xs:simpleType>
+          </xs:element>
+          <xs:element name="certificateNum" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Номер cвидетельства НДС (B 9.2)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="certificateSeries" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Серия cвидетельства НДС (B 9.1)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="countryCode" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Код страны отправителя (B 8.1)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="iik" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Расчетный счет (B1 13)</xs:documentation>
+            </xs:annotation>
+            <xs:simpleType>
+              <xs:restriction base="xs:string">
+                <xs:pattern value="[0-9A-Z]{20}"/>
+              </xs:restriction>
+            </xs:simpleType>
+          </xs:element>
+          <xs:element name="isBranchNonResident" type="xs:boolean" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Cтруктурное подразделение юридического лица-нерезидента (B 9.3)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="kbe" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>КБе (B1 12)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="name" type="xs:string" minOccurs="1">
+            <xs:annotation>
+              <xs:documentation>Наименование поставщика (B 7)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="ndscaBank" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Наименование банка контрольного счета (B2 15.1)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="ndscaBik" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>БИК контрольного счета (B2 14.1)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="ndscaIik" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>ИИК контрольного счета (B2 13.1)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="ndscaKbe" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>КБе контрольного счета (B2 12.1)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="reorganizedTin" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>БИН реорганизованного лица (B 6.1)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="shareParticipation" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Доля участия (B 7.1)</xs:documentation>
+            </xs:annotation>
+            <xs:simpleType>
+              <xs:restriction base="xs:decimal">
+                <xs:fractionDigits value="6"/>
+                <xs:totalDigits value="18"/>
+              </xs:restriction>
+            </xs:simpleType>
+          </xs:element>
+          <xs:element name="statuses" minOccurs="0">
+            <xs:complexType>
+              <xs:sequence>
+                <xs:element name="status" type="tns:SellerType" maxOccurs="unbounded">
+                  <xs:annotation>
+                    <xs:documentation>Категория поставщика (B 10)</xs:documentation>
+                  </xs:annotation>
+                </xs:element>
+              </xs:sequence>
+            </xs:complexType>
+          </xs:element>
+          <xs:element name="tin" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>ИИН/БИН (B 6)</xs:documentation>
+            </xs:annotation>
+            <xs:simpleType>
+              <xs:restriction base="xs:string">
+                <xs:pattern value="[0-9]{8,20}"/>
+              </xs:restriction>
+            </xs:simpleType>
+          </xs:element>
+          <xs:element name="trailer" type="xs:string" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Дополнительные сведения (B 11)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+
+  <xs:simpleType name="CustomerType">
+    <xs:annotation>
+      <xs:documentation>Тип получателя (C 22)</xs:documentation>
+    </xs:annotation>
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="COMMITTENT">
+        <xs:annotation>
+          <xs:documentation>Комитент</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="BROKER">
+        <xs:annotation>
+          <xs:documentation>Комиссионер</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="LESSEE">
+        <xs:annotation>
+          <xs:documentation>Лизингополучатель</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="JOINT_ACTIVITY_PARTICIPANT">
+        <xs:annotation>
+          <xs:documentation>Участник договора совместной деятельности</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="PUBLIC_OFFICE">
+        <xs:annotation>
+          <xs:documentation>Государственное учреждение</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="NONRESIDENT">
+        <xs:annotation>
+          <xs:documentation>Нерезидент</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="SHARING_AGREEMENT_PARTICIPANT">
+        <xs:annotation>
+          <xs:documentation>Участник СРП или сделки, заключенной в рамках СРП</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="PRINCIPAL">
+        <xs:annotation>
+          <xs:documentation>Доверитель</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="RETAIL">
+        <xs:annotation>
+          <xs:documentation>Розничная реализация</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="INDIVIDUAL">
+        <xs:annotation>
+          <xs:documentation>Физическое лицо</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="LAWYER">
+        <xs:annotation>
+          <xs:documentation>Адвокат</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="BAILIFF">
+        <xs:annotation>
+          <xs:documentation>Частный судебный исполнитель</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="MEDIATOR">
+        <xs:annotation>
+          <xs:documentation>Медиатор</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="NOTARY">
+        <xs:annotation>
+          <xs:documentation>Нотариус</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="NdsRateType">
+    <xs:annotation>
+      <xs:documentation>Тип НДС</xs:documentation>
+    </xs:annotation>
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="WITHOUT_NDS_NOT_KZ">
+        <xs:annotation>
+          <xs:documentation>Без НДС – не РК</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="PaperReasonType">
+    <xs:annotation>
+      <xs:documentation>Причина выписки на бумажном носителе (2.1)</xs:documentation>
+    </xs:annotation>
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="DOWN_TIME">
+        <xs:annotation>
+          <xs:documentation>Простой системы</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="MISSING_REQUIREMENT">
+        <xs:annotation>
+          <xs:documentation>Отсутствовало требование по выписке ЭСФ</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="UNLAWFUL_REMOVAL_REGISTRATION">
+        <xs:annotation>
+          <xs:documentation>Неправомерное снятие с регистрационного учета</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="SellerType">
+    <xs:annotation>
+      <xs:documentation>Тип поставщика (B 10)</xs:documentation>
+    </xs:annotation>
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="COMMITTENT">
+        <xs:annotation>
+          <xs:documentation>Комитент</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="BROKER">
+        <xs:annotation>
+          <xs:documentation>Комиссионер</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="FORWARDER">
+        <xs:annotation>
+          <xs:documentation>Экспедитор</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="LESSOR">
+        <xs:annotation>
+          <xs:documentation>Лизингодатель</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="JOINT_ACTIVITY_PARTICIPANT">
+        <xs:annotation>
+          <xs:documentation>Участник договора совместной деятельности</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="SHARING_AGREEMENT_PARTICIPANT">
+        <xs:annotation>
+          <xs:documentation>Участник СРП или сделки, заключенной в рамках СРП</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="EXPORTER">
+        <xs:annotation>
+          <xs:documentation>Экспортёр</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="TRANSPORTER">
+        <xs:annotation>
+          <xs:documentation>Международный перевозчик</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="PRINCIPAL">
+        <xs:annotation>
+          <xs:documentation>Доверитель</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="LAWYER">
+        <xs:annotation>
+          <xs:documentation>Адвокат</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="BAILIFF">
+        <xs:annotation>
+          <xs:documentation>Частный судебный исполнитель</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="MEDIATOR">
+        <xs:annotation>
+          <xs:documentation>Медиатор</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="NOTARY">
+        <xs:annotation>
+          <xs:documentation>Нотариус</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="NONRESIDENT">
+        <xs:annotation>
+          <xs:documentation>Нерезидент</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+    </xs:restriction>
+  </xs:simpleType>
+</xs:schema>

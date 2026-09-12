@@ -667,7 +667,6 @@ export async function connectWhatsAppSeller(
         schemaJson,
         channelConnections: {
           create: {
-            tenantId: membership.tenantId,
             channelType: "whatsapp",
             status: reachable ? "active" : "error",
             autoReply: false,

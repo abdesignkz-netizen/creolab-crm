@@ -102,7 +102,7 @@ function campaignHashInput(
   attachments: unknown[],
 ) {
   const fingerprint = campaign.personalizeEach ? recipientDraftsFingerprint(recipients) : "";
-  return contentHash(campaign.messageSnapshot || campaign.messageDraft, attachments, fingerprint);
+  return contentHash(campaign.messageSnapshot || campaign.messageDraft || null, attachments, fingerprint);
 }
 
 async function campaignAttachments(prisma: PrismaClient, tenantId: string, campaignId: string) {
@@ -752,7 +752,7 @@ export async function confirmCampaign(
       },
     });
     scheduleTask = await ensureCampaignScheduleTask(prisma, {
-      campaign: { ...campaign, scheduledAt: campaign.scheduledAt, status: "scheduled" },
+      campaign: { ...campaign, scheduledAt: campaign.scheduledAt },
       ownerMembershipId: membership.id,
       hasFile: attachments.length > 0,
     });

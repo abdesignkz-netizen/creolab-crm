@@ -90,7 +90,7 @@ export async function updateAIAutomationSettings(
   const workingHoursJson = next.workingHours as unknown as Prisma.InputJsonValue;
   await prisma.tenant.update({
     where: { id: tenant.id },
-    data: { settingsJson, workingHoursJson },
+    data: { settingsJson: settingsJson as Prisma.InputJsonObject, workingHoursJson },
   });
 
   return {

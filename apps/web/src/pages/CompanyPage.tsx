@@ -1,3 +1,4 @@
+import { notifySaved } from "../components/SaveNotice";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { nameWithPhone, phoneText } from "../lib/contactDisplay";
@@ -15,6 +16,14 @@ type CompanyDraft = {
   name: string;
   legalName: string;
   bin: string;
+  iin: string;
+  legalAddress: string;
+  vatPayer: boolean;
+  directorName: string;
+  directorPosition: string;
+  iban: string;
+  bankName: string;
+  bik: string;
   industry: string;
   city: string;
   website: string;
@@ -40,6 +49,14 @@ function draftFromCompany(c: any): CompanyDraft {
     name: c.name || "",
     legalName: c.legalName || "",
     bin: c.bin || "",
+    iin: c.iin || "",
+    legalAddress: c.legalAddress || "",
+    vatPayer: Boolean(c.vatPayer),
+    directorName: c.directorName || "",
+    directorPosition: c.directorPosition || "",
+    iban: c.iban || "",
+    bankName: c.bankName || "",
+    bik: c.bik || "",
     industry: c.industry || "",
     city: c.city || "",
     website: c.website || "",
@@ -68,10 +85,13 @@ export function CompanyPage() {
   const [editDraft, setEditDraft] = useState<CompanyDraft | null>(null);
   const [members, setMembers] = useState<Array<{ id: string; name: string }>>([]);
   const [personEdit, setPersonEdit] = useState<PersonDraft | null>(null);
+  const [documents, setDocuments] = useState<any[]>([]);
 
   async function load() {
     try {
       setData(await api.companyOverview(id));
+      const docs: any = await api.documents({ companyId: id, limit: "20" }).catch(() => ({ items: [] }));
+      setDocuments(docs.items || []);
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Ошибка");
@@ -114,6 +134,14 @@ export function CompanyPage() {
         name: editDraft.name.trim(),
         legalName: editDraft.legalName.trim() || null,
         bin: editDraft.bin.trim() || null,
+        iin: editDraft.iin.trim() || null,
+        legalAddress: editDraft.legalAddress.trim() || null,
+        vatPayer: editDraft.vatPayer,
+        directorName: editDraft.directorName.trim() || null,
+        directorPosition: editDraft.directorPosition.trim() || null,
+        iban: editDraft.iban.trim() || null,
+        bankName: editDraft.bankName.trim() || null,
+        bik: editDraft.bik.trim() || null,
         industry: editDraft.industry.trim() || null,
         city: editDraft.city.trim() || null,
         website: editDraft.website.trim() || null,
@@ -124,6 +152,7 @@ export function CompanyPage() {
         assigneeMembershipId: editDraft.assigneeMembershipId || null,
       });
       setEditOpen(false);
+      notifySaved("Данные компании сохранены");
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось сохранить");
@@ -156,6 +185,7 @@ export function CompanyPage() {
         isBillingContact: personEdit.isBillingContact,
       });
       setPersonEdit(null);
+      notifySaved("Данные сотрудника сохранены");
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось сохранить состав");
@@ -227,7 +257,7 @@ export function CompanyPage() {
             {[c.lifecycleLabel, c.industry, c.city].filter(Boolean).join(" · ")}
           </p>
           <p className="muted">
-            {[c.website, c.bin ? `БИН: ${c.bin}` : null].filter(Boolean).join(" · ")}
+            {[c.website, c.bin ? `БИН: ${c.bin}` : null, c.iin ? `ИИН: ${c.iin}` : null].filter(Boolean).join(" · ")}
           </p>
           <p className="muted">Ответственный: {c.assigneeName || "—"}</p>
         </div>
@@ -392,6 +422,23 @@ export function CompanyPage() {
 
       <div className="sit-section">
         <div className="sit-section-head">
+          <h3>Документы</h3>
+          <Link className="btn secondary" to="/documents">Все документы</Link>
+        </div>
+        {!documents.length ? <p className="empty">Документов по этой компании пока нет.</p> : null}
+        {documents.map((item) => (
+          <Link key={`${item.kind}-${item.id}`} className="sit-list-row" to={item.href}>
+            <div>
+              <b>{item.kindLabel} {item.number}</b>
+              <div className="muted">{item.dealTitle}</div>
+            </div>
+            <span className={item.attention ? "deal-flag" : "muted"}>{item.statusLabel}</span>
+          </Link>
+        ))}
+      </div>
+
+      <div className="sit-section">
+        <div className="sit-section-head">
           <h3>Заявки</h3>
         </div>
         <div className="stats-table-wrap">
@@ -538,6 +585,54 @@ export function CompanyPage() {
               <label>
                 БИН
                 <input value={editDraft.bin} onChange={(e) => setEditDraft({ ...editDraft, bin: e.target.value })} />
+              </label>
+              <label>
+                ИИН
+                <input value={editDraft.iin} onChange={(e) => setEditDraft({ ...editDraft, iin: e.target.value })} />
+              </label>
+              <label>
+                Юридический адрес
+                <input
+                  value={editDraft.legalAddress}
+                  onChange={(e) => setEditDraft({ ...editDraft, legalAddress: e.target.value })}
+                />
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={editDraft.vatPayer}
+                  onChange={(e) => setEditDraft({ ...editDraft, vatPayer: e.target.checked })}
+                />{" "}
+                Плательщик НДС
+              </label>
+              <label>
+                Директор
+                <input
+                  value={editDraft.directorName}
+                  onChange={(e) => setEditDraft({ ...editDraft, directorName: e.target.value })}
+                />
+              </label>
+              <label>
+                Должность директора
+                <input
+                  value={editDraft.directorPosition}
+                  onChange={(e) => setEditDraft({ ...editDraft, directorPosition: e.target.value })}
+                />
+              </label>
+              <label>
+                Банк
+                <input
+                  value={editDraft.bankName}
+                  onChange={(e) => setEditDraft({ ...editDraft, bankName: e.target.value })}
+                />
+              </label>
+              <label>
+                ИИК / IBAN
+                <input value={editDraft.iban} onChange={(e) => setEditDraft({ ...editDraft, iban: e.target.value })} />
+              </label>
+              <label>
+                БИК
+                <input value={editDraft.bik} onChange={(e) => setEditDraft({ ...editDraft, bik: e.target.value })} />
               </label>
               <label>
                 Отрасль

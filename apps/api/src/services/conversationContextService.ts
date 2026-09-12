@@ -482,7 +482,7 @@ function ruleAnalyze(input: {
       meetingUrl: url,
       clarificationNeeded,
       confidence,
-      createTask: (status === "CONFIRMED" || status === "SCHEDULED" || status === "RESCHEDULED") && confidence !== "LOW",
+      createTask: (status === "CONFIRMED" || action === "reschedule") && confidence !== "LOW",
       taskType: agreementTypeToTaskType(meetingKind),
       evidenceMessageIds: evidenceIds,
     });

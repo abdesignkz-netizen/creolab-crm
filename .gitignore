@@ -19,6 +19,7 @@ coverage
 apps/mobile/.expo
 apps/web/dist
 apps/api/dist
+apps/api/data/esf-poc/
 apps/worker/dist
 packages/**/dist
 prisma/*.db

@@ -464,7 +464,7 @@ export async function applyConversationAnalysis(
   }
 
   // Safe inquiry status
-  const applied: Record<string, unknown> = { agreements: [], inquiryStatus: null, dealStage: null, suggestions: [] };
+  const applied: { agreements: unknown[]; inquiryStatus: string | null; dealStage: string | null; suggestions: unknown[] } = { agreements: [], inquiryStatus: null, dealStage: null, suggestions: [] };
   if (inquiry && analysis.suggestedRequestStatus) {
     const allowed = SAFE_INQUIRY_TRANSITIONS[inquiry.status] || [];
     if (allowed.includes(analysis.suggestedRequestStatus) && (analysis.confidence === "HIGH" || analysis.confidence === "MEDIUM")) {

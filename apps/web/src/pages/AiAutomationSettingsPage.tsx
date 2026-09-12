@@ -1,3 +1,4 @@
+import { notifySaved } from "../components/SaveNotice";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
@@ -85,6 +86,7 @@ export function AiAutomationSettingsPage() {
   const [error, setError] = useState("");
   const [hint, setHint] = useState("");
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(true);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [mode, setMode] = useState("CONFIRM");
   const [processRepeat, setProcessRepeat] = useState(true);
@@ -128,7 +130,9 @@ export function AiAutomationSettingsPage() {
   }, []);
 
   async function save() {
+    if (busy) return;
     setBusy(true);
+    setError("");
     setHint("");
     try {
       const result = (await api.updateAiAutomationSettings({
@@ -140,6 +144,8 @@ export function AiAutomationSettingsPage() {
         customSchedule,
       })) as { message?: string };
       setHint(result.message || "Сохранено");
+      setEditing(false);
+      notifySaved("Настройки AI сохранены");
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Ошибка сохранения");
@@ -165,6 +171,10 @@ export function AiAutomationSettingsPage() {
       {error ? <p className="error">{error}</p> : null}
       {hint ? <p className="ok">{hint}</p> : null}
 
+      {!editing ? <div className="panel saved-editor-summary">
+        <b>Настройки обработки заявок сохранены</b>
+        <button type="button" className="btn secondary" autoFocus onClick={() => { setEditing(true); setHint(""); }}>Изменить настройки</button>
+      </div> : <>
       <div className="panel">
         <b>Режим по умолчанию</b>
         <div className="stack" style={{ marginTop: 12, gap: 10 }}>
@@ -246,6 +256,7 @@ export function AiAutomationSettingsPage() {
           Назад
         </Link>
       </div>
+      </>}
     </section>
   );
 }

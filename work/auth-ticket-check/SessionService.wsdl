@@ -1,0 +1,1051 @@
+<?xml version='1.0' encoding='UTF-8'?><?xml-stylesheet type='text/xsl' href='wsdl-viewer.xsl'?><wsdl:definitions xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/" xmlns:tns="esf" xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/" xmlns:ns1="http://schemas.xmlsoap.org/soap/http" name="SessionService" targetNamespace="esf">
+  <wsdl:types>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:tns="esf" attributeFormDefault="unqualified" elementFormDefault="unqualified" targetNamespace="esf">
+  <xs:complexType name="closeSessionRequest">
+    <xs:complexContent>
+      <xs:extension base="tns:AbstractSessionAwareRequest">
+        <xs:sequence/>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:complexType abstract="true" name="AbstractSessionAwareRequest">
+    <xs:sequence>
+      <xs:element name="sessionId" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>Идентификатор сессии (см. SessionService)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="closeSessionResponse">
+    <xs:sequence>
+      <xs:element name="status" type="tns:sessionStatus">
+        <xs:annotation>
+          <xs:documentation>Статус сессии</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="createSessionRequest">
+    <xs:sequence>
+      <xs:element name="tin" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>БИН предприятия от имени которого действует пользователь</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="projectCode" type="xs:long">
+        <xs:annotation>
+          <xs:documentation>Код проекта</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="businessProfileType" type="tns:businessProfileType">
+        <xs:annotation>
+          <xs:documentation>Тип пользователя. Поле является обязательным, если открывается сессия ЛЗЧП, сотрудника ЛЗЧП, руководителя проекта, пользователя работающего в рамках проекта</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="x509Certificate" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>PEM строковое представление (Base64 Encoded) X.509 сертификата, выданного удостоверяющим центром для прохождения процедур аутентификации и авторизации</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="sourceType" type="tns:SourceType">
+        <xs:annotation>
+          <xs:documentation>Тип клиента</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="createSessionResponse">
+    <xs:sequence>
+      <xs:element name="sessionId" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>Идентификатор сессии</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="AccessDeniedFault">
+    <xs:annotation>
+      <xs:documentation>При отсутствии у пользователя прав на выполнение данной операции</xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="description" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="BusinessFault">
+    <xs:annotation>
+      <xs:documentation>При возникновении ошибки в ПО</xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="description" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="currentSessionStatusRequest">
+    <xs:complexContent>
+      <xs:extension base="tns:AbstractSessionAwareRequest">
+        <xs:sequence/>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:complexType name="currentSessionStatusResponse">
+    <xs:sequence>
+      <xs:element name="status" type="tns:sessionStatus">
+        <xs:annotation>
+          <xs:documentation>Статус сессии</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="createSessionSignedRequest">
+    <xs:sequence>
+      <xs:element name="tin" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>БИН предприятия от имени которого действует пользователь</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="projectCode" type="xs:long">
+        <xs:annotation>
+          <xs:documentation>Код проекта</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="businessProfileType" type="tns:businessProfileType">
+        <xs:annotation>
+          <xs:documentation>Тип пользователя. Поле является обязательным, если открывается сессия ЛЗЧП, сотрудника ЛЗЧП, руководителя проекта, пользователя работающего в рамках проекта</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="signedAuthTicket" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>Подписанное сообщение в формате XML Dsig</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="sourceType" type="tns:SourceType">
+        <xs:annotation>
+          <xs:documentation>Тип клиента</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="currentUserProfilesRequest">
+    <xs:complexContent>
+      <xs:extension base="tns:AbstractSessionAwareRequest">
+        <xs:sequence/>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:complexType name="currentUserProfilesResponse">
+    <xs:sequence>
+      <xs:element name="profileInfoList">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element maxOccurs="unbounded" minOccurs="0" name="profileInfo" type="tns:profileInfo">
+              <xs:annotation>
+                <xs:documentation>Список активных профилей для текущего пользователя</xs:documentation>
+              </xs:annotation>
+            </xs:element>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="profileInfo">
+    <xs:annotation>
+      <xs:documentation>Информация о профиле пользователя</xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element minOccurs="0" name="iin" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>ИИН</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="tin" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>БИН предприятия от имени которого может действовать пользователь</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="businessProfileType" type="tns:businessProfileType">
+        <xs:annotation>
+          <xs:documentation>Тип пользователя определяющий полномочия в рамках данного предприятия</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="status" type="tns:userStatusType">
+        <xs:annotation>
+          <xs:documentation>Статус пользователя в рамках данного предприятия</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="type" type="tns:profileType">
+        <xs:annotation>
+          <xs:documentation>Тип данного профиля</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="projectParticipantType" type="tns:projectParticipantType">
+        <xs:annotation>
+          <xs:documentation>Тип участника проекта</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="projectCode" type="xs:long">
+        <xs:annotation>
+          <xs:documentation>Код проекта</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="projectName" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>Наименование проекта</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="SessionClosedFault">
+    <xs:annotation>
+      <xs:documentation>При попытке выполнить действие, когда сессия пользователя была закрыта вызовом соответствующего метода либо по таймауту</xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="description" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="currentUserRequest">
+    <xs:complexContent>
+      <xs:extension base="tns:AbstractSessionAwareRequest">
+        <xs:sequence/>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:complexType name="currentUserResponse">
+    <xs:sequence>
+      <xs:element name="user" type="tns:User">
+        <xs:annotation>
+          <xs:documentation>Объект представляющий информацию о текущем пользователе</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="User">
+    <xs:annotation>
+      <xs:documentation>Объект представляющий информацию о текущем пользователе</xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="login" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>ИИН</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="email" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>Адрес электронной почты</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="mobile" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>Мобильный телефон</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="issueDate" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>Дата выдачи удостоверяющего документа</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="issuedBy" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>Кем выдан удостоверяющий документ</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="passportNum" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>Номер удостоверяющего документа</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="status" type="tns:userStatusType">
+        <xs:annotation>
+          <xs:documentation>Статус текущего пользователя</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="reason" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>Причина блокировки пользователя</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="taxpayer" type="tns:Taxpayer">
+        <xs:annotation>
+          <xs:documentation>Информация о пользователе полученная из ЕХД</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="Taxpayer">
+    <xs:annotation>
+      <xs:documentation>Налогоплательщик</xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="tin" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>ИИН/БИН</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="nameRu" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>Наименование на русском языке</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="lastNameRu" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>Фамилия на русском языке</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="firstNameRu" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>Имя на русском языке</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="middleNameRu" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>Отчество на русском языке</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="lastNameKz" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>Фамилия на казахском языке</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="firstNameKz" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>Имя на казахском языке</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="middleNameKz" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>Отчество на казахском языке</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="nameKz" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>Наименование на казахском языке</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="addressRu" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>Адрес на русском языке</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="addressKz" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>Адрес на казахском языке</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="certificateSeries" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>Серия свидетельства плательщика НДС</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="certificateNum" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>Номер свидетельства плательщика НДС</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="resident" type="xs:boolean">
+        <xs:annotation>
+          <xs:documentation>Является ли налогоплательщик резидентом</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="headOffice" type="tns:Taxpayer">
+        <xs:annotation>
+          <xs:documentation>Головной офис предприятия</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="type" type="tns:EnterpriseType">
+        <xs:annotation>
+          <xs:documentation>Тип налогоплательщика</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="resourceUser" type="xs:boolean"/>
+      <xs:element minOccurs="0" name="accounts">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element maxOccurs="unbounded" minOccurs="0" name="settlementAccount" type="tns:SettlementAccount">
+              <xs:annotation>
+                <xs:documentation>Банковский счет</xs:documentation>
+              </xs:annotation>
+            </xs:element>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element minOccurs="0" name="enterpriseAdministrator" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>ИИН директора предприятия</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="budgetIin" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>ИИН ответственного работника по расчетам с бюджетом ЮЛ</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="kogd" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>Код органа государственных доходов</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="ndsRegistrationDate" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>Дата постановки на регистрационный учет плательщика НДС </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="SettlementAccount">
+    <xs:annotation>
+      <xs:documentation>Банковский счет</xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="id" type="xs:long">
+        <xs:annotation>
+          <xs:documentation>Идентификатор счёта</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="taxpayerTin" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>ИИН налогоплательщика</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="bank" type="tns:Bank">
+        <xs:annotation>
+          <xs:documentation>Банковские реквизиты</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="accountType" type="xs:int">
+        <xs:annotation>
+          <xs:documentation>Тип счёта</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="account" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>Счёт (ИИК)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="dateOpen" type="xs:dateTime">
+        <xs:annotation>
+          <xs:documentation>Дата открытия счёта</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="dateClose" type="xs:dateTime">
+        <xs:annotation>
+          <xs:documentation>Дата закрытия счёта</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="Bank">
+    <xs:annotation>
+      <xs:documentation>Банковские реквизиты</xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="id" type="xs:long">
+        <xs:annotation>
+          <xs:documentation>Идентификатор банка</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="nameRu" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>Наименование банка на русском языке</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="nameKz" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>Наименование банка на казахском языке</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="bik" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>БИК банка</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="code" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>Код банка (БИК старого формата)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="tin" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>БИН банка как ЮЛ</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="rnn" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>РНН банка как ЮЛ</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="active" type="xs:boolean">
+        <xs:annotation>
+          <xs:documentation>Статус банка</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="closeSessionBySignedCredentialsRequest">
+    <xs:sequence>
+      <xs:element name="tin" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>БИН предприятия от имени которого действует пользователь</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="projectCode" type="xs:long">
+        <xs:annotation>
+          <xs:documentation>Код проекта</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="businessProfileType" type="tns:businessProfileType">
+        <xs:annotation>
+          <xs:documentation>Тип пользователя. Поле является обязательным, если открывается сессия ЛЗЧП или сотрудника ЛЗЧП.</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="signedAuthTicket" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>Подписанное сообщение в формате XML Dsig</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="closeSessionByCredentialsRequest">
+    <xs:sequence>
+      <xs:element name="tin" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>БИН предприятия от имени которого действует пользователь</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="projectCode" type="xs:long">
+        <xs:annotation>
+          <xs:documentation>Код проекта</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="businessProfileType" type="tns:businessProfileType">
+        <xs:annotation>
+          <xs:documentation>Тип пользователя. Поле является обязательным, если открывается сессия ЛЗЧП или сотрудника ЛЗЧП.</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="x509Certificate" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>PEM строковое представление (Base64 Encoded) X.509 сертификата, выданного удостоверяющим центром для прохождения процедур аутентификации и авторизации</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:simpleType name="sessionStatus">
+    <xs:annotation>
+      <xs:documentation>Статус сессии</xs:documentation>
+    </xs:annotation>
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="OK">
+        <xs:annotation>
+          <xs:documentation>Сессия валидна</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="CLOSED">
+        <xs:annotation>
+          <xs:documentation>Сессия закрыта</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="NOT_FOUND">
+        <xs:annotation>
+          <xs:documentation>Сессия не найдена</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="businessProfileType">
+    <xs:annotation>
+      <xs:documentation>Тип пользователя</xs:documentation>
+    </xs:annotation>
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="ADMIN_ENTERPRISE">
+        <xs:annotation>
+          <xs:documentation>Руководитель юридического лица</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="USER">
+        <xs:annotation>
+          <xs:documentation>Пользователь приглашенный в предприятие</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="ENTREPRENEUR">
+        <xs:annotation>
+          <xs:documentation>Индивидуальный предприниматель</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="ENTREPRENEUR_USER">
+        <xs:annotation>
+          <xs:documentation>Пользователь работающий в ИП</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="INDIVIDUAL">
+        <xs:annotation>
+          <xs:documentation>Физическое лицо</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="LAWYER">
+        <xs:annotation>
+          <xs:documentation>ЛЗЧП: Адвокат</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="BAILIFF">
+        <xs:annotation>
+          <xs:documentation>ЛЗЧП: Частный судебный исполнитель</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="MEDIATOR">
+        <xs:annotation>
+          <xs:documentation>ЛЗЧП: Медиатор</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="NOTARY">
+        <xs:annotation>
+          <xs:documentation>ЛЗЧП: Нотариус</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="LAWYER_USER">
+        <xs:annotation>
+          <xs:documentation>Пользователь работающий в ЛЗЧП: Адвокат</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="BAILIFF_USER">
+        <xs:annotation>
+          <xs:documentation>Пользователь работающий в ЛЗЧП: Частный судебный исполнитель</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="MEDIATOR_USER">
+        <xs:annotation>
+          <xs:documentation>Пользователь работающий в ЛЗЧП: Медиатор</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="NOTARY_USER">
+        <xs:annotation>
+          <xs:documentation>Пользователь работающий в ЛЗЧП: Нотариус</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="PROJECT_ADMIN">
+        <xs:annotation>
+          <xs:documentation>Профиль руководителя проекта (управляет пользователями в рамках проекта)</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="PROJECT_USER">
+        <xs:annotation>
+          <xs:documentation>Пользователь работающий в рамках проекта</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="SourceType">
+    <xs:annotation>
+      <xs:documentation>Тип системы</xs:documentation>
+    </xs:annotation>
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="BROWSER">
+        <xs:annotation>
+          <xs:documentation>Браузер</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="DESKTOP">
+        <xs:annotation>
+          <xs:documentation>Десктоп</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="ERP_1C">
+        <xs:annotation>
+          <xs:documentation>Интеграционный механизм системы 1С</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="ERP_SAP">
+        <xs:annotation>
+          <xs:documentation>Интеграционный механизм системы ERP-система SAP</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="OTHER">
+        <xs:annotation>
+          <xs:documentation>Другая система</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="userStatusType">
+    <xs:annotation>
+      <xs:documentation>Статус пользователя</xs:documentation>
+    </xs:annotation>
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="ACTIVE">
+        <xs:annotation>
+          <xs:documentation>Активный</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="BLOCKED">
+        <xs:annotation>
+          <xs:documentation>Заблокированный администратором системы</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="ENTERPRISE_ADMIN_CHANGE_BLOCKED">
+        <xs:annotation>
+          <xs:documentation>Заблокированный при смене руководителя предприятия</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="ENTERPRISE_BLOCKED">
+        <xs:annotation>
+          <xs:documentation>Заблокированный при блокировке предприятия</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="profileType">
+    <xs:annotation>
+      <xs:documentation>Тип профиля</xs:documentation>
+    </xs:annotation>
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="GENERAL">
+        <xs:annotation>
+          <xs:documentation>Общий профиль</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="PROJECT">
+        <xs:annotation>
+          <xs:documentation>Профиль созданный в рамках проекта</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="projectParticipantType">
+    <xs:annotation>
+      <xs:documentation>Тип участника проекта</xs:documentation>
+    </xs:annotation>
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="ATTORNEY">
+        <xs:annotation>
+          <xs:documentation>Поверенный (схема Поверенный - Доверитель)</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="OPERATOR">
+        <xs:annotation>
+          <xs:documentation>Оператор (схема Оператор - Подрядчик)</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="TRUSTER">
+        <xs:annotation>
+          <xs:documentation>Доверитель (схема Поверенный - Доверитель)</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="CONTRACTOR">
+        <xs:annotation>
+          <xs:documentation>Подрядчик (схема Оператор - Подрядчик)</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="EnterpriseType">
+    <xs:annotation>
+      <xs:documentation>Тип налогоплательщика</xs:documentation>
+    </xs:annotation>
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="NOT_SET">
+        <xs:annotation>
+          <xs:documentation>Отсутствует в справочнике</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="INDIVIDUAL">
+        <xs:annotation>
+          <xs:documentation>Физическое лицо</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="INDIVIDUAL_ENTREPRENEUR">
+        <xs:annotation>
+          <xs:documentation>Индивидуальный предприниматель</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="PRIVATE_ENTERPRISE">
+        <xs:annotation>
+          <xs:documentation>Частное предприятие</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+      <xs:enumeration value="STATE_ENTERPRISE">
+        <xs:annotation>
+          <xs:documentation>Государственное предприятие/учреждение</xs:documentation>
+        </xs:annotation>
+      </xs:enumeration>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:element name="accessDeniedException" nillable="true" type="tns:AccessDeniedFault"/>
+  <xs:element name="businessException" nillable="true" type="tns:BusinessFault"/>
+  <xs:element name="sessionClosedException" nillable="true" type="tns:SessionClosedFault"/>
+  <xs:element name="closeSessionRequest" nillable="true" type="tns:closeSessionRequest"/>
+  <xs:element name="closeSessionResponse" nillable="true" type="tns:closeSessionResponse"/>
+  <xs:element name="createSessionRequest" nillable="true" type="tns:createSessionRequest"/>
+  <xs:element name="createSessionResponse" nillable="true" type="tns:createSessionResponse"/>
+  <xs:element name="currentSessionStatusRequest" nillable="true" type="tns:currentSessionStatusRequest"/>
+  <xs:element name="currentSessionStatusResponse" nillable="true" type="tns:currentSessionStatusResponse"/>
+  <xs:element name="createSessionSignedRequest" nillable="true" type="tns:createSessionSignedRequest"/>
+  <xs:element name="currentUserProfilesRequest" nillable="true" type="tns:currentUserProfilesRequest"/>
+  <xs:element name="currentUserProfilesResponse" nillable="true" type="tns:currentUserProfilesResponse"/>
+  <xs:element name="currentUserRequest" nillable="true" type="tns:currentUserRequest"/>
+  <xs:element name="currentUserResponse" nillable="true" type="tns:currentUserResponse"/>
+  <xs:element name="closeSessionBySignedCredentialsRequest" nillable="true" type="tns:closeSessionBySignedCredentialsRequest"/>
+  <xs:element name="closeSessionByCredentialsRequest" nillable="true" type="tns:closeSessionByCredentialsRequest"/>
+</xs:schema>
+  </wsdl:types>
+  <wsdl:message name="closeSession">
+    <wsdl:part element="tns:closeSessionRequest" name="closeSessionRequest">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="currentSessionStatusResponse">
+    <wsdl:part element="tns:currentSessionStatusResponse" name="currentSessionStatusResponse">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="createSessionResponse">
+    <wsdl:part element="tns:createSessionResponse" name="createSessionResponse">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="BusinessException">
+    <wsdl:part element="tns:businessException" name="BusinessException">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="currentUser">
+    <wsdl:part element="tns:currentUserRequest" name="currentUserRequest">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="createSessionSignedResponse">
+    <wsdl:part element="tns:createSessionResponse" name="createSessionResponse">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="currentUserProfilesResponse">
+    <wsdl:part element="tns:currentUserProfilesResponse" name="currentUserProfilesResponse">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="closeSessionBySignedCredentialsResponse">
+    <wsdl:part element="tns:closeSessionResponse" name="closeSessionResponse">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="closeSessionByCredentials">
+    <wsdl:part element="tns:closeSessionByCredentialsRequest" name="closeSessionByCredentialsRequest">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="createSession">
+    <wsdl:part element="tns:createSessionRequest" name="createSessionRequest">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="currentSessionStatus">
+    <wsdl:part element="tns:currentSessionStatusRequest" name="currentSessionStatusRequest">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="closeSessionByCredentialsResponse">
+    <wsdl:part element="tns:closeSessionResponse" name="closeSessionResponse">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="createSessionSigned">
+    <wsdl:part element="tns:createSessionSignedRequest" name="createSessionSignedRequest">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="SessionClosedException">
+    <wsdl:part element="tns:sessionClosedException" name="SessionClosedException">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="closeSessionResponse">
+    <wsdl:part element="tns:closeSessionResponse" name="closeSessionResponse">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="currentUserProfiles">
+    <wsdl:part element="tns:currentUserProfilesRequest" name="currentUserProfilesRequest">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="AccessDeniedException">
+    <wsdl:part element="tns:accessDeniedException" name="AccessDeniedException">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="closeSessionBySignedCredentials">
+    <wsdl:part element="tns:closeSessionBySignedCredentialsRequest" name="closeSessionBySignedCredentialsRequest">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="currentUserResponse">
+    <wsdl:part element="tns:currentUserResponse" name="currentUserResponse">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:portType name="SessionService">
+<wsdl:documentation>Сервис аутентификации</wsdl:documentation>
+    <wsdl:operation name="closeSession">
+<wsdl:documentation>Закрыть сессию, созданную на ESB для работы с бизнес методами</wsdl:documentation>
+      <wsdl:input message="tns:closeSession" name="closeSession">
+    </wsdl:input>
+      <wsdl:output message="tns:closeSessionResponse" name="closeSessionResponse">
+    </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="createSession">
+<wsdl:documentation>Создать сессию на ESB, необходимую для работы с бизнес методами</wsdl:documentation>
+      <wsdl:input message="tns:createSession" name="createSession">
+    </wsdl:input>
+      <wsdl:output message="tns:createSessionResponse" name="createSessionResponse">
+    </wsdl:output>
+      <wsdl:fault message="tns:AccessDeniedException" name="AccessDeniedException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:BusinessException" name="BusinessException">
+    </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="currentSessionStatus">
+<wsdl:documentation>Вернуть статус сессии</wsdl:documentation>
+      <wsdl:input message="tns:currentSessionStatus" name="currentSessionStatus">
+    </wsdl:input>
+      <wsdl:output message="tns:currentSessionStatusResponse" name="currentSessionStatusResponse">
+    </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="createSessionSigned">
+<wsdl:documentation>Создать сессию на ESB, необходимую для работы с бизнес методами</wsdl:documentation>
+      <wsdl:input message="tns:createSessionSigned" name="createSessionSigned">
+    </wsdl:input>
+      <wsdl:output message="tns:createSessionSignedResponse" name="createSessionSignedResponse">
+    </wsdl:output>
+      <wsdl:fault message="tns:AccessDeniedException" name="AccessDeniedException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:BusinessException" name="BusinessException">
+    </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="currentUserProfiles">
+<wsdl:documentation>Вернуть информацию об активных профилях для текущего пользователя</wsdl:documentation>
+      <wsdl:input message="tns:currentUserProfiles" name="currentUserProfiles">
+    </wsdl:input>
+      <wsdl:output message="tns:currentUserProfilesResponse" name="currentUserProfilesResponse">
+    </wsdl:output>
+      <wsdl:fault message="tns:SessionClosedException" name="SessionClosedException">
+    </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="currentUser">
+<wsdl:documentation>Вернуть информацию о текущем пользователе</wsdl:documentation>
+      <wsdl:input message="tns:currentUser" name="currentUser">
+    </wsdl:input>
+      <wsdl:output message="tns:currentUserResponse" name="currentUserResponse">
+    </wsdl:output>
+      <wsdl:fault message="tns:SessionClosedException" name="SessionClosedException">
+    </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="closeSessionBySignedCredentials">
+<wsdl:documentation>Закрыть сессию, созданную на ESB для работы с бизнес методами</wsdl:documentation>
+      <wsdl:input message="tns:closeSessionBySignedCredentials" name="closeSessionBySignedCredentials">
+    </wsdl:input>
+      <wsdl:output message="tns:closeSessionBySignedCredentialsResponse" name="closeSessionBySignedCredentialsResponse">
+    </wsdl:output>
+      <wsdl:fault message="tns:AccessDeniedException" name="AccessDeniedException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:BusinessException" name="BusinessException">
+    </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="closeSessionByCredentials">
+<wsdl:documentation>Закрыть сессию, созданную на ESB для работы с бизнес методами</wsdl:documentation>
+      <wsdl:input message="tns:closeSessionByCredentials" name="closeSessionByCredentials">
+    </wsdl:input>
+      <wsdl:output message="tns:closeSessionByCredentialsResponse" name="closeSessionByCredentialsResponse">
+    </wsdl:output>
+      <wsdl:fault message="tns:AccessDeniedException" name="AccessDeniedException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:BusinessException" name="BusinessException">
+    </wsdl:fault>
+    </wsdl:operation>
+  </wsdl:portType>
+  <wsdl:binding name="SessionServiceSoapBinding" type="tns:SessionService">
+    <soap:binding style="document" transport="http://schemas.xmlsoap.org/soap/http"/>
+    <wsdl:operation name="closeSession">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="closeSession">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="closeSessionResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="createSession">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="createSession">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="createSessionResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+      <wsdl:fault name="AccessDeniedException">
+        <soap:fault name="AccessDeniedException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="BusinessException">
+        <soap:fault name="BusinessException" use="literal"/>
+      </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="currentSessionStatus">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="currentSessionStatus">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="currentSessionStatusResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="createSessionSigned">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="createSessionSigned">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="createSessionSignedResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+      <wsdl:fault name="AccessDeniedException">
+        <soap:fault name="AccessDeniedException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="BusinessException">
+        <soap:fault name="BusinessException" use="literal"/>
+      </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="currentUserProfiles">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="currentUserProfiles">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="currentUserProfilesResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+      <wsdl:fault name="SessionClosedException">
+        <soap:fault name="SessionClosedException" use="literal"/>
+      </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="currentUser">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="currentUser">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="currentUserResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+      <wsdl:fault name="SessionClosedException">
+        <soap:fault name="SessionClosedException" use="literal"/>
+      </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="closeSessionBySignedCredentials">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="closeSessionBySignedCredentials">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="closeSessionBySignedCredentialsResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+      <wsdl:fault name="AccessDeniedException">
+        <soap:fault name="AccessDeniedException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="BusinessException">
+        <soap:fault name="BusinessException" use="literal"/>
+      </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="closeSessionByCredentials">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="closeSessionByCredentials">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="closeSessionByCredentialsResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+      <wsdl:fault name="AccessDeniedException">
+        <soap:fault name="AccessDeniedException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="BusinessException">
+        <soap:fault name="BusinessException" use="literal"/>
+      </wsdl:fault>
+    </wsdl:operation>
+  </wsdl:binding>
+  <wsdl:service name="SessionService">
+    <wsdl:port binding="tns:SessionServiceSoapBinding" name="SessionServicePort">
+      <soap:address location="https://test3.esf.kgd.gov.kz:8443/esf-web/ws/api1/SessionService"/>
+    </wsdl:port>
+  </wsdl:service>
+</wsdl:definitions>

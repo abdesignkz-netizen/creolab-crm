@@ -142,8 +142,8 @@ export async function deliverPendingPush(
   let sent = 0;
   for (const sub of subs) {
     try {
-      // Dynamic import keeps worker light when web-push is not installed.
-      const webpush = await import("web-push").catch(() => null);
+      // web-push is CommonJS: its methods are on the default export.
+      const webpush = await import("web-push").then((module) => module.default).catch(() => null);
       if (!webpush) {
         await prisma.notificationDelivery.update({
           where: { id: pushDelivery.id },

@@ -94,7 +94,7 @@ export async function loadContactComposeFacts(
     const chronological = [...conversation.messages].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
     historyByContact.set(
       conversation.contactId,
-      chronological.map((message) => ({
+      chronological.map<ContactComposeFact["history"][number]>((message) => ({
         role: message.direction === "inbound" || message.senderKind === "client" ? "user" : "assistant",
         content: String(message.text || "").trim(),
       })).filter((item) => item.content),
@@ -210,7 +210,7 @@ export async function composeCommandDraftsForContacts(input: {
 
   const firstName = facts[0]?.firstName;
   const personalizedToFirst =
-    Boolean(firstName) && new RegExp(`^${firstName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*,`, "i").test(userDraft);
+    firstName != null && new RegExp(`^${firstName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*,`, "i").test(userDraft);
   const sharedDraft =
     userDraft &&
     !looksLikeStaffCommand(userDraft) &&

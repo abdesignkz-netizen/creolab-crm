@@ -21,17 +21,31 @@ export async function processOutbox(prisma: PrismaClient) {
     take: 20,
   });
   for (const event of due) {
-    if (event.type === "campaign.run") {
-      const payload = (event.payloadJson || {}) as { campaignId?: string };
-      if (payload.campaignId) {
-        await processCampaignQueue(prisma, payload.campaignId).catch((error: unknown) => console.error("campaign outbox", error));
+    try {
+      if (event.type === "campaign.run") {
+        const payload = (event.payloadJson || {}) as { campaignId?: string };
+        if (payload.campaignId) await processCampaignQueue(prisma, payload.campaignId);
+      } else if (event.type === "inquiry.automation") {
+        const payload = (event.payloadJson || {}) as { inquiryId?: string; tenantId?: string };
+        const { processInquiryAutomationJob } = await import("./inquiryAutomationQueue.ts");
+        await processInquiryAutomationJob(prisma, payload);
+      } else if (event.type === "contract.signed") {
+        const { processContractSignedEvent } = await import("./invoiceSignedWorkflow.ts");
+        await processContractSignedEvent(prisma, event);
+      } else if (event.type === "avr.sent" || event.type === "esf.sent") {
+        const { processEsfSentOutbox } = await import("./esfStatusSyncService.ts");
+        await processEsfSentOutbox(prisma, event);
       }
-    } else if (event.type === "inquiry.automation") {
-      const payload = (event.payloadJson || {}) as { inquiryId?: string; tenantId?: string };
-      const { processInquiryAutomationJob } = await import("./inquiryAutomationQueue.ts");
-      await processInquiryAutomationJob(prisma, payload).catch((error: unknown) =>
-        console.error("inquiry.automation outbox", error),
-      );
+    } catch (error) {
+      console.error(`${event.type} outbox`, error);
+      await prisma.outboxEvent.update({
+        where: { id: event.id },
+        data: {
+          attempts: { increment: 1 },
+          availableAt: new Date(Date.now() + Math.min(300_000, TICK_MS * 2 ** Math.min(event.attempts, 6))),
+        },
+      });
+      continue;
     }
     await prisma.outboxEvent.update({
       where: { id: event.id },
@@ -178,6 +192,17 @@ export async function processDueScheduledActions(prisma: PrismaClient) {
       await prisma.scheduledAction.update({ where: { id: item.id }, data: { state: "done" } });
       continue;
     }
+    if (item.type === "esf_status_poll") {
+      const { processEsfStatusPollAction } = await import("./esfStatusSyncService.ts");
+      await processEsfStatusPollAction(prisma, item).catch(async (error: unknown) => {
+        console.error("esf status poll", error);
+        await prisma.scheduledAction.update({
+          where: { id: item.id },
+          data: { state: "failed", cancelReason: error instanceof Error ? error.message : "error" },
+        });
+      });
+      continue;
+    }
     if (item.type.startsWith("agreement_reminder")) {
       await processAgreementReminder(prisma, item).catch(async (error) => {
         console.error("agreement reminder", error);
@@ -208,6 +233,9 @@ export function startBackgroundJobs(prisma: PrismaClient) {
   started = true;
   const tick = () => {
     processOutbox(prisma).catch((error) => console.error("outbox", error));
+    import("./esfStatusSyncService.ts")
+      .then(({ ensureEsfStatusPolls }) => ensureEsfStatusPolls(prisma))
+      .catch((error) => console.error("esf polls", error));
     processDueScheduledActions(prisma).catch((error) => console.error("scheduled", error));
     resumeRunningCampaigns(prisma).catch((error) => console.error("campaign resume", error));
   };

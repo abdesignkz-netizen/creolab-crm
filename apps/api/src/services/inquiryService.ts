@@ -932,6 +932,7 @@ export async function convertInquiryToDeal(prisma: PrismaClient, auth: AuthConte
       data: {
         tenantId: membership.tenantId,
         contactId: inquiry.contactId,
+        companyId: inquiry.companyId,
         inquiryId: inquiry.id,
         stageId: stage.id,
         title: title || inquiry.subject || "Сделка",

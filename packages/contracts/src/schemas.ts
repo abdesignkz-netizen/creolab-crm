@@ -1,4 +1,15 @@
 import { z } from "zod";
+import { isValidKzTaxId } from "./kzTaxId.ts";
+
+const optionalTaxId = z
+  .string()
+  .trim()
+  .max(20)
+  .nullable()
+  .optional()
+  .refine((value) => value == null || value === "" || isValidKzTaxId(value), {
+    message: "Укажите корректный БИН/ИИН из 12 цифр",
+  });
 
 /** ISO with offset/Z, or naive `YYYY-MM-DDTHH:mm` as the company clock. */
 export const dateTimeInput = z
@@ -213,6 +224,25 @@ export const createFromCommandSchema = z
     }
   });
 
+export const createDocumentFromCommandSchema = z.object({
+  text: z.string().trim().min(2).max(2000),
+  action: z
+    .enum([
+      "generate_contract",
+      "send_for_sign",
+      "generate_invoice",
+      "create_avr",
+      "validate_avr",
+      "send_avr",
+      "create_esf",
+      "validate_esf",
+      "send_esf",
+      "close_deal",
+    ])
+    .optional(),
+  dealId: z.string().uuid().optional(),
+});
+
 export const parsePhoneListSchema = z.object({
   text: z.string().min(1).max(100_000),
 });
@@ -364,6 +394,7 @@ export const updateDealSchema = z.object({
   nextActionAt: z.string().datetime().nullable().optional(),
   expectedCloseAt: z.string().datetime().nullable().optional(),
   assigneeMembershipId: z.string().uuid().nullable().optional(),
+  companyId: z.string().uuid().nullable().optional(),
 });
 
 export const markDealWonSchema = z.object({
@@ -415,7 +446,15 @@ export const createCompanySchema = z.object({
   name: z.string().trim().min(1).max(200),
   legalName: z.string().trim().max(300).nullable().optional(),
   shortName: z.string().trim().max(120).nullable().optional(),
-  bin: z.string().trim().max(20).nullable().optional(),
+  bin: optionalTaxId,
+  iin: optionalTaxId,
+  legalAddress: z.string().trim().max(400).nullable().optional(),
+  vatPayer: z.boolean().nullable().optional(),
+  directorName: z.string().trim().max(200).nullable().optional(),
+  directorPosition: z.string().trim().max(200).nullable().optional(),
+  iban: z.string().trim().max(40).nullable().optional(),
+  bankName: z.string().trim().max(200).nullable().optional(),
+  bik: z.string().trim().max(20).nullable().optional(),
   industry: z.string().trim().max(120).nullable().optional(),
   website: z.string().trim().max(300).nullable().optional(),
   email: z.string().trim().max(200).nullable().optional(),
@@ -451,4 +490,130 @@ export const dealContactSchema = z.object({
   contactId: z.string().uuid(),
   role: z.string().trim().max(120).nullable().optional(),
   isPrimary: z.boolean().optional(),
+});
+
+export const dealItemInputSchema = z.object({
+  name: z.string().trim().min(1).max(300),
+  description: z.string().trim().max(2000).nullable().optional(),
+  quantity: z.number().positive().max(1_000_000),
+  unit: z.string().trim().min(1).max(40).optional(),
+  unitPrice: z.number().nonnegative().max(1_000_000_000),
+  vatRate: z.number().min(0).max(100).optional(),
+  sortOrder: z.number().int().min(0).max(10_000).optional(),
+  catalogItemId: z.string().uuid().nullable().optional(),
+  catalogTruId: z.string().trim().max(64).nullable().optional(),
+});
+
+export const updateDealItemSchema = dealItemInputSchema.partial();
+
+export const createDealSchema = z.object({
+  title: z.string().trim().min(1).max(200),
+  contactId: z.string().uuid(),
+  companyId: z.string().uuid().nullable().optional(),
+  description: z.string().trim().max(5000).nullable().optional(),
+  currency: z.string().trim().min(1).max(8).optional(),
+  offerAmountMinor: z.number().int().nonnegative().nullable().optional(),
+  items: z.array(dealItemInputSchema).max(200).optional(),
+});
+
+export const legalProfileSchema = z.object({
+  legalName: z.string().trim().max(300).nullable().optional(),
+  shortName: z.string().trim().max(120).nullable().optional(),
+  bin: optionalTaxId,
+  iin: optionalTaxId,
+  legalAddress: z.string().trim().max(400).nullable().optional(),
+  actualAddress: z.string().trim().max(400).nullable().optional(),
+  iban: z.string().trim().max(40).nullable().optional(),
+  bankName: z.string().trim().max(200).nullable().optional(),
+  bik: z.string().trim().max(20).nullable().optional(),
+  vatPayer: z.boolean().nullable().optional(),
+  vatRegistrationNumber: z.string().trim().max(40).nullable().optional(),
+  defaultVatMode: z.enum(["none", "percent"]).nullable().optional(),
+  defaultVatRate: z.number().min(0).max(100).nullable().optional(),
+  directorName: z.string().trim().max(200).nullable().optional(),
+  directorPosition: z.string().trim().max(200).nullable().optional(),
+  email: z.string().trim().max(200).nullable().optional(),
+  phone: z.string().trim().max(40).nullable().optional(),
+  country: z.string().trim().max(8).nullable().optional(),
+  currency: z.string().trim().max(8).nullable().optional(),
+  documentsEnabled: z.boolean().optional(),
+  contractSigningEnabled: z.boolean().optional(),
+  esfIntegrationEnabled: z.boolean().optional(),
+  defaultCatalogTruId: z.string().trim().max(64).nullable().optional(),
+});
+
+export const createContractDraftSchema = z.object({
+  subject: z.string().trim().max(400).nullable().optional(),
+  paymentTerms: z.string().trim().max(2000).nullable().optional(),
+  completionTerms: z.string().trim().max(2000).nullable().optional(),
+});
+
+export const generateContractSchema = createContractDraftSchema;
+
+export const declineSignatureSchema = z.object({
+  reason: z.string().trim().max(500).nullable().optional(),
+});
+
+export const submitSignatureSchema = z.object({
+  cmsBase64: z.string().trim().min(20).max(2_000_000),
+});
+
+export const createInvoiceDraftSchema = z.object({
+  contractId: z.string().uuid().optional(),
+  dueDate: z.string().datetime().nullable().optional(),
+});
+
+export const generateInvoiceSchema = z.object({
+  dueDate: z.string().datetime().nullable().optional(),
+});
+
+export const createElectronicDocumentDraftSchema = z.object({
+  type: z.enum(["AVR", "ESF"]),
+  contractId: z.string().uuid().optional(),
+  invoiceId: z.string().uuid().optional(),
+});
+
+export const esfConnectSchema = z
+  .object({
+    signedAuthTicket: z.string().min(80).max(200_000).optional(),
+    authCmsBase64: z.string().trim().min(20).max(2_000_000).optional(),
+    authCertificatePem: z.string().trim().min(40).max(20_000).optional(),
+    cabinetUsername: z.string().trim().max(32).optional(),
+    cabinetPassword: z.string().max(200).optional(),
+  })
+  .refine((value) => Boolean(value.signedAuthTicket || value.authCmsBase64 || value.authCertificatePem), {
+    message: "Нужен публичный сертификат или CMS от NCALayer",
+  });
+
+export const esfSendSignedSchema = z
+  .object({
+    signature: z.string().min(8).max(20_000),
+    publicCertificate: z.string().min(40).max(20_000).optional(),
+    pem: z.string().min(40).max(20_000).optional(),
+    payloadSha256: z.string().trim().length(64).optional(),
+    metadata: z
+      .object({
+        storageName: z.string().trim().max(64).optional(),
+        algorithm: z.string().trim().max(128).optional(),
+        certificateSerial: z.string().trim().max(128).optional(),
+        subjectCn: z.string().trim().max(256).optional(),
+      })
+      .optional(),
+  })
+  .refine((value) => Boolean(value.publicCertificate || value.pem), {
+    message: "Нужен публичный сертификат из signPlainData",
+  });
+
+export const esfPocAvrSendSchema = z.object({
+  signature: z.string().min(8).max(20_000),
+  pem: z.string().min(40).max(20_000),
+  payloadSha256: z.string().trim().length(64),
+  pemFingerprint: z.string().trim().length(64).optional(),
+  keyInfo: z
+    .object({
+      algorithm: z.string().max(128).optional(),
+      subjectCn: z.string().max(256).optional(),
+      serialNumber: z.string().max(128).optional(),
+    })
+    .optional(),
 });

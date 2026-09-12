@@ -1,0 +1,7 @@
+{
+  "scratch": "/var/folders/s8/y6brfzvn6814kx_c9s0kdtdm0000gn/T/creolab-real-test-poc-39LTjC",
+  "tenantId": "2cdca30d-74e7-4a81-b671-d3535ec1d123",
+  "environment": "test",
+  "endpointHost": "test3.esf.kgd.gov.kz",
+  "url": "http://localhost:4297/integrations/esf"
+}

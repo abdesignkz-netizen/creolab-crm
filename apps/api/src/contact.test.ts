@@ -216,4 +216,25 @@ describe("Contact 360", () => {
       assert.notEqual(a.items[0].id, b.items[0].id);
     }
   });
+  it("очищает реквизиты, сохраняя обязательные строковые статусы", async () => {
+    const response = await fetch(`${base}/api/v1/contacts`, {
+      method: "POST", headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({ name: "Проверка пустых полей", phone: "+77018889977" }),
+    });
+    const created = await response.json();
+    assert.equal(response.status, 201);
+    const updated = await fetch(`${base}/api/v1/contacts/${created.client.id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({ name: "", language: "", lifecycleStatus: "new", leadTemperature: "unknown", city: null }),
+    });
+    const body = await updated.json();
+    assert.equal(updated.status, 200, JSON.stringify(body));
+    const row = await prisma.contact.findUniqueOrThrow({ where: { id: created.client.id } });
+    assert.equal(row.name, null);
+    assert.equal(row.city, null);
+    assert.equal(row.language, "unknown");
+    assert.equal(row.lifecycleStatus, "new");
+    assert.equal(row.leadTemperature, "unknown");
+  });
+
 });

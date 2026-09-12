@@ -345,7 +345,7 @@ export function composeRecipientOffer(input: RecipientOfferInput) {
   }
 
   const askIsJustSend =
-    Boolean(staffAsk) &&
+    staffAsk != null &&
     /отправ|направ|кп|предложен|документ/i.test(staffAsk) &&
     !/бюджет|оплат|созвон|врем|макет|реквизит|соглас|счёт|счет/i.test(staffAsk);
 

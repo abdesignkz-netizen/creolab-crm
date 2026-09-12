@@ -15,6 +15,9 @@ export const PERMISSIONS = {
   manageAi: "manage_ai",
   viewAllConversations: "view_all_conversations",
   takeFromQueue: "take_from_queue",
+  manageDocuments: "manage_documents",
+  signDocuments: "sign_documents",
+  sendEsf: "send_esf",
 } as const;
 
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
@@ -28,11 +31,16 @@ const ROLE_PERMISSIONS: Record<Exclude<Role, "platform_admin">, Permission[]> = 
     PERMISSIONS.manageAi,
     PERMISSIONS.viewAllConversations,
     PERMISSIONS.takeFromQueue,
+    PERMISSIONS.manageDocuments,
+    PERMISSIONS.signDocuments,
+    PERMISSIONS.sendEsf,
   ],
   sales_lead: [
     PERMISSIONS.confirmPayments,
     PERMISSIONS.viewAllConversations,
     PERMISSIONS.takeFromQueue,
+    PERMISSIONS.manageDocuments,
+    PERMISSIONS.signDocuments,
   ],
   manager: [PERMISSIONS.takeFromQueue],
 };

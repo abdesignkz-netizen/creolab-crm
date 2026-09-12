@@ -141,9 +141,9 @@ const TASK_RESULT_LABEL: Record<string, string> = {
   other: "Другое",
 };
 
-function taskDoneAt(item: { status: string; completedAt?: Date | null; sentAt?: Date | null; updatedAt: Date }) {
+function taskDoneAt(item: { status: string; completedAt?: Date | null; sentAt?: Date | null; updatedAt?: Date }) {
   if (item.status !== "done" && item.status !== "canceled") return null;
-  return item.completedAt || item.sentAt || item.updatedAt;
+  return item.completedAt || item.sentAt || item.updatedAt || null;
 }
 
 function taskDoneSummary(item: {
@@ -418,6 +418,7 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
       completionResult: null,
       createdAt: campaign.createdAt,
       completedAt: null,
+      childTasks: [],
       inquiry: null,
       deal: null,
       contact: null,
@@ -671,7 +672,7 @@ export async function createTask(
     });
   }
 
-  let contactId = input.contactId;
+  let contactId: string | null | undefined = input.contactId;
   let inquiryId = input.inquiryId;
   let conversationId = input.conversationId;
   let dealId = input.dealId;

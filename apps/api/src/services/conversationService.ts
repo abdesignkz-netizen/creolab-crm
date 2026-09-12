@@ -411,7 +411,7 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
   await adoptSameContactThreadMessages(prisma, tid, conversation, contactPhone);
   const threadIds = await listThreadConversationIds(prisma, tid, conversation, contactPhone);
   await acknowledgeConversationAttention(prisma, tid, membership.id, conversation, threadIds);
-  const relatedNotices = await relatedInquiriesForConversationView(prisma, tid, conversation, threadIds, contactPhone);
+  const relatedNotices = await relatedInquiriesForConversationView(prisma, tid, conversation, threadIds, contactPhone ?? null);
   await markRelatedStaffNotifications(prisma, {
     tenantId: tid,
     membershipId: membership.id,
@@ -767,7 +767,7 @@ export async function markConversationRead(prisma: PrismaClient, auth: AuthConte
       });
     }
   }
-  const related = await relatedInquiriesForConversationView(prisma, tenantId, conversation, threadIds, phone);
+  const related = await relatedInquiriesForConversationView(prisma, tenantId, conversation, threadIds, phone ?? null);
   const noticeInquiryIds = [...new Set(related.map((item) => item.id))];
   const freshInquiryIds = related.filter((item) => item.status === "new").map((item) => item.id);
   let acknowledgeIds = freshInquiryIds;

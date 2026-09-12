@@ -15,6 +15,7 @@ import {
   createInquirySchema,
   createTaskSchema,
   createFromCommandSchema,
+  createDocumentFromCommandSchema,
   completeTaskResultSchema,
   campaignAttachmentSchema,
   confirmCampaignSchema,
@@ -29,6 +30,20 @@ import {
   parseTaskCommandSchema,
   paymentSchema,
   changeDealStageSchema,
+  createDealSchema,
+  createContractDraftSchema,
+  generateContractSchema,
+  declineSignatureSchema,
+  submitSignatureSchema,
+  createInvoiceDraftSchema,
+  generateInvoiceSchema,
+  createElectronicDocumentDraftSchema,
+  dealItemInputSchema,
+  updateDealItemSchema,
+  legalProfileSchema,
+  esfConnectSchema,
+  esfSendSignedSchema,
+  esfPocAvrSendSchema,
   updateDealSchema,
   markDealWonSchema,
   markDealLostSchema,
@@ -155,6 +170,7 @@ import { getSituationOverview } from "./services/situationOverviewService.ts";
 import { askSituation } from "./services/situationAskService.ts";
 import {
   changeDealStage,
+  createDeal,
   getDeal,
   getDealBoard,
   markDealLost,
@@ -236,6 +252,20 @@ export function createApp(prisma: PrismaClient) {
 
   const json = express.json({ limit: "200kb" });
   const jsonLarge = express.json({ limit: "30mb" });
+
+  app.post("/api/v1/documents/import-pdf/preview", jsonLarge, async (req, res) => {
+    const { previewManualPdf } = await import("./services/manualPdfImportService.ts");
+    res.json(await previewManualPdf(prisma, await requireAuth(req), req.body));
+  });
+  app.post("/api/v1/documents/import-pdf/confirm", jsonLarge, async (req, res) => {
+    const { commitManualPdf } = await import("./services/manualPdfImportService.ts");
+    res.json(await commitManualPdf(prisma, await requireAuth(req), req.body));
+  });
+  app.delete("/api/v1/documents/import-pdf/:id", async (req, res) => {
+    const { discardManualPdf } = await import("./services/manualPdfImportService.ts");
+    res.json(await discardManualPdf(prisma, await requireAuth(req), req.params.id));
+  });
+
   const urlencoded = express.urlencoded({ extended: true, limit: "200kb" });
   const rawJson = express.raw({ type: "application/json", limit: "200kb" });
 
@@ -394,6 +424,72 @@ export function createApp(prisma: PrismaClient) {
     res.json(await updateAIAutomationSettings(prisma, await requireAuth(req), req.body || {}));
   });
 
+  app.get("/api/v1/settings/legal-profile", async (req, res) => {
+    const { getLegalProfile } = await import("./services/legalProfileService.ts");
+    res.json(await getLegalProfile(prisma, await requireAuth(req)));
+  });
+
+  app.patch("/api/v1/settings/legal-profile", json, async (req, res) => {
+    const input = legalProfileSchema.parse(req.body || {});
+    const { updateLegalProfile } = await import("./services/legalProfileService.ts");
+    res.json(await updateLegalProfile(prisma, await requireAuth(req), input));
+  });
+
+  app.get("/api/v1/settings/esf-preflight", async (req, res) => {
+    const { getEsfPreflight } = await import("./integrations/esf/EsfPreflight.ts");
+    res.json(await getEsfPreflight(await requireAuth(req)));
+  });
+
+  app.get("/api/v1/integrations/esf", async (req, res) => {
+    const { getEsfConnection } = await import("./services/esfConnectionService.ts");
+    res.json(await getEsfConnection(prisma, await requireAuth(req)));
+  });
+
+  app.post("/api/v1/integrations/esf/auth-ticket", json, async (req, res) => {
+    const auth = await requireAuth(req);
+    rateLimit(`esf-auth-ticket:${auth.user.id}`, 10);
+    const { prepareEsfAuthTicket } = await import("./services/esfConnectionService.ts");
+    res.setHeader("Cache-Control", "no-store");
+    res.json(await prepareEsfAuthTicket(prisma, auth, req.body || {}));
+  });
+
+  app.post("/api/v1/integrations/esf/connect", json, async (req, res) => {
+    const input = esfConnectSchema.parse(req.body || {});
+    const { connectEsf } = await import("./services/esfConnectionService.ts");
+    const result = await connectEsf(prisma, await requireAuth(req), { ...(req.body || {}), ...input });
+    if (!result.ok) {
+      res.status(422).json(result);
+      return;
+    }
+    res.json(result);
+  });
+
+  app.post("/api/v1/integrations/esf/disconnect", async (req, res) => {
+    const { disconnectEsf } = await import("./services/esfConnectionService.ts");
+    res.json(await disconnectEsf(prisma, await requireAuth(req)));
+  });
+
+  app.get("/api/v1/integrations/esf/ncalayer-poc", async (req, res) => {
+    const { getEsfNcaLayerPoc } = await import("./services/esfNcaLayerPocService.ts");
+    res.json(await getEsfNcaLayerPoc(prisma, await requireAuth(req)));
+  });
+
+  app.post("/api/v1/integrations/esf/ncalayer-poc/legacy-sign", async (req, res) => {
+    const { runLegacyFixtureSign } = await import("./services/esfNcaLayerPocService.ts");
+    res.json(await runLegacyFixtureSign(await requireAuth(req)));
+  });
+
+  app.post("/api/v1/integrations/esf/ncalayer-poc/avr-payload", async (req, res) => {
+    const { prepareAvrPocPayload } = await import("./services/esfNcaLayerPocService.ts");
+    res.json(await prepareAvrPocPayload(prisma, await requireAuth(req)));
+  });
+
+  app.post("/api/v1/integrations/esf/ncalayer-poc/avr-send", json, async (req, res) => {
+    const input = esfPocAvrSendSchema.parse(req.body || {});
+    const { sendAvrPocSigned } = await import("./services/esfNcaLayerPocService.ts");
+    res.json(await sendAvrPocSigned(prisma, await requireAuth(req), { ...(req.body || {}), ...input }));
+  });
+
   app.get("/api/v1/inquiries/:id/ai-preview", async (req, res) => {
     const auth = await requireAuth(req);
     const membership = auth.activeMembership;
@@ -545,6 +641,20 @@ export function createApp(prisma: PrismaClient) {
     res.json(await removeContactTag(prisma, await requireAuth(req), req.params.id, req.params.tagId));
   });
 
+  app.post("/api/v1/deals", json, async (req, res) => {
+    const input = createDealSchema.parse(req.body || {});
+    const { withIdempotency } = await import("./services/idempotency.ts");
+    const auth = await requireAuth(req);
+    const result = await withIdempotency(prisma, {
+      scope: "deal.create",
+      actorKey: `${auth.activeMembership?.tenantId}:${auth.user.id}`,
+      key: String(req.header("idempotency-key") || ""),
+      payload: input,
+      run: () => createDeal(prisma, auth, input),
+    });
+    res.status(201).json(result);
+  });
+
   app.get("/api/v1/deals", async (req, res) => {
     const q = req.query as Record<string, string>;
     if (q.view === "list") {
@@ -556,6 +666,289 @@ export function createApp(prisma: PrismaClient) {
 
   app.get("/api/v1/deals/:id", async (req, res) => {
     res.json(await getDeal(prisma, await requireAuth(req), req.params.id));
+  });
+
+  app.get("/api/v1/deals/:id/items", async (req, res) => {
+    const { listDealItems } = await import("./services/dealItemService.ts");
+    res.json(await listDealItems(prisma, await requireAuth(req), req.params.id));
+  });
+
+  app.post("/api/v1/deals/:id/items", json, async (req, res) => {
+    const input = dealItemInputSchema.parse(req.body || {});
+    const { addDealItem } = await import("./services/dealItemService.ts");
+    res.status(201).json(await addDealItem(prisma, await requireAuth(req), req.params.id, input));
+  });
+
+  app.patch("/api/v1/deals/:id/items/:itemId", json, async (req, res) => {
+    const input = updateDealItemSchema.parse(req.body || {});
+    const { updateDealItem } = await import("./services/dealItemService.ts");
+    res.json(await updateDealItem(prisma, await requireAuth(req), req.params.id, req.params.itemId, input));
+  });
+
+  app.delete("/api/v1/deals/:id/items/:itemId", async (req, res) => {
+    const { deleteDealItem } = await import("./services/dealItemService.ts");
+    res.json(await deleteDealItem(prisma, await requireAuth(req), req.params.id, req.params.itemId));
+  });
+
+  app.get("/api/v1/documents", async (req, res) => {
+    const { listTenantDocuments } = await import("./services/documentInboxService.ts");
+    res.json(await listTenantDocuments(prisma, await requireAuth(req), req.query as Record<string, string>));
+  });
+
+  app.post("/api/v1/documents/from-command", json, async (req, res) => {
+    const input = createDocumentFromCommandSchema.parse(req.body || {});
+    const { executeDocumentCommand } = await import("./services/documentCommandService.ts");
+    const origin = String(req.get("origin") || "").replace(/\/$/, "");
+    res.json(
+      await executeDocumentCommand(prisma, await requireAuth(req), {
+        ...input,
+        publicBaseUrl: origin || config.appBaseUrl,
+      }),
+    );
+  });
+
+  app.get("/api/v1/deals/:id/documents", async (req, res) => {
+    const { listDealDocuments } = await import("./services/documentDraftService.ts");
+    res.json(await listDealDocuments(prisma, await requireAuth(req), req.params.id));
+  });
+
+  app.get("/api/v1/deals/:id/contract-readiness", async (req, res) => {
+    const { getContractReadiness } = await import("./services/contractReadiness.ts");
+    res.json(await getContractReadiness(prisma, await requireAuth(req), req.params.id));
+  });
+
+  app.get("/api/v1/deals/:id/invoice-readiness", async (req, res) => {
+    const { getInvoiceReadiness } = await import("./services/invoiceReadiness.ts");
+    res.json(await getInvoiceReadiness(prisma, await requireAuth(req), req.params.id));
+  });
+
+  app.get("/api/v1/deals/:id/avr-readiness", async (req, res) => {
+    const { getAvrReadiness } = await import("./services/avrReadiness.ts");
+    res.json(await getAvrReadiness(prisma, await requireAuth(req), req.params.id));
+  });
+
+  app.get("/api/v1/deals/:id/esf-invoice-readiness", async (req, res) => {
+    const { getEsfInvoiceReadiness } = await import("./services/esfInvoiceReadiness.ts");
+    res.json(await getEsfInvoiceReadiness(prisma, await requireAuth(req), req.params.id));
+  });
+
+  app.get("/api/v1/deals/:id/close-readiness", async (req, res) => {
+    const { getDealCloseReadiness } = await import("./services/dealCloseReadiness.ts");
+    res.json(await getDealCloseReadiness(prisma, await requireAuth(req), req.params.id));
+  });
+
+  app.post("/api/v1/deals/:id/esf-sync", json, async (req, res) => {
+    const { syncDealEsfDocuments } = await import("./services/esfStatusSyncService.ts");
+    res.json(await syncDealEsfDocuments(prisma, await requireAuth(req), req.params.id));
+  });
+
+  app.post("/api/v1/deals/:id/contracts", json, async (req, res) => {
+    const input = createContractDraftSchema.parse(req.body || {});
+    const auth = await requireAuth(req);
+    const { withIdempotency } = await import("./services/idempotency.ts");
+    const { createContractDraft } = await import("./services/documentDraftService.ts");
+    const result = await withIdempotency(prisma, {
+      scope: "contract.create_draft",
+      actorKey: `${auth.activeMembership?.tenantId}:${req.params.id}`,
+      key: String(req.header("idempotency-key") || ""),
+      payload: { dealId: req.params.id, ...input },
+      run: () => createContractDraft(prisma, auth, req.params.id, input),
+    });
+    res.status(201).json(result);
+  });
+
+  app.post("/api/v1/deals/:id/invoices", json, async (req, res) => {
+    const input = createInvoiceDraftSchema.parse(req.body || {});
+    const auth = await requireAuth(req);
+    const { withIdempotency } = await import("./services/idempotency.ts");
+    const { createInvoiceDraft } = await import("./services/documentDraftService.ts");
+    const result = await withIdempotency(prisma, {
+      scope: "invoice.create_draft",
+      actorKey: `${auth.activeMembership?.tenantId}:${req.params.id}`,
+      key: String(req.header("idempotency-key") || ""),
+      payload: { dealId: req.params.id, ...input },
+      run: () => createInvoiceDraft(prisma, auth, req.params.id, input),
+    });
+    res.status(201).json(result);
+  });
+
+  app.post("/api/v1/deals/:id/electronic-documents", json, async (req, res) => {
+    const input = createElectronicDocumentDraftSchema.parse(req.body || {});
+    const auth = await requireAuth(req);
+    const { withIdempotency } = await import("./services/idempotency.ts");
+    const { createElectronicDocumentDraft } = await import("./services/documentDraftService.ts");
+    const result = await withIdempotency(prisma, {
+      scope: `edoc.create_draft.${input.type}`,
+      actorKey: `${auth.activeMembership?.tenantId}:${req.params.id}`,
+      key: String(req.header("idempotency-key") || ""),
+      payload: { dealId: req.params.id, ...input },
+      run: () => createElectronicDocumentDraft(prisma, auth, req.params.id, input),
+    });
+    res.status(201).json(result);
+  });
+
+  app.post("/api/v1/contracts/:id/generate", json, async (req, res) => {
+    const input = generateContractSchema.parse(req.body || {});
+    const { generateContractPdfFile } = await import("./services/contractGenerationService.ts");
+    res.json(await generateContractPdfFile(prisma, await requireAuth(req), req.params.id, input));
+  });
+
+  app.get("/api/v1/contracts/:id/pdf", async (req, res) => {
+    const { sendContractPdf } = await import("./services/contractGenerationService.ts");
+    await sendContractPdf(prisma, await requireAuth(req), req.params.id, res);
+  });
+
+  app.post("/api/v1/contracts/:id/send-for-sign", json, async (req, res) => {
+    const { sendContractForSign } = await import("./services/contractSigningService.ts");
+    const origin = String(req.get("origin") || "").replace(/\/$/, "");
+    res.json(
+      await sendContractForSign(prisma, await requireAuth(req), req.params.id, {
+        publicBaseUrl: origin || config.appBaseUrl,
+      }),
+    );
+  });
+
+  app.get("/api/v1/contracts/:id/signing", async (req, res) => {
+    const { getContractSigning } = await import("./services/contractSigningService.ts");
+    res.json(await getContractSigning(prisma, await requireAuth(req), req.params.id));
+  });
+
+  app.post("/api/v1/signature-requests/:id/sign", jsonLarge, async (req, res) => {
+    const input = submitSignatureSchema.parse(req.body || {});
+    const { signContractAsSeller } = await import("./services/contractSigningService.ts");
+    res.json(await signContractAsSeller(prisma, await requireAuth(req), req.params.id, input.cmsBase64));
+  });
+
+  app.post("/api/v1/signature-requests/:id/decline", json, async (req, res) => {
+    const input = declineSignatureSchema.parse(req.body || {});
+    const { declineContractAsSeller } = await import("./services/contractSigningService.ts");
+    res.json(await declineContractAsSeller(prisma, await requireAuth(req), req.params.id, input.reason));
+  });
+
+  app.get("/public/sign/:token", async (req, res) => {
+    rateLimit(`sign:${req.ip}`, 60);
+    const { getPublicSign } = await import("./services/contractSigningService.ts");
+    res.json(await getPublicSign(prisma, req.params.token));
+  });
+
+  app.get("/public/sign/:token/pdf", async (req, res) => {
+    rateLimit(`sign-pdf:${req.ip}`, 40);
+    const { sendPublicSignPdf } = await import("./services/contractSigningService.ts");
+    await sendPublicSignPdf(prisma, req.params.token, res);
+  });
+
+  app.post("/public/sign/:token/sign", jsonLarge, async (req, res) => {
+    rateLimit(`sign-submit:${req.ip}`, 20);
+    const input = submitSignatureSchema.parse(req.body || {});
+    const { signPublicContract } = await import("./services/contractSigningService.ts");
+    res.json(await signPublicContract(prisma, req.params.token, input.cmsBase64));
+  });
+
+  app.post("/public/sign/:token/decline", json, async (req, res) => {
+    rateLimit(`sign-decline:${req.ip}`, 20);
+    const input = declineSignatureSchema.parse(req.body || {});
+    const { declinePublicContract } = await import("./services/contractSigningService.ts");
+    res.json(await declinePublicContract(prisma, req.params.token, input.reason));
+  });
+
+  app.get("/public/verify/:verificationId", async (req, res) => {
+    const { getPublicVerification } = await import("./services/contractSigningService.ts");
+    res.json(await getPublicVerification(prisma, req.params.verificationId));
+  });
+
+  app.get("/api/v1/contracts/:id", async (req, res) => {
+    const { getContract } = await import("./services/documentDraftService.ts");
+    res.json(await getContract(prisma, await requireAuth(req), req.params.id));
+  });
+
+  app.get("/api/v1/invoices/:id", async (req, res) => {
+    const { getInvoice } = await import("./services/documentDraftService.ts");
+    res.json(await getInvoice(prisma, await requireAuth(req), req.params.id));
+  });
+
+  app.post("/api/v1/invoices/:id/generate", json, async (req, res) => {
+    const input = generateInvoiceSchema.parse(req.body || {});
+    const { generateInvoicePdfFile } = await import("./services/invoiceGenerationService.ts");
+    res.json(await generateInvoicePdfFile(prisma, await requireAuth(req), req.params.id, input));
+  });
+
+  app.get("/api/v1/invoices/:id/pdf", async (req, res) => {
+    const { sendInvoicePdf } = await import("./services/invoiceGenerationService.ts");
+    await sendInvoicePdf(prisma, await requireAuth(req), req.params.id, res);
+  });
+
+  app.get("/api/v1/electronic-documents/:id", async (req, res) => {
+    const { getElectronicDocument } = await import("./services/documentDraftService.ts");
+    res.json(await getElectronicDocument(prisma, await requireAuth(req), req.params.id));
+  });
+
+  app.post("/api/v1/electronic-documents/:id/validate", json, async (req, res) => {
+    const auth = await requireAuth(req);
+    const membership = auth.activeMembership;
+    if (!membership) throw new ApiError(403, "no_tenant", "Нет активной компании");
+    const document = await prisma.electronicDocument.findFirst({
+      where: { id: req.params.id, tenantId: membership.tenantId },
+      select: { type: true },
+    });
+    if (!document) throw new ApiError(404, "not_found", "Документ не найден");
+    if (document.type === "ESF") {
+      const { validateEsfInvoice } = await import("./services/esfInvoiceService.ts");
+      res.json(await validateEsfInvoice(prisma, auth, req.params.id));
+      return;
+    }
+    const { validateAvr } = await import("./services/avrService.ts");
+    res.json(await validateAvr(prisma, auth, req.params.id));
+  });
+
+  app.post("/api/v1/electronic-documents/:id/esf-preview", json, async (req, res) => {
+    const { previewAvrEsf } = await import("./services/esfPocService.ts");
+    res.json(await previewAvrEsf(prisma, await requireAuth(req), req.params.id));
+  });
+
+  app.post("/api/v1/electronic-documents/:id/esf-payload", json, async (req, res) => {
+    const { getEsfPayloadToSign } = await import("./services/esfNcaLayerPocService.ts");
+    res.json(await getEsfPayloadToSign(prisma, await requireAuth(req), req.params.id));
+  });
+
+  app.post("/api/v1/electronic-documents/:id/esf-send-signed", json, async (req, res) => {
+    const auth = await requireAuth(req);
+    const input = esfSendSignedSchema.parse(req.body || {});
+    const { withIdempotency } = await import("./services/idempotency.ts");
+    const { sendEsfWithNcaLayerSignature } = await import("./services/esfNcaLayerPocService.ts");
+    res.json(
+      await withIdempotency(prisma, {
+        scope: "edoc.esf_send_signed",
+        actorKey: `${auth.activeMembership?.tenantId}:${req.params.id}`,
+        key: String(req.header("idempotency-key") || ""),
+        payload: { documentId: req.params.id, payloadSha256: input.payloadSha256 || "" },
+        run: () => sendEsfWithNcaLayerSignature(prisma, auth, req.params.id, { ...(req.body || {}), ...input }),
+      }),
+    );
+  });
+
+  app.post("/api/v1/electronic-documents/:id/esf-send", json, async (req, res) => {
+    const auth = await requireAuth(req);
+    const { esfLegacyPocEnabled } = await import("./integrations/esf/EsfConfig.ts");
+    if (!esfLegacyPocEnabled()) {
+      const { ApiError } = await import("./errors.ts");
+      throw new ApiError(403, "esf_legacy_poc_disabled", "Серверная подпись LocalService скрыта вне DEV POC");
+    }
+    const { withIdempotency } = await import("./services/idempotency.ts");
+    const { sendAvrEsf } = await import("./services/esfPocService.ts");
+    res.json(
+      await withIdempotency(prisma, {
+        scope: "edoc.esf_send",
+        actorKey: `${auth.activeMembership?.tenantId}:${req.params.id}`,
+        key: String(req.header("idempotency-key") || ""),
+        payload: { documentId: req.params.id },
+        run: () => sendAvrEsf(prisma, auth, req.params.id),
+      }),
+    );
+  });
+
+  app.post("/api/v1/electronic-documents/:id/esf-refresh", json, async (req, res) => {
+    const { refreshAvrEsf } = await import("./services/esfPocService.ts");
+    res.json(await refreshAvrEsf(prisma, await requireAuth(req), req.params.id));
   });
 
   app.patch("/api/v1/deals/:id", json, async (req, res) => {

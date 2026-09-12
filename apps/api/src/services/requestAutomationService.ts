@@ -396,7 +396,10 @@ export async function processNewRequestAutomation(
   return { inquiryId, decision, analysis, status };
 }
 
-export async function startAiManagerForInquiry(prisma: PrismaClient, tenantId: string, inquiryId: string) {
+export async function startAiManagerForInquiry(prisma: PrismaClient, tenantId: string, inquiryId: string): Promise<{
+  inquiryId: string; status: AiProcessStatus; decision?: AutomationDecision; analysis?: RequestAnalysis | null;
+  reason?: string | null; conversationId?: string;
+} | null> {
   const inquiry = await prisma.inquiry.findFirst({
     where: { id: inquiryId, tenantId },
     include: {

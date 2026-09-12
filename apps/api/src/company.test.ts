@@ -76,7 +76,7 @@ describe("Companies B2B", () => {
       headers: { "Content-Type": "application/json", cookie },
       body: JSON.stringify({
         name: "ABC Construction",
-        bin: "123456789012",
+        bin: "123456789013",
         city: "Алматы",
         industry: "Строительство",
         forceCreate: true,

@@ -1,3 +1,4 @@
+import { notifySaved } from "../components/SaveNotice";
 import { useUrlState, useRequestVersion } from "../lib/useUrlState";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -224,10 +225,15 @@ export function SituationPage() {
         links?: Array<{ label: string; href: string }>;
         usedLlm?: boolean;
         command?: boolean;
+        documentCommand?: boolean;
         suggestedPeriod?: PeriodPreset | null;
       };
       if (answer.command) {
-        navigate(`/tasks?command=${encodeURIComponent(text)}`);
+        navigate(
+          answer.documentCommand
+            ? `/documents?command=${encodeURIComponent(text)}`
+            : `/tasks?command=${encodeURIComponent(text)}`,
+        );
         return;
       }
       if (answer.suggestedPeriod && answer.suggestedPeriod !== period) {
@@ -351,7 +357,8 @@ export function SituationPage() {
                       event.preventDefault();
                       const form = new FormData(event.currentTarget);
                       void run(item, () =>
-                        api.completeIntake(item.entityId, { phone: form.get("phone"), name: form.get("name") }),
+                        api.completeIntake(item.entityId, { phone: form.get("phone"), name: form.get("name") })
+                          .then((result) => { notifySaved("Контакт сохранён"); return result; }),
                       );
                     }}
                   >

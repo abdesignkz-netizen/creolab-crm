@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<xs:schema version="1.0" targetNamespace="v1.awp" xmlns:tns="v1.awp" xmlns:v1="v1.awp" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:ns1="abstractAwp.awp">
+  <xs:import schemaLocation="RegistrationType.xsd"/>
+  <xs:import namespace="abstractAwp.awp" schemaLocation="AbstractAwp.xsd"/>
+
+  <xs:element name="awp" type="tns:AwpV1"/>
+
+  <xs:complexType name="AwpV1">
+    <xs:annotation>
+      <xs:documentation>АВР</xs:documentation>
+    </xs:annotation>
+    <xs:complexContent>
+      <xs:extension base="ns1:AbstractAwp">
+        <xs:sequence>
+          <xs:element name="additionalInfo" type="xs:string" minOccurs="0"/>
+          <xs:element name="contract" type="tns:AwpContract" minOccurs="1"/>
+          <xs:element name="recipients" minOccurs="0">
+            <xs:complexType>
+              <xs:sequence>
+                <xs:element name="recipient" type="tns:AwpRecipientParticipant" maxOccurs="unbounded"/>
+              </xs:sequence>
+            </xs:complexType>
+          </xs:element>
+          <xs:element name="senders" minOccurs="0">
+            <xs:complexType>
+              <xs:sequence>
+                <xs:element name="sender" type="tns:AwpSenderParticipant" maxOccurs="unbounded"/>
+              </xs:sequence>
+            </xs:complexType>
+          </xs:element>
+          <xs:element name="worksPerformed" type="tns:AwpWorksPerformed" minOccurs="0"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+
+  <xs:complexType name="AwpContract">
+    <xs:sequence>
+      <xs:element name="date" type="xs:string" minOccurs="0"/>
+      <xs:element name="isContract" type="xs:string"/>
+      <xs:element name="number" type="xs:string" minOccurs="0"/>
+      <xs:element name="registrationNumber" type="xs:string" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="AwpRecipientParticipant">
+    <xs:complexContent>
+      <xs:extension base="ns1:abstractAwpParticipant">
+        <xs:sequence>
+          <xs:element name="bankDetails" type="tns:AwpBankDetails" minOccurs="0"/>
+          <xs:element name="name" type="xs:string"/>
+          <xs:element name="nonResident" type="xs:string"/>
+          <xs:element name="registrationType" type="RegistrationType" minOccurs="0"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+
+  <xs:complexType name="AwpBankDetails">
+    <xs:sequence>
+      <xs:element name="bank" type="xs:string" minOccurs="0"/>
+      <xs:element name="bik" type="xs:string" minOccurs="0"/>
+      <xs:element name="iik" type="xs:string" minOccurs="0"/>
+      <xs:element name="kbe" type="xs:int" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="AwpSenderParticipant">
+    <xs:complexContent>
+      <xs:extension base="ns1:abstractAwpParticipant">
+        <xs:sequence>
+          <xs:element name="bankDetails" type="tns:AwpBankDetails" minOccurs="0"/>
+          <xs:element name="certificateNum" type="xs:string" minOccurs="0"/>
+          <xs:element name="certificateSeries" type="xs:string" minOccurs="0"/>
+          <xs:element name="name" type="xs:string"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+
+  <xs:complexType name="AwpWorksPerformed">
+    <xs:sequence>
+      <xs:element name="currencyCode" type="xs:string"/>
+      <xs:element name="rate" type="xs:decimal" minOccurs="0"/>
+      <xs:element name="total" type="xs:string" minOccurs="0"/>
+      <xs:element name="totalNdsAmount" type="xs:decimal"/>
+      <xs:element name="totalSumWithTax" type="xs:decimal"/>
+      <xs:element name="totalSumWithoutTax" type="xs:decimal"/>
+      <xs:element name="totalTurnoverSize" type="xs:decimal"/>
+      <xs:element name="works" minOccurs="0">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="work" type="tns:AwpWork" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="AwpWork">
+    <xs:sequence>
+      <xs:element name="additionalInfo" type="xs:string" minOccurs="0"/>
+      <xs:element name="measureUnitCode" type="xs:string" minOccurs="0"/>
+      <xs:element name="name" type="xs:string"/>
+      <xs:element name="ndsAmount" type="xs:decimal" minOccurs="0"/>
+      <xs:element name="ndsRate" type="xs:int"/>
+      <xs:element name="quantity" type="xs:decimal" minOccurs="0"/>
+      <xs:element name="sumWithTax" type="xs:decimal"/>
+      <xs:element name="sumWithoutTax" type="xs:decimal"/>
+      <xs:element name="turnoverSize" type="xs:decimal"/>
+      <xs:element name="unitPriceWithoutTax" type="xs:decimal"/>
+    </xs:sequence>
+  </xs:complexType>
+</xs:schema>

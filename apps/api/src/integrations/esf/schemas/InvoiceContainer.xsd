@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<xs:schema version="1.0" targetNamespace="esf" xmlns:tns="esf" xmlns:esf="esf" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:ns2="v2.esf" xmlns:ns1="v1.esf">
+
+  <xs:import namespace="v1.esf"/>
+
+  <xs:import namespace="v2.esf"/>
+
+  <xs:element name="invoiceContainer" type="tns:InvoiceContainer"/>
+
+  <xs:complexType name="InvoiceContainer">
+    <xs:annotation>
+      <xs:documentation>Данный контейнер используется для импорта ЭСФ</xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="invoiceSet" minOccurs="0">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:choice minOccurs="0" maxOccurs="unbounded">
+              <xs:element ref="ns1:invoice"/>
+              <xs:element ref="ns2:invoice"/>
+            </xs:choice>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+</xs:schema>

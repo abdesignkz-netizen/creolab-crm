@@ -1,3 +1,4 @@
+import { notifySaved } from "../components/SaveNotice";
 import { useUrlState, useRequestVersion } from "../lib/useUrlState";
 import { useEffect, useMemo, useState, type DragEvent, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
@@ -701,6 +702,7 @@ export function TasksPage() {
       setSelectedIds([]);
       setSegmentTotal(0);
       setShowCreate(false);
+      notifySaved("Задача создана");
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось создать");
@@ -757,7 +759,7 @@ export function TasksPage() {
   }
 
   async function onSaveTaskEdits() {
-    if (!activeTaskId) return;
+    if (!activeTaskId || busy) return;
     if (isScheduledSend(taskDetail) && editDueAt && !isFutureDue(editDueAt)) {
       setError("Укажите время в будущем — иначе сообщение уйдёт сразу.");
       return;
@@ -765,11 +767,11 @@ export function TasksPage() {
     setBusy(true);
     try {
       await api.updateTask(activeTaskId, await taskEditPayload());
-      const detail = await api.task(activeTaskId);
-      setTaskDetail(detail);
-      setMessageDraft(resolveOutboundDraft(detail));
-      setEditDueAt(detail.dueAt ? toDateTimeLocal(new Date(detail.dueAt)) : "");
+      setActiveTaskId(null);
+      setTaskDetail(null);
+      setEditDueAt("");
       setPreview(null);
+      notifySaved("Правки задачи сохранены");
       setError("");
       await load();
     } catch (err) {
@@ -1713,10 +1715,26 @@ export function TasksPage() {
                 </div>
               </div>
               <p className="muted">
-                {commandWillSchedule
+                {commandParse.command?.intent === "document_action"
+                  ? commandParse.understanding?.consequence
+                  : commandWillSchedule
                   ? "После подтверждения CRM поставит задачу в «Запланировано» и отправит сообщение в указанное время, не сразу."
                   : commandParse.understanding?.consequence}
               </p>
+              {commandParse.command?.intent === "document_action" ? (
+                <div className="panel soft" style={{ marginTop: 12 }}>
+                  <b>Это команда по документам</b>
+                  <p className="muted">WhatsApp-задачу не создаём.</p>
+                  {(commandParse.document?.deals || []).map((deal: { id: string; title: string; href: string }) => (
+                    <div key={deal.id}>
+                      <Link to={deal.href}>{deal.title}</Link>
+                    </div>
+                  ))}
+                  <Link className="btn" to={`/documents?command=${encodeURIComponent(commandText)}`}>
+                    Открыть в Документах
+                  </Link>
+                </div>
+              ) : null}
 
               {(commandParse.command?.ambiguities || []).length ? (
                 <div className="banner warn">
@@ -1798,10 +1816,11 @@ export function TasksPage() {
                 </div>
               ) : null}
 
-              {commandParse.command?.riskLevel >= 3 ||
-              commandParse.command?.taskType === "proposal" ||
-              commandParse.command?.taskType === "message" ||
-              commandDraft ? (
+              {commandParse.command?.intent !== "document_action" &&
+              (commandParse.command?.riskLevel >= 3 ||
+                commandParse.command?.taskType === "proposal" ||
+                commandParse.command?.taskType === "message" ||
+                commandDraft) ? (
                 <label>
                   Сообщение клиенту
                   <textarea value={commandDraft} onChange={(event) => setCommandDraft(event.target.value)} rows={3} />
@@ -1817,6 +1836,7 @@ export function TasksPage() {
                 <button type="button" className="btn secondary" onClick={() => setCommandParse(null)}>
                   Изменить
                 </button>
+                {commandParse.command?.intent !== "document_action" ? (
                 <button
                   type="button"
                   className="btn"
@@ -1834,6 +1854,7 @@ export function TasksPage() {
                       ? "Подготовить к исполнению"
                       : "Создать задачу"}
                 </button>
+                ) : null}
               </div>
 
               {commandTaskId && commandParse.command?.riskLevel >= 3 && commandParse.command?.executionMode !== "prepare_only" ? (

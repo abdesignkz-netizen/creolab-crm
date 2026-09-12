@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<esf:invoiceContainer xmlns:esf="esf">
+    <invoiceSet>
+        <v2:invoice xmlns:a="abstractInvoice.esf" xmlns:v2="v2.esf">
+            <date>03.10.2017</date>
+            <invoiceType>ORDINARY_INVOICE</invoiceType>
+            <num>2038556421124573223</num>
+            <operatorFullname>Иванов Иван Иванович</operatorFullname>
+            <turnoverDate>02.10.2017</turnoverDate>
+            <customers>
+                <customer>
+                    <address>Казахстан, Акмолинская обл., г. Астана, ул. ПРОСПЕКТ РАКЫМЖАН КОШКАРБАЕВ, д. 66</address>
+                    <countryCode>KZ</countryCode>
+                    <name>ИП БРЮС УЭЙН</name>
+                    <tin>123456789011</tin>
+                </customer>
+            </customers>
+            <deliveryDocDate>19.09.2017</deliveryDocDate>
+            <deliveryDocNum>555</deliveryDocNum>
+            <deliveryTerm>
+                <contractDate>05.01.2017</contractDate>
+                <contractNum>517</contractNum>
+                <hasContract>true</hasContract>
+                <term>безнал/нал.расчет</term>
+                <transportTypeCode>30</transportTypeCode>
+                <warrant>112</warrant>
+                <warrantDate>01.09.2017</warrantDate>
+            </deliveryTerm>
+            <productSet>
+                <currencyCode>KZT</currencyCode>
+                <products>
+                    <product>
+                        <catalogTruId>1</catalogTruId>
+                        <description>Профлекс 25 мл № 14 Раствор питьевой</description>
+                        <ndsAmount>468</ndsAmount>
+                        <ndsRate>12</ndsRate>
+                        <priceWithTax>4368</priceWithTax>
+                        <priceWithoutTax>3900</priceWithoutTax>
+                        <productDeclaration>55301/280717/0044564</productDeclaration>
+                        <productNumberInDeclaration>6</productNumberInDeclaration>
+                        <quantity>1</quantity>
+                        <tnvedName>БИОЛОГИЧЕСКИ АКТИВНАЯ ДОБАВКА К ПИЩЕ: ПРОФЛЕКС / PROFLEX, РАСТВОР ПИТЬЕВОЙ ВО ФЛАКОНАХ ПО 25 МЛ, ПО 14 ФЛАКОНОВ В ПАЧКЕ КАРТОННОЙ</tnvedName>
+                        <truOriginCode>5</truOriginCode>
+                        <turnoverSize>3900</turnoverSize>
+                        <unitCode>3004200002</unitCode>
+                        <unitNomenclature>796</unitNomenclature>
+                        <unitPrice>3900</unitPrice>
+                    </product>
+                    <product>
+                        <catalogTruId>1</catalogTruId>
+                        <description>Урсосан 0,25 № 50 капс</description>
+                        <ndsAmount>0</ndsAmount>
+                        <priceWithTax>60000</priceWithTax>
+                        <priceWithoutTax>60000</priceWithoutTax>
+                        <quantity>10</quantity>
+                        <tnvedName>Урсосан 0,25 № 50 капс</tnvedName>
+                        <truOriginCode>5</truOriginCode>
+                        <turnoverSize>60000</turnoverSize>
+                        <unitCode>3004900002</unitCode>
+                        <unitNomenclature>796</unitNomenclature>
+                        <unitPrice>6000</unitPrice>
+                    </product>
+                    <product>
+                        <catalogTruId>1</catalogTruId>
+                        <description>Нистатин 500 тыс ед № 20 табл (БЗМ)</description>
+                        <ndsAmount>129</ndsAmount>
+                        <ndsRate>12</ndsRate>
+                        <priceWithTax>1204</priceWithTax>
+                        <priceWithoutTax>1075</priceWithoutTax>
+                        <productDeclaration>600716082017N01405</productDeclaration>
+                        <productNumberInDeclaration>6</productNumberInDeclaration>
+                        <quantity>5</quantity>
+                        <tnvedName>Нистатин, таблетки, покрытые оболочкой  500000 ЕД. По 10 таблеток в контурной ячейковой упаковке. По 2 контурные ячейковые упаковки в пачке из картона. (Нистатин)</tnvedName>
+                        <truOriginCode>5</truOriginCode>
+                        <turnoverSize>1075</turnoverSize>
+                        <unitCode>3004200002</unitCode>
+                        <unitNomenclature>796</unitNomenclature>
+                        <unitPrice>215</unitPrice>
+                    </product>
+                </products>
+                <totalExciseAmount>0</totalExciseAmount>
+                <totalNdsAmount>597</totalNdsAmount>
+                <totalPriceWithTax>65572</totalPriceWithTax>
+                <totalPriceWithoutTax>64975</totalPriceWithoutTax>
+                <totalTurnoverSize>64975</totalTurnoverSize>
+            </productSet>
+            <sellers>
+                <seller>
+                    <address>Казахстан, Акмолинская обл., г. Астана, ул. ЫКЫЛАС ДУКЕН, д. 38, кв. (офис) ВП 6</address>
+                    <bank>ДБ АО «Сбербанк»</bank>
+                    <bik>SABRKZKA</bik>
+                    <certificateNum>1399478</certificateNum>
+                    <certificateSeries>13788</certificateSeries>
+                    <iik>KZ32914398914BC31725</iik>
+                    <kbe>17</kbe>
+                    <name>ТОО "АСЕМ-2"</name>
+                    <tin>123456789021</tin>
+                </seller>
+            </sellers>
+        </v2:invoice>
+    </invoiceSet>
+</esf:invoiceContainer>

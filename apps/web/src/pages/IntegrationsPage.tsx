@@ -1,3 +1,4 @@
+import { notifySaved } from "../components/SaveNotice";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
@@ -5,6 +6,8 @@ import { api } from "../lib/api";
 type ConnectMethod = "html" | "existing" | "js" | "tilda";
 
 export function IntegrationsPage() {
+  const [editingWhatsApp, setEditingWhatsApp] = useState(true);
+  const [savingWhatsApp, setSavingWhatsApp] = useState(false);
   const [catalog, setCatalog] = useState<any>(null);
   const [setup, setSetup] = useState<any>(null);
   const [error, setError] = useState("");
@@ -243,21 +246,26 @@ export function IntegrationsPage() {
           Подключено: {setup?.whatsapp?.configured ? "да" : "нет"} · Мост:{" "}
           {setup?.whatsapp?.reachable ? "отвечает" : "нет"}
         </p>
-        <form
+        {!editingWhatsApp ? <button type="button" className="btn secondary" autoFocus onClick={() => setEditingWhatsApp(true)}>Изменить подключение</button> : <form
           className="stack"
           onSubmit={async (event) => {
             event.preventDefault();
+            if (savingWhatsApp) return;
             const formEl = new FormData(event.currentTarget);
+            setSavingWhatsApp(true);
+            setError("");
             try {
               const result = (await api.connectWhatsApp(
                 String(formEl.get("sellerUrl")),
                 String(formEl.get("secret")),
               )) as any;
               setNote(result.note);
+              setEditingWhatsApp(false);
+              notifySaved("Настройки подключения сохранены");
               await load();
             } catch (err) {
               setError(err instanceof Error ? err.message : "Не удалось сохранить");
-            }
+            } finally { setSavingWhatsApp(false); }
           }}
         >
           <label>
@@ -273,7 +281,11 @@ export function IntegrationsPage() {
             <input name="secret" type="password" required placeholder="не показывается повторно" />
           </label>
           <div className="actions">
-            <button className="btn">Сохранить и проверить</button>
+            <button className="btn" disabled={savingWhatsApp}>{savingWhatsApp ? "Сохраняем…" : "Сохранить и проверить"}</button>
+
+          </div>
+        </form>}
+        <div className="actions" style={{ marginTop: 12 }}>
             <button
               type="button"
               className="btn secondary"
@@ -288,8 +300,7 @@ export function IntegrationsPage() {
             >
               Забрать диалоги из бота
             </button>
-          </div>
-        </form>
+        </div>
       </div>
 
       <h3 className="integ-section-title">Messaging (следующие этапы)</h3>
@@ -301,6 +312,20 @@ export function IntegrationsPage() {
             <span className="badge warn">{card.healthLabel}</span>
           </div>
         ))}
+      </div>
+
+      <h3 className="integ-section-title">Документы и ИС ЭСФ</h3>
+      <div className="integ-grid">
+        <div className="panel integ-card">
+          <div className="integ-card-head">
+            <b>ИС ЭСФ</b>
+            <span className="badge warn">NCALayer</span>
+          </div>
+          <p className="muted">Подключение кабинета через ЭЦП на компьютере пользователя. PIN и .p12 на сервер не передаются.</p>
+          <Link className="btn" to="/integrations/esf">
+            Открыть ИС ЭСФ
+          </Link>
+        </div>
       </div>
 
       <h3 className="integ-section-title">Уведомления</h3>

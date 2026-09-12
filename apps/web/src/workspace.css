@@ -246,3 +246,19 @@ a.sit-kpi:hover, button.sit-kpi:hover { background: #f2f7ff; border-color: #cfde
 .active-filter-note { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 16px; padding: 12px 16px; background: var(--accent-soft); border-radius: 12px; font-size: 13px; }
 .history-button { align-self: center; flex-shrink: 0; margin-bottom: 12px; }
 @media (max-width: 767px) { .page-head h2, .sit-head h2 { font-size: 26px; } .active-filter-note { flex-wrap: wrap; } }
+
+/* Save confirmation stays visible after an editor closes or the route changes. */
+.save-notice-region { position: fixed; top: max(20px, env(safe-area-inset-top)); right: 20px; z-index: 10000; max-width: min(440px, calc(100vw - 32px)); pointer-events: none; }
+.save-notice { display: flex; align-items: center; gap: 12px; padding: 14px 18px; color: #14532d; background: #f0fdf4; border: 1px solid #86cfa0; border-radius: 14px; box-shadow: 0 8px 28px #15251a24; pointer-events: auto; }
+.save-notice button { border: 0; background: transparent; color: inherit; font-size: 24px; padding: 4px 8px; cursor: pointer; }
+.saved-editor-summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+@media (max-width: 600px) { .save-notice-region { top: max(12px, env(safe-area-inset-top)); right: 16px; left: 16px; } }
+
+.pdf-import-fields { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 16px; }
+.pdf-import-parties { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.pdf-import-parties .card { display: grid; gap: 10px; }
+.pdf-import-item { display: grid; grid-template-columns: minmax(200px, 2fr) repeat(4, minmax(75px, 1fr)); gap: 12px; align-items: end; }
+.pdf-import-item button { grid-column: 1 / -1; justify-self: start; }
+.pdf-import-text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 360px; overflow: auto; }
+.pdf-import-warnings { color: #805016; }
+@media(max-width: 800px) { .pdf-import-parties, .pdf-import-item { grid-template-columns: 1fr; } }

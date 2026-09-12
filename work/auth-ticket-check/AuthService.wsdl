@@ -1,0 +1,102 @@
+<?xml version='1.0' encoding='UTF-8'?><?xml-stylesheet type='text/xsl' href='wsdl-viewer.xsl'?><wsdl:definitions xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/" xmlns:tns="esf" xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/" xmlns:ns1="http://schemas.xmlsoap.org/soap/http" name="AuthService" targetNamespace="esf">
+  <wsdl:types>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns="esf" attributeFormDefault="unqualified" elementFormDefault="unqualified" targetNamespace="esf">
+  <xs:complexType name="createAuthTicketRequest">
+    <xs:sequence>
+      <xs:element name="iin" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>ИИН пользователя проходящего аутентификацию</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="ttlInMinutes" type="xs:int">
+        <xs:annotation>
+          <xs:documentation>Время действия тикета указанное в минутах (минимум: 1, максимум: 1440, по умолчанию: 30)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="createAuthTicketResponse">
+    <xs:sequence>
+      <xs:element name="authTicketXml" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>XML тикет аутентификации</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="AccessDeniedFault">
+    <xs:annotation>
+      <xs:documentation>При отсутствии у пользователя прав на выполнение данной операции</xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="description" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="BusinessFault">
+    <xs:annotation>
+      <xs:documentation>При возникновении ошибки в ПО</xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="description" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="accessDeniedException" nillable="true" type="AccessDeniedFault"/>
+  <xs:element name="businessException" nillable="true" type="BusinessFault"/>
+  <xs:element name="createAuthTicketRequest" nillable="true" type="createAuthTicketRequest"/>
+  <xs:element name="createAuthTicketResponse" nillable="true" type="createAuthTicketResponse"/>
+</xs:schema>
+  </wsdl:types>
+  <wsdl:message name="createAuthTicketResponse">
+    <wsdl:part element="tns:createAuthTicketResponse" name="createAuthTicketResponse">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="AccessDeniedException">
+    <wsdl:part element="tns:accessDeniedException" name="AccessDeniedException">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="BusinessException">
+    <wsdl:part element="tns:businessException" name="BusinessException">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="createAuthTicket">
+    <wsdl:part element="tns:createAuthTicketRequest" name="createAuthTicketRequest">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:portType name="AuthService">
+<wsdl:documentation>Сервис аутентификации c подписанием тикета</wsdl:documentation>
+    <wsdl:operation name="createAuthTicket">
+<wsdl:documentation>Создать xml сообщение для дальнейшей аутентификации</wsdl:documentation>
+      <wsdl:input message="tns:createAuthTicket" name="createAuthTicket">
+    </wsdl:input>
+      <wsdl:output message="tns:createAuthTicketResponse" name="createAuthTicketResponse">
+    </wsdl:output>
+      <wsdl:fault message="tns:AccessDeniedException" name="AccessDeniedException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:BusinessException" name="BusinessException">
+    </wsdl:fault>
+    </wsdl:operation>
+  </wsdl:portType>
+  <wsdl:binding name="AuthServiceSoapBinding" type="tns:AuthService">
+    <soap:binding style="document" transport="http://schemas.xmlsoap.org/soap/http"/>
+    <wsdl:operation name="createAuthTicket">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="createAuthTicket">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="createAuthTicketResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+      <wsdl:fault name="AccessDeniedException">
+        <soap:fault name="AccessDeniedException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="BusinessException">
+        <soap:fault name="BusinessException" use="literal"/>
+      </wsdl:fault>
+    </wsdl:operation>
+  </wsdl:binding>
+  <wsdl:service name="AuthService">
+    <wsdl:port binding="tns:AuthServiceSoapBinding" name="AuthServicePort">
+      <soap:address location="https://test3.esf.kgd.gov.kz:8443/esf-web/ws/api1/AuthService"/>
+    </wsdl:port>
+  </wsdl:service>
+</wsdl:definitions>

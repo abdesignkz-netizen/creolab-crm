@@ -121,6 +121,7 @@ export const TASK_TYPE_LABEL: Record<string, string> = {
   follow_up: "Напомнить",
   meeting: "Встреча",
   send_documents: "Отправить документы",
+  document: "Документ сделки",
   prepare_estimate: "Подготовить расчёт",
   wait_client: "Ждать клиента",
   other: "Другое",

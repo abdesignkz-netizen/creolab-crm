@@ -1,8 +1,15 @@
 import dotenv from "dotenv";
 import path from "node:path";
 
-dotenv.config({ path: path.resolve(process.cwd(), ".env") });
-dotenv.config({ path: path.resolve(process.cwd(), "packages/db/.env") });
+const envFiles = [
+  path.resolve(process.cwd(), ".env"),
+  path.resolve(process.cwd(), "../../.env"),
+  path.resolve(process.cwd(), "packages/db/.env"),
+  path.resolve(process.cwd(), "../../packages/db/.env"),
+];
+for (const file of envFiles) {
+  dotenv.config({ path: file });
+}
 
 export const config = {
   nodeEnv: process.env.NODE_ENV || "development",

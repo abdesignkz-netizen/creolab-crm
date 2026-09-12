@@ -13,6 +13,10 @@ import {
   stageDurationLabel,
 } from "./dealPipeline.ts";
 import { displayName, phoneFromContact } from "./contactLabels.ts";
+import { writeActivity } from "./contactService.ts";
+import { serializeDealItem, totalsFromItems } from "./dealItemService.ts";
+import { lineAmounts, sumLines, toMinorTenge } from "./documentMoney.ts";
+import { getTenantDocumentFlags, resolveVatRate } from "./legalProfileService.ts";
 import { resolvePeriodRange, periodLabel, type PeriodPreset } from "./periodRange.ts";
 
 type DealTimeMode = "now" | "period";
@@ -174,6 +178,7 @@ function dealInclude() {
       take: 5,
     },
     inquiry: { select: { id: true, subject: true, source: true, sourceChannel: true } },
+    items: { orderBy: { sortOrder: "asc" as const } },
   };
 }
 
@@ -226,7 +231,9 @@ export function flagsForDeal(
 }
 
 function serializeDeal(deal: any, ops: ReturnType<typeof parseOpsSettings>, currency: string, now = new Date()) {
-  const amount = amountNumber(deal.offerAmountMinor);
+  const items = Array.isArray(deal.items) ? deal.items.map(serializeDealItem) : [];
+  const itemTotals = items.length ? totalsFromItems(items) : null;
+  const amount = itemTotals ? toMinorTenge(itemTotals.totalAmount) : amountNumber(deal.offerAmountMinor);
   const flags = flagsForDeal({ ...deal, contact: deal.contact }, ops, now);
   const assigneeName = deal.assignee?.user?.name || deal.assignee?.user?.email || null;
   const probability = deal.probability ?? deal.stage?.defaultProbability ?? 10;
@@ -293,6 +300,9 @@ function serializeDeal(deal: any, ops: ReturnType<typeof parseOpsSettings>, curr
     assigneeName,
     inquiryId: deal.inquiryId,
     inquiry: deal.inquiry || null,
+    items,
+    itemTotals,
+    amountFromItems: Boolean(items.length),
     tasks: (deal.tasks || []).map((t: any) => ({
       id: t.id,
       title: t.title,
@@ -671,6 +681,10 @@ export async function updateDeal(
   const deal = await prisma.deal.findFirst({ where: { id: dealId, tenantId: tid } });
   if (!deal) throw new ApiError(404, "not_found", "Сделка не найдена");
 
+  const itemCount = await prisma.dealItem.count({ where: { tenantId: tid, dealId } });
+  if (itemCount > 0 && input.offerAmountMinor !== undefined) {
+    throw new ApiError(422, "amount_from_items", "Сумма считается из позиций сделки");
+  }
   const probability = input.probability as number | undefined;
   if (probability != null && (probability < 0 || probability > 100)) {
     throw new ApiError(422, "invalid", "Вероятность 0–100");
@@ -678,6 +692,15 @@ export async function updateDeal(
   const paymentStatus = input.paymentStatus as string | undefined;
   if (paymentStatus && !PAYMENT_STATUSES.includes(paymentStatus as (typeof PAYMENT_STATUSES)[number])) {
     throw new ApiError(422, "invalid", "Некорректный статус оплаты");
+  }
+
+  let companyId = deal.companyId;
+  if (input.companyId !== undefined) {
+    companyId = (input.companyId as string | null) || null;
+    if (companyId) {
+      const company = await prisma.company.findFirst({ where: { id: companyId, tenantId: tid } });
+      if (!company) throw new ApiError(404, "not_found", "Компания не найдена");
+    }
   }
 
   await prisma.deal.update({
@@ -705,6 +728,7 @@ export async function updateDeal(
       ...(input.assigneeMembershipId !== undefined
         ? { assigneeMembershipId: input.assigneeMembershipId as string | null }
         : {}),
+      ...(input.companyId !== undefined ? { companyId } : {}),
       version: { increment: 1 },
     },
   });
@@ -901,5 +925,130 @@ export async function setDealOnHold(prisma: PrismaClient, auth: AuthContext, dea
     where: { id: dealId },
     data: { outcome: hold ? "on_hold" : "open", version: { increment: 1 } },
   });
+  return getDeal(prisma, auth, dealId);
+}
+
+export async function createDeal(
+  prisma: PrismaClient,
+  auth: AuthContext,
+  input: {
+    title: string;
+    contactId: string;
+    companyId?: string | null;
+    description?: string | null;
+    currency?: string;
+    offerAmountMinor?: number | null;
+    items?: Array<{
+      name: string;
+      description?: string | null;
+      quantity: number;
+      unit?: string;
+      unitPrice: number;
+      vatRate?: number;
+      sortOrder?: number;
+      catalogItemId?: string | null;
+      catalogTruId?: string | null;
+    }>;
+  },
+) {
+  const membership = requireTenant(auth);
+  const tid = membership.tenantId;
+  await ensureDealPipelineStages(prisma, tid);
+
+  const contact = await prisma.contact.findFirst({ where: { id: input.contactId, tenantId: tid } });
+  if (!contact) throw new ApiError(404, "not_found", "Клиент не найден");
+
+  const companyId = input.companyId || null;
+  if (companyId) {
+    const company = await prisma.company.findFirst({ where: { id: companyId, tenantId: tid } });
+    if (!company) throw new ApiError(404, "not_found", "Компания не найдена");
+  }
+
+  const stage = await prisma.dealStage.findFirst({ where: { tenantId: tid, systemKey: "new" } });
+  if (!stage) throw new ApiError(500, "misconfigured", "Воронка не настроена");
+
+  const flags = await getTenantDocumentFlags(prisma, tid);
+  const preparedItems = (input.items || []).map((item, index) => {
+    const vatRate = resolveVatRate(flags, item.vatRate);
+    return {
+      name: item.name.trim(),
+      description: item.description?.trim() || null,
+      quantity: item.quantity,
+      unit: item.unit?.trim() || "услуга",
+      unitPrice: item.unitPrice,
+      vatRate,
+      ...lineAmounts(item.quantity, item.unitPrice, vatRate),
+      sortOrder: item.sortOrder ?? index,
+      catalogItemId: item.catalogItemId || null,
+      catalogTruId: item.catalogTruId?.trim() || null,
+    };
+  });
+  const totals = preparedItems.length ? sumLines(preparedItems) : null;
+  const offerAmountMinor =
+    totals != null ? toMinorTenge(totals.totalAmount) : input.offerAmountMinor ?? null;
+
+  const now = new Date();
+  const dealId = await prisma.$transaction(async (tx) => {
+    const deal = await tx.deal.create({
+      data: {
+        tenantId: tid,
+        contactId: contact.id,
+        companyId,
+        inquiryId: null,
+        stageId: stage.id,
+        title: input.title.trim(),
+        description: input.description?.trim() || null,
+        currency: input.currency || membership.tenant.currency || "KZT",
+        offerAmountMinor,
+        assigneeMembershipId: membership.id,
+        probability: stage.defaultProbability ?? 10,
+        paymentStatus: "NOT_INVOICED",
+        stageEnteredAt: now,
+      },
+    });
+    if (preparedItems.length) {
+      await tx.dealItem.createMany({
+        data: preparedItems.map((item) => ({ tenantId: tid, dealId: deal.id, ...item })),
+      });
+    }
+    await tx.dealStageHistory.create({
+      data: {
+        tenantId: tid,
+        dealId: deal.id,
+        fromStageId: null,
+        fromSystemKey: null,
+        toStageId: stage.id,
+        toSystemKey: stage.systemKey,
+        enteredAt: now,
+        changedByType: "user",
+        changedById: auth.user.id,
+        note: "Создана вручную",
+      },
+    });
+    await writeActivity(tx, {
+      tenantId: tid,
+      contactId: contact.id,
+      companyId,
+      dealId: deal.id,
+      type: "deal.created",
+      title: "Создана сделка",
+      description: deal.title,
+      actorType: "user",
+      actorId: auth.user.id,
+      metadata: { dealId: deal.id, source: "manual" },
+    });
+    await tx.auditEvent.create({
+      data: {
+        tenantId: tid,
+        actorUserId: auth.user.id,
+        action: "deal.create",
+        entityType: "deal",
+        entityId: deal.id,
+        changesJson: { source: "manual", itemCount: preparedItems.length },
+      },
+    });
+    return deal.id;
+  });
+
   return getDeal(prisma, auth, dealId);
 }

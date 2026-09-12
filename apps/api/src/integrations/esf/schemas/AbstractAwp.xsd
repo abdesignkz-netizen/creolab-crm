@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<xs:schema version="1.0" targetNamespace="abstractAwp.awp" xmlns:aawp="abstractAwp.awp" xmlns:tns="abstractAwp.awp" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:element name="awp" type="tns:AbstractAwp"/>
+
+  <xs:complexType name="AbstractAwp" abstract="true">
+    <xs:annotation>
+      <xs:documentation>Базовая информация о АВР для всех версий АВР в системе</xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="date" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>Дата выписки</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="number" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>Номер учетной системы</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="performedDate" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>Дата выполнения работ (оказания услуг)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="registrationNumber" type="xs:string" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Регистрационный номер</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="abstractAwpParticipant" abstract="true">
+    <xs:annotation>
+      <xs:documentation>Участник АВР</xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="additionalInfo" type="xs:string" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Дополнительные сведения</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="address" type="xs:string" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Адрес места нахождения</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="branchTin" type="xs:string" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>БИН структурного подразделения юридического лица</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="invitationEmail" type="xs:string" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Е-mail участника, для отправки приглашения пройти регистрацию</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="tin" type="xs:string" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>ИИН/БИН</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+</xs:schema>

@@ -55,6 +55,7 @@ export async function getNavBadges(prisma: PrismaClient, auth: AuthContext) {
     integrationsIssues,
     notificationsUnread,
     incompleteIntakes,
+    documentsAttention,
   ] = await Promise.all([
     countVisibleConversations(prisma, conversationsAttentionWhere(tid)),
     countVisibleConversations(prisma, conversationsHumanWhere(tid)),
@@ -112,6 +113,7 @@ export async function getNavBadges(prisma: PrismaClient, auth: AuthContext) {
       },
     }),
     prisma.incompleteIntake.count({ where: openIntakeWhere(tid) }),
+    import("./documentInboxService.ts").then(({ countDocumentAttention }) => countDocumentAttention(prisma, tid)),
   ]);
 
   const conversations = conversationsAttention;
@@ -160,6 +162,9 @@ export async function getNavBadges(prisma: PrismaClient, auth: AuthContext) {
     "/settings": notificationsUnread
       ? ruCount(notificationsUnread, "непрочитанное уведомление", "непрочитанных уведомления", "непрочитанных уведомлений")
       : "",
+    "/documents": documentsAttention
+      ? ruCount(documentsAttention, "документ требует внимания", "документа требуют внимания", "документов требуют внимания")
+      : "",
   };
 
   return {
@@ -176,6 +181,7 @@ export async function getNavBadges(prisma: PrismaClient, auth: AuthContext) {
       "/integrations": integrationsIssues,
       "/stats": 0,
       "/settings": notificationsUnread,
+      "/documents": documentsAttention,
     } as Record<string, number>,
     hints,
     hrefs: {
@@ -190,6 +196,7 @@ export async function getNavBadges(prisma: PrismaClient, auth: AuthContext) {
       "/integrations": "/integrations",
       "/stats": "/stats",
       "/settings": "/settings",
+      "/documents": documentsAttention ? "/documents?attention=1" : "/documents",
     } as Record<string, string>,
     parts: {
       "/today": situationParts,

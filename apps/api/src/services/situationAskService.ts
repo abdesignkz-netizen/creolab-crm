@@ -2,9 +2,11 @@ import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
 import type { PrismaClient } from "@creolab/db";
 import { answerSituationAskWithLlm } from "./llmClient.ts";
+import { detectDocumentCommand } from "./documentCommandService.ts";
 import { getSituationOverview, type PeriodPreset } from "./situationOverviewService.ts";
 
-const TASK_COMMAND_RE = /постав(ь|и)|создай задачу|позвон|напиш|отправ(ь|и)|уточн|follow-?up|кп\b|сообщени/i;
+const TASK_COMMAND_RE =
+  /постав(ь|и)|создай задачу|позвон|напиш|отправ(ь|и)|уточн|follow-?up|кп\b|сообщени|сформируй|выставь\s+сч|подготовь\s+(договор|счёт|счет|авр|эсф|акт)|создай\s+(договор|счёт|счет|авр|эсф|акт)|закрой\s+сделк|проверь\s+(авр|эсф|акт|договор|счёт|счет)|валидир/i;
 const LEADING_QUESTION_RE = /^(что|какие|какой|какая|где|у кого|сравни|сколько|почему|кто)\b/i;
 
 export type SituationAskIntent =
@@ -26,6 +28,7 @@ export type SituationAskResult = {
   question: string;
   intent: SituationAskIntent;
   command: boolean;
+  documentCommand?: boolean;
   usedLlm: boolean;
   period?: string;
   suggestedPeriod?: PeriodPreset | null;
@@ -321,16 +324,22 @@ export async function askSituation(
 
   const classified = classifySituationQuestion(text);
   if (classified.command) {
+    const document = detectDocumentCommand(text);
     return {
       question: text,
       intent: "command",
       command: true,
+      documentCommand: Boolean(document),
       usedLlm: false,
       period: input.period,
       suggestedPeriod: classified.suggestedPeriod,
-      headline: "Это команда на действие. Откройте постановку задачи — CRM подготовит черновик.",
+      headline: document
+        ? "Это команда по документам сделки. Откройте раздел «Документы»."
+        : "Это команда на действие. Откройте постановку задачи — CRM подготовит черновик.",
       bullets: [],
-      links: [{ label: "Поставить задачу", href: `/tasks?command=${encodeURIComponent(text)}` }],
+      links: document
+        ? [{ label: "Открыть документы", href: `/documents?command=${encodeURIComponent(text)}` }]
+        : [{ label: "Поставить задачу", href: `/tasks?command=${encodeURIComponent(text)}` }],
     };
   }
 

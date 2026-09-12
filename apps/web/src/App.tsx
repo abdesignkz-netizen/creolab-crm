@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useRef, useState, type MouseEvent, type Reac
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { api, setTenant } from "./lib/api";
 import { NavIcon } from "./components/NavIcon";
+import { LegalSettingsPanel } from "./pages/LegalSettingsPanel";
 import { tip } from "./lib/tip";
 import {
   currentBrowserPermission,
@@ -23,7 +24,11 @@ const ControlPage = lazy(() => import("./pages/ControlPage").then(m => ({ defaul
 const ConversationsPage = lazy(() => import("./pages/ConversationsPage").then(m => ({ default: m.ConversationsPage })));
 const DealsPage = lazy(() => import("./pages/DealsPage").then(m => ({ default: m.DealsPage })));
 const DealDetailPage = lazy(() => import("./pages/DealsPage").then(m => ({ default: m.DealDetailPage })));
+const DocumentsPage = lazy(() => import("./pages/DocumentsPage").then(m => ({ default: m.DocumentsPage })));
+const SignPage = lazy(() => import("./pages/SignPage").then(m => ({ default: m.SignPage })));
+const VerifyPage = lazy(() => import("./pages/VerifyPage").then(m => ({ default: m.VerifyPage })));
 const IntegrationsPage = lazy(() => import("./pages/IntegrationsPage").then(m => ({ default: m.IntegrationsPage })));
+const EsfIntegrationPage = lazy(() => import("./pages/EsfIntegrationPage").then(m => ({ default: m.EsfIntegrationPage })));
 const RequestDetailPage = lazy(() => import("./pages/RequestDetailPage").then(m => ({ default: m.RequestDetailPage })));
 const RequestsPage = lazy(() => import("./pages/RequestsPage").then(m => ({ default: m.RequestsPage })));
 const AiAutomationSettingsPage = lazy(() => import("./pages/AiAutomationSettingsPage").then(m => ({ default: m.AiAutomationSettingsPage })));
@@ -95,6 +100,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
     ["/contacts", "Клиенты"],
     ["/companies", "Компании"],
     ["/deals", "Сделки"],
+    ["/documents", "Документы"],
     ["/integrations", "Интеграции"],
     ["/stats", "Статистика"],
     ["/settings", "Настройки"],
@@ -108,6 +114,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
     ["/companies", "Компании"],
     ["/inquiries", "Заявки"],
     ["/deals", "Сделки"],
+    ["/documents", "Документы"],
   ] as const;
   const systemLinks = [
     ["/control", "Управление"],
@@ -132,6 +139,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
         : path === "/conversations" ? "/conversations?filter=attention"
         : path === "/tasks" ? "/tasks?filter=overdue"
         : path === "/inquiries" ? "/inquiries?filter=attention"
+        : path === "/documents" ? "/documents?attention=1"
         : path
       );
     }
@@ -162,6 +170,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
     "/requests": "Заявка",
     "/conversations": "Диалоги",
     "/deals": "Сделки",
+    "/documents": "Документы",
     "/tasks": "Задачи",
     "/contacts": "Клиенты",
     "/companies": "Компании",
@@ -668,6 +677,8 @@ function Settings() {
         <a href="/settings/ai-automation">AI Manager → Новые заявки →</a>
       </p>
 
+      <LegalSettingsPanel />
+
       <div className="panel">
         <b>Уведомления браузера</b>
         <p className="muted">
@@ -918,6 +929,22 @@ export function App() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route
+        path="/sign/:token"
+        element={
+          <Suspense fallback={<div className="state">Загрузка…</div>}>
+            <SignPage />
+          </Suspense>
+        }
+      />
+      <Route
+        path="/verify/:verificationId"
+        element={
+          <Suspense fallback={<div className="state">Загрузка…</div>}>
+            <VerifyPage />
+          </Suspense>
+        }
+      />
+      <Route
         path="*"
         element={
           boot !== "ready" ? (
@@ -929,6 +956,7 @@ export function App() {
                 <Route path="/today" element={<Today />} />
                 <Route path="/control" element={<ControlPage />} />
                 <Route path="/integrations" element={<IntegrationsPage />} />
+                <Route path="/integrations/esf" element={<EsfIntegrationPage />} />
                 <Route path="/inquiries" element={<RequestsPage />} />
                 <Route path="/requests" element={<Navigate to="/inquiries" replace />} />
                 <Route path="/requests/:requestId" element={<RequestDetailPage key={location.pathname} />} />
@@ -936,6 +964,7 @@ export function App() {
                 <Route path="/conversations/:id" element={<ConversationsPage />} />
                 <Route path="/deals" element={<DealsPage />} />
                 <Route path="/deals/:dealId" element={<DealDetailPage key={location.pathname} />} />
+                <Route path="/documents" element={<DocumentsPage />} />
                 <Route path="/tasks" element={<TasksPage />} />
                 <Route path="/contacts" element={<ClientsPage />} />
                 <Route path="/contacts/:id" element={<ContactPage key={location.pathname} />} />
