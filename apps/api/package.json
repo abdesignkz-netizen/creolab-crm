@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "start": "tsx src/index.ts",
+    "start": "node --experimental-strip-types src/index.ts",
     "test": "node ../../scripts/test-api.mjs",
     "typecheck": "tsc --noEmit"
   },

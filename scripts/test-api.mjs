@@ -12,7 +12,7 @@ const files = ["apps/api/src", "packages/contracts/src"].flatMap((dir) =>
 let failures = 0;
 try {
   for (const [index, file] of files.entries()) {
-    const result = spawnSync(process.execPath, ["--import", "tsx", "--test", file], {
+    const result = spawnSync(process.execPath, ["--experimental-strip-types", "--test", file], {
       cwd: root,
       stdio: "inherit",
       env: {

@@ -37,9 +37,9 @@ export async function previewManualPdf(prisma: PrismaClient, auth: AuthContext, 
   const membership = await access(prisma, auth);
   const input = z.object({ kind: z.enum(["CONTRACT", "INVOICE"]), fileName: z.string().min(1).max(255), fileBase64: z.string().max(28_000_000) }).parse(raw);
   if (!/\.pdf$/i.test(input.fileName) || !/^[A-Za-z0-9+/]+={0,2}$/.test(input.fileBase64)) throw new ApiError(422, "pdf_required", "Выберите файл PDF");
+  if (activeExtractions >= 1) throw new ApiError(429, "pdf_import_busy", "Сейчас распознаётся другой документ. Дождитесь завершения и повторите загрузку.");
   const bytes = Buffer.from(input.fileBase64, "base64");
   if (bytes.length > 20 * 1024 * 1024 || bytes.length < 8 || !bytes.subarray(0,8).toString().startsWith("%PDF-")) throw new ApiError(422, "pdf_invalid", "Нужен PDF размером до 20 МБ");
-  if (activeExtractions >= 2) throw new ApiError(429, "pdf_import_busy", "Сейчас распознаются другие документы. Повторите чуть позже.");
   activeExtractions++;
   try {
     const pages = await extractPdfPages(bytes);

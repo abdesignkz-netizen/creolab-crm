@@ -35,6 +35,15 @@ describe("Manual PDF import",()=>{
  after(async()=>{await new Promise<void>(r=>server?.close(()=>r()));await prisma?.$disconnect();});
  it("rejects non-PDF uploads",async()=>{await req("/api/v1/documents/import-pdf/preview","POST",{kind:"CONTRACT",fileName:"fake.pdf",fileBase64:Buffer.from("not a PDF").toString("base64")},422);});
  it("recognizes a scanned PDF locally",async()=>{const pages=await extractPdfPages(await makePdf(true));assert.equal(pages[0].ocr,true);assert.match(pages[0].text,/2026.TEST.42/);assert.match(pages[0].text,/400000/);});
+ it("allows only one recognition and accepts new uploads after it finishes or fails",async()=>{
+  const scan=await makePdf(true);
+  const body=JSON.stringify({kind:"CONTRACT",fileName:"scan.pdf",fileBase64:scan.toString("base64")});
+  const replies=await Promise.all([1,2].map(()=>fetch(base+"/api/v1/documents/import-pdf/preview",{method:"POST",headers:{"content-type":"application/json",cookie},body})));
+  assert.deepEqual(replies.map(r=>r.status).sort(),[200,429]);
+  for(const r of replies){const data=await r.json();if(r.status===429)assert.equal(data.code,"pdf_import_busy");else await req(`/api/v1/documents/import-pdf/${data.importId}`,"DELETE");}
+  await req("/api/v1/documents/import-pdf/preview","POST",{kind:"CONTRACT",fileName:"broken.pdf",fileBase64:Buffer.from("%PDF-1.7\ninvalid contents").toString("base64")},422);
+  const next=await preview();await req(`/api/v1/documents/import-pdf/${next.importId}`,"DELETE");
+ });
  it("previews original PDF without creating a deal",async()=>{const before=await prisma.deal.count();const p=await preview();importId=p.importId;assert.equal(p.usedOcr,false);assert.equal(p.sha256,createHash("sha256").update(bytes).digest("hex"));assert.equal(await prisma.deal.count(),before);});
  it("requires a valid date, contact phone and consistent totals",async()=>{
   for(const changes of [{date:"2026-02-31"},{contactPhone:""},{detectedTotal:500000}])await req("/api/v1/documents/import-pdf/confirm","POST",{importId,draft:{...draft(),...changes}},422);
@@ -64,7 +73,7 @@ describe("Manual PDF import",()=>{
   try {
     const company=await prisma.company.findFirstOrThrow({where:{bin:party.bin}});
     await prisma.company.update({where:{id:company.id},data:{legalAddress:"Адрес, уточнённый менеджером"}});
-    const count=await prisma.deal.count();const [a,b]=await Promise.all([preview(),preview()]);
+    const count=await prisma.deal.count();const a=await preview(),b=await preview();
     const replies=await Promise.all([a,b].map((p,i)=>fetch(base+"/api/v1/documents/import-pdf/confirm",{method:"POST",headers:{"content-type":"application/json",cookie},body:JSON.stringify({importId:p.importId,draft:{...draft(),number:`RACE-${i}`}})})));
     assert.deepEqual(replies.map(r=>r.status).sort(),[200,409]);assert.equal(await prisma.deal.count(),count+1);
     assert.equal((await prisma.company.findUniqueOrThrow({where:{id:company.id}})).legalAddress,"Адрес, уточнённый менеджером");

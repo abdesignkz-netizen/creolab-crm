@@ -14,7 +14,7 @@ import {
   sanitizeUnknownEsfResponse,
   type EsfPlainSignature,
 } from "@creolab/contracts";
-import { NCALAYER_URL, NcalayerError } from "./ncalayerClient";
+import { NCALAYER_URL, NcalayerError } from "./ncalayerClient.ts";
 
 export { ESF_MODULE_REQUIRED_MESSAGE, ESF_NCALAYER_SERVICE };
 

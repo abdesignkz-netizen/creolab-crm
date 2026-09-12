@@ -1,12 +1,20 @@
 export class ApiError extends Error {
+  public status: number;
+  public code: string;
+  public fieldErrors?: Record<string, string>;
+  public details?: unknown;
   constructor(
-    public status: number,
-    public code: string,
+    status: number,
+    code: string,
     message: string,
-    public fieldErrors?: Record<string, string>,
-    public details?: unknown,
+    fieldErrors?: Record<string, string>,
+    details?: unknown,
   ) {
     super(message);
+    this.status = status;
+    this.code = code;
+    this.fieldErrors = fieldErrors;
+    this.details = details;
   }
 }
 

@@ -87,10 +87,12 @@ export type SellerLead = {
 };
 
 export class WhatsAppSellerBridge {
+  private readonly baseUrl: string;
+  private readonly secret: string;
   constructor(
-    private readonly baseUrl: string,
-    private readonly secret: string,
-  ) {}
+    baseUrl: string,
+    secret: string,
+  ) { this.baseUrl = baseUrl; this.secret = secret; }
 
   enabled() {
     return Boolean(this.baseUrl && this.secret);
