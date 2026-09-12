@@ -1,3 +1,4 @@
+import { documentOrganization } from "./documentOrganization.ts";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { PrismaClient } from "@creolab/db";
@@ -62,7 +63,7 @@ async function sourceForDocument(
   });
   if (!deal) throw new ApiError(404, "not_found", "Сделка не найдена");
   const [profile, tenant, contract, invoice] = await Promise.all([
-    prisma.tenantLegalProfile.findUnique({ where: { tenantId } }),
+    documentOrganization(prisma, tenantId, document.dealId, document.contractId),
     prisma.tenant.findUnique({ where: { id: tenantId }, select: { name: true } }),
     document.contractId
       ? prisma.contract.findFirst({ where: { id: document.contractId, tenantId } })
@@ -103,7 +104,7 @@ async function invoiceSourceForDocument(
   });
   if (!deal) throw new ApiError(404, "not_found", "Сделка не найдена");
   const [profile, tenant, contract, invoice] = await Promise.all([
-    prisma.tenantLegalProfile.findUnique({ where: { tenantId } }),
+    documentOrganization(prisma, tenantId, document.dealId, document.contractId),
     prisma.tenant.findUnique({ where: { id: tenantId }, select: { name: true } }),
     document.contractId
       ? prisma.contract.findFirst({ where: { id: document.contractId, tenantId } })
@@ -127,8 +128,8 @@ async function invoiceSourceForDocument(
   });
 }
 
-async function extrasForTenant(prisma: PrismaClient, tenantId: string, number: string) {
-  const profile = await prisma.tenantLegalProfile.findUnique({ where: { tenantId } });
+async function extrasForTenant(prisma: PrismaClient, tenantId: string, number: string, dealId: string, contractId: string | null) {
+  const profile = await documentOrganization(prisma, tenantId, dealId, contractId);
   return {
     number,
     sellerBank: {
@@ -155,7 +156,7 @@ export async function previewAvrEsf(prisma: PrismaClient, auth: AuthContext, doc
   const document = await loadDocument(prisma, tid, documentId);
   if (document.type === "ESF") return previewEsfInvoice(prisma, tid, document);
   const source = await sourceForDocument(prisma, tid, document);
-  const extras = await extrasForTenant(prisma, tid, document.number);
+  const extras = await extrasForTenant(prisma, tid, document.number, document.dealId, document.contractId);
   const preview = previewAvrForEsf(source, extras);
   const xmlStorageKey = await storeXml(tid, document.id, "awp-v1.xml", preview.xml);
   const updated = await prisma.electronicDocument.update({
@@ -208,7 +209,7 @@ export async function sendAvrEsf(prisma: PrismaClient, auth: AuthContext, docume
     throw new ApiError(422, "avr_immutable", "АВР уже отправлен в ИС ЭСФ");
   }
   const source = await sourceForDocument(prisma, tid, document);
-  const extras = await extrasForTenant(prisma, tid, document.number);
+  const extras = await extrasForTenant(prisma, tid, document.number, document.dealId, document.contractId);
   const result = await sendAvrToEsf(source, extras);
   if (!result.ok) {
     await prisma.electronicDocument.update({

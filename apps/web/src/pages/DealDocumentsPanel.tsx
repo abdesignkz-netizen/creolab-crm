@@ -1,3 +1,4 @@
+import { notifySaved } from "../components/SaveNotice";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
@@ -208,14 +209,26 @@ export function DealDocumentsPanel(props: {
           <MissingList
             ready={readiness?.ready}
             ok="Данных достаточно для договора."
-            title="Не хватает данных для договора:"
+            title={contracts[0]?.importedPdf ? "Для следующих документов нужно дополнить реквизиты:" : "Не хватает данных для договора:"}
             fields={readiness?.missingFields}
             labels={readiness?.missingFieldLabels}
           />
+          {contracts[0]?.importedPdf && readiness?.missingFields?.some((field:string)=>field.startsWith("organization.")) ? (
+            <div className="stack">
+              <p className="muted">Сам договор уже загружен. Перенесите реквизиты исполнителя из сохранённых данных договора, чтобы подготовить следующие документы.</p>
+              <button className="btn secondary" disabled={busy} onClick={()=>{
+                setBusy(true);setError("");
+                void api.request(`/api/v1/contracts/${contracts[0].id}/imported-requisites`,{method:"POST"})
+                  .then(async()=>{await load();notifySaved("Реквизиты из договора сохранены");})
+                  .catch(err=>setError(err.message)).finally(()=>setBusy(false));
+              }}>Заполнить реквизиты из договора</button>
+            </div>
+          ) : null}
           {contracts.map((doc: any) => (
             <div className="row" key={doc.id}>
               <div>
-                <b>Договор {doc.number}</b>{doc.importedPdf ? <div className="muted">Загружен вручную из PDF</div> : null}
+                <b>Договор {doc.number}</b>
+                {doc.originalFileName && /\.docx?$/i.test(doc.originalFileName) ? <a className="btn secondary" href={`/api/v1/contracts/${doc.id}/original`}>Скачать оригинал Word</a> : null}{doc.importedPdf ? <div className="muted">Загружен вручную</div> : null}
                 <div className="muted">
                   {CONTRACT_STATUS_LABEL[doc.status] || doc.status} · {Number(doc.totalAmount).toLocaleString("ru-RU")} ₸
                 </div>
@@ -379,7 +392,7 @@ export function DealDocumentsPanel(props: {
           {invoices.map((doc: any) => (
             <div className="row" key={doc.id}>
               <div>
-                <b>Счёт {doc.number}</b>{doc.importedPdf ? <div className="muted">Загружен вручную из PDF</div> : null}
+                <b>Счёт {doc.number}</b>{doc.importedPdf ? <div className="muted">Загружен вручную</div> : null}
                 <div className="muted">
                   {INVOICE_STATUS_LABEL[doc.status] || doc.status} · {Number(doc.totalAmount).toLocaleString("ru-RU")} ₸
                 </div>

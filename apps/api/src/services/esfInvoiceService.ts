@@ -1,3 +1,4 @@
+import { documentOrganization } from "./documentOrganization.ts";
 import type { PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import { can, type AuthContext } from "../lib/types.ts";
@@ -25,14 +26,14 @@ async function nextEsfNumber(prisma: PrismaClient, tenantId: string) {
   return `ESF-${new Date().getFullYear()}-${String(count + 1).padStart(4, "0")}`;
 }
 
-async function loadBundle(prisma: PrismaClient, tenantId: string, dealId: string) {
+async function loadBundle(prisma: PrismaClient, tenantId: string, dealId: string, contractId?: string | null) {
   const deal = await prisma.deal.findFirst({
     where: { id: dealId, tenantId },
     include: { items: { orderBy: { sortOrder: "asc" } }, company: true },
   });
   if (!deal) throw new ApiError(404, "not_found", "Сделка не найдена");
   const [profile, tenant] = await Promise.all([
-    prisma.tenantLegalProfile.findUnique({ where: { tenantId } }),
+    documentOrganization(prisma, tenantId, dealId, contractId),
     prisma.tenant.findUnique({ where: { id: tenantId }, select: { name: true } }),
   ]);
   return {
@@ -97,7 +98,7 @@ export async function createEsfDraft(
     return { document: serializeElectronicDocument(existing), reused: true };
   }
 
-  const { deal, items, profile, tenantName } = await loadBundle(prisma, tid, dealId);
+  const { deal, items, profile, tenantName } = await loadBundle(prisma, tid, dealId, contract?.id);
   if (!items.length) {
     throw new ApiError(422, "deal_items_required", "Сначала добавьте позиции в сделку");
   }
@@ -183,7 +184,7 @@ export async function validateEsfInvoice(prisma: PrismaClient, auth: AuthContext
     throw new ApiError(422, "esf_immutable", "ЭСФ уже отправлен — проверку менять нельзя");
   }
 
-  const { deal, items, profile, tenantName } = await loadBundle(prisma, tid, document.dealId);
+  const { deal, items, profile, tenantName } = await loadBundle(prisma, tid, document.dealId, document.contractId);
   const { contract, invoice } = await resolveLinks(prisma, tid, document.dealId, {
     contractId: document.contractId,
     invoiceId: document.invoiceId,

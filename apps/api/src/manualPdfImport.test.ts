@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import { createHash } from "node:crypto";
@@ -57,6 +58,92 @@ describe("Manual PDF import",()=>{
   const contract=await prisma.contract.findUniqueOrThrow({where:{id:contractId}});assert.equal(contract.number,"MANUAL-42");assert.equal(contract.date.toISOString().slice(0,10),"2026-08-12");assert.equal(contract.originalFileId,importId);assert.equal(contract.signedAt,null);
   const r=await fetch(base+`/api/v1/contracts/${contractId}/pdf`,{headers:{cookie}});assert.equal(r.status,200);assert.deepEqual(Buffer.from(await r.arrayBuffer()),bytes);
   assert.equal((await req(`/api/v1/contracts/${contractId}/generate`,"POST",{},422)).code,"imported_pdf_immutable");
+ });
+ it("fills missing seller details and restores them for an older imported contract",async()=>{
+  const contract=await prisma.contract.findUniqueOrThrow({where:{id:contractId}});
+  await prisma.tenantLegalProfile.update({where:{tenantId:contract.tenantId},data:{legalName:null,bin:null,legalAddress:null,directorName:null,iban:null,bik:null}});
+  await req(`/api/v1/contracts/${contractId}/imported-requisites`,"POST",undefined,404,foreign);
+  const restored=await req(`/api/v1/contracts/${contractId}/imported-requisites`,"POST");
+  assert.ok(restored.fields.includes("legalName"));
+  const profile=await prisma.tenantLegalProfile.findUniqueOrThrow({where:{tenantId:contract.tenantId}});
+  assert.equal(profile.legalName,draft().seller.name);assert.equal(profile.bin,draft().seller.bin);assert.equal(profile.iban,draft().seller.iban);
+  const readiness=await (await import("./services/contractReadiness.ts")).getContractReadiness(prisma,{activeMembership:{tenantId:contract.tenantId}} as any,dealId);
+  assert.equal(readiness.ready,true);
+  await prisma.tenantLegalProfile.update({where:{tenantId:contract.tenantId},data:{legalAddress:"Verified existing address"}});
+  await req(`/api/v1/contracts/${contractId}/imported-requisites`,"POST");
+  assert.equal((await prisma.tenantLegalProfile.findUniqueOrThrow({where:{tenantId:contract.tenantId}})).legalAddress,"Verified existing address");
+  await prisma.tenantLegalProfile.update({where:{tenantId:contract.tenantId},data:{bin:"999999999999",directorName:null}});
+  await req(`/api/v1/contracts/${contractId}/imported-requisites`,"POST",undefined,422);
+  assert.equal((await prisma.tenantLegalProfile.findUniqueOrThrow({where:{tenantId:contract.tenantId}})).directorName,null);
+  await prisma.tenantLegalProfile.update({where:{tenantId:contract.tenantId},data:{bin:draft().seller.bin}});
+ });
+ it("uses reviewed imported details across documents even when organization settings are empty",async()=>{
+  const contract=await prisma.contract.findUniqueOrThrow({where:{id:contractId}});
+  const savedProfile=await prisma.tenantLegalProfile.findUniqueOrThrow({where:{tenantId:contract.tenantId}});
+  const fields={legalName:savedProfile.legalName,bin:savedProfile.bin,iin:savedProfile.iin,legalAddress:savedProfile.legalAddress,directorName:savedProfile.directorName,iban:savedProfile.iban,bik:savedProfile.bik,bankName:savedProfile.bankName};
+  const {documentOrganization}=await import("./services/documentOrganization.ts");
+  let invoiceId:string|undefined;
+  try {
+    await prisma.tenantLegalProfile.update({where:{tenantId:contract.tenantId},data:Object.fromEntries(Object.keys(fields).map(k=>[k,null]))});
+    for(const route of ["contract-readiness","invoice-readiness","avr-readiness","esf-invoice-readiness"]){
+      const r=await req(`/api/v1/deals/${dealId}/${route}`);
+      assert.ok(!r.missingFields.some((f:string)=>f.startsWith("organization.")),JSON.stringify(r));
+      if(route!=="contract-readiness")assert.ok(r.missingFields.includes("contract.signed"));
+    }
+    assert.equal((await prisma.tenantLegalProfile.findUniqueOrThrow({where:{tenantId:contract.tenantId}})).legalName,null,"readiness must not mutate organization settings");
+    const dealView=await req(`/api/v1/deals/${dealId}`);assert.equal(dealView.deal.contact.phone,"+77019998855");
+    for(const type of ["AVR","ESF"]){
+      const r=await req(`/api/v1/deals/${dealId}/electronic-documents`,"POST",{type,contractId},201);
+      const row=await prisma.electronicDocument.findUniqueOrThrow({where:{id:r.document.id}});
+      const source=row.sourceDataJson as any;
+      assert.equal(source.seller.bin,draft().seller.bin);assert.equal(source.seller.legalName,draft().seller.name);
+      assert.equal(source.buyer.bin,party.bin);assert.equal(row.contractId,contractId);assert.equal(Number(row.totalAmount),400000);
+    }
+    // Signature is supplied by the test fixture only; importing never signs a contract.
+    await prisma.contract.update({where:{id:contractId},data:{status:"SIGNED",signedAt:new Date()}});
+    const invoice=await req(`/api/v1/deals/${dealId}/invoices`,"POST",{contractId},201);invoiceId=invoice.invoice.id;
+    await req(`/api/v1/invoices/${invoiceId}/generate`,"POST",{});
+    const generated=await prisma.invoice.findUniqueOrThrow({where:{id:invoiceId}});assert.ok(generated.pdfFileId);assert.equal(generated.contractId,contractId);
+    await prisma.tenantLegalProfile.update({where:{tenantId:contract.tenantId},data:{legalAddress:"Verified address"}});
+    assert.equal((await documentOrganization(prisma,contract.tenantId,dealId))?.legalAddress,"Verified address");
+    await prisma.tenantLegalProfile.update({where:{tenantId:contract.tenantId},data:{bin:"999999999999"}});
+    assert.equal((await documentOrganization(prisma,contract.tenantId,dealId))?.legalName,null,"a different seller must not supply missing fields");
+    await prisma.tenantLegalProfile.update({where:{tenantId:contract.tenantId},data:{bin:null}});
+    assert.equal((await documentOrganization(prisma,contract.tenantId,"00000000-0000-4000-8000-000000000001",contractId))?.legalName,null,"contract must belong to the requested deal");
+    const foreignTenant=await prisma.tenant.findFirstOrThrow({where:{id:{not:contract.tenantId}}});
+    const foreignProfile=await prisma.tenantLegalProfile.findUnique({where:{tenantId:foreignTenant.id}});
+    assert.deepEqual(await documentOrganization(prisma,foreignTenant.id,dealId,contractId),foreignProfile);
+  } finally {
+    await prisma.tenantLegalProfile.update({where:{tenantId:contract.tenantId},data:fields});
+    await prisma.contract.update({where:{id:contractId},data:{status:contract.status,signedAt:contract.signedAt}});
+    if(invoiceId)await prisma.invoice.update({where:{id:invoiceId},data:{status:"CANCELLED"}});
+  }
+ });
+ it("imports Word, extracts both parties and preserves the source alongside its PDF",async()=>{
+  const word=await readFile(new URL("./fixtures/manual-word-contract.docx",import.meta.url));
+  const p=await req("/api/v1/documents/import-pdf/preview","POST",{kind:"CONTRACT",fileName:"contract.docx",fileBase64:word.toString("base64")});
+  assert.equal(p.draft.number,"WORD-2026/01");assert.equal(p.draft.date,"2026-08-12");
+  assert.equal(p.draft.buyer.bin,party.bin);assert.equal(p.draft.seller.bin,draft().seller.bin);
+  assert.equal(p.draft.items.length,1);assert.equal(p.draft.detectedTotal,100000);
+  const result=await req("/api/v1/documents/import-pdf/confirm","POST",{importId:p.importId,draft:p.draft});
+  const contract=await prisma.contract.findUniqueOrThrow({where:{id:result.documentId}});
+  assert.notEqual(contract.originalFileId,contract.generatedFileId);
+  const version=await prisma.contractVersion.findFirstOrThrow({where:{contractId:contract.id}});
+  const pdf=await fetch(base+`/api/v1/contracts/${contract.id}/pdf`,{headers:{cookie}});
+  const pdfBytes=Buffer.from(await pdf.arrayBuffer());assert.equal(pdf.status,200);assert.equal(pdfBytes.subarray(0,5).toString(),"%PDF-");assert.equal(version.sha256,createHash("sha256").update(pdfBytes).digest("hex"));
+  const original=await fetch(base+`/api/v1/contracts/${contract.id}/original`,{headers:{cookie}});assert.deepEqual(Buffer.from(await original.arrayBuffer()),word);
+  const hidden=await fetch(base+`/api/v1/contracts/${contract.id}/original`,{headers:{cookie:foreign}});assert.equal(hidden.status,404);
+  assert.equal((await req("/api/v1/documents/import-pdf/confirm","POST",{importId:p.importId,draft:p.draft})).reused,true);
+  const cancel=await req("/api/v1/documents/import-pdf/preview","POST",{kind:"CONTRACT",fileName:"cancel.docx",fileBase64:word.toString("base64")});
+  await req(`/api/v1/documents/import-pdf/${cancel.importId}`,"DELETE");
+  assert.equal(await prisma.attachment.count({where:{OR:[{id:cancel.importId},{parentId:cancel.importId}]}}),0);
+ });
+ it("accepts legacy DOC and rejects a renamed non-Word file",async()=>{
+  const word=await readFile(new URL("./fixtures/manual-word-contract.doc",import.meta.url));
+  const p=await req("/api/v1/documents/import-pdf/preview","POST",{kind:"CONTRACT",fileName:"legacy.doc",fileBase64:word.toString("base64")});
+  assert.equal(p.draft.number,"WORD-2026/01");assert.equal(p.draft.seller.bin,draft().seller.bin);
+  await req(`/api/v1/documents/import-pdf/${p.importId}`,"DELETE");
+  await req("/api/v1/documents/import-pdf/preview","POST",{kind:"CONTRACT",fileName:"fake.docx",fileBase64:bytes.toString("base64")},422);
  });
  it("reuses a confirmed import and rejects re-uploaded duplicates",async()=>{const results=await Promise.all([1,2].map(()=>req("/api/v1/documents/import-pdf/confirm","POST",{importId,draft:draft()})));assert.ok(results.every(r=>r.reused&&r.dealId===dealId));const p=await preview();await req("/api/v1/documents/import-pdf/confirm","POST",{importId:p.importId,draft:{...draft(),number:"ANOTHER"}},409);await req(`/api/v1/documents/import-pdf/${p.importId}`,"DELETE");});
  it("adds manual invoice to the existing deal and preserves the PDF",async()=>{

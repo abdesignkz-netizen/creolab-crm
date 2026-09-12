@@ -793,6 +793,15 @@ export function createApp(prisma: PrismaClient) {
     res.json(await generateContractPdfFile(prisma, await requireAuth(req), req.params.id, input));
   });
 
+  app.post("/api/v1/contracts/:id/imported-requisites", json, async (req,res) => {
+    const { restoreImportedRequisites } = await import("./services/importedRequisites.ts");
+    res.json(await restoreImportedRequisites(prisma,await requireAuth(req),req.params.id));
+  });
+  app.get("/api/v1/contracts/:id/original", async (req,res) => {
+    const { sendContractOriginal } = await import("./services/contractGenerationService.ts");
+    await sendContractOriginal(prisma,await requireAuth(req),req.params.id,res);
+  });
+
   app.get("/api/v1/contracts/:id/pdf", async (req, res) => {
     const { sendContractPdf } = await import("./services/contractGenerationService.ts");
     await sendContractPdf(prisma, await requireAuth(req), req.params.id, res);

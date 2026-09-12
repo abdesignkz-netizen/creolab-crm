@@ -1,3 +1,4 @@
+import { documentOrganization } from "./documentOrganization.ts";
 import type { PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
@@ -129,10 +130,7 @@ export async function getAvrReadiness(prisma: PrismaClient, auth: AuthContext, d
     },
   });
   if (!deal) throw new ApiError(404, "not_found", "Сделка не найдена");
-  const profile = await prisma.tenantLegalProfile.findUnique({
-    where: { tenantId: tid },
-    select: { legalName: true, bin: true, iin: true, legalAddress: true, directorName: true },
-  });
+  const profile = await documentOrganization(prisma, tid, dealId, deal.electronicDocuments[0]?.contractId || deal.contracts[0]?.id);
   const signed = deal.contracts[0] || null;
   return assessAvrReadiness({
     dealId,

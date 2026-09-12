@@ -66,7 +66,7 @@ export async function extractPdfPages(bytes: Buffer): Promise<PdfPageText[]> {
         if (ocr) {
           // One deadline covers both attempts on this page.
           const deadline = Date.now() + 45_000;
-          const recognize = async (detailed: boolean) => {
+          const recognize = async (detailed: boolean, recoverFaintText = false) => {
             const scaled = page.getViewport({ scale: ocrScale(viewport.width, viewport.height, detailed) });
             const canvas = createCanvas(Math.max(1, Math.floor(scaled.width)), Math.max(1, Math.floor(scaled.height)));
             let image: Buffer;
@@ -96,9 +96,9 @@ export async function extractPdfPages(bytes: Buffer): Promise<PdfPageText[]> {
               worker = await createWorker("rus+eng", 1, { langPath: languageDir, cacheMethod: "none", errorHandler: () => undefined });
               await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_BLOCK, preserve_interword_spaces: "1" });
             }
-            // Local adaptive thresholding on the retry helps faint text next to
-            // darker print; the source image itself stays continuous grayscale.
-            await worker.setParameters({ thresholding_method: detailed ? "2" : "0", thresholding_kfactor: "0.15" });
+            // Use local thresholding only to recover mostly missing text.
+            // On dense contracts it can erase table rows despite higher confidence.
+            await worker.setParameters({ thresholding_method: recoverFaintText ? "2" : "0", thresholding_kfactor: "0.15" });
             try {
               const result = await Promise.race([
                 worker!.recognize(image, { rotateAuto: true }, { text: true, blocks: true }),
@@ -109,7 +109,7 @@ export async function extractPdfPages(bytes: Buffer): Promise<PdfPageText[]> {
           };
           let result = await recognize(false);
           if (needsDetailedOcr(result.data)) {
-            const detailed = await recognize(true);
+            const detailed = await recognize(true, result.data.text.replace(/\s/g, "").length < 40);
             if (preferDetailedOcr(result.data, detailed.data)) result = detailed;
           }
           ocrText = result.data.text;

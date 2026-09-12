@@ -432,6 +432,7 @@ export async function getDealBoard(
       lastInboundMessageAt: true,
       lastOutboundMessageAt: true,
       lastContactAt: true,
+      methods: true,
     },
   });
   const contactById = new Map(contacts.map((c) => [c.id, c]));
@@ -661,6 +662,7 @@ export async function getDeal(prisma: PrismaClient, auth: AuthContext, dealId: s
       lastInboundMessageAt: true,
       lastOutboundMessageAt: true,
       lastContactAt: true,
+      methods: true,
     },
   });
   return {

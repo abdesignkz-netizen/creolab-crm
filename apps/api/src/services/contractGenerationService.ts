@@ -1,3 +1,4 @@
+import { documentOrganization } from "./documentOrganization.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { createReadStream } from "node:fs";
@@ -64,7 +65,7 @@ export async function generateContractPdfFile(
   if (!deal) throw new ApiError(404, "not_found", "Сделка не найдена");
 
   const [profile, tenant] = await Promise.all([
-    prisma.tenantLegalProfile.findUnique({ where: { tenantId: tid } }),
+    documentOrganization(prisma, tid, deal.id),
     prisma.tenant.findUnique({ where: { id: tid }, select: { name: true } }),
   ]);
 
@@ -268,4 +269,14 @@ export async function sendContractPdf(
     stream.on("end", () => resolve());
     stream.pipe(res);
   });
+}
+
+export async function sendContractOriginal(prisma: PrismaClient, auth: AuthContext, contractId: string, res: Response) {
+  const tid = requireTenant(auth).tenantId;
+  const contract = await prisma.contract.findFirst({where:{id:contractId,tenantId:tid}});
+  const file = contract?.originalFileId ? await prisma.attachment.findFirst({where:{id:contract.originalFileId,tenantId:tid,parentId:contractId,parentType:"contract"}}) : null;
+  if (!file) throw new ApiError(404,"not_found","Исходный документ не найден");
+  res.setHeader("Content-Type",file.mimeType);
+  res.setHeader("Content-Disposition",`attachment; filename*=UTF-8''${encodeURIComponent(file.originalFileName || file.fileName)}`);
+  res.sendFile(resolveUploadPath(file.storageKey));
 }

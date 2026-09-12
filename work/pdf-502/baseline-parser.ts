@@ -1,5 +1,5 @@
 import type { PdfImportDraft, PdfImportParty } from "@creolab/contracts";
-import { wordsToLines, type PdfPageText } from "./pdfTextExtraction.ts";
+import { wordsToLines, type PdfPageText } from "../../apps/api/src/services/pdfTextExtraction.ts";
 
 const clean = (text: string) => text.replace(/[|¦\[\]]/g, " ").replace(/[ \t]+/g, " ").trim();
 const numberValue = (value: string) => Number(value.replace(/\s/g, "").replace(",", "."));
@@ -63,13 +63,8 @@ export function parsePdfDocument(pages: PdfPageText[], kind: "CONTRACT" | "INVOI
   if (requisites) {
     const heading = requisites.words.find(w => /РЕКВИЗИТЫ/i.test(w.text));
     const words = requisites.words.filter(w => w.y > (heading?.y ?? requisites.height * 0.35));
-    // Only headings near the start of the requisites section define columns.
-    // Signature labels in the page footer can be indented far into a column.
-    const sectionTop = heading?.y ?? requisites.height * 0.35;
-    const roleHeaders = words.filter(w => w.y < sectionTop + requisites.height * 0.15 && /^(?:Заказчик|Исполнитель)[:]?$/i.test(w.text.trim()));
-    const columns = roleHeaders.length >= 2 ? Math.max(...roleHeaders.map(w=>w.x)) - 2 : requisites.width * 0.55;
-    const left = party(wordsToLines(words.filter(w => w.x < columns)).map(l => l.text).join("\n"));
-    const right = party(wordsToLines(words.filter(w => w.x >= columns)).map(l => l.text).join("\n"));
+    const left = party(wordsToLines(words.filter(w => w.x < requisites.width * 0.55)).map(l => l.text).join("\n"));
+    const right = party(wordsToLines(words.filter(w => w.x >= requisites.width * 0.55)).map(l => l.text).join("\n"));
     // Prefer explicit organisation identity; otherwise infer the roles from the preamble.
     const intro = clean(first);
     const sellerName = intro.match(/(?:ТОО|TOO|ИП|АО|ЖШС)\s*[«"“]([^»"”]+)[»"”][\s\S]{0,90}?«Исполнитель»/i)?.[1];

@@ -5,6 +5,7 @@ import PDFDocument from "pdfkit";
 import type { Page } from "tesseract.js";
 import { grayscaleImage, needsDetailedOcr, ocrScale, preferDetailedOcr } from "./services/pdfOcrImage.ts";
 import { extractPdfPages } from "./services/pdfTextExtraction.ts";
+import { parsePdfDocument } from "./services/pdfDocumentParser.ts";
 
 function result(text: string, confidence: number, words: Array<{text: string; confidence: number}> = []) {
   return { text, confidence, blocks: [{ paragraphs: [{ lines: [{ words }] }] }] } as Page;
@@ -12,6 +13,20 @@ function result(text: string, confidence: number, words: Array<{text: string; co
 const clearText = "Contract for presentation design and printing. Total 400000 KZT.";
 
 describe("Memory-bounded OCR images", () => {
+  it("does not use indented signature labels as requisites column headings", () => {
+    const words = [
+      {text:"РЕКВИЗИТЫ СТОРОН",x:100,y:300},
+      {text:"ТОО «Заказчик тест»",x:100,y:350},
+      {text:"БИН 111111111111",x:100,y:380},
+      {text:"ТОО «Исполнитель тест»",x:600,y:350},
+      {text:"БИН 222222222222",x:600,y:380},
+      {text:"Заказчик",x:180,y:950},
+      {text:"Исполнитель",x:800,y:950},
+    ].map(w=>({...w,width:180,height:16}));
+    const {draft} = parsePdfDocument([{page:1,width:1000,height:1000,ocr:true,words,text:words.map(w=>w.text).join("\n")}], "CONTRACT", "222222222222");
+    assert.equal(draft.buyer.bin, "111111111111");
+    assert.equal(draft.seller.bin, "222222222222");
+  });
   it("preserves faint shades and composites transparency onto white in an 8-bit image", () => {
     const canvas = createCanvas(4, 1);
     try {

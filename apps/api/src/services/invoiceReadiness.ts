@@ -1,3 +1,4 @@
+import { documentOrganization } from "./documentOrganization.ts";
 import type { PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
@@ -10,8 +11,8 @@ import {
 export const INVOICE_FIELD_LABELS: Record<string, string> = {
   ...CONTRACT_FIELD_LABELS,
   "contract.signed": "Подписанный договор",
-  "organization.iban": "Реквизиты: ИИК / IBAN",
-  "organization.bik": "Реквизиты: БИК",
+  "organization.iban": "Ваша организация (исполнитель): ИИК / IBAN",
+  "organization.bik": "Ваша организация (исполнитель): БИК",
 };
 
 export type InvoiceReadiness = ContractReadiness & {
@@ -120,18 +121,7 @@ export async function getInvoiceReadiness(prisma: PrismaClient, auth: AuthContex
     },
   });
   if (!deal) throw new ApiError(404, "not_found", "Сделка не найдена");
-  const profile = await prisma.tenantLegalProfile.findUnique({
-    where: { tenantId: tid },
-    select: {
-      legalName: true,
-      bin: true,
-      iin: true,
-      legalAddress: true,
-      directorName: true,
-      iban: true,
-      bik: true,
-    },
-  });
+  const profile = await documentOrganization(prisma, tid, dealId, deal.invoices[0]?.contractId || deal.contracts[0]?.id);
   return assessInvoiceReadiness({
     dealId,
     contractId: deal.invoices[0]?.contractId || deal.contracts[0]?.id || null,

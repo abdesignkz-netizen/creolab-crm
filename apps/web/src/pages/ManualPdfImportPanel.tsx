@@ -45,19 +45,20 @@ export function ManualPdfImportPanel({ onSaved }: { onSaved: () => void }) {
   }
   async function recognize() {
     if (busy || !file) return;
-    if (!/\.pdf$/i.test(file.name) || file.size>20*1024*1024) { setError("Выберите PDF размером до 20 МБ");return; }
+    if (!(kind === "CONTRACT" ? /\.(pdf|docx|doc)$/i : /\.pdf$/i).test(file.name) || file.size>20*1024*1024) { setError(kind === "CONTRACT" ? "Выберите договор PDF или Word (.docx, .doc) размером до 20 МБ" : "Выберите счёт PDF размером до 20 МБ");return; }
     setBusy(true);setError("");
     try {
       const result = await api.request<PdfImportPreview>("/api/v1/documents/import-pdf/preview",{method:"POST",body:JSON.stringify({kind,fileName:file.name,fileBase64:await readBase64(file)})});
       setPreview(result);setDraft(result.draft);
-    } catch (err) { setError(err instanceof Error ? err.message : "Не удалось распознать PDF"); }
+    } catch (err) { setError(err instanceof Error ? err.message : "Не удалось распознать документ"); }
     finally { setBusy(false); }
   }
   async function save() {
     if (busy || !preview || !draft) return;
     setBusy(true);setError("");
     try {
-      const result=await api.request<{dealId:string;kind:string}>("/api/v1/documents/import-pdf/confirm",{method:"POST",body:JSON.stringify({importId:preview.importId,draft,dealId:kind==="INVOICE"?dealId:undefined})});
+      const result=await api.request<{dealId:string;kind:string;warning?:string|null}>("/api/v1/documents/import-pdf/confirm",{method:"POST",body:JSON.stringify({importId:preview.importId,draft,dealId:kind==="INVOICE"?dealId:undefined})});
+      if (result.warning) setError(result.warning);
       setSaved(result);setOpen(false);setPreview(null);setDraft(null);setFile(null);
       notifySaved(kind==="CONTRACT"?"Договор загружен, сделка создана":"Счёт добавлен в сделку");
       onSaved();
@@ -77,21 +78,21 @@ export function ManualPdfImportPanel({ onSaved }: { onSaved: () => void }) {
   }
   return <div className="panel manual-pdf-import">
     <div className="saved-editor-summary">
-      <div><b>Загрузить готовый документ</b><p className="muted">PDF договора → реквизиты, состав работ и новая сделка. PDF счёта → выбранная сделка.</p></div>
-      {!open?<button type="button" className="btn" onClick={()=>{setOpen(true);setSaved(null);setError("");}}>Загрузить PDF</button>:null}
+      <div><b>Загрузить готовый документ</b><p className="muted">Договор PDF или Word (.docx, .doc) → реквизиты, состав работ и новая сделка. PDF счёта → выбранная сделка.</p></div>
+      {!open?<button type="button" className="btn" onClick={()=>{setOpen(true);setSaved(null);setError("");}}>Загрузить документ</button>:null}
     </div>
     {saved?<p className="ok">{saved.kind==="CONTRACT"?"Договор сохранён и связан с новой сделкой.":"Счёт сохранён."} <Link to={`/deals/${saved.dealId}`}>Открыть сделку</Link></p>:null}
     {error?<p className="error" role="alert">{error}</p>:null}
     {open?<>
       {!preview?<div className="stack">
-        <label>Тип документа<select value={kind} disabled={busy} onChange={e=>setKind(e.target.value as typeof kind)}><option value="CONTRACT">Договор</option><option value="INVOICE">Счёт на оплату</option></select></label>
-        <label>PDF-файл<input type="file" accept="application/pdf,.pdf" disabled={busy} onChange={e=>{setFile(e.target.files?.[0]||null);setError("");}}/></label>
-        <p className="muted">До 20 МБ и 20 страниц. Текстовые PDF и сканы на русском и английском распознаются на сервере CRM.</p>
-        <div className="actions"><button type="button" className="btn" disabled={busy||!file} onClick={()=>void recognize()}>{busy?"Распознаём страницы…":"Распознать PDF"}</button><button type="button" className="btn secondary" disabled={busy} onClick={()=>void discard()}>Отмена</button></div>
+        <label>Тип документа<select value={kind} disabled={busy} onChange={e=>{setKind(e.target.value as typeof kind);setFile(null);setError("");}}><option value="CONTRACT">Договор</option><option value="INVOICE">Счёт на оплату</option></select></label>
+        <label>{kind === "CONTRACT" ? "Файл договора (PDF, DOCX, DOC)" : "PDF-файл счёта"}<input key={kind} type="file" accept={kind === "CONTRACT" ? ".pdf,.docx,.doc,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" : "application/pdf,.pdf"} disabled={busy} onChange={e=>{setFile(e.target.files?.[0]||null);setError("");}}/></label>
+        <p className="muted">До 20 МБ и 20 страниц. PDF, сканы и Word распознаются на сервере CRM. Для Word создаётся PDF-копия; оригинал сохраняется.</p>
+        <div className="actions"><button type="button" className="btn" disabled={busy||!file} onClick={()=>void recognize()}>{busy?"Распознаём страницы…":"Распознать документ"}</button><button type="button" className="btn secondary" disabled={busy} onClick={()=>void discard()}>Отмена</button></div>
         {busy?<p role="status">Распознавание скана может занять несколько минут. Дождитесь формы проверки.</p>:null}
       </div>:draft?<form onSubmit={e=>{e.preventDefault();void save();}}>
-        <p>{preview.fileName} · {preview.pageCount} стр. · {preview.usedOcr?"Распознан скан":"Извлечён текст"} {fileUrl?<a href={fileUrl} target="_blank" rel="noreferrer">Открыть исходный PDF</a>:null}</p>
-        <p className="muted">Проверьте поля перед сохранением. Загрузка PDF не подтверждает электронную подпись или оплату.</p>
+        <p>{preview.fileName} · {preview.pageCount} стр. · {preview.usedOcr?"Распознан скан":"Извлечён текст"} {fileUrl?<a href={fileUrl} target="_blank" rel="noreferrer">Открыть исходный файл</a>:null}</p>
+        <p className="muted">Проверьте поля перед сохранением. Загрузка документа не подтверждает электронную подпись или оплату.</p>
         {preview.warnings.length?<ul className="pdf-import-warnings">{preview.warnings.map((w,i)=><li key={i}>{w}</li>)}</ul>:null}
         <fieldset disabled={busy} className="pdf-import-fields">
           <div className="deal-edit">
@@ -104,7 +105,7 @@ export function ManualPdfImportPanel({ onSaved }: { onSaved: () => void }) {
           <div className="pdf-import-parties">{(["buyer","seller"] as const).map(side=><div key={side} className="card">
             <h3>{side==="buyer"?"Заказчик":"Исполнитель"}</h3>
             {partyFields.map(([key,label])=><label key={key}>{label} ({side==="buyer"?"заказчик":"исполнитель"})<input required={key==="name"&&side==="buyer"&&kind==="CONTRACT"} value={draft[side][key]} onChange={e=>setDraft({...draft,[side]:{...draft[side],[key]:e.target.value}})}/></label>)}
-            {side==="seller"?<p className="muted">Реквизиты вашей организации в настройках не меняются.</p>:<p className="muted">{kind==="CONTRACT"?"Компания сопоставляется по БИН. В существующей карточке заполняются только пустые реквизиты.":"БИН сверяется с компанией выбранной сделки. Её реквизиты не меняются."}</p>}
+            {side==="seller"?<p className="muted">Пустые реквизиты вашей организации будут заполнены данными исполнителя. Заполненные значения сохранятся. При несовпадении БИН перенос не выполняется.</p>:<p className="muted">{kind==="CONTRACT"?"Компания сопоставляется по БИН. В существующей карточке заполняются только пустые реквизиты.":"БИН сверяется с компанией выбранной сделки. Её реквизиты не меняются."}</p>}
           </div>)}</div>
           {kind==="CONTRACT"?<div className="deal-edit"><label>Контактное лицо заказчика<input value={draft.contactName} onChange={e=>setDraft({...draft,contactName:e.target.value})}/></label><label>Телефон заказчика<input required type="tel" value={draft.contactPhone} onChange={e=>setDraft({...draft,contactPhone:e.target.value})}/></label></div>:null}
           <h3>Состав работ / позиции счёта</h3>
@@ -117,7 +118,7 @@ export function ManualPdfImportPanel({ onSaved }: { onSaved: () => void }) {
             <button type="button" className="btn secondary" onClick={()=>setDraft({...draft,items:draft.items.filter((_,n)=>n!==i)})}>Убрать позицию {i+1}</button>
           </div>)}
           <button type="button" className="btn secondary" onClick={()=>setDraft({...draft,items:[...draft.items,{name:"",quantity:1,unitPrice:0,vatRate:0,unit:"услуга"}]})}>Добавить позицию</button>
-          <div className="deal-edit"><label>Итого в PDF, ₸<input type="number" min="0" step="0.01" value={draft.detectedTotal??""} onChange={e=>setDraft({...draft,detectedTotal:e.target.value===""?null:Number(e.target.value)})}/></label><p><b>Сумма позиций с НДС: {total.toLocaleString("ru-RU")} ₸</b></p></div>
+          <div className="deal-edit"><label>Итого в документе, ₸<input type="number" min="0" step="0.01" value={draft.detectedTotal??""} onChange={e=>setDraft({...draft,detectedTotal:e.target.value===""?null:Number(e.target.value)})}/></label><p><b>Сумма позиций с НДС: {total.toLocaleString("ru-RU")} ₸</b></p></div>
           <label>Условия оплаты<textarea value={draft.paymentTerms} onChange={e=>setDraft({...draft,paymentTerms:e.target.value})}/></label>
           <label>Сроки выполнения<textarea value={draft.completionTerms} onChange={e=>setDraft({...draft,completionTerms:e.target.value})}/></label>
           <details><summary>Распознанный текст по страницам</summary>{preview.pages.map(p=><div key={p.page}><b>Страница {p.page}</b><pre className="pdf-import-text">{p.text}</pre></div>)}</details>

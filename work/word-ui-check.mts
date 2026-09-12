@@ -1,0 +1,18 @@
+import {mkdtempSync,writeFileSync,readFileSync} from "node:fs";
+import {tmpdir} from "node:os";
+import path from "node:path";
+const scratch=mkdtempSync(path.join(tmpdir(),"crm-word-ui-"));
+Object.assign(process.env,{NODE_ENV:"development",CRM_USE_PGLITE:"1",CRM_PGLITE_DIR:path.join(scratch,"db"),STORAGE_DIR:path.join(scratch,"files"),DATABASE_URL:"",SEED_PASSWORD:"ChangeMeLocal1!",ESF_PROVIDER:"mock",ESF_ENV:"off",ESF_ALLOW_LIVE_SEND:"0",WHATSAPP_SELLER_URL:"",WHATSAPP_SELLER_SECRET:"",OPENAI_API_KEY:"",ANYMODEL_API_KEY:"",VAPID_PUBLIC_KEY:"",VAPID_PRIVATE_KEY:"",ALLOWED_ORIGINS:"http://localhost:4307",CRM_INLINE_AUTOMATION:"0"});
+const {createPrismaClient}=await import("@creolab/db");const prisma=await createPrismaClient();
+await (await import("../packages/db/src/seed.ts")).seedDatabase();
+const {login}=await import("../apps/api/src/services/authService.ts");
+const owner=await login(prisma,{email:"owner@creolab.example",password:process.env.SEED_PASSWORD,client:"web"});
+const {previewManualPdf,commitManualPdf}=await import("../apps/api/src/services/manualPdfImportService.ts");
+const preview=await previewManualPdf(prisma,owner.auth,{kind:"CONTRACT",fileName:"example.docx",fileBase64:readFileSync("apps/api/src/fixtures/manual-word-contract.docx").toString("base64")});
+const saved=await commitManualPdf(prisma,owner.auth,{importId:preview.importId,draft:preview.draft});
+await prisma.tenantLegalProfile.update({where:{tenantId:owner.auth.activeMembership!.tenantId},data:{legalName:null,bin:null,legalAddress:null,directorName:null}});
+const {createApp}=await import("../apps/api/src/app.ts");const server=createApp(prisma).listen(4308,"127.0.0.1");
+const {createServer}=await import("vite");const web=await createServer({root:path.resolve("apps/web"),configFile:path.resolve("apps/web/vite.config.ts"),server:{host:"127.0.0.1",port:4307,strictPort:true,proxy:{"/api":"http://127.0.0.1:4308","/public":"http://127.0.0.1:4308","/health":"http://127.0.0.1:4308"}}});await web.listen();
+writeFileSync("work/word-ui-state.json",JSON.stringify({dealId:saved.dealId,url:`http://localhost:4307/deals/${saved.dealId}`}));
+console.log("WORD_UI_READY");
+async function stop(){await web.close();await new Promise(resolve=>server.close(resolve));await prisma.$disconnect();process.exit(0);}process.on("SIGINT",stop);process.on("SIGTERM",stop);

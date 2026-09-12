@@ -1,3 +1,4 @@
+import { documentOrganization } from "./documentOrganization.ts";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -115,7 +116,7 @@ export async function sendContractForSign(
     throw new ApiError(422, "not_ready_to_sign", "Договор ещё не готов к подписи");
   }
   const version = currentVersion(contract);
-  const profile = await prisma.tenantLegalProfile.findUnique({ where: { tenantId: tid } });
+  const profile = await documentOrganization(prisma, tid, contract.dealId, contract.id);
   const company = contract.deal.company;
   if (!company) throw new ApiError(422, "missing_fields", "У сделки нет компании покупателя");
 
@@ -531,10 +532,7 @@ function publicContractView(
 export async function getPublicSign(prisma: PrismaClient, token: string) {
   const request = await loadPublicRequest(prisma, token);
   const [profile, seller] = await Promise.all([
-    prisma.tenantLegalProfile.findUnique({
-      where: { tenantId: request.tenantId },
-      select: { legalName: true, shortName: true },
-    }),
+    documentOrganization(prisma, request.tenantId, request.contract.dealId, request.contractId),
     prisma.signatureRequest.findFirst({
       where: { tenantId: request.tenantId, contractId: request.contractId, signerType: "SELLER" },
       orderBy: { createdAt: "desc" },
@@ -610,10 +608,7 @@ export async function getPublicVerification(prisma: PrismaClient, verificationId
     },
   });
   if (!contract) throw new ApiError(404, "not_found", "Проверка не найдена");
-  const profile = await prisma.tenantLegalProfile.findUnique({
-    where: { tenantId: contract.tenantId },
-    select: { legalName: true, shortName: true },
-  });
+  const profile = await documentOrganization(prisma, contract.tenantId, contract.dealId, contract.id);
   const signatures = await prisma.documentSignature.findMany({
     where: { tenantId: contract.tenantId, contractId: contract.id },
     orderBy: { signedAt: "asc" },

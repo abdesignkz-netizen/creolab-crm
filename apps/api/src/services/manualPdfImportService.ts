@@ -1,3 +1,5 @@
+import { wordToPdf } from "./wordDocumentConversion.ts";
+import { fillImportedSeller } from "./importedRequisites.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
@@ -36,25 +38,38 @@ async function access(prisma: PrismaClient, auth: AuthContext) {
 export async function previewManualPdf(prisma: PrismaClient, auth: AuthContext, raw: unknown): Promise<PdfImportPreview> {
   const membership = await access(prisma, auth);
   const input = z.object({ kind: z.enum(["CONTRACT", "INVOICE"]), fileName: z.string().min(1).max(255), fileBase64: z.string().max(28_000_000) }).parse(raw);
-  if (!/\.pdf$/i.test(input.fileName) || !/^[A-Za-z0-9+/]+={0,2}$/.test(input.fileBase64)) throw new ApiError(422, "pdf_required", "Выберите файл PDF");
+  const extension = path.extname(input.fileName).slice(1).toLowerCase();
+  const word = input.kind === "CONTRACT" && (extension === "docx" || extension === "doc");
+  if ((!word && extension !== "pdf") || !/^[A-Za-z0-9+/]+={0,2}$/.test(input.fileBase64)) throw new ApiError(422, "pdf_required", "Выберите договор PDF, DOCX или DOC; счёт — PDF");
   if (activeExtractions >= 1) throw new ApiError(429, "pdf_import_busy", "Сейчас распознаётся другой документ. Дождитесь завершения и повторите загрузку.");
   const bytes = Buffer.from(input.fileBase64, "base64");
-  if (bytes.length > 20 * 1024 * 1024 || bytes.length < 8 || !bytes.subarray(0,8).toString().startsWith("%PDF-")) throw new ApiError(422, "pdf_invalid", "Нужен PDF размером до 20 МБ");
+  if (bytes.length > 20 * 1024 * 1024 || bytes.length < 8 || (!word && !bytes.subarray(0,8).toString().startsWith("%PDF-"))) throw new ApiError(422, "pdf_invalid", word ? "Нужен непустой файл Word размером до 20 МБ" : "Нужен PDF размером до 20 МБ");
   activeExtractions++;
   try {
-    const pages = await extractPdfPages(bytes);
+    const pdfBytes = word ? await wordToPdf(bytes, extension as "doc" | "docx") : bytes;
+    const pages = await extractPdfPages(pdfBytes);
     if (!pages.some(p=>p.text.trim())) throw new ApiError(422, "pdf_no_text", "На страницах не удалось распознать текст. Загрузите более чёткий скан.");
     const legal = await prisma.tenantLegalProfile.findUnique({ where: { tenantId: membership.tenantId } });
     const { draft, warnings } = parsePdfDocument(pages, input.kind, legal?.bin);
+    warnings.push("При сохранении пустые реквизиты вашей организации будут заполнены данными исполнителя. Уже заполненные значения сохранятся; при несовпадении БИН перенос не выполняется.");
     const importId = randomUUID();
     const sha256 = createHash("sha256").update(bytes).digest("hex");
-    const storageKey = path.posix.join(membership.tenantId, "manual-pdf", `${importId}.pdf`);
+    const storageKey = path.posix.join(membership.tenantId, "manual-pdf", `${importId}.${extension}`);
     const absolute = resolveUploadPath(storageKey);
     await mkdir(path.dirname(absolute), { recursive: true });
     await writeFile(absolute, bytes, { flag: "wx" });
     try {
-      await prisma.attachment.create({ data: { id: importId, tenantId: membership.tenantId, parentType: "document_import", parentId: importId, documentType: input.kind.toLowerCase(), storageKey, fileName: `${importId}.pdf`, originalFileName: path.basename(input.fileName), mimeType: "application/pdf", sizeBytes: bytes.length, checksum: sha256, status: "preview", uploadedById: auth.user.id } });
-    } catch (error) { await rm(absolute, { force: true }); throw error; }
+      await prisma.attachment.create({ data: { id: importId, tenantId: membership.tenantId, parentType: "document_import", parentId: importId, documentType: input.kind.toLowerCase(), storageKey, fileName: `${importId}.${extension}`, originalFileName: path.basename(input.fileName), mimeType: word ? (extension === "docx" ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document" : "application/msword") : "application/pdf", sizeBytes: bytes.length, checksum: sha256, status: "preview", uploadedById: auth.user.id } });
+      if (word) {
+        const pdfId = randomUUID();
+        const pdfKey = path.posix.join(membership.tenantId, "manual-pdf", `${pdfId}.pdf`);
+        await writeFile(resolveUploadPath(pdfKey), pdfBytes, { flag:"wx" });
+        try {
+          await prisma.attachment.create({data:{id:pdfId,tenantId:membership.tenantId,parentType:"document_import_pdf",parentId:importId,documentType:input.kind.toLowerCase(),storageKey:pdfKey,fileName:`${pdfId}.pdf`,originalFileName:input.fileName.replace(/\.(docx|doc)$/i,".pdf"),mimeType:"application/pdf",sizeBytes:pdfBytes.length,checksum:createHash("sha256").update(pdfBytes).digest("hex"),status:"preview",uploadedById:auth.user.id}});
+        } catch(error) { await rm(resolveUploadPath(pdfKey),{force:true}); throw error; }
+        warnings.push("Word преобразован в PDF для просмотра и подписания. Оригинал Word сохранён отдельно. Проверьте оформление PDF перед подписью.");
+      }
+    } catch (error) { await prisma.attachment.deleteMany({where:{id:importId,tenantId:membership.tenantId,status:"preview"}}); await rm(absolute, { force: true }); throw error; }
     return { importId, fileName: path.basename(input.fileName), sha256, pageCount: pages.length, usedOcr: pages.some(p=>p.ocr), draft, warnings, pages: pages.map(({page,text})=>({page,text})) };
   } finally { activeExtractions--; }
 }
@@ -64,9 +79,16 @@ export async function commitManualPdf(prisma: PrismaClient, auth: AuthContext, r
   const { importId, draft, dealId: requestedDealId } = commitSchema.parse(raw);
   const tid = membership.tenantId;
   const file = await prisma.attachment.findFirst({ where: { id: importId, tenantId: tid } });
-  if (!file || file.documentType !== draft.kind.toLowerCase()) throw new ApiError(404, "not_found", "Загруженный PDF не найден");
+  if (!file || file.documentType !== draft.kind.toLowerCase()) throw new ApiError(404, "not_found", "Загруженный документ не найден");
   const bytes = await readFile(resolveUploadPath(file.storageKey));
   if (createHash("sha256").update(bytes).digest("hex") !== file.checksum) throw new ApiError(409, "pdf_changed", "Файл изменился. Загрузите PDF заново.");
+  const pdfFile = file.mimeType === "application/pdf" ? file : await prisma.attachment.findFirst({where:{tenantId:tid,parentId:importId,parentType:{in:["document_import_pdf","contract"]},mimeType:"application/pdf"}});
+  // Confirmed Word uploads are returned idempotently below; their PDF is already linked to the contract.
+  const alreadyContract = file.status === "imported" && file.parentType === "contract" ? await prisma.contract.findFirst({where:{id:file.parentId,tenantId:tid}}) : null;
+  const pdfAttachment = pdfFile || (alreadyContract?.generatedFileId ? await prisma.attachment.findFirst({where:{id:alreadyContract.generatedFileId,tenantId:tid}}) : null);
+  if (!pdfAttachment) throw new ApiError(422,"word_pdf_missing","PDF-копия не найдена. Повторите загрузку Word.");
+  const checkedPdf = await readFile(resolveUploadPath(pdfAttachment.storageKey));
+  if (createHash("sha256").update(checkedPdf).digest("hex") !== pdfAttachment.checksum) throw new ApiError(409,"pdf_changed","PDF-копия изменилась. Повторите загрузку.");
   const items = draft.items.map(item=>({ ...item, ...lineAmounts(item.quantity,item.unitPrice,item.vatRate) }));
   const totals = sumLines(items);
   if (totals.totalAmount <= 0) throw new ApiError(422, "pdf_amount_required", "Укажите стоимость работ");
@@ -115,7 +137,7 @@ export async function commitManualPdf(prisma: PrismaClient, auth: AuthContext, r
         if (!stage) throw new ApiError(422, "pipeline_required", "Воронка сделок не настроена");
         const deal = await tx.deal.create({ data: { tenantId: tid, contactId, companyId, title: draft.subject.slice(0,250), description: `Импорт договора № ${draft.number} от ${draft.date}.\n${draft.subject}`, stageId: stage.id, offerAmountMinor: toMinorTenge(totals.totalAmount), assigneeMembershipId: membership.id, nextAction: "Проверить загруженный договор и его подписание" } });
         dealId = deal.id;
-        await tx.dealStageHistory.create({ data: { tenantId: tid, dealId, toStageId: stage.id, toSystemKey: stage.systemKey, enteredAt: new Date(), changedByType: "user", changedById: auth.user.id, note: "Создана из PDF договора" } });
+        await tx.dealStageHistory.create({ data: { tenantId: tid, dealId, toStageId: stage.id, toSystemKey: stage.systemKey, enteredAt: new Date(), changedByType: "user", changedById: auth.user.id, note: "Создана из загруженного договора" } });
         await tx.dealItem.createMany({ data: items.map((item,sortOrder)=>({ ...item, tenantId: tid, dealId, sortOrder })) });
       } else {
         const deal = await tx.deal.findFirst({ where: { id: dealId, tenantId: tid } });
@@ -126,11 +148,12 @@ export async function commitManualPdf(prisma: PrismaClient, auth: AuthContext, r
         const contract = await tx.contract.findFirst({ where: { tenantId: tid, dealId }, orderBy: { createdAt: "desc" } });
         contractId = contract?.id || null;
       }
+      const requisites = draft.kind === "CONTRACT" ? await fillImportedSeller(tx, tid, draft.seller) : null;
       let documentId: string;
       if (draft.kind === "CONTRACT") {
-        const contract = await tx.contract.create({ data: { tenantId: tid, dealId, companyId, number: draft.number, date: new Date(draft.date), subject: draft.subject, paymentTerms: draft.paymentTerms || null, completionTerms: draft.completionTerms || null, ...totals, status: "READY_TO_SIGN", originalFileId: importId, generatedFileId: importId, createdByUserId: auth.user.id } });
+        const contract = await tx.contract.create({ data: { tenantId: tid, dealId, companyId, number: draft.number, date: new Date(draft.date), subject: draft.subject, paymentTerms: draft.paymentTerms || null, completionTerms: draft.completionTerms || null, ...totals, status: "READY_TO_SIGN", originalFileId: importId, generatedFileId: pdfAttachment.id, createdByUserId: auth.user.id } });
         documentId = contract.id;
-        await tx.contractVersion.create({ data: { tenantId: tid, contractId: documentId, version: 1, fileId: importId, sha256: file.checksum } });
+        await tx.contractVersion.create({ data: { tenantId: tid, contractId: documentId, version: 1, fileId: pdfAttachment.id, sha256: pdfAttachment.checksum } });
       } else {
         const invoice = await tx.invoice.create({ data: { tenantId: tid, dealId, companyId, contractId, number: draft.number, date: new Date(draft.date), ...totals, status: "ISSUED", pdfFileId: importId, createdByUserId: auth.user.id } });
         documentId = invoice.id;
@@ -138,8 +161,9 @@ export async function commitManualPdf(prisma: PrismaClient, auth: AuthContext, r
         await tx.deal.updateMany({ where: { id: dealId, tenantId: tid, paymentStatus: "NOT_INVOICED" }, data: { paymentStatus: "INVOICED" } });
       }
       await tx.attachment.update({ where: { id: importId }, data: { parentType: draft.kind.toLowerCase(), parentId: documentId, status: "imported" } });
-      await tx.auditEvent.create({ data: { tenantId: tid, actorUserId: auth.user.id, action: "document.import_pdf", entityType: draft.kind.toLowerCase(), entityId: documentId, changesJson: { dealId, sha256: file.checksum, number: draft.number, reviewedImport: draft, signatureVerified: false } } });
-      return { documentId, dealId, kind: draft.kind, reused: false };
+      if (pdfAttachment.id !== importId) await tx.attachment.update({where:{id:pdfAttachment.id},data:{parentType:"contract",parentId:documentId,status:"imported"}});
+      await tx.auditEvent.create({ data: { tenantId: tid, actorUserId: auth.user.id, action: "document.import_pdf", entityType: draft.kind.toLowerCase(), entityId: documentId, changesJson: { dealId, sha256: file.checksum, number: draft.number, reviewedImport: draft, filledOrganizationFields: requisites?.fields || [], signatureVerified: false } } });
+      return { documentId, dealId, kind: draft.kind, reused: false, warning: requisites?.warning || null };
     });
   } catch (error) {
     if ((error as { code?: string }).code === "P2002") throw new ApiError(409, "document_number_exists", "Документ с таким номером уже существует. Проверьте номер или откройте существующий документ.");
@@ -150,7 +174,15 @@ export async function commitManualPdf(prisma: PrismaClient, auth: AuthContext, r
 export async function discardManualPdf(prisma: PrismaClient, auth: AuthContext, id: string) {
   const membership = await access(prisma, auth);
   z.string().uuid().parse(id);
-  const removed = await prisma.attachment.deleteMany({ where: { id, tenantId: membership.tenantId, status: "preview", parentType: "document_import" } });
-  if (removed.count) await rm(resolveUploadPath(path.posix.join(membership.tenantId, "manual-pdf", `${id}.pdf`)), { force: true });
+  const files = await prisma.$transaction(async tx => {
+    const original = await tx.attachment.findFirst({where:{id,tenantId:membership.tenantId,status:"preview",parentType:"document_import"}});
+    if (!original) return [];
+    const deleted = await tx.attachment.deleteMany({where:{id,status:"preview",parentType:"document_import",tenantId:membership.tenantId}});
+    if (!deleted.count) return [];
+    const derived = await tx.attachment.findMany({where:{parentId:id,parentType:"document_import_pdf",status:"preview",tenantId:membership.tenantId}});
+    await tx.attachment.deleteMany({where:{id:{in:derived.map(f=>f.id)},tenantId:membership.tenantId}});
+    return [original,...derived];
+  });
+  for (const file of files) await rm(resolveUploadPath(file.storageKey),{force:true});
   return { ok: true };
 }

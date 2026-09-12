@@ -1,3 +1,4 @@
+import { documentOrganization } from "./documentOrganization.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -75,7 +76,7 @@ export async function generateInvoicePdfFile(
       });
 
   const [profile, tenant] = await Promise.all([
-    prisma.tenantLegalProfile.findUnique({ where: { tenantId: tid } }),
+    documentOrganization(prisma, tid, deal.id, invoice.contractId),
     prisma.tenant.findUnique({ where: { id: tid }, select: { name: true } }),
   ]);
 

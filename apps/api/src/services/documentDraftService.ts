@@ -246,8 +246,9 @@ export async function listDealDocuments(prisma: PrismaClient, auth: AuthContext,
   ]);
   const importedInvoiceFiles = await prisma.attachment.findMany({ where: { tenantId: tid, parentType: "invoice", status: "imported", id: { in: invoices.flatMap(i => i.pdfFileId ? [i.pdfFileId] : []) } }, select: { id: true } });
   const importedIds = new Set(importedInvoiceFiles.map(f => f.id));
+  const originals = await prisma.attachment.findMany({where:{tenantId:tid,id:{in:contracts.flatMap(c=>c.originalFileId?[c.originalFileId]:[])}},select:{id:true,originalFileName:true}});
   return {
-    contracts: contracts.map(serializeContract),
+    contracts: contracts.map(row => ({...serializeContract(row), originalFileName:originals.find(f=>f.id===row.originalFileId)?.originalFileName || null})),
     invoices: invoices.map(row => ({ ...serializeInvoice(row), importedPdf: Boolean(row.pdfFileId && importedIds.has(row.pdfFileId)) })),
     electronicDocuments: electronicDocuments.map(serializeElectronicDocument),
   };
