@@ -4,11 +4,11 @@
 services:
   - type: web
     name: creolab-crm
-    runtime: node
+    runtime: docker
     plan: starter
     region: frankfurt
-    buildCommand: npm install && npm run build --workspace=@creolab/web
-    startCommand: API_PORT=$PORT npm run start --workspace=@creolab/api
+    dockerfilePath: ./apps/api/Dockerfile
+    dockerContext: .
     disk:
       name: creolab-crm-files
       mountPath: /var/data
@@ -16,8 +16,6 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
-      - key: NODE_VERSION
-        value: "22"
       - key: STORAGE_DIR
         value: /var/data/files
       - key: STORAGE_PERSISTENT

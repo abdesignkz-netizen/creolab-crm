@@ -1,0 +1,12 @@
+.git
+**/node_modules
+**/.env
+**/.env.*
+**/dist
+**/*.tsbuildinfo
+data
+uploads
+storage
+work
+.codex
+.agents

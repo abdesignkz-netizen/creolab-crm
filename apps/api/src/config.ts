@@ -13,7 +13,7 @@ for (const file of envFiles) {
 
 export const config = {
   nodeEnv: process.env.NODE_ENV || "development",
-  port: Number(process.env.API_PORT || 4100),
+  port: Number(process.env.API_PORT || process.env.PORT || 4100),
   appBaseUrl: process.env.APP_BASE_URL || "http://localhost:5173",
   apiBaseUrl: process.env.API_BASE_URL || "http://localhost:4100",
   allowedOrigins: String(
