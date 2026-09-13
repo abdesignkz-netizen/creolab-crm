@@ -457,7 +457,7 @@ function esfSendMessage(code: string, kind: "AVR" | "ESF" = "AVR") {
       : "Подпись АВР XML на сервере через .p12 выключена. Нужен NCALayer на компьютере пользователя.";
   }
   if (code === "esf_send_not_configured") {
-    return "Живая отправка в ИС ЭСФ выключена. Нужны ESF_ENV=test|local и ESF_ALLOW_LIVE_SEND=1.";
+    return "Живая отправка в ИС ЭСФ выключена. Нужны ESF_ENV=test|prod|local, ESF_ALLOW_LIVE_SEND=1 и для prod ещё ESF_ALLOW_PROD=1.";
   }
   if (code === "esf_xsd_invalid") {
     return kind === "ESF" ? "XML ЭСФ не проходит official InvoiceV2 XSD" : "XML АВР не проходит official AwpV1 XSD";

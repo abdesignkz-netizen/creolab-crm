@@ -55,4 +55,32 @@ describe("ESF TEST endpoint guard", () => {
       else process.env[key] = value;
     }
   });
+
+  it("readEsfConfig при ESF_ENV=prod и ESF_ALLOW_PROD ходит на esf.gov.kz", () => {
+    const prev = {
+      ESF_ENV: process.env.ESF_ENV,
+      ESF_ALLOW_PROD: process.env.ESF_ALLOW_PROD,
+      ESF_ALLOW_LIVE_SEND: process.env.ESF_ALLOW_LIVE_SEND,
+      ESF_BASE_URL: process.env.ESF_BASE_URL,
+      ESF_TEST_API_URL: process.env.ESF_TEST_API_URL,
+      ESF_PRODUCTION_API_URL: process.env.ESF_PRODUCTION_API_URL,
+    };
+    process.env.ESF_ENV = "prod";
+    process.env.ESF_ALLOW_PROD = "1";
+    process.env.ESF_ALLOW_LIVE_SEND = "1";
+    delete process.env.ESF_BASE_URL;
+    delete process.env.ESF_TEST_API_URL;
+    delete process.env.ESF_PRODUCTION_API_URL;
+    const config = readEsfConfig();
+    assert.equal(config.esfEnv, "prod");
+    assert.equal(config.allowProd, true);
+    assert.equal(config.liveSendAllowed, true);
+    assert.equal(config.endpointHost, "esf.gov.kz");
+    assert.match(config.awpUrl, /esf\.gov\.kz/);
+    assert.doesNotMatch(config.baseUrl, /test3\.esf\.kgd\.gov\.kz/);
+    for (const [key, value] of Object.entries(prev)) {
+      if (value == null) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
 });

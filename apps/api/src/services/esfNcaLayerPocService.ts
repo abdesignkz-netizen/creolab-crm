@@ -747,7 +747,7 @@ async function uploadSignedDocument(input: {
     return {
       ok: false as const,
       code: "esf_send_not_configured",
-      message: "Живая отправка в ИС ЭСФ выключена. Нужны ESF_ENV=test|local и ESF_ALLOW_LIVE_SEND=1.",
+      message: "Живая отправка в ИС ЭСФ выключена. Нужны ESF_ENV=test|prod|local, ESF_ALLOW_LIVE_SEND=1 и для prod ещё ESF_ALLOW_PROD=1.",
       errors: [],
       provider: "live" as const,
       externalId: "",

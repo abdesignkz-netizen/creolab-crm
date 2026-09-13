@@ -90,13 +90,13 @@ export async function buildEsfPreflight(input?: {
     blockers.push("ESF_PROVIDER=mock — это локальная заглушка, не TEST КГД. Для живой отправки уберите mock.");
   }
   if (config.esfEnv === "off") {
-    blockers.push("ESF_ENV=off. Для кабинета КГД поставьте ESF_ENV=test.");
+    blockers.push("ESF_ENV=off. Для кабинета КГД поставьте ESF_ENV=test или ESF_ENV=prod.");
   }
   if (config.esfEnv === "prod" && !config.allowProd) {
     blockers.push("ESF_ENV=prod без ESF_ALLOW_PROD — боевой контур закрыт.");
   }
   if (!config.liveSendAllowed) {
-    blockers.push("Живая отправка выключена. Нужны ESF_ENV=test и ESF_ALLOW_LIVE_SEND=1. Production не открываем.");
+    blockers.push("Живая отправка выключена. Нужны ESF_ALLOW_LIVE_SEND=1 и ESF_ENV=test|prod (для prod ещё ESF_ALLOW_PROD=1).");
   }
   if (!esfHost.reachable) {
     blockers.push(`Хост ИС ЭСФ недоступен: ${esfTarget.host}:${esfTarget.port}`);
@@ -121,7 +121,9 @@ export async function buildEsfPreflight(input?: {
   return {
     ready,
     nextStep: ready
-      ? "Системный контур TEST доступен. Подключение — Интеграции → ИС ЭСФ через NCALayer."
+      ? (config.esfEnv === "prod"
+        ? "Системный контур ИС ЭСФ (боевой) доступен. Подключение — Интеграции → ИС ЭСФ через NCALayer."
+        : "Системный контур TEST доступен. Подключение — Интеграции → ИС ЭСФ через NCALayer.")
       : blockers[0] || "Проверьте ESF_PROVIDER, ESF_ENV и доступность хоста КГД.",
     blockers,
     legacy,
