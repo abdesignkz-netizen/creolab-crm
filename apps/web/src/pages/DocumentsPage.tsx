@@ -1,6 +1,6 @@
 import { ManualPdfImportPanel } from "./ManualPdfImportPanel";
 import { DeleteContractButton } from "../components/DeleteContractButton";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Pagination } from "../components/Pagination";
 import { api } from "../lib/api";
@@ -10,7 +10,6 @@ const KINDS = [
   ["", "Все"],
   ["CONTRACT", "Договоры"],
   ["INVOICE", "Счета"],
-  ["EDOC", "АВР и ЭСФ"],
   ["AVR", "АВР"],
   ["ESF", "ЭСФ"],
 ] as const;
@@ -33,7 +32,45 @@ export function DocumentsPage() {
   const [commandDealId, setCommandDealId] = useState("");
   const [commandBusy, setCommandBusy] = useState(false);
   const [commandResult, setCommandResult] = useState<any>(null);
+  const [esfCreateOpen, setEsfCreateOpen] = useState(false);
+  const [esfDeals, setEsfDeals] = useState<any[]>([]);
+  const [esfDealId, setEsfDealId] = useState("");
+  const [esfBusy, setEsfBusy] = useState(false);
+  const [esfError, setEsfError] = useState("");
+  const [createdEsf, setCreatedEsf] = useState<any>(null);
+  const esfFlight = useRef(false);
   const limit = 50;
+
+  async function openEsfCreate() {
+    setEsfCreateOpen(true);
+    setEsfBusy(true);
+    setEsfError("");
+    try {
+      const result: any = await api.request("/api/v1/documents/avr/eligible-deals?filter=all");
+      setEsfDeals(result.items || []);
+    } catch (err) {
+      setEsfError(err instanceof Error ? err.message : "Не удалось загрузить сделки");
+    } finally { setEsfBusy(false); }
+  }
+
+  async function createEsf(e: FormEvent) {
+    e.preventDefault();
+    if (!esfDealId || esfFlight.current) return;
+    esfFlight.current = true;
+    setEsfBusy(true);
+    setEsfError("");
+    try {
+      const result: any = await api.createElectronicDocumentDraft(esfDealId, { type: "ESF" });
+      setCreatedEsf(result.document);
+      setEsfCreateOpen(false);
+      setAttention("");
+      setOffset("0");
+      await load(0);
+    } catch (err) {
+      setEsfError(err instanceof Error ? err.message : "Не удалось создать ЭСФ");
+    } finally { esfFlight.current = false; setEsfBusy(false); }
+  }
+
 
   async function load(nextOffset = Number(offset) || 0) {
     const version = ++requestVersion.current;
@@ -131,7 +168,6 @@ export function DocumentsPage() {
           <h2>Документы</h2>
           <p className="muted">Договоры, счета, АВР и ЭСФ по всем сделкам</p>
         </div>
-        {!disabled?<Link className="btn" to="/documents/avr/new">+ Создать</Link>:null}
         <Link className="btn secondary" to="/settings#company-requisites">
           Реквизиты
         </Link>
@@ -263,15 +299,33 @@ export function DocumentsPage() {
       ) : null}
       {loading ? <div className="state">Загрузка…</div> : null}
 
-      {!loading && !disabled && !items.length ? (
-        <div className="sit-section">
-          <p className="empty">Документов пока нет. Загрузите готовый PDF или создайте договор в карточке сделки.</p>
-        </div>
-      ) : null}
+      {!disabled ? <div className="sit-section">
+        {kind === "AVR" || kind === "ESF" ? <div className="row sit-head">
+          <h3>{kind === "AVR" ? "АВР" : "ЭСФ"}</h3>
+          {kind === "AVR"
+            ? <Link className="btn" to="/documents/avr/new">Создать АВР</Link>
+            : <button type="button" className="btn" disabled={esfBusy} onClick={() => void openEsfCreate()}>Создать ЭСФ</button>}
+        </div> : null}
+        {kind === "ESF" && esfCreateOpen ? <form className="panel" onSubmit={createEsf}>
+          <label>Сделка для ЭСФ
+            <select value={esfDealId} disabled={esfBusy} onChange={e => setEsfDealId(e.target.value)}>
+              <option value="">Выберите сделку</option>
+              {esfDeals.map(deal => <option key={deal.id} value={deal.id}>{deal.title} — {deal.companyName || deal.contactName}</option>)}
+            </select>
+          </label>
+          {!esfBusy && !esfDeals.length && !esfError ? <p className="muted">Нет сделок для создания ЭСФ.</p> : null}
+          {esfError ? <p className="error" role="alert">{esfError}</p> : null}
+          <div className="actions">
+            <button type="submit" className="btn" disabled={esfBusy || !esfDealId}>Создать черновик ЭСФ</button>
+            <button type="button" className="btn secondary" disabled={esfBusy} onClick={() => setEsfCreateOpen(false)}>Отмена</button>
+          </div>
+        </form> : null}
+        {kind === "ESF" && createdEsf ? <p role="status">ЭСФ {createdEsf.number} сохранён. <Link to={`/deals/${createdEsf.dealId}#esf`}>Открыть ЭСФ</Link></p> : null}
+        {!loading && !items.length ? <p className="empty">{kind === "AVR" ? "АВР пока нет. Нажмите «Создать АВР»." : kind === "ESF" ? "ЭСФ пока нет. Нажмите «Создать ЭСФ»." : "Документов пока нет. Загрузите документ или создайте его в карточке сделки."}</p> : null}
+        {items.length > 0 ? <div className="documents-table-wrap"><table className="documents-table"><thead><tr><th>№ документа</th><th>Клиент</th><th>Сделка</th><th>Сумма</th><th>Дата</th><th>Тип</th><th>Статус</th><th>ЭСФ</th><th>Ответственный</th><th>Действия</th></tr></thead><tbody>{items.map(item=><tr key={`${item.kind}-${item.id}`}><td><Link to={item.href}>{item.number}</Link></td><td>{item.companyName||"Не указан"}</td><td><Link to={`/deals/${item.dealId}`}>{item.dealTitle}</Link></td><td>{Number(item.totalAmount).toLocaleString("ru-RU")} ₸</td><td>{new Date(item.date||item.updatedAt).toLocaleDateString("ru-RU")}</td><td>{item.kindLabel}</td><td><span className={`document-status status-${item.errorCode?"ERROR":item.status}`}>{item.statusLabel}</span></td><td>{item.esfStatus}</td><td>{item.responsible||"Не назначен"}</td><td><Link to={item.href}>Открыть</Link>{item.kind==="CONTRACT"?<DeleteContractButton id={item.id} number={item.number} onDeleted={async()=>{setOffset("0");await load(0);}}/>:null}</td></tr>)}</tbody></table></div> : null}
+      </div> : null}
 
-      <div className="documents-table-wrap"><table className="documents-table"><thead><tr><th>№ документа</th><th>Клиент</th><th>Сделка</th><th>Сумма</th><th>Дата</th><th>Тип</th><th>Статус</th><th>ЭСФ</th><th>Ответственный</th><th>Действия</th></tr></thead><tbody>{items.map(item=><tr key={`${item.kind}-${item.id}`}><td><Link to={item.href}>{item.number}</Link></td><td>{item.companyName||"Не указан"}</td><td><Link to={`/deals/${item.dealId}`}>{item.dealTitle}</Link></td><td>{Number(item.totalAmount).toLocaleString("ru-RU")} ₸</td><td>{new Date(item.date||item.updatedAt).toLocaleDateString("ru-RU")}</td><td>{item.kindLabel}</td><td><span className={`document-status status-${item.errorCode?"ERROR":item.status}`}>{item.statusLabel}</span></td><td>{item.esfStatus}</td><td>{item.responsible||"Не назначен"}</td><td><Link to={item.href}>Открыть</Link>{item.kind==="CONTRACT"?<DeleteContractButton id={item.id} number={item.number} onDeleted={async()=>{setOffset("0");await load(0);}}/>:null}</td></tr>)}</tbody></table></div>
-
-      {!disabled ? (
+      {!disabled && total > 0 ? (
         <Pagination
           total={total}
           offset={Number(offset) || 0}

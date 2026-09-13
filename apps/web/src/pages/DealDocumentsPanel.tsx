@@ -2,7 +2,7 @@ import { notifySaved } from "../components/SaveNotice";
 import { INVOICE_PAYMENT_KIND_LABEL, type PdfImportDraft } from "@creolab/contracts";
 import { DeleteContractButton } from "../components/DeleteContractButton";
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { api } from "../lib/api";
 import { signAndSendEsfDocument } from "../lib/signing/esfSignAndSend";
 import { createSigningClient, NcalayerError } from "../lib/signing/ncalayerClient";
@@ -159,6 +159,10 @@ export function DealDocumentsPanel(props: {
 
   const contracts = docs?.contracts || [];
   const invoices = docs?.invoices || [];
+  const { hash } = useLocation();
+  useEffect(() => {
+    if (hash === "#esf" && docs) document.getElementById("esf")?.scrollIntoView({ block: "start" });
+  }, [hash, docs]);
   const edocs = docs?.electronicDocuments || [];
   const avr = edocs.find((row: any) => row.type === "AVR");
   const esf = edocs.find((row: any) => row.type === "ESF");
@@ -660,7 +664,7 @@ export function DealDocumentsPanel(props: {
           ) : null}
         </div>
 
-        <div className="doc-step">
+        <div className="doc-step" id="esf" style={{ scrollMarginTop: 24 }}>
           <div className="doc-step-title">
             <b>ЭСФ</b>
           </div>
