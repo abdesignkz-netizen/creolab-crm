@@ -182,8 +182,10 @@ describe("Request analysis heuristic", () => {
     assert.match(analysis.taskObjective, /Бюджет — 77777/);
     assert.match(analysis.taskObjective, /Услуга — web/);
     assert.doesNotMatch(analysis.clientMessageDraft, /^Уже известно:/);
-    assert.match(analysis.clientMessageDraft, /Здравствуйте/i);
-    assert.match(analysis.clientMessageDraft, /сайт для строительства/i);
+    assert.match(analysis.clientMessageDraft, /аппап, добрый день/i);
+    assert.match(analysis.clientMessageDraft, /CreoLab Digital Agency/);
+    assert.match(analysis.clientMessageDraft, /заявки на сайт для строительства/i);
+    assert.doesNotMatch(analysis.clientMessageDraft, /Понял/);
     assert.doesNotMatch(analysis.clientMessageDraft, /77777777777/);
   });
 
@@ -193,24 +195,28 @@ describe("Request analysis heuristic", () => {
       subject: "Презентация · Для тендеров",
       description: "Нужна презентация для тендера",
     });
-    assert.match(analysis.clientMessageDraft, /Здравствуйте, Алия/i);
-    assert.match(analysis.clientMessageDraft, /тендер/i);
-    assert.doesNotMatch(analysis.clientMessageDraft, /^Уже известно:/);
+    assert.match(analysis.clientMessageDraft, /Алия, добрый день/i);
+    assert.match(analysis.clientMessageDraft, /CreoLab Digital Agency/);
+    assert.match(analysis.clientMessageDraft, /заявки на презентацию для тендера/i);
+    assert.doesNotMatch(analysis.clientMessageDraft, /Понял/);
   });
 
-  it("uses LLM WhatsApp copy when the draft is valid", () => {
+  it("keeps LLM questions but replaces «Понял, что нужна» with the agency intro", () => {
     const draft = analyzeRequestHeuristic({
-      description: "Нужна презентация для тендера",
+      name: "Максат",
+      description: "Нужна презентация по логистике в срочном порядке",
     });
     const merged = applyRefinedRequestAnalysis(
       draft,
       {
         clientMessageDraft:
-          "Здравствуйте! Получили заявку на презентацию для тендера. Для какого конкурса она нужна и какой примерно объём?",
+          "Максат, добрый день! Понял, что Вам нужна презентация по логистике в срочном порядке. Подскажите, пожалуйста: для кого она предназначена?",
       },
-      { description: "Нужна презентация для тендера" },
+      { name: "Максат", description: "Нужна презентация по логистике в срочном порядке" },
     );
-    assert.match(merged.clientMessageDraft, /какого конкурса/i);
+    assert.match(merged.clientMessageDraft, /Максат, добрый день! Вас приветствует CreoLab Digital Agency, пишу по поводу вашей заявки на презентацию по логистике/i);
+    assert.match(merged.clientMessageDraft, /для кого она предназначена/i);
+    assert.doesNotMatch(merged.clientMessageDraft, /Понял/);
     assert.equal(sanitizeClientMessageDraft("{not a message}"), null);
   });
 

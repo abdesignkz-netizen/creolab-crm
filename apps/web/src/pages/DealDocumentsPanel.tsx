@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { api } from "../lib/api";
 import { signAndSendEsfDocument } from "../lib/signing/esfSignAndSend";
+import { ensureEsfCabinetSession } from "../lib/signing/esfConnect";
 import { createSigningClient } from "../lib/signing/ncalayerClient";
 
 const CONTRACT_STATUS_LABEL: Record<string, string> = {
@@ -171,6 +172,10 @@ export function DealDocumentsPanel(props: {
   const esf = edocs.find((row: any) => row.type === "ESF");
   const [submissions, setSubmissions] = useState<Record<string, EsfSubmission>>({});
   const [esfSystem, setEsfSystem] = useState<any>(null);
+  const [esfIin, setEsfIin] = useState("");
+  const [cabinetPassword, setCabinetPassword] = useState("");
+  const [askCabinet, setAskCabinet] = useState(false);
+  const [esfSessionActive, setEsfSessionActive] = useState(false);
   const sendFlight = useRef(false);
   useEffect(() => { setSubmissions({}); }, [d.id]);
   function submission(type: string, value: EsfSubmission) {
@@ -193,6 +198,11 @@ export function DealDocumentsPanel(props: {
     try {
       if (!document?.id) throw new Error(`Сначала создайте ${type}`);
       await api.validateElectronicDocument(document.id);
+      phase = "AUTHORIZING"; submission(type, { phase });
+      await ensureEsfCabinetSession({ iin: esfIin, cabinetPassword });
+      setCabinetPassword("");
+      setAskCabinet(false);
+      setEsfSessionActive(true);
       phase = "CONNECTING"; submission(type, { phase });
       const result: any = await signAndSendEsfDocument(document.id, next => {
         phase = next; submission(type, { phase });
@@ -202,6 +212,9 @@ export function DealDocumentsPanel(props: {
       try { await load(); }
       catch { submission(type, { ...receipt, error: "Ответ об отправке получен, но обновить карточку сделки не удалось. Обновите страницу." }); }
     } catch (err: any) {
+      if (err.wsseRequired || err.body?.wsseRequired || err.code === "esf_wsse_required" || err.body?.code === "esf_wsse_required") {
+        setAskCabinet(true);
+      }
       const code = err.code || err.body?.error?.code || err.body?.error || err.body?.code;
       const error = code === "USER_CANCELLED" ? "Подпись отменена. Документ не отправлен." : phase === "SENDING" && !err.body ? "Связь с сервером прервалась. Ответ об отправке не получен." : err.message || `Не удалось отправить ${type}`;
       const uncertain = phase === "SENDING" && (!err.body || code === "send_result_unknown" || code === "document_sending");
@@ -231,7 +244,13 @@ export function DealDocumentsPanel(props: {
   useEffect(() => {
     void api
       .esfConnection()
-      .then((row: any) => { setEsfSystem(row.system); setLegacyPocEnabled(Boolean(row?.system?.legacyPocEnabled)); })
+      .then((row: any) => {
+        setEsfSystem(row.system);
+        setLegacyPocEnabled(Boolean(row?.system?.legacyPocEnabled));
+        setEsfSessionActive(Boolean(row?.connection?.sessionActive));
+        setEsfIin((current) => current || row?.connection?.signerIin || "");
+        setAskCabinet(Boolean(row?.wsseRequired && !row?.connection?.sessionActive));
+      })
       .catch(() => setLegacyPocEnabled(false));
   }, []);
   const contract = contracts[0];
@@ -537,6 +556,35 @@ export function DealDocumentsPanel(props: {
           </div>
           <p className="muted">Счёт на оплату не требуется. АВР можно сформировать и проверить до подписания договора.</p>
           {avrReadiness?.warnings?.map((warning:string)=><p className="pdf-import-warnings" role="status" key={warning}>{warning}</p>)}
+          {esfSessionActive ? (
+            <p className="ok">Сессия ИС ЭСФ активна. Можно подписывать и отправлять.</p>
+          ) : (
+            <p className="muted">Перед подписью АВР CRM сначала войдёт в кабинет ИС ЭСФ. Это отдельно от подписи документа.</p>
+          )}
+          <label>
+            ИИН для входа в ИС ЭСФ
+            <input
+              inputMode="numeric"
+              maxLength={12}
+              disabled={busy}
+              value={esfIin}
+              onChange={(event) => setEsfIin(event.target.value.replace(/\D/g, ""))}
+              placeholder="12 цифр"
+            />
+          </label>
+          {askCabinet ? (
+            <label>
+              Пароль кабинета ИС ЭСФ
+              <input
+                type="password"
+                autoComplete="current-password"
+                disabled={busy}
+                value={cabinetPassword}
+                onChange={(event) => setCabinetPassword(event.target.value)}
+              />
+              <span className="muted">Пароль кабинета на портале, не PIN ЭЦП.</span>
+            </label>
+          ) : null}
           <MissingList
             ready={avrReadiness?.ready}
             ok="Данных достаточно, АВР можно проверить."

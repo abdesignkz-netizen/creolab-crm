@@ -311,11 +311,69 @@ export function sanitizeClientMessageDraft(raw: unknown): string | null {
   const text = String(raw || "")
     .replace(/\r\n/g, "\n")
     .trim();
-  if (text.length < 24 || text.length > 4000) return null;
+  if (text.length < 12 || text.length > 4000) return null;
   if (/^\s*[{\[]/.test(text)) return null;
   if (/^Уже известно:/i.test(text)) return null;
   if (/не могу (отправить|написать)|скопируйте текст|задача менеджера/i.test(text)) return null;
   return text;
+}
+
+const AGENCY_INTRO = "Вас приветствует CreoLab Digital Agency";
+
+function requestTopic(requestText: string | null | undefined, serviceLabel: string) {
+  const raw = String(requestText || "").replace(/\s+/g, " ").trim();
+  const stripped = raw
+    .replace(/^(нужна|нужен|нужно|хотим|хочу|интересует|прошу)\s+/i, "")
+    .replace(/[.!?…]+$/g, "")
+    .trim();
+  if (stripped.length >= 4 && stripped.length <= 140 && !/заявка по услуге/i.test(stripped)) {
+    const topic = stripped.charAt(0).toLowerCase() + stripped.slice(1);
+    return topic
+      .replace(/^презентация(?=\s|$|,|\.|·)/i, "презентацию")
+      .replace(/^реклама(?=\s|$|,|\.|·)/i, "рекламу");
+  }
+  return serviceLabel;
+}
+
+function stripWelcomeNoise(body?: string | null) {
+  let text = String(body || "").replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  text = text.replace(/^[А-ЯA-ZЁ][а-яa-zё-]+,\s*(?:добрый день|здравствуйте)[!.,]?\s*/i, "");
+  text = text.replace(/^(?:добрый день|здравствуйте)[!.,]?\s*/i, "");
+  text = text.replace(/вас приветствует creolab digital agency[,!.]?\s*/i, "");
+  text = text.replace(/пишу по поводу вашей заявки на.+?(?=\.\s+[А-ЯЁA-Z]|Подскажите|Уточните|Напишите|$)/i, "");
+  text = text.replace(/^\.\s*/, "");
+  text = text.replace(/понял(?:а)?,\s*что[^.?!]+[.?!]?\s*/i, "");
+  text = text.replace(/получили вашу заявку[^.?!]+[.?!]?\s*/i, "");
+  text = text.replace(/уже учли:[^.?!]+[.?!]?\s*/i, "");
+  return text.trim();
+}
+
+function defaultWelcomeQuestions(questions: string[]) {
+  const items = questions
+    .filter(Boolean)
+    .slice(0, 3)
+    .map((item) =>
+      item.replace(/^(уточните|подскажите),?\s*(пожалуйста[,:]?\s*)?/i, "").replace(/[?]+$/, "").trim(),
+    )
+    .filter(Boolean);
+  if (!items.length) return "Подскажите, пожалуйста, детали задачи — подготовим следующий шаг.";
+  return `Подскажите, пожалуйста: ${items.map((item) => item.replace(/[?]+$/, "")).join("; ")}?`;
+}
+
+export function formatInquiryWelcomeMessage(args: {
+  contactName?: string | null;
+  serviceLabel: string;
+  requestText?: string | null;
+  body?: string | null;
+  qualificationQuestions: string[];
+}) {
+  const firstName = greetingFirstName(args.contactName);
+  const greeting = firstName ? `${firstName}, добрый день!` : "Добрый день!";
+  const topic = requestTopic(args.requestText, args.serviceLabel);
+  const opening = `${greeting} ${AGENCY_INTRO}, пишу по поводу вашей заявки на ${topic}.`;
+  const continuation = stripWelcomeNoise(args.body) || defaultWelcomeQuestions(args.qualificationQuestions);
+  return `${opening} ${continuation}`.replace(/\s+/g, " ").trim();
 }
 
 function buildClientMessageDraft(args: {
@@ -325,38 +383,15 @@ function buildClientMessageDraft(args: {
   knownFields: RequestAnalysis["knownFields"];
   qualificationQuestions: string[];
   requestText?: string | null;
+  body?: string | null;
 }) {
-  const firstName = greetingFirstName(args.contactName);
-  const greeting = firstName ? `Здравствуйте, ${firstName}!` : "Здравствуйте!";
-  const requestText = String(args.requestText || "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 220);
-  const looksGeneric = !requestText || /заявка по услуге/i.test(requestText);
-  const requestLower = requestText.toLowerCase();
-  const knownBits = args.knownFields
-    .filter((field) => field.key !== "phone" && field.value)
-    .filter((field) => !requestLower.includes(String(field.value).toLowerCase()))
-    .slice(0, 2)
-    .map((field) => `${field.label.toLowerCase()} — ${field.value}`);
-
-  const contextLine = [
-    looksGeneric
-      ? `Получили вашу заявку на ${args.serviceLabel}${args.company ? ` (${args.company})` : ""}.`
-      : `Получили вашу заявку${args.company ? ` от ${args.company}` : ""}: ${requestText}${/[.!?…]$/.test(requestText) ? "" : "."}`,
-    knownBits.length ? `Уже учли: ${knownBits.join("; ")}.` : null,
-  ]
-    .filter(Boolean)
-    .join(" ");
-
-  const questions = args.qualificationQuestions.slice(0, 3);
-  const askBlock = questions.length
-    ? ["Чтобы точнее понять задачу, напишите пожалуйста:", ...questions.map((question, index) => `${index + 1}. ${question}`)].join(
-        "\n",
-      )
-    : "Напишите, пожалуйста, детали задачи — подготовим следующий шаг.";
-
-  return [greeting, contextLine, askBlock].filter(Boolean).join("\n\n");
+  return formatInquiryWelcomeMessage({
+    contactName: args.contactName,
+    serviceLabel: args.serviceLabel,
+    requestText: args.requestText,
+    body: args.body,
+    qualificationQuestions: args.qualificationQuestions,
+  });
 }
 
 export function applyRefinedRequestAnalysis(
@@ -407,16 +442,13 @@ export function applyRefinedRequestAnalysis(
     city: draft.city,
     company,
   };
-  merged.clientMessageDraft =
-    sanitizeClientMessageDraft(refined.clientMessageDraft) ||
-    buildClientMessageDraft({
-      contactName: input.name,
-      serviceLabel: serviceLabelForCategory(merged.serviceCategory),
-      company,
-      knownFields,
-      qualificationQuestions,
-      requestText: input.description || input.subject || detectedNeed,
-    });
+  merged.clientMessageDraft = formatInquiryWelcomeMessage({
+    contactName: input.name,
+    serviceLabel: serviceLabelForCategory(merged.serviceCategory),
+    requestText: input.description || input.subject || detectedNeed,
+    body: sanitizeClientMessageDraft(refined.clientMessageDraft) || undefined,
+    qualificationQuestions,
+  });
   return merged;
 }
 
@@ -429,11 +461,11 @@ export async function analyzeRequestWithOptionalLlm(input: AnalyzeInput): Promis
     analysis = applyRefinedRequestAnalysis(draft, refined, input);
     const composed = await composeClientMessageWithLlm({
       instruction: [
-        "Напиши первое WhatsApp-сообщение по новой заявке CREOLAB.",
-        "Покажи, что понял конкретный запрос клиента своими словами.",
-        "Уточни 1–3 недостающих детали, чтобы квалифицировать заявку и предложить следующий шаг.",
+        "Это первое WhatsApp-сообщение по новой заявке CREOLAB.",
+        "Система сама поставит начало: «Имя, добрый день! Вас приветствует CreoLab Digital Agency, пишу по поводу вашей заявки на …».",
+        "Напиши только продолжение: 1–3 уточняющих вопроса по заявке, на «Вы», коротко.",
+        "Не пиши «Понял, что нужна…», «получили заявку», не повторяй приветствие и название агентства.",
         "Не спрашивай телефон — он уже есть. Не выдумывай цены, сроки, портфолио и обещания.",
-        "Не пиши «чем могу помочь» и не представляйся роботом.",
         analysis.qualificationQuestions.length
           ? `Ориентир по уточнениям: ${analysis.qualificationQuestions.slice(0, 3).join(" | ")}`
           : "",
@@ -445,8 +477,16 @@ export async function analyzeRequestWithOptionalLlm(input: AnalyzeInput): Promis
       interest:
         [input.description, input.subject, analysis.detectedNeed].filter(Boolean).join(" · ") || analysis.taskTitle,
     });
-    const fromLlm = sanitizeClientMessageDraft(composed);
-    if (fromLlm) analysis = { ...analysis, clientMessageDraft: fromLlm };
+    analysis = {
+      ...analysis,
+      clientMessageDraft: formatInquiryWelcomeMessage({
+        contactName: input.name,
+        serviceLabel: serviceLabelForCategory(analysis.serviceCategory),
+        requestText: input.description || input.subject || analysis.detectedNeed,
+        body: composed,
+        qualificationQuestions: analysis.qualificationQuestions,
+      }),
+    };
   } catch {
     return analysis;
   }

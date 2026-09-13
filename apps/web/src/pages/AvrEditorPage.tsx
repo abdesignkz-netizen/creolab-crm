@@ -4,9 +4,8 @@ import { avrEditorAmounts, avrEditorSchema, type AvrEditorInput } from "@creolab
 import { documentErrorFields, documentFieldLabel } from "../lib/documentErrors";
 import { api } from "../lib/api";
 import { notifySaved } from "../components/SaveNotice";
-import { connectEsfAuthTicket } from "../lib/signing/esfConnect";
+import { ensureEsfCabinetSession } from "../lib/signing/esfConnect";
 import { createEsfNcaLayerClient } from "../lib/signing/esfNcaLayerClient";
-import { createNcalayerClient } from "../lib/signing/ncalayerClient";
 import { signAndSendEsfDocument } from "../lib/signing/esfSignAndSend";
 
 const money=(v:unknown)=>Number(v||0).toLocaleString("ru-RU",{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -60,16 +59,17 @@ export function AvrEditorPage(){
   async function connect(){
     setPhase("CONNECTING");
     setConnected(false);
-    const current:any=await api.esfConnection();
-    if(current.system.esfEnv === "off")throw new Error("Подключение к ИС ЭСФ выключено на сервере. Для отправки АВР нужно включить режим ИС ЭСФ в настройках сервера.");
     const client=createEsfNcaLayerClient();
     try{if(!await client.isAvailable())throw new Error("Запустите NCALayer и снова нажмите «Подписать и отправить АВР»");const probe=await client.probe();if(!probe.officialModuleInstalled)throw new Error("В NCALayer нужен модуль ИС ЭСФ");}finally{client.disconnect();}
-    if(current.wsseRequired&&!cabinetPassword&&!current.connection.sessionActive){setAskCabinet(true);throw new Error("Портал запросил пароль кабинета ИС ЭСФ. Введите его ниже и снова нажмите «Подписать и отправить АВР».");}
-    if(current.connection.sessionActive){setConnection(current);setConnected(true);return;}
     setPhase("AUTHORIZING");
-    if(current.system.provider==="live"){try{await connectEsfAuthTicket(iin,cabinetPassword);}finally{setCabinetPassword("");}}
-    else{const basics=createNcalayerClient();try{const cms=await basics.selectAuthCertificate();await api.esfConnect({authCmsBase64:cms});}finally{basics.disconnect();}}
-    const updated:any=await api.esfConnection();if(!updated.connection.sessionActive)throw new Error(updated.connection.lastErrorMessage||"Авторизация ИС ЭСФ не завершена");setConnection(updated);setConnected(true);setAskCabinet(false);setIssues({});
+    try{
+      const updated:any=await ensureEsfCabinetSession({iin,cabinetPassword});
+      setCabinetPassword("");
+      setConnection(updated);setConnected(true);setAskCabinet(false);setIssues({});
+    }catch(err:any){
+      if(err.wsseRequired||err.body?.wsseRequired||err.code==="esf_wsse_required")setAskCabinet(true);
+      throw err;
+    }
   }
   async function check(record:any){
     const validated:any=await api.validateElectronicDocument(record.id);setDoc(validated.document);setWarnings(validated.warnings||warnings);setIssues({});setPhase("VALIDATED");notifySaved("Поля документа проверены в CRM. Проверка на портале ещё не выполнена.");

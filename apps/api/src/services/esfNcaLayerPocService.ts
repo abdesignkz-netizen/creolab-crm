@@ -474,6 +474,10 @@ export async function sendEsfWithNcaLayerSignature(prisma:PrismaClient,auth:Auth
   if(doc.status==="SENDING")throw new ApiError(409,"document_sending","Документ уже отправляется. Дождитесь результата.");
   if(!["VALIDATED","SIGNED"].includes(doc.status))throw new ApiError(422,"document_not_ready","Сначала проверьте документ");
   if(!doc.xmlStorageKey)await getEsfPayloadToSign(prisma,auth,documentId);
+  const config=readEsfConfig();
+  if(config.provider!=="mock"&&config.liveSendAllowed&&!(await getUsableEsfSession(prisma,m.tenantId,config))){
+    throw new ApiError(422,"REAUTH_REQUIRED","Нет активной сессии ИС ЭСФ. Сначала CRM входит в кабинет (ИИН и при необходимости пароль кабинета), затем подписывает документ. Повторите «Подписать и отправить».");
+  }
   await prisma.$transaction(async tx=>{
     await tx.$queryRaw`SELECT id FROM "Deal" WHERE id = ${doc.dealId} AND "tenantId" = ${m.tenantId} FOR UPDATE`;
     const duplicate=await tx.electronicDocument.findFirst({where:{tenantId:m.tenantId,dealId:doc.dealId,type:doc.type,id:{not:doc.id},OR:[{externalId:{not:null}},{status:{in:["SENDING","SENT","ACCEPTED"]}}]}});
@@ -676,7 +680,8 @@ async function uploadSignedDocument(input: {
     return {
       ok: false as const,
       code: "REAUTH_REQUIRED",
-      message: "Для отправки нужна активная сессия ИС ЭСФ. Подключение кабинета отдельно от подписи документа.",
+      message:
+        "Нет активной сессии ИС ЭСФ. Сначала CRM входит в кабинет (ИИН и при необходимости пароль кабинета), затем подписывает документ. Повторите «Подписать и отправить».",
       errors: [],
       provider: "live" as const,
       externalId: "",

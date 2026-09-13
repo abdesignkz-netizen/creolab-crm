@@ -1,7 +1,8 @@
 export const ESF_SEND_PHASES: Record<string, string> = {
   CHECKING: "Проверяем документ…",
+  AUTHORIZING: "Входим в кабинет ИС ЭСФ…",
   CONNECTING: "Подключаемся к NCALayer…",
-  SIGNING: "Ожидаем подпись в NCALayer…",
+  SIGNING: "Ожидаем подпись документа в NCALayer…",
   SENDING: "Отправляем в ИС ЭСФ. Ожидаем подтверждение…",
   REFRESHING: "Запрашиваем статус в ИС ЭСФ…",
 };
