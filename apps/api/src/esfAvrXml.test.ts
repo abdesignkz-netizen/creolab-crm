@@ -6,7 +6,7 @@ import { describe, it } from "node:test";
 import { AVR_SOURCE_KIND, type AvrSourceSnapshot } from "./services/avrMapper.ts";
 import { mapAvrSnapshotToAwpXml } from "./integrations/esf/avr/EsfAvrAdapter.ts";
 import { validateAwpV1Xml } from "./integrations/esf/avr/EsfAvrXsd.ts";
-import { buildCreateSessionEnvelope, buildUploadAwpEnvelope, formatEsfUploadDecline, parseSessionId, parseAwpUploadResult } from "./integrations/esf/EsfSoap.ts";
+import { buildCreateSessionEnvelope, buildUploadAwpEnvelope, formatEsfUploadDecline, parseSessionId, parseAwpUploadResult, awpSenderSignerName, cnFromCertificateSubject } from "./integrations/esf/EsfSoap.ts";
 import { mapInvoiceToEsfXml } from "./integrations/esf/invoice/EsfInvoiceAdapter.ts";
 import { ESF_INVOICE_SOURCE_KIND } from "./services/esfInvoiceMapper.ts";
 import { ESF_OFFICIAL, resolveEsfProvider } from "./integrations/esf/EsfConfig.ts";
@@ -115,11 +115,30 @@ describe("ESF AVR XML / official AwpV1", () => {
       awpBody: officialSoapUiSample,
       signature: "SIG",
       x509Certificate: "CERT",
+      senderSignerName: awpSenderSignerName({
+        directorName: snapshot.seller.directorName,
+        directorPosition: snapshot.seller.directorPosition,
+      }),
     });
     assert.match(upload, /<v1:awpUploadRequest>/);
     assert.match(upload, /<version>AwpV1<\/version>/);
     assert.match(upload, /<signatureType>COMPANY<\/signatureType>/);
+    assert.match(upload, /<senderSignerName>Директор Иванов Иван<\/senderSignerName>/);
+    assert.match(upload, /<\/x509Certificate><senderSignerName>/);
     assert.match(upload, /<awpBody><!\[CDATA\[/);
+    const emptyName = buildUploadAwpEnvelope({
+      sessionId: "sid-1",
+      awpBody: officialSoapUiSample,
+      signature: "SIG",
+      x509Certificate: "CERT",
+      senderSignerName: "",
+    });
+    assert.match(emptyName, /<senderSignerName>Директор<\/senderSignerName>/);
+    assert.equal(awpSenderSignerName({ directorName: "Иванов Иван", directorPosition: "Директор" }), "Директор Иванов Иван");
+    assert.equal(awpSenderSignerName({}), "Директор");
+    assert.equal(awpSenderSignerName({ certificateCn: "CN from NCALayer" }), "CN from NCALayer");
+    assert.equal(cnFromCertificateSubject("CN=Test Signer\nserialNumber=IIN222222222220"), "Test Signer");
+    assert.equal(cnFromCertificateSubject("CN=Test Signer, OU=BIN123456789013"), "Test Signer");
     const invoice = mapInvoiceToEsfXml({
       kind: ESF_INVOICE_SOURCE_KIND,
       invoiceType: "ORDINARY_INVOICE",

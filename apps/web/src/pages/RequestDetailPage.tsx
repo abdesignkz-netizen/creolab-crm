@@ -122,11 +122,17 @@ export function RequestDetailPage() {
               {...tip(
                 data.automation.status === "awaiting_confirm"
                   ? "AI начнёт писать клиенту по этой заявке"
-                  : "Передать заявку AI Manager для квалификации и первого контакта",
+                  : data.automation.status === "in_progress"
+                    ? "Если WhatsApp не ушёл, AI отправит приветствие по этой заявке"
+                    : "Передать заявку AI Manager для квалификации и первого контакта",
               )}
               onClick={() => run(() => api.startInquiryAi(data.id))}
             >
-              {data.automation.status === "awaiting_confirm" ? "Начать обработку" : "Передать AI Manager"}
+              {data.automation.status === "awaiting_confirm"
+                ? "Начать обработку"
+                : data.automation.status === "in_progress"
+                  ? "Написать в WhatsApp"
+                  : "Передать AI Manager"}
             </button>
           ) : null}
           {data.automation?.canTakeover ? (

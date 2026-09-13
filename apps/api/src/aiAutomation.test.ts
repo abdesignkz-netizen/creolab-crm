@@ -11,6 +11,7 @@ import {
   parseAIAutomationSettings,
 } from "./services/aiAutomationSettings.ts";
 import { classifyWhatsAppDeliveryError, WHATSAPP_NOT_REGISTERED } from "./services/whatsappChannel.ts";
+import { shouldSkipInquiryWelcome } from "./services/requestAutomationService.ts";
 
 describe("AI automation policy", () => {
   it("maps UI modes to flags", () => {
@@ -226,5 +227,40 @@ describe("Request analysis heuristic", () => {
       landingPage: "/website",
     });
     assert.equal(analysis.serviceCategory, "presentation");
+  });
+});
+
+describe("WhatsApp welcome skip", () => {
+  it("sends a new greeting for a website form even if the thread already has AI messages", () => {
+    assert.equal(
+      shouldSkipInquiryWelcome({
+        sourceChannel: "website_form",
+        welcomedThisInquiry: false,
+        lastMessageDirection: "outbound",
+      }),
+      false,
+    );
+  });
+
+  it("does not send a second greeting for the same inquiry", () => {
+    assert.equal(
+      shouldSkipInquiryWelcome({
+        sourceChannel: "website_form",
+        welcomedThisInquiry: true,
+        lastMessageDirection: "outbound",
+      }),
+      true,
+    );
+  });
+
+  it("lets the bot reply to a WhatsApp inbound instead of a canned form greeting", () => {
+    assert.equal(
+      shouldSkipInquiryWelcome({
+        sourceChannel: "whatsapp",
+        welcomedThisInquiry: false,
+        lastMessageDirection: "inbound",
+      }),
+      true,
+    );
   });
 });

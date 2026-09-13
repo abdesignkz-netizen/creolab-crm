@@ -114,11 +114,30 @@ export function buildCurrentSessionStatusEnvelope(sessionId: string) {
   );
 }
 
+export function cnFromCertificateSubject(subject: string) {
+  const match = String(subject || "").match(/(?:^|[,\/\n])\s*CN\s*=\s*([^,\/\n]+)/i);
+  return (match?.[1] || "").replace(/\s+/g, " ").trim();
+}
+
+/** Live AwpWebService requires senderSignerName after x509Certificate: «Должность сдавшего АВР». */
+export function awpSenderSignerName(input: {
+  directorName?: string | null;
+  directorPosition?: string | null;
+  certificateSubject?: string | null;
+  certificateCn?: string | null;
+}) {
+  const name = String(input.directorName || "").replace(/\s+/g, " ").trim();
+  const position = String(input.directorPosition || "").replace(/\s+/g, " ").trim();
+  const cn = String(input.certificateCn || cnFromCertificateSubject(input.certificateSubject || "")).replace(/\s+/g, " ").trim();
+  return ([position, name].filter(Boolean).join(" ") || cn || "Директор").slice(0, 200);
+}
+
 export function buildUploadAwpEnvelope(input: {
   sessionId: string;
   awpBody: string;
   signature: string;
   x509Certificate: string;
+  senderSignerName: string;
   version?: string;
   signatureType?: string;
 }) {
@@ -132,6 +151,7 @@ export function buildUploadAwpEnvelope(input: {
     `<signatureType>${xmlEscape(input.signatureType || ESF_OFFICIAL.signatureTypeCompany)}</signatureType>`,
     `</awpInfo></awpInfoList>`,
     `<x509Certificate>${xmlEscape(input.x509Certificate)}</x509Certificate>`,
+    `<senderSignerName>${xmlEscape(awpSenderSignerName({ directorName: input.senderSignerName }))}</senderSignerName>`,
     `</v1:awpUploadRequest>`,
   ].join("");
   return envelope(`xmlns:v1="v1.awp"`, body);

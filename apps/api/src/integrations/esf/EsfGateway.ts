@@ -5,6 +5,7 @@ import { mockUploadAwp } from "./EsfMock.ts";
 import { createEsfSession, closeEsfSession, sessionReadiness } from "./EsfSessionService.ts";
 import { signAwpXml, signingReadiness } from "./EsfSignatureService.ts";
 import {
+  awpSenderSignerName,
   buildCreateSessionEnvelope,
   buildUploadAwpEnvelope,
   formatEsfUploadDecline,
@@ -17,6 +18,10 @@ import { queryAwpStatusById } from "./sync/EsfDocumentSyncService.ts";
 export function previewAvrForEsf(source: AvrSourceSnapshot, extras: AwpBuildExtras = {}) {
   const config = readEsfConfig();
   const mapped = mapAvrSnapshotToAwpXml(source, extras);
+  const senderSignerName = awpSenderSignerName({
+    directorName: source.seller.directorName,
+    directorPosition: source.seller.directorPosition,
+  });
   const createSession = buildCreateSessionEnvelope({
     tin: source.seller.bin || source.seller.iin || config.tin || "TIN",
     x509Certificate: "[ESF_AUTH_CERT_PEM]",
@@ -27,6 +32,7 @@ export function previewAvrForEsf(source: AvrSourceSnapshot, extras: AwpBuildExtr
     awpBody: mapped.xml,
     signature: "[LocalService.generateSignature]",
     x509Certificate: "[ESF_SIGN_CERT_PEM]",
+    senderSignerName,
   });
   return {
     ...mapped,
@@ -96,6 +102,10 @@ export async function sendAvrToEsf(source: AvrSourceSnapshot, extras: AwpBuildEx
             awpBody: preview.xml,
             signature: signed.signature,
             x509Certificate: config.signCertificatePem || "[ESF_SIGN_CERT_PEM]",
+            senderSignerName: awpSenderSignerName({
+              directorName: source.seller.directorName,
+              directorPosition: source.seller.directorPosition,
+            }),
           }),
         },
       },
@@ -113,6 +123,10 @@ export async function sendAvrToEsf(source: AvrSourceSnapshot, extras: AwpBuildEx
       awpBody: preview.xml,
       signature: signed.signature,
       x509Certificate: config.signCertificatePem || config.authCertificatePem,
+      senderSignerName: awpSenderSignerName({
+        directorName: source.seller.directorName,
+        directorPosition: source.seller.directorPosition,
+      }),
     });
     const response = await postSoap(config.awpUrl, envelope);
     const fault = parseSoapFault(response.text);

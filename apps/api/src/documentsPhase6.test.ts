@@ -153,6 +153,7 @@ describe("Documents phase 6 ESF POC", () => {
     assert.deepEqual(preview.body.operations, ["createSession", "uploadAwp", "queryAwpStatusById"]);
     assert.match(preview.body.envelopes.createSession, /createSessionRequest/);
     assert.match(preview.body.envelopes.uploadAwp, /awpUploadRequest/);
+    assert.match(preview.body.envelopes.uploadAwp, /<senderSignerName>[^<]+<\/senderSignerName>/);
     assert.equal(preview.body.document.xmlPrepared, true);
     assert.equal(preview.body.signing.code, "legacy_server_p12_forbidden");
     assert.equal(preview.body.liveSendAllowed, false);

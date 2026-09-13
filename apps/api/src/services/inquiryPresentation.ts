@@ -328,7 +328,8 @@ export function mapInquiryDetail(inquiry: InquiryLike & {
         list.aiProcess.status === "analyzed" ||
         list.aiProcess.status === "none" ||
         list.aiProcess.status === "paused" ||
-        list.aiProcess.status === "failed",
+        list.aiProcess.status === "failed" ||
+        list.aiProcess.status === "in_progress",
       canTakeover: list.aiProcess.status === "in_progress" || list.aiProcess.status === "queued" || list.aiProcess.status === "waiting_client",
       canReturnAi: list.aiProcess.status === "paused" || list.aiProcess.status === "needs_human",
     },

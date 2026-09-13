@@ -119,6 +119,7 @@ describe("AVR POC preflight, without external SOAP", () => {
     const uploads = uploadRequests();
     assert.equal(uploads.length, 1);
     assert.equal(uploads[0].body.match(/<awpBody><!\[CDATA\[([\s\S]*?)\]\]><\/awpBody>/)?.[1], prepared.payload);
+    assert.match(uploads[0].body, /<\/x509Certificate><senderSignerName>[^<]+<\/senderSignerName>/);
     assert.ok(uploads[0].body.includes(signPem.trim()));
     assert.ok(!uploads[0].body.includes(authPem.trim()));
     assert.equal(requests.at(-1), uploads[0]);

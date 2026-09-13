@@ -40,6 +40,8 @@ import {
   parseSoapFault,
   parseSyncInvoiceResult,
   postSoap,
+  awpSenderSignerName,
+  cnFromCertificateSubject,
 } from "../integrations/esf/EsfSoap.ts";
 import { signInvoiceXml, signingReadiness } from "../integrations/esf/EsfSignatureService.ts";
 import { queryAwpStatusById, queryInvoiceById } from "../integrations/esf/sync/EsfDocumentSyncService.ts";
@@ -49,7 +51,7 @@ import { serializeElectronicDocument } from "./documentDraftService.ts";
 import { describeAvrPocReadiness, getEsfConnectionRow, getUsableEsfSession } from "./esfConnectionService.ts";
 import { previewAvrEsf } from "./esfPocService.ts";
 import { requireDocumentsEnabled } from "./legalProfileService.ts";
-import { normalizeCertificatePem, publicCertificateFingerprint } from "./cmsInspect.ts";
+import { inspectCertificatePem, normalizeCertificatePem, publicCertificateFingerprint } from "./cmsInspect.ts";
 
 const FORBIDDEN_KEY_FIELDS = [
   "pin",
@@ -422,7 +424,11 @@ export async function sendAvrPocSigned(
       throw new ApiError(409, "ESF_POC_SESSION_CHANGED", "Сессия изменилась перед uploadAwp. Подготовьте XML заново.");
     }
     const envelope = buildUploadAwpEnvelope({
-      sessionId: row.sessionId, awpBody: payload, signature, x509Certificate: signaturePem,
+      sessionId: row.sessionId,
+      awpBody: payload,
+      signature,
+      x509Certificate: signaturePem,
+      senderSignerName: signerNameForAwp({ publicCertificate: signaturePem }),
     });
     // The stored UTF-8 string goes directly into awpBody. No trim, XML serialization or auth PEM.
     report.sentAt = new Date().toISOString();
@@ -558,6 +564,7 @@ async function sendEsfWithNcaLayerSignatureInternal(
     throw new ApiError(409, "esf_payload_mismatch", "XML изменился после подписи. Получите payload заново.");
   }
 
+  const meta = raw.metadata && typeof raw.metadata === "object" ? (raw.metadata as { subjectCn?: string }) : {};
   const analysis = analyzeEsfSignature(signature);
   const config = readEsfConfig();
   const uploaded = await uploadSignedDocument({
@@ -568,6 +575,8 @@ async function sendEsfWithNcaLayerSignatureInternal(
     number: document.number,
     tenantId: tid,
     prisma,
+    source: document.sourceDataJson,
+    certificateCn: meta.subjectCn,
   });
   if (!uploaded.ok) {
     await prisma.electronicDocument.update({
@@ -627,6 +636,44 @@ async function sendEsfWithNcaLayerSignatureInternal(
   };
 }
 
+function sellerSignerFromSource(source: unknown) {
+  const seller =
+    source && typeof source === "object"
+      ? (source as { seller?: { directorName?: string | null; directorPosition?: string | null } }).seller
+      : undefined;
+  return {
+    directorName: seller?.directorName || "",
+    directorPosition: seller?.directorPosition || "",
+  };
+}
+
+function signerNameForAwp(input: {
+  source?: unknown;
+  directorName?: string | null;
+  directorPosition?: string | null;
+  publicCertificate?: string;
+  certificateCn?: string;
+}) {
+  const seller = sellerSignerFromSource(input.source);
+  let certificateSubject = "";
+  let certificateCn = String(input.certificateCn || "").trim();
+  if (input.publicCertificate) {
+    try {
+      const inspected = inspectCertificatePem(input.publicCertificate);
+      certificateSubject = inspected.subject;
+      certificateCn = certificateCn || inspected.commonName || cnFromCertificateSubject(certificateSubject);
+    } catch {
+      certificateSubject = "";
+    }
+  }
+  return awpSenderSignerName({
+    directorName: seller.directorName || input.directorName,
+    directorPosition: seller.directorPosition || input.directorPosition,
+    certificateSubject,
+    certificateCn,
+  });
+}
+
 async function uploadSignedDocument(input: {
   type: string;
   payload: string;
@@ -635,6 +682,8 @@ async function uploadSignedDocument(input: {
   number: string;
   tenantId: string;
   prisma: PrismaClient;
+  source?: unknown;
+  certificateCn?: string;
 }) {
   const config = readEsfConfig();
   if (config.provider === "mock") {
@@ -699,6 +748,17 @@ async function uploadSignedDocument(input: {
       httpStatus: 0,
     };
   }
+  const profile = await input.prisma.tenantLegalProfile.findUnique({
+    where: { tenantId: input.tenantId },
+    select: { directorName: true, directorPosition: true },
+  });
+  const senderSignerName = signerNameForAwp({
+    source: input.source,
+    directorName: profile?.directorName,
+    directorPosition: profile?.directorPosition,
+    publicCertificate: input.publicCertificate,
+    certificateCn: input.certificateCn,
+  });
   if (input.type === "ESF") {
     const envelope = buildSyncInvoiceEnvelope({
       sessionId: session.sessionId,
@@ -740,6 +800,7 @@ async function uploadSignedDocument(input: {
     awpBody: input.payload,
     signature: input.signature,
     x509Certificate: input.publicCertificate,
+    senderSignerName,
   });
   const response = await postSoap(config.awpUrl, envelope);
   const fault = parseSoapFault(response.text);

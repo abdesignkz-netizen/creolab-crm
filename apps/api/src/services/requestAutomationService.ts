@@ -62,6 +62,38 @@ function readAutomation(meta: Record<string, unknown>): InquiryAutomationMeta | 
   return a as InquiryAutomationMeta;
 }
 
+/** Welcome is per inquiry. Old AI messages in the same WhatsApp thread must not block a new form lead. */
+export function shouldSkipInquiryWelcome(input: {
+  sourceChannel?: string | null;
+  welcomedThisInquiry: boolean;
+  lastMessageDirection?: string | null;
+}) {
+  if (input.welcomedThisInquiry) return true;
+  return String(input.sourceChannel || "").toLowerCase() === "whatsapp" && input.lastMessageDirection === "inbound";
+}
+
+async function inquiryAlreadyWelcomed(
+  prisma: PrismaClient,
+  tenantId: string,
+  inquiry: { receivedAt: Date; conversationId?: string | null },
+  conversationId?: string | null,
+) {
+  const threadId = conversationId || inquiry.conversationId;
+  if (!threadId) return false;
+  const sent = await prisma.message.findFirst({
+    where: {
+      tenantId,
+      conversationId: threadId,
+      direction: "outbound",
+      senderKind: "ai",
+      internal: false,
+      createdAt: { gte: inquiry.receivedAt },
+    },
+    select: { id: true },
+  });
+  return Boolean(sent);
+}
+
 function buildInstruction(args: {
   contactName: string;
   companyName: string | null;
@@ -418,7 +450,14 @@ export async function startAiManagerForInquiry(prisma: PrismaClient, tenantId: s
   const analysis = (auto?.analysis || null) as RequestAnalysis | null;
   const task = inquiry.tasks[0];
 
-  if (auto?.status === "in_progress" || auto?.status === "paused") {
+  if (auto?.status === "paused") {
+    return {
+      inquiryId,
+      status: auto.status as AiProcessStatus,
+      conversationId: inquiry.conversationId || undefined,
+    };
+  }
+  if (auto?.status === "in_progress" && (await inquiryAlreadyWelcomed(prisma, tenantId, inquiry))) {
     return {
       inquiryId,
       status: auto.status as AiProcessStatus,
@@ -509,16 +548,11 @@ export async function startAiManagerForInquiry(prisma: PrismaClient, tenantId: s
     where: { tenantId, conversationId: conversation.id, internal: false },
     orderBy: { createdAt: "desc" },
   });
-  const alreadyWelcomed = await prisma.message.findFirst({
-    where: {
-      tenantId,
-      conversationId: conversation.id,
-      direction: "outbound",
-      senderKind: "ai",
-      internal: false,
-    },
+  const skipGreetingNote = shouldSkipInquiryWelcome({
+    sourceChannel: inquiry.sourceChannel,
+    welcomedThisInquiry: await inquiryAlreadyWelcomed(prisma, tenantId, inquiry, conversation.id),
+    lastMessageDirection: lastMsg?.direction,
   });
-  const skipGreetingNote = lastMsg?.direction === "inbound" || Boolean(alreadyWelcomed);
   const sourceLine = [inquiry.utmSource || inquiry.sourceType, inquiry.sourceChannel || inquiry.source]
     .filter(Boolean)
     .join(" → ");
@@ -612,9 +646,11 @@ export async function startAiManagerForInquiry(prisma: PrismaClient, tenantId: s
       tenantId,
       contactId: inquiry.contactId,
       inquiryId: inquiry.id,
-      type: "inquiry.ai_started",
-      title: "AI начал обработку",
-      description: analysis.taskTitle,
+      type: skipGreetingNote ? "inquiry.ai_started" : "inquiry.ai_whatsapp_sent",
+      title: skipGreetingNote ? "AI начал обработку" : "AI написал в WhatsApp",
+      description: skipGreetingNote
+        ? `${analysis.taskTitle}. Новое приветствие не отправлено: клиент уже пишет в этом WhatsApp-диалоге.`
+        : analysis.taskTitle,
       actorType: "system",
     });
   });
