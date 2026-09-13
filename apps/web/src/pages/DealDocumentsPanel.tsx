@@ -1,11 +1,12 @@
+import { EsfSubmissionStatus, ESF_SEND_PHASES, type EsfSubmission } from "../components/EsfSubmissionStatus";
 import { notifySaved } from "../components/SaveNotice";
 import { INVOICE_PAYMENT_KIND_LABEL, type PdfImportDraft } from "@creolab/contracts";
 import { DeleteContractButton } from "../components/DeleteContractButton";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { api } from "../lib/api";
 import { signAndSendEsfDocument } from "../lib/signing/esfSignAndSend";
-import { createSigningClient, NcalayerError } from "../lib/signing/ncalayerClient";
+import { createSigningClient } from "../lib/signing/ncalayerClient";
 
 const CONTRACT_STATUS_LABEL: Record<string, string> = {
   DRAFT: "Черновик",
@@ -28,6 +29,8 @@ const EDOC_STATUS_LABEL: Record<string, string> = {
   DRAFT: "Черновик",
   VALIDATED: "Проверен",
   SIGNED: "Подписан",
+  SENDING: "Ожидается подтверждение отправки",
+  ERROR: "Ошибка",
   SENT: "Отправлен",
   ACCEPTED: "Подтверждён",
 };
@@ -166,11 +169,69 @@ export function DealDocumentsPanel(props: {
   const edocs = docs?.electronicDocuments || [];
   const avr = edocs.find((row: any) => row.type === "AVR");
   const esf = edocs.find((row: any) => row.type === "ESF");
+  const [submissions, setSubmissions] = useState<Record<string, EsfSubmission>>({});
+  const [esfSystem, setEsfSystem] = useState<any>(null);
+  const sendFlight = useRef(false);
+  useEffect(() => { setSubmissions({}); }, [d.id]);
+  function submission(type: string, value: EsfSubmission) {
+    setSubmissions(previous => ({ ...previous, [type]: value }));
+  }
+  function currentDocument(type: string, stored: any) {
+    const recent = submissions[type]?.document;
+    return !stored || (recent?.id === stored.id && !(stored.updatedAt > recent.updatedAt)) ? recent || stored : stored;
+  }
+  function sendBlocked(type: string, stored: any) {
+    const doc = currentDocument(type, stored);
+    return busy || Boolean(doc?.externalId) || ["SENDING", "SENT", "ACCEPTED"].includes(doc?.status) || doc?.errorCode === "send_result_unknown" || submissions[type]?.uncertain;
+  }
+  async function sendDocument(type: string, document: any) {
+    if (sendFlight.current || sendBlocked(type, document)) return;
+    sendFlight.current = true;
+    setBusy(true); setError("");
+    let phase = "CHECKING";
+    submission(type, { phase });
+    try {
+      if (!document?.id) throw new Error(`Сначала создайте ${type}`);
+      await api.validateElectronicDocument(document.id);
+      phase = "CONNECTING"; submission(type, { phase });
+      const result: any = await signAndSendEsfDocument(document.id, next => {
+        phase = next; submission(type, { phase });
+      });
+      const receipt = { document: result.sent.document, provider: result.sent.provider };
+      submission(type, receipt);
+      try { await load(); }
+      catch { submission(type, { ...receipt, error: "Ответ об отправке получен, но обновить карточку сделки не удалось. Обновите страницу." }); }
+    } catch (err: any) {
+      const code = err.code || err.body?.error?.code || err.body?.error || err.body?.code;
+      const error = code === "USER_CANCELLED" ? "Подпись отменена. Документ не отправлен." : phase === "SENDING" && !err.body ? "Связь с сервером прервалась. Ответ об отправке не получен." : err.message || `Не удалось отправить ${type}`;
+      const uncertain = phase === "SENDING" && (!err.body || code === "send_result_unknown" || code === "document_sending");
+      let saved;
+      if (document?.id) {
+        try { saved = (await api.request(`/api/v1/electronic-documents/${document.id}`) as any).document; } catch { /* Keep the uncertain result visible when the server is unavailable. */ }
+      }
+      submission(type, { error: saved?.externalId && uncertain ? undefined : error, uncertain: saved?.externalId ? false : uncertain, document: saved });
+      try { await load(); } catch { /* The result above remains visible next to the send button. */ }
+    } finally { sendFlight.current = false; setBusy(false); }
+  }
+  async function refreshSubmission(type: string, document: any) {
+    if (!document?.id) return;
+    setBusy(true); setError("");
+    const previous = submissions[type] || {};
+    submission(type, { ...previous, error: undefined, phase: "REFRESHING" });
+    try {
+      const result: any = await api.refreshElectronicDocumentEsf(document.id);
+      const saved: any = result.document || (await api.request(`/api/v1/electronic-documents/${document.id}`) as any).document;
+      submission(type, { document: saved, provider: previous.provider });
+      await load();
+    } catch (err: any) {
+      submission(type, { ...previous, error: `Не удалось обновить статус: ${err.message}`, phase: undefined });
+    } finally { setBusy(false); }
+  }
   const [legacyPocEnabled, setLegacyPocEnabled] = useState(false);
   useEffect(() => {
     void api
       .esfConnection()
-      .then((row: any) => setLegacyPocEnabled(Boolean(row?.system?.legacyPocEnabled)))
+      .then((row: any) => { setEsfSystem(row.system); setLegacyPocEnabled(Boolean(row?.system?.legacyPocEnabled)); })
       .catch(() => setLegacyPocEnabled(false));
   }, []);
   const contract = contracts[0];
@@ -571,36 +632,16 @@ export function DealDocumentsPanel(props: {
             <button
               type="button"
               className="btn"
-              disabled={busy || Boolean(avr?.externalId)}
-              onClick={() => {
-                setBusy(true);
-                void (async () => {
-                  const documentId = avr?.id as string | undefined;
-                  if (!documentId) {
-                    setError("Сначала создайте и проверьте АВР");
-                    return;
-                  }
-                  const result = await signAndSendEsfDocument(documentId);
-                  setEsfPreview(result.sent);
-                  await load();
-                })()
-                  .catch((err: any) => {
-                    const details = err?.body?.details;
-                    if (details?.validation || details?.signing || details?.analysis) {
-                      setEsfPreview({ ...details, error: err.message });
-                    }
-                    setError(err instanceof NcalayerError || err instanceof Error ? err.message : "Не удалось подписать и отправить АВР");
-                  })
-                  .finally(() => setBusy(false));
-              }}
+              disabled={sendBlocked("AVR", avr)}
+              onClick={() => void sendDocument("AVR", avr)}
             >
-              Подписать и отправить
+              {submissions.AVR?.phase ? ESF_SEND_PHASES[submissions.AVR.phase!] : "Подписать и отправить"}
             </button>
             {legacyPocEnabled ? (
             <button
               type="button"
               className="btn secondary"
-              disabled={busy || Boolean(avr?.externalId)}
+              disabled={sendBlocked("AVR", avr)}
               onClick={() => {
                 setBusy(true);
                 void (async () => {
@@ -627,24 +668,13 @@ export function DealDocumentsPanel(props: {
             <button
               type="button"
               className="btn secondary"
-              disabled={busy || !avr?.externalId}
-              onClick={() => {
-                const documentId = avr?.id;
-                if (!documentId) return;
-                setBusy(true);
-                void api
-                  .refreshElectronicDocumentEsf(documentId)
-                  .then((res: any) => {
-                    setEsfPreview(res);
-                    return load();
-                  })
-                  .catch((err) => setError(err instanceof Error ? err.message : "Не удалось обновить статус ИС ЭСФ"))
-                  .finally(() => setBusy(false));
-              }}
+              disabled={busy || !currentDocument("AVR", avr)?.externalId}
+              onClick={() => void refreshSubmission("AVR", currentDocument("AVR", avr))}
             >
-              Статус ИС ЭСФ
+              Обновить статус ИС ЭСФ
             </button>
           </div>
+          {(avr || submissions.AVR) ? <EsfSubmissionStatus document={currentDocument("AVR", avr)} submission={submissions.AVR} system={esfSystem} statusLabel={esfStatusLabel("AVR", currentDocument("AVR", avr)?.externalStatus)} /> : null}
           {esfPreview?.validation || esfPreview?.externalStatus ? (
             <div style={{ marginTop: 12 }}>
               <p className="muted">
@@ -769,36 +799,16 @@ export function DealDocumentsPanel(props: {
             <button
               type="button"
               className="btn"
-              disabled={busy || Boolean(esf?.externalId)}
-              onClick={() => {
-                setBusy(true);
-                void (async () => {
-                  const documentId = esf?.id as string | undefined;
-                  if (!documentId) {
-                    setError("Сначала создайте и проверьте ЭСФ");
-                    return;
-                  }
-                  const result = await signAndSendEsfDocument(documentId);
-                  setEsfInvoicePreview(result.sent);
-                  await load();
-                })()
-                  .catch((err: any) => {
-                    const details = err?.body?.details;
-                    if (details?.validation || details?.signing || details?.analysis) {
-                      setEsfInvoicePreview({ ...details, error: err.message });
-                    }
-                    setError(err instanceof NcalayerError || err instanceof Error ? err.message : "Не удалось подписать и отправить ЭСФ");
-                  })
-                  .finally(() => setBusy(false));
-              }}
+              disabled={sendBlocked("ESF", esf)}
+              onClick={() => void sendDocument("ESF", esf)}
             >
-              Подписать и отправить
+              {submissions.ESF?.phase ? ESF_SEND_PHASES[submissions.ESF.phase!] : "Подписать и отправить"}
             </button>
             {legacyPocEnabled ? (
             <button
               type="button"
               className="btn secondary"
-              disabled={busy || Boolean(esf?.externalId)}
+              disabled={sendBlocked("ESF", esf)}
               onClick={() => {
                 setBusy(true);
                 void (async () => {
@@ -825,24 +835,13 @@ export function DealDocumentsPanel(props: {
             <button
               type="button"
               className="btn secondary"
-              disabled={busy || !esf?.externalId}
-              onClick={() => {
-                const documentId = esf?.id;
-                if (!documentId) return;
-                setBusy(true);
-                void api
-                  .refreshElectronicDocumentEsf(documentId)
-                  .then((res: any) => {
-                    setEsfInvoicePreview(res);
-                    return load();
-                  })
-                  .catch((err) => setError(err instanceof Error ? err.message : "Не удалось обновить статус ЭСФ"))
-                  .finally(() => setBusy(false));
-              }}
+              disabled={busy || !currentDocument("ESF", esf)?.externalId}
+              onClick={() => void refreshSubmission("ESF", currentDocument("ESF", esf))}
             >
-              Статус ЭСФ
+              Обновить статус ИС ЭСФ
             </button>
           </div>
+          {(esf || submissions.ESF) ? <EsfSubmissionStatus document={currentDocument("ESF", esf)} submission={submissions.ESF} system={esfSystem} statusLabel={esfStatusLabel("ESF", currentDocument("ESF", esf)?.externalStatus)} /> : null}
           {esfInvoicePreview?.validation || esfInvoicePreview?.externalStatus ? (
             <div style={{ marginTop: 12 }}>
               <p className="muted">
