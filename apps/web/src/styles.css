@@ -2374,6 +2374,7 @@ button.linkish {
 }
 
 .avr-editor { display: grid; gap: 20px; }
+.avr-editor #sign { scroll-margin-top: 24px; }
 .avr-editor .panel { display: grid; gap: 12px; }
 .avr-editor label { display: grid; gap: 6px; }
 .avr-line { display: grid; grid-template-columns: minmax(180px,3fr) repeat(4,minmax(70px,1fr)) auto auto; gap: 10px; border: 1px solid var(--border,#ddd); border-radius: 12px; padding: 16px; align-items: end; }

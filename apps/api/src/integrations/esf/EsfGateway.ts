@@ -7,6 +7,7 @@ import { signAwpXml, signingReadiness } from "./EsfSignatureService.ts";
 import {
   buildCreateSessionEnvelope,
   buildUploadAwpEnvelope,
+  formatEsfUploadDecline,
   parseAwpUploadResult,
   parseSoapFault,
   postSoap,
@@ -124,7 +125,7 @@ export async function sendAvrToEsf(source: AvrSourceSnapshot, extras: AwpBuildEx
         externalId: "",
         externalStatus: "",
         errors: uploaded.errors,
-        message: fault?.description || uploaded.errors[0]?.text || "uploadAwp declined",
+        message: formatEsfUploadDecline("AVR", fault, uploaded.errors),
       };
     }
     const status = await queryAwpStatusById(session.sessionId, uploaded.awpId, config);

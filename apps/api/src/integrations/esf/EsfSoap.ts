@@ -305,19 +305,40 @@ export function isWsseCredentialFault(input: { faultstring?: string; description
   return /username|password|wsse|wss-wssecurity|security error|verifying the message|unauthoriz|unauthenticated|access.?denied|credentials|login/.test(text);
 }
 
+function soapErrorRows(node: ReturnType<typeof findDeep>) {
+  if (!node) return [];
+  const listed = (findDeep(node, "errorList")?.children || []).filter((row) => row.local === "error");
+  const nested = listed.length ? listed : node.children.filter((row) => row.local === "error");
+  return nested.map((row) => ({
+    property: textOf(findDeep(row, "property")),
+    errorCode: textOf(findDeep(row, "errorCode")),
+    text: textOf(findDeep(row, "text")),
+  })).filter((row) => row.property || row.errorCode || row.text);
+}
+
+export function formatEsfUploadDecline(
+  kind: "AVR" | "ESF",
+  fault: { description?: string; faultstring?: string } | null | undefined,
+  errors: Array<{ property?: string; errorCode?: string; text?: string }>,
+) {
+  const details = errors
+    .map((row) => [row.errorCode, row.property, row.text].filter(Boolean).join(" — "))
+    .filter(Boolean);
+  const portal = String(fault?.description || fault?.faultstring || details[0] || "").replace(/\s+/g, " ").trim().slice(0, 500);
+  const label = kind === "ESF" ? "счёт-фактуру" : "АВР";
+  if (portal) {
+    return `ИС ЭСФ отклонила ${label}. ${portal}${details.length > 1 ? `. ${details.slice(1).join(". ")}` : ""}`;
+  }
+  return `ИС ЭСФ отклонила ${label} без текста причины. Проверьте заполненный документ и повторите отправку.`;
+}
+
 export function parseAwpUploadResult(xml: string) {
   const root = parseXml(xml);
   const accepted = findDeep(root, "acceptedList");
   const declined = findDeep(root, "declinedList");
   const firstAccepted = accepted?.children.find((row) => row.local === "awpUploadResult");
   const firstDeclined = declined?.children.find((row) => row.local === "awpUploadResult");
-  const errors = (firstDeclined ? findDeep(firstDeclined, "errorList")?.children || [] : [])
-    .filter((row) => row.local === "error")
-    .map((row) => ({
-      property: textOf(findDeep(row, "property")),
-      errorCode: textOf(findDeep(row, "errorCode")),
-      text: textOf(findDeep(row, "text")),
-    }));
+  const errors = soapErrorRows(firstDeclined);
   return {
     awpId: textOf(firstAccepted ? findDeep(firstAccepted, "awpId") : undefined),
     number: textOf(firstAccepted ? findDeep(firstAccepted, "number") : undefined),

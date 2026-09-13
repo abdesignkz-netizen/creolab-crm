@@ -35,6 +35,7 @@ import {
   parseSessionStatus,
   buildSyncInvoiceEnvelope,
   buildUploadAwpEnvelope,
+  formatEsfUploadDecline,
   parseAwpUploadResult,
   parseSoapFault,
   parseSyncInvoiceResult,
@@ -314,6 +315,14 @@ export function redactSoapText(value: string) {
     .replace(/(?:password|pin|private[_ ]?key|wsse)\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s<,;]+)/gi, "[redacted]")
     .replace(/[A-Za-z0-9+/]{40,}={0,2}/g, "[b64]")
     .slice(0, 500);
+}
+
+function formatUploadDecline(
+  kind: "AVR" | "ESF",
+  fault: { description?: string; faultstring?: string } | null | undefined,
+  errors: Array<{ property?: string; errorCode?: string; text?: string }>,
+) {
+  return redactSoapText(formatEsfUploadDecline(kind, fault, errors));
 }
 
 /** Metadata only; no public-key algorithm support is needed to read X.509 fields. */
@@ -648,7 +657,7 @@ async function uploadSignedDocument(input: {
     }
     const uploaded = mockUploadAwp({ xml: input.payload, number: input.number });
     if (!uploaded.ok) {
-        return { ok: false as const, code: "esf_upload_declined", message: "uploadAwp declined", errors: [], provider: "mock" as const, externalId: "", externalStatus: "", externalNumber: "", httpStatus: 200 };
+        return { ok: false as const, code: "esf_upload_declined", message: formatUploadDecline("AVR", null, uploaded.errors), errors: uploaded.errors, provider: "mock" as const, externalId: "", externalStatus: "", externalNumber: "", httpStatus: 200 };
     }
     return {
       ok: true as const,
@@ -704,7 +713,7 @@ async function uploadSignedDocument(input: {
       return {
         ok: false as const,
         code: "esf_upload_declined",
-        message: fault?.description || uploaded.errors[0]?.text || "syncInvoice declined",
+        message: formatUploadDecline("ESF", fault, uploaded.errors),
         errors: uploaded.errors,
         provider: "live" as const,
         externalId: "",
@@ -739,7 +748,7 @@ async function uploadSignedDocument(input: {
     return {
       ok: false as const,
       code: "esf_upload_declined",
-      message: fault?.description || uploaded.errors[0]?.text || "uploadAwp declined",
+      message: formatUploadDecline("AVR", fault, uploaded.errors),
       errors: uploaded.errors,
         provider: "live" as const,
         externalId: "",

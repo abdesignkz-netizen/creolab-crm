@@ -3,7 +3,7 @@ import { notifySaved } from "../components/SaveNotice";
 import { INVOICE_PAYMENT_KIND_LABEL, type PdfImportDraft } from "@creolab/contracts";
 import { DeleteContractButton } from "../components/DeleteContractButton";
 import { useEffect, useRef, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import { signAndSendEsfDocument } from "../lib/signing/esfSignAndSend";
 import { ensureEsfCabinetSession } from "../lib/signing/esfConnect";
@@ -161,6 +161,7 @@ export function DealDocumentsPanel(props: {
     setEsfInvoicePreview,
   } = props;
 
+  const navigate = useNavigate();
   const contracts = docs?.contracts || [];
   const invoices = docs?.invoices || [];
   const { hash } = useLocation();
@@ -175,7 +176,6 @@ export function DealDocumentsPanel(props: {
   const [esfIin, setEsfIin] = useState("");
   const [cabinetPassword, setCabinetPassword] = useState("");
   const [askCabinet, setAskCabinet] = useState(false);
-  const [esfSessionActive, setEsfSessionActive] = useState(false);
   const sendFlight = useRef(false);
   useEffect(() => { setSubmissions({}); }, [d.id]);
   function submission(type: string, value: EsfSubmission) {
@@ -202,7 +202,6 @@ export function DealDocumentsPanel(props: {
       await ensureEsfCabinetSession({ iin: esfIin, cabinetPassword });
       setCabinetPassword("");
       setAskCabinet(false);
-      setEsfSessionActive(true);
       phase = "CONNECTING"; submission(type, { phase });
       const result: any = await signAndSendEsfDocument(document.id, next => {
         phase = next; submission(type, { phase });
@@ -247,7 +246,6 @@ export function DealDocumentsPanel(props: {
       .then((row: any) => {
         setEsfSystem(row.system);
         setLegacyPocEnabled(Boolean(row?.system?.legacyPocEnabled));
-        setEsfSessionActive(Boolean(row?.connection?.sessionActive));
         setEsfIin((current) => current || row?.connection?.signerIin || "");
         setAskCabinet(Boolean(row?.wsseRequired && !row?.connection?.sessionActive));
       })
@@ -556,35 +554,7 @@ export function DealDocumentsPanel(props: {
           </div>
           <p className="muted">Счёт на оплату не требуется. АВР можно сформировать и проверить до подписания договора.</p>
           {avrReadiness?.warnings?.map((warning:string)=><p className="pdf-import-warnings" role="status" key={warning}>{warning}</p>)}
-          {esfSessionActive ? (
-            <p className="ok">Сессия ИС ЭСФ активна. Можно подписывать и отправлять.</p>
-          ) : (
-            <p className="muted">Перед подписью АВР CRM сначала войдёт в кабинет ИС ЭСФ. Это отдельно от подписи документа.</p>
-          )}
-          <label>
-            ИИН для входа в ИС ЭСФ
-            <input
-              inputMode="numeric"
-              maxLength={12}
-              disabled={busy}
-              value={esfIin}
-              onChange={(event) => setEsfIin(event.target.value.replace(/\D/g, ""))}
-              placeholder="12 цифр"
-            />
-          </label>
-          {askCabinet ? (
-            <label>
-              Пароль кабинета ИС ЭСФ
-              <input
-                type="password"
-                autoComplete="current-password"
-                disabled={busy}
-                value={cabinetPassword}
-                onChange={(event) => setCabinetPassword(event.target.value)}
-              />
-              <span className="muted">Пароль кабинета на портале, не PIN ЭЦП.</span>
-            </label>
-          ) : null}
+          <p className="muted">Подпись и отправка подтверждаются на странице заполненного АВР.</p>
           <MissingList
             ready={avrReadiness?.ready}
             ok="Данных достаточно, АВР можно проверить."
@@ -677,14 +647,29 @@ export function DealDocumentsPanel(props: {
             >
               XML для ИС ЭСФ
             </button>
-            <button
-              type="button"
-              className="btn"
-              disabled={sendBlocked("AVR", avr)}
-              onClick={() => void sendDocument("AVR", avr)}
-            >
-              {submissions.AVR?.phase ? ESF_SEND_PHASES[submissions.AVR.phase!] : "Подписать и отправить"}
-            </button>
+            {avr?.id ? (
+              <Link className="btn" to={`/documents/avr/${avr.id}#sign`}>
+                Открыть АВР и подтвердить отправку
+              </Link>
+            ) : (
+              <button
+                type="button"
+                className="btn"
+                disabled={busy}
+                onClick={() => {
+                  setBusy(true);
+                  setError("");
+                  void (async () => {
+                    const created: any = await api.createElectronicDocumentDraft(d.id, { type: "AVR" });
+                    navigate(`/documents/avr/${created.document.id}#sign`);
+                  })()
+                    .catch((err) => setError(err instanceof Error ? err.message : "Не удалось открыть АВР"))
+                    .finally(() => setBusy(false));
+                }}
+              >
+                Открыть АВР и подтвердить отправку
+              </button>
+            )}
             {legacyPocEnabled ? (
             <button
               type="button"
@@ -723,6 +708,9 @@ export function DealDocumentsPanel(props: {
             </button>
           </div>
           {(avr || submissions.AVR) ? <EsfSubmissionStatus document={currentDocument("AVR", avr)} submission={submissions.AVR} system={esfSystem} statusLabel={esfStatusLabel("AVR", currentDocument("AVR", avr)?.externalStatus)} /> : null}
+          {currentDocument("AVR", avr)?.errorMessage && !currentDocument("AVR", avr)?.externalId ? (
+            <p className="muted">Это результат прошлой отправки с карточки сделки. Откройте заполненный АВР, проверьте данные и подтвердите отправку там.</p>
+          ) : null}
           {esfPreview?.validation || esfPreview?.externalStatus ? (
             <div style={{ marginTop: 12 }}>
               <p className="muted">

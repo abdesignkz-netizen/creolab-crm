@@ -6,7 +6,7 @@ import { describe, it } from "node:test";
 import { AVR_SOURCE_KIND, type AvrSourceSnapshot } from "./services/avrMapper.ts";
 import { mapAvrSnapshotToAwpXml } from "./integrations/esf/avr/EsfAvrAdapter.ts";
 import { validateAwpV1Xml } from "./integrations/esf/avr/EsfAvrXsd.ts";
-import { buildCreateSessionEnvelope, buildUploadAwpEnvelope, parseSessionId, parseAwpUploadResult } from "./integrations/esf/EsfSoap.ts";
+import { buildCreateSessionEnvelope, buildUploadAwpEnvelope, formatEsfUploadDecline, parseSessionId, parseAwpUploadResult } from "./integrations/esf/EsfSoap.ts";
 import { mapInvoiceToEsfXml } from "./integrations/esf/invoice/EsfInvoiceAdapter.ts";
 import { ESF_INVOICE_SOURCE_KIND } from "./services/esfInvoiceMapper.ts";
 import { ESF_OFFICIAL, resolveEsfProvider } from "./integrations/esf/EsfConfig.ts";
@@ -182,6 +182,18 @@ describe("ESF AVR XML / official AwpV1", () => {
     );
     assert.equal(uploaded.awpId, "99");
     assert.equal(uploaded.declined, false);
+  });
+
+  it("не подменяет отказ ИС ЭСФ текстом uploadAwp declined", () => {
+    const declined = parseAwpUploadResult(
+      `<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Body><v1:awpUploadResponse xmlns:v1="v1.awp"><acceptedList/><declinedList><awpUploadResult><errorList><error><errorCode>AWP_SENDER_NOT_VALID</errorCode><text>Sender invalid</text></error></errorList></awpUploadResult></declinedList></v1:awpUploadResponse></soap:Body></soap:Envelope>`,
+    );
+    assert.equal(declined.declined, true);
+    assert.equal(declined.errors[0]?.errorCode, "AWP_SENDER_NOT_VALID");
+    const message = formatEsfUploadDecline("AVR", null, declined.errors);
+    assert.match(message, /ИС ЭСФ отклонила АВР/);
+    assert.match(message, /AWP_SENDER_NOT_VALID/);
+    assert.equal(formatEsfUploadDecline("AVR", null, []).includes("uploadAwp declined"), false);
   });
 
   it("mock uploadAwp возвращает official acceptedList/awpId и не включается в production", () => {
