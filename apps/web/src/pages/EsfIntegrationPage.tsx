@@ -122,7 +122,7 @@ export function EsfIntegrationPage() {
     setError("");
     try {
       if (data?.system.provider === "live") {
-        await connectEsfAuthTicket(cabinetUsername);
+        await connectEsfAuthTicket(cabinetUsername, cabinetPassword);
       } else {
       const cert = await obtainAuthPublic(reuse);
       await api.esfConnect({
@@ -156,6 +156,7 @@ export function EsfIntegrationPage() {
         setError(err instanceof Error ? err.message : "Не удалось подключить ИС ЭСФ");
       }
     } finally {
+      setCabinetPassword("");
       setBusy(false);
     }
   }
@@ -237,11 +238,11 @@ export function EsfIntegrationPage() {
 
         {data?.system.provider === "live" ? (
           <div className="stack">
-            <p className="muted">Вход через ЭЦП: NCALayer подпишет запрос авторизации ИС ЭСФ. Пароль кабинета для этого способа не требуется. PIN вводится только в NCALayer.</p>
+            <p className="muted">NCALayer подпишет запрос авторизации ИС ЭСФ. Если портал запросит пароль кабинета, поле появится здесь. PIN ЭЦП вводится только в NCALayer.</p>
             <label>ИИН пользователя<input value={cabinetUsername} onChange={(e) => setCabinetUsername(e.target.value)} inputMode="numeric" maxLength={12} autoComplete="username" /></label>
           </div>
         ) : null}
-        {data?.system.provider !== "live" && askCabinet && !connected ? (
+        {askCabinet && !connected ? (
           <form
             className="stack"
             onSubmit={(event) => {
@@ -249,7 +250,7 @@ export function EsfIntegrationPage() {
               void connect();
             }}
           >
-            <p className="muted">Пароль кабинета ИС ЭСФ — не PIN ЭЦП. Он используется только для createSession и не сохраняется.</p>
+            <p className="muted">Портал запросил пароль кабинета ИС ЭСФ. Он используется только для входа и не сохраняется. PIN ЭЦП вводится в NCALayer.</p>
             <label>
               ИИН / логин кабинета
               <input value={cabinetUsername} onChange={(e) => setCabinetUsername(e.target.value)} autoComplete="username" />

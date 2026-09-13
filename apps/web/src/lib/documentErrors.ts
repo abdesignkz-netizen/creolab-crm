@@ -3,6 +3,7 @@ const names: Record<string, string> = {
   unitPrice: "Цена без НДС", vatRate: "НДС", legalName: "Юридическое название", bin: "БИН / ИИН",
   iin: "ИИН пользователя для авторизации", legalAddress: "Юридический адрес", iban: "ИИК / IBAN",
   bik: "БИК", directorName: "Руководитель", directorBasis: "Основание полномочий", bankName: "Банк",
+  cabinetUsername: "ИИН / логин кабинета ИС ЭСФ", cabinetPassword: "Пароль кабинета ИС ЭСФ",
   signedAuthTicket: "Ответ NCALayer для авторизации ИС ЭСФ", authCmsBase64: "Сертификат авторизации NCALayer",
   publicCertificate: "Публичный сертификат подписи", signature: "Подпись NCALayer", payloadSha256: "Версия подписываемого документа",
   updatedAt: "Версия черновика", body: "Документ", items: "Позиции документа", ncalayer: "NCALayer",

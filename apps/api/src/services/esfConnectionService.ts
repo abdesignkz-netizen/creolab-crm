@@ -346,7 +346,8 @@ export async function connectEsf(
 
   try {
     const session = raw.signedAuthTicket
-      ? await createEsfSessionFromSignedTicket(organizationBin, String(raw.signedAuthTicket), config)
+      ? await createEsfSessionFromSignedTicket(organizationBin, String(raw.signedAuthTicket), config,
+          cabinetPassword ? { username: cabinetUsername, password: cabinetPassword } : undefined)
       : await createEsfSessionFromPublicCert(
       {
         tin: organizationBin,
