@@ -33,6 +33,7 @@
                 <name>test</name>
                 <ndsAmount>123</ndsAmount>
                 <ndsRate>1</ndsRate>
+                <number>1</number>
                 <quantity>123</quantity>
                 <sumWithTax>12423</sumWithTax>
                 <sumWithoutTax>12300</sumWithoutTax>

@@ -95,6 +95,7 @@ const AWP_V1: Field[] = [
               { name: "name", required: true },
               { name: "ndsAmount", type: "decimal" },
               { name: "ndsRate", required: true, type: "int" },
+              { name: "number", type: "int" },
               { name: "quantity", type: "decimal" },
               { name: "sumWithTax", required: true, type: "decimal" },
               { name: "sumWithoutTax", required: true, type: "decimal" },

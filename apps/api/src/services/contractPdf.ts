@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
-import { amountToKztWords } from "@creolab/contracts";
+import { amountToKztWords, esfMeasureUnitSymbol } from "@creolab/contracts";
 import PDFDocument from "pdfkit";
 import { ApiError } from "../errors.ts";
 
@@ -157,7 +157,7 @@ export function drawItemsTable(doc: PDFKit.PDFDocument, items: ContractPdfItem[]
       String(index + 1),
       item.name,
       String(item.quantity),
-      item.unit,
+      esfMeasureUnitSymbol(item.unit),
       formatKzt(item.unitPrice),
       formatKzt(item.amountWithoutVat ?? item.totalAmount),
     ]);

@@ -6,7 +6,7 @@ import { mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import type { PrismaClient } from "@creolab/db";
-import { validateClientPhone, type PdfImportPreview } from "@creolab/contracts";
+import { resolveEsfMeasureUnitCode, validateClientPhone, type PdfImportPreview } from "@creolab/contracts";
 import { ApiError } from "../errors.ts";
 import { can, type AuthContext } from "../lib/types.ts";
 import { resolveUploadPath } from "../lib/storage.ts";
@@ -106,7 +106,7 @@ export async function commitManualPdf(prisma: PrismaClient, auth: AuthContext, r
   if (!pdfAttachment) throw new ApiError(422,"word_pdf_missing","PDF-копия не найдена. Повторите загрузку Word.");
   const checkedPdf = await readFile(resolveUploadPath(pdfAttachment.storageKey));
   if (createHash("sha256").update(checkedPdf).digest("hex") !== pdfAttachment.checksum) throw new ApiError(409,"pdf_changed","PDF-копия изменилась. Повторите загрузку.");
-  const items = draft.items.map(item=>({ ...item, ...lineAmounts(item.quantity,item.unitPrice,item.vatRate) }));
+  const items = draft.items.map(item=>({ ...item, unit: resolveEsfMeasureUnitCode(item.unit), ...lineAmounts(item.quantity,item.unitPrice,item.vatRate) }));
   const totals = sumLines(items);
   if (totals.totalAmount <= 0) throw new ApiError(422, "pdf_amount_required", "Укажите стоимость работ");
   if (draft.detectedTotal !== null && Math.abs(totals.totalAmount - draft.detectedTotal) > 0.01) throw new ApiError(422, "pdf_total_mismatch", "Сумма позиций не совпадает с итогом. Проверьте количество, цены, НДС и итог PDF.");

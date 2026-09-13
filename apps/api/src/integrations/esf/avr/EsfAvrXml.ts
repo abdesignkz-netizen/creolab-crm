@@ -1,3 +1,4 @@
+import { resolveEsfMeasureUnitCode } from "@creolab/contracts";
 import type { AvrSourceSnapshot } from "../../../services/avrMapper.ts";
 import { el, formatEsfDate, formatEsfDecimal, formatEsfInt, mustEl, wrap } from "../xml.ts";
 
@@ -36,6 +37,11 @@ function registrationType(party: { bin?: string; iin?: string }) {
   return "";
 }
 
+/** SoapUI uploadAwp uses a numeric NSI code (G3), not a free-text unit name. */
+export function awpMeasureUnitCode(unit: string | null | undefined) {
+  return resolveEsfMeasureUnitCode(unit);
+}
+
 export function buildAwpV1Xml(source: AvrSourceSnapshot, extras: AwpBuildExtras = {}) {
   const date = formatEsfDate(source.documentDate);
   const performedDate = formatEsfDate(source.documentDate);
@@ -64,14 +70,17 @@ export function buildAwpV1Xml(source: AvrSourceSnapshot, extras: AwpBuildExtras 
   );
 
   const works = source.items
-    .map((item) => {
+    .map((item, index) => {
       const vatRate = Math.round(Number(item.vatRate) || 0);
       return wrap(
         "work",
-        `${el("additionalInfo", item.description || "")}${el("measureUnitCode", item.unit || "")}${mustEl(
+        `${el("additionalInfo", item.description || "")}${el("measureUnitCode", awpMeasureUnitCode(item.unit))}${mustEl(
           "name",
           item.name,
-        )}${el("ndsAmount", formatEsfDecimal(item.vatAmount))}${mustEl("ndsRate", formatEsfInt(vatRate))}${el(
+        )}${el("ndsAmount", formatEsfDecimal(item.vatAmount))}${mustEl("ndsRate", formatEsfInt(vatRate))}${mustEl(
+          "number",
+          formatEsfInt(index + 1),
+        )}${el(
           "quantity",
           formatEsfDecimal(item.quantity, 3),
         )}${mustEl("sumWithTax", formatEsfDecimal(item.totalAmount))}${mustEl(

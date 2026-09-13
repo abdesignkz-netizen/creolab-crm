@@ -60,5 +60,20 @@ describe("Client interest from conversation", () => {
       }),
       "Нужен бот, который отвечает клиентам в WhatsApp",
     );
+    assert.equal(
+      inquiryRequestText({
+        service: "ИИ-менеджер",
+        description:
+          "Сайт или направление: Строительство\nКонтакт: +7 (707) 412-92-13\nКаналы: Сайт, WhatsApp, CRM\nCTA: offer",
+      }),
+      "ИИ-менеджер",
+    );
+    assert.equal(
+      inquiryRequestText({
+        description:
+          "Сайт или направление: Строительство\nКонтакт: +7 (707) 412-92-13\nКаналы: Сайт, WhatsApp, CRM\nCTA: offer",
+      }),
+      null,
+    );
   });
 });

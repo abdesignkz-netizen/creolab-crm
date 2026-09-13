@@ -1,3 +1,4 @@
+import { resolveEsfMeasureUnitCode } from "@creolab/contracts";
 import type { EsfInvoiceSourceSnapshot } from "../../../services/esfInvoiceMapper.ts";
 import { boolEl, el, formatEsfDate, formatEsfDecimal, formatEsfInt, mustEl, wrap } from "../xml.ts";
 
@@ -51,7 +52,7 @@ export function buildInvoiceV2Xml(source: EsfInvoiceSourceSnapshot) {
         )}${mustEl("truOriginCode", item.truOriginCode)}${mustEl(
           "turnoverSize",
           formatEsfDecimal(item.amountWithoutVat),
-        )}${el("unitNomenclature", item.unit)}${el("unitPrice", formatEsfDecimal(item.unitPrice, 6))}`,
+        )}${el("unitNomenclature", resolveEsfMeasureUnitCode(item.unit))}${el("unitPrice", formatEsfDecimal(item.unitPrice, 6))}`,
       );
     })
     .join("");

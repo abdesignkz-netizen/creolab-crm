@@ -6,6 +6,7 @@ import { describe, it } from "node:test";
 import { AVR_SOURCE_KIND, type AvrSourceSnapshot } from "./services/avrMapper.ts";
 import { mapAvrSnapshotToAwpXml } from "./integrations/esf/avr/EsfAvrAdapter.ts";
 import { validateAwpV1Xml } from "./integrations/esf/avr/EsfAvrXsd.ts";
+import { awpMeasureUnitCode } from "./integrations/esf/avr/EsfAvrXml.ts";
 import { buildCreateSessionEnvelope, buildUploadAwpEnvelope, formatEsfUploadDecline, parseSessionId, parseAwpUploadResult, awpSenderSignerName, cnFromCertificateSubject, isSessionClosedFault, ESF_SESSION_CLOSED_USER_MESSAGE, esfSoapX509Certificate, ESF_CERTIFICATE_NOT_VALID_USER_MESSAGE } from "./integrations/esf/EsfSoap.ts";
 import { mapInvoiceToEsfXml } from "./integrations/esf/invoice/EsfInvoiceAdapter.ts";
 import { ESF_INVOICE_SOURCE_KIND } from "./services/esfInvoiceMapper.ts";
@@ -88,15 +89,20 @@ describe("ESF AVR XML / official AwpV1", () => {
     assert.match(mapped.xml, /<tin>123456789013<\/tin>/);
     assert.match(mapped.xml, /<tin>222222222220<\/tin>/);
     assert.match(mapped.xml, /<ndsRate>12<\/ndsRate>/);
+    assert.match(mapped.xml, /<\/ndsRate><number>1<\/number><quantity>/);
+    assert.match(mapped.xml, /<measureUnitCode>796<\/measureUnitCode>/);
+    assert.equal(awpMeasureUnitCode("услуга"), "796");
+    assert.equal(awpMeasureUnitCode("час"), "356");
+    assert.equal(awpMeasureUnitCode("166"), "166");
     assert.match(mapped.xml, /<totalSumWithTax>952000.00<\/totalSumWithTax>/);
-    assert.doesNotMatch(mapped.xml, /<work>[\s\S]*<number>/);
   });
 
-  it("принимает official SoapUI sample без недокументированного work/number", () => {
+  it("принимает official SoapUI sample с номером строки work/number", () => {
     const ok = validateAwpV1Xml(officialSoapUiSample);
     assert.equal(ok.valid, true, JSON.stringify(ok.issues));
-    const withExtra = officialSoapUiSample.replace("<ndsRate>1</ndsRate>", "<ndsRate>1</ndsRate><number>1</number>");
-    const bad = validateAwpV1Xml(withExtra);
+    assert.match(officialSoapUiSample, /<ndsRate>1<\/ndsRate>\s*<number>1<\/number>/);
+    const extra = officialSoapUiSample.replace("<unitPriceWithoutTax>100</unitPriceWithoutTax>", "<unitPriceWithoutTax>100</unitPriceWithoutTax><unknown>x</unknown>");
+    const bad = validateAwpV1Xml(extra);
     assert.equal(bad.valid, false);
     assert.ok(bad.issues.some((row) => row.message === "element_not_in_awp_v1_xsd"));
   });

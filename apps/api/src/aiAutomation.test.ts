@@ -190,6 +190,27 @@ describe("Request analysis heuristic", () => {
     assert.doesNotMatch(analysis.clientMessageDraft, /77777777777/);
   });
 
+  it("uses the named service in the first WhatsApp and does not paste the website form dump", () => {
+    const analysis = analyzeRequestHeuristic({
+      name: "АЙБЕК",
+      service: "ИИ-менеджер",
+      subject: "ИИ-менеджер",
+      description:
+        "Сайт или направление: Строительство\nКонтакт: +7 (707) 412-92-13\nКаналы: Сайт, WhatsApp, CRM\nCTA: offer",
+      landingPage: "https://creolab.kz/ai-manager/#lead-form",
+      phoneNormalized: "77074129213",
+    });
+    assert.equal(analysis.serviceCategory, "ai");
+    assert.match(analysis.clientMessageDraft, /АЙБЕК, добрый день/i);
+    assert.match(analysis.clientMessageDraft, /пишу по поводу вашей заявки на создание ИИ-менеджера/i);
+    assert.match(analysis.clientMessageDraft, /ИИ-менеджер/i);
+    assert.doesNotMatch(analysis.clientMessageDraft, /CTA/i);
+    assert.doesNotMatch(analysis.clientMessageDraft, /412-92-13/);
+    assert.doesNotMatch(analysis.clientMessageDraft, /Сайт или направление/i);
+    assert.doesNotMatch(analysis.clientMessageDraft, /lead-form/i);
+    assert.doesNotMatch(analysis.clientMessageDraft, /Каналы:/i);
+  });
+
   it("draft for a presentation request keeps the tender context", () => {
     const analysis = analyzeRequestHeuristic({
       name: "Алия",

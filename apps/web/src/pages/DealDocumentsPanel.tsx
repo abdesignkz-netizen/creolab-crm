@@ -1,6 +1,6 @@
 import { EsfSubmissionStatus, ESF_SEND_PHASES, type EsfSubmission } from "../components/EsfSubmissionStatus";
 import { notifySaved } from "../components/SaveNotice";
-import { INVOICE_PAYMENT_KIND_LABEL, type PdfImportDraft } from "@creolab/contracts";
+import { esfMeasureUnitShortLabel, INVOICE_PAYMENT_KIND_LABEL, type PdfImportDraft } from "@creolab/contracts";
 import { DeleteContractButton } from "../components/DeleteContractButton";
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
@@ -484,7 +484,7 @@ export function DealDocumentsPanel(props: {
                   <div>{doc.importDetails.subject}</div>
                   {doc.importDetails.paymentKind && doc.importDetails.paymentKind !== "UNSPECIFIED" ? <div>{INVOICE_PAYMENT_KIND_LABEL[doc.importDetails.paymentKind as NonNullable<PdfImportDraft["paymentKind"]>]}</div> : null}
                   {doc.importDetails.paymentTerms && doc.importDetails.paymentTerms !== doc.importDetails.subject ? <div className="muted">{doc.importDetails.paymentTerms}</div> : null}
-                  {doc.items?.map((item: {id:string;name:string;quantity:number;unit:string;unitPrice:number;totalAmount:number})=><div className="muted" key={item.id}>{item.name}: {Number(item.quantity).toLocaleString("ru-RU")} {item.unit} × {Number(item.unitPrice).toLocaleString("ru-RU")} ₸ без НДС · итого {Number(item.totalAmount).toLocaleString("ru-RU")} ₸</div>)}
+                  {doc.items?.map((item: {id:string;name:string;quantity:number;unit:string;unitPrice:number;totalAmount:number})=><div className="muted" key={item.id}>{item.name}: {Number(item.quantity).toLocaleString("ru-RU")} {esfMeasureUnitShortLabel(item.unit)} × {Number(item.unitPrice).toLocaleString("ru-RU")} ₸ без НДС · итого {Number(item.totalAmount).toLocaleString("ru-RU")} ₸</div>)}
                 </> : null}
                 <div className="muted">
                   {INVOICE_STATUS_LABEL[doc.status] || doc.status} · {Number(doc.totalAmount).toLocaleString("ru-RU")} ₸

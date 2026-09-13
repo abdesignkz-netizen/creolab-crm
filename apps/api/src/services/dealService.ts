@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { resolveEsfMeasureUnitCode } from "@creolab/contracts";
 import type { PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
@@ -976,7 +977,7 @@ export async function createDeal(
       name: item.name.trim(),
       description: item.description?.trim() || null,
       quantity: item.quantity,
-      unit: item.unit?.trim() || "услуга",
+      unit: resolveEsfMeasureUnitCode(item.unit),
       unitPrice: item.unitPrice,
       vatRate,
       ...lineAmounts(item.quantity, item.unitPrice, vatRate),

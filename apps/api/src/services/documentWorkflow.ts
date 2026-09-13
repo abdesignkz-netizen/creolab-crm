@@ -5,7 +5,7 @@ import { requireDocumentsEnabled } from "./legalProfileService.ts";
 import { documentOrganization } from "./documentOrganization.ts";
 import { assessAvrReadiness } from "./avrReadiness.ts";
 import { serializeDealItem } from "./dealItemService.ts";
-import { avrEditorAmounts } from "@creolab/contracts";
+import { avrEditorAmounts, ESF_DEFAULT_MEASURE_UNIT_CODE } from "@creolab/contracts";
 
 export function documentWorkflowState(docs: Array<{type:string;status:string;externalStatus?:string|null;externalId?:string|null;errorCode?:string|null}>) {
   const sent=(d:typeof docs[number]|undefined)=>Boolean(d&&(d.externalId||["SENT","ACCEPTED"].includes(d.status)));
@@ -48,7 +48,7 @@ export async function getAvrEditorContext(prisma:PrismaClient,auth:AuthContext,d
   const profile=await documentOrganization(prisma,m.tenantId,deal.id,deal.contracts[0]?.id);
   const legal=await (await import("./legalProfileService.ts")).getLegalProfile(prisma,auth);
   const items=deal.items.map(serializeDealItem);
-  const fallback=!items.length&&Number(deal.offerAmountMinor)>0?[{name:deal.title,quantity:1,unit:"услуга",unitPrice:Number(deal.offerAmountMinor),vatRate:0}]:[];
+  const fallback=!items.length&&Number(deal.offerAmountMinor)>0?[{name:deal.title,quantity:1,unit:ESF_DEFAULT_MEASURE_UNIT_CODE,unitPrice:Number(deal.offerAmountMinor),vatRate:0}]:[];
   return {deal:{id:deal.id,title:deal.title,number:deal.id.slice(0,8).toUpperCase(),contactId:deal.contactId,contactName:deal.contact.name,companyId:deal.companyId,responsible:deal.assignee?.user.name||null},company:deal.company,organization:{...profile,directorBasis:legal.directorBasis},contract:deal.contracts[0]||null,items:items.length?items:fallback,documentState:documentWorkflowState(deal.electronicDocuments),existingDocumentId:deal.electronicDocuments.find(d=>d.type==="AVR")?.id||null};
 }
 

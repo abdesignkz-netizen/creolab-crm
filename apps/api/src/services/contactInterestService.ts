@@ -54,10 +54,36 @@ export function inferClientInterest(messages: InterestMessage[]): ContactInteres
 
 const ACK_LINE = /^(спасибо|хорошо|ок|ok|понял[аи]?|ладно|да|нет|угу|ага|👍+)[.!]?$/i;
 
+const FORM_FIELD_LINE =
+  /^(сайт или направление|каналы|канал|cta|контакт|страница|телефон|имя|услуга|комментарий|utm[_-]?[a-z]*|landing)\s*:/i;
+
+/** Website form tracking lines are not a client request. */
+export function isLeadFormFieldLine(value?: string | null) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (!text) return false;
+  return FORM_FIELD_LINE.test(text) || /^https?:\/\//i.test(text) || /\bcta\s*:/i.test(text);
+}
+
+/** Concatenated landing-form metadata (каналы, CTA, контакт, страница). */
+export function looksLikeLeadFormDump(value?: string | null) {
+  const text = String(value || "");
+  if (!text.trim()) return false;
+  const hits = [
+    /сайт или направление/i,
+    /\bканалы\s*:/i,
+    /\bcta\s*:/i,
+    /\bконтакт\s*:/i,
+    /\bстраница\s*:/i,
+    /lead-form/i,
+  ].filter((re) => re.test(text)).length;
+  return hits >= 2;
+}
+
 /** Channel/source/field labels are not a client request — do not put them in outbound copy. */
 export function isGenericLeadLabel(value?: string | null) {
   const text = String(value || "").replace(/\s+/g, " ").trim();
   if (!text) return true;
+  if (isLeadFormFieldLine(text) || looksLikeLeadFormDump(text)) return true;
   return /^(заявка(\s+из)?(\s+(whatsapp|instagram|telegram|ватсап|формы?))?|whatsapp|instagram|telegram|ватсап|форма|лид|lead|интерес|имя|компания|телефон|email|e-mail|почта|неизвестно|unknown|без темы|менеджер(\s+(whatsapp|ватсап))?)$/i.test(
     text,
   );
@@ -91,7 +117,7 @@ export function requestLineFromText(value?: string | null) {
     .filter(Boolean);
   for (const line of [...lines].reverse()) {
     const clean = line.replace(/^(?:здравствуйте|добрый день|привет)[,! .]+/i, "").trim();
-    if (!clean || ACK_LINE.test(clean) || isGenericLeadLabel(clean) || clean.length < 3) continue;
+    if (!clean || ACK_LINE.test(clean) || isGenericLeadLabel(clean) || isLeadFormFieldLine(clean) || clean.length < 3) continue;
     return clean.length > 180 ? `${clean.slice(0, 177)}…` : clean;
   }
   return null;

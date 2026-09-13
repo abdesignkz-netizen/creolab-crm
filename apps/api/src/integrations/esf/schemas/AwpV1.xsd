@@ -104,6 +104,7 @@
       <xs:element name="name" type="xs:string"/>
       <xs:element name="ndsAmount" type="xs:decimal" minOccurs="0"/>
       <xs:element name="ndsRate" type="xs:int"/>
+      <xs:element name="number" type="xs:int" minOccurs="0"/>
       <xs:element name="quantity" type="xs:decimal" minOccurs="0"/>
       <xs:element name="sumWithTax" type="xs:decimal"/>
       <xs:element name="sumWithoutTax" type="xs:decimal"/>

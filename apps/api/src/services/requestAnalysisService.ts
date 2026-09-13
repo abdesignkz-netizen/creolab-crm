@@ -1,3 +1,4 @@
+import { looksLikeLeadFormDump } from "./contactInterestService.ts";
 import { schemaForCategory } from "./qualificationSchemas.ts";
 
 export type RequestAnalysis = {
@@ -61,6 +62,11 @@ const SERVICE_HINTS: Array<{ category: string; subcategory?: string; patterns: R
     category: "web",
     subcategory: "landing",
     patterns: [/лендинг/i, /landing/i, /посадочн/i],
+  },
+  {
+    category: "ai",
+    subcategory: "manager",
+    patterns: [/ии[- ]?менеджер/i, /ai[- ]?менеджер/i, /ai[- ]?manager/i],
   },
   {
     category: "web",
@@ -142,7 +148,8 @@ function detectUrgency(text: string, deadline: string | null): "normal" | "high"
  * Never invent missing facts.
  */
 export function analyzeRequestHeuristic(input: AnalyzeInput): RequestAnalysis {
-  const clientText = [input.description, input.subject].filter(Boolean).join("\n");
+  const rawClientText = [input.description, input.subject].filter(Boolean).join("\n");
+  const clientText = looksLikeLeadFormDump(rawClientText) ? "" : rawClientText;
   const structuredHint = [input.service, input.serviceCategory, input.landingPage, input.utmCampaign]
     .filter(Boolean)
     .join(" ");
@@ -183,8 +190,7 @@ export function analyzeRequestHeuristic(input: AnalyzeInput): RequestAnalysis {
 
   const pages = extractPages(clientText);
   const detectedNeed =
-    input.description?.trim() ||
-    input.subject?.trim() ||
+    clientText.trim() ||
     input.service?.trim() ||
     (category ? `Заявка по услуге ${category}` : null);
 
@@ -254,16 +260,22 @@ export function analyzeRequestHeuristic(input: AnalyzeInput): RequestAnalysis {
     if (f.key === "audience") return "Кто ваша целевая аудитория?";
     if (f.key === "structure") return "Какой примерно объём/структура (сколько страниц или разделов)?";
     if (f.key === "deadline") return "К какому сроку нужен результат?";
+    if (f.key === "use_case") {
+      return "Какие задачи должен выполнять ИИ-менеджер: консультировать, квалифицировать заявки или записываться на встречу?";
+    }
+    if (f.key === "channels") return "Через какие каналы к вам приходят обращения — сайт, WhatsApp, телефон?";
+    if (f.key === "integrations") return "Какая CRM используется и нужно ли связать с ней ИИ-менеджера?";
     return `Уточните, пожалуйста: ${f.label.toLowerCase()}?`;
   });
 
   const clientMessageDraft = buildClientMessageDraft({
     contactName: input.name,
     serviceLabel,
+    service: input.service || input.subject,
     company,
     knownFields,
     qualificationQuestions,
-    requestText: input.description || input.subject || detectedNeed,
+    requestText: clientText || null,
   });
 
   return {
@@ -294,8 +306,41 @@ function serviceLabelForCategory(category?: string | null) {
   if (category === "presentation") return "презентацию";
   if (category === "advertising") return "рекламу";
   if (category === "branding") return "брендинг";
-  if (category === "ai") return "AI-решение";
-  return "заявку";
+  if (category === "ai") return "ИИ-решение";
+  return "услугу";
+}
+
+function lowerFirst(value: string) {
+  return value.charAt(0).toLowerCase() + value.slice(1);
+}
+
+function welcomeServicePhrase(service?: string | null, categoryLabel?: string) {
+  const raw = String(service || "").replace(/\s+/g, " ").trim();
+  if (raw && raw.length >= 3 && raw.length <= 80 && !looksLikeLeadFormDump(raw) && !isUnsuitableTopic(raw)) {
+    return phraseServiceAsTopic(raw);
+  }
+  return categoryLabel || "услугу";
+}
+
+function phraseServiceAsTopic(service: string) {
+  const text = service.replace(/\s+/g, " ").trim();
+  if (/создан/i.test(text)) return lowerFirst(text);
+  if (/ии[- ]?менеджер/i.test(text) || /ai[- ]?manager/i.test(text) || /ai[- ]?менеджер/i.test(text)) {
+    return "создание ИИ-менеджера";
+  }
+  return lowerFirst(text)
+    .replace(/^презентация(?=\s|$|,|\.|·)/i, "презентацию")
+    .replace(/^реклама(?=\s|$|,|\.|·)/i, "рекламу");
+}
+
+function isUnsuitableTopic(text: string) {
+  if (looksLikeLeadFormDump(text)) return true;
+  if (/сайт или направление/i.test(text)) return true;
+  if (/\b(cta|utm|lead-form)\b/i.test(text)) return true;
+  if (/каналы\s*:/i.test(text) || /контакт\s*:/i.test(text) || /страница\s*:/i.test(text)) return true;
+  if (/\+?\d[\d\s()-]{8,}\d/.test(text)) return true;
+  if (/https?:\/\//i.test(text)) return true;
+  return false;
 }
 
 function greetingFirstName(name?: string | null) {
@@ -320,19 +365,24 @@ export function sanitizeClientMessageDraft(raw: unknown): string | null {
 
 const AGENCY_INTRO = "Вас приветствует CreoLab Digital Agency";
 
-function requestTopic(requestText: string | null | undefined, serviceLabel: string) {
+function requestTopic(requestText: string | null | undefined, servicePhrase: string) {
   const raw = String(requestText || "").replace(/\s+/g, " ").trim();
   const stripped = raw
     .replace(/^(нужна|нужен|нужно|хотим|хочу|интересует|прошу)\s+/i, "")
     .replace(/[.!?…]+$/g, "")
     .trim();
-  if (stripped.length >= 4 && stripped.length <= 140 && !/заявка по услуге/i.test(stripped)) {
+  if (
+    stripped.length >= 4 &&
+    stripped.length <= 90 &&
+    !/заявка по услуге/i.test(stripped) &&
+    !isUnsuitableTopic(stripped)
+  ) {
     const topic = stripped.charAt(0).toLowerCase() + stripped.slice(1);
     return topic
       .replace(/^презентация(?=\s|$|,|\.|·)/i, "презентацию")
       .replace(/^реклама(?=\s|$|,|\.|·)/i, "рекламу");
   }
-  return serviceLabel;
+  return servicePhrase;
 }
 
 function stripWelcomeNoise(body?: string | null) {
@@ -342,6 +392,10 @@ function stripWelcomeNoise(body?: string | null) {
   text = text.replace(/^(?:добрый день|здравствуйте)[!.,]?\s*/i, "");
   text = text.replace(/вас приветствует creolab digital agency[,!.]?\s*/i, "");
   text = text.replace(/пишу по поводу вашей заявки на.+?(?=\.\s+[А-ЯЁA-Z]|Подскажите|Уточните|Напишите|$)/i, "");
+  text = text.replace(/сайт или направление[:\s][^.?!]*/gi, "");
+  text = text.replace(/\b(каналы|cta|контакт|страница)\s*:[^.?!]*/gi, "");
+  text = text.replace(/https?:\/\/\S+/gi, "");
+  text = text.replace(/\+?\d[\d\s()-]{8,}\d/g, "");
   text = text.replace(/^\.\s*/, "");
   text = text.replace(/понял(?:а)?,\s*что[^.?!]+[.?!]?\s*/i, "");
   text = text.replace(/получили вашу заявку[^.?!]+[.?!]?\s*/i, "");
@@ -364,13 +418,14 @@ function defaultWelcomeQuestions(questions: string[]) {
 export function formatInquiryWelcomeMessage(args: {
   contactName?: string | null;
   serviceLabel: string;
+  service?: string | null;
   requestText?: string | null;
   body?: string | null;
   qualificationQuestions: string[];
 }) {
   const firstName = greetingFirstName(args.contactName);
   const greeting = firstName ? `${firstName}, добрый день!` : "Добрый день!";
-  const topic = requestTopic(args.requestText, args.serviceLabel);
+  const topic = requestTopic(args.requestText, welcomeServicePhrase(args.service, args.serviceLabel));
   const opening = `${greeting} ${AGENCY_INTRO}, пишу по поводу вашей заявки на ${topic}.`;
   const continuation = stripWelcomeNoise(args.body) || defaultWelcomeQuestions(args.qualificationQuestions);
   return `${opening} ${continuation}`.replace(/\s+/g, " ").trim();
@@ -379,6 +434,7 @@ export function formatInquiryWelcomeMessage(args: {
 function buildClientMessageDraft(args: {
   contactName?: string | null;
   serviceLabel: string;
+  service?: string | null;
   company: string | null;
   knownFields: RequestAnalysis["knownFields"];
   qualificationQuestions: string[];
@@ -388,6 +444,7 @@ function buildClientMessageDraft(args: {
   return formatInquiryWelcomeMessage({
     contactName: args.contactName,
     serviceLabel: args.serviceLabel,
+    service: args.service,
     requestText: args.requestText,
     body: args.body,
     qualificationQuestions: args.qualificationQuestions,
@@ -445,7 +502,8 @@ export function applyRefinedRequestAnalysis(
   merged.clientMessageDraft = formatInquiryWelcomeMessage({
     contactName: input.name,
     serviceLabel: serviceLabelForCategory(merged.serviceCategory),
-    requestText: input.description || input.subject || detectedNeed,
+    service: input.service || input.subject,
+    requestText: looksLikeLeadFormDump(input.description) ? null : input.description || input.subject || detectedNeed,
     body: sanitizeClientMessageDraft(refined.clientMessageDraft) || undefined,
     qualificationQuestions,
   });
@@ -465,6 +523,7 @@ export async function analyzeRequestWithOptionalLlm(input: AnalyzeInput): Promis
         "Система сама поставит начало: «Имя, добрый день! Вас приветствует CreoLab Digital Agency, пишу по поводу вашей заявки на …».",
         "Напиши только продолжение: 1–3 уточняющих вопроса по заявке, на «Вы», коротко.",
         "Не пиши «Понял, что нужна…», «получили заявку», не повторяй приветствие и название агентства.",
+        "Не цитируй служебные поля заявки: каналы, CTA, контакт, страница, телефон, UTM.",
         "Не спрашивай телефон — он уже есть. Не выдумывай цены, сроки, портфолио и обещания.",
         analysis.qualificationQuestions.length
           ? `Ориентир по уточнениям: ${analysis.qualificationQuestions.slice(0, 3).join(" | ")}`
@@ -475,14 +534,16 @@ export async function analyzeRequestWithOptionalLlm(input: AnalyzeInput): Promis
       firstName: greetingFirstName(input.name),
       companyName: analysis.company,
       interest:
-        [input.description, input.subject, analysis.detectedNeed].filter(Boolean).join(" · ") || analysis.taskTitle,
+        [...new Set([input.service, looksLikeLeadFormDump(input.description) ? null : input.description, input.subject].filter(Boolean))]
+          .join(" · ") || analysis.taskTitle,
     });
     analysis = {
       ...analysis,
       clientMessageDraft: formatInquiryWelcomeMessage({
         contactName: input.name,
         serviceLabel: serviceLabelForCategory(analysis.serviceCategory),
-        requestText: input.description || input.subject || analysis.detectedNeed,
+        service: input.service || input.subject,
+        requestText: looksLikeLeadFormDump(input.description) ? null : input.description || input.subject || analysis.detectedNeed,
         body: composed,
         qualificationQuestions: analysis.qualificationQuestions,
       }),

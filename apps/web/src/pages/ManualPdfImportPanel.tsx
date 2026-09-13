@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { INVOICE_PAYMENT_KIND_LABEL, type InvoiceImportMatches, type PdfImportDraft, type PdfImportParty, type PdfImportPreview } from "@creolab/contracts";
+import { ESF_DEFAULT_MEASURE_UNIT_CODE, INVOICE_PAYMENT_KIND_LABEL, type InvoiceImportMatches, type PdfImportDraft, type PdfImportParty, type PdfImportPreview } from "@creolab/contracts";
 import { api } from "../lib/api";
+import { EsfMeasureUnitSelect } from "../components/EsfMeasureUnitSelect";
 import { notifySaved } from "../components/SaveNotice";
 
 const partyFields: Array<[keyof PdfImportParty,string]> = [["name","Название"],["bin","БИН / ИИН"],["legalAddress","Юридический адрес"],["iban","ИИК / IBAN"],["bankName","Банк"],["bik","БИК"],["directorName","Директор"]];
@@ -141,13 +142,13 @@ export function ManualPdfImportPanel({ onSaved }: { onSaved: () => void }) {
           {draft.items.map((item,i)=><div className="card pdf-import-item" key={i}>
             <label>Работа / товар {i+1}<input required value={item.name} onChange={e=>updateItem(i,{name:e.target.value})}/></label>
             <label>Количество {i+1}<input required type="number" min="0.001" step="0.001" value={item.quantity} onChange={e=>updateItem(i,{quantity:Number(e.target.value)})}/></label>
-            <label>Единица {i+1}<input required value={item.unit} onChange={e=>updateItem(i,{unit:e.target.value})}/></label>
+            <label>Ед. изм. {i+1}<EsfMeasureUnitSelect required aria-label={`Единица измерения ${i+1}`} value={item.unit} onChange={unit=>updateItem(i,{unit})}/></label>
             <label>Цена без НДС {i+1}<input required type="number" min="0" step="0.01" value={item.unitPrice} onChange={e=>updateItem(i,{unitPrice:Number(e.target.value)})}/></label>
             <label>НДС, % {i+1}<input required type="number" min="0" max="100" step="0.01" value={item.vatRate} onChange={e=>updateItem(i,{vatRate:Number(e.target.value)})}/></label>
             <p>Сумма с НДС: {round(round(item.quantity*item.unitPrice)*(1+item.vatRate/100)).toLocaleString("ru-RU")} ₸</p>
             <button type="button" className="btn secondary" onClick={()=>setDraft({...draft,items:draft.items.filter((_,n)=>n!==i)})}>Убрать позицию {i+1}</button>
           </div>)}
-          <button type="button" className="btn secondary" onClick={()=>setDraft({...draft,items:[...draft.items,{name:"",quantity:1,unitPrice:0,vatRate:0,unit:"услуга"}]})}>Добавить позицию</button>
+          <button type="button" className="btn secondary" onClick={()=>setDraft({...draft,items:[...draft.items,{name:"",quantity:1,unitPrice:0,vatRate:0,unit:ESF_DEFAULT_MEASURE_UNIT_CODE}]})}>Добавить позицию</button>
           <div className="deal-edit"><label>Итого в документе, ₸<input type="number" min="0" step="0.01" value={draft.detectedTotal??""} onChange={e=>setDraft({...draft,detectedTotal:e.target.value===""?null:Number(e.target.value)})}/></label><p><b>Сумма позиций с НДС: {total.toLocaleString("ru-RU")} ₸</b></p></div>
           <label>{kind==="INVOICE"?"Уточнение платежа / условия оплаты":"Условия оплаты"}<textarea value={draft.paymentTerms} onChange={e=>setDraft({...draft,paymentTerms:e.target.value})}/></label>
           <label>Сроки выполнения<textarea value={draft.completionTerms} onChange={e=>setDraft({...draft,completionTerms:e.target.value})}/></label>

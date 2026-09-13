@@ -1,3 +1,4 @@
+import { resolveEsfMeasureUnitCode } from "@creolab/contracts";
 import type { PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
@@ -107,7 +108,7 @@ export async function addDealItem(
       name: input.name.trim(),
       description: input.description?.trim() || null,
       quantity: input.quantity,
-      unit: input.unit?.trim() || "услуга",
+      unit: resolveEsfMeasureUnitCode(input.unit),
       unitPrice: input.unitPrice,
       vatRate,
       ...amounts,
@@ -151,7 +152,7 @@ export async function updateDealItem(
       ...(input.name != null ? { name: input.name.trim() } : {}),
       ...(input.description !== undefined ? { description: input.description?.trim() || null } : {}),
       quantity,
-      unit: input.unit?.trim() || item.unit,
+      unit: input.unit != null ? resolveEsfMeasureUnitCode(input.unit) : item.unit,
       unitPrice,
       vatRate,
       ...amounts,

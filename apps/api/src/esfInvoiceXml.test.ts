@@ -105,6 +105,7 @@ describe("ESF InvoiceV2 / official syncInvoice", () => {
     assert.match(mapped.xml, /<countryCode>KZ<\/countryCode>/);
     assert.match(mapped.xml, /<iik>KZ123456789012345678<\/iik>/);
     assert.match(mapped.containerXml, /<esf:invoiceContainer xmlns:esf="esf">/);
+    assert.match(mapped.xml, /<unitNomenclature>796<\/unitNomenclature>/);
     assert.doesNotMatch(mapped.xml, /<unitCode>/);
   });
 
