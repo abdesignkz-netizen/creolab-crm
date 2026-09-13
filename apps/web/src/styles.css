@@ -2372,3 +2372,23 @@ button.linkish {
 @media (max-width: 700px) {
   .documents-row-meta { text-align: left; min-width: 0; }
 }
+
+.avr-editor { display: grid; gap: 20px; }
+.avr-editor .panel { display: grid; gap: 12px; }
+.avr-editor label { display: grid; gap: 6px; }
+.avr-line { display: grid; grid-template-columns: minmax(180px,3fr) repeat(4,minmax(70px,1fr)) auto auto; gap: 10px; border: 1px solid var(--border,#ddd); border-radius: 12px; padding: 16px; align-items: end; }
+.avr-line input { min-width: 0; width: 100%; }
+.documents-table-wrap { overflow-x: auto; }
+.documents-table { width: 100%; border-collapse: collapse; background: var(--surface,#fff); }
+.documents-table th,.documents-table td { padding: 14px; text-align: left; border-bottom: 1px solid var(--border,#ddd); vertical-align: top; }
+.documents-table th { white-space: nowrap; }
+@media(max-width:900px) { .avr-line { grid-template-columns: 1fr 1fr; } .avr-line label:first-child { grid-column: 1 / -1; } }
+
+.avr-editor .panel { gap: 10px; align-content: start; }
+.avr-editor .panel p { margin: 4px 0; }
+.avr-editor .panel h3 { margin: 4px 0 12px; }
+.document-status { display: inline-block; padding: 4px 8px; border-radius: 6px; background: #eef0f4; color: #4b5563; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.document-status.status-VALIDATED,.document-status.status-SENT { background:#eaf2ff; color:#175cb4; }
+.document-status.status-ACCEPTED { background:#e7f6ed; color:#16723a; }
+.document-status.status-SENDING,.document-status.status-SIGNING { background:#fff3da; color:#925a08; }
+.document-status.status-ERROR { background:#fce9e9; color:#b42323; }

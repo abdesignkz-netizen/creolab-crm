@@ -5,7 +5,7 @@ import { NcalayerError } from "./ncalayerClient";
 
 export { ESF_MODULE_REQUIRED_MESSAGE };
 
-export async function signAndSendEsfDocument(documentId: string) {
+export async function signAndSendEsfDocument(documentId: string, onProgress?: (phase:"SIGNING"|"SENDING")=>void) {
   const client = createEsfNcaLayerClient();
   try {
     if (!(await client.isAvailable())) {
@@ -19,7 +19,9 @@ export async function signAndSendEsfDocument(documentId: string) {
       payload: string;
       payloadSha256: string;
     };
+    onProgress?.("SIGNING");
     const signed = await client.signPlainData(prepared.payload);
+    onProgress?.("SENDING");
     const sent = await api.sendElectronicDocumentEsfSigned(documentId, {
       signature: signed.signature,
       publicCertificate: signed.publicCertificate,

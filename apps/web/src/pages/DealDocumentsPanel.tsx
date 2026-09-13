@@ -190,6 +190,7 @@ export function DealDocumentsPanel(props: {
         <div className="row sit-head">
           <div>
             <b>Документы</b>
+            {docs?.documentState?<p className="deal-flag">{docs.documentState.label}</p>:null}
             <p className="muted">АВР и ЭСФ формируются из договора, позиций сделки и реквизитов сторон. Счёт на оплату — отдельный документ, его загрузка или создание не обязательны.</p>
           </div>
           <Link className="btn secondary" to="/documents">
@@ -483,7 +484,7 @@ export function DealDocumentsPanel(props: {
             .map((doc: any) => (
               <div className="row" key={doc.id}>
                 <div>
-                  <b>АВР {doc.number}</b>
+                  <Link to={`/documents/avr/${doc.id}`}><b>АВР {doc.number}</b> · Открыть</Link>
                   <div className="muted">
                     {EDOC_STATUS_LABEL[doc.status] || doc.status}
                     {doc.xmlPrepared ? " · XML AwpV1" : ""}

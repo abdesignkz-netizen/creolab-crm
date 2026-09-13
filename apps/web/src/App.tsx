@@ -24,6 +24,7 @@ const ControlPage = lazy(() => import("./pages/ControlPage").then(m => ({ defaul
 const ConversationsPage = lazy(() => import("./pages/ConversationsPage").then(m => ({ default: m.ConversationsPage })));
 const DealsPage = lazy(() => import("./pages/DealsPage").then(m => ({ default: m.DealsPage })));
 const DealDetailPage = lazy(() => import("./pages/DealsPage").then(m => ({ default: m.DealDetailPage })));
+const AvrEditorPage = lazy(() => import("./pages/AvrEditorPage").then(m => ({ default: m.AvrEditorPage })));
 const DocumentsPage = lazy(() => import("./pages/DocumentsPage").then(m => ({ default: m.DocumentsPage })));
 const SignPage = lazy(() => import("./pages/SignPage").then(m => ({ default: m.SignPage })));
 const VerifyPage = lazy(() => import("./pages/VerifyPage").then(m => ({ default: m.VerifyPage })));
@@ -964,6 +965,8 @@ export function App() {
                 <Route path="/deals" element={<DealsPage />} />
                 <Route path="/deals/:dealId" element={<DealDetailPage key={location.pathname} />} />
                 <Route path="/documents" element={<DocumentsPage />} />
+                <Route path="/documents/avr/new" element={<AvrEditorPage />} />
+                <Route path="/documents/avr/:id" element={<AvrEditorPage />} />
                 <Route path="/tasks" element={<TasksPage />} />
                 <Route path="/contacts" element={<ClientsPage />} />
                 <Route path="/contacts/:id" element={<ContactPage key={location.pathname} />} />

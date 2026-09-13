@@ -10,6 +10,7 @@ const KINDS = [
   ["", "Все"],
   ["CONTRACT", "Договоры"],
   ["INVOICE", "Счета"],
+  ["EDOC", "АВР и ЭСФ"],
   ["AVR", "АВР"],
   ["ESF", "ЭСФ"],
 ] as const;
@@ -130,6 +131,7 @@ export function DocumentsPage() {
           <h2>Документы</h2>
           <p className="muted">Договоры, счета, АВР и ЭСФ по всем сделкам</p>
         </div>
+        {!disabled?<Link className="btn" to="/documents/avr/new">+ Создать</Link>:null}
         <Link className="btn secondary" to="/settings#company-requisites">
           Реквизиты
         </Link>
@@ -267,30 +269,7 @@ export function DocumentsPage() {
         </div>
       ) : null}
 
-      <div className="documents-list">
-        {items.map((item) => (
-          <div key={`${item.kind}-${item.id}`} className="document-list-entry">
-          <Link to={item.href} className="sit-list-row">
-            <div>
-              <b>
-                {item.kindLabel} {item.number}
-              </b>
-              <div className="muted">
-                {item.dealTitle}
-                {item.companyName ? ` · ${item.companyName}` : ""}
-              </div>
-            </div>
-            <div className="documents-row-meta">
-              <span className={item.attention ? "deal-flag" : "muted"}>{item.statusLabel}</span>
-              <span className="muted">
-                {Number(item.totalAmount || 0).toLocaleString("ru-RU")} {item.currency || "KZT"}
-              </span>
-            </div>
-          </Link>
-          {item.kind === "CONTRACT" ? <DeleteContractButton id={item.id} number={item.number} onDeleted={async()=>{setOffset("0");await load(0);}} /> : null}
-          </div>
-        ))}
-      </div>
+      <div className="documents-table-wrap"><table className="documents-table"><thead><tr><th>№ документа</th><th>Клиент</th><th>Сделка</th><th>Сумма</th><th>Дата</th><th>Тип</th><th>Статус</th><th>ЭСФ</th><th>Ответственный</th><th>Действия</th></tr></thead><tbody>{items.map(item=><tr key={`${item.kind}-${item.id}`}><td><Link to={item.href}>{item.number}</Link></td><td>{item.companyName||"Не указан"}</td><td><Link to={`/deals/${item.dealId}`}>{item.dealTitle}</Link></td><td>{Number(item.totalAmount).toLocaleString("ru-RU")} ₸</td><td>{new Date(item.date||item.updatedAt).toLocaleDateString("ru-RU")}</td><td>{item.kindLabel}</td><td><span className={`document-status status-${item.errorCode?"ERROR":item.status}`}>{item.statusLabel}</span></td><td>{item.esfStatus}</td><td>{item.responsible||"Не назначен"}</td><td><Link to={item.href}>Открыть</Link>{item.kind==="CONTRACT"?<DeleteContractButton id={item.id} number={item.number} onDeleted={async()=>{setOffset("0");await load(0);}}/>:null}</td></tr>)}</tbody></table></div>
 
       {!disabled ? (
         <Pagination

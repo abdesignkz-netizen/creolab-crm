@@ -1,3 +1,4 @@
+import { avrEditorSchema, avrEditorAmounts, type AvrEditorInput } from "@creolab/contracts";
 import { documentOrganization } from "./documentOrganization.ts";
 import type { PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
@@ -74,11 +75,29 @@ async function resolveLinks(
   return { contract, invoice };
 }
 
-export async function createAvrDraft(
+export async function createAvrDraft(prisma:PrismaClient, auth:AuthContext, dealId:string, input:{contractId?:string;invoiceId?:string;editor?:AvrEditorInput}={}) {
+  const m=requireTenant(auth);requireManageDocuments(auth);
+  return prisma.$transaction(async tx=>{
+    await tx.$queryRaw`SELECT id FROM "Tenant" WHERE id = ${m.tenantId} FOR UPDATE`;
+    return createAvrDraftLocked(tx as PrismaClient,auth,dealId,input);
+  });
+}
+
+function applyEditor(source: ReturnType<typeof mapAvrSource>, editor:AvrEditorInput) {
+  const amounts=avrEditorAmounts(editor.items);
+  return {...source,editorVersion:1,documentDate:new Date(editor.documentDate).toISOString(),items:editor.items.map((i,n)=>({...i,dealItemId:"",description:null,sortOrder:n,...amounts.rows[n]})),totals:{...amounts.totals,currency:source.totals.currency}};
+}
+function savedEditor(document:{sourceDataJson:unknown;documentDate:Date}):AvrEditorInput|null {
+  const source=document.sourceDataJson as {editorVersion?:number;items?:unknown};
+  if(source?.editorVersion!==1)return null;
+  return avrEditorSchema.parse({documentDate:document.documentDate.toISOString().slice(0,10),items:source.items});
+}
+
+async function createAvrDraftLocked(
   prisma: PrismaClient,
   auth: AuthContext,
   dealId: string,
-  input: { contractId?: string; invoiceId?: string } = {},
+  input: { contractId?: string; invoiceId?: string; editor?: AvrEditorInput } = {},
 ) {
   const membership = requireTenant(auth);
   requireManageDocuments(auth);
@@ -86,7 +105,9 @@ export async function createAvrDraft(
   await requireDocumentsEnabled(prisma, tid);
 
   const existing = await prisma.electronicDocument.findFirst({
-    where: { tenantId: tid, dealId, type: "AVR", status: { in: ["DRAFT", "VALIDATED", "SIGNED", "SENT"] } },
+    where:{tenantId:tid,dealId,type:"AVR",OR:[{externalId:{not:null}},{status:{in:["SENDING","SENT","ACCEPTED"]}}]},orderBy:{createdAt:"desc"},
+  }) || await prisma.electronicDocument.findFirst({
+    where: { tenantId: tid, dealId, type: "AVR", status: { in: ["DRAFT", "VALIDATED", "SIGNED"] } },orderBy:{createdAt:"desc"},
   });
   if (existing && existing.status !== "DRAFT") {
     return { document: serializeElectronicDocument(existing), reused: true };
@@ -94,10 +115,10 @@ export async function createAvrDraft(
   const { contract, invoice } = await resolveLinks(prisma, tid, dealId, {...input, contractId: input.contractId || existing?.contractId, invoiceId: input.invoiceId || existing?.invoiceId});
 
   const { deal, items, profile, tenantName } = await loadAvrBundle(prisma, tid, dealId, contract?.id);
-  if (!items.length) {
+  if (!items.length && !input.editor && !existing) {
     throw new ApiError(422, "deal_items_required", "Сначала добавьте позиции в сделку");
   }
-  const source = mapAvrSource({
+  let source: ReturnType<typeof mapAvrSource> & {editorVersion?:number} = mapAvrSource({
     documentDate: existing?.documentDate || new Date(),
     currency: deal.currency || "KZT",
     deal,
@@ -109,6 +130,8 @@ export async function createAvrDraft(
     invoice,
   });
 
+  const editor=input.editor?avrEditorSchema.parse(input.editor):existing?savedEditor(existing):null;
+  if(editor)source=applyEditor(source,editor);
   if (existing) {
     const updated = await prisma.electronicDocument.update({
       where: { id: existing.id },
@@ -121,6 +144,7 @@ export async function createAvrDraft(
         totalAmount: source.totals.totalAmount,
         currency: source.totals.currency,
         sourceDataJson: source,
+        documentDate: new Date(source.documentDate),
         errorCode: null,
         errorMessage: null,
       },
@@ -143,6 +167,7 @@ export async function createAvrDraft(
       currency: source.totals.currency,
       status: "DRAFT",
       sourceDataJson: source,
+      documentDate: new Date(source.documentDate),
       createdByUserId: auth.user.id,
     },
   });
@@ -160,6 +185,13 @@ export async function createAvrDraft(
 }
 
 export async function validateAvr(prisma: PrismaClient, auth: AuthContext, documentId: string) {
+  const m=requireTenant(auth);requireManageDocuments(auth);
+  return prisma.$transaction(async tx=>{
+    await tx.$queryRaw`SELECT id FROM "ElectronicDocument" WHERE id = ${documentId} AND "tenantId" = ${m.tenantId} FOR UPDATE`;
+    return validateAvrLocked(tx as PrismaClient,auth,documentId);
+  });
+}
+async function validateAvrLocked(prisma: PrismaClient, auth: AuthContext, documentId: string) {
   const membership = requireTenant(auth);
   requireManageDocuments(auth);
   const tid = membership.tenantId;
@@ -190,13 +222,13 @@ export async function validateAvr(prisma: PrismaClient, auth: AuthContext, docum
     invoiceId: invoice?.id || document.invoiceId,
     contractNumber: contract?.number || null,
     contractDate: contract?.date || null,
-    itemCount: items.length,
+    itemCount: savedEditor(document)?.items.length ?? items.length,
     profile,
     company: deal.company,
   });
   if (!readiness.ready) throw avrMissingFieldsError(readiness);
 
-  const source = mapAvrSource({
+  let source: ReturnType<typeof mapAvrSource> & {editorVersion?:number} = mapAvrSource({
     documentDate: document.documentDate,
     currency: deal.currency || "KZT",
     deal,
@@ -208,6 +240,9 @@ export async function validateAvr(prisma: PrismaClient, auth: AuthContext, docum
     invoice,
   });
 
+  const editor=savedEditor(document);
+  if(editor)source=applyEditor(source,editor);
+  if(source.totals.totalAmount<=0)throw new ApiError(422,"missing_fields","Укажите положительную сумму АВР",undefined,{missingFields:["deal.amount"],missingFieldLabels:{"deal.amount":"Сумма АВР"}});
   const updated = await prisma.electronicDocument.update({
     where: { id: document.id },
     data: {
@@ -221,6 +256,7 @@ export async function validateAvr(prisma: PrismaClient, auth: AuthContext, docum
       status: "VALIDATED",
       sourceDataJson: source,
       validatedAt: new Date(),
+      xmlStorageKey: null,
       errorCode: null,
       errorMessage: null,
     },
@@ -241,4 +277,21 @@ export async function validateAvr(prisma: PrismaClient, auth: AuthContext, docum
     warnings: readiness.warnings,
     missingFields: [] as string[],
   };
+}
+
+export async function updateAvrDraft(prisma:PrismaClient,auth:AuthContext,id:string,raw:unknown) {
+  const m=requireTenant(auth);requireManageDocuments(auth);await requireDocumentsEnabled(prisma,m.tenantId);
+  const editor=avrEditorSchema.parse(raw);
+  const expected=(raw as {updatedAt?:string}).updatedAt;
+  return prisma.$transaction(async tx=>{
+    await tx.$queryRaw`SELECT id FROM "ElectronicDocument" WHERE id = ${id} AND "tenantId" = ${m.tenantId} FOR UPDATE`;
+    const doc=await tx.electronicDocument.findFirst({where:{id,tenantId:m.tenantId,type:"AVR"}});
+    if(!doc)throw new ApiError(404,"not_found","АВР не найден");
+    if(!MUTABLE.has(doc.status)||doc.externalId)throw new ApiError(409,"avr_immutable","Отправленный или подписываемый АВР нельзя редактировать");
+    if(expected&&doc.updatedAt.toISOString()!==expected)throw new ApiError(409,"document_changed","Документ изменён. Откройте его заново.");
+    const source=applyEditor(doc.sourceDataJson as ReturnType<typeof mapAvrSource>,editor);
+    const updated=await tx.electronicDocument.update({where:{id},data:{documentDate:new Date(editor.documentDate),sourceDataJson:source,...source.totals,status:"DRAFT",validatedAt:null,xmlStorageKey:null,errorCode:null,errorMessage:null}});
+    await tx.auditEvent.create({data:{tenantId:m.tenantId,actorUserId:auth.user.id,action:"electronic_document.edit_draft",entityType:"electronic_document",entityId:id,changesJson:{dealId:doc.dealId,itemCount:editor.items.length}}});
+    return {document:serializeElectronicDocument(updated)};
+  });
 }

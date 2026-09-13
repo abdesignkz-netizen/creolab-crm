@@ -319,6 +319,7 @@ export function SituationPage() {
           </div>
         </div>
         <div className="sit-attn-summary">
+          <Link to="/documents/avr/new?filter=all">Документы требуют закрытия · {attention.summary.documentsToClose ?? 0}</Link>
           <Link to="/contacts?filter=needs_reply">Нужно ответить · {attention.summary.needsReply}</Link>
           <Link to="/tasks?filter=overdue">Просрочено · {attention.summary.overdueTasks}</Link>
           <Link to={path("/deals", { focus: "proposal_no_reply" })}>КП без ответа · {attention.summary.proposalWithoutReply ?? 0}</Link>

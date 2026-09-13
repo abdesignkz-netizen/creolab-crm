@@ -186,6 +186,7 @@ export function serializeElectronicDocument(row: {
   totalAmount: { toString(): string } | number;
   currency: string;
   status: string;
+  updatedAt?: Date;
   sourceDataJson?: unknown;
   validatedAt?: Date | null;
   xmlStorageKey?: string | null;
@@ -215,6 +216,7 @@ export function serializeElectronicDocument(row: {
     currency: row.currency,
     status: row.status,
     source: row.sourceDataJson ?? {},
+    updatedAt: row.updatedAt?.toISOString() || null,
     validatedAt: row.validatedAt?.toISOString() || null,
     xmlPrepared: Boolean(row.xmlStorageKey),
     signedXmlPrepared: Boolean(row.signedXmlStorageKey),
@@ -253,6 +255,7 @@ export async function listDealDocuments(prisma: PrismaClient, auth: AuthContext,
     contracts: contracts.map(row => ({...serializeContract(row), originalFileName:originals.find(f=>f.id===row.originalFileId)?.originalFileName || null})),
     invoices: invoices.map(row => ({ ...serializeInvoice(row), importDetails: importDetails.get(row.id) || null, importedPdf: Boolean(row.pdfFileId && importedIds.has(row.pdfFileId)) })),
     electronicDocuments: electronicDocuments.map(serializeElectronicDocument),
+    documentState: (await import("./documentWorkflow.ts")).documentWorkflowState(electronicDocuments),
   };
 }
 
@@ -497,7 +500,7 @@ export async function createElectronicDocumentDraft(
   prisma: PrismaClient,
   auth: AuthContext,
   dealId: string,
-  input: { type: "AVR" | "ESF"; contractId?: string; invoiceId?: string },
+  input: { type: "AVR" | "ESF"; contractId?: string; invoiceId?: string; editor?: import("@creolab/contracts").AvrEditorInput },
 ) {
   if (input.type === "AVR") {
     const { createAvrDraft } = await import("./avrService.ts");

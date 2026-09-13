@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { avrEditorSchema } from "./avrEditor.ts";
 import { isValidKzTaxId } from "./kzTaxId.ts";
 
 const optionalTaxId = z
@@ -517,6 +518,7 @@ export const createDealSchema = z.object({
 });
 
 export const legalProfileSchema = z.object({
+  directorBasis: z.string().trim().max(500).nullable().optional(),
   legalName: z.string().trim().max(300).nullable().optional(),
   shortName: z.string().trim().max(120).nullable().optional(),
   bin: optionalTaxId,
@@ -568,6 +570,7 @@ export const generateInvoiceSchema = z.object({
 });
 
 export const createElectronicDocumentDraftSchema = z.object({
+  editor: avrEditorSchema.optional(),
   type: z.enum(["AVR", "ESF"]),
   contractId: z.string().uuid().optional(),
   invoiceId: z.string().uuid().optional(),

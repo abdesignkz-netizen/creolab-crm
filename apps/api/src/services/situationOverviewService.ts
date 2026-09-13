@@ -1135,6 +1135,7 @@ export async function getSituationOverview(
     href: "/deals",
   }));
 
+  const documentsToClose=await (await import("./documentWorkflow.ts")).countDocumentClosing(prisma,tid,assigneeDeal);
   return {
     asOf: now.toISOString(),
     currency,
@@ -1160,7 +1161,7 @@ export async function getSituationOverview(
     attention: {
       principle:
         "Сюда попадает только то, где человек должен что-то сделать сейчас: ответить клиенту, забрать диалог у AI, закрыть просроченное, задать шаг или дописать телефон. Диалог уже у менеджера, если клиент не ждёт ответа, сюда не попадает.",
-      summary: attentionSummary,
+      summary: {...attentionSummary,documentsToClose},
       items: onlyImportant
         ? attentionItems.filter((i) =>
             ["needs_reply", "overdue", "no_next_action", "needs_human", "no_contact"].includes(i.group),

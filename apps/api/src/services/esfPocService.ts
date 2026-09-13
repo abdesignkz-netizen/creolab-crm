@@ -1,4 +1,5 @@
 import { documentOrganization } from "./documentOrganization.ts";
+import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { PrismaClient } from "@creolab/db";
@@ -158,15 +159,16 @@ export async function previewAvrEsf(prisma: PrismaClient, auth: AuthContext, doc
   const source = await sourceForDocument(prisma, tid, document);
   const extras = await extrasForTenant(prisma, tid, document.number, document.dealId, document.contractId);
   const preview = previewAvrForEsf(source, extras);
-  const xmlStorageKey = await storeXml(tid, document.id, "awp-v1.xml", preview.xml);
-  const updated = await prisma.electronicDocument.update({
-    where: { id: document.id },
-    data: {
-      xmlStorageKey,
-      errorCode: preview.validation.valid ? null : "esf_xsd_invalid",
-      errorMessage: preview.validation.valid ? null : preview.validation.issues[0]?.message || "XSD",
-    },
-  });
+  if(document.status==="SENDING")throw new ApiError(409,"document_sending","Документ уже отправляется");
+  let updated=document;
+  if(["DRAFT","VALIDATED"].includes(document.status)&&!document.externalId){
+    // Each prepared revision has immutable bytes while NCALayer is signing.
+    const hash=createHash("sha256").update(preview.xml,"utf8").digest("hex");
+    const xmlStorageKey=await storeXml(tid,document.id,`awp-v1-${hash}.xml`,preview.xml);
+    const changed=await prisma.electronicDocument.updateMany({where:{id:document.id,tenantId:tid,updatedAt:document.updatedAt,status:document.status,externalId:null},data:{xmlStorageKey,errorCode:preview.validation.valid?null:"esf_xsd_invalid",errorMessage:preview.validation.valid?null:preview.validation.issues[0]?.message||"XSD"}});
+    if(!changed.count)throw new ApiError(409,"document_changed","Документ изменён. Проверьте его и получите подпись заново.");
+    updated=await loadDocument(prisma,tid,document.id);
+  }
   return {
     document: serializeElectronicDocument(updated),
     xml: preview.xml,

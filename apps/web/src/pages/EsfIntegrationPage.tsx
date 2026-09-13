@@ -1,3 +1,4 @@
+import { connectEsfAuthTicket } from "../lib/signing/esfConnect";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { sanitizeEsfSignerPublicMeta } from "@creolab/contracts";
@@ -121,15 +122,7 @@ export function EsfIntegrationPage() {
     setError("");
     try {
       if (data?.system.provider === "live") {
-        const iin = cabinetUsername.trim();
-        if (!/^\d{12}$/.test(iin)) throw new Error("Укажите ИИН пользователя — 12 цифр");
-        const ticket = await api.esfAuthTicket(iin) as { authTicketXml: string };
-        const client = createNcalayerClient();
-        try {
-          // Authentication XML only. AVR/ESF still use the official signPlainData flow.
-          const signedAuthTicket = await client.signXml(ticket.authTicketXml, { extKeyUsageOids: [] });
-          await api.esfConnect({ signedAuthTicket });
-        } finally { client.disconnect(); }
+        await connectEsfAuthTicket(cabinetUsername);
       } else {
       const cert = await obtainAuthPublic(reuse);
       await api.esfConnect({

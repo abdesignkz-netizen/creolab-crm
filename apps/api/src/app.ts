@@ -895,6 +895,18 @@ export function createApp(prisma: PrismaClient) {
     await sendInvoicePdf(prisma, await requireAuth(req), req.params.id, res);
   });
 
+  app.get("/api/v1/documents/avr/eligible-deals", async (req, res) => {
+    const { listAvrEligibleDeals } = await import("./services/documentWorkflow.ts");
+    res.json(await listAvrEligibleDeals(prisma, await requireAuth(req), req.query));
+  });
+  app.get("/api/v1/deals/:id/avr-context", async (req, res) => {
+    const { getAvrEditorContext } = await import("./services/documentWorkflow.ts");
+    res.json(await getAvrEditorContext(prisma, await requireAuth(req), req.params.id));
+  });
+  app.patch("/api/v1/electronic-documents/:id", json, async (req, res) => {
+    const { updateAvrDraft } = await import("./services/avrService.ts");
+    res.json(await updateAvrDraft(prisma, await requireAuth(req), req.params.id, req.body));
+  });
   app.get("/api/v1/electronic-documents/:id", async (req, res) => {
     const { getElectronicDocument } = await import("./services/documentDraftService.ts");
     res.json(await getElectronicDocument(prisma, await requireAuth(req), req.params.id));

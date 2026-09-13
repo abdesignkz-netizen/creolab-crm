@@ -124,7 +124,7 @@ export async function getAvrReadiness(prisma: PrismaClient, auth: AuthContext, d
         where: { type: "AVR", status: { in: ["DRAFT", "VALIDATED"] } },
         orderBy: { createdAt: "desc" },
         take: 1,
-        select: { id: true, contractId: true, invoiceId: true },
+        select: { id: true, contractId: true, invoiceId: true, sourceDataJson: true },
       },
     },
   });
@@ -132,6 +132,7 @@ export async function getAvrReadiness(prisma: PrismaClient, auth: AuthContext, d
   const profile = await documentOrganization(prisma, tid, dealId, deal.electronicDocuments[0]?.contractId || deal.contracts[0]?.id);
   const linkedId = deal.electronicDocuments[0]?.contractId;
   const contract = linkedId ? await prisma.contract.findFirst({where:{id:linkedId,tenantId:tid,dealId}}) : deal.contracts[0] || null;
+  const source=deal.electronicDocuments[0]?.sourceDataJson as {editorVersion?:number;items?:unknown[]}|undefined;
   return assessAvrReadiness({
     dealId,
     contractId: contract?.id || null,
@@ -140,7 +141,7 @@ export async function getAvrReadiness(prisma: PrismaClient, auth: AuthContext, d
     invoiceId: deal.electronicDocuments[0]?.invoiceId || null,
     contractNumber: contract?.number || null,
     contractDate: contract?.date || null,
-    itemCount: deal.items.length,
+    itemCount: source?.editorVersion===1 ? source.items?.length||0 : deal.items.length,
     profile,
     company: deal.company,
   });

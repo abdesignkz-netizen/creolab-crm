@@ -33,10 +33,13 @@ const INVOICE_STATUS_LABEL: Record<string, string> = {
 
 const EDOC_STATUS_LABEL: Record<string, string> = {
   DRAFT: "Черновик",
-  VALIDATED: "Проверен",
+  VALIDATED: "Готов",
+  SIGNING: "Подписание",
+  SENDING: "Отправляется",
+  ERROR: "Ошибка",
   SIGNED: "Подписан",
   SENT: "Отправлен",
-  ACCEPTED: "Подтверждён",
+  ACCEPTED: "Принят",
 };
 
 const CONTRACT_ATTENTION = new Set(["READY_TO_SIGN", "PENDING_SIGNATURE", "PARTIALLY_SIGNED"]);
@@ -103,6 +106,7 @@ export async function listTenantDocuments(
     throw new ApiError(403, "documents_disabled", "Контур документов выключен в настройках");
   }
 
+  const electronicOnly = query.kind === "EDOC";
   const kindRaw = String(query.kind || "").trim().toUpperCase();
   const kind = DOCUMENT_KINDS.includes(kindRaw as DocumentKind) ? (kindRaw as DocumentKind) : "";
   const status = String(query.status || "").trim();
@@ -141,16 +145,16 @@ export async function listTenantDocuments(
   });
 
   const include = {
-    deal: { select: { id: true, title: true } },
+    deal: { select: { id: true, title: true, contact:{select:{name:true}}, assignee:{select:{user:{select:{name:true}}}}, electronicDocuments:{where:{type:"ESF"},orderBy:{createdAt:"desc" as const},take:1,select:{status:true}} } },
     company: { select: { id: true, name: true } },
   } as const;
 
   const [contracts, invoices, avrs, esfs, contractCount, invoiceCount, avrCount, esfCount, attention] =
     await Promise.all([
-      !kind || kind === "CONTRACT"
+      !electronicOnly && (!kind || kind === "CONTRACT")
         ? prisma.contract.findMany({ where: contractWhere, include, orderBy: { updatedAt: "desc" }, take: 300 })
         : [],
-      !kind || kind === "INVOICE"
+      !electronicOnly && (!kind || kind === "INVOICE")
         ? prisma.invoice.findMany({ where: invoiceWhere, include, orderBy: { updatedAt: "desc" }, take: 300 })
         : [],
       !kind || kind === "AVR"
@@ -169,8 +173,8 @@ export async function listTenantDocuments(
             take: 300,
           })
         : [],
-      !kind || kind === "CONTRACT" ? prisma.contract.count({ where: contractWhere }) : 0,
-      !kind || kind === "INVOICE" ? prisma.invoice.count({ where: invoiceWhere }) : 0,
+      !electronicOnly && (!kind || kind === "CONTRACT") ? prisma.contract.count({ where: contractWhere }) : 0,
+      !electronicOnly && (!kind || kind === "INVOICE") ? prisma.invoice.count({ where: invoiceWhere }) : 0,
       !kind || kind === "AVR" ? prisma.electronicDocument.count({ where: edocWhere("AVR") }) : 0,
       !kind || kind === "ESF" ? prisma.electronicDocument.count({ where: edocWhere("ESF") }) : 0,
       countDocumentAttention(prisma, tid),
@@ -186,10 +190,13 @@ export async function listTenantDocuments(
         totalAmount: row.totalAmount,
         currency: row.currency,
         updatedAt: row.updatedAt,
+        date: row.date,
+        responsible: row.deal.assignee?.user.name || null,
+        esfStatus: row.deal.electronicDocuments[0]?.status || null,
         dealId: row.deal.id,
         dealTitle: row.deal.title,
         companyId: row.company?.id || null,
-        companyName: row.company?.name || null,
+        companyName: row.company?.name || row.deal.contact?.name || null,
         errorCode: null,
         externalStatus: null,
       }),
@@ -203,10 +210,13 @@ export async function listTenantDocuments(
         totalAmount: row.totalAmount,
         currency: row.currency,
         updatedAt: row.updatedAt,
+        date: row.date,
+        responsible: row.deal.assignee?.user.name || null,
+        esfStatus: row.deal.electronicDocuments[0]?.status || null,
         dealId: row.deal.id,
         dealTitle: row.deal.title,
         companyId: row.company?.id || null,
-        companyName: row.company?.name || null,
+        companyName: row.company?.name || row.deal.contact?.name || null,
         errorCode: null,
         externalStatus: null,
       }),
@@ -220,10 +230,13 @@ export async function listTenantDocuments(
         totalAmount: row.totalAmount,
         currency: row.currency,
         updatedAt: row.updatedAt,
+        date: row.documentDate,
+        responsible: row.deal.assignee?.user.name || null,
+        esfStatus: row.deal.electronicDocuments[0]?.status || null,
         dealId: row.deal.id,
         dealTitle: row.deal.title,
         companyId: row.company?.id || null,
-        companyName: row.company?.name || null,
+        companyName: row.company?.name || row.deal.contact?.name || null,
         errorCode: row.errorCode,
         externalStatus: row.externalStatus,
       }),
@@ -237,10 +250,13 @@ export async function listTenantDocuments(
         totalAmount: row.totalAmount,
         currency: row.currency,
         updatedAt: row.updatedAt,
+        date: row.documentDate,
+        responsible: row.deal.assignee?.user.name || null,
+        esfStatus: row.deal.electronicDocuments[0]?.status || null,
         dealId: row.deal.id,
         dealTitle: row.deal.title,
         companyId: row.company?.id || null,
-        companyName: row.company?.name || null,
+        companyName: row.company?.name || row.deal.contact?.name || null,
         errorCode: row.errorCode,
         externalStatus: row.externalStatus,
       }),
@@ -271,6 +287,9 @@ function serializeInboxItem(row: {
   totalAmount: { toString(): string } | number;
   currency: string;
   updatedAt: Date;
+  date: Date;
+  responsible: string | null;
+  esfStatus: string | null;
   dealId: string;
   dealTitle: string;
   companyId: string | null;
@@ -284,7 +303,10 @@ function serializeInboxItem(row: {
     kindLabel: DOCUMENT_KIND_LABEL[row.kind],
     number: row.number,
     status: row.status,
-    statusLabel: documentStatusLabel(row.kind, row.status),
+    statusLabel: row.errorCode ? "Ошибка" : documentStatusLabel(row.kind, row.status),
+    date: row.date.toISOString(),
+    responsible: row.responsible,
+    esfStatus: row.esfStatus ? documentStatusLabel("ESF",row.esfStatus) : "Требуется",
     attention: isDocumentAttention(row.kind, row.status, row.errorCode),
     totalAmount: asMoney(row.totalAmount),
     currency: row.currency,
@@ -295,6 +317,6 @@ function serializeInboxItem(row: {
     companyName: row.companyName,
     errorCode: row.errorCode,
     externalStatus: row.externalStatus,
-    href: `/deals/${row.dealId}`,
+    href: row.kind === "AVR" ? `/documents/avr/${row.id}` : `/deals/${row.dealId}`,
   };
 }

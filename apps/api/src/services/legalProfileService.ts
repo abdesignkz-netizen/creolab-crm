@@ -69,7 +69,9 @@ export function serializeLegalProfile(
 export async function getLegalProfile(prisma: PrismaClient, auth: AuthContext) {
   const membership = requireTenant(auth);
   const row = await prisma.tenantLegalProfile.findUnique({ where: { tenantId: membership.tenantId } });
-  return serializeLegalProfile(row);
+  const tenant=await prisma.tenant.findUnique({where:{id:membership.tenantId},select:{settingsJson:true}});
+  const settings=tenant?.settingsJson as {documents?:{directorBasis?:string}}|null;
+  return {...serializeLegalProfile(row),directorBasis:settings?.documents?.directorBasis||null};
 }
 
 export async function getTenantDocumentFlags(prisma: PrismaClient, tenantId: string) {
@@ -205,5 +207,11 @@ export async function updateLegalProfile(
     },
   });
 
-  return serializeLegalProfile(saved);
+  if(input.directorBasis!==undefined)await prisma.$transaction(async tx=>{
+    await tx.$queryRaw`SELECT id FROM "Tenant" WHERE id = ${tid} FOR UPDATE`;
+    const tenant=await tx.tenant.findUniqueOrThrow({where:{id:tid}});
+    const settings=tenant.settingsJson as Record<string,any>;
+    await tx.tenant.update({where:{id:tid},data:{settingsJson:{...settings,documents:{...settings?.documents,directorBasis:input.directorBasis||null}}}});
+  });
+  return getLegalProfile(prisma,auth);
 }
