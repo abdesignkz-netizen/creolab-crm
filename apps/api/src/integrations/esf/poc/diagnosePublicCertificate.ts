@@ -66,9 +66,6 @@ export function diagnosePublicCertificate(
   const ekuSign = eku.includes("emailProtection");
   const reasons: string[] = [];
   const expectedEnv = options?.expectedEnv;
-  if (expectedEnv === "test" && env === "prod") {
-    reasons.push("Сертификат выдан боевым УЦ, а createSession идёт в TEST ИС ЭСФ. TEST обычно принимает только тестовый УЦ.");
-  }
   if (expectedEnv === "prod" && env === "test") {
     reasons.push("Сертификат тестового УЦ отправляется в боевой ИС ЭСФ.");
   }
@@ -83,7 +80,7 @@ export function diagnosePublicCertificate(
     reasons.push("БИН в сертификате не совпадает с БИН организации / tin createSession.");
   }
   const fault = officialFaultCode(options?.lastFault || "");
-  if (fault === "CERTIFICATE_NOT_VALID" && !reasons.some((item) => item.includes("боевым УЦ"))) {
+  if (fault === "CERTIFICATE_NOT_VALID") {
     reasons.unshift("Официальный fault после успешного WSSE: CERTIFICATE_NOT_VALID — кабинет принял пароль, но отклонил сам сертификат.");
   }
 

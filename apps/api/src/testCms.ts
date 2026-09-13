@@ -2,7 +2,7 @@ import forge from "node-forge";
 
 export function makeTestCms(
   document: Buffer,
-  options: { iin?: string; bin?: string; expired?: boolean } = {},
+  options: { iin?: string; bin?: string; expired?: boolean; issuer?: string } = {},
 ) {
   const keys = forge.pki.rsa.generateKeyPair({ bits: 1024, e: 0x10001 });
   const cert = forge.pki.createCertificate();
@@ -15,7 +15,7 @@ export function makeTestCms(
     { name: "serialNumber", value: `IIN${options.iin || "222222222220"}` },
     { name: "organizationalUnitName", value: `BIN${options.bin || "123456789013"}` },
   ]);
-  cert.setIssuer([{ name: "commonName", value: "Test CA" }]);
+  cert.setIssuer([{ name: "commonName", value: options.issuer || "Test CA" }]);
   cert.sign(keys.privateKey, forge.md.sha256.create());
 
   const p7 = forge.pkcs7.createSignedData();

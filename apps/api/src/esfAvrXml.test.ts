@@ -222,6 +222,8 @@ describe("ESF AVR XML / official AwpV1", () => {
       formatEsfUploadDecline("AVR", null, [{ errorCode: "CERTIFICATE_NOT_VALID" }]),
       ESF_CERTIFICATE_NOT_VALID_USER_MESSAGE,
     );
+    assert.doesNotMatch(ESF_CERTIFICATE_NOT_VALID_USER_MESSAGE, /тестового УЦ|тестовый ключ/);
+    assert.match(ESF_CERTIFICATE_NOT_VALID_USER_MESSAGE, /собственн/);
     assert.equal(
       esfSoapX509Certificate("-----BEGIN CERTIFICATE-----\nMIIBTw==\n-----END CERTIFICATE-----"),
       "MIIBTw==",

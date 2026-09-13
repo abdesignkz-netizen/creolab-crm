@@ -334,14 +334,14 @@ function formatUploadDecline(
       const expectedEnv =
         esfEnv === "prod" || esfEnv === "test" || esfEnv === "local" || esfEnv === "off" ? esfEnv : undefined;
       const diagnosed = diagnosePublicCertificate(pem, { expectedEnv, lastFault: "CERTIFICATE_NOT_VALID" });
-      if (diagnosed.caEnvironment === "prod" && esfEnv !== "prod") {
-        return "ИС ЭСФ не приняла сертификат: выбран боевой ЭЦП НУЦ, а отправка идёт на тестовый контур. В NCALayer выберите тестовый ключ подписи.";
-      }
       if (diagnosed.caEnvironment === "test" && esfEnv === "prod") {
         return "ИС ЭСФ не приняла сертификат: тестовый УЦ нельзя использовать на боевом контуре.";
       }
       if (!diagnosed.validNow) {
         return "ИС ЭСФ не приняла сертификат: срок действия ЭЦП истёк или ещё не начался.";
+      }
+      if (diagnosed.ekuAuth && !diagnosed.ekuSign) {
+        return "ИС ЭСФ не приняла сертификат: для АВР нужен ключ подписи (GOST для юридического лица), не ключ аутентификации AUTH_RSA.";
       }
     } catch {
       /* keep mapped portal text */

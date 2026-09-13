@@ -149,7 +149,7 @@ export function EsfIntegrationPage() {
         setAskCabinet(true);
         setError(body?.message || "ИС ЭСФ запросила пароль кабинета. Это не PIN ЭЦП.");
       } else if (body?.code === "CERTIFICATE_NOT_VALID") {
-        setError("TEST ИС ЭСФ не принял AUTH-сертификат. Upload не запускаем.");
+        setError("ИС ЭСФ не приняла AUTH-сертификат. На тестовом стенде используйте собственный действующий AUTH_RSA НУЦ, не ключ подписи. Организация должна быть зарегистрирована на test3.esf.kgd.gov.kz.");
       } else if (err instanceof NcalayerError) {
         setError(err.message);
       } else {
@@ -290,7 +290,8 @@ export function EsfIntegrationPage() {
         </div>
         <p className="muted" style={{ marginTop: 12 }}>
           БИН организации задаётся в <Link to="/settings">реквизитах</Link>. Подключение кабинета и подпись АВР/ЭСФ —
-          разные операции. PIN остаётся в NCALayer.
+          разные операции: вход — AUTH_RSA, подпись ЮЛ — GOST. На тестовом стенде КГД принимает собственные действующие
+          сертификаты НУЦ после регистрации на test3.esf.kgd.gov.kz. PIN остаётся в NCALayer.
         </p>
       </div>
 

@@ -44,4 +44,17 @@ describe("public certificate diagnosis", () => {
   it("достаёт официальный fault code", () => {
     assert.equal(officialEsfFaultCode("esf: CERTIFICATE_NOT_VALID from SessionService"), "CERTIFICATE_NOT_VALID");
   });
+
+  it("не считает боевой НУЦ ошибкой на TEST: КГД принимает собственные сертификаты", () => {
+    const pem = pemFromCms(makeTestCms(Buffer.from("auth"), { bin: "123456789013", issuer: "National Certification Authority of RK" }));
+    const diagnosed = diagnosePublicCertificate(pem, {
+      expectedEnv: "test",
+      expectedBin: "123456789013",
+      lastFault: "CERTIFICATE_NOT_VALID",
+    });
+    assert.equal(diagnosed.caEnvironment, "prod");
+    const reasons = diagnosed.likelyCertificateNotValidReasons.join(" ");
+    assert.doesNotMatch(reasons, /тестовый УЦ|боевым УЦ/);
+    assert.match(reasons, /CERTIFICATE_NOT_VALID/);
+  });
 });
