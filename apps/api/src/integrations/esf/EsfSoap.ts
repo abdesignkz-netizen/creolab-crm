@@ -13,6 +13,19 @@ function cdata(value: string) {
   return `<![CDATA[${value.replaceAll("]]>", "]]]]><![CDATA[>")}]]>`;
 }
 
+/** Official SoapUI samples send compact base64 DER, without PEM headers or whitespace. */
+export function esfSoapX509Certificate(value: string) {
+  return String(value || "")
+    .replace(/\\n/g, "\n")
+    .replace(/-----BEGIN CERTIFICATE-----/gi, "")
+    .replace(/-----END CERTIFICATE-----/gi, "")
+    .replace(/\s+/g, "");
+}
+
+function x509El(value: string) {
+  return `<x509Certificate>${xmlEscape(esfSoapX509Certificate(value))}</x509Certificate>`;
+}
+
 function envelope(nsAttr: string, body: string, header = "") {
   return [
     `<?xml version="1.0" encoding="UTF-8"?>`,
@@ -47,7 +60,7 @@ export function buildCreateSessionEnvelope(input: {
   const body = [
     `<esf:createSessionRequest>`,
     `<tin>${xmlEscape(input.tin)}</tin>`,
-    `<x509Certificate>${xmlEscape(input.x509Certificate)}</x509Certificate>`,
+    x509El(input.x509Certificate),
     input.sourceType ? `<sourceType>${xmlEscape(input.sourceType)}</sourceType>` : "",
     `</esf:createSessionRequest>`,
   ].join("");
@@ -101,7 +114,7 @@ export function buildCloseSessionByCredentialsEnvelope(input: {
     `<esf:closeSessionByCredentialsRequest>`,
     `<tin>${xmlEscape(input.tin)}</tin>`,
     optionalBusinessProfile(input.businessProfileType),
-    `<x509Certificate>${xmlEscape(input.x509Certificate)}</x509Certificate>`,
+    x509El(input.x509Certificate),
     `</esf:closeSessionByCredentialsRequest>`,
   ].join("");
   return envelope(`xmlns:esf="esf"`, body, header);
@@ -150,7 +163,7 @@ export function buildUploadAwpEnvelope(input: {
     `<signature>${xmlEscape(input.signature)}</signature>`,
     `<signatureType>${xmlEscape(input.signatureType || ESF_OFFICIAL.signatureTypeCompany)}</signatureType>`,
     `</awpInfo></awpInfoList>`,
-    `<x509Certificate>${xmlEscape(input.x509Certificate)}</x509Certificate>`,
+    x509El(input.x509Certificate),
     `<senderSignerName>${xmlEscape(awpSenderSignerName({ directorName: input.senderSignerName }))}</senderSignerName>`,
     `</v1:awpUploadRequest>`,
   ].join("");
@@ -186,7 +199,7 @@ export function buildSyncInvoiceEnvelope(input: {
     `<signature>${xmlEscape(input.signature)}</signature>`,
     `<signatureType>${xmlEscape(input.signatureType || ESF_OFFICIAL.signatureTypeCompany)}</signatureType>`,
     `</invoiceUploadInfo></invoiceUploadInfoList>`,
-    `<x509Certificate>${xmlEscape(input.x509Certificate)}</x509Certificate>`,
+    x509El(input.x509Certificate),
     `</esf:syncInvoiceRequest>`,
   ].join("");
   return envelope(`xmlns:esf="esf"`, body);
@@ -270,6 +283,9 @@ export function isSessionClosedFault(message: string) {
 export const ESF_SESSION_CLOSED_USER_MESSAGE =
   "Сессия ИС ЭСФ закрыта. Закройте кабинет ИС ЭСФ в браузере, откройте «Интеграции» и подключитесь снова, затем повторите отправку.";
 
+export const ESF_CERTIFICATE_NOT_VALID_USER_MESSAGE =
+  "ИС ЭСФ не приняла сертификат подписи. На тестовом контуре нужен сертификат тестового УЦ; в NCALayer выберите ключ подписи (не ключ аутентификации).";
+
 export const ESF_BUSINESS_PROFILES = [
   "ADMIN_ENTERPRISE",
   "ENTREPRENEUR_USER",
@@ -351,6 +367,9 @@ export function formatEsfUploadDecline(
   const label = kind === "ESF" ? "счёт-фактуру" : "АВР";
   if (isSessionClosedFault(portal) || details.some((row) => isSessionClosedFault(row))) {
     return ESF_SESSION_CLOSED_USER_MESSAGE;
+  }
+  if (/\bCERTIFICATE_NOT_VALID\b/.test(portal) || details.some((row) => /\bCERTIFICATE_NOT_VALID\b/.test(row))) {
+    return ESF_CERTIFICATE_NOT_VALID_USER_MESSAGE;
   }
   if (portal) {
     return `ИС ЭСФ отклонила ${label}. ${portal}${details.length > 1 ? `. ${details.slice(1).join(". ")}` : ""}`;

@@ -17,7 +17,7 @@ describe("public certificate diagnosis", () => {
     assert.equal(diagnosed.bin, "123456789013");
     assert.equal(diagnosed.iin, "222222222220");
     assert.equal(diagnosed.x509Format.hasPemHeaders, true);
-    assert.equal(diagnosed.x509Format.sentToCreateSessionAs, "pem_with_headers_xml_escaped");
+    assert.equal(diagnosed.x509Format.sentToCreateSessionAs, "base64_der_no_headers");
     assert.ok(diagnosed.likelyCertificateNotValidReasons.length > 0);
     assert.doesNotMatch(JSON.stringify(diagnosed), /PRIVATE KEY/);
     assert.doesNotMatch(JSON.stringify(diagnosed), /BEGIN CERTIFICATE/);

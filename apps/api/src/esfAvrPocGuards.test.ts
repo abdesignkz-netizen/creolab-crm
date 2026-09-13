@@ -120,8 +120,11 @@ describe("AVR POC preflight, without external SOAP", () => {
     assert.equal(uploads.length, 1);
     assert.equal(uploads[0].body.match(/<awpBody><!\[CDATA\[([\s\S]*?)\]\]><\/awpBody>/)?.[1], prepared.payload);
     assert.match(uploads[0].body, /<\/x509Certificate><senderSignerName>[^<]+<\/senderSignerName>/);
-    assert.ok(uploads[0].body.includes(signPem.trim()));
-    assert.ok(!uploads[0].body.includes(authPem.trim()));
+    const signBody = signPem.replace(/-----BEGIN CERTIFICATE-----|-----END CERTIFICATE-----|\s/g, "");
+    const authBody = authPem.replace(/-----BEGIN CERTIFICATE-----|-----END CERTIFICATE-----|\s/g, "");
+    assert.ok(uploads[0].body.includes(signBody));
+    assert.ok(!uploads[0].body.includes("BEGIN CERTIFICATE"));
+    assert.ok(!uploads[0].body.includes(authBody));
     assert.equal(requests.at(-1), uploads[0]);
     assert.ok(!requests.some((r) => /syncInvoice|queryAwp|createSessionRequest/.test(r.body)));
     assert.equal(report.code, "POC_AVR_NCALAYER_SUCCESS");

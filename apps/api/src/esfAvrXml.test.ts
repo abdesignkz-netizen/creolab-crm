@@ -6,7 +6,7 @@ import { describe, it } from "node:test";
 import { AVR_SOURCE_KIND, type AvrSourceSnapshot } from "./services/avrMapper.ts";
 import { mapAvrSnapshotToAwpXml } from "./integrations/esf/avr/EsfAvrAdapter.ts";
 import { validateAwpV1Xml } from "./integrations/esf/avr/EsfAvrXsd.ts";
-import { buildCreateSessionEnvelope, buildUploadAwpEnvelope, formatEsfUploadDecline, parseSessionId, parseAwpUploadResult, awpSenderSignerName, cnFromCertificateSubject, isSessionClosedFault, ESF_SESSION_CLOSED_USER_MESSAGE } from "./integrations/esf/EsfSoap.ts";
+import { buildCreateSessionEnvelope, buildUploadAwpEnvelope, formatEsfUploadDecline, parseSessionId, parseAwpUploadResult, awpSenderSignerName, cnFromCertificateSubject, isSessionClosedFault, ESF_SESSION_CLOSED_USER_MESSAGE, esfSoapX509Certificate, ESF_CERTIFICATE_NOT_VALID_USER_MESSAGE } from "./integrations/esf/EsfSoap.ts";
 import { mapInvoiceToEsfXml } from "./integrations/esf/invoice/EsfInvoiceAdapter.ts";
 import { ESF_INVOICE_SOURCE_KIND } from "./services/esfInvoiceMapper.ts";
 import { ESF_OFFICIAL, resolveEsfProvider } from "./integrations/esf/EsfConfig.ts";
@@ -218,6 +218,23 @@ describe("ESF AVR XML / official AwpV1", () => {
       formatEsfUploadDecline("AVR", { faultstring: "No open session associated with user." }, []),
       ESF_SESSION_CLOSED_USER_MESSAGE,
     );
+    assert.equal(
+      formatEsfUploadDecline("AVR", null, [{ errorCode: "CERTIFICATE_NOT_VALID" }]),
+      ESF_CERTIFICATE_NOT_VALID_USER_MESSAGE,
+    );
+    assert.equal(
+      esfSoapX509Certificate("-----BEGIN CERTIFICATE-----\nMIIBTw==\n-----END CERTIFICATE-----"),
+      "MIIBTw==",
+    );
+    const pemUpload = buildUploadAwpEnvelope({
+      sessionId: "sid-1",
+      awpBody: officialSoapUiSample,
+      signature: "SIG",
+      x509Certificate: "-----BEGIN CERTIFICATE-----\nMIIBTw==\n-----END CERTIFICATE-----",
+      senderSignerName: "Директор",
+    });
+    assert.match(pemUpload, /<x509Certificate>MIIBTw==<\/x509Certificate>/);
+    assert.doesNotMatch(pemUpload, /BEGIN CERTIFICATE/);
   });
 
   it("mock uploadAwp возвращает official acceptedList/awpId и не включается в production", () => {

@@ -21,7 +21,7 @@ export type SanitizedCertificateDiagnosis = {
     newline: "lf" | "crlf" | "none";
     bodyLength: number;
     derBytes: number;
-    sentToCreateSessionAs: "pem_with_headers_xml_escaped";
+    sentToCreateSessionAs: "base64_der_no_headers";
   };
   likelyCertificateNotValidReasons: string[];
 };
@@ -82,9 +82,6 @@ export function diagnosePublicCertificate(
   if (options?.expectedBin && inspected.bin && inspected.bin !== options.expectedBin) {
     reasons.push("БИН в сертификате не совпадает с БИН организации / tin createSession.");
   }
-  reasons.push(
-    "x509Certificate сейчас уходит как PEM с заголовками через xmlEscape, не CDATA. Если WSDL ждёт только base64 DER, TEST ответит CERTIFICATE_NOT_VALID. Формат не меняем до отдельного решения.",
-  );
   const fault = officialFaultCode(options?.lastFault || "");
   if (fault === "CERTIFICATE_NOT_VALID" && !reasons.some((item) => item.includes("боевым УЦ"))) {
     reasons.unshift("Официальный fault после успешного WSSE: CERTIFICATE_NOT_VALID — кабинет принял пароль, но отклонил сам сертификат.");
@@ -111,7 +108,7 @@ export function diagnosePublicCertificate(
       newline: normalized.includes("\r\n") ? "crlf" : normalized.includes("\n") ? "lf" : "none",
       bodyLength: body.length,
       derBytes: der.length,
-      sentToCreateSessionAs: "pem_with_headers_xml_escaped",
+      sentToCreateSessionAs: "base64_der_no_headers",
     },
     likelyCertificateNotValidReasons: reasons,
   };

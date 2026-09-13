@@ -325,7 +325,28 @@ function formatUploadDecline(
   kind: "AVR" | "ESF",
   fault: { description?: string; faultstring?: string } | null | undefined,
   errors: Array<{ property?: string; errorCode?: string; text?: string }>,
+  pem?: string,
+  esfEnv?: string,
 ) {
+  const blob = `${fault?.faultstring || ""} ${fault?.description || ""} ${errors.map((row) => `${row.errorCode || ""} ${row.text || ""}`).join(" ")}`;
+  if (pem && /\bCERTIFICATE_NOT_VALID\b/.test(blob)) {
+    try {
+      const expectedEnv =
+        esfEnv === "prod" || esfEnv === "test" || esfEnv === "local" || esfEnv === "off" ? esfEnv : undefined;
+      const diagnosed = diagnosePublicCertificate(pem, { expectedEnv, lastFault: "CERTIFICATE_NOT_VALID" });
+      if (diagnosed.caEnvironment === "prod" && esfEnv !== "prod") {
+        return "ИС ЭСФ не приняла сертификат: выбран боевой ЭЦП НУЦ, а отправка идёт на тестовый контур. В NCALayer выберите тестовый ключ подписи.";
+      }
+      if (diagnosed.caEnvironment === "test" && esfEnv === "prod") {
+        return "ИС ЭСФ не приняла сертификат: тестовый УЦ нельзя использовать на боевом контуре.";
+      }
+      if (!diagnosed.validNow) {
+        return "ИС ЭСФ не приняла сертификат: срок действия ЭЦП истёк или ещё не начался.";
+      }
+    } catch {
+      /* keep mapped portal text */
+    }
+  }
   return redactSoapText(formatEsfUploadDecline(kind, fault, errors));
 }
 
@@ -807,7 +828,7 @@ async function uploadSignedDocument(input: {
       return {
         ok: false as const,
         code: lostSession(last.fault, last.uploaded.errors, last.response.text) ? "REAUTH_REQUIRED" : "esf_upload_declined",
-        message: formatUploadDecline("ESF", last.fault, last.uploaded.errors),
+        message: formatUploadDecline("ESF", last.fault, last.uploaded.errors, input.publicCertificate, config.esfEnv),
         errors: last.uploaded.errors,
         provider: "live" as const,
         externalId: "",
@@ -833,7 +854,7 @@ async function uploadSignedDocument(input: {
     return {
       ok: false as const,
       code: lostSession(last.fault, last.uploaded.errors, last.response.text) ? "REAUTH_REQUIRED" : "esf_upload_declined",
-      message: formatUploadDecline("AVR", last.fault, last.uploaded.errors),
+      message: formatUploadDecline("AVR", last.fault, last.uploaded.errors, input.publicCertificate, config.esfEnv),
       errors: last.uploaded.errors,
       provider: "live" as const,
       externalId: "",
