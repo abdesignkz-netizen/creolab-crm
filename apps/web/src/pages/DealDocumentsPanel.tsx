@@ -4,7 +4,7 @@ import { esfMeasureUnitShortLabel, INVOICE_PAYMENT_KIND_LABEL, type PdfImportDra
 import { DeleteContractButton } from "../components/DeleteContractButton";
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { api } from "../lib/api";
+import { api, downloadAvrExcel } from "../lib/api";
 import { signAndSendEsfDocument } from "../lib/signing/esfSignAndSend";
 import { ensureEsfCabinetSession } from "../lib/signing/esfConnect";
 import { createSigningClient } from "../lib/signing/ncalayerClient";
@@ -552,7 +552,7 @@ export function DealDocumentsPanel(props: {
           <div className="doc-step-title">
             <b>АВР</b>
           </div>
-          <p className="muted">Счёт на оплату не требуется. АВР можно сформировать и проверить до подписания договора.</p>
+          <p className="muted">Счёт на оплату не требуется. АВР можно сформировать и проверить до подписания договора. Excel (форма Р-1) скачивается локально, без входа в ИС ЭСФ.</p>
           {avrReadiness?.warnings?.map((warning:string)=><p className="pdf-import-warnings" role="status" key={warning}>{warning}</p>)}
           <p className="muted">Подпись и отправка подтверждаются на странице заполненного АВР.</p>
           <MissingList
@@ -592,6 +592,28 @@ export function DealDocumentsPanel(props: {
               }}
             >
               Черновик АВР
+            </button>
+            <button
+              type="button"
+              className="btn secondary"
+              disabled={busy}
+              onClick={() => {
+                setBusy(true);
+                setError("");
+                void (async () => {
+                  let documentId = avr?.id as string | undefined;
+                  if (!documentId) {
+                    const created: any = await api.createElectronicDocumentDraft(d.id, { type: "AVR" });
+                    documentId = created.document.id;
+                    await load();
+                  }
+                  await downloadAvrExcel(documentId!);
+                })()
+                  .catch((err) => setError(err instanceof Error ? err.message : "Не удалось скачать Excel АВР"))
+                  .finally(() => setBusy(false));
+              }}
+            >
+              Скачать Excel
             </button>
             <button
               type="button"

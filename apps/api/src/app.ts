@@ -912,6 +912,11 @@ export function createApp(prisma: PrismaClient) {
     res.json(await getElectronicDocument(prisma, await requireAuth(req), req.params.id));
   });
 
+  app.get("/api/v1/electronic-documents/:id/excel", async (req, res) => {
+    const { sendAvrExcel } = await import("./services/avrExcel.ts");
+    await sendAvrExcel(prisma, await requireAuth(req), req.params.id, res);
+  });
+
   app.post("/api/v1/electronic-documents/:id/validate", json, async (req, res) => {
     const auth = await requireAuth(req);
     const membership = auth.activeMembership;
