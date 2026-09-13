@@ -10,6 +10,7 @@ import {
   isExistingSessionFault,
   isWsseCredentialFault,
   parseBusinessProfileFromSessionId,
+  isSessionClosedFault,
   parseExistingSessionIdFromFault,
   parseSessionId,
   parseSessionStatus,
@@ -174,6 +175,10 @@ export async function currentEsfSessionStatus(sessionId: string, config = readEs
   if (config.provider === "mock") return { status: "OK" };
   try {
     const response = await postSoap(config.sessionUrl, buildCurrentSessionStatusEnvelope(sessionId));
+    const fault = parseSoapFault(response.text);
+    if (isSessionClosedFault(`${fault?.faultstring || ""} ${fault?.description || ""} ${response.text}`)) {
+      return { status: "NOT_FOUND" };
+    }
     const status = parseSessionStatus(response.text);
     if (status === "OK" || status === "CLOSED" || status === "NOT_FOUND") return { status };
     return { status: "UNKNOWN" };

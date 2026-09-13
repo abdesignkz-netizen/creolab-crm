@@ -8,6 +8,7 @@ import {
   closeEsfSession,
   createEsfSessionFromPublicCert,
   currentEsfSessionStatus,
+  ESF_EXISTING_SESSION_MESSAGE,
 } from "../integrations/esf/EsfSessionService.ts";
 import { diagnosePublicCertificate, officialEsfFaultCode } from "../integrations/esf/poc/diagnosePublicCertificate.ts";
 import { inspectCertificatePem, normalizeCertificatePem, pemFromCms } from "./cmsInspect.ts";
@@ -158,11 +159,70 @@ export async function getUsableEsfSession(
   const row = await getEsfConnectionRow(prisma, tenantId, environment);
   if (!row) return null;
   if (row.sessionExpiresAt && row.sessionExpiresAt.getTime() <= Date.now() && row.sessionId) {
-    await markEsfReauthRequired(prisma, tenantId, environment, "SESSION_EXPIRED", "Сессия ИС ЭСФ истекла");
+    return reopenEsfSessionFromStoredAuth(prisma, tenantId, config);
+  }
+  if (row.sessionId && row.status === "CONNECTED" && config.provider !== "mock") {
+    const live = await currentEsfSessionStatus(row.sessionId, config);
+    if (live.status === "OK") return { sessionId: row.sessionId, row };
+    if (live.status === "CLOSED" || live.status === "NOT_FOUND") {
+      return reopenEsfSessionFromStoredAuth(prisma, tenantId, config);
+    }
+  }
+  if (!isSessionUsable(row)) {
+    if (row.authCertificatePem && row.organizationBin && config.provider !== "mock") {
+      return reopenEsfSessionFromStoredAuth(prisma, tenantId, config);
+    }
     return null;
   }
-  if (!isSessionUsable(row)) return null;
   return { sessionId: row.sessionId!, row };
+}
+
+export async function reopenEsfSessionFromStoredAuth(
+  prisma: PrismaClient,
+  tenantId: string,
+  config = readEsfConfig(),
+) {
+  const environment = connectionEnvironment(config);
+  const row = await getEsfConnectionRow(prisma, tenantId, environment);
+  if (!row?.authCertificatePem || !row.organizationBin) {
+    if (row) await markEsfReauthRequired(prisma, tenantId, environment);
+    return null;
+  }
+  if (row.sessionId && config.provider !== "mock") {
+    await closeEsfSession(row.sessionId, config);
+  }
+  const session = await createEsfSessionFromPublicCert(
+    {
+      tin: row.organizationBin,
+      x509Certificate: row.authCertificatePem,
+    },
+    config,
+  );
+  if (!session.ok) {
+    await markEsfReauthRequired(
+      prisma,
+      tenantId,
+      environment,
+      session.code === "esf_wsse_required" || session.code === "esf_session_already_open"
+        ? "REAUTH_REQUIRED"
+        : session.code,
+      session.code === "esf_session_already_open" ? ESF_EXISTING_SESSION_MESSAGE : session.message,
+    );
+    return null;
+  }
+  const saved = await prisma.esfConnection.update({
+    where: { id: row.id },
+    data: {
+      status: "CONNECTED",
+      sessionId: session.sessionId,
+      sessionCreatedAt: new Date(),
+      sessionExpiresAt: null,
+      lastConnectedAt: new Date(),
+      lastErrorCode: null,
+      lastErrorMessage: null,
+    },
+  });
+  return { sessionId: saved.sessionId!, row: saved };
 }
 
 export async function markEsfReauthRequired(

@@ -264,8 +264,11 @@ export function parseSessionStatus(xml: string) {
 
 export function isSessionClosedFault(message: string) {
   const text = String(message || "");
-  return /SessionClosedFault|session closed|SessionClosed|сессия.*(закрыт|истекла)/i.test(text);
+  return /SessionClosedFault|session closed|SessionClosed|No open session associated with user|no open session|сессия.*(закрыт|истекла)/i.test(text);
 }
+
+export const ESF_SESSION_CLOSED_USER_MESSAGE =
+  "Сессия ИС ЭСФ закрыта. Закройте кабинет ИС ЭСФ в браузере, откройте «Интеграции» и подключитесь снова, затем повторите отправку.";
 
 export const ESF_BUSINESS_PROFILES = [
   "ADMIN_ENTERPRISE",
@@ -346,6 +349,9 @@ export function formatEsfUploadDecline(
     .filter(Boolean);
   const portal = String(fault?.description || fault?.faultstring || details[0] || "").replace(/\s+/g, " ").trim().slice(0, 500);
   const label = kind === "ESF" ? "счёт-фактуру" : "АВР";
+  if (isSessionClosedFault(portal) || details.some((row) => isSessionClosedFault(row))) {
+    return ESF_SESSION_CLOSED_USER_MESSAGE;
+  }
   if (portal) {
     return `ИС ЭСФ отклонила ${label}. ${portal}${details.length > 1 ? `. ${details.slice(1).join(". ")}` : ""}`;
   }

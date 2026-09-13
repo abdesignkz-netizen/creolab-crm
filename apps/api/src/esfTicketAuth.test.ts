@@ -247,6 +247,65 @@ it("createSession from a public cert closes the conflicting session by id and ce
   } finally { globalThis.fetch = originalFetch; }
 });
 
+it("treats No open session associated with user as a missing portal session", async () => {
+  const originalFetch = globalThis.fetch;
+  const config = { ...readEsfConfig(), esfEnv: "local" as const, sessionUrl: "https://esf.test.invalid/SessionService" };
+  globalThis.fetch = async () => new Response(soapFault("No open session associated with user."), { status: 500 });
+  try {
+    const live = await currentEsfSessionStatus("dead-session", config);
+    assert.equal(live.status, "NOT_FOUND");
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+it("getUsableEsfSession reopens a stored session the portal already closed", async () => {
+  const { getUsableEsfSession } = await import("./services/esfConnectionService.ts");
+  const originalFetch = globalThis.fetch;
+  const envKeys = ["ESF_PROVIDER", "ESF_ENV", "ESF_ALLOW_LIVE_SEND", "ESF_TLS_INSECURE"];
+  const oldEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+  process.env.ESF_PROVIDER = "live";
+  process.env.ESF_ENV = "local";
+  process.env.ESF_ALLOW_LIVE_SEND = "1";
+  process.env.ESF_TLS_INSECURE = "0";
+  const config = { ...readEsfConfig(), esfEnv: "local" as const, provider: "live" as const, sessionUrl: "https://esf.test.invalid/SessionService" };
+  let stored: any = {
+    id: "row-1",
+    status: "CONNECTED",
+    sessionId: "dead-session",
+    sessionExpiresAt: null,
+    organizationBin: "123456789013",
+    authCertificatePem: "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----",
+  };
+  const persist = async ({ data }: any) => (stored = { ...stored, ...data });
+  const prisma: any = { esfConnection: { findUnique: async () => stored, update: persist } };
+  const operations: string[] = [];
+  globalThis.fetch = async (_url, init) => {
+    const xml = String(init?.body);
+    if (xml.includes("currentSessionStatusRequest")) {
+      operations.push("status");
+      return new Response(soapFault("No open session associated with user."), { status: 500 });
+    }
+    if (xml.includes("closeSessionRequest")) {
+      operations.push("close");
+      return new Response("<Envelope><Body><status>CLOSED</status></Body></Envelope>");
+    }
+    operations.push("create");
+    return new Response("<Envelope><Body><sessionId>fresh-session</sessionId></Body></Envelope>");
+  };
+  try {
+    const session = await getUsableEsfSession(prisma, "synthetic-tenant", config);
+    assert.equal(session?.sessionId, "fresh-session");
+    assert.equal(stored.sessionId, "fresh-session");
+    assert.ok(operations.includes("status"));
+    assert.ok(operations.includes("create"));
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const key of envKeys) {
+      if (oldEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = oldEnv[key];
+    }
+  }
+});
+
 it("does not treat an unreadable currentSessionStatus as a missing session", async () => {
   const originalFetch = globalThis.fetch;
   const config = { ...readEsfConfig(), esfEnv: "local" as const, sessionUrl: "https://esf.test.invalid/SessionService" };

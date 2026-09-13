@@ -36,6 +36,8 @@ import {
   buildSyncInvoiceEnvelope,
   buildUploadAwpEnvelope,
   formatEsfUploadDecline,
+  isSessionClosedFault,
+  ESF_SESSION_CLOSED_USER_MESSAGE,
   parseAwpUploadResult,
   parseSoapFault,
   parseSyncInvoiceResult,
@@ -48,7 +50,7 @@ import { queryAwpStatusById, queryInvoiceById } from "../integrations/esf/sync/E
 import { can, type AuthContext } from "../lib/types.ts";
 import { resolveUploadPath } from "../lib/storage.ts";
 import { serializeElectronicDocument } from "./documentDraftService.ts";
-import { describeAvrPocReadiness, getEsfConnectionRow, getUsableEsfSession } from "./esfConnectionService.ts";
+import { describeAvrPocReadiness, getEsfConnectionRow, getUsableEsfSession, reopenEsfSessionFromStoredAuth } from "./esfConnectionService.ts";
 import { previewAvrEsf } from "./esfPocService.ts";
 import { requireDocumentsEnabled } from "./legalProfileService.ts";
 import { inspectCertificatePem, normalizeCertificatePem, publicCertificateFingerprint } from "./cmsInspect.ts";
@@ -491,7 +493,7 @@ export async function sendEsfWithNcaLayerSignature(prisma:PrismaClient,auth:Auth
   if(!doc.xmlStorageKey)await getEsfPayloadToSign(prisma,auth,documentId);
   const config=readEsfConfig();
   if(config.provider!=="mock"&&config.liveSendAllowed&&!(await getUsableEsfSession(prisma,m.tenantId,config))){
-    throw new ApiError(422,"REAUTH_REQUIRED","Нет активной сессии ИС ЭСФ. Сначала CRM входит в кабинет (ИИН и при необходимости пароль кабинета), затем подписывает документ. Повторите «Подписать и отправить».");
+    throw new ApiError(422,"REAUTH_REQUIRED",ESF_SESSION_CLOSED_USER_MESSAGE);
   }
   await prisma.$transaction(async tx=>{
     await tx.$queryRaw`SELECT id FROM "Deal" WHERE id = ${doc.dealId} AND "tenantId" = ${m.tenantId} FOR UPDATE`;
@@ -738,8 +740,7 @@ async function uploadSignedDocument(input: {
     return {
       ok: false as const,
       code: "REAUTH_REQUIRED",
-      message:
-        "Нет активной сессии ИС ЭСФ. Сначала CRM входит в кабинет (ИИН и при необходимости пароль кабинета), затем подписывает документ. Повторите «Подписать и отправить».",
+      message: ESF_SESSION_CLOSED_USER_MESSAGE,
       errors: [],
       provider: "live" as const,
       externalId: "",
@@ -759,75 +760,98 @@ async function uploadSignedDocument(input: {
     publicCertificate: input.publicCertificate,
     certificateCn: input.certificateCn,
   });
-  if (input.type === "ESF") {
-    const envelope = buildSyncInvoiceEnvelope({
-      sessionId: session.sessionId,
-      invoiceBody: input.payload,
+  const lostSession = (
+    fault: { description?: string; faultstring?: string } | null,
+    errors: Array<{ errorCode?: string; text?: string }>,
+    body: string,
+  ) =>
+    isSessionClosedFault(
+      [fault?.faultstring, fault?.description, body, ...errors.map((row) => `${row.errorCode || ""} ${row.text || ""}`)].join(" "),
+    );
+  const submit = async (sessionId: string) => {
+    if (input.type === "ESF") {
+      const envelope = buildSyncInvoiceEnvelope({
+        sessionId,
+        invoiceBody: input.payload,
+        signature: input.signature,
+        x509Certificate: input.publicCertificate,
+      });
+      const response = await postSoap(config.invoiceUploadUrl, envelope);
+      const fault = parseSoapFault(response.text);
+      const uploaded = parseSyncInvoiceResult(response.text);
+      return { kind: "ESF" as const, response, fault, uploaded };
+    }
+    const envelope = buildUploadAwpEnvelope({
+      sessionId,
+      awpBody: input.payload,
       signature: input.signature,
       x509Certificate: input.publicCertificate,
+      senderSignerName,
     });
-    const response = await postSoap(config.invoiceUploadUrl, envelope);
+    const response = await postSoap(config.awpUrl, envelope);
     const fault = parseSoapFault(response.text);
-    const uploaded = parseSyncInvoiceResult(response.text);
-    if (uploaded.declined || !uploaded.invoiceId) {
+    const uploaded = parseAwpUploadResult(response.text);
+    return { kind: "AVR" as const, response, fault, uploaded };
+  };
+  let sessionId = session.sessionId;
+  let last = await submit(sessionId);
+  if (lostSession(last.fault, last.uploaded.errors, last.response.text)) {
+    const reopened = await reopenEsfSessionFromStoredAuth(input.prisma, input.tenantId, config);
+    if (reopened) {
+      sessionId = reopened.sessionId;
+      last = await submit(sessionId);
+    }
+  }
+  if (last.kind === "ESF") {
+    if (last.uploaded.declined || !last.uploaded.invoiceId) {
       return {
         ok: false as const,
-        code: "esf_upload_declined",
-        message: formatUploadDecline("ESF", fault, uploaded.errors),
-        errors: uploaded.errors,
+        code: lostSession(last.fault, last.uploaded.errors, last.response.text) ? "REAUTH_REQUIRED" : "esf_upload_declined",
+        message: formatUploadDecline("ESF", last.fault, last.uploaded.errors),
+        errors: last.uploaded.errors,
         provider: "live" as const,
         externalId: "",
         externalStatus: "",
         externalNumber: "",
-        httpStatus: response.status,
+        httpStatus: last.response.status,
       };
     }
-    const status = await queryInvoiceById(session.sessionId, uploaded.invoiceId, config);
+    const status = await queryInvoiceById(sessionId, last.uploaded.invoiceId, config);
     return {
       ok: true as const,
       code: "sent",
       message: "",
       errors: [],
       provider: "live" as const,
-      externalId: uploaded.invoiceId,
+      externalId: last.uploaded.invoiceId,
       externalStatus: status.status || "CREATED",
-      externalNumber: status.registrationNumber || uploaded.num,
-      httpStatus: response.status,
+      externalNumber: status.registrationNumber || last.uploaded.num,
+      httpStatus: last.response.status,
     };
   }
-  const envelope = buildUploadAwpEnvelope({
-    sessionId: session.sessionId,
-    awpBody: input.payload,
-    signature: input.signature,
-    x509Certificate: input.publicCertificate,
-    senderSignerName,
-  });
-  const response = await postSoap(config.awpUrl, envelope);
-  const fault = parseSoapFault(response.text);
-  const uploaded = parseAwpUploadResult(response.text);
-  if (uploaded.declined || !uploaded.awpId) {
+  if (last.uploaded.declined || !last.uploaded.awpId) {
     return {
       ok: false as const,
-      code: "esf_upload_declined",
-      message: formatUploadDecline("AVR", fault, uploaded.errors),
-      errors: uploaded.errors,
-        provider: "live" as const,
-        externalId: "",
-        externalStatus: "",
-        externalNumber: "",
-        httpStatus: response.status,
-      };
-    }
-    const status = await queryAwpStatusById(session.sessionId, uploaded.awpId, config);
+      code: lostSession(last.fault, last.uploaded.errors, last.response.text) ? "REAUTH_REQUIRED" : "esf_upload_declined",
+      message: formatUploadDecline("AVR", last.fault, last.uploaded.errors),
+      errors: last.uploaded.errors,
+      provider: "live" as const,
+      externalId: "",
+      externalStatus: "",
+      externalNumber: "",
+      httpStatus: last.response.status,
+    };
+  }
+  const status = await queryAwpStatusById(sessionId, last.uploaded.awpId, config);
   return {
     ok: true as const,
     code: "sent",
     message: "",
     errors: [],
     provider: "live" as const,
-    externalId: uploaded.awpId,
+    externalId: last.uploaded.awpId,
     externalStatus: status.status || "NOT_VIEWED",
-    externalNumber: status.registrationNumber || uploaded.number,
-    httpStatus: response.status,
+    externalNumber: status.registrationNumber || last.uploaded.number,
+    httpStatus: last.response.status,
   };
 }

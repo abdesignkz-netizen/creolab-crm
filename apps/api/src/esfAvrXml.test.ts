@@ -6,7 +6,7 @@ import { describe, it } from "node:test";
 import { AVR_SOURCE_KIND, type AvrSourceSnapshot } from "./services/avrMapper.ts";
 import { mapAvrSnapshotToAwpXml } from "./integrations/esf/avr/EsfAvrAdapter.ts";
 import { validateAwpV1Xml } from "./integrations/esf/avr/EsfAvrXsd.ts";
-import { buildCreateSessionEnvelope, buildUploadAwpEnvelope, formatEsfUploadDecline, parseSessionId, parseAwpUploadResult, awpSenderSignerName, cnFromCertificateSubject } from "./integrations/esf/EsfSoap.ts";
+import { buildCreateSessionEnvelope, buildUploadAwpEnvelope, formatEsfUploadDecline, parseSessionId, parseAwpUploadResult, awpSenderSignerName, cnFromCertificateSubject, isSessionClosedFault, ESF_SESSION_CLOSED_USER_MESSAGE } from "./integrations/esf/EsfSoap.ts";
 import { mapInvoiceToEsfXml } from "./integrations/esf/invoice/EsfInvoiceAdapter.ts";
 import { ESF_INVOICE_SOURCE_KIND } from "./services/esfInvoiceMapper.ts";
 import { ESF_OFFICIAL, resolveEsfProvider } from "./integrations/esf/EsfConfig.ts";
@@ -213,6 +213,11 @@ describe("ESF AVR XML / official AwpV1", () => {
     assert.match(message, /ИС ЭСФ отклонила АВР/);
     assert.match(message, /AWP_SENDER_NOT_VALID/);
     assert.equal(formatEsfUploadDecline("AVR", null, []).includes("uploadAwp declined"), false);
+    assert.equal(isSessionClosedFault("No open session associated with user."), true);
+    assert.equal(
+      formatEsfUploadDecline("AVR", { faultstring: "No open session associated with user." }, []),
+      ESF_SESSION_CLOSED_USER_MESSAGE,
+    );
   });
 
   it("mock uploadAwp возвращает official acceptedList/awpId и не включается в production", () => {
