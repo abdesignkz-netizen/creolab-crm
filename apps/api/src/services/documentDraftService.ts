@@ -246,10 +246,12 @@ export async function listDealDocuments(prisma: PrismaClient, auth: AuthContext,
   ]);
   const importedInvoiceFiles = await prisma.attachment.findMany({ where: { tenantId: tid, parentType: "invoice", status: "imported", id: { in: invoices.flatMap(i => i.pdfFileId ? [i.pdfFileId] : []) } }, select: { id: true } });
   const importedIds = new Set(importedInvoiceFiles.map(f => f.id));
+  const { importedInvoiceDetails } = await import("./importedInvoiceDetails.ts");
+  const importDetails = await importedInvoiceDetails(prisma, tid, invoices.map(i=>i.id));
   const originals = await prisma.attachment.findMany({where:{tenantId:tid,id:{in:contracts.flatMap(c=>c.originalFileId?[c.originalFileId]:[])}},select:{id:true,originalFileName:true}});
   return {
     contracts: contracts.map(row => ({...serializeContract(row), originalFileName:originals.find(f=>f.id===row.originalFileId)?.originalFileName || null})),
-    invoices: invoices.map(row => ({ ...serializeInvoice(row), importedPdf: Boolean(row.pdfFileId && importedIds.has(row.pdfFileId)) })),
+    invoices: invoices.map(row => ({ ...serializeInvoice(row), importDetails: importDetails.get(row.id) || null, importedPdf: Boolean(row.pdfFileId && importedIds.has(row.pdfFileId)) })),
     electronicDocuments: electronicDocuments.map(serializeElectronicDocument),
   };
 }
@@ -294,8 +296,10 @@ export async function createContractDraft(
 
   const { deal, items } = await loadDealBundle(prisma, tid, dealId);
   const totals = moneyFromItems(items);
-  const count = await prisma.contract.count({ where: { tenantId: tid } });
   const created = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Tenant" WHERE id = ${tid} FOR UPDATE`;
+    const count = await tx.contract.count({ where: { tenantId: tid } })
+      + await tx.auditEvent.count({where:{tenantId:tid,entityType:"contract",action:"contract.delete"}});
     const contract = await tx.contract.create({
       data: {
         tenantId: tid,
@@ -484,7 +488,9 @@ export async function getInvoice(prisma: PrismaClient, auth: AuthContext, invoic
     include: { items: { orderBy: { sortOrder: "asc" } } },
   });
   if (!row) throw new ApiError(404, "not_found", "Счёт не найден");
-  return { invoice: serializeInvoice(row) };
+  const { importedInvoiceDetails } = await import("./importedInvoiceDetails.ts");
+  const details = await importedInvoiceDetails(prisma, membership.tenantId, [row.id]);
+  return { invoice: { ...serializeInvoice(row), importDetails: details.get(row.id) || null } };
 }
 
 export async function createElectronicDocumentDraft(

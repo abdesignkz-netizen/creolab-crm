@@ -1,4 +1,6 @@
 import { notifySaved } from "../components/SaveNotice";
+import { INVOICE_PAYMENT_KIND_LABEL, type PdfImportDraft } from "@creolab/contracts";
+import { DeleteContractButton } from "../components/DeleteContractButton";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
@@ -172,7 +174,7 @@ export function DealDocumentsPanel(props: {
 
   const steps = [
     { id: "contract", label: "Договор", tone: stepTone(contract?.status === "SIGNED", Boolean(contract)) },
-    { id: "invoice", label: "Счёт", tone: stepTone(["ISSUED", "PARTIALLY_PAID", "PAID"].includes(invoice?.status), Boolean(invoice)) },
+    { id: "invoice", label: "Счёт — по необходимости", tone: stepTone(["ISSUED", "PARTIALLY_PAID", "PAID"].includes(invoice?.status), Boolean(invoice)) },
     { id: "avr", label: "АВР", tone: stepTone(avr?.status === "ACCEPTED", Boolean(avr)) },
     { id: "esf", label: "ЭСФ", tone: stepTone(esf?.status === "ACCEPTED", Boolean(esf)) },
     {
@@ -188,7 +190,7 @@ export function DealDocumentsPanel(props: {
         <div className="row sit-head">
           <div>
             <b>Документы</b>
-            <p className="muted">Договор → подпись → счёт → АВР → ИС ЭСФ → ЭСФ → закрытие.</p>
+            <p className="muted">АВР и ЭСФ формируются из договора, позиций сделки и реквизитов сторон. Счёт на оплату — отдельный документ, его загрузка или создание не обязательны.</p>
           </div>
           <Link className="btn secondary" to="/documents">
             Все документы
@@ -204,7 +206,7 @@ export function DealDocumentsPanel(props: {
 
         <div className="doc-step">
           <div className="doc-step-title">
-            <b>1. Договор</b>
+            <b>Договор</b>
           </div>
           <MissingList
             ready={readiness?.ready}
@@ -239,6 +241,7 @@ export function DealDocumentsPanel(props: {
                   Открыть PDF
                 </a>
               ) : null}
+              <DeleteContractButton id={doc.id} number={doc.number} disabled={busy} onDeleted={async()=>{setBuyerLink("");await load();}} />
             </div>
           ))}
           <div className="actions" style={{ marginTop: 8 }}>
@@ -294,7 +297,7 @@ export function DealDocumentsPanel(props: {
 
         <div className="doc-step">
           <div className="doc-step-title">
-            <b>2. Подпись</b>
+            <b>Подпись договора</b>
           </div>
           <p className="muted">Сначала исполнитель в кабинете, затем заказчик по ссылке. Нужен NCALayer.</p>
           {(signing?.requests || []).map((row: any) => (
@@ -381,7 +384,7 @@ export function DealDocumentsPanel(props: {
 
         <div className="doc-step">
           <div className="doc-step-title">
-            <b>3. Счёт</b>
+            <b>Счёт на оплату — по необходимости</b>
           </div>
           <MissingList
             ready={invoiceReadiness?.ready}
@@ -394,6 +397,12 @@ export function DealDocumentsPanel(props: {
             <div className="row" key={doc.id}>
               <div>
                 <b>Счёт {doc.number}</b>{doc.importedPdf ? <div className="muted">Загружен вручную</div> : null}
+                {doc.importDetails ? <>
+                  <div>{doc.importDetails.subject}</div>
+                  {doc.importDetails.paymentKind && doc.importDetails.paymentKind !== "UNSPECIFIED" ? <div>{INVOICE_PAYMENT_KIND_LABEL[doc.importDetails.paymentKind as NonNullable<PdfImportDraft["paymentKind"]>]}</div> : null}
+                  {doc.importDetails.paymentTerms && doc.importDetails.paymentTerms !== doc.importDetails.subject ? <div className="muted">{doc.importDetails.paymentTerms}</div> : null}
+                  {doc.items?.map((item: {id:string;name:string;quantity:number;unit:string;unitPrice:number;totalAmount:number})=><div className="muted" key={item.id}>{item.name}: {Number(item.quantity).toLocaleString("ru-RU")} {item.unit} × {Number(item.unitPrice).toLocaleString("ru-RU")} ₸ без НДС · итого {Number(item.totalAmount).toLocaleString("ru-RU")} ₸</div>)}
+                </> : null}
                 <div className="muted">
                   {INVOICE_STATUS_LABEL[doc.status] || doc.status} · {Number(doc.totalAmount).toLocaleString("ru-RU")} ₸
                 </div>
@@ -458,12 +467,13 @@ export function DealDocumentsPanel(props: {
 
         <div className="doc-step">
           <div className="doc-step-title">
-            <b>4. АВР</b>
+            <b>АВР</b>
           </div>
+          <p className="muted">Счёт на оплату не требуется. Черновик можно создать до подписания договора; проверка и отправка станут доступны после подписи.</p>
           <MissingList
             ready={avrReadiness?.ready}
             ok="Данных достаточно, АВР можно проверить."
-            title="Не готов к отправке:"
+            title="Для проверки и отправки АВР требуется:"
             fields={avrReadiness?.missingFields}
             labels={avrReadiness?.missingFieldLabels}
           />
@@ -649,8 +659,9 @@ export function DealDocumentsPanel(props: {
 
         <div className="doc-step">
           <div className="doc-step-title">
-            <b>5. ЭСФ</b>
+            <b>ЭСФ</b>
           </div>
+          <p className="muted">Счёт на оплату не требуется. Данные берутся из сделки и договора.</p>
           <MissingList
             ready={esfInvoiceReadiness?.ready}
             ok={
@@ -844,7 +855,7 @@ export function DealDocumentsPanel(props: {
 
         <div className="doc-step">
           <div className="doc-step-title">
-            <b>6. Закрытие</b>
+            <b>Закрытие</b>
           </div>
           {closeReadiness ? (
             closeReadiness.alreadyClosed ? (

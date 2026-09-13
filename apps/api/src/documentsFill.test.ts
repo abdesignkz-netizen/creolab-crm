@@ -227,7 +227,7 @@ describe("Document field fill", () => {
     assert.equal(generated.body.invoice.contractId, contractId);
   });
 
-  it("АВР заполняет продавца, покупателя, договор, счёт и позиции без смешения БИН/ИИН", async () => {
+  it("АВР заполняет стороны, договор и позиции, а счёт связывается только явно", async () => {
     const draft = await json(`/api/v1/deals/${dealId}/electronic-documents`, {
       method: "POST",
       body: JSON.stringify({ type: "AVR" }),
@@ -247,7 +247,8 @@ describe("Document field fill", () => {
     assert.equal(source.buyer.directorName, "Баеров Баер");
     assert.equal(source.buyer.directorPosition, "Директор");
     assert.equal(source.contract.id, contractId);
-    assert.equal(source.invoice.id, invoiceId);
+    assert.equal(source.invoice, null);
+    assert.equal(draft.body.document.invoiceId, null);
     assert.equal(source.items[0].name, "Сайт");
     assert.equal(source.items[0].quantity, 2);
     assert.equal(source.items[0].unit, "шт");
@@ -264,7 +265,29 @@ describe("Document field fill", () => {
     assert.equal(validated.response.status, 200, JSON.stringify(validated.body));
     assert.equal(validated.body.document.source.contract.number, validated.body.document.source.contract.number);
     assert.ok(validated.body.document.source.contract.date);
-    assert.equal(validated.body.document.source.invoice.id, invoiceId);
+    assert.equal(validated.body.document.source.invoice, null);
+
+    // Explicit links remain supported for integrations that supply invoiceId.
+    await prisma.electronicDocument.update({where:{id:draft.body.document.id},data:{status:"DRAFT"}});
+    const linked = await json(`/api/v1/deals/${dealId}/electronic-documents`, {method:"POST",body:JSON.stringify({type:"AVR",invoiceId})});
+    assert.equal(linked.body.document.source.invoice.id,invoiceId);
+    const reloaded = await json(`/api/v1/deals/${dealId}/electronic-documents`, {method:"POST",body:JSON.stringify({type:"AVR"})});
+    assert.equal(reloaded.body.document.source.invoice.id,invoiceId);
+  });
+
+  it("ЭСФ не привязывает существующий счёт автоматически", async () => {
+    const created = await json(`/api/v1/deals/${dealId}/electronic-documents`, {method:"POST",body:JSON.stringify({type:"ESF"})});
+    assert.equal(created.response.status,201,JSON.stringify(created.body));
+    assert.equal(created.body.document.invoiceId,null);
+    assert.equal(created.body.document.source.invoice,null);
+    assert.equal(created.body.document.source.contract.id,contractId);
+    assert.equal(created.body.document.totalAmount,274000);
+    const readiness = await json(`/api/v1/deals/${dealId}/esf-invoice-readiness`);
+    assert.equal(readiness.body.invoiceId,null);
+    const linked = await json(`/api/v1/deals/${dealId}/electronic-documents`, {method:"POST",body:JSON.stringify({type:"ESF",invoiceId})});
+    assert.equal(linked.body.document.source.invoice.id,invoiceId);
+    const refreshed = await json(`/api/v1/deals/${dealId}/electronic-documents`, {method:"POST",body:JSON.stringify({type:"ESF"})});
+    assert.equal(refreshed.body.document.source.invoice.id,invoiceId);
   });
 
   it("черновики договора и счёта обновляют суммы после новой позиции", async () => {

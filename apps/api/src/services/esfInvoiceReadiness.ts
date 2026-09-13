@@ -80,12 +80,6 @@ export async function getEsfInvoiceReadiness(prisma: PrismaClient, auth: AuthCon
         take: 1,
         select: { id: true, number: true, date: true },
       },
-      invoices: {
-        where: { status: { in: ["ISSUED", "PARTIALLY_PAID", "PAID"] } },
-        orderBy: { createdAt: "desc" },
-        take: 1,
-        select: { id: true },
-      },
       electronicDocuments: {
         where: { type: { in: ["AVR", "ESF"] } },
         orderBy: { createdAt: "desc" },
@@ -107,7 +101,7 @@ export async function getEsfInvoiceReadiness(prisma: PrismaClient, auth: AuthCon
     contractId: esf?.contractId || signed?.id || null,
     documentId: esf?.id || null,
     signedContractId: signed?.id || null,
-    invoiceId: esf?.invoiceId || deal.invoices[0]?.id || null,
+    invoiceId: esf?.invoiceId || null,
     contractNumber: signed?.number || null,
     contractDate: signed?.date || null,
     itemCount: deal.items.length,

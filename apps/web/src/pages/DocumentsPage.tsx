@@ -1,4 +1,5 @@
 import { ManualPdfImportPanel } from "./ManualPdfImportPanel";
+import { DeleteContractButton } from "../components/DeleteContractButton";
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Pagination } from "../components/Pagination";
@@ -268,7 +269,8 @@ export function DocumentsPage() {
 
       <div className="documents-list">
         {items.map((item) => (
-          <Link key={`${item.kind}-${item.id}`} to={item.href} className="sit-list-row">
+          <div key={`${item.kind}-${item.id}`} className="document-list-entry">
+          <Link to={item.href} className="sit-list-row">
             <div>
               <b>
                 {item.kindLabel} {item.number}
@@ -285,6 +287,8 @@ export function DocumentsPage() {
               </span>
             </div>
           </Link>
+          {item.kind === "CONTRACT" ? <DeleteContractButton id={item.id} number={item.number} onDeleted={async()=>{setOffset("0");await load(0);}} /> : null}
+          </div>
         ))}
       </div>
 

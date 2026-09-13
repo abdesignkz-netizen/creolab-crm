@@ -69,11 +69,6 @@ async function resolveLinks(
       where: { id: input.invoiceId, tenantId, dealId },
     });
     if (!invoice) throw new ApiError(404, "not_found", "Счёт не найден");
-  } else {
-    invoice = await prisma.invoice.findFirst({
-      where: { tenantId, dealId, status: { in: ["ISSUED", "PARTIALLY_PAID", "PAID"] } },
-      orderBy: { createdAt: "desc" },
-    });
   }
 
   return { contract, invoice };
@@ -90,13 +85,13 @@ export async function createAvrDraft(
   const tid = membership.tenantId;
   await requireDocumentsEnabled(prisma, tid);
 
-  const { contract, invoice } = await resolveLinks(prisma, tid, dealId, input);
   const existing = await prisma.electronicDocument.findFirst({
     where: { tenantId: tid, dealId, type: "AVR", status: { in: ["DRAFT", "VALIDATED", "SIGNED", "SENT"] } },
   });
   if (existing && existing.status !== "DRAFT") {
     return { document: serializeElectronicDocument(existing), reused: true };
   }
+  const { contract, invoice } = await resolveLinks(prisma, tid, dealId, {...input, invoiceId: input.invoiceId || existing?.invoiceId});
 
   const { deal, items, profile, tenantName } = await loadAvrBundle(prisma, tid, dealId, contract?.id);
   if (!items.length) {

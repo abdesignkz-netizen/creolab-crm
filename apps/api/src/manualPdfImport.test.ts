@@ -165,13 +165,68 @@ describe("Manual PDF import",()=>{
  });
  it("reuses a confirmed import and rejects re-uploaded duplicates",async()=>{const results=await Promise.all([1,2].map(()=>req("/api/v1/documents/import-pdf/confirm","POST",{importId,draft:draft()})));assert.ok(results.every(r=>r.reused&&r.dealId===dealId));const p=await preview();await req("/api/v1/documents/import-pdf/confirm","POST",{importId:p.importId,draft:{...draft(),number:"ANOTHER"}},409);await req(`/api/v1/documents/import-pdf/${p.importId}`,"DELETE");});
  it("adds manual invoice to the existing deal and preserves the PDF",async()=>{
-  const p=await preview("INVOICE");const data=draft("INVOICE");await req("/api/v1/documents/import-pdf/confirm","POST",{importId:p.importId,draft:data},422);
+  const p=await preview("INVOICE");const data={...draft("INVOICE"),paymentKind:"PREPAYMENT" as const,contractNumber:draft().number};await req("/api/v1/documents/import-pdf/confirm","POST",{importId:p.importId,draft:data},422);
   const saved=await req("/api/v1/documents/import-pdf/confirm","POST",{importId:p.importId,dealId,draft:data});
   const invoice=await prisma.invoice.findUniqueOrThrow({where:{id:saved.documentId}});assert.equal(invoice.dealId,dealId);assert.equal(invoice.contractId,contractId);assert.equal(invoice.status,"ISSUED");
   const r=await fetch(base+`/api/v1/invoices/${invoice.id}/pdf`,{headers:{cookie}});assert.equal(r.status,200);assert.deepEqual(Buffer.from(await r.arrayBuffer()),bytes);
   await req(`/api/v1/invoices/${invoice.id}/generate`,"POST",{},422);
   const docs=await req(`/api/v1/deals/${dealId}/documents`);assert.equal(docs.contracts[0].importedPdf,true);assert.equal(docs.invoices[0].importedPdf,true);
+  assert.deepEqual(docs.invoices[0].importDetails,{subject:data.subject,paymentTerms:"Предоплата 50%",paymentKind:"PREPAYMENT",contractNumber:data.contractNumber});
+  assert.equal((await req(`/api/v1/invoices/${invoice.id}`)).invoice.importDetails.paymentKind,"PREPAYMENT");
   const hidden=await fetch(base+`/api/v1/invoices/${invoice.id}/pdf`,{headers:{cookie:foreign}});assert.equal(hidden.status,404);
+ });
+ it("matches invoice company by tax ID and contract, without guessing between deals or tenants",async()=>{
+  const deal=await prisma.deal.findUniqueOrThrow({where:{id:dealId}});
+  const url=`/api/v1/documents/import-pdf/matches?buyerBin=${party.bin}`;
+  const existing=await req(url);assert.equal(existing.companies[0].id,deal.companyId);assert.ok(existing.deals.length>1);assert.equal(existing.suggestedDealId,null);
+  const second=await prisma.deal.create({data:{tenantId:deal.tenantId,contactId:deal.contactId,stageId:deal.stageId,companyId:deal.companyId,title:"Вторая сделка"}});
+  try {
+    assert.equal((await req(url)).suggestedDealId,null);
+    assert.equal((await req(`${url}&contractNumber=${encodeURIComponent(draft().number)}`)).suggestedDealId,dealId);
+    assert.equal((await req(`${url}&contractNumber=UNKNOWN`)).suggestedDealId,null);
+    assert.deepEqual((await req(url,"GET",undefined,200,foreign)).companies,[]);
+    const duplicate=await prisma.company.create({data:{tenantId:deal.tenantId,name:"Дубликат заказчика",bin:party.bin}});
+    try {assert.equal((await req(`${url}&contractNumber=${encodeURIComponent(draft().number)}`)).suggestedDealId,null);} finally {await prisma.company.delete({where:{id:duplicate.id}});}
+    const company=await prisma.company.findUniqueOrThrow({where:{id:deal.companyId!}});
+    await prisma.company.update({where:{id:company.id},data:{bin:null,iin:party.bin}});
+    try {assert.equal((await req(url)).companies[0].id,company.id);} finally {await prisma.company.update({where:{id:company.id},data:{bin:company.bin,iin:company.iin}});}
+  } finally {await prisma.deal.delete({where:{id:second.id}});}
+ });
+ it("links an unassigned deal and invoice to the buyer company, rejects a different buyer",async()=>{
+  const originalBytes=bytes;bytes=Buffer.concat([bytes,Buffer.from("\n% invoice-company-link\n")]);
+  const source=await prisma.deal.findUniqueOrThrow({where:{id:dealId}});
+  const unassigned=await prisma.deal.create({data:{tenantId:source.tenantId,contactId:source.contactId,stageId:source.stageId,title:"Счёт без привязанной компании"}});
+  try {
+    const p=await preview("INVOICE");const data={...draft("INVOICE"),number:"BILL-LINK",paymentKind:"BALANCE" as const,paymentTerms:"Остаток 50%"};
+    const mismatch=await req("/api/v1/documents/import-pdf/confirm","POST",{importId:p.importId,dealId,draft:{...data,buyer:{...party,bin:"999999999990"}}},422);
+    assert.equal(mismatch.code,"pdf_buyer_mismatch");
+    const duplicate=await prisma.company.create({data:{tenantId:source.tenantId,name:"Дубликат заказчика",bin:party.bin}});
+    try {
+      assert.equal((await req("/api/v1/documents/import-pdf/confirm","POST",{importId:p.importId,dealId:unassigned.id,draft:data},422)).code,"pdf_company_ambiguous");
+      assert.equal((await prisma.deal.findUniqueOrThrow({where:{id:unassigned.id}})).companyId,null);
+    } finally {await prisma.company.delete({where:{id:duplicate.id}});}
+    const result=await req("/api/v1/documents/import-pdf/confirm","POST",{importId:p.importId,dealId:unassigned.id,draft:data});
+    const invoice=await prisma.invoice.findUniqueOrThrow({where:{id:result.documentId}});
+    assert.equal(invoice.companyId,source.companyId);assert.equal(invoice.contractId,null);assert.equal(invoice.status,"ISSUED");
+    assert.equal((await prisma.deal.findUniqueOrThrow({where:{id:unassigned.id}})).companyId,source.companyId);
+    assert.equal((await req(`/api/v1/invoices/${invoice.id}`)).invoice.importDetails.paymentTerms,"Остаток 50%");
+    await req(`/api/v1/invoices/${invoice.id}`,"GET",undefined,404,foreign);
+  } finally {bytes=originalBytes;}
+ });
+ it("creates a missing customer and links it to the invoice and deal",async()=>{
+  const originalBytes=bytes;bytes=Buffer.concat([bytes,Buffer.from("\n% new-invoice-customer\n")]);
+  const source=await prisma.deal.findUniqueOrThrow({where:{id:dealId}});
+  const deal=await prisma.deal.create({data:{tenantId:source.tenantId,contactId:source.contactId,stageId:source.stageId,title:"Новый заказчик"}});
+  try {
+    const p=await preview("INVOICE");const buyer={...party,bin:"555555555550",name:"Новый заказчик"};
+    assert.deepEqual((await req(`/api/v1/documents/import-pdf/matches?buyerBin=${buyer.bin}`)).companies,[]);
+    const result=await req("/api/v1/documents/import-pdf/confirm","POST",{importId:p.importId,dealId:deal.id,draft:{...draft("INVOICE"),number:"BILL-NEW-CUSTOMER",buyer}});
+    const invoice=await prisma.invoice.findUniqueOrThrow({where:{id:result.documentId}});
+    const company=await prisma.company.findUniqueOrThrow({where:{id:invoice.companyId!}});
+    assert.equal(company.bin,buyer.bin);assert.equal(company.legalAddress,buyer.legalAddress);
+    assert.equal((await prisma.deal.findUniqueOrThrow({where:{id:deal.id}})).companyId,company.id);
+    assert.equal((await req(`/api/v1/documents/import-pdf/matches?buyerBin=${buyer.bin}`)).suggestedDealId,deal.id);
+  } finally {bytes=originalBytes;}
  });
  it("serializes simultaneous uploads and preserves existing company details",async()=>{
   const originalBytes=bytes;bytes=Buffer.concat([bytes,Buffer.from("\n% concurrency-check\n")]);

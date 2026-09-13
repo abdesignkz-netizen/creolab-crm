@@ -156,6 +156,13 @@ describe("Documents phase 8 ЭСФ → syncInvoice", () => {
   });
 
   it("собирает official InvoiceV2 и шлёт syncInvoice через mock", async () => {
+    assert.equal(await prisma.invoice.count({where:{dealId}}),0,"Счёт на оплату отсутствует");
+    const readiness = await json(`/api/v1/deals/${dealId}/esf-invoice-readiness`);
+    assert.equal(readiness.body.ready,true);
+    assert.equal(readiness.body.invoiceId,null);
+    const stored = await prisma.electronicDocument.findUniqueOrThrow({where:{id:esfId}});
+    assert.equal(stored.invoiceId,null);
+    assert.equal((stored.sourceDataJson as any).invoice,null);
     const preview = await json(`/api/v1/electronic-documents/${esfId}/esf-preview`, {
       method: "POST",
       body: JSON.stringify({}),
@@ -177,6 +184,7 @@ describe("Documents phase 8 ЭСФ → syncInvoice", () => {
     assert.equal(sent.response.status, 200, JSON.stringify(sent.body));
     assert.equal(sent.body.provider, "mock");
     assert.equal(sent.body.document.status, "SENT");
+    assert.equal(await prisma.invoice.count({where:{dealId}}),0,"ЭСФ отправляется без создания счёта на оплату");
     assert.ok(sent.body.externalId);
     assert.equal(sent.body.externalStatus, "CREATED");
     assert.equal(sent.body.document.externalSystem, "ESF_INVOICE");

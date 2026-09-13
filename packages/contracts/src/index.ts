@@ -8,4 +8,5 @@ export * from "./schemas.ts";
 
 export const PAGE_SIZE_DEFAULT = 30;
 export const PAGE_SIZE_MAX = 100;
-export type { PdfImportParty, PdfImportDraft, PdfImportPreview } from "./pdfImport.ts";
+export { INVOICE_PAYMENT_KIND_LABEL } from "./pdfImport.ts";
+export type { PdfImportParty, PdfImportDraft, PdfImportPreview, InvoiceImportMatches } from "./pdfImport.ts";

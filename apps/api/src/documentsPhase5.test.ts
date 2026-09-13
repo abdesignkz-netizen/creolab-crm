@@ -164,6 +164,7 @@ describe("Documents phase 5", () => {
   });
 
   it("после SIGNED заполняет договор в snapshot и ставит VALIDATED", async () => {
+    assert.equal(await prisma.invoice.count({where:{dealId}}),0,"Счёт не создавался и не загружался");
     await prisma.contract.update({
       where: { id: contractId },
       data: { status: "SIGNED", signedAt: new Date() },
@@ -171,6 +172,7 @@ describe("Documents phase 5", () => {
 
     const ready = await json(`/api/v1/deals/${dealId}/avr-readiness`);
     assert.equal(ready.body.ready, true);
+    assert.equal(ready.body.invoiceId, null);
 
     const refreshed = await json(`/api/v1/deals/${dealId}/electronic-documents`, {
       method: "POST",
@@ -185,12 +187,15 @@ describe("Documents phase 5", () => {
     });
     assert.equal(validated.response.status, 200, JSON.stringify(validated.body));
     assert.equal(validated.body.document.status, "VALIDATED");
+    assert.equal(validated.body.document.invoiceId, null);
+    assert.equal(validated.body.document.source.invoice, null);
     assert.ok(validated.body.document.validatedAt);
     assert.equal(validated.body.document.source.seller.bin, "123456789013");
     assert.equal(validated.body.document.source.buyer.bin, "222222222220");
     assert.equal(validated.body.document.source.contract.id, contractId);
     assert.ok(validated.body.document.source.contract.date);
     assert.equal(validated.body.document.source.items[0].name, "Разработка сайта");
+    assert.equal(await prisma.invoice.count({where:{dealId}}),0,"Формирование АВР не создаёт счёт");
   });
 
   it("не отдаёт АВР другому тенанту и не даёт проверить после отправки", async () => {

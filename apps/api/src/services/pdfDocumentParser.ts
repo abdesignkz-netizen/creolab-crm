@@ -1,5 +1,7 @@
 import type { PdfImportDraft, PdfImportParty } from "@creolab/contracts";
 import { wordsToLines, type PdfPageText } from "./pdfTextExtraction.ts";
+import { invoiceTableRows } from "./invoiceTableParsing.ts";
+import { invoicePayment } from "./invoicePayment.ts";
 
 const clean = (text: string) => text.replace(/[|¦\[\]]/g, " ").replace(/[ \t]+/g, " ").trim();
 const numberValue = (value: string) => Number(value.replace(/\s/g, "").replace(",", "."));
@@ -22,10 +24,12 @@ function party(text: string): PdfImportParty {
   const binIndex = relevant.findIndex(l => /(?:БИН|БИН\/ИИН|ИИН)\s*:?\s*\d{12}/i.test(l));
   const directorIndex = relevant.findIndex(l => /^Директор(?:\s|$)/i.test(l));
   const rawIban = text.match(/\bKZ(?:[ \t]*[A-Z\d]){18}\b/i)?.[0]?.replace(/[ \t]/g, "") || "";
+  const normalizedText = lines.join("\n");
+  const inlineAddress = name ? normalizedText.slice(normalizedText.indexOf(name)+name.length).replace(/^[\s,;]+/,"").split(/Тел(?:ефон)?\.?\s*:|БИН|ИИН|ИИК|БИК|\bKZ|Директор/i)[0].trim() : "";
   return {
     name: name.replace(/^TOO/, "ТОО"),
     bin: text.match(/(?:БИН|ИИН)\s*:?\s*(\d{12})/i)?.[1] || "",
-    legalAddress: name && binIndex > 0 ? relevant.slice(1, binIndex).filter(l => !/^(?:Заказчик|Исполнитель)/i.test(l)).join(" ") : "",
+    legalAddress: name && binIndex > 0 ? relevant.slice(1, binIndex).filter(l => !/^(?:Заказчик|Исполнитель)/i.test(l)).join(" ") : /^(?:РК|Казахстан|\d{6}|г\.)/i.test(inlineAddress) ? clean(inlineAddress.replace(/\n/g," ")) : "",
     iban: /^KZ/i.test(rawIban) ? rawIban.toUpperCase() : "",
     bankName: relevant.find(l => /банк|Bank/i.test(l)) || "",
     bik: text.match(/БИК\s*:?\s*([A-Z\d]{8,11})/i)?.[1]?.toUpperCase() || "",
@@ -86,10 +90,19 @@ export function parsePdfDocument(pages: PdfPageText[], kind: "CONTRACT" | "INVOI
     [seller, buyer] = leftIsSeller ? [left, right] : [right, left];
     if (!tenantBin || (seller.bin !== tenantBin && buyer.bin !== tenantBin)) warnings.push("Проверьте, правильно ли определены заказчик и исполнитель; при необходимости поменяйте стороны местами.");
   } else {
-    const supplier = text.match(/(?:Поставщик|Исполнитель)\s*:?\s*([\s\S]+?)(?=Покупатель|Заказчик|$)/i)?.[1];
-    const customer = text.match(/(?:Покупатель|Заказчик)\s*:?\s*([\s\S]+?)(?=Основание|Договор|№\s*(?:Наименование|Товар)|$)/i)?.[1];
+    const supplier = text.match(/(?:^|\n)(?:Поставщик|Исполнитель)\s*:\s*([\s\S]+?)(?=\n(?:Покупатель|Заказчик)\s*:|$)/i)?.[1];
+    const customer = text.match(/(?:^|\n)(?:Покупатель|Заказчик)\s*:\s*([\s\S]+?)(?=\n(?:Основание|Договор)\s*:|\n№|$)/i)?.[1];
     if (supplier) seller = party(supplier);
     if (customer) buyer = party(customer);
+    if (kind === "INVOICE") {
+      const bankText = text.split(/Сч[её]т\s+на\s+оплату/i)[0];
+      const bankParty = party(bankText);
+      if (bankParty.bin && bankParty.bin === seller.bin) {
+        seller.iban ||= bankParty.iban;
+        seller.bankName ||= bankText.split("\n").find(l=>/(?:АО|ТОО).*банк|Bank/i.test(l))?.split(/\s{2,}/)[0] || "";
+        seller.bik ||= bankText.match(/\b[A-Z]{6}[A-Z\d]{2}(?:[A-Z\d]{3})?\b/)?.[0] || "";
+      }
+    }
   }
   const totalPage = [...pages].reverse().find(p => /(?:Итого|Всего к оплате)\s*:?\s*[\d\s]+/i.test(p.text));
   const totalMatch = totalPage?.text.match(/(?:Итого|Всего к оплате)\s*:?\s*([\d][\d \u00a0]*(?:[.,]\d{1,2})?)/i);
@@ -98,7 +111,7 @@ export function parsePdfDocument(pages: PdfPageText[], kind: "CONTRACT" | "INVOI
   const vatRate = noVat ? 0 : Number(text.match(/НДС\s*[:—-]?\s*(\d{1,2})\s*%/i)?.[1] || 0);
   if (vatRate) warnings.push("Проверьте, включён ли НДС в цены PDF: в форме указываются цены без НДС.");
   if (!noVat && !vatRate) warnings.push("Ставка НДС не определена. Проверьте её для каждой позиции.");
-  const items: PdfImportDraft["items"] = kind === "INVOICE" ? pages.flatMap(p => invoiceRows(p.text, vatRate)) : [];
+  const items: PdfImportDraft["items"] = kind === "INVOICE" ? pages.flatMap(p => {const rows=invoiceTableRows(p,vatRate);return rows.length?rows:invoiceRows(p.text,vatRate);}) : [];
   if (totalPage && !items.length) {
     for (const raw of totalPage.text.split("\n")) {
       const line = clean(raw);
@@ -125,6 +138,12 @@ export function parsePdfDocument(pages: PdfPageText[], kind: "CONTRACT" | "INVOI
     subject: items.map(i => i.name).join("; ").slice(0,1000),
     paymentTerms: clean(paymentTerms).slice(0,4000), completionTerms: [...new Set(deadlineLines)].join("; "), items, detectedTotal,
   };
+  if (kind === "INVOICE") {
+    const payment = invoicePayment([items.map(i=>i.name).join("\n"),...text.split("\n").filter(l=>/предоплат|аванс|остаток|окончательн|доплат|доп\.?\s*объ[её]м|дополнительн|назначение платежа|условия оплаты|полная оплата|оплата\s*100\s*%/i.test(l) && !/^\s*\d+[.)]?\s/.test(l))].join("\n"));
+    draft.paymentKind=payment.paymentKind;
+    draft.paymentTerms=payment.paymentTerms;
+    draft.contractNumber=text.match(/(?:^|\n)Договор\s*:\s*(?:№|No\.?|N)?\s*([^\s]+)(?=\s+от)/i)?.[1] || "";
+  }
   if (kind === "CONTRACT" && !contactPhone) warnings.push("Телефон заказчика не распознан. Укажите его для создания сделки.");
   if (!number || !draft.date) warnings.push("Проверьте номер и дату документа.");
   if (!buyer.name || !buyer.bin) warnings.push("Заполните название и БИН заказчика.");

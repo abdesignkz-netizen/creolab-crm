@@ -253,6 +253,10 @@ export function createApp(prisma: PrismaClient) {
   const json = express.json({ limit: "200kb" });
   const jsonLarge = express.json({ limit: "30mb" });
 
+  app.get("/api/v1/documents/import-pdf/matches", async (req, res) => {
+    const { matchInvoiceImport } = await import("./services/manualPdfImportService.ts");
+    res.json(await matchInvoiceImport(prisma, await requireAuth(req), req.query));
+  });
   app.post("/api/v1/documents/import-pdf/preview", jsonLarge, async (req, res) => {
     const { previewManualPdf } = await import("./services/manualPdfImportService.ts");
     res.json(await previewManualPdf(prisma, await requireAuth(req), req.body));
@@ -785,6 +789,11 @@ export function createApp(prisma: PrismaClient) {
       run: () => createElectronicDocumentDraft(prisma, auth, req.params.id, input),
     });
     res.status(201).json(result);
+  });
+
+  app.delete("/api/v1/contracts/:id", async (req, res) => {
+    const { deleteContract } = await import("./services/contractDeletionService.ts");
+    res.json(await deleteContract(prisma, await requireAuth(req), req.params.id));
   });
 
   app.post("/api/v1/contracts/:id/generate", json, async (req, res) => {

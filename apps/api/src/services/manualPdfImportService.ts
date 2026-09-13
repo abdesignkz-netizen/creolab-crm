@@ -24,6 +24,8 @@ const commitSchema = z.object({
     subject: z.string().trim().min(1).max(1000), buyer: partySchema, seller: partySchema,
     contactName: z.string().trim().max(200), contactPhone: z.string().trim().max(40),
     paymentTerms: z.string().max(4000), completionTerms: z.string().max(2000),
+    paymentKind: z.enum(["PREPAYMENT", "BALANCE", "ADDITIONAL", "FULL", "UNSPECIFIED"]).optional(),
+    contractNumber: z.string().trim().max(100).optional(),
     detectedTotal: z.number().nonnegative().nullable(),
     items: z.array(z.object({ name: z.string().trim().min(1).max(1000), quantity: z.number().positive().max(1e6), unitPrice: z.number().nonnegative().max(1e10), vatRate: z.number().min(0).max(100), unit: z.string().trim().min(1).max(40) })).min(1).max(100),
   }),
@@ -33,6 +35,19 @@ async function access(prisma: PrismaClient, auth: AuthContext) {
   if (!can(auth, "manage_documents")) throw new ApiError(403, "forbidden", "Недостаточно прав для загрузки документов");
   await requireDocumentsEnabled(prisma, auth.activeMembership.tenantId);
   return auth.activeMembership;
+}
+
+export async function matchInvoiceImport(prisma: PrismaClient, auth: AuthContext, raw: unknown) {
+  const membership = await access(prisma, auth);
+  const { buyerBin, contractNumber } = z.object({buyerBin:z.string().regex(/^\d{12}$|^$/),contractNumber:z.string().trim().max(100).default("")}).parse(raw);
+  const tid = membership.tenantId;
+  const companies = buyerBin ? await prisma.company.findMany({where:{tenantId:tid,archivedAt:null,OR:[{bin:buyerBin},{iin:buyerBin}]},select:{id:true,name:true}}) : [];
+  const deals = companies.length ? await prisma.deal.findMany({where:{tenantId:tid,companyId:{in:companies.map(c=>c.id)}},select:{id:true,title:true,companyId:true},orderBy:{createdAt:"desc"}}) : [];
+  const contracts = contractNumber && deals.length ? await prisma.contract.findMany({where:{tenantId:tid,dealId:{in:deals.map(d=>d.id)},number:contractNumber},select:{dealId:true}}) : [];
+  const exactDeals = [...new Set(contracts.map(c=>c.dealId))];
+  // An explicit contract reference that does not match must not select another deal.
+  const suggestedDealId = companies.length !== 1 ? null : contractNumber ? (exactDeals.length===1?exactDeals[0]:null) : deals.length===1?deals[0].id:null;
+  return {companies,deals,suggestedDealId};
 }
 
 export async function previewManualPdf(prisma: PrismaClient, auth: AuthContext, raw: unknown): Promise<PdfImportPreview> {
@@ -50,7 +65,7 @@ export async function previewManualPdf(prisma: PrismaClient, auth: AuthContext, 
     if (!pages.some(p=>p.text.trim())) throw new ApiError(422, "pdf_no_text", "На страницах не удалось распознать текст. Загрузите более чёткий скан.");
     const legal = await prisma.tenantLegalProfile.findUnique({ where: { tenantId: membership.tenantId } });
     const { draft, warnings } = parsePdfDocument(pages, input.kind, legal?.bin);
-    warnings.push("При сохранении пустые реквизиты вашей организации будут заполнены данными исполнителя. Уже заполненные значения сохранятся; при несовпадении БИН перенос не выполняется.");
+    if (input.kind === "CONTRACT") warnings.push("При сохранении пустые реквизиты вашей организации будут заполнены данными исполнителя. Уже заполненные значения сохранятся; при несовпадении БИН перенос не выполняется.");
     const importId = randomUUID();
     const sha256 = createHash("sha256").update(bytes).digest("hex");
     const storageKey = path.posix.join(membership.tenantId, "manual-pdf", `${importId}.${extension}`);
@@ -139,12 +154,22 @@ export async function commitManualPdf(prisma: PrismaClient, auth: AuthContext, r
         await tx.dealStageHistory.create({ data: { tenantId: tid, dealId, toStageId: stage.id, toSystemKey: stage.systemKey, enteredAt: new Date(), changedByType: "user", changedById: auth.user.id, note: "Создана из загруженного договора" } });
         await tx.dealItem.createMany({ data: items.map((item,sortOrder)=>({ ...item, tenantId: tid, dealId, sortOrder })) });
       } else {
+        await tx.$queryRaw`SELECT id FROM "Deal" WHERE id = ${dealId} AND "tenantId" = ${tid} FOR UPDATE`;
         const deal = await tx.deal.findFirst({ where: { id: dealId, tenantId: tid } });
         if (!deal) throw new ApiError(404, "not_found", "Сделка не найдена");
         companyId = deal.companyId;
-        const company = companyId ? await tx.company.findFirst({ where: { id: companyId, tenantId: tid } }) : null;
-        if (company?.bin && draft.buyer.bin && company.bin !== draft.buyer.bin) throw new ApiError(422, "pdf_buyer_mismatch", "Заказчик счёта не совпадает с компанией сделки");
-        const contract = await tx.contract.findFirst({ where: { tenantId: tid, dealId }, orderBy: { createdAt: "desc" } });
+        let company = companyId ? await tx.company.findFirst({ where: { id: companyId, tenantId: tid, archivedAt: null } }) : null;
+        if (companyId && !company) throw new ApiError(422, "pdf_buyer_mismatch", "Компания сделки недоступна. Выберите действующую компанию.");
+        if (company && draft.buyer.bin && ![company.bin, company.iin].includes(draft.buyer.bin)) throw new ApiError(422, "pdf_buyer_mismatch", "БИН / ИИН заказчика счёта не совпадает с компанией сделки. Проверьте выбранную сделку и реквизиты компании.");
+        if (!company) {
+          if (!draft.buyer.bin || !draft.buyer.name) throw new ApiError(422, "pdf_buyer_required", "Укажите название и БИН / ИИН заказчика для привязки компании");
+          const matches = await tx.company.findMany({where:{tenantId:tid,archivedAt:null,OR:[{bin:draft.buyer.bin},{iin:draft.buyer.bin}]}});
+          if (matches.length > 1) throw new ApiError(422, "pdf_company_ambiguous", "Найдено несколько компаний с этим БИН / ИИН. Привяжите нужную компанию в карточке сделки.");
+          company = matches[0] || await tx.company.create({data:{tenantId:tid,name:draft.buyer.name,nameNormalized:draft.buyer.name.toLowerCase(),legalName:draft.buyer.name,bin:draft.buyer.bin,legalAddress:draft.buyer.legalAddress||null,iban:draft.buyer.iban||null,bik:draft.buyer.bik||null,bankName:draft.buyer.bankName||null,directorName:draft.buyer.directorName||null,initialSource:"manual_pdf",assigneeMembershipId:membership.id}});
+          companyId = company.id;
+          await tx.deal.update({where:{id:dealId},data:{companyId}});
+        }
+        const contract = await tx.contract.findFirst({ where: { tenantId: tid, dealId, ...(draft.contractNumber ? {number:draft.contractNumber} : {}) }, orderBy: { createdAt: "desc" } });
         contractId = contract?.id || null;
       }
       const requisites = draft.kind === "CONTRACT" ? await fillImportedSeller(tx, tid, draft.seller) : null;

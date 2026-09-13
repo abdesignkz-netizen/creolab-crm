@@ -115,12 +115,6 @@ export async function getAvrReadiness(prisma: PrismaClient, auth: AuthContext, d
         take: 1,
         select: { id: true, number: true, date: true },
       },
-      invoices: {
-        where: { status: { in: ["ISSUED", "PARTIALLY_PAID", "PAID"] } },
-        orderBy: { createdAt: "desc" },
-        take: 1,
-        select: { id: true },
-      },
       electronicDocuments: {
         where: { type: "AVR", status: { in: ["DRAFT", "VALIDATED"] } },
         orderBy: { createdAt: "desc" },
@@ -137,7 +131,7 @@ export async function getAvrReadiness(prisma: PrismaClient, auth: AuthContext, d
     contractId: deal.electronicDocuments[0]?.contractId || signed?.id || null,
     documentId: deal.electronicDocuments[0]?.id || null,
     signedContractId: signed?.id || null,
-    invoiceId: deal.electronicDocuments[0]?.invoiceId || deal.invoices[0]?.id || null,
+    invoiceId: deal.electronicDocuments[0]?.invoiceId || null,
     contractNumber: signed?.number || null,
     contractDate: signed?.date || null,
     itemCount: deal.items.length,

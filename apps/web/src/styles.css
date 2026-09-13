@@ -2325,6 +2325,11 @@ button.linkish {
 /* ——— Documents ——— */
 .documents-page { display: grid; gap: 14px; }
 .documents-list { display: grid; gap: 0; }
+.document-list-entry { padding: 8px 0 14px; border-bottom: 1px solid var(--line); }
+.document-list-entry:last-child { border-bottom: 0; }
+.document-list-entry .sit-list-row { border-bottom: 0; }
+.contract-delete { max-width: 440px; }
+.contract-delete p { margin: 8px 0; }
 .documents-row-meta {
   display: grid;
   gap: 2px;
