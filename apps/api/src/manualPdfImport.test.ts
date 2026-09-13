@@ -134,6 +134,24 @@ describe("Manual PDF import",()=>{
   const original=await fetch(base+`/api/v1/contracts/${contract.id}/original`,{headers:{cookie}});assert.deepEqual(Buffer.from(await original.arrayBuffer()),word);
   const hidden=await fetch(base+`/api/v1/contracts/${contract.id}/original`,{headers:{cookie:foreign}});assert.equal(hidden.status,404);
   assert.equal((await req("/api/v1/documents/import-pdf/confirm","POST",{importId:p.importId,draft:p.draft})).reused,true);
+  // Reproduce an older Word import whose seller cell was missed by the parser.
+  const savedProfile = await prisma.tenantLegalProfile.findUniqueOrThrow({where:{tenantId:contract.tenantId}});
+  const savedAudit = await prisma.auditEvent.findFirstOrThrow({where:{tenantId:contract.tenantId,entityId:contract.id,action:"document.import_pdf"}});
+  await prisma.auditEvent.update({where:{id:savedAudit.id},data:{changesJson:{...(savedAudit.changesJson as object),reviewedImport:{...p.draft,seller:Object.fromEntries(Object.keys(p.draft.seller).map(k=>[k,""]))}}}});
+  await prisma.tenantLegalProfile.update({where:{tenantId:contract.tenantId},data:{legalName:null,bin:null,iin:null,legalAddress:null,directorName:null,iban:null,bik:null,bankName:null}});
+  try {
+    const before = await prisma.deal.count();
+    const restored = await req(`/api/v1/contracts/${contract.id}/imported-requisites`,"POST");
+    assert.ok(restored.fields.includes("legalName"));
+    const settings = await req("/api/v1/settings/legal-profile");
+    assert.equal(settings.legalName,p.draft.seller.name);
+    assert.equal(settings.bin,p.draft.seller.bin);
+    assert.equal(settings.iban,p.draft.seller.iban);
+    assert.equal(await prisma.deal.count(),before,"restore must not create another deal");
+  } finally {
+    const keys=["legalName","bin","iin","legalAddress","directorName","iban","bik","bankName"] as const;
+    await prisma.tenantLegalProfile.update({where:{tenantId:contract.tenantId},data:Object.fromEntries(keys.map(k=>[k,savedProfile[k]]))});
+  }
   const cancel=await req("/api/v1/documents/import-pdf/preview","POST",{kind:"CONTRACT",fileName:"cancel.docx",fileBase64:word.toString("base64")});
   await req(`/api/v1/documents/import-pdf/${cancel.importId}`,"DELETE");
   assert.equal(await prisma.attachment.count({where:{OR:[{id:cancel.importId},{parentId:cancel.importId}]}}),0);

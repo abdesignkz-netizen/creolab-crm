@@ -13,6 +13,32 @@ function result(text: string, confidence: number, words: Array<{text: string; co
 const clearText = "Contract for presentation design and printing. Total 400000 KZT.";
 
 describe("Memory-bounded OCR images", () => {
+  it("reads both Word table cells when the seller starts before 55% of the page", () => {
+    const words = [
+      {text:"РЕКВИЗИТЫ СТОРОН",x:237,y:341},
+      {text:"ТОО «Заказчик тест»",x:86,y:369},
+      {text:"Адрес заказчика",x:76,y:383},
+      {text:"БИН 111111111111",x:76,y:410},
+      {text:"ТОО «",x:324,y:369,width:35},
+      {text:"Исполнитель тест»",x:360,y:369},
+      {text:"Адрес исполнителя",x:324,y:383},
+      {text:"БИН 222222222222",x:324,y:397},
+      {text:"KZ 268562203127261373",x:324,y:424},
+      {text:"АО «Банк ЦентрКредит»",x:324,y:438},
+      {text:"БИК KCJBKZKX",x:324,y:452},
+      {text:"Директор",x:324,y:480},
+      {text:"Тестов А. Б.",x:324,y:510},
+    ].map(w=>({width:150,height:12,...w}));
+    const {draft}=parsePdfDocument([{page:1,width:595,height:842,ocr:false,words,text:words.map(w=>w.text).join("\n")}],"CONTRACT");
+    assert.equal(draft.buyer.bin,"111111111111");
+    assert.equal(draft.buyer.legalAddress,"Адрес заказчика");
+    assert.match(draft.seller.name,/Исполнитель тест/);
+    assert.equal(draft.seller.bin,"222222222222");
+    assert.equal(draft.seller.legalAddress,"Адрес исполнителя");
+    assert.equal(draft.seller.iban,"KZ268562203127261373");
+    assert.equal(draft.seller.bik,"KCJBKZKX");
+    assert.equal(draft.seller.directorName,"Тестов А. Б.");
+  });
   it("does not use indented signature labels as requisites column headings", () => {
     const words = [
       {text:"РЕКВИЗИТЫ СТОРОН",x:100,y:300},

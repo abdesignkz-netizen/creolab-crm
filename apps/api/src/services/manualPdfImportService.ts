@@ -1,5 +1,6 @@
 import { wordToPdf } from "./wordDocumentConversion.ts";
 import { fillImportedSeller } from "./importedRequisites.ts";
+import { beginDocumentExtraction } from "./documentExtractionGate.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
@@ -27,7 +28,6 @@ const commitSchema = z.object({
     items: z.array(z.object({ name: z.string().trim().min(1).max(1000), quantity: z.number().positive().max(1e6), unitPrice: z.number().nonnegative().max(1e10), vatRate: z.number().min(0).max(100), unit: z.string().trim().min(1).max(40) })).min(1).max(100),
   }),
 });
-let activeExtractions = 0;
 async function access(prisma: PrismaClient, auth: AuthContext) {
   if (!auth.activeMembership) throw new ApiError(403, "no_tenant", "Нет активной организации");
   if (!can(auth, "manage_documents")) throw new ApiError(403, "forbidden", "Недостаточно прав для загрузки документов");
@@ -41,10 +41,9 @@ export async function previewManualPdf(prisma: PrismaClient, auth: AuthContext, 
   const extension = path.extname(input.fileName).slice(1).toLowerCase();
   const word = input.kind === "CONTRACT" && (extension === "docx" || extension === "doc");
   if ((!word && extension !== "pdf") || !/^[A-Za-z0-9+/]+={0,2}$/.test(input.fileBase64)) throw new ApiError(422, "pdf_required", "Выберите договор PDF, DOCX или DOC; счёт — PDF");
-  if (activeExtractions >= 1) throw new ApiError(429, "pdf_import_busy", "Сейчас распознаётся другой документ. Дождитесь завершения и повторите загрузку.");
   const bytes = Buffer.from(input.fileBase64, "base64");
   if (bytes.length > 20 * 1024 * 1024 || bytes.length < 8 || (!word && !bytes.subarray(0,8).toString().startsWith("%PDF-"))) throw new ApiError(422, "pdf_invalid", word ? "Нужен непустой файл Word размером до 20 МБ" : "Нужен PDF размером до 20 МБ");
-  activeExtractions++;
+  const release = beginDocumentExtraction();
   try {
     const pdfBytes = word ? await wordToPdf(bytes, extension as "doc" | "docx") : bytes;
     const pages = await extractPdfPages(pdfBytes);
@@ -71,7 +70,7 @@ export async function previewManualPdf(prisma: PrismaClient, auth: AuthContext, 
       }
     } catch (error) { await prisma.attachment.deleteMany({where:{id:importId,tenantId:membership.tenantId,status:"preview"}}); await rm(absolute, { force: true }); throw error; }
     return { importId, fileName: path.basename(input.fileName), sha256, pageCount: pages.length, usedOcr: pages.some(p=>p.ocr), draft, warnings, pages: pages.map(({page,text})=>({page,text})) };
-  } finally { activeExtractions--; }
+  } finally { release(); }
 }
 
 export async function commitManualPdf(prisma: PrismaClient, auth: AuthContext, raw: unknown) {

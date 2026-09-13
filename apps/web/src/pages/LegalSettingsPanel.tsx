@@ -6,6 +6,7 @@ import { api } from "../lib/api";
 type Profile = {
   legalName: string | null;
   bin: string | null;
+  iin: string | null;
   legalAddress: string | null;
   iban: string | null;
   bankName: string | null;
@@ -24,6 +25,7 @@ type Profile = {
 const EMPTY: Profile = {
   legalName: "",
   bin: "",
+  iin: "",
   legalAddress: "",
   iban: "",
   bankName: "",
@@ -46,6 +48,7 @@ export function LegalSettingsPanel() {
   const [error, setError] = useState("");
   const [editing, setEditing] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const [preflight, setPreflight] = useState<any>(null);
 
   function applyLoaded(data: Profile) {
@@ -73,13 +76,18 @@ export function LegalSettingsPanel() {
   useEffect(() => {
     void api
       .legalProfile()
-      .then((data) => applyLoaded(data as Profile))
+      .then((data) => {
+        applyLoaded(data as Profile);
+        setEditing(!(data as Profile).legalName);
+        setLoaded(true);
+        if (location.hash === "#company-requisites") document.getElementById("company-requisites")?.scrollIntoView();
+      })
       .catch((err) => setError(err instanceof Error ? err.message : "Не удалось загрузить реквизиты"));
     void loadPreflight();
   }, []);
 
   async function save() {
-    if (busy) return;
+    if (busy || !loaded) return;
     setBusy(true);
     setError("");
     try {
@@ -89,6 +97,7 @@ export function LegalSettingsPanel() {
       const next = (await api.updateLegalProfile({
         legalName: profile.legalName || null,
         bin: profile.bin || null,
+        iin: profile.iin || null,
         legalAddress: profile.legalAddress || null,
         iban: profile.iban || null,
         bankName: profile.bankName || null,
@@ -113,17 +122,28 @@ export function LegalSettingsPanel() {
   }
 
   return (
-    <div className="panel">
-      <b>Реквизиты и НДС</b>
+    <div className="panel" id="company-requisites">
+      <h3>Реквизиты компании</h3>
       <p className="muted">
-        Эти данные пойдут в договор, счёт, АВР и ЭСФ. Ставка НДС по умолчанию подставляется в новые позиции сделки,
-        пока менеджер не укажет другую.
+        Ваша организация — исполнитель. Реквизиты из загруженного договора автоматически заполняют пустые поля после проверки и сохранения документа.
+        Эти данные используются в договорах, счетах, АВР и ЭСФ.
       </p>
       {error ? <p className="error">{error}</p> : null}
-      {!editing ? <div className="saved-editor-summary">
-        <p>{profile.legalName || "Организация"}{profile.bin ? ` · БИН ${profile.bin}` : ""}</p>
+      {!loaded ? (error ? <button className="btn secondary" onClick={()=>location.reload()}>Повторить загрузку</button> : <p role="status">Загружаем реквизиты…</p>) : !editing ? <>
+      <dl className="deal-edit">
+        {([
+          ["Юридическое название", profile.legalName],
+          ["БИН / ИИН", profile.bin || profile.iin],
+          ["Юридический адрес", profile.legalAddress],
+          ["Директор", profile.directorName],
+          ["Банк", profile.bankName],
+          ["ИИК / IBAN", profile.iban],
+          ["БИК", profile.bik],
+        ]).map(([label, value]) => <div key={label}><dt className="muted">{label}</dt><dd style={{margin:0}}>{value || "Не заполнено"}</dd></div>)}
+      </dl>
+      <div className="actions">
         <button type="button" className="btn secondary" autoFocus onClick={() => setEditing(true)}>Изменить реквизиты</button>
-      </div> : <>
+      </div></> : <>
       <div className="deal-edit">
         <label>
           Юридическое название
@@ -136,6 +156,7 @@ export function LegalSettingsPanel() {
           БИН
           <input value={profile.bin || ""} onChange={(e) => setProfile({ ...profile, bin: e.target.value })} />
         </label>
+        <label>ИИН (для ИП)<input value={profile.iin || ""} onChange={(e) => setProfile({ ...profile, iin: e.target.value })} /></label>
         <label>
           Юридический адрес
           <input

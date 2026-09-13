@@ -21,7 +21,7 @@ function party(text: string): PdfImportParty {
   const name = relevant[0]?.match(/(?:ТОО|TOO|ИП|АО|ЖШС)\s*[«"“][^»"”]+[»"”]/i)?.[0] || "";
   const binIndex = relevant.findIndex(l => /(?:БИН|БИН\/ИИН|ИИН)\s*:?\s*\d{12}/i.test(l));
   const directorIndex = relevant.findIndex(l => /^Директор(?:\s|$)/i.test(l));
-  const rawIban = text.match(/\b(?:KZ|КZ|КЗ|К7)[A-ZА-Я\d]{18}\b/i)?.[0] || "";
+  const rawIban = text.match(/\bKZ(?:[ \t]*[A-Z\d]){18}\b/i)?.[0]?.replace(/[ \t]/g, "") || "";
   return {
     name: name.replace(/^TOO/, "ТОО"),
     bin: text.match(/(?:БИН|ИИН)\s*:?\s*(\d{12})/i)?.[1] || "",
@@ -67,13 +67,22 @@ export function parsePdfDocument(pages: PdfPageText[], kind: "CONTRACT" | "INVOI
     // Signature labels in the page footer can be indented far into a column.
     const sectionTop = heading?.y ?? requisites.height * 0.35;
     const roleHeaders = words.filter(w => w.y < sectionTop + requisites.height * 0.15 && /^(?:Заказчик|Исполнитель)[:]?$/i.test(w.text.trim()));
-    const columns = roleHeaders.length >= 2 ? Math.max(...roleHeaders.map(w=>w.x)) - 2 : requisites.width * 0.55;
+    // Word often places the right cell just left of 55% of the page. Anchor
+    // the split to the actual first row of company names, including split runs.
+    const names = words.filter(w => /^(?:ТОО|TOO|ИП|АО|ЖШС)(?:\s|$)/i.test(w.text.trim()));
+    const firstNameY = Math.min(...names.map(w => w.y));
+    const nameHeaders = names.filter(w => Math.abs(w.y - firstNameY) < Math.max(w.height, 6));
+    const anchors = roleHeaders.length >= 2 ? roleHeaders : nameHeaders;
+    const columns = anchors.length >= 2 && Math.max(...anchors.map(w=>w.x)) - Math.min(...anchors.map(w=>w.x)) > requisites.width * 0.2
+      ? Math.max(...anchors.map(w=>w.x)) - 2 : requisites.width * 0.55;
     const left = party(wordsToLines(words.filter(w => w.x < columns)).map(l => l.text).join("\n"));
     const right = party(wordsToLines(words.filter(w => w.x >= columns)).map(l => l.text).join("\n"));
     // Prefer explicit organisation identity; otherwise infer the roles from the preamble.
     const intro = clean(first);
     const sellerName = intro.match(/(?:ТОО|TOO|ИП|АО|ЖШС)\s*[«"“]([^»"”]+)[»"”][\s\S]{0,90}?«Исполнитель»/i)?.[1];
-    const leftIsSeller = Boolean((tenantBin && left.bin === tenantBin) || (sellerName && left.name.includes(sellerName)));
+    const leftRole = roleHeaders.find(w => w.x < columns)?.text || "";
+    const leftIsSeller = roleHeaders.length >= 2 ? /Исполнитель/i.test(leftRole)
+      : Boolean((tenantBin && left.bin === tenantBin) || (sellerName && left.name.includes(sellerName)));
     [seller, buyer] = leftIsSeller ? [left, right] : [right, left];
     if (!tenantBin || (seller.bin !== tenantBin && buyer.bin !== tenantBin)) warnings.push("Проверьте, правильно ли определены заказчик и исполнитель; при необходимости поменяйте стороны местами.");
   } else {
@@ -119,6 +128,7 @@ export function parsePdfDocument(pages: PdfPageText[], kind: "CONTRACT" | "INVOI
   if (kind === "CONTRACT" && !contactPhone) warnings.push("Телефон заказчика не распознан. Укажите его для создания сделки.");
   if (!number || !draft.date) warnings.push("Проверьте номер и дату документа.");
   if (!buyer.name || !buyer.bin) warnings.push("Заполните название и БИН заказчика.");
+  if (kind === "CONTRACT" && (!seller.name || !seller.bin)) warnings.push("Реквизиты исполнителя распознаны не полностью. Заполните название и БИН / ИИН: они будут сохранены в настройках компании.");
   if (tenantBin && seller.bin && seller.bin !== tenantBin) warnings.push("БИН исполнителя в PDF отличается от реквизитов текущей организации.");
   if (pages.some(p => p.ocr)) warnings.push("Документ содержит сканы. Перед сохранением сверьте номера, БИН и банковские реквизиты с PDF.");
   if (detectedTotal !== null && Math.abs(items.reduce((s,i)=>s+i.quantity*i.unitPrice*(1+i.vatRate/100),0)-detectedTotal)>0.01) warnings.push("Сумма позиций отличается от итога PDF. Уточните цены и НДС.");

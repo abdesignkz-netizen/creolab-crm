@@ -129,7 +129,7 @@ export function DocumentsPage() {
           <h2>Документы</h2>
           <p className="muted">Договоры, счета, АВР и ЭСФ по всем сделкам</p>
         </div>
-        <Link className="btn secondary" to="/settings">
+        <Link className="btn secondary" to="/settings#company-requisites">
           Реквизиты
         </Link>
       </div>

@@ -215,13 +215,14 @@ export function DealDocumentsPanel(props: {
           />
           {contracts[0]?.importedPdf && readiness?.missingFields?.some((field:string)=>field.startsWith("organization.")) ? (
             <div className="stack">
-              <p className="muted">Сам договор уже загружен. Перенесите реквизиты исполнителя из сохранённых данных договора, чтобы подготовить следующие документы.</p>
+              <p className="muted">Заполните реквизиты исполнителя из сохранённого договора. Если часть данных была пропущена, система повторно прочитает его PDF-копию.</p>
               <button className="btn secondary" disabled={busy} onClick={()=>{
                 setBusy(true);setError("");
                 void api.request(`/api/v1/contracts/${contracts[0].id}/imported-requisites`,{method:"POST"})
                   .then(async()=>{await load();notifySaved("Реквизиты из договора сохранены");})
                   .catch(err=>setError(err.message)).finally(()=>setBusy(false));
               }}>Заполнить реквизиты из договора</button>
+              <Link to="/settings#company-requisites">Реквизиты компании в настройках</Link>
             </div>
           ) : null}
           {contracts.map((doc: any) => (

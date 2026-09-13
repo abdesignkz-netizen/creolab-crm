@@ -667,6 +667,7 @@ function Settings() {
   return (
     <section>
       <h2>Настройки компании</h2>
+      <LegalSettingsPanel />
       <p>
         <a href="/integrations">Подключить WhatsApp, форму, webhook и Telegram →</a>
       </p>
@@ -676,8 +677,6 @@ function Settings() {
       <p>
         <a href="/settings/ai-automation">AI Manager → Новые заявки →</a>
       </p>
-
-      <LegalSettingsPanel />
 
       <div className="panel">
         <b>Уведомления браузера</b>
