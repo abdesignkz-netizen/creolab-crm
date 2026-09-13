@@ -58,8 +58,8 @@ async function resolveLinks(
     if (!contract) throw new ApiError(404, "not_found", "Договор не найден");
   } else {
     contract = await prisma.contract.findFirst({
-      where: { tenantId, dealId, status: "SIGNED" },
-      orderBy: { signedAt: "desc" },
+      where: { tenantId, dealId },
+      orderBy: { createdAt: "desc" },
     });
   }
 
@@ -91,7 +91,7 @@ export async function createAvrDraft(
   if (existing && existing.status !== "DRAFT") {
     return { document: serializeElectronicDocument(existing), reused: true };
   }
-  const { contract, invoice } = await resolveLinks(prisma, tid, dealId, {...input, invoiceId: input.invoiceId || existing?.invoiceId});
+  const { contract, invoice } = await resolveLinks(prisma, tid, dealId, {...input, contractId: input.contractId || existing?.contractId, invoiceId: input.invoiceId || existing?.invoiceId});
 
   const { deal, items, profile, tenantName } = await loadAvrBundle(prisma, tid, dealId, contract?.id);
   if (!items.length) {
@@ -176,26 +176,20 @@ export async function validateAvr(prisma: PrismaClient, auth: AuthContext, docum
     throw new ApiError(422, "avr_immutable", "АВР уже подписан или отправлен — проверку менять нельзя");
   }
 
-  const { deal, items, profile, tenantName } = await loadAvrBundle(prisma, tid, document.dealId, document.contractId);
   const { contract, invoice } = await resolveLinks(prisma, tid, document.dealId, {
     contractId: document.contractId,
     invoiceId: document.invoiceId,
   });
-  const signed =
-    contract?.status === "SIGNED"
-      ? contract
-      : await prisma.contract.findFirst({
-          where: { tenantId: tid, dealId: document.dealId, status: "SIGNED" },
-          orderBy: { signedAt: "desc" },
-        });
+  const { deal, items, profile, tenantName } = await loadAvrBundle(prisma, tid, document.dealId, contract?.id);
+
   const readiness = assessAvrReadiness({
     dealId: deal.id,
-    contractId: document.contractId,
+    contractId: contract?.id || null,
     documentId: document.id,
-    signedContractId: signed?.id || null,
+    signedContractId: contract?.status === "SIGNED" ? contract.id : null,
     invoiceId: invoice?.id || document.invoiceId,
-    contractNumber: signed?.number || null,
-    contractDate: signed?.date || null,
+    contractNumber: contract?.number || null,
+    contractDate: contract?.date || null,
     itemCount: items.length,
     profile,
     company: deal.company,
@@ -210,14 +204,14 @@ export async function validateAvr(prisma: PrismaClient, auth: AuthContext, docum
     profile,
     tenantName,
     company: deal.company,
-    contract: signed,
+    contract,
     invoice,
   });
 
   const updated = await prisma.electronicDocument.update({
     where: { id: document.id },
     data: {
-      contractId: signed!.id,
+      contractId: contract?.id || null,
       invoiceId: invoice?.id || document.invoiceId,
       companyId: deal.companyId,
       amountWithoutVat: source.totals.amountWithoutVat,
@@ -244,6 +238,7 @@ export async function validateAvr(prisma: PrismaClient, auth: AuthContext, docum
   return {
     document: serializeElectronicDocument(updated),
     ready: true,
+    warnings: readiness.warnings,
     missingFields: [] as string[],
   };
 }

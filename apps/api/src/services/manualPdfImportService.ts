@@ -17,7 +17,7 @@ import { lineAmounts, sumLines, toMinorTenge } from "./documentMoney.ts";
 
 const partySchema = z.object({ name: z.string().trim().max(300), bin: z.string().trim().regex(/^\d{12}$|^$/, "БИН должен содержать 12 цифр"), legalAddress: z.string().trim().max(1000), iban: z.string().trim().regex(/^KZ[A-Z0-9]{18}$|^$/, "Проверьте IBAN"), bankName: z.string().trim().max(300), bik: z.string().trim().regex(/^[A-Z0-9]{8,11}$|^$/, "Проверьте БИК"), directorName: z.string().trim().max(200) });
 const commitSchema = z.object({
-  importId: z.string().uuid(), dealId: z.string().uuid().optional(),
+  importId: z.string().uuid(), dealId: z.string().uuid().optional(), createDeal: z.boolean().default(false),
   draft: z.object({
     kind: z.enum(["CONTRACT", "INVOICE"]), number: z.string().trim().min(1).max(100),
     date: z.string().regex(/^20\d{2}-\d{2}-\d{2}$/).refine(s => { const d = new Date(s); return !Number.isNaN(d.getTime()) && d.toISOString().slice(0,10) === s; }, "Укажите корректную дату"),
@@ -40,14 +40,16 @@ async function access(prisma: PrismaClient, auth: AuthContext) {
 export async function matchInvoiceImport(prisma: PrismaClient, auth: AuthContext, raw: unknown) {
   const membership = await access(prisma, auth);
   const { buyerBin, contractNumber } = z.object({buyerBin:z.string().regex(/^\d{12}$|^$/),contractNumber:z.string().trim().max(100).default("")}).parse(raw);
-  const tid = membership.tenantId;
+  return findInvoiceMatches(prisma, membership.tenantId, buyerBin, contractNumber);
+}
+
+async function findInvoiceMatches(prisma: Pick<PrismaClient,"company"|"deal"|"contract">, tid: string, buyerBin: string, contractNumber: string) {
   const companies = buyerBin ? await prisma.company.findMany({where:{tenantId:tid,archivedAt:null,OR:[{bin:buyerBin},{iin:buyerBin}]},select:{id:true,name:true}}) : [];
   const deals = companies.length ? await prisma.deal.findMany({where:{tenantId:tid,companyId:{in:companies.map(c=>c.id)}},select:{id:true,title:true,companyId:true},orderBy:{createdAt:"desc"}}) : [];
   const contracts = contractNumber && deals.length ? await prisma.contract.findMany({where:{tenantId:tid,dealId:{in:deals.map(d=>d.id)},number:contractNumber},select:{dealId:true}}) : [];
   const exactDeals = [...new Set(contracts.map(c=>c.dealId))];
-  // An explicit contract reference that does not match must not select another deal.
-  const suggestedDealId = companies.length !== 1 ? null : contractNumber ? (exactDeals.length===1?exactDeals[0]:null) : deals.length===1?deals[0].id:null;
-  return {companies,deals,suggestedDealId};
+  const suggestedDealId = companies.length !== 1 ? null : exactDeals.length===1 ? exactDeals[0] : deals.length===1 ? deals[0].id : null;
+  return {companies,deals,suggestedDealId,canCreateDeal:Boolean(buyerBin && companies.length<=1 && !deals.length)};
 }
 
 export async function previewManualPdf(prisma: PrismaClient, auth: AuthContext, raw: unknown): Promise<PdfImportPreview> {
@@ -90,7 +92,8 @@ export async function previewManualPdf(prisma: PrismaClient, auth: AuthContext, 
 
 export async function commitManualPdf(prisma: PrismaClient, auth: AuthContext, raw: unknown) {
   const membership = await access(prisma, auth);
-  const { importId, draft, dealId: requestedDealId } = commitSchema.parse(raw);
+  const { importId, draft, dealId: requestedDealId, createDeal } = commitSchema.parse(raw);
+  if (createDeal && (draft.kind !== "INVOICE" || requestedDealId)) throw new ApiError(422,"pdf_deal_choice","Выберите существующую сделку или создание новой");
   const tid = membership.tenantId;
   const file = await prisma.attachment.findFirst({ where: { id: importId, tenantId: tid } });
   if (!file || file.documentType !== draft.kind.toLowerCase()) throw new ApiError(404, "not_found", "Загруженный документ не найден");
@@ -110,7 +113,6 @@ export async function commitManualPdf(prisma: PrismaClient, auth: AuthContext, r
   if (draft.kind === "CONTRACT" && !draft.buyer.name) throw new ApiError(422, "pdf_buyer_required", "Укажите заказчика");
   const phone = draft.kind === "CONTRACT" ? validateClientPhone(draft.contactPhone, membership.tenant.defaultRegion) : null;
   if (phone && !phone.ok) throw new ApiError(422, "pdf_phone_required", "Укажите корректный телефон контактного лица заказчика");
-  if (draft.kind === "INVOICE" && !requestedDealId) throw new ApiError(422, "pdf_deal_required", "Выберите сделку для счёта");
   try {
     return await prisma.$transaction(async tx => {
       // Serialize imports per tenant, including different uploads of the same PDF.
@@ -128,6 +130,30 @@ export async function commitManualPdf(prisma: PrismaClient, auth: AuthContext, r
       const duplicate = await tx.attachment.findFirst({ where: { tenantId: tid, checksum: file.checksum, documentType: file.documentType, status: "imported", id: { not: importId } } });
       if (duplicate) throw new ApiError(409, "pdf_already_imported", "Этот PDF уже загружен в документы");
       let dealId = requestedDealId || "", companyId: string | null = null, contractId: string | null = null;
+      let createdDeal = false;
+      if (draft.kind === "INVOICE" && !dealId) {
+        const matches = await findInvoiceMatches(tx, tid, draft.buyer.bin, draft.contractNumber || "");
+        if (createDeal) {
+          if (!matches.canCreateDeal) throw new ApiError(422,"pdf_deal_exists","У заказчика уже есть сделки или найдено несколько компаний. Обновите подбор и выберите сделку.");
+          if (!draft.buyer.name) throw new ApiError(422,"pdf_buyer_required","Укажите название заказчика");
+          const company = matches.companies[0] || await tx.company.create({data:{tenantId:tid,name:draft.buyer.name,nameNormalized:draft.buyer.name.toLowerCase(),legalName:draft.buyer.name,bin:draft.buyer.bin,legalAddress:draft.buyer.legalAddress||null,iban:draft.buyer.iban||null,bik:draft.buyer.bik||null,bankName:draft.buyer.bankName||null,directorName:draft.buyer.directorName||null,initialSource:"manual_pdf",assigneeMembershipId:membership.id}});
+          const linkedContact = await tx.companyContact.findFirst({where:{tenantId:tid,companyId:company.id,contact:{archivedAt:null}},orderBy:{isPrimary:"desc"}});
+          // Invoices frequently have no person's name or phone. Reuse a company
+          // contact, or create a company-named contact without inventing a phone.
+          const contactId = linkedContact?.contactId || (await tx.contact.create({data:{tenantId:tid,name:draft.contactName||draft.buyer.directorName||draft.buyer.name,companyName:draft.buyer.name,ownerMembershipId:membership.id,attributionJson:{source:"manual_invoice"}}})).id;
+          if (!linkedContact) await tx.companyContact.create({data:{tenantId:tid,companyId:company.id,contactId,isPrimary:true}});
+          const stage = await tx.dealStage.findFirst({where:{tenantId:tid,systemKey:"new"}});
+          if (!stage) throw new ApiError(422,"pipeline_required","Воронка сделок не настроена");
+          const partial = draft.paymentKind === "PREPAYMENT" || draft.paymentKind === "BALANCE";
+          const deal = await tx.deal.create({data:{tenantId:tid,companyId:company.id,contactId,stageId:stage.id,title:draft.subject.slice(0,250),description:`Создана из счёта № ${draft.number} от ${draft.date}.\n${draft.subject}\n${draft.paymentTerms}`,offerAmountMinor:partial?null:toMinorTenge(totals.totalAmount),assigneeMembershipId:membership.id,nextAction:"Проверить объём заказа и контакт заказчика"}});
+          dealId=deal.id;createdDeal=true;
+          await tx.dealStageHistory.create({data:{tenantId:tid,dealId,toStageId:stage.id,toSystemKey:stage.systemKey,enteredAt:new Date(),changedByType:"user",changedById:auth.user.id,note:"Создана из загруженного счёта"}});
+          await tx.dealItem.createMany({data:items.map((item,sortOrder)=>({...item,tenantId:tid,dealId,sortOrder}))});
+        } else {
+          if (!matches.suggestedDealId) throw new ApiError(422,"pdf_deal_required",matches.canCreateDeal?"У заказчика ещё нет сделок. Выберите «Создать сделку из счёта».":"Уточните компанию и выберите одну из её сделок");
+          dealId=matches.suggestedDealId;
+        }
+      }
       if (draft.kind === "CONTRACT") {
         let company = draft.buyer.bin ? await tx.company.findFirst({ where: { tenantId: tid, bin: draft.buyer.bin, archivedAt: null } }) : null;
         if (!company) company = await tx.company.create({ data: { tenantId: tid, name: draft.buyer.name, nameNormalized: draft.buyer.name.toLowerCase(), legalName: draft.buyer.name, bin: draft.buyer.bin || null, legalAddress: draft.buyer.legalAddress || null, iban: draft.buyer.iban || null, bik: draft.buyer.bik || null, bankName: draft.buyer.bankName || null, directorName: draft.buyer.directorName || null, initialSource: "manual_pdf", assigneeMembershipId: membership.id } });
@@ -186,8 +212,8 @@ export async function commitManualPdf(prisma: PrismaClient, auth: AuthContext, r
       }
       await tx.attachment.update({ where: { id: importId }, data: { parentType: draft.kind.toLowerCase(), parentId: documentId, status: "imported" } });
       if (pdfAttachment.id !== importId) await tx.attachment.update({where:{id:pdfAttachment.id},data:{parentType:"contract",parentId:documentId,status:"imported"}});
-      await tx.auditEvent.create({ data: { tenantId: tid, actorUserId: auth.user.id, action: "document.import_pdf", entityType: draft.kind.toLowerCase(), entityId: documentId, changesJson: { dealId, sha256: file.checksum, number: draft.number, reviewedImport: draft, filledOrganizationFields: requisites?.fields || [], signatureVerified: false } } });
-      return { documentId, dealId, kind: draft.kind, reused: false, warning: requisites?.warning || null };
+      await tx.auditEvent.create({ data: { tenantId: tid, actorUserId: auth.user.id, action: "document.import_pdf", entityType: draft.kind.toLowerCase(), entityId: documentId, changesJson: { dealId, createdDeal, sha256: file.checksum, number: draft.number, reviewedImport: draft, filledOrganizationFields: requisites?.fields || [], signatureVerified: false } } });
+      return { documentId, dealId, createdDeal, kind: draft.kind, reused: false, warning: requisites?.warning || null };
     });
   } catch (error) {
     if ((error as { code?: string }).code === "P2002") throw new ApiError(409, "document_number_exists", "Документ с таким номером уже существует. Проверьте номер или откройте существующий документ.");

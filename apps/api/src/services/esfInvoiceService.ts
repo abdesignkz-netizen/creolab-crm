@@ -58,8 +58,8 @@ async function resolveLinks(
     if (!contract) throw new ApiError(404, "not_found", "Договор не найден");
   } else {
     contract = await prisma.contract.findFirst({
-      where: { tenantId, dealId, status: "SIGNED" },
-      orderBy: { signedAt: "desc" },
+      where: { tenantId, dealId },
+      orderBy: { createdAt: "desc" },
     });
   }
 
@@ -91,7 +91,7 @@ export async function createEsfDraft(
   if (existing && existing.status !== "DRAFT") {
     return { document: serializeElectronicDocument(existing), reused: true };
   }
-  const { contract, invoice } = await resolveLinks(prisma, tid, dealId, {...input, invoiceId: input.invoiceId || existing?.invoiceId});
+  const { contract, invoice } = await resolveLinks(prisma, tid, dealId, {...input, contractId: input.contractId || existing?.contractId, invoiceId: input.invoiceId || existing?.invoiceId});
 
   const { deal, items, profile, tenantName } = await loadBundle(prisma, tid, dealId, contract?.id);
   if (!items.length) {
@@ -179,30 +179,24 @@ export async function validateEsfInvoice(prisma: PrismaClient, auth: AuthContext
     throw new ApiError(422, "esf_immutable", "ЭСФ уже отправлен — проверку менять нельзя");
   }
 
-  const { deal, items, profile, tenantName } = await loadBundle(prisma, tid, document.dealId, document.contractId);
   const { contract, invoice } = await resolveLinks(prisma, tid, document.dealId, {
     contractId: document.contractId,
     invoiceId: document.invoiceId,
   });
-  const signed =
-    contract?.status === "SIGNED"
-      ? contract
-      : await prisma.contract.findFirst({
-          where: { tenantId: tid, dealId: document.dealId, status: "SIGNED" },
-          orderBy: { signedAt: "desc" },
-        });
+  const { deal, items, profile, tenantName } = await loadBundle(prisma, tid, document.dealId, contract?.id);
+
   const catalogTruId =
     items.map((item) => resolveCatalogTruId(item, profile?.defaultCatalogTruId)).find(Boolean) ||
     profile?.defaultCatalogTruId ||
     "";
   const readiness = assessEsfInvoiceReadiness({
     dealId: deal.id,
-    contractId: document.contractId,
+    contractId: contract?.id || null,
     documentId: document.id,
-    signedContractId: signed?.id || null,
+    signedContractId: contract?.status === "SIGNED" ? contract.id : null,
     invoiceId: invoice?.id || document.invoiceId,
-    contractNumber: signed?.number || null,
-    contractDate: signed?.date || null,
+    contractNumber: contract?.number || null,
+    contractDate: contract?.date || null,
     itemCount: items.length,
     profile,
     company: deal.company,
@@ -222,14 +216,14 @@ export async function validateEsfInvoice(prisma: PrismaClient, auth: AuthContext
     profile,
     tenantName,
     company: deal.company,
-    contract: signed,
+    contract,
     invoice,
   });
 
   const updated = await prisma.electronicDocument.update({
     where: { id: document.id },
     data: {
-      contractId: signed!.id,
+      contractId: contract?.id || null,
       invoiceId: invoice?.id || document.invoiceId,
       companyId: deal.companyId,
       amountWithoutVat: source.totals.amountWithoutVat,
@@ -256,6 +250,7 @@ export async function validateEsfInvoice(prisma: PrismaClient, auth: AuthContext
   return {
     document: serializeElectronicDocument(updated),
     ready: true,
+    warnings: readiness.warnings,
     missingFields: [] as string[],
   };
 }

@@ -120,10 +120,7 @@ describe("Documents phase 8 ЭСФ → syncInvoice", () => {
       method: "POST",
       body: JSON.stringify({}),
     });
-    await prisma.contract.update({
-      where: { id: contract.body.contract.id },
-      data: { status: "SIGNED", signedAt: new Date() },
-    });
+    assert.notEqual(contract.body.contract.status, "SIGNED");
     const avr = await json(`/api/v1/deals/${dealId}/electronic-documents`, {
       method: "POST",
       body: JSON.stringify({ type: "AVR" }),
@@ -149,16 +146,20 @@ describe("Documents phase 8 ЭСФ → syncInvoice", () => {
       body: JSON.stringify({}),
     });
     assert.equal(validatedEsf.response.status, 200, JSON.stringify(validatedEsf.body));
+    assert.equal(validatedEsf.body.document.contractId,contract.body.contract.id);
+    assert.notEqual(validatedEsf.body.document.source.contract.status,"SIGNED");
+    assert.equal((await prisma.contract.findUniqueOrThrow({where:{id:contract.body.contract.id}})).signedAt,null);
   });
 
   after(() => {
     server?.close();
   });
 
-  it("собирает official InvoiceV2 и шлёт syncInvoice через mock", async () => {
+  it("собирает InvoiceV2 и отправляет через mock даже с неподписанным договором", async () => {
     assert.equal(await prisma.invoice.count({where:{dealId}}),0,"Счёт на оплату отсутствует");
     const readiness = await json(`/api/v1/deals/${dealId}/esf-invoice-readiness`);
     assert.equal(readiness.body.ready,true);
+    assert.match(readiness.body.warnings[0], /не подписан/);
     assert.equal(readiness.body.invoiceId,null);
     const stored = await prisma.electronicDocument.findUniqueOrThrow({where:{id:esfId}});
     assert.equal(stored.invoiceId,null);

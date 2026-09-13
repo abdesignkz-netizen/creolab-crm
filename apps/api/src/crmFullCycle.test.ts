@@ -140,7 +140,7 @@ test("CRM: public form → inquiry → deal → signed contract → invoice → 
     totals(items.body.totals);
   });
 
-  await step("до подписания договор блокирует выпуск счёта и валидацию АВР", async () => {
+  await step("до подписания договор блокирует выпуск счёта, но разрешает валидацию АВР", async () => {
     const draft = await request(`/api/v1/deals/${dealId}/contracts`, "POST", {}, 201);
     contractId = draft.body.contract.id;
     totals(draft.body.contract);
@@ -151,8 +151,8 @@ test("CRM: public form → inquiry → deal → signed contract → invoice → 
     assert.ok(blocked.body.details.missingFields.includes("contract.signed"));
     const avr = await request(`/api/v1/deals/${dealId}/electronic-documents`, "POST", { type: "AVR", invoiceId }, 201);
     avrId = avr.body.document.id;
-    const validation = await request(`/api/v1/electronic-documents/${avrId}/validate`, "POST", {}, 422);
-    assert.ok(validation.body.details.missingFields.includes("contract.signed"));
+    const validation = await request(`/api/v1/electronic-documents/${avrId}/validate`, "POST", {});
+    assert.equal(validation.body.document.status,"VALIDATED");
   });
 
   await step("подписи исполнителя и заказчика проверяют один PDF и закрывают договор", async () => {

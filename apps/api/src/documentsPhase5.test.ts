@@ -129,11 +129,11 @@ describe("Documents phase 5", () => {
     server?.close();
   });
 
-  it("создаёт внутренний черновик АВР из позиций сделки и не пускает проверку без SIGNED", async () => {
+  it("создаёт и проверяет АВР до подписи, сохраняя предупреждение", async () => {
     const ready = await json(`/api/v1/deals/${dealId}/avr-readiness`);
     assert.equal(ready.response.status, 200);
-    assert.equal(ready.body.ready, false);
-    assert.ok(ready.body.missingFields.includes("contract.signed"));
+    assert.equal(ready.body.ready, true);
+    assert.match(ready.body.warnings[0], /не подписан/);
 
     const draft = await json(`/api/v1/deals/${dealId}/electronic-documents`, {
       method: "POST",
@@ -144,7 +144,8 @@ describe("Documents phase 5", () => {
     assert.equal(draft.body.document.status, "DRAFT");
     assert.equal(draft.body.document.source.kind, "avr_internal_v1");
     assert.equal(draft.body.document.source.items[0].name, "Разработка сайта");
-    assert.equal(draft.body.document.source.contract, null);
+    assert.equal(draft.body.document.source.contract.id, contractId);
+    assert.notEqual(draft.body.document.source.contract.status, "SIGNED");
     assert.equal(draft.body.document.source.xml, undefined);
 
     const again = await json(`/api/v1/deals/${dealId}/electronic-documents`, {
@@ -158,9 +159,25 @@ describe("Documents phase 5", () => {
       method: "POST",
       body: JSON.stringify({}),
     });
-    assert.equal(validated.response.status, 422);
-    assert.equal(validated.body.code, "missing_fields");
-    assert.ok(validated.body.details.missingFields.includes("contract.signed"));
+    assert.equal(validated.response.status, 200, JSON.stringify(validated.body));
+    assert.equal(validated.body.document.status, "VALIDATED");
+    assert.equal(validated.body.document.contractId, contractId);
+    assert.match((await json(`/api/v1/deals/${dealId}/avr-readiness`)).body.warnings[0], /не подписан/);
+  });
+
+  it("не подменяет привязанный неподписанный договор другим подписанным",async()=>{
+    const original=await prisma.contract.findUniqueOrThrow({where:{id:contractId}});
+    const other=await prisma.contract.create({data:{tenantId:original.tenantId,dealId,companyId:original.companyId,number:"OTHER-SIGNED",amountWithoutVat:original.amountWithoutVat,vatAmount:original.vatAmount,totalAmount:original.totalAmount,date:new Date(),subject:"Другой договор",status:"SIGNED",signedAt:new Date()}});
+    try {
+      const checked=await json(`/api/v1/electronic-documents/${documentId}/validate`,{method:"POST",body:JSON.stringify({})});
+      assert.equal(checked.response.status,200,JSON.stringify(checked.body));
+      assert.equal(checked.body.document.contractId,contractId);
+      assert.equal(checked.body.document.source.contract.number,original.number);
+      assert.notEqual(checked.body.document.source.contract.status,"SIGNED");
+      const ready=await json(`/api/v1/deals/${dealId}/avr-readiness`);
+      assert.equal(ready.body.contractId,contractId);assert.equal(ready.body.signedContractId,null);assert.match(ready.body.warnings[0],/не подписан/);
+      assert.equal((await prisma.contract.findUniqueOrThrow({where:{id:contractId}})).signedAt,null);
+    } finally {await prisma.contract.delete({where:{id:other.id}});}
   });
 
   it("после SIGNED заполняет договор в snapshot и ставит VALIDATED", async () => {
@@ -173,6 +190,7 @@ describe("Documents phase 5", () => {
     const ready = await json(`/api/v1/deals/${dealId}/avr-readiness`);
     assert.equal(ready.body.ready, true);
     assert.equal(ready.body.invoiceId, null);
+    assert.deepEqual(ready.body.warnings, []);
 
     const refreshed = await json(`/api/v1/deals/${dealId}/electronic-documents`, {
       method: "POST",

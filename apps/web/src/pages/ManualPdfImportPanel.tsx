@@ -23,23 +23,19 @@ export function ManualPdfImportPanel({ onSaved }: { onSaved: () => void }) {
   const [busy,setBusy] = useState(false);
   const [error,setError] = useState("");
   const [dealId,setDealId] = useState("");
-  const [deals,setDeals] = useState<Array<{id:string;title:string}>>([]);
+  const [createDeal,setCreateDeal] = useState(false);
+  const [matchAttempt,setMatchAttempt] = useState(0);
   const [matches,setMatches] = useState<InvoiceImportMatches|null>(null);
   const [matching,setMatching] = useState(false);
   const [matchError,setMatchError] = useState("");
-  const [saved,setSaved] = useState<{dealId:string;kind:string}|null>(null);
+  const [saved,setSaved] = useState<{dealId:string;kind:string;createdDeal?:boolean}|null>(null);
   useEffect(()=>{
     if (!file) { setFileUrl(""); return; }
     const url=URL.createObjectURL(file);setFileUrl(url);
     return ()=>URL.revokeObjectURL(url);
   },[file]);
   useEffect(()=>{
-    if (!open || kind !== "INVOICE") return;
-    void api.request<{items:Array<{id:string;title:string}>}>("/api/v1/deals?view=list")
-      .then(res=>setDeals(res.items)).catch(err=>setError(err.message));
-  },[open,kind]);
-  useEffect(()=>{
-    setDealId("");setMatches(null);setMatchError("");
+    setDealId("");setCreateDeal(false);setMatches(null);setMatchError("");
     if (!preview || draft?.kind !== "INVOICE" || !/^\d{12}$/.test(draft.buyer.bin)) { setMatching(false);return; }
     let active=true;
     setMatching(true);
@@ -50,7 +46,7 @@ export function ManualPdfImportPanel({ onSaved }: { onSaved: () => void }) {
         .finally(()=>{if(active)setMatching(false);});
     },250);
     return ()=>{active=false;clearTimeout(timer);};
-  },[preview?.importId,draft?.kind,draft?.buyer.bin,draft?.contractNumber]);
+  },[preview?.importId,draft?.kind,draft?.buyer.bin,draft?.contractNumber,matchAttempt]);
   async function discard() {
     if (busy) return;
     setError("");
@@ -73,10 +69,10 @@ export function ManualPdfImportPanel({ onSaved }: { onSaved: () => void }) {
     if (busy || matching || !preview || !draft) return;
     setBusy(true);setError("");
     try {
-      const result=await api.request<{dealId:string;kind:string;warning?:string|null}>("/api/v1/documents/import-pdf/confirm",{method:"POST",body:JSON.stringify({importId:preview.importId,draft,dealId:kind==="INVOICE"?dealId:undefined})});
+      const result=await api.request<{dealId:string;kind:string;createdDeal?:boolean;warning?:string|null}>("/api/v1/documents/import-pdf/confirm",{method:"POST",body:JSON.stringify({importId:preview.importId,draft,dealId:kind==="INVOICE"&&dealId?dealId:undefined,createDeal:kind==="INVOICE"&&createDeal})});
       if (result.warning) setError(result.warning);
       setSaved(result);setOpen(false);setPreview(null);setDraft(null);setFile(null);
-      notifySaved(kind==="CONTRACT"?"Договор загружен, сделка создана":"Счёт добавлен в сделку");
+      notifySaved(kind==="CONTRACT"?"Договор загружен, сделка создана":result.createdDeal?"Сделка создана, счёт сохранён":"Счёт добавлен в сделку");
       onSaved();
     } catch (err: any) {
       const fields=err?.body?.field_errors;
@@ -94,10 +90,10 @@ export function ManualPdfImportPanel({ onSaved }: { onSaved: () => void }) {
   }
   return <div className="panel manual-pdf-import">
     <div className="saved-editor-summary">
-      <div><b>Загрузить готовый документ</b><p className="muted">Договор PDF или Word (.docx, .doc) → реквизиты, состав работ и новая сделка. PDF счёта → выбранная сделка.</p></div>
+      <div><b>Загрузить готовый документ</b><p className="muted">Договор PDF или Word (.docx, .doc) → реквизиты, состав работ и новая сделка. PDF счёта → автоматический подбор компании и сделки.</p></div>
       {!open?<button type="button" className="btn" onClick={()=>{setOpen(true);setSaved(null);setError("");}}>Загрузить документ</button>:null}
     </div>
-    {saved?<p className="ok">{saved.kind==="CONTRACT"?"Договор сохранён и связан с новой сделкой.":"Счёт сохранён."} <Link to={`/deals/${saved.dealId}`}>Открыть сделку</Link></p>:null}
+    {saved?<p className="ok">{saved.kind==="CONTRACT"?"Договор сохранён и связан с новой сделкой.":saved.createdDeal?"Новая сделка создана, счёт сохранён и связан с компанией.":"Счёт сохранён."} <Link to={`/deals/${saved.dealId}`}>Открыть сделку</Link></p>:null}
     {error?<p className="error" role="alert">{error}</p>:null}
     {open?<>
       {!preview?<div className="stack">
@@ -120,12 +116,19 @@ export function ManualPdfImportPanel({ onSaved }: { onSaved: () => void }) {
             <label>Назначение счёта<select value={draft.paymentKind||"UNSPECIFIED"} onChange={e=>setDraft({...draft,paymentKind:e.target.value as PdfImportDraft["paymentKind"]})}>{Object.entries(INVOICE_PAYMENT_KIND_LABEL).map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label>
             <label>Номер договора из счёта<input maxLength={100} value={draft.contractNumber||""} onChange={e=>setDraft({...draft,contractNumber:e.target.value})}/></label>
             {matching?<p role="status">Ищем компанию и сделку…</p>:null}
-            {matchError?<p className="error">Не удалось подобрать компанию: {matchError}. Выберите сделку вручную.</p>:null}
-            {matches?<p className="muted">{matches.companies.length ? `По БИН / ИИН найдены: ${matches.companies.map(c=>c.name).join("; ")}. ${matches.suggestedDealId?"Сделка подобрана автоматически — проверьте выбор.":"Выберите нужную сделку."}` : "Компания с этим БИН / ИИН не найдена. Выберите сделку без компании: при сохранении будет создана и привязана карточка заказчика."}</p>:null}
-            <label>Сделка для счёта<select required disabled={matching} value={dealId} onChange={e=>setDealId(e.target.value)}><option value="">Выберите сделку</option>
-              {matches?.deals.length?<optgroup label="Сделки заказчика">{matches.deals.map(d=><option key={d.id} value={d.id}>{d.title}</option>)}</optgroup>:null}
-              <optgroup label="Другие сделки">{deals.filter(d=>!matches?.deals.some(m=>m.id===d.id)).map(d=><option key={d.id} value={d.id}>{d.title}</option>)}</optgroup>
-            </select></label>
+            {matchError?<div><p className="error">Не удалось подобрать компанию: {matchError}</p><button type="button" className="btn secondary" onClick={()=>setMatchAttempt(n=>n+1)}>Повторить подбор</button></div>:null}
+            {!/^\d{12}$/.test(draft.buyer.bin)?<p className="muted">Укажите БИН / ИИН заказчика ниже — компания и сделка будут подобраны автоматически.</p>:null}
+            {matches?<div className="card">
+              <b>Заказчик: {matches.companies.length===1?matches.companies[0].name:draft.buyer.name}</b>
+              {matches.suggestedDealId?<p>Сделка подобрана автоматически: <Link to={`/deals/${matches.suggestedDealId}`}>{matches.deals.find(d=>d.id===matches.suggestedDealId)?.title}</Link></p>:null}
+              {matches.canCreateDeal?<>
+                <p>{matches.companies.length?"У компании ещё нет сделок.":"Карточка компании и сделки ещё не созданы."} Можно создать сделку из этого счёта.</p>
+                {!createDeal?<button type="button" className="btn secondary" onClick={()=>setCreateDeal(true)}>Создать сделку из счёта</button>:<p className="ok">При сохранении будет создана сделка «{draft.subject || "по счёту"}» и привязана к заказчику.</p>}
+              </>:!matches.suggestedDealId?<>
+                <p>{matches.companies.length>1?"Найдено несколько карточек с этим БИН / ИИН. Выберите сделку нужной компании.":"У компании несколько сделок. Уточните, к какой относится счёт."}</p>
+                {matches.deals.length?<label>Сделки заказчика<select required value={dealId} onChange={e=>setDealId(e.target.value)}><option value="">Выберите сделку заказчика</option>{matches.deals.map(d=><option key={d.id} value={d.id}>{d.title}{matches.companies.length>1?` · ${matches.companies.find(c=>c.id===d.companyId)?.name}`:""}</option>)}</select></label>:<p>Уточните дублирующиеся карточки в разделе «Компании», затем <button type="button" className="btn secondary" onClick={()=>setMatchAttempt(n=>n+1)}>Повторить подбор</button></p>}
+              </>:null}
+            </div>:null}
           </div>:null}
           <div className="actions"><button type="button" className="btn secondary" onClick={()=>setDraft({...draft,buyer:draft.seller,seller:draft.buyer,contactName:"",contactPhone:""})}>Поменять заказчика и исполнителя местами</button></div>
           <div className="pdf-import-parties">{(["buyer","seller"] as const).map(side=><div key={side} className="card">
@@ -149,7 +152,7 @@ export function ManualPdfImportPanel({ onSaved }: { onSaved: () => void }) {
           <label>{kind==="INVOICE"?"Уточнение платежа / условия оплаты":"Условия оплаты"}<textarea value={draft.paymentTerms} onChange={e=>setDraft({...draft,paymentTerms:e.target.value})}/></label>
           <label>Сроки выполнения<textarea value={draft.completionTerms} onChange={e=>setDraft({...draft,completionTerms:e.target.value})}/></label>
           <details><summary>Распознанный текст по страницам</summary>{preview.pages.map(p=><div key={p.page}><b>Страница {p.page}</b><pre className="pdf-import-text">{p.text}</pre></div>)}</details>
-          <div className="actions"><button className="btn" type="submit" disabled={!draft.items.length||busy||matching}>{busy?"Сохраняем…":kind==="CONTRACT"?"Сохранить договор и создать сделку":"Добавить счёт в сделку"}</button><button type="button" className="btn secondary" onClick={()=>void discard()}>Отмена</button></div>
+          <div className="actions"><button className="btn" type="submit" disabled={!draft.items.length||busy||matching||(kind==="INVOICE"&&(!matches||(!dealId&&!createDeal)))}>{busy?"Сохраняем…":kind==="CONTRACT"?"Сохранить договор и создать сделку":createDeal?"Создать сделку и сохранить счёт":"Сохранить счёт в сделке"}</button><button type="button" className="btn secondary" onClick={()=>void discard()}>Отмена</button></div>
         </fieldset>
       </form>:null}
     </>:null}

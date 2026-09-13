@@ -469,7 +469,8 @@ export function DealDocumentsPanel(props: {
           <div className="doc-step-title">
             <b>АВР</b>
           </div>
-          <p className="muted">Счёт на оплату не требуется. Черновик можно создать до подписания договора; проверка и отправка станут доступны после подписи.</p>
+          <p className="muted">Счёт на оплату не требуется. АВР можно сформировать и проверить до подписания договора.</p>
+          {avrReadiness?.warnings?.map((warning:string)=><p className="pdf-import-warnings" role="status" key={warning}>{warning}</p>)}
           <MissingList
             ready={avrReadiness?.ready}
             ok="Данных достаточно, АВР можно проверить."
@@ -527,6 +528,7 @@ export function DealDocumentsPanel(props: {
                     const missing = err?.body?.details?.missingFields || err?.body?.missingFields;
                     if (Array.isArray(missing) && missing.length) {
                       setAvrReadiness({
+                        ...avrReadiness,
                         ready: false,
                         missingFields: missing,
                         missingFieldLabels: err.body?.details?.missingFieldLabels || err.body?.missingFieldLabels || {},
@@ -662,6 +664,7 @@ export function DealDocumentsPanel(props: {
             <b>ЭСФ</b>
           </div>
           <p className="muted">Счёт на оплату не требуется. Данные берутся из сделки и договора.</p>
+          {esfInvoiceReadiness?.warnings?.map((warning:string)=><p className="pdf-import-warnings" role="status" key={warning}>{warning}</p>)}
           <MissingList
             ready={esfInvoiceReadiness?.ready}
             ok={
@@ -723,6 +726,7 @@ export function DealDocumentsPanel(props: {
                     const missing = err?.body?.details?.missingFields || err?.body?.missingFields;
                     if (Array.isArray(missing) && missing.length) {
                       setEsfInvoiceReadiness({
+                        ...esfInvoiceReadiness,
                         ready: false,
                         missingFields: missing,
                         missingFieldLabels: err.body?.details?.missingFieldLabels || err.body?.missingFieldLabels || {},

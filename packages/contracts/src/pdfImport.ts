@@ -20,6 +20,7 @@ export type InvoiceImportMatches = {
   companies: Array<{ id: string; name: string }>;
   deals: Array<{ id: string; title: string; companyId: string | null }>;
   suggestedDealId: string | null;
+  canCreateDeal: boolean;
 };
 export const INVOICE_PAYMENT_KIND_LABEL = {
   UNSPECIFIED: "Не указано / смешанный платёж",

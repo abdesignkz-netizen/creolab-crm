@@ -16,6 +16,7 @@ export const AVR_FIELD_LABELS: Record<string, string> = {
 };
 
 export type AvrReadiness = ContractReadiness & {
+  warnings: string[];
   documentId: string | null;
   signedContractId: string | null;
   invoiceId: string | null;
@@ -58,15 +59,19 @@ export function assessAvrReadiness(input: {
     company: input.company,
   });
   const missingFields = [...base.missingFields];
-  if (!input.signedContractId) missingFields.push("contract.signed");
-  if (input.signedContractId && !filled(input.contractNumber)) missingFields.push("contract.number");
-  if (input.signedContractId && !input.contractDate) missingFields.push("contract.date");
+  const contractId = input.contractId || input.signedContractId;
+  const warnings = input.signedContractId ? [] : [contractId
+    ? "Договор не подписан. Это не препятствует формированию, проверке и отправке АВР и ЭСФ."
+    : "Договор не загружен. АВР и ЭСФ можно сформировать из данных сделки."];
+  if (contractId && !filled(input.contractNumber)) missingFields.push("contract.number");
+  if (contractId && !input.contractDate) missingFields.push("contract.date");
 
   const missingFieldLabels = Object.fromEntries(
     missingFields.map((code) => [code, AVR_FIELD_LABELS[code] || code]),
   );
   return {
     ready: missingFields.length === 0,
+    warnings,
     missingFields,
     missingFieldLabels,
     dealId: input.dealId,
@@ -88,6 +93,7 @@ export function avrMissingFieldsError(readiness: AvrReadiness) {
       ready: false,
       missingFields: readiness.missingFields,
       missingFieldLabels: readiness.missingFieldLabels,
+      warnings: readiness.warnings,
     },
   );
 }
@@ -110,10 +116,9 @@ export async function getAvrReadiness(prisma: PrismaClient, auth: AuthContext, d
       },
       items: { select: { id: true } },
       contracts: {
-        where: { status: "SIGNED" },
-        orderBy: { signedAt: "desc" },
+        orderBy: { createdAt: "desc" },
         take: 1,
-        select: { id: true, number: true, date: true },
+        select: { id: true, number: true, date: true, status: true },
       },
       electronicDocuments: {
         where: { type: "AVR", status: { in: ["DRAFT", "VALIDATED"] } },
@@ -125,15 +130,16 @@ export async function getAvrReadiness(prisma: PrismaClient, auth: AuthContext, d
   });
   if (!deal) throw new ApiError(404, "not_found", "Сделка не найдена");
   const profile = await documentOrganization(prisma, tid, dealId, deal.electronicDocuments[0]?.contractId || deal.contracts[0]?.id);
-  const signed = deal.contracts[0] || null;
+  const linkedId = deal.electronicDocuments[0]?.contractId;
+  const contract = linkedId ? await prisma.contract.findFirst({where:{id:linkedId,tenantId:tid,dealId}}) : deal.contracts[0] || null;
   return assessAvrReadiness({
     dealId,
-    contractId: deal.electronicDocuments[0]?.contractId || signed?.id || null,
+    contractId: contract?.id || null,
     documentId: deal.electronicDocuments[0]?.id || null,
-    signedContractId: signed?.id || null,
+    signedContractId: contract?.status === "SIGNED" ? contract.id : null,
     invoiceId: deal.electronicDocuments[0]?.invoiceId || null,
-    contractNumber: signed?.number || null,
-    contractDate: signed?.date || null,
+    contractNumber: contract?.number || null,
+    contractDate: contract?.date || null,
     itemCount: deal.items.length,
     profile,
     company: deal.company,

@@ -19,15 +19,16 @@ const company = {
 };
 
 describe("avr readiness", () => {
-  it("требует подписанный договор с номером и датой", () => {
+  it("предупреждает об отсутствии договора без блокировки", () => {
     const result = assessAvrReadiness({
       dealId: "deal-1",
       itemCount: 1,
       profile,
       company,
     });
-    assert.equal(result.ready, false);
-    assert.ok(result.missingFields.includes("contract.signed"));
+    assert.equal(result.ready, true);
+    assert.deepEqual(result.missingFields, []);
+    assert.match(result.warnings[0], /не загружен/);
   });
 
   it("готов, если договор подписан и есть позиции", () => {
@@ -43,4 +44,12 @@ describe("avr readiness", () => {
     assert.equal(result.ready, true);
     assert.deepEqual(result.missingFields, []);
   });
+  it("неподписанный договор остаётся предупреждением, а реквизиты обязательны",()=>{
+    const input={dealId:"deal-1",contractId:"draft-1",contractNumber:"DRAFT-1",contractDate:new Date(),itemCount:1,profile,company};
+    const result=assessAvrReadiness(input);
+    assert.equal(result.ready,true);assert.match(result.warnings[0],/не подписан/);assert.equal(result.contractId,"draft-1");
+    const missing=assessAvrReadiness({...input,contractNumber:"",company:null});
+    assert.equal(missing.ready,false);assert.ok(missing.missingFields.includes("contract.number"));assert.ok(missing.missingFields.includes("customer.company"));
+  });
+
 });

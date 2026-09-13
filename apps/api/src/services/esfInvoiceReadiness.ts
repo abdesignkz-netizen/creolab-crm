@@ -53,6 +53,7 @@ export function esfInvoiceMissingFieldsError(readiness: EsfInvoiceReadiness) {
       sendReady: readiness.sendReady,
       missingFields: readiness.missingFields,
       missingFieldLabels: readiness.missingFieldLabels,
+      warnings: readiness.warnings,
     },
   );
 }
@@ -75,10 +76,9 @@ export async function getEsfInvoiceReadiness(prisma: PrismaClient, auth: AuthCon
       },
       items: { select: { id: true, catalogTruId: true } },
       contracts: {
-        where: { status: "SIGNED" },
-        orderBy: { signedAt: "desc" },
+        orderBy: { createdAt: "desc" },
         take: 1,
-        select: { id: true, number: true, date: true },
+        select: { id: true, number: true, date: true, status: true },
       },
       electronicDocuments: {
         where: { type: { in: ["AVR", "ESF"] } },
@@ -89,8 +89,8 @@ export async function getEsfInvoiceReadiness(prisma: PrismaClient, auth: AuthCon
   });
   if (!deal) throw new ApiError(404, "not_found", "Сделка не найдена");
   const profile = await documentOrganization(prisma, tid, dealId, deal.electronicDocuments.find(row => row.type === "ESF")?.contractId || deal.contracts[0]?.id);
-  const signed = deal.contracts[0] || null;
   const esf = deal.electronicDocuments.find((row) => row.type === "ESF") || null;
+  const contract = esf?.contractId ? await prisma.contract.findFirst({where:{id:esf.contractId,tenantId:tid,dealId}}) : deal.contracts[0] || null;
   const avr = deal.electronicDocuments.find((row) => row.type === "AVR" && row.externalId) || null;
   const catalogTruId =
     deal.items.map((item) => resolveCatalogTruId(item, profile?.defaultCatalogTruId)).find(Boolean) ||
@@ -98,12 +98,12 @@ export async function getEsfInvoiceReadiness(prisma: PrismaClient, auth: AuthCon
     "";
   return assessEsfInvoiceReadiness({
     dealId,
-    contractId: esf?.contractId || signed?.id || null,
+    contractId: contract?.id || null,
     documentId: esf?.id || null,
-    signedContractId: signed?.id || null,
+    signedContractId: contract?.status === "SIGNED" ? contract.id : null,
     invoiceId: esf?.invoiceId || null,
-    contractNumber: signed?.number || null,
-    contractDate: signed?.date || null,
+    contractNumber: contract?.number || null,
+    contractDate: contract?.date || null,
     itemCount: deal.items.length,
     profile,
     company: deal.company,
