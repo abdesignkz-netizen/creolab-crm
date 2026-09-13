@@ -1,6 +1,6 @@
 import { notifySaved } from "../components/SaveNotice";
 import { useUrlState, useRequestVersion } from "../lib/useUrlState";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { PeriodSelector, type PeriodPreset } from "../components/PeriodSelector";
 import { nameWithPhone } from "../lib/contactDisplay";
@@ -514,7 +514,19 @@ export function DealDetailPage() {
   const [itemName, setItemName] = useState("");
   const [itemQty, setItemQty] = useState("1");
   const [itemPrice, setItemPrice] = useState("");
-  const [itemVat, setItemVat] = useState("");
+  const [itemVat, setItemVat] = useState("0");
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const itemLoadedDeal = useRef<string | null>(null);
+  function editItem(item: any) {
+    setEditingItemId(item.id);
+    setItemName(item.name);
+    setItemQty(String(item.quantity));
+    setItemPrice(String(item.unitPrice));
+    setItemVat(String(item.vatRate ?? 0));
+  }
+  function newItem() {
+    setEditingItemId(null); setItemName(""); setItemQty("1"); setItemPrice(""); setItemVat("0");
+  }
   const [docs, setDocs] = useState<any>(null);
   const [readiness, setReadiness] = useState<any>(null);
   const [invoiceReadiness, setInvoiceReadiness] = useState<any>(null);
@@ -552,6 +564,10 @@ export function DealDetailPage() {
       const contractId = (documents as any)?.contracts?.[0]?.id;
       setSigning(contractId ? await api.contractSigning(contractId).catch(() => null) : null);
       const d = (detail as any).deal;
+      if (itemLoadedDeal.current !== dealId) {
+        itemLoadedDeal.current = dealId;
+        if (d.items?.length) editItem(d.items[0]); else newItem();
+      }
       setAmount(d.amount != null ? String(d.amount) : "");
       setProbability(String(d.probability ?? 10));
       setNextAction(d.nextAction || "");
@@ -677,7 +693,7 @@ export function DealDetailPage() {
       </div>
 
       <div className="panel">
-        <b>Позиции</b>
+        <div className="row"><b>Позиции</b><button type="button" className="btn secondary" disabled={busy} onClick={newItem}>Добавить новую позицию</button></div>
         <p className="muted">Они же попадут в договор, счёт, АВР и ЭСФ.</p>
         {(d.items || []).length === 0 ? <p className="empty">Позиций пока нет</p> : null}
         {(d.items || []).map((item: any) => (
@@ -692,6 +708,7 @@ export function DealDetailPage() {
             <div>
               <b>{Number(item.totalAmount).toLocaleString("ru-RU")} ₸</b>
               <div>
+                <button type="button" className="btn secondary" disabled={busy} onClick={() => editItem(item)}>Изменить</button>
                 <button
                   type="button"
                   className="btn secondary"
@@ -700,7 +717,7 @@ export function DealDetailPage() {
                     setBusy(true);
                     void api
                       .deleteDealItem(d.id, item.id)
-                      .then(() => load())
+                      .then(() => { if (editingItemId === item.id) newItem(); return load(); })
                       .catch((err) => setError(err instanceof Error ? err.message : "Не удалось удалить"))
                       .finally(() => setBusy(false));
                   }}
@@ -718,6 +735,7 @@ export function DealDetailPage() {
           </p>
         ) : null}
         <div className="deal-edit" style={{ marginTop: 12 }}>
+          <b>{editingItemId ? "Редактирование позиции" : "Новая позиция"}</b>
           <label>
             Услуга
             <input value={itemName} onChange={(e) => setItemName(e.target.value)} placeholder="Разработка сайта" />
@@ -731,8 +749,12 @@ export function DealDetailPage() {
             <input value={itemPrice} onChange={(e) => setItemPrice(e.target.value)} />
           </label>
           <label>
-            НДС % (пусто = из настроек)
-            <input value={itemVat} onChange={(e) => setItemVat(e.target.value)} placeholder="необязательно" />
+            НДС
+            <select aria-label="НДС" value={itemVat} onChange={(e) => setItemVat(e.target.value)}>
+              <option value="0">Без НДС</option>
+              <option value="12">С НДС (12%)</option>
+              {!["0", "12"].includes(itemVat) ? <option value={itemVat}>С НДС ({itemVat}%) — из документа</option> : null}
+            </select>
           </label>
           <div className="actions">
             <button
@@ -741,24 +763,23 @@ export function DealDetailPage() {
               disabled={busy || !itemName.trim() || !itemPrice}
               onClick={() => {
                 setBusy(true);
-                void api
-                  .addDealItem(d.id, {
-                    name: itemName.trim(),
-                    quantity: Number(String(itemQty).replace(",", ".")) || 1,
-                    unitPrice: Number(String(itemPrice).replace(/\s+/g, "").replace(",", ".")),
-                    ...(itemVat.trim() ? { vatRate: Number(String(itemVat).replace(",", ".")) } : {}),
-                  })
+                const input = {
+                  name: itemName.trim(),
+                  quantity: Number(String(itemQty).replace(",", ".")),
+                  unitPrice: Number(String(itemPrice).replace(/\s+/g, "").replace(",", ".")),
+                  vatRate: Number(itemVat),
+                };
+                void (editingItemId ? api.updateDealItem(d.id, editingItemId, input) : api.addDealItem(d.id, input))
                   .then(() => {
-                    setItemName("");
-                    setItemPrice("");
-                    setItemVat("");
+                    notifySaved(editingItemId ? "Позиция сохранена" : "Позиция добавлена");
+                    if (!editingItemId) newItem();
                     return load();
                   })
                   .catch((err) => setError(err instanceof Error ? err.message : "Не удалось добавить позицию"))
                   .finally(() => setBusy(false));
               }}
             >
-              Добавить позицию
+              {editingItemId ? "Сохранить позицию" : "Добавить позицию"}
             </button>
           </div>
         </div>

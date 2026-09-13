@@ -1,3 +1,4 @@
+import { moneyRound, lineAmounts } from "./documentMoney.ts";
 import type { PdfImportDraft, PdfImportParty } from "@creolab/contracts";
 import { wordsToLines, type PdfPageText } from "./pdfTextExtraction.ts";
 import { invoiceTableRows } from "./invoiceTableParsing.ts";
@@ -105,11 +106,12 @@ export function parsePdfDocument(pages: PdfPageText[], kind: "CONTRACT" | "INVOI
     }
   }
   const totalPage = [...pages].reverse().find(p => /(?:Итого|Всего к оплате)\s*:?\s*[\d\s]+/i.test(p.text));
-  const totalMatch = totalPage?.text.match(/(?:Итого|Всего к оплате)\s*:?\s*([\d][\d \u00a0]*(?:[.,]\d{1,2})?)/i);
+  const finalTotalMatch = text.match(/(?:Всего|Итого)\s+к\s+оплате\s*:?\s*([\d][\d \u00a0]*(?:[.,]\d{1,2})?)/i);
+  const totalMatch = finalTotalMatch || totalPage?.text.match(/(?:Итого|Всего к оплате)\s*:?\s*([\d][\d \u00a0]*(?:[.,]\d{1,2})?)/i);
   const detectedTotal = totalMatch ? numberValue(totalMatch[1]) : null;
-  const noVat = /(?:без\s*(?:учета\s*)?НДС|не является плательщиком НДС|НДС\s*:?\s*без НДС)/i.test(text);
-  const vatRate = noVat ? 0 : Number(text.match(/НДС\s*[:—-]?\s*(\d{1,2})\s*%/i)?.[1] || 0);
-  if (vatRate) warnings.push("Проверьте, включён ли НДС в цены PDF: в форме указываются цены без НДС.");
+  const statedRate = text.match(/НДС\s*[:—(-]?\s*(\d{1,2})\s*%/i)?.[1];
+  const noVat = !statedRate && /(?:без\s*НДС|не является плательщиком НДС)/i.test(text);
+  const vatRate = noVat ? 0 : Number(statedRate || 0);
   if (!noVat && !vatRate) warnings.push("Ставка НДС не определена. Проверьте её для каждой позиции.");
   const items: PdfImportDraft["items"] = kind === "INVOICE" ? pages.flatMap(p => {const rows=invoiceTableRows(p,vatRate);return rows.length?rows:invoiceRows(p.text,vatRate);}) : [];
   if (totalPage && !items.length) {
@@ -126,6 +128,23 @@ export function parsePdfDocument(pages: PdfPageText[], kind: "CONTRACT" | "INVOI
     const scope = text.match(/2\.2\.1\.?\s*([\s\S]+?)(?=2\.3\.|3\.\s*ПРАВА)/)?.[1];
     if (scope) for (const name of scope.split(/2\.2\.\d\.?/).map(clean).filter(Boolean)) items.push({ name: name.replace(/^Разработать\s+/i, "Разработка "), quantity: 1, unitPrice: 0, vatRate, unit: "услуга" });
     warnings.push("Проверьте состав работ и укажите стоимость позиций: таблица распознана не полностью.");
+  }
+  if (vatRate && items.length) {
+    const rawTotal = moneyRound(items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0));
+    const taxedTotal = moneyRound(items.reduce((sum, item) => sum + lineAmounts(item.quantity, item.unitPrice, vatRate).totalAmount, 0));
+    const exclusivePrice = /(?:цен[аы]|стоимость)\s+(?:указан[аы]\s+)?без\s*(?:уч[её]та\s*)?НДС/i.test(text);
+    const includesVat = /(?:в\s*том\s*числе|включая|включает(?:\s+в\s+себя)?|с\s*уч[её]том|с)\s+НДС|НДС\s+включ[её]н/i.test(text);
+    const totalsMatchGross = detectedTotal !== null && Math.abs(rawTotal - detectedTotal) <= 0.01;
+    const totalsMatchNet = detectedTotal !== null && Math.abs(taxedTotal - detectedTotal) <= 0.01;
+    if (!exclusivePrice && !totalsMatchNet && (includesVat || (finalTotalMatch && totalsMatchGross))) {
+      const divisor = 10000n + BigInt(Math.round(vatRate * 100));
+      for (const item of items) {
+        const cents = BigInt(Math.round(item.unitPrice * 100));
+        item.unitPrice = Number((cents * 10000n + divisor / 2n) / divisor) / 100;
+      }
+    } else if (!exclusivePrice && !totalsMatchNet) {
+      warnings.push("Проверьте, включён ли НДС в цены документа: в форме указываются цены без НДС.");
+    }
   }
   const contactPhone = clean(first).match(/Контактное\s+лицо\s+(?:от\s+)?Заказчика\s*:?\s*(\+?[78][\d ()-]{9,20})/i)?.[1]?.trim() || "";
   const paymentTerms = text.match(/(?:^|\n)4\.5\.?\s*([\s\S]+?)(?=\n4\.6\.|\n5\.\s*УСЛОВИЯ)/)?.[0] || "";
