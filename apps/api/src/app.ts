@@ -1455,6 +1455,10 @@ export function createApp(prisma: PrismaClient) {
       res.status(422).json({
         code: "invalid",
         message: "Проверьте поля",
+        field_issues: (error as { issues?: Array<{ path: (string | number)[]; message: string }> }).issues?.map(issue => ({
+          path: issue.path.join(".") || "body",
+          message: issue.message,
+        })) || [],
         field_errors: Object.fromEntries(
           (error as { issues?: Array<{ path: (string | number)[]; message: string }> }).issues?.map((issue) => [
             String(issue.path[0] || "body"),

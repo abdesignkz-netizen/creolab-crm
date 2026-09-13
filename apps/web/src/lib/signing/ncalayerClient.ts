@@ -46,7 +46,7 @@ type BasicsResponse = {
   code?: string;
   message?: string;
   details?: string;
-  body?: { result?: string };
+  body?: { result?: unknown };
   result?: { version?: string };
 };
 
@@ -216,9 +216,14 @@ export class NCALayerSigningClient implements SigningClient {
           reject(mapNcalayerFailure(payload));
           return;
         }
-        const result = payload.body?.result;
-        if (!result) {
+        const raw = payload.body?.result;
+        const result = Array.isArray(raw) && raw.length === 1 ? raw[0] : raw;
+        if (result == null || result === "" || (Array.isArray(result) && result.length === 0)) {
           reject(new NcalayerError("USER_CANCELLED", "Подпись отменена"));
+          return;
+        }
+        if (typeof result !== "string" || !result.trim()) {
+          reject(new NcalayerError("SIGNATURE_FAILED", "NCALayer вернул неподходящий формат подписи. Для одного документа ожидается одна подпись. Повторите подписание."));
           return;
         }
         resolve(result);
