@@ -20,3 +20,16 @@ services:
         value: /var/data/files
       - key: STORAGE_PERSISTENT
         value: "1"
+      # CreoLab uses the working IS ESF portal. These settings enable the
+      # connection; each document still requires the user's NCALayer signature.
+      # For services managed in the Dashboard, apply the same values there.
+      - key: ESF_PROVIDER
+        value: live
+      - key: ESF_ENV
+        value: prod
+      - key: ESF_ALLOW_PROD
+        value: "1"
+      - key: ESF_ALLOW_LIVE_SEND
+        value: "1"
+      - key: ESF_BASE_URL
+        value: https://esf.gov.kz:8443/esf-web
