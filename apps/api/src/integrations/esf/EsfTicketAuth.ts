@@ -1,6 +1,7 @@
 import { ApiError } from "../../errors.ts";
 import { readEsfConfig, assertTestEndpointNotProduction, ESF_OFFICIAL } from "./EsfConfig.ts";
-import { SOAP_NS, postSoap, parseSessionId, parseSoapFault, isWsseCredentialFault, buildWsseUsernameToken } from "./EsfSoap.ts";
+import { SOAP_NS, postSoap, parseSoapFault, isWsseCredentialFault, buildWsseUsernameToken, ESF_SESSION_ID_IN_TEXT } from "./EsfSoap.ts";
+import { closeExistingEsfSession, createSoapSessionHandlingConflict, ESF_EXISTING_SESSION_MESSAGE } from "./EsfSessionService.ts";
 import { findDeep, parseXml, textOf, xmlEscape } from "./xml.ts";
 
 function ticketEnvelope(operation: string, body: string, header = "") {
@@ -14,6 +15,11 @@ export function ticketFault(body: string, status: number, secrets: string[] = []
   for (const secret of secrets.filter(Boolean)) {
     description = description.split(xmlEscape(secret)).join("[скрыто]").split(secret).join("[скрыто]");
   }
+  const sessionIds: string[] = [];
+  description = description.replace(new RegExp(ESF_SESSION_ID_IN_TEXT.source, "gi"), (token) => {
+    sessionIds.push(token);
+    return `\u0000ESFSESSION${sessionIds.length - 1}\u0000`;
+  });
   description = description
     .replace(/<(?:[\w-]+:)?(?:signedAuthTicket|authSign|authTicket|Signature|Security|Password|X509Certificate)\b[\s\S]*/gi, "[скрыто]")
     .replace(/-----BEGIN[\s\S]*?-----END [^-]+-----/g, "[скрыто]")
@@ -22,6 +28,7 @@ export function ticketFault(body: string, status: number, secrets: string[] = []
     .replace(/\b\d{12}\b/g, "[скрыто]")
     .replace(/<[^>]*>/g, "")
     .slice(0, 500);
+  description = description.replace(/\u0000ESFSESSION(\d+)\u0000/g, (_, index) => sessionIds[Number(index)] || "");
   const officialFault = description.match(/\b(?:CERTIFICATE_NOT_VALID|CERTIFICATE_EXPIRED|CERTIFICATE_REVOKED|AUTH_TICKET_EXPIRED|AUTH_TICKET_NOT_FOUND|USER_NOT_FOUND|INVALID_SIGNATURE|SIGNATURE_NOT_VALID|INVALID_AUTH_TICKET|METHOD_NOT_SUPPORT_GOST_2015)\b/)?.[0] || null;
   const wsseRequired = !officialFault && isWsseCredentialFault({ ...fault, status });
   return {
@@ -60,11 +67,17 @@ export async function createEsfSessionFromSignedTicket(tin: string, signedAuthTi
   assertTestEndpointNotProduction(config);
   const header = credentials?.password ? buildWsseUsernameToken(credentials.username, credentials.password) : "";
   const envelope = ticketEnvelope("createSessionSignedRequest", `<tin>${xmlEscape(tin)}</tin><signedAuthTicket>${xmlEscape(signedAuthTicket).replaceAll("\r", "&#13;")}</signedAuthTicket><sourceType>${ESF_OFFICIAL.sourceTypeOther}</sourceType>`, header);
-  const response = await postSoap(config.sessionUrl, envelope);
-  let sessionId = "";
-  try { sessionId = parseSessionId(response.text); } catch { /* Proxy errors may be HTML or plain text. */ }
-  const ok = response.status < 400 && !parseSoapFault(response.text) && Boolean(sessionId);
-  if (ok) return { ok: true, sessionId, code: "ok", message: "", wsseRequired: false, officialFault: null };
-  const fault = ticketFault(response.text, response.status, [signedAuthTicket, credentials?.password || ""]);
-  return { ok: false, sessionId: "", code: fault.code, message: `Авторизация ИС ЭСФ не завершена: HTTP ${response.status}. ${fault.description}`, wsseRequired: fault.wsseRequired, officialFault: fault.officialFault };
+  const recovered = await createSoapSessionHandlingConflict(
+    () => postSoap(config.sessionUrl, envelope),
+    (existingId) => closeExistingEsfSession(
+      { sessionId: existingId || undefined, tin, signedAuthTicket, credentials },
+      config,
+    ),
+  );
+  if (recovered.ok) return { ok: true, sessionId: recovered.sessionId, code: "ok", message: "", wsseRequired: false, officialFault: null };
+  if (recovered.existingConflict) {
+    return { ok: false, sessionId: "", code: "esf_session_already_open", message: ESF_EXISTING_SESSION_MESSAGE, wsseRequired: false, officialFault: null };
+  }
+  const fault = ticketFault(recovered.text, recovered.status, [signedAuthTicket, credentials?.password || ""]);
+  return { ok: false, sessionId: "", code: fault.code, message: `Авторизация ИС ЭСФ не завершена: HTTP ${recovered.status}. ${fault.description}`, wsseRequired: fault.wsseRequired, officialFault: fault.officialFault };
 }

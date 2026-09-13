@@ -233,9 +233,9 @@ export function AiAutomationSettingsPage() {
       {showAdvanced ? (
         <div className="panel soft">
           <p className="muted">
-            Безопасный default: «AI после подтверждения». Исключения по источникам (Manual → Ручной, API →
-            AI-подсказки) уже в backend. Полный автомат для Website Form включайте осознанно через режим или
-            sourceModes.
+            При режиме «Полный автомат» заявки с формы сайта тоже обрабатываются сразу: AI пишет
+            приветствие на номер из заявки. Если номер не зарегистрирован в WhatsApp, это появится на
+            Главной. Исключения: ручные заявки остаются ручными, API — AI-подсказки.
           </p>
           <pre className="code">{JSON.stringify({
             sourceModes: data?.sourceModes,

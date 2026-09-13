@@ -223,16 +223,7 @@ export function analyzeRequestHeuristic(input: AnalyzeInput): RequestAnalysis {
     .map((f) => ({ key: f.key, label: f.label }));
 
   const companyPart = company ? ` ${company}` : "";
-  const serviceLabel =
-    category === "web"
-      ? "корпоративный сайт"
-      : category === "presentation"
-        ? "презентацию"
-        : category === "advertising"
-          ? "рекламу"
-          : category === "branding"
-            ? "брендинг"
-            : "заявку";
+  const serviceLabel = serviceLabelForCategory(category);
 
   const knownSummary = knownFields
     .filter((f) => f.key !== "phone")
@@ -272,6 +263,7 @@ export function analyzeRequestHeuristic(input: AnalyzeInput): RequestAnalysis {
     company,
     knownFields,
     qualificationQuestions,
+    requestText: input.description || input.subject || detectedNeed,
   });
 
   return {
@@ -297,27 +289,61 @@ export function analyzeRequestHeuristic(input: AnalyzeInput): RequestAnalysis {
   };
 }
 
+function serviceLabelForCategory(category?: string | null) {
+  if (category === "web") return "сайт";
+  if (category === "presentation") return "презентацию";
+  if (category === "advertising") return "рекламу";
+  if (category === "branding") return "брендинг";
+  if (category === "ai") return "AI-решение";
+  return "заявку";
+}
+
+function greetingFirstName(name?: string | null) {
+  const first = String(name || "")
+    .trim()
+    .split(/\s+/)[0];
+  if (!first || first.length < 2) return null;
+  if (/^(клиент|lead|test|тест|интерес|\+?\d)/i.test(first)) return null;
+  return first;
+}
+
+export function sanitizeClientMessageDraft(raw: unknown): string | null {
+  const text = String(raw || "")
+    .replace(/\r\n/g, "\n")
+    .trim();
+  if (text.length < 24 || text.length > 4000) return null;
+  if (/^\s*[{\[]/.test(text)) return null;
+  if (/^Уже известно:/i.test(text)) return null;
+  if (/не могу (отправить|написать)|скопируйте текст|задача менеджера/i.test(text)) return null;
+  return text;
+}
+
 function buildClientMessageDraft(args: {
   contactName?: string | null;
   serviceLabel: string;
   company: string | null;
   knownFields: RequestAnalysis["knownFields"];
   qualificationQuestions: string[];
+  requestText?: string | null;
 }) {
-  const firstName = String(args.contactName || "")
+  const firstName = greetingFirstName(args.contactName);
+  const greeting = firstName ? `Здравствуйте, ${firstName}!` : "Здравствуйте!";
+  const requestText = String(args.requestText || "")
+    .replace(/\s+/g, " ")
     .trim()
-    .split(/\s+/)[0];
-  const greeting = firstName && !/^(клиент|lead|test|тест|\+?\d)/i.test(firstName)
-    ? `Здравствуйте, ${firstName}!`
-    : "Здравствуйте!";
-
+    .slice(0, 220);
+  const looksGeneric = !requestText || /заявка по услуге/i.test(requestText);
+  const requestLower = requestText.toLowerCase();
   const knownBits = args.knownFields
-    .filter((f) => f.key !== "phone" && f.value)
-    .slice(0, 3)
-    .map((f) => `${f.label.toLowerCase()} — ${f.value}`);
+    .filter((field) => field.key !== "phone" && field.value)
+    .filter((field) => !requestLower.includes(String(field.value).toLowerCase()))
+    .slice(0, 2)
+    .map((field) => `${field.label.toLowerCase()} — ${field.value}`);
 
   const contextLine = [
-    `Получили вашу заявку на ${args.serviceLabel}${args.company ? ` (${args.company})` : ""}.`,
+    looksGeneric
+      ? `Получили вашу заявку на ${args.serviceLabel}${args.company ? ` (${args.company})` : ""}.`
+      : `Получили вашу заявку${args.company ? ` от ${args.company}` : ""}: ${requestText}${/[.!?…]$/.test(requestText) ? "" : "."}`,
     knownBits.length ? `Уже учли: ${knownBits.join("; ")}.` : null,
   ]
     .filter(Boolean)
@@ -325,7 +351,7 @@ function buildClientMessageDraft(args: {
 
   const questions = args.qualificationQuestions.slice(0, 3);
   const askBlock = questions.length
-    ? ["Чтобы подготовить предложение, уточните пожалуйста:", ...questions.map((q, i) => `${i + 1}. ${q}`)].join(
+    ? ["Чтобы точнее понять задачу, напишите пожалуйста:", ...questions.map((question, index) => `${index + 1}. ${question}`)].join(
         "\n",
       )
     : "Напишите, пожалуйста, детали задачи — подготовим следующий шаг.";
@@ -333,54 +359,96 @@ function buildClientMessageDraft(args: {
   return [greeting, contextLine, askBlock].filter(Boolean).join("\n\n");
 }
 
+export function applyRefinedRequestAnalysis(
+  draft: RequestAnalysis,
+  refined: Record<string, unknown> | null | undefined,
+  input: AnalyzeInput,
+): RequestAnalysis {
+  if (!refined) return draft;
+  const knownFields = Array.isArray(refined.knownFields)
+    ? (refined.knownFields as RequestAnalysis["knownFields"])
+    : draft.knownFields;
+  const missingFields = Array.isArray(refined.missingFields)
+    ? (refined.missingFields as RequestAnalysis["missingFields"])
+    : draft.missingFields;
+  const qualificationQuestions = Array.isArray(refined.qualificationQuestions)
+    ? (refined.qualificationQuestions as string[])
+    : draft.qualificationQuestions;
+  const serviceCategory =
+    typeof refined.serviceCategory === "string" ? refined.serviceCategory : draft.serviceCategory;
+  const company = draft.company;
+  const detectedNeed = typeof refined.detectedNeed === "string" ? refined.detectedNeed : draft.detectedNeed;
+  const merged: RequestAnalysis = {
+    ...draft,
+    serviceCategory,
+    serviceSubcategory:
+      typeof refined.serviceSubcategory === "string" ? refined.serviceSubcategory : draft.serviceSubcategory,
+    detectedNeed,
+    knownFields,
+    missingFields,
+    qualificationQuestions,
+    evidence: Array.isArray(refined.evidence) ? (refined.evidence as string[]) : draft.evidence,
+    taskTitle: typeof refined.taskTitle === "string" ? refined.taskTitle : draft.taskTitle,
+    taskObjective: typeof refined.taskObjective === "string" ? refined.taskObjective : draft.taskObjective,
+    expectedOutcome: typeof refined.expectedOutcome === "string" ? refined.expectedOutcome : draft.expectedOutcome,
+    recommendedAction:
+      typeof refined.recommendedAction === "string" ? refined.recommendedAction : draft.recommendedAction,
+    urgency:
+      refined.urgency === "urgent" || refined.urgency === "high" || refined.urgency === "normal"
+        ? refined.urgency
+        : draft.urgency,
+    confidence:
+      refined.confidence === "HIGH" || refined.confidence === "MEDIUM" || refined.confidence === "LOW"
+        ? refined.confidence
+        : draft.confidence,
+    budgetMin: draft.budgetMin,
+    budgetMax: draft.budgetMax,
+    deadline: draft.deadline,
+    city: draft.city,
+    company,
+  };
+  merged.clientMessageDraft =
+    sanitizeClientMessageDraft(refined.clientMessageDraft) ||
+    buildClientMessageDraft({
+      contactName: input.name,
+      serviceLabel: serviceLabelForCategory(merged.serviceCategory),
+      company,
+      knownFields,
+      qualificationQuestions,
+      requestText: input.description || input.subject || detectedNeed,
+    });
+  return merged;
+}
+
 export async function analyzeRequestWithOptionalLlm(input: AnalyzeInput): Promise<RequestAnalysis> {
   const draft = analyzeRequestHeuristic(input);
+  let analysis = draft;
   try {
-    const { refineRequestAnalysisWithLlm } = await import("./llmClient.ts");
+    const { refineRequestAnalysisWithLlm, composeClientMessageWithLlm } = await import("./llmClient.ts");
     const refined = await refineRequestAnalysisWithLlm(input, draft);
-    if (!refined) return draft;
-    return {
-      ...draft,
-      serviceCategory:
-        typeof refined.serviceCategory === "string" ? refined.serviceCategory : draft.serviceCategory,
-      serviceSubcategory:
-        typeof refined.serviceSubcategory === "string"
-          ? refined.serviceSubcategory
-          : draft.serviceSubcategory,
-      detectedNeed: typeof refined.detectedNeed === "string" ? refined.detectedNeed : draft.detectedNeed,
-      knownFields: Array.isArray(refined.knownFields)
-        ? (refined.knownFields as RequestAnalysis["knownFields"])
-        : draft.knownFields,
-      missingFields: Array.isArray(refined.missingFields)
-        ? (refined.missingFields as RequestAnalysis["missingFields"])
-        : draft.missingFields,
-      qualificationQuestions: Array.isArray(refined.qualificationQuestions)
-        ? (refined.qualificationQuestions as string[])
-        : draft.qualificationQuestions,
-      evidence: Array.isArray(refined.evidence) ? (refined.evidence as string[]) : draft.evidence,
-      taskTitle: typeof refined.taskTitle === "string" ? refined.taskTitle : draft.taskTitle,
-      taskObjective: typeof refined.taskObjective === "string" ? refined.taskObjective : draft.taskObjective,
-      clientMessageDraft: draft.clientMessageDraft,
-      expectedOutcome:
-        typeof refined.expectedOutcome === "string" ? refined.expectedOutcome : draft.expectedOutcome,
-      recommendedAction:
-        typeof refined.recommendedAction === "string" ? refined.recommendedAction : draft.recommendedAction,
-      urgency:
-        refined.urgency === "urgent" || refined.urgency === "high" || refined.urgency === "normal"
-          ? refined.urgency
-          : draft.urgency,
-      confidence:
-        refined.confidence === "HIGH" || refined.confidence === "MEDIUM" || refined.confidence === "LOW"
-          ? refined.confidence
-          : draft.confidence,
-      // Structured numbers only if already present in heuristic (never invent)
-      budgetMin: draft.budgetMin,
-      budgetMax: draft.budgetMax,
-      deadline: draft.deadline,
-      city: draft.city,
-      company: draft.company,
-    };
+    analysis = applyRefinedRequestAnalysis(draft, refined, input);
+    const composed = await composeClientMessageWithLlm({
+      instruction: [
+        "Напиши первое WhatsApp-сообщение по новой заявке CREOLAB.",
+        "Покажи, что понял конкретный запрос клиента своими словами.",
+        "Уточни 1–3 недостающих детали, чтобы квалифицировать заявку и предложить следующий шаг.",
+        "Не спрашивай телефон — он уже есть. Не выдумывай цены, сроки, портфолио и обещания.",
+        "Не пиши «чем могу помочь» и не представляйся роботом.",
+        analysis.qualificationQuestions.length
+          ? `Ориентир по уточнениям: ${analysis.qualificationQuestions.slice(0, 3).join(" | ")}`
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" "),
+      firstName: greetingFirstName(input.name),
+      companyName: analysis.company,
+      interest:
+        [input.description, input.subject, analysis.detectedNeed].filter(Boolean).join(" · ") || analysis.taskTitle,
+    });
+    const fromLlm = sanitizeClientMessageDraft(composed);
+    if (fromLlm) analysis = { ...analysis, clientMessageDraft: fromLlm };
   } catch {
-    return draft;
+    return analysis;
   }
+  return analysis;
 }

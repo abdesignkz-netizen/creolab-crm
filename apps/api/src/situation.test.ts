@@ -474,6 +474,46 @@ describe("Situation API", () => {
     assert.equal(overview.attention.summary.overdueTasks, badges.badges["/tasks"]);
   });
 
+  it("заявка без WhatsApp попадает в Требует внимания", async () => {
+    const contact = await prisma.contact.create({
+      data: { tenantId, name: "Нет WhatsApp" },
+    });
+    const inquiry = await prisma.inquiry.create({
+      data: {
+        tenantId,
+        contactId: contact.id,
+        source: "website_form",
+        sourceChannel: "website_form",
+        status: "qualification",
+        subject: "Презентация",
+        phoneRaw: "+7 707 412 92 13",
+        phoneNormalized: "77074129213",
+        attentionReason: "WHATSAPP_NOT_REGISTERED",
+        nextStep: "Контакт не зарегистрирован в WhatsApp. Приветственное сообщение не отправлено.",
+      },
+    });
+    const data = await situation();
+    const row = data.items.find((item) => item.entityId === inquiry.id);
+    assert.ok(row);
+    assert.equal(row.kind, "inquiry_ai_blocked");
+    assert.equal(row.blocked, true);
+    assert.equal(row.nextAction, "open_inquiry");
+    assert.match(row.reason || "", /не зарегистрирован в WhatsApp/i);
+
+    const overviewRes = await fetch(`${base}/api/v1/situation/overview?period=today&scope=all`, {
+      headers: { cookie },
+    });
+    assert.equal(overviewRes.status, 200);
+    const overview = (await overviewRes.json()) as {
+      attention: { items: Array<{ entityId?: string; whyLabel?: string; reason?: string; group?: string }> };
+    };
+    const attn = overview.attention.items.find((item) => item.entityId === inquiry.id);
+    assert.ok(attn);
+    assert.equal(attn.whyLabel, "Нет WhatsApp");
+    assert.equal(attn.group, "needs_human");
+    assert.match(attn.reason || "", /не зарегистрирован в WhatsApp/i);
+  });
+
   it("поручение без sellerLead — 422", async () => {
     const conversation = await prisma.conversation.create({
       data: { tenantId, mode: "ai", status: "open" },

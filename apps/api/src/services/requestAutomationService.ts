@@ -3,7 +3,11 @@ import { parseAIAutomationSettings, isWithinAiSchedule } from "./aiAutomationSet
 import { decideAutomationPolicy, type AutomationDecision } from "./aiAutomationPolicyService.ts";
 import { analyzeRequestWithOptionalLlm, type RequestAnalysis } from "./requestAnalysisService.ts";
 import { writeActivity } from "./contactService.ts";
-import { findExistingWhatsAppConversation } from "./sellerLink.ts";
+import { findExistingWhatsAppConversation, openWhatsAppChannelForContact } from "./sellerLink.ts";
+import {
+  classifyWhatsAppDeliveryError,
+  WHATSAPP_NOT_REGISTERED,
+} from "./whatsappChannel.ts";
 
 export type AiProcessStatus =
   | "none"
@@ -414,6 +418,14 @@ export async function startAiManagerForInquiry(prisma: PrismaClient, tenantId: s
   const analysis = (auto?.analysis || null) as RequestAnalysis | null;
   const task = inquiry.tasks[0];
 
+  if (auto?.status === "in_progress" || auto?.status === "paused") {
+    return {
+      inquiryId,
+      status: auto.status as AiProcessStatus,
+      conversationId: inquiry.conversationId || undefined,
+    };
+  }
+
   if (!analysis) {
     return processNewRequestAutomation(prisma, tenantId, inquiryId, {
       forceMode: "AUTO",
@@ -421,22 +433,27 @@ export async function startAiManagerForInquiry(prisma: PrismaClient, tenantId: s
     });
   }
 
-  const conversation = await findWhatsAppConversation(prisma, tenantId, inquiry.contactId);
-  if (!conversation?.sellerLeadId) {
+  const contactName =
+    inquiry.contact?.name ||
+    [inquiry.contact?.firstName, inquiry.contact?.lastName].filter(Boolean).join(" ") ||
+    "Клиент";
+
+  async function markBlocked(code: string, message: string) {
     await prisma.$transaction(async (tx) => {
       if (task) {
         await tx.task.update({
           where: { id: task.id },
           data: {
-            executionStatus: "needs_human",
+            executionStatus: code === "AI_OUTBOUND_FAILED" ? "failed" : "needs_human",
+            resultText: message,
             contextSnapshotJson: {
               ...(typeof task.contextSnapshotJson === "object" && task.contextSnapshotJson
                 ? (task.contextSnapshotJson as object)
                 : {}),
               executorType: "AI",
               executorId: "AI_MANAGER",
-              aiStatus: "needs_human",
-              handoffReason: "NO_AUTOMATED_CHANNEL",
+              aiStatus: code === "AI_OUTBOUND_FAILED" ? "failed" : "needs_human",
+              handoffReason: code,
             } as Prisma.InputJsonValue,
           },
         });
@@ -444,14 +461,14 @@ export async function startAiManagerForInquiry(prisma: PrismaClient, tenantId: s
       await tx.inquiry.update({
         where: { id: inquiry.id },
         data: {
-          attentionReason: "NO_AUTOMATED_CHANNEL",
-          nextStep: "Нет доступного канала связи для AI",
+          attentionReason: code,
+          nextStep: message,
           fieldMetaJson: {
             ...fieldMeta,
             automation: {
               ...auto,
-              status: "needs_human",
-              handoffReason: "NO_AUTOMATED_CHANNEL",
+              status: code === "AI_OUTBOUND_FAILED" ? "failed" : "needs_human",
+              handoffReason: code,
             },
           } as Prisma.InputJsonValue,
         },
@@ -460,23 +477,48 @@ export async function startAiManagerForInquiry(prisma: PrismaClient, tenantId: s
         tenantId,
         contactId: inquiry.contactId,
         inquiryId: inquiry.id,
-        type: "inquiry.ai_needs_human",
-        title: "AI требуется менеджер",
-        description: "Нет доступного канала связи (WhatsApp lead не найден).",
+        type: code === WHATSAPP_NOT_REGISTERED ? "inquiry.whatsapp_not_registered" : "inquiry.ai_needs_human",
+        title:
+          code === WHATSAPP_NOT_REGISTERED
+            ? "Контакт не зарегистрирован в WhatsApp"
+            : "AI требуется менеджер",
+        description: message,
         actorType: "system",
       });
     });
-    return { inquiryId, status: "needs_human" as const, reason: "NO_AUTOMATED_CHANNEL" };
+    return {
+      inquiryId,
+      status: (code === "AI_OUTBOUND_FAILED" ? "failed" : "needs_human") as AiProcessStatus,
+      reason: code,
+    };
   }
 
-  // If client already wrote last — do not send a second greeting; only set AI mode + instruction
-  const lastMsg = conversation.messages[0];
-  const skipGreetingNote = lastMsg && lastMsg.direction === "inbound";
+  const opened = await openWhatsAppChannelForContact(prisma, {
+    tenantId,
+    contactId: inquiry.contactId,
+    contactName,
+    extraPhones: [inquiry.phoneNormalized, inquiry.phoneRaw],
+  });
+  const conversation = opened.conversation;
+  if (!conversation?.sellerLeadId) {
+    const classified = classifyWhatsAppDeliveryError(opened.error);
+    return markBlocked(classified.code, classified.message);
+  }
 
-  const contactName =
-    inquiry.contact?.name ||
-    [inquiry.contact?.firstName, inquiry.contact?.lastName].filter(Boolean).join(" ") ||
-    "Клиент";
+  const lastMsg = await prisma.message.findFirst({
+    where: { tenantId, conversationId: conversation.id, internal: false },
+    orderBy: { createdAt: "desc" },
+  });
+  const alreadyWelcomed = await prisma.message.findFirst({
+    where: {
+      tenantId,
+      conversationId: conversation.id,
+      direction: "outbound",
+      senderKind: "ai",
+      internal: false,
+    },
+  });
+  const skipGreetingNote = lastMsg?.direction === "inbound" || Boolean(alreadyWelcomed);
   const sourceLine = [inquiry.utmSource || inquiry.sourceType, inquiry.sourceChannel || inquiry.source]
     .filter(Boolean)
     .join(" → ");
@@ -486,6 +528,9 @@ export async function startAiManagerForInquiry(prisma: PrismaClient, tenantId: s
     analysis,
     sourceLine: sourceLine || "заявка",
   });
+  const greeting =
+    analysis.clientMessageDraft?.trim() ||
+    `Здравствуйте${contactName && contactName !== "Клиент" ? `, ${contactName}` : ""}! Мы получили вашу заявку и хотим уточнить детали.`;
 
   let appliedOnSeller = false;
   let sellerError: string | null = null;
@@ -497,6 +542,20 @@ export async function startAiManagerForInquiry(prisma: PrismaClient, tenantId: s
     } else {
       await resolved.bridge.setMode(conversation.sellerLeadId, "AUTO");
       await resolved.bridge.addInstruction(conversation.sellerLeadId, instruction);
+      if (!skipGreetingNote && greeting) {
+        const key = `ai-welcome:${inquiry.id}`;
+        await resolved.bridge.sendText(conversation.sellerLeadId, greeting, key);
+        await prisma.message.create({
+          data: {
+            tenantId,
+            conversationId: conversation.id,
+            senderKind: "ai",
+            direction: "outbound",
+            text: greeting,
+            operationState: "accepted",
+          },
+        });
+      }
       appliedOnSeller = true;
     }
   } catch (err) {
@@ -504,38 +563,8 @@ export async function startAiManagerForInquiry(prisma: PrismaClient, tenantId: s
   }
 
   if (!appliedOnSeller) {
-    await prisma.$transaction(async (tx) => {
-      if (task) {
-        await tx.task.update({
-          where: { id: task.id },
-          data: { executionStatus: "failed", resultText: sellerError },
-        });
-      }
-      await tx.inquiry.update({
-        where: { id: inquiry.id },
-        data: {
-          attentionReason: "AI_OUTBOUND_FAILED",
-          fieldMetaJson: {
-            ...fieldMeta,
-            automation: {
-              ...auto,
-              status: "failed",
-              handoffReason: sellerError,
-            },
-          } as Prisma.InputJsonValue,
-        },
-      });
-      await writeActivity(tx, {
-        tenantId,
-        contactId: inquiry.contactId,
-        inquiryId: inquiry.id,
-        type: "inquiry.ai_outbound_failed",
-        title: "Ошибка отправки первого сообщения AI",
-        description: sellerError,
-        actorType: "system",
-      });
-    });
-    return { inquiryId, status: "failed" as const, reason: sellerError };
+    const classified = classifyWhatsAppDeliveryError(sellerError);
+    return markBlocked(classified.code, classified.message);
   }
 
   await prisma.$transaction(async (tx) => {

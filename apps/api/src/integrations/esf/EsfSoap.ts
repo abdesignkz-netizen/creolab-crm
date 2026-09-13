@@ -61,6 +61,52 @@ export function buildCloseSessionEnvelope(sessionId: string) {
   );
 }
 
+function optionalBusinessProfile(profile?: string) {
+  return profile ? `<businessProfileType>${xmlEscape(profile)}</businessProfileType>` : "";
+}
+
+/** Official SessionService.closeSessionBySignedCredentials from SessionService.wsdl. */
+export function buildCloseSessionBySignedCredentialsEnvelope(input: {
+  tin: string;
+  signedAuthTicket: string;
+  businessProfileType?: string;
+  wsseUsername?: string;
+  wssePassword?: string;
+}) {
+  const header = input.wsseUsername
+    ? buildWsseUsernameToken(input.wsseUsername, input.wssePassword || "")
+    : "";
+  const body = [
+    `<esf:closeSessionBySignedCredentialsRequest>`,
+    `<tin>${xmlEscape(input.tin)}</tin>`,
+    optionalBusinessProfile(input.businessProfileType),
+    `<signedAuthTicket>${xmlEscape(input.signedAuthTicket).replaceAll("\r", "&#13;")}</signedAuthTicket>`,
+    `</esf:closeSessionBySignedCredentialsRequest>`,
+  ].join("");
+  return envelope(`xmlns:esf="esf"`, body, header);
+}
+
+/** Official SessionService.closeSessionByCredentials from SessionService.wsdl. */
+export function buildCloseSessionByCredentialsEnvelope(input: {
+  tin: string;
+  x509Certificate: string;
+  businessProfileType?: string;
+  wsseUsername?: string;
+  wssePassword?: string;
+}) {
+  const header = input.wsseUsername
+    ? buildWsseUsernameToken(input.wsseUsername, input.wssePassword || "")
+    : "";
+  const body = [
+    `<esf:closeSessionByCredentialsRequest>`,
+    `<tin>${xmlEscape(input.tin)}</tin>`,
+    optionalBusinessProfile(input.businessProfileType),
+    `<x509Certificate>${xmlEscape(input.x509Certificate)}</x509Certificate>`,
+    `</esf:closeSessionByCredentialsRequest>`,
+  ].join("");
+  return envelope(`xmlns:esf="esf"`, body, header);
+}
+
 export function buildCurrentSessionStatusEnvelope(sessionId: string) {
   return envelope(
     `xmlns:esf="esf"`,
@@ -199,6 +245,57 @@ export function parseSessionStatus(xml: string) {
 export function isSessionClosedFault(message: string) {
   const text = String(message || "");
   return /SessionClosedFault|session closed|SessionClosed|сессия.*(закрыт|истекла)/i.test(text);
+}
+
+export const ESF_BUSINESS_PROFILES = [
+  "ADMIN_ENTERPRISE",
+  "ENTREPRENEUR_USER",
+  "ENTREPRENEUR",
+  "LAWYER_USER",
+  "BAILIFF_USER",
+  "MEDIATOR_USER",
+  "NOTARY_USER",
+  "PROJECT_ADMIN",
+  "PROJECT_USER",
+  "INDIVIDUAL",
+  "LAWYER",
+  "BAILIFF",
+  "MEDIATOR",
+  "NOTARY",
+  "USER",
+] as const;
+
+const ESF_PROFILE_PATTERN = ESF_BUSINESS_PROFILES.join("|");
+export const ESF_SESSION_ID_IN_TEXT = new RegExp(
+  `([A-Za-z0-9][A-Za-z0-9+/=._-]{7,}--(?:${ESF_PROFILE_PATTERN}))`,
+  "i",
+);
+
+const EXISTING_SESSION_FAULT =
+  /already has opened session|opened session with id|Can't create a new user session|нельзя создать новую сессию|уже (?:есть|открыта).{0,40}сесси/i;
+
+export function isExistingSessionFault(text: string) {
+  const fault = parseSoapFault(text);
+  return EXISTING_SESSION_FAULT.test(`${fault?.faultstring || ""} ${fault?.description || ""} ${text}`);
+}
+
+export function parseBusinessProfileFromSessionId(sessionId: string) {
+  const match = String(sessionId || "").match(new RegExp(`--(${ESF_PROFILE_PATTERN})$`, "i"));
+  return match ? match[1].toUpperCase() : "";
+}
+
+/** Portal echoes the live session id in the createSession fault. Parse it before any redaction. */
+export function parseExistingSessionIdFromFault(text: string) {
+  const fault = parseSoapFault(text);
+  const source = `${fault?.description || ""} ${fault?.faultstring || ""} ${text}`;
+  const match =
+    source.match(ESF_SESSION_ID_IN_TEXT) ||
+    source.match(/opened session with id[:\s]+([^\s<"']+)/i) ||
+    source.match(/session with id[:\s]+([^\s<"']+)/i) ||
+    source.match(/сесси[яи].*?id[:\s]+([^\s<"']+)/i);
+  const id = (match?.[1] || "").replace(/[.,;]+$/g, "").trim();
+  if (id.length < 8 || /[<>]/.test(id)) return "";
+  return id;
 }
 
 export function isWsseCredentialFault(input: { faultstring?: string; description?: string; body?: string; status?: number }) {

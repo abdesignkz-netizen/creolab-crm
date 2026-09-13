@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { decideAutomationPolicy } from "./services/aiAutomationPolicyService.ts";
-import { analyzeRequestHeuristic } from "./services/requestAnalysisService.ts";
+import { analyzeRequestHeuristic, applyRefinedRequestAnalysis, sanitizeClientMessageDraft } from "./services/requestAnalysisService.ts";
 import {
   DEFAULT_AI_AUTOMATION,
   MODE_FLAGS,
@@ -10,6 +10,7 @@ import {
   mergeAIAutomationIntoSettingsJson,
   parseAIAutomationSettings,
 } from "./services/aiAutomationSettings.ts";
+import { classifyWhatsAppDeliveryError, WHATSAPP_NOT_REGISTERED } from "./services/whatsappChannel.ts";
 
 describe("AI automation policy", () => {
   it("maps UI modes to flags", () => {
@@ -90,6 +91,37 @@ describe("AI automation policy", () => {
     assert.equal(decision.clientOverride, "OFF");
   });
 
+  it("reads stored AUTO and ignores leftover website_form CONFIRM", () => {
+    const settings = parseAIAutomationSettings({
+      aiAutomation: {
+        defaultMode: "AUTO",
+        sourceModes: { website_form: "CONFIRM", manual: "MANUAL" },
+      },
+    });
+    assert.equal(settings.defaultMode, "AUTO");
+    assert.equal(settings.sourceModes.website_form, undefined);
+    const decision = decideAutomationPolicy({
+      settingsJson: mergeAIAutomationIntoSettingsJson({}, settings),
+      sourceChannel: "website_form",
+    });
+    assert.equal(decision.mode, "AUTO");
+    assert.equal(decision.autoStart, true);
+  });
+
+  it("AUTO default applies to website form instead of factory CONFIRM", () => {
+    const decision = decideAutomationPolicy({
+      settingsJson: mergeAIAutomationIntoSettingsJson(
+        {},
+        applyModeToSettings(DEFAULT_AI_AUTOMATION, "AUTO"),
+      ),
+      sourceChannel: "website_form",
+      sourceType: "website_form",
+    });
+    assert.equal(decision.mode, "AUTO");
+    assert.equal(decision.autoStart, true);
+    assert.equal(decision.allowOutbound, true);
+  });
+
   it("doNotContact hard-blocks outbound", () => {
     const decision = decideAutomationPolicy({
       settingsJson: mergeAIAutomationIntoSettingsJson(
@@ -102,6 +134,20 @@ describe("AI automation policy", () => {
     assert.equal(decision.mode, "MANUAL");
     assert.equal(decision.hardBlocked, true);
     assert.equal(decision.allowOutbound, false);
+  });
+});
+
+describe("WhatsApp delivery errors", () => {
+  it("recognizes an unregistered number", () => {
+    const unregistered = classifyWhatsAppDeliveryError("Whatsapp number not exists. The number is not registered");
+    assert.equal(unregistered.code, WHATSAPP_NOT_REGISTERED);
+    assert.match(unregistered.message, /не зарегистрирован в WhatsApp/i);
+  });
+
+  it("maps a missing WhatsApp connection", () => {
+    const missing = classifyWhatsAppDeliveryError("not_configured");
+    assert.equal(missing.code, "NO_AUTOMATED_CHANNEL");
+    assert.match(missing.message, /не подключ/i);
   });
 });
 
@@ -137,7 +183,35 @@ describe("Request analysis heuristic", () => {
     assert.match(analysis.taskObjective, /Услуга — web/);
     assert.doesNotMatch(analysis.clientMessageDraft, /^Уже известно:/);
     assert.match(analysis.clientMessageDraft, /Здравствуйте/i);
-    assert.match(analysis.clientMessageDraft, /заявку/i);
+    assert.match(analysis.clientMessageDraft, /сайт для строительства/i);
+    assert.doesNotMatch(analysis.clientMessageDraft, /77777777777/);
+  });
+
+  it("draft for a presentation request keeps the tender context", () => {
+    const analysis = analyzeRequestHeuristic({
+      name: "Алия",
+      subject: "Презентация · Для тендеров",
+      description: "Нужна презентация для тендера",
+    });
+    assert.match(analysis.clientMessageDraft, /Здравствуйте, Алия/i);
+    assert.match(analysis.clientMessageDraft, /тендер/i);
+    assert.doesNotMatch(analysis.clientMessageDraft, /^Уже известно:/);
+  });
+
+  it("uses LLM WhatsApp copy when the draft is valid", () => {
+    const draft = analyzeRequestHeuristic({
+      description: "Нужна презентация для тендера",
+    });
+    const merged = applyRefinedRequestAnalysis(
+      draft,
+      {
+        clientMessageDraft:
+          "Здравствуйте! Получили заявку на презентацию для тендера. Для какого конкурса она нужна и какой примерно объём?",
+      },
+      { description: "Нужна презентация для тендера" },
+    );
+    assert.match(merged.clientMessageDraft, /какого конкурса/i);
+    assert.equal(sanitizeClientMessageDraft("{not a message}"), null);
   });
 
   it("detects presentation from free text", () => {

@@ -486,17 +486,26 @@ export async function findExistingWhatsAppConversation(
 
 async function healWhatsAppFromBot(
   prisma: PrismaClient,
-  args: { tenantId: string; contactId: string; defaultRegion?: string; contactName?: string | null },
-) {
+  args: {
+    tenantId: string;
+    contactId: string;
+    defaultRegion?: string;
+    contactName?: string | null;
+    extraPhones?: Array<string | null | undefined>;
+  },
+): Promise<{ conversation: Awaited<ReturnType<typeof findExistingWhatsAppConversation>>; error: string | null }> {
   const phones = await prisma.contactMethod.findMany({
     where: { tenantId: args.tenantId, contactId: args.contactId, type: "phone" },
     select: { rawValue: true, normalizedValue: true },
   });
-  const values = phoneLookupValues(phones.map((item) => item.normalizedValue || item.rawValue));
-  if (!values.length) return null;
+  const values = phoneLookupValues([
+    ...phones.map((item) => item.normalizedValue || item.rawValue),
+    ...(args.extraPhones || []),
+  ]);
+  if (!values.length) return { conversation: null, error: "no_phone" };
 
   const resolved = await resolveSellerBridge(prisma, args.tenantId);
-  if (!resolved.bridge) return null;
+  if (!resolved.bridge) return { conversation: null, error: "not_configured" };
   const region = args.defaultRegion || "KZ";
   const connection = resolved.integration
     ? await prisma.channelConnection.findFirst({
@@ -523,7 +532,7 @@ async function healWhatsAppFromBot(
         connectionId: connection?.id || null,
       });
       const synced = await findExistingWhatsAppConversation(prisma, args.tenantId, args.contactId);
-      if (synced?.sellerLeadId) return synced;
+      if (synced?.sellerLeadId) return { conversation: synced, error: null };
     }
   } catch (error) {
     console.warn("[whatsapp-heal] listLeads failed", error instanceof Error ? error.message : error);
@@ -539,13 +548,18 @@ async function healWhatsAppFromBot(
         lead: ensured.lead,
         connectionId: connection?.id || null,
       });
-      return findExistingWhatsAppConversation(prisma, args.tenantId, args.contactId);
+      return {
+        conversation: await findExistingWhatsAppConversation(prisma, args.tenantId, args.contactId),
+        error: null,
+      };
     }
   } catch (error) {
-    console.warn("[whatsapp-heal] ensureLead failed", error instanceof Error ? error.message : error);
+    const message = error instanceof Error ? error.message : "ensureLead failed";
+    console.warn("[whatsapp-heal] ensureLead failed", message);
+    return { conversation: null, error: message };
   }
 
-  return null;
+  return { conversation: null, error: "NO_AUTOMATED_CHANNEL" };
 }
 
 export async function resolveWhatsAppConversation(
@@ -567,6 +581,22 @@ export async function resolveWhatsAppConversation(
   );
   if (existing?.sellerLeadId) return existing;
   if (!args.healFromBot) return existing;
+  const healed = await healWhatsAppFromBot(prisma, args);
+  return healed.conversation;
+}
+
+export async function openWhatsAppChannelForContact(
+  prisma: PrismaClient,
+  args: {
+    tenantId: string;
+    contactId: string;
+    contactName?: string | null;
+    defaultRegion?: string;
+    extraPhones?: Array<string | null | undefined>;
+  },
+) {
+  const existing = await findExistingWhatsAppConversation(prisma, args.tenantId, args.contactId);
+  if (existing?.sellerLeadId) return { conversation: existing, error: null as string | null };
   return healWhatsAppFromBot(prisma, args);
 }
 

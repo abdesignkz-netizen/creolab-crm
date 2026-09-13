@@ -85,6 +85,25 @@ export const DEFAULT_AI_AUTOMATION: AIAutomationSettings = {
   integrationModes: {},
 };
 
+/** Inbound form sources that follow the global mode when the operator chooses AUTO. */
+export const FORM_SOURCES_FOLLOWING_AUTO = [
+  "website_form",
+  "form",
+  "website",
+  "website_ai",
+  "google_lead_form",
+  "webhook",
+] as const;
+
+function followAutoForFormSources(sourceModes: Record<string, AutomationMode>, mode: AutomationMode) {
+  if (mode !== "AUTO") return sourceModes;
+  const next = { ...sourceModes };
+  for (const key of FORM_SOURCES_FOLLOWING_AUTO) {
+    if (next[key] === "CONFIRM") delete next[key];
+  }
+  return next;
+}
+
 function isMode(value: unknown): value is AutomationMode {
   return value === "MANUAL" || value === "ASSIST" || value === "CONFIRM" || value === "AUTO";
 }
@@ -176,6 +195,7 @@ export function parseAIAutomationSettings(raw: unknown): AIAutomationSettings {
 
   // Keep mode label consistent with flags if flags were overridden explicitly
   base.defaultMode = modeFromFlags(base);
+  base.sourceModes = followAutoForFormSources(base.sourceModes, base.defaultMode);
   return base;
 }
 
@@ -187,6 +207,7 @@ export function applyModeToSettings(
     ...settings,
     defaultMode: mode,
     ...MODE_FLAGS[mode],
+    sourceModes: followAutoForFormSources(settings.sourceModes, mode),
   };
 }
 

@@ -28,6 +28,7 @@ const HANDOFF_REASON_LABEL: Record<string, string> = {
   global_ai_pause: "AI Manager на паузе",
   AI_ANALYSIS_FAILED: "Не удалось сформировать ответ",
   AI_OUTBOUND_FAILED: "Не удалось отправить сообщение",
+  WHATSAPP_NOT_REGISTERED: "Контакт не зарегистрирован в WhatsApp",
   NO_AUTOMATED_CHANNEL: "Нет канала для ответа AI",
   OTHER: "Другое",
 };

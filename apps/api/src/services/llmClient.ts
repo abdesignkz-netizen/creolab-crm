@@ -221,10 +221,13 @@ serviceCategory (web|presentation|advertising|branding|ai|other|null), serviceSu
 detectedNeed, budgetMin, budgetMax, deadline, city, company,
 knownFields[{key,label,value}], missingFields[{key,label}],
 urgency (normal|high|urgent), recommendedAction, taskTitle, taskObjective, expectedOutcome,
-qualificationQuestions[], confidence (HIGH|MEDIUM|LOW), evidence[].
+qualificationQuestions[], clientMessageDraft, confidence (HIGH|MEDIUM|LOW), evidence[].
 Приоритет: текст клиента > поля формы > landing > кампания.
 Не придумывай бюджет/срок/город/компанию, если их нет в данных.
-taskTitle должен быть конкретным, не «Обработать новую заявку».`,
+taskTitle должен быть конкретным, не «Обработать новую заявку».
+clientMessageDraft — готовое первое WhatsApp-сообщение клиенту CREOLAB: на «Вы», коротко, как живой менеджер.
+Опирайся на конкретный текст заявки, покажи что понял запрос, задай 1–3 уточнения.
+Не спрашивай телефон. Не выдумывай цены и сроки. Не пиши «чем могу помочь».`,
           },
           { role: "user", content: JSON.stringify({ input, draft }) },
         ],

@@ -85,6 +85,7 @@ export async function updateAIAutomationSettings(
   if (input.integrationModes && typeof input.integrationModes === "object") {
     next.integrationModes = { ...next.integrationModes, ...input.integrationModes };
   }
+  next.sourceModes = applyModeToSettings(next, next.defaultMode).sourceModes;
 
   const settingsJson = mergeAIAutomationIntoSettingsJson(tenant.settingsJson, next);
   const workingHoursJson = next.workingHours as unknown as Prisma.InputJsonValue;
@@ -92,6 +93,13 @@ export async function updateAIAutomationSettings(
     where: { id: tenant.id },
     data: { settingsJson: settingsJson as Prisma.InputJsonObject, workingHoursJson },
   });
+
+  if (next.autoStartAiManager) {
+    const { enqueuePendingAutoStarts } = await import("./inquiryAutomationQueue.ts");
+    void enqueuePendingAutoStarts(prisma, tenant.id).catch((err) => {
+      console.error("enqueuePendingAutoStarts", err);
+    });
+  }
 
   return {
     ...next,

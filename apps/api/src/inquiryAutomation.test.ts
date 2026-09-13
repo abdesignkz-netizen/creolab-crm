@@ -146,8 +146,33 @@ describe("inquiry AI automation modes", () => {
     const detail = await (await fetch(`${url}/api/v1/inquiries/${inquiry.id}`, { headers: { cookie } })).json();
     assert.ok(["needs_human", "queued", "in_progress", "failed"].includes(detail.automation?.status));
     if (detail.automation?.status === "needs_human") {
-      assert.equal(detail.automation.handoffReason, "NO_AUTOMATED_CHANNEL");
+      assert.ok(
+        ["NO_AUTOMATED_CHANNEL", "WHATSAPP_NOT_REGISTERED", "AI_OUTBOUND_FAILED"].includes(
+          detail.automation.handoffReason,
+        ),
+      );
     }
+  });
+
+  it("AUTO website_form does not wait for confirm", async () => {
+    await setMode("AUTO");
+    const created = await fetch(`${url}/api/v1/inquiries`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        name: "Form Auto Client",
+        phone: "+7 701 200 00 06",
+        company: "Form Auto Co",
+        message: "Нужна презентация для тендера, сроки до конца месяца",
+        sourceChannel: "website_form",
+        sourceType: "website_form",
+      }),
+    });
+    assert.equal(created.status, 201);
+    const inquiry = await created.json();
+    const detail = await (await fetch(`${url}/api/v1/inquiries/${inquiry.id}`, { headers: { cookie } })).json();
+    assert.notEqual(detail.automation?.status, "awaiting_confirm");
+    assert.ok(["needs_human", "queued", "in_progress", "failed"].includes(detail.automation?.status));
   });
 
   it("takeover pauses AI", async () => {

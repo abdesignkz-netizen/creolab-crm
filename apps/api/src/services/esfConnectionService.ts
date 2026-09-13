@@ -345,6 +345,9 @@ export async function connectEsf(
       });
 
   try {
+    if (existing?.sessionId && config.provider !== "mock") {
+      await closeEsfSession(existing.sessionId, config);
+    }
     const session = raw.signedAuthTicket
       ? await createEsfSessionFromSignedTicket(organizationBin, String(raw.signedAuthTicket), config,
           cabinetPassword ? { username: cabinetUsername, password: cabinetPassword } : undefined)

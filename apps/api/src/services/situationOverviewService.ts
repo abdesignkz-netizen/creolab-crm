@@ -381,6 +381,7 @@ function attentionGroup(item: Pick<SituationItem, "kind" | "waitingReply">): str
   if (item.kind === "task_overdue") return "overdue";
   if (item.kind === "missing_next_action") return "no_next_action";
   if (item.kind.startsWith("conversation_")) return "needs_human";
+  if (item.kind === "inquiry_ai_blocked") return "needs_human";
   if (item.kind === "needs_phone") return "no_contact";
   if (item.kind.startsWith("inquiry_")) return "inquiry";
   return "other";
@@ -410,6 +411,10 @@ export async function getSituationOverview(
   const tenantRow = await prisma.tenant.findUnique({ where: { id: tid } });
   const ops = parseOpsSettings(tenantRow?.settingsJson);
   await ensureDealPipelineStages(prisma, tid);
+  const { enqueuePendingAutoStarts } = await import("./inquiryAutomationQueue.ts");
+  void enqueuePendingAutoStarts(prisma, tid).catch((err) => {
+    console.error("enqueuePendingAutoStarts", err);
+  });
 
   const presetRaw = String(query.period || query.periodPreset || "today");
   const allowed: PeriodPreset[] = [
@@ -845,7 +850,10 @@ export async function getSituationOverview(
     ...board.items.map((item) => ({
       ...item,
         group: attentionGroup(item),
-        whyLabel: ATTENTION_WHY_LABEL[attentionGroup(item)] || ATTENTION_WHY_LABEL.other,
+        whyLabel:
+          item.kind === "inquiry_ai_blocked" && /не зарегистрирован в WhatsApp/i.test(item.reason || "")
+            ? "Нет WhatsApp"
+            : ATTENTION_WHY_LABEL[attentionGroup(item)] || ATTENTION_WHY_LABEL.other,
       href:
         item.kind === "needs_phone"
           ? "/inquiries?filter=needs_clarification"

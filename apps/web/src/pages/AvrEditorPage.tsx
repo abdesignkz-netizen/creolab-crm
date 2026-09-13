@@ -69,7 +69,7 @@ export function AvrEditorPage(){
     setPhase("AUTHORIZING");
     if(current.system.provider==="live"){try{await connectEsfAuthTicket(iin,cabinetPassword);}finally{setCabinetPassword("");}}
     else{const basics=createNcalayerClient();try{const cms=await basics.selectAuthCertificate();await api.esfConnect({authCmsBase64:cms});}finally{basics.disconnect();}}
-    const updated:any=await api.esfConnection();if(!updated.connection.sessionActive)throw new Error("Авторизация ИС ЭСФ не завершена");setConnection(updated);setConnected(true);setAskCabinet(false);setIssues({});
+    const updated:any=await api.esfConnection();if(!updated.connection.sessionActive)throw new Error(updated.connection.lastErrorMessage||"Авторизация ИС ЭСФ не завершена");setConnection(updated);setConnected(true);setAskCabinet(false);setIssues({});
   }
   async function check(record:any){
     const validated:any=await api.validateElectronicDocument(record.id);setDoc(validated.document);setWarnings(validated.warnings||warnings);setIssues({});setPhase("VALIDATED");notifySaved("Поля документа проверены в CRM. Проверка на портале ещё не выполнена.");

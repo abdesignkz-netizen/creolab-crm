@@ -19,6 +19,7 @@ const ATTENTION_REASON_LABEL: Record<string, string> = {
   global_ai_pause: "AI Manager на паузе",
   AI_ANALYSIS_FAILED: "Не удалось сформировать ответ",
   AI_OUTBOUND_FAILED: "Не удалось отправить сообщение",
+  WHATSAPP_NOT_REGISTERED: "Контакт не зарегистрирован в WhatsApp",
   NO_AUTOMATED_CHANNEL: "Нет канала, чтобы AI ответил",
   seller_lead_rematched: "Чат отвязался от WhatsApp после перепривязки",
   OTHER: "Нужно вмешательство человека",

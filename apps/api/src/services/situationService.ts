@@ -7,6 +7,7 @@ import type { AuthContext } from "../lib/types.ts";
 import { CONTACT_PHONE_SELECT, digitsOnly, displayName, needsReply, phoneFromContact } from "./contactLabels.ts";
 import { inquiryInterest, loadConversationInterests } from "./contactInterestService.ts";
 import { attentionReasonLabel, STATUS_ONLY_ATTENTION } from "./attentionReasons.ts";
+import { WHATSAPP_HOME_ATTENTION_CODES } from "./whatsappChannel.ts";
 import { excludeRematchedLeftovers } from "./attentionCounts.ts";
 import { openIntakeWhere } from "./inquiryAttention.ts";
 import { taskMarkedForScheduledSend } from "./taskExecutionService.ts";
@@ -15,6 +16,7 @@ export type SituationKind =
   | "needs_phone"
   | "inquiry_new"
   | "inquiry_accepted"
+  | "inquiry_ai_blocked"
   | "conversation_human"
   | "conversation_paused"
   | "conversation_attention"
@@ -309,7 +311,18 @@ export async function getSituation(
       include: { contact: { select: CONTACT_PHONE_SELECT } },
     }),
     prisma.inquiry.findMany({
-      where: { tenantId: tid, archived: false, test: false, status: { in: ["new", "accepted", "in_progress", "waiting_client", "waiting_manager"] } },
+      where: {
+        tenantId: tid,
+        archived: false,
+        test: false,
+        OR: [
+          { status: { in: ["new", "accepted", "in_progress", "waiting_client", "waiting_manager"] } },
+          {
+            attentionReason: { in: [...WHATSAPP_HOME_ATTENTION_CODES] },
+            status: { notIn: ["lost", "converted", "cancelled"] },
+          },
+        ],
+      },
       include: { contact: { select: CONTACT_PHONE_SELECT } },
     }),
     prisma.conversation.findMany({
@@ -405,6 +418,36 @@ export async function getSituation(
   }
 
   for (const inquiry of inquiries) {
+    const blockedCode = WHATSAPP_HOME_ATTENTION_CODES.find((code) => code === inquiry.attentionReason);
+    if (blockedCode) {
+      const task = tasks.find((row) => row.dedupeKey === processInquiryKey(inquiry.id) || (row.type === "process_inquiry" && row.inquiryId === inquiry.id));
+      items.push({
+        id: `inquiry_ai_blocked:${inquiry.id}`,
+        kind: "inquiry_ai_blocked",
+        entityId: inquiry.id,
+        title: inquiry.subject || inquiry.contact?.name || "Заявка",
+        contactName: inquiry.contact ? displayName(inquiry.contact) : null,
+        phone: phoneFromContact(inquiry.contact, inquiry),
+        interest: resolveInterest(inquiry.contactId, inquiry.conversationId, inquiry),
+        reason: inquiry.nextStep || attentionReasonLabel(blockedCode),
+        nextAction: "open_inquiry",
+        severity: "high",
+        ownerMembershipId: inquiry.assigneeMembershipId,
+        dueAt: task?.dueAt ? task.dueAt.toISOString() : null,
+        ageMinutes: ageMinutes(inquiry.receivedAt, now),
+        freshness: "unknown",
+        links: {
+          inquiryId: inquiry.id,
+          taskId: task?.id,
+          contactId: inquiry.contactId,
+          conversationId: inquiry.conversationId || undefined,
+          dealId: inquiry.dealId || undefined,
+        },
+        blocked: true,
+        snoozedUntil: null,
+      });
+      continue;
+    }
     if (!["new", "accepted"].includes(inquiry.status)) continue;
     const task = tasks.find((row) => row.dedupeKey === processInquiryKey(inquiry.id) || (row.type === "process_inquiry" && row.inquiryId === inquiry.id));
     const kind: SituationKind = inquiry.status === "accepted" ? "inquiry_accepted" : "inquiry_new";
