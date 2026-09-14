@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import ExcelJS from "exceljs";
+import JSZip from "jszip";
 import { AVR_SOURCE_KIND, type AvrSourceSnapshot } from "./services/avrMapper.ts";
 import {
   AVR_EXCEL_SHEET_NAME,
@@ -135,8 +136,8 @@ describe("AVR Excel Form R-1", () => {
     const ws = wb.getWorksheet(AVR_EXCEL_SHEET_NAME);
     assert.ok(ws);
     assert.equal((ws.model.merges || []).length, 82);
-    assert.equal(ws.getColumn(1).width, 4.5);
-    assert.equal(ws.getColumn(11).width, 1.75);
+    assert.equal(ws.getColumn(1).width, 3.67);
+    assert.equal(ws.getColumn(11).width, 0.83);
     assert.equal(ws.getRow(17).height, 66);
     assert.equal(ws.getRow(20).height, 40.5);
     assert.equal(cellValue(ws, "A17"), "Номер по порядку");
@@ -165,6 +166,29 @@ describe("AVR Excel Form R-1", () => {
     assert.equal(cellValue(ws, "AA30"), "Принял (Заказчик)");
     assert.equal(cellValue(ws, "A33"), "М.П.");
     assert.equal(ws.getCell("AN20").value && typeof ws.getCell("AN20").value === "object" ? (ws.getCell("AN20").value as { formula?: string }).formula : "", "AF20*AI20");
+
+    const zip = await JSZip.loadAsync(buffer);
+    const types = await zip.file("[Content_Types].xml")?.async("string");
+    const sheet = await zip.file("xl/worksheets/sheet1.xml")?.async("string");
+    assert.ok(types && sheet);
+    assert.equal(types.includes("vml"), false);
+    const stylesXml = await zip.file("xl/styles.xml")?.async("string");
+    assert.ok(stylesXml);
+    assert.equal(stylesXml.includes("slicerStyles"), false);
+    assert.equal(stylesXml.includes("timelineStyles"), false);
+    assert.equal(sheet.includes('max="257"'), false);
+    assert.equal(sheet.includes("4294967295"), false);
+    assert.match(sheet, /<c r="AT15"[^>]*><v>46275<\/v><\/c>/);
+    assert.match(sheet, /<c r="A7"/);
+    assert.match(sheet, /<c r="AU32"/);
+    assert.ok(sheet.indexOf('r="AG32"') < sheet.indexOf('r="AU32"'));
+    assert.equal(/<c r="AO1"/.test(sheet), false);
+    const merges = [...sheet.matchAll(/<mergeCell ref="([^"]+)"/g)].map((match) => match[1]);
+    assert.equal(merges.length, 82);
+    for (const ref of merges) {
+      const master = ref.split(":")[0];
+      assert.match(sheet, new RegExp(`<c r="${master}"`), `нет ячейки объединения ${master}`);
+    }
   });
 
   it("сдвигает итоги и подписи, если позиций больше трёх", async () => {
@@ -203,6 +227,8 @@ describe("AVR Excel Form R-1", () => {
     assert.equal(cellValue(ws, "T26"), "Триста сорок пять тысяч тенге");
     assert.equal(cellValue(ws, "R31"), "Булан А. Б.");
     assert.equal(avrExcelLayout(4).stampRow, 34);
+    assert.ok((ws.model.merges || []).includes("A23:B23"));
+    assert.ok((ws.model.merges || []).includes("AF24:AH24"));
   });
 });
 

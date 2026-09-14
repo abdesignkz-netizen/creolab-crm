@@ -38,6 +38,9 @@ const SituationPage = lazy(() => import("./pages/SituationPage").then(m => ({ de
 const StatsPage = lazy(() => import("./pages/StatsPage").then(m => ({ default: m.StatsPage })));
 const TasksPage = lazy(() => import("./pages/TasksPage").then(m => ({ default: m.TasksPage })));
 const SettingsPage = lazy(() => import("./pages/SettingsPage").then(m => ({ default: m.SettingsPage })));
+const PlatformAdminPage = lazy(() => import("./pages/PlatformAdminPage").then(m => ({ default: m.PlatformAdminPage })));
+const PlatformLoginPage = lazy(() => import("./pages/PlatformLoginPage").then(m => ({ default: m.PlatformLoginPage })));
+const InvitePage = lazy(() => import("./pages/InvitePage").then(m => ({ default: m.InvitePage })));
 
 type LoadState<T> = { status: "loading" | "ready" | "error" | "empty"; data?: T; error?: string };
 
@@ -93,26 +96,28 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
 
   const caps: Capabilities = me?.capabilities || emptyCaps;
   const locale = normalizeLocale(me?.user?.locale);
+  const platformAdmin = Boolean(me.user?.platformAdmin);
+  const hasCompany = Boolean(tenantId);
 
-  const primaryTabs = [
-    { to: "/today", label: t(locale, "nav.home"), icon: "home" },
-    { to: "/conversations", label: t(locale, "nav.conversations"), icon: "chat" },
-    { to: "/tasks", label: t(locale, "nav.tasks"), icon: "tasks" },
-    { to: "/inquiries", label: t(locale, "nav.inquiries"), icon: "inquiries" },
-  ] as const;
+  const primaryTabs = (hasCompany
+    ? [
+        { to: "/today", label: t(locale, "nav.home"), icon: "home" },
+        { to: "/conversations", label: t(locale, "nav.conversations"), icon: "chat" },
+        { to: "/tasks", label: t(locale, "nav.tasks"), icon: "tasks" },
+        { to: "/inquiries", label: t(locale, "nav.inquiries"), icon: "inquiries" },
+      ]
+    : platformAdmin
+      ? [
+          { to: "/admin", label: t(locale, "nav.platformOverview"), icon: "home" },
+          { to: "/admin/companies", label: t(locale, "nav.platformCompanies"), icon: "inquiries" },
+          { to: "/admin/members", label: t(locale, "nav.platformMembers"), icon: "tasks" },
+        ]
+      : [
+          { to: "/today", label: t(locale, "nav.home"), icon: "home" },
+          { to: "/settings", label: t(locale, "nav.settings"), icon: "tasks" },
+        ]) as Array<{ to: string; label: string; icon: string }>;
 
-  const moreLinks = [
-    ["/control", t(locale, "nav.control"), !caps.manager],
-    ["/contacts", t(locale, "nav.contacts"), true],
-    ["/companies", t(locale, "nav.companies"), true],
-    ["/deals", t(locale, "nav.deals"), true],
-    ["/documents", t(locale, "nav.documents"), caps.documents],
-    ["/integrations", t(locale, "nav.integrations"), caps.integrations],
-    ["/stats", t(locale, "nav.stats"), caps.analytics],
-    ["/settings", t(locale, "nav.settings"), true],
-  ].filter((item) => item[2]) as Array<[string, string]>;
-
-  const workLinks = [
+  const workLinks = hasCompany ? [
     ["/today", t(locale, "nav.home")],
     ["/conversations", t(locale, "nav.conversations")],
     ["/tasks", t(locale, "nav.tasks")],
@@ -121,13 +126,25 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
     ["/inquiries", t(locale, "nav.inquiries")],
     ["/deals", t(locale, "nav.deals")],
     ...(caps.documents ? [["/documents", t(locale, "nav.documents")] as [string, string]] : []),
-  ];
-  const systemLinks = [
+  ] : [];
+  const systemLinks = hasCompany ? [
     ...(!caps.manager ? [["/control", t(locale, "nav.control")] as [string, string]] : []),
     ...(caps.integrations ? [["/integrations", t(locale, "nav.integrations")] as [string, string]] : []),
     ...(caps.analytics ? [["/stats", t(locale, "nav.stats")] as [string, string]] : []),
     ["/settings", t(locale, "nav.settings")],
-  ];
+  ] : ([["/settings", t(locale, "nav.settings")] as [string, string]]);
+
+  const moreLinks = [
+    ["/admin", t(locale, "nav.platform"), platformAdmin],
+    ["/control", t(locale, "nav.control"), hasCompany && !caps.manager],
+    ["/contacts", t(locale, "nav.contacts"), hasCompany],
+    ["/companies", t(locale, "nav.companies"), hasCompany],
+    ["/deals", t(locale, "nav.deals"), hasCompany],
+    ["/documents", t(locale, "nav.documents"), hasCompany && caps.documents],
+    ["/integrations", t(locale, "nav.integrations"), hasCompany && caps.integrations],
+    ["/stats", t(locale, "nav.stats"), hasCompany && caps.analytics],
+    ["/settings", t(locale, "nav.settings"), true],
+  ].filter((item) => item[2]) as Array<[string, string]>;
 
   function badgeCount(path: string) {
     const n = Number(navBadges[path] || 0);
@@ -315,7 +332,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
 
   async function logout() {
     await api.request("/api/v1/auth/logout", { method: "POST", body: "{}" });
-    navigate("/login");
+    navigate(platformAdmin ? "/admin/login" : "/login");
   }
 
   return (
@@ -345,7 +362,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
           </div>
         </div>
         <nav className="nav-links">
-          <p className="nav-section">{t(locale, "nav.work")}</p>
+          {workLinks.length ? <p className="nav-section">{t(locale, "nav.work")}</p> : null}
           {workLinks.map(([to, label]) => {
             const count = badgeCount(to);
             const hint = badgeHint(to);
@@ -387,7 +404,17 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
               </NavLink>
             );
           })}
-          {me.user.platformAdmin ? <NavLink to="/admin">{t(locale, "nav.platform")}</NavLink> : null}
+          {platformAdmin ? (
+            <>
+              <p className="nav-section">{t(locale, "nav.platform")}</p>
+              <NavLink to="/admin" end>{t(locale, "nav.platformOverview")}</NavLink>
+              <NavLink to="/admin/companies">{t(locale, "nav.platformCompanies")}</NavLink>
+              <NavLink to="/admin/members">{t(locale, "nav.platformMembers")}</NavLink>
+              <NavLink to="/admin/integrations">{t(locale, "nav.platformCatalog")}</NavLink>
+              <NavLink to="/admin/settings">{t(locale, "nav.platformSettings")}</NavLink>
+              <NavLink to="/admin/audit">{t(locale, "nav.platformAudit")}</NavLink>
+            </>
+          ) : null}
         </nav>
         <button className="btn secondary nav-logout" onClick={logout} {...tip("Завершить сеанс в этом браузере")}>
           {t(locale, "nav.logout")}
@@ -562,8 +589,8 @@ function Login() {
               const tenantId =
                 result.user?.activeTenant?.tenant?.id || result.user?.memberships?.[0]?.tenant?.id;
               if (tenantId) setTenant(tenantId);
-              // Полная перезагрузка: App заново вызовет /me с cookie и снимет boot=anon
-              window.location.assign("/today");
+              const dest = result.user?.user?.platformAdmin && !tenantId ? "/admin" : "/today";
+              window.location.assign(dest);
             } catch (err) {
               const message = err instanceof Error ? err.message : "Ошибка входа";
               setError(
@@ -592,6 +619,9 @@ function Login() {
           </label>
           {error ? <p className="error">{error}</p> : null}
           <button className="btn">{t(normalizeLocale(null), "login.submit")}</button>
+          <p className="muted login-alt">
+            <Link to="/admin/login">{t(normalizeLocale(null), "login.platformLink")}</Link>
+          </p>
         </form>
       </div>
     </div>
@@ -645,6 +675,26 @@ export function App() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route
+        path="/admin/login"
+        element={
+          boot === "ready" && me?.user?.platformAdmin ? (
+            <Navigate to="/admin" replace />
+          ) : (
+            <Suspense fallback={<div className="state">{t(normalizeLocale(null), "common.loading")}</div>}>
+              <PlatformLoginPage />
+            </Suspense>
+          )
+        }
+      />
+      <Route
+        path="/invite/:token"
+        element={
+          <Suspense fallback={<div className="state">Загрузка…</div>}>
+            <InvitePage />
+          </Suspense>
+        }
+      />
+      <Route
         path="/sign/:token"
         element={
           <Suspense fallback={<div className="state">Загрузка…</div>}>
@@ -664,13 +714,13 @@ export function App() {
         path="*"
         element={
           boot !== "ready" ? (
-            <Navigate to="/login" />
+            <Navigate to={location.pathname.startsWith("/admin") ? "/admin/login" : "/login"} replace />
           ) : (
             <SessionContext.Provider value={{ me, caps: me?.capabilities || emptyCaps }}>
             <Shell me={me}>
               <Suspense fallback={<div className="state" role="status">Загрузка раздела…</div>}>
               <Routes>
-                <Route path="/today" element={<Today />} />
+                <Route path="/today" element={!me?.activeTenant && me?.user?.platformAdmin ? <Navigate to="/admin" replace /> : <Today />} />
                 <Route path="/control" element={me?.capabilities?.manager ? <Navigate to="/today" replace /> : <ControlPage />} />
                 <Route path="/integrations" element={me?.capabilities?.integrations ? <IntegrationsPage /> : <Navigate to="/today" replace />} />
                 <Route path="/integrations/esf" element={me?.capabilities?.documents ? <EsfIntegrationPage /> : <Navigate to="/today" replace />} />
@@ -693,8 +743,8 @@ export function App() {
                 <Route path="/stats" element={me?.capabilities?.analytics ? <StatsPage /> : <Navigate to="/today" replace />} />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/settings/ai-automation" element={me?.capabilities?.aiSettings ? <AiAutomationSettingsPage /> : <Navigate to="/settings" replace />} />
-                <Route path="/admin" element={<Admin />} />
-                <Route path="*" element={<Navigate to="/today" />} />
+                <Route path="/admin/*" element={me?.user?.platformAdmin ? <PlatformAdminPage /> : <Navigate to="/today" replace />} />
+                <Route path="*" element={<Navigate to={me?.user?.platformAdmin && !me?.activeTenant ? "/admin" : "/today"} />} />
               </Routes>
               </Suspense>
             </Shell>
@@ -703,22 +753,5 @@ export function App() {
         }
       />
     </Routes>
-  );
-}
-
-function Admin() {  const [state] = useQuery(() => api.adminTenants() as Promise<any>);
-  if (state.status !== "ready" || !state.data) return <StateView state={state} onRetry={() => location.reload()} empty="Нет компаний" />;
-  return (
-    <section>
-      <h2>Кабинет платформы</h2>
-      {state.data.items.map((item: any) => (
-        <div className="row" key={item.id}>
-          <div>
-            <b>{item.name}</b>
-            <div className="muted">{item.status} · сотрудников {item._count.memberships}</div>
-          </div>
-        </div>
-      ))}
-    </section>
   );
 }

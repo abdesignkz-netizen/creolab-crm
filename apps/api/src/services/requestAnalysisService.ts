@@ -41,6 +41,8 @@ type AnalyzeInput = {
   utmCampaign?: string | null;
   sourceChannel?: string | null;
   phoneNormalized?: string | null;
+  prisma?: import("@creolab/db").PrismaClient | null;
+  tenantId?: string | null;
 };
 
 const SERVICE_HINTS: Array<{ category: string; subcategory?: string; patterns: RegExp[] }> = [
@@ -515,7 +517,10 @@ export async function analyzeRequestWithOptionalLlm(input: AnalyzeInput): Promis
   let analysis = draft;
   try {
     const { refineRequestAnalysisWithLlm, composeClientMessageWithLlm } = await import("./llmClient.ts");
-    const refined = await refineRequestAnalysisWithLlm(input, draft);
+    const refined = await refineRequestAnalysisWithLlm(input, draft, {
+      prisma: input.prisma,
+      tenantId: input.tenantId,
+    });
     analysis = applyRefinedRequestAnalysis(draft, refined, input);
     const composed = await composeClientMessageWithLlm({
       instruction: [
@@ -536,6 +541,8 @@ export async function analyzeRequestWithOptionalLlm(input: AnalyzeInput): Promis
       interest:
         [...new Set([input.service, looksLikeLeadFormDump(input.description) ? null : input.description, input.subject].filter(Boolean))]
           .join(" · ") || analysis.taskTitle,
+      prisma: input.prisma,
+      tenantId: input.tenantId,
     });
     analysis = {
       ...analysis,

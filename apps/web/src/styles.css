@@ -1213,6 +1213,11 @@ fieldset.field-block legend { padding: 0 6px; font-weight: 600; }
   font-size: 1.2rem;
 }
 .login .btn { width: 100%; min-height: 46px; margin-top: 4px; }
+.login-alt {
+  margin: 12px 0 0;
+  text-align: center;
+}
+.login-alt a { color: inherit; }
 
 /* ——— Mobile chrome ——— */
 .mobile-topbar,
@@ -2486,4 +2491,13 @@ html[data-theme="dark"] {
   .settings-layout { grid-template-columns: 1fr; }
   .settings-nav { position: static; }
 }
+
+.stack { display: grid; gap: 16px; }
+.kpi-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+.kpi-value { font-size: 28px; }
+.filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: end; }
+.filters input, .filters select { min-width: 160px; }
+.settings-nav.horizontal { flex-direction: row; flex-wrap: wrap; position: static; }
+.label.check, label.check { display: flex; align-items: center; gap: 8px; }
+
 

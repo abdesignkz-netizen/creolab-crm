@@ -18,8 +18,15 @@ export function roleOf(auth: AuthContext | null) {
   return auth?.activeMembership?.role || null;
 }
 
+export function isPlatformAdmin(auth: AuthContext | null) {
+  return Boolean(auth?.user.platformAdmin);
+}
+
+export function requirePlatformAdmin(auth: AuthContext, message = "Доступно только администратору сервиса") {
+  if (!isPlatformAdmin(auth)) throw new ApiError(403, "forbidden", message);
+}
+
 export function isCompanyAdmin(auth: AuthContext | null) {
-  if (auth?.user.platformAdmin) return true;
   return isCompanyAdminRole(roleOf(auth));
 }
 
@@ -28,13 +35,12 @@ export function isManager(auth: AuthContext | null) {
 }
 
 export function seesAllCompanyRecords(auth: AuthContext | null) {
-  if (!auth?.activeMembership) return Boolean(auth?.user.platformAdmin);
+  if (!auth?.activeMembership) return false;
   return !isManager(auth);
 }
 
 export function effectivePermissions(auth: AuthContext | null): Permission[] {
   if (!auth) return [];
-  if (auth.user.platformAdmin) return Object.values(PERMISSIONS);
   const membership = auth.activeMembership;
   if (!membership) return [];
   const extra = Array.isArray(membership.permissions) ? membership.permissions : [];
@@ -45,7 +51,6 @@ export function effectivePermissions(auth: AuthContext | null): Permission[] {
 
 export function can(auth: AuthContext | null, permission: Permission): boolean {
   if (!auth) return false;
-  if (auth.user.platformAdmin) return true;
   const membership = auth.activeMembership;
   if (!membership) return false;
   const role = membership.role;
@@ -66,6 +71,12 @@ export function can(auth: AuthContext | null, permission: Permission): boolean {
 
 export function requireTenant(auth: AuthContext) {
   if (!auth.activeMembership) throw new ApiError(403, "no_tenant", "Нет активной компании");
+  if (!auth.activeMembership.active) {
+    throw new ApiError(403, "membership_suspended", "Участие в компании приостановлено");
+  }
+  if (auth.activeMembership.tenant.status !== "active") {
+    throw new ApiError(403, "tenant_suspended", "Доступ компании приостановлен");
+  }
   return auth.activeMembership;
 }
 
@@ -99,6 +110,7 @@ export function capabilities(auth: AuthContext | null) {
   return {
     role: roleOf(auth),
     roleLabel: roleOf(auth) ? ROLE_LABELS[roleOf(auth) as Role] : "",
+    platformAdmin: isPlatformAdmin(auth),
     companyAdmin: admin,
     manager,
     documents: can(auth, PERMISSIONS.manageDocuments),

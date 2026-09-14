@@ -22,6 +22,8 @@ try {
         CRM_PGLITE_DIR: join(scratch, String(index)),
         STORAGE_DIR: join(scratch, "uploads", String(index)),
         SEED_PASSWORD: "ChangeMeLocal1!",
+        PLATFORM_ADMIN_EMAIL: "",
+        PLATFORM_ADMIN_PASSWORD: "",
         WHATSAPP_SELLER_URL: "",
         WHATSAPP_SELLER_SECRET: "",
         ESF_PROVIDER: "mock",

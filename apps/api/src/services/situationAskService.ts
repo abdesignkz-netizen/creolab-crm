@@ -352,7 +352,10 @@ export async function askSituation(
     onlyImportant: input.onlyImportant ? "true" : undefined,
   });
   const snapshot = snapshotFromOverview(overview);
-  const llm = process.env.NODE_ENV === "test" ? null : await answerSituationAskWithLlm(text, snapshot);
+  const llm = process.env.NODE_ENV === "test" ? null : await answerSituationAskWithLlm(text, snapshot, {
+    prisma,
+    tenantId: auth.activeMembership?.tenantId,
+  });
   const base = llm
     ? {
         headline: llm.headline,

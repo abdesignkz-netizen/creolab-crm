@@ -328,14 +328,26 @@ export async function updateCompanyMember(
       throw new ApiError(422, "invalid", "Некорректная роль");
     }
     if (role === ROLES.platform_admin) throw new ApiError(403, "forbidden", "Нельзя назначить администратора платформы");
-    if (target.id === actor.id && role !== actor.role && isCompanyAdminRole(actor.role) && actor.role === ROLES.owner) {
-      const owners = await prisma.membership.count({
-        where: { tenantId: actor.tenantId, role: ROLES.owner, active: true, id: { not: target.id } },
-      });
-      if (owners < 1) throw new ApiError(422, "last_owner", "Нельзя снять последнего администратора компании");
-    }
     data.role = role;
     if (role === ROLES.manager) data.permissions = [];
+  }
+  if ("active" in input && data.active === false) {
+    data.active = false;
+  }
+  const nextRole = data.role ?? target.role;
+  const nextActive = data.active ?? target.active;
+  const wasAdmin = isCompanyAdminRole(target.role) && target.active;
+  const staysAdmin = isCompanyAdminRole(nextRole) && nextActive;
+  if (wasAdmin && !staysAdmin) {
+    const remaining = await prisma.membership.count({
+      where: {
+        tenantId: actor.tenantId,
+        active: true,
+        role: { in: [ROLES.owner, ROLES.director] },
+        id: { not: target.id },
+      },
+    });
+    if (remaining < 1) throw new ApiError(422, "last_admin", "Нельзя убрать последнего администратора или директора компании");
   }
   const updated = await prisma.membership.update({ where: { id: target.id }, data });
   return {

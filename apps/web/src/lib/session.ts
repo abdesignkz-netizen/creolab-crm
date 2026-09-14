@@ -3,6 +3,7 @@ import { createContext, useContext } from "react";
 export type Capabilities = {
   role: string | null;
   roleLabel: string;
+  platformAdmin: boolean;
   companyAdmin: boolean;
   manager: boolean;
   documents: boolean;
@@ -18,6 +19,7 @@ export type Capabilities = {
 export const emptyCaps: Capabilities = {
   role: null,
   roleLabel: "",
+  platformAdmin: false,
   companyAdmin: false,
   manager: false,
   documents: false,

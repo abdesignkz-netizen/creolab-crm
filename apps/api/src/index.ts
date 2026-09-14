@@ -5,6 +5,11 @@ import { ensureUploadsRoot } from "./lib/storage.ts";
 import { promoteWebsiteFormsToLive } from "./services/integrationCatalogService.ts";
 
 const prisma = await createPrismaClient();
+const { ensurePlatformAdmin } = await import("./services/platformAdminBootstrap.ts");
+const platformAdmin = await ensurePlatformAdmin(prisma);
+if (platformAdmin.created || platformAdmin.updated) {
+  console.log("Service administrator account is ready");
+}
 const promoted = await promoteWebsiteFormsToLive(prisma);
 if (promoted.updated > 0) {
   console.log(`Website form integrations switched to live mode: ${promoted.updated}`);

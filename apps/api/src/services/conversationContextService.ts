@@ -657,6 +657,8 @@ export async function analyzeConversationContext(
         status: a.status,
         scheduledAt: a.scheduledAt?.toISOString() || null,
       })),
+      prisma,
+      tenantId: tid,
     });
     if (llm) {
       llmUsed = true;

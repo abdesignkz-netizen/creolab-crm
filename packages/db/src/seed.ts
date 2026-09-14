@@ -11,6 +11,9 @@ export async function seedDatabase() {
   const prisma = await createPrismaClient();
   const password = process.env.SEED_PASSWORD || "ChangeMeLocal1!";
   const passwordHash = await argon2.hash(password);
+  const platformEmail = String(process.env.PLATFORM_ADMIN_EMAIL || "creolabkz@gmail.com").trim().toLowerCase();
+  const platformPassword = String(process.env.PLATFORM_ADMIN_PASSWORD || password);
+  const platformPasswordHash = process.env.PLATFORM_ADMIN_PASSWORD ? await argon2.hash(platformPassword) : passwordHash;
 
   const starter = await prisma.plan.upsert({
     where: { code: "starter" },
@@ -31,6 +34,16 @@ export async function seedDatabase() {
         email: "platform@creolab.example",
         passwordHash,
         name: "Администратор платформы",
+        platformAdmin: true,
+      },
+    }),
+    service: await prisma.user.upsert({
+      where: { email: platformEmail },
+      update: { passwordHash: platformPasswordHash, name: "Администратор сервиса", platformAdmin: true, status: "active" },
+      create: {
+        email: platformEmail,
+        passwordHash: platformPasswordHash,
+        name: "Администратор сервиса",
         platformAdmin: true,
       },
     }),

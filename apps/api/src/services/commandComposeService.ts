@@ -184,6 +184,8 @@ export async function composeCommandClientDraft(input: {
     interest,
     lastClientMessage: fact?.lastClientMessage,
     history: fact?.history,
+    prisma: input.prisma,
+    tenantId: input.tenantId,
   });
   if (llmText && acceptPersonalizedDraft({ taskText: input.taskText, firstName, draft: llmText })) {
     return llmText;
@@ -252,6 +254,8 @@ export async function composeCommandDraftsForContacts(input: {
       interest: fact?.interest,
       lastClientMessage: fact?.lastClientMessage,
       history: fact?.history,
+      prisma: input.prisma,
+      tenantId: input.tenantId,
     });
     if (llmText && acceptPersonalizedDraft({ taskText, firstName: fact?.firstName, draft: llmText })) {
       drafts = [{ contactId: drafts[0].contactId, text: llmText }];
@@ -264,6 +268,8 @@ export async function composeCommandDraftsForContacts(input: {
     clientAsk: clientFacingAskFromTask(taskText) || clientAskFromStaffTask(taskText),
     kind: inferCampaignOfferKind(taskText, sharedDraft),
     hasFile: Boolean(input.hasFile),
+    prisma: input.prisma,
+    tenantId: input.tenantId,
     recipients: drafts.map((row) => {
       const fact = facts.find((item) => item.contactId === row.contactId);
       return {

@@ -69,6 +69,7 @@ import {
   authFromAccessToken,
   authFromSessionToken,
   login,
+  loginPlatformAdmin,
   logout,
   publicAuth,
   refreshMobile,
@@ -102,7 +103,6 @@ import {
   listNotifications,
   listTasks,
   markNotificationRead,
-  platformTenants,
   reopenTask,
   setConversationMode,
   statsSummary,
@@ -198,6 +198,38 @@ import {
   sellerHealthFor,
   syncSellerLeads,
 } from "./services/sellerLink.ts";
+import { acceptInvitation, previewInvitation } from "./services/invitationService.ts";
+import {
+  createPlatformCompany,
+  getPlatformCompany,
+  getPlatformServiceSettings,
+  invitePlatformMember,
+  listCompanyMembers,
+  listPlatformAudit,
+  listPlatformCompanies,
+  listPlatformMembers,
+  platformOverview,
+  repeatPlatformInvitation,
+  revokeMembershipSessions,
+  revokePlatformInvitation,
+  setPlatformCompanyStatus,
+  updatePlatformCompany,
+  updatePlatformMembership,
+  updatePlatformServiceSettings,
+} from "./services/platformAdminService.ts";
+import {
+  createTenantConnection,
+  disableTenantConnection,
+  listIntegrationEvents,
+  listTenantConnections,
+  rotateTenantWebhookSecret,
+  saveTenantAiSettings,
+  testTenantConnection,
+  updateTenantConnection,
+} from "./services/platformIntegrationService.ts";
+import { listPlatformCatalog, updatePlatformIntegrationType } from "./services/platformCatalog.ts";
+import { decryptSecret } from "./lib/secretBox.ts";
+import { safeEqual } from "./lib/hash.ts";
 import type { AuthContext } from "./lib/types.ts";
 
 const rateBuckets = new Map<string, { count: number; reset: number }>();
@@ -297,7 +329,7 @@ export function createApp(prisma: PrismaClient) {
     res.status(204).end();
   });
 
-  async function requireAuth(req: express.Request): Promise<AuthContext> {
+  async function authenticate(req: express.Request): Promise<AuthContext> {
     const tenantHeader = String(req.header("x-tenant-id") || req.query.tenantId || "");
     const cookie = req.cookies?.crm_session as string | undefined;
     const bearer = String(req.header("authorization") || "").replace(/^Bearer\s+/i, "");
@@ -306,8 +338,52 @@ export function createApp(prisma: PrismaClient) {
     throw new ApiError(401, "unauthorized", "Нужно войти");
   }
 
+  async function optionalAuth(req: express.Request): Promise<AuthContext | null> {
+    try {
+      return await authenticate(req);
+    } catch {
+      return null;
+    }
+  }
+
+  async function requireAuth(req: express.Request): Promise<AuthContext> {
+    const auth = await authenticate(req);
+    const path = req.path || "";
+    if (path.startsWith("/api/v1/admin") || path.startsWith("/api/v1/invitations") || path.startsWith("/api/v1/me") || path.startsWith("/api/v1/auth")) {
+      return auth;
+    }
+    if (auth.activeMembership && !auth.activeMembership.active) {
+      throw new ApiError(403, "membership_suspended", "Участие в компании приостановлено");
+    }
+    if (auth.activeMembership && auth.activeMembership.tenant.status !== "active") {
+      throw new ApiError(403, "tenant_suspended", "Доступ компании приостановлен");
+    }
+    return auth;
+  }
+
   app.post("/api/v1/auth/login", json, async (req, res) => {
     const result = await login(prisma, req.body, {
+      userAgent: String(req.header("user-agent") || ""),
+      ip: String(req.ip || req.socket.remoteAddress || ""),
+    });
+    if (result.auth.client === "web") {
+      res.cookie("crm_session", result.sessionToken, {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: config.cookieSecure,
+        path: "/",
+        maxAge: 12 * 60 * 60 * 1000,
+      });
+    }
+    res.json({
+      user: publicAuth(result.auth),
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
+    });
+  });
+
+  app.post("/api/v1/auth/platform-login", json, async (req, res) => {
+    const result = await loginPlatformAdmin(prisma, req.body, {
       userAgent: String(req.header("user-agent") || ""),
       ip: String(req.ip || req.socket.remoteAddress || ""),
     });
@@ -1506,8 +1582,147 @@ export function createApp(prisma: PrismaClient) {
     res.json(await aiSandbox(prisma, await requireAuth(req), String(req.body?.message || "")));
   });
 
+  app.get("/api/v1/invitations/:token", async (req, res) => {
+    res.json(await previewInvitation(prisma, req.params.token));
+  });
+
+  app.post("/api/v1/invitations/:token/accept", json, async (req, res) => {
+    const result = await acceptInvitation(prisma, req.params.token, {
+      password: req.body?.password,
+      name: req.body?.name,
+      auth: await optionalAuth(req),
+    });
+    res.json(result);
+  });
+
+  app.get("/api/v1/admin/overview", async (req, res) => {
+    res.json(await platformOverview(prisma, await requireAuth(req)));
+  });
+
   app.get("/api/v1/admin/tenants", async (req, res) => {
-    res.json({ items: await platformTenants(prisma, await requireAuth(req)) });
+    res.json(await listPlatformCompanies(prisma, await requireAuth(req), req.query as Record<string, string>));
+  });
+
+  app.post("/api/v1/admin/tenants", json, async (req, res) => {
+    res.status(201).json(await createPlatformCompany(prisma, await requireAuth(req), req.body || {}));
+  });
+
+  app.get("/api/v1/admin/tenants/:id", async (req, res) => {
+    res.json(await getPlatformCompany(prisma, await requireAuth(req), req.params.id));
+  });
+
+  app.patch("/api/v1/admin/tenants/:id", json, async (req, res) => {
+    res.json(await updatePlatformCompany(prisma, await requireAuth(req), req.params.id, req.body || {}));
+  });
+
+  app.post("/api/v1/admin/tenants/:id/suspend", async (req, res) => {
+    res.json(await setPlatformCompanyStatus(prisma, await requireAuth(req), req.params.id, "suspended"));
+  });
+
+  app.post("/api/v1/admin/tenants/:id/restore", async (req, res) => {
+    res.json(await setPlatformCompanyStatus(prisma, await requireAuth(req), req.params.id, "active"));
+  });
+
+  app.get("/api/v1/admin/tenants/:id/members", async (req, res) => {
+    res.json(await listCompanyMembers(prisma, await requireAuth(req), req.params.id));
+  });
+
+  app.post("/api/v1/admin/tenants/:id/invitations", json, async (req, res) => {
+    res.status(201).json(await invitePlatformMember(prisma, await requireAuth(req), req.params.id, req.body || {}));
+  });
+
+  app.get("/api/v1/admin/tenants/:id/integrations", async (req, res) => {
+    const auth = await requireAuth(req);
+    if (!auth.user.platformAdmin) throw new ApiError(403, "forbidden", "Доступно только администратору сервиса");
+    res.json(await listTenantConnections(prisma, req.params.id));
+  });
+
+  app.post("/api/v1/admin/tenants/:id/integrations", json, async (req, res) => {
+    const auth = await requireAuth(req);
+    if (!auth.user.platformAdmin) throw new ApiError(403, "forbidden", "Доступно только администратору сервиса");
+    res.status(201).json(await createTenantConnection(prisma, auth.user.id, req.params.id, req.body || {}));
+  });
+
+  app.patch("/api/v1/admin/tenants/:id/integrations/:integrationId", json, async (req, res) => {
+    const auth = await requireAuth(req);
+    if (!auth.user.platformAdmin) throw new ApiError(403, "forbidden", "Доступно только администратору сервиса");
+    res.json(await updateTenantConnection(prisma, auth.user.id, req.params.id, req.params.integrationId, req.body || {}));
+  });
+
+  app.post("/api/v1/admin/tenants/:id/integrations/:integrationId/test", async (req, res) => {
+    const auth = await requireAuth(req);
+    if (!auth.user.platformAdmin) throw new ApiError(403, "forbidden", "Доступно только администратору сервиса");
+    res.json(await testTenantConnection(prisma, req.params.id, req.params.integrationId, auth));
+  });
+
+  app.post("/api/v1/admin/tenants/:id/integrations/:integrationId/disable", json, async (req, res) => {
+    const auth = await requireAuth(req);
+    if (!auth.user.platformAdmin) throw new ApiError(403, "forbidden", "Доступно только администратору сервиса");
+    res.json(await disableTenantConnection(prisma, auth.user.id, req.params.id, req.params.integrationId, req.body?.disabled !== false));
+  });
+
+  app.post("/api/v1/admin/tenants/:id/integrations/:integrationId/rotate-secret", async (req, res) => {
+    const auth = await requireAuth(req);
+    if (!auth.user.platformAdmin) throw new ApiError(403, "forbidden", "Доступно только администратору сервиса");
+    res.json(await rotateTenantWebhookSecret(prisma, auth.user.id, req.params.id, req.params.integrationId));
+  });
+
+  app.get("/api/v1/admin/tenants/:id/integrations/:integrationId/events", async (req, res) => {
+    const auth = await requireAuth(req);
+    if (!auth.user.platformAdmin) throw new ApiError(403, "forbidden", "Доступно только администратору сервиса");
+    res.json(await listIntegrationEvents(prisma, req.params.id, req.params.integrationId));
+  });
+
+  app.patch("/api/v1/admin/tenants/:id/ai", json, async (req, res) => {
+    const auth = await requireAuth(req);
+    if (!auth.user.platformAdmin) throw new ApiError(403, "forbidden", "Доступно только администратору сервиса");
+    res.json(await saveTenantAiSettings(prisma, auth.user.id, req.params.id, req.body || {}));
+  });
+
+  app.get("/api/v1/admin/members", async (req, res) => {
+    res.json(await listPlatformMembers(prisma, await requireAuth(req), req.query as Record<string, string>));
+  });
+
+  app.patch("/api/v1/admin/members/:id", json, async (req, res) => {
+    res.json(await updatePlatformMembership(prisma, await requireAuth(req), req.params.id, req.body || {}));
+  });
+
+  app.post("/api/v1/admin/members/:id/revoke-sessions", async (req, res) => {
+    res.json(await revokeMembershipSessions(prisma, await requireAuth(req), req.params.id));
+  });
+
+  app.post("/api/v1/admin/invitations/:id/repeat", async (req, res) => {
+    res.json(await repeatPlatformInvitation(prisma, await requireAuth(req), req.params.id));
+  });
+
+  app.post("/api/v1/admin/invitations/:id/revoke", async (req, res) => {
+    res.json(await revokePlatformInvitation(prisma, await requireAuth(req), req.params.id));
+  });
+
+  app.get("/api/v1/admin/integrations/catalog", async (req, res) => {
+    const auth = await requireAuth(req);
+    if (!auth.user.platformAdmin) throw new ApiError(403, "forbidden", "Доступно только администратору сервиса");
+    res.json({ items: await listPlatformCatalog(prisma) });
+  });
+
+  app.patch("/api/v1/admin/integrations/catalog/:type", json, async (req, res) => {
+    const auth = await requireAuth(req);
+    if (!auth.user.platformAdmin) throw new ApiError(403, "forbidden", "Доступно только администратору сервиса");
+    const row = await updatePlatformIntegrationType(prisma, req.params.type, req.body || {});
+    if (!row) throw new ApiError(404, "not_found", "Тип интеграции не найден");
+    res.json(row);
+  });
+
+  app.get("/api/v1/admin/settings", async (req, res) => {
+    res.json(await getPlatformServiceSettings(prisma, await requireAuth(req)));
+  });
+
+  app.patch("/api/v1/admin/settings", json, async (req, res) => {
+    res.json(await updatePlatformServiceSettings(prisma, await requireAuth(req), req.body || {}));
+  });
+
+  app.get("/api/v1/admin/audit", async (req, res) => {
+    res.json(await listPlatformAudit(prisma, await requireAuth(req), req.query as Record<string, string>));
   });
 
   app.post("/api/v1/integrations/:integrationId/events", rawJson, async (req, res) => {
@@ -1525,7 +1740,24 @@ export function createApp(prisma: PrismaClient) {
 
   app.post("/api/v1/integrations/seller-events", json, async (req, res) => {
     const secret = String(req.header("authorization") || "").replace(/^Bearer\s+/i, "");
-    if (!config.crmBridgeSecret || secret !== config.crmBridgeSecret) {
+    const globalOk = Boolean(config.crmBridgeSecret && secret && safeEqual(secret, config.crmBridgeSecret));
+    let tenantSecretOk = false;
+    if (!globalOk && secret) {
+      const rows = await prisma.integration.findMany({ where: { type: "whatsapp_seller" } });
+      for (const row of rows) {
+        const schema = (row.schemaJson || {}) as { secretEnc?: string };
+        if (!schema.secretEnc) continue;
+        try {
+          if (safeEqual(secret, decryptSecret(schema.secretEnc))) {
+            tenantSecretOk = true;
+            break;
+          }
+        } catch {
+          /* ignore undecryptable */
+        }
+      }
+    }
+    if (!globalOk && !tenantSecretOk) {
       throw new ApiError(401, "unauthorized", "Мост не принят");
     }
     const result = await ingestSellerBridgeEvent(prisma, req.body);

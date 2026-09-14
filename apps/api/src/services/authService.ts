@@ -60,8 +60,12 @@ function toAuth(
   client: "web" | "mobile",
   tenantId?: string | null,
 ): AuthContext {
+  const requested = tenantId
+    ? user.memberships.find((item) => item.tenantId === tenantId)
+    : undefined;
   const active =
-    user.memberships.find((item) => item.active && item.tenantId === tenantId) ||
+    requested ||
+    user.memberships.find((item) => item.active && item.tenant.status === "active") ||
     user.memberships.find((item) => item.active) ||
     null;
   return {
@@ -179,6 +183,19 @@ export async function login(
     accessToken,
     cookieName: "crm_session",
   };
+}
+
+export async function loginPlatformAdmin(
+  prisma: PrismaClient,
+  input: unknown,
+  meta: { userAgent?: string; ip?: string } = {},
+) {
+  const result = await login(prisma, input, meta);
+  if (!result.auth.user.platformAdmin) {
+    await logout(prisma, result.auth.sessionId);
+    throw new ApiError(403, "forbidden", "Эта страница только для администратора сервиса");
+  }
+  return result;
 }
 
 export async function logout(prisma: PrismaClient, sessionId: string, all = false, userId?: string) {

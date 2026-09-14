@@ -31,6 +31,9 @@ async function applyLivePostgresPatches(prisma: PrismaClient) {
     ...ACCOUNT_DOMAIN_SQL.split(";")
       .map((s) => s.trim())
       .filter(Boolean),
+    ...PLATFORM_DOMAIN_SQL.split(";")
+      .map((s) => s.trim())
+      .filter(Boolean),
   ];
   for (const sql of statements) {
     try {
@@ -504,6 +507,7 @@ async function applyAdditiveSchema(pglite: PGlite) {
 
     ${DOCUMENT_DOMAIN_SQL}
     ${ACCOUNT_DOMAIN_SQL}
+    ${PLATFORM_DOMAIN_SQL}
   `);
 }
 
@@ -808,6 +812,35 @@ const ACCOUNT_DOMAIN_SQL = `
     ALTER TABLE "Session" ADD COLUMN IF NOT EXISTS "userAgent" TEXT;
     ALTER TABLE "Session" ADD COLUMN IF NOT EXISTS "ip" TEXT;
     ALTER TABLE "Session" ADD COLUMN IF NOT EXISTS "lastSeenAt" TIMESTAMP(3);
+`;
+
+const PLATFORM_DOMAIN_SQL = `
+    ALTER TABLE "Invitation" ADD COLUMN IF NOT EXISTS "revokedAt" TIMESTAMP(3);
+    ALTER TABLE "Invitation" ADD COLUMN IF NOT EXISTS "name" TEXT;
+    ALTER TABLE "Invitation" ADD COLUMN IF NOT EXISTS "phone" TEXT;
+
+    CREATE TABLE IF NOT EXISTS "PlatformSetting" (
+      "id" TEXT NOT NULL,
+      "key" TEXT NOT NULL,
+      "valueJson" JSONB NOT NULL DEFAULT '{}',
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "PlatformSetting_pkey" PRIMARY KEY ("id")
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS "PlatformSetting_key_key" ON "PlatformSetting"("key");
+
+    CREATE TABLE IF NOT EXISTS "PlatformIntegrationType" (
+      "id" TEXT NOT NULL,
+      "type" TEXT NOT NULL,
+      "title" TEXT NOT NULL,
+      "description" TEXT NOT NULL DEFAULT '',
+      "purpose" TEXT NOT NULL DEFAULT '',
+      "available" BOOLEAN NOT NULL DEFAULT true,
+      "defaultSettingsJson" JSONB NOT NULL DEFAULT '{}',
+      "allowedParamsJson" JSONB NOT NULL DEFAULT '{}',
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "PlatformIntegrationType_pkey" PRIMARY KEY ("id")
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS "PlatformIntegrationType_type_key" ON "PlatformIntegrationType"("type");
 `;
 
 export async function createPrismaClient(): Promise<PrismaClient> {

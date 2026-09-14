@@ -42,6 +42,8 @@ export function createApiClient(options: ClientOptions) {
     request,
     login: (email: string, password: string, client: "web" | "mobile" = "web") =>
       request("/api/v1/auth/login", { method: "POST", body: JSON.stringify({ email, password, client }) }),
+    platformLogin: (email: string, password: string, client: "web" | "mobile" = "web") =>
+      request("/api/v1/auth/platform-login", { method: "POST", body: JSON.stringify({ email, password, client }) }),
     me: () => request("/api/v1/me"),
     updateProfile: (body: Record<string, unknown>) =>
       request("/api/v1/me/profile", { method: "PATCH", body: JSON.stringify(body) }),
@@ -507,6 +509,76 @@ export function createApiClient(options: ClientOptions) {
     knowledge: () => request("/api/v1/knowledge/current"),
     sandbox: (message: string) =>
       request("/api/v1/ai/sandbox", { method: "POST", body: JSON.stringify({ message }) }),
-    adminTenants: () => request("/api/v1/admin/tenants"),
+    adminTenants: (query?: Record<string, string | number | undefined>) => {
+      const params = new URLSearchParams();
+      Object.entries(query || {}).forEach(([key, value]) => {
+        if (value != null && value !== "") params.set(key, String(value));
+      });
+      const qs = params.toString();
+      return request(`/api/v1/admin/tenants${qs ? `?${qs}` : ""}`);
+    },
+    adminOverview: () => request("/api/v1/admin/overview"),
+    adminCompany: (id: string) => request(`/api/v1/admin/tenants/${id}`),
+    adminCreateCompany: (body: Record<string, unknown>) =>
+      request("/api/v1/admin/tenants", { method: "POST", body: JSON.stringify(body) }),
+    adminUpdateCompany: (id: string, body: Record<string, unknown>) =>
+      request(`/api/v1/admin/tenants/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+    adminSuspendCompany: (id: string) => request(`/api/v1/admin/tenants/${id}/suspend`, { method: "POST" }),
+    adminRestoreCompany: (id: string) => request(`/api/v1/admin/tenants/${id}/restore`, { method: "POST" }),
+    adminCompanyMembers: (id: string) => request(`/api/v1/admin/tenants/${id}/members`),
+    adminInviteMember: (tenantId: string, body: Record<string, unknown>) =>
+      request(`/api/v1/admin/tenants/${tenantId}/invitations`, { method: "POST", body: JSON.stringify(body) }),
+    adminCompanyIntegrations: (id: string) => request(`/api/v1/admin/tenants/${id}/integrations`),
+    adminCreateCompanyIntegration: (tenantId: string, body: Record<string, unknown>) =>
+      request(`/api/v1/admin/tenants/${tenantId}/integrations`, { method: "POST", body: JSON.stringify(body) }),
+    adminUpdateCompanyIntegration: (tenantId: string, integrationId: string, body: Record<string, unknown>) =>
+      request(`/api/v1/admin/tenants/${tenantId}/integrations/${integrationId}`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+    adminTestCompanyIntegration: (tenantId: string, integrationId: string) =>
+      request(`/api/v1/admin/tenants/${tenantId}/integrations/${integrationId}/test`, { method: "POST" }),
+    adminDisableCompanyIntegration: (tenantId: string, integrationId: string, disabled = true) =>
+      request(`/api/v1/admin/tenants/${tenantId}/integrations/${integrationId}/disable`, {
+        method: "POST",
+        body: JSON.stringify({ disabled }),
+      }),
+    adminRotateCompanyWebhook: (tenantId: string, integrationId: string) =>
+      request(`/api/v1/admin/tenants/${tenantId}/integrations/${integrationId}/rotate-secret`, { method: "POST" }),
+    adminCompanyIntegrationEvents: (tenantId: string, integrationId: string) =>
+      request(`/api/v1/admin/tenants/${tenantId}/integrations/${integrationId}/events`),
+    adminUpdateCompanyAi: (tenantId: string, body: Record<string, unknown>) =>
+      request(`/api/v1/admin/tenants/${tenantId}/ai`, { method: "PATCH", body: JSON.stringify(body) }),
+    adminMembers: (query?: Record<string, string | number | undefined>) => {
+      const params = new URLSearchParams();
+      Object.entries(query || {}).forEach(([key, value]) => {
+        if (value != null && value !== "") params.set(key, String(value));
+      });
+      const qs = params.toString();
+      return request(`/api/v1/admin/members${qs ? `?${qs}` : ""}`);
+    },
+    adminUpdateMember: (id: string, body: Record<string, unknown>) =>
+      request(`/api/v1/admin/members/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+    adminRevokeMemberSessions: (id: string) =>
+      request(`/api/v1/admin/members/${id}/revoke-sessions`, { method: "POST" }),
+    adminRepeatInvitation: (id: string) => request(`/api/v1/admin/invitations/${id}/repeat`, { method: "POST" }),
+    adminRevokeInvitation: (id: string) => request(`/api/v1/admin/invitations/${id}/revoke`, { method: "POST" }),
+    adminIntegrationCatalog: () => request("/api/v1/admin/integrations/catalog"),
+    adminUpdateIntegrationType: (type: string, body: Record<string, unknown>) =>
+      request(`/api/v1/admin/integrations/catalog/${type}`, { method: "PATCH", body: JSON.stringify(body) }),
+    adminSettings: () => request("/api/v1/admin/settings"),
+    adminUpdateSettings: (body: Record<string, unknown>) =>
+      request("/api/v1/admin/settings", { method: "PATCH", body: JSON.stringify(body) }),
+    adminAudit: (query?: Record<string, string | number | undefined>) => {
+      const params = new URLSearchParams();
+      Object.entries(query || {}).forEach(([key, value]) => {
+        if (value != null && value !== "") params.set(key, String(value));
+      });
+      const qs = params.toString();
+      return request(`/api/v1/admin/audit${qs ? `?${qs}` : ""}`);
+    },
+    invitationPreview: (token: string) => request(`/api/v1/invitations/${token}`),
+    acceptInvitation: (token: string, body: Record<string, unknown>) =>
+      request(`/api/v1/invitations/${token}/accept`, { method: "POST", body: JSON.stringify(body) }),
   };
 }

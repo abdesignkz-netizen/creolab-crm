@@ -1,6 +1,10 @@
 import { CALLS_ENABLED } from "../lib/featureFlags.ts";
+import type { PrismaClient } from "@creolab/db";
+import { getEffectiveLlmConfig } from "./runtimeSettings.ts";
 
 const DEFAULT_ANYMODEL_BASE_URL = "https://anymodel.org/v1";
+
+export type LlmRuntime = { prisma?: PrismaClient | null; tenantId?: string | null };
 
 function llmConfig() {
   const anyModelKey = String(process.env.ANYMODEL_API_KEY || "").trim();
@@ -15,14 +19,23 @@ function llmConfig() {
   return { apiKey, baseUrl: baseUrl.replace(/\/$/, ""), model };
 }
 
+async function resolveLlm(runtime?: LlmRuntime) {
+  if (runtime?.prisma && runtime.tenantId) {
+    return getEffectiveLlmConfig(runtime.prisma, runtime.tenantId);
+  }
+  return llmConfig();
+}
+
 /**
  * Optional LLM client. Used only to refine StructuredCommand JSON
  * or ConversationAnalysis JSON. Never calls sendMessage / messaging providers.
  */
-export async function refineCommandWithLlm(rawText: string, ruleParsed: Record<string, unknown>) {
-  const apiKey = process.env.OPENAI_API_KEY || process.env.ANYMODEL_API_KEY;
-  const baseUrl = process.env.ANYMODEL_BASE_URL || process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
-  const model = process.env.ANYMODEL_MODEL || process.env.OPENAI_MODEL || "gpt-4o-mini";
+export async function refineCommandWithLlm(
+  rawText: string,
+  ruleParsed: Record<string, unknown>,
+  runtime?: LlmRuntime,
+) {
+  const { apiKey, baseUrl, model } = await resolveLlm(runtime);
   if (!apiKey) return null;
 
   const taskTypes = CALLS_ENABLED
@@ -74,10 +87,10 @@ export async function refineConversationContextWithLlm(input: {
   dealStage: string | null;
   openTaskTitles: string[];
   existingAgreements: Array<{ id: string; type: string; status: string; scheduledAt: string | null }>;
+  prisma?: PrismaClient | null;
+  tenantId?: string | null;
 }) {
-  const apiKey = process.env.OPENAI_API_KEY || process.env.ANYMODEL_API_KEY;
-  const baseUrl = process.env.ANYMODEL_BASE_URL || process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
-  const model = process.env.ANYMODEL_MODEL || process.env.OPENAI_MODEL || "gpt-4o-mini";
+  const { apiKey, baseUrl, model } = await resolveLlm(input);
   if (!apiKey) return null;
 
   try {
@@ -138,10 +151,10 @@ export async function refineResultNextActionWithLlm(input: {
   contactName: string | null;
   inquiryTitle: string | null;
   draft: unknown;
+  prisma?: PrismaClient | null;
+  tenantId?: string | null;
 }) {
-  const apiKey = process.env.OPENAI_API_KEY || process.env.ANYMODEL_API_KEY;
-  const baseUrl = process.env.ANYMODEL_BASE_URL || process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
-  const model = process.env.ANYMODEL_MODEL || process.env.OPENAI_MODEL || "gpt-4o-mini";
+  const { apiKey, baseUrl, model } = await resolveLlm(input);
   if (!apiKey) return null;
 
   try {
@@ -196,10 +209,9 @@ suggestedDealStage только: need_identified|proposal_sent|negotiation|contr
 export async function refineRequestAnalysisWithLlm(
   input: Record<string, unknown>,
   draft: Record<string, unknown>,
+  runtime?: LlmRuntime,
 ) {
-  const apiKey = process.env.OPENAI_API_KEY || process.env.ANYMODEL_API_KEY;
-  const baseUrl = process.env.ANYMODEL_BASE_URL || process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
-  const model = process.env.ANYMODEL_MODEL || process.env.OPENAI_MODEL || "gpt-4o-mini";
+  const { apiKey, baseUrl, model } = await resolveLlm(runtime);
   if (!apiKey) return null;
 
   try {
@@ -252,6 +264,8 @@ export async function refineCampaignRecipientDraftsWithLlm(input: {
   clientAsk?: string | null;
   kind: string;
   hasFile: boolean;
+  prisma?: PrismaClient | null;
+  tenantId?: string | null;
   recipients: Array<{
     id: string;
     firstName: string | null;
@@ -260,9 +274,7 @@ export async function refineCampaignRecipientDraftsWithLlm(input: {
     draft: string;
   }>;
 }) {
-  const apiKey = process.env.OPENAI_API_KEY || process.env.ANYMODEL_API_KEY;
-  const baseUrl = process.env.ANYMODEL_BASE_URL || process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
-  const model = process.env.ANYMODEL_MODEL || process.env.OPENAI_MODEL || "gpt-4o-mini";
+  const { apiKey, baseUrl, model } = await resolveLlm(input);
   if (!apiKey || input.recipients.length === 0 || input.recipients.length > MAX_CAMPAIGN_LLM_RECIPIENTS) return null;
 
   try {
@@ -321,8 +333,10 @@ export async function composeClientMessageWithLlm(input: {
   interest?: string | null;
   lastClientMessage?: string | null;
   history?: Array<{ role: string; content: string }>;
+  prisma?: PrismaClient | null;
+  tenantId?: string | null;
 }) {
-  const { apiKey, baseUrl, model } = llmConfig();
+  const { apiKey, baseUrl, model } = await resolveLlm(input);
   const instruction = String(input.instruction || "").trim();
   if (!apiKey || !instruction) return null;
 
@@ -403,8 +417,9 @@ export type SituationAskLlmAnswer = {
 export async function answerSituationAskWithLlm(
   question: string,
   snapshot: Record<string, unknown>,
+  runtime?: LlmRuntime,
 ): Promise<SituationAskLlmAnswer | null> {
-  const { apiKey, baseUrl, model } = llmConfig();
+  const { apiKey, baseUrl, model } = await resolveLlm(runtime);
   if (!apiKey) return null;
   try {
     const response = await fetch(`${baseUrl}/chat/completions`, {

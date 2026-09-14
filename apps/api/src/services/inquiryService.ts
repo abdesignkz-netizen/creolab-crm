@@ -4,7 +4,7 @@ import { integrationEventSchema, validateClientPhone } from "@creolab/contracts"
 import { ApiError } from "../errors.ts";
 import { hmacSha256Hex, safeEqual, sha256 } from "../lib/hash.ts";
 import type { AuthContext } from "../lib/types.ts";
-import { andWhere, assertInquiryVisible, inquiryAccessWhere, isManager, managerInquiryWriteFields, seesAllCompanyRecords } from "../lib/access.ts";
+import { andWhere, assertInquiryVisible, inquiryAccessWhere, isManager, managerInquiryWriteFields, requireTenant, seesAllCompanyRecords } from "../lib/access.ts";
 import { writeActivity } from "./contactService.ts";
 import { inferClientInterest } from "./contactInterestService.ts";
 import { periodLabel, resolvePeriodRange, type PeriodPreset } from "./periodRange.ts";
@@ -16,13 +16,6 @@ const ACTIVE_WHATSAPP_INQUIRY = ["new", "accepted", "in_progress", "waiting_clie
 
 function hashPayload(value: unknown) {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
-}
-
-function requireTenant(auth: AuthContext) {
-  if (!auth.activeMembership) {
-    throw new ApiError(403, "no_tenant", "Нет активной компании");
-  }
-  return auth.activeMembership;
 }
 
 async function defaultAssignee(prisma: PrismaClient, tenantId: string, preferred?: string | null) {
@@ -561,7 +554,17 @@ export async function submitPublicForm(
     where: { publicKey },
     include: { integration: true },
   });
-  if (!form || !form.active || form.integration.status !== "active") {
+  if (!form || !form.active) {
+    throw new ApiError(404, "not_found", "Форма недоступна");
+  }
+  const tenant = await prisma.tenant.findUnique({ where: { id: form.tenantId }, select: { status: true } });
+  if (!tenant || tenant.status !== "active") {
+    throw new ApiError(403, "tenant_suspended", "Компания приостановлена, заявка не принята");
+  }
+  if (form.integration.status === "disabled") {
+    throw new ApiError(403, "integration_disabled", "Интеграция отключена, заявка не принята");
+  }
+  if (form.integration.status !== "active") {
     throw new ApiError(404, "not_found", "Форма недоступна");
   }
   // honeypot — silent success, no lead
@@ -680,7 +683,17 @@ export async function ingestIntegrationEvent(
   headers: { signature?: string; timestamp?: string; authorization?: string },
 ) {
   const integration = await prisma.integration.findUnique({ where: { id: integrationId } });
-  if (!integration || integration.type !== "webhook" || integration.status !== "active") {
+  if (!integration || integration.type !== "webhook") {
+    throw new ApiError(404, "not_found", "Интеграция не найдена");
+  }
+  const tenant = await prisma.tenant.findUnique({ where: { id: integration.tenantId }, select: { status: true } });
+  if (!tenant || tenant.status !== "active") {
+    throw new ApiError(403, "tenant_suspended", "Компания приостановлена, событие не принято");
+  }
+  if (integration.status === "disabled") {
+    throw new ApiError(403, "integration_disabled", "Интеграция отключена, событие не принято");
+  }
+  if (integration.status !== "active") {
     throw new ApiError(404, "not_found", "Интеграция не найдена");
   }
   const timestamp = Number(headers.timestamp || 0);

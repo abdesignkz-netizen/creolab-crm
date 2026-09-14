@@ -330,7 +330,10 @@ export async function parseTaskCommand(
   requireManageTasks(auth);
   if (!auth.activeMembership) throw new ApiError(403, "no_tenant", "Нет активной компании");
   let command = parseRules(text);
-  const llm = await refineCommandWithLlm(text, command as unknown as Record<string, unknown>);
+  const llm = await refineCommandWithLlm(text, command as unknown as Record<string, unknown>, {
+    prisma,
+    tenantId: auth.activeMembership.tenantId,
+  });
   command = mergeLlm(command, llm);
 
   let clients: Array<Record<string, unknown>> = [];

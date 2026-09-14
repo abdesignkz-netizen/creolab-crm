@@ -82,6 +82,15 @@ export async function authForScheduledTask(
 }
 
 export async function processScheduledTask(prisma: PrismaClient, action: ScheduledTaskAction) {
+  const tenant = await prisma.tenant.findUnique({ where: { id: action.tenantId }, select: { status: true } });
+  if (!tenant || tenant.status !== "active") {
+    await prisma.scheduledAction.update({
+      where: { id: action.id },
+      data: { state: "canceled", cancelReason: "tenant_suspended" },
+    });
+    return { skipped: true as const, reason: "tenant_suspended" };
+  }
+
   const task = await prisma.task.findFirst({
     where: { id: action.parentId, tenantId: action.tenantId },
   });

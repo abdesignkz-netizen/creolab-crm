@@ -154,6 +154,15 @@ export async function processDueScheduledActions(prisma: PrismaClient) {
   for (const item of due) {
     if (!(await claimDueAction(prisma, item.id, item.version))) continue;
 
+    const tenant = await prisma.tenant.findUnique({ where: { id: item.tenantId }, select: { status: true } });
+    if (!tenant || tenant.status !== "active") {
+      await prisma.scheduledAction.update({
+        where: { id: item.id },
+        data: { state: "canceled", cancelReason: "tenant_suspended" },
+      });
+      continue;
+    }
+
     if (item.type === "client_followup") {
       await prisma.scheduledAction.update({
         where: { id: item.id },

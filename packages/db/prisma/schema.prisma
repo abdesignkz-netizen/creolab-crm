@@ -189,14 +189,36 @@ model Invitation {
   tenantId   String
   email      String
   role       String
+  name       String?
+  phone      String?
   tokenHash  String    @unique
   expiresAt  DateTime
   acceptedAt DateTime?
+  revokedAt  DateTime?
   inviterId  String?
   tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   inviter    User?     @relation("InvitationInviter", fields: [inviterId], references: [id])
 
   @@index([tenantId, email])
+}
+
+model PlatformSetting {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  valueJson Json     @default("{}")
+  updatedAt DateTime @updatedAt
+}
+
+model PlatformIntegrationType {
+  id                  String   @id @default(uuid())
+  type                String   @unique
+  title               String
+  description         String   @default("")
+  purpose             String   @default("")
+  available           Boolean  @default(true)
+  defaultSettingsJson Json     @default("{}")
+  allowedParamsJson   Json     @default("{}")
+  updatedAt           DateTime @updatedAt
 }
 
 model Credential {

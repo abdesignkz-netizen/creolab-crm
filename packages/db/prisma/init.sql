@@ -103,9 +103,12 @@ CREATE TABLE "Invitation" (
     "tenantId" TEXT NOT NULL,
     "email" TEXT NOT NULL,
     "role" TEXT NOT NULL,
+    "name" TEXT,
+    "phone" TEXT,
     "tokenHash" TEXT NOT NULL,
     "expiresAt" TIMESTAMP(3) NOT NULL,
     "acceptedAt" TIMESTAMP(3),
+    "revokedAt" TIMESTAMP(3),
     "inviterId" TEXT,
 
     CONSTRAINT "Invitation_pkey" PRIMARY KEY ("id")
@@ -1546,4 +1549,35 @@ ALTER TABLE "SupportSession" ADD CONSTRAINT "SupportSession_tenantId_fkey" FOREI
 
 -- AddForeignKey
 ALTER TABLE "SituationSnooze" ADD CONSTRAINT "SituationSnooze_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- CreateTable
+CREATE TABLE "PlatformSetting" (
+    "id" TEXT NOT NULL,
+    "key" TEXT NOT NULL,
+    "valueJson" JSONB NOT NULL DEFAULT '{}',
+    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "PlatformSetting_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "PlatformIntegrationType" (
+    "id" TEXT NOT NULL,
+    "type" TEXT NOT NULL,
+    "title" TEXT NOT NULL,
+    "description" TEXT NOT NULL DEFAULT '',
+    "purpose" TEXT NOT NULL DEFAULT '',
+    "available" BOOLEAN NOT NULL DEFAULT true,
+    "defaultSettingsJson" JSONB NOT NULL DEFAULT '{}',
+    "allowedParamsJson" JSONB NOT NULL DEFAULT '{}',
+    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "PlatformIntegrationType_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateIndex
+CREATE UNIQUE INDEX "PlatformSetting_key_key" ON "PlatformSetting"("key");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "PlatformIntegrationType_type_key" ON "PlatformIntegrationType"("type");
 

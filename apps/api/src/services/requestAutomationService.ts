@@ -222,6 +222,8 @@ export async function processNewRequestAutomation(
         utmCampaign: inquiry.utmCampaign,
         sourceChannel: inquiry.sourceChannel,
         phoneNormalized: inquiry.phoneNormalized,
+        prisma,
+        tenantId,
       });
     } catch (err) {
       analysisError = err instanceof Error ? err.message : "AI analysis failed";
