@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { nameWithPhone, phoneText } from "../lib/contactDisplay";
 import { formatDurationMinutes, formatWaitSince } from "../lib/duration";
 import { api } from "../lib/api";
+import { useCapabilities } from "../lib/session";
 import { CALLS_ENABLED } from "../lib/featureFlags";
 import { tip } from "../lib/tip";
 
@@ -28,6 +29,7 @@ const STATUS_OPTIONS = [
 ];
 
 export function RequestDetailPage() {
+  const caps = useCapabilities();
   const { requestId = "" } = useParams();
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState("");
@@ -112,10 +114,10 @@ export function RequestDetailPage() {
         <div className="actions">
           {!closed && data.status !== "in_progress" ? (
             <button className="btn" disabled={busy} onClick={() => run(() => api.takeInquiry(data.id))}>
-              Взять в работу
+              Принять в обработку
             </button>
           ) : null}
-          {data.automation?.canStart && !closed ? (
+          {data.automation?.canStart && !closed && !caps.manager ? (
             <button
               className="btn"
               disabled={busy}
@@ -145,7 +147,7 @@ export function RequestDetailPage() {
               Забрать себе
             </button>
           ) : null}
-          {data.automation?.canReturnAi ? (
+          {data.automation?.canReturnAi && !caps.manager ? (
             <button
               className="btn secondary"
               disabled={busy}

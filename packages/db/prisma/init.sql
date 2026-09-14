@@ -49,6 +49,15 @@ CREATE TABLE "User" (
     "name" TEXT NOT NULL,
     "status" TEXT NOT NULL DEFAULT 'active',
     "phone" TEXT,
+    "firstName" TEXT,
+    "lastName" TEXT,
+    "middleName" TEXT,
+    "city" TEXT,
+    "avatarStorageKey" TEXT,
+    "locale" TEXT NOT NULL DEFAULT 'ru',
+    "timezone" TEXT,
+    "timeFormat" TEXT NOT NULL DEFAULT '24',
+    "theme" TEXT NOT NULL DEFAULT 'system',
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
     "platformAdmin" BOOLEAN NOT NULL DEFAULT false,
@@ -63,6 +72,7 @@ CREATE TABLE "Membership" (
     "userId" TEXT NOT NULL,
     "role" TEXT NOT NULL,
     "permissions" JSONB NOT NULL DEFAULT '[]',
+    "jobTitle" TEXT,
     "active" BOOLEAN NOT NULL DEFAULT true,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -80,6 +90,9 @@ CREATE TABLE "Session" (
     "refreshExpiresAt" TIMESTAMP(3),
     "revokedAt" TIMESTAMP(3),
     "deviceLabel" TEXT,
+    "userAgent" TEXT,
+    "ip" TEXT,
+    "lastSeenAt" TIMESTAMP(3),
 
     CONSTRAINT "Session_pkey" PRIMARY KEY ("id")
 );

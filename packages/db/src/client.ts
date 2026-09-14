@@ -28,6 +28,9 @@ async function applyLivePostgresPatches(prisma: PrismaClient) {
     ...DOCUMENT_DOMAIN_SQL.split(";")
       .map((s) => s.trim())
       .filter(Boolean),
+    ...ACCOUNT_DOMAIN_SQL.split(";")
+      .map((s) => s.trim())
+      .filter(Boolean),
   ];
   for (const sql of statements) {
     try {
@@ -500,6 +503,7 @@ async function applyAdditiveSchema(pglite: PGlite) {
     WHERE "healthStatus" IS NULL OR "healthStatus" = 'UNKNOWN';
 
     ${DOCUMENT_DOMAIN_SQL}
+    ${ACCOUNT_DOMAIN_SQL}
   `);
 }
 
@@ -788,6 +792,22 @@ const DOCUMENT_DOMAIN_SQL = `
     CREATE UNIQUE INDEX IF NOT EXISTS "EsfConnection_tenantId_environment_key" ON "EsfConnection"("tenantId", "environment");
     CREATE UNIQUE INDEX IF NOT EXISTS "EsfConnection_tenantId_id_key" ON "EsfConnection"("tenantId", "id");
     CREATE INDEX IF NOT EXISTS "EsfConnection_tenantId_status_idx" ON "EsfConnection"("tenantId", "status");
+`;
+
+const ACCOUNT_DOMAIN_SQL = `
+    ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "firstName" TEXT;
+    ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "lastName" TEXT;
+    ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "middleName" TEXT;
+    ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "city" TEXT;
+    ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "avatarStorageKey" TEXT;
+    ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "locale" TEXT DEFAULT 'ru';
+    ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "timezone" TEXT;
+    ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "timeFormat" TEXT DEFAULT '24';
+    ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "theme" TEXT DEFAULT 'system';
+    ALTER TABLE "Membership" ADD COLUMN IF NOT EXISTS "jobTitle" TEXT;
+    ALTER TABLE "Session" ADD COLUMN IF NOT EXISTS "userAgent" TEXT;
+    ALTER TABLE "Session" ADD COLUMN IF NOT EXISTS "ip" TEXT;
+    ALTER TABLE "Session" ADD COLUMN IF NOT EXISTS "lastSeenAt" TIMESTAMP(3);
 `;
 
 export async function createPrismaClient(): Promise<PrismaClient> {

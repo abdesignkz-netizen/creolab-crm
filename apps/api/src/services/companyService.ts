@@ -2,6 +2,7 @@ import type { Prisma, PrismaClient } from "@creolab/db";
 import { normalizeKzTaxId } from "@creolab/contracts";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
+import { isManager } from "../lib/access.ts";
 import { CONTACT_PHONE_SELECT, digitsOnly, displayName, formatWhen, phoneFromContact } from "./contactLabels.ts";
 import { amountNumber, formatMoney } from "./dealPipeline.ts";
 import { writeActivity } from "./contactService.ts";
@@ -22,6 +23,10 @@ function requireTenant(auth: AuthContext) {
 /** Stub for future RBAC — always allow within tenant for now. */
 export function assertCanViewCompany(_auth: AuthContext, _company: { tenantId: string }) {
   return true;
+}
+
+export function assertCanEditCompany(auth: AuthContext) {
+  if (isManager(auth)) throw new ApiError(403, "forbidden", "Недостаточно прав для изменения карточки");
 }
 
 export function normalizeCompanyName(name: string) {
@@ -273,6 +278,7 @@ export async function updateCompany(
   const existing = await prisma.company.findFirst({ where: { id: companyId, tenantId: tid } });
   if (!existing) throw new ApiError(404, "not_found", "Компания не найдена");
   assertCanViewCompany(auth, existing);
+  assertCanEditCompany(auth);
 
   const name = input.name != null ? String(input.name).trim() : undefined;
   if (name !== undefined && !name) throw new ApiError(422, "invalid", "Название не может быть пустым");
@@ -322,6 +328,7 @@ export async function deleteCompany(prisma: PrismaClient, auth: AuthContext, com
   const existing = await prisma.company.findFirst({ where: { id: companyId, tenantId: tid } });
   if (!existing) throw new ApiError(404, "not_found", "Компания не найдена");
   assertCanViewCompany(auth, existing);
+  assertCanEditCompany(auth);
 
   await prisma.$transaction(async (tx) => {
     await tx.companyContact.updateMany({
@@ -664,7 +671,7 @@ export async function getCompanyOverview(prisma: PrismaClient, auth: AuthContext
   if (!company) throw new ApiError(404, "not_found", "Компания не найдена");
   assertCanViewCompany(auth, company);
 
-  const [contactsRes, inquiries, deals, tasks, activities] = await Promise.all([
+  const [contactsRes, inquiriesRaw, dealsRaw, tasksRaw, activities] = await Promise.all([
     getCompanyContacts(prisma, auth, companyId),
     prisma.inquiry.findMany({
       where: { tenantId: tid, companyId, archived: false },
@@ -701,6 +708,13 @@ export async function getCompanyOverview(prisma: PrismaClient, auth: AuthContext
     }),
   ]);
 
+  const me = membership.id;
+  const inquiries = isManager(auth)
+    ? inquiriesRaw.filter((item) => !item.assigneeMembershipId || item.assigneeMembershipId === me)
+    : inquiriesRaw;
+  const deals = isManager(auth) ? dealsRaw.filter((item) => item.assigneeMembershipId === me) : dealsRaw;
+  const tasks = isManager(auth) ? tasksRaw.filter((item) => item.ownerMembershipId === me) : tasksRaw;
+
   const activeInquiries = inquiries.filter((i) =>
     ["new", "accepted", "qualification", "qualified", "in_progress", "waiting_client", "waiting_manager", "proposal"].includes(
       i.status,
@@ -728,6 +742,14 @@ export async function getCompanyOverview(prisma: PrismaClient, auth: AuthContext
       revenue += n;
       revenueKnown += 1;
     }
+  }
+
+  if (isManager(auth)) {
+    pipeline = 0;
+    pipelineKnown = 0;
+    revenue = 0;
+    revenueKnown = 0;
+    onContract = 0;
   }
 
   const overdueTasks = tasks.filter((t) => t.dueAt && t.dueAt < new Date() && t.status === "open");

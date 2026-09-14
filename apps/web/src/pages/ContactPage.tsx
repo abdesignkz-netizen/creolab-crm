@@ -4,10 +4,12 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { nameWithPhone, phoneText } from "../lib/contactDisplay";
 import { formatWaitSince } from "../lib/duration";
 import { api } from "../lib/api";
+import { useCapabilities } from "../lib/session";
 import { CALLS_ENABLED } from "../lib/featureFlags";
 import { tip } from "../lib/tip";
 
 export function ContactPage() {
+  const caps = useCapabilities();
   const { id } = useParams();
   const navigate = useNavigate();
   const [data, setData] = useState<any>(null);
@@ -149,7 +151,7 @@ export function ContactPage() {
             </button>
             {menuOpen ? (
               <div className="menu">
-                <button onClick={() => { setEditOpen(true); setMenuOpen(false); }}>Редактировать</button>
+                {!caps.manager ? <button onClick={() => { setEditOpen(true); setMenuOpen(false); }}>Редактировать</button> : null}
                 <button
                   onClick={async () => {
                     const text = prompt("Внутренняя заметка");
@@ -189,7 +191,7 @@ export function ContactPage() {
 
       {error ? <p className="error">{error}</p> : null}
 
-      {editOpen ? (
+      {editOpen && !caps.manager ? (
         <form
           className="panel contact-edit-card"
           onSubmit={async (event) => {

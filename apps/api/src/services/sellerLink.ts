@@ -9,6 +9,7 @@ import { decryptSecret, encryptSecret } from "../lib/secretBox.ts";
 import { fileStorageStatus } from "../lib/storage.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { can } from "../lib/types.ts";
+import { requireIntegrationsAccess, requireNotManager } from "../lib/access.ts";
 import { analyzeAndApplyConversation } from "./conversationContextApplyService.ts";
 import { adoptSameContactThreadMessages, listThreadConversationIds } from "./conversationThread.ts";
 import { ensureWhatsAppInquiry } from "./inquiryService.ts";
@@ -357,6 +358,10 @@ function requireTenant(auth: AuthContext) {
   return auth.activeMembership;
 }
 
+function requireIntegrationAdmin(auth: AuthContext) {
+  requireIntegrationsAccess(auth);
+}
+
 function describeBridgeError(error: unknown, sellerUrl: string) {
   const message = error instanceof Error ? error.message : String(error || "");
   const cause = error instanceof Error && "cause" in error ? (error.cause as { code?: string } | undefined) : undefined;
@@ -661,7 +666,7 @@ export async function connectWhatsAppSeller(
   input: { sellerUrl: string; secret: string },
 ) {
   const membership = requireTenant(auth);
-  if (!can(auth, "manage_integrations") && membership.role !== "owner") {
+  if (!can(auth, "manage_integrations")) {
     throw new ApiError(403, "forbidden", "Нет права управлять интеграциями");
   }
   const sellerUrl = String(input.sellerUrl || "").trim().replace(/\/$/, "");
@@ -934,6 +939,7 @@ export async function addSellerInstruction(
 }
 
 export async function integrationSetup(prisma: PrismaClient, auth: AuthContext) {
+  requireIntegrationAdmin(auth);
   const membership = requireTenant(auth);
   const [form, webhook, seller, telegram] = await Promise.all([
     prisma.formDefinition.findFirst({
@@ -1016,7 +1022,7 @@ export async function integrationSetup(prisma: PrismaClient, auth: AuthContext) 
 
 export async function rotateWebhookSecret(prisma: PrismaClient, auth: AuthContext, integrationId: string) {
   const membership = requireTenant(auth);
-  if (!can(auth, "manage_integrations") && membership.role !== "owner") {
+  if (!can(auth, "manage_integrations")) {
     throw new ApiError(403, "forbidden", "Нет права");
   }
   const integration = await prisma.integration.findFirst({
@@ -1073,6 +1079,7 @@ export async function beginTelegramLink(prisma: PrismaClient, auth: AuthContext)
 }
 
 export async function controlBoard(prisma: PrismaClient, auth: AuthContext) {
+  requireNotManager(auth, "Управление доступно администратору и директору");
   const [situation, seller] = await Promise.all([getSituation(prisma, auth, { scope: "all" }), sellerHealthFor(prisma, auth)]);
   return {
     seller,

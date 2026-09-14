@@ -4,6 +4,7 @@ import { ApiError } from "../errors.ts";
 import { DEFAULT_DOCUMENT_FLAGS } from "../lib/featureFlags.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { can } from "../lib/types.ts";
+import { requireDocumentsAccess } from "../lib/access.ts";
 import { asMoney } from "./documentMoney.ts";
 
 function requireTenant(auth: AuthContext) {
@@ -67,6 +68,7 @@ export function serializeLegalProfile(
 }
 
 export async function getLegalProfile(prisma: PrismaClient, auth: AuthContext) {
+  requireDocumentsAccess(auth);
   const membership = requireTenant(auth);
   const row = await prisma.tenantLegalProfile.findUnique({ where: { tenantId: membership.tenantId } });
   const tenant=await prisma.tenant.findUnique({where:{id:membership.tenantId},select:{settingsJson:true}});

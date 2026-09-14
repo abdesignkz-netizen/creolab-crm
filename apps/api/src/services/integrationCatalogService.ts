@@ -2,6 +2,7 @@ import type { Prisma, PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { can } from "../lib/types.ts";
+import { requireIntegrationsAccess } from "../lib/access.ts";
 import { MODE_LABEL, type AutomationMode } from "./aiAutomationSettings.ts";
 import { config } from "../config.ts";
 
@@ -93,6 +94,7 @@ export async function touchIntegrationError(
 }
 
 export async function listIntegrationCatalog(prisma: PrismaClient, auth: AuthContext) {
+  requireIntegrationsAccess(auth);
   const membership = requireTenant(auth);
   const tid = membership.tenantId;
   const apiBase = config.apiBaseUrl;
@@ -138,10 +140,16 @@ export async function listIntegrationCatalog(prisma: PrismaClient, auth: AuthCon
         catalogType: meta.catalogType,
         title: meta.title,
         stage: meta.stage,
-        connected: Boolean(row && (row.status === "active" || row.connectionStatus === "CONNECTED")),
-        connectionStatus: row?.connectionStatus || (row ? "CONNECTED" : "DISCONNECTED"),
+        connected: Boolean(row && (row.connectionStatus === "CONNECTED" || row.status === "active") && (row.connectionStatus !== "PENDING")),
+        connectionStatus:
+          row?.connectionStatus ||
+          (row?.status === "active" ? "CONNECTED" : row ? "PENDING" : "DISCONNECTED"),
         healthStatus: health,
-        healthLabel: row ? healthLabel(health) : "Не подключено",
+        healthLabel: row
+          ? row.connectionStatus === "PENDING" || row.status === "pending"
+            ? "Ожидает подтверждения"
+            : healthLabel(health)
+          : "Не подключено",
         inquiryCount: row?._count.inquiries || 0,
         eventCount: row?._count.inboundEvents || 0,
         automationMode: row?.automationMode || "inherit",
@@ -163,10 +171,14 @@ export async function listIntegrationCatalog(prisma: PrismaClient, auth: AuthCon
         catalogType: meta.catalogType,
         title: meta.title,
         stage: meta.stage,
-        connected: Boolean(row && row.status === "active"),
+        connected: Boolean(row && row.status === "active" && row.connectionStatus !== "PENDING"),
         connectionStatus: row?.connectionStatus || (row?.status === "active" ? "CONNECTED" : "DISCONNECTED"),
         healthStatus: health,
-        healthLabel: row ? healthLabel(health) : "Не подключено",
+        healthLabel: row
+          ? row.status === "pending" || row.connectionStatus === "PENDING"
+            ? "Ожидает подтверждения"
+            : healthLabel(health)
+          : "Не подключено",
         inquiryCount: row?._count.inquiries || 0,
         eventCount: row?._count.inboundEvents || 0,
         automationMode: row?.automationMode || "inherit",
@@ -240,9 +252,18 @@ export async function listIntegrationCatalog(prisma: PrismaClient, auth: AuthCon
     messaging: messagingCards,
     notifications: {
       employeeTelegram: {
-        connected: Boolean(telegram),
-        healthLabel: telegram ? "Подключено" : "Не подключено",
-        note: "Уведомления сотрудника — не источник заявок.",
+        connected: Boolean(telegram?.chatRef),
+        connectionStatus: telegram?.chatRef
+          ? "CONNECTED"
+          : telegram?.pendingTokenHash
+            ? "PENDING"
+            : "DISCONNECTED",
+        healthLabel: telegram?.chatRef
+          ? "Подключено"
+          : telegram?.pendingTokenHash
+            ? "Ожидает подтверждения"
+            : "Не подключено",
+        note: "Личные уведомления сотрудника — не корпоративная интеграция и не источник заявок. Нужен TELEGRAM_BOT_USERNAME.",
       },
     },
     eventLog,
@@ -275,7 +296,7 @@ export async function listInboundEventLog(
   auth: AuthContext,
   query: { limit?: number } = {},
 ) {
-  if (!can(auth, "manage_integrations") && auth.activeMembership?.role !== "owner") {
+  if (!can(auth, "manage_integrations")) {
     throw new ApiError(403, "forbidden", "Нет права");
   }
   const membership = requireTenant(auth);
@@ -309,6 +330,7 @@ export async function setIntegrationTestMode(
   integrationId: string,
   testMode: boolean,
 ) {
+  requireIntegrationsAccess(auth);
   const membership = requireTenant(auth);
   const integration = await prisma.integration.findFirst({
     where: { id: integrationId, tenantId: membership.tenantId },
@@ -337,6 +359,7 @@ export async function promoteWebsiteFormsToLive(prisma: PrismaClient) {
 }
 
 export async function runIntegrationHealthCheck(prisma: PrismaClient, auth: AuthContext, integrationId: string) {
+  requireIntegrationsAccess(auth);
   const membership = requireTenant(auth);
   const integration = await prisma.integration.findFirst({
     where: { id: integrationId, tenantId: membership.tenantId },

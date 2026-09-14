@@ -8,6 +8,7 @@ import type { PrismaClient } from "@creolab/db";
 import type { Response } from "express";
 import { ApiError } from "../errors.ts";
 import { can, type AuthContext } from "../lib/types.ts";
+import { requireDocumentsAccess } from "../lib/access.ts";
 import { resolveUploadPath } from "../lib/storage.ts";
 import { sumLines } from "./documentMoney.ts";
 import { serializeDealItem } from "./dealItemService.ts";
@@ -246,6 +247,7 @@ export async function sendContractPdf(
   contractId: string,
   res: Response,
 ) {
+  requireDocumentsAccess(auth);
   const membership = requireTenant(auth);
   const tid = membership.tenantId;
   const contract = await prisma.contract.findFirst({
@@ -272,6 +274,7 @@ export async function sendContractPdf(
 }
 
 export async function sendContractOriginal(prisma: PrismaClient, auth: AuthContext, contractId: string, res: Response) {
+  requireDocumentsAccess(auth);
   const tid = requireTenant(auth).tenantId;
   const contract = await prisma.contract.findFirst({where:{id:contractId,tenantId:tid}});
   const file = contract?.originalFileId ? await prisma.attachment.findFirst({where:{id:contract.originalFileId,tenantId:tid,parentId:contractId,parentType:"contract"}}) : null;

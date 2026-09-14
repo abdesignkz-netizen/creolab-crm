@@ -2,6 +2,7 @@ import type { Prisma, PrismaClient } from "@creolab/db";
 import { validateClientPhone } from "@creolab/contracts";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
+import { isManager } from "../lib/access.ts";
 import {
   INQUIRY_STATUS_LABEL,
   INQUIRY_ACTIVE_STATUSES,
@@ -458,6 +459,15 @@ export async function getContactOverview(prisma: PrismaClient, auth: AuthContext
     },
   });
   if (!contact) throw new ApiError(404, "not_found", "Клиент не найден");
+  if (isManager(auth)) {
+    const me = membership.id;
+    contact.inquiries = contact.inquiries.filter((item) => !item.assigneeMembershipId || item.assigneeMembershipId === me);
+    contact.deals = contact.deals.filter((item) => item.assigneeMembershipId === me);
+    contact.tasks = contact.tasks.filter((item) => item.ownerMembershipId === me);
+    contact.conversations = contact.conversations.filter(
+      (item) => item.assigneeMembershipId === me || contact.inquiries.some((inquiry) => inquiry.conversationId === item.id),
+    );
+  }
 
   const companyLinks = await prisma.companyContact.findMany({
     where: { tenantId: tid, contactId, isActive: true },
@@ -823,6 +833,7 @@ export async function updateContact(
   const tid = membership.tenantId;
   const current = await prisma.contact.findFirst({ where: { id: contactId, tenantId: tid } });
   if (!current) throw new ApiError(404, "not_found", "Клиент не найден");
+  if (isManager(auth)) throw new ApiError(403, "forbidden", "Недостаточно прав для изменения карточки");
 
   const data: Prisma.ContactUncheckedUpdateInput = {};
   for (const key of [

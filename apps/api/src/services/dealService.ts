@@ -3,6 +3,7 @@ import { resolveEsfMeasureUnitCode } from "@creolab/contracts";
 import type { PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
+import { assertDealVisible, isManager, managerDealWriteFields, seesAllCompanyRecords } from "../lib/access.ts";
 import {
   LEGACY_STAGE_MAP,
   LOST_REASONS,
@@ -339,7 +340,11 @@ export async function getDealBoard(
   const tenant = await prisma.tenant.findUnique({ where: { id: tid } });
   const ops = parseOpsSettings(tenant?.settingsJson);
   const stages = await ensureDealPipelineStages(prisma, tid);
-  const scope = query.scope === "mine" || query.scope === "unassigned" ? query.scope : "all";
+  const scope = isManager(auth)
+    ? "mine"
+    : query.scope === "mine" || query.scope === "unassigned"
+      ? query.scope
+      : "all";
   const timeMode: DealTimeMode = query.timeMode === "period" ? "period" : "now";
   const basis: DealPeriodBasis =
     query.basis === "activity" || query.basis === "closed" ? query.basis : "created";
@@ -653,6 +658,7 @@ export async function getDeal(prisma: PrismaClient, auth: AuthContext, dealId: s
     },
   });
   if (!deal) throw new ApiError(404, "not_found", "Сделка не найдена");
+  assertDealVisible(auth, deal);
   const contact = await prisma.contact.findFirst({
     where: { id: deal.contactId, tenantId: tid },
     select: {
@@ -683,6 +689,8 @@ export async function updateDeal(
   const tid = membership.tenantId;
   const deal = await prisma.deal.findFirst({ where: { id: dealId, tenantId: tid } });
   if (!deal) throw new ApiError(404, "not_found", "Сделка не найдена");
+  assertDealVisible(auth, deal);
+  if (isManager(auth)) input = managerDealWriteFields(input);
 
   const itemCount = await prisma.dealItem.count({ where: { tenantId: tid, dealId } });
   if (itemCount > 0 && input.offerAmountMinor !== undefined) {
@@ -754,6 +762,7 @@ export async function changeDealStage(
     include: { stage: true },
   });
   if (!deal) throw new ApiError(404, "not_found", "Сделка не найдена");
+  assertDealVisible(auth, deal);
   if (deal.outcome !== "open" && deal.outcome !== "on_hold") {
     throw new ApiError(422, "closed", "Закрытую сделку нельзя двигать по воронке");
   }
@@ -835,6 +844,7 @@ export async function markDealWon(
   const tid = membership.tenantId;
   const deal = await prisma.deal.findFirst({ where: { id: dealId, tenantId: tid } });
   if (!deal) throw new ApiError(404, "not_found", "Сделка не найдена");
+  assertDealVisible(auth, deal);
   const now = new Date();
   const wonAmount = input.wonAmountMinor ?? amountNumber(deal.offerAmountMinor);
 
@@ -881,6 +891,7 @@ export async function markDealLost(
   const tid = membership.tenantId;
   const deal = await prisma.deal.findFirst({ where: { id: dealId, tenantId: tid } });
   if (!deal) throw new ApiError(404, "not_found", "Сделка не найдена");
+  assertDealVisible(auth, deal);
   const reason = String(input.lossReason || "").trim();
   if (!reason) throw new ApiError(422, "invalid", "Укажите причину потери");
   const now = new Date();
@@ -921,6 +932,7 @@ export async function setDealOnHold(prisma: PrismaClient, auth: AuthContext, dea
   const membership = requireTenant(auth);
   const deal = await prisma.deal.findFirst({ where: { id: dealId, tenantId: membership.tenantId } });
   if (!deal) throw new ApiError(404, "not_found", "Сделка не найдена");
+  assertDealVisible(auth, deal);
   if (deal.outcome === "won" || deal.outcome === "lost") {
     throw new ApiError(422, "closed", "Закрытую сделку нельзя отложить");
   }
@@ -955,6 +967,7 @@ export async function createDeal(
   },
 ) {
   const membership = requireTenant(auth);
+  if (isManager(auth)) throw new ApiError(403, "forbidden", "Сделку можно создать из своей заявки");
   const tid = membership.tenantId;
   await ensureDealPipelineStages(prisma, tid);
 

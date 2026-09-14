@@ -2,6 +2,7 @@ import { documentOrganization } from "./documentOrganization.ts";
 import type { PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
+import { requireDocumentsAccess } from "../lib/access.ts";
 import {
   assessContractReadiness,
   CONTRACT_FIELD_LABELS,
@@ -90,6 +91,7 @@ export function invoiceMissingFieldsError(readiness: InvoiceReadiness) {
 }
 
 export async function getInvoiceReadiness(prisma: PrismaClient, auth: AuthContext, dealId: string) {
+  requireDocumentsAccess(auth);
   if (!auth.activeMembership) throw new ApiError(403, "no_tenant", "Нет активной компании");
   const tid = auth.activeMembership.tenantId;
   const deal = await prisma.deal.findFirst({

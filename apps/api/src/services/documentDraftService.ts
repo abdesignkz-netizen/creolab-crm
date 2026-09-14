@@ -234,6 +234,7 @@ export function serializeElectronicDocument(row: {
 
 export async function listDealDocuments(prisma: PrismaClient, auth: AuthContext, dealId: string) {
   const membership = requireTenant(auth);
+  requireManageDocuments(auth);
   const tid = membership.tenantId;
   const deal = await prisma.deal.findFirst({ where: { id: dealId, tenantId: tid } });
   if (!deal) throw new ApiError(404, "not_found", "Сделка не найдена");
@@ -341,6 +342,7 @@ export async function createContractDraft(
 
 export async function getContract(prisma: PrismaClient, auth: AuthContext, contractId: string) {
   const membership = requireTenant(auth);
+  requireManageDocuments(auth);
   const row = await prisma.contract.findFirst({
     where: { id: contractId, tenantId: membership.tenantId },
     include: { versions: { orderBy: { version: "asc" } } },
@@ -486,6 +488,7 @@ export async function createInvoiceDraft(
 
 export async function getInvoice(prisma: PrismaClient, auth: AuthContext, invoiceId: string) {
   const membership = requireTenant(auth);
+  requireManageDocuments(auth);
   const row = await prisma.invoice.findFirst({
     where: { id: invoiceId, tenantId: membership.tenantId },
     include: { items: { orderBy: { sortOrder: "asc" } } },
@@ -569,6 +572,7 @@ export async function createElectronicDocumentDraft(
 
 export async function getElectronicDocument(prisma: PrismaClient, auth: AuthContext, id: string) {
   const membership = requireTenant(auth);
+  requireManageDocuments(auth);
   const row = await prisma.electronicDocument.findFirst({
     where: { id, tenantId: membership.tenantId },
   });

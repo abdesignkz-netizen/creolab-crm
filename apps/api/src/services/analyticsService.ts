@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
+import { requireAnalyticsAccess } from "../lib/access.ts";
 import { displayName, formatPhoneDisplay } from "./contactLabels.ts";
 import { PIPELINE_STAGES, amountNumber, formatMoney } from "./dealPipeline.ts";
 import {
@@ -577,6 +578,7 @@ function groupCount<T>(rows: T[], keyFn: (row: T) => string) {
 }
 
 export async function getAnalyticsDashboard(prisma: PrismaClient, auth: AuthContext, query: AnalyticsQuery = {}) {
+  requireAnalyticsAccess(auth);
   const membership = requireTenant(auth);
   const tid = membership.tenantId;
   const timeZone = membership.tenant.timezone || "Asia/Almaty";
@@ -1452,6 +1454,7 @@ export async function getAnalyticsTrend(
   auth: AuthContext,
   query: AnalyticsQuery & { metric?: string },
 ) {
+  requireAnalyticsAccess(auth);
   const membership = requireTenant(auth);
   const tid = membership.tenantId;
   const timeZone = membership.tenant.timezone || "Asia/Almaty";
@@ -1524,6 +1527,7 @@ export async function getAnalyticsDrilldown(
   auth: AuthContext,
   query: AnalyticsQuery & { entity?: string; key?: string },
 ) {
+  requireAnalyticsAccess(auth);
   const membership = requireTenant(auth);
   const tid = membership.tenantId;
   const timeZone = membership.tenant.timezone || "Asia/Almaty";

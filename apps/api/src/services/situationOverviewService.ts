@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
+import { requireAnalyticsAccess } from "../lib/access.ts";
 import { getSituation, type SituationItem, type SituationScope } from "./situationService.ts";
 import {
   conversationsAttentionWhere,
@@ -399,10 +400,12 @@ const ATTENTION_WHY_LABEL: Record<string, string> = {
 };
 
 export async function getSituationOverview(
+
   prisma: PrismaClient,
   auth: AuthContext,
   query: Record<string, string | undefined> = {},
 ) {
+  requireAnalyticsAccess(auth);
   const membership = requireTenant(auth);
   const tid = membership.tenantId;
   const timeZone = membership.tenant.timezone || "Asia/Almaty";

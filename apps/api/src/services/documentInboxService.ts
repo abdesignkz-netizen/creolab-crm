@@ -3,6 +3,7 @@ import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { asMoney } from "./documentMoney.ts";
 import { isDocumentsEnabled } from "./legalProfileService.ts";
+import { requireDocumentsAccess } from "../lib/access.ts";
 
 export const DOCUMENT_KINDS = ["CONTRACT", "INVOICE", "AVR", "ESF"] as const;
 export type DocumentKind = (typeof DOCUMENT_KINDS)[number];
@@ -101,6 +102,7 @@ export async function listTenantDocuments(
   query: Record<string, string | undefined> = {},
 ) {
   const membership = requireTenant(auth);
+  requireDocumentsAccess(auth);
   const tid = membership.tenantId;
   if (!(await isDocumentsEnabled(prisma, tid))) {
     throw new ApiError(403, "documents_disabled", "Контур документов выключен в настройках");

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type DragEvent, type FormEvent } from "re
 import { Link, useSearchParams } from "react-router-dom";
 import { nameWithPhone, phoneText } from "../lib/contactDisplay";
 import { api } from "../lib/api";
+import { useCapabilities } from "../lib/session";
 import { tip } from "../lib/tip";
 import { CALLS_ENABLED } from "../lib/featureFlags";
 import { CampaignMassPanel } from "./CampaignMassPanel";
@@ -265,6 +266,7 @@ function toggleValue(list: string[], value: string) {
 }
 
 export function TasksPage() {
+  const caps = useCapabilities();
   const [items, setItems] = useState<any[]>([]);
   const [error, setError] = useState("");
   const [filter, setFilter] = useUrlState<Filter>("filter", "open", ["open", "waiting", "scheduled", "overdue", "mine", "done", "all"]);
@@ -378,7 +380,7 @@ export function TasksPage() {
     const fromConversation = searchParams.get("conversationId");
     const fromDeal = searchParams.get("dealId");
     const fromCommand = searchParams.get("command");
-    if (fromCommand) {
+    if (fromCommand && caps.manageTasks) {
       setCommandText(fromCommand);
       setComposeMode("command");
       setShowCampaignPanel(false);
@@ -393,7 +395,7 @@ export function TasksPage() {
         await openTaskEditor(openId);
       }
 
-      const needsCompose = Boolean(fromInquiry || fromContact || fromConversation || fromDeal);
+      const needsCompose = Boolean(caps.manageTasks && (fromInquiry || fromContact || fromConversation || fromDeal));
       if (needsCompose) {
         setShowCreate(true);
         setComposeMode("manual");
@@ -1205,6 +1207,8 @@ export function TasksPage() {
           <h2>Задачи</h2>
         </div>
         <div className="actions">
+          {caps.manageTasks ? (
+            <>
           <button
             type="button"
             className={showCreate && composeMode === "command" ? "btn" : "btn secondary"}
@@ -1242,6 +1246,8 @@ export function TasksPage() {
           >
             Настроить вручную
           </button>
+            </>
+          ) : null}
         </div>
       </div>
       <div className="actions">
@@ -2350,7 +2356,7 @@ export function TasksPage() {
           </label>
           <label>
             Когда выполнить
-            <input type="datetime-local" value={editDueAt} onChange={(event) => setEditDueAt(event.target.value)} />
+            <input type="datetime-local" value={editDueAt} onChange={(event) => setEditDueAt(event.target.value)} disabled={!caps.manageTasks} />
           </label>
           <label>
             Тип файла
@@ -2847,7 +2853,7 @@ export function TasksPage() {
                           {item.needsFileRetry ? "Открыть задачу" : "Подготовить отправку"}
                         </button>
                       ) : null}
-                      {SENDABLE.has(item.type) && item.targetType === "group" && !item.campaignId ? (
+                      {caps.manageTasks && SENDABLE.has(item.type) && item.targetType === "group" && !item.campaignId ? (
                         <button
                           className="btn"
                           type="button"

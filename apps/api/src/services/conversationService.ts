@@ -4,6 +4,7 @@ import { inferClientInterest } from "./contactInterestService.ts";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
+import { andWhere, assertConversationReachable, conversationAccessWhere, isManager } from "../lib/access.ts";
 import {
   INQUIRY_STATUS_LABEL,
   SOURCE_LABEL,
@@ -137,8 +138,13 @@ export async function listConversationsBoard(
   }
 
   const where: Prisma.ConversationWhereInput = {
-    tenantId: tid,
-    status: filter === "archived" ? "archived" : { not: "archived" },
+    AND: [
+      {
+        tenantId: tid,
+        status: filter === "archived" ? "archived" : { not: "archived" },
+      },
+      conversationAccessWhere(auth),
+    ],
   };
 
   if (filter === "ai") where.mode = "ai";
@@ -404,6 +410,7 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
     },
   });
   if (!conversation) throw new ApiError(404, "not_found", "Диалог не найден");
+  await assertConversationReachable(prisma, auth, id);
 
   const contact = conversation.contact;
   const phone = contact ? primaryPhone(contact.methods) : null;
@@ -747,6 +754,7 @@ export async function markConversationRead(prisma: PrismaClient, auth: AuthConte
     },
   });
   if (!conversation) throw new ApiError(404, "not_found", "Диалог не найден");
+  await assertConversationReachable(prisma, auth, id);
   const phone = conversation.contact ? primaryPhone(conversation.contact.methods)?.normalizedValue : null;
   const threadIds = await listThreadConversationIds(prisma, tenantId, conversation, phone);
   const cursor = String(messageId || "").trim();
@@ -830,6 +838,7 @@ export async function getConversationMessages(prisma: PrismaClient, auth: AuthCo
     include: { contact: { include: { methods: true } } },
   });
   if (!conversation) throw new ApiError(404, "not_found", "Диалог не найден");
+  await assertConversationReachable(prisma, auth, id);
   const phone = conversation.contact ? primaryPhone(conversation.contact.methods)?.normalizedValue : null;
   const threadIds = await listThreadConversationIds(prisma, tenantId, conversation, phone);
   const cursor = await prisma.message.findFirst({ where: { tenantId, conversationId: { in: threadIds }, id: before } });

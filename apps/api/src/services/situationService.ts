@@ -4,6 +4,7 @@ import { WhatsAppSellerBridge } from "@creolab/integrations";
 import { ApiError } from "../errors.ts";
 import { decryptSecret } from "../lib/secretBox.ts";
 import type { AuthContext } from "../lib/types.ts";
+import { conversationAccessWhere, inquiryAccessWhere, isManager, taskAccessWhere } from "../lib/access.ts";
 import { CONTACT_PHONE_SELECT, digitsOnly, displayName, needsReply, phoneFromContact } from "./contactLabels.ts";
 import { inquiryInterest, loadConversationInterests } from "./contactInterestService.ts";
 import { attentionReasonLabel, STATUS_ONLY_ATTENTION } from "./attentionReasons.ts";
@@ -302,31 +303,48 @@ export async function getSituation(
   const tid = membership.tenantId;
   const timeZone = membership.tenant.timezone || "Asia/Almaty";
   const now = new Date();
-  const scope = (query.scope === "mine" || query.scope === "unassigned" ? query.scope : "all") as SituationScope;
+  const scope = (
+    isManager(auth)
+      ? "all"
+      : query.scope === "mine" || query.scope === "unassigned"
+        ? query.scope
+        : "all"
+  ) as SituationScope;
   const includeSnoozed = query.includeSnoozed === true || query.includeSnoozed === "true";
 
   const [intakes, inquiries, conversations, tasks, snoozes, seller, contacts] = await Promise.all([
     prisma.incompleteIntake.findMany({
-      where: openIntakeWhere(tid),
+      where: {
+        AND: [
+          openIntakeWhere(tid),
+          isManager(auth)
+            ? { OR: [{ assigneeMembershipId: null }, { assigneeMembershipId: membership.id }] }
+            : {},
+        ],
+      },
       include: { contact: { select: CONTACT_PHONE_SELECT } },
     }),
     prisma.inquiry.findMany({
       where: {
-        tenantId: tid,
-        archived: false,
-        test: false,
-        OR: [
-          { status: { in: ["new", "accepted", "in_progress", "waiting_client", "waiting_manager"] } },
+        AND: [
+          inquiryAccessWhere(auth),
           {
-            attentionReason: { in: [...WHATSAPP_HOME_ATTENTION_CODES] },
-            status: { notIn: ["lost", "converted", "cancelled"] },
+            archived: false,
+            test: false,
+            OR: [
+              { status: { in: ["new", "accepted", "in_progress", "waiting_client", "waiting_manager"] } },
+              {
+                attentionReason: { in: [...WHATSAPP_HOME_ATTENTION_CODES] },
+                status: { notIn: ["lost", "converted", "cancelled"] },
+              },
+            ],
           },
         ],
       },
       include: { contact: { select: CONTACT_PHONE_SELECT } },
     }),
     prisma.conversation.findMany({
-      where: { tenantId: tid, status: "open" },
+      where: { AND: [conversationAccessWhere(auth), { status: "open" }] },
       include: {
         contact: {
           select: {
@@ -339,7 +357,7 @@ export async function getSituation(
       },
     }),
     prisma.task.findMany({
-      where: { tenantId: tid, status: { in: ["open", "waiting"] } },
+      where: { AND: [taskAccessWhere(auth), { status: { in: ["open", "waiting"] } }] },
       include: {
         contact: { select: CONTACT_PHONE_SELECT },
         inquiry: { select: { subject: true, service: true, phoneRaw: true, phoneNormalized: true, contactId: true } },
@@ -641,6 +659,7 @@ export async function getSituation(
     }
     if (scope === "mine" && item.ownerMembershipId !== membership.id) continue;
     if (scope === "unassigned" && item.ownerMembershipId) continue;
+    if (isManager(auth) && item.ownerMembershipId && item.ownerMembershipId !== membership.id) continue;
     visible.push(item);
   }
 

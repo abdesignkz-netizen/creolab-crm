@@ -43,6 +43,23 @@ export function createApiClient(options: ClientOptions) {
     login: (email: string, password: string, client: "web" | "mobile" = "web") =>
       request("/api/v1/auth/login", { method: "POST", body: JSON.stringify({ email, password, client }) }),
     me: () => request("/api/v1/me"),
+    updateProfile: (body: Record<string, unknown>) =>
+      request("/api/v1/me/profile", { method: "PATCH", body: JSON.stringify(body) }),
+    updateAppearance: (body: Record<string, unknown>) =>
+      request("/api/v1/me/appearance", { method: "PATCH", body: JSON.stringify(body) }),
+    changePassword: (body: Record<string, unknown>) =>
+      request("/api/v1/me/password", { method: "POST", body: JSON.stringify(body) }),
+    sessions: () => request("/api/v1/me/sessions"),
+    revokeSession: (id: string) => request(`/api/v1/me/sessions/${id}`, { method: "DELETE" }),
+    revokeOtherSessions: () => request("/api/v1/me/sessions/revoke-others", { method: "POST", body: "{}" }),
+    uploadAvatar: (body: { contentBase64: string; mimeType: string }) =>
+      request("/api/v1/me/avatar", { method: "POST", body: JSON.stringify(body) }),
+    notificationPreferences: () => request("/api/v1/me/notification-preferences"),
+    updateNotificationPreferences: (body: Record<string, unknown>) =>
+      request("/api/v1/me/notification-preferences", { method: "PATCH", body: JSON.stringify(body) }),
+    companyMembers: () => request("/api/v1/settings/members"),
+    updateCompanyMember: (id: string, body: Record<string, unknown>) =>
+      request(`/api/v1/workspace/members/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
     today: () => request("/api/v1/today"),
     situation: (query: { scope?: "all" | "mine" | "unassigned"; includeSnoozed?: boolean } = {}) => {
       const params = new URLSearchParams();

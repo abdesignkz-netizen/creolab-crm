@@ -4,6 +4,7 @@ import { ApiError } from "../errors.ts";
 import { CALLS_ENABLED } from "../lib/featureFlags.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { can } from "../lib/types.ts";
+import { assertTaskVisible, assertConversationReachable, assertDealVisible, isManager, requireAiSettingsAccess, requireIntegrationsAccess, requireManageTasks, requireNotManager, taskAccessWhere } from "../lib/access.ts";
 import { campaignTaskDedupeKey } from "./campaignPersonalize.ts";
 import { INQUIRY_STATUS_LABEL, displayName, phoneFromContact } from "./contactLabels.ts";
 import { resolveSellerBridge } from "./sellerLink.ts";
@@ -27,7 +28,9 @@ export async function todayQueue(
 
 export async function listDeals(prisma: PrismaClient, auth: AuthContext) {
   return prisma.deal.findMany({
-    where: { tenantId: tenantId(auth) },
+    where: isManager(auth)
+      ? { tenantId: tenantId(auth), assigneeMembershipId: auth.activeMembership?.id }
+      : { tenantId: tenantId(auth) },
     include: { contact: { include: { methods: true } }, stage: true, payments: true },
     orderBy: { createdAt: "desc" },
     take: 50,
@@ -46,6 +49,7 @@ export async function addPayment(
   const tid = tenantId(auth);
   const deal = await prisma.deal.findFirst({ where: { id: dealId, tenantId: tid } });
   if (!deal) throw new ApiError(404, "not_found", "Сделка не найдена");
+  assertDealVisible(auth, deal);
   if (!Number.isFinite(input.amountMinor) || input.amountMinor <= 0) {
     throw new ApiError(422, "invalid", "Сумма оплаты должна быть больше 0");
   }
@@ -217,7 +221,7 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
   const tid = tenantId(auth);
   const now = new Date();
   const items = await prisma.task.findMany({
-    where: { tenantId: tid, parentTaskId: null },
+    where: { AND: [taskAccessWhere(auth), { parentTaskId: null }] },
     include: {
       inquiry: { include: { contact: { include: { methods: true } } } },
       deal: { include: { stage: true, contact: { include: { methods: true } } } },
@@ -475,6 +479,7 @@ export async function getTask(prisma: PrismaClient, auth: AuthContext, id: strin
     },
   });
   if (!item) throw new ApiError(404, "not_found", "Задача не найдена");
+  assertTaskVisible(auth, item);
   const attachments = await prisma.attachment.findMany({
     where: { tenantId: tid, parentType: "task", parentId: id },
     orderBy: { createdAt: "asc" },
@@ -604,6 +609,7 @@ export async function createTask(
     segmentSnapshot?: Record<string, unknown>;
   },
 ) {
+  requireManageTasks(auth);
   if (!CALLS_ENABLED && input.type === "call") {
     throw new ApiError(422, "calls_disabled", "Звонки временно отключены. Создайте задачу «Написать».");
   }
@@ -724,6 +730,7 @@ async function taskInTenant(prisma: PrismaClient, auth: AuthContext, id: string)
   const tid = tenantId(auth);
   const task = await prisma.task.findFirst({ where: { id, tenantId: tid } });
   if (!task) throw new ApiError(404, "not_found", "Задача не найдена");
+  assertTaskVisible(auth, task);
   return { tid, task };
 }
 
@@ -766,18 +773,21 @@ export async function completeTask(prisma: PrismaClient, auth: AuthContext, id: 
 }
 
 export async function waitTask(prisma: PrismaClient, auth: AuthContext, id: string) {
+  requireManageTasks(auth);
   const { task } = await taskInTenant(prisma, auth, id);
   if (task.status !== "open") throw new ApiError(409, "invalid_state", "В ожидание можно перевести только открытую задачу");
   return prisma.task.update({ where: { id }, data: { status: "waiting" } });
 }
 
 export async function reopenTask(prisma: PrismaClient, auth: AuthContext, id: string) {
+  requireManageTasks(auth);
   const { task } = await taskInTenant(prisma, auth, id);
   if (task.status !== "waiting") throw new ApiError(409, "invalid_state", "Вернуть можно только задачу в ожидании");
   return prisma.task.update({ where: { id }, data: { status: "open", completedAt: null } });
 }
 
 export async function cancelTask(prisma: PrismaClient, auth: AuthContext, id: string) {
+  requireManageTasks(auth);
   const { tid, task } = await taskInTenant(prisma, auth, id);
   if (task.status === "done") throw new ApiError(409, "invalid_state", "Сделанную задачу нельзя отменить");
   await prisma.scheduledAction.updateMany({
@@ -788,6 +798,7 @@ export async function cancelTask(prisma: PrismaClient, auth: AuthContext, id: st
 }
 
 export async function assignTask(prisma: PrismaClient, auth: AuthContext, id: string, membershipId?: string) {
+  requireManageTasks(auth);
   const { tid } = await taskInTenant(prisma, auth, id);
   const ownerId = membershipId || auth.activeMembership?.id;
   if (!ownerId) throw new ApiError(422, "invalid", "Нет сотрудника для назначения");
@@ -812,6 +823,7 @@ export async function setConversationMode(
   mode: "ai" | "human" | "paused",
 ) {
   const tid = tenantId(auth);
+  await assertConversationReachable(prisma, auth, id);
   return prisma.$transaction(async (tx) => {
     const current = await tx.conversation.findFirst({
       where: { id, tenantId: tid },
@@ -922,6 +934,7 @@ export async function addConversationMessage(
   const tid = tenantId(auth);
   const conversation = await prisma.conversation.findFirst({ where: { id, tenantId: tid } });
   if (!conversation) throw new ApiError(404, "not_found", "Диалог не найден");
+  await assertConversationReachable(prisma, auth, id);
   if (input.internal) {
     return prisma.message.create({
       data: {
@@ -1034,6 +1047,7 @@ export async function markNotificationRead(prisma: PrismaClient, auth: AuthConte
 }
 
 export async function statsSummary(prisma: PrismaClient, auth: AuthContext) {
+  requireNotManager(auth, "Статистика доступна администратору и директору");
   const tid = tenantId(auth);
   const start = new Date();
   start.setHours(0, 0, 0, 0);
@@ -1060,12 +1074,7 @@ export async function statsSummary(prisma: PrismaClient, auth: AuthContext) {
 }
 
 export async function listIntegrations(prisma: PrismaClient, auth: AuthContext) {
-  if (!can(auth, "manage_integrations") && auth.activeMembership?.role !== "owner") {
-    return prisma.integration.findMany({
-      where: { tenantId: tenantId(auth) },
-      select: { id: true, name: true, type: true, status: true, lastEventAt: true, lastError: true },
-    });
-  }
+  requireIntegrationsAccess(auth);
   return prisma.integration.findMany({
     where: { tenantId: tenantId(auth) },
     include: { forms: true, channelConnections: true },
@@ -1073,6 +1082,7 @@ export async function listIntegrations(prisma: PrismaClient, auth: AuthContext) 
 }
 
 export async function knowledgeCurrent(prisma: PrismaClient, auth: AuthContext) {
+  requireAiSettingsAccess(auth);
   return prisma.knowledgeVersion.findFirst({
     where: { tenantId: tenantId(auth) },
     orderBy: { version: "desc" },
@@ -1080,6 +1090,7 @@ export async function knowledgeCurrent(prisma: PrismaClient, auth: AuthContext) 
 }
 
 export async function aiSandbox(prisma: PrismaClient, auth: AuthContext, message: string) {
+  requireAiSettingsAccess(auth);
   const tid = tenantId(auth);
   const execution = await prisma.aIExecution.create({
     data: {

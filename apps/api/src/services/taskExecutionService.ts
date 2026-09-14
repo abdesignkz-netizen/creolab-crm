@@ -6,6 +6,7 @@ import path from "node:path";
 import { ApiError } from "../errors.ts";
 import { resolveUploadPath } from "../lib/storage.ts";
 import type { AuthContext } from "../lib/types.ts";
+import { assertTaskVisible, isManager, requireManageTasks } from "../lib/access.ts";
 import { writeActivity } from "./contactService.ts";
 import { displayName, formatWhen } from "./contactLabels.ts";
 import { hashExecutionContent, sendViaProvider } from "./messagingProvider.ts";
@@ -60,6 +61,7 @@ async function taskInTenant(prisma: PrismaClient, auth: AuthContext, id: string)
     },
   });
   if (!task) throw new ApiError(404, "not_found", "Задача не найдена");
+  assertTaskVisible(auth, task);
   return { tid, task };
 }
 
@@ -288,6 +290,7 @@ export async function updateTaskDraft(
     dueAt?: string | null;
   },
 ) {
+  requireManageTasks(auth);
   const { tid, task } = await taskInTenant(prisma, auth, id);
   if (task.status === "done" || task.status === "canceled") {
     throw new ApiError(409, "invalid_state", "Закрытую задачу нельзя менять");
@@ -1046,7 +1049,7 @@ export async function completeTaskWithResult(
 
   let createdNext = null;
   // Explicit nextAction from UI (manager confirmed) — create immediately
-  if (input.nextAction && !input.skipNext) {
+  if (input.nextAction && !input.skipNext && !isManager(auth)) {
     const needsHitl = ["proposal", "send_documents"].includes(input.nextAction.type);
     createdNext = await prisma.task.create({
       data: {
@@ -1117,6 +1120,7 @@ export async function createNextActionFromSuggestion(
   id: string,
   input: { type: string; title: string; dueOffsetHours?: number | null },
 ) {
+  requireManageTasks(auth);
   const { tid, task } = await taskInTenant(prisma, auth, id);
   const dueAt =
     input.dueOffsetHours != null ? new Date(Date.now() + input.dueOffsetHours * 3600_000) : null;

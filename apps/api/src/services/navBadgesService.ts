@@ -9,6 +9,7 @@ import {
   overdueTasksWhere,
 } from "./attentionCounts.ts";
 import { inquiryNeedsActionWhere, openIntakeWhere } from "./inquiryAttention.ts";
+import { isManager, inquiryAccessWhere, taskAccessWhere, conversationAccessWhere, dealAccessWhere } from "../lib/access.ts";
 
 function requireTenant(auth: AuthContext) {
   if (!auth.activeMembership) throw new ApiError(403, "no_tenant", "Нет активной компании");
@@ -57,23 +58,27 @@ export async function getNavBadges(prisma: PrismaClient, auth: AuthContext) {
     incompleteIntakes,
     documentsAttention,
   ] = await Promise.all([
-    countVisibleConversations(prisma, conversationsAttentionWhere(tid)),
-    countVisibleConversations(prisma, conversationsHumanWhere(tid)),
+    countVisibleConversations(prisma, { AND: [conversationsAttentionWhere(tid), conversationAccessWhere(auth)] }),
+    countVisibleConversations(prisma, { AND: [conversationsHumanWhere(tid), conversationAccessWhere(auth)] }),
     prisma.task.count({
-      where: overdueTasksWhere(tid, now),
+      where: { AND: [overdueTasksWhere(tid, now), taskAccessWhere(auth)] },
     }),
     countContactsNew(prisma, tid),
-    prisma.inquiry.count({ where: inquiryAction }),
+    prisma.inquiry.count({ where: { AND: [inquiryAction, inquiryAccessWhere(auth)] } }),
     prisma.deal.count({
       where: {
-        tenantId: tid,
-        stage: { isTerminal: false },
-        tasks: {
-          some: {
-            status: { in: ["open", "waiting"] },
-            dueAt: { lt: now },
+        AND: [
+          dealAccessWhere(auth),
+          {
+            stage: { isTerminal: false },
+            tasks: {
+              some: {
+                status: { in: ["open", "waiting"] },
+                dueAt: { lt: now },
+              },
+            },
           },
-        },
+        ],
       },
     }),
     prisma.company.count({
@@ -119,7 +124,10 @@ export async function getNavBadges(prisma: PrismaClient, auth: AuthContext) {
   const conversations = conversationsAttention;
   const tasks = tasksOverdue;
   const inquiries = inquiriesAttention + incompleteIntakes;
-  const control = conversationsHuman;
+  const manager = isManager(auth);
+  const control = manager ? 0 : conversationsHuman;
+  const documentsCount = manager ? 0 : documentsAttention;
+  const integrationsCount = manager ? 0 : integrationsIssues;
   const situation = conversationsAttention + tasksOverdue + inquiriesAttention + incompleteIntakes;
 
   const situationParts = [
@@ -156,14 +164,14 @@ export async function getNavBadges(prisma: PrismaClient, auth: AuthContext) {
       ? `${ruCount(dealsAttention, "сделка", "сделки", "сделок")} с просроченной задачей`
       : "",
     "/control": control ? `${ruCount(control, "диалог", "диалога", "диалогов")} у менеджера, не у AI` : "",
-    "/integrations": integrationsIssues
-      ? `${ruCount(integrationsIssues, "интеграция", "интеграции", "интеграций")} с ошибкой`
+    "/integrations": integrationsCount
+      ? `${ruCount(integrationsCount, "интеграция", "интеграции", "интеграций")} с ошибкой`
       : "",
     "/settings": notificationsUnread
       ? ruCount(notificationsUnread, "непрочитанное уведомление", "непрочитанных уведомления", "непрочитанных уведомлений")
       : "",
-    "/documents": documentsAttention
-      ? ruCount(documentsAttention, "документ требует внимания", "документа требуют внимания", "документов требуют внимания")
+    "/documents": documentsCount
+      ? ruCount(documentsCount, "документ требует внимания", "документа требуют внимания", "документов требуют внимания")
       : "",
   };
 
@@ -178,10 +186,10 @@ export async function getNavBadges(prisma: PrismaClient, auth: AuthContext) {
       "/inquiries": inquiries,
       "/deals": dealsAttention,
       "/control": control,
-      "/integrations": integrationsIssues,
+      "/integrations": integrationsCount,
       "/stats": 0,
       "/settings": notificationsUnread,
-      "/documents": documentsAttention,
+      "/documents": documentsCount,
     } as Record<string, number>,
     hints,
     hrefs: {

@@ -7,6 +7,7 @@ import type { PrismaClient } from "@creolab/db";
 import type { Response } from "express";
 import { ApiError } from "../errors.ts";
 import { can, type AuthContext } from "../lib/types.ts";
+import { requireDocumentsAccess } from "../lib/access.ts";
 import { resolveUploadPath } from "../lib/storage.ts";
 import { sumLines } from "./documentMoney.ts";
 import { serializeDealItem } from "./dealItemService.ts";
@@ -240,6 +241,7 @@ export async function sendInvoicePdf(
   invoiceId: string,
   res: Response,
 ) {
+  requireDocumentsAccess(auth);
   const membership = requireTenant(auth);
   const tid = membership.tenantId;
   const invoice = await prisma.invoice.findFirst({

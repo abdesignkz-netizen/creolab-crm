@@ -2,8 +2,9 @@ import { lazy, Suspense, useEffect, useRef, useState, type MouseEvent, type Reac
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { api, setTenant } from "./lib/api";
 import { NavIcon } from "./components/NavIcon";
-import { LegalSettingsPanel } from "./pages/LegalSettingsPanel";
 import { tip } from "./lib/tip";
+import { applyAppearance, emptyCaps, SessionContext, type Capabilities } from "./lib/session";
+import { normalizeLocale, t } from "./i18n";
 import {
   currentBrowserPermission,
   dismissNotificationBanner,
@@ -36,6 +37,7 @@ const AiAutomationSettingsPage = lazy(() => import("./pages/AiAutomationSettings
 const SituationPage = lazy(() => import("./pages/SituationPage").then(m => ({ default: m.SituationPage })));
 const StatsPage = lazy(() => import("./pages/StatsPage").then(m => ({ default: m.StatsPage })));
 const TasksPage = lazy(() => import("./pages/TasksPage").then(m => ({ default: m.TasksPage })));
+const SettingsPage = lazy(() => import("./pages/SettingsPage").then(m => ({ default: m.SettingsPage })));
 
 type LoadState<T> = { status: "loading" | "ready" | "error" | "empty"; data?: T; error?: string };
 
@@ -89,40 +91,43 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
   const [moreOpen, setMoreOpen] = useState(false);
   const moreSheetRef = useRef<HTMLDivElement>(null);
 
+  const caps: Capabilities = me?.capabilities || emptyCaps;
+  const locale = normalizeLocale(me?.user?.locale);
+
   const primaryTabs = [
-    { to: "/today", label: "Главная", icon: "home" },
-    { to: "/conversations", label: "Диалоги", icon: "chat" },
-    { to: "/tasks", label: "Задачи", icon: "tasks" },
-    { to: "/inquiries", label: "Заявки", icon: "inquiries" },
+    { to: "/today", label: t(locale, "nav.home"), icon: "home" },
+    { to: "/conversations", label: t(locale, "nav.conversations"), icon: "chat" },
+    { to: "/tasks", label: t(locale, "nav.tasks"), icon: "tasks" },
+    { to: "/inquiries", label: t(locale, "nav.inquiries"), icon: "inquiries" },
   ] as const;
 
   const moreLinks = [
-    ["/control", "Управление"],
-    ["/contacts", "Клиенты"],
-    ["/companies", "Компании"],
-    ["/deals", "Сделки"],
-    ["/documents", "Документы"],
-    ["/integrations", "Интеграции"],
-    ["/stats", "Статистика"],
-    ["/settings", "Настройки"],
-  ] as const;
+    ["/control", t(locale, "nav.control"), !caps.manager],
+    ["/contacts", t(locale, "nav.contacts"), true],
+    ["/companies", t(locale, "nav.companies"), true],
+    ["/deals", t(locale, "nav.deals"), true],
+    ["/documents", t(locale, "nav.documents"), caps.documents],
+    ["/integrations", t(locale, "nav.integrations"), caps.integrations],
+    ["/stats", t(locale, "nav.stats"), caps.analytics],
+    ["/settings", t(locale, "nav.settings"), true],
+  ].filter((item) => item[2]) as Array<[string, string]>;
 
   const workLinks = [
-    ["/today", "Главная"],
-    ["/conversations", "Диалоги"],
-    ["/tasks", "Задачи"],
-    ["/contacts", "Клиенты"],
-    ["/companies", "Компании"],
-    ["/inquiries", "Заявки"],
-    ["/deals", "Сделки"],
-    ["/documents", "Документы"],
-  ] as const;
+    ["/today", t(locale, "nav.home")],
+    ["/conversations", t(locale, "nav.conversations")],
+    ["/tasks", t(locale, "nav.tasks")],
+    ["/contacts", t(locale, "nav.contacts")],
+    ["/companies", t(locale, "nav.companies")],
+    ["/inquiries", t(locale, "nav.inquiries")],
+    ["/deals", t(locale, "nav.deals")],
+    ...(caps.documents ? [["/documents", t(locale, "nav.documents")] as [string, string]] : []),
+  ];
   const systemLinks = [
-    ["/control", "Управление"],
-    ["/integrations", "Интеграции"],
-    ["/stats", "Статистика"],
-    ["/settings", "Настройки"],
-  ] as const;
+    ...(!caps.manager ? [["/control", t(locale, "nav.control")] as [string, string]] : []),
+    ...(caps.integrations ? [["/integrations", t(locale, "nav.integrations")] as [string, string]] : []),
+    ...(caps.analytics ? [["/stats", t(locale, "nav.stats")] as [string, string]] : []),
+    ["/settings", t(locale, "nav.settings")],
+  ];
 
   function badgeCount(path: string) {
     const n = Number(navBadges[path] || 0);
@@ -165,20 +170,20 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
   const moreBadgeTotal = moreLinks.reduce((sum, [path]) => sum + badgeCount(path), 0);
 
   const titleMap: Record<string, string> = {
-    "/today": "Главная",
-    "/control": "Управление",
-    "/inquiries": "Заявки",
-    "/requests": "Заявка",
-    "/conversations": "Диалоги",
-    "/deals": "Сделки",
-    "/documents": "Документы",
-    "/tasks": "Задачи",
-    "/contacts": "Клиенты",
-    "/companies": "Компании",
-    "/integrations": "Интеграции",
-    "/stats": "Статистика",
-    "/settings": "Настройки",
-    "/admin": "Платформа",
+    "/today": t(locale, "nav.home"),
+    "/control": t(locale, "nav.control"),
+    "/inquiries": t(locale, "nav.inquiries"),
+    "/requests": t(locale, "nav.inquiries"),
+    "/conversations": t(locale, "nav.conversations"),
+    "/deals": t(locale, "nav.deals"),
+    "/documents": t(locale, "nav.documents"),
+    "/tasks": t(locale, "nav.tasks"),
+    "/contacts": t(locale, "nav.contacts"),
+    "/companies": t(locale, "nav.companies"),
+    "/integrations": t(locale, "nav.integrations"),
+    "/stats": t(locale, "nav.stats"),
+    "/settings": t(locale, "nav.settings"),
+    "/admin": t(locale, "nav.platform"),
   };
   const pageTitle =
     Object.entries(titleMap).find(([path]) => location.pathname === path || location.pathname.startsWith(`${path}/`))?.[1] ||
@@ -340,7 +345,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
           </div>
         </div>
         <nav className="nav-links">
-          <p className="nav-section">Работа</p>
+          <p className="nav-section">{t(locale, "nav.work")}</p>
           {workLinks.map(([to, label]) => {
             const count = badgeCount(to);
             const hint = badgeHint(to);
@@ -361,7 +366,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
               </NavLink>
             );
           })}
-          <p className="nav-section">Система</p>
+          <p className="nav-section">{t(locale, "nav.system")}</p>
           {systemLinks.map(([to, label]) => {
             const count = badgeCount(to);
             const hint = badgeHint(to, to === "/settings" ? "Непрочитанные уведомления" : "Требует внимания");
@@ -382,10 +387,10 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
               </NavLink>
             );
           })}
-          {me.user.platformAdmin ? <NavLink to="/admin">Кабинет платформы</NavLink> : null}
+          {me.user.platformAdmin ? <NavLink to="/admin">{t(locale, "nav.platform")}</NavLink> : null}
         </nav>
         <button className="btn secondary nav-logout" onClick={logout} {...tip("Завершить сеанс в этом браузере")}>
-          Выйти
+          {t(locale, "nav.logout")}
         </button>
       </aside>
 
@@ -462,7 +467,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
         else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
       }}>
         <div className="more-sheet-handle" />
-        <div className="more-sheet-heading"><b className="more-sheet-title">Ещё</b><button type="button" className="btn secondary" onClick={() => setMoreOpen(false)}>Закрыть</button></div>
+        <div className="more-sheet-heading"><b className="more-sheet-title">{t(locale, "nav.more")}</b><button type="button" className="btn secondary" onClick={() => setMoreOpen(false)}>{t(locale, "common.close")}</button></div>
         <nav className="more-sheet-links">
           {moreLinks.map(([to, label]) => {
             const count = badgeCount(to);
@@ -490,7 +495,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
           ) : null}
         </nav>
         <button type="button" className="btn secondary" onClick={logout} {...tip("Завершить сеанс в этом браузере")}>
-          Выйти
+          {t(locale, "nav.logout")}
         </button>
       </div>
 
@@ -528,7 +533,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
             <span className="tab-icon icon-more" aria-hidden />
             {moreBadgeTotal > 0 ? <span className="tab-badge">{formatBadge(moreBadgeTotal)}</span> : null}
           </span>
-          <span className="tab-label">Ещё</span>
+          <span className="tab-label">{t(locale, "nav.more")}</span>
         </button>
       </nav>
     </div>
@@ -569,14 +574,14 @@ function Login() {
             }
           }}
         >
-          <h2>Вход</h2>
-          <p className="muted">Email и пароль. WhatsApp для входа не нужен.</p>
+          <h2>{t(normalizeLocale(null), "login.title")}</h2>
+          <p className="muted">{t(normalizeLocale(null), "login.hint")}</p>
           <label>
-            Email
+            {t(normalizeLocale(null), "login.email")}
             <input name="email" type="email" required defaultValue="owner@creolab.example" autoComplete="username" />
           </label>
           <label>
-            Пароль
+            {t(normalizeLocale(null), "login.password")}
             <input
               name="password"
               type="password"
@@ -586,7 +591,7 @@ function Login() {
             />
           </label>
           {error ? <p className="error">{error}</p> : null}
-          <button className="btn">Войти</button>
+          <button className="btn">{t(normalizeLocale(null), "login.submit")}</button>
         </form>
       </div>
     </div>
@@ -610,296 +615,6 @@ function SimpleList({ title, load, render }: { title: string; load: () => Promis
   );
 }
 
-function Settings() {
-  const [state] = useQuery(() => api.knowledge() as Promise<any>);
-  const [sandbox, setSandbox] = useState("");
-  const [notices, setNotices] = useState<any[]>([]);
-  const [permission, setPermission] = useState(currentBrowserPermission());
-  const [enabled, setEnabled] = useState(getBrowserNotificationPreference());
-  const [noticeError, setNoticeError] = useState("");
-  const [notifyHint, setNotifyHint] = useState<{ tone: "ok" | "warn" | "error"; text: string } | null>(null);
-  const [permitBusy, setPermitBusy] = useState(false);
-  const [testBusy, setTestBusy] = useState(false);
-
-  async function loadNotices() {
-    try {
-      const data = (await api.notifications()) as { items?: any[] } | any[];
-      setNotices(Array.isArray(data) ? data : data.items || []);
-      setNoticeError("");
-    } catch (err) {
-      setNoticeError(err instanceof Error ? err.message : "Не удалось загрузить уведомления");
-    }
-  }
-
-  useEffect(() => {
-    void loadNotices();
-    setPermission(currentBrowserPermission());
-    setEnabled(getBrowserNotificationPreference());
-    const onAttention = () => {
-      void loadNotices();
-    };
-    window.addEventListener("creolab:attention-changed", onAttention);
-    return () => window.removeEventListener("creolab:attention-changed", onAttention);
-  }, []);
-
-  if (state.status !== "ready") {
-    return <StateView state={state} onRetry={() => location.reload()} empty="Нет настроек" />;
-  }
-
-  const iosNeedsHomeScreen = isLikelyIosSafari() && !isStandaloneDisplayMode();
-  const canRequestPermission = permission === "default" || permission === "granted";
-  const canTest = permission === "granted";
-
-  const permissionLabel =
-    permission === "granted"
-      ? "разрешены"
-      : permission === "denied"
-        ? "запрещены в браузере"
-        : iosNeedsHomeScreen
-          ? "нужен экран «Домой» (сейчас открыто в Safari)"
-          : permission === "unsupported"
-            ? "не поддерживаются этим браузером"
-            : "ещё не запрошены";
-
-  function setFeedback(tone: "ok" | "warn" | "error", text: string) {
-    setNotifyHint({ tone, text });
-  }
-
-  return (
-    <section>
-      <h2>Настройки компании</h2>
-      <LegalSettingsPanel />
-      <p>
-        <a href="/integrations">Подключить WhatsApp, форму, webhook и Telegram →</a>
-      </p>
-      <p>
-        <a href="/control">Управлять ИИ, диалогами и задачами →</a>
-      </p>
-      <p>
-        <a href="/settings/ai-automation">AI Manager → Новые заявки →</a>
-      </p>
-
-      <div className="panel">
-        <b>Уведомления браузера</b>
-        <p className="muted">
-          Новые заявки, обращения без телефона и диалоги, где нужен человек. Работают при свёрнутом окне CRM, пока
-          браузер запущен.
-        </p>
-
-        {iosNeedsHomeScreen ? (
-          <div className="notify-steps">
-            <b>На iPhone уведомления работают только с иконки</b>
-            <ol>
-              <li>Нажмите кнопку «Поделиться» внизу Safari</li>
-              <li>Выберите «На экран „Домой“» → «Добавить»</li>
-              <li>Закройте эту вкладку и откройте CRM с новой иконки</li>
-              <li>Внутри приложения нажмите «Разрешить уведомления»</li>
-            </ol>
-          </div>
-        ) : null}
-
-        <p>
-          Статус: <b>{permissionLabel}</b>
-          {enabled ? " · включены в кабинете" : " · выключены в кабинете"}
-        </p>
-
-        {notifyHint ? <div className={`notify-feedback ${notifyHint.tone}`}>{notifyHint.text}</div> : null}
-
-        <div className="actions notify-actions">
-          {iosNeedsHomeScreen ? (
-            <button
-              type="button"
-              className="btn"
-              onClick={() => {
-                setPermission(currentBrowserPermission());
-                if (isStandaloneDisplayMode()) {
-                  setFeedback("ok", "Открыто с иконки — теперь нажмите «Разрешить уведомления».");
-                } else {
-                  setFeedback(
-                    "warn",
-                    "Пока открыто во вкладке Safari. Добавьте на экран «Домой» и зайдите с иконки — иначе iPhone не даст уведомления.",
-                  );
-                }
-              }}
-            >
-              Я открыл с иконки — проверить
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="btn"
-              disabled={permitBusy || permission === "granted"}
-              onClick={() => {
-                setPermitBusy(true);
-                setNotifyHint(null);
-                void (async () => {
-                  try {
-                    const result = await requestBrowserNotificationPermission();
-                    setPermission(result);
-                    if (result === "granted") {
-                      setEnabled(true);
-                      setBrowserNotificationPreference(true);
-                      setFeedback("ok", "Готово: уведомления разрешены. Можно нажать «Проверить».");
-                      return;
-                    }
-                    if (result === "denied") {
-                      setFeedback(
-                        "error",
-                        "Браузер запретил уведомления. В настройках сайта разрешите их и обновите страницу.",
-                      );
-                      return;
-                    }
-                    setFeedback(
-                      "warn",
-                      "Этот браузер не поддерживает уведомления. Откройте CRM в Chrome или Safari по HTTPS.",
-                    );
-                  } finally {
-                    setPermitBusy(false);
-                  }
-                })();
-              }}
-            >
-              {permitBusy ? "Запрашиваем…" : permission === "granted" ? "Уже разрешено ✓" : "Разрешить уведомления"}
-            </button>
-          )}
-
-          <button
-            type="button"
-            className="btn secondary"
-            onClick={() => {
-              const next = !enabled;
-              setBrowserNotificationPreference(next);
-              setEnabled(next);
-              setFeedback("ok", next ? "Включены в кабинете." : "Выключены в кабинете (тосты не приходят).");
-            }}
-          >
-            {enabled ? "Выключить в кабинете" : "Включить в кабинете"}
-          </button>
-
-          <button
-            type="button"
-            className="btn secondary"
-            disabled={testBusy}
-            onClick={() => {
-              if (!canTest) {
-                setFeedback(
-                  "warn",
-                  iosNeedsHomeScreen
-                    ? "Сначала откройте CRM с экрана «Домой», затем разрешите уведомления — после этого «Проверить» отправит тест."
-                    : permission === "denied"
-                      ? "Сначала разрешите уведомления в настройках сайта браузера."
-                      : "Сначала нажмите «Разрешить уведомления» и согласитесь в диалоге браузера.",
-                );
-                return;
-              }
-              setTestBusy(true);
-              setNotifyHint(null);
-              void (async () => {
-                try {
-                  const ok = await showBrowserNotification({
-                    title: "CREOLAB CRM",
-                    body: "Тестовое уведомление. Так будут приходить новые заявки.",
-                    tag: `test-${Date.now()}`,
-                    url: "/settings",
-                    force: true,
-                  });
-                  setFeedback(
-                    ok ? "ok" : "error",
-                    ok
-                      ? "Тест отправлен. Если не видно — откройте Центр уведомлений или выключите «Не беспокоить»."
-                      : "Не удалось показать уведомление. Нажмите «Разрешить уведомления» ещё раз.",
-                  );
-                } finally {
-                  setTestBusy(false);
-                }
-              })();
-            }}
-          >
-            {testBusy ? "Отправляем…" : "Проверить"}
-          </button>
-        </div>
-
-        {!canTest && !iosNeedsHomeScreen && canRequestPermission ? (
-          <p className="muted notify-help">«Проверить» станет доступен после разрешения уведомлений.</p>
-        ) : null}
-        {permission === "denied" ? (
-          <p className="error">Разрешите уведомления в настройках сайта браузера, затем обновите страницу.</p>
-        ) : null}
-      </div>
-
-      <div className="panel">
-        <div className="page-head">
-          <b>Последние уведомления</b>
-          <button type="button" className="btn secondary" onClick={() => void loadNotices()}>
-            Обновить
-          </button>
-        </div>
-        {noticeError ? <p className="error">{noticeError}</p> : null}
-        {notices.length === 0 ? <p className="empty">Пока пусто. Новая заявка появится здесь и в системном тосте.</p> : null}
-        {notices.slice(0, 20).map((item) => (
-          <div className="row" key={item.id}>
-            <div>
-              <b>{item.title}</b>
-              <div className="muted">{item.body}</div>
-              <div className="muted">
-                {item.readAt ? "прочитано" : "новое"}
-                {item.createdAt ? ` · ${new Date(item.createdAt).toLocaleString("ru-RU")}` : ""}
-              </div>
-            </div>
-            <div className="actions">
-              <Link
-                className="btn secondary"
-                to={item.href || "/today"}
-                onClick={() => {
-                  if (item.readAt) return;
-                  void api
-                    .markNotificationRead(item.id)
-                    .then(() => {
-                      window.dispatchEvent(new Event("creolab:attention-changed"));
-                    })
-                    .catch(() => undefined);
-                }}
-              >
-                Открыть
-              </Link>
-              {!item.readAt ? (
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={async () => {
-                    await api.markNotificationRead(item.id);
-                    window.dispatchEvent(new Event("creolab:attention-changed"));
-                    await loadNotices();
-                  }}
-                >
-                  Прочитано
-                </button>
-              ) : null}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <h3>База знаний</h3>
-      <pre className="code">{JSON.stringify(state.data?.contentJson || {}, null, 2)}</pre>
-      <form
-        className="panel"
-        onSubmit={async (event) => {
-          event.preventDefault();
-          const form = new FormData(event.currentTarget);
-          const result = (await api.sandbox(String(form.get("message")))) as any;
-          setSandbox(result.reply_text);
-        }}
-      >
-        <b>Проверить ИИ (песочница, без WhatsApp)</b>
-        <textarea name="message" required />
-        <button className="btn">Проверить</button>
-        {sandbox ? <p>{sandbox}</p> : null}
-      </form>
-    </section>
-  );
-}
-
 export function App() {
   const location = useLocation();
   const [me, setMe] = useState<any>(null);
@@ -912,6 +627,7 @@ export function App() {
     api.me().then((data) => {
       if (cancelled) return;
       setMe(data);
+      applyAppearance((data as any).user);
       setBoot("ready");
     }).catch((error) => {
       if (cancelled) return;
@@ -923,7 +639,7 @@ export function App() {
     });
     return () => { cancelled = true; };
   }, [bootRevision]);
-  if (boot === "loading") return <div className="state">Загрузка…</div>;
+  if (boot === "loading") return <div className="state">{t(normalizeLocale(null), "common.loading")}</div>;
   if (boot === "error") return <div className="state"><p>{bootError}</p><button className="btn" onClick={() => setBootRevision(value => value + 1)}>Повторить</button></div>;
   return (
     <Routes>
@@ -950,13 +666,14 @@ export function App() {
           boot !== "ready" ? (
             <Navigate to="/login" />
           ) : (
+            <SessionContext.Provider value={{ me, caps: me?.capabilities || emptyCaps }}>
             <Shell me={me}>
               <Suspense fallback={<div className="state" role="status">Загрузка раздела…</div>}>
               <Routes>
                 <Route path="/today" element={<Today />} />
-                <Route path="/control" element={<ControlPage />} />
-                <Route path="/integrations" element={<IntegrationsPage />} />
-                <Route path="/integrations/esf" element={<EsfIntegrationPage />} />
+                <Route path="/control" element={me?.capabilities?.manager ? <Navigate to="/today" replace /> : <ControlPage />} />
+                <Route path="/integrations" element={me?.capabilities?.integrations ? <IntegrationsPage /> : <Navigate to="/today" replace />} />
+                <Route path="/integrations/esf" element={me?.capabilities?.documents ? <EsfIntegrationPage /> : <Navigate to="/today" replace />} />
                 <Route path="/inquiries" element={<RequestsPage />} />
                 <Route path="/requests" element={<Navigate to="/inquiries" replace />} />
                 <Route path="/requests/:requestId" element={<RequestDetailPage key={location.pathname} />} />
@@ -964,23 +681,24 @@ export function App() {
                 <Route path="/conversations/:id" element={<ConversationsPage />} />
                 <Route path="/deals" element={<DealsPage />} />
                 <Route path="/deals/:dealId" element={<DealDetailPage key={location.pathname} />} />
-                <Route path="/documents" element={<DocumentsPage />} />
-                <Route path="/documents/avr/new" element={<AvrEditorPage />} />
-                <Route path="/documents/avr/:id" element={<AvrEditorPage />} />
+                <Route path="/documents" element={me?.capabilities?.documents ? <DocumentsPage /> : <Navigate to="/today" replace />} />
+                <Route path="/documents/avr/new" element={me?.capabilities?.documents ? <AvrEditorPage /> : <Navigate to="/today" replace />} />
+                <Route path="/documents/avr/:id" element={me?.capabilities?.documents ? <AvrEditorPage /> : <Navigate to="/today" replace />} />
                 <Route path="/tasks" element={<TasksPage />} />
                 <Route path="/contacts" element={<ClientsPage />} />
                 <Route path="/contacts/:id" element={<ContactPage key={location.pathname} />} />
                 <Route path="/clients/:id" element={<ContactPage key={location.pathname} />} />
                 <Route path="/companies" element={<CompaniesPage />} />
                 <Route path="/companies/:id" element={<CompanyPage key={location.pathname} />} />
-                <Route path="/stats" element={<StatsPage />} />
-                <Route path="/settings" element={<Settings />} />
-                <Route path="/settings/ai-automation" element={<AiAutomationSettingsPage />} />
+                <Route path="/stats" element={me?.capabilities?.analytics ? <StatsPage /> : <Navigate to="/today" replace />} />
+                <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/settings/ai-automation" element={me?.capabilities?.aiSettings ? <AiAutomationSettingsPage /> : <Navigate to="/settings" replace />} />
                 <Route path="/admin" element={<Admin />} />
                 <Route path="*" element={<Navigate to="/today" />} />
               </Routes>
               </Suspense>
             </Shell>
+            </SessionContext.Provider>
           )
         }
       />

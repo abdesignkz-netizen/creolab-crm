@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@creolab/db";
 import type { Permission, Role } from "@creolab/contracts";
+import { can as canAccess } from "./access.ts";
 
 export type AuthContext = {
   user: {
@@ -7,6 +8,16 @@ export type AuthContext = {
     email: string;
     name: string;
     platformAdmin: boolean;
+    phone?: string | null;
+    firstName?: string | null;
+    lastName?: string | null;
+    middleName?: string | null;
+    city?: string | null;
+    avatarStorageKey?: string | null;
+    locale?: string;
+    timezone?: string | null;
+    timeFormat?: string;
+    theme?: string;
   };
   memberships: Array<{
     id: string;
@@ -14,6 +25,7 @@ export type AuthContext = {
     role: Role;
     permissions: string[];
     active: boolean;
+    jobTitle?: string | null;
     tenant: { id: string; name: string; slug: string; status: string; timezone: string; currency: string; defaultRegion: string };
   }>;
   activeMembership: AuthContext["memberships"][number] | null;
@@ -27,16 +39,5 @@ export type AppContext = {
 };
 
 export function can(auth: AuthContext | null, permission: Permission): boolean {
-  if (!auth?.activeMembership && !auth?.user.platformAdmin) return false;
-  if (auth.user.platformAdmin) return true;
-  const role = auth.activeMembership?.role;
-  if (!role) return false;
-  if (role === "owner" || role === "sales_lead") {
-    if (permission === "view_all_conversations") return true;
-  }
-  if (role === "owner") return true;
-  if (role === "sales_lead" && permission !== "manage_integrations" && permission !== "export_all" && permission !== "manage_members") {
-    return true;
-  }
-  return Boolean(auth.activeMembership?.permissions.includes(permission));
+  return canAccess(auth, permission);
 }

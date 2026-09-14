@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import { CALLS_ENABLED } from "../lib/featureFlags.ts";
+import { requireManageTasks } from "../lib/access.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { composeCommandClientDraft } from "./commandComposeService.ts";
 import {
@@ -326,6 +327,7 @@ export async function parseTaskCommand(
   text: string,
   opts: { contactId?: string; contactIds?: string[]; phone?: string; phones?: string[]; phoneListText?: string } = {},
 ) {
+  requireManageTasks(auth);
   if (!auth.activeMembership) throw new ApiError(403, "no_tenant", "Нет активной компании");
   let command = parseRules(text);
   const llm = await refineCommandWithLlm(text, command as unknown as Record<string, unknown>);

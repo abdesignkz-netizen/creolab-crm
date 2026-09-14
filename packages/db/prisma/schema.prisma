@@ -117,6 +117,15 @@ model User {
   name         String
   status       String   @default("active")
   phone        String?
+  firstName    String?
+  lastName     String?
+  middleName   String?
+  city         String?
+  avatarStorageKey String?
+  locale       String   @default("ru")
+  timezone     String?
+  timeFormat   String   @default("24")
+  theme        String   @default("system")
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -135,6 +144,7 @@ model Membership {
   userId      String
   role        String
   permissions Json     @default("[]")
+  jobTitle    String?
   active      Boolean  @default(true)
   createdAt   DateTime @default(now())
   tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -166,6 +176,9 @@ model Session {
   refreshExpiresAt DateTime?
   revokedAt        DateTime?
   deviceLabel      String?
+  userAgent        String?
+  ip               String?
+  lastSeenAt       DateTime?
   user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, revokedAt])

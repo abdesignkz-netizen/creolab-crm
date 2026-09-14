@@ -1,6 +1,7 @@
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
+import { isManager } from "../lib/access.ts";
 import {
   INQUIRY_STATUS_LABEL,
   SOURCE_LABEL,
@@ -353,7 +354,7 @@ export async function listWorkspaceMembers(prisma: PrismaClient, auth: AuthConte
     items: items.map((item) => ({
       id: item.id,
       name: item.user.name,
-      email: item.user.email,
+      email: isManager(auth) ? undefined : item.user.email,
       role: item.role,
       isMe: item.id === membership.id,
     })),

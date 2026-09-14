@@ -2,6 +2,7 @@ import { resolveEsfMeasureUnitCode } from "@creolab/contracts";
 import type { PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
+import { assertDealVisible } from "../lib/access.ts";
 import { asMoney, lineAmounts, sumLines, toMinorTenge } from "./documentMoney.ts";
 import { getTenantDocumentFlags, resolveVatRate } from "./legalProfileService.ts";
 
@@ -65,6 +66,7 @@ export async function listDealItems(prisma: PrismaClient, auth: AuthContext, dea
   const membership = requireTenant(auth);
   const deal = await prisma.deal.findFirst({ where: { id: dealId, tenantId: membership.tenantId } });
   if (!deal) throw new ApiError(404, "not_found", "Сделка не найдена");
+  assertDealVisible(auth, deal);
   const items = await prisma.dealItem.findMany({
     where: { tenantId: membership.tenantId, dealId },
     orderBy: { sortOrder: "asc" },
@@ -93,6 +95,7 @@ export async function addDealItem(
   const tid = membership.tenantId;
   const deal = await prisma.deal.findFirst({ where: { id: dealId, tenantId: tid } });
   if (!deal) throw new ApiError(404, "not_found", "Сделка не найдена");
+  assertDealVisible(auth, deal);
   const flags = await getTenantDocumentFlags(prisma, tid);
   const vatRate = resolveVatRate(flags, input.vatRate);
   const amounts = lineAmounts(input.quantity, input.unitPrice, vatRate);
@@ -140,6 +143,9 @@ export async function updateDealItem(
 ) {
   const membership = requireTenant(auth);
   const tid = membership.tenantId;
+  const deal = await prisma.deal.findFirst({ where: { id: dealId, tenantId: tid } });
+  if (!deal) throw new ApiError(404, "not_found", "Сделка не найдена");
+  assertDealVisible(auth, deal);
   const item = await prisma.dealItem.findFirst({ where: { id: itemId, tenantId: tid, dealId } });
   if (!item) throw new ApiError(404, "not_found", "Позиция не найдена");
   const quantity = input.quantity ?? asMoney(item.quantity);
@@ -168,6 +174,9 @@ export async function updateDealItem(
 export async function deleteDealItem(prisma: PrismaClient, auth: AuthContext, dealId: string, itemId: string) {
   const membership = requireTenant(auth);
   const tid = membership.tenantId;
+  const deal = await prisma.deal.findFirst({ where: { id: dealId, tenantId: tid } });
+  if (!deal) throw new ApiError(404, "not_found", "Сделка не найдена");
+  assertDealVisible(auth, deal);
   const item = await prisma.dealItem.findFirst({ where: { id: itemId, tenantId: tid, dealId } });
   if (!item) throw new ApiError(404, "not_found", "Позиция не найдена");
   await prisma.dealItem.delete({ where: { id: itemId } });

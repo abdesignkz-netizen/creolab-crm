@@ -6,6 +6,8 @@ import { PeriodSelector, type PeriodPreset } from "../components/PeriodSelector"
 import { nameWithPhone } from "../lib/contactDisplay";
 import { formatDurationMinutes } from "../lib/duration";
 import { api } from "../lib/api";
+import { useCapabilities, useSession } from "../lib/session";
+import { normalizeLocale, t } from "../i18n";
 
 type Scope = "all" | "mine" | "unassigned";
 
@@ -87,6 +89,9 @@ function Kpi({
 }
 
 export function SituationPage() {
+  const caps = useCapabilities();
+  const { me } = useSession();
+  const locale = normalizeLocale(me?.user?.locale);
   const requestVersion = useRequestVersion();
   const navigate = useNavigate();
   const [scope, setScope] = useUrlState<Scope>("scope", "all");
@@ -127,13 +132,15 @@ export function SituationPage() {
         return;
       }
       const [result, badges] = await Promise.all([
-        api.situationOverview({
-          period,
-          scope,
-          onlyImportant,
-          dateFrom: period === "custom" ? dateFrom : undefined,
-          dateTo: period === "custom" ? dateTo : undefined,
-        }),
+        caps.manager
+          ? api.situation({ scope: "all" })
+          : api.situationOverview({
+              period,
+              scope,
+              onlyImportant,
+              dateFrom: period === "custom" ? dateFrom : undefined,
+              dateTo: period === "custom" ? dateTo : undefined,
+            }),
         api.navBadges().catch(() => null),
       ]);
       if (request !== requestVersion.current) return;
@@ -151,7 +158,7 @@ export function SituationPage() {
     void load();
     const timer = window.setInterval(() => void load(), 60_000);
     return () => window.clearInterval(timer);
-  }, [scope, period, onlyImportant, dateFrom, dateTo]);
+  }, [scope, period, onlyImportant, dateFrom, dateTo, caps.manager]);
 
   async function run(item: any, action: () => Promise<unknown>) {
     setBusyId(item.id);
@@ -184,6 +191,49 @@ export function SituationPage() {
         <button type="button" className="btn" onClick={() => void load()}>
           Повторить
         </button>
+      </section>
+    );
+  }
+
+  if (caps.manager) {
+    const items = Array.isArray(data.items) ? data.items : [];
+    const inquiries = items.filter((item: any) => String(item.kind || "").startsWith("inquiry") || item.entityType === "inquiry");
+    const deals = items.filter((item: any) => String(item.kind || "").includes("deal"));
+    const tasks = items.filter((item: any) => String(item.kind || "").startsWith("task"));
+    const dialogs = items.filter((item: any) => String(item.kind || "").startsWith("conversation"));
+    return (
+      <section className="situation-page">
+        <div className="page-head sit-head">
+          <div>
+            <p className="page-kicker">{t(locale, "today.work")}</p>
+            <h2>Главная</h2>
+            {badgeHint ? <p className="muted sit-badge-explain">{badgeHint}</p> : null}
+          </div>
+        </div>
+        {error ? <p className="error">{error}</p> : null}
+        <div className="sit-kpi-grid">
+          <Kpi label="Доступные заявки" value={inquiries.length} to="/inquiries" />
+          <Kpi label="Сделки" value={deals.length} to="/deals" />
+          <Kpi label="Задачи" value={tasks.length} to="/tasks" />
+          <Kpi label="Диалоги" value={dialogs.length} to="/conversations" />
+        </div>
+        <div className="panel">
+          <b>Что требует внимания</b>
+          {!items.length ? <p className="empty">Пока нет рабочих пунктов</p> : null}
+          {items.slice(0, 40).map((item: any) => (
+            <div className="row" key={item.id}>
+              <div>
+                <b>{item.title}</b>
+                <div className="muted">{item.subtitle || item.reason || item.kind}</div>
+              </div>
+              {item.href ? (
+                <Link className="btn secondary" to={item.href}>
+                  Открыть
+                </Link>
+              ) : null}
+            </div>
+          ))}
+        </div>
       </section>
     );
   }
@@ -264,8 +314,8 @@ export function SituationPage() {
     <section className="situation-page">
       <div className="page-head sit-head">
         <div>
-          <p className="page-kicker">Оперативный центр</p>
-          <h2>Главная</h2>
+          <p className="page-kicker">{caps.manager ? "Рабочий кабинет" : "Оперативный центр"}</p>
+          <h2>{caps.manager ? "Главная" : "Главная"}</h2>
           {badgeHint ? <p className="muted sit-badge-explain">{badgeHint}</p> : null}
         </div>
         <div className="sit-meta">

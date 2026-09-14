@@ -2,6 +2,7 @@ import type { PrismaClient } from "@creolab/db";
 import { crmModeToSeller, formatDurationMinutes } from "@creolab/contracts";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
+import { requireAiSettingsAccess, requireNotManager } from "../lib/access.ts";
 import { digitsOnly, displayName, formatPhoneDisplay, formatWhen } from "./contactLabels.ts";
 import { WAITING_FOR_LABEL, type WaitingFor } from "./conversationContextTypes.ts";
 import { setConversationMode } from "./domainService.ts";
@@ -190,6 +191,7 @@ function mapConversationCard(
 }
 
 export async function getManagementOverview(prisma: PrismaClient, auth: AuthContext) {
+  requireNotManager(auth, "Управление компанией доступно администратору и директору");
   const membership = requireTenant(auth);
   const tid = membership.tenantId;
   const timeZone = membership.tenant.timezone || "Asia/Almaty";
@@ -377,6 +379,7 @@ function auditText(action: string, actor: string) {
 }
 
 export async function setAiManagerRuntimePause(prisma: PrismaClient, auth: AuthContext, paused: boolean) {
+  requireAiSettingsAccess(auth);
   const membership = requireTenant(auth);
   const tid = membership.tenantId;
   const tenant = await prisma.tenant.findFirst({ where: { id: tid } });
@@ -469,6 +472,7 @@ export async function setAiManagerRuntimePause(prisma: PrismaClient, auth: AuthC
 }
 
 export async function claimAllAiConversations(prisma: PrismaClient, auth: AuthContext) {
+  requireNotManager(auth, "Недостаточно прав");
   const membership = requireTenant(auth);
   const items = await prisma.conversation.findMany({
     where: { tenantId: membership.tenantId, status: "open", mode: "ai" },

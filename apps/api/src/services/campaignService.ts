@@ -6,6 +6,7 @@ import type { Prisma, PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import { fileStorageStatus, resolveUploadPath } from "../lib/storage.ts";
 import type { AuthContext } from "../lib/types.ts";
+import { requireNotManager } from "../lib/access.ts";
 import {
   acceptPersonalizedDraft,
   campaignTaskDedupeKey,
@@ -78,7 +79,10 @@ const SEND_CHUNK = 5;
 const SEND_DELAY_MS = 400;
 
 function requireTenant(auth: AuthContext) {
-  if (!auth.activeMembership) throw new ApiError(403, "no_tenant", "Нет активной компании");
+  if (!auth.activeMembership) {
+    throw new ApiError(403, "no_tenant", "Нет активной компании");
+  }
+  requireNotManager(auth, "Постановка задач и автоматизация доступны администратору и директору");
   return auth.activeMembership;
 }
 

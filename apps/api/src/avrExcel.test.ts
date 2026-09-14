@@ -19,8 +19,14 @@ function cellValue(ws: ExcelJS.Worksheet, addr: string) {
   const value = ws.getCell(addr).value as
     | string
     | number
+    | Date
     | { result?: string | number; formula?: string; richText?: Array<{ text: string }> }
     | null;
+  if (value instanceof Date) {
+    const day = String(value.getDate()).padStart(2, "0");
+    const month = String(value.getMonth() + 1).padStart(2, "0");
+    return `${day}.${month}.${value.getFullYear()}`;
+  }
   if (value && typeof value === "object") {
     if ("result" in value && value.result != null) return value.result;
     if ("formula" in value && value.formula) return value.formula;
@@ -128,10 +134,16 @@ describe("AVR Excel Form R-1", () => {
     await wb.xlsx.load(buffer);
     const ws = wb.getWorksheet(AVR_EXCEL_SHEET_NAME);
     assert.ok(ws);
+    assert.equal((ws.model.merges || []).length, 82);
+    assert.equal(ws.getColumn(1).width, 4.5);
+    assert.equal(ws.getColumn(11).width, 1.75);
+    assert.equal(ws.getRow(17).height, 66);
+    assert.equal(ws.getRow(20).height, 40.5);
+    assert.equal(cellValue(ws, "A17"), "Номер по порядку");
     assert.equal(cellValue(ws, "AN1"), "Приложение 50");
     assert.equal(cellValue(ws, "AW6"), "Форма Р-1");
     assert.match(String(cellValue(ws, "E9")), /ГОЛД ПРОДУКТ/);
-    assert.equal(String(cellValue(ws, "AQ9")), "980740001015");
+    assert.equal(String(cellValue(ws, "AQ9")).trim(), "980740001015");
     assert.match(String(cellValue(ws, "E11")), /Creolab/);
     assert.equal(String(cellValue(ws, "AQ11")), "221140036408");
     assert.equal(cellValue(ws, "F13"), "No 26022026/01 от «26» февраля 2026 года");

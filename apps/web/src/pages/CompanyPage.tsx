@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { nameWithPhone, phoneText } from "../lib/contactDisplay";
 import { api } from "../lib/api";
+import { useCapabilities } from "../lib/session";
 
 const LIFECYCLE_OPTIONS = [
   ["PROSPECT", "Потенциальный клиент"],
@@ -69,6 +70,7 @@ function draftFromCompany(c: any): CompanyDraft {
 }
 
 export function CompanyPage() {
+  const caps = useCapabilities();
   const { id = "" } = useParams();
   const navigate = useNavigate();
   const [data, setData] = useState<any>(null);
@@ -90,8 +92,12 @@ export function CompanyPage() {
   async function load() {
     try {
       setData(await api.companyOverview(id));
-      const docs: any = await api.documents({ companyId: id, limit: "20" }).catch(() => ({ items: [] }));
-      setDocuments(docs.items || []);
+      if (caps.documents) {
+        const docs: any = await api.documents({ companyId: id, limit: "20" }).catch(() => ({ items: [] }));
+        setDocuments(docs.items || []);
+      } else {
+        setDocuments([]);
+      }
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Ошибка");
@@ -100,7 +106,7 @@ export function CompanyPage() {
 
   useEffect(() => {
     void load();
-  }, [id]);
+  }, [id, caps.documents]);
 
   useEffect(() => {
     if (!linkOpen) return;
@@ -262,12 +268,16 @@ export function CompanyPage() {
           <p className="muted">Ответственный: {c.assigneeName || "—"}</p>
         </div>
         <div className="sit-toolbar-side">
+          {!caps.manager ? (
+            <>
           <button type="button" className="btn secondary" onClick={openEdit}>
             Изменить
           </button>
           <button type="button" className="btn danger" disabled={busy} onClick={() => void removeCompany()}>
             Удалить
           </button>
+            </>
+          ) : null}
           <button type="button" className="btn" onClick={() => setLinkOpen(true)}>
             Добавить контакт
           </button>
@@ -292,10 +302,12 @@ export function CompanyPage() {
             <span className="muted">Активные сделки</span>
             <strong>{cur.activeDeals}</strong>
           </div>
+          {!caps.manager ? (
           <div className="sit-kpi">
             <span className="muted">Pipeline</span>
             <strong>{cur.pipelineLabel || "—"}</strong>
           </div>
+          ) : null}
           <div className="sit-kpi">
             <span className="muted">На договоре</span>
             <strong>{cur.contractDeals}</strong>
@@ -420,6 +432,7 @@ export function CompanyPage() {
         </div>
       </div>
 
+      {caps.documents ? (
       <div className="sit-section">
         <div className="sit-section-head">
           <h3>Документы</h3>
@@ -436,6 +449,7 @@ export function CompanyPage() {
           </Link>
         ))}
       </div>
+      ) : null}
 
       <div className="sit-section">
         <div className="sit-section-head">
@@ -504,6 +518,8 @@ export function CompanyPage() {
             <span className="muted">WON</span>
             <strong>{life.wonDeals}</strong>
           </div>
+          {!caps.manager ? (
+          <>
           <div className="sit-kpi">
             <span className="muted">Продано</span>
             <strong>{life.revenueLabel || "—"}</strong>
@@ -512,6 +528,8 @@ export function CompanyPage() {
             <span className="muted">Средний чек</span>
             <strong>{life.averageDealLabel || "—"}</strong>
           </div>
+          </>
+          ) : null}
         </div>
       </div>
 
@@ -534,7 +552,7 @@ export function CompanyPage() {
         </div>
       </div>
 
-      {editOpen && editDraft ? (
+      {editOpen && editDraft && !caps.manager ? (
         <div className="stats-modal-backdrop" onClick={() => setEditOpen(false)}>
           <div className="stats-modal" onClick={(e) => e.stopPropagation()}>
             <h3>Изменить компанию</h3>

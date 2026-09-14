@@ -4,6 +4,7 @@ import { integrationEventSchema, validateClientPhone } from "@creolab/contracts"
 import { ApiError } from "../errors.ts";
 import { hmacSha256Hex, safeEqual, sha256 } from "../lib/hash.ts";
 import type { AuthContext } from "../lib/types.ts";
+import { andWhere, assertInquiryVisible, inquiryAccessWhere, isManager, managerInquiryWriteFields, seesAllCompanyRecords } from "../lib/access.ts";
 import { writeActivity } from "./contactService.ts";
 import { inferClientInterest } from "./contactInterestService.ts";
 import { periodLabel, resolvePeriodRange, type PeriodPreset } from "./periodRange.ts";
@@ -911,6 +912,10 @@ export async function convertInquiryToDeal(prisma: PrismaClient, auth: AuthConte
       include: { contact: { include: { methods: true } } },
     });
     if (!inquiry) throw new ApiError(404, "not_found", "Заявка не найдена");
+    assertInquiryVisible(auth, inquiry);
+    if (isManager(auth) && inquiry.assigneeMembershipId !== membership.id) {
+      throw new ApiError(403, "forbidden", "Сделку можно создать только из своей заявки");
+    }
     if (inquiry.dealId) {
       return tx.deal.findFirstOrThrow({
         where: { id: inquiry.dealId, tenantId: membership.tenantId },
@@ -1206,7 +1211,7 @@ export async function listInquiries(prisma: PrismaClient, auth: AuthContext, que
   const timeZone = membership.tenant.timezone || "Asia/Almaty";
   const { take, skip } = pagination(query);
   query = { ...query, ...(query.scope === "mine" ? { assignee: membership.id } : query.scope === "unassigned" ? { assignee: "unassigned" } : {}) };
-  const where = buildInquiryWhere(membership.tenantId, query, timeZone);
+  const where = andWhere(buildInquiryWhere(membership.tenantId, query, timeZone), inquiryAccessWhere(auth));
   const sort = query.sort || "attention";
 
   const periodRaw = String(query.period || "all");
@@ -1260,17 +1265,17 @@ export async function listInquiries(prisma: PrismaClient, auth: AuthContext, que
     }),
     prisma.inquiry.groupBy({
       by: ["status"],
-      where: buildInquiryWhere(membership.tenantId, { ...periodBase, filter: "all" }, timeZone),
+      where: andWhere(buildInquiryWhere(membership.tenantId, { ...periodBase, filter: "all" }, timeZone), inquiryAccessWhere(auth)),
       _count: { _all: true },
     }),
     prisma.inquiry.groupBy({
       by: ["sourceChannel"],
-      where: buildInquiryWhere(membership.tenantId, { ...periodBase, sourceChannel: undefined, source: undefined }, timeZone),
+      where: andWhere(buildInquiryWhere(membership.tenantId, { ...periodBase, sourceChannel: undefined, source: undefined }, timeZone), inquiryAccessWhere(auth)),
       _count: { _all: true },
     }),
     prisma.inquiry.groupBy({
       by: ["serviceCategory"],
-      where: buildInquiryWhere(membership.tenantId, { ...periodBase, serviceCategory: undefined }, timeZone),
+      where: andWhere(buildInquiryWhere(membership.tenantId, { ...periodBase, serviceCategory: undefined }, timeZone), inquiryAccessWhere(auth)),
       _count: { _all: true },
     }),
     prisma.incompleteIntake.findMany({
@@ -1319,21 +1324,21 @@ export async function listInquiries(prisma: PrismaClient, auth: AuthContext, que
     attentionIntakeCount,
   ] = await Promise.all([
     prisma.inquiry.count({
-      where: buildInquiryWhere(membership.tenantId, { ...periodBase, filter: "needs_reply" }, timeZone),
+      where: andWhere(buildInquiryWhere(membership.tenantId, { ...periodBase, filter: "needs_reply" }, timeZone), inquiryAccessWhere(auth)),
     }),
     prisma.inquiry.count({
-      where: buildInquiryWhere(membership.tenantId, { ...periodBase, filter: "unassigned" }, timeZone),
+      where: andWhere(buildInquiryWhere(membership.tenantId, { ...periodBase, filter: "unassigned" }, timeZone), inquiryAccessWhere(auth)),
     }),
     prisma.inquiry.count({
-      where: buildInquiryWhere(membership.tenantId, { ...periodBase, filter: "no_phone" }, timeZone),
+      where: andWhere(buildInquiryWhere(membership.tenantId, { ...periodBase, filter: "no_phone" }, timeZone), inquiryAccessWhere(auth)),
     }),
     prisma.inquiry.count({
-      where: buildInquiryWhere(membership.tenantId, { ...periodBase, filter: "today" }, timeZone),
+      where: andWhere(buildInquiryWhere(membership.tenantId, { ...periodBase, filter: "today" }, timeZone), inquiryAccessWhere(auth)),
     }),
     prisma.inquiry.count({
-      where: buildInquiryWhere(membership.tenantId, { ...periodBase, filter: "needs_clarification" }, timeZone),
+      where: andWhere(buildInquiryWhere(membership.tenantId, { ...periodBase, filter: "needs_clarification" }, timeZone), inquiryAccessWhere(auth)),
     }),
-    prisma.inquiry.count({ where: inquiryNeedsActionWhere(membership.tenantId) }),
+    prisma.inquiry.count({ where: andWhere(inquiryNeedsActionWhere(membership.tenantId), inquiryAccessWhere(auth)) }),
     prisma.incompleteIntake.count({ where: openIntakeWhere(membership.tenantId) }),
   ]);
 
@@ -1413,6 +1418,10 @@ export async function getInquiry(prisma: PrismaClient, auth: AuthContext, inquir
     },
   });
   if (!inquiry) throw new ApiError(404, "not_found", "Заявка не найдена");
+  assertInquiryVisible(auth, inquiry);
+  const visibleTasks = isManager(auth)
+    ? inquiry.tasks.filter((task) => task.ownerMembershipId === membership.id)
+    : inquiry.tasks;
   await markRelatedStaffNotifications(prisma, {
     tenantId: membership.tenantId,
     membershipId: membership.id,
@@ -1425,16 +1434,25 @@ export async function getInquiry(prisma: PrismaClient, auth: AuthContext, inquir
     take: 40,
   });
   const { mapInquiryDetail } = await import("./inquiryPresentation.ts");
-  return mapInquiryDetail({ ...inquiry, activities }, membership.tenant.timezone);
+  return mapInquiryDetail({ ...inquiry, tasks: visibleTasks, activities }, membership.tenant.timezone);
 }
 
 export async function takeInquiry(prisma: PrismaClient, auth: AuthContext, inquiryId: string) {
   const membership = requireTenant(auth);
   return prisma.$transaction(async (tx) => {
-    const inquiry = await tx.inquiry.findFirst({
-      where: { id: inquiryId, tenantId: membership.tenantId },
-    });
+    const rows = await tx.$queryRaw<Array<{ id: string; assigneeMembershipId: string | null; status: string; contactId: string; nextStep: string | null }>>`
+      SELECT id, "assigneeMembershipId", status, "contactId", "nextStep"
+      FROM "Inquiry"
+      WHERE id = ${inquiryId} AND "tenantId" = ${membership.tenantId}
+      FOR UPDATE
+    `;
+    const inquiry = rows[0];
     if (!inquiry) throw new ApiError(404, "not_found", "Заявка не найдена");
+    if (inquiry.assigneeMembershipId && inquiry.assigneeMembershipId !== membership.id) {
+      if (isManager(auth)) {
+        throw new ApiError(409, "already_taken", "Заявку уже принял другой сотрудник");
+      }
+    }
     const fromStatus = inquiry.status;
     const updated = await tx.inquiry.update({
       where: { id: inquiry.id },
@@ -1479,8 +1497,19 @@ export async function updateInquiry(
       where: { id: inquiryId, tenantId: membership.tenantId },
     });
     if (!inquiry) throw new ApiError(404, "not_found", "Заявка не найдена");
+    assertInquiryVisible(auth, inquiry);
+    if (isManager(auth) && inquiry.assigneeMembershipId !== membership.id) {
+      throw new ApiError(403, "forbidden", "Сначала примите заявку в обработку");
+    }
 
     const data: Prisma.InquiryUncheckedUpdateInput = {};
+    if (isManager(auth)) {
+      const phone = input.phone;
+      const status = input.status;
+      input = managerInquiryWriteFields(input);
+      if (phone !== undefined) input.phone = phone;
+      if (status !== undefined) input.status = status;
+    }
     if ("subject" in input) data.subject = input.subject as string | null;
     if ("description" in input) data.description = input.description as string | null;
     if ("service" in input) data.service = input.service as string | null;
@@ -1573,6 +1602,10 @@ export async function loseInquiry(
       where: { id: inquiryId, tenantId: membership.tenantId },
     });
     if (!inquiry) throw new ApiError(404, "not_found", "Заявка не найдена");
+    assertInquiryVisible(auth, inquiry);
+    if (isManager(auth) && inquiry.assigneeMembershipId !== membership.id) {
+      throw new ApiError(403, "forbidden", "Недостаточно прав");
+    }
     await tx.inquiry.update({
       where: { id: inquiry.id },
       data: {
@@ -1613,7 +1646,13 @@ export async function listIncomplete(prisma: PrismaClient, auth: AuthContext) {
   const membership = requireTenant(auth);
   const { intakeReasonLabel, relativeDayLabel } = await import("./inquiryPresentation.ts");
   const items = await prisma.incompleteIntake.findMany({
-    where: { tenantId: membership.tenantId, status: "pending" },
+    where: {
+      tenantId: membership.tenantId,
+      status: "pending",
+      ...(isManager(auth)
+        ? { OR: [{ assigneeMembershipId: null }, { assigneeMembershipId: membership.id }] }
+        : {}),
+    },
     orderBy: { receivedAt: "desc" },
     take: 50,
   });

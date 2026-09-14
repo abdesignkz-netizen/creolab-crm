@@ -1,6 +1,45 @@
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { randomUUID } from "node:crypto";
 
+const EVENT_CATEGORY: Record<string, string> = {
+  "inquiry.created": "new_inquiries",
+  "inquiry.available": "new_inquiries",
+  needs_phone: "new_inquiries",
+  "inquiry.assigned": "assignment",
+  "inquiry.taken": "assignment",
+  "deal.assigned": "assignment",
+  "conversation.needs_human": "dialogs",
+  "conversation.message": "dialogs",
+  "task.assigned": "tasks",
+  "task.due": "tasks",
+  "task.reminder": "tasks",
+  "deal.updated": "deals",
+  "deal.stage_changed": "deals",
+  "ai.needs_human": "ai_events",
+  "inquiry.needs_human": "ai_events",
+  "integration.error": "management",
+  "ai_manager.pause": "management",
+  "campaign.failed": "management",
+};
+
+function inQuietHours(quiet: { enabled?: boolean; start?: string; end?: string } | null | undefined, timeZone?: string | null) {
+  if (!quiet?.enabled) return false;
+  const start = String(quiet.start || "22:00");
+  const end = String(quiet.end || "08:00");
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: timeZone || "Asia/Almaty",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(now);
+  const hh = parts.find((part) => part.type === "hour")?.value || "00";
+  const mm = parts.find((part) => part.type === "minute")?.value || "00";
+  const current = `${hh}:${mm}`;
+  if (start <= end) return current >= start && current < end;
+  return current >= start || current < end;
+}
+
 /** Shared in-app notification writer used by API and worker. */
 export async function createStaffNotification(
   prisma: PrismaClient | Prisma.TransactionClient,
@@ -18,6 +57,23 @@ export async function createStaffNotification(
   },
 ) {
   if (!args.membershipId) return null;
+  const membership = await prisma.membership.findFirst({
+    where: { id: args.membershipId, tenantId: args.tenantId, active: true },
+    include: { user: true },
+  });
+  if (!membership) return null;
+  const pref = await prisma.notificationPreference.findUnique({
+    where: {
+      tenantId_membershipId: { tenantId: args.tenantId, membershipId: args.membershipId },
+    },
+  });
+  const events = (pref?.eventsJson || {}) as Record<string, boolean>;
+  const channelsPref = (pref?.channelsJson || {}) as Record<string, boolean>;
+  const quiet = (pref?.quietHoursJson || {}) as { enabled?: boolean; start?: string; end?: string };
+  const category = EVENT_CATEGORY[args.type] || null;
+  if (category && events[category] === false) return null;
+  if (category === "management" && membership.role === "manager") return null;
+
   const episodeKey = args.episodeKey || `${args.type}:${args.entityId}`;
   const notification = await prisma.notification.upsert({
     where: {
@@ -41,8 +97,19 @@ export async function createStaffNotification(
     },
   });
 
-  const channels = args.channels || ["in_app"];
-  for (const channel of channels) {
+  const quietHours = inQuietHours(quiet, membership.user.timezone);
+  const requested = args.channels || ["in_app"];
+  const channels = requested.filter((channel) => {
+    if (channel === "in_app") return channelsPref.in_app !== false;
+    if (channel === "web_push") return channelsPref.web_push !== false && !quietHours;
+    if (channel === "email") return false;
+    return false;
+  });
+  if (!channels.length && channelsPref.in_app === false) return null;
+  const effectiveChannels = channels.length ? channels : channelsPref.in_app === false ? [] : ["in_app"];
+  if (!effectiveChannels.length) return null;
+
+  for (const channel of effectiveChannels) {
     const existing = await prisma.notificationDelivery.findFirst({
       where: { notificationId: notification.id, channel },
     });

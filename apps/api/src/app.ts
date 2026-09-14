@@ -307,7 +307,10 @@ export function createApp(prisma: PrismaClient) {
   }
 
   app.post("/api/v1/auth/login", json, async (req, res) => {
-    const result = await login(prisma, req.body);
+    const result = await login(prisma, req.body, {
+      userAgent: String(req.header("user-agent") || ""),
+      ip: String(req.ip || req.socket.remoteAddress || ""),
+    });
     if (result.auth.client === "web") {
       res.cookie("crm_session", result.sessionToken, {
         httpOnly: true,
@@ -338,6 +341,71 @@ export function createApp(prisma: PrismaClient) {
 
   app.get("/api/v1/me", async (req, res) => {
     res.json(publicAuth(await requireAuth(req)));
+  });
+
+  app.patch("/api/v1/me/profile", json, async (req, res) => {
+    const { updateProfile } = await import("./services/accountService.ts");
+    res.json(await updateProfile(prisma, await requireAuth(req), req.body || {}));
+  });
+
+  app.patch("/api/v1/me/appearance", json, async (req, res) => {
+    const { updateAppearance } = await import("./services/accountService.ts");
+    res.json(await updateAppearance(prisma, await requireAuth(req), req.body || {}));
+  });
+
+  app.post("/api/v1/me/password", json, async (req, res) => {
+    const { changePassword } = await import("./services/accountService.ts");
+    res.json(await changePassword(prisma, await requireAuth(req), req.body || {}));
+  });
+
+  app.get("/api/v1/me/sessions", async (req, res) => {
+    const { listSessions } = await import("./services/accountService.ts");
+    res.json(await listSessions(prisma, await requireAuth(req)));
+  });
+
+  app.delete("/api/v1/me/sessions/:id", async (req, res) => {
+    const auth = await requireAuth(req);
+    const { revokeSession } = await import("./services/accountService.ts");
+    const result = await revokeSession(prisma, auth, req.params.id);
+    if (result.current) res.clearCookie("crm_session", { path: "/" });
+    res.json(result);
+  });
+
+  app.post("/api/v1/me/sessions/revoke-others", json, async (req, res) => {
+    const { revokeOtherSessions } = await import("./services/accountService.ts");
+    res.json(await revokeOtherSessions(prisma, await requireAuth(req)));
+  });
+
+  app.post("/api/v1/me/avatar", jsonLarge, async (req, res) => {
+    const { saveAvatar } = await import("./services/accountService.ts");
+    res.json(await saveAvatar(prisma, await requireAuth(req), req.body || {}));
+  });
+
+  app.get("/api/v1/me/avatar", async (req, res) => {
+    const { avatarFilePath } = await import("./services/accountService.ts");
+    const filePath = await avatarFilePath(prisma, await requireAuth(req));
+    if (!existsSync(filePath)) throw new ApiError(404, "not_found", "Аватар не загружен");
+    res.sendFile(filePath);
+  });
+
+  app.get("/api/v1/me/notification-preferences", async (req, res) => {
+    const { getNotificationPreferences } = await import("./services/accountService.ts");
+    res.json(await getNotificationPreferences(prisma, await requireAuth(req)));
+  });
+
+  app.patch("/api/v1/me/notification-preferences", json, async (req, res) => {
+    const { updateNotificationPreferences } = await import("./services/accountService.ts");
+    res.json(await updateNotificationPreferences(prisma, await requireAuth(req), req.body || {}));
+  });
+
+  app.get("/api/v1/settings/members", async (req, res) => {
+    const { listCompanyMembers } = await import("./services/accountService.ts");
+    res.json(await listCompanyMembers(prisma, await requireAuth(req)));
+  });
+
+  app.patch("/api/v1/workspace/members/:id", json, async (req, res) => {
+    const { updateCompanyMember } = await import("./services/accountService.ts");
+    res.json(await updateCompanyMember(prisma, await requireAuth(req), req.params.id, req.body || {}));
   });
 
   app.post("/api/v1/tenants/switch", json, async (req, res) => {
@@ -527,6 +595,9 @@ export function createApp(prisma: PrismaClient) {
       const { ApiError } = await import("./errors.ts");
       throw new ApiError(404, "not_found", "Заявка не найдена");
     }
+    const { assertInquiryVisible, requireNotManager } = await import("./lib/access.ts");
+    assertInquiryVisible(auth, inquiry);
+    requireNotManager(auth, "Запуск AI доступен администратору и директору");
     const meta =
       inquiry.fieldMetaJson && typeof inquiry.fieldMetaJson === "object"
         ? (inquiry.fieldMetaJson as { automation?: { status?: string } }).automation
@@ -549,6 +620,15 @@ export function createApp(prisma: PrismaClient) {
       const { ApiError } = await import("./errors.ts");
       throw new ApiError(403, "no_tenant", "Нет активной компании");
     }
+    const inquiry = await prisma.inquiry.findFirst({
+      where: { id: req.params.id, tenantId: membership.tenantId },
+    });
+    if (!inquiry) {
+      const { ApiError } = await import("./errors.ts");
+      throw new ApiError(404, "not_found", "Заявка не найдена");
+    }
+    const { assertInquiryVisible } = await import("./lib/access.ts");
+    assertInquiryVisible(auth, inquiry);
     const { handoffInquiryToHuman } = await import("./services/requestAutomationService.ts");
     await handoffInquiryToHuman(prisma, membership.tenantId, req.params.id, {
       userId: auth.user.id,
@@ -565,6 +645,16 @@ export function createApp(prisma: PrismaClient) {
       const { ApiError } = await import("./errors.ts");
       throw new ApiError(403, "no_tenant", "Нет активной компании");
     }
+    const inquiry = await prisma.inquiry.findFirst({
+      where: { id: req.params.id, tenantId: membership.tenantId },
+    });
+    if (!inquiry) {
+      const { ApiError } = await import("./errors.ts");
+      throw new ApiError(404, "not_found", "Заявка не найдена");
+    }
+    const { assertInquiryVisible, requireNotManager } = await import("./lib/access.ts");
+    assertInquiryVisible(auth, inquiry);
+    requireNotManager(auth, "Возврат заявки AI доступен администратору и директору");
     const { returnInquiryToAi } = await import("./services/requestAutomationService.ts");
     await returnInquiryToAi(prisma, membership.tenantId, req.params.id);
     res.json(await getInquiry(prisma, auth, req.params.id));
@@ -577,6 +667,16 @@ export function createApp(prisma: PrismaClient) {
       const { ApiError } = await import("./errors.ts");
       throw new ApiError(403, "no_tenant", "Нет активной компании");
     }
+    const inquiry = await prisma.inquiry.findFirst({
+      where: { id: req.params.id, tenantId: membership.tenantId },
+    });
+    if (!inquiry) {
+      const { ApiError } = await import("./errors.ts");
+      throw new ApiError(404, "not_found", "Заявка не найдена");
+    }
+    const { assertInquiryVisible, requireNotManager } = await import("./lib/access.ts");
+    assertInquiryVisible(auth, inquiry);
+    requireNotManager(auth, "Анализ AI доступен администратору и директору");
     const { processNewRequestAutomation } = await import("./services/requestAutomationService.ts");
     await processNewRequestAutomation(prisma, membership.tenantId, req.params.id, { forceMode: "ASSIST" });
     res.json(await getInquiry(prisma, auth, req.params.id));

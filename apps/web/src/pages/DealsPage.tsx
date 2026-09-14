@@ -7,6 +7,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { PeriodSelector, type PeriodPreset } from "../components/PeriodSelector";
 import { nameWithPhone } from "../lib/contactDisplay";
 import { api } from "../lib/api";
+import { useCapabilities } from "../lib/session";
 import { tip } from "../lib/tip";
 import { DealDocumentsPanel } from "./DealDocumentsPanel";
 
@@ -500,6 +501,7 @@ export function DealsPage() {
 }
 
 export function DealDetailPage() {
+  const caps = useCapabilities();
   const { dealId } = useParams();
   const navigate = useNavigate();
   const [data, setData] = useState<any>(null);
@@ -550,12 +552,12 @@ export function DealDetailPage() {
       const [detail, boardData, documents, contractReady, invoiceReady, avrReady, esfReady, closeReady] = await Promise.all([
         api.deal(dealId),
         api.deals({ timeMode: "now" }),
-        api.dealDocuments(dealId).catch(() => null),
-        api.contractReadiness(dealId).catch(() => null),
-        api.invoiceReadiness(dealId).catch(() => null),
-        api.avrReadiness(dealId).catch(() => null),
-        api.esfInvoiceReadiness(dealId).catch(() => null),
-        api.dealCloseReadiness(dealId).catch(() => null),
+        caps.documents ? api.dealDocuments(dealId).catch(() => null) : Promise.resolve(null),
+        caps.documents ? api.contractReadiness(dealId).catch(() => null) : Promise.resolve(null),
+        caps.documents ? api.invoiceReadiness(dealId).catch(() => null) : Promise.resolve(null),
+        caps.documents ? api.avrReadiness(dealId).catch(() => null) : Promise.resolve(null),
+        caps.documents ? api.esfInvoiceReadiness(dealId).catch(() => null) : Promise.resolve(null),
+        caps.documents ? api.dealCloseReadiness(dealId).catch(() => null) : Promise.resolve(null),
       ]);
       setData(detail);
       setBoard(boardData);
@@ -603,12 +605,12 @@ export function DealDetailPage() {
     setBusy(true);
     try {
       await api.updateDeal(dealId, {
-        ...((data as any)?.deal?.amountFromItems
+        ...((data as any)?.deal?.amountFromItems || caps.manager
           ? {}
           : { offerAmountMinor: amount === "" ? null : Number(amount) }),
         probability: Number(probability),
         nextAction: nextAction || null,
-        paymentStatus,
+        ...(caps.confirmPayments ? { paymentStatus } : {}),
       });
       setEditing(false);
       notifySaved("Изменения сделки сохранены");
@@ -666,8 +668,12 @@ export function DealDetailPage() {
         <div>
           <p className="page-kicker">
             <Link to="/deals">Сделки</Link>
-            {" · "}
-            <Link to="/documents">Документы</Link>
+            {caps.documents ? (
+              <>
+                {" · "}
+                <Link to="/documents">Документы</Link>
+              </>
+            ) : null}
           </p>
           <h2>{d.title}</h2>
           <p className="muted">
@@ -856,6 +862,7 @@ export function DealDetailPage() {
         ) : null}
       </div>
 
+      {caps.documents ? (
       <DealDocumentsPanel
         deal={d}
         docs={docs}
@@ -880,6 +887,7 @@ export function DealDetailPage() {
         esfInvoicePreview={esfInvoicePreview}
         setEsfInvoicePreview={setEsfInvoicePreview}
       />
+      ) : null}
 
       {!editing ? <div className="panel saved-editor-summary">
         <b>Данные сделки</b>
@@ -892,7 +900,7 @@ export function DealDetailPage() {
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
             placeholder="пусто = неизвестна"
-            disabled={Boolean(d.amountFromItems)}
+            disabled={Boolean(d.amountFromItems) || caps.manager}
           />
         </label>
         <label>
@@ -903,6 +911,7 @@ export function DealDetailPage() {
           Следующий шаг
           <input value={nextAction} onChange={(e) => setNextAction(e.target.value)} />
         </label>
+        {caps.confirmPayments ? (
         <label>
           Статус оплаты
           <select value={paymentStatus} onChange={(e) => setPaymentStatus(e.target.value)}>
@@ -913,6 +922,7 @@ export function DealDetailPage() {
             ))}
           </select>
         </label>
+        ) : null}
         <div className="actions">
           <button
             type="button"
@@ -936,6 +946,7 @@ export function DealDetailPage() {
         </div>
       </div>}
 
+      {caps.confirmPayments ? (
       <div className="panel">
         <b>Платежи</b>
         <div className="muted" style={{ marginBottom: 8 }}>
@@ -980,6 +991,7 @@ export function DealDetailPage() {
           </div>
         </div>
       </div>
+      ) : null}
 
       <div className="panel">
         <b>Перевести на стадию</b>

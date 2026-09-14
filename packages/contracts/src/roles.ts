@@ -1,11 +1,22 @@
 export const ROLES = {
   platform_admin: "platform_admin",
   owner: "owner",
+  director: "director",
   sales_lead: "sales_lead",
   manager: "manager",
 } as const;
 
 export type Role = (typeof ROLES)[keyof typeof ROLES];
+
+export const COMPANY_ADMIN_ROLES = [ROLES.owner, ROLES.director] as const;
+
+export const ROLE_LABELS: Record<Role, string> = {
+  platform_admin: "Администратор платформы",
+  owner: "Администратор компании",
+  director: "Директор",
+  sales_lead: "Руководитель продаж",
+  manager: "Менеджер",
+};
 
 export const PERMISSIONS = {
   manageIntegrations: "manage_integrations",
@@ -22,19 +33,22 @@ export const PERMISSIONS = {
 
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
 
+const COMPANY_ADMIN_PERMISSIONS: Permission[] = [
+  PERMISSIONS.manageIntegrations,
+  PERMISSIONS.exportAll,
+  PERMISSIONS.confirmPayments,
+  PERMISSIONS.manageMembers,
+  PERMISSIONS.manageAi,
+  PERMISSIONS.viewAllConversations,
+  PERMISSIONS.takeFromQueue,
+  PERMISSIONS.manageDocuments,
+  PERMISSIONS.signDocuments,
+  PERMISSIONS.sendEsf,
+];
+
 const ROLE_PERMISSIONS: Record<Exclude<Role, "platform_admin">, Permission[]> = {
-  owner: [
-    PERMISSIONS.manageIntegrations,
-    PERMISSIONS.exportAll,
-    PERMISSIONS.confirmPayments,
-    PERMISSIONS.manageMembers,
-    PERMISSIONS.manageAi,
-    PERMISSIONS.viewAllConversations,
-    PERMISSIONS.takeFromQueue,
-    PERMISSIONS.manageDocuments,
-    PERMISSIONS.signDocuments,
-    PERMISSIONS.sendEsf,
-  ],
+  owner: [...COMPANY_ADMIN_PERMISSIONS],
+  director: [...COMPANY_ADMIN_PERMISSIONS],
   sales_lead: [
     PERMISSIONS.confirmPayments,
     PERMISSIONS.viewAllConversations,
@@ -44,6 +58,14 @@ const ROLE_PERMISSIONS: Record<Exclude<Role, "platform_admin">, Permission[]> = 
   ],
   manager: [PERMISSIONS.takeFromQueue],
 };
+
+export function isCompanyAdminRole(role: Role | string | null | undefined) {
+  return role === ROLES.owner || role === ROLES.director;
+}
+
+export function isManagerRole(role: Role | string | null | undefined) {
+  return role === ROLES.manager;
+}
 
 export function permissionsForRole(role: Role): Permission[] {
   if (role === ROLES.platform_admin) {

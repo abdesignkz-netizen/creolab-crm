@@ -1,6 +1,7 @@
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
+import { requireAiSettingsAccess } from "../lib/access.ts";
 import {
   applyModeToSettings,
   mergeAIAutomationIntoSettingsJson,
@@ -22,6 +23,7 @@ function requireTenant(auth: AuthContext) {
 }
 
 export async function getAIAutomationSettings(prisma: PrismaClient, auth: AuthContext) {
+  requireAiSettingsAccess(auth);
   const membership = requireTenant(auth);
   const tenant = await prisma.tenant.findUnique({ where: { id: membership.tenantId } });
   const settings = parseAIAutomationSettings(tenant?.settingsJson);
@@ -47,6 +49,7 @@ export async function updateAIAutomationSettings(
   auth: AuthContext,
   input: Partial<AIAutomationSettings> & { defaultMode?: AutomationMode },
 ) {
+  requireAiSettingsAccess(auth);
   const membership = requireTenant(auth);
   const tenant = await prisma.tenant.findUnique({ where: { id: membership.tenantId } });
   if (!tenant) throw new ApiError(404, "not_found", "Компания не найдена");
