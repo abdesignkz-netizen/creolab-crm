@@ -11,6 +11,7 @@ export type IntegrationImplementation = {
   fields: string[];
   connectable: boolean;
   connectHint: string;
+  steps?: string[];
 };
 
 export const INTEGRATION_IMPLEMENTATIONS: IntegrationImplementation[] = [
@@ -25,6 +26,11 @@ export const INTEGRATION_IMPLEMENTATIONS: IntegrationImplementation[] = [
     fields: ["name", "fields", "mapping", "assigneeMembershipId", "allowedDomains", "automationMode"],
     connectable: true,
     connectHint: "",
+    steps: [
+      "Выберите компанию CRM, для которой нужна форма.",
+      "Сохраните подключение — появится публичный адрес приёма заявок.",
+      "Этот адрес вставляется в HTML, Tilda или fetch. Секрет в разметку формы не нужен.",
+    ],
   },
   {
     type: "webhook",
@@ -37,6 +43,11 @@ export const INTEGRATION_IMPLEMENTATIONS: IntegrationImplementation[] = [
     fields: ["name", "mapping", "assigneeMembershipId", "automationMode", "testMode"],
     connectable: true,
     connectHint: "",
+    steps: [
+      "Выберите компанию, которая будет принимать заявки по API.",
+      "Сохраните подключение — появятся URL событий и секрет. Секрет показывается один раз.",
+      "Отправитель подписывает тело HMAC-SHA256. Общий ключ сервера этой компании не подставляется.",
+    ],
   },
   {
     type: "whatsapp_seller",
@@ -49,6 +60,13 @@ export const INTEGRATION_IMPLEMENTATIONS: IntegrationImplementation[] = [
     fields: ["name", "sellerUrl", "secret"],
     connectable: true,
     connectHint: "",
+    steps: [
+      "Выберите компанию, к которой привязывается WhatsApp-номер.",
+      "У компании должен быть свой мост WhatsApp AI Manager (бот с Green API или аналог). Общий мост сервера к компании не подключается.",
+      "Укажите HTTPS-адрес моста и секрет. Они хранятся только у этой компании.",
+      "Нажмите «Подключить». CRM проверит, отвечает ли мост, и покажет sender (номер). Сообщения клиентам при проверке не отправляются.",
+      "Если мост не ответил, настройки сохранятся со статусом ошибки — исправьте адрес или секрет и проверьте снова.",
+    ],
   },
   {
     type: "esf",
@@ -61,6 +79,11 @@ export const INTEGRATION_IMPLEMENTATIONS: IntegrationImplementation[] = [
     fields: ["environment"],
     connectable: false,
     connectHint: "Авторизация только через NCALayer в кабинете компании. Ключ ЭЦП в панель не переносится.",
+    steps: [
+      "Откройте карточку нужной компании.",
+      "В кабинете компании сотрудник с ЭЦП подключает ИС ЭСФ через NCALayer.",
+      "PIN и файл ключа в администрирование сервиса не переносятся.",
+    ],
   },
   {
     type: "telegram_bot",
@@ -201,6 +224,7 @@ export async function listPlatformCatalog(prisma: PrismaClient) {
       available: row.available,
       connectable,
       connectHint: connectable ? "" : impl?.connectHint || "Нельзя подключить: нет готового модуля или тип выключен.",
+      steps: impl?.steps || [],
       multiple: Boolean(impl?.multiple),
       fields: impl?.fields || [],
       defaultSettings: row.defaultSettingsJson,

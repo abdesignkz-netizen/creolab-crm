@@ -193,6 +193,7 @@ export async function listPlatformCompanies(
           ? { name: admin.user.name, email: admin.user.email, role: admin.role, roleLabel: ROLE_LABELS[admin.role as keyof typeof ROLE_LABELS] || admin.role }
           : null,
         memberCount: tenant.memberships.length,
+        integrationTypes: tenant.integrations.map((row) => row.type),
         connectionSummary,
         connectionsLabel: connectionSummary.length
           ? [...new Set(connectionSummary.map((item) => item))].join(", ")

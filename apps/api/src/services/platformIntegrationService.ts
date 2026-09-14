@@ -141,6 +141,18 @@ async function assertTypeConnectable(prisma: PrismaClient, type: string) {
   return row;
 }
 
+async function ensureCompanyFeature(prisma: PrismaClient, tenantId: string, key: "forms" | "webhook" | "whatsapp") {
+  const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { settingsJson: true } });
+  const raw = asRecord(tenant?.settingsJson);
+  const features = asRecord(raw.features);
+  if (features[key] !== false) return;
+  await prisma.tenant.update({
+    where: { id: tenantId },
+    data: { settingsJson: { ...raw, features: { ...features, [key]: true } } as Prisma.InputJsonValue },
+  });
+  invalidateRuntimeConfig(tenantId);
+}
+
 export async function createTenantConnection(
   prisma: PrismaClient,
   actorUserId: string,
@@ -153,9 +165,15 @@ export async function createTenantConnection(
   if (!impl?.multiple) {
     const existing = await prisma.integration.findFirst({ where: { tenantId, type } });
     if (existing) {
+      if (type === "whatsapp_seller") {
+        return updateTenantConnection(prisma, actorUserId, tenantId, existing.id, input);
+      }
       throw new ApiError(409, "already_connected", "Для этого типа допускается только одно подключение");
     }
   }
+  if (type === "form") await ensureCompanyFeature(prisma, tenantId, "forms");
+  if (type === "webhook") await ensureCompanyFeature(prisma, tenantId, "webhook");
+  if (type === "whatsapp_seller") await ensureCompanyFeature(prisma, tenantId, "whatsapp");
   const settings = await getEffectiveTenantSettings(prisma, tenantId);
   if (type === "form" && !settings.features.forms.value) {
     throw new ApiError(422, "feature_disabled", "Формы отключены для этой компании");

@@ -9,7 +9,6 @@ import {
 import ExcelJS from "exceljs";
 import type { Response } from "express";
 import JSZip from "jszip";
-import * as XLSX from "xlsx";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { requireDocumentsAccess } from "../lib/access.ts";
@@ -21,7 +20,8 @@ export const AVR_EXCEL_SHEET_NAME = "Акт выполненных работ";
 export const AVR_EXCEL_ITEM_START_ROW = 20;
 const TEMPLATE_ITEM_COUNT = 3;
 const MONEY_FMT = "#,##0.00";
-const THIN = { style: "thin" as const, color: { argb: "FF000000" } };
+const DATE_FMT = "dd.mm.yyyy";
+const ITEM_COLS = ["A", "C", "N", "AC", "AF", "AI", "AN", "AS"] as const;
 const ITEM_MERGE_COLS: Array<[number, number]> = [
   [0, 1],
   [2, 12],
@@ -152,15 +152,23 @@ export function avrExcelFileName(input: { number: string; source: AvrSourceSnaps
 
 export function avrExcelLayout(itemCount: number) {
   const items = Math.max(itemCount, 1);
-  const totalsRow = AVR_EXCEL_ITEM_START_ROW + items;
+  const extra = Math.max(0, items - TEMPLATE_ITEM_COUNT);
+  const slots = TEMPLATE_ITEM_COUNT + extra;
+  const firstItemRow = AVR_EXCEL_ITEM_START_ROW;
+  const lastItemRow = firstItemRow + items - 1;
+  const lastSlotRow = firstItemRow + slots - 1;
+  const totalsRow = lastSlotRow + 1;
   const wordsRow = totalsRow + 2;
   const captionRow = totalsRow + 3;
   const appendixRow = totalsRow + 4;
   const signRow = totalsRow + 7;
   return {
     itemCount: items,
-    firstItemRow: AVR_EXCEL_ITEM_START_ROW,
-    lastItemRow: AVR_EXCEL_ITEM_START_ROW + items - 1,
+    extra,
+    slots,
+    firstItemRow,
+    lastItemRow,
+    lastSlotRow,
     totalsRow,
     wordsRow,
     captionRow,
@@ -196,103 +204,41 @@ function contentDisposition(filename: string) {
 
 function avrTemplatePath() {
   const names = [
-    path.resolve(import.meta.dirname, "../../assets/avr-form-r1.xls"),
-    path.resolve(process.cwd(), "apps/api/assets/avr-form-r1.xls"),
-    path.resolve(process.cwd(), "assets/avr-form-r1.xls"),
+    path.resolve(import.meta.dirname, "../../assets/avr-form-r1.xlsx"),
+    path.resolve(process.cwd(), "apps/api/assets/avr-form-r1.xlsx"),
+    path.resolve(process.cwd(), "assets/avr-form-r1.xlsx"),
   ];
-  const found = names.find((file) => existsSync(file));
+  const found = names.find((file) => existsSync(file) && !path.basename(file).startsWith("~$"));
   if (!found) throw new ApiError(500, "avr_template_missing", "Не найден шаблон АВР Excel");
   return found;
 }
 
-const PAPER_FONT: Partial<ExcelJS.Font> = { name: "Times New Roman", charset: 204, size: 9 };
-const MAX_TEMPLATE_COL = 57;
-
-function excelSerial(value: string | Date | null | undefined) {
-  const date = civilDateFromIso(value);
-  if (!date) return null;
-  return Math.round(Date.UTC(date.year, date.month - 1, date.day) / 86400000 + 25569);
-}
-
-function mergeRef(range: XLSX.Range) {
-  return `${XLSX.utils.encode_cell(range.s)}:${XLSX.utils.encode_cell(range.e)}`;
-}
-
-function isMergeMaster(r: number, c: number, merges: XLSX.Range[]) {
-  for (const merge of merges) {
-    if (r >= merge.s.r && r <= merge.e.r && c >= merge.s.c && c <= merge.e.c) {
-      return r === merge.s.r && c === merge.s.c;
-    }
+function colLetter(index1: number) {
+  let n = index1;
+  let s = "";
+  while (n > 0) {
+    const m = (n - 1) % 26;
+    s = String.fromCharCode(65 + m) + s;
+    n = Math.floor((n - 1) / 26);
   }
-  return true;
+  return s;
 }
 
-function readTemplateSheet() {
-  const parsed = XLSX.read(readFileSync(avrTemplatePath()), {
-    type: "buffer",
-    cellNF: true,
-    cellDates: false,
-    cellStyles: true,
-    bookSST: true,
-  });
-  const sheetName = parsed.SheetNames[0] || AVR_EXCEL_SHEET_NAME;
-  const sheet = parsed.Sheets[sheetName];
-  if (!sheet) throw new ApiError(500, "avr_template_missing", "В шаблоне АВР нет листа");
-  return sheet;
+function colIndex(letters: string) {
+  return letters.split("").reduce((n, ch) => n * 26 + (ch.charCodeAt(0) - 64), 0);
 }
 
-function cellValueFromTemplate(cell: XLSX.CellObject): ExcelJS.CellValue {
-  if (cell.f) {
-    const result = cell.t === "n" ? Number(cell.v) : cell.v == null ? undefined : String(cell.v);
-    return { formula: String(cell.f), result };
-  }
-  if (cell.t === "z" || cell.v == null || cell.v === "") return null;
-  if (cell.t === "n" || typeof cell.v === "number") return Number(cell.v);
-  if (cell.t === "b") return Boolean(cell.v);
-  return String(cell.v);
-}
-
-function copyTemplateToWorksheet(ws: ExcelJS.Worksheet, template: XLSX.WorkSheet) {
-  const merges = (template["!merges"] || []) as XLSX.Range[];
-  const cols = (template["!cols"] || []) as Array<XLSX.ColInfo | undefined>;
-  const rows = (template["!rows"] || []) as Array<XLSX.RowInfo | undefined>;
-  cols.slice(0, MAX_TEMPLATE_COL).forEach((col, index) => {
-    if (col?.wch != null) ws.getColumn(index + 1).width = col.wch;
-  });
-  rows.forEach((row, index) => {
-    if (row?.hpt) ws.getRow(index + 1).height = row.hpt;
-  });
-  for (const key of Object.keys(template)) {
-    if (key[0] === "!") continue;
-    const pos = XLSX.utils.decode_cell(key);
-    if (pos.c >= MAX_TEMPLATE_COL) continue;
-    if (!isMergeMaster(pos.r, pos.c, merges)) continue;
-    const src = template[key] as XLSX.CellObject;
-    if (!src || src.t === "z") continue;
-    const value = cellValueFromTemplate(src);
-    if (value == null) continue;
-    const cell = ws.getCell(key);
-    cell.value = value;
-    if (src.z && src.z !== "General") cell.numFmt = src.z;
-    cell.font = { ...PAPER_FONT };
-    cell.alignment = { vertical: "middle", wrapText: true };
-  }
-  for (const merge of merges) {
-    if (merge.s.c >= MAX_TEMPLATE_COL || merge.e.c >= MAX_TEMPLATE_COL) continue;
-    if (merge.s.r === merge.e.r && merge.s.c === merge.e.c) continue;
-    const ref = mergeRef(merge);
-    if ((ws.model.merges || []).includes(ref)) continue;
-    try {
-      ws.mergeCells(ref);
-    } catch {
-      /* already merged after row copy */
-    }
-  }
+function decodeMerge(range: string) {
+  const [start, end] = range.split(":");
+  const left = start.replace(/\d/g, "");
+  const top = Number(start.replace(/\D/g, ""));
+  const right = (end || start).replace(/\d/g, "");
+  const bottom = Number((end || start).replace(/\D/g, ""));
+  return { start, left, top, right, bottom };
 }
 
 function itemMergeRefs(row1: number) {
-  const r = row1 - 1;
-  return ITEM_MERGE_COLS.map(([c1, c2]) => mergeRef({ s: { r, c: c1 }, e: { r, c: c2 } }));
+  return ITEM_MERGE_COLS.map(([c1, c2]) => `${colLetter(c1 + 1)}${row1}:${colLetter(c2 + 1)}${row1}`);
 }
 
 function unmergeAll(ws: ExcelJS.Worksheet) {
@@ -318,68 +264,120 @@ function shiftMergeRange(range: string, extra: number) {
   if (!extra) return range;
   const box = decodeMerge(range);
   const lastTemplateItem = AVR_EXCEL_ITEM_START_ROW + TEMPLATE_ITEM_COUNT - 1;
-  if (box.top >= AVR_EXCEL_ITEM_START_ROW && box.bottom <= lastTemplateItem) {
-    return box.top <= AVR_EXCEL_ITEM_START_ROW + Math.max(1, TEMPLATE_ITEM_COUNT + extra) - 1 ? range : "";
-  }
+  if (box.top >= AVR_EXCEL_ITEM_START_ROW && box.bottom <= lastTemplateItem) return range;
   const startShift = lastTemplateItem + 1;
   if (box.top >= startShift) return `${box.left}${box.top + extra}:${box.right}${box.bottom + extra}`;
   if (box.bottom >= startShift) return `${box.left}${box.top}:${box.right}${box.bottom + extra}`;
   return range;
 }
 
-function rebuildMerges(ws: ExcelJS.Worksheet, templateMerges: string[], itemCount: number) {
-  const needed = Math.max(itemCount, 1);
-  const extra = needed - TEMPLATE_ITEM_COUNT;
+function insertExtraItemRows(ws: ExcelJS.Worksheet, extra: number) {
+  if (extra <= 0) return;
+  const templateMerges = [...(ws.model.merges || [])];
   const lastTemplateItem = AVR_EXCEL_ITEM_START_ROW + TEMPLATE_ITEM_COUNT - 1;
+  unmergeAll(ws);
+  ws.duplicateRow(lastTemplateItem, extra, true);
   const rebuilt: string[] = [];
   for (const range of templateMerges) {
     const next = shiftMergeRange(range, extra);
     if (next) rebuilt.push(next);
   }
-  for (let row = lastTemplateItem + 1; row < AVR_EXCEL_ITEM_START_ROW + needed; row += 1) {
+  for (let row = lastTemplateItem + 1; row <= lastTemplateItem + extra; row += 1) {
     rebuilt.push(...itemMergeRefs(row));
   }
   unmergeAll(ws);
   for (const range of rebuilt) mergeSafe(ws, range);
 }
 
-function adjustItemRows(ws: ExcelJS.Worksheet, itemCount: number, templateMerges: string[]) {
-  const needed = Math.max(itemCount, 1);
-  const lastTemplateItem = AVR_EXCEL_ITEM_START_ROW + TEMPLATE_ITEM_COUNT - 1;
-  if (needed > TEMPLATE_ITEM_COUNT) {
-    ws.duplicateRow(lastTemplateItem, needed - TEMPLATE_ITEM_COUNT, true);
-  } else if (needed < TEMPLATE_ITEM_COUNT) {
-    ws.spliceRows(AVR_EXCEL_ITEM_START_ROW + needed, TEMPLATE_ITEM_COUNT - needed);
-  }
-  rebuildMerges(ws, templateMerges, needed);
-  for (let row = AVR_EXCEL_ITEM_START_ROW; row < AVR_EXCEL_ITEM_START_ROW + needed; row += 1) {
-    ws.getRow(row).height = 40.5;
-  }
+function setValue(ws: ExcelJS.Worksheet, addr: string, value: ExcelJS.CellValue) {
+  ws.getCell(addr).value = value;
 }
 
-function applyPrintSetup(ws: ExcelJS.Worksheet) {
-  ws.properties.dyDescent = 0.25;
-  ws.views = [{ showGridLines: true, zoomScale: 85, state: "normal" }];
-  ws.pageSetup.paperSize = 9;
-  ws.pageSetup.orientation = "landscape";
-  ws.pageSetup.horizontalCentered = true;
-  ws.pageSetup.fitToPage = false;
-  ws.pageSetup.margins = {
-    left: 0.7086614173228347,
-    right: 0.7086614173228347,
-    top: 0.7480314960629921,
-    bottom: 0.7480314960629921,
-    header: 0.31496062992125984,
-    footer: 0.31496062992125984,
+function setNumber(ws: ExcelJS.Worksheet, addr: string, value: number | string | null, numFmt?: string) {
+  const cell = ws.getCell(addr);
+  cell.value = value;
+  if (numFmt) cell.numFmt = numFmt;
+}
+
+function setDate(ws: ExcelJS.Worksheet, addr: string, value: string | Date | null | undefined) {
+  const date = civilDateFromIso(value);
+  const cell = ws.getCell(addr);
+  if (!date) {
+    cell.value = null;
+    return;
+  }
+  cell.value = new Date(Date.UTC(date.year, date.month - 1, date.day));
+  cell.numFmt = DATE_FMT;
+}
+
+function clearItemRow(ws: ExcelJS.Worksheet, row: number) {
+  for (const col of ITEM_COLS) setValue(ws, `${col}${row}`, null);
+}
+
+function fillItemRow(
+  ws: ExcelJS.Worksheet,
+  row: number,
+  index: number,
+  item: AvrSourceSnapshot["items"][number],
+) {
+  const amount = Number(item.amountWithoutVat ?? Number(item.quantity || 0) * Number(item.unitPrice || 0));
+  setNumber(ws, `A${row}`, index + 1, "0");
+  setValue(ws, `C${row}`, item.name || "");
+  setValue(ws, `N${row}`, null);
+  setValue(ws, `AC${row}`, paperAvrMeasureUnit(item.unit));
+  setNumber(ws, `AF${row}`, Number(item.quantity || 0), "0");
+  setNumber(ws, `AI${row}`, Number(item.unitPrice || 0), MONEY_FMT);
+  ws.getCell(`AN${row}`).value = { formula: `AF${row}*AI${row}`, result: amount };
+  ws.getCell(`AN${row}`).numFmt = MONEY_FMT;
+  setNumber(ws, `AS${row}`, Number(item.vatAmount || 0), MONEY_FMT);
+}
+
+function fillWorksheet(ws: ExcelJS.Worksheet, input: { localNumber: string; source: AvrSourceSnapshot }) {
+  const layout = avrExcelLayout(input.source.items.length);
+  const { source } = input;
+  const buyerId = taxId(source.buyer);
+  const sellerId = taxId(source.seller);
+
+  setValue(ws, "E9", partyLine(source.buyer.legalName || source.buyer.name, source.buyer.legalAddress));
+  setValue(ws, "AQ9", buyerId ? ` ${buyerId}` : "");
+  setValue(ws, "E11", partyLine(source.seller.legalName, source.seller.legalAddress));
+  if (/^\d{12}$/.test(sellerId)) setNumber(ws, "AQ11", Number(sellerId), "0");
+  else setValue(ws, "AQ11", sellerId);
+  setValue(ws, "F13", formatAvrContractBasis(source.contract));
+  setValue(ws, "AP15", input.localNumber);
+  setDate(ws, "AT15", source.documentDate);
+
+  for (let row = layout.firstItemRow; row <= layout.lastSlotRow; row += 1) {
+    const item = source.items[row - layout.firstItemRow];
+    if (item) fillItemRow(ws, row, row - layout.firstItemRow, item);
+    else clearItemRow(ws, row);
+  }
+
+  const qty = source.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+  setValue(ws, `AE${layout.totalsRow}`, "Итого");
+  ws.getCell(`AF${layout.totalsRow}`).value = {
+    formula: `SUM(AF${layout.firstItemRow}:AF${layout.lastSlotRow})`,
+    result: qty,
   };
-  const setup = ws.pageSetup as unknown as Record<string, unknown>;
-  setup.horizontalDpi = 96;
-  setup.verticalDpi = 96;
-  delete setup.scale;
-  delete setup.fitToWidth;
-  delete setup.fitToHeight;
-  delete setup.copies;
-  delete setup.firstPageNumber;
+  ws.getCell(`AF${layout.totalsRow}`).numFmt = "0";
+  setValue(ws, `AI${layout.totalsRow}`, "x");
+  ws.getCell(`AN${layout.totalsRow}`).value = {
+    formula: `SUM(AN${layout.firstItemRow}:AN${layout.lastSlotRow})`,
+    result: source.totals.amountWithoutVat,
+  };
+  ws.getCell(`AN${layout.totalsRow}`).numFmt = MONEY_FMT;
+  ws.getCell(`AS${layout.totalsRow}`).value = {
+    formula: `SUM(AS${layout.firstItemRow}:AS${layout.lastSlotRow})`,
+    result: source.totals.vatAmount,
+  };
+  ws.getCell(`AS${layout.totalsRow}`).numFmt = MONEY_FMT;
+  setValue(
+    ws,
+    `T${layout.wordsRow}`,
+    capitalizeRu(amountToKztWords(source.totals.amountWithoutVat || source.totals.totalAmount)),
+  );
+  setValue(ws, `F${layout.signRow}`, source.seller.directorPosition || "Директор");
+  setValue(ws, `R${layout.signRow}`, directorShortName(source.seller.directorName));
 }
 
 function sortCellsInRows(xml: string) {
@@ -405,7 +403,7 @@ function stripMergeSlaveCells(xml: string) {
     const right = colIndex(merge.right);
     for (let r = merge.top; r <= merge.bottom; r += 1) {
       for (let c = left; c <= right; c += 1) {
-        const addr = XLSX.utils.encode_cell({ r: r - 1, c: c - 1 });
+        const addr = `${colLetter(c)}${r}`;
         if (addr !== merge.start) slaves.add(addr);
       }
     }
@@ -428,159 +426,74 @@ function stripMergeSlaveCells(xml: string) {
   return xml;
 }
 
+function cleanSheetXml(xml: string) {
+  return sortCellsInRows(
+    stripMergeSlaveCells(
+      xml
+        .replace(/\shorizontalDpi="4294967295"/g, "")
+        .replace(/\sverticalDpi="4294967295"/g, "")
+        .replace(/x14ac:dyDescent="55"/g, 'x14ac:dyDescent="0.25"'),
+    ),
+  );
+}
+
 async function sanitizeAvrXlsx(buffer: Buffer) {
   const zip = await JSZip.loadAsync(buffer);
   const typeFile = zip.file("[Content_Types].xml");
   if (typeFile && !Object.keys(zip.files).some((name) => name.endsWith(".vml"))) {
     const types = await typeFile.async("string");
-    zip.file(
-      "[Content_Types].xml",
-      types.replace(/<Default Extension="vml"[^>]*>/g, ""),
-    );
+    zip.file("[Content_Types].xml", types.replace(/<Default Extension="vml"[^>]*>/g, ""));
   }
   const stylesFile = zip.file("xl/styles.xml");
   if (stylesFile) {
     const styles = await stylesFile.async("string");
     zip.file("xl/styles.xml", styles.replace(/<extLst>[\s\S]*?<\/extLst>/g, ""));
   }
-  const sheetFile = zip.file("xl/worksheets/sheet1.xml");
-  if (sheetFile) {
-    const xml = await sheetFile.async("string");
-    zip.file(
-      "xl/worksheets/sheet1.xml",
-      sortCellsInRows(
-        stripMergeSlaveCells(
-          xml
-            .replace(/\shorizontalDpi="4294967295"/g, "")
-            .replace(/\sverticalDpi="4294967295"/g, "")
-            .replace(/x14ac:dyDescent="55"/g, 'x14ac:dyDescent="0.25"')
-            .replace(/\sfitToWidth="1"/g, "")
-            .replace(/\sfitToHeight="1"/g, ""),
-        ),
-      ),
-    );
+  const sheetNames = Object.keys(zip.files).filter((name) => /^xl\/worksheets\/sheet\d+\.xml$/.test(name));
+  for (const name of sheetNames) {
+    const sheetFile = zip.file(name);
+    if (!sheetFile) continue;
+    zip.file(name, cleanSheetXml(await sheetFile.async("string")));
+  }
+  if (sheetNames.length === 1 && sheetNames[0] !== "xl/worksheets/sheet1.xml") {
+    const xml = await zip.file(sheetNames[0])!.async("string");
+    zip.file("xl/worksheets/sheet1.xml", xml);
+    zip.remove(sheetNames[0]);
+    const relsFile = zip.file("xl/_rels/workbook.xml.rels");
+    if (relsFile) {
+      const rels = await relsFile.async("string");
+      zip.file("xl/_rels/workbook.xml.rels", rels.replaceAll(path.basename(sheetNames[0]), "sheet1.xml"));
+    }
+    const typesFile = zip.file("[Content_Types].xml");
+    if (typesFile) {
+      const types = await typesFile.async("string");
+      zip.file("[Content_Types].xml", types.replaceAll(sheetNames[0], "xl/worksheets/sheet1.xml"));
+    }
   }
   return Buffer.from(
     await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE", compressionOptions: { level: 6 } }),
   );
 }
 
-function writeCell(ws: ExcelJS.Worksheet, addr: string, value: ExcelJS.CellValue, numFmt?: string) {
-  const cell = ws.getCell(addr);
-  cell.value = value;
-  if (numFmt) cell.numFmt = numFmt;
-  cell.font = { ...(cell.font || {}), ...PAPER_FONT };
-  cell.alignment = { ...(cell.alignment || {}), vertical: "middle", wrapText: true };
-}
-
-function fillWorksheet(ws: ExcelJS.Worksheet, input: { localNumber: string; source: AvrSourceSnapshot }) {
-  const layout = avrExcelLayout(input.source.items.length);
-  const { source } = input;
-  const buyerId = taxId(source.buyer);
-  const sellerId = taxId(source.seller);
-  const performed = excelSerial(source.documentDate);
-
-  writeCell(ws, "E9", partyLine(source.buyer.legalName || source.buyer.name, source.buyer.legalAddress));
-  writeCell(ws, "AQ9", buyerId ? ` ${buyerId}` : "", "@");
-  writeCell(ws, "E11", partyLine(source.seller.legalName, source.seller.legalAddress));
-  if (/^\d{12}$/.test(sellerId)) writeCell(ws, "AQ11", Number(sellerId), "0");
-  else writeCell(ws, "AQ11", sellerId, "@");
-  writeCell(ws, "F13", formatAvrContractBasis(source.contract));
-  writeCell(ws, "AP15", input.localNumber, "00000000000");
-  if (performed != null) writeCell(ws, "AT15", performed, "m/d/yy");
-  else writeCell(ws, "AT15", formatDotDate(source.documentDate));
-
-  for (let i = 0; i < layout.itemCount; i += 1) {
-    const row = layout.firstItemRow + i;
-    const item = source.items[i];
-    if (!item) {
-      for (const col of ["A", "C", "N", "AC", "AF", "AI", "AN", "AS"]) writeCell(ws, `${col}${row}`, "");
-      continue;
-    }
-    const amount = Number(item.amountWithoutVat ?? Number(item.quantity || 0) * Number(item.unitPrice || 0));
-    writeCell(ws, `A${row}`, i === 0 ? String(i + 1) : i + 1, "0");
-    writeCell(ws, `C${row}`, item.name || "");
-    if (performed != null) writeCell(ws, `N${row}`, performed, "m/d/yy");
-    else writeCell(ws, `N${row}`, formatDotDate(source.documentDate));
-    writeCell(ws, `AC${row}`, paperAvrMeasureUnit(item.unit));
-    writeCell(ws, `AF${row}`, item.quantity, "0");
-    writeCell(ws, `AI${row}`, item.unitPrice, MONEY_FMT);
-    writeCell(ws, `AN${row}`, { formula: `AF${row}*AI${row}`, result: amount }, MONEY_FMT);
-    writeCell(ws, `AS${row}`, item.vatAmount, MONEY_FMT);
-  }
-
-  const qty = source.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
-  writeCell(ws, `AE${layout.totalsRow}`, "Итого");
-  writeCell(ws, `AF${layout.totalsRow}`, {
-    formula: `SUM(AF${layout.firstItemRow}:AF${layout.lastItemRow})`,
-    result: qty,
-  }, "0");
-  writeCell(ws, `AI${layout.totalsRow}`, "x", MONEY_FMT);
-  writeCell(ws, `AN${layout.totalsRow}`, {
-    formula: `SUM(AN${layout.firstItemRow}:AN${layout.lastItemRow})`,
-    result: source.totals.amountWithoutVat,
-  }, MONEY_FMT);
-  writeCell(ws, `AS${layout.totalsRow}`, {
-    formula: `SUM(AS${layout.firstItemRow}:AS${layout.lastItemRow})`,
-    result: source.totals.vatAmount,
-  }, MONEY_FMT);
-  writeCell(
-    ws,
-    `T${layout.wordsRow}`,
-    capitalizeRu(amountToKztWords(source.totals.amountWithoutVat || source.totals.totalAmount)),
-  );
-  writeCell(ws, `F${layout.signRow}`, source.seller.directorPosition || "Директор");
-  writeCell(ws, `R${layout.signRow}`, directorShortName(source.seller.directorName));
-}
-
-function decodeMerge(range: string) {
-  const [start, end] = range.split(":");
-  const left = start.replace(/\d/g, "");
-  const top = Number(start.replace(/\D/g, ""));
-  const right = (end || start).replace(/\d/g, "");
-  const bottom = Number((end || start).replace(/\D/g, ""));
-  return { start, left, top, right, bottom };
-}
-
-function colIndex(letters: string) {
-  return letters.split("").reduce((n, ch) => n * 26 + (ch.charCodeAt(0) - 64), 0);
-}
-
-function restorePaperLook(ws: ExcelJS.Worksheet, totalsRow: number) {
-  applyPrintSetup(ws);
-  for (const range of ws.model.merges || []) {
-    const box = decodeMerge(range);
-    const col = colIndex(box.left);
-    const table = box.top >= 17 && box.top <= totalsRow;
-    const bin = (box.top === 9 || box.top === 11) && col >= 43;
-    const number = box.top >= 13 && box.top <= 15 && col >= 42;
-    const party = (box.top === 9 || box.top === 11) && col <= 36;
-    const contract = box.top === 13 && col <= 29;
-    if (!table && !bin && !number && !party && !contract) continue;
-    const cell = ws.getCell(box.start);
-    cell.border = { top: THIN, left: THIN, bottom: THIN, right: THIN };
-    cell.font = { ...(cell.font || {}), ...PAPER_FONT };
-  }
-}
-
 export async function renderAvrExcel(input: { number: string; source: AvrSourceSnapshot }) {
   const layout = avrExcelLayout(input.source.items.length);
   const localNumber = avrLocalNumber(input.number, input.source.documentDate);
   const filename = avrExcelFileName({ number: input.number, source: input.source });
-  const template = readTemplateSheet();
   const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(readFileSync(avrTemplatePath()));
   wb.calcProperties.fullCalcOnLoad = true;
-  const ws = wb.addWorksheet(AVR_EXCEL_SHEET_NAME);
-  copyTemplateToWorksheet(ws, template);
-  const templateMerges = [...(ws.model.merges || [])];
-  adjustItemRows(ws, input.source.items.length, templateMerges);
+  const ws = wb.worksheets[0];
+  if (!ws) throw new ApiError(500, "avr_template_missing", "В шаблоне АВР нет листа");
+  ws.name = AVR_EXCEL_SHEET_NAME;
+  if (ws.pageSetup.horizontalDpi === 4294967295) ws.pageSetup.horizontalDpi = 96;
+  if (ws.pageSetup.verticalDpi === 4294967295) ws.pageSetup.verticalDpi = 96;
+  insertExtraItemRows(ws, layout.extra);
   fillWorksheet(ws, { localNumber, source: input.source });
-  restorePaperLook(ws, layout.totalsRow);
   const data = await wb.xlsx.writeBuffer();
   return { buffer: await sanitizeAvrXlsx(Buffer.from(data)), filename, localNumber, layout };
 }
 
-async function resolveAvrSource(
+export async function resolveAvrSource(
   prisma: PrismaClient,
   tenantId: string,
   document: {

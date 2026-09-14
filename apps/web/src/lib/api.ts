@@ -11,6 +11,15 @@ export function setTenant(id: string) {
 
 export async function downloadAvrExcel(documentId: string) {
   const { blob, filename } = await api.downloadElectronicDocumentExcel(documentId);
+  triggerDownload(blob, filename);
+}
+
+export async function downloadAvrPdf(documentId: string) {
+  const { blob, filename } = await api.downloadElectronicDocumentPdf(documentId);
+  triggerDownload(blob, filename);
+}
+
+function triggerDownload(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;

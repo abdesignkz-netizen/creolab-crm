@@ -3,6 +3,7 @@ import { Link, useLocation, useParams } from "react-router-dom";
 import { api } from "../../lib/api";
 import { formatDateTime } from "../../lib/datetime";
 import { notifySaved } from "../../components/SaveNotice";
+import { AssignIntegrationForm } from "./PlatformAssignIntegration";
 
 const TABS = [
   ["info", "Основные данные"],
@@ -289,11 +290,9 @@ function CompanyMembers({ tenantId }: { tenantId: string }) {
 
 function CompanyIntegrations({ tenantId }: { tenantId: string }) {
   const [data, setData] = useState<any>(null);
-  const [type, setType] = useState("form");
-  const [note, setNote] = useState("");
-  const [secret, setSecret] = useState("");
   const [error, setError] = useState("");
   const [events, setEvents] = useState<any[] | null>(null);
+  const [note, setNote] = useState("");
 
   async function load() {
     setData(await api.adminCompanyIntegrations(tenantId));
@@ -301,56 +300,35 @@ function CompanyIntegrations({ tenantId }: { tenantId: string }) {
   useEffect(() => { void load().catch((err) => setError(err instanceof Error ? err.message : "Ошибка")); }, [tenantId]);
   if (!data) return <div className="state">Загрузка…</div>;
   const connectable = (data.catalog || []).filter((item: any) => item.connectable);
-  const selected = connectable.find((item: any) => item.type === type) || connectable[0];
+  const companies = [{ id: tenantId, name: "Эта компания", integrationTypes: (data.items || []).map((row: any) => row.type) }];
 
   return (
     <div className="stack">
       {(data.needsAssignment || []).length ? (
         <p className="error">Есть подключения без назначения этой компании. Общие секреты сервера не используются автоматически.</p>
       ) : null}
-      <form
-        className="panel stack"
-        onSubmit={async (event) => {
-          event.preventDefault();
-          const form = new FormData(event.currentTarget);
-          try {
-            const body: Record<string, unknown> = {
-              type,
-              name: String(form.get("name") || ""),
-              sellerUrl: String(form.get("sellerUrl") || ""),
-              secret: String(form.get("secret") || ""),
-              assigneeMembershipId: String(form.get("assigneeMembershipId") || ""),
-            };
-            const result = (await api.adminCreateCompanyIntegration(tenantId, body)) as any;
-            setSecret(result.secret || "");
-            setNote(result.note || (result.reachable === false ? "Сохранено, но не подключено" : "Сохранено"));
-            notifySaved(result.reachable ? "Мост ответил" : "Ссылка создана / настройки сохранены");
-            await load();
-            setError("");
-          } catch (err) {
-            setError(err instanceof Error ? err.message : "Ошибка");
-          }
-        }}
-      >
-        <h4>Добавить интеграцию</h4>
-        <label>
-          Тип
-          <select value={type} onChange={(e) => setType(e.target.value)}>
-            {connectable.map((item: any) => (
-              <option key={item.type} value={item.type}>{item.title}</option>
-            ))}
-          </select>
-        </label>
-        {!selected?.multiple ? <p className="muted">Для этого типа допускается только одно подключение. Сервер отклонит второе.</p> : null}
-        <label>Название<input name="name" /></label>
-        {selected?.fields?.includes("sellerUrl") ? <label>Адрес моста<input name="sellerUrl" placeholder="https://…" /></label> : null}
-        {selected?.fields?.includes("secret") ? <label>Секрет<input name="secret" type="password" autoComplete="off" /></label> : null}
-        {selected?.fields?.includes("assigneeMembershipId") ? <label>ID ответственного сотрудника<input name="assigneeMembershipId" /></label> : null}
-        <button className="btn">Сохранить</button>
-      </form>
-      {note ? <p className="ok">{note}</p> : null}
-      {secret ? <pre className="code">{secret}</pre> : null}
       {error ? <p className="error">{error}</p> : null}
+      {connectable.map((item: any) => (
+        <div className="panel stack" key={item.type}>
+          <div className="page-head">
+            <div>
+              <b>{item.title}</b>
+              <div className="muted">{item.type}</div>
+            </div>
+          </div>
+          {(item.steps || []).length ? (
+            <div className="notify-steps">
+              <b>Как подключить</b>
+              <ol>
+                {(item.steps as string[]).map((step: string) => (
+                  <li key={step}>{step}</li>
+                ))}
+              </ol>
+            </div>
+          ) : null}
+          <AssignIntegrationForm item={item} companies={companies} lockedTenantId={tenantId} />
+        </div>
+      ))}
       {(data.items || []).map((item: any) => (
         <div className="panel stack" key={item.id}>
           <div className="page-head">
@@ -367,7 +345,7 @@ function CompanyIntegrations({ tenantId }: { tenantId: string }) {
               {item.type === "webhook" ? (
                 <button className="btn secondary" onClick={async () => {
                   const result = (await api.adminRotateCompanyWebhook(tenantId, item.id)) as any;
-                  setSecret(result.secret);
+                  setNote(`${result.note || "Ключ заменён"} ${result.secret || ""}`);
                   notifySaved("Ключ заменён. Значение в журнал не записано.");
                 }}>Заменить ключ</button>
               ) : null}
@@ -395,6 +373,7 @@ function CompanyIntegrations({ tenantId }: { tenantId: string }) {
           {item.lastErrorMessage ? <p className="error">{item.lastErrorMessage}</p> : null}
         </div>
       ))}
+      {note ? <p className="ok">{note}</p> : null}
       {events ? (
         <div className="panel">
           <h4>История событий</h4>

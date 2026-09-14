@@ -13,6 +13,7 @@ import {
   paperAvrMeasureUnit,
   renderAvrExcel,
 } from "./services/avrExcel.ts";
+import { avrPdfFileName, renderAvrPdf } from "./services/avrPdf.ts";
 import { createPrismaClient } from "@creolab/db";
 import { createApp } from "./app.ts";
 
@@ -34,6 +35,17 @@ function cellValue(ws: ExcelJS.Worksheet, addr: string) {
     if ("richText" in value && Array.isArray(value.richText)) return value.richText.map((part) => part.text).join("");
   }
   return value ?? "";
+}
+
+async function pdfText(buffer: Buffer) {
+  const { DOMMatrix, ImageData, Path2D } = await import("@napi-rs/canvas");
+  Object.assign(globalThis, { DOMMatrix, ImageData, Path2D });
+  const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const pdf = await getDocument({ data: new Uint8Array(buffer), useSystemFonts: true }).promise;
+  const page = await pdf.getPage(1);
+  const content = await page.getTextContent();
+  page.cleanup();
+  return content.items.map((item) => ("str" in item ? item.str : "")).join(" ");
 }
 
 const gold: AvrSourceSnapshot = {
@@ -136,8 +148,8 @@ describe("AVR Excel Form R-1", () => {
     const ws = wb.getWorksheet(AVR_EXCEL_SHEET_NAME);
     assert.ok(ws);
     assert.equal((ws.model.merges || []).length, 82);
-    assert.equal(ws.getColumn(1).width, 3.67);
-    assert.equal(ws.getColumn(11).width, 0.83);
+    assert.equal(ws.getColumn(1).width, 4.5);
+    assert.equal(ws.getColumn(11).width, 1.75);
     assert.equal(ws.getRow(17).height, 66);
     assert.equal(ws.getRow(20).height, 40.5);
     assert.equal(cellValue(ws, "A17"), "Номер по порядку");
@@ -151,6 +163,7 @@ describe("AVR Excel Form R-1", () => {
     assert.equal(cellValue(ws, "AP15"), "26-0035");
     assert.equal(cellValue(ws, "AT15"), "10.09.2026");
     assert.equal(cellValue(ws, "C20"), gold.items[0].name);
+    assert.equal(cellValue(ws, "N20"), "");
     assert.equal(cellValue(ws, "AC20"), "услуга");
     assert.equal(cellValue(ws, "AF20"), 1);
     assert.equal(cellValue(ws, "AI20"), 150000);
@@ -161,11 +174,13 @@ describe("AVR Excel Form R-1", () => {
     assert.equal(cellValue(ws, "AI23"), "x");
     assert.equal(cellValue(ws, "AN23"), 325000);
     assert.equal(cellValue(ws, "T25"), "Триста двадцать пять тысяч тенге");
+    assert.equal(cellValue(ws, "A30"), "Сдал (Исполнитель)");
     assert.equal(cellValue(ws, "F30"), "Директор");
     assert.equal(cellValue(ws, "R30"), "Булан А. Б.");
     assert.equal(cellValue(ws, "AA30"), "Принял (Заказчик)");
     assert.equal(cellValue(ws, "A33"), "М.П.");
     assert.equal(ws.getCell("AN20").value && typeof ws.getCell("AN20").value === "object" ? (ws.getCell("AN20").value as { formula?: string }).formula : "", "AF20*AI20");
+    assert.equal(ws.getCell("AT15").numFmt, "dd.mm.yyyy");
 
     const zip = await JSZip.loadAsync(buffer);
     const types = await zip.file("[Content_Types].xml")?.async("string");
@@ -229,6 +244,92 @@ describe("AVR Excel Form R-1", () => {
     assert.equal(avrExcelLayout(4).stampRow, 34);
     assert.ok((ws.model.merges || []).includes("A23:B23"));
     assert.ok((ws.model.merges || []).includes("AF24:AH24"));
+  });
+
+  it("не ломает сетку формы, если позиция одна", async () => {
+    const source: AvrSourceSnapshot = {
+      ...gold,
+      items: [gold.items[0]],
+      totals: { amountWithoutVat: 150000, vatAmount: 0, totalAmount: 150000, currency: "KZT" },
+    };
+    const { buffer, layout } = await renderAvrExcel({ number: "AVR-2026-0002", source });
+    assert.equal(layout.totalsRow, 23);
+    assert.equal(layout.signRow, 30);
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buffer);
+    const ws = wb.getWorksheet(AVR_EXCEL_SHEET_NAME);
+    assert.ok(ws);
+    assert.equal((ws.model.merges || []).length, 82);
+    assert.equal(cellValue(ws, "C20"), gold.items[0].name);
+    assert.equal(cellValue(ws, "C21"), "");
+    assert.equal(cellValue(ws, "C22"), "");
+    assert.equal(cellValue(ws, "AE23"), "Итого");
+    assert.equal(cellValue(ws, "AN23"), 150000);
+    assert.equal(cellValue(ws, "A30"), "Сдал (Исполнитель)");
+    assert.equal(cellValue(ws, "AA30"), "Принял (Заказчик)");
+    assert.equal(cellValue(ws, "A33"), "М.П.");
+    assert.equal(ws.getCell("AT15").numFmt, "dd.mm.yyyy");
+  });
+
+  it("fills the existing Form R-1 PDF without leftover template text", async () => {
+    const { buffer, filename } = await renderAvrPdf({ number: "AVR-2026-0035", source: gold });
+    assert.equal(buffer.subarray(0, 5).toString("utf8"), "%PDF-");
+    assert.equal(filename, "26-0035 ГОЛД ПРОДУКТ от 10 сентября 2026.pdf");
+    assert.equal(avrPdfFileName({ number: "AVR-2026-0035", source: gold }), filename);
+    const text = await pdfText(buffer);
+    assert.match(text, /26-0035/);
+    assert.match(text, /10\.09\.2026/);
+    assert.match(text, /ГОЛД ПРОДУКТ/);
+    assert.match(text, /фотосъемка/);
+    assert.match(text, /Булан А\. Б\./);
+    assert.match(text, /Триста двадцать пять тысяч тенге/);
+
+    const one: AvrSourceSnapshot = {
+      ...gold,
+      buyer: {
+        ...gold.buyer,
+        name: "АрыстанТехСервис",
+        legalName: "ТОО «АрыстанТехСервис»",
+        legalAddress: "РК, город Астана, район Есиль",
+        bin: "111111111111",
+      },
+      items: [gold.items[0]],
+      totals: { amountWithoutVat: 150000, vatAmount: 0, totalAmount: 150000, currency: "KZT" },
+    };
+    const other = await renderAvrPdf({ number: "AVR-2026-0002", source: one });
+    const otherText = await pdfText(other.buffer);
+    assert.match(otherText, /АрыстанТехСервис/);
+    assert.match(otherText, /26-0002/);
+    assert.equal(/ГОЛД ПРОДУКТ/.test(otherText), false);
+    assert.equal(/фотосъемка/.test(otherText), false);
+    assert.equal(/26-0035/.test(otherText), false);
+
+    const four: AvrSourceSnapshot = {
+      ...gold,
+      items: [
+        ...gold.items,
+        {
+          dealItemId: "4",
+          name: "Часы сопровождения",
+          description: null,
+          quantity: 2,
+          unit: "час",
+          unitPrice: 10000,
+          amountWithoutVat: 20000,
+          vatRate: 12,
+          vatAmount: 2400,
+          totalAmount: 22400,
+          sortOrder: 3,
+        },
+      ],
+      totals: { amountWithoutVat: 345000, vatAmount: 2400, totalAmount: 347400, currency: "KZT" },
+    };
+    const extra = await renderAvrPdf({ number: "AVR-2026-0035", source: four });
+    const extraText = await pdfText(extra.buffer);
+    assert.match(extraText, /Часы сопровождения/);
+    assert.match(extraText, /фотосъемка/);
+    assert.match(extraText, /345 000,00/);
+    assert.match(extraText, /Триста сорок пять тысяч тенге/);
   });
 });
 
@@ -352,6 +453,19 @@ describe("GET AVR Excel", () => {
     assert.equal(cellValue(ws, "AI20"), 850000);
   });
 
+  it("отдаёт PDF формы Р-1 без ИС ЭСФ", async () => {
+    const response = await fetch(`${base}/api/v1/electronic-documents/${documentId}/pdf`, { headers: { cookie } });
+    const buffer = Buffer.from(await response.arrayBuffer());
+    assert.equal(response.status, 200, buffer.toString("utf8").slice(0, 400));
+    assert.match(response.headers.get("content-type") || "", /pdf/);
+    assert.match(response.headers.get("content-disposition") || "", /\.pdf/);
+    assert.equal(buffer.subarray(0, 5).toString("utf8"), "%PDF-");
+    const text = await pdfText(buffer);
+    assert.match(text, /Разработка сайта/);
+    assert.match(text, /Excel Buyer/);
+    assert.equal(/ГОЛД ПРОДУКТ/.test(text), false);
+  });
+
   it("не отдаёт Excel чужому тенанту и не считает ЭСФ актом", async () => {
     assert.equal((await fetch(`${base}/api/v1/electronic-documents/${documentId}/excel`)).status, 401);
     assert.equal(
@@ -362,6 +476,14 @@ describe("GET AVR Excel", () => {
       const denied = await json(`/api/v1/electronic-documents/${esfId}/excel`);
       assert.equal(denied.response.status, 422);
       assert.equal(denied.body.code, "not_avr");
+      const deniedPdf = await json(`/api/v1/electronic-documents/${esfId}/pdf`);
+      assert.equal(deniedPdf.response.status, 422);
+      assert.equal(deniedPdf.body.code, "not_avr");
     }
+    assert.equal((await fetch(`${base}/api/v1/electronic-documents/${documentId}/pdf`)).status, 401);
+    assert.equal(
+      (await fetch(`${base}/api/v1/electronic-documents/${documentId}/pdf`, { headers: { cookie: otherCookie } })).status,
+      404,
+    );
   });
 });

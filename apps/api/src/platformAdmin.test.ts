@@ -160,6 +160,32 @@ describe("platform admin panel", () => {
     assert.match(String(created.data.note || ""), /адрес приёма|сохран/i);
   });
 
+  it("lets a service admin attach WhatsApp to a chosen company", async () => {
+    const catalog = await req(platformCookie, "/api/v1/admin/integrations/catalog");
+    assert.equal(catalog.status, 200);
+    const whatsapp = (catalog.data.items || []).find((item: { type: string }) => item.type === "whatsapp_seller");
+    assert.equal(whatsapp.connectable, true);
+    assert.ok(Array.isArray(whatsapp.steps) && whatsapp.steps.length >= 4);
+    assert.equal((await req(ownerCookie, "/api/v1/admin/integrations/catalog")).status, 403);
+
+    const tenant = await prisma.tenant.create({
+      data: { name: "WA Co", slug: `wa-co-${Date.now()}`, settingsJson: { features: { whatsapp: false } } },
+    });
+    const created = await req(platformCookie, `/api/v1/admin/tenants/${tenant.id}/integrations`, {
+      method: "POST",
+      body: { type: "whatsapp_seller", name: "Номер компании", sellerUrl: "http://localhost:1", secret: "bridge-secret" },
+    });
+    assert.ok([200, 201].includes(created.status), JSON.stringify(created.data));
+    assert.equal(created.data.type, "whatsapp_seller");
+    const saved = await prisma.tenant.findUnique({ where: { id: tenant.id } });
+    const features = (saved?.settingsJson as { features?: { whatsapp?: boolean } } | null)?.features;
+    assert.equal(features?.whatsapp, true);
+    const row = await prisma.integration.findFirst({ where: { tenantId: tenant.id, type: "whatsapp_seller" } });
+    assert.ok(row);
+    const schema = (row?.schemaJson || {}) as { sellerUrl?: string };
+    assert.equal(schema.sellerUrl, "http://localhost:1");
+  });
+
   it("does not use the global WhatsApp bridge for an unconfigured company", async () => {
     process.env.WHATSAPP_SELLER_URL = "https://shared-bot.example";
     process.env.WHATSAPP_SELLER_SECRET = "shared-secret";

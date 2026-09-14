@@ -31,7 +31,7 @@ export function PlatformOverviewPage() {
       <div className="actions">
         <Link className="btn" to="/admin/companies/new">Добавить компанию</Link>
         <Link className="btn secondary" to="/admin/members">Пригласить участника</Link>
-        <Link className="btn secondary" to="/admin/companies">Подключить интеграцию</Link>
+        <Link className="btn secondary" to="/admin/integrations?type=whatsapp_seller">Подключить интеграцию</Link>
       </div>
       <div className="kpi-grid">
         {cards.map(([label, value]) => (

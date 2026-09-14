@@ -318,6 +318,34 @@ export function createApiClient(options: ClientOptions) {
       const filename = encoded ? decodeURIComponent(encoded[1]) : plain?.[1] || "avr.xlsx";
       return { blob, filename };
     },
+    electronicDocumentPdfUrl: (documentId: string) => `/api/v1/electronic-documents/${documentId}/pdf`,
+    downloadElectronicDocumentPdf: async (documentId: string) => {
+      const headers = new Headers();
+      const token = await options.getToken?.();
+      if (token) headers.set("Authorization", `Bearer ${token}`);
+      const tenantId = options.getTenantId?.();
+      if (tenantId) headers.set("x-tenant-id", tenantId);
+      const response = await fetch(`${options.baseUrl}/api/v1/electronic-documents/${documentId}/pdf`, {
+        headers,
+        credentials: "include",
+      });
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as { message?: string };
+        const error = new Error(data.message || `HTTP ${response.status}`) as Error & {
+          status: number;
+          body: unknown;
+        };
+        error.status = response.status;
+        error.body = data;
+        throw error;
+      }
+      const blob = await response.blob();
+      const disposition = response.headers.get("content-disposition") || "";
+      const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+      const plain = disposition.match(/filename="([^"]+)"/i);
+      const filename = encoded ? decodeURIComponent(encoded[1]) : plain?.[1] || "avr.pdf";
+      return { blob, filename };
+    },
     changeDealStage: (id: string, body: unknown) =>
       request(`/api/v1/deals/${id}/stage`, { method: "POST", body: JSON.stringify(body) }),
     markDealWon: (id: string, body: unknown = {}) =>
