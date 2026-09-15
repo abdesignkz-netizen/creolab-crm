@@ -4,7 +4,7 @@ import { createCanvas, DOMMatrix, ImageData, Path2D } from "@napi-rs/canvas";
 import type { PrismaClient } from "@creolab/db";
 import { amountToKztWords } from "@creolab/contracts";
 import type { Response } from "express";
-import { PDFDocument, rgb, type PDFFont, type PDFPage } from "pdf-lib";
+import { PDFDocument, rgb, type PDFFont, type PDFImage, type PDFPage } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
@@ -47,6 +47,10 @@ const ITEM_BANDS = [
 const BODY_TOP = 276.28;
 const BODY_BOTTOM = 163.28;
 const TOTALS_TOP = 172.78;
+const TOTALS_H = TOTALS_TOP - BODY_BOTTOM;
+const ITEM_ROW_H = ITEM_BANDS[0].top - ITEM_BANDS[0].bottom;
+const TOTALS_VALUES_OFFSET = 2;
+const STROKE = 0.4;
 const TEMPLATE_ITEMS = ITEM_BANDS.length;
 
 function requireTenant(auth: AuthContext) {
@@ -65,11 +69,14 @@ function avrPdfTemplatePath() {
   return found;
 }
 
-let templatePng: Buffer | null = null;
-let templateSize: { width: number; height: number } | null = null;
+let templateCache: { png: Buffer; footerPng: Buffer; width: number; height: number } | null = null;
+
+function unusedRowShift(itemCount: number) {
+  return Math.max(0, TEMPLATE_ITEMS - Math.max(itemCount, 1)) * ITEM_ROW_H;
+}
 
 async function avrTemplatePng() {
-  if (templatePng && templateSize) return { png: templatePng, ...templateSize };
+  if (templateCache) return templateCache;
   Object.assign(globalThis, { DOMMatrix, ImageData, Path2D });
   const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
   const bytes = new Uint8Array(readFileSync(avrPdfTemplatePath()));
@@ -86,9 +93,19 @@ async function avrTemplatePng() {
       viewport,
       background: "rgb(255,255,255)",
     }).promise;
-    templatePng = canvas.toBuffer("image/png");
-    templateSize = { width: viewport.width / scale, height: viewport.height / scale };
-    return { png: templatePng, ...templateSize };
+    const width = viewport.width / scale;
+    const height = viewport.height / scale;
+    const srcY = Math.max(0, Math.round(canvas.height - (BODY_BOTTOM / height) * canvas.height));
+    const srcH = Math.max(1, canvas.height - srcY);
+    const footer = createCanvas(canvas.width, srcH);
+    footer.getContext("2d").drawImage(canvas, 0, srcY, canvas.width, srcH, 0, 0, canvas.width, srcH);
+    templateCache = {
+      png: canvas.toBuffer("image/png"),
+      footerPng: footer.toBuffer("image/png"),
+      width,
+      height,
+    };
+    return templateCache;
   } finally {
     page.cleanup();
   }
@@ -224,12 +241,20 @@ function fillItem(
   drawRight(page, money(Number(item.vatAmount || 0)), COL.vat.r - 2.2, band.valuesY, font, size);
 }
 
+function strokeH(page: PDFPage, y: number, x1 = COL.num.l, x2 = COL.vat.r) {
+  page.drawLine({ start: { x: x1, y }, end: { x: x2, y }, thickness: STROKE, color: BLACK });
+}
+
+function strokeV(page: PDFPage, x: number, y1: number, y2: number) {
+  page.drawLine({ start: { x, y: y1 }, end: { x, y: y2 }, thickness: STROKE, color: BLACK });
+}
+
 function fillTotals(
   page: PDFPage,
   items: AvrSourceSnapshot["items"],
   totals: AvrSourceSnapshot["totals"],
   font: PDFFont,
-  valuesY = 165.28,
+  valuesY = BODY_BOTTOM + TOTALS_VALUES_OFFSET,
   bottom = BODY_BOTTOM,
   top = TOTALS_TOP,
 ) {
@@ -242,6 +267,30 @@ function fillTotals(
   drawCentered(page, "x", (COL.price.l + COL.price.r) / 2, valuesY, font, BODY);
   drawRight(page, money(Number(totals.amountWithoutVat || 0)), COL.amount.r - 2.2, valuesY, font, BODY);
   drawRight(page, money(Number(totals.vatAmount || 0)), COL.vat.r - 2.2, valuesY, font, BODY);
+}
+
+function removeUnusedItemRows(
+  page: PDFPage,
+  items: AvrSourceSnapshot["items"],
+  totals: AvrSourceSnapshot["totals"],
+  font: PDFFont,
+  footerImage: PDFImage,
+  pageWidth: number,
+  shift: number,
+) {
+  const lastBand = ITEM_BANDS[Math.max(items.length, 1) - 1];
+  const totalsTop = lastBand.bottom;
+  const totalsBottom = totalsTop - TOTALS_H;
+  const valuesY = totalsBottom + TOTALS_VALUES_OFFSET;
+  white(page, 0, 0, pageWidth, lastBand.bottom - 0.35);
+  page.drawImage(footerImage, { x: 0, y: shift, width: pageWidth, height: BODY_BOTTOM });
+  strokeH(page, totalsTop);
+  strokeH(page, totalsBottom);
+  strokeV(page, COL.num.l, totalsBottom, totalsTop);
+  strokeV(page, COL.vat.r, totalsBottom, totalsTop);
+  for (const x of VLINES) strokeV(page, x, totalsBottom, totalsTop);
+  drawRight(page, "Итого", COL.qty.l - 3.2, valuesY, font, BODY);
+  fillTotals(page, items, totals, font, valuesY, totalsBottom, totalsTop);
 }
 
 function fillExtraItems(
@@ -307,6 +356,7 @@ export async function renderAvrPdf(input: { number: string; source: AvrSourceSna
   const seller = partyLine(source.seller.legalName, source.seller.legalAddress);
   const buyerId = taxId(source.buyer);
   const sellerId = taxId(source.seller);
+  const shift = source.items.length > TEMPLATE_ITEMS ? 0 : unusedRowShift(source.items.length);
 
   white(page, 103.2, 445.9, 362.5, 18.2);
   white(page, 534.9, 446.2, 81.2, 17.6);
@@ -315,9 +365,6 @@ export async function renderAvrPdf(input: { number: string; source: AvrSourceSna
   white(page, 115.9, 396.2, 272, 9.8);
   white(page, 522.9, 366.7, 45.2, 18.2);
   white(page, 570.9, 366.7, 45.2, 18.2);
-  white(page, 365, 139.6, 253.5, 14.2);
-  white(page, 118, 86.6, 52, 10.2);
-  white(page, 247.4, 86.6, 78, 10.2);
 
   drawWrappedCenter(page, buyer, 284.5, 456.82, 446.5, bold, PARTY, 368);
   drawCentered(page, buyerId ? ` ${buyerId}` : "", 575.5, 452.52, bold, PARTY);
@@ -330,21 +377,30 @@ export async function renderAvrPdf(input: { number: string; source: AvrSourceSna
   if (source.items.length > TEMPLATE_ITEMS) {
     fillExtraItems(page, source.items, source.totals, font);
   } else {
-    for (const band of ITEM_BANDS) coverItemBand(page, band.bottom, band.top);
+    const used = Math.max(source.items.length, 1);
+    for (const band of ITEM_BANDS.slice(0, used)) coverItemBand(page, band.bottom, band.top);
     source.items.forEach((item, index) => fillItem(page, ITEM_BANDS[index], index, item, font));
-    fillTotals(page, source.items, source.totals, font);
+    if (shift > 0) {
+      const footerImage = await pdf.embedPng(background.footerPng);
+      removeUnusedItemRows(page, source.items, source.totals, font, footerImage, background.width, shift);
+    } else {
+      fillTotals(page, source.items, source.totals, font);
+    }
   }
 
+  white(page, 365, 139.6 + shift, 253.5, 14.2);
+  white(page, 118, 86.6 + shift, 52, 10.2);
+  white(page, 247.4, 86.6 + shift, 78, 10.2);
   drawCentered(
     page,
     capitalizeRu(amountToKztWords(source.totals.amountWithoutVat || source.totals.totalAmount)),
     441.8,
-    146.36,
+    146.36 + shift,
     font,
     BODY,
   );
-  drawCentered(page, source.seller.directorPosition || "Директор", 145.1, 90.46, font, BODY);
-  drawCentered(page, directorShortName(source.seller.directorName), 286.5, 90.46, font, BODY);
+  drawCentered(page, source.seller.directorPosition || "Директор", 145.1, 90.46 + shift, font, BODY);
+  drawCentered(page, directorShortName(source.seller.directorName), 286.5, 90.46 + shift, font, BODY);
 
   return { buffer: Buffer.from(await pdf.save()), filename, localNumber };
 }

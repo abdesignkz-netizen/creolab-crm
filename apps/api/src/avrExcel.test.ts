@@ -181,6 +181,9 @@ describe("AVR Excel Form R-1", () => {
     assert.equal(cellValue(ws, "A33"), "М.П.");
     assert.equal(ws.getCell("AN20").value && typeof ws.getCell("AN20").value === "object" ? (ws.getCell("AN20").value as { formula?: string }).formula : "", "AF20*AI20");
     assert.equal(ws.getCell("AT15").numFmt, "dd.mm.yyyy");
+    assert.equal(ws.getCell("B20").border?.right?.style, "thin");
+    assert.equal(ws.getCell("M20").border?.right?.style, "thin");
+    assert.equal(ws.getCell("AH23").border?.right?.style, "thin");
 
     const zip = await JSZip.loadAsync(buffer);
     const types = await zip.file("[Content_Types].xml")?.async("string");
@@ -197,7 +200,10 @@ describe("AVR Excel Form R-1", () => {
     assert.match(sheet, /<c r="A7"/);
     assert.match(sheet, /<c r="AU32"/);
     assert.ok(sheet.indexOf('r="AG32"') < sheet.indexOf('r="AU32"'));
-    assert.equal(/<c r="AO1"/.test(sheet), false);
+    assert.match(sheet, /<c r="B20"/);
+    assert.match(sheet, /<c r="M20"/);
+    assert.match(sheet, /<c r="AO1"/);
+    assert.equal(/<c r="AO1"[^>/]*><v>/.test(sheet), false);
     const merges = [...sheet.matchAll(/<mergeCell ref="([^"]+)"/g)].map((match) => match[1]);
     assert.equal(merges.length, 82);
     for (const ref of merges) {
@@ -246,29 +252,43 @@ describe("AVR Excel Form R-1", () => {
     assert.ok((ws.model.merges || []).includes("AF24:AH24"));
   });
 
-  it("не ломает сетку формы, если позиция одна", async () => {
+  it("убирает пустые строки формы, если позиция одна", async () => {
     const source: AvrSourceSnapshot = {
       ...gold,
       items: [gold.items[0]],
       totals: { amountWithoutVat: 150000, vatAmount: 0, totalAmount: 150000, currency: "KZT" },
     };
     const { buffer, layout } = await renderAvrExcel({ number: "AVR-2026-0002", source });
-    assert.equal(layout.totalsRow, 23);
-    assert.equal(layout.signRow, 30);
+    assert.equal(layout.unused, 2);
+    assert.equal(layout.totalsRow, 21);
+    assert.equal(layout.wordsRow, 23);
+    assert.equal(layout.signRow, 28);
+    assert.equal(layout.stampRow, 31);
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(buffer);
     const ws = wb.getWorksheet(AVR_EXCEL_SHEET_NAME);
     assert.ok(ws);
-    assert.equal((ws.model.merges || []).length, 82);
+    assert.equal((ws.model.merges || []).length, 64);
+    assert.equal(ws.getRow(20).height, 40.5);
+    assert.equal(ws.getRow(21).height, 11);
     assert.equal(cellValue(ws, "C20"), gold.items[0].name);
+    assert.equal(cellValue(ws, "AE21"), "Итого");
+    assert.equal(cellValue(ws, "AN21"), 150000);
     assert.equal(cellValue(ws, "C21"), "");
     assert.equal(cellValue(ws, "C22"), "");
-    assert.equal(cellValue(ws, "AE23"), "Итого");
-    assert.equal(cellValue(ws, "AN23"), 150000);
-    assert.equal(cellValue(ws, "A30"), "Сдал (Исполнитель)");
-    assert.equal(cellValue(ws, "AA30"), "Принял (Заказчик)");
-    assert.equal(cellValue(ws, "A33"), "М.П.");
+    assert.equal(cellValue(ws, "T23"), "Сто пятьдесят тысяч тенге");
+    assert.equal(cellValue(ws, "A28"), "Сдал (Исполнитель)");
+    assert.equal(cellValue(ws, "AA28"), "Принял (Заказчик)");
+    assert.equal(cellValue(ws, "A31"), "М.П.");
     assert.equal(ws.getCell("AT15").numFmt, "dd.mm.yyyy");
+    assert.ok((ws.model.merges || []).includes("C20:M20"));
+    assert.ok((ws.model.merges || []).includes("AF21:AH21"));
+    assert.equal((ws.model.merges || []).includes("C21:M21"), false);
+    assert.equal((ws.model.merges || []).includes("C22:M22"), false);
+    assert.equal(ws.getCell("B20").border?.right?.style, "thin");
+    assert.equal(ws.getCell("M20").border?.right?.style, "thin");
+    assert.equal(ws.getCell("AH21").border?.right?.style, "thin");
+    assert.equal(ws.getCell("AW21").border?.right?.style, "thin");
   });
 
   it("fills the existing Form R-1 PDF without leftover template text", async () => {
@@ -300,6 +320,7 @@ describe("AVR Excel Form R-1", () => {
     const otherText = await pdfText(other.buffer);
     assert.match(otherText, /АрыстанТехСервис/);
     assert.match(otherText, /26-0002/);
+    assert.match(otherText, /Итого/);
     assert.equal(/ГОЛД ПРОДУКТ/.test(otherText), false);
     assert.equal(/фотосъемка/.test(otherText), false);
     assert.equal(/26-0035/.test(otherText), false);

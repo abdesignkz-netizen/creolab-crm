@@ -153,10 +153,11 @@ export function avrExcelFileName(input: { number: string; source: AvrSourceSnaps
 export function avrExcelLayout(itemCount: number) {
   const items = Math.max(itemCount, 1);
   const extra = Math.max(0, items - TEMPLATE_ITEM_COUNT);
-  const slots = TEMPLATE_ITEM_COUNT + extra;
+  const unused = Math.max(0, TEMPLATE_ITEM_COUNT - items);
+  const slots = items;
   const firstItemRow = AVR_EXCEL_ITEM_START_ROW;
   const lastItemRow = firstItemRow + items - 1;
-  const lastSlotRow = firstItemRow + slots - 1;
+  const lastSlotRow = lastItemRow;
   const totalsRow = lastSlotRow + 1;
   const wordsRow = totalsRow + 2;
   const captionRow = totalsRow + 3;
@@ -165,6 +166,7 @@ export function avrExcelLayout(itemCount: number) {
   return {
     itemCount: items,
     extra,
+    unused,
     slots,
     firstItemRow,
     lastItemRow,
@@ -271,6 +273,25 @@ function shiftMergeRange(range: string, extra: number) {
   return range;
 }
 
+function shiftMergeAfterDelete(range: string, unused: number): string | null {
+  if (!unused) return range;
+  const box = decodeMerge(range);
+  const deleteAt = AVR_EXCEL_ITEM_START_ROW + TEMPLATE_ITEM_COUNT - unused;
+  const deleteEnd = AVR_EXCEL_ITEM_START_ROW + TEMPLATE_ITEM_COUNT - 1;
+  if (box.top >= deleteAt && box.bottom <= deleteEnd) return null;
+  if (box.bottom < deleteAt) return range;
+  if (box.top > deleteEnd) return `${box.left}${box.top - unused}:${box.right}${box.bottom - unused}`;
+  if (box.top < deleteAt && box.bottom >= deleteAt) {
+    const bottom = box.bottom > deleteEnd ? box.bottom - unused : Math.min(box.bottom, deleteAt - 1);
+    if (bottom < box.top) return null;
+    return `${box.left}${box.top}:${box.right}${bottom}`;
+  }
+  if (box.top >= deleteAt && box.top <= deleteEnd && box.bottom > deleteEnd) {
+    return `${box.left}${deleteAt}:${box.right}${box.bottom - unused}`;
+  }
+  return range;
+}
+
 function insertExtraItemRows(ws: ExcelJS.Worksheet, extra: number) {
   if (extra <= 0) return;
   const templateMerges = [...(ws.model.merges || [])];
@@ -287,6 +308,43 @@ function insertExtraItemRows(ws: ExcelJS.Worksheet, extra: number) {
   }
   unmergeAll(ws);
   for (const range of rebuilt) mergeSafe(ws, range);
+}
+
+function deleteUnusedItemRows(ws: ExcelJS.Worksheet, unused: number) {
+  if (unused <= 0) return;
+  const templateMerges = [...(ws.model.merges || [])];
+  const deleteAt = AVR_EXCEL_ITEM_START_ROW + TEMPLATE_ITEM_COUNT - unused;
+  unmergeAll(ws);
+  ws.spliceRows(deleteAt, unused);
+  const rebuilt: string[] = [];
+  for (const range of templateMerges) {
+    const next = shiftMergeAfterDelete(range, unused);
+    if (next) rebuilt.push(next);
+  }
+  unmergeAll(ws);
+  for (const range of rebuilt) mergeSafe(ws, range);
+}
+
+function applyTableMergeBorders(ws: ExcelJS.Worksheet, lastTableRow: number) {
+  const thin: ExcelJS.Border = { style: "thin" };
+  for (const range of [...(ws.model.merges || [])]) {
+    const box = decodeMerge(range);
+    if (box.top < 17 || box.top > lastTableRow) continue;
+    const left = colIndex(box.left);
+    const right = colIndex(box.right);
+    for (let r = box.top; r <= box.bottom; r += 1) {
+      for (let c = left; c <= right; c += 1) {
+        const cell = ws.getCell(r, c);
+        const current = cell.border || {};
+        cell.border = {
+          top: current.top || thin,
+          bottom: current.bottom || thin,
+          ...(c === left ? { left: current.left || thin } : {}),
+          ...(c === right ? { right: current.right || thin } : {}),
+        };
+      }
+    }
+  }
 }
 
 function setValue(ws: ExcelJS.Worksheet, addr: string, value: ExcelJS.CellValue) {
@@ -308,10 +366,6 @@ function setDate(ws: ExcelJS.Worksheet, addr: string, value: string | Date | nul
   }
   cell.value = new Date(Date.UTC(date.year, date.month - 1, date.day));
   cell.numFmt = DATE_FMT;
-}
-
-function clearItemRow(ws: ExcelJS.Worksheet, row: number) {
-  for (const col of ITEM_COLS) setValue(ws, `${col}${row}`, null);
 }
 
 function fillItemRow(
@@ -347,11 +401,7 @@ function fillWorksheet(ws: ExcelJS.Worksheet, input: { localNumber: string; sour
   setValue(ws, "AP15", input.localNumber);
   setDate(ws, "AT15", source.documentDate);
 
-  for (let row = layout.firstItemRow; row <= layout.lastSlotRow; row += 1) {
-    const item = source.items[row - layout.firstItemRow];
-    if (item) fillItemRow(ws, row, row - layout.firstItemRow, item);
-    else clearItemRow(ws, row);
-  }
+  source.items.forEach((item, index) => fillItemRow(ws, layout.firstItemRow + index, index, item));
 
   const qty = source.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
   setValue(ws, `AE${layout.totalsRow}`, "Итого");
@@ -393,7 +443,7 @@ function sortCellsInRows(xml: string) {
   });
 }
 
-function stripMergeSlaveCells(xml: string) {
+function stripMergeSlaveValues(xml: string) {
   const merges = [...xml.matchAll(/<mergeCell ref="([^"]+)"/g)].map((match) => decodeMerge(match[1]));
   const slaves = new Set<string>();
   const masters: string[] = [];
@@ -409,8 +459,11 @@ function stripMergeSlaveCells(xml: string) {
     }
   }
   xml = xml.replace(/\sspans="[^"]*"/g, "");
-  xml = xml.replace(/<c r="([A-Z]+\d+)"[^/]*\/>/g, (all, addr) => (slaves.has(addr) ? "" : all));
-  xml = xml.replace(/<c r="([A-Z]+\d+)"[^>]*>[\s\S]*?<\/c>/g, (all, addr) => (slaves.has(addr) ? "" : all));
+  xml = xml.replace(/<c r="([A-Z]+\d+)"([^>/]*)>([\s\S]*?)<\/c>/g, (all, addr, attrs) => {
+    if (!slaves.has(addr)) return all;
+    const style = attrs.match(/\ss="[^"]*"/)?.[0] || "";
+    return `<c r="${addr}"${style}/>`;
+  });
   for (const master of masters) {
     if (new RegExp(`<c r="${master}"`).test(xml)) continue;
     const row = master.replace(/\D/g, "");
@@ -428,7 +481,7 @@ function stripMergeSlaveCells(xml: string) {
 
 function cleanSheetXml(xml: string) {
   return sortCellsInRows(
-    stripMergeSlaveCells(
+    stripMergeSlaveValues(
       xml
         .replace(/\shorizontalDpi="4294967295"/g, "")
         .replace(/\sverticalDpi="4294967295"/g, "")
@@ -488,7 +541,9 @@ export async function renderAvrExcel(input: { number: string; source: AvrSourceS
   if (ws.pageSetup.horizontalDpi === 4294967295) ws.pageSetup.horizontalDpi = 96;
   if (ws.pageSetup.verticalDpi === 4294967295) ws.pageSetup.verticalDpi = 96;
   insertExtraItemRows(ws, layout.extra);
+  deleteUnusedItemRows(ws, layout.unused);
   fillWorksheet(ws, { localNumber, source: input.source });
+  applyTableMergeBorders(ws, layout.totalsRow);
   const data = await wb.xlsx.writeBuffer();
   return { buffer: await sanitizeAvrXlsx(Buffer.from(data)), filename, localNumber, layout };
 }
