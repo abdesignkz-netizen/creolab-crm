@@ -325,28 +325,6 @@ function deleteUnusedItemRows(ws: ExcelJS.Worksheet, unused: number) {
   for (const range of rebuilt) mergeSafe(ws, range);
 }
 
-function applyTableMergeBorders(ws: ExcelJS.Worksheet, lastTableRow: number) {
-  const thin: ExcelJS.Border = { style: "thin" };
-  for (const range of [...(ws.model.merges || [])]) {
-    const box = decodeMerge(range);
-    if (box.top < 17 || box.top > lastTableRow) continue;
-    const left = colIndex(box.left);
-    const right = colIndex(box.right);
-    for (let r = box.top; r <= box.bottom; r += 1) {
-      for (let c = left; c <= right; c += 1) {
-        const cell = ws.getCell(r, c);
-        const current = cell.border || {};
-        cell.border = {
-          top: current.top || thin,
-          bottom: current.bottom || thin,
-          ...(c === left ? { left: current.left || thin } : {}),
-          ...(c === right ? { right: current.right || thin } : {}),
-        };
-      }
-    }
-  }
-}
-
 function setValue(ws: ExcelJS.Worksheet, addr: string, value: ExcelJS.CellValue) {
   ws.getCell(addr).value = value;
 }
@@ -430,6 +408,76 @@ function fillWorksheet(ws: ExcelJS.Worksheet, input: { localNumber: string; sour
   setValue(ws, `R${layout.signRow}`, directorShortName(source.seller.directorName));
 }
 
+function tableMergeAddresses(sheetXml: string, lastTableRow: number) {
+  const addresses = new Set<string>();
+  const merges = [...sheetXml.matchAll(/<mergeCell ref="([^"]+)"/g)].map((match) => decodeMerge(match[1]));
+  for (const box of merges) {
+    if (box.top < 17 || box.bottom > lastTableRow) continue;
+    const left = colIndex(box.left);
+    const right = colIndex(box.right);
+    for (let r = box.top; r <= box.bottom; r += 1) {
+      for (let c = left; c <= right; c += 1) addresses.add(`${colLetter(c)}${r}`);
+    }
+  }
+  return addresses;
+}
+
+function withBoxTableBorders(stylesXml: string, sheetXml: string, lastTableRow: number) {
+  const addresses = tableMergeAddresses(sheetXml, lastTableRow);
+  if (!addresses.size) return { stylesXml, sheetXml };
+  const bordersMatch = stylesXml.match(/<borders count="(\d+)">/);
+  const borderCount = Number(bordersMatch?.[1] || 0);
+  const borderId = borderCount;
+  stylesXml = stylesXml.replace(`<borders count="${borderCount}">`, `<borders count="${borderCount + 1}">`);
+  stylesXml = stylesXml.replace(
+    "</borders>",
+    `<border><left style="thin"><color indexed="64"/></left><right style="thin"><color indexed="64"/></right><top style="thin"><color indexed="64"/></top><bottom style="thin"><color indexed="64"/></bottom><diagonal/></border></borders>`,
+  );
+  const xfsMatch = stylesXml.match(/<cellXfs count="(\d+)">([\s\S]*?)<\/cellXfs>/);
+  if (!xfsMatch) return { stylesXml, sheetXml };
+  const xfs = xfsMatch[2].match(/<xf\b[^>]*\/>|<xf\b[^>]*>[\s\S]*?<\/xf>/g) || [];
+  const used = new Set<number>();
+  let missingStyle = false;
+  for (const addr of addresses) {
+    const sid = sheetXml.match(new RegExp(`<c r="${addr}"[^>]*s="(\\d+)"`))?.[1];
+    if (sid) used.add(Number(sid));
+    else missingStyle = true;
+  }
+  const mapped = new Map<number, number>();
+  const extra: string[] = [];
+  let nextId = xfs.length;
+  for (const id of used) {
+    const xf = xfs[id];
+    if (!xf) continue;
+    let clone = xf.replace(/borderId="\d+"/, `borderId="${borderId}"`);
+    if (!/applyBorder=/.test(clone)) clone = clone.replace("<xf ", '<xf applyBorder="1" ');
+    else clone = clone.replace(/applyBorder="0"/, 'applyBorder="1"');
+    extra.push(clone);
+    mapped.set(id, nextId);
+    nextId += 1;
+  }
+  let fallback = mapped.values().next().value as number | undefined;
+  if (missingStyle || fallback == null) {
+    extra.push(`<xf numFmtId="0" fontId="0" fillId="0" borderId="${borderId}" xfId="0" applyBorder="1"/>`);
+    fallback = nextId;
+    nextId += 1;
+  }
+  stylesXml = stylesXml.replace(
+    /<cellXfs count="\d+">[\s\S]*?<\/cellXfs>/,
+    `<cellXfs count="${xfs.length + extra.length}">${xfs.join("")}${extra.join("")}</cellXfs>`,
+  );
+  for (const addr of addresses) {
+    sheetXml = sheetXml.replace(new RegExp(`<c r="${addr}"([^>/]*)(/?)>`), (all, attrs: string, self: string) => {
+      const sid = attrs.match(/\ss="(\d+)"/)?.[1];
+      const next = sid && mapped.has(Number(sid)) ? mapped.get(Number(sid)) : fallback;
+      if (next == null) return all;
+      const rest = /\ss="\d+"/.test(attrs) ? attrs.replace(/\ss="\d+"/, ` s="${next}"`) : ` s="${next}"${attrs}`;
+      return `<c r="${addr}"${rest}${self}>`;
+    });
+  }
+  return { stylesXml, sheetXml };
+}
+
 function sortCellsInRows(xml: string) {
   return xml.replace(/<row ([^>/]*)>([\s\S]*?)<\/row>/g, (all, attrs, inner) => {
     const cells = inner.match(/<c [^>]+\/>|<c [^>]*>[\s\S]*?<\/c>/g);
@@ -490,19 +538,24 @@ function cleanSheetXml(xml: string) {
   );
 }
 
-async function sanitizeAvrXlsx(buffer: Buffer) {
+async function sanitizeAvrXlsx(buffer: Buffer, lastTableRow: number) {
   const zip = await JSZip.loadAsync(buffer);
   const typeFile = zip.file("[Content_Types].xml");
   if (typeFile && !Object.keys(zip.files).some((name) => name.endsWith(".vml"))) {
     const types = await typeFile.async("string");
     zip.file("[Content_Types].xml", types.replace(/<Default Extension="vml"[^>]*>/g, ""));
   }
-  const stylesFile = zip.file("xl/styles.xml");
-  if (stylesFile) {
-    const styles = await stylesFile.async("string");
-    zip.file("xl/styles.xml", styles.replace(/<extLst>[\s\S]*?<\/extLst>/g, ""));
-  }
   const sheetNames = Object.keys(zip.files).filter((name) => /^xl\/worksheets\/sheet\d+\.xml$/.test(name));
+  let stylesXml = (await zip.file("xl/styles.xml")?.async("string")) || "";
+  stylesXml = stylesXml.replace(/<extLst>[\s\S]*?<\/extLst>/g, "");
+  for (const name of sheetNames) {
+    const sheetFile = zip.file(name);
+    if (!sheetFile) continue;
+    const boxed = withBoxTableBorders(stylesXml, cleanSheetXml(await sheetFile.async("string")), lastTableRow);
+    stylesXml = boxed.stylesXml;
+    zip.file(name, boxed.sheetXml);
+  }
+  if (stylesXml) zip.file("xl/styles.xml", stylesXml);
   for (const name of sheetNames) {
     const sheetFile = zip.file(name);
     if (!sheetFile) continue;
@@ -543,9 +596,8 @@ export async function renderAvrExcel(input: { number: string; source: AvrSourceS
   insertExtraItemRows(ws, layout.extra);
   deleteUnusedItemRows(ws, layout.unused);
   fillWorksheet(ws, { localNumber, source: input.source });
-  applyTableMergeBorders(ws, layout.totalsRow);
   const data = await wb.xlsx.writeBuffer();
-  return { buffer: await sanitizeAvrXlsx(Buffer.from(data)), filename, localNumber, layout };
+  return { buffer: await sanitizeAvrXlsx(Buffer.from(data), layout.totalsRow), filename, localNumber, layout };
 }
 
 export async function resolveAvrSource(

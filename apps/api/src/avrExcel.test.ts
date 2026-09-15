@@ -181,7 +181,9 @@ describe("AVR Excel Form R-1", () => {
     assert.equal(cellValue(ws, "A33"), "М.П.");
     assert.equal(ws.getCell("AN20").value && typeof ws.getCell("AN20").value === "object" ? (ws.getCell("AN20").value as { formula?: string }).formula : "", "AF20*AI20");
     assert.equal(ws.getCell("AT15").numFmt, "dd.mm.yyyy");
+    assert.equal(ws.getCell("A20").border?.left?.style, "thin");
     assert.equal(ws.getCell("B20").border?.right?.style, "thin");
+    assert.equal(ws.getCell("C20").border?.left?.style, "thin");
     assert.equal(ws.getCell("M20").border?.right?.style, "thin");
     assert.equal(ws.getCell("AH23").border?.right?.style, "thin");
 
@@ -285,7 +287,9 @@ describe("AVR Excel Form R-1", () => {
     assert.ok((ws.model.merges || []).includes("AF21:AH21"));
     assert.equal((ws.model.merges || []).includes("C21:M21"), false);
     assert.equal((ws.model.merges || []).includes("C22:M22"), false);
+    assert.equal(ws.getCell("A20").border?.left?.style, "thin");
     assert.equal(ws.getCell("B20").border?.right?.style, "thin");
+    assert.equal(ws.getCell("C20").border?.left?.style, "thin");
     assert.equal(ws.getCell("M20").border?.right?.style, "thin");
     assert.equal(ws.getCell("AH21").border?.right?.style, "thin");
     assert.equal(ws.getCell("AW21").border?.right?.style, "thin");
