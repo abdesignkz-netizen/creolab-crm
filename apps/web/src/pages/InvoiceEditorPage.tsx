@@ -13,7 +13,14 @@ import { EsfMeasureUnitSelect } from "../components/EsfMeasureUnitSelect";
 import { notifySaved } from "../components/SaveNotice";
 
 const money = (v: unknown) => Number(v || 0).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const empty: InvoiceEditorInput = { documentDate: new Date().toISOString().slice(0, 10), paymentPercent: 100, contractNumber: "", contractDate: "", items: [] };
+const empty: InvoiceEditorInput = {
+  documentDate: new Date().toISOString().slice(0, 10),
+  paymentPercent: 100,
+  withoutContract: false,
+  contractNumber: "",
+  contractDate: "",
+  items: [],
+};
 const partyFields = [
   ["legalName", "Название"],
   ["bin", "БИН / ИИН"],
@@ -110,8 +117,9 @@ export function InvoiceEditorPage() {
           ? {
               documentDate: String(record.date || record.documentDate || ctx.editor?.documentDate || empty.documentDate).slice(0, 10),
               paymentPercent: record.paymentPercent || ctx.editor?.paymentPercent || 100,
-              contractNumber: record.contractNumber || ctx.editor?.contractNumber || ctx.contract?.number || "",
-              contractDate: String(record.contractDate || ctx.editor?.contractDate || ctx.contract?.date || "").slice(0, 10),
+              withoutContract: Boolean(record.withoutContract ?? ctx.editor?.withoutContract),
+              contractNumber: record.withoutContract ? "" : record.contractNumber || ctx.editor?.contractNumber || ctx.contract?.number || "",
+              contractDate: record.withoutContract ? "" : String(record.contractDate || ctx.editor?.contractDate || ctx.contract?.date || "").slice(0, 10),
               items: toEditorItems(record.items || ctx.editor?.items || []),
             }
           : { ...empty, items: toEditorItems(ctx.items), contractNumber: ctx.contract?.number || "", contractDate: String(ctx.contract?.date || "").slice(0, 10) },
@@ -214,6 +222,20 @@ export function InvoiceEditorPage() {
     } finally {
       flight.current = false;
       setBusy(false);
+    }
+  }
+  async function issueInvoice() {
+    try {
+      const record = dirty || !doc ? await save() : doc;
+      await api.generateInvoice(record.id);
+      const r: any = await api.request(`/api/v1/invoices/${record.id}`);
+      setDoc(r.invoice);
+      setDirty(false);
+      setPreview(null);
+      notifySaved("Счёт выставлен");
+    } catch (e) {
+      setPreview(null);
+      throw e;
     }
   }
   async function saveBuyer() {
@@ -353,24 +375,58 @@ export function InvoiceEditorPage() {
             <p>
               Сделка #{context.deal.number} · {context.deal.contactName || "Контакт не указан"} · {context.deal.responsible || "Ответственный не назначен"}
             </p>
-            <label>
-              Номер договора
-              <input
-                maxLength={100}
-                disabled={busy || immutable}
-                aria-invalid={Boolean(issues.contractNumber)}
-                value={form.contractNumber || ""}
-                onChange={(e) => edit({ contractNumber: e.target.value })}
-                placeholder="Например 19122025/01"
-              />
-              {fieldError("contractNumber")}
-            </label>
-            <label>
-              Дата договора
-              <input type="date" disabled={busy || immutable} aria-invalid={Boolean(issues.contractDate)} value={form.contractDate || ""} onChange={(e) => edit({ contractDate: e.target.value })} />
-              {fieldError("contractDate")}
-            </label>
-            {context.contract && context.contract.status !== "SIGNED" ? <p className="muted">Договор ещё не подписан. Номер в счёте можно изменить.</p> : null}
+            <div className="invoice-preview-marks" role="radiogroup" aria-label="Договор">
+              <label>
+                <input
+                  type="radio"
+                  name="invoice-contract-basis"
+                  disabled={busy || immutable}
+                  checked={!form.withoutContract}
+                  onChange={() =>
+                    edit({
+                      withoutContract: false,
+                      contractNumber: form.contractNumber || context.contract?.number || "",
+                      contractDate: form.contractDate || String(context.contract?.date || "").slice(0, 10),
+                    })
+                  }
+                />{" "}
+                По договору
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  name="invoice-contract-basis"
+                  disabled={busy || immutable}
+                  checked={Boolean(form.withoutContract)}
+                  onChange={() => edit({ withoutContract: true, contractNumber: "", contractDate: "" })}
+                />{" "}
+                Без договора
+              </label>
+            </div>
+            {form.withoutContract ? (
+              <p className="muted">В печатной форме будет указано «без договора», без даты.</p>
+            ) : (
+              <>
+                <label>
+                  Номер договора
+                  <input
+                    maxLength={100}
+                    disabled={busy || immutable}
+                    aria-invalid={Boolean(issues.contractNumber)}
+                    value={form.contractNumber || ""}
+                    onChange={(e) => edit({ contractNumber: e.target.value })}
+                    placeholder="Например 19122025/01"
+                  />
+                  {fieldError("contractNumber")}
+                </label>
+                <label>
+                  Дата договора
+                  <input type="date" disabled={busy || immutable} aria-invalid={Boolean(issues.contractDate)} value={form.contractDate || ""} onChange={(e) => edit({ contractDate: e.target.value })} />
+                  {fieldError("contractDate")}
+                </label>
+                {context.contract && context.contract.status !== "SIGNED" ? <p className="muted">Договор ещё не подписан. Номер в счёте можно изменить.</p> : null}
+              </>
+            )}
             <label>
               Дата счёта
               <input type="date" disabled={busy || immutable} aria-invalid={Boolean(issues.documentDate)} value={form.documentDate} onChange={(e) => edit({ documentDate: e.target.value })} />
@@ -525,35 +581,19 @@ export function InvoiceEditorPage() {
           </div>
           <div className="panel">
             <h3>Печатная форма</h3>
-            <p className="muted">Счёт собирается по форме 1С. Сначала откройте PDF, сверьте реквизиты и сумму, затем скачайте.</p>
+            <p className="muted">Счёт собирается по форме 1С. Сформируйте PDF, сверьте реквизиты и сумму, затем выставьте счёт.</p>
             <div className="actions">
               <button
-                className="btn secondary"
+                className="btn"
                 disabled={busy}
                 onClick={() =>
                   void action(async () => {
-                    const record = dirty || !doc ? await save() : doc;
+                    const record = await save();
                     setPreview({ id: record.id, stamped: false });
                   })
                 }
               >
-                Посмотреть счёт
-              </button>
-              <button
-                className="btn"
-                disabled={busy || immutable || doc?.importedPdf}
-                onClick={() =>
-                  void action(async () => {
-                    const record = dirty || !doc ? await save() : doc;
-                    await api.generateInvoice(record.id);
-                    const r: any = await api.request(`/api/v1/invoices/${record.id}`);
-                    setDoc(r.invoice);
-                    setPreview({ id: record.id, stamped: false });
-                    notifySaved("Счёт выставлен");
-                  })
-                }
-              >
-                Выставить счёт
+                Сформировать счёт
               </button>
             </div>
           </div>
@@ -562,8 +602,14 @@ export function InvoiceEditorPage() {
               <div className="stats-modal invoice-preview-modal" onClick={(e) => e.stopPropagation()}>
                 <div className="row">
                   <h3>Счёт {doc?.number || ""}</h3>
-                  <button type="button" className="btn secondary" onClick={() => setPreview(null)}>
-                    Закрыть
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={busy || immutable || doc?.importedPdf}
+                    title={doc?.importedPdf ? "Загруженный PDF уже сохранён в исходном виде" : undefined}
+                    onClick={() => void action(issueInvoice)}
+                  >
+                    Выставить счёт
                   </button>
                 </div>
                 <div className="invoice-preview-marks">
@@ -604,7 +650,7 @@ export function InvoiceEditorPage() {
                 <div className="actions">
                   <button
                     type="button"
-                    className="btn"
+                    className="btn secondary"
                     disabled={busy || !previewUrl}
                     onClick={() =>
                       void action(async () => {
@@ -615,8 +661,14 @@ export function InvoiceEditorPage() {
                   >
                     Скачать
                   </button>
-                  <button type="button" className="btn secondary" onClick={() => setPreview(null)}>
-                    Закрыть
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={busy || immutable || doc?.importedPdf}
+                    title={doc?.importedPdf ? "Загруженный PDF уже сохранён в исходном виде" : undefined}
+                    onClick={() => void action(issueInvoice)}
+                  >
+                    Выставить счёт
                   </button>
                 </div>
               </div>

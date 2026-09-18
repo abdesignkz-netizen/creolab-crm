@@ -775,6 +775,7 @@ const DOCUMENT_DOMAIN_SQL = `
 
     ALTER TABLE "Invoice" ADD COLUMN IF NOT EXISTS "contractNumber" TEXT;
     ALTER TABLE "Invoice" ADD COLUMN IF NOT EXISTS "contractDate" TIMESTAMP(3);
+    ALTER TABLE "Invoice" ADD COLUMN IF NOT EXISTS "withoutContract" BOOLEAN NOT NULL DEFAULT false;
 
     CREATE TABLE IF NOT EXISTS "EsfConnection" (
       "id" TEXT NOT NULL,

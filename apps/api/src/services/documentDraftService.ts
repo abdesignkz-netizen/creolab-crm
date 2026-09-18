@@ -28,9 +28,12 @@ async function nextNumber(prisma: PrismaClient, tenantId: string, prefix: string
 }
 
 function invoiceContractBasis(editor?: InvoiceEditorInput) {
+  if (editor?.withoutContract) {
+    return { withoutContract: true, contractNumber: null, contractDate: null };
+  }
   const contractNumber = String(editor?.contractNumber || "").trim() || null;
   const contractDate = editor?.contractDate ? new Date(`${editor.contractDate}T00:00:00.000Z`) : null;
-  return { contractNumber, contractDate };
+  return { withoutContract: false, contractNumber, contractDate };
 }
 
 async function syncUnsignedContractBasis(
@@ -177,6 +180,7 @@ export function serializeInvoice(row: {
   pdfFileId?: string | null;
   contractNumber?: string | null;
   contractDate?: Date | null;
+  withoutContract?: boolean | null;
   updatedAt?: Date;
   items?: Array<{
     id: string;
@@ -214,6 +218,7 @@ export function serializeInvoice(row: {
     pdfFileId: row.pdfFileId ?? null,
     contractNumber: row.contractNumber || "",
     contractDate: row.contractDate ? row.contractDate.toISOString().slice(0, 10) : "",
+    withoutContract: Boolean(row.withoutContract),
     updatedAt: row.updatedAt?.toISOString() || null,
     items: (row.items || []).map((item) => ({
       id: item.id,
@@ -586,6 +591,7 @@ export async function applyInvoiceEditor(
         pdfFileId: invoice.status === "ISSUED" ? null : invoice.pdfFileId,
         contractNumber: basis.contractNumber,
         contractDate: basis.contractDate,
+        withoutContract: basis.withoutContract,
       },
       include: { items: { orderBy: { sortOrder: "asc" } } },
     });

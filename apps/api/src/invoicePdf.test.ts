@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   formatInvoiceBin,
+  formatInvoiceContractBasis,
   invoiceDirectorShortName,
   invoiceLocalNumber,
   invoicePayableWords,
@@ -117,6 +118,15 @@ describe("invoice pdf", () => {
 
     const again = await renderInvoicePdf(sample);
     assert.equal(createHash("sha256").update(pdf).digest("hex"), createHash("sha256").update(again).digest("hex"));
+  });
+
+  it("печатает «без договора» без даты", async () => {
+    assert.equal(formatInvoiceContractBasis("18092026", new Date("2026-09-18T00:00:00Z"), true), "без договора");
+    assert.match(formatInvoiceContractBasis("18092026", new Date("2026-09-18T00:00:00Z")), /№ 18092026 от/);
+    const text = await pdfText(await renderInvoicePdf({ ...sample, withoutContract: true }));
+    assert.match(text, /без договора/);
+    assert.equal(/без договора от/.test(text), false);
+    assert.equal(/№ без договора/.test(text), false);
   });
 
   it("не ставит строку предоплаты при полной оплате", async () => {

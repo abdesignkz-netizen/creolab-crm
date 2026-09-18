@@ -30,6 +30,7 @@ export type InvoicePdfInput = {
   dueDate?: Date | null;
   contractNumber: string;
   contractDate: Date | string | null;
+  withoutContract?: boolean;
   dealName?: string;
   amountWithoutVat: number;
   vatRate: number | null;
@@ -108,7 +109,12 @@ export function invoiceDirectorShortName(fullName: string) {
   return directorShortName(fullName).replace(/(\.)\s+(?=[A-ZА-ЯЁ])/g, "$1");
 }
 
-export function formatInvoiceContractBasis(number: string, date: Date | string | null | undefined) {
+export function formatInvoiceContractBasis(
+  number: string,
+  date: Date | string | null | undefined,
+  withoutContract = false,
+) {
+  if (withoutContract) return "без договора";
   const raw = String(number || "").replace(/^\s*(№|No|Nо)\s*/i, "").trim();
   if (!raw) return "";
   const dated = formatInvoiceQuotedDate(date);
@@ -316,7 +322,7 @@ export async function renderInvoicePdf(input: InvoicePdfInput) {
     "Тел:",
   );
 
-  const contract = formatInvoiceContractBasis(input.contractNumber, input.contractDate);
+  const contract = formatInvoiceContractBasis(input.contractNumber, input.contractDate, input.withoutContract);
   doc.font("NotoSans-Bold").fontSize(12).text("Договор:", left, y, { width: partyIndent - 4, lineBreak: false });
   doc.font("NotoSans").fontSize(10).text(contract, left + partyIndent, y + 1, { width: width - partyIndent });
   y = Math.max(doc.y, y + 14) + 10;
