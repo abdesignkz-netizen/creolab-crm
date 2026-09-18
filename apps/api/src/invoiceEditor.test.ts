@@ -182,6 +182,41 @@ describe("Invoice editor workflow", () => {
     assert.equal(current.body.invoice.id, invoiceId);
   });
 
+  it("сохраняет номер договора в счёте и печатает его в PDF", async () => {
+    const current = await json(`/api/v1/invoices/${invoiceId}`);
+    const patched = await json(`/api/v1/invoices/${invoiceId}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        documentDate: "2026-09-03",
+        paymentPercent: 50,
+        contractNumber: "19122025/01",
+        contractDate: "2025-12-19",
+        items: current.body.invoice.items.map((item: { name: string; quantity: number; unit: string; unitPrice: number; vatRate: number }) => ({
+          name: item.name,
+          quantity: item.quantity,
+          unit: item.unit,
+          unitPrice: item.unitPrice,
+          vatRate: item.vatRate,
+        })),
+        updatedAt: current.body.invoice.updatedAt,
+      }),
+    });
+    assert.equal(patched.response.status, 200, JSON.stringify(patched.body));
+    assert.equal(patched.body.invoice.contractNumber, "19122025/01");
+    assert.equal(patched.body.invoice.contractDate, "2025-12-19");
+    const pdf = await fetch(`${base}/api/v1/invoices/${invoiceId}/pdf`, { headers: { cookie } });
+    assert.equal(pdf.status, 200);
+    const { DOMMatrix, ImageData, Path2D } = await import("@napi-rs/canvas");
+    Object.assign(globalThis, { DOMMatrix, ImageData, Path2D });
+    const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    const parsed = await getDocument({ data: new Uint8Array(await pdf.arrayBuffer()), useSystemFonts: true }).promise;
+    const page = await parsed.getPage(1);
+    const content = await page.getTextContent();
+    page.cleanup();
+    const text = content.items.map((item) => ("str" in item ? item.str : "")).join(" ");
+    assert.match(text, /19122025\/01/);
+  });
+
   it("создаёт счёт по компании без сделки", async () => {
     const company = await json("/api/v1/companies", {
       method: "POST",

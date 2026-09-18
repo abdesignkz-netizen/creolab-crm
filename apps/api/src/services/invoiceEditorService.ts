@@ -34,10 +34,12 @@ function defaultKbe(bin?: string | null, iin?: string | null) {
   return String(bin || "").trim() ? "17" : String(iin || "").trim() ? "19" : "17";
 }
 
-function toEditor(invoice: ReturnType<typeof serializeInvoice>): InvoiceEditorInput {
+function toEditor(invoice: ReturnType<typeof serializeInvoice>, contract?: { number?: string | null; date?: Date | string | null } | null): InvoiceEditorInput {
   return {
     documentDate: invoice.date.slice(0, 10),
     paymentPercent: invoice.paymentPercent || 100,
+    contractNumber: invoice.contractNumber || contract?.number || "",
+    contractDate: invoice.contractDate || (contract?.date ? String(contract.date).slice(0, 10) : "") || "",
     items: (invoice.items || []).map((item) => ({
       name: item.name || "",
       quantity: item.quantity,
@@ -283,7 +285,7 @@ export async function getInvoiceEditorContext(prisma: PrismaClient, auth: AuthCo
     items: items.length ? items : fallback,
     invoice,
     existingInvoiceId: invoice?.id || null,
-    editor: invoice ? toEditor(invoice) : null,
+    editor: invoice ? toEditor(invoice, deal.contracts[0]) : null,
   };
 }
 

@@ -13,7 +13,7 @@ import { EsfMeasureUnitSelect } from "../components/EsfMeasureUnitSelect";
 import { notifySaved } from "../components/SaveNotice";
 
 const money = (v: unknown) => Number(v || 0).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const empty: InvoiceEditorInput = { documentDate: new Date().toISOString().slice(0, 10), paymentPercent: 100, items: [] };
+const empty: InvoiceEditorInput = { documentDate: new Date().toISOString().slice(0, 10), paymentPercent: 100, contractNumber: "", contractDate: "", items: [] };
 const partyFields = [
   ["legalName", "Название"],
   ["bin", "БИН / ИИН"],
@@ -110,9 +110,11 @@ export function InvoiceEditorPage() {
           ? {
               documentDate: String(record.date || record.documentDate || ctx.editor?.documentDate || empty.documentDate).slice(0, 10),
               paymentPercent: record.paymentPercent || ctx.editor?.paymentPercent || 100,
+              contractNumber: record.contractNumber || ctx.editor?.contractNumber || ctx.contract?.number || "",
+              contractDate: String(record.contractDate || ctx.editor?.contractDate || ctx.contract?.date || "").slice(0, 10),
               items: toEditorItems(record.items || ctx.editor?.items || []),
             }
-          : { ...empty, items: toEditorItems(ctx.items) },
+          : { ...empty, items: toEditorItems(ctx.items), contractNumber: ctx.contract?.number || "", contractDate: String(ctx.contract?.date || "").slice(0, 10) },
       );
       setDirty(false);
       setIssues({});
@@ -351,10 +353,24 @@ export function InvoiceEditorPage() {
             <p>
               Сделка #{context.deal.number} · {context.deal.contactName || "Контакт не указан"} · {context.deal.responsible || "Ответственный не назначен"}
             </p>
-            <p>
-              Договор: {context.contract?.number || "Не указан"} · {context.contract?.date?.slice?.(0, 10) || "Дата не указана"}
-              {context.contract && context.contract.status !== "SIGNED" ? " · не подписан" : ""}
-            </p>
+            <label>
+              Номер договора
+              <input
+                maxLength={100}
+                disabled={busy || immutable}
+                aria-invalid={Boolean(issues.contractNumber)}
+                value={form.contractNumber || ""}
+                onChange={(e) => edit({ contractNumber: e.target.value })}
+                placeholder="Например 19122025/01"
+              />
+              {fieldError("contractNumber")}
+            </label>
+            <label>
+              Дата договора
+              <input type="date" disabled={busy || immutable} aria-invalid={Boolean(issues.contractDate)} value={form.contractDate || ""} onChange={(e) => edit({ contractDate: e.target.value })} />
+              {fieldError("contractDate")}
+            </label>
+            {context.contract && context.contract.status !== "SIGNED" ? <p className="muted">Договор ещё не подписан. Номер в счёте можно изменить.</p> : null}
             <label>
               Дата счёта
               <input type="date" disabled={busy || immutable} aria-invalid={Boolean(issues.documentDate)} value={form.documentDate} onChange={(e) => edit({ documentDate: e.target.value })} />

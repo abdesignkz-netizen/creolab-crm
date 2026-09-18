@@ -88,7 +88,7 @@ describe("Manual PDF import",()=>{
     for(const route of ["contract-readiness","invoice-readiness","avr-readiness","esf-invoice-readiness"]){
       const r=await req(`/api/v1/deals/${dealId}/${route}`);
       assert.ok(!r.missingFields.some((f:string)=>f.startsWith("organization.")),JSON.stringify(r));
-      if(route==="invoice-readiness")assert.ok(r.missingFields.includes("contract.signed"));
+      if(route==="invoice-readiness")assert.ok(!r.missingFields.includes("contract.signed"),JSON.stringify(r));
       if(route==="avr-readiness"||route==="esf-invoice-readiness"){assert.ok(!r.missingFields.includes("contract.signed"));assert.match(r.warnings[0],/не подписан/);}
     }
     assert.equal((await prisma.tenantLegalProfile.findUniqueOrThrow({where:{tenantId:contract.tenantId}})).legalName,null,"readiness must not mutate organization settings");

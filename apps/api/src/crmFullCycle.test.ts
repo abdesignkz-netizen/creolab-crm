@@ -140,15 +140,15 @@ test("CRM: public form → inquiry → deal → signed contract → invoice → 
     totals(items.body.totals);
   });
 
-  await step("до подписания договор блокирует выпуск счёта, но разрешает валидацию АВР", async () => {
+  await step("до подписания договор не блокирует выпуск счёта и разрешает валидацию АВР", async () => {
     const draft = await request(`/api/v1/deals/${dealId}/contracts`, "POST", {}, 201);
     contractId = draft.body.contract.id;
     totals(draft.body.contract);
     await request(`/api/v1/contracts/${contractId}/generate`, "POST", {});
     const invoice = await request(`/api/v1/deals/${dealId}/invoices`, "POST", {}, 201);
     invoiceId = invoice.body.invoice.id;
-    const blocked = await request(`/api/v1/invoices/${invoiceId}/generate`, "POST", {}, 422);
-    assert.ok(blocked.body.details.missingFields.includes("contract.signed"));
+    const issued = await request(`/api/v1/invoices/${invoiceId}/generate`, "POST", {});
+    assert.equal(issued.body.invoice.status, "ISSUED");
     const avr = await request(`/api/v1/deals/${dealId}/electronic-documents`, "POST", { type: "AVR", invoiceId }, 201);
     avrId = avr.body.document.id;
     const validation = await request(`/api/v1/electronic-documents/${avrId}/validate`, "POST", {});

@@ -773,6 +773,9 @@ const DOCUMENT_DOMAIN_SQL = `
     ALTER TABLE "TenantLegalProfile" ADD COLUMN IF NOT EXISTS "defaultCatalogTruId" TEXT;
     ALTER TABLE "DealItem" ADD COLUMN IF NOT EXISTS "catalogTruId" TEXT;
 
+    ALTER TABLE "Invoice" ADD COLUMN IF NOT EXISTS "contractNumber" TEXT;
+    ALTER TABLE "Invoice" ADD COLUMN IF NOT EXISTS "contractDate" TIMESTAMP(3);
+
     CREATE TABLE IF NOT EXISTS "EsfConnection" (
       "id" TEXT NOT NULL,
       "tenantId" TEXT NOT NULL,

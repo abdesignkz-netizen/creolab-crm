@@ -1681,6 +1681,8 @@ model Invoice {
   status           String    @default("DRAFT")
   pdfFileId        String?
   createdByUserId  String?
+  contractNumber   String?
+  contractDate     DateTime?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
   tenant           Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)

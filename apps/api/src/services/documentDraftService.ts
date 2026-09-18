@@ -27,6 +27,36 @@ async function nextNumber(prisma: PrismaClient, tenantId: string, prefix: string
   return `${prefix}-${year}-${String(count + 1).padStart(4, "0")}`;
 }
 
+function invoiceContractBasis(editor?: InvoiceEditorInput) {
+  const contractNumber = String(editor?.contractNumber || "").trim() || null;
+  const contractDate = editor?.contractDate ? new Date(`${editor.contractDate}T00:00:00.000Z`) : null;
+  return { contractNumber, contractDate };
+}
+
+async function syncUnsignedContractBasis(
+  tx: { contract: PrismaClient["contract"] },
+  input: { tenantId: string; dealId: string; contractId?: string | null; number: string | null; date: Date | null },
+) {
+  if (!input.number && !input.date) return input.contractId || null;
+  const contract = input.contractId
+    ? await tx.contract.findFirst({ where: { id: input.contractId, tenantId: input.tenantId, dealId: input.dealId } })
+    : await tx.contract.findFirst({ where: { tenantId: input.tenantId, dealId: input.dealId }, orderBy: { createdAt: "desc" } });
+  if (!contract || contract.status === "SIGNED") return contract?.id || input.contractId || null;
+  const nextNumber = input.number || contract.number;
+  if (nextNumber !== contract.number) {
+    const clash = await tx.contract.findFirst({ where: { tenantId: input.tenantId, number: nextNumber, id: { not: contract.id } }, select: { id: true } });
+    if (clash) return contract.id;
+  }
+  await tx.contract.update({
+    where: { id: contract.id },
+    data: {
+      number: nextNumber,
+      ...(input.date ? { date: input.date } : {}),
+    },
+  });
+  return contract.id;
+}
+
 function moneyFromItems(items: Array<ReturnType<typeof serializeDealItem>>) {
   if (!items.length) {
     throw new ApiError(422, "deal_items_required", "Сначала добавьте позиции в сделку");
@@ -145,6 +175,8 @@ export function serializeInvoice(row: {
   totalAmount: { toString(): string } | number;
   status: string;
   pdfFileId?: string | null;
+  contractNumber?: string | null;
+  contractDate?: Date | null;
   updatedAt?: Date;
   items?: Array<{
     id: string;
@@ -180,6 +212,8 @@ export function serializeInvoice(row: {
     ),
     status: row.status,
     pdfFileId: row.pdfFileId ?? null,
+    contractNumber: row.contractNumber || "",
+    contractDate: row.contractDate ? row.contractDate.toISOString().slice(0, 10) : "",
     updatedAt: row.updatedAt?.toISOString() || null,
     items: (row.items || []).map((item) => ({
       id: item.id,
@@ -478,6 +512,7 @@ export async function createOrReuseInvoiceDraft(
         totalAmount: totals.totalAmount,
         status: "DRAFT",
         createdByUserId: input.actorUserId || null,
+        ...invoiceContractBasis(editor),
       },
     });
     await tx.invoiceItem.createMany({
@@ -519,15 +554,23 @@ export async function applyInvoiceEditor(
   const vatRate = editor.items.length && editor.items.every((item) => item.vatRate === editor.items[0].vatRate)
     ? editor.items[0].vatRate
     : null;
+  const basis = invoiceContractBasis(editor);
   const updated = await prisma.$transaction(async (tx) => {
     await tx.invoiceItem.deleteMany({ where: { tenantId, invoiceId } });
     if (editor.items.length) {
       await tx.invoiceItem.createMany({ data: mapEditorToInvoiceItems(editor, tenantId, invoiceId) });
     }
+    const contractId = await syncUnsignedContractBasis(tx, {
+      tenantId,
+      dealId: invoice.dealId,
+      contractId: extra.contractId !== undefined ? extra.contractId : invoice.contractId,
+      number: basis.contractNumber,
+      date: basis.contractDate,
+    });
     return tx.invoice.update({
       where: { id: invoiceId },
       data: {
-        contractId: extra.contractId !== undefined ? extra.contractId : invoice.contractId,
+        contractId: extra.contractId !== undefined ? extra.contractId : contractId || invoice.contractId,
         date: new Date(`${editor.documentDate}T00:00:00.000Z`),
         dueDate:
           extra.dueDate !== undefined
@@ -541,6 +584,8 @@ export async function applyInvoiceEditor(
         totalAmount: computed.payable.totalAmount,
         status: invoice.status === "ISSUED" ? "DRAFT" : invoice.status,
         pdfFileId: invoice.status === "ISSUED" ? null : invoice.pdfFileId,
+        contractNumber: basis.contractNumber,
+        contractDate: basis.contractDate,
       },
       include: { items: { orderBy: { sortOrder: "asc" } } },
     });
@@ -566,12 +611,16 @@ export async function createInvoiceDraft(
     });
     if (!contract) throw new ApiError(404, "not_found", "Договор не найден");
   } else {
-    const signed = await prisma.contract.findFirst({
+    const linked = await prisma.contract.findFirst({
       where: { tenantId: tid, dealId, status: "SIGNED" },
       orderBy: { signedAt: "desc" },
       select: { id: true },
+    }) || await prisma.contract.findFirst({
+      where: { tenantId: tid, dealId },
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
     });
-    contractId = signed?.id || null;
+    contractId = linked?.id || null;
   }
 
   return createOrReuseInvoiceDraft(prisma, {

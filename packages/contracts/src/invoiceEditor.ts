@@ -11,6 +11,12 @@ const paymentPercent = z.coerce
 export const invoiceEditorSchema = avrEditorSchema.and(
   z.object({
     paymentPercent: paymentPercent.default(100),
+    contractNumber: z.string().trim().max(100).optional().default(""),
+    contractDate: z
+      .string()
+      .regex(/^$|^20\d{2}-\d{2}-\d{2}$/, "Укажите дату договора")
+      .optional()
+      .default(""),
   }),
 );
 
@@ -20,7 +26,7 @@ export const updateInvoiceDraftSchema = invoiceEditorSchema.and(
   }),
 );
 
-export type InvoiceEditorInput = AvrEditorInput & { paymentPercent: number };
+export type InvoiceEditorInput = AvrEditorInput & { paymentPercent: number; contractNumber?: string; contractDate?: string };
 
 function scaledCents(amount: number) {
   return BigInt(amount.toFixed(2).replace(".", ""));

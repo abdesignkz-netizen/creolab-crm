@@ -146,8 +146,8 @@ async function invoicePdfSnapshot(
     number: invoice.number,
     date: invoice.date,
     dueDate: invoice.dueDate,
-    contractNumber: signed?.number || "",
-    contractDate: signed?.date || null,
+    contractNumber: invoice.contractNumber || signed?.number || "",
+    contractDate: invoice.contractDate || signed?.date || null,
     dealName: deal.title,
     amountWithoutVat: payable.amountWithoutVat,
     vatRate: payable.vatRate,
@@ -177,7 +177,7 @@ async function invoicePdfSnapshot(
   };
   return {
     input,
-    signedId: signedReady?.id || null,
+    signedId: signedReady?.id || signed?.id || invoice.contractId || null,
     filename: invoicePdfFileName(input),
     itemCount: items.length,
     paymentPercent,
@@ -232,7 +232,7 @@ export async function generateInvoicePdfFile(
       const reused = await prisma.invoice.update({
         where: { id: invoice.id },
         data: {
-          contractId: snapshot.signedId,
+          contractId: snapshot.signedId || invoice.contractId,
           companyId: deal.companyId,
           dueDate,
           currency: deal.currency || "KZT",
@@ -297,7 +297,7 @@ export async function generateInvoicePdfFile(
     const updated = await tx.invoice.update({
       where: { id: invoice.id },
       data: {
-        contractId: snapshot.signedId,
+        contractId: snapshot.signedId || invoice.contractId,
         companyId: deal.companyId,
         dueDate,
         currency: deal.currency || "KZT",

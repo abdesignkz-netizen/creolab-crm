@@ -57,7 +57,6 @@ export function assessInvoiceReadiness(input: {
     company: input.company,
   });
   const missingFields = [...base.missingFields];
-  if (!input.signedContractId) missingFields.push("contract.signed");
   if (!filled(input.profile?.iban)) missingFields.push("organization.iban");
   if (!filled(input.profile?.bik)) missingFields.push("organization.bik");
 

@@ -471,7 +471,7 @@ export function DealDocumentsPanel(props: {
           </div>
           <MissingList
             ready={invoiceReadiness?.ready}
-            ok="Можно сформировать счёт по подписанному договору."
+            ok="Можно сформировать счёт. Подпись договора не обязательна."
             title="Не хватает данных для счёта:"
             fields={invoiceReadiness?.missingFields}
             labels={invoiceReadiness?.missingFieldLabels}

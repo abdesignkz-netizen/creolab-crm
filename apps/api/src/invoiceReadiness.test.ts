@@ -21,7 +21,7 @@ const company = {
 };
 
 describe("invoice readiness", () => {
-  it("требует подписанный договор и банковские реквизиты", () => {
+  it("требует банковские реквизиты и не требует подписанный договор", () => {
     const result = assessInvoiceReadiness({
       dealId: "deal-1",
       itemCount: 1,
@@ -29,21 +29,20 @@ describe("invoice readiness", () => {
       company,
     });
     assert.equal(result.ready, false);
-    assert.ok(result.missingFields.includes("contract.signed"));
+    assert.ok(!result.missingFields.includes("contract.signed"));
     assert.ok(result.missingFields.includes("organization.iban"));
     assert.ok(result.missingFields.includes("organization.bik"));
   });
 
-  it("готов, если договор подписан и есть ИИК/БИК", () => {
+  it("готов без подписи договора, если есть ИИК/БИК", () => {
     const result = assessInvoiceReadiness({
       dealId: "deal-1",
       itemCount: 1,
-      signedContractId: "contract-1",
       profile,
       company,
     });
     assert.equal(result.ready, true);
     assert.deepEqual(result.missingFields, []);
-    assert.equal(result.signedContractId, "contract-1");
+    assert.equal(result.signedContractId, null);
   });
 });

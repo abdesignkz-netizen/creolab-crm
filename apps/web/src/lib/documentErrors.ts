@@ -7,6 +7,7 @@ const names: Record<string, string> = {
   signedAuthTicket: "Ответ NCALayer для авторизации ИС ЭСФ", authCmsBase64: "Сертификат авторизации NCALayer",
   publicCertificate: "Публичный сертификат подписи", signature: "Подпись NCALayer", payloadSha256: "Версия подписываемого документа",
   updatedAt: "Версия черновика", body: "Документ", items: "Позиции документа", ncalayer: "NCALayer",
+  contractNumber: "Номер договора", contractDate: "Дата договора",
 };
 export function documentFieldLabel(path: string) {
   const parts = path.replace(/^editor\./, "").split(".");

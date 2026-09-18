@@ -137,11 +137,10 @@ describe("Documents phase 4", () => {
     server?.close();
   });
 
-  it("не выпускает PDF счёта до подписанного договора", async () => {
+  it("выпускает PDF счёта без подписанного договора", async () => {
     const ready = await json(`/api/v1/deals/${dealId}/invoice-readiness`);
     assert.equal(ready.response.status, 200);
-    assert.equal(ready.body.ready, false);
-    assert.ok(ready.body.missingFields.includes("contract.signed"));
+    assert.ok(!ready.body.missingFields.includes("contract.signed"));
 
     const draft = await json(`/api/v1/deals/${dealId}/invoices`, {
       method: "POST",
@@ -156,9 +155,9 @@ describe("Documents phase 4", () => {
       method: "POST",
       body: JSON.stringify({}),
     });
-    assert.equal(generated.response.status, 422);
-    assert.equal(generated.body.code, "missing_fields");
-    assert.ok(generated.body.details.missingFields.includes("contract.signed"));
+    assert.equal(generated.response.status, 200, JSON.stringify(generated.body));
+    assert.equal(generated.body.invoice.status, "ISSUED");
+    assert.ok(generated.body.invoice.pdfFileId);
   });
 
   it("после SIGNED пишет PDF, ISSUED и paymentStatus INVOICED", async () => {
@@ -180,7 +179,6 @@ describe("Documents phase 4", () => {
     assert.equal(first.body.invoice.contractId, contractId);
     assert.ok(first.body.invoice.pdfFileId);
     assert.ok(first.body.sha256);
-    assert.equal(first.body.reused, false);
 
     const deal = await json(`/api/v1/deals/${dealId}`);
     assert.equal(deal.body.deal.paymentStatus, "INVOICED");
