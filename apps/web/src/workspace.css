@@ -272,4 +272,15 @@ a.sit-kpi:hover, button.sit-kpi:hover { background: #f2f7ff; border-color: #cfde
 .pdf-import-item button { grid-column: 1 / -1; justify-self: start; }
 .pdf-import-text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 360px; overflow: auto; }
 .pdf-import-warnings { color: #805016; }
+.pdf-import-save-company {
+  display: grid;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 12px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-ring);
+  border-radius: var(--radius-sm);
+}
+.pdf-import-save-company p { margin: 0; }
+.pdf-import-save-company .btn { justify-self: start; }
 @media(max-width: 800px) { .pdf-import-parties, .pdf-import-item { grid-template-columns: 1fr; } }

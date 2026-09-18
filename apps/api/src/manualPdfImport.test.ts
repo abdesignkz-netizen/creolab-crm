@@ -165,6 +165,14 @@ describe("Manual PDF import",()=>{
   await req("/api/v1/documents/import-pdf/preview","POST",{kind:"CONTRACT",fileName:"fake.docx",fileBase64:bytes.toString("base64")},422);
  });
  it("reuses a confirmed import and rejects re-uploaded duplicates",async()=>{const results=await Promise.all([1,2].map(()=>req("/api/v1/documents/import-pdf/confirm","POST",{importId,draft:draft()})));assert.ok(results.every(r=>r.reused&&r.dealId===dealId));const p=await preview();await req("/api/v1/documents/import-pdf/confirm","POST",{importId:p.importId,draft:{...draft(),number:"ANOTHER"}},409);await req(`/api/v1/documents/import-pdf/${p.importId}`,"DELETE");});
+ it("detects a new contract buyer and keeps the saved company for later confirm",async()=>{
+  const buyerBin="020240004419";
+  assert.deepEqual((await req(`/api/v1/documents/import-pdf/matches?buyerBin=${buyerBin}`)).companies,[]);
+  const created=await req("/api/v1/companies","POST",{name:'ТОО "ENOVO Technologies"',legalName:'ТОО "ENOVO Technologies"',bin:buyerBin,legalAddress:"РК, г. Алматы, ул. Сатпаева 30/8",iban:"KZ268562203127261373",bankName:"АО «Банк ЦентрКредит»",bik:"KCJBKZKX",directorName:"Шурманов А. К.",forceCreate:true},201);
+  const found=await req(`/api/v1/documents/import-pdf/matches?buyerBin=${buyerBin}`);
+  assert.equal(found.companies.length,1);
+  assert.equal(found.companies[0].id,created.id);
+ });
  it("adds manual invoice to the existing deal and preserves the PDF",async()=>{
   const p=await preview("INVOICE");const data={...draft("INVOICE"),paymentKind:"PREPAYMENT" as const,contractNumber:draft().number};
   const saved=await req("/api/v1/documents/import-pdf/confirm","POST",{importId:p.importId,draft:data});

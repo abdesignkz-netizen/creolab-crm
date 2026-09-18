@@ -136,6 +136,89 @@ export async function listInvoiceEligibleDeals(
   return { items: query.filter === "ready" ? items.filter((deal) => deal.ready) : items, total: items.length };
 }
 
+export async function listInvoiceEligibleCompanies(
+  prisma: PrismaClient,
+  auth: AuthContext,
+  query: Record<string, unknown> = {},
+) {
+  const membership = await workflowAccess(prisma, auth);
+  const tid = membership.tenantId;
+  const q = String(query.q || "").trim();
+  const companies = await prisma.company.findMany({
+    where: {
+      tenantId: tid,
+      archivedAt: null,
+      ...(q
+        ? {
+            OR: [
+              { name: { contains: q, mode: "insensitive" } },
+              { legalName: { contains: q, mode: "insensitive" } },
+              { bin: { contains: q } },
+              { iin: { contains: q } },
+            ],
+          }
+        : {}),
+    },
+    select: {
+      id: true,
+      name: true,
+      legalName: true,
+      bin: true,
+      iin: true,
+      city: true,
+      legalAddress: true,
+      _count: { select: { deals: { where: { outcome: "open" } } } },
+    },
+    orderBy: [{ lastActivityAt: "desc" }, { createdAt: "desc" }],
+    take: 80,
+  });
+  return {
+    items: companies.map((company) => ({
+      id: company.id,
+      name: company.legalName || company.name,
+      bin: company.bin || company.iin,
+      city: company.city,
+      legalAddress: company.legalAddress,
+      openDealsCount: company._count.deals,
+    })),
+  };
+}
+
+export async function createInvoiceDealForCompany(prisma: PrismaClient, auth: AuthContext, companyId: string) {
+  const membership = await workflowAccess(prisma, auth);
+  const tid = membership.tenantId;
+  if (!/^[0-9a-f-]{36}$/i.test(companyId)) throw new ApiError(422, "invalid", "Укажите компанию");
+  const company = await prisma.company.findFirst({ where: { id: companyId, tenantId: tid, archivedAt: null } });
+  if (!company) throw new ApiError(404, "not_found", "Компания не найдена");
+  const linked = await prisma.companyContact.findFirst({
+    where: { tenantId: tid, companyId, isActive: true, contact: { archivedAt: null } },
+    orderBy: { isPrimary: "desc" },
+    select: { contactId: true },
+  });
+  let contactId = linked?.contactId || "";
+  if (!contactId) {
+    const contact = await prisma.contact.create({
+      data: {
+        tenantId: tid,
+        name: company.directorName || company.legalName || company.name,
+        companyName: company.name,
+        ownerMembershipId: membership.id,
+        attributionJson: { source: "invoice_company" },
+      },
+    });
+    contactId = contact.id;
+    await prisma.companyContact.create({ data: { tenantId: tid, companyId, contactId, isPrimary: true } });
+  }
+  const { createDeal } = await import("./dealService.ts");
+  const created = await createDeal(prisma, auth, {
+    title: `Счёт — ${company.legalName || company.name}`.slice(0, 200),
+    contactId,
+    companyId,
+    description: "Создана автоматически для выставления счёта по компании.",
+  });
+  return { dealId: created.deal.id, createdDeal: true, companyId };
+}
+
 export async function getInvoiceEditorContext(prisma: PrismaClient, auth: AuthContext, dealId: string) {
   const membership = await workflowAccess(prisma, auth);
   const deal = await prisma.deal.findFirst({

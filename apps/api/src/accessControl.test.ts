@@ -310,6 +310,7 @@ describe("role access and account settings", () => {
       "/api/v1/knowledge/current",
       "/api/v1/documents/avr/eligible-deals",
       "/api/v1/documents/invoices/eligible-deals",
+      "/api/v1/documents/invoices/eligible-companies",
       `/api/v1/deals/${dealId}/documents`,
       `/api/v1/deals/${dealId}/avr-readiness`,
       `/api/v1/deals/${dealId}/contract-readiness`,

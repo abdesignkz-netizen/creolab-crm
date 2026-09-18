@@ -313,6 +313,8 @@ export function createApiClient(options: ClientOptions) {
     invoiceReadiness: (dealId: string) => request(`/api/v1/deals/${dealId}/invoice-readiness`),
     createInvoiceDraft: (dealId: string, body: unknown = {}) =>
       request(`/api/v1/deals/${dealId}/invoices`, { method: "POST", body: JSON.stringify(body) }),
+    createInvoiceDealForCompany: (companyId: string) =>
+      request(`/api/v1/companies/${companyId}/invoice-deal`, { method: "POST", body: JSON.stringify({}) }),
     updateInvoiceDraft: (invoiceId: string, body: unknown) =>
       request(`/api/v1/invoices/${invoiceId}`, { method: "PATCH", body: JSON.stringify(body) }),
     generateInvoice: (invoiceId: string, body: unknown = {}) =>

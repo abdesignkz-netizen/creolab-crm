@@ -31,6 +31,8 @@ export function InvoiceEditorPage() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const [deals, setDeals] = useState<any[]>([]);
+  const [companies, setCompanies] = useState<any[]>([]);
+  const [source, setSource] = useState<"deals" | "companies">("deals");
   const [filter, setFilter] = useState(params.get("filter") === "ready" ? "ready" : "all");
   const [q, setQ] = useState("");
   const [context, setContext] = useState<any>(null);
@@ -141,16 +143,35 @@ export function InvoiceEditorPage() {
   useEffect(() => {
     if (context) return;
     let active = true;
+    const path =
+      source === "companies"
+        ? `/api/v1/documents/invoices/eligible-companies?q=${encodeURIComponent(q)}`
+        : `/api/v1/documents/invoices/eligible-deals?filter=${filter}&q=${encodeURIComponent(q)}`;
     void api
-      .request<any>(`/api/v1/documents/invoices/eligible-deals?filter=${filter}&q=${encodeURIComponent(q)}`)
+      .request<any>(path)
       .then((r) => {
-        if (active) setDeals(r.items);
+        if (!active) return;
+        if (source === "companies") setCompanies(r.items || []);
+        else setDeals(r.items || []);
       })
       .catch((e) => setError(e.message));
     return () => {
       active = false;
     };
-  }, [filter, q, context]);
+  }, [filter, q, context, source]);
+
+  async function pickCompany(companyId: string) {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const created: any = await api.createInvoiceDealForCompany(companyId);
+      await loadDeal(created.dealId);
+    } catch (e: any) {
+      setError(e.message || "Не удалось создать счёт по компании");
+      setBusy(false);
+    }
+  }
 
   function edit(patch: Partial<InvoiceEditorInput>) {
     setForm((v) => ({ ...v, ...patch }));
@@ -241,34 +262,70 @@ export function InvoiceEditorPage() {
           </div>
         ) : (
           <div className="panel">
-            <h3>Сделка</h3>
+            <h3>Основание счёта</h3>
+            <p className="muted">Выберите сделку или компанию. Если сделки ещё нет, она создастся вместе со счётом.</p>
             <div className="actions">
-              <button className={filter === "all" ? "btn" : "btn secondary"} onClick={() => setFilter("all")}>
-                Все сделки
+              <button className={source === "deals" ? "btn" : "btn secondary"} onClick={() => { setSource("deals"); setQ(""); }}>
+                Сделки
               </button>
-              <button className={filter === "ready" ? "btn" : "btn secondary"} onClick={() => setFilter("ready")}>
-                Готовы к выставлению
+              <button className={source === "companies" ? "btn" : "btn secondary"} onClick={() => { setSource("companies"); setQ(""); }}>
+                Компании
               </button>
             </div>
-            <label>
-              Найти сделку
-              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Название или компания" />
-            </label>
-            {!deals.length ? <p>Подходящих сделок нет.</p> : null}
-            {deals.map((d) => (
-              <div className="card" key={d.id}>
-                <b>
-                  {d.title} — {d.companyName || d.contactName}
-                </b>
-                <p>
-                  Сделка #{d.number} · {money(d.amount)} ₸ · {d.stage} · {d.responsible || "Ответственный не назначен"}
-                </p>
-                <p className={d.ready ? "ok" : "pdf-import-warnings"}>{d.ready ? "Можно выставить счёт" : d.reasons.join("; ")}</p>
-                <button className="btn secondary" disabled={busy} onClick={() => void loadDeal(d.id)}>
-                  {d.invoiceId ? "Открыть счёт" : "Выбрать"}
-                </button>
-              </div>
-            ))}
+            {source === "deals" ? (
+              <>
+                <div className="actions">
+                  <button className={filter === "all" ? "btn" : "btn secondary"} onClick={() => setFilter("all")}>
+                    Все сделки
+                  </button>
+                  <button className={filter === "ready" ? "btn" : "btn secondary"} onClick={() => setFilter("ready")}>
+                    Готовы к выставлению
+                  </button>
+                </div>
+                <label>
+                  Найти сделку
+                  <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Название или компания" />
+                </label>
+                {!deals.length ? <p>Подходящих сделок нет.</p> : null}
+                {deals.map((d) => (
+                  <div className="card" key={d.id}>
+                    <b>
+                      {d.title} — {d.companyName || d.contactName}
+                    </b>
+                    <p>
+                      Сделка #{d.number} · {money(d.amount)} ₸ · {d.stage} · {d.responsible || "Ответственный не назначен"}
+                    </p>
+                    <p className={d.ready ? "ok" : "pdf-import-warnings"}>{d.ready ? "Можно выставить счёт" : d.reasons.join("; ")}</p>
+                    <button className="btn secondary" disabled={busy} onClick={() => void loadDeal(d.id)}>
+                      {d.invoiceId ? "Открыть счёт" : "Выбрать"}
+                    </button>
+                  </div>
+                ))}
+              </>
+            ) : (
+              <>
+                <label>
+                  Найти компанию
+                  <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Название или БИН" />
+                </label>
+                {!companies.length ? <p>Подходящих компаний нет.</p> : null}
+                {companies.map((c) => (
+                  <div className="card" key={c.id}>
+                    <b>{c.name}</b>
+                    <p>
+                      {c.bin ? `БИН / ИИН ${c.bin}` : "БИН не указан"}
+                      {c.city ? ` · ${c.city}` : ""}
+                    </p>
+                    <p className="muted">
+                      {c.openDealsCount ? `Открытых сделок: ${c.openDealsCount}` : "Открытых сделок нет — сделка создастся вместе со счётом"}
+                    </p>
+                    <button className="btn" disabled={busy} onClick={() => void pickCompany(c.id)}>
+                      Создать счёт
+                    </button>
+                  </div>
+                ))}
+              </>
+            )}
           </div>
         )
       ) : (
@@ -286,7 +343,7 @@ export function InvoiceEditorPage() {
                     setDirty(false);
                   }}
                 >
-                  Выбрать другую сделку
+                  Выбрать другое основание
                 </button>
               ) : null}
             </div>

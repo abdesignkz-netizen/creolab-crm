@@ -182,6 +182,48 @@ describe("Invoice editor workflow", () => {
     assert.equal(current.body.invoice.id, invoiceId);
   });
 
+  it("создаёт счёт по компании без сделки", async () => {
+    const company = await json("/api/v1/companies", {
+      method: "POST",
+      body: JSON.stringify({
+        name: "ENOVO Technologies",
+        legalName: 'ТОО "ENOVO Technologies"',
+        bin: "020240004419",
+        legalAddress: "РК, г. Алматы, ул. Сатпаева 30/8",
+        forceCreate: true,
+      }),
+    });
+    assert.equal(company.response.status, 201, JSON.stringify(company.body));
+    const listed = await json("/api/v1/documents/invoices/eligible-companies?q=ENOVO");
+    assert.equal(listed.response.status, 200, JSON.stringify(listed.body));
+    const row = listed.body.items.find((item: { id: string }) => item.id === company.body.id);
+    assert.ok(row);
+    assert.equal(row.openDealsCount, 0);
+    assert.equal((await json("/api/v1/documents/invoices/eligible-companies", {}, otherCookie)).response.status, 200);
+    assert.equal((await json(`/api/v1/companies/${company.body.id}/invoice-deal`, { method: "POST", body: JSON.stringify({}) }, otherCookie)).response.status, 404);
+
+    const prepared = await json(`/api/v1/companies/${company.body.id}/invoice-deal`, { method: "POST", body: JSON.stringify({}) });
+    assert.equal(prepared.response.status, 201, JSON.stringify(prepared.body));
+    assert.equal(prepared.body.createdDeal, true);
+    const ctx = await json(`/api/v1/deals/${prepared.body.dealId}/invoice-context`);
+    assert.equal(ctx.response.status, 200, JSON.stringify(ctx.body));
+    assert.equal(ctx.body.deal.companyId, company.body.id);
+    const created = await json(`/api/v1/deals/${prepared.body.dealId}/invoices`, {
+      method: "POST",
+      body: JSON.stringify({
+        editor: {
+          documentDate: "2026-09-18",
+          paymentPercent: 100,
+          items: [{ name: "Разработка презентации компании", quantity: 1, unit: "услуга", unitPrice: 500000, vatRate: 0 }],
+        },
+      }),
+    });
+    assert.equal(created.response.status, 201, JSON.stringify(created.body));
+    assert.equal(created.body.invoice.totalAmount, 500000);
+    const again = await json("/api/v1/documents/invoices/eligible-companies?q=ENOVO");
+    assert.equal(again.body.items.find((item: { id: string }) => item.id === company.body.id).openDealsCount, 1);
+  });
+
   it("принимает печать и отдаёт stamped PDF", async () => {
     const png =
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";

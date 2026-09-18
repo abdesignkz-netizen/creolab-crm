@@ -1161,6 +1161,23 @@ export function createApp(prisma: PrismaClient) {
     const { listInvoiceEligibleDeals } = await import("./services/invoiceEditorService.ts");
     res.json(await listInvoiceEligibleDeals(prisma, await requireAuth(req), req.query));
   });
+  app.get("/api/v1/documents/invoices/eligible-companies", async (req, res) => {
+    const { listInvoiceEligibleCompanies } = await import("./services/invoiceEditorService.ts");
+    res.json(await listInvoiceEligibleCompanies(prisma, await requireAuth(req), req.query));
+  });
+  app.post("/api/v1/companies/:id/invoice-deal", json, async (req, res) => {
+    const auth = await requireAuth(req);
+    const { withIdempotency } = await import("./services/idempotency.ts");
+    const { createInvoiceDealForCompany } = await import("./services/invoiceEditorService.ts");
+    const result = await withIdempotency(prisma, {
+      scope: "invoice.create_company_deal",
+      actorKey: `${auth.activeMembership?.tenantId}:${req.params.id}`,
+      key: String(req.header("idempotency-key") || ""),
+      payload: { companyId: req.params.id },
+      run: () => createInvoiceDealForCompany(prisma, auth, req.params.id),
+    });
+    res.status(201).json(result);
+  });
   app.get("/api/v1/deals/:id/avr-context", async (req, res) => {
     const { getAvrEditorContext } = await import("./services/documentWorkflow.ts");
     res.json(await getAvrEditorContext(prisma, await requireAuth(req), req.params.id));
