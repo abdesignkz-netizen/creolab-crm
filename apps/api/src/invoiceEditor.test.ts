@@ -53,6 +53,7 @@ describe("Invoice editor workflow", () => {
         legalAddress: "г. Алматы, ул. Монгольская 44",
         directorName: "Булан Асет Болатович",
         phone: "+7 (707) 747 13 01",
+        email: "info@creolab.kz",
         iban: "KZ268562203127261373",
         bankName: 'АО "Банк ЦентрКредит"',
         bik: "KCJBKZKX",
@@ -84,6 +85,7 @@ describe("Invoice editor workflow", () => {
         bin: "150540023591",
         legalAddress: "РК, г.Алматы, ул. Абиш Кекилбайулы 131, кв 5.",
         phone: "+7 776 002 02 09",
+        email: "office@arasaka.test",
         forceCreate: true,
       }),
     });
@@ -103,7 +105,8 @@ describe("Invoice editor workflow", () => {
 
     const ctx = await json(`/api/v1/deals/${dealId}/invoice-context`);
     assert.equal(ctx.response.status, 200, JSON.stringify(ctx.body));
-    assert.equal(ctx.body.organization.bin, "221140036408");
+    assert.equal(ctx.body.organization.phone, "+7 (707) 747 13 01");
+    assert.equal(ctx.body.organization.email, "info@creolab.kz");
     assert.equal((await json(`/api/v1/deals/${dealId}/invoice-context`, {}, otherCookie)).response.status, 404);
 
     const editor = {
@@ -123,6 +126,7 @@ describe("Invoice editor workflow", () => {
 
     const pdf = await fetch(`${base}/api/v1/invoices/${invoiceId}/pdf`, { headers: { cookie } });
     assert.equal(pdf.status, 200);
+    assert.match(pdf.headers.get("content-disposition") || "", /inline/);
     const bytes = Buffer.from(await pdf.arrayBuffer());
     assert.equal(bytes.subarray(0, 4).toString("utf8"), "%PDF");
     const { DOMMatrix, ImageData, Path2D } = await import("@napi-rs/canvas");
@@ -132,11 +136,23 @@ describe("Invoice editor workflow", () => {
     const page = await parsed.getPage(1);
     const content = await page.getTextContent();
     page.cleanup();
-    const text = content.items.map((item) => ("str" in item ? item.str : "")).join(" ");
+    const items = content.items
+      .filter((item): item is { str: string; transform: number[] } => "str" in item && Boolean(item.str.trim()))
+      .map((item) => ({ str: item.str, y: item.transform[5] }));
+    const text = items.map((item) => item.str).join(" ");
     assert.match(text, /Счет на оплату/);
     assert.match(text, /Предоплата 50%/);
     assert.match(text, /ARASAKA/);
     assert.match(text, /Образец платежного поручения/);
+    assert.match(text, /Тел\.: \+7 \(707\) 747 13 01/);
+    assert.match(text, /Тел: \+7 776 002 02 09/);
+    const bin = items.find((item) => item.str.startsWith("БИН:"));
+    const bank = items.find((item) => item.str === "Банк бенефициара");
+    assert.ok(bin && bank);
+    assert.ok(bin.y - bank.y >= 18, `BIN y=${bin.y} bank y=${bank.y}`);
+
+    const attachment = await fetch(`${base}/api/v1/invoices/${invoiceId}/pdf?download=1`, { headers: { cookie } });
+    assert.match(attachment.headers.get("content-disposition") || "", /attachment/);
 
     assert.equal((await fetch(`${base}/api/v1/invoices/${invoiceId}/pdf`, { headers: { cookie: otherCookie } })).status, 404);
     assert.equal((await json(`/api/v1/invoices/${invoiceId}`, {}, otherCookie)).response.status, 404);
@@ -164,5 +180,22 @@ describe("Invoice editor workflow", () => {
     assert.equal(again.body.reused, true);
     const current = await json(`/api/v1/invoices/${invoiceId}`);
     assert.equal(current.body.invoice.id, invoiceId);
+  });
+
+  it("принимает печать и отдаёт stamped PDF", async () => {
+    const png =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    const uploaded = await json("/api/v1/settings/legal-profile/marks/stamp", {
+      method: "POST",
+      body: JSON.stringify({ contentBase64: `data:image/png;base64,${png}`, mimeType: "image/png" }),
+    });
+    assert.equal(uploaded.response.status, 200, JSON.stringify(uploaded.body));
+    assert.equal(uploaded.body.hasStamp, true);
+    const plain = await fetch(`${base}/api/v1/invoices/${invoiceId}/pdf`, { headers: { cookie } });
+    const stamped = await fetch(`${base}/api/v1/invoices/${invoiceId}/pdf?stamped=1`, { headers: { cookie } });
+    assert.equal(stamped.status, 200);
+    const plainBytes = Buffer.from(await plain.arrayBuffer());
+    const stampedBytes = Buffer.from(await stamped.arrayBuffer());
+    assert.ok(stampedBytes.length > plainBytes.length);
   });
 });

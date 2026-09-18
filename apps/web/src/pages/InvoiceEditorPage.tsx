@@ -22,6 +22,7 @@ const partyFields = [
   ["bankName", "Банк"],
   ["bik", "БИК"],
   ["phone", "Телефон"],
+  ["email", "Email"],
 ] as const;
 const labels: Record<string, string> = { DRAFT: "Черновик", ISSUED: "Выставлен", PARTIALLY_PAID: "Частично оплачен", PAID: "Оплачен", OVERDUE: "Просрочен", CANCELLED: "Отменён" };
 
@@ -41,12 +42,40 @@ export function InvoiceEditorPage() {
   const [editingBuyer, setEditingBuyer] = useState(false);
   const [buyer, setBuyer] = useState<Record<string, string>>({});
   const [dirty, setDirty] = useState(false);
+  const [preview, setPreview] = useState<{ id: string; stamped: boolean } | null>(null);
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [previewError, setPreviewError] = useState("");
   const flight = useRef(false);
   const version = useRef(0);
   const issueSummary = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (error || Object.keys(issues).length) issueSummary.current?.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [error, issues]);
+  useEffect(() => {
+    if (!preview) {
+      setPreviewUrl("");
+      setPreviewError("");
+      return;
+    }
+    let live = true;
+    let objectUrl = "";
+    setPreviewUrl("");
+    setPreviewError("");
+    void api
+      .downloadInvoicePdf(preview.id, { stamped: preview.stamped })
+      .then(({ blob }) => {
+        if (!live) return;
+        objectUrl = URL.createObjectURL(blob);
+        setPreviewUrl(objectUrl);
+      })
+      .catch((err: unknown) => {
+        if (live) setPreviewError(err instanceof Error ? err.message : "Не удалось открыть счёт");
+      });
+    return () => {
+      live = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [preview]);
   const immutable = Boolean(doc && !["DRAFT", "ISSUED"].includes(doc.status));
   const parsed = invoiceEditorSchema.safeParse(form);
   const totals = parsed.success ? invoicePayableTotals(form.items, form.paymentPercent) : null;
@@ -423,7 +452,7 @@ export function InvoiceEditorPage() {
           </div>
           <div className="panel">
             <h3>Печатная форма</h3>
-            <p className="muted">Счёт на оплату собирается в CRM по форме 1С: шапка платёжки, стороны, таблица и сумма прописью. Это не ЭСФ.</p>
+            <p className="muted">Счёт собирается по форме 1С. Сначала откройте PDF, сверьте реквизиты и сумму, затем скачайте.</p>
             <div className="actions">
               <button
                 className="btn secondary"
@@ -431,12 +460,11 @@ export function InvoiceEditorPage() {
                 onClick={() =>
                   void action(async () => {
                     const record = dirty || !doc ? await save() : doc;
-                    await downloadInvoicePdf(record.id);
-                    notifySaved("PDF счёта скачан");
+                    setPreview({ id: record.id, stamped: false });
                   })
                 }
               >
-                Скачать PDF
+                Посмотреть счёт
               </button>
               <button
                 className="btn"
@@ -447,7 +475,7 @@ export function InvoiceEditorPage() {
                     await api.generateInvoice(record.id);
                     const r: any = await api.request(`/api/v1/invoices/${record.id}`);
                     setDoc(r.invoice);
-                    await downloadInvoicePdf(record.id);
+                    setPreview({ id: record.id, stamped: false });
                     notifySaved("Счёт выставлен");
                   })
                 }
@@ -456,6 +484,71 @@ export function InvoiceEditorPage() {
               </button>
             </div>
           </div>
+          {preview ? (
+            <div className="stats-modal-backdrop" onClick={() => setPreview(null)}>
+              <div className="stats-modal invoice-preview-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="row">
+                  <h3>Счёт {doc?.number || ""}</h3>
+                  <button type="button" className="btn secondary" onClick={() => setPreview(null)}>
+                    Закрыть
+                  </button>
+                </div>
+                <div className="invoice-preview-marks">
+                  <label>
+                    <input
+                      type="radio"
+                      name="invoice-mark"
+                      checked={!preview.stamped}
+                      onChange={() => setPreview({ ...preview, stamped: false })}
+                    />{" "}
+                    Без подписи и печати
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="invoice-mark"
+                      checked={preview.stamped}
+                      onChange={() => setPreview({ ...preview, stamped: true })}
+                    />{" "}
+                    С подписью и печатью
+                  </label>
+                </div>
+                {preview.stamped && !(context.organization?.hasStamp || context.organization?.hasSignature) ? (
+                  <p className="muted">
+                    Загрузите печать и подпись в{" "}
+                    <Link to="/settings#company-requisites" target="_blank">
+                      реквизитах компании
+                    </Link>
+                    , затем обновите реквизиты на этой странице.
+                  </p>
+                ) : null}
+                {previewError ? <p className="error">{previewError}</p> : null}
+                {previewUrl ? (
+                  <iframe title="Просмотр счёта" src={previewUrl} />
+                ) : previewError ? null : (
+                  <p className="muted">Готовим PDF…</p>
+                )}
+                <div className="actions">
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={busy || !previewUrl}
+                    onClick={() =>
+                      void action(async () => {
+                        await downloadInvoicePdf(preview.id, preview.stamped);
+                        notifySaved("PDF счёта скачан");
+                      })
+                    }
+                  >
+                    Скачать
+                  </button>
+                  <button type="button" className="btn secondary" onClick={() => setPreview(null)}>
+                    Закрыть
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
         </>
       )}
     </section>

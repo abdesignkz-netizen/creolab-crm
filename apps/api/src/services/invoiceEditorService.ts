@@ -189,6 +189,9 @@ export async function getInvoiceEditorContext(prisma: PrismaClient, auth: AuthCo
     organization: {
       ...profile,
       phone: legal.phone,
+      email: legal.email,
+      hasStamp: legal.hasStamp,
+      hasSignature: legal.hasSignature,
       directorBasis: legal.directorBasis,
       kbe: settings?.documents?.kbe || defaultKbe(profile?.bin, profile?.iin),
       knp: settings?.documents?.knp || "859",

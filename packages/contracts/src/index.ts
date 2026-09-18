@@ -20,3 +20,9 @@ export {
   scaleInvoiceMoney,
   type InvoiceEditorInput,
 } from "./invoiceEditor.ts";
+export {
+  parseCompanyRequisitesSchema,
+  companyRequisitesDraftSchema,
+  type CompanyRequisitesDraft,
+  type ParseCompanyRequisitesInput,
+} from "./companyRequisites.ts";

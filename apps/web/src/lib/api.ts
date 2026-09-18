@@ -24,8 +24,8 @@ export async function downloadAvrPdf(documentId: string) {
   triggerDownload(blob, filename);
 }
 
-export async function downloadInvoicePdf(invoiceId: string) {
-  const { blob, filename } = await api.downloadInvoicePdf(invoiceId);
+export async function downloadInvoicePdf(invoiceId: string, stamped = false) {
+  const { blob, filename } = await api.downloadInvoicePdf(invoiceId, { stamped });
   triggerDownload(blob, filename);
 }
 

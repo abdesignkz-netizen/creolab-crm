@@ -13,11 +13,14 @@ import { resolveUploadPath } from "../lib/storage.ts";
 import { asMoney, sumLines } from "./documentMoney.ts";
 import { serializeDealItem } from "./dealItemService.ts";
 import { requireDocumentsEnabled } from "./legalProfileService.ts";
+import { listInvoiceMarkFiles } from "./legalProfileService.ts";
 import { mapDealItemsToInvoiceItems, serializeInvoice } from "./documentDraftService.ts";
 import { assessInvoiceReadiness, invoiceMissingFieldsError } from "./invoiceReadiness.ts";
+import { phoneFromContact } from "./contactLabels.ts";
 import {
   invoicePdfContentDisposition,
   invoicePdfFileName,
+  punchInvoiceStampBackground,
   renderInvoicePdf,
   type InvoicePdfInput,
 } from "./invoicePdf.ts";
@@ -67,7 +70,11 @@ async function invoicePdfSnapshot(
 ): Promise<{ input: InvoicePdfInput; signedId: string | null; filename: string; itemCount: number; paymentPercent: number; itemTotals: ReturnType<typeof sumLines>; payable: ReturnType<typeof sumLines> }> {
   const deal = await prisma.deal.findFirst({
     where: { id: invoice.dealId, tenantId: tid },
-    include: { items: { orderBy: { sortOrder: "asc" } }, company: true },
+    include: {
+      items: { orderBy: { sortOrder: "asc" } },
+      company: true,
+      contact: { include: { methods: { select: { type: true, rawValue: true, normalizedValue: true, primary: true } } } },
+    },
   });
   if (!deal) throw new ApiError(404, "not_found", "Сделка не найдена");
 
@@ -83,12 +90,12 @@ async function invoicePdfSnapshot(
         orderBy: { createdAt: "desc" },
       });
 
-  const [profile, tenant, settingsRow] = await Promise.all([
+  const [profile, tenant, legal] = await Promise.all([
     documentOrganization(prisma, tid, deal.id, invoice.contractId || signed?.id),
     prisma.tenant.findUnique({ where: { id: tid }, select: { name: true, settingsJson: true } }),
-    prisma.tenantLegalProfile.findUnique({ where: { tenantId: tid }, select: { phone: true } }),
+    prisma.tenantLegalProfile.findUnique({ where: { tenantId: tid } }),
   ]);
-  const settings = tenant?.settingsJson as { documents?: { kbe?: string; knp?: string } } | null;
+  const settings = tenant?.settingsJson as { documents?: { kbe?: string; knp?: string }; contactPhone?: string; contactEmail?: string } | null;
   const invoiceItems = invoice.items.map((item) => ({
     name: item.name,
     quantity: asMoney(item.quantity),
@@ -131,6 +138,10 @@ async function invoicePdfSnapshot(
   const payable = { ...computed.payable, vatRate: itemTotals.vatRate };
 
   const company = deal.company;
+  const contactEmail =
+    deal.contact?.methods?.find((item) => item.type === "email" && item.primary)?.rawValue ||
+    deal.contact?.methods?.find((item) => item.type === "email")?.rawValue ||
+    "";
   const input: InvoicePdfInput = {
     number: invoice.number,
     date: invoice.date,
@@ -149,7 +160,8 @@ async function invoicePdfSnapshot(
     sellerName: profile?.legalName || profile?.shortName || tenant?.name || "",
     sellerBin: profile?.bin || profile?.iin || "",
     sellerAddress: profile?.legalAddress || "",
-    sellerPhone: settingsRow?.phone || (profile as { phone?: string | null } | null)?.phone || "",
+    sellerPhone: legal?.phone || settings?.contactPhone || (profile as { phone?: string | null } | null)?.phone || "",
+    sellerEmail: legal?.email || settings?.contactEmail || "",
     sellerIban: profile?.iban || "",
     sellerBankName: profile?.bankName || "",
     sellerBik: profile?.bik || "",
@@ -159,7 +171,8 @@ async function invoicePdfSnapshot(
     buyerName: company?.legalName || company?.name || "",
     buyerBin: company?.bin || company?.iin || "",
     buyerAddress: company?.legalAddress || company?.address || "",
-    buyerPhone: company?.phone || "",
+    buyerPhone: company?.phone || phoneFromContact(deal.contact) || "",
+    buyerEmail: company?.email || contactEmail || "",
     items,
   };
   return {
@@ -208,7 +221,7 @@ export async function generateInvoicePdfFile(
         ? new Date(input.dueDate)
         : null
       : invoice.dueDate || defaultDueDate(invoice.date);
-  const pdf = await renderInvoicePdf({ ...snapshot.input, dueDate });
+  const pdf = await renderInvoicePdf(await withInvoiceMarks(prisma, tid, { ...snapshot.input, dueDate }, false));
   const sha256 = createHash("sha256").update(pdf).digest("hex");
   const totals = snapshot.payable;
   if (invoice.pdfFileId) {
@@ -325,15 +338,31 @@ export async function generateInvoicePdfFile(
   };
 }
 
+async function withInvoiceMarks(
+  prisma: PrismaClient,
+  tenantId: string,
+  input: InvoicePdfInput,
+  stamped: boolean,
+): Promise<InvoicePdfInput> {
+  if (!stamped) return { ...input, withStamp: false, stampPng: null, signaturePng: null };
+  const marks = await listInvoiceMarkFiles(prisma, tenantId);
+  const stampPng = marks.stamp ? await punchInvoiceStampBackground(marks.stamp).catch(() => marks.stamp) : null;
+  const signaturePng = marks.signature ? await punchInvoiceStampBackground(marks.signature).catch(() => marks.signature) : null;
+  return { ...input, withStamp: true, stampPng, signaturePng };
+}
+
 export async function sendInvoicePdf(
   prisma: PrismaClient,
   auth: AuthContext,
   invoiceId: string,
   res: Response,
+  query: Record<string, unknown> = {},
 ) {
   requireDocumentsAccess(auth);
   const membership = requireTenant(auth);
   const tid = membership.tenantId;
+  const stamped = query.stamped === "1" || query.stamped === "true" || query.stamped === true;
+  const download = query.download === "1" || query.download === "true" || query.download === true;
   const invoice = await prisma.invoice.findFirst({
     where: { id: invoiceId, tenantId: tid },
     include: { items: { orderBy: { sortOrder: "asc" } } },
@@ -357,9 +386,9 @@ export async function sendInvoicePdf(
     }
   }
   const snapshot = await invoicePdfSnapshot(prisma, tid, invoice);
-  const pdf = await renderInvoicePdf(snapshot.input);
+  const pdf = await renderInvoicePdf(await withInvoiceMarks(prisma, tid, snapshot.input, stamped));
   res.setHeader("Content-Type", "application/pdf");
-  res.setHeader("Content-Disposition", invoicePdfContentDisposition(snapshot.filename));
+  res.setHeader("Content-Disposition", invoicePdfContentDisposition(snapshot.filename, !download));
   res.setHeader("Cache-Control", "no-store");
   res.send(pdf);
 }

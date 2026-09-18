@@ -7,6 +7,11 @@ import { invoicePayment } from "./invoicePayment.ts";
 const clean = (text: string) => text.replace(/[|¦\[\]]/g, " ").replace(/[ \t]+/g, " ").trim();
 const numberValue = (value: string) => Number(value.replace(/\s/g, "").replace(",", "."));
 const emptyParty = (): PdfImportParty => ({ name: "", bin: "", legalAddress: "", iban: "", bankName: "", bik: "", directorName: "" });
+function taxIdFromText(text: string) {
+  const labeled = text.match(/(?:БИН(?:\s*\/\s*ИИН)?|ИИН)\s*:?\s*([\d\s]{12,20})/i);
+  const digits = String(labeled?.[1] || "").replace(/\D/g, "");
+  return digits.length === 12 ? digits : "";
+}
 const months = ["январ", "феврал", "март", "апрел", "ма[йя]", "июн", "июл", "август", "сентябр", "октябр", "ноябр", "декабр"];
 function documentDate(text: string) {
   const numeric = text.match(/\b(\d{2})[./-](\d{2})[./-](20\d{2})\b/);
@@ -22,14 +27,14 @@ function party(text: string): PdfImportParty {
   const nameIndex = lines.findIndex(l => /(?:ТОО|TOO|ИП|АО|ЖШС)\s*[«"“]/i.test(l));
   const relevant = nameIndex >= 0 ? lines.slice(nameIndex) : lines;
   const name = relevant[0]?.match(/(?:ТОО|TOO|ИП|АО|ЖШС)\s*[«"“][^»"”]+[»"”]/i)?.[0] || "";
-  const binIndex = relevant.findIndex(l => /(?:БИН|БИН\/ИИН|ИИН)\s*:?\s*\d{12}/i.test(l));
+  const binIndex = relevant.findIndex(l => /(?:БИН|БИН\/ИИН|ИИН)\s*:?\s*[\d\s]{12,}/i.test(l));
   const directorIndex = relevant.findIndex(l => /^Директор(?:\s|$)/i.test(l));
   const rawIban = text.match(/\bKZ(?:[ \t]*[A-Z\d]){18}\b/i)?.[0]?.replace(/[ \t]/g, "") || "";
   const normalizedText = lines.join("\n");
   const inlineAddress = name ? normalizedText.slice(normalizedText.indexOf(name)+name.length).replace(/^[\s,;]+/,"").split(/Тел(?:ефон)?\.?\s*:|БИН|ИИН|ИИК|БИК|\bKZ|Директор/i)[0].trim() : "";
   return {
     name: name.replace(/^TOO/, "ТОО"),
-    bin: text.match(/(?:БИН|ИИН)\s*:?\s*(\d{12})/i)?.[1] || "",
+    bin: taxIdFromText(text),
     legalAddress: name && binIndex > 0 ? relevant.slice(1, binIndex).filter(l => !/^(?:Заказчик|Исполнитель)/i.test(l)).join(" ") : /^(?:РК|Казахстан|\d{6}|г\.)/i.test(inlineAddress) ? clean(inlineAddress.replace(/\n/g," ")) : "",
     iban: /^KZ/i.test(rawIban) ? rawIban.toUpperCase() : "",
     bankName: relevant.find(l => /банк|Bank/i.test(l)) || "",

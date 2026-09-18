@@ -13,6 +13,8 @@ type Profile = {
   bik: string | null;
   directorName: string | null;
   directorPosition: string | null;
+  phone: string | null;
+  email: string | null;
   defaultVatMode: "none" | "percent" | null;
   defaultVatRate: number | null;
   documentsEnabled: boolean;
@@ -20,6 +22,8 @@ type Profile = {
   esfIntegrationEnabled: boolean;
   defaultCatalogTruId: string | null;
   vatConfigured: boolean;
+  hasStamp?: boolean;
+  hasSignature?: boolean;
 };
 
 const EMPTY: Profile = {
@@ -32,6 +36,8 @@ const EMPTY: Profile = {
   bik: "",
   directorName: "",
   directorPosition: "",
+  phone: "",
+  email: "",
   defaultVatMode: null,
   defaultVatRate: null,
   documentsEnabled: true,
@@ -39,6 +45,8 @@ const EMPTY: Profile = {
   esfIntegrationEnabled: false,
   defaultCatalogTruId: "",
   vatConfigured: false,
+  hasStamp: false,
+  hasSignature: false,
 };
 
 export function LegalSettingsPanel() {
@@ -104,6 +112,8 @@ export function LegalSettingsPanel() {
         bik: profile.bik || null,
         directorName: profile.directorName || null,
         directorPosition: profile.directorPosition || null,
+        phone: profile.phone || null,
+        email: profile.email || null,
         defaultVatMode,
         defaultVatRate,
         documentsEnabled: profile.documentsEnabled,
@@ -136,6 +146,8 @@ export function LegalSettingsPanel() {
           ["БИН / ИИН", profile.bin || profile.iin],
           ["Юридический адрес", profile.legalAddress],
           ["Директор", profile.directorName],
+          ["Телефон", profile.phone],
+          ["Email", profile.email],
           ["Банк", profile.bankName],
           ["ИИК / IBAN", profile.iban],
           ["БИК", profile.bik],
@@ -143,7 +155,9 @@ export function LegalSettingsPanel() {
       </dl>
       <div className="actions">
         <button type="button" className="btn secondary" autoFocus onClick={() => setEditing(true)}>Изменить реквизиты</button>
-      </div></> : <>
+      </div>
+      <InvoiceMarksEditor profile={profile} busy={busy} setBusy={setBusy} setError={setError} onUpdated={applyLoaded} />
+      </>} : <>
       <div className="deal-edit">
         <label>
           Юридическое название
@@ -189,6 +203,14 @@ export function LegalSettingsPanel() {
             value={profile.directorPosition || ""}
             onChange={(e) => setProfile({ ...profile, directorPosition: e.target.value })}
           />
+        </label>
+        <label>
+          Телефон
+          <input value={profile.phone || ""} onChange={(e) => setProfile({ ...profile, phone: e.target.value })} />
+        </label>
+        <label>
+          Email
+          <input value={profile.email || ""} onChange={(e) => setProfile({ ...profile, email: e.target.value })} />
         </label>
         <label>
           Идентификатор ТРУ (G 18)
@@ -265,7 +287,89 @@ export function LegalSettingsPanel() {
           {busy ? "Сохраняем…" : "Сохранить реквизиты"}
         </button>
       </div>
+      <InvoiceMarksEditor profile={profile} busy={busy} setBusy={setBusy} setError={setError} onUpdated={applyLoaded} />
       </>}
+    </div>
+  );
+}
+
+function InvoiceMarksEditor({
+  profile,
+  busy,
+  setBusy,
+  setError,
+  onUpdated,
+}: {
+  profile: Profile;
+  busy: boolean;
+  setBusy: (v: boolean) => void;
+  setError: (v: string) => void;
+  onUpdated: (data: Profile) => void;
+}) {
+  async function upload(kind: "stamp" | "signature", file: File | undefined) {
+    if (!file || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const contentBase64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error("Не удалось прочитать файл"));
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.readAsDataURL(file);
+      });
+      const next = (await api.uploadLegalMark(kind, { contentBase64, mimeType: file.type || "image/png" })) as Profile;
+      onUpdated(next);
+      notifySaved(kind === "stamp" ? "Печать сохранена" : "Подпись сохранена");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось загрузить файл");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function remove(kind: "stamp" | "signature") {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      onUpdated((await api.deleteLegalMark(kind)) as Profile);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось удалить файл");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="invoice-marks" style={{ marginTop: 16 }}>
+      <h4>Печать и подпись на счёте</h4>
+      <p className="muted">PNG или JPEG. Используются, когда в просмотре счёта выбран вариант «С подписью и печатью».</p>
+      <div className="invoice-marks-grid">
+        {(
+          [
+            ["stamp", "Печать", profile.hasStamp],
+            ["signature", "Подпись", profile.hasSignature],
+          ] as const
+        ).map(([kind, label, ready]) => (
+          <label key={kind}>
+            {label}
+            {ready ? <img src={`${api.legalMarkUrl(kind)}?t=${Number(Boolean(profile.hasStamp))}${Number(Boolean(profile.hasSignature))}`} alt={label} /> : <span className="muted">Не загружена</span>}
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              disabled={busy}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                void upload(kind, file);
+              }}
+            />
+            {ready ? (
+              <button type="button" className="btn secondary" disabled={busy} onClick={() => void remove(kind)}>
+                Удалить
+              </button>
+            ) : null}
+          </label>
+        ))}
+      </div>
     </div>
   );
 }

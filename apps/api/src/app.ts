@@ -59,6 +59,7 @@ import {
   updateInquirySchema,
   updateTaskSchema,
   createCompanySchema,
+  parseCompanyRequisitesSchema,
   updateCompanySchema,
   companyContactSchema,
   updateCompanyContactSchema,
@@ -640,6 +641,25 @@ export function createApp(prisma: PrismaClient) {
     res.json(await updateLegalProfile(prisma, await requireAuth(req), input));
   });
 
+  app.post("/api/v1/settings/legal-profile/marks/:kind", jsonLarge, async (req, res) => {
+    const { saveInvoiceMarkImage } = await import("./services/legalProfileService.ts");
+    res.json(await saveInvoiceMarkImage(prisma, await requireAuth(req), String(req.params.kind || ""), req.body || {}));
+  });
+
+  app.get("/api/v1/settings/legal-profile/marks/:kind", async (req, res) => {
+    const { invoiceMarkFilePath } = await import("./services/legalProfileService.ts");
+    const file = await invoiceMarkFilePath(prisma, await requireAuth(req), String(req.params.kind || ""));
+    if (!existsSync(file.path)) throw new ApiError(404, "not_found", "Файл не найден");
+    res.setHeader("Cache-Control", "no-store");
+    res.type(file.mimeType);
+    res.sendFile(file.path);
+  });
+
+  app.delete("/api/v1/settings/legal-profile/marks/:kind", async (req, res) => {
+    const { deleteInvoiceMarkImage } = await import("./services/legalProfileService.ts");
+    res.json(await deleteInvoiceMarkImage(prisma, await requireAuth(req), String(req.params.kind || "")));
+  });
+
   app.get("/api/v1/settings/esf-preflight", async (req, res) => {
     const { getEsfPreflight } = await import("./integrations/esf/EsfPreflight.ts");
     res.json(await getEsfPreflight(await requireAuth(req)));
@@ -1130,7 +1150,7 @@ export function createApp(prisma: PrismaClient) {
 
   app.get("/api/v1/invoices/:id/pdf", async (req, res) => {
     const { sendInvoicePdf } = await import("./services/invoiceGenerationService.ts");
-    await sendInvoicePdf(prisma, await requireAuth(req), req.params.id, res);
+    await sendInvoicePdf(prisma, await requireAuth(req), req.params.id, res, req.query as Record<string, unknown>);
   });
 
   app.get("/api/v1/documents/avr/eligible-deals", async (req, res) => {
@@ -1516,6 +1536,12 @@ export function createApp(prisma: PrismaClient) {
   app.post("/api/v1/companies", json, async (req, res) => {
     const input = createCompanySchema.parse(req.body || {});
     res.status(201).json(await createCompany(prisma, await requireAuth(req), input));
+  });
+
+  app.post("/api/v1/companies/parse-requisites", jsonLarge, async (req, res) => {
+    const { parseCompanyRequisitesUpload } = await import("./services/companyRequisitesService.ts");
+    const input = parseCompanyRequisitesSchema.parse(req.body || {});
+    res.json(await parseCompanyRequisitesUpload(prisma, await requireAuth(req), input));
   });
 
   app.get("/api/v1/companies/duplicates", async (req, res) => {

@@ -181,6 +181,11 @@ export function createApiClient(options: ClientOptions) {
     legalProfile: () => request("/api/v1/settings/legal-profile"),
     updateLegalProfile: (body: unknown) =>
       request("/api/v1/settings/legal-profile", { method: "PATCH", body: JSON.stringify(body) }),
+    uploadLegalMark: (kind: "stamp" | "signature", body: { contentBase64: string; mimeType: string }) =>
+      request(`/api/v1/settings/legal-profile/marks/${kind}`, { method: "POST", body: JSON.stringify(body) }),
+    legalMarkUrl: (kind: "stamp" | "signature") => `/api/v1/settings/legal-profile/marks/${kind}`,
+    deleteLegalMark: (kind: "stamp" | "signature") =>
+      request(`/api/v1/settings/legal-profile/marks/${kind}`, { method: "DELETE" }),
     esfPreflight: () => request("/api/v1/settings/esf-preflight"),
     esfConnection: () => request("/api/v1/integrations/esf"),
     esfAuthTicket: (iin: string) => request("/api/v1/integrations/esf/auth-ticket", { method: "POST", body: JSON.stringify({ iin }) }),
@@ -312,8 +317,18 @@ export function createApiClient(options: ClientOptions) {
       request(`/api/v1/invoices/${invoiceId}`, { method: "PATCH", body: JSON.stringify(body) }),
     generateInvoice: (invoiceId: string, body: unknown = {}) =>
       request(`/api/v1/invoices/${invoiceId}/generate`, { method: "POST", body: JSON.stringify(body) }),
-    invoicePdfUrl: (invoiceId: string) => `/api/v1/invoices/${invoiceId}/pdf`,
-    downloadInvoicePdf: (invoiceId: string) => downloadBlob(`/api/v1/invoices/${invoiceId}/pdf`, "invoice.pdf"),
+    invoicePdfUrl: (invoiceId: string, query: { stamped?: boolean; download?: boolean } = {}) => {
+      const params = new URLSearchParams();
+      if (query.stamped) params.set("stamped", "1");
+      if (query.download) params.set("download", "1");
+      const qs = params.toString();
+      return `/api/v1/invoices/${invoiceId}/pdf${qs ? `?${qs}` : ""}`;
+    },
+    downloadInvoicePdf: (invoiceId: string, query: { stamped?: boolean } = {}) =>
+      downloadBlob(
+        `/api/v1/invoices/${invoiceId}/pdf?download=1${query.stamped ? "&stamped=1" : ""}`,
+        "invoice.pdf",
+      ),
     avrReadiness: (dealId: string) => request(`/api/v1/deals/${dealId}/avr-readiness`),
     esfInvoiceReadiness: (dealId: string) => request(`/api/v1/deals/${dealId}/esf-invoice-readiness`),
     dealCloseReadiness: (dealId: string) => request(`/api/v1/deals/${dealId}/close-readiness`),
@@ -496,6 +511,8 @@ export function createApiClient(options: ClientOptions) {
     company: (id: string) => request(`/api/v1/companies/${id}`),
     createCompany: (body: unknown) =>
       request("/api/v1/companies", { method: "POST", body: JSON.stringify(body) }),
+    parseCompanyRequisites: (body: { text?: string; fileName?: string; fileBase64?: string }) =>
+      request("/api/v1/companies/parse-requisites", { method: "POST", body: JSON.stringify(body) }),
     updateCompany: (id: string, body: unknown) =>
       request(`/api/v1/companies/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
     deleteCompany: (id: string) => request(`/api/v1/companies/${id}`, { method: "DELETE" }),

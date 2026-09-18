@@ -1,4 +1,5 @@
 import { amountToKztWords } from "@creolab/contracts";
+import { createCanvas, loadImage } from "@napi-rs/canvas";
 import PDFDocument from "pdfkit";
 import {
   collectPdf,
@@ -48,10 +49,15 @@ export type InvoicePdfInput = {
   sellerKbe?: string;
   sellerKnp?: string;
   sellerDirector?: string;
+  sellerEmail?: string;
   buyerName: string;
   buyerBin: string;
   buyerAddress: string;
   buyerPhone?: string;
+  buyerEmail?: string;
+  withStamp?: boolean;
+  stampPng?: Buffer | null;
+  signaturePng?: Buffer | null;
   items: InvoicePdfItem[];
 };
 
@@ -60,13 +66,13 @@ const NOTICE =
   "Внимание!Оплата данного счета означает согласие с условиями поставки товара.Уведомление об оплате обязательно, в противном случае не гарантируется наличие товара на складе.Товар отпускается по факту прихода денег на р / с Поставщика, самовывозом, при наличии доверенности и документов удостоверяющих личность.";
 
 const COLS = [
-  { key: "num", width: 36 },
-  { key: "code", width: 52 },
-  { key: "name", width: 188 },
+  { key: "num", width: 40 },
+  { key: "code", width: 48 },
+  { key: "name", width: 186 },
   { key: "qty", width: 46 },
-  { key: "unit", width: 58 },
+  { key: "unit", width: 62 },
   { key: "price", width: 82 },
-  { key: "amount", width: 83 },
+  { key: "amount", width: 81 },
 ] as const;
 
 function money(value: number) {
@@ -143,9 +149,37 @@ export function invoicePdfFileName(input: InvoicePdfInput) {
   return safeFilePart([local, buyer, dated ? `от ${dated}` : ""].filter(Boolean).join(" ")) + ".pdf";
 }
 
-export function invoicePdfContentDisposition(filename: string) {
+export function invoicePdfContentDisposition(filename: string, inline = false) {
   const ascii = filename.replace(/[^\x20-\x7E]/g, "_").replace(/"/g, "");
-  return `attachment; filename="${ascii || "invoice.pdf"}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+  const mode = inline ? "inline" : "attachment";
+  return `${mode}; filename="${ascii || "invoice.pdf"}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+}
+
+export function formatInvoiceBin(value: string) {
+  const digits = String(value || "").replace(/\D/g, "");
+  return digits.replace(/(\d{3})(?=\d)/g, "$1 ").trim();
+}
+
+export function cyrillicOrgName(name: string) {
+  return String(name || "")
+    .replace(/\bTOO\b/gi, "ТОО")
+    .replace(/\bAO\b/gi, "АО")
+    .replace(/\bIP\b/gi, "ИП");
+}
+
+/** White paper around a scan of the stamp/signature becomes transparent for overlay. */
+export async function punchInvoiceStampBackground(png: Buffer) {
+  const image = await loadImage(png);
+  const canvas = createCanvas(image.width, image.height);
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(image, 0, 0);
+  const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = pixels.data;
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i] > 242 && data[i + 1] > 242 && data[i + 2] > 242) data[i + 3] = 0;
+  }
+  ctx.putImageData(pixels, 0, 0);
+  return canvas.toBuffer("image/png");
 }
 
 function defaultKbe(input: InvoicePdfInput) {
@@ -153,8 +187,8 @@ function defaultKbe(input: InvoicePdfInput) {
 }
 
 function partyDetails(bin: string, name: string, address: string) {
-  const tax = String(bin || "").replace(/\s/g, "");
-  return [`БИН/ИИН ${tax || "—"}`, name, address].filter((part) => part && part !== "—").join(", ");
+  const tax = formatInvoiceBin(bin) || String(bin || "").replace(/\D/g, "");
+  return [`БИН/ИИН ${tax || "—"}`, cyrillicOrgName(name), address].filter((part) => part && part !== "—").join(", ");
 }
 
 function lineAmount(item: InvoicePdfItem) {
@@ -190,78 +224,102 @@ export async function renderInvoicePdf(input: InvoicePdfInput) {
   const localNumber = invoiceLocalNumber(input.number, input.date);
 
   doc.fillColor(BLACK).font("NotoSans").fontSize(9).text(NOTICE, left, 34, { width, align: "left", lineGap: 1.2 });
-
   let y = doc.y + 10;
   doc.font("NotoSans-Bold").fontSize(14).text("Образец платежного поручения", left, y);
-  y = doc.y + 6;
+  y = doc.y + 8;
 
-  const boxH = 72;
-  const col1 = width * 0.62;
-  const col3 = 58;
-  const col2 = width - col1 - col3;
+  const row1H = 58;
+  const row2H = 46;
+  const boxH = row1H + row2H;
+  const col3 = 52;
+  const col2 = 148;
+  const col1 = width - col2 - col3;
+  const boxY = y;
   doc.lineWidth(0.8).strokeColor(BLACK);
-  doc.rect(left, y, width, boxH).stroke();
-  doc.moveTo(left + col1, y).lineTo(left + col1, y + boxH).stroke();
-  doc.moveTo(left + col1 + col2, y).lineTo(left + col1 + col2, y + boxH).stroke();
-  doc.moveTo(left, y + boxH / 2).lineTo(right, y + boxH / 2).stroke();
+  doc.rect(left, boxY, width, boxH).stroke();
+  doc.moveTo(left + col1, boxY).lineTo(left + col1, boxY + boxH).stroke();
+  doc.moveTo(left + col1 + col2, boxY).lineTo(left + col1 + col2, boxY + boxH).stroke();
+  doc.moveTo(left, boxY + row1H).lineTo(right, boxY + row1H).stroke();
 
   const pad = 6;
-  doc.font("NotoSans").fontSize(11).text("Бенефициар", left + pad, y + 4, { width: col1 - pad * 2 });
-  doc.font("NotoSans-Bold").fontSize(10).text(input.sellerName || "", left + pad, y + 18, { width: col1 - pad * 2 });
-  doc.font("NotoSans").fontSize(10).text(`БИН: ${String(input.sellerBin || "").replace(/\s/g, "")}`, left + pad, y + 32, {
-    width: col1 - pad * 2,
+  const binText = `БИН: ${String(input.sellerBin || "").replace(/\s/g, "")}`;
+  const inner1 = col1 - pad * 2;
+  doc.save();
+  doc.rect(left, boxY, col1, row1H).clip();
+  doc.font("NotoSans").fontSize(12).text("Бенефициар", left + pad, boxY + 4, { width: inner1, lineBreak: false });
+  doc.font("NotoSans-Bold").fontSize(10).text(cyrillicOrgName(input.sellerName || ""), left + pad, boxY + 20, {
+    width: inner1,
+    height: 13,
+    lineBreak: false,
   });
-  doc.fontSize(11).text("ИИК", left + col1 + pad, y + 4, { width: col2 - pad * 2, align: "center" });
-  doc.fontSize(10).text(input.sellerIban || "", left + col1 + pad, y + 20, { width: col2 - pad * 2, align: "center" });
-  doc.fontSize(11).text("КБе", left + col1 + col2 + pad, y + 4, { width: col3 - pad * 2, align: "center" });
-  doc.fontSize(10).text(defaultKbe(input), left + col1 + col2 + pad, y + 20, { width: col3 - pad * 2, align: "center" });
+  doc.font("NotoSans").fontSize(10).text(binText, left + pad, boxY + 36, {
+    width: inner1,
+    height: 13,
+    lineBreak: false,
+  });
+  doc.restore();
+  doc.font("NotoSans").fontSize(12).text("ИИК", left + col1, boxY + 4, { width: col2, align: "center", lineBreak: false });
+  doc.fontSize(10).text(input.sellerIban || "", left + col1, boxY + 22, { width: col2, align: "center", lineBreak: false });
+  doc.fontSize(12).text("КБе", left + col1 + col2, boxY + 4, { width: col3, align: "center", lineBreak: false });
+  doc.fontSize(10).text(defaultKbe(input), left + col1 + col2, boxY + 22, { width: col3, align: "center", lineBreak: false });
 
-  const row2 = y + boxH / 2;
-  doc.fontSize(11).text("Банк бенефициара", left + pad, row2 + 4, { width: col1 - pad * 2 });
-  doc.fontSize(10).text(input.sellerBankName || "", left + pad, row2 + 20, { width: col1 - pad * 2 });
-  doc.fontSize(11).text("БИК", left + col1 + pad, row2 + 4, { width: col2 - pad * 2, align: "center" });
-  doc.fontSize(10).text(input.sellerBik || "", left + col1 + pad, row2 + 20, { width: col2 - pad * 2, align: "center" });
-  doc.fontSize(11).text("КНП", left + col1 + col2 + pad, row2 + 4, { width: col3 - pad * 2, align: "center" });
-  doc.fontSize(10).text(String(input.sellerKnp || "859"), left + col1 + col2 + pad, row2 + 20, {
-    width: col3 - pad * 2,
+  const row2 = boxY + row1H;
+  doc.save();
+  doc.rect(left, row2, col1, row2H).clip();
+  doc.font("NotoSans").fontSize(12).text("Банк бенефициара", left + pad, row2 + 5, { width: inner1, lineBreak: false });
+  doc.fontSize(10).text(input.sellerBankName || "", left + pad, row2 + 23, { width: inner1, height: 16, lineBreak: false });
+  doc.restore();
+  doc.fontSize(12).text("БИК", left + col1, row2 + 5, { width: col2, align: "center", lineBreak: false });
+  doc.fontSize(10).text(input.sellerBik || "", left + col1, row2 + 23, { width: col2, align: "center", lineBreak: false });
+  doc.fontSize(12).text("КНП", left + col1 + col2, row2 + 5, { width: col3, align: "center", lineBreak: false });
+  doc.fontSize(10).text(String(input.sellerKnp || "859"), left + col1 + col2, row2 + 23, {
+    width: col3,
     align: "center",
+    lineBreak: false,
   });
 
-  y = y + boxH + 16;
+  y = boxY + boxH + 16;
   doc.font("NotoSans-Bold").fontSize(16).text(`Счет на оплату № ${localNumber} от ${formatDotDate(input.date)} г.`, left, y, {
     width,
   });
   y = doc.y + 14;
 
-  const labelW = 78;
-  doc.font("NotoSans-Bold").fontSize(11).text("Поставщик:", left, y, { width: labelW });
-  doc.font("NotoSans").fontSize(10).text(partyDetails(input.sellerBin, input.sellerName, input.sellerAddress), left + labelW, y - 1, {
-    width: width - labelW,
-  });
-  y = Math.max(doc.y, y + 12);
-  if (input.sellerPhone) {
-    doc.text(`Тел.: ${input.sellerPhone}`, left + labelW, y, { width: width - labelW });
-    y = doc.y + 8;
-  } else {
-    y += 8;
-  }
-
-  doc.font("NotoSans-Bold").fontSize(11).text("Покупатель:", left, y, { width: labelW });
-  doc.font("NotoSans").fontSize(10).text(partyDetails(input.buyerBin, input.buyerName, input.buyerAddress), left + labelW, y - 1, {
-    width: width - labelW,
-  });
-  y = Math.max(doc.y, y + 12);
-  if (input.buyerPhone) {
-    doc.text(`Тел: ${input.buyerPhone}`, left + labelW, y, { width: width - labelW });
-    y = doc.y + 10;
-  } else {
+  const partyIndent = 93;
+  function drawParty(label: string, details: string, phone: string, email: string, phoneLabel: string) {
+    const start = y;
+    doc.font("NotoSans-Bold").fontSize(12).text(label, left, start, { width: partyIndent - 4, lineBreak: false });
+    doc.font("NotoSans").fontSize(10).text(details, left + partyIndent, start + 1, { width: width - partyIndent });
+    y = Math.max(doc.y, start + 14);
+    if (phone) {
+      doc.text(`${phoneLabel} ${phone}`, left + partyIndent, y, { width: width - partyIndent });
+      y = doc.y;
+    }
+    if (email) {
+      doc.text(`E-mail: ${email}`, left + partyIndent, y, { width: width - partyIndent });
+      y = doc.y;
+    }
     y += 10;
   }
 
+  drawParty(
+    "Поставщик:",
+    partyDetails(input.sellerBin, input.sellerName, input.sellerAddress),
+    input.sellerPhone || "",
+    input.sellerEmail || "",
+    "Тел.:",
+  );
+  drawParty(
+    "Покупатель:",
+    partyDetails(input.buyerBin, input.buyerName, input.buyerAddress),
+    input.buyerPhone || "",
+    input.buyerEmail || "",
+    "Тел:",
+  );
+
   const contract = formatInvoiceContractBasis(input.contractNumber, input.contractDate);
-  doc.font("NotoSans-Bold").fontSize(11).text("Договор:", left, y, { width: labelW });
-  doc.font("NotoSans").fontSize(10).text(contract, left + labelW, y, { width: width - labelW });
-  y = Math.max(doc.y, y + 12) + 8;
+  doc.font("NotoSans-Bold").fontSize(12).text("Договор:", left, y, { width: partyIndent - 4, lineBreak: false });
+  doc.font("NotoSans").fontSize(10).text(contract, left + partyIndent, y + 1, { width: width - partyIndent });
+  y = Math.max(doc.y, y + 14) + 10;
 
   const tableHeaders = ["№", "Код", "", "", "Ед. изм.", "Цена", "Сумма"];
   const colXs: number[] = [];
@@ -284,7 +342,7 @@ export async function renderInvoicePdf(input: InvoicePdfInput) {
     for (let i = 1; i < COLS.length; i += 1) {
       doc.moveTo(colXs[i], y).lineTo(colXs[i], y + h).stroke();
     }
-    doc.font("NotoSans-Bold").fontSize(11);
+    doc.font("NotoSans-Bold").fontSize(12);
     tableHeaders.forEach((title, index) => {
       if (!title) return;
       doc.text(title, colXs[index], y + 5, { width: COLS[index].width, align: "center" });
@@ -334,9 +392,13 @@ export async function renderInvoicePdf(input: InvoicePdfInput) {
     doc.text("Без НДС", summaryX, y, { width: summaryW, align: "left" });
   }
 
-  const footerH = 78;
-  if (doc.y + footerH + 24 > doc.page.height - doc.page.margins.bottom) doc.addPage();
-  y = Math.max(doc.y + 36, doc.page.height - doc.page.margins.bottom - footerH);
+  const stamped = Boolean(input.withStamp && (input.stampPng || input.signaturePng));
+  const footerH = stamped ? 140 : 72;
+  y = doc.y + 48;
+  if (y + footerH > doc.page.height - doc.page.margins.bottom) {
+    doc.addPage();
+    y = doc.page.margins.top;
+  }
 
   doc.font("NotoSans").fontSize(10).text(
     `Всего наименований ${input.items.length}, на сумму ${money(payableTotal)} KZT`,
@@ -346,7 +408,7 @@ export async function renderInvoicePdf(input: InvoicePdfInput) {
   );
   y = doc.y + 6;
   doc.font("NotoSans-Bold").fontSize(12).text(`Всего к оплате: ${invoicePayableWords(payableTotal)}`, left, y, { width });
-  y = doc.y + 18;
+  y = doc.y + (stamped ? 42 : 22);
   const signer = invoiceDirectorShortName(input.sellerDirector || "");
   doc.font("NotoSans").fontSize(10).text(
     `Исполнитель ________________________________________${signer ? ` /${signer}/` : ""}`,
@@ -354,6 +416,22 @@ export async function renderInvoicePdf(input: InvoicePdfInput) {
     y,
     { width },
   );
+  if (stamped) {
+    if (input.stampPng) {
+      try {
+        doc.image(input.stampPng, left + 40, y - 18, { fit: [100, 100] });
+      } catch {
+        /* keep the line even if the stamp file is unreadable */
+      }
+    }
+    if (input.signaturePng) {
+      try {
+        doc.image(input.signaturePng, left + 86, y - 24, { fit: [126, 50] });
+      } catch {
+        /* keep the line even if the signature file is unreadable */
+      }
+    }
+  }
 
   doc.end();
   return done;

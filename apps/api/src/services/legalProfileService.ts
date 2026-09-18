@@ -1,10 +1,14 @@
 import type { PrismaClient } from "@creolab/db";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { normalizeKzTaxId } from "@creolab/contracts";
 import { ApiError } from "../errors.ts";
 import { DEFAULT_DOCUMENT_FLAGS } from "../lib/featureFlags.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { can } from "../lib/types.ts";
 import { requireDocumentsAccess } from "../lib/access.ts";
+import { resolveUploadPath } from "../lib/storage.ts";
 import { asMoney } from "./documentMoney.ts";
 
 function requireTenant(auth: AuthContext) {
@@ -73,7 +77,8 @@ export async function getLegalProfile(prisma: PrismaClient, auth: AuthContext) {
   const row = await prisma.tenantLegalProfile.findUnique({ where: { tenantId: membership.tenantId } });
   const tenant=await prisma.tenant.findUnique({where:{id:membership.tenantId},select:{settingsJson:true}});
   const settings=tenant?.settingsJson as {documents?:{directorBasis?:string}}|null;
-  return {...serializeLegalProfile(row),directorBasis:settings?.documents?.directorBasis||null};
+  const marks = row ? await invoiceMarkFlags(prisma, membership.tenantId, row.id) : { hasStamp: false, hasSignature: false };
+  return {...serializeLegalProfile(row),directorBasis:settings?.documents?.directorBasis||null, ...marks};
 }
 
 export async function getTenantDocumentFlags(prisma: PrismaClient, tenantId: string) {
@@ -216,4 +221,151 @@ export async function updateLegalProfile(
     await tx.tenant.update({where:{id:tid},data:{settingsJson:{...settings,documents:{...settings?.documents,directorBasis:input.directorBasis||null}}}});
   });
   return getLegalProfile(prisma,auth);
+}
+
+export const INVOICE_MARK_KINDS = ["stamp", "signature"] as const;
+export type InvoiceMarkKind = (typeof INVOICE_MARK_KINDS)[number];
+
+function markDocumentType(kind: InvoiceMarkKind) {
+  return kind === "stamp" ? "invoice_stamp" : "invoice_signature";
+}
+
+async function invoiceMarkFlags(prisma: PrismaClient, tenantId: string, profileId: string) {
+  const rows = await prisma.attachment.findMany({
+    where: { tenantId, parentType: "legal_profile", parentId: profileId, documentType: { in: ["invoice_stamp", "invoice_signature"] } },
+    select: { documentType: true },
+  });
+  return {
+    hasStamp: rows.some((row) => row.documentType === "invoice_stamp"),
+    hasSignature: rows.some((row) => row.documentType === "invoice_signature"),
+  };
+}
+
+async function ensureLegalProfileRow(prisma: PrismaClient, tenantId: string) {
+  return (
+    (await prisma.tenantLegalProfile.findUnique({ where: { tenantId } })) ||
+    (await prisma.tenantLegalProfile.create({ data: { tenantId } }))
+  );
+}
+
+export async function listInvoiceMarkFiles(prisma: PrismaClient, tenantId: string) {
+  const profile = await prisma.tenantLegalProfile.findUnique({ where: { tenantId } });
+  if (!profile) return { stamp: null as Buffer | null, signature: null as Buffer | null, hasStamp: false, hasSignature: false };
+  const rows = await prisma.attachment.findMany({
+    where: { tenantId, parentType: "legal_profile", parentId: profile.id, documentType: { in: ["invoice_stamp", "invoice_signature"] } },
+  });
+  async function load(kind: InvoiceMarkKind) {
+    const row = rows.find((item) => item.documentType === markDocumentType(kind));
+    if (!row) return null;
+    try {
+      return await readFile(resolveUploadPath(row.storageKey));
+    } catch {
+      return null;
+    }
+  }
+  const stamp = await load("stamp");
+  const signature = await load("signature");
+  return { stamp, signature, hasStamp: Boolean(stamp), hasSignature: Boolean(signature) };
+}
+
+export async function saveInvoiceMarkImage(
+  prisma: PrismaClient,
+  auth: AuthContext,
+  kindRaw: string,
+  input: { contentBase64?: string; mimeType?: string },
+) {
+  const membership = requireTenant(auth);
+  if (!can(auth, "manage_documents")) throw new ApiError(403, "forbidden", "Недостаточно прав для реквизитов");
+  if (!INVOICE_MARK_KINDS.includes(kindRaw as InvoiceMarkKind)) {
+    throw new ApiError(422, "invalid", "Загрузите печать или подпись");
+  }
+  const kind = kindRaw as InvoiceMarkKind;
+  const mime = String(input.mimeType || "").toLowerCase();
+  if (mime !== "image/png" && mime !== "image/jpeg" && mime !== "image/webp") {
+    throw new ApiError(422, "invalid", "Печать и подпись — PNG, JPEG или WebP");
+  }
+  const raw = String(input.contentBase64 || "").replace(/^data:[^;]+;base64,/, "");
+  let buffer: Buffer;
+  try {
+    buffer = Buffer.from(raw, "base64");
+  } catch {
+    throw new ApiError(422, "invalid", "Некорректный файл");
+  }
+  if (!buffer.length) throw new ApiError(422, "invalid", "Файл пуст");
+  if (buffer.length > 2 * 1024 * 1024) throw new ApiError(422, "invalid", "Файл больше 2 МБ");
+  const profile = await ensureLegalProfileRow(prisma, membership.tenantId);
+  const previous = await prisma.attachment.findMany({
+    where: {
+      tenantId: membership.tenantId,
+      parentType: "legal_profile",
+      parentId: profile.id,
+      documentType: markDocumentType(kind),
+    },
+  });
+  const ext = mime === "image/jpeg" ? "jpg" : mime === "image/webp" ? "webp" : "png";
+  const id = randomUUID();
+  const storageKey = path.posix.join(membership.tenantId, "legal-marks", `${kind}-${id}.${ext}`);
+  const absolute = resolveUploadPath(storageKey);
+  await mkdir(path.dirname(absolute), { recursive: true });
+  await writeFile(absolute, buffer, { flag: "wx" });
+  await prisma.attachment.create({
+    data: {
+      id,
+      tenantId: membership.tenantId,
+      parentType: "legal_profile",
+      parentId: profile.id,
+      documentType: markDocumentType(kind),
+      storageKey,
+      fileName: `${kind}.${ext}`,
+      originalFileName: `${kind}.${ext}`,
+      mimeType: mime,
+      sizeBytes: buffer.length,
+      checksum: createHash("sha256").update(buffer).digest("hex"),
+      status: "stored",
+      uploadedById: auth.user.id,
+    },
+  });
+  for (const old of previous) {
+    await prisma.attachment.delete({ where: { id: old.id } }).catch(() => undefined);
+    await rm(resolveUploadPath(old.storageKey), { force: true }).catch(() => undefined);
+  }
+  return getLegalProfile(prisma, auth);
+}
+
+export async function invoiceMarkFilePath(prisma: PrismaClient, auth: AuthContext, kindRaw: string) {
+  requireDocumentsAccess(auth);
+  const membership = requireTenant(auth);
+  if (!INVOICE_MARK_KINDS.includes(kindRaw as InvoiceMarkKind)) throw new ApiError(404, "not_found", "Файл не найден");
+  const profile = await prisma.tenantLegalProfile.findUnique({ where: { tenantId: membership.tenantId } });
+  if (!profile) throw new ApiError(404, "not_found", "Файл не найден");
+  const row = await prisma.attachment.findFirst({
+    where: {
+      tenantId: membership.tenantId,
+      parentType: "legal_profile",
+      parentId: profile.id,
+      documentType: markDocumentType(kindRaw as InvoiceMarkKind),
+    },
+  });
+  if (!row) throw new ApiError(404, "not_found", "Файл не загружен");
+  return { path: resolveUploadPath(row.storageKey), mimeType: row.mimeType };
+}
+
+export async function deleteInvoiceMarkImage(prisma: PrismaClient, auth: AuthContext, kindRaw: string) {
+  const membership = requireTenant(auth);
+  if (!can(auth, "manage_documents")) throw new ApiError(403, "forbidden", "Недостаточно прав для реквизитов");
+  if (!INVOICE_MARK_KINDS.includes(kindRaw as InvoiceMarkKind)) throw new ApiError(404, "not_found", "Файл не найден");
+  const file = await invoiceMarkFilePath(prisma, auth, kindRaw).catch(() => null);
+  const profile = await prisma.tenantLegalProfile.findUnique({ where: { tenantId: membership.tenantId } });
+  if (profile) {
+    await prisma.attachment.deleteMany({
+      where: {
+        tenantId: membership.tenantId,
+        parentType: "legal_profile",
+        parentId: profile.id,
+        documentType: markDocumentType(kindRaw as InvoiceMarkKind),
+      },
+    });
+  }
+  if (file) await rm(file.path, { force: true }).catch(() => undefined);
+  return getLegalProfile(prisma, auth);
 }

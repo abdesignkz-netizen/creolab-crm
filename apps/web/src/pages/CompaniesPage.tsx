@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { notifySaved } from "../components/SaveNotice";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
@@ -6,9 +6,37 @@ import { useRequestVersion } from "../lib/useUrlState";
 
 type Scope = "all" | "mine" | "unassigned";
 
+const emptyDraft = () => ({
+  name: "",
+  legalName: "",
+  bin: "",
+  iin: "",
+  legalAddress: "",
+  directorName: "",
+  iban: "",
+  bankName: "",
+  bik: "",
+  industry: "",
+  city: "",
+  website: "",
+  phone: "",
+  email: "",
+  description: "",
+});
+
+function readBase64(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Не удалось прочитать файл"));
+    reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+    reader.readAsDataURL(file);
+  });
+}
+
 export function CompaniesPage() {
   const navigate = useNavigate();
   const requestVersion = useRequestVersion();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [scope, setScope] = useState<Scope>("all");
   const [q, setQ] = useState("");
   const [lifecycleStatus, setLifecycleStatus] = useState("");
@@ -18,17 +46,23 @@ export function CompaniesPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [duplicates, setDuplicates] = useState<any[]>([]);
   const [createBusy, setCreateBusy] = useState(false);
-  const [draft, setDraft] = useState({
-    name: "",
-    legalName: "",
-    bin: "",
-    industry: "",
-    city: "",
-    website: "",
-    phone: "",
-    email: "",
-    description: "",
-  });
+  const [parseBusy, setParseBusy] = useState(false);
+  const [parseError, setParseError] = useState("");
+  const [parseWarnings, setParseWarnings] = useState<string[]>([]);
+  const [requisitesText, setRequisitesText] = useState("");
+  const [requisitesFile, setRequisitesFile] = useState<File | null>(null);
+  const [draft, setDraft] = useState(emptyDraft);
+
+  function closeCreate() {
+    if (createBusy || parseBusy) return;
+    setShowCreate(false);
+    setDuplicates([]);
+    setParseError("");
+    setParseWarnings([]);
+    setRequisitesText("");
+    setRequisitesFile(null);
+    setDraft(emptyDraft());
+  }
 
   async function load() {
     const version = ++requestVersion.current;
@@ -59,23 +93,71 @@ export function CompaniesPage() {
     await load();
   }
 
+  async function parseRequisites(file = requisitesFile, text = requisitesText) {
+    if (parseBusy || createBusy) return;
+    if (!file && !text.trim()) {
+      setParseError("Вставьте текст реквизитов или выберите PDF / Word");
+      return;
+    }
+    if (file && (file.size > 20 * 1024 * 1024 || !/\.(pdf|docx|doc)$/i.test(file.name))) {
+      setParseError("Выберите PDF или Word (.docx, .doc) размером до 20 МБ");
+      return;
+    }
+    setParseBusy(true);
+    setParseError("");
+    setParseWarnings([]);
+    try {
+      const result: any = await api.parseCompanyRequisites(
+        text.trim()
+          ? { text: text.trim() }
+          : { fileName: file!.name, fileBase64: await readBase64(file!) },
+      );
+      const parsed = result.draft || {};
+      setDraft((current) => ({
+        ...current,
+        name: parsed.name || current.name,
+        legalName: parsed.legalName || parsed.name || current.legalName,
+        bin: parsed.bin || parsed.iin || current.bin,
+        iin: parsed.iin || current.iin,
+        legalAddress: parsed.legalAddress || current.legalAddress,
+        directorName: parsed.directorName || current.directorName,
+        iban: parsed.iban || current.iban,
+        bankName: parsed.bankName || current.bankName,
+        bik: parsed.bik || current.bik,
+        city: parsed.city || current.city,
+        phone: parsed.phone || current.phone,
+        email: parsed.email || current.email,
+      }));
+      setParseWarnings(Array.isArray(result.warnings) ? result.warnings : []);
+    } catch (err) {
+      setParseError(err instanceof Error ? err.message : "Не удалось распознать реквизиты");
+    } finally {
+      setParseBusy(false);
+    }
+  }
+
+  async function onPickFile(file: File | null) {
+    setRequisitesFile(file);
+    setParseError("");
+    if (file) await parseRequisites(file, "");
+  }
+
   async function createCompany(force = false) {
     setCreateBusy(true);
     try {
-      const created: any = await api.createCompany({ ...draft, forceCreate: force || undefined });
+      const created: any = await api.createCompany({
+        ...draft,
+        bin: draft.bin || undefined,
+        iin: draft.iin || undefined,
+        forceCreate: force || undefined,
+      });
       setShowCreate(false);
       setDuplicates([]);
-      setDraft({
-        name: "",
-        legalName: "",
-        bin: "",
-        industry: "",
-        city: "",
-        website: "",
-        phone: "",
-        email: "",
-        description: "",
-      });
+      setParseError("");
+      setParseWarnings([]);
+      setRequisitesText("");
+      setRequisitesFile(null);
+      setDraft(emptyDraft());
       notifySaved("Компания создана");
       navigate(`/companies/${created.id}`);
     } catch (err: any) {
@@ -191,33 +273,111 @@ export function CompaniesPage() {
       </div>
 
       {showCreate ? (
-        <div className="stats-modal-backdrop" onClick={() => setShowCreate(false)}>
-          <div className="stats-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="stats-modal-backdrop" onClick={closeCreate}>
+          <div className="stats-modal company-create-modal" onClick={(e) => e.stopPropagation()}>
             <h3>Новая компания</h3>
-            <div className="stats-filters" style={{ gridTemplateColumns: "1fr" }}>
-              <label>
+            <div className="company-requisites">
+              <b>Из реквизитов</b>
+              <p className="muted">PDF, Word или вставьте текст — распознаем название, БИН, адрес и банк.</p>
+              <div className="company-requisites-actions">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  hidden
+                  accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  onChange={(e) => void onPickFile(e.target.files?.[0] || null)}
+                />
+                <button
+                  type="button"
+                  className="btn secondary"
+                  disabled={parseBusy || createBusy}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  {requisitesFile ? requisitesFile.name : "Загрузить PDF / Word"}
+                </button>
+                {requisitesFile ? (
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    disabled={parseBusy || createBusy}
+                    onClick={() => {
+                      setRequisitesFile(null);
+                      if (fileInputRef.current) fileInputRef.current.value = "";
+                    }}
+                  >
+                    Убрать файл
+                  </button>
+                ) : null}
+              </div>
+              <textarea
+                value={requisitesText}
+                onChange={(e) => setRequisitesText(e.target.value)}
+                rows={4}
+                placeholder="Вставьте реквизиты компании…"
+              />
+              <button
+                type="button"
+                className="btn secondary"
+                disabled={parseBusy || createBusy}
+                onClick={() => void parseRequisites()}
+              >
+                {parseBusy ? "Распознаём…" : "Распознать"}
+              </button>
+              {parseError ? <p className="error">{parseError}</p> : null}
+              {parseWarnings.length ? (
+                <ul className="company-requisites-warnings">
+                  {parseWarnings.map((warning) => (
+                    <li key={warning}>{warning}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+            <div className="company-create-grid">
+              <label className="span-2">
                 Название *
                 <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
               </label>
-              <label>
+              <label className="span-2">
                 Юридическое название
                 <input value={draft.legalName} onChange={(e) => setDraft({ ...draft, legalName: e.target.value })} />
               </label>
               <label>
-                БИН
+                БИН / ИИН
                 <input value={draft.bin} onChange={(e) => setDraft({ ...draft, bin: e.target.value })} />
-              </label>
-              <label>
-                Отрасль
-                <input value={draft.industry} onChange={(e) => setDraft({ ...draft, industry: e.target.value })} />
               </label>
               <label>
                 Город
                 <input value={draft.city} onChange={(e) => setDraft({ ...draft, city: e.target.value })} />
               </label>
+              <label className="span-2">
+                Юридический адрес
+                <input
+                  value={draft.legalAddress}
+                  onChange={(e) => setDraft({ ...draft, legalAddress: e.target.value })}
+                />
+              </label>
               <label>
-                Сайт
-                <input value={draft.website} onChange={(e) => setDraft({ ...draft, website: e.target.value })} />
+                Директор
+                <input
+                  value={draft.directorName}
+                  onChange={(e) => setDraft({ ...draft, directorName: e.target.value })}
+                />
+              </label>
+              <label>
+                Банк
+                <input value={draft.bankName} onChange={(e) => setDraft({ ...draft, bankName: e.target.value })} />
+              </label>
+              <label>
+                ИИК / IBAN
+                <input value={draft.iban} onChange={(e) => setDraft({ ...draft, iban: e.target.value })} />
+              </label>
+              <label>
+                БИК
+                <input value={draft.bik} onChange={(e) => setDraft({ ...draft, bik: e.target.value })} />
+              </label>
+              <label>
+                Отрасль
+                <input value={draft.industry} onChange={(e) => setDraft({ ...draft, industry: e.target.value })} />
               </label>
               <label>
                 Телефон
@@ -227,7 +387,11 @@ export function CompaniesPage() {
                 Email
                 <input value={draft.email} onChange={(e) => setDraft({ ...draft, email: e.target.value })} />
               </label>
-              <label>
+              <label className="span-2">
+                Сайт
+                <input value={draft.website} onChange={(e) => setDraft({ ...draft, website: e.target.value })} />
+              </label>
+              <label className="span-2">
                 Комментарий
                 <textarea
                   value={draft.description}
@@ -260,10 +424,10 @@ export function CompaniesPage() {
               </div>
             ) : null}
             <div className="row" style={{ gap: 8, marginTop: 12 }}>
-              <button type="button" className="btn" disabled={createBusy || !draft.name.trim()} onClick={() => void createCompany(false)}>
+              <button type="button" className="btn" disabled={createBusy || parseBusy || !draft.name.trim()} onClick={() => void createCompany(false)}>
                 Создать
               </button>
-              <button type="button" className="btn secondary" onClick={() => setShowCreate(false)}>
+              <button type="button" className="btn secondary" disabled={createBusy || parseBusy} onClick={closeCreate}>
                 Отмена
               </button>
             </div>
