@@ -80,6 +80,8 @@ export function requireTenant(auth: AuthContext) {
   return auth.activeMembership;
 }
 
+export const requireOrganization = requireTenant;
+
 export function requirePermission(auth: AuthContext, permission: Permission, message = "Недостаточно прав") {
   requireTenant(auth);
   if (!can(auth, permission)) throw new ApiError(403, "forbidden", message);

@@ -155,7 +155,17 @@ a.sit-kpi:hover, button.sit-kpi:hover { background: #f2f7ff; border-color: #cfde
 .deal-col { background: #eeeef2; border-color: transparent; border-radius: 16px; padding: 10px; }
 .deal-col-head { padding: 8px 7px 14px; font-size: 12px; }
 .deal-flag { border-radius: 5px; font-size: 10px; }
-.conversations-layout { min-height: 660px; height: calc(100dvh - 110px); grid-template-columns: minmax(260px, 300px) minmax(0, 1fr) minmax(220px, 270px); gap: 12px; }
+.conversations-layout { min-height: 0; height: auto; flex: 1 1 auto; grid-template-columns: minmax(280px, 320px) minmax(420px, 1.8fr) minmax(240px, 300px); gap: 12px; }
+.main:has(.conversations-layout) {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100dvh;
+  overflow: hidden;
+  padding-top: 16px;
+  padding-bottom: 16px;
+}
+.main:has(.conversations-layout) .workspace-toolbar { flex-shrink: 0; padding-bottom: 12px; }
 .conv-list-pane, .conv-chat-pane, .conv-context-pane { box-shadow: var(--shadow-soft); }
 .conv-list-pane { padding: 18px 12px; }
 .conv-list-pane .page-head { margin: 0 8px 12px; }
@@ -163,8 +173,8 @@ a.sit-kpi:hover, button.sit-kpi:hover { background: #f2f7ff; border-color: #cfde
 .conv-row { background: transparent; border-radius: 12px; padding: 13px 12px; }
 .conv-row.active { background: var(--accent-soft); border-color: transparent; }
 .conv-row:hover { background: #f1f4f9; border-color: transparent; }
-.conv-chat-head, .conv-composer { padding: 20px; background: #fff; }
-.conv-messages { background: #fafbfe; }
+.conv-header, .conv-composer { padding: 16px 20px; background: #fff; }
+.conv-messages { background: #fafbfe; min-height: 320px; }
 .bubble { border-radius: 17px; box-shadow: none; line-height: 1.55; }
 .conv-context-pane { padding: 20px; font-size: 12px; }
 .hover-hint { background: rgba(32, 34, 41, .96); border-radius: 9px; padding: 9px 12px; font-size: 11px; box-shadow: 0 6px 24px #12182626; }
@@ -178,7 +188,7 @@ a.sit-kpi:hover, button.sit-kpi:hover { background: #f2f7ff; border-color: #cfde
 @media (min-width: 768px) and (max-width: 1200px) {
   :root { --nav-w: 206px; }
   .main { padding-inline: 24px; }
-  .conversations-layout { grid-template-columns: 260px minmax(0, 1fr); }
+  .conversations-layout { grid-template-columns: 280px minmax(0, 1fr); }
   .conv-context-pane { display: none; }
   .stats-kpi-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
@@ -201,11 +211,11 @@ a.sit-kpi:hover, button.sit-kpi:hover { background: #f2f7ff; border-color: #cfde
   .conv-context-strip { font-size: 11px; gap: 5px 12px; }
   .conv-header > div, .conv-header-actions, .conv-topic, .bubble { min-width: 0; overflow-wrap: anywhere; }
   .conv-composer { grid-template-columns: minmax(0, 1fr) auto; }
-  .conv-composer textarea { min-height: 60px; width: 100%; }
+  .conv-composer textarea { min-height: 88px; width: 100%; }
   .conv-list-pane, .conv-chat-pane { min-height: 0; min-width: 0; }
-  .conv-chat-pane { display: flex; flex-direction: column; }
+  .conv-chat-pane { display: flex; flex-direction: column; overflow: hidden; }
   .conv-chat-pane > * { flex-shrink: 0; }
-  .conv-chat-pane .conv-messages { flex: 1 1 140px; min-height: 140px; }
+  .conv-chat-pane .conv-messages { flex: 1 1 220px; min-height: 220px; }
   .mobile-topbar { background: rgba(248, 248, 251, .88); border-color: #e6e7ee; }
   .page-head { gap: 12px; margin-bottom: 20px; align-items: flex-start; }
   .page-head > div { min-width: 0; }
@@ -225,7 +235,8 @@ a.sit-kpi:hover, button.sit-kpi:hover { background: #f2f7ff; border-color: #cfde
   .client-row-side { border-left: 0; border-top: 1px solid #eff0f3; padding: 12px 0 0; margin-top: 10px; }
   .client-row-title { font-size: 16px; }
   .stats-tabs { border-radius: 12px; }
-  .conversations-layout { display: grid; grid-template-columns: minmax(0, 1fr); height: calc(100dvh - 175px); min-height: 460px; }
+  .conversations-layout { display: grid; grid-template-columns: minmax(0, 1fr); height: calc(100dvh - 175px); min-height: 520px; flex: none; }
+  .main:has(.conversations-layout) { height: auto; overflow: visible; padding-bottom: calc(20px + 64px + env(safe-area-inset-bottom, 0px)); }
   .conv-context-pane { display: none; }
   .conv-chat-head, .conv-composer { padding: 14px; }
   .conv-list-pane { padding: 16px 12px; }

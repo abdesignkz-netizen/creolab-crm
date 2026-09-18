@@ -1,10 +1,11 @@
-import argon2 from "argon2";
 import { SignJWT, jwtVerify } from "jose";
 import type { PrismaClient } from "@creolab/db";
 import { loginSchema, ROLE_LABELS, type Role } from "@creolab/contracts";
 import { ApiError } from "../errors.ts";
 import { config } from "../config.ts";
+import { writeAudit } from "../lib/audit.ts";
 import { randomToken, sha256 } from "../lib/hash.ts";
+import { verifyPassword } from "../lib/password.ts";
 import { capabilities } from "../lib/access.ts";
 import type { AuthContext } from "../lib/types.ts";
 
@@ -38,6 +39,20 @@ function deviceLabelFromUa(ua?: string | null) {
   return [browser, os].filter(Boolean).join(" · ");
 }
 
+function tenantChoices(memberships: AuthContext["memberships"]) {
+  return memberships
+    .filter((item) => item.active && item.tenant.status === "active")
+    .map((item) => ({
+      tenantId: item.tenantId,
+      name: item.tenant.name,
+      role: item.role,
+    }));
+}
+
+function denyTenant(code: string, message: string, memberships: AuthContext["memberships"]): never {
+  throw new ApiError(403, code, message, undefined, { memberships: tenantChoices(memberships) });
+}
+
 function toAuth(
   user: {
     id: string;
@@ -60,14 +75,26 @@ function toAuth(
   client: "web" | "mobile",
   tenantId?: string | null,
 ): AuthContext {
-  const requested = tenantId
-    ? user.memberships.find((item) => item.tenantId === tenantId)
-    : undefined;
-  const active =
-    requested ||
-    user.memberships.find((item) => item.active && item.tenant.status === "active") ||
-    user.memberships.find((item) => item.active) ||
-    null;
+  const requested = String(tenantId || "").trim();
+  let active: AuthContext["activeMembership"] = null;
+  if (requested) {
+    const membership = user.memberships.find((item) => item.tenantId === requested);
+    if (!membership) {
+      denyTenant("unknown_tenant", "Нет доступа к компании", user.memberships);
+    }
+    if (!membership.active) {
+      denyTenant("membership_suspended", "Участие в компании приостановлено", user.memberships);
+    }
+    if (membership.tenant.status !== "active") {
+      denyTenant("tenant_suspended", "Доступ компании приостановлен", user.memberships);
+    }
+    active = membership;
+  } else {
+    active =
+      user.memberships.find((item) => item.active && item.tenant.status === "active") ||
+      user.memberships.find((item) => item.active) ||
+      null;
+  }
   return {
     user: {
       id: user.id,
@@ -148,8 +175,16 @@ export async function login(
 ) {
   const parsed = loginSchema.parse(input);
   const user = await prisma.user.findUnique({ where: { email: parsed.email.toLowerCase() } });
-  if (!user || !(await argon2.verify(user.passwordHash, parsed.password))) {
+  if (!user || !(await verifyPassword(user.passwordHash, parsed.password))) {
+    await writeAudit(prisma, {
+      action: "auth.login_failed",
+      entityType: "user",
+      changes: { email: parsed.email.toLowerCase() },
+    }).catch(() => undefined);
     throw new ApiError(401, "invalid_credentials", "Неверный email или пароль");
+  }
+  if (user.status !== "active") {
+    throw new ApiError(403, "account_disabled", "Учётная запись отключена");
   }
   const sessionToken = randomToken();
   const refreshToken = parsed.client === "mobile" ? randomToken() : null;
@@ -167,6 +202,17 @@ export async function login(
       lastSeenAt: new Date(),
     },
   });
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { lastLoginAt: new Date() },
+  }).catch(() => undefined);
+  await writeAudit(prisma, {
+    actorUserId: user.id,
+    action: "auth.login",
+    entityType: "session",
+    entityId: session.id,
+    changes: { client: parsed.client },
+  }).catch(() => undefined);
   const loaded = await loadUser(prisma, user.id);
   const auth = toAuth(loaded, session.id, parsed.client);
   let accessToken: string | undefined;
@@ -204,12 +250,24 @@ export async function logout(prisma: PrismaClient, sessionId: string, all = fals
       where: { userId, revokedAt: null },
       data: { revokedAt: new Date() },
     });
+    await writeAudit(prisma, {
+      actorUserId: userId,
+      action: "auth.logout_all",
+      entityType: "session",
+      entityId: sessionId,
+    }).catch(() => undefined);
     return;
   }
   await prisma.session.update({
     where: { id: sessionId },
     data: { revokedAt: new Date() },
   });
+  await writeAudit(prisma, {
+    actorUserId: userId || null,
+    action: "auth.logout",
+    entityType: "session",
+    entityId: sessionId,
+  }).catch(() => undefined);
 }
 
 export async function refreshMobile(prisma: PrismaClient, refreshToken: string) {
@@ -258,7 +316,7 @@ export async function authFromAccessToken(prisma: PrismaClient, token: string, t
     const session = await prisma.session.findFirst({
       where: { id: String(payload.sid), userId: String(payload.sub), revokedAt: null },
     });
-    if (!session) throw new Error("no session");
+    if (!session || session.expiresAt < new Date()) throw new Error("no session");
     const loaded = await loadUser(prisma, session.userId);
     return toAuth(loaded, session.id, "mobile", tenantId);
   } catch {

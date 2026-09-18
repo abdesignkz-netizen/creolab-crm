@@ -12,3 +12,11 @@ export const PAGE_SIZE_MAX = 100;
 export { INVOICE_PAYMENT_KIND_LABEL } from "./pdfImport.ts";
 export type { PdfImportParty, PdfImportDraft, PdfImportPreview, InvoiceImportMatches } from "./pdfImport.ts";
 export { avrEditorSchema, avrEditorAmounts, type AvrEditorInput } from "./avrEditor.ts";
+export {
+  invoiceEditorSchema,
+  updateInvoiceDraftSchema,
+  invoicePayableTotals,
+  inferInvoicePaymentPercent,
+  scaleInvoiceMoney,
+  type InvoiceEditorInput,
+} from "./invoiceEditor.ts";

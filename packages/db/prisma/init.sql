@@ -58,6 +58,9 @@ CREATE TABLE "User" (
     "timezone" TEXT,
     "timeFormat" TEXT NOT NULL DEFAULT '24',
     "theme" TEXT NOT NULL DEFAULT 'system',
+    "lastLoginAt" TIMESTAMP(3),
+    "emailVerifiedAt" TIMESTAMP(3),
+    "phoneVerifiedAt" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
     "platformAdmin" BOOLEAN NOT NULL DEFAULT false,
@@ -95,6 +98,18 @@ CREATE TABLE "Session" (
     "lastSeenAt" TIMESTAMP(3),
 
     CONSTRAINT "Session_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "PasswordResetToken" (
+    "id" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "tokenHash" TEXT NOT NULL,
+    "expiresAt" TIMESTAMP(3) NOT NULL,
+    "usedAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "PasswordResetToken_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -999,6 +1014,12 @@ CREATE UNIQUE INDEX "Membership_tenantId_id_key" ON "Membership"("tenantId", "id
 CREATE INDEX "Session_userId_revokedAt_idx" ON "Session"("userId", "revokedAt");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "PasswordResetToken_tokenHash_key" ON "PasswordResetToken"("tokenHash");
+
+-- CreateIndex
+CREATE INDEX "PasswordResetToken_userId_usedAt_idx" ON "PasswordResetToken"("userId", "usedAt");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "Invitation_tokenHash_key" ON "Invitation"("tokenHash");
 
 -- CreateIndex
@@ -1161,6 +1182,9 @@ CREATE INDEX "Campaign_tenantId_status_scheduledAt_idx" ON "Campaign"("tenantId"
 CREATE INDEX "Campaign_tenantId_createdAt_idx" ON "Campaign"("tenantId", "createdAt");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "Campaign_tenantId_id_key" ON "Campaign"("tenantId", "id");
+
+-- CreateIndex
 CREATE INDEX "CampaignRecipient_tenantId_campaignId_status_idx" ON "CampaignRecipient"("tenantId", "campaignId", "status");
 
 -- CreateIndex
@@ -1252,6 +1276,8 @@ ALTER TABLE "Membership" ADD CONSTRAINT "Membership_userId_fkey" FOREIGN KEY ("u
 
 -- AddForeignKey
 ALTER TABLE "Session" ADD CONSTRAINT "Session_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+ALTER TABLE "PasswordResetToken" ADD CONSTRAINT "PasswordResetToken_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Invitation" ADD CONSTRAINT "Invitation_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;

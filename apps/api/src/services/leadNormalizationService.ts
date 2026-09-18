@@ -51,7 +51,75 @@ const DEFAULT_FORM_FIELDS: Record<string, string> = {
   mobile: "phone",
   business: "company",
   request_text: "message",
+  // Tilda webhook (application/x-www-form-urlencoded, capitalized keys)
+  Name: "name",
+  Phone: "phone",
+  Email: "email",
+  Comments: "message",
+  Comment: "message",
+  // Contact Form 7 / typical WordPress webhook field names
+  "your-name": "name",
+  "your-email": "email",
+  "your-phone": "phone",
+  "your-message": "message",
+  "your-subject": "service",
+  Имя: "name",
+  ФИО: "name",
+  Телефон: "phone",
+  tel: "phone",
+  phone_number: "phone",
+  phoneNumber: "phone",
 };
+
+const CLIENT_OVERRIDE_KEYS = new Set([
+  "company_id",
+  "companyId",
+  "tenant_id",
+  "tenantId",
+  "responsible_user_id",
+  "responsibleUserId",
+  "assigneeMembershipId",
+  "assignee_id",
+  "assigneeId",
+  "integration_id",
+  "integrationId",
+]);
+
+function firstScalar(value: unknown): unknown {
+  if (Array.isArray(value)) return value.length ? value[0] : undefined;
+  return value;
+}
+
+function asObject(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+/**
+ * Flatten hosted-form payloads (Tilda nested `data`, CF7 wrappers) into a single
+ * map. Client-supplied company/assignee ids are dropped — tenant comes from form_id.
+ */
+export function flattenIncomingFormBody(body: unknown): Record<string, unknown> {
+  const src = asObject(body);
+  if (!src) return {};
+  let nested: Record<string, unknown> = {};
+  if (typeof src.data === "string") {
+    try {
+      nested = asObject(JSON.parse(src.data)) || {};
+    } catch {
+      nested = {};
+    }
+  } else {
+    nested = asObject(src.data) || {};
+  }
+  const merged: Record<string, unknown> = { ...nested, ...src };
+  delete merged.data;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(merged)) {
+    if (CLIENT_OVERRIDE_KEYS.has(key)) continue;
+    out[key] = firstScalar(value);
+  }
+  return out;
+}
 
 /** Accept flat { name: "name" } or versioned { version, fields } */
 export function parseFieldMapping(raw: unknown): FieldMappingConfig {
@@ -136,6 +204,12 @@ export function normalizeLeadFromFormPayload(args: {
     "is_test",
     "isTest",
     "test",
+    "tranid",
+    "formid",
+    "formname",
+    "COOKIES",
+    "Cookies",
+    "Url",
   ]);
   const customFields: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(args.body)) {
@@ -146,20 +220,20 @@ export function normalizeLeadFromFormPayload(args: {
   }
 
   return {
-    externalLeadId: str(args.body.submission_id || args.body.externalLeadId || args.body.lead_id),
-    name: byTarget("name", ["name"]),
-    phone: byTarget("phone", ["phone", "mobile"]),
-    email: byTarget("email", ["email"]),
+    externalLeadId: str(args.body.submission_id || args.body.externalLeadId || args.body.lead_id || args.body.tranid),
+    name: byTarget("name", ["name", "Name", "your-name", "Имя", "ФИО"]),
+    phone: byTarget("phone", ["phone", "Phone", "mobile", "your-phone", "Телефон", "tel"]),
+    email: byTarget("email", ["email", "Email", "your-email"]),
     company: byTarget("company", ["company", "business"]),
-    service: byTarget("service", ["service", "subject"]),
-    message: byTarget("message", ["message", "comment", "request_text"]),
+    service: byTarget("service", ["service", "subject", "your-subject"]),
+    message: byTarget("message", ["message", "comment", "Comments", "request_text", "your-message"]),
     budget: byTarget("budget", ["budget"]),
     deadline: byTarget("deadline", ["deadline"]),
     city: byTarget("city", ["city"]),
     acquisitionSource: utmSource || str(args.body.acquisitionSource) || null,
     entryChannel: args.entryChannel || "website_form",
-    landingPage: str(args.body.landingPage || args.body.landing_page || args.body.pageUrl || args.body.page_url),
-    pageUrl: str(args.body.pageUrl || args.body.page_url),
+    landingPage: str(args.body.landingPage || args.body.landing_page || args.body.pageUrl || args.body.page_url || args.body.Url),
+    pageUrl: str(args.body.pageUrl || args.body.page_url || args.body.Url),
     pageTitle: str(args.body.pageTitle || args.body.page_title),
     referrer: str(args.body.referrer),
     utm: {

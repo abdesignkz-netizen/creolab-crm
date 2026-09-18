@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { avrEditorSchema } from "./avrEditor.ts";
+import { invoiceEditorSchema } from "./invoiceEditor.ts";
 import { isValidKzTaxId } from "./kzTaxId.ts";
 
 const optionalTaxId = z
@@ -22,6 +23,15 @@ export const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
   client: z.enum(["web", "mobile"]).default("web"),
+});
+
+export const passwordResetRequestSchema = z.object({
+  email: z.string().email(),
+});
+
+export const passwordResetCompleteSchema = z.object({
+  token: z.string().min(20).max(200),
+  password: z.string().min(10).max(200),
 });
 
 export const createInquirySchema = z.object({
@@ -563,6 +573,7 @@ export const submitSignatureSchema = z.object({
 export const createInvoiceDraftSchema = z.object({
   contractId: z.string().uuid().optional(),
   dueDate: z.string().datetime().nullable().optional(),
+  editor: invoiceEditorSchema.optional(),
 });
 
 export const generateInvoiceSchema = z.object({

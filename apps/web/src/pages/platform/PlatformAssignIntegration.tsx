@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../../lib/api";
 import { notifySaved } from "../../components/SaveNotice";
+import { FormConnectionWizard } from "./PlatformFormConnection";
 
 type CatalogItem = {
   type: string;
@@ -23,6 +24,22 @@ type CompanyOption = {
 type MemberOption = { id: string; name: string; email: string };
 
 export function AssignIntegrationForm({
+  item,
+  companies,
+  lockedTenantId,
+}: {
+  item: CatalogItem;
+  companies: CompanyOption[];
+  lockedTenantId?: string;
+}) {
+  if (!item.connectable) return null;
+  if (item.type === "form") {
+    return <FormConnectionWizard item={item} companies={companies} lockedTenantId={lockedTenantId} />;
+  }
+  return <ProviderAssignForm item={item} companies={companies} lockedTenantId={lockedTenantId} />;
+}
+
+function ProviderAssignForm({
   item,
   companies,
   lockedTenantId,
@@ -65,8 +82,6 @@ export function AssignIntegrationForm({
       cancelled = true;
     };
   }, [tenantId, item.type]);
-
-  if (!item.connectable) return null;
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -176,7 +191,6 @@ export function AssignIntegrationForm({
       </div>
       {note ? <p className="ok">{note}</p> : null}
       {secret ? <pre className="code">{secret}</pre> : null}
-      {existing?.forms?.[0]?.submitUrl ? <p className="muted">Адрес формы: {existing.forms[0].submitUrl}</p> : null}
       {existing?.eventsUrl ? <p className="muted">Webhook: {existing.eventsUrl}</p> : null}
       {error ? <p className="error">{error}</p> : null}
     </form>

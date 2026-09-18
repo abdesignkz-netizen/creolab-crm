@@ -479,7 +479,8 @@ export function DealDocumentsPanel(props: {
           {invoices.map((doc: any) => (
             <div className="row" key={doc.id}>
               <div>
-                <b>Счёт {doc.number}</b>{doc.importedPdf ? <div className="muted">Загружен вручную</div> : null}
+                <Link to={`/documents/invoices/${doc.id}`}><b>Счёт {doc.number}</b> · Открыть</Link>
+                {doc.importedPdf ? <div className="muted">Загружен вручную</div> : null}
                 {doc.importDetails ? <>
                   <div>{doc.importDetails.subject}</div>
                   {doc.importDetails.paymentKind && doc.importDetails.paymentKind !== "UNSPECIFIED" ? <div>{INVOICE_PAYMENT_KIND_LABEL[doc.importDetails.paymentKind as NonNullable<PdfImportDraft["paymentKind"]>]}</div> : null}
@@ -498,6 +499,7 @@ export function DealDocumentsPanel(props: {
             </div>
           ))}
           <div className="actions" style={{ marginTop: 8 }}>
+            <Link className="btn" to={`/documents/invoices/new?dealId=${d.id}`}>Создать счёт</Link>
             <button
               type="button"
               className="btn secondary"

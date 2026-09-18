@@ -300,9 +300,11 @@ export function DocumentsPage() {
       {loading ? <div className="state">Загрузка…</div> : null}
 
       {!disabled ? <div className="sit-section">
-        {kind === "AVR" || kind === "ESF" ? <div className="row sit-head">
-          <h3>{kind === "AVR" ? "АВР" : "ЭСФ"}</h3>
-          {kind === "AVR"
+        {kind === "INVOICE" || kind === "AVR" || kind === "ESF" ? <div className="row sit-head">
+          <h3>{kind === "INVOICE" ? "Счета" : kind === "AVR" ? "АВР" : "ЭСФ"}</h3>
+          {kind === "INVOICE"
+            ? <Link className="btn" to="/documents/invoices/new">Создать счёт</Link>
+            : kind === "AVR"
             ? <Link className="btn" to="/documents/avr/new">Создать АВР</Link>
             : <button type="button" className="btn" disabled={esfBusy} onClick={() => void openEsfCreate()}>Создать ЭСФ</button>}
         </div> : null}
@@ -321,7 +323,7 @@ export function DocumentsPage() {
           </div>
         </form> : null}
         {kind === "ESF" && createdEsf ? <p role="status">ЭСФ {createdEsf.number} сохранён. <Link to={`/deals/${createdEsf.dealId}#esf`}>Открыть ЭСФ</Link></p> : null}
-        {!loading && !items.length ? <p className="empty">{kind === "AVR" ? "АВР пока нет. Нажмите «Создать АВР»." : kind === "ESF" ? "ЭСФ пока нет. Нажмите «Создать ЭСФ»." : "Документов пока нет. Загрузите документ или создайте его в карточке сделки."}</p> : null}
+        {!loading && !items.length ? <p className="empty">{kind === "INVOICE" ? "Счетов пока нет. Нажмите «Создать счёт»." : kind === "AVR" ? "АВР пока нет. Нажмите «Создать АВР»." : kind === "ESF" ? "ЭСФ пока нет. Нажмите «Создать ЭСФ»." : "Документов пока нет. Загрузите документ или создайте его в карточке сделки."}</p> : null}
         {items.length > 0 ? <div className="documents-table-wrap"><table className="documents-table"><thead><tr><th>№ документа</th><th>Клиент</th><th>Сделка</th><th>Сумма</th><th>Дата</th><th>Тип</th><th>Статус</th><th>ЭСФ</th><th>Ответственный</th><th>Действия</th></tr></thead><tbody>{items.map(item=><tr key={`${item.kind}-${item.id}`}><td><Link to={item.href}>{item.number}</Link></td><td>{item.companyName||"Не указан"}</td><td><Link to={`/deals/${item.dealId}`}>{item.dealTitle}</Link></td><td>{Number(item.totalAmount).toLocaleString("ru-RU")} ₸</td><td>{new Date(item.date||item.updatedAt).toLocaleDateString("ru-RU")}</td><td>{item.kindLabel}</td><td><span className={`document-status status-${item.errorCode?"ERROR":item.status}`}>{item.statusLabel}</span></td><td>{item.esfStatus}</td><td>{item.responsible||"Не назначен"}</td><td><Link to={item.href}>Открыть</Link>{item.kind==="CONTRACT"?<DeleteContractButton id={item.id} number={item.number} onDeleted={async()=>{setOffset("0");await load(0);}}/>:null}</td></tr>)}</tbody></table></div> : null}
       </div> : null}
 

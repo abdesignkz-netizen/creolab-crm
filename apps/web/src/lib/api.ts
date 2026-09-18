@@ -3,10 +3,15 @@ import { createApiClient } from "@creolab/api-client";
 export const api = createApiClient({
   baseUrl: "",
   getTenantId: () => localStorage.getItem("crm_tenant"),
+  onUnknownTenant: () => localStorage.removeItem("crm_tenant"),
 });
 
 export function setTenant(id: string) {
   localStorage.setItem("crm_tenant", id);
+}
+
+export function clearTenant() {
+  localStorage.removeItem("crm_tenant");
 }
 
 export async function downloadAvrExcel(documentId: string) {
@@ -16,6 +21,11 @@ export async function downloadAvrExcel(documentId: string) {
 
 export async function downloadAvrPdf(documentId: string) {
   const { blob, filename } = await api.downloadElectronicDocumentPdf(documentId);
+  triggerDownload(blob, filename);
+}
+
+export async function downloadInvoicePdf(invoiceId: string) {
+  const { blob, filename } = await api.downloadInvoicePdf(invoiceId);
   triggerDownload(blob, filename);
 }
 

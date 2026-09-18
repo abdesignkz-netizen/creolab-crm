@@ -94,6 +94,7 @@ export function RequestDetailPage() {
               </span>
             ) : null}
             {data.hasDeal ? <span className="badge">Сделка создана</span> : null}
+            {data.test ? <span className="badge warn">Тестовая заявка</span> : null}
           </div>
         </div>
       </div>

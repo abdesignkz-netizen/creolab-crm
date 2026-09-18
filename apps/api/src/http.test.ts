@@ -200,4 +200,9 @@ describe("CRM HTTP domain", () => {
       assert.notEqual(item.id, item.phoneNormalized);
     }
   });
+
+  it("does not expose proxy IP diagnostics unless TRUST_PROXY_DEBUG=1", async () => {
+    const response = await fetch(`${base}/api/v1/debug/client-ip`);
+    assert.equal(response.status, 404);
+  });
 });

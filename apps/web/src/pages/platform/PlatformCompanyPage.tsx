@@ -317,6 +317,9 @@ function CompanyIntegrations({ tenantId }: { tenantId: string }) {
             </div>
           </div>
           {(item.steps || []).length ? (
+            item.type === "form" ? (
+              <p className="muted">{(item.steps as string[])[0]}</p>
+            ) : (
             <div className="notify-steps">
               <b>Как подключить</b>
               <ol>
@@ -325,6 +328,7 @@ function CompanyIntegrations({ tenantId }: { tenantId: string }) {
                 ))}
               </ol>
             </div>
+            )
           ) : null}
           <AssignIntegrationForm item={item} companies={companies} lockedTenantId={tenantId} />
         </div>

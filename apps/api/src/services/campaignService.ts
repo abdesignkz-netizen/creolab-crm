@@ -86,6 +86,22 @@ function requireTenant(auth: AuthContext) {
   return auth.activeMembership;
 }
 
+async function requireCampaignForTenant(prisma: PrismaClient, tenantId: string, id: string) {
+  const campaign = await prisma.campaign.findFirst({ where: { id, tenantId } });
+  if (!campaign) throw new ApiError(404, "not_found", "Рассылка не найдена");
+  return campaign;
+}
+
+async function updateCampaignForTenant(
+  prisma: PrismaClient,
+  tenantId: string,
+  id: string,
+  data: Prisma.CampaignUpdateManyMutationInput,
+) {
+  const result = await prisma.campaign.updateMany({ where: { id, tenantId }, data });
+  if (result.count === 0) throw new ApiError(404, "not_found", "Рассылка не найдена");
+}
+
 export function campaignSendLater(scheduledAt: Date | string | null | undefined, now = new Date()) {
   if (!scheduledAt) return false;
   const due = scheduledAt instanceof Date ? scheduledAt : new Date(scheduledAt);
@@ -689,10 +705,10 @@ export async function confirmCampaign(
   input: { scheduledAt?: string | null } = {},
 ) {
   const membership = requireTenant(auth);
+  await requireCampaignForTenant(prisma, membership.tenantId, id);
   if (input.scheduledAt !== undefined) {
-    await prisma.campaign.update({
-      where: { id },
-      data: { scheduledAt: input.scheduledAt ? new Date(input.scheduledAt) : null },
+    await updateCampaignForTenant(prisma, membership.tenantId, id, {
+      scheduledAt: input.scheduledAt ? new Date(input.scheduledAt) : null,
     });
   }
   const prepared = await prepareCampaign(prisma, auth, id);
@@ -729,8 +745,8 @@ export async function confirmCampaign(
     data: { state: "canceled", cancelReason: later ? "rescheduled" : "send_now" },
   });
 
-  const updated = await prisma.campaign.update({
-    where: { id },
+  const updatedCount = await prisma.campaign.updateMany({
+    where: { id, tenantId: membership.tenantId },
     data: {
       status,
       confirmedAt: new Date(),
@@ -741,6 +757,8 @@ export async function confirmCampaign(
       recipientSnapshotJson: recipientSnapshot,
     },
   });
+  if (updatedCount.count === 0) throw new ApiError(404, "not_found", "Рассылка не найдена");
+  const updated = await prisma.campaign.findFirstOrThrow({ where: { id, tenantId: membership.tenantId } });
 
   let scheduleTask = null;
   if (later && campaign.scheduledAt) {
@@ -792,8 +810,8 @@ export async function startCampaign(prisma: PrismaClient, auth: AuthContext, id:
     }
   }
 
-  await prisma.campaign.update({
-    where: { id },
+  await prisma.campaign.updateMany({
+    where: { id, tenantId: membership.tenantId },
     data: { status: "running", startedAt: new Date(), pausedAt: null },
   });
   await prisma.campaignRecipient.updateMany({
@@ -809,30 +827,31 @@ export async function startCampaign(prisma: PrismaClient, auth: AuthContext, id:
 
 export async function pauseCampaign(prisma: PrismaClient, auth: AuthContext, id: string) {
   const membership = requireTenant(auth);
-  const campaign = await prisma.campaign.findFirst({ where: { id, tenantId: membership.tenantId } });
-  if (!campaign) throw new ApiError(404, "not_found", "Рассылка не найдена");
-  await prisma.campaign.update({ where: { id }, data: { status: "paused", pausedAt: new Date() } });
+  await requireCampaignForTenant(prisma, membership.tenantId, id);
+  await updateCampaignForTenant(prisma, membership.tenantId, id, { status: "paused", pausedAt: new Date() });
   return getCampaign(prisma, auth, id);
 }
 
 export async function cancelCampaignRemainder(prisma: PrismaClient, auth: AuthContext, id: string) {
   const membership = requireTenant(auth);
+  await requireCampaignForTenant(prisma, membership.tenantId, id);
   await prisma.campaignRecipient.updateMany({
     where: { campaignId: id, tenantId: membership.tenantId, status: { in: ["pending", "queued"] } },
     data: { status: "cancelled", skipReason: "Отменено пользователем" },
   });
-  await prisma.campaign.update({ where: { id }, data: { status: "cancelled", completedAt: new Date() } });
+  await updateCampaignForTenant(prisma, membership.tenantId, id, { status: "cancelled", completedAt: new Date() });
   await closeCampaignScheduleTask(prisma, membership.tenantId, id, "canceled");
   return getCampaign(prisma, auth, id);
 }
 
 export async function retryFailedCampaign(prisma: PrismaClient, auth: AuthContext, id: string) {
   const membership = requireTenant(auth);
+  await requireCampaignForTenant(prisma, membership.tenantId, id);
   await prisma.campaignRecipient.updateMany({
     where: { campaignId: id, tenantId: membership.tenantId, status: "failed" },
     data: { status: "queued", error: null },
   });
-  await prisma.campaign.update({ where: { id }, data: { status: "running", pausedAt: null, completedAt: null } });
+  await updateCampaignForTenant(prisma, membership.tenantId, id, { status: "running", pausedAt: null, completedAt: null });
   void processCampaignQueue(prisma, id).catch((err) => console.error("campaign retry", id, err));
   return getCampaign(prisma, auth, id);
 }

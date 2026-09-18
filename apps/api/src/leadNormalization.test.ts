@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  flattenIncomingFormBody,
   normalizeLeadFromFormPayload,
   parseFieldMapping,
 } from "./services/leadNormalizationService.ts";
@@ -50,5 +51,30 @@ describe("lead normalization + mapping", () => {
     assert.equal(lead.utm?.source, "google");
     assert.equal(lead.mappingVersion, 2);
     assert.equal(lead.entryChannel, "website_form");
+  });
+
+  it("flattens Tilda urlencoded keys and ignores client company override", () => {
+    const flat = flattenIncomingFormBody({
+      Name: "Иван",
+      Phone: "+77015550011",
+      Email: "ivan@example.com",
+      Comments: "Нужен сайт",
+      tranid: "467251:8442970",
+      formid: "form48844953",
+      company_id: "other-tenant",
+      responsible_user_id: "other-user",
+    });
+    assert.equal(flat.company_id, undefined);
+    assert.equal(flat.responsible_user_id, undefined);
+    const lead = normalizeLeadFromFormPayload({
+      body: flat,
+      mappingJson: { version: 1, fields: { name: "name", phone: "phone" } },
+      integrationId: "int-tilda",
+    });
+    assert.equal(lead.name, "Иван");
+    assert.equal(lead.phone, "+77015550011");
+    assert.equal(lead.email, "ivan@example.com");
+    assert.equal(lead.message, "Нужен сайт");
+    assert.equal(lead.externalLeadId, "467251:8442970");
   });
 });

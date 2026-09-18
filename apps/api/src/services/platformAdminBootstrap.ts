@@ -1,5 +1,5 @@
-import argon2 from "argon2";
 import type { PrismaClient } from "@creolab/db";
+import { hashPassword } from "../lib/password.ts";
 
 const DEFAULT_PLATFORM_ADMIN_EMAIL = "creolabkz@gmail.com";
 
@@ -20,7 +20,7 @@ export async function ensurePlatformAdmin(prisma: PrismaClient) {
     await prisma.user.create({
       data: {
         email,
-        passwordHash: await argon2.hash(password),
+        passwordHash: await hashPassword(password),
         name: "Администратор сервиса",
         platformAdmin: true,
         status: "active",
@@ -33,7 +33,7 @@ export async function ensurePlatformAdmin(prisma: PrismaClient) {
     platformAdmin: true,
     status: "active",
   };
-  if (password) data.passwordHash = await argon2.hash(password);
+  if (password) data.passwordHash = await hashPassword(password);
   if (!existing.name) data.name = "Администратор сервиса";
   await prisma.user.update({ where: { id: existing.id }, data });
   return { email, created: false, updated: true };

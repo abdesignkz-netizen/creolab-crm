@@ -48,6 +48,9 @@ export function PlatformCatalogPage() {
           </div>
           <p>{item.description}</p>
           {(item.steps || []).length ? (
+            item.type === "form" ? (
+              <p className="muted">{(item.steps as string[])[0]}</p>
+            ) : (
             <div className={`notify-steps ${focusType === item.type ? "catalog-steps-focus" : ""}`}>
               <b>Как подключить</b>
               <ol>
@@ -56,11 +59,12 @@ export function PlatformCatalogPage() {
                 ))}
               </ol>
             </div>
+            )
           ) : item.connectHint ? (
             <p className="muted">{item.connectHint}</p>
           ) : null}
           <AssignIntegrationForm item={item} companies={companies} />
-          <p className="muted">Функции: {(item.functions || []).join(", ") || "нет"}</p>
+          {item.type === "form" ? null : <p className="muted">Функции: {(item.functions || []).join(", ") || "нет"}</p>}
           <label>
             Описание
             <textarea

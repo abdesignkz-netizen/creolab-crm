@@ -603,6 +603,25 @@ export async function openWhatsAppChannelForContact(
   return healWhatsAppFromBot(prisma, args);
 }
 
+function sellerSyncWarning(args: {
+  configured: boolean;
+  reachable: boolean;
+  lastSyncAt: Date | null;
+  leadCountOnBot: number | null;
+  conversationCount: number;
+}) {
+  if (!args.configured) return null;
+  if (!args.reachable) return "Картина неполная: бот не отвечает";
+  if (!args.lastSyncAt) return "Ждём первый автоматический синк диалогов";
+  if (args.leadCountOnBot != null && args.leadCountOnBot > 0 && args.conversationCount === 0) {
+    return "На боте есть лиды, в CRM нет диалогов — синк ещё не подтянул";
+  }
+  if (Date.now() - args.lastSyncAt.getTime() > 15 * 60 * 1000 && args.conversationCount > 0) {
+    return "Синк устарел — обновится автоматически";
+  }
+  return null;
+}
+
 export async function sellerHealthFor(prisma: PrismaClient, auth: AuthContext) {
   const membership = requireTenant(auth);
   const resolved = await resolveSellerBridge(prisma, membership.tenantId);
@@ -621,6 +640,13 @@ export async function sellerHealthFor(prisma: PrismaClient, auth: AuthContext) {
       conversationCount,
       lastSyncAt,
       storePathKind: null as string | null,
+      warning: sellerSyncWarning({
+        configured: false,
+        reachable: false,
+        lastSyncAt,
+        leadCountOnBot: null,
+        conversationCount,
+      }),
       note: "WhatsApp ещё не подключён. CRM уже принимает формы и задачи.",
     };
   }
@@ -637,6 +663,13 @@ export async function sellerHealthFor(prisma: PrismaClient, auth: AuthContext) {
       conversationCount,
       lastSyncAt,
       storePathKind: health.storePathKind || null,
+      warning: sellerSyncWarning({
+        configured: true,
+        reachable: true,
+        lastSyncAt,
+        leadCountOnBot,
+        conversationCount,
+      }),
       note:
         leadCountOnBot === null
           ? "Мост отвечает. Отправка и команды менеджера остаются в боте."
@@ -653,6 +686,13 @@ export async function sellerHealthFor(prisma: PrismaClient, auth: AuthContext) {
       conversationCount,
       lastSyncAt,
       storePathKind: null,
+      warning: sellerSyncWarning({
+        configured: true,
+        reachable: false,
+        lastSyncAt,
+        leadCountOnBot: null,
+        conversationCount,
+      }),
       note: describeBridgeError(error, resolved.url),
     };
   }

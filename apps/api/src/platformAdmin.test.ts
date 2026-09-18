@@ -156,8 +156,79 @@ describe("platform admin panel", () => {
       body: { type: "form", name: "Сайт" },
     });
     assert.equal(created.status, 201, JSON.stringify(created.data));
-    assert.equal(created.data.lifecycle, "connected");
-    assert.match(String(created.data.note || ""), /адрес приёма|сохран/i);
+    assert.equal(created.data.lifecycle, "created");
+    assert.match(String(created.data.note || ""), /адрес приёма|подключите/i);
+  });
+
+  it("routes Tilda urlencoded submissions to the assigned company member", async () => {
+    const tenant = await prisma.tenant.create({ data: { name: "Tilda Co", slug: `tilda-co-${Date.now()}` } });
+    const user = await prisma.user.create({
+      data: { email: `tilda-mgr-${Date.now()}@example.test`, passwordHash: "x", name: "Менеджер формы" },
+    });
+    const membership = await prisma.membership.create({
+      data: { tenantId: tenant.id, userId: user.id, role: "manager", active: true },
+    });
+    const created = await req(platformCookie, `/api/v1/admin/tenants/${tenant.id}/integrations`, {
+      method: "POST",
+      body: { type: "form", name: "Форма сайта", assigneeMembershipId: membership.id },
+    });
+    assert.equal(created.status, 201, JSON.stringify(created.data));
+    assert.equal(created.data.lifecycle, "created");
+    assert.equal(created.data.assignment?.membershipId, membership.id);
+    const publicKey = created.data.forms[0].publicKey;
+    const other = await prisma.tenant.create({ data: { name: "Other Co", slug: `other-co-${Date.now()}` } });
+    const submit = await fetch(`${url}/public/forms/${publicKey}/submissions`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        Name: "Тильда Клиент",
+        Phone: "+77015550011",
+        Email: "tilda@example.test",
+        Comments: "Нужен лендинг",
+        tranid: `tilda-${Date.now()}`,
+        formid: "form48844953",
+        company_id: other.id,
+        responsible_user_id: "spoofed",
+      }).toString(),
+    });
+    const body = await submit.json();
+    assert.equal(submit.status, 200, JSON.stringify(body));
+    assert.equal(body.ok, true);
+    const inquiry = await prisma.inquiry.findFirst({
+      where: { tenantId: tenant.id },
+      orderBy: { receivedAt: "desc" },
+    });
+    assert.ok(inquiry);
+    assert.equal(inquiry?.assigneeMembershipId, membership.id);
+    assert.equal(inquiry?.tenantId, tenant.id);
+    assert.equal(inquiry?.test, false);
+    const leaked = await prisma.inquiry.findFirst({ where: { tenantId: other.id } });
+    assert.equal(leaked, null);
+    const listed = await req(platformCookie, `/api/v1/admin/tenants/${tenant.id}/integrations`);
+    const form = (listed.data.items || []).find((item: { type: string }) => item.type === "form");
+    assert.equal(form.lifecycle, "working");
+    assert.ok(form.lastSuccessAt);
+
+    const jsonSubmit = await fetch(`${url}/public/forms/${publicKey}/submissions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "Тестовый клиент",
+        phone: "+77015550022",
+        email: "test@example.test",
+        message: "Проверка из админки",
+        is_test: true,
+        company_id: other.id,
+      }),
+    });
+    const jsonBody = await jsonSubmit.json();
+    assert.equal(jsonSubmit.status, 202, JSON.stringify(jsonBody));
+    const testInquiry = await prisma.inquiry.findFirst({
+      where: { tenantId: tenant.id, test: true },
+      orderBy: { receivedAt: "desc" },
+    });
+    assert.ok(testInquiry);
+    assert.equal(testInquiry?.assigneeMembershipId, membership.id);
   });
 
   it("lets a service admin attach WhatsApp to a chosen company", async () => {

@@ -255,6 +255,7 @@ async function applyAdditiveSchema(pglite: PGlite) {
     );
     CREATE INDEX IF NOT EXISTS "Campaign_tenantId_status_scheduledAt_idx" ON "Campaign"("tenantId", "status", "scheduledAt");
     CREATE INDEX IF NOT EXISTS "Campaign_tenantId_createdAt_idx" ON "Campaign"("tenantId", "createdAt");
+    CREATE UNIQUE INDEX IF NOT EXISTS "Campaign_tenantId_id_key" ON "Campaign"("tenantId", "id");
 
     CREATE TABLE IF NOT EXISTS "CampaignRecipient" (
       "id" TEXT NOT NULL,
@@ -812,6 +813,21 @@ const ACCOUNT_DOMAIN_SQL = `
     ALTER TABLE "Session" ADD COLUMN IF NOT EXISTS "userAgent" TEXT;
     ALTER TABLE "Session" ADD COLUMN IF NOT EXISTS "ip" TEXT;
     ALTER TABLE "Session" ADD COLUMN IF NOT EXISTS "lastSeenAt" TIMESTAMP(3);
+    ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "lastLoginAt" TIMESTAMP(3);
+    ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "emailVerifiedAt" TIMESTAMP(3);
+    ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "phoneVerifiedAt" TIMESTAMP(3);
+    CREATE TABLE IF NOT EXISTS "PasswordResetToken" (
+      "id" TEXT NOT NULL,
+      "userId" TEXT NOT NULL,
+      "tokenHash" TEXT NOT NULL,
+      "expiresAt" TIMESTAMP(3) NOT NULL,
+      "usedAt" TIMESTAMP(3),
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "PasswordResetToken_pkey" PRIMARY KEY ("id")
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS "PasswordResetToken_tokenHash_key" ON "PasswordResetToken"("tokenHash");
+    CREATE INDEX IF NOT EXISTS "PasswordResetToken_userId_usedAt_idx" ON "PasswordResetToken"("userId", "usedAt");
+    CREATE UNIQUE INDEX IF NOT EXISTS "Campaign_tenantId_id_key" ON "Campaign"("tenantId", "id");
 `;
 
 const PLATFORM_DOMAIN_SQL = `

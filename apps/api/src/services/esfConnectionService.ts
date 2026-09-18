@@ -13,6 +13,7 @@ import {
 import { diagnosePublicCertificate, officialEsfFaultCode } from "../integrations/esf/poc/diagnosePublicCertificate.ts";
 import { inspectCertificatePem, normalizeCertificatePem, pemFromCms } from "./cmsInspect.ts";
 import { can, type AuthContext } from "../lib/types.ts";
+import { isEsfSessionCiphertext, persistEsfSessionId, withRevealedEsfSession } from "../lib/esfSessionSecret.ts";
 
 export const ESF_CONNECTION_STATUSES = [
   "NOT_CONNECTED",
@@ -145,9 +146,25 @@ export async function getEsfConnectionRow(
   tenantId: string,
   environment: string = connectionEnvironment(),
 ) {
-  return prisma.esfConnection.findUnique({
+  const row = await prisma.esfConnection.findUnique({
     where: { tenantId_environment: { tenantId, environment } },
   });
+  if (!row) return null;
+  if (row.sessionId && !isEsfSessionCiphertext(row.sessionId)) {
+    const packed = persistEsfSessionId(row.sessionId);
+    if (row.id && packed) {
+      try {
+        await prisma.esfConnection.update({
+          where: { id: row.id },
+          data: { sessionId: packed },
+        });
+      } catch {
+        /* mock Prisma clients may omit update; plaintext is still rewritten on the next real write */
+      }
+    }
+    return row;
+  }
+  return withRevealedEsfSession(row);
 }
 
 export async function getUsableEsfSession(
@@ -190,6 +207,14 @@ export async function reopenEsfSessionFromStoredAuth(
   }
   if (row.sessionId && config.provider !== "mock") {
     await closeEsfSession(row.sessionId, config);
+    try {
+      await prisma.esfConnection.update({
+        where: { id: row.id },
+        data: { sessionId: null },
+      });
+    } catch {
+      /* ignore mock clients without update */
+    }
   }
   const session = await createEsfSessionFromPublicCert(
     {
@@ -214,7 +239,7 @@ export async function reopenEsfSessionFromStoredAuth(
     where: { id: row.id },
     data: {
       status: "CONNECTED",
-      sessionId: session.sessionId,
+      sessionId: persistEsfSessionId(session.sessionId),
       sessionCreatedAt: new Date(),
       sessionExpiresAt: null,
       lastConnectedAt: new Date(),
@@ -222,7 +247,8 @@ export async function reopenEsfSessionFromStoredAuth(
       lastErrorMessage: null,
     },
   });
-  return { sessionId: saved.sessionId!, row: saved };
+  const revealed = withRevealedEsfSession(saved);
+  return { sessionId: revealed.sessionId!, row: revealed };
 }
 
 export async function markEsfReauthRequired(
@@ -463,7 +489,7 @@ export async function connectEsf(
       where: { id: connecting.id },
       data: {
         status: "CONNECTED",
-        sessionId: session.sessionId,
+        sessionId: persistEsfSessionId(session.sessionId),
         sessionCreatedAt: new Date(),
         sessionExpiresAt: null,
         organizationBin,

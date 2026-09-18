@@ -107,7 +107,7 @@ export async function platformOverview(prisma: PrismaClient, auth: AuthContext) 
       where: { acceptedAt: null, revokedAt: null, expiresAt: { gt: now } },
     }),
     prisma.integration.findMany({
-      select: { status: true, connectionStatus: true, healthStatus: true, lastError: true, lastErrorCode: true, type: true, schemaJson: true },
+      select: { status: true, connectionStatus: true, healthStatus: true, lastError: true, lastErrorCode: true, lastSuccessAt: true, type: true, schemaJson: true },
     }),
   ]);
   let connected = 0;
@@ -115,7 +115,7 @@ export async function platformOverview(prisma: PrismaClient, auth: AuthContext) 
   let needsAssignment = 0;
   for (const row of integrations) {
     const lifecycle = publicConnectionStatus(row);
-    if (lifecycle === "connected") connected += 1;
+    if (lifecycle === "connected" || lifecycle === "created" || lifecycle === "working") connected += 1;
     if (lifecycle === "error" || lifecycle === "reauth") unhealthy += 1;
     if (lifecycle === "needs_assignment") needsAssignment += 1;
   }
@@ -162,7 +162,7 @@ export async function listPlatformCompanies(
           include: { user: { select: { id: true, name: true, email: true, phone: true } } },
         },
         integrations: {
-          select: { type: true, status: true, connectionStatus: true, healthStatus: true, lastError: true, lastErrorCode: true, schemaJson: true },
+          select: { type: true, status: true, connectionStatus: true, healthStatus: true, lastError: true, lastErrorCode: true, lastSuccessAt: true, schemaJson: true },
         },
       },
     }),

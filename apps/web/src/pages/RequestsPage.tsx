@@ -692,6 +692,7 @@ export function RequestsPage() {
                     </span>
                   ) : null}
                   {item.hasDeal ? <span className="badge">Сделка</span> : null}
+                  {item.test ? <span className="badge warn">Тест</span> : null}
                   {!item.hasPhone ? <span className="badge danger">Нет телефона</span> : null}
                 </div>
               </div>

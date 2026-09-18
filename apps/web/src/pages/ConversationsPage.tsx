@@ -264,7 +264,7 @@ export function ConversationsPage() {
       </div>
 
       {workspace.conversation.attentionReason && workspace.conversation.mode === "human" ? (
-        <div className="panel soft">
+        <div className="conv-attention">
           <b>Требуется менеджер</b>
           <div className="muted">{workspace.conversation.attentionReason}</div>
         </div>
@@ -318,6 +318,7 @@ export function ConversationsPage() {
         <textarea
           ref={replyRef}
           value={text}
+          rows={4}
           onChange={(event) => setText(event.target.value)}
           autoFocus={focusReply}
           placeholder={

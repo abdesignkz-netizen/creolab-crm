@@ -31,6 +31,36 @@ async function defaultAssignee(prisma: PrismaClient, tenantId: string, preferred
   return owner?.id || null;
 }
 
+function assignmentMembershipId(assignmentJson: unknown): string | null {
+  if (!assignmentJson || typeof assignmentJson !== "object" || Array.isArray(assignmentJson)) return null;
+  const row = assignmentJson as Record<string, unknown>;
+  const id = row.membershipId;
+  return typeof id === "string" && id.trim() ? id : null;
+}
+
+function originAllowed(allowedDomains: unknown, origin?: string): boolean {
+  const list = Array.isArray(allowedDomains)
+    ? allowedDomains.map((item) => String(item || "").trim()).filter(Boolean)
+    : [];
+  if (!list.length) return true;
+  // Tilda and other server-side webhooks often send no Origin header.
+  if (!origin) return true;
+  let host = "";
+  try {
+    host = new URL(origin).hostname.replace(/^www\./i, "").toLowerCase();
+  } catch {
+    return false;
+  }
+  return list.some((entry) => {
+    const normalized = entry
+      .replace(/^https?:\/\//i, "")
+      .replace(/\/.*$/, "")
+      .replace(/^www\./i, "")
+      .toLowerCase();
+    return host === normalized || host.endsWith(`.${normalized}`);
+  });
+}
+
 async function writeOutbox(
   tx: Prisma.TransactionClient,
   tenantId: string,
@@ -567,15 +597,20 @@ export async function submitPublicForm(
   if (form.integration.status !== "active") {
     throw new ApiError(404, "not_found", "Форма недоступна");
   }
+  if (!originAllowed(form.allowedDomains, meta.origin)) {
+    throw new ApiError(403, "origin_not_allowed", "Домен не разрешён для этой формы");
+  }
+
+  const { flattenIncomingFormBody, normalizeLeadFromFormPayload } = await import("./leadNormalizationService.ts");
+  const incoming = flattenIncomingFormBody(body);
   // honeypot — silent success, no lead
-  if (body.website) {
+  if (incoming.website) {
     return { receipt: "ok", duplicate: false };
   }
 
-  const { normalizeLeadFromFormPayload } = await import("./leadNormalizationService.ts");
   const { touchIntegrationSuccess } = await import("./integrationCatalogService.ts");
   const lead = normalizeLeadFromFormPayload({
-    body,
+    body: incoming,
     mappingJson: form.integration.mappingJson,
     integrationId: form.integrationId,
     entryChannel: "website_form",
@@ -628,7 +663,11 @@ export async function submitPublicForm(
         occurredAt: new Date(),
       },
     });
-    const assignee = await defaultAssignee(tx as unknown as PrismaClient, form.tenantId);
+    const assignee = await defaultAssignee(
+      tx as unknown as PrismaClient,
+      form.tenantId,
+      assignmentMembershipId(form.integration.assignmentJson),
+    );
     const inquiry = await createInquiryTx(tx, {
       tenantId: form.tenantId,
       integrationId: form.integrationId,
@@ -733,7 +772,11 @@ export async function ingestIntegrationEvent(
   const payloadHash = hashPayload(parsed);
   const phoneMethod = parsed.contact.methods.find((item) => item.type === "phone");
   const phone = validateClientPhone(phoneMethod?.value, "KZ");
-  const assignee = await defaultAssignee(prisma, integration.tenantId);
+  const assignee = await defaultAssignee(
+    prisma,
+    integration.tenantId,
+    assignmentMembershipId(integration.assignmentJson),
+  );
 
   const result = await prisma.$transaction(async (tx) => {
     const existing = await tx.inboundEvent.findUnique({

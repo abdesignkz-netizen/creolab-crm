@@ -93,6 +93,7 @@ type InquiryLike = {
   aiSummary?: string | null;
   dealId?: string | null;
   assigneeMembershipId?: string | null;
+  test?: boolean;
   contact?: {
     id: string;
     name?: string | null;
@@ -246,6 +247,7 @@ export function mapInquiryListItem(inquiry: InquiryLike, timeZone = "Asia/Almaty
     waitingMinutes: waitMinutes,
     assigneeMembershipId: inquiry.assigneeMembershipId,
     assigneeName: inquiry.assignee?.user?.name || null,
+    test: Boolean(inquiry.test),
     nextStep: inquiry.nextStep || openTask?.title || null,
     dealId: inquiry.dealId || inquiry.deal?.id || null,
     dealTitle: inquiry.deal?.title || null,

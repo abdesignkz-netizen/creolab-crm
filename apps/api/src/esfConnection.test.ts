@@ -4,6 +4,7 @@ import { createPrismaClient } from "@creolab/db";
 import { createApp } from "./app.ts";
 import { makeTestGostCertificate } from "./testGostCertificate.ts";
 import { makeTestCms } from "./testCms.ts";
+import { revealEsfSessionId } from "./lib/esfSessionSecret.ts";
 
 describe("ESF connection NCALayer", () => {
   let prisma: Awaited<ReturnType<typeof createPrismaClient>>;
@@ -301,6 +302,11 @@ describe("ESF connection NCALayer", () => {
 
     const stored = await prisma.esfConnection.findFirst({ where: { tenantId } });
     assert.ok(stored?.sessionId);
+    assert.match(stored.sessionId, /^[0-9a-f]{24}:[0-9a-f]{32}:[0-9a-f]+$/i);
+    const revealed = revealEsfSessionId(stored.sessionId);
+    assert.ok(revealed);
+    assert.notEqual(revealed, stored.sessionId);
+    assert.match(revealed, /^mock-session-/);
     assert.equal(JSON.stringify(stored).includes("secret-cabinet-password-value"), false);
     assert.equal(JSON.stringify(stored).includes("should-not-be-accepted"), false);
     assert.match(stored?.authCertificatePem || "", /BEGIN CERTIFICATE/);

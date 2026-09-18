@@ -67,7 +67,7 @@ describe("Manual PDF import",()=>{
   assert.ok(restored.fields.includes("legalName"));
   const profile=await prisma.tenantLegalProfile.findUniqueOrThrow({where:{tenantId:contract.tenantId}});
   assert.equal(profile.legalName,draft().seller.name);assert.equal(profile.bin,draft().seller.bin);assert.equal(profile.iban,draft().seller.iban);
-  const readiness=await (await import("./services/contractReadiness.ts")).getContractReadiness(prisma,{activeMembership:{tenantId:contract.tenantId}} as any,dealId);
+  const readiness=await (await import("./services/contractReadiness.ts")).getContractReadiness(prisma,{user:{platformAdmin:false},activeMembership:{tenantId:contract.tenantId,role:"owner",active:true,permissions:[],tenant:{status:"active"}}} as any,dealId);
   assert.equal(readiness.ready,true);
   await prisma.tenantLegalProfile.update({where:{tenantId:contract.tenantId},data:{legalAddress:"Verified existing address"}});
   await req(`/api/v1/contracts/${contractId}/imported-requisites`,"POST");

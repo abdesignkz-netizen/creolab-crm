@@ -5,16 +5,22 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { PrismaClient } from "@creolab/db";
 import type { Response } from "express";
+import { inferInvoicePaymentPercent, invoicePayableTotals } from "@creolab/contracts";
 import { ApiError } from "../errors.ts";
 import { can, type AuthContext } from "../lib/types.ts";
 import { requireDocumentsAccess } from "../lib/access.ts";
 import { resolveUploadPath } from "../lib/storage.ts";
-import { sumLines } from "./documentMoney.ts";
+import { asMoney, sumLines } from "./documentMoney.ts";
 import { serializeDealItem } from "./dealItemService.ts";
 import { requireDocumentsEnabled } from "./legalProfileService.ts";
 import { mapDealItemsToInvoiceItems, serializeInvoice } from "./documentDraftService.ts";
 import { assessInvoiceReadiness, invoiceMissingFieldsError } from "./invoiceReadiness.ts";
-import { renderInvoicePdf } from "./invoicePdf.ts";
+import {
+  invoicePdfContentDisposition,
+  invoicePdfFileName,
+  renderInvoicePdf,
+  type InvoicePdfInput,
+} from "./invoicePdf.ts";
 
 const MUTABLE_STATUSES = new Set(["DRAFT", "ISSUED"]);
 
@@ -33,6 +39,138 @@ function defaultDueDate(from: Date) {
   const due = new Date(from);
   due.setUTCDate(due.getUTCDate() + 7);
   return due;
+}
+
+function defaultKbe(bin?: string | null, iin?: string | null) {
+  return String(bin || "").trim() ? "17" : String(iin || "").trim() ? "19" : "17";
+}
+
+type InvoiceRecord = Awaited<ReturnType<PrismaClient["invoice"]["findFirst"]>> & {
+  items: Array<{
+    name: string;
+    quantity: { toString(): string } | number;
+    unit: string;
+    unitPrice: { toString(): string } | number;
+    amountWithoutVat: { toString(): string } | number;
+    vatRate: { toString(): string } | number;
+    vatAmount: { toString(): string } | number;
+    totalAmount: { toString(): string } | number;
+    sortOrder: number;
+  }>;
+};
+
+async function invoicePdfSnapshot(
+  prisma: PrismaClient,
+  tid: string,
+  invoice: NonNullable<InvoiceRecord>,
+  options: { requireReady?: boolean } = {},
+): Promise<{ input: InvoicePdfInput; signedId: string | null; filename: string; itemCount: number; paymentPercent: number; itemTotals: ReturnType<typeof sumLines>; payable: ReturnType<typeof sumLines> }> {
+  const deal = await prisma.deal.findFirst({
+    where: { id: invoice.dealId, tenantId: tid },
+    include: { items: { orderBy: { sortOrder: "asc" } }, company: true },
+  });
+  if (!deal) throw new ApiError(404, "not_found", "Сделка не найдена");
+
+  const signed = invoice.contractId
+    ? await prisma.contract.findFirst({
+        where: { id: invoice.contractId, tenantId: tid, dealId: deal.id },
+      })
+    : await prisma.contract.findFirst({
+        where: { tenantId: tid, dealId: deal.id, status: "SIGNED" },
+        orderBy: { signedAt: "desc" },
+      }) || await prisma.contract.findFirst({
+        where: { tenantId: tid, dealId: deal.id },
+        orderBy: { createdAt: "desc" },
+      });
+
+  const [profile, tenant, settingsRow] = await Promise.all([
+    documentOrganization(prisma, tid, deal.id, invoice.contractId || signed?.id),
+    prisma.tenant.findUnique({ where: { id: tid }, select: { name: true, settingsJson: true } }),
+    prisma.tenantLegalProfile.findUnique({ where: { tenantId: tid }, select: { phone: true } }),
+  ]);
+  const settings = tenant?.settingsJson as { documents?: { kbe?: string; knp?: string } } | null;
+  const invoiceItems = invoice.items.map((item) => ({
+    name: item.name,
+    quantity: asMoney(item.quantity),
+    unit: item.unit,
+    unitPrice: asMoney(item.unitPrice),
+    amountWithoutVat: asMoney(item.amountWithoutVat),
+    vatRate: asMoney(item.vatRate),
+    vatAmount: asMoney(item.vatAmount),
+    totalAmount: asMoney(item.totalAmount),
+    sortOrder: item.sortOrder,
+  }));
+  const dealItems = deal.items.map(serializeDealItem);
+  const items = invoiceItems.length ? invoiceItems : dealItems;
+  const signedReady = signed?.status === "SIGNED" ? signed : null;
+  if (options.requireReady) {
+    const readiness = assessInvoiceReadiness({
+      dealId: deal.id,
+      contractId: signedReady?.id || invoice.contractId,
+      invoiceId: invoice.id,
+      signedContractId: signedReady?.id || null,
+      itemCount: items.length,
+      profile,
+      company: deal.company,
+    });
+    if (!readiness.ready) throw invoiceMissingFieldsError(readiness);
+  }
+
+  const itemTotals = sumLines(items);
+  const paymentPercent = inferInvoicePaymentPercent(asMoney(invoice.totalAmount), itemTotals.totalAmount);
+  const computed = invoicePayableTotals(
+    items.map((item) => ({
+      name: item.name,
+      quantity: item.quantity,
+      unit: item.unit,
+      unitPrice: item.unitPrice,
+      vatRate: item.vatRate,
+    })),
+    paymentPercent,
+  );
+  const payable = { ...computed.payable, vatRate: itemTotals.vatRate };
+
+  const company = deal.company;
+  const input: InvoicePdfInput = {
+    number: invoice.number,
+    date: invoice.date,
+    dueDate: invoice.dueDate,
+    contractNumber: signed?.number || "",
+    contractDate: signed?.date || null,
+    dealName: deal.title,
+    amountWithoutVat: payable.amountWithoutVat,
+    vatRate: payable.vatRate,
+    vatAmount: payable.vatAmount,
+    totalAmount: payable.totalAmount,
+    itemsTotalWithoutVat: itemTotals.amountWithoutVat,
+    itemsVatAmount: itemTotals.vatAmount,
+    itemsTotalAmount: itemTotals.totalAmount,
+    paymentPercent,
+    sellerName: profile?.legalName || profile?.shortName || tenant?.name || "",
+    sellerBin: profile?.bin || profile?.iin || "",
+    sellerAddress: profile?.legalAddress || "",
+    sellerPhone: settingsRow?.phone || (profile as { phone?: string | null } | null)?.phone || "",
+    sellerIban: profile?.iban || "",
+    sellerBankName: profile?.bankName || "",
+    sellerBik: profile?.bik || "",
+    sellerKbe: settings?.documents?.kbe || defaultKbe(profile?.bin, profile?.iin),
+    sellerKnp: settings?.documents?.knp || "859",
+    sellerDirector: profile?.directorName || "",
+    buyerName: company?.legalName || company?.name || "",
+    buyerBin: company?.bin || company?.iin || "",
+    buyerAddress: company?.legalAddress || company?.address || "",
+    buyerPhone: company?.phone || "",
+    items,
+  };
+  return {
+    input,
+    signedId: signedReady?.id || null,
+    filename: invoicePdfFileName(input),
+    itemCount: items.length,
+    paymentPercent,
+    itemTotals,
+    payable,
+  };
 }
 
 export async function generateInvoicePdfFile(
@@ -58,74 +196,21 @@ export async function generateInvoicePdfFile(
     throw new ApiError(422, "invoice_immutable", "Счёт уже оплачен, просрочен или отменён — PDF нельзя пересобрать");
   }
 
+  const snapshot = await invoicePdfSnapshot(prisma, tid, invoice, { requireReady: true });
   const deal = await prisma.deal.findFirst({
     where: { id: invoice.dealId, tenantId: tid },
-    include: {
-      items: { orderBy: { sortOrder: "asc" } },
-      company: true,
-    },
+    select: { id: true, companyId: true, currency: true, paymentStatus: true },
   });
   if (!deal) throw new ApiError(404, "not_found", "Сделка не найдена");
-
-  const signed = invoice.contractId
-    ? await prisma.contract.findFirst({
-        where: { id: invoice.contractId, tenantId: tid, dealId: deal.id, status: "SIGNED" },
-      })
-    : await prisma.contract.findFirst({
-        where: { tenantId: tid, dealId: deal.id, status: "SIGNED" },
-        orderBy: { signedAt: "desc" },
-      });
-
-  const [profile, tenant] = await Promise.all([
-    documentOrganization(prisma, tid, deal.id, invoice.contractId),
-    prisma.tenant.findUnique({ where: { id: tid }, select: { name: true } }),
-  ]);
-
-  const items = deal.items.map(serializeDealItem);
-  const readiness = assessInvoiceReadiness({
-    dealId: deal.id,
-    contractId: signed?.id || invoice.contractId,
-    invoiceId: invoice.id,
-    signedContractId: signed?.id || null,
-    itemCount: items.length,
-    profile,
-    company: deal.company,
-  });
-  if (!readiness.ready) throw invoiceMissingFieldsError(readiness);
-
-  const totals = sumLines(items);
   const dueDate =
     input.dueDate !== undefined
       ? input.dueDate
         ? new Date(input.dueDate)
         : null
       : invoice.dueDate || defaultDueDate(invoice.date);
-  const company = deal.company!;
-
-  const pdf = await renderInvoicePdf({
-    number: invoice.number,
-    date: invoice.date,
-    dueDate,
-    contractNumber: signed!.number,
-    contractDate: signed!.date,
-    dealName: deal.title,
-    amountWithoutVat: totals.amountWithoutVat,
-    vatRate: totals.vatRate,
-    vatAmount: totals.vatAmount,
-    totalAmount: totals.totalAmount,
-    sellerName: profile!.legalName || profile!.shortName || tenant?.name || "",
-    sellerBin: profile!.bin || profile!.iin || "",
-    sellerAddress: profile!.legalAddress || "",
-    sellerIban: profile!.iban || "",
-    sellerBankName: profile!.bankName || "",
-    sellerBik: profile!.bik || "",
-    buyerName: company.legalName || company.name,
-    buyerBin: company.bin || company.iin || "",
-    buyerAddress: company.legalAddress || company.address || "",
-    items,
-  });
-
+  const pdf = await renderInvoicePdf({ ...snapshot.input, dueDate });
   const sha256 = createHash("sha256").update(pdf).digest("hex");
+  const totals = snapshot.payable;
   if (invoice.pdfFileId) {
     const current = await prisma.attachment.findFirst({
       where: { id: invoice.pdfFileId, tenantId: tid, parentType: "invoice", parentId: invoice.id },
@@ -134,7 +219,7 @@ export async function generateInvoicePdfFile(
       const reused = await prisma.invoice.update({
         where: { id: invoice.id },
         data: {
-          contractId: signed!.id,
+          contractId: snapshot.signedId,
           companyId: deal.companyId,
           dueDate,
           currency: deal.currency || "KZT",
@@ -163,17 +248,22 @@ export async function generateInvoicePdfFile(
   }
 
   const attachmentId = randomUUID();
-  const fileName = `${invoice.number}.pdf`;
+  const fileName = snapshot.filename;
   const storageKey = path.posix.join(tid, "invoices", invoice.id, `${attachmentId}-${fileName}`);
   const abs = resolveUploadPath(storageKey);
   await mkdir(path.dirname(abs), { recursive: true });
   await writeFile(abs, pdf);
 
   const saved = await prisma.$transaction(async (tx) => {
-    await tx.invoiceItem.deleteMany({ where: { tenantId: tid, invoiceId: invoice.id } });
-    await tx.invoiceItem.createMany({
-      data: mapDealItemsToInvoiceItems(items, tid, invoice.id),
-    });
+    if (!invoice.items.length) {
+      const dealItems = await tx.dealItem.findMany({
+        where: { tenantId: tid, dealId: deal.id },
+        orderBy: { sortOrder: "asc" },
+      });
+      await tx.invoiceItem.createMany({
+        data: mapDealItemsToInvoiceItems(dealItems.map(serializeDealItem), tid, invoice.id),
+      });
+    }
     await tx.attachment.create({
       data: {
         id: attachmentId,
@@ -194,7 +284,7 @@ export async function generateInvoicePdfFile(
     const updated = await tx.invoice.update({
       where: { id: invoice.id },
       data: {
-        contractId: signed!.id,
+        contractId: snapshot.signedId,
         companyId: deal.companyId,
         dueDate,
         currency: deal.currency || "KZT",
@@ -246,23 +336,31 @@ export async function sendInvoicePdf(
   const tid = membership.tenantId;
   const invoice = await prisma.invoice.findFirst({
     where: { id: invoiceId, tenantId: tid },
-    select: { id: true, number: true, pdfFileId: true },
+    include: { items: { orderBy: { sortOrder: "asc" } } },
   });
   if (!invoice) throw new ApiError(404, "not_found", "Счёт не найден");
-  if (!invoice.pdfFileId) {
-    throw new ApiError(404, "pdf_not_ready", "PDF счёта ещё не сформирован");
+  if (invoice.pdfFileId) {
+    const attachment = await prisma.attachment.findFirst({
+      where: { id: invoice.pdfFileId, tenantId: tid, parentType: "invoice", parentId: invoice.id },
+    });
+    if (attachment?.status === "imported") {
+      const abs = resolveUploadPath(attachment.storageKey);
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(attachment.originalFileName || invoice.number)}.pdf"`);
+      await new Promise<void>((resolve, reject) => {
+        const stream = createReadStream(abs);
+        stream.on("error", () => reject(new ApiError(404, "not_found", "Файл счёта не найден на диске")));
+        stream.on("end", () => resolve());
+        stream.pipe(res);
+      });
+      return;
+    }
   }
-  const attachment = await prisma.attachment.findFirst({
-    where: { id: invoice.pdfFileId, tenantId: tid, parentType: "invoice", parentId: invoice.id },
-  });
-  if (!attachment) throw new ApiError(404, "not_found", "Файл счёта не найден");
-  const abs = resolveUploadPath(attachment.storageKey);
+  const snapshot = await invoicePdfSnapshot(prisma, tid, invoice);
+  const pdf = await renderInvoicePdf(snapshot.input);
   res.setHeader("Content-Type", "application/pdf");
-  res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(invoice.number)}.pdf"`);
-  await new Promise<void>((resolve, reject) => {
-    const stream = createReadStream(abs);
-    stream.on("error", () => reject(new ApiError(404, "not_found", "Файл счёта не найден на диске")));
-    stream.on("end", () => resolve());
-    stream.pipe(res);
-  });
+  res.setHeader("Content-Disposition", invoicePdfContentDisposition(snapshot.filename));
+  res.setHeader("Cache-Control", "no-store");
+  res.send(pdf);
 }
+

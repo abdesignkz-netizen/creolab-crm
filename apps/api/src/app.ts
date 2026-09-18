@@ -21,6 +21,8 @@ import {
   confirmCampaignSchema,
   createCampaignSchema,
   loginSchema,
+  passwordResetCompleteSchema,
+  passwordResetRequestSchema,
   lookupInquiryContactSchema,
   loseInquirySchema,
   nextActionSchema,
@@ -64,6 +66,8 @@ import {
 } from "@creolab/contracts";
 import { config } from "./config.ts";
 import { ApiError, errorBody } from "./errors.ts";
+import { clientIp, rateLimit } from "./lib/rateLimit.ts";
+import { logServerError } from "./lib/redact.ts";
 import { fileStorageStatus } from "./lib/storage.ts";
 import {
   authFromAccessToken,
@@ -199,6 +203,7 @@ import {
   syncSellerLeads,
 } from "./services/sellerLink.ts";
 import { acceptInvitation, previewInvitation } from "./services/invitationService.ts";
+import { completePasswordReset, requestPasswordReset } from "./services/passwordResetService.ts";
 import {
   createPlatformCompany,
   getPlatformCompany,
@@ -232,24 +237,30 @@ import { decryptSecret } from "./lib/secretBox.ts";
 import { safeEqual } from "./lib/hash.ts";
 import type { AuthContext } from "./lib/types.ts";
 
-const rateBuckets = new Map<string, { count: number; reset: number }>();
-
-function rateLimit(key: string, limit: number) {
-  const now = Date.now();
-  const bucket = rateBuckets.get(key);
-  if (!bucket || bucket.reset < now) {
-    rateBuckets.set(key, { count: 1, reset: now + 60_000 });
-    return;
-  }
-  bucket.count += 1;
-  if (bucket.count > limit) {
-    throw new ApiError(429, "rate_limited", "Слишком много запросов");
-  }
-}
+const SESSION_COOKIE = {
+  httpOnly: true as const,
+  sameSite: "lax" as const,
+  secure: config.cookieSecure,
+  path: "/",
+  maxAge: 12 * 60 * 60 * 1000,
+};
 
 export function createApp(prisma: PrismaClient) {
   const app = express();
   app.disable("x-powered-by");
+  if (config.trustProxy !== false) {
+    app.set("trust proxy", config.trustProxy);
+  }
+  app.use((_req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+    if (config.nodeEnv === "production") {
+      res.setHeader("Strict-Transport-Security", "max-age=15552000; includeSubDomains");
+    }
+    next();
+  });
   app.use(
     cors({
       origin: config.allowedOrigins,
@@ -281,6 +292,16 @@ export function createApp(prisma: PrismaClient) {
     await prisma.$queryRaw`SELECT 1`;
     res.json({ status: "ready" });
   });
+  if (String(process.env.TRUST_PROXY_DEBUG || "") === "1") {
+    app.get("/api/v1/debug/client-ip", (req, res) => {
+      res.json({
+        ip: req.ip || null,
+        ips: req.ips || [],
+        remoteAddress: req.socket?.remoteAddress || null,
+        trustProxy: config.trustProxy,
+      });
+    });
+  }
 
   const json = express.json({ limit: "200kb" });
   const jsonLarge = express.json({ limit: "30mb" });
@@ -305,32 +326,49 @@ export function createApp(prisma: PrismaClient) {
   const urlencoded = express.urlencoded({ extended: true, limit: "200kb" });
   const rawJson = express.raw({ type: "application/json", limit: "200kb" });
 
-  // Public form: JSON + urlencoded (HTML forms). Multipart later for files.
-  app.post("/public/forms/:publicKey/submissions", json, urlencoded, async (req, res) => {
-    rateLimit(`form:${req.params.publicKey}:${req.ip}`, 20);
+  function publicFormCors(req: express.Request, res: express.Response) {
     res.setHeader("Access-Control-Allow-Origin", req.get("origin") || "*");
     res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Submission-Id");
+  }
+
+  function hostedFormStatus(req: express.Request, duplicate: boolean) {
+    if (duplicate) return 200;
+    const ct = String(req.get("content-type") || "").toLowerCase();
+    if (ct.includes("application/x-www-form-urlencoded")) return 200;
+    const body = req.body && typeof req.body === "object" ? (req.body as Record<string, unknown>) : {};
+    // Tilda's webhook is urlencoded; if a client still posts JSON with Tilda keys, answer 200.
+    if (body.tranid || body.formid || (body.Name && (body.Phone || body.Email))) return 200;
+    return 202;
+  }
+
+  app.use("/public/forms", (req, res, next) => {
+    publicFormCors(req, res);
+    next();
+  });
+
+  // Public form: JSON + urlencoded (HTML / Tilda / WordPress webhooks). Multipart later for files.
+  app.post("/public/forms/:publicKey/submissions", json, urlencoded, async (req, res) => {
+    rateLimit(`form:${req.params.publicKey}:${req.ip}`, 20);
+    publicFormCors(req, res);
     const result = await submitPublicForm(prisma, req.params.publicKey, req.body || {}, {
       origin: req.get("origin") || undefined,
-      submissionId: String(req.header("x-submission-id") || req.body?.submission_id || ""),
+      submissionId: String(req.header("x-submission-id") || req.body?.submission_id || req.body?.tranid || ""),
     });
-    res.status(result.duplicate ? 200 : 202).json({
+    res.status(hostedFormStatus(req, result.duplicate)).json({
       ok: true,
       receipt: result.receipt,
       duplicate: result.duplicate,
     });
   });
 
-  app.options("/public/forms/:publicKey/submissions", (_req, res) => {
-    res.setHeader("Access-Control-Allow-Origin", _req.get("origin") || "*");
-    res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Submission-Id");
+  app.options("/public/forms/:publicKey/submissions", (req, res) => {
+    publicFormCors(req, res);
     res.status(204).end();
   });
 
   async function authenticate(req: express.Request): Promise<AuthContext> {
-    const tenantHeader = String(req.header("x-tenant-id") || req.query.tenantId || "");
+    const tenantHeader = String(req.header("x-tenant-id") || "").trim();
     const cookie = req.cookies?.crm_session as string | undefined;
     const bearer = String(req.header("authorization") || "").replace(/^Bearer\s+/i, "");
     if (cookie) return authFromSessionToken(prisma, cookie, tenantHeader || null);
@@ -341,8 +379,9 @@ export function createApp(prisma: PrismaClient) {
   async function optionalAuth(req: express.Request): Promise<AuthContext | null> {
     try {
       return await authenticate(req);
-    } catch {
-      return null;
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) return null;
+      throw error;
     }
   }
 
@@ -362,18 +401,16 @@ export function createApp(prisma: PrismaClient) {
   }
 
   app.post("/api/v1/auth/login", json, async (req, res) => {
+    const ip = clientIp(req);
+    const email = String(req.body?.email || "").toLowerCase();
+    rateLimit(`login:ip:${ip}`, 20);
+    if (email) rateLimit(`login:email:${email}`, 8);
     const result = await login(prisma, req.body, {
       userAgent: String(req.header("user-agent") || ""),
-      ip: String(req.ip || req.socket.remoteAddress || ""),
+      ip,
     });
     if (result.auth.client === "web") {
-      res.cookie("crm_session", result.sessionToken, {
-        httpOnly: true,
-        sameSite: "lax",
-        secure: config.cookieSecure,
-        path: "/",
-        maxAge: 12 * 60 * 60 * 1000,
-      });
+      res.cookie("crm_session", result.sessionToken, SESSION_COOKIE);
     }
     res.json({
       user: publicAuth(result.auth),
@@ -383,18 +420,16 @@ export function createApp(prisma: PrismaClient) {
   });
 
   app.post("/api/v1/auth/platform-login", json, async (req, res) => {
+    const ip = clientIp(req);
+    const email = String(req.body?.email || "").toLowerCase();
+    rateLimit(`platform-login:ip:${ip}`, 20);
+    if (email) rateLimit(`platform-login:email:${email}`, 8);
     const result = await loginPlatformAdmin(prisma, req.body, {
       userAgent: String(req.header("user-agent") || ""),
-      ip: String(req.ip || req.socket.remoteAddress || ""),
+      ip,
     });
     if (result.auth.client === "web") {
-      res.cookie("crm_session", result.sessionToken, {
-        httpOnly: true,
-        sameSite: "lax",
-        secure: config.cookieSecure,
-        path: "/",
-        maxAge: 12 * 60 * 60 * 1000,
-      });
+      res.cookie("crm_session", result.sessionToken, SESSION_COOKIE);
     }
     res.json({
       user: publicAuth(result.auth),
@@ -406,13 +441,33 @@ export function createApp(prisma: PrismaClient) {
   app.post("/api/v1/auth/logout", json, async (req, res) => {
     const auth = await requireAuth(req);
     await logout(prisma, auth.sessionId, Boolean(req.body?.all), auth.user.id);
-    res.clearCookie("crm_session", { path: "/" });
+    res.clearCookie("crm_session", {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: config.cookieSecure,
+      path: "/",
+    });
     res.json({ ok: true });
   });
 
   app.post("/api/v1/auth/refresh", json, async (req, res) => {
+    rateLimit(`refresh:ip:${clientIp(req)}`, 30);
     const parsed = await refreshMobile(prisma, String(req.body?.refreshToken || ""));
     res.json(parsed);
+  });
+
+  app.post("/api/v1/auth/password-reset/request", json, async (req, res) => {
+    const ip = clientIp(req);
+    rateLimit(`password-reset:ip:${ip}`, 5);
+    const parsed = passwordResetRequestSchema.parse(req.body || {});
+    rateLimit(`password-reset:email:${parsed.email.toLowerCase()}`, 3);
+    res.json(await requestPasswordReset(prisma, parsed));
+  });
+
+  app.post("/api/v1/auth/password-reset/complete", json, async (req, res) => {
+    rateLimit(`password-reset-complete:ip:${clientIp(req)}`, 8);
+    const parsed = passwordResetCompleteSchema.parse(req.body || {});
+    res.json(await completePasswordReset(prisma, parsed));
   });
 
   app.get("/api/v1/me", async (req, res) => {
@@ -487,7 +542,9 @@ export function createApp(prisma: PrismaClient) {
   app.post("/api/v1/tenants/switch", json, async (req, res) => {
     const auth = await requireAuth(req);
     const tenantId = String(req.body?.tenantId || "");
-    const membership = auth.memberships.find((item) => item.tenantId === tenantId && item.active);
+    const membership = auth.memberships.find(
+      (item) => item.tenantId === tenantId && item.active && item.tenant.status === "active",
+    );
     if (!membership) throw new ApiError(403, "forbidden", "Нет доступа к компании");
     res.json({ activeTenant: { membershipId: membership.id, role: membership.role, tenant: membership.tenant } });
   });
@@ -1060,6 +1117,11 @@ export function createApp(prisma: PrismaClient) {
     res.json(await getInvoice(prisma, await requireAuth(req), req.params.id));
   });
 
+  app.patch("/api/v1/invoices/:id", json, async (req, res) => {
+    const { updateInvoiceDraft } = await import("./services/invoiceEditorService.ts");
+    res.json(await updateInvoiceDraft(prisma, await requireAuth(req), req.params.id, req.body));
+  });
+
   app.post("/api/v1/invoices/:id/generate", json, async (req, res) => {
     const input = generateInvoiceSchema.parse(req.body || {});
     const { generateInvoicePdfFile } = await import("./services/invoiceGenerationService.ts");
@@ -1075,9 +1137,17 @@ export function createApp(prisma: PrismaClient) {
     const { listAvrEligibleDeals } = await import("./services/documentWorkflow.ts");
     res.json(await listAvrEligibleDeals(prisma, await requireAuth(req), req.query));
   });
+  app.get("/api/v1/documents/invoices/eligible-deals", async (req, res) => {
+    const { listInvoiceEligibleDeals } = await import("./services/invoiceEditorService.ts");
+    res.json(await listInvoiceEligibleDeals(prisma, await requireAuth(req), req.query));
+  });
   app.get("/api/v1/deals/:id/avr-context", async (req, res) => {
     const { getAvrEditorContext } = await import("./services/documentWorkflow.ts");
     res.json(await getAvrEditorContext(prisma, await requireAuth(req), req.params.id));
+  });
+  app.get("/api/v1/deals/:id/invoice-context", async (req, res) => {
+    const { getInvoiceEditorContext } = await import("./services/invoiceEditorService.ts");
+    res.json(await getInvoiceEditorContext(prisma, await requireAuth(req), req.params.id));
   });
   app.patch("/api/v1/electronic-documents/:id", json, async (req, res) => {
     const { updateAvrDraft } = await import("./services/avrService.ts");
@@ -1592,6 +1662,7 @@ export function createApp(prisma: PrismaClient) {
   });
 
   app.post("/api/v1/invitations/:token/accept", json, async (req, res) => {
+    rateLimit(`invite-accept:ip:${clientIp(req)}`, 10);
     const result = await acceptInvitation(prisma, req.params.token, {
       password: req.body?.password,
       name: req.body?.name,
@@ -1813,7 +1884,7 @@ export function createApp(prisma: PrismaClient) {
     }
     const mapped = errorBody(error, res.locals.requestId);
     if (mapped.status >= 500) {
-      console.error(error);
+      logServerError(error);
     }
     res.status(mapped.status).json(mapped.body);
   });

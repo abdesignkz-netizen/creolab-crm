@@ -241,6 +241,7 @@ export function IntegrationsPage() {
 
       <div className="panel">
         <h3>WhatsApp AI Manager</h3>
+        {setup?.whatsapp?.warning ? <div className="banner warn">{setup.whatsapp.warning}</div> : null}
         <p className="muted">{setup?.whatsapp?.note}</p>
         <p>
           Подключено: {setup?.whatsapp?.configured ? "да" : "нет"} · Мост:{" "}

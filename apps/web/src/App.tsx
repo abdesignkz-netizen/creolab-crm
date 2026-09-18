@@ -26,6 +26,7 @@ const ConversationsPage = lazy(() => import("./pages/ConversationsPage").then(m 
 const DealsPage = lazy(() => import("./pages/DealsPage").then(m => ({ default: m.DealsPage })));
 const DealDetailPage = lazy(() => import("./pages/DealsPage").then(m => ({ default: m.DealDetailPage })));
 const AvrEditorPage = lazy(() => import("./pages/AvrEditorPage").then(m => ({ default: m.AvrEditorPage })));
+const InvoiceEditorPage = lazy(() => import("./pages/InvoiceEditorPage").then(m => ({ default: m.InvoiceEditorPage })));
 const DocumentsPage = lazy(() => import("./pages/DocumentsPage").then(m => ({ default: m.DocumentsPage })));
 const SignPage = lazy(() => import("./pages/SignPage").then(m => ({ default: m.SignPage })));
 const VerifyPage = lazy(() => import("./pages/VerifyPage").then(m => ({ default: m.VerifyPage })));
@@ -605,7 +606,7 @@ function Login() {
           <p className="muted">{t(normalizeLocale(null), "login.hint")}</p>
           <label>
             {t(normalizeLocale(null), "login.email")}
-            <input name="email" type="email" required defaultValue="owner@creolab.example" autoComplete="username" />
+            <input name="email" type="email" required autoComplete="username" />
           </label>
           <label>
             {t(normalizeLocale(null), "login.password")}
@@ -613,7 +614,6 @@ function Login() {
               name="password"
               type="password"
               required
-              defaultValue="ChangeMeLocal1!"
               autoComplete="current-password"
             />
           </label>
@@ -648,9 +648,14 @@ function SimpleList({ title, load, render }: { title: string; load: () => Promis
 export function App() {
   const location = useLocation();
   const [me, setMe] = useState<any>(null);
-  const [boot, setBoot] = useState<"loading" | "anon" | "ready" | "error">("loading");
+  const [boot, setBoot] = useState<"loading" | "anon" | "ready" | "error" | "tenant-blocked">("loading");
   const [bootError, setBootError] = useState("");
   const [bootRevision, setBootRevision] = useState(0);
+  const [tenantBlock, setTenantBlock] = useState<{
+    code: string;
+    message: string;
+    memberships: Array<{ tenantId: string; name: string; role: string }>;
+  } | null>(null);
   useEffect(() => {
     let cancelled = false;
     setBoot("loading");
@@ -658,11 +663,26 @@ export function App() {
       if (cancelled) return;
       setMe(data);
       applyAppearance((data as any).user);
+      const recovered = (data as any).activeTenant?.tenant?.id as string | undefined;
+      if (recovered && !localStorage.getItem("crm_tenant")) setTenant(recovered);
       setBoot("ready");
     }).catch((error) => {
       if (cancelled) return;
-      if (error?.status === 401) setBoot("anon");
-      else {
+      const code = String((error as { code?: string })?.code || "");
+      if ((error as { status?: number })?.status === 401) setBoot("anon");
+      else if (
+        (error as { status?: number })?.status === 403 &&
+        (code === "membership_suspended" || code === "tenant_suspended" || code === "unknown_tenant")
+      ) {
+        const details = (error as { body?: { details?: { memberships?: Array<{ tenantId: string; name: string; role: string }> } } })
+          .body?.details;
+        setTenantBlock({
+          code,
+          message: error instanceof Error ? error.message : "Нет доступа к выбранной компании",
+          memberships: details?.memberships || [],
+        });
+        setBoot("tenant-blocked");
+      } else {
         setBootError("Не удалось связаться с CRM. Проверьте соединение и повторите загрузку.");
         setBoot("error");
       }
@@ -671,6 +691,47 @@ export function App() {
   }, [bootRevision]);
   if (boot === "loading") return <div className="state">{t(normalizeLocale(null), "common.loading")}</div>;
   if (boot === "error") return <div className="state"><p>{bootError}</p><button className="btn" onClick={() => setBootRevision(value => value + 1)}>Повторить</button></div>;
+  if (boot === "tenant-blocked" && tenantBlock) {
+    return (
+      <div className="login">
+        <div className="login-stage">
+          <div className="login-brand">
+            <div className="brand-mark" aria-hidden>C</div>
+            <h1 className="brand-wordmark">CREOLAB</h1>
+          </div>
+          <div className="panel">
+            <h2>Компания недоступна</h2>
+            <p className="error">{tenantBlock.message}</p>
+            {tenantBlock.memberships.length ? (
+              <>
+                <p className="muted">Выберите доступную организацию. Автоматического перехода на другую компанию нет.</p>
+                <div className="tenant-choice-list">
+                  {tenantBlock.memberships.map((item) => (
+                    <button
+                      key={item.tenantId}
+                      className="btn"
+                      type="button"
+                      onClick={() => {
+                        setTenant(item.tenantId);
+                        window.location.assign("/today");
+                      }}
+                    >
+                      {item.name}
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <p className="muted">Других доступных компаний нет. Обратитесь к администратору.</p>
+            )}
+            <p className="muted login-alt">
+              <Link to="/login" onClick={() => localStorage.removeItem("crm_tenant")}>Выйти на экран входа</Link>
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
@@ -734,6 +795,8 @@ export function App() {
                 <Route path="/documents" element={me?.capabilities?.documents ? <DocumentsPage /> : <Navigate to="/today" replace />} />
                 <Route path="/documents/avr/new" element={me?.capabilities?.documents ? <AvrEditorPage /> : <Navigate to="/today" replace />} />
                 <Route path="/documents/avr/:id" element={me?.capabilities?.documents ? <AvrEditorPage /> : <Navigate to="/today" replace />} />
+                <Route path="/documents/invoices/new" element={me?.capabilities?.documents ? <InvoiceEditorPage /> : <Navigate to="/today" replace />} />
+                <Route path="/documents/invoices/:id" element={me?.capabilities?.documents ? <InvoiceEditorPage /> : <Navigate to="/today" replace />} />
                 <Route path="/tasks" element={<TasksPage />} />
                 <Route path="/contacts" element={<ClientsPage />} />
                 <Route path="/contacts/:id" element={<ContactPage key={location.pathname} />} />

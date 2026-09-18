@@ -10,10 +10,11 @@ export type ClientOptions = {
   baseUrl: string;
   getToken?: () => string | null | Promise<string | null>;
   getTenantId?: () => string | null;
+  onUnknownTenant?: () => void;
 };
 
 export function createApiClient(options: ClientOptions) {
-  async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  async function request<T>(path: string, init: RequestInit = {}, retried = false): Promise<T> {
     const headers = new Headers(init.headers);
     headers.set("Content-Type", "application/json");
     const token = await options.getToken?.();
@@ -27,15 +28,58 @@ export function createApiClient(options: ClientOptions) {
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
+      if (shouldRetryUnknownTenant(response.status, data, tenantId, retried)) {
+        return request<T>(path, init, true);
+      }
       const error = new Error(data.message || `HTTP ${response.status}`) as Error & {
         status: number;
+        code?: string;
         body: unknown;
       };
       error.status = response.status;
+      error.code = (data as { code?: string }).code;
       error.body = data;
       throw error;
     }
     return data as T;
+  }
+
+  function shouldRetryUnknownTenant(status: number, data: unknown, tenantId: string | null | undefined, retried: boolean) {
+    if (retried || status !== 403 || !tenantId) return false;
+    const code = (data as { code?: string }).code;
+    if (code !== "unknown_tenant") return false;
+    options.onUnknownTenant?.();
+    return true;
+  }
+
+  async function downloadBlob(path: string, fallbackName: string, retried = false) {
+    const headers = new Headers();
+    const token = await options.getToken?.();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    const tenantId = options.getTenantId?.();
+    if (tenantId) headers.set("x-tenant-id", tenantId);
+    const response = await fetch(`${options.baseUrl}${path}`, { headers, credentials: "include" });
+    if (!response.ok) {
+      const data = (await response.json().catch(() => ({}))) as { message?: string; code?: string };
+      if (shouldRetryUnknownTenant(response.status, data, tenantId, retried)) {
+        return downloadBlob(path, fallbackName, true);
+      }
+      const error = new Error(data.message || `HTTP ${response.status}`) as Error & {
+        status: number;
+        code?: string;
+        body: unknown;
+      };
+      error.status = response.status;
+      error.code = data.code;
+      error.body = data;
+      throw error;
+    }
+    const blob = await response.blob();
+    const disposition = response.headers.get("content-disposition") || "";
+    const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+    const plain = disposition.match(/filename="([^"]+)"/i);
+    const filename = encoded ? decodeURIComponent(encoded[1]) : plain?.[1] || fallbackName;
+    return { blob, filename };
   }
 
   return {
@@ -264,9 +308,12 @@ export function createApiClient(options: ClientOptions) {
     invoiceReadiness: (dealId: string) => request(`/api/v1/deals/${dealId}/invoice-readiness`),
     createInvoiceDraft: (dealId: string, body: unknown = {}) =>
       request(`/api/v1/deals/${dealId}/invoices`, { method: "POST", body: JSON.stringify(body) }),
+    updateInvoiceDraft: (invoiceId: string, body: unknown) =>
+      request(`/api/v1/invoices/${invoiceId}`, { method: "PATCH", body: JSON.stringify(body) }),
     generateInvoice: (invoiceId: string, body: unknown = {}) =>
       request(`/api/v1/invoices/${invoiceId}/generate`, { method: "POST", body: JSON.stringify(body) }),
     invoicePdfUrl: (invoiceId: string) => `/api/v1/invoices/${invoiceId}/pdf`,
+    downloadInvoicePdf: (invoiceId: string) => downloadBlob(`/api/v1/invoices/${invoiceId}/pdf`, "invoice.pdf"),
     avrReadiness: (dealId: string) => request(`/api/v1/deals/${dealId}/avr-readiness`),
     esfInvoiceReadiness: (dealId: string) => request(`/api/v1/deals/${dealId}/esf-invoice-readiness`),
     dealCloseReadiness: (dealId: string) => request(`/api/v1/deals/${dealId}/close-readiness`),
@@ -291,61 +338,11 @@ export function createApiClient(options: ClientOptions) {
     refreshElectronicDocumentEsf: (documentId: string) =>
       request(`/api/v1/electronic-documents/${documentId}/esf-refresh`, { method: "POST", body: JSON.stringify({}) }),
     electronicDocumentExcelUrl: (documentId: string) => `/api/v1/electronic-documents/${documentId}/excel`,
-    downloadElectronicDocumentExcel: async (documentId: string) => {
-      const headers = new Headers();
-      const token = await options.getToken?.();
-      if (token) headers.set("Authorization", `Bearer ${token}`);
-      const tenantId = options.getTenantId?.();
-      if (tenantId) headers.set("x-tenant-id", tenantId);
-      const response = await fetch(`${options.baseUrl}/api/v1/electronic-documents/${documentId}/excel`, {
-        headers,
-        credentials: "include",
-      });
-      if (!response.ok) {
-        const data = (await response.json().catch(() => ({}))) as { message?: string };
-        const error = new Error(data.message || `HTTP ${response.status}`) as Error & {
-          status: number;
-          body: unknown;
-        };
-        error.status = response.status;
-        error.body = data;
-        throw error;
-      }
-      const blob = await response.blob();
-      const disposition = response.headers.get("content-disposition") || "";
-      const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/i);
-      const plain = disposition.match(/filename="([^"]+)"/i);
-      const filename = encoded ? decodeURIComponent(encoded[1]) : plain?.[1] || "avr.xlsx";
-      return { blob, filename };
-    },
+    downloadElectronicDocumentExcel: (documentId: string) =>
+      downloadBlob(`/api/v1/electronic-documents/${documentId}/excel`, "avr.xlsx"),
     electronicDocumentPdfUrl: (documentId: string) => `/api/v1/electronic-documents/${documentId}/pdf`,
-    downloadElectronicDocumentPdf: async (documentId: string) => {
-      const headers = new Headers();
-      const token = await options.getToken?.();
-      if (token) headers.set("Authorization", `Bearer ${token}`);
-      const tenantId = options.getTenantId?.();
-      if (tenantId) headers.set("x-tenant-id", tenantId);
-      const response = await fetch(`${options.baseUrl}/api/v1/electronic-documents/${documentId}/pdf`, {
-        headers,
-        credentials: "include",
-      });
-      if (!response.ok) {
-        const data = (await response.json().catch(() => ({}))) as { message?: string };
-        const error = new Error(data.message || `HTTP ${response.status}`) as Error & {
-          status: number;
-          body: unknown;
-        };
-        error.status = response.status;
-        error.body = data;
-        throw error;
-      }
-      const blob = await response.blob();
-      const disposition = response.headers.get("content-disposition") || "";
-      const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/i);
-      const plain = disposition.match(/filename="([^"]+)"/i);
-      const filename = encoded ? decodeURIComponent(encoded[1]) : plain?.[1] || "avr.pdf";
-      return { blob, filename };
-    },
+    downloadElectronicDocumentPdf: (documentId: string) =>
+      downloadBlob(`/api/v1/electronic-documents/${documentId}/pdf`, "avr.pdf"),
     changeDealStage: (id: string, body: unknown) =>
       request(`/api/v1/deals/${id}/stage`, { method: "POST", body: JSON.stringify(body) }),
     markDealWon: (id: string, body: unknown = {}) =>

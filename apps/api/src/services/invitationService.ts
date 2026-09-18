@@ -1,10 +1,10 @@
-import argon2 from "argon2";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { ROLES, isCompanyAdminRole } from "@creolab/contracts";
 import { config } from "../config.ts";
 import { ApiError } from "../errors.ts";
 import { writeAudit } from "../lib/audit.ts";
 import { randomToken, sha256 } from "../lib/hash.ts";
+import { hashPassword } from "../lib/password.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { getEffectiveTenantSettings } from "./runtimeSettings.ts";
 
@@ -208,7 +208,7 @@ export async function acceptInvitation(
     const created = await prisma.user.create({
       data: {
         email: invitation.email,
-        passwordHash: await argon2.hash(password),
+        passwordHash: await hashPassword(password),
         name,
         phone: invitation.phone,
         platformAdmin: false,

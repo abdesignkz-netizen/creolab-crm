@@ -348,14 +348,6 @@ export function SituationPage() {
         </div>
       ) : null}
 
-      {data.freshness?.warning ? (
-        <div className="banner warn">
-          <span>{data.freshness.warning}</span>
-          <Link className="btn secondary" to="/integrations">
-            Интеграции
-          </Link>
-        </div>
-      ) : null}
       {error ? <p className="error">{error}</p> : null}
 
       <div className="sit-section sit-attention" id="attention">

@@ -5,6 +5,7 @@ import { createEsfSessionFromPublicCert, currentEsfSessionStatus } from "./integ
 import { readEsfConfig } from "./integrations/esf/EsfConfig.ts";
 import { findDeep, parseXml, textOf, xmlEscape } from "./integrations/esf/xml.ts";
 import { SOAP_NS, WSSE_NS, isExistingSessionFault, parseExistingSessionIdFromFault } from "./integrations/esf/EsfSoap.ts";
+import { revealEsfSessionId } from "./lib/esfSessionSecret.ts";
 
 const soapFault = (message: string) => `<s:Envelope xmlns:s="${SOAP_NS}"><s:Body><s:Fault><faultcode>s:Server</faultcode><faultstring>${xmlEscape(message)}</faultstring></s:Fault></s:Body></s:Envelope>`;
 
@@ -36,7 +37,7 @@ it("redacts authentication material in fault descriptions and ignores non-fault 
 
 it("retries signed-ticket authorization with WSSE credentials without changing the signed XML", async () => {
   const originalFetch = globalThis.fetch;
-  const config = { ...readEsfConfig(), esfEnv: "local" as const, baseUrl: "https://esf.test.invalid", sessionUrl: "https://esf.test.invalid/SessionService" };
+  const config = { ...readEsfConfig(), esfEnv: "local" as const, provider: "live" as const, baseUrl: "https://esf.test.invalid", sessionUrl: "https://esf.test.invalid/SessionService" };
   const signedTicket = '<authSign><state>exact &amp; signed</state><Signature>synthetic</Signature></authSign>';
   const password = 'cabinet-password<&"';
   let calls = 0;
@@ -73,7 +74,7 @@ it("retries signed-ticket authorization with WSSE credentials without changing t
 
 it("does not mistake HTTP errors or SOAP faults containing sessionId for a successful login", async () => {
   const originalFetch = globalThis.fetch;
-  const config = { ...readEsfConfig(), esfEnv: "local" as const, baseUrl: "https://esf.test.invalid", sessionUrl: "https://esf.test.invalid/SessionService" };
+  const config = { ...readEsfConfig(), esfEnv: "local" as const, provider: "live" as const, baseUrl: "https://esf.test.invalid", sessionUrl: "https://esf.test.invalid/SessionService" };
   try {
     for (const [status, body] of [[502, "Bad Gateway"], [500, "<response><sessionId>echo</sessionId></response>"], [200, `<Envelope><Body><Fault><faultstring>Invalid</faultstring><sessionId>echo</sessionId></Fault></Body></Envelope>`]] as const) {
       globalThis.fetch = async () => new Response(body, { status });
@@ -158,7 +159,7 @@ it("does not redact the portal session id in an already-open fault", () => {
 
 it("closes an already open portal session by id and signed credentials, then retries createSessionSigned", async () => {
   const originalFetch = globalThis.fetch;
-  const config = { ...readEsfConfig(), esfEnv: "local" as const, baseUrl: "https://esf.test.invalid", sessionUrl: "https://esf.test.invalid/SessionService" };
+  const config = { ...readEsfConfig(), esfEnv: "local" as const, provider: "live" as const, baseUrl: "https://esf.test.invalid", sessionUrl: "https://esf.test.invalid/SessionService" };
   const signedTicket = "<authSign><state>open-session</state><Signature>synthetic</Signature></authSign>";
   const existingId = "22bc1234-ba8a-4d3f-9c1e-abcdef012345--ADMIN_ENTERPRISE";
   const operations: string[] = [];
@@ -192,7 +193,7 @@ it("closes an already open portal session by id and signed credentials, then ret
 
 it("closes by signed credentials when the portal does not echo a session id, then reuses the id if create still conflicts", async () => {
   const originalFetch = globalThis.fetch;
-  const config = { ...readEsfConfig(), esfEnv: "local" as const, baseUrl: "https://esf.test.invalid", sessionUrl: "https://esf.test.invalid/SessionService" };
+  const config = { ...readEsfConfig(), esfEnv: "local" as const, provider: "live" as const, baseUrl: "https://esf.test.invalid", sessionUrl: "https://esf.test.invalid/SessionService" };
   const signedTicket = "<authSign><state>no-id-echo</state><Signature>synthetic</Signature></authSign>";
   const operations: string[] = [];
   globalThis.fetch = async (_url, options) => {
@@ -218,7 +219,7 @@ it("closes by signed credentials when the portal does not echo a session id, the
 
 it("createSession from a public cert closes the conflicting session by id and certificate", async () => {
   const originalFetch = globalThis.fetch;
-  const config = { ...readEsfConfig(), esfEnv: "local" as const, baseUrl: "https://esf.test.invalid", sessionUrl: "https://esf.test.invalid/SessionService" };
+  const config = { ...readEsfConfig(), esfEnv: "local" as const, provider: "live" as const, baseUrl: "https://esf.test.invalid", sessionUrl: "https://esf.test.invalid/SessionService" };
   const existingId = "cert-session--ADMIN_ENTERPRISE";
   const operations: string[] = [];
   globalThis.fetch = async (_url, options) => {
@@ -249,7 +250,7 @@ it("createSession from a public cert closes the conflicting session by id and ce
 
 it("treats No open session associated with user as a missing portal session", async () => {
   const originalFetch = globalThis.fetch;
-  const config = { ...readEsfConfig(), esfEnv: "local" as const, sessionUrl: "https://esf.test.invalid/SessionService" };
+  const config = { ...readEsfConfig(), esfEnv: "local" as const, provider: "live" as const, sessionUrl: "https://esf.test.invalid/SessionService" };
   globalThis.fetch = async () => new Response(soapFault("No open session associated with user."), { status: 500 });
   try {
     const live = await currentEsfSessionStatus("dead-session", config);
@@ -294,7 +295,8 @@ it("getUsableEsfSession reopens a stored session the portal already closed", asy
   try {
     const session = await getUsableEsfSession(prisma, "synthetic-tenant", config);
     assert.equal(session?.sessionId, "fresh-session");
-    assert.equal(stored.sessionId, "fresh-session");
+    assert.equal(revealEsfSessionId(stored.sessionId), "fresh-session");
+    assert.notEqual(stored.sessionId, "fresh-session");
     assert.ok(operations.includes("status"));
     assert.ok(operations.includes("create"));
   } finally {
@@ -308,7 +310,7 @@ it("getUsableEsfSession reopens a stored session the portal already closed", asy
 
 it("does not treat an unreadable currentSessionStatus as a missing session", async () => {
   const originalFetch = globalThis.fetch;
-  const config = { ...readEsfConfig(), esfEnv: "local" as const, sessionUrl: "https://esf.test.invalid/SessionService" };
+  const config = { ...readEsfConfig(), esfEnv: "local" as const, provider: "live" as const, sessionUrl: "https://esf.test.invalid/SessionService" };
   globalThis.fetch = async () => new Response("<html>Bad Gateway</html>", { status: 502 });
   try {
     const live = await currentEsfSessionStatus("kept-session", config);
@@ -350,7 +352,8 @@ it("connectEsf closes a stored portal session before creating a new one", async 
   try {
     const success = await connectEsf(prisma, auth, { signedAuthTicket: ticket });
     assert.equal(success.ok, true);
-    assert.equal(stored.sessionId, "new-session");
+    assert.equal(revealEsfSessionId(stored.sessionId), "new-session");
+    assert.notEqual(stored.sessionId, "new-session");
     assert.deepEqual(operations, ["close", "create"]);
   } finally {
     globalThis.fetch = oldFetch;

@@ -1,6 +1,6 @@
 const names: Record<string, string> = {
-  documentDate: "Дата АВР", name: "Название", quantity: "Количество", unit: "Единица измерения",
-  unitPrice: "Цена без НДС", vatRate: "НДС", legalName: "Юридическое название", bin: "БИН / ИИН",
+  documentDate: "Дата документа", name: "Название", quantity: "Количество", unit: "Единица измерения",
+  unitPrice: "Цена без НДС", vatRate: "НДС", paymentPercent: "Процент оплаты", legalName: "Юридическое название", bin: "БИН / ИИН",
   iin: "ИИН пользователя для авторизации", legalAddress: "Юридический адрес", iban: "ИИК / IBAN",
   bik: "БИК", directorName: "Руководитель", directorBasis: "Основание полномочий", bankName: "Банк",
   cabinetUsername: "ИИН / логин кабинета ИС ЭСФ", cabinetPassword: "Пароль кабинета ИС ЭСФ",

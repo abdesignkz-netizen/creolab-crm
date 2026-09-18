@@ -319,6 +319,6 @@ function serializeInboxItem(row: {
     companyName: row.companyName,
     errorCode: row.errorCode,
     externalStatus: row.externalStatus,
-    href: row.kind === "AVR" ? `/documents/avr/${row.id}` : `/deals/${row.dealId}`,
+    href: row.kind === "AVR" ? `/documents/avr/${row.id}` : row.kind === "INVOICE" ? `/documents/invoices/${row.id}` : `/deals/${row.dealId}`,
   };
 }

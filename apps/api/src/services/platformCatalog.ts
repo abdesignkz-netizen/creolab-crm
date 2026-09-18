@@ -27,9 +27,7 @@ export const INTEGRATION_IMPLEMENTATIONS: IntegrationImplementation[] = [
     connectable: true,
     connectHint: "",
     steps: [
-      "Выберите компанию CRM, для которой нужна форма.",
-      "Сохраните подключение — появится публичный адрес приёма заявок.",
-      "Этот адрес вставляется в HTML, Tilda или fetch. Секрет в разметку формы не нужен.",
+      "Создайте адрес для приёма заявок с сайта компании. После создания вы получите инструкцию по подключению и сможете отправить тестовую заявку.",
     ],
   },
   {
@@ -262,12 +260,21 @@ export function publicConnectionStatus(row: {
   healthStatus: string | null;
   lastError: string | null;
   lastErrorCode: string | null;
+  lastSuccessAt?: Date | string | null;
   schemaJson?: unknown;
 } | null) {
   if (!row) return "not_configured";
   const schema = row.schemaJson && typeof row.schemaJson === "object" ? (row.schemaJson as Record<string, unknown>) : {};
   if (row.type === "whatsapp_seller" && !String(schema.sellerUrl || "").trim()) return "needs_assignment";
   if (row.status === "disabled" || row.connectionStatus === "DISCONNECTED") return "disabled";
+  if (row.type === "form") {
+    if (row.healthStatus === "ERROR" || row.status === "error") return "error";
+    if (row.lastSuccessAt) return "working";
+    if (row.connectionStatus === "CONNECTED" || row.status === "active") return "created";
+    if (row.connectionStatus === "CHECKING") return "checking";
+    if (row.connectionStatus === "PENDING" || row.status === "pending") return "pending_auth";
+    return "not_configured";
+  }
   if (row.connectionStatus === "CHECKING") return "checking";
   if (row.lastErrorCode === "TOKEN_EXPIRED" || row.healthStatus === "TOKEN_EXPIRED") return "reauth";
   if (row.status === "error" || row.healthStatus === "ERROR" || row.lastError) return "error";
@@ -281,6 +288,8 @@ export const CONNECTION_STATUS_LABEL: Record<string, string> = {
   needs_assignment: "Требуется назначение",
   pending_auth: "Ожидает авторизации",
   checking: "Проверяется",
+  created: "Создано",
+  working: "Работает",
   connected: "Подключено",
   reauth: "Нужна повторная авторизация",
   error: "Ошибка",

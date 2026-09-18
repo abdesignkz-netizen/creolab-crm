@@ -4,7 +4,7 @@ import { config } from "../config.ts";
 import { ApiError } from "../errors.ts";
 import { writeAudit } from "../lib/audit.ts";
 import { randomToken, sha256 } from "../lib/hash.ts";
-import { encryptSecret } from "../lib/secretBox.ts";
+import { encryptSecret, encryptionKeyVersion } from "../lib/secretBox.ts";
 import { getEffectiveTenantSettings, invalidateRuntimeConfig } from "./runtimeSettings.ts";
 import {
   CONNECTION_STATUS_LABEL,
@@ -29,7 +29,12 @@ function publicSchema(type: string, schema: unknown) {
       sendOwner: row.sendOwner || "external_bot",
     };
   }
-  return row;
+  const next: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(row)) {
+    if (/secret|password|token|key|credential|pin/i.test(key)) continue;
+    next[key] = value;
+  }
+  return next;
 }
 
 export function publicIntegration(row: {
@@ -207,12 +212,13 @@ export async function createTenantConnection(
       : [
           { key: "name", label: "Имя", required: true },
           { key: "phone", label: "Телефон", required: true, immutableRequired: true },
+          { key: "email", label: "Email", required: false },
           { key: "message", label: "Задача", required: false },
         ];
     const mapping =
       input.mapping && typeof input.mapping === "object"
         ? input.mapping
-        : { version: 1, fields: { name: "name", phone: "phone", message: "message", service: "service", company: "company" } };
+        : { version: 1, fields: { name: "name", phone: "phone", email: "email", message: "message", service: "service", company: "company" } };
     const assignment =
       input.assigneeMembershipId
         ? { kind: "member", membershipId: String(input.assigneeMembershipId) }
@@ -254,7 +260,7 @@ export async function createTenantConnection(
     });
     return {
       ...publicIntegration(row),
-      note: "Форма создана. Статус «подключено» означает, что адрес приёма готов, а не что уже были заявки.",
+      note: "Адрес для приёма заявок создан. Теперь подключите к нему форму сайта компании.",
     };
   }
 
@@ -448,10 +454,13 @@ export async function testTenantConnection(
   });
   if (!row) throw new ApiError(404, "not_found", "Подключение не найдено");
   const checkedAt = new Date();
-  await prisma.integration.update({
-    where: { id: row.id },
-    data: { connectionStatus: "CHECKING" },
-  });
+  const isForm = row.type === "form";
+  if (!isForm) {
+    await prisma.integration.update({
+      where: { id: row.id },
+      data: { connectionStatus: "CHECKING" },
+    });
+  }
 
   if (row.type === "whatsapp_seller") {
     const resolved = await resolveSellerBridge(prisma, tenantId);
@@ -521,14 +530,16 @@ export async function testTenantConnection(
         where: { id: row.id },
         data: {
           connectionStatus: row.status === "active" ? "CONNECTED" : row.connectionStatus,
-          lastSuccessAt: ok ? checkedAt : row.lastSuccessAt,
+          lastSuccessAt: ok && !isForm ? checkedAt : row.lastSuccessAt,
         },
       });
       return {
         ok,
         category: ok ? "ok" : "params",
         checkedAt,
-        message: "Проверены настройки и секрет. Внешняя отправка не выполнялась.",
+        message: isForm
+          ? "Адрес приёма сохранён. Это не проверка внешней формы — отправьте тестовую заявку на публичный адрес."
+          : "Проверены настройки и секрет. Внешняя отправка не выполнялась.",
         checks: structural,
         liveSend: false,
       };
@@ -598,7 +609,7 @@ export async function saveTenantAiSettings(
           scope: "tenant",
           kind: "llm_api_key",
           encryptedValue: encrypted,
-          keyVersion: "v1",
+          keyVersion: encryptionKeyVersion(),
         },
       });
       credentialId = cred.id;

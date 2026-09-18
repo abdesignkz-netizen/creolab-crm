@@ -1,10 +1,10 @@
 import { writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
-import argon2 from "argon2";
 import type { PrismaClient } from "@creolab/db";
 import { ROLES, isCompanyAdminRole } from "@creolab/contracts";
 import { ApiError } from "../errors.ts";
 import { capabilities, isManager, requireCompanyAdmin, requireTenant } from "../lib/access.ts";
+import { hashPassword, verifyPassword } from "../lib/password.ts";
 import { ensureUploadsRoot, resolveUploadPath, uploadsRoot } from "../lib/storage.ts";
 import type { AuthContext } from "../lib/types.ts";
 
@@ -145,11 +145,11 @@ export async function changePassword(
   if (newPassword.length < 10) throw new ApiError(422, "invalid", "Новый пароль должен быть не короче 10 символов");
   if (newPassword !== confirmPassword) throw new ApiError(422, "invalid", "Пароли не совпадают", { confirmPassword: "Пароли не совпадают" });
   const user = await prisma.user.findUniqueOrThrow({ where: { id: auth.user.id } });
-  const ok = await argon2.verify(user.passwordHash, currentPassword);
+  const ok = await verifyPassword(user.passwordHash, currentPassword);
   if (!ok) throw new ApiError(422, "invalid", "Неверный текущий пароль", { currentPassword: "Неверный текущий пароль" });
   await prisma.user.update({
     where: { id: user.id },
-    data: { passwordHash: await argon2.hash(newPassword) },
+    data: { passwordHash: await hashPassword(newPassword) },
   });
   await prisma.session.updateMany({
     where: { userId: user.id, revokedAt: null, id: { not: auth.sessionId } },
