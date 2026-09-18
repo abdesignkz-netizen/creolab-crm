@@ -157,7 +157,7 @@ export function LegalSettingsPanel() {
         <button type="button" className="btn secondary" autoFocus onClick={() => setEditing(true)}>Изменить реквизиты</button>
       </div>
       <InvoiceMarksEditor profile={profile} busy={busy} setBusy={setBusy} setError={setError} onUpdated={applyLoaded} />
-      </>} : <>
+      </> : <>
       <div className="deal-edit">
         <label>
           Юридическое название
