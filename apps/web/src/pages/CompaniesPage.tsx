@@ -264,7 +264,7 @@ export function CompaniesPage() {
             <div className="company-row-meta">
               <div>Контактов: {item.contactsCount}</div>
               <div>Активных сделок: {item.activeDealsCount}</div>
-              <div>Pipeline: {item.pipelineLabel || "—"}</div>
+              <div>Сумма сделки: {item.pipelineLabel || "—"}</div>
               <div className="muted">{item.lastActivityLabel || "Нет активности"}</div>
               <div className="muted">{item.assigneeName || "Без ответственного"}</div>
             </div>
