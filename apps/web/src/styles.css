@@ -93,13 +93,13 @@ h1, h2, h3, .card strong, .client-row-title, .nav h1, .brand-wordmark {
 
 .brand-logo {
   display: block;
-  width: 100%;
+  width: 80%;
   height: auto;
   background: transparent;
 }
 
 .brand-logo-login {
-  width: min(280px, 100%);
+  width: min(224px, 100%);
 }
 
 .brand-mark {
