@@ -1620,6 +1620,8 @@ model ContractTemplate {
   tenantId  String
   name      String
   body      String
+  sourceFileName     String?
+  sourceStorageKey   String?
   isDefault Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

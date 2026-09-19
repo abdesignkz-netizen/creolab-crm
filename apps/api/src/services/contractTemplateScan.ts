@@ -226,14 +226,53 @@ function pathStem(fileName?: string) {
 
 function insertItemsTable(body: string) {
   if (/\{\{\s*items_table\s*\}\}/i.test(body)) return body;
-  if (/РЕКВИЗИТЫ\s+СТОРОН/i.test(body)) {
-    return body.replace(/(?:\n\d+\.\s*)?РЕКВИЗИТЫ\s+СТОРОН/i, "\n\n{{items_table}}\n\nРЕКВИЗИТЫ СТОРОН");
-  }
+  if (/РЕКВИЗИТЫ\s+СТОРОН|Приложение\s*№/i.test(body)) return body;
   return `${body.trim()}\n\n{{items_table}}\n`;
 }
 
 function placeholdersIn(body: string) {
   return [...new Set([...body.matchAll(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi)].map((match) => match[1]))];
+}
+
+export function rewriteScannedFragment(text: string, scanned: Pick<ScannedContractTemplate, "seller" | "buyer">) {
+  let next = text;
+  const pairs: Array<[string, string]> = [
+    [scanned.seller.name, "{{seller_name}}"],
+    [scanned.seller.legalAddress, "{{seller_address}}"],
+    [scanned.seller.directorName, "{{seller_director}}"],
+    [scanned.seller.bankName, "{{seller_bank}}"],
+    [scanned.buyer.name, "{{buyer_name}}"],
+    [scanned.buyer.legalAddress, "{{buyer_address}}"],
+    [scanned.buyer.directorName, "{{buyer_director}}"],
+    [scanned.buyer.bankName, "{{buyer_bank}}"],
+  ];
+  pairs.sort((a, b) => b[0].length - a[0].length);
+  for (const [value, placeholder] of pairs) {
+    next = replaceFlexible(next, value, placeholder);
+  }
+  next = replaceBin(next, scanned.seller.bin, "{{seller_bin}}");
+  next = replaceBin(next, scanned.buyer.bin, "{{buyer_bin}}");
+  next = replaceIban(next, scanned.seller.iban, "{{seller_iban}}");
+  next = replaceIban(next, scanned.buyer.iban, "{{buyer_iban}}");
+  if (scanned.seller.bik) next = next.replace(new RegExp(escapeRegExp(scanned.seller.bik), "gi"), "{{seller_bik}}");
+  if (scanned.buyer.bik) next = next.replace(new RegExp(escapeRegExp(scanned.buyer.bik), "gi"), "{{buyer_bik}}");
+  next = next.replace(/Договор\s*№\s*[\w./-]+/i, "Договор № {{contract_number}}");
+  next = next.replace(/№\s*[\d]{6,}\/[\d]{1,4}/g, "№ {{contract_number}}");
+  next = next.replace(/[«"“]\d{1,2}[»"”]\s+[а-яё]+\s+20\d{2}(?:\s*г(?:ода)?\.?)?/gi, "{{contract_date}}");
+  next = replaceTotalAmount(next);
+  if (!/\{\{\s*buyer_address\s*\}\}/i.test(next)) {
+    next = next.replace(
+      /(\{\{\s*buyer_name\s*\}\}[ \t]*\n)(?!\{\{\s*buyer_address)([\s\S]{8,280}?)(\n[ \t]*БИН[ \t]*\{\{\s*buyer_bin\s*\}\})/i,
+      "$1{{buyer_address}}$3",
+    );
+  }
+  if (!/\{\{\s*seller_address\s*\}\}/i.test(next)) {
+    next = next.replace(
+      /(\{\{\s*seller_name\s*\}\}[ \t]*\n)(?!\{\{\s*seller_address)([\s\S]{8,280}?)(\n[ \t]*БИН[ \t]*\{\{\s*seller_bin\s*\}\})/i,
+      "$1{{seller_address}}$3",
+    );
+  }
+  return next;
 }
 
 export function scanContractTemplateText(
@@ -274,48 +313,13 @@ export function scanContractTemplateText(
   if (!seller.name) warnings.push("Не удалось однозначно найти исполнителя. Проверьте текст шаблона.");
   if (!buyer.name) warnings.push("Не удалось однозначно найти заказчика. Проверьте текст шаблона.");
 
-  const replacements: Array<[string, string]> = [];
-  const push = (value: string, key: string) => {
-    if (clean(value).length >= 3) replacements.push([value, `{{${key}}}`]);
-  };
-  push(seller.name, "seller_name");
-  push(seller.legalAddress, "seller_address");
-  push(seller.directorName, "seller_director");
-  push(seller.bankName, "seller_bank");
-  push(buyer.name, "buyer_name");
-  push(buyer.legalAddress, "buyer_address");
-  push(buyer.directorName, "buyer_director");
-  push(buyer.bankName, "buyer_bank");
-  if (profile.phone && text.includes(profile.phone)) push(profile.phone, "seller_phone");
-  if (profile.email && new RegExp(escapeRegExp(profile.email), "i").test(text)) push(profile.email, "seller_email");
-
-  replacements.sort((a, b) => b[0].length - a[0].length);
-  for (const [value, placeholder] of replacements) {
-    text = replaceFlexible(text, value, placeholder);
+  if (profile.phone && text.includes(profile.phone)) {
+    text = replaceFlexible(text, profile.phone, "{{seller_phone}}");
   }
-  text = replaceBin(text, seller.bin, "{{seller_bin}}");
-  text = replaceBin(text, buyer.bin, "{{buyer_bin}}");
-  text = replaceIban(text, seller.iban, "{{seller_iban}}");
-  text = replaceIban(text, buyer.iban, "{{buyer_iban}}");
-  if (seller.bik) text = text.replace(new RegExp(escapeRegExp(seller.bik), "gi"), "{{seller_bik}}");
-  if (buyer.bik) text = text.replace(new RegExp(escapeRegExp(buyer.bik), "gi"), "{{buyer_bik}}");
-
-  text = text.replace(/Договор\s*№\s*[\w./-]+/i, "Договор № {{contract_number}}");
-  text = text.replace(/№\s*[\d]{6,}\/[\d]{1,4}/g, "№ {{contract_number}}");
-  text = text.replace(/[«"“]\d{1,2}[»"”]\s+[а-яё]+\s+20\d{2}(?:\s*г(?:ода)?\.?)?/gi, "{{contract_date}}");
-  text = replaceTotalAmount(text);
-  if (!/\{\{\s*buyer_address\s*\}\}/i.test(text)) {
-    text = text.replace(
-      /(\{\{\s*buyer_name\s*\}\}[ \t]*\n)(?!\{\{\s*buyer_address)([\s\S]{8,280}?)(\n[ \t]*БИН[ \t]*\{\{\s*buyer_bin\s*\}\})/i,
-      "$1{{buyer_address}}$3",
-    );
+  if (profile.email && new RegExp(escapeRegExp(profile.email), "i").test(text)) {
+    text = replaceFlexible(text, profile.email, "{{seller_email}}");
   }
-  if (!/\{\{\s*seller_address\s*\}\}/i.test(text)) {
-    text = text.replace(
-      /(\{\{\s*seller_name\s*\}\}[ \t]*\n)(?!\{\{\s*seller_address)([\s\S]{8,280}?)(\n[ \t]*БИН[ \t]*\{\{\s*seller_bin\s*\}\})/i,
-      "$1{{seller_address}}$3",
-    );
-  }
+  text = rewriteScannedFragment(text, { seller, buyer });
   text = insertItemsTable(text).replace(/\n{3,}/g, "\n\n").trim();
 
   const placeholders = placeholdersIn(text);

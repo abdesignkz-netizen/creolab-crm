@@ -3,8 +3,10 @@ import { after, before, describe, it } from "node:test";
 import JSZip from "jszip";
 import { createPrismaClient } from "@creolab/db";
 import { createApp } from "./app.ts";
-import { scanContractTemplateText } from "./services/contractTemplateScan.ts";
-import { extractDocUnicodeText } from "./services/wordDocumentText.ts";
+import { scanContractTemplateText, rewriteScannedFragment } from "./services/contractTemplateScan.ts";
+import { extractDocUnicodeText, docxToText } from "./services/wordDocumentText.ts";
+import { fillDocxPlaceholders, rewriteDocxText } from "./services/docxTemplateFill.ts";
+import { extractPdfPages } from "./services/pdfTextExtraction.ts";
 
 const SAMPLE = `Договор №05082026/01
 об оказании возмездных услуг
@@ -100,6 +102,36 @@ describe("Contract Word templates", () => {
     assert.match(scanned.name, /презентац/i);
   });
 
+  it("вписывает поля в исходный Word, сохраняя пункты шаблона", async () => {
+    const bytes = await makeDocx(SAMPLE);
+    const scanned = scanContractTemplateText(SAMPLE, {
+      legalName: "ТОО CREOLAB",
+      bin: "123456789013",
+    });
+    const rewritten = await rewriteDocxText(bytes, (text) => rewriteScannedFragment(text, scanned));
+    const asTemplate = await docxToText(rewritten);
+    assert.match(asTemplate, /\{\{seller_name\}\}/);
+    assert.match(asTemplate, /\{\{buyer_name\}\}/);
+    assert.match(asTemplate, /Разработать презентацию компании/);
+    assert.match(asTemplate, /РЕКВИЗИТЫ СТОРОН/);
+    const filled = await fillDocxPlaceholders(rewritten, {
+      seller_name: "ТОО Creolab",
+      buyer_name: "ТОО Minerals Supply Services Atyrau",
+      seller_bin: "221140036408",
+      buyer_bin: "140540016755",
+      contract_number: "DOG-2026-0005",
+      contract_date: "19 сентября 2026 г.",
+      amount: "200 000,00 ₸",
+      amount_words: "двести тысяч тенге",
+    });
+    const asContract = await docxToText(filled);
+    assert.match(asContract, /ТОО Creolab/);
+    assert.match(asContract, /Minerals Supply Services Atyrau/);
+    assert.match(asContract, /Разработать презентацию компании/);
+    assert.doesNotMatch(asContract, /\{\{seller_name\}\}/);
+    assert.doesNotMatch(asContract, /5\.\s*Заключительные положения/);
+  });
+
   it("читает unicode-текст из OLE .doc без LibreOffice", () => {
     const payload = Buffer.from(SAMPLE, "utf16le");
     const bytes = Buffer.concat([
@@ -172,9 +204,12 @@ describe("Contract Word templates", () => {
         name: "Договор на разработку презентации",
         body: preview.body.body,
         isDefault: true,
+        fileName: "Договор на возмездные услуги.docx",
+        fileBase64: bytes.toString("base64"),
       }),
     });
     assert.equal(created.response.status, 201, JSON.stringify(created.body));
+    assert.equal(created.body.template.fromWord, true);
     const templateId = created.body.template.id;
     const hidden = await json(`/api/v1/documents/contract-templates/${templateId}`, {
       method: "PATCH",
@@ -211,6 +246,10 @@ describe("Contract Word templates", () => {
     assert.equal(pdf.status, 200);
     const pdfBytes = Buffer.from(await pdf.arrayBuffer());
     assert.ok(pdfBytes.subarray(0, 5).equals(Buffer.from("%PDF-")));
+    const pdfText = (await extractPdfPages(pdfBytes)).map((page) => page.text).join("\n");
+    assert.match(pdfText, /Разработать презентацию компании/);
+    assert.match(pdfText, /реквизит/i);
+    assert.doesNotMatch(pdfText, /5\.\s*Заключительные положения/);
     assert.equal(formed.body.contract.status, "READY_TO_SIGN");
 
     const list = await json("/api/v1/documents/contract-templates");

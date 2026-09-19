@@ -1,8 +1,7 @@
 import { documentOrganization } from "./documentOrganization.ts";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createReadStream } from "node:fs";
-import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { PrismaClient } from "@creolab/db";
 import type { Response } from "express";
@@ -16,7 +15,10 @@ import { requireDocumentsEnabled } from "./legalProfileService.ts";
 import { serializeContract } from "./documentDraftService.ts";
 import { assessContractReadiness, missingFieldsError } from "./contractReadiness.ts";
 import { ensureDefaultTemplate } from "./contractTemplate.ts";
-import { renderContractPdf } from "./contractPdf.ts";
+import { buildContractPlaceholders, renderContractPdf, type ContractPdfInput } from "./contractPdf.ts";
+import { fillDocxPlaceholders } from "./docxTemplateFill.ts";
+import { sniffWordKind, textutilConvert } from "./wordDocumentText.ts";
+import { wordToPdf } from "./wordDocumentConversion.ts";
 
 const MUTABLE_STATUSES = new Set(["DRAFT", "READY_TO_SIGN"]);
 
@@ -33,6 +35,35 @@ function requireManageDocuments(auth: AuthContext) {
 
 function filled(value: string | null | undefined) {
   return Boolean(value && String(value).trim());
+}
+
+async function renderContractFromTemplate(
+  template: { body: string; sourceFileName?: string | null; sourceStorageKey?: string | null },
+  input: ContractPdfInput,
+) {
+  const sourceKey = template.sourceStorageKey;
+  if (sourceKey) {
+    try {
+      const bytes = await readFile(resolveUploadPath(sourceKey));
+      if (sniffWordKind(bytes, template.sourceFileName || "template.docx") === "docx") {
+        const filledDocx = await fillDocxPlaceholders(bytes, buildContractPlaceholders(input));
+        try {
+          return await wordToPdf(filledDocx, "docx");
+        } catch (error) {
+          if (!(error instanceof ApiError && (error.code === "word_conversion_unavailable" || error.code === "word_conversion_failed"))) {
+            throw error;
+          }
+          const fromTextutil = await textutilConvert(filledDocx, "docx", "pdf");
+          if (fromTextutil) return fromTextutil;
+        }
+      }
+    } catch (error) {
+      if (error instanceof ApiError && error.code !== "word_file_type" && error.code !== "word_invalid") {
+        throw error;
+      }
+    }
+  }
+  return renderContractPdf(input);
 }
 
 export async function generateContractPdfFile(
@@ -99,7 +130,7 @@ export async function generateContractPdfFile(
     : await ensureDefaultTemplate(prisma, tid);
 
   const company = deal.company!;
-  const pdf = await renderContractPdf({
+  const pdfInput: ContractPdfInput = {
     number: contract.number,
     date: contract.date,
     subject,
@@ -129,7 +160,8 @@ export async function generateContractPdfFile(
     buyerBik: company.bik || "",
     items,
     templateBody: template.body,
-  });
+  };
+  const pdf = await renderContractFromTemplate(template, pdfInput);
 
   const sha256 = createHash("sha256").update(pdf).digest("hex");
   const latest = contract.versions[contract.versions.length - 1] || null;

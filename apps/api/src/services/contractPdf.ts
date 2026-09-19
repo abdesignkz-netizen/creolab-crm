@@ -3,6 +3,7 @@ import path from "node:path";
 import { amountToKztWords, esfMeasureUnitSymbol } from "@creolab/contracts";
 import PDFDocument from "pdfkit";
 import { ApiError } from "../errors.ts";
+import { isFullContractTemplateBody } from "./contractTemplate.ts";
 
 export type ContractPdfItem = {
   name: string;
@@ -183,13 +184,18 @@ export function drawItemsTable(doc: PDFKit.PDFDocument, items: ContractPdfItem[]
   doc.fillColor("#111111");
 }
 
+export function looksLikeFullContractTemplate(body: string) {
+  return isFullContractTemplateBody(body);
+}
+
 export async function renderContractPdf(input: ContractPdfInput) {
   const regular = resolveFont("NotoSans-Regular.ttf");
   const bold = resolveFont("NotoSans-Bold.ttf");
   const values = buildContractPlaceholders(input);
   const body = input.templateBody || "";
-  const hasOwnHeader = /^\s*договор/i.test(body) || /\{\{\s*contract_number\s*\}\}/i.test(body.slice(0, 400));
-  const hasOwnSignatures = /реквизиты\s+сторон/i.test(body) || /_{5,}/.test(body);
+  const fullTemplate = looksLikeFullContractTemplate(body);
+  const hasOwnHeader = fullTemplate || /^\s*договор/i.test(body) || /\{\{\s*contract_number\s*\}\}/i.test(body.slice(0, 400));
+  const hasOwnSignatures = fullTemplate || /реквизиты\s+сторон/i.test(body) || /_{5,}/.test(body);
   const doc = new PDFDocument({
     size: "A4",
     margins: { top: 50, bottom: 56, left: 50, right: 50 },
@@ -217,8 +223,12 @@ export async function renderContractPdf(input: ContractPdfInput) {
   parts.forEach((part, index) => {
     const text = applyPlaceholders(part, values).replace(/\n{3,}/g, "\n\n").trim();
     if (text) {
-      doc.font("NotoSans").fontSize(11).text(text, { align: "justify", paragraphGap: 8 });
-      doc.moveDown(0.6);
+      doc.font("NotoSans").fontSize(fullTemplate ? 10 : 11).text(text, {
+        align: fullTemplate ? "left" : "justify",
+        paragraphGap: fullTemplate ? 4 : 8,
+        lineGap: fullTemplate ? 1 : 0,
+      });
+      doc.moveDown(fullTemplate ? 0.25 : 0.6);
     }
     if (index < parts.length - 1) {
       drawItemsTable(doc, input.items);
@@ -226,7 +236,7 @@ export async function renderContractPdf(input: ContractPdfInput) {
     }
   });
 
-  if (!/\{\{\s*items_table\s*\}\}/i.test(body) && input.items.length) {
+  if (!fullTemplate && !/\{\{\s*items_table\s*\}\}/i.test(body) && input.items.length) {
     doc.font("NotoSans-Bold").fontSize(11).text("Спецификация");
     doc.moveDown(0.4);
     drawItemsTable(doc, input.items);

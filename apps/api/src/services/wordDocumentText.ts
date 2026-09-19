@@ -159,6 +159,25 @@ async function sofficeToText(bytes: Buffer, extension: "doc" | "docx") {
   }
 }
 
+export async function textutilConvert(bytes: Buffer, fromExt: "doc" | "docx", toExt: "docx" | "pdf") {
+  if (process.platform !== "darwin") return null;
+  const dir = await mkdtemp(path.join(tmpdir(), "crm-textutil-"));
+  try {
+    const input = path.join(dir, `contract.${fromExt}`);
+    await writeFile(input, bytes);
+    await run("textutil", ["-convert", toExt, input], { timeout: 30_000, maxBuffer: 8_000_000 });
+    const output = path.join(dir, `contract.${toExt}`);
+    const converted = await readFile(output);
+    if (toExt === "pdf" && !converted.subarray(0, 5).equals(Buffer.from("%PDF-"))) return null;
+    if (toExt === "docx" && !converted.subarray(0, 4).equals(DOCX_MAGIC)) return null;
+    return converted;
+  } catch {
+    return null;
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
 async function textutilToText(bytes: Buffer, extension: "doc" | "docx") {
   if (process.platform !== "darwin") return "";
   const dir = await mkdtemp(path.join(tmpdir(), "crm-textutil-"));

@@ -718,6 +718,8 @@ const DOCUMENT_DOMAIN_SQL = `
     );
     CREATE UNIQUE INDEX IF NOT EXISTS "ContractTemplate_tenantId_id_key" ON "ContractTemplate"("tenantId", "id");
     CREATE INDEX IF NOT EXISTS "ContractTemplate_tenantId_isDefault_idx" ON "ContractTemplate"("tenantId", "isDefault");
+    ALTER TABLE "ContractTemplate" ADD COLUMN IF NOT EXISTS "sourceFileName" TEXT;
+    ALTER TABLE "ContractTemplate" ADD COLUMN IF NOT EXISTS "sourceStorageKey" TEXT;
 
     ALTER TABLE "Contract" ADD COLUMN IF NOT EXISTS "verificationPublicId" TEXT;
     CREATE UNIQUE INDEX IF NOT EXISTS "Contract_verificationPublicId_key" ON "Contract"("verificationPublicId");

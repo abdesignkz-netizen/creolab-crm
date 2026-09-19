@@ -595,6 +595,8 @@ export const saveContractTemplateSchema = z.object({
   name: z.string().trim().min(1).max(200),
   body: z.string().trim().min(40).max(200_000),
   isDefault: z.boolean().optional(),
+  fileName: z.string().trim().min(1).max(255).optional(),
+  fileBase64: z.string().min(20).max(28_000_000).optional(),
 });
 
 export const patchContractTemplateSchema = z.object({

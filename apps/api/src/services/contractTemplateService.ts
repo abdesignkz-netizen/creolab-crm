@@ -1,3 +1,5 @@
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 import type { PrismaClient } from "@creolab/db";
 import {
   companyContractFromTemplateSchema,
@@ -11,11 +13,13 @@ import { requireTenant } from "../lib/access.ts";
 import { beginDocumentExtraction } from "./documentExtractionGate.ts";
 import { requireDocumentsEnabled } from "./legalProfileService.ts";
 import { ensureDefaultTemplate } from "./contractTemplate.ts";
-import { scanContractTemplateText, type TemplateSellerProfile } from "./contractTemplateScan.ts";
-import { wordFileToText } from "./wordDocumentText.ts";
+import { rewriteScannedFragment, scanContractTemplateText, type TemplateSellerProfile } from "./contractTemplateScan.ts";
+import { sniffWordKind, textutilConvert, wordFileToText } from "./wordDocumentText.ts";
+import { rewriteDocxText } from "./docxTemplateFill.ts";
 import { createContractDraft } from "./documentDraftService.ts";
 import { generateContractPdfFile } from "./contractGenerationService.ts";
 import { addDealItem } from "./dealItemService.ts";
+import { resolveUploadPath } from "../lib/storage.ts";
 
 function requireManageDocuments(auth: AuthContext) {
   if (!can(auth, "manage_documents")) {
@@ -28,6 +32,8 @@ function serializeTemplate(row: {
   name: string;
   body: string;
   isDefault: boolean;
+  sourceFileName?: string | null;
+  sourceStorageKey?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }, withBody = false) {
@@ -36,12 +42,41 @@ function serializeTemplate(row: {
     id: row.id,
     name: row.name,
     isDefault: row.isDefault,
+    fromWord: Boolean(row.sourceStorageKey),
     placeholders,
     preview: row.body.slice(0, 280),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     ...(withBody ? { body: row.body } : {}),
   };
+}
+
+async function storeTemplateWord(
+  tenantId: string,
+  templateId: string,
+  fileName: string,
+  bytes: Buffer,
+  scanned: ReturnType<typeof scanContractTemplateText>,
+) {
+  let stored = bytes;
+  let kind = sniffWordKind(bytes, fileName);
+  if (kind === "doc") {
+    const asDocx = await textutilConvert(bytes, "doc", "docx");
+    if (asDocx) {
+      stored = asDocx;
+      kind = "docx";
+      fileName = fileName.replace(/\.doc$/i, ".docx");
+    }
+  }
+  if (kind === "docx") {
+    stored = await rewriteDocxText(stored, (text) => rewriteScannedFragment(text, scanned));
+  }
+  const safe = fileName.replace(/[^\w.\-а-яёА-ЯЁ]+/gi, "_").slice(0, 180) || "template.docx";
+  const storageKey = path.posix.join(tenantId, "contract-templates", templateId, safe);
+  const abs = resolveUploadPath(storageKey);
+  await mkdir(path.dirname(abs), { recursive: true });
+  await writeFile(abs, stored);
+  return { sourceFileName: fileName, sourceStorageKey: storageKey };
 }
 
 async function sellerProfile(prisma: PrismaClient, tenantId: string): Promise<TemplateSellerProfile> {
@@ -118,18 +153,32 @@ export async function createContractTemplate(prisma: PrismaClient, auth: AuthCon
   let name = "";
   let body = "";
   let makeDefault = false;
+  let sourceBytes: Buffer | null = null;
+  let sourceName = "";
+  let scannedForFile: ReturnType<typeof scanContractTemplateText> | null = null;
+  const profile = await sellerProfile(prisma, membership.tenantId);
   if (asSave.success && asSave.data.body) {
     name = asSave.data.name;
     body = asSave.data.body;
-    makeDefault = Boolean(asSave.data.isDefault);
+    makeDefault = asSave.data.isDefault !== false;
+    if (asSave.data.fileBase64 && asSave.data.fileName) {
+      sourceName = asSave.data.fileName;
+      sourceBytes = Buffer.from(asSave.data.fileBase64, "base64");
+      const text = await wordFileToText(sourceBytes, sourceName).catch(() => "");
+      if (text) scannedForFile = scanOrThrow(text, profile, sourceName);
+    }
   } else {
     const { input, bytes } = await decodeUpload(raw);
     const release = beginDocumentExtraction();
     try {
       const text = await wordFileToText(bytes, input.fileName);
-      const scanned = scanOrThrow(text, await sellerProfile(prisma, membership.tenantId), input.fileName);
+      const scanned = scanOrThrow(text, profile, input.fileName);
       name = input.name?.trim() || scanned.name;
       body = scanned.body;
+      makeDefault = true;
+      sourceBytes = bytes;
+      sourceName = input.fileName;
+      scannedForFile = scanned;
     } finally {
       release();
     }
@@ -155,6 +204,14 @@ export async function createContractTemplate(prisma: PrismaClient, auth: AuthCon
       },
     });
   });
+  if (sourceBytes && scannedForFile) {
+    const stored = await storeTemplateWord(membership.tenantId, created.id, sourceName, sourceBytes, scannedForFile);
+    await prisma.contractTemplate.update({
+      where: { id: created.id },
+      data: stored,
+    });
+    Object.assign(created, stored);
+  }
   await prisma.auditEvent.create({
     data: {
       tenantId: membership.tenantId,
@@ -162,7 +219,7 @@ export async function createContractTemplate(prisma: PrismaClient, auth: AuthCon
       action: "contract_template.create",
       entityType: "contract_template",
       entityId: created.id,
-      changesJson: { name: created.name, isDefault: created.isDefault },
+      changesJson: { name: created.name, isDefault: created.isDefault, fromWord: Boolean(sourceBytes) },
     },
   });
   return { template: serializeTemplate(created, true) };

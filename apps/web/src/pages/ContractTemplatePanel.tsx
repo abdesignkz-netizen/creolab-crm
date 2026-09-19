@@ -13,6 +13,7 @@ type TemplateRow = {
   id: string;
   name: string;
   isDefault: boolean;
+  fromWord?: boolean;
   placeholders: string[];
   preview: string;
 };
@@ -103,7 +104,13 @@ export function ContractTemplatePanel() {
     setBusy(true);
     setError("");
     try {
-      await api.createContractTemplate({ name: name.trim(), body: preview.body, isDefault: items.length <= 1 });
+      await api.createContractTemplate({
+        name: name.trim(),
+        body: preview.body,
+        isDefault: true,
+        fileName: file?.name,
+        fileBase64: file ? await readBase64(file) : undefined,
+      });
       notifySaved("Шаблон договора сохранён");
       setOpen(false);
       setFile(null);
@@ -169,7 +176,7 @@ export function ContractTemplatePanel() {
         <div>
           <b>Шаблоны договоров</b>
           <p className="muted">
-            Загрузите пример договора в Word — система подставит поля сторон, номера и суммы. Затем по реквизитам новой компании можно сразу сформировать договор по выбранному шаблону.
+            Загрузите договор в Word — PDF соберётся из этого файла: все пункты, приложения и реквизиты останутся как в шаблоне, подставятся только стороны, номер, дата и сумма.
           </p>
         </div>
         {!open ? (
@@ -240,6 +247,7 @@ export function ContractTemplatePanel() {
               <div>
                 <b>{row.name}</b>
                 {row.isDefault ? <span className="muted"> · по умолчанию</span> : null}
+                {row.fromWord ? <span className="muted"> · Word</span> : null}
                 <div className="muted">{row.placeholders.slice(0, 8).join(", ")}</div>
               </div>
               <div className="actions">
@@ -260,7 +268,7 @@ export function ContractTemplatePanel() {
       {items.length ? (
         <div className="stack" style={{ marginTop: 12 }}>
           <b>Сформировать договор по шаблону</b>
-          <p className="muted">После загрузки реквизитов компании выберите шаблон — договор подставит её данные в сохранённый текст.</p>
+          <p className="muted">После загрузки реквизитов компании выберите шаблон Word — договор повторит его текст, а не короткую форму CRM.</p>
           <label>
             Компания
             <select value={companyId} onChange={(e) => setCompanyId(e.target.value)}>
