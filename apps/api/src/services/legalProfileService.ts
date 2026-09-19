@@ -112,7 +112,7 @@ export function resolveVatRate(
   throw new ApiError(
     422,
     "vat_default_unset",
-    "Выберите НДС по умолчанию в настройках или укажите ставку в строке",
+    "Укажите НДС у услуги: без НДС или 12%",
   );
 }
 

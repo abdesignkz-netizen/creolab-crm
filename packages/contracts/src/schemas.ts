@@ -606,6 +606,7 @@ export const companyContractFromTemplateSchema = z.object({
   templateId: z.string().uuid(),
   dealId: z.string().uuid().optional(),
   generate: z.boolean().optional(),
+  items: z.array(dealItemInputSchema).min(1).max(200).optional(),
 });
 
 export const declineSignatureSchema = z.object({

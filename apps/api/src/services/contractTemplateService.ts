@@ -221,6 +221,11 @@ export async function createContractFromTemplateForCompany(
   });
   if (!company) throw new ApiError(404, "not_found", "Компания не найдена");
 
+  const itemRows = (input.items?.length
+    ? input.items
+    : [{ name: template.name, quantity: 1, unitPrice: 0, vatRate: 0 }]
+  ).map((item) => ({ ...item, vatRate: item.vatRate ?? 0 }));
+
   let dealId = input.dealId || "";
   let createdDeal = false;
   if (dealId) {
@@ -230,7 +235,9 @@ export async function createContractFromTemplateForCompany(
     });
     if (!deal) throw new ApiError(404, "not_found", "Сделка не найдена");
     if (!deal.items.length) {
-      await addDealItem(prisma, auth, deal.id, { name: template.name, quantity: 1, unitPrice: 0 });
+      for (const item of itemRows) {
+        await addDealItem(prisma, auth, deal.id, item);
+      }
     }
   } else {
     const linked = await prisma.companyContact.findFirst({
@@ -260,7 +267,7 @@ export async function createContractFromTemplateForCompany(
       contactId,
       companyId,
       description: `Договор по шаблону «${template.name}».`,
-      items: [{ name: template.name, quantity: 1, unitPrice: 0 }],
+      items: itemRows,
     });
     dealId = created.deal.id;
     createdDeal = true;

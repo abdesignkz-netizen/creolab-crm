@@ -2,6 +2,12 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import { notifySaved } from "../components/SaveNotice";
+import {
+  ContractGenerateItems,
+  newContractDraftLine,
+  parseContractDraftLines,
+  type ContractDraftLine,
+} from "../components/ContractGenerateItems";
 
 type TemplateRow = {
   id: string;
@@ -42,13 +48,20 @@ export function ContractTemplatePanel() {
   const [companyId, setCompanyId] = useState("");
   const [templateId, setTemplateId] = useState("");
   const [formBusy, setFormBusy] = useState(false);
+  const [lines, setLines] = useState<ContractDraftLine[]>([newContractDraftLine()]);
 
   async function loadTemplates() {
     try {
       const data: any = await api.contractTemplates();
       const list = data.items || [];
       setItems(list);
-      if (!templateId && list[0]) setTemplateId(list.find((row: TemplateRow) => row.isDefault)?.id || list[0].id);
+      const nextId = templateId || list.find((row: TemplateRow) => row.isDefault)?.id || list[0]?.id || "";
+      if (!templateId && nextId) setTemplateId(nextId);
+      setLines((current) => {
+        if (current.length !== 1 || current[0].name.trim()) return current;
+        const chosen = list.find((row: TemplateRow) => row.id === nextId);
+        return [{ ...current[0], name: chosen?.name || "" }];
+      });
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось загрузить шаблоны");
@@ -130,10 +143,17 @@ export function ContractTemplatePanel() {
 
   async function generateForCompany() {
     if (!companyId || !templateId || formBusy) return;
+    let items;
+    try {
+      items = parseContractDraftLines(lines);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Проверьте услуги");
+      return;
+    }
     setFormBusy(true);
     setError("");
     try {
-      const result: any = await api.createCompanyContractFromTemplate(companyId, { templateId });
+      const result: any = await api.createCompanyContractFromTemplate(companyId, { templateId, items });
       notifySaved(result.generated ? "Договор сформирован по шаблону" : "Черновик договора создан");
       if (result.dealId) navigate(`/deals/${result.dealId}`);
     } catch (err) {
@@ -252,12 +272,27 @@ export function ContractTemplatePanel() {
           </label>
           <label>
             Шаблон
-            <select value={templateId} onChange={(e) => setTemplateId(e.target.value)}>
+            <select
+              value={templateId}
+              onChange={(e) => {
+                const id = e.target.value;
+                const previous = items.find((row) => row.id === templateId)?.name || "";
+                setTemplateId(id);
+                const nextName = items.find((row) => row.id === id)?.name || "";
+                setLines((current) => {
+                  if (current.length === 1 && (!current[0].name.trim() || current[0].name === previous)) {
+                    return [{ ...current[0], name: nextName }];
+                  }
+                  return current;
+                });
+              }}
+            >
               {items.map((row) => (
                 <option key={row.id} value={row.id}>{row.name}{row.isDefault ? " (по умолчанию)" : ""}</option>
               ))}
             </select>
           </label>
+          <ContractGenerateItems lines={lines} onChange={setLines} disabled={formBusy} />
           <div className="actions">
             <button type="button" className="btn" disabled={formBusy || !companyId || !templateId} onClick={() => void generateForCompany()}>
               {formBusy ? "Формируем…" : "Сформировать по шаблону"}

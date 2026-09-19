@@ -217,6 +217,38 @@ describe("Contract Word templates", () => {
     assert.ok((list.body.items || []).some((row: { id: string }) => row.id === templateId));
   });
 
+  it("формирует договор с услугами и выбранным НДС даже без НДС в настройках", async () => {
+    await json("/api/v1/settings/legal-profile", {
+      method: "PATCH",
+      body: JSON.stringify({ defaultVatMode: null, defaultVatRate: null }),
+    });
+    const list = await json("/api/v1/documents/contract-templates");
+    const templateId = (list.body.items || []).find((row: { isDefault?: boolean }) => row.isDefault)?.id
+      || (list.body.items || [])[0]?.id;
+    assert.ok(templateId);
+    const companies = await json("/api/v1/companies");
+    const companyId = (companies.body.items || companies.body.companies || [])[0]?.id;
+    assert.ok(companyId, JSON.stringify(companies.body));
+    const formed = await json(`/api/v1/companies/${companyId}/contract-from-template`, {
+      method: "POST",
+      body: JSON.stringify({
+        templateId,
+        items: [
+          { name: "Разработка презентации", quantity: 1, unitPrice: 120000, vatRate: 12 },
+          { name: "Доп. слайды", quantity: 3, unitPrice: 20000, vatRate: 0 },
+        ],
+      }),
+    });
+    assert.equal(formed.response.status, 201, JSON.stringify(formed.body));
+    const deal = await json(`/api/v1/deals/${formed.body.dealId}`);
+    assert.equal(deal.response.status, 200, JSON.stringify(deal.body));
+    const items = deal.body.deal?.items || [];
+    assert.equal(items.length, 2);
+    assert.equal(items[0].name, "Разработка презентации");
+    assert.equal(items[0].vatRate, 12);
+    assert.equal(items[1].vatRate, 0);
+  });
+
   it("не отдаёт шаблон другой компании", async () => {
     const list = await json("/api/v1/documents/contract-templates", {}, otherCookie);
     assert.equal(list.response.status, 200);

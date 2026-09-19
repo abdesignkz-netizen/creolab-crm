@@ -4,6 +4,12 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { nameWithPhone, phoneText } from "../lib/contactDisplay";
 import { api } from "../lib/api";
 import { useCapabilities } from "../lib/session";
+import {
+  ContractGenerateItems,
+  newContractDraftLine,
+  parseContractDraftLines,
+  type ContractDraftLine,
+} from "../components/ContractGenerateItems";
 
 const LIFECYCLE_OPTIONS = [
   ["PROSPECT", "Потенциальный клиент"],
@@ -91,6 +97,7 @@ export function CompanyPage() {
   const [templates, setTemplates] = useState<Array<{ id: string; name: string; isDefault: boolean }>>([]);
   const [templateId, setTemplateId] = useState("");
   const [templateBusy, setTemplateBusy] = useState(false);
+  const [contractLines, setContractLines] = useState<ContractDraftLine[]>([newContractDraftLine()]);
 
   async function load() {
     try {
@@ -116,7 +123,13 @@ export function CompanyPage() {
     void api.contractTemplates().then((result: any) => {
       const list = result.items || [];
       setTemplates(list);
-      setTemplateId(list.find((row: any) => row.isDefault)?.id || list[0]?.id || "");
+      const nextId = list.find((row: any) => row.isDefault)?.id || list[0]?.id || "";
+      setTemplateId(nextId);
+      setContractLines((current) => {
+        if (current.length !== 1 || current[0].name.trim()) return current;
+        const chosen = list.find((row: any) => row.id === nextId);
+        return [{ ...current[0], name: chosen?.name || "" }];
+      });
     }).catch(() => setTemplates([]));
   }, [caps.documents, id]);
 
@@ -455,20 +468,43 @@ export function CompanyPage() {
             <p className="muted">Сформировать договор по сохранённому шаблону — реквизиты этой компании подставятся в текст.</p>
             <label>
               Шаблон
-              <select value={templateId} disabled={templateBusy} onChange={(e) => setTemplateId(e.target.value)}>
+              <select
+                value={templateId}
+                disabled={templateBusy}
+                onChange={(e) => {
+                  const nextId = e.target.value;
+                  const previous = templates.find((row) => row.id === templateId)?.name || "";
+                  setTemplateId(nextId);
+                  const nextName = templates.find((row) => row.id === nextId)?.name || "";
+                  setContractLines((current) => {
+                    if (current.length === 1 && (!current[0].name.trim() || current[0].name === previous)) {
+                      return [{ ...current[0], name: nextName }];
+                    }
+                    return current;
+                  });
+                }}
+              >
                 {templates.map((row) => (
                   <option key={row.id} value={row.id}>{row.name}{row.isDefault ? " (по умолчанию)" : ""}</option>
                 ))}
               </select>
             </label>
+            <ContractGenerateItems lines={contractLines} onChange={setContractLines} disabled={templateBusy} />
             <button
               type="button"
               className="btn"
               disabled={templateBusy || !templateId}
               onClick={() => {
+                let items;
+                try {
+                  items = parseContractDraftLines(contractLines);
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : "Проверьте услуги");
+                  return;
+                }
                 setTemplateBusy(true);
                 setError("");
-                void api.createCompanyContractFromTemplate(id, { templateId })
+                void api.createCompanyContractFromTemplate(id, { templateId, items })
                   .then((result: any) => {
                     notifySaved(result.generated ? "Договор сформирован по шаблону" : "Черновик договора создан");
                     if (result.dealId) navigate(`/deals/${result.dealId}`);
@@ -597,14 +633,14 @@ export function CompanyPage() {
 
       {editOpen && editDraft && !caps.manager ? (
         <div className="stats-modal-backdrop" onClick={() => setEditOpen(false)}>
-          <div className="stats-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="stats-modal company-edit-modal" onClick={(e) => e.stopPropagation()}>
             <h3>Изменить компанию</h3>
-            <div className="stats-filters" style={{ gridTemplateColumns: "1fr" }}>
-              <label>
+            <div className="company-create-grid">
+              <label className="span-2">
                 Название *
                 <input value={editDraft.name} onChange={(e) => setEditDraft({ ...editDraft, name: e.target.value })} />
               </label>
-              <label>
+              <label className="span-2">
                 Юридическое название
                 <input
                   value={editDraft.legalName}
@@ -651,35 +687,42 @@ export function CompanyPage() {
                 ИИН
                 <input value={editDraft.iin} onChange={(e) => setEditDraft({ ...editDraft, iin: e.target.value })} />
               </label>
-              <label>
+              <label className="span-2">
                 Юридический адрес
                 <input
                   value={editDraft.legalAddress}
                   onChange={(e) => setEditDraft({ ...editDraft, legalAddress: e.target.value })}
                 />
               </label>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={editDraft.vatPayer}
-                  onChange={(e) => setEditDraft({ ...editDraft, vatPayer: e.target.checked })}
-                />{" "}
-                Плательщик НДС
+              <label className="span-2">
+                <span className="check-line">
+                  <input
+                    type="checkbox"
+                    checked={editDraft.vatPayer}
+                    onChange={(e) => setEditDraft({ ...editDraft, vatPayer: e.target.checked })}
+                  />
+                  Плательщик НДС
+                </span>
               </label>
               <label>
-                Директор
+                Руководитель
                 <input
                   value={editDraft.directorName}
                   onChange={(e) => setEditDraft({ ...editDraft, directorName: e.target.value })}
+                  placeholder="Фамилия И. О."
                 />
               </label>
               <label>
-                Должность директора
+                Должность
                 <input
                   value={editDraft.directorPosition}
                   onChange={(e) => setEditDraft({ ...editDraft, directorPosition: e.target.value })}
+                  placeholder="Директор"
                 />
               </label>
+              <p className="muted tiny span-2">
+                Для договора: «в лице директора / генерального директора». Если пусто — подставим «Директор».
+              </p>
               <label>
                 Банк
                 <input
@@ -721,7 +764,7 @@ export function CompanyPage() {
                 Email
                 <input value={editDraft.email} onChange={(e) => setEditDraft({ ...editDraft, email: e.target.value })} />
               </label>
-              <label>
+              <label className="span-2">
                 Комментарий
                 <textarea
                   value={editDraft.description}
@@ -730,7 +773,7 @@ export function CompanyPage() {
                 />
               </label>
             </div>
-            <div className="row" style={{ gap: 8, marginTop: 12 }}>
+            <div className="modal-actions">
               <button type="button" className="btn" disabled={busy || !editDraft.name.trim()} onClick={() => void saveCompany()}>
                 Сохранить
               </button>
