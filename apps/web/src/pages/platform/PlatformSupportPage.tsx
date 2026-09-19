@@ -267,7 +267,7 @@ export function PlatformSupportPage() {
   return (
     <div className="stack">
       <div>
-        <h3>Поддержка BasQar</h3>
+        <h2>Поддержка</h2>
         <p className="muted">Обращения пользователей сервиса. Это не CRM-диалоги компаний.</p>
       </div>
       <div className="support-tabs">

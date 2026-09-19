@@ -143,6 +143,9 @@ h1, h2, h3, .card strong, .client-row-title, .nav h1, .brand-wordmark {
   padding: 0 2px 8px;
   scrollbar-width: thin;
 }
+.nav-links > div {
+  display: contents;
+}
 
 .nav-section {
   margin: 12px 10px 4px;

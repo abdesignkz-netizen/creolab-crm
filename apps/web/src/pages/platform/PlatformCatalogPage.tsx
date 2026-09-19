@@ -31,6 +31,7 @@ export function PlatformCatalogPage() {
 
   return (
     <div className="stack">
+      <h2>Каталог интеграций</h2>
       <p className="muted">
         Подключение всегда к выбранной компании. Общий WhatsApp-мост сервера к организации не подставляется.
       </p>

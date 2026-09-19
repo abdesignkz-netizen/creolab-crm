@@ -42,6 +42,7 @@ export function PlatformServiceSettingsPage() {
 
   return (
     <form className="panel stack" onSubmit={onSubmit}>
+      <h2>Настройки сервиса</h2>
       <p className="muted">Значения по умолчанию для новых и существующих компаний, пока они не переопределены. Ключи БД, JWT и ENCRYPTION_KEY здесь не редактируются.</p>
       <h4>AI по умолчанию</h4>
       <label className="check"><input type="checkbox" name="aiEnabled" defaultChecked={data.ai?.enabled} /> AI включён на уровне сервиса</label>

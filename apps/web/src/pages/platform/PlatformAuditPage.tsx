@@ -17,6 +17,7 @@ export function PlatformAuditPage() {
 
   return (
     <div className="stack">
+      <h2>Журнал действий</h2>
       <form className="filters" onSubmit={(event) => { event.preventDefault(); void load(); }}>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Фильтр по действию" />
         <button className="btn secondary">Найти</button>

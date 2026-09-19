@@ -112,7 +112,6 @@ export function LegalSettingsPanel() {
         bankName: profile.bankName || null,
         bik: profile.bik || null,
         directorName: profile.directorName || null,
-        directorPosition: profile.directorPosition || null,
         phone: profile.phone || null,
         email: profile.email || null,
         defaultVatMode,
@@ -195,13 +194,6 @@ export function LegalSettingsPanel() {
           <input
             value={profile.directorName || ""}
             onChange={(e) => setProfile({ ...profile, directorName: e.target.value })}
-          />
-        </label>
-        <label>
-          Должность директора
-          <input
-            value={profile.directorPosition || ""}
-            onChange={(e) => setProfile({ ...profile, directorPosition: e.target.value })}
           />
         </label>
         <label>

@@ -133,7 +133,7 @@ a.sit-kpi:hover, button.sit-kpi:hover { background: #f2f7ff; border-color: #cfde
 .sit-brief b { font-size: 11px; color: #4e6890; text-transform: uppercase; letter-spacing: .06em; }
 .sit-brief p { font-size: 13px; color: #324663; }
 .sit-toolbar { padding: 0; gap: 16px; margin-bottom: 2px; }
-.sit-period-bar { margin: 2px 0 6px; }
+.sit-period-bar { margin: 16px 0 8px; }
 .sit-periods { gap: 5px; }
 .sit-list-row { border-color: #eff0f3; padding-block: 13px; }
 .sit-pipe-chip { background: #f5f6f9; border: 1px solid #eceef3; border-radius: 9px; padding: 7px 10px; }
@@ -228,7 +228,6 @@ a.sit-kpi:hover, button.sit-kpi:hover { background: #f2f7ff; border-color: #cfde
   .sit-kpi { padding: 14px; }
   .sit-kpi strong { font-size: 25px; }
   .sit-toolbar { flex-direction: column; align-items: stretch; }
-  .sit-period-bar { margin-top: 0; }
   .stats-compare { min-width: 0; }
   .stats-overview-split, .stats-filters { grid-template-columns: 1fr; }
   .search-bar { display: grid; grid-template-columns: 1fr auto; }

@@ -28,10 +28,13 @@ export function PlatformOverviewPage() {
 
   return (
     <div className="stack">
-      <div className="actions">
+      <div className="page-head">
+        <h2>Обзор</h2>
+        <div className="actions">
         <Link className="btn" to="/admin/companies/new">Добавить компанию</Link>
         <Link className="btn secondary" to="/admin/members">Пригласить участника</Link>
         <Link className="btn secondary" to="/admin/integrations?type=whatsapp_seller">Подключить интеграцию</Link>
+        </div>
       </div>
       <div className="kpi-grid">
         {cards.map(([label, value]) => (

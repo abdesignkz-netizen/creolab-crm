@@ -39,7 +39,7 @@ function CompanyList() {
   return (
     <div className="stack">
       <div className="page-head">
-        <h3>Компании сервиса</h3>
+        <h2>Компании</h2>
         <Link className="btn" to="/admin/companies/new">Добавить компанию</Link>
       </div>
       <form

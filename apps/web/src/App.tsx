@@ -104,6 +104,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
   const locale = normalizeLocale(me?.user?.locale);
   const platformAdmin = Boolean(me.user?.platformAdmin);
   const hasCompany = Boolean(tenantId);
+  const inServiceAdmin = location.pathname.startsWith("/admin");
 
   const primaryTabs = (hasCompany
     ? [
@@ -139,19 +140,37 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
     ...(caps.analytics ? [["/stats", t(locale, "nav.stats")] as [string, string]] : []),
     ["/settings", t(locale, "nav.settings")],
   ] : ([["/settings", t(locale, "nav.settings")] as [string, string]]);
+  const platformLinks: Array<[string, string]> = platformAdmin ? [
+    ["/admin", t(locale, "nav.platformOverview")],
+    ["/admin/companies", t(locale, "nav.platformCompanies")],
+    ["/admin/members", t(locale, "nav.platformMembers")],
+    ["/admin/support", t(locale, "nav.platformSupport")],
+    ["/admin/integrations", t(locale, "nav.platformCatalog")],
+    ["/admin/ai-usage", t(locale, "nav.platformUsage")],
+    ["/admin/settings", t(locale, "nav.platformSettings")],
+    ["/admin/audit", t(locale, "nav.platformAudit")],
+  ] : [];
 
-  const moreLinks = [
-    ["/admin", t(locale, "nav.platform"), platformAdmin],
-    ["/admin/support", t(locale, "nav.platformSupport"), platformAdmin],
-    ["/control", t(locale, "nav.control"), hasCompany && !caps.manager],
-    ["/contacts", t(locale, "nav.contacts"), hasCompany],
-    ["/companies", t(locale, "nav.companies"), hasCompany],
-    ["/deals", t(locale, "nav.deals"), hasCompany],
-    ["/documents", t(locale, "nav.documents"), hasCompany && caps.documents],
-    ["/integrations", t(locale, "nav.integrations"), hasCompany && caps.integrations],
-    ["/stats", t(locale, "nav.stats"), hasCompany && caps.analytics],
-    ["/settings", t(locale, "nav.settings"), true],
-  ].filter((item) => item[2]) as Array<[string, string]>;
+  const moreLinks = (platformAdmin && !hasCompany
+    ? [
+        ["/admin/support", t(locale, "nav.platformSupport")],
+        ["/admin/integrations", t(locale, "nav.platformCatalog")],
+        ["/admin/ai-usage", t(locale, "nav.platformUsage")],
+        ["/admin/settings", t(locale, "nav.platformSettings")],
+        ["/admin/audit", t(locale, "nav.platformAudit")],
+        ["/settings", t(locale, "nav.settings")],
+      ]
+    : [
+        ["/admin", t(locale, "nav.platform"), platformAdmin],
+        ["/control", t(locale, "nav.control"), hasCompany && !caps.manager],
+        ["/contacts", t(locale, "nav.contacts"), hasCompany],
+        ["/companies", t(locale, "nav.companies"), hasCompany],
+        ["/deals", t(locale, "nav.deals"), hasCompany],
+        ["/documents", t(locale, "nav.documents"), hasCompany && caps.documents],
+        ["/integrations", t(locale, "nav.integrations"), hasCompany && caps.integrations],
+        ["/stats", t(locale, "nav.stats"), hasCompany && caps.analytics],
+        ["/settings", t(locale, "nav.settings"), true],
+      ].filter((item) => item[2]) as Array<[string, string]>);
 
   function badgeCount(path: string) {
     const n = Number(navBadges[path] || 0);
@@ -207,8 +226,14 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
     "/integrations": t(locale, "nav.integrations"),
     "/stats": t(locale, "nav.stats"),
     "/settings": t(locale, "nav.settings"),
-    "/admin": t(locale, "nav.platform"),
+    "/admin/companies": t(locale, "nav.platformCompanies"),
+    "/admin/members": t(locale, "nav.platformMembers"),
     "/admin/support": t(locale, "nav.platformSupport"),
+    "/admin/integrations": t(locale, "nav.platformCatalog"),
+    "/admin/ai-usage": t(locale, "nav.platformUsage"),
+    "/admin/settings": t(locale, "nav.platformSettings"),
+    "/admin/audit": t(locale, "nav.platformAudit"),
+    "/admin": t(locale, "nav.platformOverview"),
   };
   const pageTitle =
     Object.entries(titleMap)
@@ -279,7 +304,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const help = params.get("help");
-    if (help) {
+    if (help && !location.pathname.startsWith("/admin")) {
       setHelpTicketId(help);
       setHelpOpen(true);
     }
@@ -407,7 +432,9 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
           <b>{pageTitle}</b>
           <span className="muted">{me.activeTenant?.tenant?.name || "Нет компании"}</span>
         </div>
+        {inServiceAdmin ? null : (
         <SupportHelpButton unread={helpUnread} onClick={() => { setHelpTicketId(null); setHelpOpen(true); }} />
+        )}
         {unreadNotices > 0 ? (
           <button type="button" className="nav-badge" onClick={() => navigate("/settings")} title="Уведомления">
             {unreadNotices > 9 ? "9+" : unreadNotices}
@@ -423,61 +450,44 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
           <p>{me.activeTenant?.tenant?.name || "Нет компании"}</p>
         </div>
         <nav className="nav-links">
-          {workLinks.length ? <p className="nav-section">{t(locale, "nav.work")}</p> : null}
-          {workLinks.map(([to, label]) => {
-            const count = badgeCount(to);
-            const hint = badgeHint(to);
-            return (
-              <NavLink
-                key={to}
-                to={navTo(to)}
-                className={({ isActive }) => (isActive ? "active" : "")}
-                aria-label={count > 0 ? `${label}. ${hint}` : label}
-                onClick={(event) => onNavClick(to, event)}
-              >
-                <span className="nav-link-label"><NavIcon to={to} />{label}</span>
-                {count > 0 ? (
-                  <span className="nav-badge" {...tip(hint)}>
-                    {formatBadge(count)}
-                  </span>
-                ) : null}
-              </NavLink>
-            );
-          })}
-          <p className="nav-section">{t(locale, "nav.system")}</p>
-          {systemLinks.map(([to, label]) => {
-            const count = badgeCount(to);
-            const hint = badgeHint(to, to === "/settings" ? "Непрочитанные уведомления" : "Требует внимания");
-            return (
-              <NavLink
-                key={to}
-                to={navTo(to)}
-                className={({ isActive }) => (isActive ? "active" : "")}
-                aria-label={count > 0 ? `${label}. ${hint}` : label}
-                onClick={(event) => onNavClick(to, event)}
-              >
-                <span className="nav-link-label"><NavIcon to={to} />{label}</span>
-                {count > 0 ? (
-                  <span className="nav-badge" {...tip(hint)}>
-                    {formatBadge(count)}
-                  </span>
-                ) : null}
-              </NavLink>
-            );
-          })}
-          {platformAdmin ? (
-            <>
-              <p className="nav-section">{t(locale, "nav.platform")}</p>
-              <NavLink to="/admin" end>{t(locale, "nav.platformOverview")}</NavLink>
-              <NavLink to="/admin/companies">{t(locale, "nav.platformCompanies")}</NavLink>
-              <NavLink to="/admin/members">{t(locale, "nav.platformMembers")}</NavLink>
-              <NavLink to="/admin/support">{t(locale, "nav.platformSupport")}</NavLink>
-              <NavLink to="/admin/integrations">{t(locale, "nav.platformCatalog")}</NavLink>
-              <NavLink to="/admin/settings">{t(locale, "nav.platformSettings")}</NavLink>
-              <NavLink to="/admin/audit">{t(locale, "nav.platformAudit")}</NavLink>
-            </>
-          ) : null}
+          {(
+            [
+              workLinks.length ? { section: t(locale, "nav.work"), links: workLinks } : null,
+              platformAdmin && !hasCompany ? { section: t(locale, "nav.platform"), links: platformLinks } : null,
+              { section: t(locale, "nav.system"), links: systemLinks },
+              platformAdmin && hasCompany ? { section: t(locale, "nav.platform"), links: platformLinks } : null,
+            ] as Array<{ section: string; links: Array<[string, string]> } | null>
+          ).filter((block): block is { section: string; links: Array<[string, string]> } => Boolean(block?.links.length)).map((block) => (
+            <div key={block.section}>
+              <p className="nav-section">{block.section}</p>
+              {block.links.map(([to, label]) => {
+                const count = badgeCount(to);
+                const hint = badgeHint(
+                  to,
+                  to === "/settings" ? "Непрочитанные уведомления" : to === "/admin/support" ? "Непрочитанные обращения" : "Требует внимания",
+                );
+                return (
+                  <NavLink
+                    key={to}
+                    to={navTo(to)}
+                    end={to === "/admin"}
+                    className={({ isActive }) => (isActive ? "active" : "")}
+                    aria-label={count > 0 ? `${label}. ${hint}` : label}
+                    onClick={(event) => onNavClick(to, event)}
+                  >
+                    <span className="nav-link-label"><NavIcon to={to} />{label}</span>
+                    {count > 0 ? (
+                      <span className="nav-badge" {...tip(hint)}>
+                        {formatBadge(count)}
+                      </span>
+                    ) : null}
+                  </NavLink>
+                );
+              })}
+            </div>
+          ))}
         </nav>
+        {inServiceAdmin ? null : (
         <button
           type="button"
           className="nav-help"
@@ -493,6 +503,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
           </span>
           {helpUnread > 0 ? <span className="nav-badge">{formatBadge(helpUnread)}</span> : null}
         </button>
+        )}
         <button className="btn secondary nav-logout" onClick={logout} {...tip("Завершить сеанс в этом браузере")}>
           {t(locale, "nav.logout")}
         </button>
@@ -502,7 +513,9 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
         <div className="workspace-toolbar">
           <div className="workspace-breadcrumb"><span>{pageTitle}</span></div>
           <div className="workspace-identity">
+            {inServiceAdmin ? null : (
             <SupportHelpButton unread={helpUnread} onClick={() => { setHelpTicketId(null); setHelpOpen(true); }} />
+            )}
             <span>{me.user.name}</span>
             <span className="workspace-avatar" aria-hidden="true">{String(me.user.name || "C").split(" ").slice(0, 2).map((part) => part[0]).join("")}</span>
           </div>
@@ -596,17 +609,13 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
               </NavLink>
             );
           })}
-          {me.user.platformAdmin ? (
-            <NavLink to="/admin" onClick={() => setMoreOpen(false)}>
-              Кабинет платформы
-            </NavLink>
-          ) : null}
         </nav>
         <button type="button" className="btn secondary" onClick={logout} {...tip("Завершить сеанс в этом браузере")}>
           {t(locale, "nav.logout")}
         </button>
       </div>
 
+      {inServiceAdmin ? null : (
       <SupportCenter
         open={helpOpen}
         onClose={() => setHelpOpen(false)}
@@ -614,6 +623,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
         onUnread={setHelpUnread}
         canCreateTicket={hasCompany}
       />
+      )}
 
       <nav className="mobile-tabbar" aria-label="Основная навигация">
         {primaryTabs.map((tab) => {

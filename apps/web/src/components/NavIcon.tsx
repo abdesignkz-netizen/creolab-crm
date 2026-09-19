@@ -14,7 +14,18 @@ const paths: Record<string, string> = {
   help: "M9.1 9a3 3 0 1 1 4.2 2.7c-.8.5-1.3 1-1.3 2M12 17.5h.01",
 };
 
+const ADMIN_ICONS: Record<string, string> = {
+  companies: "companies",
+  members: "contacts",
+  support: "help",
+  integrations: "integrations",
+  "ai-usage": "stats",
+  settings: "settings",
+  audit: "control",
+};
+
 export function NavIcon({ to }: { to: string }) {
-  const key = to.replace(/^\//, "").split("/")[0] || "today";
+  const parts = to.replace(/^\//, "").split("/");
+  const key = parts[0] === "admin" ? ADMIN_ICONS[parts[1] || ""] || "today" : parts[0] || "today";
   return <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[key] || paths.today} /></svg>;
 }

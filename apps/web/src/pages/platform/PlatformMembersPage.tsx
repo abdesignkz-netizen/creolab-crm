@@ -24,6 +24,7 @@ export function PlatformMembersPage() {
 
   return (
     <div className="stack">
+      <h2>Участники</h2>
       <form
         className="panel stack"
         onSubmit={async (event) => {

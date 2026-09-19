@@ -44,7 +44,7 @@ export function PlatformAiUsagePage({ lockedTenantId }: { lockedTenantId?: strin
     <div className="stack">
       <div className="page-head">
         <div>
-          <h3>AI Usage</h3>
+          <h2>Расход AI</h2>
           <p className="muted">Внутренняя себестоимость. Клиентам не показывается.</p>
         </div>
         <div className="actions">
