@@ -110,11 +110,21 @@ export function buildContractPlaceholders(input: ContractPdfInput) {
     vat: vatLine(input),
     payment_terms: input.paymentTerms,
     completion_terms: input.completionTerms,
-    items_table: "",
+    items_table: formatContractItemsTable(input),
   };
 }
 
-function applyPlaceholders(text: string, values: Record<string, string>) {
+export function formatContractItemsTable(input: ContractPdfInput) {
+  if (!input.items.length) return "";
+  const lines = input.items.map((item, index) => {
+    const sum = formatKzt(item.amountWithoutVat ?? item.totalAmount);
+    return `${index + 1}. ${item.name} — ${item.quantity} ${esfMeasureUnitSymbol(item.unit)} × ${formatKzt(item.unitPrice)} = ${sum}`;
+  });
+  lines.push(`Итого: ${formatKzt(input.totalAmount)}, ${vatLine(input)}`);
+  return lines.join("\n");
+}
+
+export function applyPlaceholders(text: string, values: Record<string, string>) {
   return text.replace(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi, (_, key: string) => values[key] ?? "");
 }
 

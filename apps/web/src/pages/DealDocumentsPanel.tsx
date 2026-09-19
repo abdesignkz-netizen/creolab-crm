@@ -332,8 +332,8 @@ export function DealDocumentsPanel(props: {
                 </div>
               </div>
               {doc.generatedFileId ? (
-                <a className="btn secondary" href={api.contractPdfUrl(doc.id)} target="_blank" rel="noreferrer">
-                  Открыть PDF
+                <a className="btn secondary" href={api.contractPdfUrl(doc.id)}>
+                  {doc.importedPdf || /pdf/i.test(doc.generatedMimeType || "") ? "Открыть PDF" : "Скачать Word"}
                 </a>
               ) : null}
               <DeleteContractButton id={doc.id} number={doc.number} disabled={busy} onDeleted={async()=>{setBuyerLink("");await load();}} />
@@ -375,12 +375,12 @@ export function DealDocumentsPanel(props: {
                         missingFieldLabels: err.body?.details?.missingFieldLabels || err.body?.missingFieldLabels || {},
                       });
                     }
-                    setError(err instanceof Error ? err.message : "Не удалось сформировать PDF");
+                    setError(err instanceof Error ? err.message : "Не удалось сформировать договор");
                   })
                   .finally(() => setBusy(false));
               }}
             >
-              Сформировать PDF
+              Сформировать Word
             </button>
             <button
               type="button"
@@ -462,7 +462,7 @@ export function DealDocumentsPanel(props: {
                 const client = createSigningClient();
                 void (async () => {
                   const pdf = await fetch(api.contractPdfUrl(current.id), { credentials: "include" });
-                  if (!pdf.ok) throw new Error("Не удалось открыть PDF");
+                  if (!pdf.ok) throw new Error("Не удалось открыть договор");
                   const bytes = new Uint8Array(await pdf.arrayBuffer());
                   let binary = "";
                   bytes.forEach((byte) => {

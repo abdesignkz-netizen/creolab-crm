@@ -138,6 +138,7 @@ export function serializeContract(row: {
   verificationPublicId?: string | null;
   signedAt?: Date | null;
   createdAt: Date;
+  generatedMimeType?: string | null;
 }) {
   return {
     id: row.id,
@@ -155,6 +156,7 @@ export function serializeContract(row: {
     completionTerms: row.completionTerms,
     status: row.status,
     generatedFileId: row.generatedFileId ?? null,
+    generatedMimeType: row.generatedMimeType ?? null,
     importedPdf: Boolean(row.originalFileId),
     templateId: row.templateId ?? null,
     verificationPublicId: row.verificationPublicId ?? null,
@@ -316,9 +318,21 @@ export async function listDealDocuments(prisma: PrismaClient, auth: AuthContext,
   const importedIds = new Set(importedInvoiceFiles.map(f => f.id));
   const { importedInvoiceDetails } = await import("./importedInvoiceDetails.ts");
   const importDetails = await importedInvoiceDetails(prisma, tid, invoices.map(i=>i.id));
-  const originals = await prisma.attachment.findMany({where:{tenantId:tid,id:{in:contracts.flatMap(c=>c.originalFileId?[c.originalFileId]:[])}},select:{id:true,originalFileName:true}});
+  const originals = await prisma.attachment.findMany({
+    where: {
+      tenantId: tid,
+      id: { in: contracts.flatMap((c) => [c.originalFileId, c.generatedFileId].filter(Boolean) as string[]) },
+    },
+    select: { id: true, originalFileName: true, mimeType: true },
+  });
   return {
-    contracts: contracts.map(row => ({...serializeContract(row), originalFileName:originals.find(f=>f.id===row.originalFileId)?.originalFileName || null})),
+    contracts: contracts.map((row) => ({
+      ...serializeContract({
+        ...row,
+        generatedMimeType: originals.find((f) => f.id === row.generatedFileId)?.mimeType || null,
+      }),
+      originalFileName: originals.find((f) => f.id === row.originalFileId)?.originalFileName || null,
+    })),
     invoices: invoices.map(row => ({ ...serializeInvoice(row), importDetails: importDetails.get(row.id) || null, importedPdf: Boolean(row.pdfFileId && importedIds.has(row.pdfFileId)) })),
     electronicDocuments: electronicDocuments.map(serializeElectronicDocument),
     documentState: (await import("./documentWorkflow.ts")).documentWorkflowState(electronicDocuments),

@@ -29,7 +29,7 @@ export function SignPage() {
     const client = createSigningClient();
     try {
       const pdf = await fetch(api.publicSignPdfUrl(token), { credentials: "include" });
-      if (!pdf.ok) throw new Error("Не удалось открыть PDF");
+      if (!pdf.ok) throw new Error("Не удалось открыть договор");
       const bytes = new Uint8Array(await pdf.arrayBuffer());
       let binary = "";
       bytes.forEach((byte) => {
@@ -74,8 +74,8 @@ export function SignPage() {
               </p>
               {data.waitingForSeller ? <p className="muted">Сначала должен подписать исполнитель.</p> : null}
               <div className="actions">
-                <a className="btn secondary" href={api.publicSignPdfUrl(token)} target="_blank" rel="noreferrer">
-                  Открыть PDF
+                <a className="btn secondary" href={api.publicSignPdfUrl(token)}>
+                  Скачать договор
                 </a>
                 <button type="button" className="btn" disabled={busy || !data.canSign} onClick={() => void sign()}>
                   {busy ? "Подписываем…" : "Подписать ЭЦП"}

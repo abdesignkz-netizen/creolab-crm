@@ -34,7 +34,11 @@ function rewriteParagraph(paragraph: string, transform: (text: string) => string
     index += 1;
     if (index === 1) {
       const withSpace = /xml:space=/.test(attrs) ? attrs : `${attrs} xml:space="preserve"`;
-      return `<w:t${withSpace}>${encodeXml(next)}</w:t>`;
+      const xml = next
+        .split("\n")
+        .map((line) => encodeXml(line))
+        .join('</w:t><w:br/><w:t xml:space="preserve">');
+      return `<w:t${withSpace}>${xml}</w:t>`;
     }
     return `<w:t${attrs}></w:t>`;
   });
@@ -57,4 +61,30 @@ export async function rewriteDocxText(bytes: Buffer, transform: (text: string) =
 
 export async function fillDocxPlaceholders(bytes: Buffer, values: Record<string, string>) {
   return mapDocxXml(bytes, (text) => applyPlaceholders(text, values));
+}
+
+function paragraphPlainText(paragraph: string) {
+  return [...paragraph.matchAll(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g)].map((node) => decodeXml(node[1])).join("");
+}
+
+export async function ensureDocxItemsPlaceholder(bytes: Buffer) {
+  const zip = await JSZip.loadAsync(bytes);
+  const xml = await zip.file("word/document.xml")?.async("string");
+  if (!xml || /\{\{\s*items_table\s*\}\}/i.test(paragraphPlainText(xml))) return bytes;
+  let inserted = false;
+  const next = xml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (paragraph) => {
+    if (inserted) return paragraph;
+    if (!/РЕКВИЗИТЫ/i.test(paragraphPlainText(paragraph))) return paragraph;
+    inserted = true;
+    return `<w:p><w:r><w:t xml:space="preserve">{{items_table}}</w:t></w:r></w:p>${paragraph}`;
+  });
+  if (!inserted) {
+    zip.file(
+      "word/document.xml",
+      xml.replace(/<w:sectPr\b/, `<w:p><w:r><w:t xml:space="preserve">{{items_table}}</w:t></w:r></w:p><w:sectPr`),
+    );
+  } else {
+    zip.file("word/document.xml", next);
+  }
+  return Buffer.from(await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" }));
 }

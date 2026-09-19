@@ -12,6 +12,7 @@ import { asMoney } from "./documentMoney.ts";
 import { getTenantDocumentFlags, requireDocumentsEnabled } from "./legalProfileService.ts";
 import { serializeContract } from "./documentDraftService.ts";
 import { verifyDocumentSignature } from "./signatureVerificationService.ts";
+import { contractFileDownload } from "./contractDocx.ts";
 
 const SIGN_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 const OPEN_REQUESTS = ["PENDING", "OPENED"];
@@ -86,7 +87,7 @@ async function loadContractBundle(prisma: PrismaClient, tenantId: string, contra
 function currentVersion(contract: { versions: Array<{ id: string; version: number; fileId: string | null; sha256: string | null }> }) {
   const latest = contract.versions[contract.versions.length - 1] || null;
   if (!latest?.fileId || !latest.sha256) {
-    throw new ApiError(422, "pdf_not_ready", "Сначала сформируйте PDF договора");
+    throw new ApiError(422, "pdf_not_ready", "Сначала сформируйте договор");
   }
   return latest;
 }
@@ -552,7 +553,7 @@ export async function getPublicSign(prisma: PrismaClient, token: string) {
 
 export async function sendPublicSignPdf(prisma: PrismaClient, token: string, res: Response) {
   const request = await loadPublicRequest(prisma, token);
-  if (!request.contract.generatedFileId) throw new ApiError(404, "pdf_not_ready", "PDF ещё не готов");
+  if (!request.contract.generatedFileId) throw new ApiError(404, "pdf_not_ready", "Договор ещё не сформирован");
   const attachment = await prisma.attachment.findFirst({
     where: {
       id: request.contract.generatedFileId,
@@ -562,8 +563,9 @@ export async function sendPublicSignPdf(prisma: PrismaClient, token: string, res
     },
   });
   if (!attachment) throw new ApiError(404, "not_found", "Файл договора не найден");
-  res.setHeader("Content-Type", "application/pdf");
-  res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(request.contract.number)}.pdf"`);
+  const headers = contractFileDownload(request.contract.number, attachment);
+  res.setHeader("Content-Type", headers.contentType);
+  res.setHeader("Content-Disposition", headers.disposition);
   await new Promise<void>((resolve, reject) => {
     const stream = createReadStream(resolveUploadPath(attachment.storageKey));
     stream.on("error", () => reject(new ApiError(404, "not_found", "Файл договора не найден на диске")));

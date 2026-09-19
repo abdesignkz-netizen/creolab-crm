@@ -15,7 +15,7 @@ import { requireDocumentsEnabled } from "./legalProfileService.ts";
 import { ensureDefaultTemplate } from "./contractTemplate.ts";
 import { rewriteScannedFragment, scanContractTemplateText, type TemplateSellerProfile } from "./contractTemplateScan.ts";
 import { sniffWordKind, textutilConvert, wordFileToText } from "./wordDocumentText.ts";
-import { rewriteDocxText } from "./docxTemplateFill.ts";
+import { rewriteDocxText, ensureDocxItemsPlaceholder } from "./docxTemplateFill.ts";
 import { createContractDraft } from "./documentDraftService.ts";
 import { generateContractPdfFile } from "./contractGenerationService.ts";
 import { addDealItem } from "./dealItemService.ts";
@@ -70,6 +70,7 @@ async function storeTemplateWord(
   }
   if (kind === "docx") {
     stored = await rewriteDocxText(stored, (text) => rewriteScannedFragment(text, scanned));
+    stored = await ensureDocxItemsPlaceholder(stored);
   }
   const safe = fileName.replace(/[^\w.\-а-яёА-ЯЁ]+/gi, "_").slice(0, 180) || "template.docx";
   const storageKey = path.posix.join(tenantId, "contract-templates", templateId, safe);

@@ -155,7 +155,7 @@ test("CRM: public form → inquiry → deal → signed contract → invoice → 
     assert.equal(validation.body.document.status,"VALIDATED");
   });
 
-  await step("подписи исполнителя и заказчика проверяют один PDF и закрывают договор", async () => {
+  await step("подписи исполнителя и заказчика проверяют один файл и закрывают договор", async () => {
     const signing = await request(`/api/v1/contracts/${contractId}/send-for-sign`, "POST", {});
     assert.equal(signing.body.contract.status, "PENDING_SIGNATURE");
     const seller = signing.body.requests.find((r: { signerType: string }) => r.signerType === "SELLER");
@@ -166,7 +166,7 @@ test("CRM: public form → inquiry → deal → signed contract → invoice → 
     const response = await fetch(`${base}/api/v1/contracts/${contractId}/pdf`, { headers: { cookie } });
     assert.equal(response.status, 200);
     const bytes = Buffer.from(await response.arrayBuffer());
-    assert.equal(bytes.subarray(0, 4).toString(), "%PDF");
+    assert.equal(bytes.subarray(0, 2).toString(), "PK");
     const signedSeller = await request(`/api/v1/signature-requests/${seller.id}/sign`, "POST", {
       cmsBase64: makeTestCms(bytes, { iin: "123456789013", bin: "123456789013" }),
     });

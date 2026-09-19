@@ -6,7 +6,6 @@ import { createApp } from "./app.ts";
 import { scanContractTemplateText, rewriteScannedFragment } from "./services/contractTemplateScan.ts";
 import { extractDocUnicodeText, docxToText } from "./services/wordDocumentText.ts";
 import { fillDocxPlaceholders, rewriteDocxText } from "./services/docxTemplateFill.ts";
-import { extractPdfPages } from "./services/pdfTextExtraction.ts";
 
 const SAMPLE = `Договор №05082026/01
 об оказании возмездных услуг
@@ -95,6 +94,7 @@ describe("Contract Word templates", () => {
     assert.match(scanned.body, /\{\{seller_bin\}\}/);
     assert.match(scanned.body, /\{\{buyer_bin\}\}/);
     assert.match(scanned.body, /\{\{contract_number\}\}/);
+    assert.match(scanned.body, /\{\{items_table\}\}/);
     assert.match(scanned.body, /Разработать презентацию компании/);
     assert.doesNotMatch(scanned.body, /АрыстанТехСервис/);
     assert.equal(scanned.buyer.bin, "222222222220");
@@ -138,6 +138,67 @@ KZ111111111111111111
     assert.equal(scanned.warnings.length, 0);
   });
 
+  it("понимает преамбулу, где «в лице» стоит до «именуемое»", () => {
+    const text = `ДОГОВОР оказания услуг №05082026/01
+
+г. Алматы                                          «19» сентября 2026 года
+
+ТОО «Creolab», в лице Директора Булан А. Б., действующего на основании Устава, именуемое в дальнейшем «Исполнитель», с одной стороны, и ТОО «Minerals Supply Services Atyrau», в лице Директора Мухсинов Е. Н., действующего на основании Устава, именуемое в дальнейшем «Заказчик», с другой стороны, заключили настоящий Договор о нижеследующем.
+
+ПРЕДМЕТ ДОГОВОРА
+2.1. Исполнитель обязуется оказать услуги.
+
+11. РЕКВИЗИТЫ СТОРОН
+ТОО «Minerals Supply Services Atyrau»
+РК, г. Атырау
+БИН 140540016755
+ИИК KZ5396503F0007969139
+АО «ForteBank»
+БИК: IRTYKZKA
+
+ТОО «Creolab»
+РК, г. Алматы, ул. Монгольская, 44
+БИН 221140036408
+KZ111111111111111111
+АО «Банк ЦентрКредит»
+БИК: KCJBKZKX`;
+    const scanned = scanContractTemplateText(text, {
+      legalName: "ТОО «Creolab»",
+      bin: "221140036408",
+      directorName: "Булан А. Б.",
+    });
+    assert.match(scanned.seller.name, /Creolab/i);
+    assert.match(scanned.buyer.name, /Minerals Supply Services Atyrau/i);
+    assert.equal(scanned.seller.bin, "221140036408");
+    assert.equal(scanned.buyer.bin, "140540016755");
+    assert.equal(scanned.seller.directorName, "Булан А. Б.");
+    assert.equal(scanned.buyer.directorName, "Мухсинов Е. Н.");
+    assert.match(scanned.body, /\{\{seller_name\}\}/);
+    assert.match(scanned.body, /\{\{buyer_name\}\}/);
+    assert.match(scanned.body, /\{\{contract_number\}\}/);
+    assert.match(scanned.body, /\{\{contract_date\}\}/);
+    assert.match(scanned.body, /\{\{items_table\}\}/);
+    assert.match(scanned.body, /ПРЕДМЕТ ДОГОВОРА/);
+    const itemsAt = scanned.body.indexOf("{{items_table}}");
+    const requisitesAt = scanned.body.search(/РЕКВИЗИТЫ\s+СТОРОН/i);
+    assert.ok(itemsAt > 0 && itemsAt < requisitesAt);
+  });
+
+  it("распознаёт заказчика, если в договоре он назван «Покупатель»", () => {
+    const text = `Договор №12
+ТОО «Creolab», именуемое далее «Исполнитель», в лице Директора Иванов Иван, и ТОО «АрыстанТехСервис», именуемое далее «Покупатель», в лице Директора Шайдуллинов Р. К., заключили настоящий Договор о нижеследующем.
+
+РЕКВИЗИТЫ СТОРОН
+ТОО «АрыстанТехСервис»
+БИН 222222222220
+ТОО «Creolab»
+БИН 123456789013`;
+    const scanned = scanContractTemplateText(text, { legalName: "ТОО CREOLAB", bin: "123456789013" });
+    assert.match(scanned.buyer.name, /АрыстанТехСервис/);
+    assert.match(scanned.body, /\{\{buyer_name\}\}/);
+    assert.match(scanned.body, /\{\{seller_name\}\}/);
+  });
+
   it("вписывает поля в исходный Word, сохраняя пункты шаблона", async () => {
     const bytes = await makeDocx(SAMPLE);
     const scanned = scanContractTemplateText(SAMPLE, {
@@ -145,12 +206,15 @@ KZ111111111111111111
       bin: "123456789013",
     });
     const rewritten = await rewriteDocxText(bytes, (text) => rewriteScannedFragment(text, scanned));
-    const asTemplate = await docxToText(rewritten);
+    const { ensureDocxItemsPlaceholder } = await import("./services/docxTemplateFill.ts");
+    const withItems = await ensureDocxItemsPlaceholder(rewritten);
+    const asTemplate = await docxToText(withItems);
     assert.match(asTemplate, /\{\{seller_name\}\}/);
     assert.match(asTemplate, /\{\{buyer_name\}\}/);
+    assert.match(asTemplate, /\{\{items_table\}\}/);
     assert.match(asTemplate, /Разработать презентацию компании/);
     assert.match(asTemplate, /РЕКВИЗИТЫ СТОРОН/);
-    const filled = await fillDocxPlaceholders(rewritten, {
+    const filled = await fillDocxPlaceholders(withItems, {
       seller_name: "ТОО Creolab",
       buyer_name: "ТОО Minerals Supply Services Atyrau",
       seller_bin: "221140036408",
@@ -166,6 +230,40 @@ KZ111111111111111111
     assert.match(asContract, /Разработать презентацию компании/);
     assert.doesNotMatch(asContract, /\{\{seller_name\}\}/);
     assert.doesNotMatch(asContract, /5\.\s*Заключительные положения/);
+  });
+
+  it("собирает Word-файл с позициями без PDF", async () => {
+    const { renderContractDocx, isDocxBytes } = await import("./services/contractDocx.ts");
+    const { DEFAULT_CONTRACT_BODY } = await import("./services/contractTemplate.ts");
+    const bytes = await renderContractDocx({
+      number: "DOG-2026-0009",
+      date: new Date("2026-09-19T00:00:00Z"),
+      subject: "Разработка презентации",
+      dealName: "Презентация",
+      paymentTerms: "100% после подписания",
+      completionTerms: "10 дней",
+      amountWithoutVat: 200000,
+      vatRate: null,
+      vatAmount: 0,
+      totalAmount: 200000,
+      sellerName: "ТОО Creolab",
+      sellerBin: "221140036408",
+      sellerAddress: "Алматы",
+      sellerDirector: "Булан А. Б.",
+      sellerDirectorPosition: "Директор",
+      buyerName: "ТОО Minerals Supply Services Atyrau",
+      buyerBin: "140540016755",
+      buyerAddress: "Атырау",
+      buyerDirector: "Мухсинов Е. Н.",
+      items: [{ name: "Разработка презентации компании", quantity: 1, unit: "шт", unitPrice: 200000, totalAmount: 200000 }],
+      templateBody: DEFAULT_CONTRACT_BODY,
+    });
+    assert.ok(isDocxBytes(bytes));
+    const text = await docxToText(bytes);
+    assert.match(text, /Разработка презентации компании/);
+    assert.match(text, /Minerals Supply Services Atyrau/);
+    assert.match(text, /200\s*000/);
+    assert.doesNotMatch(text, /\{\{/);
   });
 
   it("читает unicode-текст из OLE .doc без LibreOffice", () => {
@@ -294,14 +392,14 @@ KZ111111111111111111
     assert.ok(formed.body.dealId);
     assert.equal(formed.body.generated, true, JSON.stringify(formed.body));
 
-    const pdf = await fetch(`${base}/api/v1/contracts/${formed.body.contract.id}/pdf`, { headers: { cookie } });
-    assert.equal(pdf.status, 200);
-    const pdfBytes = Buffer.from(await pdf.arrayBuffer());
-    assert.ok(pdfBytes.subarray(0, 5).equals(Buffer.from("%PDF-")));
-    const pdfText = (await extractPdfPages(pdfBytes)).map((page) => page.text).join("\n");
-    assert.match(pdfText, /Разработать презентацию компании/);
-    assert.match(pdfText, /реквизит/i);
-    assert.doesNotMatch(pdfText, /5\.\s*Заключительные положения/);
+    const file = await fetch(`${base}/api/v1/contracts/${formed.body.contract.id}/pdf`, { headers: { cookie } });
+    assert.equal(file.status, 200);
+    const fileBytes = Buffer.from(await file.arrayBuffer());
+    assert.ok(fileBytes.subarray(0, 2).equals(Buffer.from("PK")));
+    const wordText = await docxToText(fileBytes);
+    assert.match(wordText, /Разработать презентацию компании/);
+    assert.match(wordText, /реквизит/i);
+    assert.doesNotMatch(wordText, /5\.\s*Заключительные положения/);
     assert.equal(formed.body.contract.status, "READY_TO_SIGN");
 
     const list = await json("/api/v1/documents/contract-templates");

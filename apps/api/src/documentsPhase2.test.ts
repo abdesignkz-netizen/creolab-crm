@@ -165,7 +165,7 @@ describe("Documents phase 2", () => {
       where: { id: generatedFileId },
     });
     assert.ok(attachment);
-    assert.equal(attachment?.mimeType, "application/pdf");
+    assert.match(attachment?.mimeType || "", /wordprocessingml/);
     assert.equal(attachment?.checksum, first.body.version.sha256);
 
     const second = await json(`/api/v1/contracts/${contractId}/generate`, {
@@ -176,11 +176,11 @@ describe("Documents phase 2", () => {
     assert.equal(second.body.contract.generatedFileId, generatedFileId);
     assert.equal(second.body.version.version, 1);
 
-    const pdf = await fetch(`${base}/api/v1/contracts/${contractId}/pdf`, { headers: { cookie } });
-    assert.equal(pdf.status, 200);
-    assert.match(pdf.headers.get("content-type") || "", /pdf/);
-    const bytes = Buffer.from(await pdf.arrayBuffer());
-    assert.equal(bytes.subarray(0, 4).toString("utf8"), "%PDF");
+    const file = await fetch(`${base}/api/v1/contracts/${contractId}/pdf`, { headers: { cookie } });
+    assert.equal(file.status, 200);
+    assert.match(file.headers.get("content-type") || "", /wordprocessingml|officedocument/);
+    const bytes = Buffer.from(await file.arrayBuffer());
+    assert.equal(bytes.subarray(0, 2).toString("utf8"), "PK");
   });
 
   it("не отдаёт PDF другому тенанту и блокирует пересборку после ухода в подпись", async () => {

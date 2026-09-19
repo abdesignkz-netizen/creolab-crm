@@ -69,9 +69,12 @@ function legalNameMatch(profile: TemplateSellerProfile, candidate: string) {
   return names.some((name) => name && (needle.includes(name) || name.includes(needle)));
 }
 
+const ORG_PATTERN =
+  "(?:товарищество с ограниченной ответственностью|ТОО|TOO|ИП|АО|ЖШС)\\s*[«\"“][^»\"”]{1,120}[»\"”]|(?:ТОО|TOO|ИП|АО|ЖШС)\\s+[А-ЯЁA-Z][А-ЯЁA-Za-z0-9«»\"\\- ]{1,80}";
+
 function orgName(block: string) {
-  const quoted = block.match(/(?:ТОО|TOO|ИП|АО|ЖШС)\s*[«"“][^»"”]{1,120}[»"”]/i);
-  if (quoted) return clean(quoted[0]).replace(/^TOO/i, "ТОО");
+  const quoted = block.match(/(?:товарищество с ограниченной ответственностью|ТОО|TOO|ИП|АО|ЖШС)\s*[«"“][^»"”]{1,120}[»"”]/i);
+  if (quoted) return clean(quoted[0]).replace(/товарищество с ограниченной ответственностью/i, "ТОО").replace(/^TOO/i, "ТОО");
   const plain = block.match(/(?:ТОО|TOO|ИП|АО|ЖШС)\s+[А-ЯЁA-Z][А-ЯЁA-Za-z0-9«»"\- ]{1,80}/);
   return plain ? clean(plain[0]).replace(/^TOO/i, "ТОО") : "";
 }
@@ -92,6 +95,8 @@ function binIn(block: string) {
 }
 
 function ibanIn(block: string) {
+  const labeled = block.match(/(?:ИИК|IBAN|р\/сч?)\s*:?\s*(KZ[A-Z0-9 \t]{18,36})/i)?.[1]?.replace(/[ \t]/g, "") || "";
+  if (/^KZ[A-Z0-9]{18}$/i.test(labeled)) return labeled.toUpperCase();
   const raw = block.match(/\bKZ(?:[ \t]*[A-Z0-9]){18}\b/i)?.[0]?.replace(/[ \t]/g, "") || "";
   return /^KZ[A-Z0-9]{18}$/i.test(raw) ? raw.toUpperCase() : "";
 }
@@ -123,10 +128,38 @@ function windowAfter(text: string, name: string, size = 700) {
   return rest.slice(0, nextOrg > 0 ? Math.min(size, name.length + nextOrg) : size);
 }
 
+function partyBeforeRole(text: string, role: "seller" | "buyer") {
+  const roleWord = role === "buyer" ? "(?:Заказчик|Покупатель|Клиент)" : "(?:Исполнитель|Подрядчик|Поставщик)";
+  const re = new RegExp(
+    `именуем[аоы]е?\\s+(?:в\\s+дальнейшем|далее)\\s*[«"“”']?${roleWord}[»"“”']?`,
+    "i",
+  );
+  const roleMatch = re.exec(text);
+  if (!roleMatch || roleMatch.index == null) return { name: "", director: "" };
+  const start = Math.max(0, roleMatch.index - 420);
+  const before = text.slice(start, roleMatch.index);
+  const orgs = [...before.matchAll(new RegExp(ORG_PATTERN, "gi"))];
+  const last = orgs[orgs.length - 1];
+  const name = last ? orgName(last[0]) || clean(last[0]) : "";
+  const fromOrg = last
+    ? text.slice(start + (last.index || 0), roleMatch.index + roleMatch[0].length + 220)
+    : "";
+  return { name, director: directorIn(fromOrg) };
+}
+
+function sidesByOrder(text: string) {
+  const preamble = text.split(/заключили\s+настоящий/i)[0] || text.slice(0, 1800);
+  const orgs = [...preamble.matchAll(new RegExp(ORG_PATTERN, "gi"))].map((match) => orgName(match[0]) || clean(match[0]));
+  const unique = [...new Set(orgs.filter(Boolean))];
+  return { first: unique[0] || "", second: unique[1] || "" };
+}
+
 function partyByRole(text: string, role: "Исполнитель" | "Заказчик") {
+  const found = partyBeforeRole(text, role === "Заказчик" ? "buyer" : "seller");
+  if (found.name) return found;
   const matched = text.match(
     new RegExp(
-      `((?:ТОО|TOO|ИП|АО|ЖШС)\\s*[«"“][^»"”]{1,120}[»"”]|(?:ТОО|TOO|ИП|АО|ЖШС)\\s+[А-ЯЁA-Z][А-ЯЁA-Za-z0-9\\- ]{1,80})\\s*,?\\s*именуем[аоы]е?\\s+в\\s+дальнейшем\\s+[«"“”']${role}[»"“”']`,
+      `((?:${ORG_PATTERN}))\\s*,?\\s*именуем[аоы]е?\\s+(?:в\\s+дальнейшем|далее)\\s+[«"“”']${role}[»"“”']`,
       "i",
     ),
   );
@@ -141,17 +174,27 @@ function partyByRole(text: string, role: "Исполнитель" | "Заказ�
 function preambleRoles(text: string) {
   const executor = partyByRole(text, "Исполнитель");
   const customer = partyByRole(text, "Заказчик");
+  const ordered = sidesByOrder(text);
   return {
-    sellerName: executor.name,
+    sellerName: executor.name || ordered.first,
     sellerDirector: executor.director,
-    buyerName: customer.name,
+    buyerName: customer.name || (ordered.second && ordered.second !== executor.name ? ordered.second : ""),
     buyerDirector: customer.director,
   };
 }
 
-function fillParty(text: string, name: string, director: string): TemplateParty {
+function windowForParty(text: string, name: string, roleLabel: string) {
   const requisites = text.split(/РЕКВИЗИТЫ\s+СТОРОН/i)[1] || text;
-  const block = windowAfter(requisites, name) || windowAfter(text, name);
+  if (name) {
+    const byName = windowAfter(requisites, name) || windowAfter(text, name);
+    if (byName) return byName;
+  }
+  const parts = requisites.split(new RegExp(`(?:^|\\n)\\s*${roleLabel}\\b\\s*:?\\s*\\n`, "i"));
+  return parts[1] ? parts[1].slice(0, 700) : "";
+}
+
+function fillParty(text: string, name: string, director: string, roleLabel: "Исполнитель" | "Заказчик"): TemplateParty {
+  const block = windowForParty(text, name, roleLabel);
   return {
     name,
     bin: binIn(block),
@@ -228,7 +271,8 @@ function pathStem(fileName?: string) {
 
 function insertItemsTable(body: string) {
   if (/\{\{\s*items_table\s*\}\}/i.test(body)) return body;
-  if (/РЕКВИЗИТЫ\s+СТОРОН|Приложение\s*№/i.test(body)) return body;
+  const at = body.search(/\n\s*(?:\d+\.\s*)?РЕКВИЗИТЫ\s+СТОРОН/i);
+  if (at > 0) return `${body.slice(0, at).trimEnd()}\n\n{{items_table}}\n${body.slice(at)}`;
   return `${body.trim()}\n\n{{items_table}}\n`;
 }
 
@@ -258,9 +302,10 @@ export function rewriteScannedFragment(text: string, scanned: Pick<ScannedContra
   next = replaceIban(next, scanned.buyer.iban, "{{buyer_iban}}");
   if (scanned.seller.bik) next = next.replace(new RegExp(escapeRegExp(scanned.seller.bik), "gi"), "{{seller_bik}}");
   if (scanned.buyer.bik) next = next.replace(new RegExp(escapeRegExp(scanned.buyer.bik), "gi"), "{{buyer_bik}}");
-  next = next.replace(/Договор\s*№\s*[\w./-]+/i, "Договор № {{contract_number}}");
-  next = next.replace(/№\s*[\d]{6,}\/[\d]{1,4}/g, "№ {{contract_number}}");
-  next = next.replace(/[«"“]\d{1,2}[»"”]\s+[а-яё]+\s+20\d{2}(?:\s*г(?:ода)?\.?)?/gi, "{{contract_date}}");
+  next = next.replace(/(договор(?:\s+[^\n№]{0,50})?)\s*№\s*[\w./-]+/i, "$1 № {{contract_number}}");
+  next = next.replace(/№\s*\d{6,}\/\d{1,4}/, "№ {{contract_number}}");
+  next = next.replace(/[«"“]?\d{1,2}[»"”]?\s+[а-яё]{3,}\s+20\d{2}(?:\s*г(?:ода)?\.?)?/i, "{{contract_date}}");
+  next = next.replace(/\b\d{1,2}\.\d{1,2}\.20\d{2}\b/, "{{contract_date}}");
   next = replaceTotalAmount(next);
   if (!/\{\{\s*buyer_address\s*\}\}/i.test(next)) {
     next = next.replace(
@@ -293,8 +338,8 @@ export function scanContractTemplateText(
   }
 
   const roles = preambleRoles(text);
-  let seller = fillParty(text, roles.sellerName, roles.sellerDirector);
-  let buyer = fillParty(text, roles.buyerName, roles.buyerDirector);
+  let seller = fillParty(text, roles.sellerName, roles.sellerDirector, "Исполнитель");
+  let buyer = fillParty(text, roles.buyerName, roles.buyerDirector, "Заказчик");
 
   const tenantBin = taxDigits(profile.bin || profile.iin);
   const tenantOwnsBuyer = tenantBin && buyer.bin === tenantBin && seller.bin !== tenantBin;
