@@ -95,13 +95,11 @@ h1, h2, h3, .card strong, .client-row-title, .nav h1, .brand-wordmark {
   display: block;
   width: 100%;
   height: auto;
-  background: #000;
-  border-radius: 12px;
+  background: transparent;
 }
 
 .brand-logo-login {
-  width: min(380px, 100%);
-  border-radius: 16px;
+  width: min(280px, 100%);
 }
 
 .brand-mark {
