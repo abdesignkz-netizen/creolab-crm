@@ -77,8 +77,10 @@ function orgName(block: string) {
 }
 
 function directorIn(block: string) {
-  const labeled = block.match(/в\s+лице\s+(?:Директора|Генерального\s+директора|руководителя)\s+([^,]{3,80}),/i);
-  if (labeled) return clean(labeled[1]);
+  const labeled = block.match(
+    /в\s+лице\s+(?:Директора|Генерального\s+директора|руководителя)?\s*([А-ЯЁ][А-ЯЁа-яё\-]+(?:\s+[А-ЯЁ][А-ЯЁа-яё\-]+|\s+[А-ЯЁA-Z]\.\s*[А-ЯЁA-Z]\.){0,2})/i,
+  );
+  if (labeled) return clean(labeled[1]).slice(0, 80);
   const initials = block.match(/([А-ЯЁ][а-яё]+\s+[А-ЯЁA-Z]\.\s*[А-ЯЁA-Z]\.)/);
   return initials ? clean(initials[1]) : "";
 }
@@ -124,7 +126,7 @@ function windowAfter(text: string, name: string, size = 700) {
 function partyByRole(text: string, role: "Исполнитель" | "Заказчик") {
   const matched = text.match(
     new RegExp(
-      `((?:ТОО|TOO|ИП|АО|ЖШС)\\s*[«"“][^»"”]{1,120}[»"”]|(?:ТОО|TOO|ИП|АО|ЖШС)\\s+[А-ЯЁA-Z][А-ЯЁA-Za-z0-9\\- ]{1,80}),\\s*именуем[аоы]е?\\s+в\\s+дальнейшем\\s+[«"]${role}[»"]`,
+      `((?:ТОО|TOO|ИП|АО|ЖШС)\\s*[«"“][^»"”]{1,120}[»"”]|(?:ТОО|TOO|ИП|АО|ЖШС)\\s+[А-ЯЁA-Z][А-ЯЁA-Za-z0-9\\- ]{1,80})\\s*,?\\s*именуем[аоы]е?\\s+в\\s+дальнейшем\\s+[«"“”']${role}[»"“”']`,
       "i",
     ),
   );
@@ -163,7 +165,7 @@ function fillParty(text: string, name: string, director: string): TemplateParty 
 
 function replaceFlexible(text: string, needle: string, placeholder: string) {
   const value = clean(needle);
-  if (value.length < 3) return text;
+  if (value.length < 3 || value.length > 240) return text;
   const pattern = escapeRegExp(value).replace(/\\ /g, "\\s+");
   return text.replace(new RegExp(pattern, "gi"), placeholder);
 }
@@ -310,8 +312,12 @@ export function scanContractTemplateText(
     const fromProfile = orgName(text) && legalNameMatch(profile, orgName(text)) ? orgName(text) : "";
     if (fromProfile) seller.name = fromProfile;
   }
-  if (!seller.name) warnings.push("Не удалось однозначно найти исполнителя. Проверьте текст шаблона.");
-  if (!buyer.name) warnings.push("Не удалось однозначно найти заказчика. Проверьте текст шаблона.");
+  if (!seller.name) {
+    warnings.push("Исполнитель в преамбуле не размечен как поле. Название вашей организации подставится при формировании, если оно есть в настройках.");
+  }
+  if (!buyer.name) {
+    warnings.push("Заказчик в преамбуле не размечен как поле. При формировании останется название из файла — лучше сохранить шаблон после проверки сторон.");
+  }
 
   if (profile.phone && text.includes(profile.phone)) {
     text = replaceFlexible(text, profile.phone, "{{seller_phone}}");
@@ -324,7 +330,7 @@ export function scanContractTemplateText(
 
   const placeholders = placeholdersIn(text);
   if (!placeholders.includes("seller_name") || !placeholders.includes("buyer_name")) {
-    warnings.push("Не все реквизиты сторон заменены на поля шаблона. Можно поправить текст вручную перед сохранением.");
+    warnings.push("Не все названия сторон заменены на поля. Договор можно сохранить — при формировании подставятся данные из карточек, только если поле есть в тексте.");
   }
 
   return {

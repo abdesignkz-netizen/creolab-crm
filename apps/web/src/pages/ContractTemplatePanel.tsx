@@ -226,7 +226,8 @@ export function ContractTemplatePanel() {
                   {preview.warnings.map((warning) => <li key={warning}>{warning}</li>)}
                 </ul>
               ) : null}
-              <pre className="contract-template-preview">{preview.body.slice(0, 1600)}{preview.body.length > 1600 ? "…" : ""}</pre>
+              <p className="muted">Полный текст шаблона — прокрутите, чтобы увидеть все пункты. Сохраняется целиком, не только то, что видно в окне.</p>
+              <pre className="contract-template-preview">{preview.body}</pre>
               <div className="actions">
                 <button type="button" className="btn" disabled={busy || !name.trim()} onClick={() => void save()}>
                   {busy ? "Сохраняем…" : "Сохранить шаблон"}

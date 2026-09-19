@@ -102,6 +102,42 @@ describe("Contract Word templates", () => {
     assert.match(scanned.name, /презентац/i);
   });
 
+  it("находит заказчика в преамбуле даже без запятой перед «именуемое»", () => {
+    const text = `ДОГОВОР №05082026/01
+ТОО «Creolab», именуемое в дальнейшем «Исполнитель», в лице Директора Булан А. Б., действующего на основании Устава, с одной стороны, и ТОО «Minerals Supply Services Atyrau» именуемое в дальнейшем «Заказчик», в лице Директора Мухсинов Е. Н., действующего на основании Устава, с другой стороны, заключили настоящий Договор о нижеследующем.
+
+ТЕРМИНЫ И ОПРЕДЕЛЕНИЯ, ИСПОЛЬЗУЕМЫЕ В ДОГОВОРЕ
+Услуги – дизайнерские услуги в полном объеме в соответствии с Техническим заданием (Приложение № 1 к Договору).
+
+11. РЕКВИЗИТЫ СТОРОН
+ТОО «Minerals Supply Services Atyrau»
+РК, г. Атырау
+БИН 140540016755
+KZ5396503F0007969139
+АО «ForteBank»
+БИК: IRTYKZKA
+
+ТОО «Creolab»
+РК, г. Алматы, ул. Монгольская, 44
+БИН 221140036408
+KZ111111111111111111
+АО «Банк ЦентрКредит»
+БИК: KCJBKZKX`;
+    const scanned = scanContractTemplateText(text, {
+      legalName: "ТОО «Creolab»",
+      bin: "221140036408",
+      directorName: "Булан А. Б.",
+    });
+    assert.match(scanned.buyer.name, /Minerals Supply Services Atyrau/i);
+    assert.equal(scanned.buyer.bin, "140540016755");
+    assert.equal(scanned.buyer.directorName, "Мухсинов Е. Н.");
+    assert.match(scanned.body, /\{\{buyer_name\}\}/);
+    assert.match(scanned.body, /\{\{seller_name\}\}/);
+    assert.match(scanned.body, /ТЕРМИНЫ И ОПРЕДЕЛЕНИЯ/);
+    assert.match(scanned.body, /Приложение № 1/);
+    assert.equal(scanned.warnings.length, 0);
+  });
+
   it("вписывает поля в исходный Word, сохраняя пункты шаблона", async () => {
     const bytes = await makeDocx(SAMPLE);
     const scanned = scanContractTemplateText(SAMPLE, {

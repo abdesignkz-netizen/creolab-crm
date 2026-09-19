@@ -1,5 +1,4 @@
-import { ESF_DEFAULT_MEASURE_UNIT_CODE } from "@creolab/contracts";
-import { EsfMeasureUnitSelect } from "./EsfMeasureUnitSelect";
+import { MeasureUnitSelect } from "./MeasureUnitSelect";
 
 export type ContractDraftLine = {
   key: string;
@@ -15,7 +14,7 @@ export function newContractDraftLine(name = ""): ContractDraftLine {
     key: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     name,
     quantity: "1",
-    unit: ESF_DEFAULT_MEASURE_UNIT_CODE,
+    unit: "шт",
     unitPrice: "",
     vatRate: "0",
   };
@@ -99,7 +98,7 @@ export function ContractGenerateItems({
           </label>
           <label>
             Ед. изм.
-            <EsfMeasureUnitSelect
+            <MeasureUnitSelect
               value={line.unit}
               disabled={disabled}
               aria-label={`Единица измерения ${index + 1}`}

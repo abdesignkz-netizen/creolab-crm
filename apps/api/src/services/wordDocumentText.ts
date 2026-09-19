@@ -211,6 +211,8 @@ export async function wordFileToText(bytes: Buffer, fileName: string) {
     const xmlText = await docxToText(bytes);
     if (looksLikeContractText(xmlText) || xmlText.length >= 80) return xmlText;
   } else {
+    const fromTextutil = await textutilToText(bytes, kind);
+    if (looksLikeContractText(fromTextutil)) return fromTextutil;
     const ole = extractDocUnicodeText(bytes);
     if (looksLikeContractText(ole)) return ole;
   }

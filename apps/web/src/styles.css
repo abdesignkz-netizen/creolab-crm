@@ -2525,7 +2525,7 @@ button.linkish {
 .document-list-entry:last-child { border-bottom: 0; }
 .document-list-entry .sit-list-row { border-bottom: 0; }
 .contract-template-preview {
-  max-height: 220px;
+  max-height: 420px;
   overflow: auto;
   white-space: pre-wrap;
   font: inherit;

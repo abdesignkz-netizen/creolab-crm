@@ -1,6 +1,6 @@
-import { ESF_DEFAULT_MEASURE_UNIT_CODE, esfMeasureUnitShortLabel, resolveEsfMeasureUnitCode } from "@creolab/contracts";
+import { esfMeasureUnitSymbol } from "@creolab/contracts";
 import { notifySaved } from "../components/SaveNotice";
-import { EsfMeasureUnitSelect } from "../components/EsfMeasureUnitSelect";
+import { MeasureUnitSelect } from "../components/MeasureUnitSelect";
 import { useUrlState, useRequestVersion } from "../lib/useUrlState";
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -518,7 +518,7 @@ export function DealDetailPage() {
   const [itemName, setItemName] = useState("");
   const [itemQty, setItemQty] = useState("1");
   const [itemPrice, setItemPrice] = useState("");
-  const [itemUnit, setItemUnit] = useState(ESF_DEFAULT_MEASURE_UNIT_CODE);
+  const [itemUnit, setItemUnit] = useState("шт");
   const [itemVat, setItemVat] = useState("0");
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const itemLoadedDeal = useRef<string | null>(null);
@@ -527,11 +527,11 @@ export function DealDetailPage() {
     setItemName(item.name);
     setItemQty(String(item.quantity));
     setItemPrice(String(item.unitPrice));
-    setItemUnit(resolveEsfMeasureUnitCode(item.unit));
+    setItemUnit(esfMeasureUnitSymbol(item.unit));
     setItemVat(String(item.vatRate ?? 0));
   }
   function newItem() {
-    setEditingItemId(null); setItemName(""); setItemQty("1"); setItemPrice(""); setItemUnit(ESF_DEFAULT_MEASURE_UNIT_CODE); setItemVat("0");
+    setEditingItemId(null); setItemName(""); setItemQty("1"); setItemPrice(""); setItemUnit("шт"); setItemVat("0");
   }
   const [docs, setDocs] = useState<any>(null);
   const [readiness, setReadiness] = useState<any>(null);
@@ -711,7 +711,7 @@ export function DealDetailPage() {
             <div>
               <b>{item.name}</b>
               <div className="muted">
-                {item.quantity} {esfMeasureUnitShortLabel(item.unit)} × {Number(item.unitPrice).toLocaleString("ru-RU")} ₸
+                {item.quantity} {esfMeasureUnitSymbol(item.unit)} × {Number(item.unitPrice).toLocaleString("ru-RU")} ₸
                 {item.vatRate ? ` · НДС ${item.vatRate}%` : " · без НДС"}
               </div>
             </div>
@@ -756,7 +756,7 @@ export function DealDetailPage() {
           </label>
           <label>
             Ед. изм.
-            <EsfMeasureUnitSelect value={itemUnit} onChange={setItemUnit} />
+            <MeasureUnitSelect value={itemUnit} onChange={setItemUnit} />
           </label>
           <label>
             Цена без НДС (₸)
