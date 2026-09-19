@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../../lib/api";
 import { notifySaved } from "../../components/SaveNotice";
+import { statusBadgeClass } from "../../lib/statusBadge";
 import { PlatformAiUsagePage } from "./PlatformAiUsagePage";
 
 const INNER = [
@@ -31,7 +32,12 @@ export function PlatformCompanyAiManager({ tenantId }: { tenantId: string }) {
   return (
     <div className="stack">
       <div className="panel">
-        <p>Статус · {data.status === "active" ? "Активен" : data.status}</p>
+        <p className="integ-status-line">
+          Статус
+          <span className={statusBadgeClass(data.status === "active" ? "Активен" : data.status)}>
+            {data.status === "active" ? "Активен" : data.status}
+          </span>
+        </p>
         <p>Модель · {data.model || "инфраструктура сервиса"}</p>
         <p>Knowledge Base · {data.knowledgeCount} материала</p>
         <p>WhatsApp · {data.integration ? "Connected" : "не подключён"}</p>

@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { api } from "../../lib/api";
 import { formatDateTime } from "../../lib/datetime";
 import { notifySaved } from "../../components/SaveNotice";
+import { statusBadgeClass } from "../../lib/statusBadge";
 
 export function PlatformMembersPage() {
   const [q, setQ] = useState("");
@@ -90,7 +91,11 @@ export function PlatformMembersPage() {
                   <td>{item.phone || "—"}</td>
                   <td><Link to={`/admin/companies/${item.tenantId}`}>{item.tenantName}</Link></td>
                   <td>{item.roleLabel}</td>
-                  <td>{item.active ? "Активен" : "Приостановлен"}</td>
+                  <td>
+                    <span className={statusBadgeClass(item.active ? "Активен" : "Приостановлен")}>
+                      {item.active ? "Активен" : "Приостановлен"}
+                    </span>
+                  </td>
                   <td>{formatDateTime(item.createdAt)}</td>
                   <td>{item.lastSeenAt ? formatDateTime(item.lastSeenAt) : "—"}</td>
                 </tr>

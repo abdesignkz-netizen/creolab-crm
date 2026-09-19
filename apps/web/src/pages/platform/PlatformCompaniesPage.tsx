@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { api } from "../../lib/api";
 import { formatDateTime } from "../../lib/datetime";
 import { notifySaved } from "../../components/SaveNotice";
+import { statusBadgeClass } from "../../lib/statusBadge";
 
 const STATUS_LABEL: Record<string, string> = {
   active: "Активна",
@@ -83,7 +84,11 @@ function CompanyList() {
                     <td>{[item.contactEmail, item.contactPhone].filter(Boolean).join(" · ") || "—"}</td>
                     <td>{item.memberCount}</td>
                     <td>{item.connectionsLabel}</td>
-                    <td>{STATUS_LABEL[item.status] || item.status}</td>
+                    <td>
+                      <span className={statusBadgeClass(STATUS_LABEL[item.status] || item.status)}>
+                        {STATUS_LABEL[item.status] || item.status}
+                      </span>
+                    </td>
                     <td>{formatDateTime(item.createdAt)}</td>
                   </tr>
                 ))}

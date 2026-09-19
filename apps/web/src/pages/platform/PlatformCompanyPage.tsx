@@ -3,6 +3,7 @@ import { Link, useLocation, useParams } from "react-router-dom";
 import { api } from "../../lib/api";
 import { formatDateTime } from "../../lib/datetime";
 import { notifySaved } from "../../components/SaveNotice";
+import { statusBadgeClass } from "../../lib/statusBadge";
 import { AssignIntegrationForm } from "./PlatformAssignIntegration";
 import { PlatformCompanyAiManager } from "./PlatformCompanyAiManager";
 import { PlatformAiUsagePage } from "./PlatformAiUsagePage";
@@ -42,7 +43,12 @@ export function PlatformCompanyPage() {
         <div>
           <p className="muted"><Link to="/admin/companies">Компании</Link></p>
           <h3>{company.name}</h3>
-          <p className="muted">{company.status === "suspended" ? "Приостановлена" : "Активна"} · {company.slug}</p>
+          <p className="muted integ-status-line">
+            <span className={statusBadgeClass(company.status === "suspended" ? "Приостановлена" : "Активна")}>
+              {company.status === "suspended" ? "Приостановлена" : "Активна"}
+            </span>
+            {company.slug}
+          </p>
         </div>
         <div className="actions">
           {company.status === "active" ? (
@@ -252,7 +258,11 @@ function CompanyMembers({ tenantId }: { tenantId: string }) {
                     <option value="manager">Менеджер</option>
                   </select>
                 </td>
-                <td>{item.active ? "Активен" : "Приостановлен"}</td>
+                <td>
+                  <span className={statusBadgeClass(item.active ? "Активен" : "Приостановлен")}>
+                    {item.active ? "Активен" : "Приостановлен"}
+                  </span>
+                </td>
                 <td>{formatDateTime(item.createdAt)}</td>
                 <td>{item.lastSeenAt ? formatDateTime(item.lastSeenAt) : "—"}</td>
                 <td className="actions">

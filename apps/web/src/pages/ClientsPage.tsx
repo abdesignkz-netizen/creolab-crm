@@ -6,6 +6,7 @@ import { PERIOD_OPTIONS, formatCustomPeriodLabel } from "../lib/period";
 import { tip } from "../lib/tip";
 import { formatWaitSince } from "../lib/duration";
 import { api } from "../lib/api";
+import { statusBadgeClass } from "../lib/statusBadge";
 import { Pagination } from "../components/Pagination";
 
 const FILTERS = [
@@ -259,7 +260,7 @@ export function ClientsPage() {
             </div>
             <div className="muted">{item.phone || "Нет телефона"}</div>
             <div className="client-meta">
-              <span className="badge">{item.lifecycleLabel}</span>
+              <span className={statusBadgeClass(item.lifecycleLabel)}>{item.lifecycleLabel}</span>
               {item.inquiryStatusLabel ? <span className="badge">{item.inquiryStatusLabel}</span> : null}
               {item.needsReply ? (
                 <span className="badge warn">

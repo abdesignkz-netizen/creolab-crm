@@ -2,6 +2,7 @@ import { notifySaved } from "../components/SaveNotice";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
+import { statusBadgeClass } from "../lib/statusBadge";
 
 type ConnectMethod = "html" | "existing" | "js" | "tilda";
 
@@ -67,7 +68,7 @@ export function IntegrationsPage() {
           <div className="panel integ-card" key={card.catalogType}>
             <div className="integ-card-head">
               <b>{card.title}</b>
-              <span className={`badge ${card.connected ? "" : "warn"}`}>{card.healthLabel}</span>
+              <span className={statusBadgeClass(card.healthLabel)}>{card.healthLabel}</span>
             </div>
             {card.connected ? (
               <>
@@ -244,11 +245,21 @@ export function IntegrationsPage() {
         <h3>WhatsApp AI Manager</h3>
         {setup?.whatsapp?.warning ? <div className="banner warn">{setup.whatsapp.warning}</div> : null}
         <p className="muted">{setup?.whatsapp?.note}</p>
-        <p>
-          Статус подключения · {setup?.whatsapp?.configured ? "Подключён" : "Не подключён"}
+        <p className="integ-status-line">
+          Статус подключения
+          <span className={statusBadgeClass(setup?.whatsapp?.configured ? "Подключён" : "Не подключён")}>
+            {setup?.whatsapp?.configured ? "Подключён" : "Не подключён"}
+          </span>
         </p>
-        <p>
-          AI Manager · {setup?.whatsapp?.reachable ? "Активен" : setup?.whatsapp?.configured ? "Не отвечает" : "Ожидает подключение"}
+        <p className="integ-status-line">
+          AI Manager
+          {setup?.whatsapp?.reachable ? (
+            <span className="badge ok">Активен</span>
+          ) : setup?.whatsapp?.configured ? (
+            <span className="badge warn">Не отвечает</span>
+          ) : (
+            <span className="badge">Ожидает подключение</span>
+          )}
         </p>
         {setup?.whatsapp?.sender ? <p>WhatsApp · {setup.whatsapp.sender}</p> : null}
         {setup?.whatsapp?.instanceId ? <p className="muted">Instance ID · {setup.whatsapp.instanceId}</p> : null}

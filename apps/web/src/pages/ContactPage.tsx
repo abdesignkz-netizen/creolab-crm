@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { nameWithPhone, phoneText } from "../lib/contactDisplay";
 import { formatWaitSince } from "../lib/duration";
 import { api } from "../lib/api";
+import { statusBadgeClass } from "../lib/statusBadge";
 import { useCapabilities } from "../lib/session";
 import { CALLS_ENABLED } from "../lib/featureFlags";
 import { tip } from "../lib/tip";
@@ -111,7 +112,7 @@ export function ContactPage() {
             {client.companyName ? ` · ${client.companyName}` : ""}
           </div>
           <div className="client-meta">
-            <span className="badge">{client.lifecycleLabel}</span>
+            <span className={statusBadgeClass(client.lifecycleLabel)}>{client.lifecycleLabel}</span>
             {client.temperatureLabel && client.leadTemperature !== "unknown" ? (
               <span className="badge">{client.temperatureLabel}</span>
             ) : null}
