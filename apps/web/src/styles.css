@@ -2474,6 +2474,18 @@ button.linkish {
 .document-list-entry { padding: 8px 0 14px; border-bottom: 1px solid var(--line); }
 .document-list-entry:last-child { border-bottom: 0; }
 .document-list-entry .sit-list-row { border-bottom: 0; }
+.contract-template-preview {
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.45;
+  background: #f6f7f9;
+  border-radius: 10px;
+  padding: 12px;
+  margin: 0;
+}
 .contract-delete { max-width: 440px; }
 .contract-delete p { margin: 8px 0; }
 .documents-row-meta {

@@ -176,8 +176,20 @@ export function DealDocumentsPanel(props: {
   const [esfIin, setEsfIin] = useState("");
   const [cabinetPassword, setCabinetPassword] = useState("");
   const [askCabinet, setAskCabinet] = useState(false);
+  const [templates, setTemplates] = useState<Array<{ id: string; name: string; isDefault: boolean }>>([]);
+  const [templateId, setTemplateId] = useState("");
   const sendFlight = useRef(false);
   useEffect(() => { setSubmissions({}); }, [d.id]);
+  useEffect(() => {
+    void api.contractTemplates().then((data: any) => {
+      const list = data.items || [];
+      setTemplates(list);
+      setTemplateId((current) => current || list.find((row: any) => row.isDefault)?.id || list[0]?.id || "");
+    }).catch(() => setTemplates([]));
+  }, [d.id]);
+  useEffect(() => {
+    if (contracts[0]?.templateId) setTemplateId(contracts[0].templateId);
+  }, [contracts[0]?.templateId]);
   function submission(type: string, value: EsfSubmission) {
     setSubmissions(previous => ({ ...previous, [type]: value }));
   }
@@ -328,6 +340,16 @@ export function DealDocumentsPanel(props: {
             </div>
           ))}
           <div className="actions" style={{ marginTop: 8 }}>
+            {templates.length ? (
+              <label>
+                Шаблон договора
+                <select value={templateId} disabled={busy || contracts[0]?.importedPdf} onChange={(e) => setTemplateId(e.target.value)}>
+                  {templates.map((row) => (
+                    <option key={row.id} value={row.id}>{row.name}{row.isDefault ? " (по умолчанию)" : ""}</option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
             <button
               type="button"
               className="btn"
@@ -338,10 +360,10 @@ export function DealDocumentsPanel(props: {
                 void (async () => {
                   let contractId = contracts[0]?.id as string | undefined;
                   if (!contractId) {
-                    const created: any = await api.createContractDraft(d.id);
+                    const created: any = await api.createContractDraft(d.id, templateId ? { templateId } : {});
                     contractId = created.contract.id;
                   }
-                  await api.generateContract(contractId!);
+                  await api.generateContract(contractId!, templateId ? { templateId } : {});
                   await load();
                 })()
                   .catch((err: any) => {
@@ -367,7 +389,7 @@ export function DealDocumentsPanel(props: {
               onClick={() => {
                 setBusy(true);
                 void api
-                  .createContractDraft(d.id)
+                  .createContractDraft(d.id, templateId ? { templateId } : {})
                   .then(() => load())
                   .catch((err) => setError(err instanceof Error ? err.message : "Не удалось создать договор"))
                   .finally(() => setBusy(false));

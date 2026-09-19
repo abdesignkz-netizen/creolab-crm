@@ -1,5 +1,4 @@
 import path from "node:path";
-import JSZip from "jszip";
 import type { PrismaClient } from "@creolab/db";
 import { parseCompanyRequisitesSchema, type ParseCompanyRequisitesInput } from "@creolab/contracts";
 import { ApiError } from "../errors.ts";
@@ -9,44 +8,11 @@ import { beginDocumentExtraction } from "./documentExtractionGate.ts";
 import { extractPdfPages, type PdfPageText } from "./pdfTextExtraction.ts";
 import { wordToPdf } from "./wordDocumentConversion.ts";
 import { recognizeCompanyRequisites, scoreCompanyRequisites } from "./companyRequisitesParser.ts";
+import { docxToText, extractDocUnicodeText } from "./wordDocumentText.ts";
 
 const PDF_MAGIC = Buffer.from("%PDF-");
 const DOCX_MAGIC = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
 const DOC_MAGIC = Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
-
-function decodeXmlEntities(value: string) {
-  return value
-    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)))
-    .replace(/&#(\d+);/g, (_, n: string) => String.fromCharCode(Number(n)))
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'");
-}
-
-export async function docxToText(bytes: Buffer) {
-  if (!bytes.subarray(0, 4).equals(DOCX_MAGIC)) {
-    throw new ApiError(422, "word_invalid", "Файл не соответствует формату Word. Выберите .docx или .doc");
-  }
-  let zip: JSZip;
-  try {
-    zip = await JSZip.loadAsync(bytes);
-  } catch {
-    throw new ApiError(422, "word_invalid", "Не удалось открыть Word. Проверьте, что файл не повреждён.");
-  }
-  const xml = await zip.file("word/document.xml")?.async("string");
-  if (!xml) throw new ApiError(422, "word_invalid", "В файле Word нет текста документа.");
-  return decodeXmlEntities(
-    xml
-      .replace(/<w:tab\b[^>]*\/>/g, "\t")
-      .replace(/<w:br\b[^>]*\/>/g, "\n")
-      .replace(/<\/w:p>/g, "\n")
-      .replace(/<\/w:tc>/g, "\n")
-      .replace(/<[^>]+>/g, "")
-      .replace(/\n{3,}/g, "\n\n"),
-  ).trim();
-}
 
 function sniffKind(bytes: Buffer, fileName: string) {
   if (bytes.subarray(0, 5).equals(PDF_MAGIC)) return "pdf" as const;
@@ -93,12 +59,20 @@ async function extractFromFile(fileName: string, fileBase64: string) {
       throw error;
     }
   }
-  const pdfBytes = await wordToPdf(bytes, "doc");
-  const pages = await extractPdfPages(pdfBytes);
-  if (!pages.some((page) => page.text.trim())) {
-    throw new ApiError(422, "pdf_no_text", "Не удалось прочитать Word. Сохраните файл как PDF или вставьте реквизиты текстом.");
+  try {
+    const pdfBytes = await wordToPdf(bytes, "doc");
+    const pages = await extractPdfPages(pdfBytes);
+    if (pages.some((page) => page.text.trim())) {
+      return { text: pages.map((page) => page.text).join("\n"), pages, ocr: pages.some((page) => page.ocr) };
+    }
+  } catch (error) {
+    const ole = extractDocUnicodeText(bytes);
+    if (ole.trim()) return { text: ole, pages: undefined, ocr: false };
+    throw error;
   }
-  return { text: pages.map((page) => page.text).join("\n"), pages, ocr: pages.some((page) => page.ocr) };
+  const ole = extractDocUnicodeText(bytes);
+  if (ole.trim()) return { text: ole, pages: undefined, ocr: false };
+  throw new ApiError(422, "pdf_no_text", "Не удалось прочитать Word. Сохраните файл как PDF или вставьте реквизиты текстом.");
 }
 
 export async function parseCompanyRequisitesUpload(

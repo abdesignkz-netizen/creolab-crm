@@ -287,6 +287,20 @@ export function createApiClient(options: ClientOptions) {
     generateContract: (contractId: string, body: unknown = {}) =>
       request(`/api/v1/contracts/${contractId}/generate`, { method: "POST", body: JSON.stringify(body) }),
     contractPdfUrl: (contractId: string) => `/api/v1/contracts/${contractId}/pdf`,
+    contractTemplates: () => request("/api/v1/documents/contract-templates"),
+    previewContractTemplate: (body: unknown) =>
+      request("/api/v1/documents/contract-templates/preview", { method: "POST", body: JSON.stringify(body) }),
+    createContractTemplate: (body: unknown) =>
+      request("/api/v1/documents/contract-templates", { method: "POST", body: JSON.stringify(body) }),
+    updateContractTemplate: (id: string, body: unknown) =>
+      request(`/api/v1/documents/contract-templates/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+    deleteContractTemplate: (id: string) =>
+      request(`/api/v1/documents/contract-templates/${id}`, { method: "DELETE" }),
+    createCompanyContractFromTemplate: (companyId: string, body: unknown) =>
+      request(`/api/v1/companies/${companyId}/contract-from-template`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
     sendContractForSign: (contractId: string) =>
       request(`/api/v1/contracts/${contractId}/send-for-sign`, { method: "POST", body: JSON.stringify({}) }),
     contractSigning: (contractId: string) => request(`/api/v1/contracts/${contractId}/signing`),

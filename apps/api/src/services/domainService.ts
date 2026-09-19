@@ -22,6 +22,7 @@ import {
 } from "./conversationMedia.ts";
 import { sendViaProvider } from "./messagingProvider.ts";
 import { resolveUploadPath } from "../lib/storage.ts";
+import { createStaffNotification } from "./notificationService.ts";
 
 function tenantId(auth: AuthContext) {
   if (!auth.activeMembership) throw new ApiError(403, "no_tenant", "Нет активной компании");
@@ -869,7 +870,43 @@ export async function setConversationMode(
     const assigneeChanged = nextAssignee !== current.assigneeMembershipId;
     const sameOwnerTake = mode === "human" && current.mode === "human" && !assigneeChanged;
     const alreadySameMode = current.mode === mode && (mode !== "human" || sameOwnerTake);
+
+    async function settleTakeoverNotices() {
+      if (mode !== "human" || !nextAssignee) return;
+      await tx.notification.updateMany({
+        where: {
+          tenantId: tid,
+          readAt: null,
+          OR: [
+            { type: "conversation.needs_human", entityId: id },
+            { episodeKey: `conversation.needs_human:${id}` },
+          ],
+        },
+        data: { readAt: new Date(), resolvedAt: new Date() },
+      });
+      if (nextAssignee !== selfId) {
+        const notice = await createStaffNotification(tx, {
+          tenantId: tid,
+          membershipId: nextAssignee,
+          type: "conversation.needs_human",
+          entityType: "conversation",
+          entityId: id,
+          episodeKey: `conversation.needs_human:${id}`,
+          title: "Вам закрепили диалог",
+          body: "Диалог передан вам. Ответьте клиенту, если он ждёт.",
+          priority: "high",
+        });
+        if (notice) {
+          await tx.notification.update({
+            where: { id: notice.id },
+            data: { readAt: null, resolvedAt: null },
+          });
+        }
+      }
+    }
+
     if (alreadySameMode || sameOwnerTake) {
+      await settleTakeoverNotices();
       return { ...current, appliedOnSeller: true as const, sellerError: null as string | null };
     }
 
@@ -884,29 +921,7 @@ export async function setConversationMode(
         attentionReason: mode === "human" ? "taken_by_human" : mode === "paused" ? "paused" : current.attentionReason,
       },
     });
-    if (mode === "human" && nextAssignee) {
-      await tx.notification.upsert({
-        where: {
-          tenantId_episodeKey_recipientMembershipId: {
-            tenantId: tid,
-            episodeKey: `conversation.needs_human:${id}`,
-            recipientMembershipId: nextAssignee,
-          },
-        },
-        update: { title: "Диалог закреплён", body: "Нужен ответ человеку" },
-        create: {
-          tenantId: tid,
-          episodeKey: `conversation.needs_human:${id}`,
-          recipientMembershipId: nextAssignee,
-          type: "conversation.needs_human",
-          priority: "high",
-          entityType: "conversation",
-          entityId: id,
-          title: "Диалог закреплён",
-          body: "Нужен ответ человеку",
-        },
-      });
-    }
+    await settleTakeoverNotices();
     await tx.outboundOperation.updateMany({
       where: { tenantId: tid, conversationId: id, state: { in: ["queued", "generating"] } },
       data: { state: "canceled", error: "taken_by_human" },

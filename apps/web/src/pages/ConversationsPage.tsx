@@ -391,10 +391,11 @@ export function ConversationsPage() {
         )}
       </div>
 
-      {workspace.conversation.attentionReason && workspace.conversation.mode === "human" ? (
+      {(workspace.conversation.needsManagerAssign ??
+        (workspace.conversation.mode === "human" && !workspace.conversation.assigneeMembershipId)) ? (
         <div className="conv-attention">
           <b>Требуется менеджер</b>
-          <div className="muted">{workspace.conversation.attentionReasonLabel || workspace.conversation.attentionReason}</div>
+          <div className="muted">{workspace.conversation.attentionReasonLabel || workspace.conversation.attentionReason || "Назначьте ответственного за этот диалог"}</div>
           <div className="conv-attention-assign">
             <select
               aria-label="Менеджер диалога"

@@ -36,6 +36,9 @@ import {
   createDealSchema,
   createContractDraftSchema,
   generateContractSchema,
+  uploadContractTemplateSchema,
+  patchContractTemplateSchema,
+  companyContractFromTemplateSchema,
   declineSignatureSchema,
   submitSignatureSchema,
   createInvoiceDraftSchema,
@@ -326,6 +329,30 @@ export function createApp(prisma: PrismaClient) {
   app.delete("/api/v1/documents/import-pdf/:id", async (req, res) => {
     const { discardManualPdf } = await import("./services/manualPdfImportService.ts");
     res.json(await discardManualPdf(prisma, await requireAuth(req), req.params.id));
+  });
+
+  app.get("/api/v1/documents/contract-templates", async (req, res) => {
+    const { listContractTemplates } = await import("./services/contractTemplateService.ts");
+    res.json(await listContractTemplates(prisma, await requireAuth(req)));
+  });
+  app.post("/api/v1/documents/contract-templates/preview", jsonLarge, async (req, res) => {
+    uploadContractTemplateSchema.parse(req.body || {});
+    const { previewContractTemplate } = await import("./services/contractTemplateService.ts");
+    res.json(await previewContractTemplate(prisma, await requireAuth(req), req.body));
+  });
+  app.post("/api/v1/documents/contract-templates", jsonLarge, async (req, res) => {
+    const { createContractTemplate } = await import("./services/contractTemplateService.ts");
+    const created = await createContractTemplate(prisma, await requireAuth(req), req.body);
+    res.status(201).json(created);
+  });
+  app.patch("/api/v1/documents/contract-templates/:id", json, async (req, res) => {
+    patchContractTemplateSchema.parse(req.body || {});
+    const { updateContractTemplate } = await import("./services/contractTemplateService.ts");
+    res.json(await updateContractTemplate(prisma, await requireAuth(req), req.params.id, req.body));
+  });
+  app.delete("/api/v1/documents/contract-templates/:id", async (req, res) => {
+    const { deleteContractTemplate } = await import("./services/contractTemplateService.ts");
+    res.json(await deleteContractTemplate(prisma, await requireAuth(req), req.params.id));
   });
 
   const urlencoded = express.urlencoded({ extended: true, limit: "200kb" });
@@ -1187,6 +1214,20 @@ export function createApp(prisma: PrismaClient) {
       key: String(req.header("idempotency-key") || ""),
       payload: { companyId: req.params.id },
       run: () => createInvoiceDealForCompany(prisma, auth, req.params.id),
+    });
+    res.status(201).json(result);
+  });
+  app.post("/api/v1/companies/:id/contract-from-template", json, async (req, res) => {
+    const input = companyContractFromTemplateSchema.parse(req.body || {});
+    const auth = await requireAuth(req);
+    const { withIdempotency } = await import("./services/idempotency.ts");
+    const { createContractFromTemplateForCompany } = await import("./services/contractTemplateService.ts");
+    const result = await withIdempotency(prisma, {
+      scope: "contract.from_template",
+      actorKey: `${auth.activeMembership?.tenantId}:${req.params.id}:${input.templateId}`,
+      key: String(req.header("idempotency-key") || ""),
+      payload: { companyId: req.params.id, ...input },
+      run: () => createContractFromTemplateForCompany(prisma, auth, req.params.id, input),
     });
     res.status(201).json(result);
   });

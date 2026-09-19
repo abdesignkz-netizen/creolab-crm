@@ -325,16 +325,29 @@ export async function listDealDocuments(prisma: PrismaClient, auth: AuthContext,
   };
 }
 
+async function resolveTemplateId(prisma: PrismaClient, tenantId: string, templateId?: string | null) {
+  if (!templateId) return undefined;
+  const template = await prisma.contractTemplate.findFirst({ where: { id: templateId, tenantId } });
+  if (!template) throw new ApiError(404, "not_found", "Шаблон не найден");
+  return template.id;
+}
+
 export async function createContractDraft(
   prisma: PrismaClient,
   auth: AuthContext,
   dealId: string,
-  input: { subject?: string | null; paymentTerms?: string | null; completionTerms?: string | null },
+  input: {
+    subject?: string | null;
+    paymentTerms?: string | null;
+    completionTerms?: string | null;
+    templateId?: string | null;
+  },
 ) {
   const membership = requireTenant(auth);
   requireManageDocuments(auth);
   const tid = membership.tenantId;
   await requireDocumentsEnabled(prisma, tid);
+  const templateId = await resolveTemplateId(prisma, tid, input.templateId);
   const existing = await prisma.contract.findFirst({
     where: { tenantId: tid, dealId, status: { in: CONTRACT_OPEN } },
   });
@@ -358,6 +371,7 @@ export async function createContractDraft(
         vatAmount: totals.vatAmount,
         totalAmount: totals.totalAmount,
         currency: deal.currency || existing.currency,
+        ...(templateId ? { templateId } : {}),
       },
     });
     return { contract: serializeContract(updated), reused: true };
@@ -385,6 +399,7 @@ export async function createContractDraft(
         completionTerms: input.completionTerms?.trim() || null,
         status: "DRAFT",
         createdByUserId: auth.user.id,
+        ...(templateId ? { templateId } : {}),
       },
     });
     await tx.contractVersion.create({

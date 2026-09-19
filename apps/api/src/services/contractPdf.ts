@@ -29,10 +29,18 @@ export type ContractPdfInput = {
   sellerAddress: string;
   sellerDirector: string;
   sellerDirectorPosition: string;
+  sellerIban?: string;
+  sellerBank?: string;
+  sellerBik?: string;
+  sellerPhone?: string;
+  sellerEmail?: string;
   buyerName: string;
   buyerBin: string;
   buyerAddress: string;
   buyerDirector: string;
+  buyerIban?: string;
+  buyerBank?: string;
+  buyerBik?: string;
   items: ContractPdfItem[];
   templateBody: string;
 };
@@ -82,10 +90,18 @@ export function buildContractPlaceholders(input: ContractPdfInput) {
     seller_address: input.sellerAddress,
     seller_director: input.sellerDirector,
     seller_director_position: input.sellerDirectorPosition,
+    seller_iban: input.sellerIban || "",
+    seller_bank: input.sellerBank || "",
+    seller_bik: input.sellerBik || "",
+    seller_phone: input.sellerPhone || "",
+    seller_email: input.sellerEmail || "",
     buyer_name: input.buyerName,
     buyer_bin: input.buyerBin,
     buyer_address: input.buyerAddress,
     buyer_director: input.buyerDirector,
+    buyer_iban: input.buyerIban || "",
+    buyer_bank: input.buyerBank || "",
+    buyer_bik: input.buyerBik || "",
     deal_name: input.dealName,
     subject: input.subject,
     amount: formatKzt(input.totalAmount),
@@ -171,6 +187,9 @@ export async function renderContractPdf(input: ContractPdfInput) {
   const regular = resolveFont("NotoSans-Regular.ttf");
   const bold = resolveFont("NotoSans-Bold.ttf");
   const values = buildContractPlaceholders(input);
+  const body = input.templateBody || "";
+  const hasOwnHeader = /^\s*договор/i.test(body) || /\{\{\s*contract_number\s*\}\}/i.test(body.slice(0, 400));
+  const hasOwnSignatures = /реквизиты\s+сторон/i.test(body) || /_{5,}/.test(body);
   const doc = new PDFDocument({
     size: "A4",
     margins: { top: 50, bottom: 56, left: 50, right: 50 },
@@ -187,12 +206,14 @@ export async function renderContractPdf(input: ContractPdfInput) {
   doc.registerFont("NotoSans", regular);
   doc.registerFont("NotoSans-Bold", bold);
 
-  doc.font("NotoSans-Bold").fontSize(16).text(`ДОГОВОР № ${values.contract_number}`, { align: "center" });
-  doc.moveDown(0.3);
-  doc.font("NotoSans").fontSize(11).text(`от ${values.contract_date}`, { align: "center" });
-  doc.moveDown(1.2);
+  if (!hasOwnHeader) {
+    doc.font("NotoSans-Bold").fontSize(16).text(`ДОГОВОР № ${values.contract_number}`, { align: "center" });
+    doc.moveDown(0.3);
+    doc.font("NotoSans").fontSize(11).text(`от ${values.contract_date}`, { align: "center" });
+    doc.moveDown(1.2);
+  }
 
-  const parts = (input.templateBody || "").split(/\{\{\s*items_table\s*\}\}/i);
+  const parts = body.split(/\{\{\s*items_table\s*\}\}/i);
   parts.forEach((part, index) => {
     const text = applyPlaceholders(part, values).replace(/\n{3,}/g, "\n\n").trim();
     if (text) {
@@ -205,24 +226,26 @@ export async function renderContractPdf(input: ContractPdfInput) {
     }
   });
 
-  if (!/\{\{\s*items_table\s*\}\}/i.test(input.templateBody || "") && input.items.length) {
+  if (!/\{\{\s*items_table\s*\}\}/i.test(body) && input.items.length) {
     doc.font("NotoSans-Bold").fontSize(11).text("Спецификация");
     doc.moveDown(0.4);
     drawItemsTable(doc, input.items);
   }
 
-  doc.moveDown(1.2);
-  doc.font("NotoSans-Bold").fontSize(11).text("Подписи сторон");
-  doc.moveDown(0.6);
-  const colWidth = (doc.page.width - doc.page.margins.left - doc.page.margins.right - 24) / 2;
-  const y = doc.y;
-  doc.font("NotoSans").fontSize(10);
-  doc.text(`Исполнитель\n${input.sellerDirectorPosition} ${input.sellerDirector}\n________________`, doc.page.margins.left, y, {
-    width: colWidth,
-  });
-  doc.text(`Заказчик\n${input.buyerDirector}\n________________`, doc.page.margins.left + colWidth + 24, y, {
-    width: colWidth,
-  });
+  if (!hasOwnSignatures) {
+    doc.moveDown(1.2);
+    doc.font("NotoSans-Bold").fontSize(11).text("Подписи сторон");
+    doc.moveDown(0.6);
+    const colWidth = (doc.page.width - doc.page.margins.left - doc.page.margins.right - 24) / 2;
+    const y = doc.y;
+    doc.font("NotoSans").fontSize(10);
+    doc.text(`Исполнитель\n${input.sellerDirectorPosition} ${input.sellerDirector}\n________________`, doc.page.margins.left, y, {
+      width: colWidth,
+    });
+    doc.text(`Заказчик\n${input.buyerDirector}\n________________`, doc.page.margins.left + colWidth + 24, y, {
+      width: colWidth,
+    });
+  }
 
   doc.end();
   return done;

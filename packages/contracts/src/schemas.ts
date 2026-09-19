@@ -580,9 +580,33 @@ export const createContractDraftSchema = z.object({
   subject: z.string().trim().max(400).nullable().optional(),
   paymentTerms: z.string().trim().max(2000).nullable().optional(),
   completionTerms: z.string().trim().max(2000).nullable().optional(),
+  templateId: z.string().uuid().optional(),
 });
 
 export const generateContractSchema = createContractDraftSchema;
+
+export const uploadContractTemplateSchema = z.object({
+  name: z.string().trim().max(200).optional(),
+  fileName: z.string().trim().min(1).max(255),
+  fileBase64: z.string().min(20).max(28_000_000),
+});
+
+export const saveContractTemplateSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  body: z.string().trim().min(40).max(200_000),
+  isDefault: z.boolean().optional(),
+});
+
+export const patchContractTemplateSchema = z.object({
+  name: z.string().trim().min(1).max(200).optional(),
+  isDefault: z.boolean().optional(),
+});
+
+export const companyContractFromTemplateSchema = z.object({
+  templateId: z.string().uuid(),
+  dealId: z.string().uuid().optional(),
+  generate: z.boolean().optional(),
+});
 
 export const declineSignatureSchema = z.object({
   reason: z.string().trim().max(500).nullable().optional(),

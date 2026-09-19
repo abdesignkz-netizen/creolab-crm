@@ -1,4 +1,5 @@
 import { ManualPdfImportPanel } from "./ManualPdfImportPanel";
+import { ContractTemplatePanel } from "./ContractTemplatePanel";
 import { DeleteContractButton } from "../components/DeleteContractButton";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
@@ -191,6 +192,7 @@ export function DocumentsPage() {
       </div>
 
       {!disabled ? <ManualPdfImportPanel onSaved={() => void load()} /> : null}
+      {!disabled ? <ContractTemplatePanel /> : null}
 
       <form
         className="panel command-compose"

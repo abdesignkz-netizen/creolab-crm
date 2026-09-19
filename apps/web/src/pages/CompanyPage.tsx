@@ -88,6 +88,9 @@ export function CompanyPage() {
   const [members, setMembers] = useState<Array<{ id: string; name: string }>>([]);
   const [personEdit, setPersonEdit] = useState<PersonDraft | null>(null);
   const [documents, setDocuments] = useState<any[]>([]);
+  const [templates, setTemplates] = useState<Array<{ id: string; name: string; isDefault: boolean }>>([]);
+  const [templateId, setTemplateId] = useState("");
+  const [templateBusy, setTemplateBusy] = useState(false);
 
   async function load() {
     try {
@@ -107,6 +110,15 @@ export function CompanyPage() {
   useEffect(() => {
     void load();
   }, [id, caps.documents]);
+
+  useEffect(() => {
+    if (!caps.documents) return;
+    void api.contractTemplates().then((result: any) => {
+      const list = result.items || [];
+      setTemplates(list);
+      setTemplateId(list.find((row: any) => row.isDefault)?.id || list[0]?.id || "");
+    }).catch(() => setTemplates([]));
+  }, [caps.documents, id]);
 
   useEffect(() => {
     if (!linkOpen) return;
@@ -438,6 +450,37 @@ export function CompanyPage() {
           <h3>Документы</h3>
           <Link className="btn secondary" to="/documents">Все документы</Link>
         </div>
+        {templates.length ? (
+          <div className="stack" style={{ marginBottom: 12 }}>
+            <p className="muted">Сформировать договор по сохранённому шаблону — реквизиты этой компании подставятся в текст.</p>
+            <label>
+              Шаблон
+              <select value={templateId} disabled={templateBusy} onChange={(e) => setTemplateId(e.target.value)}>
+                {templates.map((row) => (
+                  <option key={row.id} value={row.id}>{row.name}{row.isDefault ? " (по умолчанию)" : ""}</option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              className="btn"
+              disabled={templateBusy || !templateId}
+              onClick={() => {
+                setTemplateBusy(true);
+                setError("");
+                void api.createCompanyContractFromTemplate(id, { templateId })
+                  .then((result: any) => {
+                    notifySaved(result.generated ? "Договор сформирован по шаблону" : "Черновик договора создан");
+                    if (result.dealId) navigate(`/deals/${result.dealId}`);
+                  })
+                  .catch((err) => setError(err instanceof Error ? err.message : "Не удалось сформировать договор"))
+                  .finally(() => setTemplateBusy(false));
+              }}
+            >
+              {templateBusy ? "Формируем…" : "Сформировать по шаблону"}
+            </button>
+          </div>
+        ) : null}
         {!documents.length ? <p className="empty">Документов по этой компании пока нет.</p> : null}
         {documents.map((item) => (
           <Link key={`${item.kind}-${item.id}`} className="sit-list-row" to={item.href}>

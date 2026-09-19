@@ -534,10 +534,24 @@ describe("Conversations board", () => {
         attentionReason: "needs_reply",
       },
     });
+    const notice = await prisma.notification.create({
+      data: {
+        tenantId: contact.tenantId,
+        episodeKey: `conversation.needs_human:${conversation.id}`,
+        recipientMembershipId: manager.id,
+        type: "conversation.needs_human",
+        entityType: "conversation",
+        entityId: conversation.id,
+        title: "Нужен человек",
+        body: "AI просит менеджера",
+        priority: "high",
+      },
+    });
     const workspace = await fetch(`${base}/api/v1/conversations/${conversation.id}`, { headers: { cookie } });
     const before = await workspace.json();
     assert.equal(before.conversation.attentionReasonLabel, "Клиент написал, AI просит человека ответить");
     assert.equal(before.conversation.assigneeMembershipId, null);
+    assert.equal(before.conversation.needsManagerAssign, true);
 
     const assigned = await fetch(`${base}/api/v1/conversations/${conversation.id}/assign`, {
       method: "POST",
@@ -553,6 +567,33 @@ describe("Conversations board", () => {
     assert.equal(after?.assigneeMembershipId, manager.id);
     assert.equal(after?.attentionReason, "taken_by_human");
     assert.equal(after?.needsAttention, false);
+
+    const afterWorkspace = await fetch(`${base}/api/v1/conversations/${conversation.id}`, { headers: { cookie } });
+    const afterBody = await afterWorkspace.json();
+    assert.equal(afterBody.conversation.needsManagerAssign, false);
+    assert.equal(afterBody.conversation.assigneeMembershipId, manager.id);
+
+    const owner = await prisma.membership.findFirst({
+      where: { tenantId: contact.tenantId, role: "owner", active: true },
+    });
+    const selfAssign = await fetch(`${base}/api/v1/conversations/${conversation.id}/assign`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({ membershipId: owner?.id }),
+    });
+    assert.equal(selfAssign.status, 200, await selfAssign.text());
+    const leftover = await prisma.notification.findFirst({ where: { id: notice.id } });
+    assert.ok(leftover?.readAt, "после закрепления за собой уведомление «нужен менеджер» должно стать прочитанным");
+    const unreadSelf = await prisma.notification.count({
+      where: {
+        tenantId: contact.tenantId,
+        entityId: conversation.id,
+        type: "conversation.needs_human",
+        recipientMembershipId: owner?.id,
+        readAt: null,
+      },
+    });
+    assert.equal(unreadSelf, 0);
   });
 
   it("отправляет фото в диалог и отдаёт его в переписке", async () => {

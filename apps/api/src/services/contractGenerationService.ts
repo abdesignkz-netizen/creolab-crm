@@ -39,7 +39,12 @@ export async function generateContractPdfFile(
   prisma: PrismaClient,
   auth: AuthContext,
   contractId: string,
-  input: { subject?: string | null; paymentTerms?: string | null; completionTerms?: string | null } = {},
+  input: {
+    subject?: string | null;
+    paymentTerms?: string | null;
+    completionTerms?: string | null;
+    templateId?: string | null;
+  } = {},
 ) {
   const membership = requireTenant(auth);
   requireManageDocuments(auth);
@@ -87,8 +92,9 @@ export async function generateContractPdfFile(
   const completionTerms =
     input.completionTerms !== undefined ? input.completionTerms?.trim() || null : contract.completionTerms;
 
-  const template = contract.templateId
-    ? (await prisma.contractTemplate.findFirst({ where: { id: contract.templateId, tenantId: tid } })) ||
+  const requestedTemplateId = input.templateId || contract.templateId;
+  const template = requestedTemplateId
+    ? (await prisma.contractTemplate.findFirst({ where: { id: requestedTemplateId, tenantId: tid } })) ||
       (await ensureDefaultTemplate(prisma, tid))
     : await ensureDefaultTemplate(prisma, tid);
 
@@ -109,10 +115,18 @@ export async function generateContractPdfFile(
     sellerAddress: profile!.legalAddress || "",
     sellerDirector: profile!.directorName || "",
     sellerDirectorPosition: filled(profile!.directorPosition) ? profile!.directorPosition! : "Директор",
+    sellerIban: profile!.iban || "",
+    sellerBank: profile!.bankName || "",
+    sellerBik: profile!.bik || "",
+    sellerPhone: profile!.phone || "",
+    sellerEmail: profile!.email || "",
     buyerName: company.legalName || company.name,
     buyerBin: company.bin || company.iin || "",
     buyerAddress: company.legalAddress || company.address || "",
     buyerDirector: filled(company.directorName) ? company.directorName! : "________________",
+    buyerIban: company.iban || "",
+    buyerBank: company.bankName || "",
+    buyerBik: company.bik || "",
     items,
     templateBody: template.body,
   });
