@@ -115,7 +115,7 @@ export function exportAnalyticsExcel(data: any, sections: ReportSections) {
   }
   if (sections.funnel) {
     pushSheet(
-      "Воронка",
+      "Этапы",
       ["Этап", "Количество", "От начала %", "От предыдущего %"],
       (data.funnel?.steps || []).map((s: any) => [s.name, s.count, s.fromStartPct, s.fromPrevPct]),
     );
@@ -140,13 +140,12 @@ export function exportAnalyticsExcel(data: any, sections: ReportSections) {
       "Продажи",
       ["Показатель", "Значение"],
       [
-        ["WON", s.won],
+        ["Продажи", s.won],
         ["Продано", s.revenueLabel],
         ["Средний чек", s.avgCheckLabel],
         ["Медианный чек", s.medianCheckLabel],
         ["Макс. сделка", s.maxCheckLabel],
-        ["Pipeline", s.pipelineLabel],
-        ["Взвешенный pipeline", s.weightedPipelineLabel],
+        ["В работе", s.pipelineLabel],
         ["Средний цикл, дн.", s.cycle?.avgDays],
         ["Медианный цикл, дн.", s.cycle?.medianDays],
       ],
@@ -195,7 +194,7 @@ export function exportAnalyticsPdf(data: any, sections: ReportSections) {
     </ul>`);
   }
   if (sections.funnel) {
-    parts.push(`<h2>2. Воронка</h2><table><thead><tr><th>Этап</th><th>Кол-во</th><th>От начала</th></tr></thead><tbody>`);
+    parts.push(`<h2>2. Этапы</h2><table><thead><tr><th>Этап</th><th>Кол-во</th><th>От начала</th></tr></thead><tbody>`);
     for (const s of data.funnel?.steps || []) {
       parts.push(
         `<tr><td>${esc(s.name)}</td><td>${esc(s.count)}</td><td>${s.fromStartPct != null ? esc(s.fromStartPct) + "%" : "—"}</td></tr>`,
@@ -229,7 +228,7 @@ export function exportAnalyticsPdf(data: any, sections: ReportSections) {
   if (sections.sales) {
     const s = data.sales || {};
     parts.push(`<h2>5. Продажи</h2><ul>
-      <li>WON: ${esc(s.won)}</li>
+      <li>Продажи: ${esc(s.won)}</li>
       <li>Выручка: ${esc(s.revenueLabel || "—")}</li>
       <li>Средний / медианный чек: ${esc(s.avgCheckLabel || "—")} / ${esc(s.medianCheckLabel || "—")}</li>
       <li>Цикл продажи: ср. ${esc(s.cycle?.avgDays ?? "—")} дн., мед. ${esc(s.cycle?.medianDays ?? "—")} дн.</li>

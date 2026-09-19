@@ -270,11 +270,11 @@ async function tenantSellerFreshness(prisma: PrismaClient, tenantId: string) {
     const leadCountOnBot = typeof health.leadCount === "number" ? health.leadCount : null;
     const storePathKind = health.storePathKind || null;
     let warning: string | null = null;
-    if (!lastSyncAt) warning = "Ждём первый автоматический синк диалогов";
+    if (!lastSyncAt) warning = "Ждём первую загрузку диалогов";
     else if (leadCountOnBot !== null && leadCountOnBot > 0 && conversationCount === 0) {
-      warning = "На боте есть лиды, в CRM нет диалогов — синк ещё не подтянул";
+      warning = "На WhatsApp есть переписки, которых ещё нет в CRM";
     } else if (Date.now() - lastSyncAt.getTime() > STALE_SYNC_MS && conversationCount > 0) {
-      warning = "Синк устарел — обновится автоматически";
+      warning = "Список диалогов устарел — обновится сам";
     }
     return {
       configured: true,

@@ -26,7 +26,7 @@ const HANDOFF_REASON_LABEL: Record<string, string> = {
   needs_reply: "Клиент ждёт ответа",
   escalate: "Нужно вмешательство",
   paused: "AI на паузе",
-  global_ai_pause: "AI Manager на паузе",
+  global_ai_pause: "AI на паузе",
   AI_ANALYSIS_FAILED: "Не удалось сформировать ответ",
   AI_OUTBOUND_FAILED: "Не удалось отправить сообщение",
   WHATSAPP_NOT_REGISTERED: "Контакт не зарегистрирован в WhatsApp",
@@ -273,14 +273,14 @@ export async function getManagementOverview(prisma: PrismaClient, auth: AuthCont
     problems.push({
       id: "seller-not-configured",
       title: "Один из каналов AI недоступен",
-      detail: "WhatsApp AI Manager не подключён.",
+      detail: "WhatsApp ещё не подключён.",
       href: "/integrations",
     });
   } else if (!seller.reachable) {
     problems.push({
       id: "seller-unreachable",
-      title: "AI Manager временно недоступен",
-      detail: seller.note || "Мост к AI Manager не отвечает.",
+      title: "WhatsApp временно недоступен",
+      detail: seller.note || "Подключение к WhatsApp не отвечает.",
       href: "/integrations",
     });
   }
@@ -341,11 +341,13 @@ export async function getManagementOverview(prisma: PrismaClient, auth: AuthCont
       updatedAt: now.toISOString(),
       updatedAtLabel: formatWhen(now, timeZone),
       note:
-        !seller.configured || !seller.reachable
-          ? "Техническая диагностика — в Интеграциях."
-          : runtime.aiPaused
+        !seller.configured
+          ? "Подключите WhatsApp в Интеграциях."
+          : !seller.reachable
+            ? "WhatsApp сейчас не отвечает. Проверьте подключение в Интеграциях."
+            : runtime.aiPaused
             ? "Автоматические ответы AI приостановлены. Входящие сообщения и заявки продолжают сохраняться."
-            : "AI Manager работает нормально.",
+            : "AI отвечает клиентам как обычно.",
     },
     interventions: interventions.slice(0, LIST_LIMIT),
     waitingForManager: waitingForManager.slice(0, LIST_LIMIT),
@@ -373,8 +375,8 @@ function auditText(action: string, actor: string) {
   if (action === "conversation.take") return `${actor} забрал диалог у AI`;
   if (action === "conversation.return_to_ai") return `${actor} передал диалог обратно AI`;
   if (action === "conversation.pause") return `${actor} поставил диалог на паузу`;
-  if (action === "ai_manager.pause") return `${actor} приостановил AI Manager`;
-  if (action === "ai_manager.resume") return `${actor} возобновил AI Manager`;
+  if (action === "ai_manager.pause") return `${actor} приостановил AI`;
+  if (action === "ai_manager.resume") return `${actor} возобновил AI`;
   return action;
 }
 
@@ -466,8 +468,8 @@ export async function setAiManagerRuntimePause(prisma: PrismaClient, auth: AuthC
     sellerSynced,
     sellerErrors,
     note: paused
-      ? "AI Manager приостановлен. Входящие сообщения и заявки продолжают поступать."
-      : "AI Manager возобновлён. Автоответы снова по постоянным настройкам.",
+      ? "AI приостановлен. Входящие сообщения и заявки продолжают поступать."
+      : "AI снова отвечает по обычным настройкам.",
   };
 }
 

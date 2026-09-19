@@ -49,13 +49,13 @@ export const SOURCE_CHANNEL_LABEL: Record<string, string> = {
   whatsapp: "WhatsApp",
   website_form: "Форма сайта",
   website: "Форма сайта",
-  website_ai: "Website AI",
+  website_ai: "Сайт",
   telegram: "Telegram",
   instagram: "Instagram",
   phone: "Звонок",
   phone_call: "Звонок",
   manual: "Ручное добавление",
-  api: "API",
+  api: "Сайт",
   form: "Форма сайта",
   other: "Другое",
 };
@@ -102,13 +102,13 @@ export const TEMP_LABEL: Record<string, string> = {
 export const SOURCE_LABEL: Record<string, string> = {
   whatsapp: "WhatsApp",
   form: "Форма сайта",
-  webhook: "Webhook",
+  webhook: "Сайт",
   manual: "Вручную",
-  seed_form: "Форма (демо)",
-  seed_manual: "Вручную (демо)",
+  seed_form: "Форма сайта",
+  seed_manual: "Вручную",
   telegram: "Telegram",
   instagram: "Instagram",
-  api: "API",
+  api: "Сайт",
   phone_call: "Звонок",
 };
 

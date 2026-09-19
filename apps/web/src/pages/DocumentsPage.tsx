@@ -202,18 +202,18 @@ export function DocumentsPage() {
         }}
       >
         <div className="command-compose-head">
-          <b>Команда по документам</b>
-          <p className="muted">«Сформируй договор по сделке …», «Проверь АВР», «Отправь ЭСФ в ИС ЭСФ».</p>
+          <b>Что сделать</b>
+          <p className="muted">Например: сформировать договор, проверить АВР, отправить ЭСФ.</p>
         </div>
         <textarea
           value={commandText}
           onChange={(e) => setCommandText(e.target.value)}
           rows={2}
-          placeholder="Сформируй договор по сделке Phase11 документы"
+          placeholder="Сформируй договор по сделке …"
         />
         <div className="actions">
           <button type="submit" className="btn secondary" disabled={commandBusy || !commandText.trim()}>
-            Понять
+            Разобрать
           </button>
           <button
             type="button"
@@ -228,7 +228,7 @@ export function DocumentsPage() {
             }
             onClick={() => void runCommand()}
           >
-            Выполнить
+            Сделать
           </button>
         </div>
         {commandParse?.command?.intent === "document_action" ? (

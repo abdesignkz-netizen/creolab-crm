@@ -54,10 +54,6 @@ export function fileStorageStatus() {
 }
 
 export function missingFileMessage() {
-  const status = fileStorageStatus();
-  if (status.storePathKind === "ephemeral") {
-    return "Файл не найден на сервере (хранилище без persistent disk — файлы пропадают после рестарта). Прикрепите КП заново и повторите отправку.";
-  }
   return "Файл не найден на сервере. Прикрепите КП заново и повторите отправку.";
 }
 

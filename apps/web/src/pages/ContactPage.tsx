@@ -8,6 +8,7 @@ import { statusBadgeClass } from "../lib/statusBadge";
 import { useCapabilities } from "../lib/session";
 import { CALLS_ENABLED } from "../lib/featureFlags";
 import { tip } from "../lib/tip";
+import { conversationModeLabel, dealOutcomeLabel } from "../lib/labels";
 
 export function ContactPage() {
   const caps = useCapabilities();
@@ -480,11 +481,11 @@ export function ContactPage() {
               <div><dt>Источник обращения</dt><dd>{attribution.sourceType || "Не указано"}</dd></div>
               <div><dt>Канал</dt><dd>{attribution.sourceChannel || "Не указано"}</dd></div>
               <div><dt>Интеграция</dt><dd>{attribution.sourceIntegration || "Не указано"}</dd></div>
-              <div><dt>UTM Source</dt><dd>{attribution.utmSource || "Не указано"}</dd></div>
-              <div><dt>UTM Medium</dt><dd>{attribution.utmMedium || "Не указано"}</dd></div>
-              <div><dt>UTM Campaign</dt><dd>{attribution.utmCampaign || "Не указано"}</dd></div>
-              <div><dt>Landing</dt><dd>{attribution.landingPage || "Не указано"}</dd></div>
-              <div><dt>Referrer</dt><dd>{attribution.referrer || "Не указано"}</dd></div>
+              <div><dt>Откуда пришёл</dt><dd>{attribution.utmSource || "Не указано"}</dd></div>
+              <div><dt>Канал рекламы</dt><dd>{attribution.utmMedium || "Не указано"}</dd></div>
+              <div><dt>Кампания</dt><dd>{attribution.utmCampaign || "Не указано"}</dd></div>
+              <div><dt>Страница</dt><dd>{attribution.landingPage || "Не указано"}</dd></div>
+              <div><dt>Предыдущая страница</dt><dd>{attribution.referrer || "Не указано"}</dd></div>
             </dl>
           </div>
 
@@ -698,7 +699,7 @@ export function ContactPage() {
                 <b>{item.channel}</b>
                 <div className="muted">{item.updatedLabel} · {item.lastMessage || "нет сообщений"}</div>
               </div>
-              <span className="badge">{item.mode}</span>
+              <span className="badge">{conversationModeLabel(item.mode, item.modeLabel)}</span>
             </Link>
           ))}
         </div>
@@ -712,8 +713,8 @@ export function ContactPage() {
               <div>
                 <b>{item.title}</b>
                 <div className="muted">
-                  {item.stage || item.outcome}
-                  {item.amountMinor != null ? ` · ${item.amountMinor} ${item.currency}` : ""}
+                  {dealOutcomeLabel(item.outcome, item.stage)}
+                  {item.amountMinor != null ? ` · ${Number(item.amountMinor).toLocaleString("ru-RU")} ${item.currency || "₸"}` : ""}
                   {item.createdLabel ? ` · ${item.createdLabel}` : ""}
                 </div>
               </div>

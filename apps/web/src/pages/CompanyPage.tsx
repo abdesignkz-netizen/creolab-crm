@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { nameWithPhone, phoneText } from "../lib/contactDisplay";
 import { api } from "../lib/api";
 import { useCapabilities } from "../lib/session";
+import { dealOutcomeLabel } from "../lib/labels";
 import {
   ContractGenerateItems,
   newContractDraftLine,
@@ -329,7 +330,7 @@ export function CompanyPage() {
           </div>
           {!caps.manager ? (
           <div className="sit-kpi">
-            <span className="muted">Pipeline</span>
+            <span className="muted">Сумма сделок</span>
             <strong>{cur.pipelineLabel || "—"}</strong>
           </div>
           ) : null}
@@ -437,7 +438,7 @@ export function CompanyPage() {
                     <Link to={d.href}>{d.title}</Link>
                   </td>
                   <td>
-                    {d.outcome === "open" ? d.stageName : d.outcome.toUpperCase()}
+                    {dealOutcomeLabel(d.outcome, d.stageName)}
                   </td>
                   <td>{d.amountLabel || "—"}</td>
                   <td className="muted">
@@ -594,7 +595,7 @@ export function CompanyPage() {
             <strong>{life.deals}</strong>
           </div>
           <div className="sit-kpi">
-            <span className="muted">WON</span>
+            <span className="muted">Продажи</span>
             <strong>{life.wonDeals}</strong>
           </div>
           {!caps.manager ? (

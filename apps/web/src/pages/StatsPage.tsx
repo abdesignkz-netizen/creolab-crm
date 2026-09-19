@@ -24,14 +24,14 @@ type BarMetric = "inquiries" | "won" | "revenue" | "conversion";
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "overview", label: "Обзор" },
-  { id: "funnel", label: "Воронка" },
+  { id: "funnel", label: "Этапы" },
   { id: "sales", label: "Продажи" },
   { id: "sources", label: "Источники" },
   { id: "services", label: "Услуги" },
   { id: "managers", label: "Менеджеры" },
   { id: "communications", label: "Коммуникации" },
   { id: "tasks", label: "Задачи" },
-  { id: "ai", label: "AI Manager" },
+  { id: "ai", label: "AI-менеджер" },
   { id: "campaigns", label: "Рассылки" },
   { id: "losses", label: "Потери" },
 ];
@@ -49,9 +49,9 @@ const METRIC_HINTS: Record<TrendMetric, string> = {
   inquiries: "Количество поступивших обращений по датам выбранного периода",
   clients: "Количество новых клиентов по дате первого обращения",
   deals: "Количество созданных сделок по датам выбранного периода",
-  won: "Количество сделок, отмеченных выигранными, по датам закрытия",
-  revenue: "Сумма выигранных сделок по датам закрытия",
-  conversion: "Отношение продаж к обращениям за каждую дату; сделки могут быть из более ранних обращений. Без обращений показатель не рассчитывается",
+  won: "Сколько продаж закрыто в эти дни",
+  revenue: "Сумма продаж по дням закрытия",
+  conversion: "Доля продаж от обращений за день. Если обращений не было — показатель не считается",
 };
 
 function formatChartValue(value: number | null, metric: TrendMetric) {
@@ -428,7 +428,7 @@ export function StatsPage() {
       <div className="row sit-head">
         <div>
           <h2>Статистика</h2>
-          <p className="muted">Что произошло, почему и где эффективность выше или ниже</p>
+          <p className="muted">Продажи, заявки и откуда приходят клиенты.</p>
         </div>
         <div className="sit-toolbar-side">
           <button type="button" className="btn secondary" onClick={() => setFiltersOpen((v) => !v)}>
@@ -586,7 +586,7 @@ export function StatsPage() {
           <div className="stats-overview-split">
             <div className="sit-section">
               <div className="sit-section-head">
-                <h3>Воронка</h3>
+                <h3>По этапам</h3>
               </div>
               <p className="stats-funnel-mini">
                 {(data.funnel?.steps || []).map((s: any) => s.count).join(" → ")}
@@ -597,7 +597,7 @@ export function StatsPage() {
                 </p>
               ) : null}
               <button type="button" className="btn secondary" onClick={() => setTab("funnel")}>
-                Открыть воронку
+                Открыть этапы
               </button>
             </div>
             <div className="sit-section">
@@ -625,21 +625,21 @@ export function StatsPage() {
       {tab === "funnel" && data ? (
         <div className="sit-section">
           <div className="sit-section-head">
-            <h3>Воронка продаж</h3>
+            <h3>Этапы продаж</h3>
             <div className="stats-metric-switch">
               <button
                 type="button"
                 className={funnelMode === "events" ? "btn sit-chip" : "btn secondary sit-chip"}
                 onClick={() => setFunnelMode("events")}
               >
-                События периода
+                Что случилось за период
               </button>
               <button
                 type="button"
                 className={funnelMode === "cohort" ? "btn sit-chip" : "btn secondary sit-chip"}
                 onClick={() => setFunnelMode("cohort")}
               >
-                Когорта обращений
+                Кто пришёл за период
               </button>
             </div>
           </div>
@@ -725,13 +725,12 @@ export function StatsPage() {
             <h3>Продажи</h3>
           </div>
           <div className="sit-kpi-grid stats-kpi-grid">
-            <KpiCard label="WON" value={sales.won} onClick={() => void openDrill("won")} />
+            <KpiCard label="Продажи" value={sales.won} onClick={() => void openDrill("won")} />
             <KpiCard label="Продано" value={sales.revenueLabel || "—"} onClick={() => void openDrill("won")} />
             <KpiCard label="Средний чек" value={sales.avgCheckLabel || "—"} />
             <KpiCard label="Медианный чек" value={sales.medianCheckLabel || "—"} />
             <KpiCard label="Максимальная сделка" value={sales.maxCheckLabel || "—"} />
-            <KpiCard label="Pipeline" value={sales.pipelineLabel || "—"} />
-            <KpiCard label="Взвешенный pipeline" value={sales.weightedPipelineLabel || "—"} />
+            <KpiCard label="В работе" value={sales.pipelineLabel || "—"} />
           </div>
           <div className="stats-metric-switch">
             {(["won", "revenue"] as TrendMetric[]).map((m) => (
@@ -894,7 +893,7 @@ export function StatsPage() {
             <h3>Потери</h3>
           </div>
           <div className="sit-kpi-grid stats-kpi-grid">
-            <KpiCard label="LOST" value={data.losses?.lost ?? 0} onClick={() => void openDrill("lost")} />
+            <KpiCard label="Потери" value={data.losses?.lost ?? 0} onClick={() => void openDrill("lost")} />
             <KpiCard label="Потерянная сумма" value={data.losses?.lostAmountLabel || "—"} onClick={() => void openDrill("lost")} />
           </div>
           <h4>Почему теряем</h4>
@@ -955,21 +954,21 @@ export function StatsPage() {
         <div className="sit-section">
           <div className="sit-section-head">
             <h3>Менеджеры</h3>
-            <span className="muted">Attribution: текущий ответственный / ответственный на сделке</span>
+            <span className="muted">По текущему ответственному и по сделке</span>
           </div>
           <div className="stats-table-wrap">
             <table className="stats-table">
               <thead>
                 <tr>
                   <th>Менеджер</th>
-                  <th>Лиды</th>
-                  <th>WON</th>
-                  <th>LOST</th>
+                  <th>Заявки</th>
+                  <th>Продажи</th>
+                  <th>Потери</th>
                   <th>Конверсия</th>
                   <th>Выручка</th>
                   <th>Ср. ответ</th>
                   <th>Просрочки</th>
-                  <th>Без next</th>
+                  <th>Без шага</th>
                   <th>Цикл</th>
                 </tr>
               </thead>
@@ -1093,22 +1092,22 @@ export function StatsPage() {
       {tab === "ai" && data ? (
         <div className="sit-section">
           <div className="sit-section-head">
-            <h3>AI Manager</h3>
+            <h3>AI-менеджер</h3>
           </div>
           <div className="sit-kpi-grid stats-kpi-grid">
             <KpiCard label="Диалогов AI" value={data.aiManager?.dialogs ?? 0} />
             <KpiCard label="Клиентов" value={data.aiManager?.clients ?? 0} />
-            <KpiCard label="Квалифицировано" value={data.aiManager?.qualified ?? 0} />
+            <KpiCard label="С потребностью" value={data.aiManager?.qualified ?? 0} />
             <KpiCard label="Задач из AI" value={data.aiManager?.tasksCreated ?? 0} />
             <KpiCard label="Передано человеку" value={data.aiManager?.handedToHuman ?? 0} />
             <KpiCard label="Дошло до сделки" value={data.aiManager?.dealsReached ?? 0} />
-            <KpiCard label="WON среди AI" value={data.aiManager?.won ?? 0} onClick={() => void openDrill("won")} />
+            <KpiCard label="Продажи с AI" value={data.aiManager?.won ?? 0} onClick={() => void openDrill("won")} />
           </div>
           <p className="stats-funnel-mini">
             {data.aiManager?.funnel?.clients ?? 0} → {data.aiManager?.funnel?.qualified ?? 0} →{" "}
             {data.aiManager?.funnel?.deals ?? 0} → {data.aiManager?.funnel?.won ?? 0}
           </p>
-          <p className="muted">Клиенты AI → квалификация → сделки → продажи</p>
+          <p className="muted">Клиенты → потребность → сделки → продажи</p>
           <h4>Причины передачи человеку</h4>
           <BarChart
             items={(data.aiManager?.handoffReasons || []).map((r: any) => ({ name: r.reason, inquiries: r.count }))}
@@ -1231,7 +1230,7 @@ export function StatsPage() {
               {(
                 [
                   ["overview", "Общий результат"],
-                  ["funnel", "Воронка"],
+                  ["funnel", "Этапы"],
                   ["sources", "Источники"],
                   ["services", "Услуги"],
                   ["sales", "Продажи"],
@@ -1277,7 +1276,7 @@ export function StatsPage() {
                   setExportOpen(false);
                 }}
               >
-                CSV воронки
+                CSV этапов
               </button>
               <button type="button" className="btn secondary" onClick={() => setExportOpen(false)}>
                 Отмена

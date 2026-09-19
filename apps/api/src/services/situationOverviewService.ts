@@ -143,12 +143,12 @@ function deltaPercent(current: number, previous: number | null) {
 const SOURCE_LABELS: Record<string, string> = {
   manual: "Ручное добавление",
   website_form: "Форма сайта",
-  website_ai: "Website AI",
+  website_ai: "Сайт",
   whatsapp: "WhatsApp",
   telegram: "Telegram",
   instagram: "Instagram",
   phone: "Звонок",
-  api: "API",
+  api: "Сайт",
   other: "Другое",
 };
 
@@ -1262,9 +1262,9 @@ export async function getSituationOverview(
         : "offline",
       label: board.freshness.seller.configured
         ? board.freshness.seller.reachable
-          ? "AI Manager · активен"
-          : "AI Manager · ошибка интеграции"
-        : "AI Manager · не подключён",
+          ? "AI · активен"
+          : "AI · ошибка подключения"
+        : "AI · не подключён",
       conversations: {
         ai: conversationAi,
         human: conversationsHumanVisible,

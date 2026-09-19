@@ -149,7 +149,7 @@ export function EsfIntegrationPage() {
         setAskCabinet(true);
         setError(body?.message || "ИС ЭСФ запросила пароль кабинета. Это не PIN ЭЦП.");
       } else if (body?.code === "CERTIFICATE_NOT_VALID") {
-        setError("ИС ЭСФ не приняла AUTH-сертификат. На тестовом стенде используйте собственный действующий AUTH_RSA НУЦ, не ключ подписи. Организация должна быть зарегистрирована на test3.esf.kgd.gov.kz.");
+        setError("ИС ЭСФ не приняла сертификат для входа. На тестовом стенде используйте свой действующий ключ НУЦ для входа, не ключ подписи. Организация должна быть зарегистрирована на test3.esf.kgd.gov.kz.");
       } else if (err instanceof NcalayerError) {
         setError(err.message);
       } else {
@@ -205,7 +205,12 @@ export function EsfIntegrationPage() {
           <div>
             <b>{STATUS_LABEL[status] || status}</b>
             <p className="muted">
-              Контур: {data?.system.esfEnv || "—"} · {data?.system.provider === "mock" ? "локальная заглушка" : "ИС ЭСФ"}
+              {data?.system.esfEnv === "prod"
+                ? "Боевой кабинет"
+                : data?.system.esfEnv === "test"
+                  ? "Тестовый кабинет"
+                  : data?.system.esfEnv || "—"}
+              {data?.system.provider === "mock" ? " · без ИС ЭСФ" : ""}
             </p>
           </div>
         </div>
@@ -289,9 +294,7 @@ export function EsfIntegrationPage() {
           )}
         </div>
         <p className="muted" style={{ marginTop: 12 }}>
-          БИН организации задаётся в <Link to="/settings">реквизитах</Link>. Подключение кабинета и подпись АВР/ЭСФ —
-          разные операции: вход — AUTH_RSA, подпись ЮЛ — GOST. На тестовом стенде КГД принимает собственные действующие
-          сертификаты НУЦ после регистрации на test3.esf.kgd.gov.kz. PIN остаётся в NCALayer.
+          БИН компании задаётся в <Link to="/settings">реквизитах</Link>. PIN ключа вводится только в NCALayer на этом компьютере.
         </p>
       </div>
 

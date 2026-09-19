@@ -17,7 +17,7 @@ export const INTEGRATION_TYPE_META: Record<
 > = {
   form: { catalogType: "WEBSITE_FORM", title: "Форма сайта", group: "leads", stage: 1 },
   webhook: { catalogType: "WEBHOOK_API", title: "Webhook / API", group: "leads", stage: 2 },
-  whatsapp_seller: { catalogType: "WHATSAPP", title: "WhatsApp AI Manager", group: "messaging", stage: 0 },
+  whatsapp_seller: { catalogType: "WHATSAPP", title: "WhatsApp", group: "messaging", stage: 0 },
   telegram_bot: { catalogType: "TELEGRAM", title: "Telegram", group: "messaging", stage: 3 },
   instagram_direct: { catalogType: "INSTAGRAM_DIRECT", title: "Instagram Direct", group: "messaging", stage: 4 },
   meta_lead_forms: { catalogType: "META_LEAD_FORMS", title: "Meta Lead Forms", group: "leads", stage: 5 },
@@ -46,7 +46,7 @@ export function deriveHealthStatus(row: {
 export function healthLabel(status: string) {
   const map: Record<string, string> = {
     HEALTHY: "Работает",
-    NO_EVENTS_YET: "Подключено · событий ещё нет",
+    NO_EVENTS_YET: "Подключено",
     TOKEN_EXPIRED: "Требуется повторная авторизация",
     ERROR: "Ошибка",
     DEGRADED: "Есть проблемы",
@@ -263,18 +263,10 @@ export async function listIntegrationCatalog(prisma: PrismaClient, auth: AuthCon
           : telegram?.pendingTokenHash
             ? "Ожидает подтверждения"
             : "Не подключено",
-        note: "Личные уведомления сотрудника — не корпоративная интеграция и не источник заявок. Нужен TELEGRAM_BOT_USERNAME.",
+        note: "Личные уведомления сотрудника. Это не заявки с сайта.",
       },
     },
     eventLog,
-    checksHint: [
-      "Credentials",
-      "Provider доступен",
-      "Webhook / endpoint",
-      "Mapping заполнен",
-      "Очередь работает",
-      "Последнее событие обработано",
-    ],
   };
 }
 
@@ -444,7 +436,6 @@ export async function runIntegrationHealthCheck(prisma: PrismaClient, auth: Auth
     connectionStatus: connected ? "CONNECTED" : "DISCONNECTED",
     healthStatus: health,
     healthLabel: healthLabel(health),
-    checks,
     allOk: checks.every((c) => c.ok),
   };
 }

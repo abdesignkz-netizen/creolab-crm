@@ -12,8 +12,8 @@ const TABS = [
   ["info", "Основные данные"],
   ["members", "Участники"],
   ["integrations", "Интеграции"],
-  ["ai-manager", "AI Manager"],
-  ["ai-usage", "AI Usage"],
+  ["ai-manager", "AI-менеджер"],
+  ["ai-usage", "Расход AI"],
   ["settings", "Настройки"],
   ["audit", "История действий"],
 ] as const;

@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { nameWithPhone, phoneText } from "../lib/contactDisplay";
 import { api } from "../lib/api";
 import { tip } from "../lib/tip";
+import { dealOutcomeLabel } from "../lib/labels";
 
 const FILTERS = [
   ["all", "Все"],
@@ -369,7 +370,7 @@ export function ConversationsPage() {
               <button
                 className="btn secondary"
                 type="button"
-                {...tip("Вернуть диалог AI Manager — бот снова отвечает сам")}
+                {...tip("Вернуть диалог AI-менеджеру — бот снова отвечает сам")}
                 disabled={busy}
                 onClick={() => changeMode(() => api.returnToAi(workspace.conversation.id))}
               >
@@ -702,9 +703,9 @@ export function ConversationsPage() {
         <div>{workspace.conversation.sourceLine}</div>
         {workspace.attribution.utmCampaign ? (
           <details>
-            <summary className="muted">Детали UTM</summary>
-            <div className="muted">Campaign: {workspace.attribution.utmCampaign}</div>
-            {workspace.attribution.landingPage ? <div className="muted">Landing: {workspace.attribution.landingPage}</div> : null}
+            <summary className="muted">Откуда пришёл</summary>
+            <div className="muted">Кампания: {workspace.attribution.utmCampaign}</div>
+            {workspace.attribution.landingPage ? <div className="muted">Страница: {workspace.attribution.landingPage}</div> : null}
           </details>
         ) : null}
       </div>
@@ -714,7 +715,7 @@ export function ConversationsPage() {
           <b>Сделка</b>
           <div>{workspace.deal.title}</div>
           <div className="muted">
-            {workspace.deal.stage || workspace.deal.outcome}
+            {dealOutcomeLabel(workspace.deal.outcome, workspace.deal.stage)}
             {workspace.deal.amountMinor != null ? ` · ${Number(workspace.deal.amountMinor).toLocaleString("ru-RU")} ${workspace.deal.currency || "KZT"}` : ""}
           </div>
         </div>

@@ -106,7 +106,7 @@ function buildInstruction(args: {
     .join("\n");
   const missing = args.analysis.missingFields.map((f) => `□ ${f.label}`).join("\n");
   return [
-    `Задача AI Manager: ${args.analysis.taskTitle}`,
+    `Задача AI: ${args.analysis.taskTitle}`,
     `Клиент: ${args.contactName}`,
     args.companyName ? `Компания: ${args.companyName}` : null,
     `Источник: ${args.sourceLine}`,
@@ -174,7 +174,7 @@ export async function processNewRequestAutomation(
         createTask: options.forceMode === "CONFIRM" || options.forceMode === "AUTO" || Boolean(options.forceStart),
         autoStart: options.forceMode === "AUTO" || Boolean(options.forceStart),
         allowOutbound: options.forceMode === "AUTO" || Boolean(options.forceStart),
-        reason: "Ручная передача AI Manager",
+        reason: "Ручная передача AI",
       }
     : decideAutomationPolicy({
         settingsJson: tenant?.settingsJson,
@@ -411,7 +411,7 @@ export async function processNewRequestAutomation(
         type: "inquiry.ai_task_ready",
         title:
           decision.autoStart || options.forceStart
-            ? "Создана задача AI Manager"
+            ? "Создана задача AI"
             : "AI готов обработать заявку",
         description: analysis.taskTitle,
         actorType: "system",

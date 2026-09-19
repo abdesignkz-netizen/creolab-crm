@@ -3,6 +3,7 @@ import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from
 import { api, setTenant } from "./lib/api";
 import { NavIcon } from "./components/NavIcon";
 import { BrandLogo } from "./components/BrandLogo";
+import { SupportCenter, SupportHelpButton } from "./components/SupportCenter";
 import { tip } from "./lib/tip";
 import { applyAppearance, emptyCaps, SessionContext, type Capabilities } from "./lib/session";
 import { normalizeLocale, t } from "./i18n";
@@ -94,6 +95,9 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
   const [navHrefs, setNavHrefs] = useState<Record<string, string>>({});
   const [notifyBanner, setNotifyBanner] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [helpTicketId, setHelpTicketId] = useState<string | null>(null);
+  const [helpUnread, setHelpUnread] = useState(0);
   const moreSheetRef = useRef<HTMLDivElement>(null);
 
   const caps: Capabilities = me?.capabilities || emptyCaps;
@@ -138,6 +142,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
 
   const moreLinks = [
     ["/admin", t(locale, "nav.platform"), platformAdmin],
+    ["/admin/support", t(locale, "nav.platformSupport"), platformAdmin],
     ["/control", t(locale, "nav.control"), hasCompany && !caps.manager],
     ["/contacts", t(locale, "nav.contacts"), hasCompany],
     ["/companies", t(locale, "nav.companies"), hasCompany],
@@ -203,9 +208,12 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
     "/stats": t(locale, "nav.stats"),
     "/settings": t(locale, "nav.settings"),
     "/admin": t(locale, "nav.platform"),
+    "/admin/support": t(locale, "nav.platformSupport"),
   };
   const pageTitle =
-    Object.entries(titleMap).find(([path]) => location.pathname === path || location.pathname.startsWith(`${path}/`))?.[1] ||
+    Object.entries(titleMap)
+      .sort((a, b) => b[0].length - a[0].length)
+      .find(([path]) => location.pathname === path || location.pathname.startsWith(`${path}/`))?.[1] ||
     "BasQar CRM";
   const inquiriesActive = location.pathname === "/inquiries" || location.pathname.startsWith("/requests/");
   const moreActive = moreLinks.some(([path]) => location.pathname === path || location.pathname.startsWith(`${path}/`));
@@ -242,7 +250,10 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
         };
         if (cancelled) return;
         const badges = data.badges || {};
-        setNavBadges(badges);
+        setNavBadges((prev) => ({
+          ...badges,
+          ...(platformAdmin ? { "/admin/support": Number(prev["/admin/support"] || 0) } : {}),
+        }));
         setNavHints(data.hints || {});
         setNavHrefs(data.hrefs || {});
         setUnreadNotices(Number(badges["/settings"] || 0));
@@ -263,7 +274,59 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
       window.clearInterval(timer);
       window.removeEventListener("creolab:attention-changed", onAttention);
     };
-  }, [tenantId, location.pathname]);
+  }, [tenantId, location.pathname, platformAdmin]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const help = params.get("help");
+    if (help) {
+      setHelpTicketId(help);
+      setHelpOpen(true);
+    }
+  }, [location.search]);
+
+  useEffect(() => {
+    if (!hasCompany) return;
+    let cancelled = false;
+    async function loadHelp() {
+      try {
+        const data = (await api.supportUnread()) as { unread?: number };
+        if (!cancelled) setHelpUnread(Number(data.unread || 0));
+      } catch {
+        if (!cancelled) setHelpUnread(0);
+      }
+    }
+    void loadHelp();
+    const timer = window.setInterval(() => {
+      if (!cancelled) void loadHelp();
+    }, 20000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [hasCompany, tenantId]);
+
+  useEffect(() => {
+    if (!platformAdmin) return;
+    let cancelled = false;
+    async function loadAdminHelp() {
+      try {
+        const data = (await api.adminSupportUnread()) as { unread?: number };
+        if (cancelled) return;
+        setNavBadges((prev) => ({ ...prev, "/admin/support": Number(data.unread || 0) }));
+      } catch {
+        /* keep previous */
+      }
+    }
+    void loadAdminHelp();
+    const timer = window.setInterval(() => {
+      if (!cancelled) void loadAdminHelp();
+    }, 20000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [platformAdmin]);
 
   useEffect(() => {
     if (!tenantId) return;
@@ -340,10 +403,11 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
   return (
     <div className={`app-shell ${moreOpen ? "more-open" : ""}`}>
       <header className="mobile-topbar">
-        <div className="mobile-topbar-title">
+          <div className="mobile-topbar-title">
           <b>{pageTitle}</b>
           <span className="muted">{me.activeTenant?.tenant?.name || "Нет компании"}</span>
         </div>
+        <SupportHelpButton unread={helpUnread} onClick={() => { setHelpTicketId(null); setHelpOpen(true); }} />
         {unreadNotices > 0 ? (
           <button type="button" className="nav-badge" onClick={() => navigate("/settings")} title="Уведомления">
             {unreadNotices > 9 ? "9+" : unreadNotices}
@@ -407,12 +471,28 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
               <NavLink to="/admin" end>{t(locale, "nav.platformOverview")}</NavLink>
               <NavLink to="/admin/companies">{t(locale, "nav.platformCompanies")}</NavLink>
               <NavLink to="/admin/members">{t(locale, "nav.platformMembers")}</NavLink>
+              <NavLink to="/admin/support">{t(locale, "nav.platformSupport")}</NavLink>
               <NavLink to="/admin/integrations">{t(locale, "nav.platformCatalog")}</NavLink>
               <NavLink to="/admin/settings">{t(locale, "nav.platformSettings")}</NavLink>
               <NavLink to="/admin/audit">{t(locale, "nav.platformAudit")}</NavLink>
             </>
           ) : null}
         </nav>
+        <button
+          type="button"
+          className="nav-help"
+          onClick={() => {
+            setHelpTicketId(null);
+            setHelpOpen(true);
+          }}
+          aria-label={helpUnread > 0 ? `${t(locale, "nav.help")}. Есть непрочитанные ответы` : t(locale, "nav.help")}
+        >
+          <span className="nav-link-label">
+            <NavIcon to="/help" />
+            {t(locale, "nav.help")}
+          </span>
+          {helpUnread > 0 ? <span className="nav-badge">{formatBadge(helpUnread)}</span> : null}
+        </button>
         <button className="btn secondary nav-logout" onClick={logout} {...tip("Завершить сеанс в этом браузере")}>
           {t(locale, "nav.logout")}
         </button>
@@ -420,8 +500,12 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
 
       <main className="main">
         <div className="workspace-toolbar">
-          <div className="workspace-breadcrumb"><span>Рабочее пространство</span><span aria-hidden="true">/</span><span>{pageTitle}</span></div>
-          <div className="workspace-identity"><span>{me.user.name}</span><span className="workspace-avatar" aria-hidden="true">{String(me.user.name || "C").split(" ").slice(0, 2).map((part) => part[0]).join("")}</span></div>
+          <div className="workspace-breadcrumb"><span>{pageTitle}</span></div>
+          <div className="workspace-identity">
+            <SupportHelpButton unread={helpUnread} onClick={() => { setHelpTicketId(null); setHelpOpen(true); }} />
+            <span>{me.user.name}</span>
+            <span className="workspace-avatar" aria-hidden="true">{String(me.user.name || "C").split(" ").slice(0, 2).map((part) => part[0]).join("")}</span>
+          </div>
         </div>
         {notifyBanner ? (
           <div className="banner warn notify-banner">
@@ -523,6 +607,14 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
         </button>
       </div>
 
+      <SupportCenter
+        open={helpOpen}
+        onClose={() => setHelpOpen(false)}
+        initialTicketId={helpTicketId}
+        onUnread={setHelpUnread}
+        canCreateTicket={hasCompany}
+      />
+
       <nav className="mobile-tabbar" aria-label="Основная навигация">
         {primaryTabs.map((tab) => {
           const count = badgeCount(tab.to);
@@ -571,7 +663,7 @@ function Login() {
       <div className="login-stage">
         <div className="login-brand">
           <BrandLogo variant="login" />
-          <p>CRM для продаж и диалогов — спокойный рабочий контур команды.</p>
+          <p>{t(normalizeLocale(null), "login.brand")}</p>
         </div>
         <form
           className="panel"
@@ -589,7 +681,7 @@ function Login() {
               const message = err instanceof Error ? err.message : "Ошибка входа";
               setError(
                 message === "Failed to fetch" || message === "HTTP 500"
-                  ? "Нет связи с API на порту 4100. Запустите npm run dev в папке CRM и откройте http://127.0.0.1:4180."
+                  ? "Сейчас не удаётся войти. Попробуйте ещё раз через минуту."
                   : message,
               );
             }

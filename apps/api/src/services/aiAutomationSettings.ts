@@ -43,10 +43,10 @@ export const MODE_FLAGS: Record<
 };
 
 export const MODE_LABEL: Record<AutomationMode, string> = {
-  MANUAL: "Ручной",
-  ASSIST: "AI-подсказки",
-  CONFIRM: "AI после подтверждения",
-  AUTO: "Полный автомат",
+  MANUAL: "Вручную",
+  ASSIST: "Только подсказка",
+  CONFIRM: "После подтверждения",
+  AUTO: "Сам пишет клиенту",
 };
 
 export const DEFAULT_WORKING_HOURS: ScheduleWindow = {

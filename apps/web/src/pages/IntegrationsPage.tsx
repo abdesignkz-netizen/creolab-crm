@@ -6,16 +6,25 @@ import { statusBadgeClass } from "../lib/statusBadge";
 
 type ConnectMethod = "html" | "existing" | "js" | "tilda";
 
+function whatsappStatusNote(wa: any) {
+  if (!wa?.configured) return "Укажите Instance ID и API Token из личного кабинета Green API.";
+  if (wa.reachable) {
+    if (typeof wa.leadCountOnBot === "number") {
+      return `На WhatsApp ${wa.leadCountOnBot} переписок · в CRM ${wa.conversationCount ?? 0} диалогов.`;
+    }
+    return "WhatsApp подключён.";
+  }
+  return "WhatsApp не отвечает. Проверьте Instance ID и API Token или обратитесь в поддержку.";
+}
+
 export function IntegrationsPage() {
   const [editingWhatsApp, setEditingWhatsApp] = useState(false);
   const [savingWhatsApp, setSavingWhatsApp] = useState(false);
-  const [issuedBridgeSecret, setIssuedBridgeSecret] = useState("");
   const [catalog, setCatalog] = useState<any>(null);
   const [setup, setSetup] = useState<any>(null);
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
   const [formMethod, setFormMethod] = useState<ConnectMethod>("html");
-  const [health, setHealth] = useState<any>(null);
   const [telegram, setTelegram] = useState<any>(null);
 
   async function load() {
@@ -47,19 +56,23 @@ export function IntegrationsPage() {
 
   const formCard = catalog?.leads?.find((i: any) => i.catalogType === "WEBSITE_FORM");
   const submitUrl = formCard?.submitUrl || setup?.form?.submitUrl;
-  const leadCards = (catalog?.leads || []).filter((card: any) => card.catalogType !== "WEBHOOK_API");
+  const leadCards = (catalog?.leads || []).filter(
+    (card: any) => card.catalogType === "WEBSITE_FORM" || (card.connected && card.catalogType !== "WEBHOOK_API"),
+  );
+  const telegramReady = Boolean(setup?.telegram?.employee?.botConfigured);
+  const whatsappSender =
+    setup?.whatsapp?.sender && !/\.js$/i.test(String(setup.whatsapp.sender)) ? setup.whatsapp.sender : null;
 
   return (
     <section className="integrations-page">
       <div className="page-head">
         <div>
           <h2>Интеграции</h2>
-          <p className="muted">Приём заявок и обращений. WhatsApp — отдельно; клиентский Telegram/Instagram — следующие этапы.</p>
+          <p className="muted">Форма сайта, WhatsApp и кабинет ИС ЭСФ.</p>
         </div>
       </div>
       {error ? <p className="error">{error}</p> : null}
       {note ? <p className="ok">{note}</p> : null}
-      {setup?.fileStorage?.warning ? <p className="error">{setup.fileStorage.warning}</p> : null}
 
       <h3 className="integ-section-title">Приём заявок и обращений</h3>
       <div className="integ-grid">
@@ -73,9 +86,7 @@ export function IntegrationsPage() {
               <>
                 <p className="muted">
                   {card.inquiryCount != null ? `${card.inquiryCount} заявок` : null}
-                  {card.eventCount != null ? ` · ${card.eventCount} событий` : null}
                 </p>
-                <p className="muted">AI: {card.automationLabel}</p>
                 {card.integrationId ? (
                   <button
                     type="button"
@@ -83,7 +94,6 @@ export function IntegrationsPage() {
                     onClick={async () => {
                       try {
                         const result = await api.integrationHealthCheck(card.integrationId) as { healthLabel: string };
-                        setHealth(result);
                         setNote(`Проверка «${card.title}»: ${result.healthLabel}`);
                       } catch (err) {
                         setError(err instanceof Error ? err.message : "Проверка не выполнена");
@@ -104,7 +114,7 @@ export function IntegrationsPage() {
       {setup?.form?.connected && submitUrl ? (
         <div className="panel">
           <h3>Форма сайта — подключение</h3>
-          <p className="muted">Endpoint: {submitUrl}</p>
+          <p className="muted">Адрес для заявок: {submitUrl}</p>
           <div className="actions" style={{ marginBottom: 12 }}>
             {(
               [
@@ -126,7 +136,7 @@ export function IntegrationsPage() {
           </div>
           {formMethod === "html" ? (
             <>
-              <p className="muted">Обычный HTML POST. Секрет API в HTML не нужен.</p>
+              <p className="muted">Готовый HTML. Дополнительных ключей не нужно.</p>
               <pre className="code">{`<form method="POST" action="${submitUrl}">
   <input name="name" required />
   <input name="phone" required />
@@ -141,7 +151,7 @@ export function IntegrationsPage() {
           ) : null}
           {formMethod === "js" ? (
             <>
-              <p className="muted">Для fetch нужна CORS (уже включена на endpoint) и JSON/urlencoded.</p>
+              <p className="muted">Отправка заявки из кода сайта.</p>
               <pre className="code">{`await fetch("${submitUrl}", {
   method: "POST",
   headers: {
@@ -160,14 +170,12 @@ export function IntegrationsPage() {
           ) : null}
           {formMethod === "existing" ? (
             <p className="muted">
-              Поставьте action формы на endpoint выше. Имена полей: name, phone, message, company — или настройте
-              mapping в integration.mappingJson (versioned). Honeypot: скрытое поле website.
+              В action формы укажите адрес выше. Поля: name, phone, message, company. Скрытое поле website оставьте пустым — оно отсекает спам.
             </p>
           ) : null}
           {formMethod === "tilda" ? (
             <p className="muted">
-              В Tilda: Webhook / свой endpoint → POST на {submitUrl}. Передайте name, phone, message. UTM и pageUrl —
-              скрытыми полями. Файлы (multipart) — на следующем этапе.
+              В Tilda: Настройки сайта → Формы → Webhook. Укажите адрес выше и поля name, phone, message.
             </p>
           ) : null}
           <p className="muted">
@@ -175,7 +183,7 @@ export function IntegrationsPage() {
             {formCard?.testMode || setup?.form?.testMode ? (
               <b>тестовый</b>
             ) : (
-              <b>обычный (боевой)</b>
+              <b>обычный</b>
             )}
             . Телефон обязателен.
           </p>
@@ -219,9 +227,9 @@ export function IntegrationsPage() {
       ) : null}
 
       <div className="panel">
-        <h3>WhatsApp AI Manager</h3>
+        <h3>WhatsApp</h3>
         {setup?.whatsapp?.warning ? <div className="banner warn">{setup.whatsapp.warning}</div> : null}
-        <p className="muted">{setup?.whatsapp?.note}</p>
+        <p className="muted">{whatsappStatusNote(setup?.whatsapp)}</p>
         <p className="integ-status-line">
           Статус подключения
           <span className={statusBadgeClass(setup?.whatsapp?.configured ? "Подключён" : "Не подключён")}>
@@ -229,7 +237,7 @@ export function IntegrationsPage() {
           </span>
         </p>
         <p className="integ-status-line">
-          AI Manager
+          AI-менеджер
           {setup?.whatsapp?.reachable ? (
             <span className="badge ok">Активен</span>
           ) : setup?.whatsapp?.configured ? (
@@ -238,19 +246,12 @@ export function IntegrationsPage() {
             <span className="badge">Ожидает подключение</span>
           )}
         </p>
-        {setup?.whatsapp?.sender ? <p>WhatsApp · {setup.whatsapp.sender}</p> : null}
-        {setup?.whatsapp?.instanceId ? <p className="muted">Instance ID · {setup.whatsapp.instanceId}</p> : null}
+        {whatsappSender ? <p>WhatsApp · {whatsappSender}</p> : null}
         <p className="muted">Диалоги · {setup?.whatsapp?.conversationCount ?? 0}</p>
         <p className="muted">
           Последняя синхронизация ·{" "}
           {setup?.whatsapp?.lastSyncAt ? new Date(setup.whatsapp.lastSyncAt).toLocaleString("ru-RU") : "ещё не было"}
         </p>
-        {issuedBridgeSecret ? (
-          <div className="banner warn">
-            Секрет моста показан один раз. Сохраните его, если внешний бот ещё не обновлён автоматически.
-            <pre className="code">{issuedBridgeSecret}</pre>
-          </div>
-        ) : null}
         {editingWhatsApp ? (
           <form
             className="stack"
@@ -265,8 +266,11 @@ export function IntegrationsPage() {
                   instanceId: String(formEl.get("instanceId") || ""),
                   apiToken: String(formEl.get("apiToken") || ""),
                 })) as any;
-                setNote(result.note);
-                if (result.bridgeSecret) setIssuedBridgeSecret(result.bridgeSecret);
+                setNote(
+                  result?.reachable
+                    ? "WhatsApp подключён."
+                    : "Сохранено. Подключение пока не подтверждено. Проверьте Instance ID и API Token.",
+                );
                 setEditingWhatsApp(false);
                 notifySaved("WhatsApp подключён");
                 await load();
@@ -316,8 +320,7 @@ export function IntegrationsPage() {
               onClick={async () => {
                 try {
                   const result = (await api.disconnectWhatsApp()) as any;
-                  setNote(result.note);
-                  setIssuedBridgeSecret("");
+                  setNote(result.note || "WhatsApp отключён.");
                   notifySaved("WhatsApp отключён");
                   await load();
                 } catch (err) {
@@ -334,7 +337,10 @@ export function IntegrationsPage() {
             onClick={async () => {
               try {
                 const result = (await api.syncWhatsApp()) as any;
-                setNote(`Синхронизация: новых ${result.imported}, обновлено ${result.updated}.`);
+                setNote(
+                  result.note ||
+                    `Синхронизация: новых ${result.imported}, обновлено ${result.updated}.`,
+                );
               } catch (err) {
                 setError(err instanceof Error ? err.message : "Синхронизация не выполнена");
               }
@@ -345,17 +351,6 @@ export function IntegrationsPage() {
         </div>
       </div>
 
-      <h3 className="integ-section-title">Messaging (следующие этапы)</h3>
-      <div className="integ-grid">
-        {(catalog?.messaging || []).map((card: any) => (
-          <div className="panel integ-card" key={card.catalogType}>
-            <b>{card.title}</b>
-            <p className="muted">{card.note}</p>
-            <span className="badge warn">{card.healthLabel}</span>
-          </div>
-        ))}
-      </div>
-
       <h3 className="integ-section-title">Документы и ИС ЭСФ</h3>
       <div className="integ-grid">
         <div className="panel integ-card">
@@ -363,55 +358,44 @@ export function IntegrationsPage() {
             <b>ИС ЭСФ</b>
             <span className="badge warn">NCALayer</span>
           </div>
-          <p className="muted">Подключение кабинета через ЭЦП на компьютере пользователя. PIN и .p12 на сервер не передаются.</p>
+          <p className="muted">Подключение кабинета через ЭЦП на этом компьютере. PIN ключа на сервер не передаётся.</p>
           <Link className="btn" to="/integrations/esf">
             Открыть ИС ЭСФ
           </Link>
         </div>
       </div>
 
-      <h3 className="integ-section-title">Уведомления</h3>
-      <div className="panel">
-        <b>Telegram сотрудника</b>
-        <p className="muted">{catalog?.notifications?.employeeTelegram?.note || setup?.telegram?.employee?.note}</p>
-        <p className="muted">{setup?.telegram?.employee?.note}</p>
-        <button
-          className="btn"
-          onClick={async () => {
-            const result = await api.beginTelegram();
-            setTelegram(result);
-          }}
-        >
-          Подключить Telegram
-        </button>
-        {telegram ? (
-          <p>
-            {telegram.deepLink ? (
-              <a href={telegram.deepLink} target="_blank" rel="noreferrer">
-                Открыть бота
-              </a>
-            ) : (
-              telegram.note
-            )}
-          </p>
-        ) : null}
-        <p className="muted" style={{ marginTop: 8 }}>
-          Также: <Link to="/settings">Настройки</Link> · это не источник заявок.
-        </p>
-      </div>
-
-      {health ? (
-        <div className="panel soft">
-          <b>Результат проверки</b>
-          <ul>
-            {(health.checks || []).map((c: any) => (
-              <li key={c.key}>
-                {c.ok ? "✓" : "✕"} {c.label}
-                {c.detail ? ` — ${c.detail}` : ""}
-              </li>
-            ))}
-          </ul>
-        </div>
+      {telegramReady ? (
+        <>
+          <h3 className="integ-section-title">Уведомления</h3>
+          <div className="panel">
+            <b>Telegram сотрудника</b>
+            <p className="muted">Личные уведомления. Это не заявки с сайта.</p>
+            <button
+              className="btn"
+              onClick={async () => {
+                const result = await api.beginTelegram();
+                setTelegram(result);
+              }}
+            >
+              Подключить Telegram
+            </button>
+            {telegram ? (
+              <p>
+                {telegram.deepLink ? (
+                  <a href={telegram.deepLink} target="_blank" rel="noreferrer">
+                    Открыть бота
+                  </a>
+                ) : (
+                  "Откройте бота и отправьте /start."
+                )}
+              </p>
+            ) : null}
+            <p className="muted" style={{ marginTop: 8 }}>
+              Также: <Link to="/settings">Настройки</Link>
+            </p>
+          </div>
+        </>
       ) : null}
     </section>
   );

@@ -478,6 +478,9 @@ export async function seedDatabase() {
     });
   }
 
+  const { upsertSupportCatalog } = await import("./supportCatalog.ts");
+  await upsertSupportCatalog(prisma);
+
   console.log("Seed completed. Users have no required phone. Two tenants isolated.");
   console.log("Login examples: owner@creolab.example / SEED_PASSWORD");
 }

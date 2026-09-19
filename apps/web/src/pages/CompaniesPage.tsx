@@ -191,7 +191,7 @@ export function CompaniesPage() {
       <div className="row sit-head">
         <div>
           <h2>Компании</h2>
-          <p className="muted">Организации и общая история отношений</p>
+          <p className="muted">Организации, с которыми вы работаете.</p>
         </div>
         <button type="button" className="btn" onClick={() => setShowCreate(true)}>
           + Компания
@@ -202,7 +202,7 @@ export function CompaniesPage() {
         <div className="sit-periods">
           {(
             [
-              ["all", "Все доступные"],
+              ["all", "Все"],
               ["mine", "Мои"],
               ["unassigned", "Без ответственного"],
             ] as const
@@ -242,7 +242,7 @@ export function CompaniesPage() {
 
       {!loading && !items.length ? (
         <div className="sit-section">
-          <p className="empty">Пока нет компаний. B2C-клиенты продолжают работать без организации.</p>
+          <p className="empty">Пока нет компаний. Клиентов без организации можно вести в разделе «Клиенты».</p>
         </div>
       ) : null}
 

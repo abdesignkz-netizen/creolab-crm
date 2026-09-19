@@ -614,9 +614,6 @@ export function CampaignMassPanel({
           <p>{notice.text}</p>
         </div>
       ) : null}
-      {(campaign as any)?.storageWarning ? (
-        <p className="error">{(campaign as any).storageWarning}</p>
-      ) : null}
 
       <div className="command-step">
         <div className="command-step-label">Получатели</div>

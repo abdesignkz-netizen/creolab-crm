@@ -391,7 +391,7 @@ function NotificationsSection({ locale }: { locale: Locale }) {
           <input type="checkbox" name="ch_web_push" defaultChecked={prefs.channels?.web_push !== false} />
           Браузерные уведомления
         </label>
-        <p className="muted">Email, Telegram и WhatsApp для личных уведомлений появятся после полноценного подключения канала.</p>
+        <p className="muted">Сейчас уведомления приходят в кабинет и в браузер.</p>
         <b>Время тишины (внешние уведомления)</b>
         <label className="check-row">
           <input type="checkbox" name="quiet" defaultChecked={Boolean(prefs.quietHours?.enabled)} />

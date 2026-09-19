@@ -11,6 +11,7 @@ import { useCapabilities } from "../lib/session";
 import { tip } from "../lib/tip";
 import { DealDocumentsPanel } from "./DealDocumentsPanel";
 import { CONTRACT_SIGNING_ENABLED } from "../lib/featureFlags";
+import { dealOutcomeLabel } from "../lib/labels";
 
 type Scope = "all" | "mine" | "unassigned";
 type TimeMode = "now" | "period";
@@ -28,6 +29,36 @@ const PAYMENT_STATUS_LABEL: Record<string, string> = {
   OVERDUE: "Просрочен",
   CANCELLED: "Отменён",
 };
+
+const EDOC_KPI_RANK: Record<string, number> = {
+  ACCEPTED: 6,
+  SENT: 5,
+  SENDING: 4,
+  SIGNED: 3,
+  VALIDATED: 2,
+  DRAFT: 1,
+  ERROR: 0,
+};
+
+const EDOC_KPI_LABEL: Record<string, string> = {
+  DRAFT: "Черновик",
+  VALIDATED: "Сформирован",
+  SIGNED: "Подписан",
+  SENDING: "Отправлен",
+  SENT: "Отправлен",
+  ACCEPTED: "Подтверждён",
+  ERROR: "Ошибка",
+};
+
+function electronicDocKpi(docs: any, type: "AVR" | "ESF") {
+  if (!docs) return "—";
+  const items = (docs.electronicDocuments || []).filter((row: { type?: string }) => row.type === type);
+  if (!items.length) return "Нет";
+  const best = items.reduce((current: { status?: string }, row: { status?: string }) =>
+    (EDOC_KPI_RANK[row.status || ""] || 0) > (EDOC_KPI_RANK[current.status || ""] || 0) ? row : current,
+  );
+  return EDOC_KPI_LABEL[best.status || ""] || "Черновик";
+}
 
 function Flag({ on, label }: { on?: boolean; label: string }) {
   if (!on) return null;
@@ -188,7 +219,6 @@ export function DealsPage() {
     <section className="deals-page">
       <div className="page-head">
         <div>
-          <p className="page-kicker">Воронка продаж</p>
           <h2>Сделки</h2>
         </div>
         <div className="sit-toolbar-side">
@@ -284,17 +314,13 @@ export function DealsPage() {
               <strong>{s.activeDeals}</strong>
             </div>
             <div className="sit-kpi">
-              <span className="muted">Потенциальный pipeline</span>
+              <span className="muted">Сумма сделок</span>
               <strong>{s.pipelineAmountLabel || "—"}</strong>
               {s.amountKnownOf ? (
                 <span className="kpi-hint">
                   сумма у {s.amountKnownCount} из {s.amountKnownOf}
                 </span>
               ) : null}
-            </div>
-            <div className="sit-kpi">
-              <span className="muted">Взвешенный прогноз</span>
-              <strong>{s.weightedPipelineLabel || "—"}</strong>
             </div>
             <div className="sit-kpi">
               <span className="muted">Ожидаемые оплаты</span>
@@ -327,7 +353,7 @@ export function DealsPage() {
           <div className="segmented sit-scope" style={{ width: "fit-content" }}>
             {(
               [
-                ["all", "Все фокусы"],
+                ["all", "Все"],
                 ["stalled", "Зависшие"],
                 ["needs_reply", "Нужен ответ"],
                 ["no_next_action", "Без следующего шага"],
@@ -380,7 +406,6 @@ export function DealsPage() {
                   <div className="muted">{nameWithPhone(deal.contact?.name, deal.contact?.phone)}</div>
                   <div className="deal-card-meta">
                     <span>{deal.amountLabel || "сумма не указана"}</span>
-                    {deal.outcome === "open" ? <span>{deal.probability}%</span> : null}
                   </div>
                   {deal.outcome === "won" || deal.outcome === "lost" ? (
                     <div className="deal-flag">{deal.outcome === "won" ? "Продажа" : "Потеря"}</div>
@@ -402,7 +427,7 @@ export function DealsPage() {
                   </div>
                 </article>
               ))}
-              {col.deals.length === 0 ? <p className="empty">Пусто</p> : null}
+              {col.deals.length === 0 ? <p className="empty">Пока нет сделок</p> : null}
             </div>
           </div>
         ))}
@@ -410,7 +435,7 @@ export function DealsPage() {
 
       {data.onHold?.length ? (
         <div className="sit-section">
-          <h3>Отложено (ON HOLD)</h3>
+          <h3>На паузе</h3>
           {data.onHold.map((deal: any) => (
             <Link key={deal.id} className="sit-list-row" to={`/deals/${deal.id}`}>
               <div>
@@ -651,7 +676,7 @@ export function DealDetailPage() {
     return (
       <section>
         <p className="error">{error}</p>
-        <Link to="/deals">К воронке</Link>
+        <Link to="/deals">К списку сделок</Link>
       </section>
     );
   }
@@ -678,20 +703,18 @@ export function DealDetailPage() {
           </p>
           <h2>{d.title}</h2>
           <p className="muted">
-            {nameWithPhone(d.contact?.name, d.contact?.phone)} · {d.stage?.name} · {d.outcome}
+            {nameWithPhone(d.contact?.name, d.contact?.phone)}
+            {d.stage?.name ? ` · ${d.stage.name}` : ""}
+            {d.outcome && d.outcome !== "open" ? ` · ${dealOutcomeLabel(d.outcome)}` : ""}
           </p>
         </div>
       </div>
       {error ? <p className="error">{error}</p> : null}
 
-      <div className="sit-kpi-grid">
+      <div className={`sit-kpi-grid${caps.documents ? " deal-kpi-5" : ""}`}>
         <div className="sit-kpi">
           <span className="muted">Сумма</span>
           <strong>{d.amountLabel || "—"}</strong>
-        </div>
-        <div className="sit-kpi">
-          <span className="muted">Вероятность</span>
-          <strong>{d.probability}%</strong>
         </div>
         <div className="sit-kpi">
           <span className="muted">На этапе</span>
@@ -701,6 +724,18 @@ export function DealDetailPage() {
           <span className="muted">Оплата</span>
           <strong>{PAYMENT_STATUS_LABEL[d.paymentStatus] || d.paymentStatus}</strong>
         </div>
+        {caps.documents ? (
+          <>
+            <a className="sit-kpi" href="#avr">
+              <span className="muted">АВР</span>
+              <strong>{electronicDocKpi(docs, "AVR")}</strong>
+            </a>
+            <a className="sit-kpi" href="#esf">
+              <span className="muted">ЭСФ</span>
+              <strong>{electronicDocKpi(docs, "ESF")}</strong>
+            </a>
+          </>
+        ) : null}
       </div>
 
       <div className="panel">
@@ -905,10 +940,6 @@ export function DealDetailPage() {
           />
         </label>
         <label>
-          Вероятность %
-          <input value={probability} onChange={(e) => setProbability(e.target.value)} type="number" min={0} max={100} />
-        </label>
-        <label>
           Следующий шаг
           <input value={nextAction} onChange={(e) => setNextAction(e.target.value)} />
         </label>
@@ -929,7 +960,7 @@ export function DealDetailPage() {
             type="button"
             className="btn"
             disabled={busy}
-            {...tip("Сохранить сумму, вероятность, следующий шаг и статус оплаты")}
+            {...tip("Сохранить сумму, следующий шаг и статус оплаты")}
             onClick={() => void save()}
           >
             Сохранить
@@ -1023,7 +1054,7 @@ export function DealDetailPage() {
           type="button"
           className="btn"
           disabled={busy || d.outcome === "won"}
-          {...tip("Отметить сделку выигранной (WON)")}
+          {...tip("Отметить, что сделка продана")}
           onClick={() => {
             setBusy(true);
             void api
@@ -1033,7 +1064,7 @@ export function DealDetailPage() {
               .finally(() => setBusy(false));
           }}
         >
-          WON
+          Продажа
         </button>
         <button
           type="button"
@@ -1041,8 +1072,8 @@ export function DealDetailPage() {
           disabled={busy}
           {...tip(
             d.outcome === "on_hold"
-              ? "Вернуть сделку с паузы в активную воронку"
-              : "Поставить сделку на паузу (ON HOLD)",
+              ? "Вернуть сделку в работу"
+              : "Отложить сделку, не закрывая её",
           )}
           onClick={() => {
             setBusy(true);
@@ -1053,7 +1084,7 @@ export function DealDetailPage() {
               .finally(() => setBusy(false));
           }}
         >
-          {d.outcome === "on_hold" ? "Снять с hold" : "ON HOLD"}
+          {d.outcome === "on_hold" ? "Снять с паузы" : "На паузу"}
         </button>
         <select value={lossReason} onChange={(e) => setLossReason(e.target.value)} title="Причина проигрыша">
           {(board?.lostReasons || ["Дорого", "Другое"]).map((r: string) => (
@@ -1066,7 +1097,7 @@ export function DealDetailPage() {
           type="button"
           className="btn danger"
           disabled={busy || d.outcome === "lost"}
-          {...tip("Отметить сделку проигранной с выбранной причиной")}
+          {...tip("Отметить, что сделка не состоялась")}
           onClick={() => {
             setBusy(true);
             void api
@@ -1076,7 +1107,7 @@ export function DealDetailPage() {
               .finally(() => setBusy(false));
           }}
         >
-          LOST
+          Потеря
         </button>
         <button
           type="button"

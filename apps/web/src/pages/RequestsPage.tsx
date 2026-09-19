@@ -63,12 +63,7 @@ const SERVICE_OPTIONS = [
 const SOURCE_OPTIONS = [
   { value: "manual", label: "Ручное добавление" },
   { value: "website_form", label: "Форма сайта" },
-  { value: "website_ai", label: "Website AI" },
   { value: "whatsapp", label: "WhatsApp" },
-  { value: "telegram", label: "Telegram" },
-  { value: "instagram", label: "Instagram" },
-  { value: "phone", label: "Звонок" },
-  { value: "api", label: "API" },
   { value: "other", label: "Другое" },
 ];
 
@@ -329,16 +324,12 @@ export function RequestsPage() {
     <section className="requests-page">
       <div className="page-head">
         <div>
-          <p className="page-kicker">Воронка обращений</p>
           <h2>Заявки</h2>
-          {filter === "attention" ? (
-            <p className="muted">Как цифра в меню: все открытые заявки, которые ждут действия, не за период.</p>
-          ) : (
-            <p className="muted">
-              Цифра «Заявки» в меню — сколько сейчас ждут действия (новые, без ответа или без телефона)
-              {period !== "all" && data?.period?.label ? `, а не сколько пришло за период «${data.period.label}»` : ""}.
-            </p>
-          )}
+          <p className="muted">
+            {filter === "attention"
+              ? "Заявки, которые ждут действия: новые, без ответа или без телефона."
+              : "Новые обращения и те, что ещё нужно взять в работу."}
+          </p>
         </div>
         <div className="actions">
           <button type="button" className="btn" onClick={() => setShowCreate((v) => !v)}>
@@ -387,7 +378,7 @@ export function RequestsPage() {
         >
           <span className="muted">Требуют внимания</span>
           <strong>{counts.attention ?? 0}</strong>
-          <span className="kpi-hint">как в меню · {attentionHint}</span>
+          {attentionHint ? <span className="kpi-hint">{attentionHint}</span> : null}
         </button>
         <button type="button" className={`card ${filter === "all" ? "active" : ""}`} aria-pressed={filter === "all"} onClick={() => setFilter("all")}>
           <span className="muted">Все{period !== "all" ? " за период" : ""}</span>

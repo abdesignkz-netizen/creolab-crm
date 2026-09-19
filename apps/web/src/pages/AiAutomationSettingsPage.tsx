@@ -4,10 +4,10 @@ import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 
 const MODE_HELP: Record<string, string> = {
-  MANUAL: "Заявка сохраняется. Без AI-анализа и без AI-задачи.",
-  ASSIST: "AI анализирует заявку и показывает подсказку. Клиенту не пишет.",
-  CONFIRM: "AI готовит задачу и ждёт кнопку «Начать обработку».",
-  AUTO: "AI анализирует, создаёт задачу и сам начинает контакт, если канал доступен.",
+  MANUAL: "Заявка сохраняется. AI её не разбирает и клиенту не пишет.",
+  ASSIST: "AI разбирает заявку и показывает подсказку. Клиенту не пишет.",
+  CONFIRM: "AI готовит задачу и ждёт, пока вы нажмёте «Начать обработку».",
+  AUTO: "AI разбирает заявку и сам пишет клиенту, если WhatsApp подключён.",
 };
 
 const DAY_OPTIONS = [
@@ -161,10 +161,10 @@ export function AiAutomationSettingsPage() {
       <div className="page-head">
         <div>
           <p className="page-kicker">
-            <Link to="/settings">Настройки</Link> · AI Manager
+            <Link to="/settings">Настройки</Link> · AI-менеджер
           </p>
           <h2>Новые заявки</h2>
-          <p className="muted">Уровень автоматизации для входящих Request. Уже запущенные AI-задачи не меняются.</p>
+          <p className="muted">Как обрабатывать новые заявки. Уже запущенные задачи не меняются.</p>
         </div>
       </div>
 
@@ -233,18 +233,9 @@ export function AiAutomationSettingsPage() {
       {showAdvanced ? (
         <div className="panel soft">
           <p className="muted">
-            При режиме «Полный автомат» заявки с формы сайта тоже обрабатываются сразу: AI пишет
-            приветствие на номер из заявки. Если номер не зарегистрирован в WhatsApp, это появится на
-            Главной. Исключения: ручные заявки остаются ручными, API — AI-подсказки.
+            При режиме «Сам пишет клиенту» заявки с формы сайта тоже обрабатываются сразу: AI пишет
+            приветствие на номер из заявки. Если номера нет в WhatsApp, это появится на Главной. Заявки, созданные вручную, AI сам не берёт.
           </p>
-          <pre className="code">{JSON.stringify({
-            sourceModes: data?.sourceModes,
-            serviceModes: data?.serviceModes,
-            allowProactiveOutbound: data?.allowProactiveOutbound,
-            scheduleMode,
-            workingHours,
-            customSchedule,
-          }, null, 2)}</pre>
         </div>
       ) : null}
 

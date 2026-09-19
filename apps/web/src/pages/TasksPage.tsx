@@ -153,7 +153,7 @@ const SERVICE_OPTIONS = [
   { id: "PRESENTATION", label: "Презентация" },
   { id: "ADVERTISING", label: "Реклама" },
   { id: "BRANDING", label: "Брендинг" },
-  { id: "AI", label: "AI Manager" },
+  { id: "AI", label: "AI-менеджер" },
 ];
 
 const STATUS_OPTIONS = [
@@ -1203,7 +1203,6 @@ export function TasksPage() {
     <section>
       <div className="page-head">
         <div>
-          <p className="page-kicker">Операции</p>
           <h2>Задачи</h2>
         </div>
         <div className="actions">
@@ -1219,7 +1218,7 @@ export function TasksPage() {
               setShowCreate(true);
             }}
           >
-            Поставить командой
+            Описать задачу
           </button>
           <button
             type="button"
@@ -1244,7 +1243,7 @@ export function TasksPage() {
               setShowCreate(true);
             }}
           >
-            Настроить вручную
+            Заполнить форму
           </button>
             </>
           ) : null}
@@ -1539,7 +1538,7 @@ export function TasksPage() {
             ) : null}
 
             {cmdWhoMode === "auto" ? (
-              <p className="muted">CRM сама найдёт клиента или группу по тексту команды (имя, «вчерашним», услуга…).</p>
+              <p className="muted">CRM сама найдёт клиента или группу по тексту задачи (имя, «вчерашним», услуга…).</p>
             ) : null}
           </div>
 
@@ -1554,7 +1553,7 @@ export function TasksPage() {
               rows={3}
               placeholder="Любая задача своими словами: попросить реквизиты, согласовать макет, напомнить про оплату…"
             />
-            <p className="muted">Пишите как есть. ИИ соберёт текст клиенту из вашей команды и заявки — не из готовых шаблонов.</p>
+            <p className="muted">Пишите как есть. AI соберёт текст клиенту из вашей задачи — не из готовых шаблонов.</p>
           </div>
 
           <div

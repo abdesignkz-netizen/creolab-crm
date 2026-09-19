@@ -233,6 +233,29 @@ import {
   updatePlatformServiceSettings,
 } from "./services/platformAdminService.ts";
 import {
+  addSupportAttachment,
+  addSupportMessage,
+  adminSupportUnread,
+  createSupportTicket,
+  deleteSupportQuickReply,
+  getSupportAttachment,
+  getSupportTicket,
+  listAdminSupportTickets,
+  listMySupportTickets,
+  listSupportQuickReplies,
+  tenantSupportUnread,
+  updateAdminSupportTicket,
+  upsertSupportQuickReply,
+} from "./services/supportTicketService.ts";
+import {
+  deleteAdminSupportArticle,
+  getSupportArticle,
+  listAdminSupportArticles,
+  searchSupportArticles,
+  submitSupportArticleFeedback,
+  upsertAdminSupportArticle,
+} from "./services/supportKnowledgeService.ts";
+import {
   createTenantConnection,
   disableTenantConnection,
   listIntegrationEvents,
@@ -1602,6 +1625,71 @@ export function createApp(prisma: PrismaClient) {
     res.json(await markNotificationRead(prisma, await requireAuth(req), req.params.id));
   });
 
+  app.get("/api/v1/support/articles", async (req, res) => {
+    rateLimit(`support-search:${(await requireAuth(req)).user.id}`, 60);
+    res.json(
+      await searchSupportArticles(prisma, await requireAuth(req), {
+        q: String(req.query.q || ""),
+        route: String(req.query.route || ""),
+      }),
+    );
+  });
+
+  app.get("/api/v1/support/articles/:id", async (req, res) => {
+    res.json(await getSupportArticle(prisma, await requireAuth(req), req.params.id));
+  });
+
+  app.post("/api/v1/support/articles/:id/feedback", json, async (req, res) => {
+    const auth = await requireAuth(req);
+    rateLimit(`support-feedback:${auth.user.id}`, 20);
+    res.json(await submitSupportArticleFeedback(prisma, auth, req.params.id, Boolean(req.body?.helpful)));
+  });
+
+  app.get("/api/v1/support/unread", async (req, res) => {
+    res.json(await tenantSupportUnread(prisma, await requireAuth(req)));
+  });
+
+  app.get("/api/v1/support/tickets", async (req, res) => {
+    res.json(await listMySupportTickets(prisma, await requireAuth(req)));
+  });
+
+  app.post("/api/v1/support/tickets", json, async (req, res) => {
+    const auth = await requireAuth(req);
+    rateLimit(`support-ticket:${auth.user.id}`, 8, 60 * 60 * 1000);
+    res.status(201).json(await createSupportTicket(prisma, auth, req.body || {}));
+  });
+
+  app.get("/api/v1/support/tickets/:id", async (req, res) => {
+    res.json(await getSupportTicket(prisma, await requireAuth(req), req.params.id, false));
+  });
+
+  app.post("/api/v1/support/tickets/:id/messages", json, async (req, res) => {
+    const auth = await requireAuth(req);
+    rateLimit(`support-msg:${auth.user.id}`, 30);
+    res.status(201).json(await addSupportMessage(prisma, auth, req.params.id, req.body || {}, false));
+  });
+
+  app.post("/api/v1/support/tickets/:id/attachments", jsonLarge, async (req, res) => {
+    const auth = await requireAuth(req);
+    rateLimit(`support-file:${auth.user.id}`, 20);
+    res.status(201).json(
+      await addSupportAttachment(prisma, auth, req.params.id, req.body || {}, false),
+    );
+  });
+
+  app.get("/api/v1/support/tickets/:id/attachments/:attachmentId", async (req, res) => {
+    const file = await getSupportAttachment(prisma, await requireAuth(req), req.params.id, req.params.attachmentId, false);
+    if (!existsSync(file.path)) throw new ApiError(404, "not_found", "Файл не найден");
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.type(file.mimeType);
+    const ascii = file.fileName.replace(/[^\x20-\x7E]/g, "_").replace(/"/g, "");
+    res.setHeader(
+      "Content-Disposition",
+      `${file.kind === "image" ? "inline" : "attachment"}; filename="${ascii || "file"}"; filename*=UTF-8''${encodeURIComponent(file.fileName)}`,
+    );
+    res.sendFile(file.path);
+  });
+
   app.get("/api/v1/stats/summary", async (req, res) => {
     res.json(await statsSummary(prisma, await requireAuth(req)));
   });
@@ -1972,6 +2060,77 @@ export function createApp(prisma: PrismaClient) {
 
   app.get("/api/v1/admin/audit", async (req, res) => {
     res.json(await listPlatformAudit(prisma, await requireAuth(req), req.query as Record<string, string>));
+  });
+
+  app.get("/api/v1/admin/support/unread", async (req, res) => {
+    res.json(await adminSupportUnread(prisma, await requireAuth(req)));
+  });
+
+  app.get("/api/v1/admin/support/tickets", async (req, res) => {
+    res.json(await listAdminSupportTickets(prisma, await requireAuth(req), req.query as Record<string, string>));
+  });
+
+  app.get("/api/v1/admin/support/tickets/:id", async (req, res) => {
+    res.json(await getSupportTicket(prisma, await requireAuth(req), req.params.id, true));
+  });
+
+  app.post("/api/v1/admin/support/tickets/:id/messages", json, async (req, res) => {
+    const auth = await requireAuth(req);
+    rateLimit(`admin-support-msg:${auth.user.id}`, 60);
+    res.status(201).json(await addSupportMessage(prisma, auth, req.params.id, req.body || {}, true));
+  });
+
+  app.post("/api/v1/admin/support/tickets/:id/attachments", jsonLarge, async (req, res) => {
+    res.status(201).json(await addSupportAttachment(prisma, await requireAuth(req), req.params.id, req.body || {}, true));
+  });
+
+  app.get("/api/v1/admin/support/tickets/:id/attachments/:attachmentId", async (req, res) => {
+    const file = await getSupportAttachment(prisma, await requireAuth(req), req.params.id, req.params.attachmentId, true);
+    if (!existsSync(file.path)) throw new ApiError(404, "not_found", "Файл не найден");
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.type(file.mimeType);
+    const ascii = file.fileName.replace(/[^\x20-\x7E]/g, "_").replace(/"/g, "");
+    res.setHeader(
+      "Content-Disposition",
+      `${file.kind === "image" ? "inline" : "attachment"}; filename="${ascii || "file"}"; filename*=UTF-8''${encodeURIComponent(file.fileName)}`,
+    );
+    res.sendFile(file.path);
+  });
+
+  app.patch("/api/v1/admin/support/tickets/:id", json, async (req, res) => {
+    res.json(await updateAdminSupportTicket(prisma, await requireAuth(req), req.params.id, req.body || {}));
+  });
+
+  app.get("/api/v1/admin/support/articles", async (req, res) => {
+    res.json(await listAdminSupportArticles(prisma, await requireAuth(req)));
+  });
+
+  app.post("/api/v1/admin/support/articles", json, async (req, res) => {
+    res.status(201).json(await upsertAdminSupportArticle(prisma, await requireAuth(req), req.body || {}));
+  });
+
+  app.patch("/api/v1/admin/support/articles/:id", json, async (req, res) => {
+    res.json(await upsertAdminSupportArticle(prisma, await requireAuth(req), { ...req.body, id: req.params.id }));
+  });
+
+  app.delete("/api/v1/admin/support/articles/:id", async (req, res) => {
+    res.json(await deleteAdminSupportArticle(prisma, await requireAuth(req), req.params.id));
+  });
+
+  app.get("/api/v1/admin/support/replies", async (req, res) => {
+    res.json(await listSupportQuickReplies(prisma, await requireAuth(req)));
+  });
+
+  app.post("/api/v1/admin/support/replies", json, async (req, res) => {
+    res.status(201).json(await upsertSupportQuickReply(prisma, await requireAuth(req), req.body || {}));
+  });
+
+  app.patch("/api/v1/admin/support/replies/:id", json, async (req, res) => {
+    res.json(await upsertSupportQuickReply(prisma, await requireAuth(req), { ...req.body, id: req.params.id }));
+  });
+
+  app.delete("/api/v1/admin/support/replies/:id", async (req, res) => {
+    res.json(await deleteSupportQuickReply(prisma, await requireAuth(req), req.params.id));
   });
 
   app.post("/api/v1/integrations/:integrationId/events", rawJson, async (req, res) => {

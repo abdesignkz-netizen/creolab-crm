@@ -136,8 +136,7 @@ export function LegalSettingsPanel() {
     <div className="panel" id="company-requisites">
       <h3>Реквизиты компании</h3>
       <p className="muted">
-        Ваша организация — исполнитель. Реквизиты из загруженного договора автоматически заполняют пустые поля после проверки и сохранения документа.
-        Эти данные используются в договорах, счетах, АВР и ЭСФ.
+        Реквизиты вашей организации. Они подставляются в договоры, счета, АВР и ЭСФ.
       </p>
       {error ? <p className="error">{error}</p> : null}
       {!loaded ? (error ? <button className="btn secondary" onClick={()=>location.reload()}>Повторить загрузку</button> : <p role="status">Загружаем реквизиты…</p>) : !editing ? <>
@@ -265,20 +264,12 @@ export function LegalSettingsPanel() {
         </label>
         {preflight ? (
           <div className={preflight.ready ? "banner" : "banner warn"} style={{ marginTop: 12 }}>
-            <b>{preflight.ready ? "TEST ИС ЭСФ готов к живой отправке" : "TEST ИС ЭСФ ещё не готов"}</b>
-            <p className="muted">{preflight.nextStep}</p>
+            <b>{preflight.ready ? "ИС ЭСФ готов к отправке" : "ИС ЭСФ ещё не готов"}</b>
             <p className="muted">
-              {preflight.esfEnv} · {preflight.provider}
-              {preflight.probes?.localService?.reachable ? " · Kalkan доступен" : " · Kalkan нет"}
-              {preflight.probes?.esfHost?.reachable ? " · хост КГД доступен" : " · хост КГД нет"}
+              {preflight.ready
+                ? "Кабинет подключается в Интеграции → ИС ЭСФ через NCALayer."
+                : "Отправка в ИС ЭСФ пока недоступна. Если кабинет уже должен работать — обратитесь в поддержку."}
             </p>
-            {(preflight.blockers || []).length ? (
-              <ul>
-                {(preflight.blockers as string[]).map((row) => (
-                  <li key={row}>{row}</li>
-                ))}
-              </ul>
-            ) : null}
             <button type="button" className="btn secondary" disabled={busy} onClick={() => void loadPreflight()}>
               Проверить снова
             </button>

@@ -548,15 +548,15 @@ export async function parseTaskCommand(
             : Math.min((selectable || total) + pendingPhones, 30),
       needsClarification: clients.length && needsClarification ? clients.length : Math.max(0, total - (selectable || total)),
       when: command.executionMode === "prepare_only" ? "Только подготовка" : "Сейчас (после подтверждения)",
-      executor: command.intent === "document_action" ? "Контур документов" : "CRM / AI Manager",
+      executor: command.intent === "document_action" ? "Документы" : "CRM",
       label: command.understandingLabel,
       consequence:
         command.intent === "document_action"
           ? command.documentAction === "send_esf" || command.documentAction === "send_avr"
             ? "После подтверждения CRM вызовет официальную отправку в ИС ЭСФ. WhatsApp не трогаем."
-            : "CRM выполнит действие в контуре документов сделки, не создавая задачу WhatsApp."
+            : "CRM выполнит действие в документах сделки, не создавая задачу WhatsApp."
         : asCampaign
-        ? "Это массовая отправка: откроется Campaign с проверкой получателей и подтверждением."
+        ? "Это массовая отправка: откроется проверка получателей и подтверждение."
         : command.riskLevel >= 3
           ? "После подтверждения CRM отправит сообщение клиенту через WhatsApp."
           : command.taskType === "call"

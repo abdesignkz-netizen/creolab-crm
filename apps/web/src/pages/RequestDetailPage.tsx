@@ -6,6 +6,7 @@ import { api } from "../lib/api";
 import { useCapabilities } from "../lib/session";
 import { CALLS_ENABLED } from "../lib/featureFlags";
 import { tip } from "../lib/tip";
+import { dealOutcomeLabel } from "../lib/labels";
 
 const LOST_REASONS = [
   { value: "expensive", label: "Дорого" },
@@ -36,7 +37,6 @@ export function RequestDetailPage() {
   const [busy, setBusy] = useState(false);
   const [showLose, setShowLose] = useState(false);
   const [showDealConfirm, setShowDealConfirm] = useState(false);
-  const [showUtm, setShowUtm] = useState(false);
 
   async function load() {
     try {
@@ -127,7 +127,7 @@ export function RequestDetailPage() {
                   ? "AI начнёт писать клиенту по этой заявке"
                   : data.automation.status === "in_progress"
                     ? "Если WhatsApp не ушёл, AI отправит приветствие по этой заявке"
-                    : "Передать заявку AI Manager для квалификации и первого контакта",
+                    : "Передать заявку AI-менеджеру для первого контакта",
               )}
               onClick={() => run(() => api.startInquiryAi(data.id))}
             >
@@ -135,7 +135,7 @@ export function RequestDetailPage() {
                 ? "Начать обработку"
                 : data.automation.status === "in_progress"
                   ? "Написать в WhatsApp"
-                  : "Передать AI Manager"}
+                  : "Передать AI-менеджеру"}
             </button>
           ) : null}
           {data.automation?.canTakeover ? (
@@ -152,7 +152,7 @@ export function RequestDetailPage() {
             <button
               className="btn secondary"
               disabled={busy}
-              {...tip("Снова отдать заявку AI Manager")}
+              {...tip("Снова отдать заявку AI-менеджеру")}
               onClick={() => run(() => api.returnInquiryAi(data.id))}
             >
               Передать обратно AI
@@ -191,7 +191,7 @@ export function RequestDetailPage() {
             <button
               className="btn"
               disabled={busy}
-              {...tip("Перевести заявку в сделку воронки")}
+              {...tip("Создать сделку по этой заявке")}
               onClick={() => setShowDealConfirm(true)}
             >
               Создать сделку
@@ -317,7 +317,7 @@ export function RequestDetailPage() {
                   <dd>
                     {data.automation.status === "none" || data.automation.status === "analyzed"
                       ? "Менеджер"
-                      : "AI Manager"}
+                      : "AI-менеджер"}
                   </dd>
                 </div>
                 <div>
@@ -429,10 +429,12 @@ export function RequestDetailPage() {
                 <dd>{data.landingPage || "—"}</dd>
               </div>
             </div>
-            <button type="button" className="linkish" onClick={() => setShowUtm((v) => !v)}>
-              {showUtm ? "Скрыть UTM" : "Показать UTM"}
-            </button>
-            {showUtm ? <pre className="code">{JSON.stringify({ utmSource: data.utmSource, utmCampaign: data.utmCampaign }, null, 2)}</pre> : null}
+            {data.utmSource || data.utmCampaign ? (
+              <p className="muted" style={{ marginTop: 8 }}>
+                Метка кампании: {data.utmSource || "—"}
+                {data.utmCampaign ? ` · ${data.utmCampaign}` : ""}
+              </p>
+            ) : null}
           </div>
 
           <div className="panel">
@@ -562,7 +564,7 @@ export function RequestDetailPage() {
             {data.deal ? (
               <>
                 <b>{data.deal.title}</b>
-                <div className="muted">{data.deal.stage || data.deal.outcome}</div>
+                <div className="muted">{dealOutcomeLabel(data.deal.outcome, data.deal.stage)}</div>
                 <div className="actions" style={{ marginTop: 10 }}>
                   <Link className="btn secondary" to="/deals">
                     Открыть сделку

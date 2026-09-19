@@ -586,7 +586,7 @@ export async function getTask(prisma: PrismaClient, auth: AuthContext, id: strin
           m.senderKind === "client" || m.direction === "inbound"
             ? "Клиент"
             : m.senderKind === "ai"
-              ? "AI Manager"
+              ? "AI"
               : "Менеджер",
         createdAt: m.createdAt,
       })),
@@ -595,7 +595,7 @@ export async function getTask(prisma: PrismaClient, auth: AuthContext, id: strin
         item.source === "context_engine"
           ? "Создано автоматически из договорённости в WhatsApp"
           : item.source === "ai_command"
-            ? "Создано из команды"
+            ? "Создано из описания задачи"
             : null,
     },
   };
@@ -938,7 +938,7 @@ export async function setConversationMode(
           sellerError = "На боте не применилось: WhatsApp не подключён";
         }
       } catch (error) {
-        sellerError = `На боте не применилось: ${error instanceof Error ? error.message : "мост недоступен"}`;
+        sellerError = `На WhatsApp не применилось: ${error instanceof Error ? error.message : "сейчас недоступен"}`;
         await tx.auditEvent.create({
           data: {
             tenantId: tid,
@@ -1130,6 +1130,7 @@ export async function listNotifications(prisma: PrismaClient, auth: AuthContext)
 
 function notificationHref(type: string, entityType: string, entityId: string, conversationId?: string) {
   if (type.startsWith("conversation.") || entityType === "conversation") return `/conversations/${entityId}`;
+  if (entityType === "support_ticket" || type.startsWith("support.")) return `/today?help=${entityId}`;
   if (type === "inquiry.created" || entityType === "inquiry") {
     return conversationId ? `/conversations/${conversationId}` : `/requests/${entityId}`;
   }

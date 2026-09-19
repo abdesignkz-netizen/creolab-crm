@@ -26,7 +26,7 @@ export function PlatformLoginPage() {
               const message = err instanceof Error ? err.message : "Ошибка входа";
               setError(
                 message === "Failed to fetch" || message === "HTTP 500"
-                  ? "Нет связи с API. Запустите сервер и откройте ссылку входа ещё раз."
+                  ? "Сейчас не удаётся войти. Попробуйте ещё раз через минуту."
                   : message,
               );
             }

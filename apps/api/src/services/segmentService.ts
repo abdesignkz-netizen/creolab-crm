@@ -18,7 +18,7 @@ export const SERVICE_CATEGORIES = [
   { id: "PRESENTATION", label: "Презентация", keywords: /презентац|pitch|deck|тендерн|pitch.?deck/i },
   { id: "ADVERTISING", label: "Реклама", keywords: /реклам|google\s*ads|meta\s*ads|tiktok|facebook\s*ads|яндекс/i },
   { id: "BRANDING", label: "Брендинг", keywords: /бренд|логотип|айдентик|brand/i },
-  { id: "AI", label: "AI Manager", keywords: /ai\s*manager|ии.?менеджер|whatsapp\s*ai|чат.?бот/i },
+  { id: "AI", label: "AI-менеджер", keywords: /ai\s*manager|ии.?менеджер|whatsapp\s*ai|чат.?бот/i },
 ] as const;
 
 export type SegmentInput = {

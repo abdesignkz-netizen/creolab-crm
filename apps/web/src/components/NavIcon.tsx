@@ -11,8 +11,10 @@ const paths: Record<string, string> = {
   integrations: "M8 3v5m8-5v5M5 8h14v3a7 7 0 0 1-7 7v4M5 8v3a7 7 0 0 0 7 7",
   stats: "M4 3v17h17M8 15v-4m5 4V7m5 8V4",
   settings: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8m-2-5h4l1 3 3 1 3 3v4l-3 1-1 3-3 3h-4l-1-3-3-1-3-3v-4l3-1 1-3 3-3",
+  help: "M9.1 9a3 3 0 1 1 4.2 2.7c-.8.5-1.3 1-1.3 2M12 17.5h.01",
 };
 
 export function NavIcon({ to }: { to: string }) {
-  return <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[to.split("/")[1]] || paths.today} /></svg>;
+  const key = to.replace(/^\//, "").split("/")[0] || "today";
+  return <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[key] || paths.today} /></svg>;
 }

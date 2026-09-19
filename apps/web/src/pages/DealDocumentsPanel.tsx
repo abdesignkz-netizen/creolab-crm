@@ -168,6 +168,7 @@ export function DealDocumentsPanel(props: {
   const { hash } = useLocation();
   useEffect(() => {
     if (hash === "#esf" && docs) document.getElementById("esf")?.scrollIntoView({ block: "start" });
+    if (hash === "#avr" && docs) document.getElementById("avr")?.scrollIntoView({ block: "start" });
   }, [hash, docs]);
   const edocs = docs?.electronicDocuments || [];
   const avr = edocs.find((row: any) => row.type === "AVR");
@@ -579,7 +580,7 @@ export function DealDocumentsPanel(props: {
           </div>
         </div>
 
-        <div className="doc-step">
+        <div className="doc-step" id="avr" style={{ scrollMarginTop: 24 }}>
           <div className="doc-step-title">
             <b>АВР</b>
           </div>

@@ -93,12 +93,9 @@ export function ClientsPage() {
         <div>
           <h2>Клиенты</h2>
           {filter === "new" ? (
-            <p className="muted">Как цифра в меню: клиенты со статусом «Новый», ещё не взятые в работу.</p>
+          <p className="muted">Новые клиенты, которых ещё не взяли в работу.</p>
           ) : (
-            <p className="muted">
-              Кто · откуда · что нужно · что делать дальше
-              {newClients > 0 ? `. Цифра в меню — ${clientsNewLabel(newClients)}.` : ""}
-            </p>
+            <p className="muted">Кто пришёл, откуда и что делать дальше.</p>
           )}
         </div>
         <button className="btn" onClick={() => setCreating((value) => !value)}>
@@ -112,7 +109,7 @@ export function ClientsPage() {
       </div> : null}
       {filter !== "new" && !q && newClients > 0 ? (
         <div className="active-filter-note">
-          <span>{clientsNewLabel(newClients)} — те же, что цифра у «Клиенты» в меню.</span>
+          <span>{clientsNewLabel(newClients)} ещё не взяты в работу.</span>
           <button type="button" className="btn secondary" onClick={openNewClients}>
             Показать
           </button>
@@ -208,7 +205,6 @@ export function ClientsPage() {
               <option value="whatsapp">WhatsApp</option>
               <option value="form">Форма</option>
               <option value="manual">Вручную</option>
-              <option value="webhook">Webhook</option>
             </select>
           </label>
         </div>
@@ -223,7 +219,7 @@ export function ClientsPage() {
             {...(value === "today"
               ? tip("Клиенты, с которыми был контакт сегодня")
               : value === "new"
-                ? tip("Как цифра в меню: статус «Новый»")
+                ? tip("Клиенты со статусом «Новый»")
                 : value === "needs_reply"
                   ? tip("Последнее сообщение было от клиента — ещё не ответили")
                   : {})}

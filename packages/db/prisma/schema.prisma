@@ -63,6 +63,8 @@ model Tenant {
   notificationPrefs    NotificationPreference[]
   auditEvents          AuditEvent[]
   supportSessions      SupportSession[]
+  supportTickets       SupportTicket[]
+  supportArticleFeedbacks SupportArticleFeedback[]
   situationSnoozes     SituationSnooze[]
   tags                 Tag[]
   contactTags          ContactTag[]
@@ -1840,4 +1842,89 @@ model ElectronicDocument {
   @@unique([tenantId, id])
   @@unique([tenantId, type, number])
   @@index([tenantId, dealId, type, status])
+}
+
+model SupportArticle {
+  id           String   @id @default(uuid())
+  category     String
+  title        String
+  slug         String   @unique
+  content      String
+  keywords     String   @default("")
+  sortOrder    Int      @default(0)
+  isPopular    Boolean  @default(false)
+  isPublished  Boolean  @default(true)
+  relatedRoute String?
+  relatedLabel String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  feedback     SupportArticleFeedback[]
+
+  @@index([isPublished, isPopular, sortOrder])
+  @@index([category, sortOrder])
+}
+
+model SupportArticleFeedback {
+  id        String   @id @default(uuid())
+  articleId String
+  tenantId  String
+  userId    String
+  helpful   Boolean
+  createdAt DateTime @default(now())
+  article   SupportArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  tenant    Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([articleId, userId])
+  @@index([tenantId, createdAt])
+}
+
+model SupportTicket {
+  id               String    @id @default(uuid())
+  number           Int       @unique @default(autoincrement())
+  tenantId         String
+  createdByUserId  String
+  assignedToUserId String?
+  subject          String?
+  status           String    @default("OPEN")
+  priority         String    @default("NORMAL")
+  sourceRoute      String?
+  sourceModule     String?
+  contextJson      Json      @default("{}")
+  lastMessageAt    DateTime  @default(now())
+  customerUnread   Int       @default(0)
+  adminUnread      Int       @default(1)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  resolvedAt       DateTime?
+  tenant           Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  messages         SupportMessage[]
+
+  @@index([tenantId, status, lastMessageAt])
+  @@index([status, lastMessageAt])
+  @@index([assignedToUserId, status])
+  @@index([createdByUserId, tenantId])
+}
+
+model SupportMessage {
+  id           String   @id @default(uuid())
+  ticketId     String
+  senderUserId String?
+  senderType   String
+  type         String   @default("TEXT")
+  content      String   @default("")
+  createdAt    DateTime @default(now())
+  ticket       SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId, createdAt])
+}
+
+model SupportQuickReply {
+  id        String   @id @default(uuid())
+  shortcut  String   @unique
+  title     String
+  content   String
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

@@ -7,7 +7,6 @@ import { nameWithPhone } from "../lib/contactDisplay";
 import { formatDurationMinutes } from "../lib/duration";
 import { api } from "../lib/api";
 import { useCapabilities, useSession } from "../lib/session";
-import { normalizeLocale, t } from "../i18n";
 
 type Scope = "all" | "mine" | "unassigned";
 
@@ -17,11 +16,11 @@ const ACTION_LABEL: Record<string, string> = {
   open_inquiry: "Открыть заявку",
   take_conversation: "Забрать себе",
   reply_human: "Ответить",
-  return_to_ai: "Вернуть ИИ",
+  return_to_ai: "Вернуть AI",
   resume_paused: "Снять паузу",
   complete_task: "Закрыть задачу",
   assign_owner: "Назначить себе",
-  instruct_ai: "Поручить ИИ",
+  instruct_ai: "Поручить AI",
   open_contact: "Открыть клиента",
   create_next_action: "Задать шаг",
 };
@@ -91,7 +90,6 @@ function Kpi({
 export function SituationPage() {
   const caps = useCapabilities();
   const { me } = useSession();
-  const locale = normalizeLocale(me?.user?.locale);
   const requestVersion = useRequestVersion();
   const navigate = useNavigate();
   const [scope, setScope] = useUrlState<Scope>("scope", "all");
@@ -205,7 +203,6 @@ export function SituationPage() {
       <section className="situation-page">
         <div className="page-head sit-head">
           <div>
-            <p className="page-kicker">{t(locale, "today.work")}</p>
             <h2>Главная</h2>
             {badgeHint ? <p className="muted sit-badge-explain">{badgeHint}</p> : null}
           </div>
@@ -219,7 +216,7 @@ export function SituationPage() {
         </div>
         <div className="panel">
           <b>Что требует внимания</b>
-          {!items.length ? <p className="empty">Пока нет рабочих пунктов</p> : null}
+          {!items.length ? <p className="empty">Сейчас ничего не требует внимания</p> : null}
           {items.slice(0, 40).map((item: any) => (
             <div className="row" key={item.id}>
               <div>
@@ -314,8 +311,7 @@ export function SituationPage() {
     <section className="situation-page">
       <div className="page-head sit-head">
         <div>
-          <p className="page-kicker">{caps.manager ? "Рабочий кабинет" : "Оперативный центр"}</p>
-          <h2>{caps.manager ? "Главная" : "Главная"}</h2>
+          <h2>Главная</h2>
           {badgeHint ? <p className="muted sit-badge-explain">{badgeHint}</p> : null}
         </div>
         <div className="sit-meta">
@@ -328,7 +324,7 @@ export function SituationPage() {
         <div className="sit-kpi-grid" style={{ marginBottom: 12 }}>
           <Kpi label="AI обрабатывает заявки" value={data.aiManager.newRequests.processing} to="/inquiries?filter=ai_processing" />
           <Kpi label="Ожидают менеджера" value={data.aiManager.newRequests.needsHuman} to="/inquiries?filter=ai_needs_human" />
-          <Kpi label="Ошибка AI-обработки" value={data.aiManager.newRequests.analysisFailed} to="/inquiries?filter=ai_failed" />
+          <Kpi label="Ошибка обработки AI" value={data.aiManager.newRequests.analysisFailed} to="/inquiries?filter=ai_failed" />
         </div>
       ) : null}
 
@@ -643,28 +639,27 @@ export function SituationPage() {
       <div className="sit-section sit-current">
         <div className="sit-section-head">
           <h3>Сейчас в работе</h3>
-          <span className="muted">Текущее состояние, не период</span>
+          <span className="muted">Не за период — как сейчас</span>
         </div>
         <div className="sit-kpi-grid sit-kpi-grid-current">
           <Kpi label="Новые заявки" value={c.newInquiries ?? 0} to={path("/inquiries", { filter: "new", test: "false" })} emphasize />
           <Kpi label="Заявки в работе" value={c.inWorkInquiries ?? 0} to={path("/inquiries", { filter: "in_progress", test: "false" })} />
           <Kpi label="Активные сделки" value={c.activeDeals} to={path("/deals")} emphasize />
-          <Kpi
-            label="Сумма воронки"
-            value={c.activePipelineAmountLabel || "—"}
-            hint={
-              c.amountKnownOf
-                ? `сумма известна у ${c.amountKnownCount} из ${c.amountKnownOf}`
-                : undefined
-            }
-            to={path("/deals")}
-            emphasize
-          />
-          <Kpi label="Взвешенный прогноз" value={c.weightedPipelineLabel || "—"} to={path("/deals")} />
+            <Kpi
+              label="Сумма сделок"
+              value={c.activePipelineAmountLabel || "—"}
+              hint={
+                c.amountKnownOf
+                  ? `сумма известна у ${c.amountKnownCount} из ${c.amountKnownOf}`
+                  : undefined
+              }
+              to={path("/deals")}
+              emphasize
+            />
           <Kpi label="На договоре" value={c.contractStage} to={path("/deals", { stage: "contract" })} />
           <Kpi label="Заявки ждут клиента" value={c.waitingClientInquiries} to={path("/inquiries", {filter: "waiting_client", test: "false"})} />
           <Kpi label="Нужен ответ" value={c.needsReply} to="/contacts?filter=needs_reply" />
-          <Kpi label="Без след. шага" value={nextActionItems.length} to={noNextHref} />
+          <Kpi label="Без следующего шага" value={nextActionItems.length} to={noNextHref} />
           <Kpi label="Просрочено" value={c.overdueTasks} to="/tasks?filter=overdue" />
           <Kpi label="Зависли" value={c.stalledDeals} to={path("/deals", { focus: "stalled" })} />
           <Kpi label="КП без ответа" value={c.proposalWithoutReply ?? 0} to={path("/deals", { focus: "proposal_no_reply" })} />
@@ -693,7 +688,7 @@ export function SituationPage() {
         <div className="sit-section sit-team" id="team">
           <div className="sit-section-head">
             <h3>Команда</h3>
-            <span className="muted">Компактный снимок</span>
+            <span className="muted">По сотрудникам</span>
           </div>
           {team.length === 0 ? (
             <p className="empty">Нет данных по менеджерам за выбранные условия.</p>

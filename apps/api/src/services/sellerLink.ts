@@ -6,7 +6,6 @@ import { config } from "../config.ts";
 import { ApiError } from "../errors.ts";
 import { sha256, randomToken, safeEqual } from "../lib/hash.ts";
 import { decryptSecret, encryptSecret } from "../lib/secretBox.ts";
-import { fileStorageStatus } from "../lib/storage.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { can } from "../lib/types.ts";
 import { requireIntegrationsAccess, requireNotManager, requireTenant } from "../lib/access.ts";
@@ -414,18 +413,18 @@ function describeBridgeError(error: unknown, _sellerUrl: string) {
   const cause = error instanceof Error && "cause" in error ? (error.cause as { code?: string } | undefined) : undefined;
   const code = cause?.code || "";
   if (code === "ECONNREFUSED" || message === "fetch failed" || message.includes("ECONNREFUSED")) {
-    return "Общий AI Manager сейчас недоступен. Проверьте подключение позже или обратитесь в поддержку.";
+    return "WhatsApp сейчас недоступен. Проверьте подключение позже или обратитесь в поддержку.";
   }
   if (message.includes("unauthorized") || message.includes("HTTP 401")) {
-    return "Секрет моста не совпал. Нажмите «Переподключить» или обратитесь в поддержку.";
+    return "Не удалось подтвердить подключение. Нажмите «Переподключить» или обратитесь в поддержку.";
   }
   if (message.includes("HTTP 404") || message.includes("Cannot GET /internal/crm")) {
-    return "AI Manager отвечает, но мост CRM на нём ещё не включён.";
+    return "WhatsApp ещё не готов для этой компании. Обратитесь в поддержку.";
   }
   if (code === "ETIMEDOUT" || message.includes("Timeout") || message.includes("aborted")) {
-    return "AI Manager не ответил за 15 секунд.";
+    return "WhatsApp не ответил. Попробуйте позже.";
   }
-  return message || "Мост недоступен";
+  return "WhatsApp сейчас недоступен.";
 }
 
 export async function getSellerIntegration(prisma: PrismaClient, tenantId: string) {
@@ -739,13 +738,13 @@ function sellerSyncWarning(args: {
   conversationCount: number;
 }) {
   if (!args.configured) return null;
-  if (!args.reachable) return "Картина неполная: бот не отвечает";
-  if (!args.lastSyncAt) return "Ждём первый автоматический синк диалогов";
+  if (!args.reachable) return "Картина неполная: WhatsApp не отвечает";
+  if (!args.lastSyncAt) return "Ждём первую загрузку диалогов";
   if (args.leadCountOnBot != null && args.leadCountOnBot > 0 && args.conversationCount === 0) {
-    return "На боте есть лиды, в CRM нет диалогов — синк ещё не подтянул";
+    return "На WhatsApp есть переписки, которых ещё нет в CRM. Нажмите «Забрать диалоги из бота».";
   }
   if (Date.now() - args.lastSyncAt.getTime() > 15 * 60 * 1000 && args.conversationCount > 0) {
-    return "Синк устарел — обновится автоматически";
+    return "Список диалогов устарел — обновится сам";
   }
   return null;
 }
@@ -780,8 +779,8 @@ export async function sellerHealthFor(prisma: PrismaClient, auth: AuthContext) {
         conversationCount,
       }),
       note: sharedAiManagerUrl()
-        ? "Укажите Instance ID и API Token Green API — адрес бота задаётся платформой."
-        : "WhatsApp ещё не подключён. CRM уже принимает формы и задачи.",
+        ? "Укажите Instance ID и API Token из личного кабинета Green API."
+        : "WhatsApp ещё не подключён.",
     };
   }
   try {
@@ -803,14 +802,14 @@ export async function sellerHealthFor(prisma: PrismaClient, auth: AuthContext) {
       }),
       note:
         leadCountOnBot === null
-          ? "Мост отвечает. Отправка и команды менеджера остаются в боте."
-          : `На боте ${leadCountOnBot} лидов · в CRM ${conversationCount} диалогов.`,
+          ? "WhatsApp подключён."
+          : `На WhatsApp ${leadCountOnBot} переписок · в CRM ${conversationCount} диалогов.`,
     };
   } catch (error) {
     return {
       configured: true,
       reachable: false,
-      sender: "whatsappService.js",
+      sender: null,
       ...publicView,
       leadCountOnBot: null,
       storePathKind: null,
@@ -855,7 +854,7 @@ export async function upsertWhatsAppSellerForTenant(
   }
   const secretEnc = secret ? encryptSecret(secret) : previousSchema.secretEnc;
   if (!secretEnc) {
-    throw new ApiError(422, "invalid", "Не удалось создать секрет моста");
+    throw new ApiError(422, "invalid", "Не удалось создать секрет подключения");
   }
   const integrationSecret = secret || decryptSecret(secretEnc);
   const schemaJson: WhatsAppSellerSchema = {
@@ -877,7 +876,7 @@ export async function upsertWhatsAppSellerForTenant(
         name: String(input.name || "WhatsApp ИИ-менеджер"),
         status: "error",
         testMode: false,
-        lastError: "Проверка моста ещё не выполнена",
+        lastError: "Проверка подключения ещё не выполнена",
         lastErrorCode: "provider_unreachable",
         connectionStatus: "ERROR",
         healthStatus: "ERROR",
@@ -911,7 +910,7 @@ export async function upsertWhatsAppSellerForTenant(
     }
   }
 
-  let note = "Сохранено. Проверка моста не подтвердила соединение — статус не «подключено».";
+  let note = "Сохранено. Подключение пока не подтверждено.";
   let reachable = false;
   const savedInstanceId = String(schemaJson.instanceId || "").trim();
   const savedToken = Boolean(apiTokenEnc);
@@ -1338,7 +1337,7 @@ async function syncSellerLeadsOnce(prisma: PrismaClient, auth: AuthContext) {
     total: leads.length,
     note:
       leads.length === 0
-        ? "Бот ответил, но в его базе нет лидов. Кнопка забирает только то, что уже лежит в leads.json после входящих сообщений. Историю WhatsApp из Green API она не выгружает."
+        ? "Новых диалогов в WhatsApp пока нет. История чатов из Green API этой кнопкой не выгружается."
         : undefined,
   };
 }
@@ -1368,7 +1367,7 @@ export async function addSellerInstruction(
     await resolved.bridge.addInstruction(conversation.sellerLeadId, instruction);
     appliedOnSeller = true;
   } catch (error) {
-    sellerError = `На боте не применилось: ${error instanceof Error ? error.message : "мост недоступен"}`;
+    sellerError = `На WhatsApp не применилось: ${error instanceof Error ? error.message : "сейчас недоступен"}`;
   }
   await prisma.note.create({
     data: {
@@ -1397,12 +1396,11 @@ export async function addSellerInstruction(
 export async function integrationSetup(prisma: PrismaClient, auth: AuthContext) {
   requireIntegrationAdmin(auth);
   const membership = requireTenant(auth);
-  const [form, webhook, seller, telegram] = await Promise.all([
+  const [form, seller, telegram] = await Promise.all([
     prisma.formDefinition.findFirst({
       where: { tenantId: membership.tenantId, active: true },
       include: { integration: true },
     }),
-    prisma.integration.findFirst({ where: { tenantId: membership.tenantId, type: "webhook" } }),
     sellerHealthFor(prisma, auth),
     prisma.telegramBinding.findFirst({ where: { userId: auth.user.id, revokedAt: null } }),
   ]);
@@ -1416,7 +1414,6 @@ export async function integrationSetup(prisma: PrismaClient, auth: AuthContext) 
     : "UNKNOWN";
   return {
     whatsapp: seller,
-    fileStorage: fileStorageStatus(),
     form: form
       ? {
           connected: true,
@@ -1429,49 +1426,20 @@ export async function integrationSetup(prisma: PrismaClient, auth: AuthContext) 
             formHealth === "HEALTHY"
               ? "Работает"
               : formHealth === "NO_EVENTS_YET"
-                ? "Подключено · событий ещё нет"
+                ? "Подключено"
                 : "Ошибка",
-          mapping: form.integration.mappingJson,
           testMode: Boolean(form.integration.testMode),
           integrationId: form.integrationId,
         }
       : { connected: false },
-    webhook: webhook
-      ? {
-          connected: webhook.status === "active",
-          id: webhook.id,
-          eventsUrl: `${apiBase}/api/v1/integrations/${webhook.id}/events`,
-          connectionStatus: webhook.status === "active" ? "CONNECTED" : "PENDING",
-          healthStatus: webhook.lastError
-            ? "ERROR"
-            : webhook.lastEventAt
-              ? "HEALTHY"
-              : "NO_EVENTS_YET",
-          healthLabel: webhook.lastError
-            ? "Ошибка"
-            : webhook.lastEventAt
-              ? "Работает"
-              : "Подключено · событий ещё нет",
-        }
-      : { connected: false },
     telegram: {
-      siteLeads: {
-        connected: false,
-        note: "Клиентский Telegram-бот — отдельный этап (сообщения ≠ заявки).",
-      },
       employee: {
         connected: Boolean(telegram),
         botConfigured: Boolean(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_BOT_USERNAME),
         note: process.env.TELEGRAM_BOT_TOKEN
-          ? "Бот задан. Нажмите «Подключить Telegram», затем /start в боте."
-          : "Для уведомлений сотрудника задайте TELEGRAM_BOT_TOKEN и TELEGRAM_BOT_USERNAME в .env CRM.",
+          ? "Нажмите «Подключить Telegram», затем откройте бота и отправьте /start."
+          : "Уведомления в Telegram пока недоступны.",
       },
-    },
-    placeholders: {
-      instagramDirect: { connected: false, note: "Этап 4 · OAuth Professional Account" },
-      metaLeadForms: { connected: false, note: "Этап 5 · отдельно от Instagram Direct" },
-      googleForms: { connected: false, note: "Этап 6 · Pub/Sub + watch renewal" },
-      tiktokLeads: { connected: false, note: "Только после capability check аккаунта" },
     },
   };
 }
@@ -1529,8 +1497,8 @@ export async function beginTelegramLink(prisma: PrismaClient, auth: AuthContext)
     deepLink: username ? `https://t.me/${username}?start=${token}` : null,
     token: username ? undefined : token,
     note: username
-      ? "Откройте ссылку и нажмите Start. Не отправляйте токен в клиентский чат."
-      : "TELEGRAM_BOT_USERNAME не задан. Привязка не завершится, пока бот сотрудника не настроен.",
+      ? "Откройте бота и нажмите Start."
+      : "Уведомления в Telegram пока недоступны.",
   };
 }
 

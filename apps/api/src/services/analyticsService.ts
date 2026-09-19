@@ -1549,8 +1549,8 @@ export async function getAnalyticsDrilldown(
     inquiries: "Обращения",
     clients: "Уникальные клиенты",
     deals: "Созданные сделки",
-    won: "Продажи (WON)",
-    lost: "Потери (LOST)",
+    won: "Продажи",
+    lost: "Потери",
     source_won: `Источник → продажи: ${key}`,
     source_inquiries: `Источник → обращения: ${key}`,
     service_won: `Услуга → продажи: ${key}`,
@@ -1558,7 +1558,7 @@ export async function getAnalyticsDrilldown(
     loss_stage: `Потери на стадии: ${key}`,
     manager_won: `Менеджер → продажи`,
     manager_lost: `Менеджер → потери`,
-    manager_leads: `Менеджер → лиды`,
+    manager_leads: `Менеджер → обращения`,
   };
 
   if (entity === "clients") {

@@ -45,7 +45,7 @@ export function ControlPage() {
       const result = await action();
       if (result?.note) setNote(result.note);
       else if (result?.sellerError) setNote(result.sellerError);
-      else if (result?.appliedOnSeller === false) setNote("Режим записан в CRM. На AI Manager не применилось.");
+      else if (result?.appliedOnSeller === false) setNote("Записано в CRM, но на AI это не повлияло.");
       else setNote("");
       await load();
     } catch (err) {
@@ -81,7 +81,7 @@ export function ControlPage() {
       <div className="page-head">
         <div>
           <h2>Управление</h2>
-          <p className="muted">Оперативный контроль AI Manager и передачи диалогов сотрудникам.</p>
+          <p className="muted">Где отвечает AI, а где нужен сотрудник.</p>
         </div>
       </div>
       {error ? <p className="error">{error}</p> : null}
@@ -90,7 +90,7 @@ export function ControlPage() {
       <div className="panel management-ai-status">
         <div className="management-ai-status-head">
           <div>
-            <b>AI Manager</b>
+            <b>AI-менеджер</b>
             <span className={`mgmt-dot ${ai.statusTone === "ok" ? "ok" : "warn"}`} />
             <span>{ai.status}</span>
           </div>
@@ -149,10 +149,9 @@ export function ControlPage() {
 
       {confirmPause ? (
         <div className="panel soft">
-          <b>Приостановить AI Manager?</b>
+          <b>Приостановить AI-менеджера?</b>
           <p className="muted">
-            AI Manager перестанет автоматически отвечать клиентам в активных диалогах. Входящие сообщения и заявки
-            продолжат поступать и сохраняться в CRM.
+            AI перестанет сам отвечать клиентам. Новые сообщения и заявки по-прежнему будут приходить в CRM.
           </p>
           <div className="actions">
             <button type="button" className="btn secondary" onClick={() => setConfirmPause(false)}>
@@ -224,7 +223,7 @@ export function ControlPage() {
             <span className="muted">{(data.interventions || []).length}</span>
           </div>
           {(data.interventions || []).length === 0 ? (
-            <p className="empty">Сейчас AI Manager не требует вмешательства.</p>
+            <p className="empty">Сейчас AI не требует вмешательства.</p>
           ) : (
             (data.interventions || []).map((item: any) => (
               <div className="mgmt-card" key={item.id}>
@@ -421,7 +420,7 @@ export function ControlPage() {
             <span className="muted">{(data.problems || []).length}</span>
           </div>
           {(data.problems || []).length === 0 ? (
-            <p className="empty">AI Manager работает без обнаруженных проблем.</p>
+            <p className="empty">Сбоев у AI сейчас нет.</p>
           ) : (
             (data.problems || []).map((item: any) => (
               <div className="mgmt-card compact" key={item.id}>

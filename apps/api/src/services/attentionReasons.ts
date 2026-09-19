@@ -16,7 +16,7 @@ const ATTENTION_REASON_LABEL: Record<string, string> = {
   needs_reply: "Клиент написал, AI просит человека ответить",
   escalate: "AI передал диалог человеку",
   paused: "Диалог на паузе",
-  global_ai_pause: "AI Manager на паузе",
+  global_ai_pause: "AI на паузе",
   AI_ANALYSIS_FAILED: "Не удалось сформировать ответ",
   AI_OUTBOUND_FAILED: "Не удалось отправить сообщение",
   WHATSAPP_NOT_REGISTERED: "Контакт не зарегистрирован в WhatsApp",

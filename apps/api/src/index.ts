@@ -10,6 +10,8 @@ const platformAdmin = await ensurePlatformAdmin(prisma);
 if (platformAdmin.created || platformAdmin.updated) {
   console.log("Service administrator account is ready");
 }
+const { ensureSupportCatalog } = await import("./services/supportKnowledgeService.ts");
+await ensureSupportCatalog(prisma);
 const promoted = await promoteWebsiteFormsToLive(prisma);
 if (promoted.updated > 0) {
   console.log(`Website form integrations switched to live mode: ${promoted.updated}`);

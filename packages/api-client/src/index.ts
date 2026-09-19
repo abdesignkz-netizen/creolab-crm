@@ -688,5 +688,55 @@ export function createApiClient(options: ClientOptions) {
     invitationPreview: (token: string) => request(`/api/v1/invitations/${token}`),
     acceptInvitation: (token: string, body: Record<string, unknown>) =>
       request(`/api/v1/invitations/${token}/accept`, { method: "POST", body: JSON.stringify(body) }),
+    supportArticles: (query: { q?: string; route?: string } = {}) => {
+      const params = new URLSearchParams();
+      if (query.q) params.set("q", query.q);
+      if (query.route) params.set("route", query.route);
+      const qs = params.toString();
+      return request(`/api/v1/support/articles${qs ? `?${qs}` : ""}`);
+    },
+    supportArticle: (id: string) => request(`/api/v1/support/articles/${id}`),
+    supportArticleFeedback: (id: string, helpful: boolean) =>
+      request(`/api/v1/support/articles/${id}/feedback`, { method: "POST", body: JSON.stringify({ helpful }) }),
+    supportUnread: () => request("/api/v1/support/unread"),
+    supportTickets: () => request("/api/v1/support/tickets"),
+    createSupportTicket: (body: Record<string, unknown>) =>
+      request("/api/v1/support/tickets", { method: "POST", body: JSON.stringify(body) }),
+    supportTicket: (id: string) => request(`/api/v1/support/tickets/${id}`),
+    supportMessage: (id: string, body: Record<string, unknown>) =>
+      request(`/api/v1/support/tickets/${id}/messages`, { method: "POST", body: JSON.stringify(body) }),
+    supportAttachment: (id: string, body: Record<string, unknown>) =>
+      request(`/api/v1/support/tickets/${id}/attachments`, { method: "POST", body: JSON.stringify(body) }),
+    downloadSupportAttachment: (ticketId: string, attachmentId: string) =>
+      downloadBlob(`/api/v1/support/tickets/${ticketId}/attachments/${attachmentId}`, "file"),
+    adminSupportUnread: () => request("/api/v1/admin/support/unread"),
+    adminSupportTickets: (query: { status?: string; q?: string } = {}) => {
+      const params = new URLSearchParams();
+      if (query.status) params.set("status", query.status);
+      if (query.q) params.set("q", query.q);
+      const qs = params.toString();
+      return request(`/api/v1/admin/support/tickets${qs ? `?${qs}` : ""}`);
+    },
+    adminSupportTicket: (id: string) => request(`/api/v1/admin/support/tickets/${id}`),
+    adminSupportMessage: (id: string, body: Record<string, unknown>) =>
+      request(`/api/v1/admin/support/tickets/${id}/messages`, { method: "POST", body: JSON.stringify(body) }),
+    adminSupportAttachment: (id: string, body: Record<string, unknown>) =>
+      request(`/api/v1/admin/support/tickets/${id}/attachments`, { method: "POST", body: JSON.stringify(body) }),
+    downloadAdminSupportAttachment: (ticketId: string, attachmentId: string) =>
+      downloadBlob(`/api/v1/admin/support/tickets/${ticketId}/attachments/${attachmentId}`, "file"),
+    adminSupportTicketUpdate: (id: string, body: Record<string, unknown>) =>
+      request(`/api/v1/admin/support/tickets/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+    adminSupportArticles: () => request("/api/v1/admin/support/articles"),
+    adminSupportArticleCreate: (body: Record<string, unknown>) =>
+      request("/api/v1/admin/support/articles", { method: "POST", body: JSON.stringify(body) }),
+    adminSupportArticleUpdate: (id: string, body: Record<string, unknown>) =>
+      request(`/api/v1/admin/support/articles/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+    adminSupportArticleDelete: (id: string) => request(`/api/v1/admin/support/articles/${id}`, { method: "DELETE" }),
+    adminSupportReplies: () => request("/api/v1/admin/support/replies"),
+    adminSupportReplyCreate: (body: Record<string, unknown>) =>
+      request("/api/v1/admin/support/replies", { method: "POST", body: JSON.stringify(body) }),
+    adminSupportReplyUpdate: (id: string, body: Record<string, unknown>) =>
+      request(`/api/v1/admin/support/replies/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+    adminSupportReplyDelete: (id: string) => request(`/api/v1/admin/support/replies/${id}`, { method: "DELETE" }),
   };
 }
