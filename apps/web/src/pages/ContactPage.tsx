@@ -29,6 +29,11 @@ export function ContactPage() {
   const [editBusy, setEditBusy] = useState(false);
   const [noteOpen, setNoteOpen] = useState(true);
   const [noteBusy, setNoteBusy] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+  const [writeBusy, setWriteBusy] = useState(false);
+  const [writeBlocked, setWriteBlocked] = useState(false);
 
   async function load() {
     if (!id) return;
@@ -41,6 +46,8 @@ export function ContactPage() {
   }
 
   useEffect(() => {
+    setWriteBlocked(false);
+    setWriteBusy(false);
     load();
   }, [id]);
 
@@ -72,6 +79,26 @@ export function ContactPage() {
 
   const { client, currentRequest, control, attribution, tags, notes, requests, conversations, deals, tasks, timeline, gaps, members } = data;
   const tel = client.phoneNormalized || client.phone?.replace(/\D+/g, "");
+  const whatsapp = conversations.find((item: { sellerLeadId?: string | null }) => item.sellerLeadId) || null;
+
+  async function openWhatsAppChat() {
+    if (writeBusy || writeBlocked) return;
+    setWriteBusy(true);
+    setError("");
+    try {
+      const opened = await api.openContactWhatsAppChat(client.id);
+      navigate(`/conversations/${opened.conversationId}?focus=reply`);
+    } catch (err) {
+      const code = err && typeof err === "object" && "code" in err ? String((err as { code?: string }).code) : "";
+      const message = err instanceof Error ? err.message : "Не удалось открыть WhatsApp";
+      if (code === "WHATSAPP_NOT_REGISTERED") {
+        setWriteBlocked(true);
+      }
+      setError(message);
+    } finally {
+      setWriteBusy(false);
+    }
+  }
 
   return (
     <section className="contact-page">
@@ -98,17 +125,30 @@ export function ContactPage() {
           </div>
         </div>
         <div className="actions sticky-actions">
-          {conversations[0] ? (
+          {whatsapp ? (
             <Link
               className="btn"
-              to={`/conversations/${conversations[0].id}?focus=reply`}
+              to={`/conversations/${whatsapp.id}?focus=reply`}
               {...tip("Открыть WhatsApp-диалог и ответить клиенту")}
             >
               Написать
             </Link>
-          ) : (
-            <button className="btn secondary" disabled {...tip("Нет связанного диалога WhatsApp")}>
+          ) : writeBlocked ? (
+            <button className="btn secondary" disabled {...tip("Этот номер не зарегистрирован в WhatsApp")}>
               Написать
+            </button>
+          ) : !tel ? (
+            <button className="btn secondary" disabled {...tip("Укажите телефон клиента, чтобы написать в WhatsApp")}>
+              Написать
+            </button>
+          ) : (
+            <button
+              className="btn"
+              disabled={writeBusy}
+              {...tip("Открыть WhatsApp, даже если переписки ещё не было")}
+              onClick={() => void openWhatsAppChat()}
+            >
+              {writeBusy ? "Открываем…" : "Написать"}
             </button>
           )}
           {CALLS_ENABLED && tel ? (
@@ -144,15 +184,16 @@ export function ContactPage() {
           <div className="menu-wrap">
             <button
               className="btn secondary"
-              {...tip("Дополнительные действия: редактировать, теги, архив")}
+              {...tip("Дополнительные действия: редактировать, теги, архив, удаление")}
               onClick={() => setMenuOpen((value) => !value)}
             >
               •••
             </button>
             {menuOpen ? (
               <div className="menu">
-                {!caps.manager ? <button onClick={() => { setEditOpen(true); setMenuOpen(false); }}>Редактировать</button> : null}
+                {!caps.manager ? <button type="button" onClick={() => { setEditOpen(true); setMenuOpen(false); }}>Редактировать</button> : null}
                 <button
+                  type="button"
                   onClick={async () => {
                     const text = prompt("Внутренняя заметка");
                     if (!text) return;
@@ -165,6 +206,7 @@ export function ContactPage() {
                   Добавить заметку
                 </button>
                 <button
+                  type="button"
                   onClick={async () => {
                     const name = prompt("Тег");
                     if (!name) return;
@@ -176,6 +218,7 @@ export function ContactPage() {
                   Добавить тег
                 </button>
                 <button
+                  type="button"
                   onClick={async () => {
                     await api.updateContact(client.id, { archived: true });
                     navigate("/contacts");
@@ -183,6 +226,19 @@ export function ContactPage() {
                 >
                   Архивировать
                 </button>
+                {caps.companyAdmin ? (
+                  <button
+                    type="button"
+                    className="danger"
+                    onClick={() => {
+                      setDeleteError("");
+                      setDeleteConfirm(true);
+                      setMenuOpen(false);
+                    }}
+                  >
+                    Удалить клиента
+                  </button>
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -190,6 +246,50 @@ export function ContactPage() {
       </div>
 
       {error ? <p className="error">{error}</p> : null}
+
+      {deleteConfirm && caps.companyAdmin ? (
+        <div className="panel contact-delete-confirm" role="alertdialog" aria-labelledby="contact-delete-title">
+          <p id="contact-delete-title">
+            Удалить клиента безвозвратно вместе с заявками и диалогами? Сделки с выставленными счетами, подписанными договорами или ЭСФ удалить нельзя — тогда архивируйте карточку. Отменить удаление нельзя.
+          </p>
+          {deleteError ? <p className="error" role="alert">{deleteError}</p> : null}
+          <div className="actions">
+            <button
+              type="button"
+              className="btn danger"
+              disabled={deleteBusy}
+              onClick={async () => {
+                if (deleteBusy) return;
+                setDeleteBusy(true);
+                setDeleteError("");
+                try {
+                  await api.deleteContact(client.id);
+                  notifySaved("Клиент удалён");
+                  window.dispatchEvent(new Event("creolab:attention-changed"));
+                  navigate("/contacts");
+                } catch (err) {
+                  setDeleteError(err instanceof Error ? err.message : "Не удалось удалить клиента");
+                } finally {
+                  setDeleteBusy(false);
+                }
+              }}
+            >
+              {deleteBusy ? "Удаляем…" : "Да, удалить"}
+            </button>
+            <button
+              type="button"
+              className="btn secondary"
+              disabled={deleteBusy}
+              onClick={() => {
+                setDeleteConfirm(false);
+                setDeleteError("");
+              }}
+            >
+              Отмена
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {editOpen && !caps.manager ? (
         <form

@@ -508,7 +508,10 @@ export function DealDocumentsPanel(props: {
                 setBusy(true);
                 void api
                   .createInvoiceDraft(d.id)
-                  .then(() => load())
+                  .then(() => {
+                    window.dispatchEvent(new Event("creolab:attention-changed"));
+                    return load();
+                  })
                   .catch((err) => setError(err instanceof Error ? err.message : "Не удалось создать счёт"))
                   .finally(() => setBusy(false));
               }}
@@ -529,6 +532,7 @@ export function DealDocumentsPanel(props: {
                     invoiceId = created.invoice.id;
                   }
                   await api.generateInvoice(invoiceId!);
+                  window.dispatchEvent(new Event("creolab:attention-changed"));
                   await load();
                 })()
                   .catch((err: any) => {

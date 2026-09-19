@@ -50,20 +50,20 @@ export const INTEGRATION_IMPLEMENTATIONS: IntegrationImplementation[] = [
   {
     type: "whatsapp_seller",
     title: "WhatsApp",
-    purpose: "Подключение моста WhatsApp AI Manager компании: адрес и секрет.",
+    purpose: "Подключение WhatsApp компании к общему AI Manager: Instance ID и API Token Green API.",
     functions: ["receive_messages", "sync_leads"],
-    authMethod: "url_and_secret",
+    authMethod: "green_api",
     implementationReady: true,
     multiple: false,
-    fields: ["name", "sellerUrl", "secret"],
+    fields: ["name", "instanceId", "apiToken"],
     connectable: true,
     connectHint: "",
     steps: [
       "Выберите компанию, к которой привязывается WhatsApp-номер.",
-      "У компании должен быть свой мост WhatsApp AI Manager (бот с Green API или аналог). Общий мост сервера к компании не подключается.",
-      "Укажите HTTPS-адрес моста и секрет. Они хранятся только у этой компании.",
-      "Нажмите «Подключить». CRM проверит, отвечает ли мост, и покажет sender (номер). Сообщения клиентам при проверке не отправляются.",
-      "Если мост не ответил, настройки сохранятся со статусом ошибки — исправьте адрес или секрет и проверьте снова.",
+      "Укажите Instance ID и API Token Green API этой компании. Адрес AI Manager задаётся платформой и не вводится вручную.",
+      "Секрет интеграции создаёт BasQar автоматически. Глобальный CRM_BRIDGE_SECRET на запросы компании не ставится.",
+      "При сохранении CRM регистрирует Integration в AI Manager (INTERNAL_SERVICE_SECRET) и выставляет webhook Green API на /webhook/<token>.",
+      "Голый /webhook без token для зарегистрированной компании не принимается.",
     ],
   },
   {
@@ -265,7 +265,7 @@ export function publicConnectionStatus(row: {
 } | null) {
   if (!row) return "not_configured";
   const schema = row.schemaJson && typeof row.schemaJson === "object" ? (row.schemaJson as Record<string, unknown>) : {};
-  if (row.type === "whatsapp_seller" && !String(schema.sellerUrl || "").trim()) return "needs_assignment";
+  if (row.type === "whatsapp_seller" && !String(schema.secretEnc || schema.instanceId || "").trim()) return "needs_assignment";
   if (row.status === "disabled" || row.connectionStatus === "DISCONNECTED") return "disabled";
   if (row.type === "form") {
     if (row.healthStatus === "ERROR" || row.status === "error") return "error";

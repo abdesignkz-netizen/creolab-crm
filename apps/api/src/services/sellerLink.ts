@@ -4,26 +4,49 @@ import { crmModeToSeller, sellerModeToCrm, validateClientPhone } from "@creolab/
 import { WhatsAppSellerBridge } from "@creolab/integrations";
 import { config } from "../config.ts";
 import { ApiError } from "../errors.ts";
-import { sha256 } from "../lib/hash.ts";
+import { sha256, randomToken, safeEqual } from "../lib/hash.ts";
 import { decryptSecret, encryptSecret } from "../lib/secretBox.ts";
 import { fileStorageStatus } from "../lib/storage.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { can } from "../lib/types.ts";
 import { requireIntegrationsAccess, requireNotManager, requireTenant } from "../lib/access.ts";
-import { assertExternalCallbackUrl } from "../lib/externalUrl.ts";
 import { analyzeAndApplyConversation } from "./conversationContextApplyService.ts";
+import {
+  assertAiManagerReachableUrl,
+  extractWhatsAppInstanceId,
+  platformBridgeSecret,
+  resolveAiManagerUrl,
+  sharedAiManagerUrl,
+  type WhatsAppSellerSchema,
+} from "./aiManagerConfig.ts";
+import { syncWhatsAppAiManagerRegistration } from "./aiManagerRegistration.ts";
+import { checkGreenApiWhatsAppNumber } from "./greenApiWebhook.ts";
+import { classifyWhatsAppDeliveryError, WHATSAPP_NOT_REGISTERED } from "./whatsappChannel.ts";
 import { adoptSameContactThreadMessages, listThreadConversationIds } from "./conversationThread.ts";
 import { ensureWhatsAppInquiry } from "./inquiryService.ts";
 import { getSituation, isConversationCommand } from "./situationService.ts";
+import {
+  attachHistoryMedia,
+  historyMediaFingerprint,
+  historyMessageText,
+  historyMessageType,
+  looksLikeMediaPlaceholder,
+  normalizeHistoryMediaItem,
+  type HistoryMediaItem,
+} from "./conversationMedia.ts";
 
-function historyScopedId(leadId: string, item: { role: string; content: string; at?: string }) {
-  const raw = `${leadId}|${item.role}|${item.at || ""}|${item.content}`;
-  return `seller:${createHash("sha1").update(raw).digest("hex")}`;
+function historyScopedRaw(item: HistoryMediaItem) {
+  const raw = `${item.role}|${item.at || ""}|${item.content}`;
+  const media = historyMediaFingerprint(item);
+  return media ? `${raw}|${media}` : raw;
 }
 
-function historyScopedIdByPhone(phone: string, item: { role: string; content: string; at?: string }) {
-  const raw = `${phone}|${item.role}|${item.at || ""}|${item.content}`;
-  return `sellerp:${createHash("sha1").update(raw).digest("hex")}`;
+function historyScopedId(leadId: string, item: HistoryMediaItem) {
+  return `seller:${createHash("sha1").update(`${leadId}|${historyScopedRaw(item)}`).digest("hex")}`;
+}
+
+function historyScopedIdByPhone(phone: string, item: HistoryMediaItem) {
+  return `sellerp:${createHash("sha1").update(`${phone}|${historyScopedRaw(item)}`).digest("hex")}`;
 }
 
 function validHistoryDate(value?: string) {
@@ -38,14 +61,16 @@ async function upsertLeadHistory(
   conversationId: string,
   leadId: string,
   phone: string,
-  history: Array<{ role: string; content: string; at?: string }>,
+  history: unknown[],
 ) {
   const slice = (history || []).slice(-40);
   if (!slice.length) return { added: 0, moved: 0 };
   let added = 0;
   let moved = 0;
   let inboundAdded = false;
-  for (const item of slice) {
+  for (const raw of slice) {
+    const item = normalizeHistoryMediaItem(raw);
+    if (!item) continue;
     const oldPhoneScopedId = historyScopedIdByPhone(phone, item);
     const phoneScopedId = `${tid}:${oldPhoneScopedId}`;
     const legacyScopedId = historyScopedId(leadId, item);
@@ -53,16 +78,20 @@ async function upsertLeadHistory(
       where: { tenantId: tid, connectionScopedId: { in: [phoneScopedId, oldPhoneScopedId, legacyScopedId] } },
     });
     if (existing) {
-      const patch: { conversationId?: string; connectionScopedId?: string } = {};
+      const patch: { conversationId?: string; connectionScopedId?: string; type?: string } = {};
       if (existing.conversationId !== conversationId) patch.conversationId = conversationId;
       if (existing.connectionScopedId !== phoneScopedId) patch.connectionScopedId = phoneScopedId;
+      const nextType = historyMessageType(item);
+      if (nextType !== "text" && existing.type === "text") patch.type = nextType;
       if (Object.keys(patch).length) {
         await prisma.message.update({ where: { id: existing.id }, data: patch });
         if (patch.conversationId) moved += 1;
       }
+      const hasFile = await prisma.attachment.findFirst({ where: { tenantId: tid, messageId: existing.id } });
+      if (!hasFile) await attachHistoryMedia(prisma, tid, existing.id, item);
       continue;
     }
-    await prisma.message.upsert({
+    const created = await prisma.message.upsert({
       where: { connectionScopedId: phoneScopedId },
       update: {},
       create: {
@@ -70,12 +99,14 @@ async function upsertLeadHistory(
         conversationId,
         senderKind: item.role === "assistant" ? "ai" : "client",
         direction: item.role === "assistant" ? "outbound" : "inbound",
-        text: item.content,
+        type: historyMessageType(item),
+        text: historyMessageText(item),
         historical: true,
         connectionScopedId: phoneScopedId,
         createdAt: validHistoryDate(item.at) || new Date(),
       },
     });
+    await attachHistoryMedia(prisma, tid, created.id, item);
     added += 1;
     if (item.role !== "assistant") inboundAdded = true;
   }
@@ -358,21 +389,41 @@ function requireIntegrationAdmin(auth: AuthContext) {
   requireIntegrationsAccess(auth);
 }
 
-function describeBridgeError(error: unknown, sellerUrl: string) {
+function mergeLeadHistory(history: unknown[], extras: unknown[]) {
+  const next = [...history];
+  for (const extra of extras) {
+    const item = normalizeHistoryMediaItem(extra);
+    if (!item) continue;
+    const idx = next.findIndex((raw) => {
+      const current = normalizeHistoryMediaItem(raw);
+      return Boolean(
+        current &&
+          current.role === item.role &&
+          (current.at || "") === (item.at || "") &&
+          (current.content === item.content || !current.content || looksLikeMediaPlaceholder(current.content)),
+      );
+    });
+    if (idx >= 0) next[idx] = { ...(typeof next[idx] === "object" && next[idx] ? next[idx] : {}), ...item };
+    else next.push(item);
+  }
+  return next;
+}
+
+function describeBridgeError(error: unknown, _sellerUrl: string) {
   const message = error instanceof Error ? error.message : String(error || "");
   const cause = error instanceof Error && "cause" in error ? (error.cause as { code?: string } | undefined) : undefined;
   const code = cause?.code || "";
   if (code === "ECONNREFUSED" || message === "fetch failed" || message.includes("ECONNREFUSED")) {
-    return `Бот не запущен на ${sellerUrl || "http://127.0.0.1:3000"}. В папке whatsap ai выполните npm start, затем снова «Сохранить и проверить».`;
+    return "Общий AI Manager сейчас недоступен. Проверьте подключение позже или обратитесь в поддержку.";
   }
   if (message.includes("unauthorized") || message.includes("HTTP 401")) {
-    return "Секрет не совпал с CRM_BRIDGE_SECRET бота. На Render должен быть тот же секрет, что в кабинете.";
+    return "Секрет моста не совпал. Нажмите «Переподключить» или обратитесь в поддержку.";
   }
   if (message.includes("HTTP 404") || message.includes("Cannot GET /internal/crm")) {
-    return "Это боевой бот, но на нём ещё нет моста CRM (/internal/crm). Нужен деплой crmInternalApi.js на Render.";
+    return "AI Manager отвечает, но мост CRM на нём ещё не включён.";
   }
   if (code === "ETIMEDOUT" || message.includes("Timeout") || message.includes("aborted")) {
-    return `Бот на ${sellerUrl} не ответил за 15 секунд.`;
+    return "AI Manager не ответил за 15 секунд.";
   }
   return message || "Мост недоступен";
 }
@@ -386,17 +437,22 @@ export async function getSellerIntegration(prisma: PrismaClient, tenantId: strin
 
 export async function resolveSellerBridge(prisma: PrismaClient, tenantId: string) {
   const integration = await getSellerIntegration(prisma, tenantId);
-  const schema = (integration?.schemaJson || {}) as { sellerUrl?: string; secretEnc?: string };
+  const schema = (integration?.schemaJson || {}) as WhatsAppSellerSchema;
   const disabled = integration?.status === "disabled" || integration?.connectionStatus === "DISCONNECTED";
-  const url = String(schema.sellerUrl || "").trim();
-  const secret = schema.secretEnc ? decryptSecret(schema.secretEnc) : "";
+  const url = resolveAiManagerUrl(schema.sellerUrl);
+  const integrationSecret = schema.secretEnc ? decryptSecret(schema.secretEnc) : "";
+  const configured = Boolean(!disabled && url && integrationSecret);
   return {
     integration,
     url,
-    configured: Boolean(!disabled && url && secret),
-    secretSet: Boolean(secret),
-    needsAssignment: Boolean(integration && !url),
-    bridge: !disabled && url && secret ? new WhatsAppSellerBridge(url, secret) : null,
+    configured,
+    secretSet: Boolean(integrationSecret),
+    instanceId: String(schema.instanceId || "").trim() || null,
+    needsAssignment: Boolean(integration && !integrationSecret),
+    bridge:
+      configured && url && integrationSecret && integration?.id
+        ? new WhatsAppSellerBridge(url, integrationSecret, { tenantId, integrationId: integration.id })
+        : null,
   };
 }
 
@@ -525,7 +581,8 @@ async function healWhatsAppFromBot(
   };
 
   try {
-    const { leads } = await resolved.bridge.listLeads();
+    const listed = await resolved.bridge.listLeads();
+    const leads = await filterLeadsForTenant(prisma, args.tenantId, listed.leads);
     const lead = leads.find((item) => matchesPhone(item.clientPhone));
     if (lead) {
       await applySellerLeadSync(prisma, {
@@ -603,6 +660,77 @@ export async function openWhatsAppChannelForContact(
   return healWhatsAppFromBot(prisma, args);
 }
 
+function greenApiTokenPlain(schema: WhatsAppSellerSchema) {
+  if (!schema.apiTokenEnc) return "";
+  try {
+    return decryptSecret(schema.apiTokenEnc);
+  } catch {
+    return "";
+  }
+}
+
+export async function startContactWhatsAppChat(prisma: PrismaClient, auth: AuthContext, contactId: string) {
+  const membership = requireTenant(auth);
+  const tid = membership.tenantId;
+  const contact = await prisma.contact.findFirst({
+    where: { id: contactId, tenantId: tid },
+    include: { methods: true },
+  });
+  if (!contact) throw new ApiError(404, "not_found", "Клиент не найден");
+
+  const existing = await findExistingWhatsAppConversation(prisma, tid, contactId);
+  if (existing?.sellerLeadId) {
+    return { conversationId: existing.id, created: false };
+  }
+
+  const region = membership.tenant.defaultRegion || "KZ";
+  const phoneRow = contact.methods.find((item) => item.type === "phone" && item.primary) || contact.methods.find((item) => item.type === "phone");
+  const parsed = phoneRow ? validateClientPhone(phoneRow.rawValue || phoneRow.normalizedValue, region) : { ok: false as const };
+  if (!parsed.ok) {
+    throw new ApiError(422, "no_phone", "Укажите телефон клиента, чтобы написать в WhatsApp");
+  }
+
+  const resolved = await resolveSellerBridge(prisma, tid);
+  const schema = (resolved.integration?.schemaJson || {}) as WhatsAppSellerSchema;
+  const instanceId = String(schema.instanceId || "").trim();
+  const apiToken = greenApiTokenPlain(schema);
+  if (instanceId && apiToken) {
+    const check = await checkGreenApiWhatsAppNumber({
+      instanceId,
+      apiToken,
+      phone: parsed.normalized,
+      apiHost: schema.greenApiHost,
+    });
+    if (check.exists === false) {
+      throw new ApiError(409, WHATSAPP_NOT_REGISTERED, "Этот номер не зарегистрирован в WhatsApp");
+    }
+  }
+
+  const opened = await openWhatsAppChannelForContact(prisma, {
+    tenantId: tid,
+    contactId,
+    contactName: [contact.firstName, contact.lastName, contact.name].filter(Boolean).join(" ").trim() || contact.name,
+    defaultRegion: region,
+    extraPhones: [parsed.normalized, parsed.raw],
+  });
+  if (!opened.conversation?.sellerLeadId) {
+    const classified = classifyWhatsAppDeliveryError(opened.error);
+    if (classified.code === WHATSAPP_NOT_REGISTERED) {
+      throw new ApiError(409, WHATSAPP_NOT_REGISTERED, "Этот номер не зарегистрирован в WhatsApp");
+    }
+    throw new ApiError(422, classified.code, classified.message);
+  }
+
+  try {
+    const { setConversationMode } = await import("./domainService.ts");
+    await setConversationMode(prisma, auth, opened.conversation.id, "human");
+  } catch {
+    // The thread exists; the composer still opens even if takeover is already done.
+  }
+
+  return { conversationId: opened.conversation.id, created: true };
+}
+
 function sellerSyncWarning(args: {
   configured: boolean;
   reachable: boolean;
@@ -629,16 +757,20 @@ export async function sellerHealthFor(prisma: PrismaClient, auth: AuthContext) {
     where: { tenantId: membership.tenantId, sellerLeadId: { not: null } },
   });
   const lastSyncAt = resolved.integration?.lastEventAt || null;
+  const schema = (resolved.integration?.schemaJson || {}) as WhatsAppSellerSchema;
+  const publicView = {
+    instanceId: String(schema.instanceId || "").trim() || null,
+    secretSet: resolved.secretSet,
+    conversationCount,
+    lastSyncAt,
+  };
   if (!resolved.configured || !resolved.bridge) {
     return {
       configured: false,
       reachable: false,
       sender: null,
-      sellerUrl: resolved.url || "",
-      secretSet: resolved.secretSet,
+      ...publicView,
       leadCountOnBot: null as number | null,
-      conversationCount,
-      lastSyncAt,
       storePathKind: null as string | null,
       warning: sellerSyncWarning({
         configured: false,
@@ -647,7 +779,9 @@ export async function sellerHealthFor(prisma: PrismaClient, auth: AuthContext) {
         leadCountOnBot: null,
         conversationCount,
       }),
-      note: "WhatsApp ещё не подключён. CRM уже принимает формы и задачи.",
+      note: sharedAiManagerUrl()
+        ? "Укажите Instance ID и API Token Green API — адрес бота задаётся платформой."
+        : "WhatsApp ещё не подключён. CRM уже принимает формы и задачи.",
     };
   }
   try {
@@ -657,11 +791,8 @@ export async function sellerHealthFor(prisma: PrismaClient, auth: AuthContext) {
       configured: true,
       reachable: true,
       sender: health.sender,
-      sellerUrl: resolved.url,
-      secretSet: true,
+      ...publicView,
       leadCountOnBot,
-      conversationCount,
-      lastSyncAt,
       storePathKind: health.storePathKind || null,
       warning: sellerSyncWarning({
         configured: true,
@@ -680,11 +811,8 @@ export async function sellerHealthFor(prisma: PrismaClient, auth: AuthContext) {
       configured: true,
       reachable: false,
       sender: "whatsappService.js",
-      sellerUrl: resolved.url,
-      secretSet: true,
+      ...publicView,
       leadCountOnBot: null,
-      conversationCount,
-      lastSyncAt,
       storePathKind: null,
       warning: sellerSyncWarning({
         configured: true,
@@ -701,36 +829,45 @@ export async function sellerHealthFor(prisma: PrismaClient, auth: AuthContext) {
 export async function upsertWhatsAppSellerForTenant(
   prisma: PrismaClient,
   tenantId: string,
-  input: { sellerUrl: string; secret?: string; name?: string; actorUserId?: string | null },
+  input: {
+    sellerUrl?: string;
+    secret?: string;
+    instanceId?: string;
+    apiToken?: string;
+    name?: string;
+    actorUserId?: string | null;
+    rotateSecret?: boolean;
+  },
 ) {
-  const sellerUrl = String(input.sellerUrl || "").trim().replace(/\/$/, "");
-  assertExternalCallbackUrl(sellerUrl, "sellerUrl");
   const existing = await getSellerIntegration(prisma, tenantId);
-  const previousSchema = (existing?.schemaJson || {}) as { sellerUrl?: string; secretEnc?: string };
-  const secret = String(input.secret || "").trim();
+  const previousSchema = (existing?.schemaJson || {}) as WhatsAppSellerSchema;
+  const requestedUrl = String(input.sellerUrl || "").trim().replace(/\/$/, "");
+  const sellerUrl = resolveAiManagerUrl(requestedUrl || previousSchema.sellerUrl);
+  assertAiManagerReachableUrl(sellerUrl);
+  const instanceId = String(input.instanceId || previousSchema.instanceId || "").trim();
+  const apiToken = String(input.apiToken || "").trim();
+  const apiTokenEnc = apiToken ? encryptSecret(apiToken) : previousSchema.apiTokenEnc;
+  let secret = String(input.secret || "").trim();
+  let issuedSecret: string | null = null;
+  if (!secret && (input.rotateSecret || !previousSchema.secretEnc)) {
+    secret = randomToken(32);
+    issuedSecret = secret;
+  }
   const secretEnc = secret ? encryptSecret(secret) : previousSchema.secretEnc;
   if (!secretEnc) {
-    throw new ApiError(422, "invalid", "Укажите адрес бота и секрет моста", {
-      sellerUrl: sellerUrl ? "" : "Обязательно",
-      secret: "Обязательно для нового подключения",
-    });
+    throw new ApiError(422, "invalid", "Не удалось создать секрет моста");
   }
-  const plainSecret = secret || decryptSecret(secretEnc);
-  const bridge = new WhatsAppSellerBridge(sellerUrl, plainSecret);
-  let reachable = false;
-  let note = "Сохранено. Проверка моста не подтвердила соединение — статус не «подключено».";
-  try {
-    const health = await bridge.health();
-    reachable = true;
-    note = `Мост отвечает. Sender: ${health.sender}. Управление менеджера из WhatsApp не отключено.`;
-  } catch (error) {
-    note = describeBridgeError(error, sellerUrl);
-  }
-
-  const schemaJson = { sellerUrl, secretEnc, sendOwner: "external_bot" };
-  const status = reachable ? "active" : "error";
-  const connectionStatus = reachable ? "CONNECTED" : "ERROR";
-  const healthStatus = reachable ? "NO_EVENTS_YET" : "ERROR";
+  const integrationSecret = secret || decryptSecret(secretEnc);
+  const schemaJson: WhatsAppSellerSchema = {
+    sellerUrl,
+    secretEnc,
+    instanceId: instanceId || previousSchema.instanceId,
+    apiTokenEnc,
+    sendOwner: "external_bot",
+    webhookToken: previousSchema.webhookToken,
+    webhookUrl: previousSchema.webhookUrl,
+    greenApiHost: previousSchema.greenApiHost,
+  };
   let integration = existing;
   if (!integration) {
     integration = await prisma.integration.create({
@@ -738,19 +875,20 @@ export async function upsertWhatsAppSellerForTenant(
         tenantId,
         type: "whatsapp_seller",
         name: String(input.name || "WhatsApp ИИ-менеджер"),
-        status,
+        status: "error",
         testMode: false,
-        lastError: reachable ? null : note,
-        lastErrorCode: reachable ? null : "provider_unreachable",
-        connectionStatus,
-        healthStatus,
+        lastError: "Проверка моста ещё не выполнена",
+        lastErrorCode: "provider_unreachable",
+        connectionStatus: "ERROR",
+        healthStatus: "ERROR",
         schemaJson,
         channelConnections: {
           create: {
             channelType: "whatsapp",
-            status: reachable ? "active" : "error",
+            status: "error",
             autoReply: false,
             capabilitiesJson: ["receive_messages", "send_text", "send_media", "delivery_receipts"],
+            externalRef: instanceId || null,
           },
         },
       },
@@ -761,129 +899,354 @@ export async function upsertWhatsAppSellerForTenant(
       where: { id: integration.id },
       data: {
         name: input.name ? String(input.name) : undefined,
-        status,
-        lastError: reachable ? null : note,
-        lastErrorCode: reachable ? null : "provider_unreachable",
-        connectionStatus,
-        healthStatus,
         schemaJson,
       },
       include: { channelConnections: true, forms: true },
     });
+    if (instanceId) {
+      await prisma.channelConnection.updateMany({
+        where: { tenantId, integrationId: integration.id },
+        data: { externalRef: instanceId },
+      });
+    }
   }
+
+  let note = "Сохранено. Проверка моста не подтвердила соединение — статус не «подключено».";
+  let reachable = false;
+  const savedInstanceId = String(schemaJson.instanceId || "").trim();
+  const savedToken = Boolean(apiTokenEnc);
+  if (savedInstanceId && savedToken) {
+    try {
+      const registered = await syncWhatsAppAiManagerRegistration(prisma, tenantId, integration.id);
+      note = registered.note;
+      if (registered.ok || registered.registered) {
+        const healthBridge = new WhatsAppSellerBridge(sellerUrl, integrationSecret, {
+          tenantId,
+          integrationId: integration.id,
+        });
+        try {
+          const health = await healthBridge.health();
+          reachable = true;
+          note = registered.webhookUrl
+            ? `${registered.note} Sender: ${health.sender}.`
+            : `Мост отвечает. Sender: ${health.sender}. ${registered.note}`;
+        } catch (error) {
+          reachable = false;
+          note = `${registered.note} ${describeBridgeError(error, sellerUrl)}`;
+        }
+      }
+    } catch (error) {
+      note = describeBridgeError(error, sellerUrl);
+    }
+  } else {
+    try {
+      const healthBridge = new WhatsAppSellerBridge(sellerUrl, integrationSecret, {
+        tenantId,
+        integrationId: integration.id,
+      });
+      const health = await healthBridge.health();
+      reachable = true;
+      note = `Мост отвечает. Sender: ${health.sender}.`;
+    } catch (error) {
+      note = describeBridgeError(error, sellerUrl);
+    }
+  }
+
+  const status = reachable ? "active" : "error";
+  const connectionStatus = reachable ? "CONNECTED" : "ERROR";
+  const healthStatus = reachable ? "NO_EVENTS_YET" : "ERROR";
+  integration = await prisma.integration.update({
+    where: { id: integration.id },
+    data: {
+      status,
+      lastError: reachable ? null : note,
+      lastErrorCode: reachable ? null : "provider_unreachable",
+      connectionStatus,
+      healthStatus,
+    },
+    include: { channelConnections: true, forms: true },
+  });
+  await prisma.channelConnection.updateMany({
+    where: { tenantId, integrationId: integration.id },
+    data: { status: reachable ? "active" : "error" },
+  });
   await prisma.auditEvent.create({
     data: {
       tenantId,
       actorUserId: input.actorUserId || null,
-      action: secret ? "integration.whatsapp.secret_replaced" : "integration.whatsapp.connect",
+      action: issuedSecret || secret ? "integration.whatsapp.secret_replaced" : "integration.whatsapp.connect",
       entityType: "integration",
       entityId: integration.id,
-      changesJson: { sellerUrl, reachable, secretReplaced: Boolean(secret) },
+      changesJson: { reachable, secretReplaced: Boolean(issuedSecret || input.secret), instanceId: instanceId || null },
     },
   });
-  return { ok: true, reachable, note, integrationId: integration.id, connectionStatus };
+  return {
+    ok: true,
+    reachable,
+    note,
+    integrationId: integration.id,
+    connectionStatus,
+    bridgeSecret: issuedSecret,
+    secretIssued: Boolean(issuedSecret),
+  };
 }
 
 export async function connectWhatsAppSeller(
   prisma: PrismaClient,
   auth: AuthContext,
-  input: { sellerUrl: string; secret: string },
+  input: { sellerUrl?: string; secret?: string; instanceId?: string; apiToken?: string },
 ) {
   const membership = requireTenant(auth);
   if (!can(auth, "manage_integrations")) {
     throw new ApiError(403, "forbidden", "Нет права управлять интеграциями");
   }
-  const sellerUrl = String(input.sellerUrl || "").trim().replace(/\/$/, "");
-  const secret = String(input.secret || "").trim();
-  if (!sellerUrl || !secret) {
-    throw new ApiError(422, "invalid", "Укажите адрес бота и секрет моста", {
-      sellerUrl: sellerUrl ? "" : "Обязательно",
-      secret: secret ? "" : "Обязательно",
-    });
+  const existing = await getSellerIntegration(prisma, membership.tenantId);
+  const instanceId = String(input.instanceId || "").trim();
+  const apiToken = String(input.apiToken || "").trim();
+  const legacySecret = String(input.secret || "").trim();
+  const previous = (existing?.schemaJson || {}) as WhatsAppSellerSchema;
+  if (!existing && !instanceId && !legacySecret) {
+    throw new ApiError(422, "invalid", "Укажите Instance ID Green API", { instanceId: "Обязательно" });
+  }
+  if (instanceId && !apiToken && !previous.apiTokenEnc) {
+    throw new ApiError(422, "invalid", "Укажите API Token Green API", { apiToken: "Обязательно" });
   }
   return upsertWhatsAppSellerForTenant(prisma, membership.tenantId, {
-    sellerUrl,
-    secret,
+    instanceId,
+    apiToken,
+    sellerUrl: input.sellerUrl,
+    secret: input.secret,
     actorUserId: auth.user.id,
   });
 }
 
+export async function rotateWhatsAppSellerSecret(prisma: PrismaClient, auth: AuthContext) {
+  const membership = requireTenant(auth);
+  if (!can(auth, "manage_integrations")) throw new ApiError(403, "forbidden", "Нет права");
+  const existing = await getSellerIntegration(prisma, membership.tenantId);
+  if (!existing) throw new ApiError(404, "not_found", "WhatsApp не подключён");
+  return upsertWhatsAppSellerForTenant(prisma, membership.tenantId, {
+    rotateSecret: true,
+    actorUserId: auth.user.id,
+  });
+}
+
+export async function disconnectWhatsAppSeller(prisma: PrismaClient, auth: AuthContext) {
+  const membership = requireTenant(auth);
+  if (!can(auth, "manage_integrations")) throw new ApiError(403, "forbidden", "Нет права");
+  const existing = await getSellerIntegration(prisma, membership.tenantId);
+  if (!existing) throw new ApiError(404, "not_found", "WhatsApp не подключён");
+  await prisma.integration.update({
+    where: { id: existing.id },
+    data: { status: "disabled", connectionStatus: "DISCONNECTED", healthStatus: "UNKNOWN" },
+  });
+  await prisma.auditEvent.create({
+    data: {
+      tenantId: membership.tenantId,
+      actorUserId: auth.user.id,
+      action: "integration.whatsapp.disconnect",
+      entityType: "integration",
+      entityId: existing.id,
+      changesJson: {},
+    },
+  });
+  return { ok: true, note: "WhatsApp отключён. Диалоги в CRM сохранены." };
+}
+
 const runningSyncs = new WeakMap<PrismaClient, Map<string, Promise<unknown>>>();
 
-export async function ingestSellerBridgeEvent(prisma: PrismaClient, payload: unknown) {
+async function foreignSellerLeadIds(prisma: PrismaClient, tenantId: string) {
+  const rows = await prisma.conversation.findMany({
+    where: { sellerLeadId: { not: null }, tenantId: { not: tenantId } },
+    select: { sellerLeadId: true },
+  });
+  return new Set(rows.map((row) => row.sellerLeadId).filter((id): id is string => Boolean(id)));
+}
+
+async function filterLeadsForTenant<T extends { leadId: string }>(prisma: PrismaClient, tenantId: string, leads: T[]) {
+  const taken = await foreignSellerLeadIds(prisma, tenantId);
+  return leads.filter((lead) => !taken.has(lead.leadId));
+}
+
+function integrationSecretPlain(schema: WhatsAppSellerSchema) {
+  if (!schema.secretEnc) return "";
+  try {
+    return decryptSecret(schema.secretEnc);
+  } catch {
+    return "";
+  }
+}
+
+export async function resolveSellerIntegrationForEvent(
+  prisma: PrismaClient,
+  input: { secret: string; integrationId?: string | null; payload?: unknown },
+) {
+  const secret = String(input.secret || "").trim();
+  if (!secret) throw new ApiError(401, "unauthorized", "Мост не принят");
+  const rows = await prisma.integration.findMany({
+    where: { type: "whatsapp_seller" },
+    include: { tenant: { select: { id: true, defaultRegion: true, status: true } } },
+  });
+  const secretMatches = rows.filter((row) => {
+    const plain = integrationSecretPlain((row.schemaJson || {}) as WhatsAppSellerSchema);
+    return Boolean(plain) && safeEqual(secret, plain);
+  });
+  const platformOk = Boolean(platformBridgeSecret() && safeEqual(secret, platformBridgeSecret()));
+  const hintedId = String(input.integrationId || "").trim();
+  if (hintedId) {
+    const hinted = rows.find((row) => row.id === hintedId);
+    if (!hinted) throw new ApiError(401, "unauthorized", "Мост не принят");
+    const ownSecret = integrationSecretPlain((hinted.schemaJson || {}) as WhatsAppSellerSchema);
+    if (ownSecret && safeEqual(secret, ownSecret)) return hinted;
+    throw new ApiError(401, "unauthorized", "Мост не принят");
+  }
+  if (secretMatches.length === 1) return secretMatches[0];
+  if (secretMatches.length > 1) {
+    throw new ApiError(401, "unauthorized", "Секрет моста неоднозначен");
+  }
+  if (!platformOk) throw new ApiError(401, "unauthorized", "Мост не принят");
+  const active = rows.filter((row) => row.status !== "disabled");
+  const instanceId = extractWhatsAppInstanceId(input.payload);
+  if (instanceId) {
+    const byInstance = active.filter((row) => {
+      const schema = (row.schemaJson || {}) as WhatsAppSellerSchema;
+      return String(schema.instanceId || "").trim() === instanceId;
+    });
+    if (byInstance.length === 1) return byInstance[0];
+  }
+  const leadId = String((input.payload as { leadId?: unknown } | undefined)?.leadId || "").trim();
+  if (leadId) {
+    const owned = await prisma.conversation.findMany({
+      where: { sellerLeadId: leadId },
+      select: { tenantId: true },
+    });
+    const tenantIds = [...new Set(owned.map((row) => row.tenantId))];
+    if (tenantIds.length === 1) {
+      const row = active.find((item) => item.tenantId === tenantIds[0]);
+      if (row) return row;
+    }
+  }
+  if (active.length === 1) return active[0];
+  throw new ApiError(401, "unknown_connection", "Событие не привязано к конкретной интеграции WhatsApp");
+}
+
+export async function ingestSellerBridgeEvent(
+  prisma: PrismaClient,
+  payload: unknown,
+  auth?: { secret?: string; integrationId?: string | null },
+) {
   const body = payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
-  const leadId = String(body.leadId || "").trim();
   const type = String(body.type || "");
+  const integration = auth?.secret
+    ? await resolveSellerIntegrationForEvent(prisma, {
+        secret: auth.secret,
+        integrationId: auth.integrationId,
+        payload,
+      })
+    : null;
+  if (!integration) throw new ApiError(401, "unauthorized", "Мост не принят");
+  if (integration.status === "disabled" || integration.connectionStatus === "DISCONNECTED") {
+    throw new ApiError(403, "disabled", "Интеграция WhatsApp отключена");
+  }
+  if (integration.tenant.status !== "active") {
+    throw new ApiError(403, "tenant_suspended", "Компания приостановлена, событие не обработано");
+  }
+
+  if (type === "ai.usage" || body.usage) {
+    const usage = (body.usage && typeof body.usage === "object" ? body.usage : body) as Record<string, unknown>;
+    const { recordAiUsage } = await import("./aiUsageService.ts");
+    await recordAiUsage(prisma, {
+      tenantId: integration.tenantId,
+      integrationId: integration.id,
+      conversationId: String(usage.conversationId || body.conversationId || "") || null,
+      provider: String(usage.provider || "openai"),
+      model: String(usage.model || "unknown"),
+      feature: String(usage.feature || "AI_MANAGER_REPLY"),
+      providerRequestId: String(usage.providerRequestId || usage.id || "") || null,
+      inputTokens: usage.inputTokens != null ? Number(usage.inputTokens) : null,
+      outputTokens: usage.outputTokens != null ? Number(usage.outputTokens) : null,
+      cachedInputTokens: usage.cachedInputTokens != null ? Number(usage.cachedInputTokens) : null,
+      reasoningTokens: usage.reasoningTokens != null ? Number(usage.reasoningTokens) : null,
+      totalTokens: usage.totalTokens != null ? Number(usage.totalTokens) : null,
+      latencyMs: usage.latencyMs != null ? Number(usage.latencyMs) : null,
+      status: String(usage.status || "ok") === "failed" ? "failed" : "ok",
+      errorCode: usage.errorCode ? String(usage.errorCode).slice(0, 80) : null,
+    });
+    if (type === "ai.usage") return { accepted: true, handled: true, usage: true, tenantId: integration.tenantId };
+  }
+
+  const leadId = String(body.leadId || "").trim();
   if (!leadId) {
     throw new ApiError(422, "invalid", "Событие отклонено: нет leadId");
   }
-  if (type && type !== "lead.created" && type !== "lead.updated") {
+  const allowedTypes = new Set(["", "lead.created", "lead.updated", "message.received", "incomingMessageReceived", "ai.usage"]);
+  if (type && !allowedTypes.has(type)) {
     throw new ApiError(422, "ignored_type", `Событие отклонено: тип ${type} не обрабатывается`);
   }
-
-  const integrations = await prisma.integration.findMany({
-    where: { type: "whatsapp_seller", status: { not: "disabled" } },
-    include: { tenant: { select: { id: true, defaultRegion: true, status: true } } },
+  const foreign = await prisma.conversation.findFirst({
+    where: { sellerLeadId: leadId, tenantId: { not: integration.tenantId } },
+    select: { id: true },
   });
-  const results: Array<Record<string, unknown>> = [];
-  let matchedSuspended = false;
-  for (const integration of integrations) {
-    const resolved = await resolveSellerBridge(prisma, integration.tenantId);
-    if (!resolved.bridge) continue;
-    if (integration.tenant.status !== "active") {
-      matchedSuspended = true;
-      results.push({
-        tenantId: integration.tenantId,
-        rejected: true,
-        reason: "tenant_suspended",
-      });
-      continue;
-    }
-    let lead: {
-      leadId: string;
-      clientPhone: string | null;
-      clientName?: string | null;
-      aiMode?: string | null;
-      conversationHistory?: Array<{ role: string; content: string; at?: string }>;
-    } | undefined;
+  if (foreign) {
+    throw new ApiError(403, "cross_tenant", "Диалог принадлежит другой компании");
+  }
+
+  const resolved = await resolveSellerBridge(prisma, integration.tenantId);
+  let lead:
+    | {
+        leadId: string;
+        clientPhone: string | null;
+        clientName?: string | null;
+        aiMode?: string | null;
+        conversationHistory?: Array<{ role: string; content: string; at?: string }>;
+      }
+    | undefined;
+  if (resolved.bridge) {
     try {
       const listed = await resolved.bridge.listLeads();
       lead = listed.leads.find((item) => item.leadId === leadId);
     } catch (error) {
-      results.push({
-        tenantId: integration.tenantId,
-        error: error instanceof Error ? error.message : "bridge_failed",
-      });
-      continue;
-    }
-    if (!lead) continue;
-    const connection = resolved.integration
-      ? await prisma.channelConnection.findFirst({
-          where: { tenantId: integration.tenantId, integrationId: resolved.integration.id },
-        })
-      : null;
-    const synced = await applySellerLeadSync(prisma, {
-      tenantId: integration.tenantId,
-      defaultRegion: integration.tenant.defaultRegion || "KZ",
-      lead,
-      connectionId: connection?.id || null,
-    });
-    results.push({ tenantId: integration.tenantId, ...synced });
-    if (resolved.integration) {
-      await prisma.integration.update({
-        where: { id: resolved.integration.id },
-        data: { lastEventAt: new Date(), lastError: null, status: "active" },
-      });
+      console.warn("[seller-events] listLeads failed", error instanceof Error ? error.message : error);
     }
   }
-  const handled = results.some((item) => !item.error && !item.skipped && !item.rejected);
-  if (handled) return { accepted: true, handled: true, results };
-  if (matchedSuspended && results.every((item) => item.rejected || item.error)) {
-    throw new ApiError(403, "tenant_suspended", "Компания приостановлена, событие не обработано", undefined, { results });
+  if (!lead) {
+    lead = {
+      leadId,
+      clientPhone: String(body.clientPhone || body.phone || "") || null,
+      clientName: String(body.clientName || body.name || "") || null,
+      aiMode: body.aiMode ? String(body.aiMode) : null,
+      conversationHistory: Array.isArray(body.conversationHistory)
+        ? (body.conversationHistory as Array<{ role: string; content: string; at?: string }>)
+        : [],
+    };
   }
-  throw new ApiError(404, "unknown_connection", "Событие не привязано ни к одному настроенному подключению WhatsApp", undefined, {
-    results,
+  const extras = [body.message, body.messageData ? body : null].filter(Boolean);
+  if (extras.length) {
+    lead = {
+      ...lead,
+      conversationHistory: mergeLeadHistory(lead.conversationHistory || [], extras) as Array<{
+        role: string;
+        content: string;
+        at?: string;
+      }>,
+    };
+  }
+  const connection = resolved.integration
+    ? await prisma.channelConnection.findFirst({
+        where: { tenantId: integration.tenantId, integrationId: resolved.integration.id },
+      })
+    : null;
+  const synced = await applySellerLeadSync(prisma, {
+    tenantId: integration.tenantId,
+    defaultRegion: integration.tenant.defaultRegion || "KZ",
+    lead,
+    connectionId: connection?.id || null,
   });
+  await prisma.integration.update({
+    where: { id: integration.id },
+    data: { lastEventAt: new Date(), lastError: null, status: "active" },
+  });
+  return { accepted: true, handled: true, tenantId: integration.tenantId, integrationId: integration.id, results: [{ tenantId: integration.tenantId, ...synced }] };
 }
 
 export async function syncSellerLeads(prisma: PrismaClient, auth: AuthContext) {
@@ -903,7 +1266,8 @@ async function syncSellerLeadsOnce(prisma: PrismaClient, auth: AuthContext) {
   if (!resolved.bridge) {
     throw new ApiError(422, "not_configured", "Сначала подключите WhatsApp ИИ-менеджер");
   }
-  const { leads } = await resolved.bridge.listLeads();
+  const listed = await resolved.bridge.listLeads();
+  const leads = await filterLeadsForTenant(prisma, membership.tenantId, listed.leads);
   const connection = resolved.integration
     ? await prisma.channelConnection.findFirst({
         where: { tenantId: membership.tenantId, integrationId: resolved.integration.id },

@@ -1,0 +1,360 @@
+import assert from "node:assert/strict";
+import { after, before, describe, it, mock } from "node:test";
+import { createPrismaClient } from "@creolab/db";
+import { WhatsAppSellerBridge } from "@creolab/integrations";
+import { createApp } from "./app.ts";
+import { decryptSecret } from "./lib/secretBox.ts";
+import type { AuthContext } from "./lib/types.ts";
+import { sharedAiManagerUrl } from "./services/aiManagerConfig.ts";
+import { setGreenApiFetchForTests } from "./services/greenApiWebhook.ts";
+import { recordAiUsage, listPlatformAiUsage } from "./services/aiUsageService.ts";
+import {
+  getPublishedTenantAiContext,
+  getTenantAiManagerAdmin,
+  saveTenantAiPrompt,
+  searchTenantKnowledge,
+  upsertTenantKnowledgeDocument,
+} from "./services/tenantAiConfigService.ts";
+import {
+  connectWhatsAppSeller,
+  ingestSellerBridgeEvent,
+  resolveSellerBridge,
+  sellerHealthFor,
+} from "./services/sellerLink.ts";
+
+describe("shared AI Manager SaaS", () => {
+  let prisma: Awaited<ReturnType<typeof createPrismaClient>>;
+  let platformAuth: AuthContext;
+  let ownerAuth: AuthContext;
+  let tenantA: string;
+  let tenantB: string;
+  let server: { close: (cb?: (err?: Error) => void) => void; address: () => { port: number } | string | null };
+  let url = "";
+  let platformCookie = "";
+  let ownerCookie = "";
+  const registerCalls: Array<{ input: Record<string, unknown>; serviceSecret?: string; bearerSecret?: string }> = [];
+  const healthSecrets: string[] = [];
+
+  async function login(email: string) {
+    const response = await fetch(`${url}/api/v1/auth/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email, password: process.env.SEED_PASSWORD, client: "web" }),
+    });
+    assert.equal(response.status, 200, await response.text());
+    let cookie = response.headers.getSetCookie?.()?.[0]?.split(";")[0] || "";
+    if (!cookie) cookie = (response.headers.get("set-cookie") || "").split(";")[0];
+    return cookie;
+  }
+
+  before(async () => {
+    process.env.SEED_PASSWORD ||= "ChangeMeLocal1!";
+    process.env.AI_MANAGER_URL = "https://ai.basqar.test";
+    process.env.INTERNAL_SERVICE_SECRET = "internal-service-secret";
+    process.env.CRM_BRIDGE_SECRET = "global-bridge-secret";
+    prisma = await createPrismaClient();
+    const { seedDatabase } = await import("../../../packages/db/src/seed.ts");
+    await seedDatabase();
+    const platformUser = await prisma.user.findFirstOrThrow({ where: { email: "platform@creolab.example" } });
+    const ownerMembership = await prisma.membership.findFirstOrThrow({
+      where: { role: "owner", tenant: { slug: "creolab" } },
+      include: { user: true, tenant: true },
+    });
+    platformAuth = { user: platformUser, activeMembership: null } as AuthContext;
+    ownerAuth = { user: ownerMembership.user, activeMembership: ownerMembership } as unknown as AuthContext;
+    tenantA = ownerMembership.tenantId;
+    const other = await prisma.tenant.create({ data: { name: "Tenant B", slug: `tenant-b-${Date.now()}` } });
+    tenantB = other.id;
+    setGreenApiFetchForTests(async () => new Response(JSON.stringify({ saveSettings: true }), { status: 200 }));
+    mock.method(WhatsAppSellerBridge.prototype, "health", async function health(this: { secret?: string }) {
+      if (this?.secret) healthSecrets.push(this.secret);
+      return { ok: true, sender: "+7701" };
+    });
+    mock.method(
+      WhatsAppSellerBridge.prototype,
+      "registerIntegration",
+      async function registerIntegration(
+        this: { secret?: string },
+        input: { integrationId: string; integrationSecret?: string; prompt?: string; knowledge?: string; crmEventsUrl?: string },
+        options?: { serviceSecret?: string },
+      ) {
+        registerCalls.push({
+          input: input as unknown as Record<string, unknown>,
+          serviceSecret: options?.serviceSecret,
+          bearerSecret: this?.secret,
+        });
+        return { ok: true, integration: { webhookToken: `hook-${input.integrationId}`, integrationId: input.integrationId } };
+      },
+    );
+    mock.method(WhatsAppSellerBridge.prototype, "listLeads", async () => ({ leads: [] }));
+    const app = createApp(prisma);
+    await new Promise<void>((resolve) => {
+      server = app.listen(0, "127.0.0.1", () => resolve()) as typeof server;
+    });
+    const addr = server.address();
+    if (!addr || typeof addr === "string") throw new Error("no port");
+    url = `http://127.0.0.1:${addr.port}`;
+    platformCookie = await login("platform@creolab.example");
+    ownerCookie = await login("owner@creolab.example");
+  });
+
+  after(async () => {
+    delete process.env.AI_MANAGER_URL;
+    delete process.env.INTERNAL_SERVICE_SECRET;
+    delete process.env.CRM_BRIDGE_SECRET;
+    setGreenApiFetchForTests(null);
+    mock.restoreAll();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+
+  it("uses one shared AI_MANAGER_URL for several tenants and hides it from tenant health", async () => {
+    const first = await connectWhatsAppSeller(prisma, ownerAuth, { instanceId: "111", apiToken: "token-a" });
+    assert.equal(first.ok, true);
+    assert.ok(first.bridgeSecret);
+    const tenantBOwner = await prisma.user.create({
+      data: {
+        email: `owner-b-${Date.now()}@example.test`,
+        passwordHash: (ownerAuth.user as { passwordHash?: string }).passwordHash || "x",
+        name: "B",
+        memberships: { create: { tenantId: tenantB, role: "owner", permissions: ["manage_integrations"] } },
+      },
+      include: { memberships: { include: { tenant: true } } },
+    });
+    const authB = {
+      user: tenantBOwner,
+      activeMembership: { ...tenantBOwner.memberships[0], user: tenantBOwner },
+    } as unknown as AuthContext;
+    const second = await connectWhatsAppSeller(prisma, authB, { instanceId: "222", apiToken: "token-b" });
+    const rowA = await prisma.integration.findFirstOrThrow({ where: { id: first.integrationId } });
+    const rowB = await prisma.integration.findFirstOrThrow({ where: { id: second.integrationId } });
+    const schemaA = rowA.schemaJson as { sellerUrl?: string; secretEnc?: string; instanceId?: string };
+    const schemaB = rowB.schemaJson as { sellerUrl?: string; secretEnc?: string; instanceId?: string };
+    assert.equal(schemaA.sellerUrl, sharedAiManagerUrl());
+    assert.equal(schemaB.sellerUrl, sharedAiManagerUrl());
+    assert.equal(schemaA.instanceId, "111");
+    assert.equal(schemaB.instanceId, "222");
+    assert.notEqual(decryptSecret(schemaA.secretEnc || ""), decryptSecret(schemaB.secretEnc || ""));
+    assert.notEqual(decryptSecret(schemaA.secretEnc || ""), "global-bridge-secret");
+    assert.equal(schemaA.webhookToken, `hook-${first.integrationId}`);
+    assert.equal(schemaA.webhookUrl, `https://ai.basqar.test/webhook/hook-${first.integrationId}`);
+    assert.equal(schemaB.webhookUrl, `https://ai.basqar.test/webhook/hook-${second.integrationId}`);
+    assert.equal(registerCalls.length >= 2, true);
+    assert.equal(registerCalls[0].serviceSecret, "internal-service-secret");
+    assert.equal(registerCalls[0].bearerSecret, "internal-service-secret");
+    assert.equal(registerCalls[0].input.integrationSecret, decryptSecret(schemaA.secretEnc || ""));
+    assert.ok(String(registerCalls[0].input.prompt || "").includes("Базовые правила BasQar"));
+    assert.ok(String(registerCalls[0].input.knowledge || "").length > 0);
+    assert.ok(healthSecrets.includes(decryptSecret(schemaA.secretEnc || "")));
+    assert.ok(!healthSecrets.includes("global-bridge-secret"));
+    const health = await sellerHealthFor(prisma, ownerAuth);
+    assert.equal((health as { sellerUrl?: string }).sellerUrl, undefined);
+    const resolvedA = await resolveSellerBridge(prisma, tenantA);
+    const resolvedB = await resolveSellerBridge(prisma, tenantB);
+    assert.equal(resolvedA.url, "https://ai.basqar.test");
+    assert.equal(resolvedB.url, "https://ai.basqar.test");
+  });
+
+  it("resolves webhook tenant by integration secret and rejects cross-tenant attempts", async () => {
+    const rowA = await prisma.integration.findFirstOrThrow({ where: { tenantId: tenantA, type: "whatsapp_seller" } });
+    const rowB = await prisma.integration.findFirstOrThrow({ where: { tenantId: tenantB, type: "whatsapp_seller" } });
+    const secretA = decryptSecret(String((rowA.schemaJson as { secretEnc?: string }).secretEnc));
+    const secretB = decryptSecret(String((rowB.schemaJson as { secretEnc?: string }).secretEnc));
+    const accepted = await ingestSellerBridgeEvent(
+      prisma,
+      { type: "message.received", leadId: "LEAD-A-1", clientPhone: "+77011111111", clientName: "A" },
+      { secret: secretA, integrationId: rowA.id },
+    );
+    assert.equal(accepted.tenantId, tenantA);
+    const convA = await prisma.conversation.findFirst({ where: { tenantId: tenantA, sellerLeadId: "LEAD-A-1" } });
+    assert.ok(convA);
+    await assert.rejects(
+      () =>
+        ingestSellerBridgeEvent(
+          prisma,
+          { type: "message.received", leadId: "LEAD-B-1", clientPhone: "+77012222222" },
+          { secret: secretA, integrationId: rowB.id },
+        ),
+      (error: { status?: number }) => error.status === 401,
+    );
+    await assert.rejects(
+      () => ingestSellerBridgeEvent(prisma, { leadId: "LEAD-X" }, { secret: "wrong-secret", integrationId: rowA.id }),
+      (error: { status?: number }) => error.status === 401,
+    );
+    await ingestSellerBridgeEvent(
+      prisma,
+      { type: "message.received", leadId: "LEAD-B-1", clientPhone: "+77012222222", clientName: "B" },
+      { secret: secretB, integrationId: rowB.id },
+    );
+    await ingestSellerBridgeEvent(
+      prisma,
+      {
+        type: "ai.usage",
+        provider: "openai",
+        model: "gpt-4o-mini",
+        providerRequestId: "usage-a-1",
+        inputTokens: 11,
+        outputTokens: 4,
+      },
+      { secret: secretA, integrationId: rowA.id },
+    );
+    const usageA = await prisma.aIUsageEvent.findFirst({ where: { providerRequestId: "usage-a-1" } });
+    assert.equal(usageA?.tenantId, tenantA);
+    assert.equal(usageA?.integrationId, rowA.id);
+    assert.ok(Number(usageA?.totalCost || 0) > 0);
+    const again = await ingestSellerBridgeEvent(
+      prisma,
+      { type: "ai.usage", provider: "openai", model: "gpt-4o-mini", providerRequestId: "usage-a-1", inputTokens: 11, outputTokens: 4 },
+      { secret: secretA, integrationId: rowA.id },
+    );
+    assert.equal(again.usage, true);
+    assert.equal(await prisma.aIUsageEvent.count({ where: { providerRequestId: "usage-a-1" } }), 1);
+    await assert.rejects(
+      () =>
+        ingestSellerBridgeEvent(
+          prisma,
+          { type: "ai.usage", provider: "openai", model: "gpt-4o-mini", providerRequestId: "usage-x", inputTokens: 1, outputTokens: 1 },
+          { secret: secretA, integrationId: rowB.id },
+        ),
+      (error: { status?: number }) => error.status === 401,
+    );
+    await assert.rejects(
+      () =>
+        ingestSellerBridgeEvent(
+          prisma,
+          { type: "message.received", leadId: "LEAD-B-1", clientPhone: "+77012222222" },
+          { secret: secretA, integrationId: rowA.id },
+        ),
+      (error: { status?: number }) => error.status === 403,
+    );
+  });
+
+  it("records AI Manager and CRM usage with tokens, cost, and no double-count", async () => {
+    const first = await recordAiUsage(prisma, {
+      tenantId: tenantA,
+      integrationId: "int-a",
+      conversationId: "conv-a",
+      provider: "openai",
+      model: "gpt-4o-mini",
+      feature: "AI_MANAGER_REPLY",
+      providerRequestId: "req-1",
+      inputTokens: 100,
+      outputTokens: 50,
+      totalTokens: 150,
+      status: "ok",
+    });
+    const duplicate = await recordAiUsage(prisma, {
+      tenantId: tenantA,
+      provider: "openai",
+      model: "gpt-4o-mini",
+      feature: "AI_MANAGER_REPLY",
+      providerRequestId: "req-1",
+      inputTokens: 100,
+      outputTokens: 50,
+      status: "ok",
+    });
+    assert.equal(first?.id, duplicate?.id);
+    assert.equal(first?.pricingMissing, false);
+    assert.ok(Number(first?.totalCost || 0) > 0);
+    const command = await recordAiUsage(prisma, {
+      tenantId: tenantA,
+      provider: "openai",
+      model: "gpt-4o-mini",
+      feature: "AI_CRM_COMMAND",
+      providerRequestId: "req-cmd-1",
+      inputTokens: 20,
+      outputTokens: 10,
+      status: "ok",
+    });
+    assert.equal(command?.feature, "AI_CRM_COMMAND");
+    const missing = await recordAiUsage(prisma, {
+      tenantId: tenantA,
+      provider: "openai",
+      model: "unknown-model-xyz",
+      feature: "AI_SUMMARY",
+      providerRequestId: "req-miss",
+      inputTokens: 10,
+      outputTokens: 4,
+      status: "ok",
+    });
+    assert.equal(missing?.pricingMissing, true);
+    assert.equal(missing?.totalCost, null);
+    const failed = await recordAiUsage(prisma, {
+      tenantId: tenantA,
+      provider: "openai",
+      model: "gpt-4o-mini",
+      feature: "AI_MANAGER_REPLY",
+      status: "failed",
+      errorCode: "http_500",
+    });
+    assert.equal(failed?.inputTokens, null);
+    assert.equal(failed?.totalCost, null);
+    const orig = prisma.aIUsageEvent.create.bind(prisma.aIUsageEvent);
+    prisma.aIUsageEvent.create = (async () => {
+      throw new Error("telemetry down");
+    }) as typeof prisma.aIUsageEvent.create;
+    try {
+      const ignored = await recordAiUsage(prisma, {
+        tenantId: tenantA,
+        provider: "openai",
+        model: "gpt-4o-mini",
+        feature: "AI_OTHER",
+        status: "ok",
+        inputTokens: 1,
+        outputTokens: 1,
+      });
+      assert.equal(ignored, null);
+    } finally {
+      prisma.aIUsageEvent.create = orig;
+    }
+  });
+
+  it("keeps prompt and knowledge tenant-scoped; draft is unused until publish", async () => {
+    await saveTenantAiPrompt(prisma, platformAuth, tenantA, { draftPrompt: "Prompt A draft", publish: false });
+    await saveTenantAiPrompt(prisma, platformAuth, tenantB, { draftPrompt: "Prompt B published", publish: true });
+    const draftA = await getPublishedTenantAiContext(prisma, tenantA);
+    assert.equal(draftA.tenantPrompt, "");
+    await saveTenantAiPrompt(prisma, platformAuth, tenantA, { draftPrompt: "Prompt A published", publish: true });
+    const publishedA = await getPublishedTenantAiContext(prisma, tenantA);
+    const publishedB = await getPublishedTenantAiContext(prisma, tenantB);
+    assert.equal(publishedA.tenantPrompt, "Prompt A published");
+    assert.equal(publishedB.tenantPrompt, "Prompt B published");
+    assert.ok(!publishedA.tenantPrompt.includes("Prompt B"));
+    await upsertTenantKnowledgeDocument(prisma, platformAuth, tenantA, {
+      title: "Прайс A",
+      content: "Массаж стоит 10000",
+      publish: true,
+    });
+    await upsertTenantKnowledgeDocument(prisma, platformAuth, tenantB, {
+      title: "Прайс B",
+      content: "Секретная цена 999",
+      publish: true,
+    });
+    const hitsA = await searchTenantKnowledge(prisma, platformAuth, tenantA, "массаж");
+    assert.ok(hitsA.items.some((item) => item.title === "Прайс A"));
+    assert.ok(!hitsA.items.some((item) => item.title === "Прайс B"));
+    await assert.rejects(() => getTenantAiManagerAdmin(prisma, ownerAuth, tenantA), (error: { status?: number }) => error.status === 403);
+  });
+
+  it("forbids tenant admin from AI usage and allows platform admin", async () => {
+    const forbidden = await fetch(`${url}/api/v1/admin/ai-usage`, { headers: { cookie: ownerCookie, "x-tenant-id": tenantA } });
+    assert.equal(forbidden.status, 403);
+    const promptForbidden = await fetch(`${url}/api/v1/admin/tenants/${tenantA}/ai-manager`, {
+      headers: { cookie: ownerCookie },
+    });
+    assert.equal(promptForbidden.status, 403);
+    const allowed = await fetch(`${url}/api/v1/admin/ai-usage?period=last_7`, { headers: { cookie: platformCookie } });
+    assert.equal(allowed.status, 200);
+    const body = await allowed.json();
+    assert.ok(body.totals);
+    const listed = await listPlatformAiUsage(prisma, platformAuth, { period: "last_30" });
+    assert.ok(listed.tenants.some((row) => row.tenantId === tenantA));
+    const health = await fetch(`${url}/api/v1/integrations/whatsapp-seller/health`, {
+      headers: { cookie: ownerCookie, "x-tenant-id": tenantA },
+    });
+    const healthBody = await health.json();
+    assert.equal(health.status, 200);
+    assert.equal(healthBody.sellerUrl, undefined);
+    assert.ok(!JSON.stringify(healthBody).includes("inputTokens"));
+    assert.ok(!JSON.stringify(healthBody).includes("totalCost"));
+  });
+});

@@ -215,6 +215,9 @@ export function createApiClient(options: ClientOptions) {
     contactOverview: (id: string) => request(`/api/v1/contacts/${id}/overview`),
     updateContact: (id: string, body: unknown) =>
       request(`/api/v1/contacts/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+    deleteContact: (id: string) => request(`/api/v1/contacts/${id}`, { method: "DELETE" }),
+    openContactWhatsAppChat: (id: string) =>
+      request<{ conversationId: string; created: boolean }>(`/api/v1/contacts/${id}/whatsapp-chat`, { method: "POST" }),
     addContactNote: (id: string, body: unknown) =>
       request(`/api/v1/contacts/${id}/notes`, { method: "POST", body: JSON.stringify(body) }),
     addContactTag: (id: string, name: string) =>
@@ -450,6 +453,8 @@ export function createApiClient(options: ClientOptions) {
       }),
     conversationAgreements: (id: string) => request(`/api/v1/conversations/${id}/agreements`),
     takeConversation: (id: string) => request(`/api/v1/conversations/${id}/take`, { method: "POST" }),
+    assignConversation: (id: string, membershipId: string) =>
+      request(`/api/v1/conversations/${id}/assign`, { method: "POST", body: JSON.stringify({ membershipId }) }),
     returnToAi: (id: string) => request(`/api/v1/conversations/${id}/return-to-ai`, { method: "POST" }),
     pauseConversation: (id: string) => request(`/api/v1/conversations/${id}/pause`, { method: "POST", body: "{}" }),
     addInstruction: (id: string, text: string) =>
@@ -460,19 +465,26 @@ export function createApiClient(options: ClientOptions) {
       request("/api/v1/management/ai-pause", { method: "POST", body: JSON.stringify({ paused }) }),
     claimAllAiConversations: () => request("/api/v1/management/claim-all-ai", { method: "POST", body: "{}" }),
     integrationSetup: () => request("/api/v1/integrations/setup"),
-    connectWhatsApp: (sellerUrl: string, secret: string) =>
+    connectWhatsApp: (body: { instanceId?: string; apiToken?: string; sellerUrl?: string; secret?: string }) =>
       request("/api/v1/integrations/whatsapp-seller/connect", {
         method: "POST",
-        body: JSON.stringify({ sellerUrl, secret }),
+        body: JSON.stringify(body),
       }),
+    rotateWhatsAppSecret: () => request("/api/v1/integrations/whatsapp-seller/rotate-secret", { method: "POST" }),
+    disconnectWhatsApp: () => request("/api/v1/integrations/whatsapp-seller/disconnect", { method: "POST" }),
     syncWhatsApp: () => request("/api/v1/integrations/whatsapp-seller/sync", { method: "POST" }),
     rotateWebhook: (id: string) => request(`/api/v1/integrations/${id}/rotate-secret`, { method: "POST" }),
     beginTelegram: () => request("/api/v1/telegram/begin-link", { method: "POST" }),
-    sendMessage: (id: string, text: string, idempotencyKey: string) =>
+    sendMessage: (
+      id: string,
+      text: string,
+      idempotencyKey: string,
+      attachments?: Array<{ fileName: string; mimeType: string; contentBase64: string }>,
+    ) =>
       request(`/api/v1/conversations/${id}/messages`, {
         method: "POST",
         headers: { "Idempotency-Key": idempotencyKey },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, attachments }),
       }),
     notifications: () => request("/api/v1/notifications"),
     markNotificationRead: (id: string) => request(`/api/v1/notifications/${id}/read`, { method: "POST" }),
@@ -593,6 +605,44 @@ export function createApiClient(options: ClientOptions) {
       request(`/api/v1/admin/tenants/${tenantId}/integrations/${integrationId}/events`),
     adminUpdateCompanyAi: (tenantId: string, body: Record<string, unknown>) =>
       request(`/api/v1/admin/tenants/${tenantId}/ai`, { method: "PATCH", body: JSON.stringify(body) }),
+    adminAiUsage: (query: Record<string, string | undefined> = {}) => {
+      const params = new URLSearchParams();
+      Object.entries(query).forEach(([key, value]) => {
+        if (value != null && value !== "") params.set(key, value);
+      });
+      const qs = params.toString();
+      return request(`/api/v1/admin/ai-usage${qs ? `?${qs}` : ""}`);
+    },
+    adminCompanyAiUsage: (tenantId: string, query: Record<string, string | undefined> = {}) => {
+      const params = new URLSearchParams();
+      Object.entries(query).forEach(([key, value]) => {
+        if (value != null && value !== "") params.set(key, value);
+      });
+      const qs = params.toString();
+      return request(`/api/v1/admin/tenants/${tenantId}/ai-usage${qs ? `?${qs}` : ""}`);
+    },
+    adminCompanyAiManager: (tenantId: string) => request(`/api/v1/admin/tenants/${tenantId}/ai-manager`),
+    adminSaveCompanyAiPrompt: (tenantId: string, body: Record<string, unknown>) =>
+      request(`/api/v1/admin/tenants/${tenantId}/ai-manager/prompt`, { method: "PATCH", body: JSON.stringify(body) }),
+    adminSaveCompanyKnowledge: (tenantId: string, body: Record<string, unknown>) =>
+      request(`/api/v1/admin/tenants/${tenantId}/ai-manager/knowledge`, { method: "POST", body: JSON.stringify(body) }),
+    adminUpdateCompanyKnowledge: (tenantId: string, docId: string, body: Record<string, unknown>) =>
+      request(`/api/v1/admin/tenants/${tenantId}/ai-manager/knowledge/${docId}`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+    adminDeleteCompanyKnowledge: (tenantId: string, docId: string) =>
+      request(`/api/v1/admin/tenants/${tenantId}/ai-manager/knowledge/${docId}`, { method: "DELETE" }),
+    adminSearchCompanyKnowledge: (tenantId: string, query: string) =>
+      request(`/api/v1/admin/tenants/${tenantId}/ai-manager/knowledge/search`, {
+        method: "POST",
+        body: JSON.stringify({ query }),
+      }),
+    adminPreviewCompanyAi: (tenantId: string, message: string) =>
+      request(`/api/v1/admin/tenants/${tenantId}/ai-manager/preview`, {
+        method: "POST",
+        body: JSON.stringify({ message }),
+      }),
     adminMembers: (query?: Record<string, string | number | undefined>) => {
       const params = new URLSearchParams();
       Object.entries(query || {}).forEach(([key, value]) => {

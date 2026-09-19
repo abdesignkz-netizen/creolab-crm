@@ -1,10 +1,26 @@
 import { CALLS_ENABLED } from "../lib/featureFlags.ts";
 import type { PrismaClient } from "@creolab/db";
+import { recordAiUsage } from "./aiUsageService.ts";
 import { getEffectiveLlmConfig } from "./runtimeSettings.ts";
 
 const DEFAULT_ANYMODEL_BASE_URL = "https://anymodel.org/v1";
 
-export type LlmRuntime = { prisma?: PrismaClient | null; tenantId?: string | null };
+export type LlmRuntime = {
+  prisma?: PrismaClient | null;
+  tenantId?: string | null;
+  feature?: string;
+  integrationId?: string | null;
+  conversationId?: string | null;
+  userId?: string | null;
+};
+
+type ChatUsage = {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  prompt_tokens_details?: { cached_tokens?: number };
+  completion_tokens_details?: { reasoning_tokens?: number };
+};
 
 function llmConfig() {
   const anyModelKey = String(process.env.ANYMODEL_API_KEY || "").trim();
@@ -16,14 +32,102 @@ function llmConfig() {
     process.env.OPENAI_BASE_URL ||
     (useAnyModel ? DEFAULT_ANYMODEL_BASE_URL : "https://api.openai.com/v1");
   const model = process.env.ANYMODEL_MODEL || process.env.OPENAI_MODEL || "gpt-4o-mini";
-  return { apiKey, baseUrl: baseUrl.replace(/\/$/, ""), model };
+  return {
+    apiKey,
+    baseUrl: baseUrl.replace(/\/$/, ""),
+    model,
+    provider: openAiKey ? "openai" : useAnyModel ? "anymodel" : "openai",
+  };
 }
 
 async function resolveLlm(runtime?: LlmRuntime) {
   if (runtime?.prisma && runtime.tenantId) {
-    return getEffectiveLlmConfig(runtime.prisma, runtime.tenantId);
+    const resolved = await getEffectiveLlmConfig(runtime.prisma, runtime.tenantId);
+    return {
+      ...resolved,
+      provider: resolved.provider || (resolved.baseUrl.includes("anymodel") ? "anymodel" : "openai"),
+    };
   }
   return llmConfig();
+}
+
+async function completeChat(input: {
+  runtime?: LlmRuntime;
+  feature: string;
+  messages: Array<{ role: string; content: string }>;
+  temperature?: number;
+  json?: boolean;
+  timeoutMs?: number;
+}) {
+  const runtime = input.runtime || {};
+  const { apiKey, baseUrl, model, provider } = await resolveLlm(runtime);
+  if (!apiKey) return { content: null as string | null };
+  const started = Date.now();
+  let status: "ok" | "failed" = "failed";
+  let errorCode: string | null = "llm_request_failed";
+  let content: string | null = null;
+  let usage: ChatUsage | null = null;
+  let requestId: string | null = null;
+  try {
+    const response = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        temperature: input.temperature ?? 0,
+        ...(input.json ? { response_format: { type: "json_object" } } : {}),
+        messages: input.messages,
+      }),
+      signal: AbortSignal.timeout(input.timeoutMs ?? 15000),
+    });
+    const data = (await response.json().catch(() => ({}))) as {
+      id?: string;
+      usage?: ChatUsage;
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+    requestId = data.id || null;
+    usage = data.usage || null;
+    if (!response.ok) {
+      errorCode = `http_${response.status}`;
+    } else {
+      content = String(data.choices?.[0]?.message?.content || "").trim() || null;
+      status = content ? "ok" : "failed";
+      errorCode = content ? null : "empty_completion";
+    }
+  } catch {
+    errorCode = "llm_request_failed";
+  }
+  await recordAiUsage(runtime.prisma, {
+    tenantId: runtime.tenantId || null,
+    integrationId: runtime.integrationId || null,
+    conversationId: runtime.conversationId || null,
+    userId: runtime.userId || null,
+    provider,
+    model,
+    feature: runtime.feature || input.feature,
+    providerRequestId: requestId,
+    inputTokens: usage?.prompt_tokens ?? null,
+    outputTokens: usage?.completion_tokens ?? null,
+    cachedInputTokens: usage?.prompt_tokens_details?.cached_tokens ?? null,
+    reasoningTokens: usage?.completion_tokens_details?.reasoning_tokens ?? null,
+    totalTokens: usage?.total_tokens ?? null,
+    latencyMs: Date.now() - started,
+    status,
+    errorCode,
+  });
+  return { content: status === "ok" ? content : null };
+}
+
+function parseJson<T>(content: string | null): T | null {
+  if (!content) return null;
+  try {
+    return JSON.parse(content) as T;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -35,49 +139,24 @@ export async function refineCommandWithLlm(
   ruleParsed: Record<string, unknown>,
   runtime?: LlmRuntime,
 ) {
-  const { apiKey, baseUrl, model } = await resolveLlm(runtime);
-  if (!apiKey) return null;
-
   const taskTypes = CALLS_ENABLED
     ? "proposal|message|call|follow_up|send_documents|other"
     : "proposal|message|follow_up|send_documents|other";
-  const callHint = CALLS_ENABLED
-    ? ""
-    : " Звонки отключены: «позвони/созвонись» → taskType message.";
-
-  try {
-    const response = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
+  const callHint = CALLS_ENABLED ? "" : " Звонки отключены: «позвони/созвонись» → taskType message.";
+  const { content } = await completeChat({
+    runtime,
+    feature: "AI_CRM_COMMAND",
+    json: true,
+    timeoutMs: 12000,
+    messages: [
+      {
+        role: "system",
+        content: `Ты парсер CRM-команд. Верни JSON с полями: taskType (${taskTypes}), executionMode (execute|prepare_only), serviceCategories (WEB|PRESENTATION|ADVERTISING|BRANDING|AI[]), datePreset (today|yesterday|last_3_days|last_7_days|last_30_days|null), needsReply (bool), excludeWon (bool), proposalSentDaysAgo (number|null), clientNameQuery (string|null), intent (string), riskLevel (0-4). «скажи/напиши/сообщи что …» = taskType message. «отправь КП» = proposal. «отправь файл/документ» = send_documents.${callHint} Не выдумывай факты. Не отправляй сообщения.`,
       },
-      body: JSON.stringify({
-        model,
-        temperature: 0,
-        response_format: { type: "json_object" },
-        messages: [
-          {
-            role: "system",
-            content:
-              `Ты парсер CRM-команд. Верни JSON с полями: taskType (${taskTypes}), executionMode (execute|prepare_only), serviceCategories (WEB|PRESENTATION|ADVERTISING|BRANDING|AI[]), datePreset (today|yesterday|last_3_days|last_7_days|last_30_days|null), needsReply (bool), excludeWon (bool), proposalSentDaysAgo (number|null), clientNameQuery (string|null), intent (string), riskLevel (0-4). «скажи/напиши/сообщи что …» = taskType message. «отправь КП» = proposal. «отправь файл/документ» = send_documents.${callHint} Не выдумывай факты. Не отправляй сообщения.`,
-          },
-          {
-            role: "user",
-            content: `Команда: ${rawText}\nЧерновик правил: ${JSON.stringify(ruleParsed)}`,
-          },
-        ],
-      }),
-      signal: AbortSignal.timeout(12000),
-    });
-    if (!response.ok) return null;
-    const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
-    const content = data.choices?.[0]?.message?.content;
-    if (!content) return null;
-    return JSON.parse(content) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
+      { role: "user", content: `Команда: ${rawText}\nЧерновик правил: ${JSON.stringify(ruleParsed)}` },
+    ],
+  });
+  return parseJson<Record<string, unknown>>(content);
 }
 
 export async function refineConversationContextWithLlm(input: {
@@ -90,58 +169,41 @@ export async function refineConversationContextWithLlm(input: {
   prisma?: PrismaClient | null;
   tenantId?: string | null;
 }) {
-  const { apiKey, baseUrl, model } = await resolveLlm(input);
-  if (!apiKey) return null;
-
-  try {
-    const response = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        temperature: 0,
-        response_format: { type: "json_object" },
-        messages: [
-          {
-            role: "system",
-            content: `Ты CRM Context Analyst. Анализируй КОНТЕКСТ переписки целиком, не одно сообщение.
+  const { content } = await completeChat({
+    runtime: input,
+    feature: "AI_SUMMARY",
+    json: true,
+    timeoutMs: 20000,
+    messages: [
+      {
+        role: "system",
+        content: `Ты CRM Context Analyst. Анализируй КОНТЕКСТ переписки целиком, не одно сообщение.
 Верни JSON ConversationAnalysis:
 clientIntent, detectedNeed, suggestedRequestStatus (new|qualification|qualified|waiting_client|waiting_manager|null),
 suggestedDealStage (только: need_identified|proposal_sent|negotiation|contract|null — НИКОГДА won/lost),
 waitingFor (CLIENT|MANAGER|AI|THIRD_PARTY|NONE), needsReply,
 agreements[{action:create|update|reschedule|cancel|complete, existingAgreementId, type, title, summary, purpose, status, scheduledAt ISO|null, locationName, address, meetingProvider, meetingUrl, clarificationNeeded, confidence HIGH|MEDIUM|LOW, createTask, taskType, evidenceMessageIds[]}],
 suggestedTasks[{type,title,dueAt,purpose,briefingText,preparationHints[],linkedAgreementIndex,evidenceMessageIds[],confidence}],
-suggestedNextAction, humanRequired, humanReason, summaryUpdate, evidenceMessageIds[], confidence, facts{service,budget,deadline,company,meetingDate,meetingTime}.
+suggestedNextAction, humanRequired, humanReason, summaryUpdate, evidenceMessageIds[], confidence, facts{service,budget,deadline,company,meetingDate,meetingTime,proposalSent,pricesSent,waitingForManagement}.
 Типы agreement: CALL, ONLINE_MEETING, OFFLINE_MEETING, SEND_PROPOSAL, SEND_DOCUMENTS, SEND_CONTRACT, SEND_INVOICE, FOLLOW_UP, MESSAGE, PAYMENT_PROMISE, PREPARE_ESTIMATE, CLIENT_CALLBACK, MANAGER_CALLBACK, OTHER.
 Статусы: DETECTED, NEEDS_CLARIFICATION, CONFIRMED, SCHEDULED, COMPLETED, RESCHEDULED, CANCELLED, MISSED.
-Не выдумывай дату/время/место/ссылку если их нет в тексте. Не предлагай WON/LOST. Не отправляй сообщения.`,
-          },
-          {
-            role: "user",
-            content: JSON.stringify({
-              inquiryStatus: input.inquiryStatus,
-              dealStage: input.dealStage,
-              openTaskTitles: input.openTaskTitles,
-              existingAgreements: input.existingAgreements,
-              draft: input.draft,
-              messages: input.messages,
-            }),
-          },
-        ],
-      }),
-      signal: AbortSignal.timeout(20000),
-    });
-    if (!response.ok) return null;
-    const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
-    const content = data.choices?.[0]?.message?.content;
-    if (!content) return null;
-    return JSON.parse(content) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
+Не выдумывай дату/время/место/ссылку если их нет в тексте. Не предлагай WON/LOST. Не отправляй сообщения.
+summaryUpdate — 2–4 коротких предложения, полная картина: потребность; что уже сделано (КП, цены, файлы); кого ждём. Если КП или цены уже высланы командой — напиши «КП выслано» / «цены отправлены» и suggestedDealStage=proposal_sent, не предлагай снова «отправить КП». Если клиент передал вопрос руководству, директору или «они решают» — waitingFor=CLIENT, needsReply=false, в summaryUpdate обязательно «Ждём ответа руководства клиента». Не пиши «явных договорённостей нет», если КП, цены или документы уже ушли.`,
+      },
+      {
+        role: "user",
+        content: JSON.stringify({
+          inquiryStatus: input.inquiryStatus,
+          dealStage: input.dealStage,
+          openTaskTitles: input.openTaskTitles,
+          existingAgreements: input.existingAgreements,
+          draft: input.draft,
+          messages: input.messages,
+        }),
+      },
+    ],
+  });
+  return parseJson<Record<string, unknown>>(content);
 }
 
 export async function refineResultNextActionWithLlm(input: {
@@ -154,81 +216,51 @@ export async function refineResultNextActionWithLlm(input: {
   prisma?: PrismaClient | null;
   tenantId?: string | null;
 }) {
-  const { apiKey, baseUrl, model } = await resolveLlm(input);
-  if (!apiKey) return null;
-
-  try {
-    const response = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        temperature: 0,
-        response_format: { type: "json_object" },
-        messages: [
-          {
-            role: "system",
-            content: `Ты CRM Next Action Analyst. По результату звонка/встречи предложи следующие задачи.
+  const { content } = await completeChat({
+    runtime: input,
+    feature: "AI_FOLLOW_UP",
+    json: true,
+    messages: [
+      {
+        role: "system",
+        content: `Ты CRM Next Action Analyst. По результату звонка/встречи предложи следующие задачи.
 Верни JSON: { suggestions: [{ type, title, dueOffsetHours|null, dueAt|null, purpose, suggestedDealStage|null, suggestedRequestStatus|null, requiresConfirm, reason }] }.
 Типы задач: call, meeting, proposal, send_documents, prepare_estimate, follow_up, wait_client, payment, other.
 suggestedDealStage только: need_identified|proposal_sent|negotiation|contract|null. Никогда won/lost.
 Для договора/счёта/индивидуального КП всегда requiresConfirm=true.
 Не выдумывай факты, которых нет в resultText.`,
-          },
-          { role: "user", content: JSON.stringify(input) },
-        ],
-      }),
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!response.ok) return null;
-    const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
-    const content = data.choices?.[0]?.message?.content;
-    if (!content) return null;
-    return JSON.parse(content) as {
-      suggestions?: Array<{
-        type?: string;
-        title?: string;
-        dueAt?: string | null;
-        dueOffsetHours?: number | null;
-        purpose?: string | null;
-        suggestedDealStage?: string | null;
-        suggestedRequestStatus?: string | null;
-        requiresConfirm?: boolean;
-        reason?: string;
-      }>;
-    };
-  } catch {
-    return null;
-  }
+      },
+      { role: "user", content: JSON.stringify(input) },
+    ],
+  });
+  return parseJson<{
+    suggestions?: Array<{
+      type?: string;
+      title?: string;
+      dueAt?: string | null;
+      dueOffsetHours?: number | null;
+      purpose?: string | null;
+      suggestedDealStage?: string | null;
+      suggestedRequestStatus?: string | null;
+      requiresConfirm?: boolean;
+      reason?: string;
+    }>;
+  }>(content);
 }
-
 
 export async function refineRequestAnalysisWithLlm(
   input: Record<string, unknown>,
   draft: Record<string, unknown>,
   runtime?: LlmRuntime,
 ) {
-  const { apiKey, baseUrl, model } = await resolveLlm(runtime);
-  if (!apiKey) return null;
-
-  try {
-    const response = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        temperature: 0,
-        response_format: { type: "json_object" },
-        messages: [
-          {
-            role: "system",
-            content: `Ты CRM Request Analyst. Анализируй новую заявку. Верни JSON RequestAnalysis:
+  const { content } = await completeChat({
+    runtime,
+    feature: "AI_LEAD_ANALYSIS",
+    json: true,
+    messages: [
+      {
+        role: "system",
+        content: `Ты CRM Request Analyst. Анализируй новую заявку. Верни JSON RequestAnalysis:
 serviceCategory (web|presentation|advertising|branding|ai|other|null), serviceSubcategory,
 detectedNeed, budgetMin, budgetMax, deadline, city, company,
 knownFields[{key,label,value}], missingFields[{key,label}],
@@ -240,20 +272,11 @@ taskTitle должен быть конкретным, не «Обработат�
 clientMessageDraft — продолжение первого WhatsApp после фразы «Вас приветствует CreoLab Digital Agency, пишу по поводу вашей заявки на …»: только 1–3 уточнения.
 Не цитируй служебные поля заявки (каналы, CTA, контакт, страница, телефон).
 Не пиши «Понял, что нужна». Не спрашивай телефон. Не выдумывай цены и сроки. Не пиши «чем могу помочь».`,
-          },
-          { role: "user", content: JSON.stringify({ input, draft }) },
-        ],
-      }),
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!response.ok) return null;
-    const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
-    const content = data.choices?.[0]?.message?.content;
-    if (!content) return null;
-    return JSON.parse(content) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
+      },
+      { role: "user", content: JSON.stringify({ input, draft }) },
+    ],
+  });
+  return parseJson<Record<string, unknown>>(content);
 }
 
 const MAX_CAMPAIGN_LLM_RECIPIENTS = 40;
@@ -274,52 +297,35 @@ export async function refineCampaignRecipientDraftsWithLlm(input: {
     draft: string;
   }>;
 }) {
-  const { apiKey, baseUrl, model } = await resolveLlm(input);
-  if (!apiKey || input.recipients.length === 0 || input.recipients.length > MAX_CAMPAIGN_LLM_RECIPIENTS) return null;
-
-  try {
-    const response = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
+  if (input.recipients.length === 0 || input.recipients.length > MAX_CAMPAIGN_LLM_RECIPIENTS) return null;
+  const { content } = await completeChat({
+    runtime: input,
+    feature: "AI_FOLLOW_UP",
+    json: true,
+    timeoutMs: 20000,
+    messages: [
+      {
+        role: "system",
+        content:
+          "Ты пишешь исходящие WhatsApp-сообщения клиентам CREOLAB. Главное — выполни задачу менеджера по смыслу, не шаблоном. Не пиши «актуальна ли заявка» / «актуален ли ещё запрос», если менеджер просил другое (время созвона, оплату, файл, документы и т.д.). Верни JSON { drafts: [{id, text}] }. 1–3 предложения, на «Вы», как живой менеджер. Имя только из firstName; не используй ярлыки полей («Интерес», «Имя», «Компания»). Если имени нет — «Добрый день!». Интерес и компанию — как контекст заявки. Не выдумывай цены, скидки, сроки и факты. Не упоминай менеджера, CRM и что текст составлен по инструкции. Не отправляй сообщения.",
       },
-      body: JSON.stringify({
-        model,
-        temperature: 0,
-        response_format: { type: "json_object" },
-        messages: [
-          {
-            role: "system",
-            content:
-              "Ты пишешь исходящие WhatsApp-сообщения клиентам CREOLAB. Главное — выполни задачу менеджера по смыслу, не шаблоном. Не пиши «актуальна ли заявка» / «актуален ли ещё запрос», если менеджер просил другое (время созвона, оплату, файл, документы и т.д.). Верни JSON { drafts: [{id, text}] }. 1–3 предложения, на «Вы», как живой менеджер. Имя только из firstName; не используй ярлыки полей («Интерес», «Имя», «Компания»). Если имени нет — «Добрый день!». Интерес и компанию — как контекст заявки. Не выдумывай цены, скидки, сроки и факты. Не упоминай менеджера, CRM и что текст составлен по инструкции. Не отправляй сообщения.",
-          },
-          {
-            role: "user",
-            content: JSON.stringify({
-              task: input.taskText,
-              clientAsk: input.clientAsk || undefined,
-              kind: input.kind,
-              hasFile: input.hasFile,
-              recipients: input.recipients,
-            }),
-          },
-        ],
-      }),
-      signal: AbortSignal.timeout(20000),
-    });
-    if (!response.ok) return null;
-    const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
-    const content = data.choices?.[0]?.message?.content;
-    if (!content) return null;
-    const parsed = JSON.parse(content) as { drafts?: Array<{ id?: string; text?: string }> };
-    const drafts = (parsed.drafts || [])
-      .map((row) => ({ id: String(row.id || ""), text: String(row.text || "").trim() }))
-      .filter((row) => row.id && row.text && row.text.length <= 4000);
-    return drafts.length ? drafts : null;
-  } catch {
-    return null;
-  }
+      {
+        role: "user",
+        content: JSON.stringify({
+          task: input.taskText,
+          clientAsk: input.clientAsk || undefined,
+          kind: input.kind,
+          hasFile: input.hasFile,
+          recipients: input.recipients,
+        }),
+      },
+    ],
+  });
+  const parsed = parseJson<{ drafts?: Array<{ id?: string; text?: string }> }>(content);
+  const drafts = (parsed?.drafts || [])
+    .map((row) => ({ id: String(row.id || ""), text: String(row.text || "").trim() }))
+    .filter((row) => row.id && row.text && row.text.length <= 4000);
+  return drafts.length ? drafts : null;
 }
 
 /**
@@ -335,27 +341,39 @@ export async function composeClientMessageWithLlm(input: {
   history?: Array<{ role: string; content: string }>;
   prisma?: PrismaClient | null;
   tenantId?: string | null;
+  feature?: string;
 }) {
-  const { apiKey, baseUrl, model } = await resolveLlm(input);
   const instruction = String(input.instruction || "").trim();
-  if (!apiKey || !instruction) return null;
-
+  if (!instruction) return null;
   const fact = (value?: string | null, empty = "нет — не выдумывай и не подставляй ярлык поля") => {
     const text = String(value || "").replace(/\s+/g, " ").trim();
     return text || empty;
   };
-  const history = Array.isArray(input.history) && input.history.length
-    ? input.history
-        .slice(-40)
-        .map((item, index) => {
-          const role = item.role === "assistant" ? "мы уже отправили клиенту" : item.role === "user" ? "клиент" : item.role || "unknown";
-          return `${index + 1}. [${role}]: ${item.content || ""}`;
-        })
-        .join("\n")
-    : "История диалога пуста.";
+  const history =
+    Array.isArray(input.history) && input.history.length
+      ? input.history
+          .slice(-40)
+          .map((item, index) => {
+            const role = item.role === "assistant" ? "мы уже отправили клиенту" : item.role === "user" ? "клиент" : item.role || "unknown";
+            return `${index + 1}. [${role}]: ${item.content || ""}`;
+          })
+          .join("\n")
+      : "История диалога пуста.";
+
+  let tenantPreamble = "";
+  if (input.prisma && input.tenantId) {
+    try {
+      const { buildTenantAiSystemPreamble, getPublishedTenantAiContext } = await import("./tenantAiConfigService.ts");
+      const context = await getPublishedTenantAiContext(input.prisma, input.tenantId);
+      tenantPreamble = buildTenantAiSystemPreamble(context);
+    } catch {
+      tenantPreamble = "";
+    }
+  }
 
   const prompt = [
-    "Ты пишешь одно исходящее WhatsApp-сообщение клиенту CREOLAB.",
+    tenantPreamble,
+    "Ты пишешь одно исходящее WhatsApp-сообщение клиенту этой компании.",
     "Главное — выполни задачу менеджера по смыслу. Не подменяй её шаблоном.",
     "Не пиши типовые фразы вроде «актуальна ли заявка», «готов ли обсудить шаги», «задайте пару вопросов», если менеджер просил о другом.",
     "Если просят напомнить о согласовании, подтверждении, запуске, файле, макете, оплате или удобном времени — пиши именно об этом.",
@@ -377,33 +395,23 @@ export async function composeClientMessageWithLlm(input: {
     `Задача менеджера: ${instruction}`,
     "",
     "Верни только текст сообщения клиенту, без кавычек и без пояснений.",
-  ].join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 
-  try {
-    const response = await fetch(`${baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        temperature: 0.2,
-        messages: [{ role: "user", content: prompt }],
-      }),
-      signal: AbortSignal.timeout(20000),
-    });
-    if (!response.ok) return null;
-    const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
-    const text = String(data.choices?.[0]?.message?.content || "")
-      .trim()
-      .replace(/^["«]|["»]$/g, "");
-    if (!text || text.length > 4000) return null;
-    if (/^не могу|^я не могу|скопируйте текст|задача менеджера/i.test(text)) return null;
-    return text;
-  } catch {
-    return null;
-  }
+  const { content } = await completeChat({
+    runtime: input,
+    feature: input.feature || "AI_CRM_COMMAND",
+    temperature: 0.2,
+    timeoutMs: 20000,
+    messages: [{ role: "user", content: prompt }],
+  });
+  const text = String(content || "")
+    .trim()
+    .replace(/^["«]|["»]$/g, "");
+  if (!text || text.length > 4000) return null;
+  if (/^не могу|^я не могу|скопируйте текст|задача менеджера/i.test(text)) return null;
+  return text;
 }
 
 export type SituationAskLlmAnswer = {
@@ -419,65 +427,39 @@ export async function answerSituationAskWithLlm(
   snapshot: Record<string, unknown>,
   runtime?: LlmRuntime,
 ): Promise<SituationAskLlmAnswer | null> {
-  const { apiKey, baseUrl, model } = await resolveLlm(runtime);
-  if (!apiKey) return null;
-  try {
-    const response = await fetch(`${baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
+  const { content } = await completeChat({
+    runtime,
+    feature: "AI_CRM_COMMAND",
+    json: true,
+    messages: [
+      {
+        role: "system",
+        content:
+          "Ты аналитик CRM CREOLAB для руководителя. Ответь на вопрос менеджера только фактами из JSON. Не выдумывай цифры, имена, сделки и заявки. Если в фактах нет ответа — так и скажи и предложи ближайший список. Пиши по-русски, коротко, по делу. Верни JSON: headline (1–2 предложения), bullets[{text, href?}], links[{label, href}], intent (attention|deals|inquiries|tasks|team|funnel|period|clients|other). href только внутренние пути CRM, начинающиеся с / или #.",
       },
-      body: JSON.stringify({
-        model,
-        temperature: 0,
-        response_format: { type: "json_object" },
-        messages: [
-          {
-            role: "system",
-            content:
-              "Ты аналитик CRM CREOLAB для руководителя. Ответь на вопрос менеджера только фактами из JSON. Не выдумывай цифры, имена, сделки и заявки. Если в фактах нет ответа — так и скажи и предложи ближайший список. Пиши по-русски, коротко, по делу. Верни JSON: headline (1–2 предложения), bullets[{text, href?}], links[{label, href}], intent (attention|deals|inquiries|tasks|team|funnel|period|clients|other). href только внутренние пути CRM, начинающиеся с / или #.",
-          },
-          {
-            role: "user",
-            content: `Вопрос: ${question}\nФакты CRM: ${JSON.stringify(snapshot)}`,
-          },
-        ],
-      }),
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!response.ok) return null;
-    const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
-    const content = data.choices?.[0]?.message?.content;
-    if (!content) return null;
-    const parsed = JSON.parse(content) as Partial<SituationAskLlmAnswer>;
-    const headline = String(parsed.headline || "").trim();
-    if (!headline) return null;
-    const bullets = Array.isArray(parsed.bullets)
-      ? parsed.bullets
-          .map((row) => ({
-            text: String(row?.text || "").trim(),
-            href: row?.href ? String(row.href) : undefined,
-          }))
-          .filter((row) => row.text)
-          .slice(0, 8)
-      : [];
-    const links = Array.isArray(parsed.links)
-      ? parsed.links
-          .map((row) => ({
-            label: String(row?.label || "").trim(),
-            href: String(row?.href || "").trim(),
-          }))
-          .filter((row) => row.label && row.href)
-          .slice(0, 6)
-      : [];
-    return {
-      headline,
-      bullets,
-      links,
-      intent: String(parsed.intent || "other"),
-    };
-  } catch {
-    return null;
-  }
+      { role: "user", content: `Вопрос: ${question}\nФакты CRM: ${JSON.stringify(snapshot)}` },
+    ],
+  });
+  const parsed = parseJson<Partial<SituationAskLlmAnswer>>(content);
+  const headline = String(parsed?.headline || "").trim();
+  if (!headline) return null;
+  const bullets = Array.isArray(parsed?.bullets)
+    ? parsed.bullets
+        .map((row) => ({
+          text: String(row?.text || "").trim(),
+          href: row?.href ? String(row.href) : undefined,
+        }))
+        .filter((row) => row.text)
+        .slice(0, 8)
+    : [];
+  const links = Array.isArray(parsed?.links)
+    ? parsed.links
+        .map((row) => ({
+          label: String(row?.label || "").trim(),
+          href: String(row.href || "").trim(),
+        }))
+        .filter((row) => row.label && row.href)
+        .slice(0, 6)
+    : [];
+  return { headline, bullets, links, intent: String(parsed?.intent || "other") };
 }

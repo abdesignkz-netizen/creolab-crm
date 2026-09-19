@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { after, before, describe, it } from "node:test";
 import { createPrismaClient } from "@creolab/db";
 import { createApp } from "./app.ts";
+import { encryptSecret } from "./lib/secretBox.ts";
+import { setGreenApiFetchForTests } from "./services/greenApiWebhook.ts";
 
 describe("Contact 360", () => {
   let prisma: Awaited<ReturnType<typeof createPrismaClient>>;
@@ -235,6 +238,168 @@ describe("Contact 360", () => {
     assert.equal(row.language, "unknown");
     assert.equal(row.lifecycleStatus, "new");
     assert.equal(row.leadTemperature, "unknown");
+  });
+
+  async function login(email: string) {
+    const response = await fetch(`${base}/api/v1/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password: process.env.SEED_PASSWORD, client: "web" }),
+    });
+    assert.equal(response.status, 200, await response.text());
+    return response.headers.get("set-cookie") || "";
+  }
+
+  async function createClient(session: string, name: string) {
+    const phone = `+7701${String(Math.floor(Math.random() * 1e7)).padStart(7, "0")}`;
+    const response = await fetch(`${base}/api/v1/contacts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie: session },
+      body: JSON.stringify({ name, phone }),
+    });
+    const body = await response.json();
+    assert.equal(response.status, 201, JSON.stringify(body));
+    return body.client.id as string;
+  }
+
+  it("владелец удаляет клиента вместе с заявкой и диалогом", async () => {
+    const id = await createClient(cookie, "Удаление владельцем");
+    const tenant = await prisma.tenant.findFirstOrThrow({ where: { slug: "creolab" } });
+    await prisma.inquiry.create({
+      data: { tenantId: tenant.id, source: "manual", contactId: id, phoneRaw: "+77010000000", phoneNormalized: "77010000000" },
+    });
+    await prisma.conversation.create({ data: { tenantId: tenant.id, contactId: id } });
+    const deleted = await fetch(`${base}/api/v1/contacts/${id}`, { method: "DELETE", headers: { cookie } });
+    assert.equal(deleted.status, 200, await deleted.text());
+    assert.equal(await prisma.contact.findUnique({ where: { id } }), null);
+    assert.equal(await prisma.inquiry.count({ where: { contactId: id } }), 0);
+    assert.equal(await prisma.conversation.count({ where: { contactId: id } }), 0);
+    const missing = await fetch(`${base}/api/v1/contacts/${id}`, { headers: { cookie } });
+    assert.equal(missing.status, 404);
+  });
+
+  it("директор может удалить клиента, менеджер и руководитель продаж — нет", async () => {
+    const managerSession = await login("manager@creolab.example");
+    const leadSession = await login("sales@creolab.example");
+    const ownerUser = await prisma.user.findUniqueOrThrow({ where: { email: "owner@creolab.example" } });
+    const tenant = await prisma.tenant.findFirstOrThrow({ where: { slug: "creolab" } });
+    const director = await prisma.user.create({
+      data: {
+        email: `director-del-${randomUUID()}@creolab.example`,
+        passwordHash: ownerUser.passwordHash,
+        name: "Директор удаления",
+        memberships: { create: { tenantId: tenant.id, role: "director", active: true } },
+      },
+    });
+    const directorSession = await login(director.email);
+
+    const blockedId = await createClient(cookie, "Нельзя менеджеру");
+    for (const session of [managerSession, leadSession]) {
+      const denied = await fetch(`${base}/api/v1/contacts/${blockedId}`, { method: "DELETE", headers: { cookie: session } });
+      const body = await denied.json();
+      assert.equal(denied.status, 403, JSON.stringify(body));
+    }
+    assert.ok(await prisma.contact.findUnique({ where: { id: blockedId } }));
+
+    const directorId = await createClient(directorSession, "Удаление директором");
+    const removed = await fetch(`${base}/api/v1/contacts/${directorId}`, {
+      method: "DELETE",
+      headers: { cookie: directorSession },
+    });
+    assert.equal(removed.status, 200, await removed.text());
+    assert.equal(await prisma.contact.findUnique({ where: { id: directorId } }), null);
+  });
+
+  it("чужая компания не видит удаление, выставленный счёт блокирует удаление", async () => {
+    const id = await createClient(cookie, "Клиент со счётом");
+    const deal = await fetch(`${base}/api/v1/deals`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({
+        title: "Сделка удаления",
+        contactId: id,
+        items: [{ name: "Услуга", quantity: 1, unitPrice: 100, vatRate: 0 }],
+      }),
+    });
+    const dealBody = await deal.json();
+    assert.equal(deal.status, 201, JSON.stringify(dealBody));
+    const tenantId = (await prisma.deal.findUniqueOrThrow({ where: { id: dealBody.deal.id } })).tenantId;
+    await prisma.invoice.create({
+      data: {
+        tenantId,
+        dealId: dealBody.deal.id,
+        number: `DEL-${randomUUID()}`,
+        amountWithoutVat: 100,
+        vatAmount: 0,
+        totalAmount: 100,
+        status: "ISSUED",
+      },
+    });
+
+    const demoCookie = await login("owner@demo-agency.example");
+    const foreign = await fetch(`${base}/api/v1/contacts/${id}`, { method: "DELETE", headers: { cookie: demoCookie } });
+    assert.equal(foreign.status, 404);
+
+    const blocked = await fetch(`${base}/api/v1/contacts/${id}`, { method: "DELETE", headers: { cookie } });
+    const blockedBody = await blocked.json();
+    assert.equal(blocked.status, 409, JSON.stringify(blockedBody));
+    assert.equal(blockedBody.code, "contact_has_documents");
+    assert.ok(await prisma.contact.findUnique({ where: { id } }));
+  });
+
+  it("Написать открывает существующий WhatsApp-диалог и не требует прошлой переписки", async () => {
+    const id = await createClient(cookie, "Диалог уже есть");
+    const tenant = await prisma.tenant.findFirstOrThrow({ where: { slug: "creolab" } });
+    const conversation = await prisma.conversation.create({
+      data: { tenantId: tenant.id, contactId: id, sellerLeadId: `lead-${randomUUID()}`, status: "open", mode: "ai" },
+    });
+    const opened = await fetch(`${base}/api/v1/contacts/${id}/whatsapp-chat`, { method: "POST", headers: { cookie } });
+    const body = await opened.json();
+    assert.equal(opened.status, 200, JSON.stringify(body));
+    assert.equal(body.conversationId, conversation.id);
+    assert.equal(body.created, false);
+  });
+
+  it("без телефона написать нельзя, незарегистрированный WhatsApp блокирует", async () => {
+    const tenant = await prisma.tenant.findFirstOrThrow({ where: { slug: "creolab" } });
+    const nameless = await prisma.contact.create({
+      data: { tenantId: tenant.id, name: "Без телефона" },
+    });
+    const missing = await fetch(`${base}/api/v1/contacts/${nameless.id}/whatsapp-chat`, {
+      method: "POST",
+      headers: { cookie },
+    });
+    const missingBody = await missing.json();
+    assert.equal(missing.status, 422, JSON.stringify(missingBody));
+    assert.equal(missingBody.code, "no_phone");
+
+    const id = await createClient(cookie, "Нет WhatsApp");
+    const seller = await prisma.integration.findFirstOrThrow({ where: { tenantId: tenant.id, type: "whatsapp_seller" } });
+    const previous = (seller.schemaJson || {}) as Record<string, unknown>;
+    await prisma.integration.update({
+      where: { id: seller.id },
+      data: {
+        schemaJson: {
+          ...previous,
+          instanceId: "110011",
+          apiTokenEnc: encryptSecret("check-token"),
+          greenApiHost: "green.test",
+        },
+      },
+    });
+    setGreenApiFetchForTests(async (url) => {
+      assert.match(String(url), /checkWhatsapp/);
+      return new Response(JSON.stringify({ existsWhatsapp: false }), { status: 200 });
+    });
+    try {
+      const blocked = await fetch(`${base}/api/v1/contacts/${id}/whatsapp-chat`, { method: "POST", headers: { cookie } });
+      const body = await blocked.json();
+      assert.equal(blocked.status, 409, JSON.stringify(body));
+      assert.equal(body.code, "WHATSAPP_NOT_REGISTERED");
+    } finally {
+      setGreenApiFetchForTests(null);
+      await prisma.integration.update({ where: { id: seller.id }, data: { schemaJson: previous } });
+    }
   });
 
 });

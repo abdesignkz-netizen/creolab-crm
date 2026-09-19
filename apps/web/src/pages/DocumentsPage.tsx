@@ -16,9 +16,9 @@ const KINDS = [
 
 export function DocumentsPage() {
   const requestVersion = useRequestVersion();
-  const [searchParams] = useSearchParams();
-  const [kind, setKind] = useUrlState<(typeof KINDS)[number][0]>("kind", "", KINDS.map(([value]) => value));
-  const [attention, setAttention] = useUrlState<"" | "1">("attention", "", ["", "1"]);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [kind] = useUrlState<(typeof KINDS)[number][0]>("kind", "", KINDS.map(([value]) => value));
+  const [attention] = useUrlState<"" | "1">("attention", "", ["", "1"]);
   const [q, setQ] = useState("");
   const [offset, setOffset] = useUrlState<string>("offset", "0");
   const [items, setItems] = useState<any[]>([]);
@@ -63,8 +63,8 @@ export function DocumentsPage() {
       const result: any = await api.createElectronicDocumentDraft(esfDealId, { type: "ESF" });
       setCreatedEsf(result.document);
       setEsfCreateOpen(false);
-      setAttention("");
-      setOffset("0");
+      showKind("ESF");
+      window.dispatchEvent(new Event("creolab:attention-changed"));
       await load(0);
     } catch (err) {
       setEsfError(err instanceof Error ? err.message : "Не удалось создать ЭСФ");
@@ -131,6 +131,17 @@ export function DocumentsPage() {
     }
   }
 
+  function showKind(nextKind: (typeof KINDS)[number][0]) {
+    setSearchParams((previous) => {
+      const result = new URLSearchParams(previous);
+      result.delete("offset");
+      result.delete("attention");
+      if (!nextKind) result.delete("kind");
+      else result.set("kind", nextKind);
+      return result;
+    }, { replace: true });
+  }
+
   async function runCommand() {
     if (!commandText.trim()) return;
     setCommandBusy(true);
@@ -142,7 +153,13 @@ export function DocumentsPage() {
       });
       setCommandResult(result);
       setError("");
-      await load(Number(offset) || 0);
+      const action = String(result.action || commandParse?.command?.documentAction || "");
+      if (action === "generate_invoice") showKind("INVOICE");
+      else if (action === "generate_contract" || action === "send_for_sign") showKind("CONTRACT");
+      else if (action === "create_avr" || action === "validate_avr" || action === "send_avr") showKind("AVR");
+      else if (action === "create_esf" || action === "validate_esf" || action === "send_esf") showKind("ESF");
+      window.dispatchEvent(new Event("creolab:attention-changed"));
+      await load(0);
     } catch (err: any) {
       const details = err?.body?.details;
       if (Array.isArray(details?.deals) && details.deals.length) {
@@ -243,7 +260,11 @@ export function DocumentsPage() {
         {commandResult?.deal?.id ? (
           <p>
             {commandResult.prepareOnly ? "Черновик готов. " : "Готово. "}
-            <Link to={`/deals/${commandResult.deal.id}`}>Открыть сделку</Link>
+            {commandResult.result?.invoice?.id ? (
+              <Link to={`/documents/invoices/${commandResult.result.invoice.id}`}>Открыть счёт</Link>
+            ) : (
+              <Link to={`/deals/${commandResult.deal.id}`}>Открыть сделку</Link>
+            )}
           </p>
         ) : null}
       </form>
@@ -254,10 +275,8 @@ export function DocumentsPage() {
             <button
               key={id || "all"}
               type="button"
-              className={kind === id ? "btn sit-chip" : "btn secondary sit-chip"}
-              onClick={() => {
-                setKind(id);
-              }}
+              className={kind === id && attention !== "1" ? "btn sit-chip" : "btn secondary sit-chip"}
+              onClick={() => showKind(id)}
             >
               {label}
               {id === "CONTRACT" && counts.contract ? ` · ${counts.contract}` : ""}
@@ -270,7 +289,14 @@ export function DocumentsPage() {
             type="button"
             className={attention === "1" ? "btn sit-chip" : "btn secondary sit-chip"}
             onClick={() => {
-              setAttention(attention === "1" ? "" : "1");
+              setSearchParams((previous) => {
+                const result = new URLSearchParams(previous);
+                result.delete("offset");
+                result.delete("kind");
+                if (previous.get("attention") === "1") result.delete("attention");
+                else result.set("attention", "1");
+                return result;
+              }, { replace: true });
             }}
           >
             Требуют внимания{counts.attention ? ` · ${counts.attention}` : ""}

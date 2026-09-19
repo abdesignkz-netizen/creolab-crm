@@ -436,6 +436,7 @@ export async function applyConversationAnalysis(
 
   const lastMsg = conversation.messages[0];
   const keepHuman = conversation.mode === "human";
+  const waitingOnStaff = analysis.needsReply || analysis.waitingFor === "MANAGER";
   await prisma.conversation.update({
     where: { id: conversationId },
     data: {
@@ -445,10 +446,12 @@ export async function applyConversationAnalysis(
       lastAnalyzedMessageId: lastMsg?.id || null,
       attentionReason: analysis.humanRequired
         ? analysis.humanReason || "human_required"
-        : analysis.needsReply || analysis.waitingFor === "MANAGER"
+        : waitingOnStaff
           ? "needs_reply"
           : keepHuman
-            ? conversation.attentionReason || "human"
+            ? conversation.attentionReason === "needs_reply"
+              ? "taken_by_human"
+              : conversation.attentionReason || "human"
             : conversation.attentionReason,
     },
   });

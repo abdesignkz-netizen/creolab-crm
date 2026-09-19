@@ -205,6 +205,7 @@ export function InvoiceEditorPage() {
       : await api.createInvoiceDraft(context.deal.id, { editor: form });
     setDoc(result.invoice);
     setDirty(false);
+    window.dispatchEvent(new Event("creolab:attention-changed"));
     if (!id) navigate(`/documents/invoices/${result.invoice.id}`, { replace: true });
     return result.invoice;
   }
@@ -233,6 +234,8 @@ export function InvoiceEditorPage() {
       setDirty(false);
       setPreview(null);
       notifySaved("Счёт выставлен");
+      window.dispatchEvent(new Event("creolab:attention-changed"));
+      navigate("/documents?kind=INVOICE");
     } catch (e) {
       setPreview(null);
       throw e;

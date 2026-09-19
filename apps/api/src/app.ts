@@ -7,6 +7,7 @@ import path from "node:path";
 import type { PrismaClient } from "@creolab/db";
 import {
   assignTaskSchema,
+  assignConversationSchema,
   completeIntakeSchema,
   contactNoteSchema,
   contactTagSchema,
@@ -110,6 +111,7 @@ import {
   markNotificationRead,
   reopenTask,
   setConversationMode,
+  assignConversation,
   statsSummary,
   todayQueue,
   waitTask,
@@ -135,13 +137,14 @@ import {
   addContactTag,
   createContact,
   getContactOverview,
+  deleteContact,
   listContactActivities,
   listContactsBoard,
   removeContactTag,
   updateContact,
 } from "./services/contactService.ts";
 import { listWorkspaceMembers, previewContactSegment, searchContactsForPicker } from "./services/segmentService.ts";
-import { getConversationWorkspace, listConversationsBoard, markConversationRead, getConversationMessages } from "./services/conversationService.ts";
+import { getConversationWorkspace, listConversationsBoard, markConversationRead, getConversationMessages, getConversationAttachment } from "./services/conversationService.ts";
 import {
   addTaskAttachment,
   completeTaskWithResult,
@@ -197,10 +200,13 @@ import {
   beginTelegramLink,
   connectWhatsAppSeller,
   controlBoard,
+  disconnectWhatsAppSeller,
   ingestSellerBridgeEvent,
   integrationSetup,
   rotateWebhookSecret,
+  rotateWhatsAppSellerSecret,
   sellerHealthFor,
+  startContactWhatsAppChat,
   syncSellerLeads,
 } from "./services/sellerLink.ts";
 import { acceptInvitation, previewInvitation } from "./services/invitationService.ts";
@@ -234,8 +240,6 @@ import {
   updateTenantConnection,
 } from "./services/platformIntegrationService.ts";
 import { listPlatformCatalog, updatePlatformIntegrationType } from "./services/platformCatalog.ts";
-import { decryptSecret } from "./lib/secretBox.ts";
-import { safeEqual } from "./lib/hash.ts";
 import type { AuthContext } from "./lib/types.ts";
 
 const SESSION_COOKIE = {
@@ -880,6 +884,14 @@ export function createApp(prisma: PrismaClient) {
     res.json(await updateContact(prisma, await requireAuth(req), req.params.id, input));
   });
 
+  app.delete("/api/v1/contacts/:id", async (req, res) => {
+    res.json(await deleteContact(prisma, await requireAuth(req), req.params.id));
+  });
+
+  app.post("/api/v1/contacts/:id/whatsapp-chat", async (req, res) => {
+    res.json(await startContactWhatsAppChat(prisma, await requireAuth(req), req.params.id));
+  });
+
   app.get("/api/v1/contacts/:id/activities", async (req, res) => {
     res.json(await listContactActivities(prisma, await requireAuth(req), req.params.id, req.query as Record<string, string>));
   });
@@ -1477,6 +1489,20 @@ export function createApp(prisma: PrismaClient) {
     res.json(await getConversationMessages(prisma, await requireAuth(req), req.params.id, String(req.query.before || "")));
   });
 
+  app.get("/api/v1/conversations/:id/attachments/:attachmentId", async (req, res) => {
+    const file = await getConversationAttachment(prisma, await requireAuth(req), req.params.id, req.params.attachmentId);
+    if (!existsSync(file.path)) throw new ApiError(404, "not_found", "Файл не найден");
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.type(file.mimeType);
+    const inline = file.kind === "image" || file.kind === "video" || file.kind === "audio";
+    const ascii = file.fileName.replace(/[^\x20-\x7E]/g, "_").replace(/"/g, "");
+    res.setHeader(
+      "Content-Disposition",
+      `${inline ? "inline" : "attachment"}; filename="${ascii || "file"}"; filename*=UTF-8''${encodeURIComponent(file.fileName)}`,
+    );
+    res.sendFile(file.path);
+  });
+
   app.post("/api/v1/conversations/:id/read", json, async (req, res) => {
     res.json(await markConversationRead(prisma, await requireAuth(req), req.params.id, String(req.body?.messageId || "")));
   });
@@ -1504,6 +1530,11 @@ export function createApp(prisma: PrismaClient) {
     res.json(await setConversationMode(prisma, await requireAuth(req), req.params.id, "human"));
   });
 
+  app.post("/api/v1/conversations/:id/assign", json, async (req, res) => {
+    const input = assignConversationSchema.parse(req.body || {});
+    res.json(await assignConversation(prisma, await requireAuth(req), req.params.id, input.membershipId));
+  });
+
   app.post("/api/v1/conversations/:id/return-to-ai", async (req, res) => {
     res.json(await setConversationMode(prisma, await requireAuth(req), req.params.id, "ai"));
   });
@@ -1513,7 +1544,7 @@ export function createApp(prisma: PrismaClient) {
     res.json(await setConversationMode(prisma, await requireAuth(req), req.params.id, "paused"));
   });
 
-  app.post("/api/v1/conversations/:id/messages", json, async (req, res) => {
+  app.post("/api/v1/conversations/:id/messages", jsonLarge, async (req, res) => {
     const input = sendMessageSchema.parse(req.body);
     const message = await addConversationMessage(prisma, await requireAuth(req), req.params.id, {
       ...input,
@@ -1676,6 +1707,14 @@ export function createApp(prisma: PrismaClient) {
     res.json(await connectWhatsAppSeller(prisma, await requireAuth(req), req.body || {}));
   });
 
+  app.post("/api/v1/integrations/whatsapp-seller/rotate-secret", async (req, res) => {
+    res.json(await rotateWhatsAppSellerSecret(prisma, await requireAuth(req)));
+  });
+
+  app.post("/api/v1/integrations/whatsapp-seller/disconnect", async (req, res) => {
+    res.json(await disconnectWhatsAppSeller(prisma, await requireAuth(req)));
+  });
+
   app.post("/api/v1/integrations/whatsapp-seller/sync", async (req, res) => {
     res.json(await syncSellerLeads(prisma, await requireAuth(req)));
   });
@@ -1798,6 +1837,56 @@ export function createApp(prisma: PrismaClient) {
     res.json(await saveTenantAiSettings(prisma, auth.user.id, req.params.id, req.body || {}));
   });
 
+  app.get("/api/v1/admin/ai-usage", async (req, res) => {
+    const { listPlatformAiUsage } = await import("./services/aiUsageService.ts");
+    res.json(await listPlatformAiUsage(prisma, await requireAuth(req), req.query as Record<string, string>));
+  });
+
+  app.get("/api/v1/admin/tenants/:id/ai-usage", async (req, res) => {
+    const { getTenantAiUsage } = await import("./services/aiUsageService.ts");
+    res.json(await getTenantAiUsage(prisma, await requireAuth(req), req.params.id, req.query as Record<string, string>));
+  });
+
+  app.get("/api/v1/admin/tenants/:id/ai-manager", async (req, res) => {
+    const { getTenantAiManagerAdmin } = await import("./services/tenantAiConfigService.ts");
+    res.json(await getTenantAiManagerAdmin(prisma, await requireAuth(req), req.params.id));
+  });
+
+  app.patch("/api/v1/admin/tenants/:id/ai-manager/prompt", json, async (req, res) => {
+    const { saveTenantAiPrompt } = await import("./services/tenantAiConfigService.ts");
+    res.json(await saveTenantAiPrompt(prisma, await requireAuth(req), req.params.id, req.body || {}));
+  });
+
+  app.post("/api/v1/admin/tenants/:id/ai-manager/knowledge", json, async (req, res) => {
+    const { upsertTenantKnowledgeDocument } = await import("./services/tenantAiConfigService.ts");
+    res.status(201).json(await upsertTenantKnowledgeDocument(prisma, await requireAuth(req), req.params.id, req.body || {}));
+  });
+
+  app.patch("/api/v1/admin/tenants/:id/ai-manager/knowledge/:docId", json, async (req, res) => {
+    const { upsertTenantKnowledgeDocument } = await import("./services/tenantAiConfigService.ts");
+    res.json(
+      await upsertTenantKnowledgeDocument(prisma, await requireAuth(req), req.params.id, {
+        ...(req.body || {}),
+        id: req.params.docId,
+      }),
+    );
+  });
+
+  app.delete("/api/v1/admin/tenants/:id/ai-manager/knowledge/:docId", async (req, res) => {
+    const { deleteTenantKnowledgeDocument } = await import("./services/tenantAiConfigService.ts");
+    res.json(await deleteTenantKnowledgeDocument(prisma, await requireAuth(req), req.params.id, req.params.docId));
+  });
+
+  app.post("/api/v1/admin/tenants/:id/ai-manager/knowledge/search", json, async (req, res) => {
+    const { searchTenantKnowledge } = await import("./services/tenantAiConfigService.ts");
+    res.json(await searchTenantKnowledge(prisma, await requireAuth(req), req.params.id, String(req.body?.query || "")));
+  });
+
+  app.post("/api/v1/admin/tenants/:id/ai-manager/preview", json, async (req, res) => {
+    const { previewTenantAi } = await import("./services/tenantAiConfigService.ts");
+    res.json(await previewTenantAi(prisma, await requireAuth(req), req.params.id, String(req.body?.message || "")));
+  });
+
   app.get("/api/v1/admin/members", async (req, res) => {
     res.json(await listPlatformMembers(prisma, await requireAuth(req), req.query as Record<string, string>));
   });
@@ -1857,29 +1946,21 @@ export function createApp(prisma: PrismaClient) {
     res.status(202).json(result);
   });
 
-  app.post("/api/v1/integrations/seller-events", json, async (req, res) => {
+  app.post("/api/v1/integrations/seller-events", jsonLarge, async (req, res) => {
     const secret = String(req.header("authorization") || "").replace(/^Bearer\s+/i, "");
-    const globalOk = Boolean(config.crmBridgeSecret && secret && safeEqual(secret, config.crmBridgeSecret));
-    let tenantSecretOk = false;
-    if (!globalOk && secret) {
-      const rows = await prisma.integration.findMany({ where: { type: "whatsapp_seller" } });
-      for (const row of rows) {
-        const schema = (row.schemaJson || {}) as { secretEnc?: string };
-        if (!schema.secretEnc) continue;
-        try {
-          if (safeEqual(secret, decryptSecret(schema.secretEnc))) {
-            tenantSecretOk = true;
-            break;
-          }
-        } catch {
-          /* ignore undecryptable */
-        }
-      }
-    }
-    if (!globalOk && !tenantSecretOk) {
-      throw new ApiError(401, "unauthorized", "Мост не принят");
-    }
-    const result = await ingestSellerBridgeEvent(prisma, req.body);
+    const result = await ingestSellerBridgeEvent(prisma, req.body, {
+      secret,
+      integrationId: req.header("x-crm-integration-id") || null,
+    });
+    res.status(202).json(result);
+  });
+
+  app.post("/api/v1/integrations/seller-events/:integrationId", jsonLarge, async (req, res) => {
+    const secret = String(req.header("authorization") || "").replace(/^Bearer\s+/i, "");
+    const result = await ingestSellerBridgeEvent(prisma, req.body, {
+      secret,
+      integrationId: req.params.integrationId,
+    });
     res.status(202).json(result);
   });
 

@@ -3,6 +3,7 @@ import { after, before, describe, it } from "node:test";
 import { createPrismaClient } from "@creolab/db";
 import { createApp } from "./app.ts";
 import { resolveSellerBridge } from "./services/sellerLink.ts";
+import { sharedAiManagerUrl } from "./services/aiManagerConfig.ts";
 
 describe("platform admin panel", () => {
   let prisma: Awaited<ReturnType<typeof createPrismaClient>>;
@@ -253,8 +254,9 @@ describe("platform admin panel", () => {
     assert.equal(features?.whatsapp, true);
     const row = await prisma.integration.findFirst({ where: { tenantId: tenant.id, type: "whatsapp_seller" } });
     assert.ok(row);
-    const schema = (row?.schemaJson || {}) as { sellerUrl?: string };
-    assert.equal(schema.sellerUrl, "http://localhost:1");
+    const schema = (row?.schemaJson || {}) as { sellerUrl?: string; secretEnc?: string };
+    assert.ok(schema.secretEnc);
+    assert.equal(schema.sellerUrl, sharedAiManagerUrl() || "http://localhost:1");
   });
 
   it("does not use the global WhatsApp bridge for an unconfigured company", async () => {

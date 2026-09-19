@@ -133,6 +133,7 @@ a.sit-kpi:hover, button.sit-kpi:hover { background: #f2f7ff; border-color: #cfde
 .sit-brief b { font-size: 11px; color: #4e6890; text-transform: uppercase; letter-spacing: .06em; }
 .sit-brief p { font-size: 13px; color: #324663; }
 .sit-toolbar { padding: 0; gap: 16px; margin-bottom: 2px; }
+.sit-period-bar { margin: 2px 0 6px; }
 .sit-periods { gap: 5px; }
 .sit-list-row { border-color: #eff0f3; padding-block: 13px; }
 .sit-pipe-chip { background: #f5f6f9; border: 1px solid #eceef3; border-radius: 9px; padding: 7px 10px; }
@@ -210,7 +211,7 @@ a.sit-kpi:hover, button.sit-kpi:hover { background: #f2f7ff; border-color: #cfde
   .conversation-back { display: inline-flex; }
   .conv-context-strip { font-size: 11px; gap: 5px 12px; }
   .conv-header > div, .conv-header-actions, .conv-topic, .bubble { min-width: 0; overflow-wrap: anywhere; }
-  .conv-composer { grid-template-columns: minmax(0, 1fr) auto; }
+  .conv-composer { grid-template-columns: auto minmax(0, 1fr) auto; }
   .conv-composer textarea { min-height: 88px; width: 100%; }
   .conv-list-pane, .conv-chat-pane { min-height: 0; min-width: 0; }
   .conv-chat-pane { display: flex; flex-direction: column; overflow: hidden; }
@@ -227,6 +228,7 @@ a.sit-kpi:hover, button.sit-kpi:hover { background: #f2f7ff; border-color: #cfde
   .sit-kpi { padding: 14px; }
   .sit-kpi strong { font-size: 25px; }
   .sit-toolbar { flex-direction: column; align-items: stretch; }
+  .sit-period-bar { margin-top: 0; }
   .stats-compare { min-width: 0; }
   .stats-overview-split, .stats-filters { grid-template-columns: 1fr; }
   .search-bar { display: grid; grid-template-columns: 1fr auto; }

@@ -7,12 +7,14 @@ import { PlatformMembersPage } from "./platform/PlatformMembersPage";
 import { PlatformCatalogPage } from "./platform/PlatformCatalogPage";
 import { PlatformServiceSettingsPage } from "./platform/PlatformServiceSettingsPage";
 import { PlatformAuditPage } from "./platform/PlatformAuditPage";
+import { PlatformAiUsagePage } from "./platform/PlatformAiUsagePage";
 
 const LINKS = [
   ["/admin", "Обзор"],
   ["/admin/companies", "Компании"],
   ["/admin/members", "Участники"],
   ["/admin/integrations", "Каталог интеграций"],
+  ["/admin/ai-usage", "AI Usage"],
   ["/admin/settings", "Настройки сервиса"],
   ["/admin/audit", "Журнал действий"],
 ] as const;
@@ -26,6 +28,7 @@ function AdminSection() {
   if (pathname === "/admin/members") return <PlatformMembersPage />;
   if (pathname === "/admin/integrations") return <PlatformCatalogPage />;
   if (pathname === "/admin/settings") return <PlatformServiceSettingsPage />;
+  if (pathname === "/admin/ai-usage") return <PlatformAiUsagePage />;
   if (pathname === "/admin/audit") return <PlatformAuditPage />;
   return <Navigate to="/admin" replace />;
 }

@@ -26,6 +26,7 @@ try {
         PLATFORM_ADMIN_PASSWORD: "",
         WHATSAPP_SELLER_URL: "",
         WHATSAPP_SELLER_SECRET: "",
+        AI_MANAGER_URL: "",
         ESF_PROVIDER: "mock",
         ESF_ENV: "off",
         ESF_ALLOW_LIVE_SEND: "0",

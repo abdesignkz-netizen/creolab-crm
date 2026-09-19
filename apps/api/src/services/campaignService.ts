@@ -1185,6 +1185,8 @@ export async function personalizeCampaignRecipients(
       clientAsk,
       kind,
       hasFile,
+      prisma,
+      tenantId: membership.tenantId,
       recipients: drafts.map((row) => {
         const fact = facts.find((item) => item.id === row.id);
         return {

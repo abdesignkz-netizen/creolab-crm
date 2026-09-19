@@ -53,6 +53,8 @@ model Tenant {
   catalogItems         CatalogItem[]
   aiConfigurations     AIConfiguration[]
   aiExecutions         AIExecution[]
+  aiUsageEvents        AIUsageEvent[]
+  knowledgeDocuments   KnowledgeDocument[]
   inboundEvents        InboundEvent[]
   outboxEvents         OutboxEvent[]
   outboundOperations   OutboundOperation[]
@@ -1233,7 +1235,82 @@ model AIConfiguration {
   publishedVersionId String?
   enabled            Boolean @default(false)
   limitsJson         Json    @default("{}")
+  systemPrompt       String?
+  draftPrompt        String?
+  promptStatus       String  @default("draft")
+  promptUpdatedAt    DateTime?
+  promptUpdatedById  String?
+  temperature        Float?
+  maxOutputTokens    Int?
   tenant             Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model KnowledgeDocument {
+  id          String   @id @default(uuid())
+  tenantId    String
+  title       String
+  content     String   @default("")
+  sourceType  String   @default("text")
+  status      String   @default("draft")
+  publishedAt DateTime?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, status])
+}
+
+model AIUsageEvent {
+  id                   String   @id @default(uuid())
+  tenantId             String?
+  integrationId        String?
+  conversationId       String?
+  userId               String?
+  provider             String
+  model                String
+  feature              String
+  providerRequestId    String?
+  inputTokens          Int?
+  outputTokens         Int?
+  cachedInputTokens    Int?
+  reasoningTokens      Int?
+  totalTokens          Int?
+  inputUnitPrice       Decimal? @db.Decimal(18, 8)
+  outputUnitPrice      Decimal? @db.Decimal(18, 8)
+  cachedInputUnitPrice Decimal? @db.Decimal(18, 8)
+  inputCost            Decimal? @db.Decimal(18, 8)
+  outputCost           Decimal? @db.Decimal(18, 8)
+  cachedInputCost      Decimal? @db.Decimal(18, 8)
+  totalCost            Decimal? @db.Decimal(18, 8)
+  currency             String   @default("USD")
+  pricingVersion       String?
+  pricingMissing       Boolean  @default(false)
+  latencyMs            Int?
+  status               String
+  errorCode            String?
+  createdAt            DateTime @default(now())
+  tenant               Tenant?  @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt])
+  @@index([feature, createdAt])
+  @@index([provider, model, createdAt])
+  @@index([providerRequestId])
+}
+
+model AIModelPricing {
+  id                    String    @id @default(uuid())
+  provider              String
+  model                 String
+  pricingVersion        String
+  inputPerMillion       Decimal   @db.Decimal(18, 8)
+  outputPerMillion      Decimal   @db.Decimal(18, 8)
+  cachedInputPerMillion Decimal?  @db.Decimal(18, 8)
+  currency              String    @default("USD")
+  effectiveFrom         DateTime
+  effectiveTo           DateTime?
+
+  @@index([provider, model, effectiveFrom])
 }
 
 model AIExecution {

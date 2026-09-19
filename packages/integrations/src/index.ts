@@ -82,17 +82,37 @@ export type SellerLead = {
   status?: string | null;
   lastClientMessage?: string | null;
   lastAIMessage?: string | null;
-  conversationHistory?: Array<{ role: string; content: string; at?: string }>;
+  conversationHistory?: Array<{
+    role: string;
+    content: string;
+    at?: string;
+    type?: string;
+    mimeType?: string;
+    fileName?: string;
+    contentBase64?: string;
+    fileUrl?: string;
+    downloadUrl?: string;
+    mediaId?: string;
+    jpegThumbnail?: string;
+  }>;
   rawChatId?: string | null;
 };
 
 export class WhatsAppSellerBridge {
   private readonly baseUrl: string;
   private readonly secret: string;
+  private readonly tenantId?: string;
+  private readonly integrationId?: string;
   constructor(
     baseUrl: string,
     secret: string,
-  ) { this.baseUrl = baseUrl; this.secret = secret; }
+    identity?: { tenantId?: string; integrationId?: string },
+  ) {
+    this.baseUrl = baseUrl;
+    this.secret = secret;
+    this.tenantId = identity?.tenantId;
+    this.integrationId = identity?.integrationId;
+  }
 
   enabled() {
     return Boolean(this.baseUrl && this.secret);
@@ -105,6 +125,8 @@ export class WhatsAppSellerBridge {
       headers: {
         Authorization: `Bearer ${this.secret}`,
         "Content-Type": "application/json",
+        ...(this.tenantId ? { "X-CRM-Tenant-Id": this.tenantId } : {}),
+        ...(this.integrationId ? { "X-CRM-Integration-Id": this.integrationId } : {}),
         ...(fetchInit.headers || {}),
       },
       signal: AbortSignal.timeout(timeoutMs ?? 15000),
@@ -180,6 +202,60 @@ export class WhatsAppSellerBridge {
     return this.request(`/internal/crm/leads/${encodeURIComponent(leadId)}/instruction`, {
       method: "POST",
       body: JSON.stringify({ text }),
+    });
+  }
+
+  registerIntegration(
+    input: {
+      integrationId: string;
+      tenantId: string;
+      instanceId?: string | null;
+      apiToken?: string | null;
+      greenApiInstanceId?: string | null;
+      greenApiToken?: string | null;
+      integrationSecret?: string;
+      crmSecret?: string;
+      crmEventsUrl?: string;
+      prompt?: string;
+      knowledge?: string;
+      webhookToken?: string | null;
+      aiConfig?: Record<string, unknown>;
+    },
+    options?: { serviceSecret?: string },
+  ) {
+    const integrationSecret = String(input.integrationSecret || input.crmSecret || "").trim();
+    const instanceId = String(input.greenApiInstanceId || input.instanceId || "").trim();
+    const apiToken = String(input.greenApiToken || input.apiToken || "").trim();
+    const headers: Record<string, string> = {};
+    if (options?.serviceSecret) headers.Authorization = `Bearer ${options.serviceSecret}`;
+    return this.request<{
+      ok?: boolean;
+      unsupported?: boolean;
+      integration?: { webhookToken?: string; integrationId?: string; tenantId?: string };
+    }>("/internal/crm/integrations/register", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        integrationId: input.integrationId,
+        tenantId: input.tenantId,
+        greenApiInstanceId: instanceId,
+        greenApiToken: apiToken,
+        instanceId,
+        apiToken,
+        integrationSecret,
+        secret: integrationSecret,
+        crmEventsUrl: input.crmEventsUrl,
+        prompt: input.prompt || "",
+        knowledge: input.knowledge || "",
+        webhookToken: input.webhookToken || undefined,
+        aiConfig: input.aiConfig || undefined,
+      }),
+    }).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error || "");
+      if (message.includes("404") || message.includes("Cannot POST") || message.includes("HTTP 404")) {
+        return { ok: false, unsupported: true };
+      }
+      throw error;
     });
   }
 }

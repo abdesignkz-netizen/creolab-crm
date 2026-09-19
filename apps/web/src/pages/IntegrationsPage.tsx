@@ -6,8 +6,9 @@ import { api } from "../lib/api";
 type ConnectMethod = "html" | "existing" | "js" | "tilda";
 
 export function IntegrationsPage() {
-  const [editingWhatsApp, setEditingWhatsApp] = useState(true);
+  const [editingWhatsApp, setEditingWhatsApp] = useState(false);
   const [savingWhatsApp, setSavingWhatsApp] = useState(false);
+  const [issuedBridgeSecret, setIssuedBridgeSecret] = useState("");
   const [catalog, setCatalog] = useState<any>(null);
   const [setup, setSetup] = useState<any>(null);
   const [error, setError] = useState("");
@@ -244,63 +245,115 @@ export function IntegrationsPage() {
         {setup?.whatsapp?.warning ? <div className="banner warn">{setup.whatsapp.warning}</div> : null}
         <p className="muted">{setup?.whatsapp?.note}</p>
         <p>
-          Подключено: {setup?.whatsapp?.configured ? "да" : "нет"} · Мост:{" "}
-          {setup?.whatsapp?.reachable ? "отвечает" : "нет"}
+          Статус подключения · {setup?.whatsapp?.configured ? "Подключён" : "Не подключён"}
         </p>
-        {!editingWhatsApp ? <button type="button" className="btn secondary" autoFocus onClick={() => setEditingWhatsApp(true)}>Изменить подключение</button> : <form
-          className="stack"
-          onSubmit={async (event) => {
-            event.preventDefault();
-            if (savingWhatsApp) return;
-            const formEl = new FormData(event.currentTarget);
-            setSavingWhatsApp(true);
-            setError("");
-            try {
-              const result = (await api.connectWhatsApp(
-                String(formEl.get("sellerUrl")),
-                String(formEl.get("secret")),
-              )) as any;
-              setNote(result.note);
-              setEditingWhatsApp(false);
-              notifySaved("Настройки подключения сохранены");
-              await load();
-            } catch (err) {
-              setError(err instanceof Error ? err.message : "Не удалось сохранить");
-            } finally { setSavingWhatsApp(false); }
-          }}
-        >
-          <label>
-            Адрес бота
-            <input
-              name="sellerUrl"
-              defaultValue={setup?.whatsapp?.sellerUrl || "https://creolab-ai-manager.onrender.com"}
-              required
-            />
-          </label>
-          <label>
-            Секрет моста
-            <input name="secret" type="password" required placeholder="не показывается повторно" />
-          </label>
-          <div className="actions">
-            <button className="btn" disabled={savingWhatsApp}>{savingWhatsApp ? "Сохраняем…" : "Сохранить и проверить"}</button>
-
+        <p>
+          AI Manager · {setup?.whatsapp?.reachable ? "Активен" : setup?.whatsapp?.configured ? "Не отвечает" : "Ожидает подключение"}
+        </p>
+        {setup?.whatsapp?.sender ? <p>WhatsApp · {setup.whatsapp.sender}</p> : null}
+        {setup?.whatsapp?.instanceId ? <p className="muted">Instance ID · {setup.whatsapp.instanceId}</p> : null}
+        <p className="muted">Диалоги · {setup?.whatsapp?.conversationCount ?? 0}</p>
+        <p className="muted">
+          Последняя синхронизация ·{" "}
+          {setup?.whatsapp?.lastSyncAt ? new Date(setup.whatsapp.lastSyncAt).toLocaleString("ru-RU") : "ещё не было"}
+        </p>
+        {issuedBridgeSecret ? (
+          <div className="banner warn">
+            Секрет моста показан один раз. Сохраните его, если внешний бот ещё не обновлён автоматически.
+            <pre className="code">{issuedBridgeSecret}</pre>
           </div>
-        </form>}
+        ) : null}
+        {editingWhatsApp ? (
+          <form
+            className="stack"
+            onSubmit={async (event) => {
+              event.preventDefault();
+              if (savingWhatsApp) return;
+              const formEl = new FormData(event.currentTarget);
+              setSavingWhatsApp(true);
+              setError("");
+              try {
+                const result = (await api.connectWhatsApp({
+                  instanceId: String(formEl.get("instanceId") || ""),
+                  apiToken: String(formEl.get("apiToken") || ""),
+                })) as any;
+                setNote(result.note);
+                if (result.bridgeSecret) setIssuedBridgeSecret(result.bridgeSecret);
+                setEditingWhatsApp(false);
+                notifySaved("WhatsApp подключён");
+                await load();
+              } catch (err) {
+                setError(err instanceof Error ? err.message : "Не удалось сохранить");
+              } finally {
+                setSavingWhatsApp(false);
+              }
+            }}
+          >
+            <label>
+              Instance ID
+              <input name="instanceId" defaultValue={setup?.whatsapp?.instanceId || ""} required={!setup?.whatsapp?.configured} />
+            </label>
+            <label>
+              API Token
+              <input name="apiToken" type="password" autoComplete="off" placeholder={setup?.whatsapp?.configured ? "оставьте пустым, чтобы не менять" : ""} required={!setup?.whatsapp?.configured} />
+            </label>
+            <div className="actions">
+              <button className="btn" disabled={savingWhatsApp}>{savingWhatsApp ? "Подключаем…" : "Подключить"}</button>
+              <button type="button" className="btn secondary" onClick={() => setEditingWhatsApp(false)}>Отмена</button>
+            </div>
+          </form>
+        ) : null}
         <div className="actions" style={{ marginTop: 12 }}>
+          <button
+            type="button"
+            className="btn secondary"
+            onClick={async () => {
+              try {
+                await load();
+                setNote("Проверка подключения выполнена.");
+              } catch (err) {
+                setError(err instanceof Error ? err.message : "Проверка не выполнена");
+              }
+            }}
+          >
+            Проверить подключение
+          </button>
+          <button type="button" className="btn secondary" onClick={() => setEditingWhatsApp(true)}>
+            {setup?.whatsapp?.configured ? "Переподключить" : "Подключить"}
+          </button>
+          {setup?.whatsapp?.configured ? (
             <button
               type="button"
               className="btn secondary"
               onClick={async () => {
                 try {
-                  const result = (await api.syncWhatsApp()) as any;
-                  setNote(`Синхронизация: новых ${result.imported}, обновлено ${result.updated}.`);
+                  const result = (await api.disconnectWhatsApp()) as any;
+                  setNote(result.note);
+                  setIssuedBridgeSecret("");
+                  notifySaved("WhatsApp отключён");
+                  await load();
                 } catch (err) {
-                  setError(err instanceof Error ? err.message : "Синхронизация не выполнена");
+                  setError(err instanceof Error ? err.message : "Не удалось отключить");
                 }
               }}
             >
-              Забрать диалоги из бота
+              Отключить
             </button>
+          ) : null}
+          <button
+            type="button"
+            className="btn secondary"
+            onClick={async () => {
+              try {
+                const result = (await api.syncWhatsApp()) as any;
+                setNote(`Синхронизация: новых ${result.imported}, обновлено ${result.updated}.`);
+              } catch (err) {
+                setError(err instanceof Error ? err.message : "Синхронизация не выполнена");
+              }
+            }}
+          >
+            Забрать диалоги из бота
+          </button>
         </div>
       </div>
 

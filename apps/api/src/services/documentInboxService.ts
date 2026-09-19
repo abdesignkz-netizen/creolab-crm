@@ -44,7 +44,7 @@ const EDOC_STATUS_LABEL: Record<string, string> = {
 };
 
 const CONTRACT_ATTENTION = new Set(["READY_TO_SIGN", "PENDING_SIGNATURE", "PARTIALLY_SIGNED"]);
-const INVOICE_ATTENTION = new Set(["OVERDUE"]);
+const INVOICE_ATTENTION = new Set(["DRAFT", "ISSUED", "PARTIALLY_PAID", "OVERDUE"]);
 
 function requireTenant(auth: AuthContext) {
   if (!auth.activeMembership) throw new ApiError(403, "no_tenant", "Нет активной компании");
@@ -151,7 +151,7 @@ export async function listTenantDocuments(
     company: { select: { id: true, name: true } },
   } as const;
 
-  const [contracts, invoices, avrs, esfs, contractCount, invoiceCount, avrCount, esfCount, attention] =
+  const [contracts, invoices, avrs, esfs, contractCount, invoiceCount, avrCount, esfCount, attention, contractKindCount, invoiceKindCount, avrKindCount, esfKindCount] =
     await Promise.all([
       !electronicOnly && (!kind || kind === "CONTRACT")
         ? prisma.contract.findMany({ where: contractWhere, include, orderBy: { updatedAt: "desc" }, take: 300 })
@@ -180,6 +180,10 @@ export async function listTenantDocuments(
       !kind || kind === "AVR" ? prisma.electronicDocument.count({ where: edocWhere("AVR") }) : 0,
       !kind || kind === "ESF" ? prisma.electronicDocument.count({ where: edocWhere("ESF") }) : 0,
       countDocumentAttention(prisma, tid),
+      prisma.contract.count({ where: base }),
+      prisma.invoice.count({ where: base }),
+      prisma.electronicDocument.count({ where: { ...base, type: "AVR" } }),
+      prisma.electronicDocument.count({ where: { ...base, type: "ESF" } }),
     ]);
 
   const items = [
@@ -273,10 +277,10 @@ export async function listTenantDocuments(
     counts: {
       all: contractCount + invoiceCount + avrCount + esfCount,
       attention,
-      contract: contractCount,
-      invoice: invoiceCount,
-      avr: avrCount,
-      esf: esfCount,
+      contract: contractKindCount,
+      invoice: invoiceKindCount,
+      avr: avrKindCount,
+      esf: esfKindCount,
     },
   };
 }

@@ -329,4 +329,40 @@ describe("seller lead sync rematch by phone", () => {
     assert.equal(repeat.inquiryId, first.inquiryId);
     assert.equal(await prisma.inquiry.count({ where: { conversationId: first.conversationId } }), 1);
   });
+
+  it("stores inbound WhatsApp photo in the conversation thread", async () => {
+    const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    const result = await applySellerLeadSync(prisma, {
+      tenantId,
+      defaultRegion: "KZ",
+      connectionId: null,
+      lead: {
+        leadId: "LEAD-inbound-photo",
+        clientPhone: "77070001122",
+        clientName: "Фото клиент",
+        aiMode: "AUTO",
+        conversationHistory: [
+          {
+            role: "user",
+            content: "Вот фото объекта",
+            at: "2026-09-18T10:00:00.000Z",
+            type: "image",
+            mimeType: "image/png",
+            fileName: "object.png",
+            contentBase64: png,
+          },
+        ],
+      },
+    });
+    assert.equal(result.skipped, null);
+    const message = await prisma.message.findFirst({
+      where: { conversationId: result.conversationId!, type: "image" },
+      include: { attachments: true },
+    });
+    assert.ok(message);
+    assert.equal(message?.text, "Вот фото объекта");
+    assert.equal(message?.attachments.length, 1);
+    assert.equal(message?.attachments[0].mimeType, "image/png");
+    assert.equal(message?.attachments[0].documentType, "image");
+  });
 });

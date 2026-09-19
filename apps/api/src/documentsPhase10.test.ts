@@ -122,7 +122,36 @@ describe("Documents phase 10 общий список", () => {
     assert.equal(list.response.status, 200, JSON.stringify(list.body));
     assert.ok(list.body.items.some((row: { id: string; kind: string }) => row.id === contractId && row.kind === "CONTRACT"));
     assert.ok(list.body.items.some((row: { kind: string; dealId: string }) => row.kind === "INVOICE" && row.dealId === dealId));
-    assert.equal(list.body.items.every((row: { href: string }) => String(row.href).startsWith("/deals/")), true);
+    assert.equal(
+      list.body.items.every((row: { href: string; kind: string }) => {
+        if (row.kind === "INVOICE") return String(row.href).startsWith("/documents/invoices/");
+        if (row.kind === "AVR") return String(row.href).startsWith("/documents/avr/");
+        return String(row.href).startsWith("/deals/");
+      }),
+      true,
+    );
+
+    const invoices = await json("/api/v1/documents?kind=INVOICE");
+    assert.ok(invoices.body.items.some((row: { kind: string; dealId: string }) => row.kind === "INVOICE" && row.dealId === dealId));
+    assert.ok(Number(invoices.body.counts.invoice) >= 1);
+
+    const createdInvoice = await prisma.invoice.findFirst({ where: { dealId }, orderBy: { createdAt: "desc" } });
+    assert.ok(createdInvoice);
+    const draftAttention = await json("/api/v1/documents?attention=1&kind=INVOICE");
+    assert.ok(
+      draftAttention.body.items.some(
+        (row: { id: string; kind: string; attention: boolean }) =>
+          row.id === createdInvoice.id && row.kind === "INVOICE" && row.attention,
+      ),
+    );
+    await prisma.invoice.update({ where: { id: createdInvoice.id }, data: { status: "ISSUED" } });
+    const attentionInvoices = await json("/api/v1/documents?attention=1&kind=INVOICE");
+    assert.ok(
+      attentionInvoices.body.items.some(
+        (row: { id: string; kind: string; attention: boolean }) =>
+          row.id === createdInvoice.id && row.kind === "INVOICE" && row.attention,
+      ),
+    );
 
     const byDeal = await json(`/api/v1/documents?dealId=${dealId}`);
     assert.ok(byDeal.body.total >= 2);

@@ -60,9 +60,10 @@ export const config = {
   jwtRefreshSecret: envSecret("JWT_REFRESH_SECRET", "dev-refresh-secret-change"),
   cookieSecure: process.env.NODE_ENV === "production",
   trustProxy: readTrustProxy(),
-  whatsappSellerUrl: process.env.WHATSAPP_SELLER_URL || "",
+  whatsappSellerUrl: process.env.AI_MANAGER_URL || process.env.WHATSAPP_SELLER_URL || "",
   whatsappSellerSecret: process.env.WHATSAPP_SELLER_SECRET || "",
   crmBridgeSecret: process.env.CRM_BRIDGE_SECRET || "",
+  internalServiceSecret: process.env.INTERNAL_SERVICE_SECRET || "",
   storageDir: process.env.STORAGE_DIR || "",
 };
 

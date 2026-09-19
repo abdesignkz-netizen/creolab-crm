@@ -4,11 +4,15 @@ import { api } from "../../lib/api";
 import { formatDateTime } from "../../lib/datetime";
 import { notifySaved } from "../../components/SaveNotice";
 import { AssignIntegrationForm } from "./PlatformAssignIntegration";
+import { PlatformCompanyAiManager } from "./PlatformCompanyAiManager";
+import { PlatformAiUsagePage } from "./PlatformAiUsagePage";
 
 const TABS = [
   ["info", "Основные данные"],
   ["members", "Участники"],
   ["integrations", "Интеграции"],
+  ["ai-manager", "AI Manager"],
+  ["ai-usage", "AI Usage"],
   ["settings", "Настройки"],
   ["audit", "История действий"],
 ] as const;
@@ -62,6 +66,8 @@ export function PlatformCompanyPage() {
       {tab === "info" ? <CompanyInfo company={company} onSaved={setCompany} /> : null}
       {tab === "members" ? <CompanyMembers tenantId={id} /> : null}
       {tab === "integrations" ? <CompanyIntegrations tenantId={id} /> : null}
+      {tab === "ai-manager" ? <PlatformCompanyAiManager tenantId={id} /> : null}
+      {tab === "ai-usage" ? <PlatformAiUsagePage lockedTenantId={id} /> : null}
       {tab === "settings" ? <CompanySettings company={company} onSaved={setCompany} /> : null}
       {tab === "audit" ? <CompanyAudit tenantId={id} /> : null}
     </div>
@@ -364,7 +370,7 @@ function CompanyIntegrations({ tenantId }: { tenantId: string }) {
               }}>События</button>
             </div>
           </div>
-          {item.schema?.sellerUrl ? <p className="muted">Адрес: {item.schema.sellerUrl}</p> : null}
+          {item.schema?.instanceId ? <p className="muted">Instance: {item.schema.instanceId}</p> : null}
           {item.forms?.[0]?.submitUrl ? <p className="muted">Форма: {item.forms[0].submitUrl}</p> : null}
           {item.eventsUrl ? <p className="muted">Webhook: {item.eventsUrl}</p> : null}
           {item.lastError ? <p className="error">{item.lastError}</p> : null}

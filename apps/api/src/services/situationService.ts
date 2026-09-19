@@ -4,6 +4,7 @@ import { WhatsAppSellerBridge } from "@creolab/integrations";
 import { ApiError } from "../errors.ts";
 import { decryptSecret } from "../lib/secretBox.ts";
 import type { AuthContext } from "../lib/types.ts";
+import { resolveAiManagerUrl } from "./aiManagerConfig.ts";
 import { conversationAccessWhere, inquiryAccessWhere, isManager, taskAccessWhere } from "../lib/access.ts";
 import { CONTACT_PHONE_SELECT, digitsOnly, displayName, needsReply, phoneFromContact } from "./contactLabels.ts";
 import { inquiryInterest, loadConversationInterests } from "./contactInterestService.ts";
@@ -243,9 +244,9 @@ async function tenantSellerFreshness(prisma: PrismaClient, tenantId: string) {
     where: { tenantId, type: "whatsapp_seller" },
   });
   const schema = (integration?.schemaJson || {}) as { sellerUrl?: string; secretEnc?: string };
-  const sellerUrl = String(schema.sellerUrl || "").trim();
-  const secret = schema.secretEnc ? decryptSecret(schema.secretEnc) : "";
-  const configured = Boolean(sellerUrl && secret);
+  const sellerUrl = resolveAiManagerUrl(schema.sellerUrl);
+  const integrationSecret = schema.secretEnc ? decryptSecret(schema.secretEnc) : "";
+  const configured = Boolean(sellerUrl && integrationSecret);
   const conversationCount = await prisma.conversation.count({
     where: { tenantId, sellerLeadId: { not: null } },
   });
@@ -262,7 +263,10 @@ async function tenantSellerFreshness(prisma: PrismaClient, tenantId: string) {
     };
   }
   try {
-    const health = await new WhatsAppSellerBridge(sellerUrl, secret).health();
+    const health = await new WhatsAppSellerBridge(sellerUrl, integrationSecret, {
+      tenantId,
+      integrationId: integration?.id,
+    }).health();
     const leadCountOnBot = typeof health.leadCount === "number" ? health.leadCount : null;
     const storePathKind = health.storePathKind || null;
     let warning: string | null = null;

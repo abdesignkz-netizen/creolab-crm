@@ -12,6 +12,16 @@ import { resolveContactLinks } from "./segmentService.ts";
 import { getSituation } from "./situationService.ts";
 import { getConversationWorkspace, listConversationsBoard } from "./conversationService.ts";
 import { parseDateTimeInput } from "./periodRange.ts";
+import {
+  CONVERSATION_MAX_ATTACHMENTS,
+  CONVERSATION_MAX_FILE_BYTES,
+  assertConversationMime,
+  conversationMediaKind,
+  decodeBase64Payload,
+  storeMessageAttachment,
+} from "./conversationMedia.ts";
+import { sendViaProvider } from "./messagingProvider.ts";
+import { resolveUploadPath } from "../lib/storage.ts";
 
 function tenantId(auth: AuthContext) {
   if (!auth.activeMembership) throw new ApiError(403, "no_tenant", "Нет активной компании");
@@ -821,6 +831,7 @@ export async function setConversationMode(
   auth: AuthContext,
   id: string,
   mode: "ai" | "human" | "paused",
+  options: { assigneeMembershipId?: string } = {},
 ) {
   const tid = tenantId(auth);
   await assertConversationReachable(prisma, auth, id);
@@ -831,18 +842,32 @@ export async function setConversationMode(
     });
     if (!current) throw new ApiError(404, "not_found", "Диалог не найден");
 
+    const selfId = auth.activeMembership?.id;
+    let nextAssignee = current.assigneeMembershipId;
+    if (mode === "human") {
+      const requested = options.assigneeMembershipId || selfId;
+      if (!requested) throw new ApiError(422, "invalid", "Нет сотрудника для назначения");
+      if (requested !== current.assigneeMembershipId) {
+        const owner = await tx.membership.findFirst({ where: { id: requested, tenantId: tid, active: true } });
+        if (!owner) throw new ApiError(422, "invalid", "Сотрудник не найден");
+      }
+      nextAssignee = requested;
+    }
+
+    const explicitAssign = Boolean(options.assigneeMembershipId);
     if (
       mode === "human" &&
       current.mode === "human" &&
       current.assigneeMembershipId &&
-      current.assigneeMembershipId !== auth.activeMembership?.id
+      current.assigneeMembershipId !== selfId &&
+      !explicitAssign
     ) {
       const holder = current.assignee?.user?.name || "другой сотрудник";
       throw new ApiError(409, "already_taken", `Уже забрал ${holder}`);
     }
 
-    const sameOwnerTake =
-      mode === "human" && current.mode === "human" && current.assigneeMembershipId === auth.activeMembership?.id;
+    const assigneeChanged = nextAssignee !== current.assigneeMembershipId;
+    const sameOwnerTake = mode === "human" && current.mode === "human" && !assigneeChanged;
     const alreadySameMode = current.mode === mode && (mode !== "human" || sameOwnerTake);
     if (alreadySameMode || sameOwnerTake) {
       return { ...current, appliedOnSeller: true as const, sellerError: null as string | null };
@@ -853,31 +878,31 @@ export async function setConversationMode(
       where: { id },
       data: {
         mode,
-        controlVersion: modeChanged ? { increment: 1 } : undefined,
-        assigneeMembershipId: mode === "human" ? auth.activeMembership?.id : current.assigneeMembershipId,
-        needsAttention: mode === "ai" ? false : current.needsAttention,
+        controlVersion: modeChanged || assigneeChanged ? { increment: 1 } : undefined,
+        assigneeMembershipId: mode === "human" ? nextAssignee : current.assigneeMembershipId,
+        needsAttention: mode === "ai" ? false : mode === "human" ? false : current.needsAttention,
         attentionReason: mode === "human" ? "taken_by_human" : mode === "paused" ? "paused" : current.attentionReason,
       },
     });
-    if (mode === "human" && auth.activeMembership) {
+    if (mode === "human" && nextAssignee) {
       await tx.notification.upsert({
         where: {
           tenantId_episodeKey_recipientMembershipId: {
             tenantId: tid,
             episodeKey: `conversation.needs_human:${id}`,
-            recipientMembershipId: auth.activeMembership.id,
+            recipientMembershipId: nextAssignee,
           },
         },
-        update: { title: "Диалог у менеджера", body: "Нужен ответ человеку" },
+        update: { title: "Диалог закреплён", body: "Нужен ответ человеку" },
         create: {
           tenantId: tid,
           episodeKey: `conversation.needs_human:${id}`,
-          recipientMembershipId: auth.activeMembership.id,
+          recipientMembershipId: nextAssignee,
           type: "conversation.needs_human",
           priority: "high",
           entityType: "conversation",
           entityId: id,
-          title: "Диалог у менеджера",
+          title: "Диалог закреплён",
           body: "Нужен ответ человеку",
         },
       });
@@ -915,27 +940,39 @@ export async function setConversationMode(
       data: {
         tenantId: tid,
         actorUserId: auth.user.id,
-        action: `conversation.${mode === "human" ? "take" : mode === "paused" ? "pause" : "return_to_ai"}`,
+        action: explicitAssign ? "conversation.assign" : `conversation.${mode === "human" ? "take" : mode === "paused" ? "pause" : "return_to_ai"}`,
         entityType: "conversation",
         entityId: id,
-        changesJson: { mode, controlVersion: updated.controlVersion, appliedOnSeller },
+        changesJson: { mode, assigneeMembershipId: nextAssignee, controlVersion: updated.controlVersion, appliedOnSeller },
       },
     });
     return { ...updated, appliedOnSeller, sellerError };
   });
 }
 
+export async function assignConversation(prisma: PrismaClient, auth: AuthContext, id: string, membershipId: string) {
+  return setConversationMode(prisma, auth, id, "human", { assigneeMembershipId: membershipId });
+}
+
 export async function addConversationMessage(
   prisma: PrismaClient,
   auth: AuthContext,
   id: string,
-  input: { text: string; internal?: boolean; idempotencyKey?: string },
+  input: {
+    text?: string;
+    internal?: boolean;
+    idempotencyKey?: string;
+    attachments?: Array<{ fileName: string; mimeType: string; contentBase64: string }>;
+  },
 ) {
   const tid = tenantId(auth);
   const conversation = await prisma.conversation.findFirst({ where: { id, tenantId: tid } });
   if (!conversation) throw new ApiError(404, "not_found", "Диалог не найден");
   await assertConversationReachable(prisma, auth, id);
+  const text = String(input.text || "").trim();
+  const files = (input.attachments || []).slice(0, CONVERSATION_MAX_ATTACHMENTS);
   if (input.internal) {
+    if (!text) throw new ApiError(422, "invalid", "Введите текст заметки");
     return prisma.message.create({
       data: {
         tenantId: tid,
@@ -943,7 +980,7 @@ export async function addConversationMessage(
         senderKind: "staff",
         senderUserId: auth.user.id,
         direction: "internal",
-        text: input.text,
+        text,
         internal: true,
       },
     });
@@ -951,16 +988,28 @@ export async function addConversationMessage(
   if (conversation.mode !== "human") {
     throw new ApiError(409, "mode_locked", "Сначала возьмите диалог, затем отвечайте");
   }
-  const key = input.idempotencyKey || `msg:${id}:${input.text}:${auth.user.id}`;
+  if (!text && !files.length) throw new ApiError(422, "invalid", "Введите текст или прикрепите файл");
+  const decoded = files.map((file) => {
+    const mimeType = assertConversationMime(file.fileName, file.mimeType);
+    const buffer = decodeBase64Payload(file.contentBase64);
+    if (buffer.length > CONVERSATION_MAX_FILE_BYTES) throw new ApiError(422, "too_large", "Файл больше 16 МБ");
+    return { fileName: file.fileName, mimeType, buffer };
+  });
+  const fileFingerprint = decoded
+    .map((file) => `${file.fileName}:${file.buffer.length}`)
+    .join("|");
+  const key = input.idempotencyKey || `msg:${id}:${text}:${auth.user.id}:${fileFingerprint}`;
   const existing = await prisma.outboundOperation.findFirst({
     where: { tenantId: tid, idempotencyKey: key },
   });
   if (existing) {
     return prisma.message.findFirst({
-      where: { tenantId: tid, conversationId: id, text: input.text },
+      where: { tenantId: tid, conversationId: id, senderUserId: auth.user.id },
+      include: { attachments: true },
       orderBy: { createdAt: "desc" },
     });
   }
+  const firstKind = decoded[0] ? conversationMediaKind(decoded[0].mimeType) : "text";
   const message = await prisma.message.create({
     data: {
       tenantId: tid,
@@ -968,10 +1017,25 @@ export async function addConversationMessage(
       senderKind: "staff",
       senderUserId: auth.user.id,
       direction: "outbound",
-      text: input.text,
+      type: decoded.length ? firstKind : "text",
+      text: text || null,
       operationState: conversation.sellerLeadId ? "queued" : "stored",
     },
   });
+  const storedFiles = [];
+  for (const file of decoded) {
+    storedFiles.push(
+      await storeMessageAttachment(prisma, {
+        tenantId: tid,
+        messageId: message.id,
+        fileName: file.fileName,
+        mimeType: file.mimeType,
+        buffer: file.buffer,
+        uploadedById: auth.user.id,
+        sendState: conversation.sellerLeadId ? "pending" : "stored",
+      }),
+    );
+  }
   await prisma.outboundOperation.create({
     data: {
       tenantId: tid,
@@ -981,11 +1045,30 @@ export async function addConversationMessage(
       state: conversation.sellerLeadId ? "queued" : "stored",
     },
   });
-  const resolved = conversation.sellerLeadId ? await resolveSellerBridge(prisma, tid) : { bridge: null };
-  if (conversation.sellerLeadId && resolved.bridge) {
-    const bridge = resolved.bridge;
+  if (conversation.sellerLeadId) {
     try {
-      await bridge.sendText(conversation.sellerLeadId, input.text, key);
+      if (text) {
+        await sendViaProvider(prisma, tid, {
+          sellerLeadId: conversation.sellerLeadId,
+          text,
+          idempotencyKey: `${key}:text`,
+        });
+      }
+      for (const file of storedFiles) {
+        const result = await sendViaProvider(prisma, tid, {
+          sellerLeadId: conversation.sellerLeadId,
+          file: {
+            fileName: file.fileName,
+            mimeType: file.mimeType,
+            filePath: resolveUploadPath(file.storageKey),
+          },
+          idempotencyKey: `${key}:file:${file.id}`,
+        });
+        await prisma.attachment.update({
+          where: { id: file.id },
+          data: { sendState: "sent", providerMessageId: result.providerMessageId },
+        });
+      }
       await prisma.message.update({
         where: { id: message.id },
         data: { operationState: "accepted" },
@@ -998,7 +1081,10 @@ export async function addConversationMessage(
       throw new ApiError(503, "sender_unknown", error instanceof Error ? error.message : "Неизвестный результат отправки");
     }
   }
-  return message;
+  return prisma.message.findFirst({
+    where: { id: message.id, tenantId: tid },
+    include: { attachments: true },
+  });
 }
 
 export async function listNotifications(prisma: PrismaClient, auth: AuthContext) {

@@ -38,7 +38,12 @@ function envLlm() {
     process.env.OPENAI_BASE_URL ||
     (useAnyModel ? "https://anymodel.org/v1" : "https://api.openai.com/v1");
   const model = process.env.ANYMODEL_MODEL || process.env.OPENAI_MODEL || "gpt-4o-mini";
-  return { apiKey, baseUrl: baseUrl.replace(/\/$/, ""), model };
+  return {
+    apiKey,
+    baseUrl: baseUrl.replace(/\/$/, ""),
+    model,
+    provider: openAiKey ? "openai" : useAnyModel ? "anymodel" : "",
+  };
 }
 
 function readCache<T>(key: string): T | null {
@@ -239,5 +244,6 @@ export async function getEffectiveLlmConfig(prisma: PrismaClient, tenantId?: str
     apiKey,
     baseUrl: env.baseUrl,
     model: settings.ai.model || env.model,
+    provider: settings.ai.provider || env.provider || (env.baseUrl.includes("anymodel") ? "anymodel" : "openai"),
   };
 }

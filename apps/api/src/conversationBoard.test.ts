@@ -429,4 +429,176 @@ describe("Conversations board", () => {
     assert.ok(after.conversation.contextSummary);
     assert.match(after.conversation.contextSummary, /сайт|потребност/i);
   });
+
+  it("контекст отмечает высланное КП и ожидание руководства клиента", async () => {
+    const contact = await prisma.contact.findFirst({ where: { name: { contains: "Александр" } } });
+    assert.ok(contact);
+    const conversation = await prisma.conversation.create({
+      data: {
+        tenantId: contact.tenantId,
+        contactId: contact.id,
+        mode: "human",
+        status: "open",
+        attentionReason: "needs_reply",
+      },
+    });
+    await prisma.message.create({
+      data: {
+        tenantId: contact.tenantId,
+        conversationId: conversation.id,
+        senderKind: "client",
+        direction: "inbound",
+        text: "Нужна презентация с нуля",
+        createdAt: new Date("2026-09-16T00:58:00Z"),
+      },
+    });
+    const offer = await prisma.message.create({
+      data: {
+        tenantId: contact.tenantId,
+        conversationId: conversation.id,
+        senderKind: "staff",
+        direction: "outbound",
+        type: "document",
+        text: "КОММЕРЧЕСКОЕ ПРЕДЛОЖЕНИЕ",
+        createdAt: new Date("2026-09-16T11:00:00Z"),
+      },
+    });
+    await prisma.attachment.create({
+      data: {
+        tenantId: contact.tenantId,
+        parentType: "message",
+        parentId: offer.id,
+        messageId: offer.id,
+        storageKey: `test/${offer.id}.pdf`,
+        fileName: "КОММЕРЧЕСКОЕ ПРЕДЛОЖЕНИЕ.pdf",
+        originalFileName: "КОММЕРЧЕСКОЕ ПРЕДЛОЖЕНИЕ.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 12,
+        status: "stored",
+      },
+    });
+    await prisma.message.create({
+      data: {
+        tenantId: contact.tenantId,
+        conversationId: conversation.id,
+        senderKind: "client",
+        direction: "inbound",
+        text: "Добрый день! Я направила руководству, они решают кого нанять",
+        createdAt: new Date("2026-09-17T09:00:00Z"),
+      },
+    });
+    await prisma.message.create({
+      data: {
+        tenantId: contact.tenantId,
+        conversationId: conversation.id,
+        senderKind: "staff",
+        direction: "outbound",
+        text: "Эльвира, добрый день! Хотели уточнить интересно ли наше предложение?",
+        createdAt: new Date("2026-09-18T10:58:00Z"),
+      },
+    });
+
+    const response = await fetch(`${base}/api/v1/conversations/${conversation.id}/analyze-context`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({ useLlm: false }),
+    });
+    const body = await response.json();
+    assert.equal(response.status, 200, JSON.stringify(body));
+    assert.match(String(body.analysis?.summaryUpdate || ""), /КП выслано/);
+    assert.match(String(body.analysis?.summaryUpdate || ""), /руководства клиента/);
+    assert.doesNotMatch(String(body.analysis?.summaryUpdate || ""), /Явных договорённостей пока нет/);
+    assert.equal(body.analysis?.waitingFor, "CLIENT");
+    assert.equal(body.analysis?.needsReply, false);
+
+    const workspace = await fetch(`${base}/api/v1/conversations/${conversation.id}`, { headers: { cookie } });
+    const after = await workspace.json();
+    assert.match(String(after.conversation.contextSummary || ""), /КП выслано/);
+    assert.match(String(after.conversation.contextSummary || ""), /руководства клиента/);
+  });
+
+  it("закрепляет выбранного менеджера в диалоге", async () => {
+    const contact = await prisma.contact.findFirst({ where: { name: { contains: "Александр" } } });
+    assert.ok(contact);
+    const manager = await prisma.membership.findFirst({
+      where: { tenantId: contact.tenantId, role: "manager", active: true },
+    });
+    assert.ok(manager);
+    const conversation = await prisma.conversation.create({
+      data: {
+        tenantId: contact.tenantId,
+        contactId: contact.id,
+        mode: "human",
+        status: "open",
+        needsAttention: true,
+        attentionReason: "needs_reply",
+      },
+    });
+    const workspace = await fetch(`${base}/api/v1/conversations/${conversation.id}`, { headers: { cookie } });
+    const before = await workspace.json();
+    assert.equal(before.conversation.attentionReasonLabel, "Клиент написал, AI просит человека ответить");
+    assert.equal(before.conversation.assigneeMembershipId, null);
+
+    const assigned = await fetch(`${base}/api/v1/conversations/${conversation.id}/assign`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({ membershipId: manager.id }),
+    });
+    const body = await assigned.json();
+    assert.equal(assigned.status, 200, JSON.stringify(body));
+    assert.equal(body.mode, "human");
+    assert.equal(body.assigneeMembershipId, manager.id);
+
+    const after = await prisma.conversation.findFirst({ where: { id: conversation.id } });
+    assert.equal(after?.assigneeMembershipId, manager.id);
+    assert.equal(after?.attentionReason, "taken_by_human");
+    assert.equal(after?.needsAttention, false);
+  });
+
+  it("отправляет фото в диалог и отдаёт его в переписке", async () => {
+    const contact = await prisma.contact.findFirst({ where: { name: { contains: "Александр" } } });
+    assert.ok(contact);
+    const conversation = await prisma.conversation.create({
+      data: {
+        tenantId: contact.tenantId,
+        contactId: contact.id,
+        mode: "human",
+        status: "open",
+      },
+    });
+    const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    const sent = await fetch(`${base}/api/v1/conversations/${conversation.id}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie, "Idempotency-Key": "media-send-1" },
+      body: JSON.stringify({
+        text: "Смотрите фото",
+        attachments: [{ fileName: "photo.png", mimeType: "image/png", contentBase64: png }],
+      }),
+    });
+    const created = await sent.json();
+    assert.equal(sent.status, 201, JSON.stringify(created));
+    assert.equal(created.type, "image");
+    assert.equal(created.attachments?.length, 1);
+
+    const workspace = await fetch(`${base}/api/v1/conversations/${conversation.id}`, { headers: { cookie } });
+    const body = await workspace.json();
+    const message = (body.messages || []).find((item: { id: string }) => item.id === created.id);
+    assert.ok(message);
+    assert.equal(message.type, "image");
+    assert.equal(message.text, "Смотрите фото");
+    assert.equal(message.attachments[0].kind, "image");
+    assert.match(message.attachments[0].url, /\/attachments\//);
+
+    const file = await fetch(`${base}${message.attachments[0].url}`, { headers: { cookie } });
+    assert.equal(file.status, 200);
+    assert.match(file.headers.get("content-type") || "", /image\/png/);
+    const bytes = Buffer.from(await file.arrayBuffer());
+    assert.equal(bytes[0], 0x89);
+    assert.equal(bytes[1], 0x50);
+
+    const listed = await fetch(`${base}/api/v1/conversations`, { headers: { cookie } });
+    const board = await listed.json();
+    const item = board.items.find((row: { id: string }) => row.id === conversation.id);
+    assert.equal(item.lastMessagePreview, "Смотрите фото");
+  });
 });

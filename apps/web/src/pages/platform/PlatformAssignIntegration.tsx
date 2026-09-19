@@ -90,8 +90,8 @@ function ProviderAssignForm({
     const body: Record<string, unknown> = {
       type: item.type,
       name: String(form.get("name") || ""),
-      sellerUrl: String(form.get("sellerUrl") || ""),
-      secret: String(form.get("secret") || ""),
+      instanceId: String(form.get("instanceId") || ""),
+      apiToken: String(form.get("apiToken") || ""),
       assigneeMembershipId: String(form.get("assigneeMembershipId") || ""),
     };
     setBusy(true);
@@ -103,6 +103,7 @@ function ProviderAssignForm({
         : ((await api.adminCreateCompanyIntegration(tenantId, body)) as any);
       setNote(result.note || (result.reachable === false ? "Сохранено, мост не ответил" : "Подключено к компании"));
       if (result.secret) setSecret(result.secret);
+      if (result.bridgeSecret) setSecret(result.bridgeSecret);
       notifySaved(result.reachable ? "Мост ответил" : "Интеграция сохранена для компании");
       setExisting(result.id ? result : existing);
       const refreshed = (await api.adminCompanyIntegrations(tenantId)) as any;
@@ -137,7 +138,7 @@ function ProviderAssignForm({
       {already && existing ? (
         <p className="muted">
           Сейчас: {existing.lifecycleLabel || existing.lifecycle}.{" "}
-          {existing.schema?.sellerUrl ? `Адрес: ${existing.schema.sellerUrl}` : null}{" "}
+          {existing.schema?.instanceId ? `Instance: ${existing.schema.instanceId}` : null}{" "}
           <Link to={`/admin/companies/${tenantId}`}>Карточка компании</Link>
         </p>
       ) : null}
@@ -147,27 +148,21 @@ function ProviderAssignForm({
           <input name="name" defaultValue={existing?.name || ""} placeholder={item.title} />
         </label>
       ) : null}
-      {fields.includes("sellerUrl") ? (
+      {fields.includes("instanceId") ? (
         <label>
-          Адрес моста
-          <input
-            name="sellerUrl"
-            type="url"
-            required={!already}
-            defaultValue={existing?.schema?.sellerUrl || ""}
-            placeholder="https://…"
-          />
+          Instance ID Green API
+          <input name="instanceId" defaultValue={existing?.schema?.instanceId || ""} required={!already} />
         </label>
       ) : null}
-      {fields.includes("secret") ? (
+      {fields.includes("apiToken") ? (
         <label>
-          Секрет моста
+          API Token
           <input
-            name="secret"
+            name="apiToken"
             type="password"
             autoComplete="off"
             required={!already}
-            placeholder={existing?.schema?.secretSet ? "задан, введите чтобы заменить" : ""}
+            placeholder={existing?.schema?.apiTokenSet ? "задан, введите чтобы заменить" : ""}
           />
         </label>
       ) : null}

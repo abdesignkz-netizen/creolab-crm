@@ -106,10 +106,28 @@ export const conversationModeSchema = z.object({
   resumeStrategy: z.enum(["continue", "reply_last"]).optional(),
 });
 
-export const sendMessageSchema = z.object({
-  text: z.string().trim().min(1).max(4000),
-  internal: z.boolean().optional(),
+export const conversationMessageAttachmentSchema = z.object({
+  fileName: z.string().trim().min(1).max(200),
+  mimeType: z.string().trim().min(1).max(120),
+  contentBase64: z.string().min(1),
 });
+
+export const sendMessageSchema = z
+  .object({
+    text: z.string().trim().max(4000).optional(),
+    internal: z.boolean().optional(),
+    attachments: z.array(conversationMessageAttachmentSchema).max(5).optional(),
+  })
+  .superRefine((value, ctx) => {
+    const text = String(value.text || "").trim();
+    const files = value.attachments?.length || 0;
+    if (value.internal && !text) {
+      ctx.addIssue({ code: "custom", message: "Введите текст заметки", path: ["text"] });
+    }
+    if (!value.internal && !text && !files) {
+      ctx.addIssue({ code: "custom", message: "Введите текст или прикрепите файл", path: ["text"] });
+    }
+  });
 
 export const createTaskSchema = z.object({
   type: z
@@ -317,6 +335,10 @@ export const parseContactImportSchema = z.object({
 
 export const assignTaskSchema = z.object({
   membershipId: z.string().uuid().optional(),
+});
+
+export const assignConversationSchema = z.object({
+  membershipId: z.string().uuid(),
 });
 
 export const snoozeSituationSchema = z.object({

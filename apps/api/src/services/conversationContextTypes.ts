@@ -89,6 +89,9 @@ export type ConversationAnalysis = {
     company?: string | null;
     meetingDate?: string | null;
     meetingTime?: string | null;
+    proposalSent?: boolean;
+    pricesSent?: boolean;
+    waitingForManagement?: boolean;
   };
 };
 

@@ -39,19 +39,28 @@
 
 Ротация: сменить секрет в кабинете, обновить отправителя. Старый ключ после ротации не принимается.
 
-## WhatsApp / текущий бот
+## WhatsApp / общий AI Manager
 
-Не подключайте второй Green API sender.
+Не подключайте второй Green API sender на ту же компанию.
 
-| На стороне бота | На стороне CRM |
+| На стороне AI Manager | На стороне CRM |
 | --- | --- |
-| `CRM_BRIDGE_SECRET` | `WHATSAPP_SELLER_SECRET` |
-| `CRM_EVENTS_URL` | `POST /api/v1/integrations/seller-events` |
-| процесс `server.js` | `WHATSAPP_SELLER_URL` |
+| `INTERNAL_SERVICE_SECRET` | `INTERNAL_SERVICE_SECRET` |
+| `AI_MANAGER` public URL | `AI_MANAGER_URL` |
+| `CRM_EVENTS_URL` (fallback) | `POST /api/v1/integrations/seller-events/:integrationId` |
+| `DATA_DIR` persistent | — |
+| `GREEN_API_*` только legacy CREOLAB | Instance ID + token компании в Integration |
 
-Внутренние маршруты бота (только с секретом):
+При сохранении WhatsApp CRM вызывает `POST /internal/crm/integrations/register` и выставляет webhook Green API на `https://<ai-manager>/webhook/<webhookToken>`.
 
-- `GET /internal/crm/health` — sender = `whatsappService.js`
+Запросы CRM→AI Manager: `Authorization: Bearer <секрет Integration>`, `X-CRM-Tenant-Id`, `X-CRM-Integration-Id`. Глобальный `CRM_BRIDGE_SECRET` для tenant-запросов не используется.
+
+Событие `type=ai.usage`: tenant из Integration, дедуп `providerRequestId`, деньги по `AIModelPricing`.
+
+Внутренние маршруты бота:
+
+- `POST /internal/crm/integrations/register` — только `INTERNAL_SERVICE_SECRET`
+- `GET /internal/crm/health`
 - `GET /internal/crm/leads`
 - `POST /internal/crm/leads/:leadId/mode` — `AUTO|HUMAN|PAUSED`
 - `POST /internal/crm/leads/:leadId/messages` — отправка через существующий `sendWhatsAppMessage`

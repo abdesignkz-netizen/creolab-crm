@@ -26,7 +26,10 @@ import {
   type WaitingFor,
 } from "./conversationContextTypes.ts";
 import { excludeRematchedLeftovers } from "./attentionCounts.ts";
+import { attentionReasonLabel } from "./attentionReasons.ts";
 import { adoptSameContactThreadMessages, listThreadConversationIds } from "./conversationThread.ts";
+import { attachmentView, conversationMediaKind, inferKindFromText, messagePreviewText } from "./conversationMedia.ts";
+import { resolveUploadPath } from "../lib/storage.ts";
 import { markRelatedStaffNotifications } from "./notificationService.ts";
 
 const ACTIVE_INQUIRY = ["new", "accepted", "qualification", "qualified", "in_progress", "waiting_client", "waiting_manager"];
@@ -109,6 +112,7 @@ async function loadThreadMessages(
   const ids = await listThreadConversationIds(prisma, tenantId, conversation, phoneNormalized);
   return prisma.message.findMany({
     where: { tenantId, conversationId: { in: ids } },
+    include: { attachments: { orderBy: { createdAt: "asc" } } },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take,
   });
@@ -311,7 +315,7 @@ export async function listConversationsBoard(
         channel,
         acquisition,
         sourceLine: sourceArrow(acquisition, channel),
-        lastMessagePreview: last?.text?.slice(0, 160) || "Нет сообщений",
+        lastMessagePreview: messagePreviewText(last),
         lastMessageAt: lastAt,
         lastMessageLabel: formatWhen(lastAt, timeZone),
         lastRelativeMinutes: minutesAgo(lastAt, now),
@@ -521,6 +525,8 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
       waitingFor,
       waitingForLabel: WAITING_FOR_LABEL[waitingFor],
       attentionReason: conversation.attentionReason,
+      attentionReasonLabel: attentionReasonLabel(conversation.attentionReason),
+      assigneeMembershipId: conversation.assigneeMembershipId || null,
       assigneeName: conversation.assignee?.user?.name || contact?.owner?.user?.name || null,
       topic: topic || "Тема не определена",
       contextSummary: conversation.contextSummary,
@@ -633,7 +639,7 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
     },
     pinnedNotes: contact?.notes?.map((item) => ({ id: item.id, text: item.text })) || [],
     hasEarlierMessages: messages.length === 120,
-    messages: messages.map(message => messageView(message, timeZone)),
+    messages: messages.map(message => messageView(message, timeZone, conversation.id)),
   };
 }
 
@@ -806,9 +812,16 @@ export async function markConversationRead(prisma: PrismaClient, auth: AuthConte
   return { ok: true };
 }
 
-function messageView(message: any, timeZone: string) { return {
+function messageView(message: any, timeZone: string, viewerConversationId = message.conversationId) {
+  const attachments = (message.attachments || []).map((item: any) => attachmentView(viewerConversationId, item));
+  const kind =
+    conversationMediaKind(attachments[0]?.mimeType, message.type) !== "text"
+      ? conversationMediaKind(attachments[0]?.mimeType, message.type)
+      : inferKindFromText(message.text || "") || "text";
+  return {
       id: message.id,
       text: message.text,
+      type: kind,
       direction: message.direction,
       senderKind: message.senderKind,
       actorLabel: message.internal ? "Заметка" : actorLabel(message.senderKind, message.direction),
@@ -817,6 +830,8 @@ function messageView(message: any, timeZone: string) { return {
       createdLabel: formatWhen(message.createdAt, timeZone),
       operationState: message.operationState,
       receiptState: message.receiptState,
+      attachments,
+      previewLabel: messagePreviewText({ text: message.text, type: kind }),
       deliveryLabel:
         message.direction === "outbound"
           ? message.receiptState === "read"
@@ -829,7 +844,8 @@ function messageView(message: any, timeZone: string) { return {
                   ? "Ошибка"
                   : message.operationState
           : null,
-    }; }
+    };
+}
 
 export async function getConversationMessages(prisma: PrismaClient, auth: AuthContext, id: string, before: string) {
   const { tenantId, tenant } = requireTenant(auth);
@@ -849,8 +865,40 @@ export async function getConversationMessages(prisma: PrismaClient, auth: AuthCo
       conversationId: { in: threadIds },
       OR: [{ createdAt: { lt: cursor.createdAt } }, { createdAt: cursor.createdAt, id: { lt: cursor.id } }],
     },
+    include: { attachments: { orderBy: { createdAt: "asc" } } },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: 121,
   });
-  return { hasEarlierMessages: messages.length > 120, messages: messages.slice(0, 120).reverse().map(message => messageView(message, tenant.timezone || "Asia/Almaty")) };
+  return { hasEarlierMessages: messages.length > 120, messages: messages.slice(0, 120).reverse().map(message => messageView(message, tenant.timezone || "Asia/Almaty", id)) };
+}
+
+export async function getConversationAttachment(
+  prisma: PrismaClient,
+  auth: AuthContext,
+  conversationId: string,
+  attachmentId: string,
+) {
+  const { tenantId } = requireTenant(auth);
+  const conversation = await prisma.conversation.findFirst({
+    where: { id: conversationId, tenantId },
+    include: { contact: { include: { methods: true } } },
+  });
+  if (!conversation) throw new ApiError(404, "not_found", "Диалог не найден");
+  await assertConversationReachable(prisma, auth, conversationId);
+  const phone = conversation.contact ? primaryPhone(conversation.contact.methods)?.normalizedValue : null;
+  const threadIds = await listThreadConversationIds(prisma, tenantId, conversation, phone);
+  const attachment = await prisma.attachment.findFirst({
+    where: {
+      id: attachmentId,
+      tenantId,
+      message: { conversationId: { in: threadIds } },
+    },
+  });
+  if (!attachment) throw new ApiError(404, "not_found", "Файл не найден");
+  return {
+    path: resolveUploadPath(attachment.storageKey),
+    mimeType: attachment.mimeType,
+    fileName: attachment.originalFileName || attachment.fileName,
+    kind: conversationMediaKind(attachment.mimeType, attachment.documentType),
+  };
 }

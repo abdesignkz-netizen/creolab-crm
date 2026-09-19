@@ -49,14 +49,18 @@ npm test
 
 Пустой/некорректный телефон → `422`. Успех не раскрывает, был ли контакт в базе.
 
-## Подключение текущего WhatsApp ИИ
+## Подключение WhatsApp AI Manager
 
-1. В боте задать `CRM_BRIDGE_SECRET` (и опционально `CRM_EVENTS_URL=http://127.0.0.1:4100/api/v1/integrations/seller-events`).
-2. В CRM задать `WHATSAPP_SELLER_URL` (например `http://127.0.0.1:3000`) и тот же `WHATSAPP_SELLER_SECRET`.
-3. Проверить `GET /api/v1/integrations/whatsapp-seller/health`.
-4. Не переключать Green API webhook на CRM, пока бот отвечает. Иначе два продавца.
+Один общий AI Manager на всех tenant. В кабинете компании задаются только Instance ID и API Token Green API.
 
-Кабинет «Взять диалог» / «Вернуть ИИ» вызывает тот же `SET_MODE`, что и WhatsApp-команды менеджера. Отправка текста идёт через `whatsappService.js`.
+1. На AI Manager (Render): `INTERNAL_SERVICE_SECRET`, persistent `DATA_DIR`, `CRM_EVENTS_URL` (запасной адрес seller-events, если Integration не прислала свой URL). `GREEN_API_*` оставьте только для текущего CREOLAB, пока этот номер не зарегистрирован как Integration.
+2. В CRM: `AI_MANAGER_URL` и тот же `INTERNAL_SERVICE_SECRET`.
+3. Сохранение WhatsApp Integration вызывает `POST /internal/crm/integrations/register` с `INTERNAL_SERVICE_SECRET` и передаёт prompt/knowledge этой компании.
+4. Дальнейшие запросы к AI Manager идут с `X-CRM-Tenant-Id`, `X-CRM-Integration-Id` и Bearer-секретом этой Integration, не с `CRM_BRIDGE_SECRET`.
+5. Green API webhook: `https://<ai-manager>/webhook/<webhookToken>` из ответа register. Голый `/webhook` для зарегистрированной Integration не принимается.
+6. События `ai.usage` принимает CRM, tenant берётся из Integration, дедуп по `providerRequestId`, стоимость по `AIModelPricing`.
+
+Кабинет «Взять диалог» / «Вернуть ИИ» вызывает тот же `SET_MODE`. Отправка текста идёт через AI Manager.
 
 ## Документы
 

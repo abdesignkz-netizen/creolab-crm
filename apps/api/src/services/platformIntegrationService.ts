@@ -24,8 +24,9 @@ function publicSchema(type: string, schema: unknown) {
   const row = asRecord(schema);
   if (type === "whatsapp_seller") {
     return {
-      sellerUrl: String(row.sellerUrl || ""),
+      instanceId: String(row.instanceId || ""),
       secretSet: Boolean(row.secretEnc),
+      apiTokenSet: Boolean(row.apiTokenEnc),
       sendOwner: row.sendOwner || "external_bot",
     };
   }
@@ -192,8 +193,10 @@ export async function createTenantConnection(
 
   if (type === "whatsapp_seller") {
     const result = await upsertWhatsAppSellerForTenant(prisma, tenantId, {
-      sellerUrl: String(input.sellerUrl || ""),
-      secret: String(input.secret || ""),
+      instanceId: input.instanceId ? String(input.instanceId) : undefined,
+      apiToken: input.apiToken ? String(input.apiToken) : undefined,
+      sellerUrl: input.sellerUrl ? String(input.sellerUrl) : undefined,
+      secret: input.secret ? String(input.secret) : undefined,
       name: input.name ? String(input.name) : undefined,
       actorUserId,
     });
@@ -201,7 +204,14 @@ export async function createTenantConnection(
       where: { id: result.integrationId },
       include: { forms: true },
     });
-    return { ...publicIntegration(row), reachable: result.reachable, note: result.note, savedConnected: result.reachable };
+    return {
+      ...publicIntegration(row),
+      reachable: result.reachable,
+      note: result.note,
+      savedConnected: result.reachable,
+      bridgeSecret: result.bridgeSecret,
+      secretIssued: result.secretIssued,
+    };
   }
 
   if (type === "form") {
@@ -319,10 +329,13 @@ export async function updateTenantConnection(
   });
   if (!row) throw new ApiError(404, "not_found", "Подключение не найдено");
 
-  if (row.type === "whatsapp_seller" && (input.sellerUrl || input.secret)) {
+  if (row.type === "whatsapp_seller" && (input.sellerUrl || input.secret || input.instanceId || input.apiToken || input.rotateSecret)) {
     const result = await upsertWhatsAppSellerForTenant(prisma, tenantId, {
-      sellerUrl: String(input.sellerUrl || asRecord(row.schemaJson).sellerUrl || ""),
+      instanceId: input.instanceId ? String(input.instanceId) : undefined,
+      apiToken: input.apiToken ? String(input.apiToken) : undefined,
+      sellerUrl: input.sellerUrl ? String(input.sellerUrl) : undefined,
       secret: input.secret ? String(input.secret) : undefined,
+      rotateSecret: Boolean(input.rotateSecret),
       name: input.name ? String(input.name) : undefined,
       actorUserId,
     });
@@ -330,7 +343,13 @@ export async function updateTenantConnection(
       where: { id: result.integrationId },
       include: { forms: true },
     });
-    return { ...publicIntegration(updated), reachable: result.reachable, note: result.note };
+    return {
+      ...publicIntegration(updated),
+      reachable: result.reachable,
+      note: result.note,
+      bridgeSecret: result.bridgeSecret,
+      secretIssued: result.secretIssued,
+    };
   }
 
   const data: Prisma.IntegrationUpdateInput = {};
@@ -620,6 +639,9 @@ export async function saveTenantAiSettings(
     model: input.model ? String(input.model) : existing?.model || null,
     enabled: "enabled" in input ? Boolean(input.enabled) : existing?.enabled ?? true,
     credentialId,
+    temperature: input.temperature != null && input.temperature !== "" ? Number(input.temperature) : existing?.temperature ?? null,
+    maxOutputTokens:
+      input.maxOutputTokens != null && input.maxOutputTokens !== "" ? Number(input.maxOutputTokens) : existing?.maxOutputTokens ?? null,
     limitsJson: (input.limits && typeof input.limits === "object" ? input.limits : existing?.limitsJson || {}) as Prisma.InputJsonValue,
   };
   if (existing) {

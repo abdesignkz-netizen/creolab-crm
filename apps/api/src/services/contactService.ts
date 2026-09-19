@@ -2,7 +2,7 @@ import type { Prisma, PrismaClient } from "@creolab/db";
 import { validateClientPhone } from "@creolab/contracts";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
-import { isManager } from "../lib/access.ts";
+import { isManager, requireCompanyAdmin } from "../lib/access.ts";
 import {
   INQUIRY_STATUS_LABEL,
   INQUIRY_ACTIVE_STATUSES,
@@ -912,6 +912,152 @@ export async function updateContact(
   });
   void updated;
   return getContactOverview(prisma, auth, contactId);
+}
+
+const BLOCKING_INVOICE_STATUSES = ["ISSUED", "PARTIALLY_PAID", "PAID", "OVERDUE"] as const;
+const SIGNED_CONTRACT_STATUSES = ["SIGNED", "PARTIALLY_SIGNED"] as const;
+
+export async function deleteContact(prisma: PrismaClient, auth: AuthContext, contactId: string) {
+  requireCompanyAdmin(auth, "Удалить клиента может только владелец или директор компании");
+  const membership = requireTenant(auth);
+  const tid = membership.tenantId;
+  const contact = await prisma.contact.findFirst({
+    where: { id: contactId, tenantId: tid },
+    select: { id: true, name: true },
+  });
+  if (!contact) throw new ApiError(404, "not_found", "Клиент не найден");
+
+  const deals = await prisma.deal.findMany({ where: { tenantId: tid, contactId }, select: { id: true } });
+  const dealIds = deals.map((row) => row.id);
+  if (dealIds.length) {
+    const [issuedInvoices, signedContracts, electronicDocuments] = await Promise.all([
+      prisma.invoice.count({
+        where: { tenantId: tid, dealId: { in: dealIds }, status: { in: [...BLOCKING_INVOICE_STATUSES] } },
+      }),
+      prisma.contract.count({
+        where: {
+          tenantId: tid,
+          dealId: { in: dealIds },
+          OR: [{ signedAt: { not: null } }, { status: { in: [...SIGNED_CONTRACT_STATUSES] } }],
+        },
+      }),
+      prisma.electronicDocument.count({ where: { tenantId: tid, dealId: { in: dealIds } } }),
+    ]);
+    if (issuedInvoices || signedContracts || electronicDocuments) {
+      throw new ApiError(
+        409,
+        "contact_has_documents",
+        "Нельзя удалить клиента: есть выставленные счета, подписанные договоры или ЭСФ. Архивируйте карточку.",
+      );
+    }
+  }
+
+  await prisma.$transaction(async (tx) => {
+    const inquiries = await tx.inquiry.findMany({ where: { tenantId: tid, contactId }, select: { id: true } });
+    const inquiryIds = inquiries.map((row) => row.id);
+    const conversations = await tx.conversation.findMany({
+      where: { tenantId: tid, contactId },
+      select: { id: true },
+    });
+    const conversationIds = conversations.map((row) => row.id);
+
+    await tx.campaignRecipient.updateMany({
+      where: { tenantId: tid, contactId },
+      data: { contactId: null, conversationId: null },
+    });
+    await tx.note.deleteMany({ where: { tenantId: tid, contactId } });
+    await tx.task.updateMany({
+      where: { tenantId: tid, contactId },
+      data: { contactId: null },
+    });
+    if (inquiryIds.length) {
+      await tx.task.updateMany({ where: { tenantId: tid, inquiryId: { in: inquiryIds } }, data: { inquiryId: null } });
+      await tx.agreement.updateMany({
+        where: { tenantId: tid, inquiryId: { in: inquiryIds } },
+        data: { inquiryId: null },
+      });
+      await tx.incompleteIntake.updateMany({
+        where: { tenantId: tid, inquiryId: { in: inquiryIds } },
+        data: { inquiryId: null },
+      });
+    }
+    if (dealIds.length) {
+      await tx.task.updateMany({ where: { tenantId: tid, dealId: { in: dealIds } }, data: { dealId: null } });
+      await tx.agreement.updateMany({ where: { tenantId: tid, dealId: { in: dealIds } }, data: { dealId: null } });
+    }
+    await tx.agreement.updateMany({
+      where: { tenantId: tid, contactId },
+      data: { contactId: null, conversationId: null },
+    });
+    await tx.incompleteIntake.updateMany({
+      where: { tenantId: tid, contactId },
+      data: { contactId: null, conversationId: null },
+    });
+
+    if (conversationIds.length) {
+      const messages = await tx.message.findMany({
+        where: { tenantId: tid, conversationId: { in: conversationIds } },
+        select: { id: true },
+      });
+      const messageIds = messages.map((row) => row.id);
+      if (messageIds.length) {
+        await tx.messageStatusEvent.updateMany({
+          where: { tenantId: tid, messageId: { in: messageIds } },
+          data: { messageId: null },
+        });
+        await tx.attachment.updateMany({
+          where: { tenantId: tid, messageId: { in: messageIds } },
+          data: { messageId: null },
+        });
+      }
+      await tx.outboundOperation.deleteMany({ where: { tenantId: tid, conversationId: { in: conversationIds } } });
+      await tx.inquiry.updateMany({
+        where: { tenantId: tid, conversationId: { in: conversationIds } },
+        data: { conversationId: null },
+      });
+      await tx.incompleteIntake.updateMany({
+        where: { tenantId: tid, conversationId: { in: conversationIds } },
+        data: { conversationId: null },
+      });
+      await tx.agreement.updateMany({
+        where: { tenantId: tid, conversationId: { in: conversationIds } },
+        data: { conversationId: null },
+      });
+      await tx.dealConversation.deleteMany({
+        where: { tenantId: tid, conversationId: { in: conversationIds } },
+      });
+      await tx.conversation.deleteMany({ where: { tenantId: tid, id: { in: conversationIds } } });
+    }
+
+    await tx.inquiry.updateMany({
+      where: { tenantId: tid, contactId },
+      data: { dealId: null, conversationId: null },
+    });
+    if (dealIds.length) {
+      await tx.deal.updateMany({ where: { tenantId: tid, id: { in: dealIds } }, data: { inquiryId: null } });
+    }
+    await tx.inquiry.deleteMany({ where: { tenantId: tid, contactId } });
+
+    if (dealIds.length) {
+      await tx.invoice.deleteMany({ where: { tenantId: tid, dealId: { in: dealIds } } });
+      await tx.contract.deleteMany({ where: { tenantId: tid, dealId: { in: dealIds } } });
+      await tx.deal.deleteMany({ where: { tenantId: tid, id: { in: dealIds } } });
+    }
+
+    await tx.auditEvent.create({
+      data: {
+        tenantId: tid,
+        actorUserId: auth.user.id,
+        action: "contact.delete",
+        entityType: "contact",
+        entityId: contactId,
+        changesJson: { name: contact.name } as Prisma.InputJsonValue,
+      },
+    });
+    await tx.contact.delete({ where: { id: contactId } });
+  });
+
+  return { ok: true, id: contactId };
 }
 
 export async function addContactNote(

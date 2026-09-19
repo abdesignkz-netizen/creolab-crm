@@ -454,15 +454,6 @@ export function SituationPage() {
       </div>
 
       <div className="sit-toolbar">
-        <PeriodSelector
-          period={period}
-          onPeriodChange={setPeriod}
-          dateFrom={dateFrom}
-          dateTo={dateTo}
-          onDateFromChange={setDateFrom}
-          onDateToChange={setDateTo}
-          activeLabel={data.period?.label}
-        />
         <div className="sit-toolbar-side">
           <div className="segmented sit-scope">
             {(
@@ -490,6 +481,17 @@ export function SituationPage() {
             Только важное
           </button>
         </div>
+      </div>
+      <div className="sit-period-bar">
+        <PeriodSelector
+          period={period}
+          onPeriodChange={setPeriod}
+          dateFrom={dateFrom}
+          dateTo={dateTo}
+          onDateFromChange={setDateFrom}
+          onDateToChange={setDateTo}
+          activeLabel={data.period?.label}
+        />
       </div>
 
       <form className="sit-section sit-ask" id="ask-ai" onSubmit={onAsk}>

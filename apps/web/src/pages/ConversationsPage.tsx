@@ -1,5 +1,5 @@
 import { useUrlState, useRequestVersion } from "../lib/useUrlState";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type DragEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { nameWithPhone, phoneText } from "../lib/contactDisplay";
 import { api } from "../lib/api";
@@ -18,6 +18,80 @@ const FILTERS = [
   ["no_topic", "Без темы"],
 ] as const;
 
+type PendingFile = {
+  localId: string;
+  fileName: string;
+  mimeType: string;
+  contentBase64: string;
+  previewUrl: string;
+  kind: "image" | "video" | "audio" | "document";
+};
+
+function mediaKind(mimeType: string): PendingFile["kind"] {
+  if (mimeType.startsWith("image/")) return "image";
+  if (mimeType.startsWith("video/")) return "video";
+  if (mimeType.startsWith("audio/")) return "audio";
+  return "document";
+}
+
+function readFileBase64(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || "");
+      resolve(result.includes(",") ? result.split(",")[1] : result);
+    };
+    reader.onerror = () => reject(new Error("Не удалось прочитать файл"));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function filesToPending(files: FileList | File[]): Promise<PendingFile[]> {
+  const out: PendingFile[] = [];
+  for (const file of Array.from(files)) {
+    if (file.size > 16 * 1024 * 1024) throw new Error(`«${file.name}» больше 16 МБ`);
+    out.push({
+      localId: `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(36).slice(2, 8)}`,
+      fileName: file.name,
+      mimeType: file.type || "application/octet-stream",
+      contentBase64: await readFileBase64(file),
+      previewUrl: URL.createObjectURL(file),
+      kind: mediaKind(file.type),
+    });
+  }
+  return out;
+}
+
+function MessageBody({ message }: { message: any }) {
+  const attachments = Array.isArray(message.attachments) ? message.attachments : [];
+  const type = String(message.type || "text");
+  return (
+    <>
+      {attachments.map((file: any) => (
+        <div key={file.id} className="bubble-media">
+          {file.kind === "image" ? (
+            <a href={file.url} target="_blank" rel="noreferrer">
+              <img src={file.url} alt={file.fileName || "Фото"} />
+            </a>
+          ) : file.kind === "video" ? (
+            <video src={file.url} controls preload="metadata" />
+          ) : file.kind === "audio" ? (
+            <audio src={file.url} controls preload="metadata" />
+          ) : (
+            <a className="bubble-file" href={file.url} target="_blank" rel="noreferrer">
+              {file.fileName || "Файл"}
+            </a>
+          )}
+        </div>
+      ))}
+      {!attachments.length && type !== "text" ? (
+        <div className="bubble-media-placeholder">{message.previewLabel || "Вложение"}</div>
+      ) : null}
+      {message.text ? <div>{message.text}</div> : null}
+    </>
+  );
+}
+
 export function ConversationsPage() {
   const listVersion = useRequestVersion();
   const workspaceVersion = useRequestVersion();
@@ -34,11 +108,15 @@ export function ConversationsPage() {
   const [error, setError] = useState("");
   const [workspace, setWorkspace] = useState<any>(null);
   const [text, setText] = useState("");
+  const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [busy, setBusy] = useState(false);
   const [showContext, setShowContext] = useState(false);
   const [contextNote, setContextNote] = useState("");
+  const [members, setMembers] = useState<Array<{ id: string; name: string; isMe?: boolean }>>([]);
+  const [assigneePick, setAssigneePick] = useState("");
   const focusReply = searchParams.get("focus") === "reply";
   const replyRef = useRef<HTMLTextAreaElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   async function loadList() {
     const request = ++listVersion.current;
@@ -63,6 +141,7 @@ export function ConversationsPage() {
       const data = await api.conversation(id);
       if (request !== workspaceVersion.current) return;
       setWorkspace(data);
+      setAssigneePick((data as any).conversation?.assigneeMembershipId || "");
       setItems((previous) => {
         const next = previous.map((item) =>
           item.id === id
@@ -104,8 +183,13 @@ export function ConversationsPage() {
     workspaceVersion.current += 1;
     setWorkspace(null);
     setText("");
+    setPendingFiles((previous) => {
+      previous.forEach((file) => URL.revokeObjectURL(file.previewUrl));
+      return [];
+    });
     setShowContext(false);
     setContextNote("");
+    setAssigneePick("");
     if (selectedId) loadWorkspace(selectedId);
     else setWorkspace(null);
   }, [selectedId]);
@@ -118,6 +202,21 @@ export function ConversationsPage() {
     node.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [focusReply, workspace?.conversation?.id]);
 
+  useEffect(() => {
+    let live = true;
+    void api
+      .workspaceMembers()
+      .then((data: any) => {
+        if (live) setMembers(data.items || []);
+      })
+      .catch(() => {
+        if (live) setMembers([]);
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
   async function changeMode(action: () => Promise<unknown>) {
     const id = selectedId;
     if (busy || !id) return;
@@ -125,6 +224,35 @@ export function ConversationsPage() {
     try { await action(); if (selectedRef.current === id) await loadWorkspace(id); await loadList(); }
     catch (err) { if (selectedRef.current === id) setError(err instanceof Error ? err.message : "Не удалось изменить режим"); }
     finally { setBusy(false); }
+  }
+
+  async function addPendingFiles(list: FileList | File[]) {
+    try {
+      const next = await filesToPending(list);
+      setPendingFiles((previous) => {
+        const room = Math.max(0, 5 - previous.length);
+        const accepted = next.slice(0, room);
+        next.slice(room).forEach((file) => URL.revokeObjectURL(file.previewUrl));
+        return [...previous, ...accepted];
+      });
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось прикрепить файл");
+    }
+  }
+
+  function removePendingFile(localId: string) {
+    setPendingFiles((previous) => {
+      const found = previous.find((file) => file.localId === localId);
+      if (found) URL.revokeObjectURL(found.previewUrl);
+      return previous.filter((file) => file.localId !== localId);
+    });
+  }
+
+  function onComposerDrop(event: DragEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (workspace?.conversation?.mode !== "human" || busy) return;
+    if (event.dataTransfer.files?.length) void addPendingFiles(event.dataTransfer.files);
   }
 
   const listPane = (
@@ -266,7 +394,37 @@ export function ConversationsPage() {
       {workspace.conversation.attentionReason && workspace.conversation.mode === "human" ? (
         <div className="conv-attention">
           <b>Требуется менеджер</b>
-          <div className="muted">{workspace.conversation.attentionReason}</div>
+          <div className="muted">{workspace.conversation.attentionReasonLabel || workspace.conversation.attentionReason}</div>
+          <div className="conv-attention-assign">
+            <select
+              aria-label="Менеджер диалога"
+              disabled={busy}
+              value={assigneePick}
+              onChange={(event) => setAssigneePick(event.target.value)}
+            >
+              <option value="">Выберите менеджера</option>
+              {assigneePick && !members.some((member) => member.id === assigneePick) ? (
+                <option value={assigneePick}>{workspace.conversation.assigneeName || "Текущий ответственный"}</option>
+              ) : null}
+              {members.map((member) => (
+                <option key={member.id} value={member.id}>
+                  {member.name}
+                  {member.isMe ? " · вы" : ""}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="btn"
+              disabled={busy || !assigneePick}
+              {...tip("Назначить выбранного сотрудника ответственным за этот диалог")}
+              onClick={() =>
+                changeMode(() => api.assignConversation(workspace.conversation.id, assigneePick))
+              }
+            >
+              Закрепить менеджера
+            </button>
+          </div>
         </div>
       ) : null}
 
@@ -290,7 +448,7 @@ export function ConversationsPage() {
               <span>{message.actorLabel}</span>
               <span>{message.createdLabel}</span>
             </div>
-            <div>{message.text}</div>
+            <MessageBody message={message} />
             {message.deliveryLabel ? <div className="muted tiny">{message.deliveryLabel}</div> : null}
           </div>
         ))}
@@ -298,14 +456,29 @@ export function ConversationsPage() {
 
       <form
         className="conv-composer"
+        onDragOver={(event) => event.preventDefault()}
+        onDrop={onComposerDrop}
         onSubmit={async (event) => {
           event.preventDefault();
-          if (!text.trim()) return;
+          if (!text.trim() && !pendingFiles.length) return;
           setBusy(true);
           try {
-            await api.sendMessage(workspace.conversation.id, text.trim(), crypto.randomUUID());
+            await api.sendMessage(
+              workspace.conversation.id,
+              text.trim(),
+              crypto.randomUUID(),
+              pendingFiles.map((file) => ({
+                fileName: file.fileName,
+                mimeType: file.mimeType,
+                contentBase64: file.contentBase64,
+              })),
+            );
             if (selectedRef.current !== workspace.conversation.id) return;
             setText("");
+            setPendingFiles((previous) => {
+              previous.forEach((file) => URL.revokeObjectURL(file.previewUrl));
+              return [];
+            });
             await loadWorkspace(workspace.conversation.id);
             await loadList();
           } catch (err) {
@@ -315,6 +488,49 @@ export function ConversationsPage() {
           }
         }}
       >
+        <input
+          ref={fileInputRef}
+          type="file"
+          hidden
+          multiple
+          accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.txt"
+          onChange={(event) => {
+            if (event.target.files?.length) void addPendingFiles(event.target.files);
+            event.target.value = "";
+          }}
+        />
+        {pendingFiles.length ? (
+          <div className="conv-pending-files">
+            {pendingFiles.map((file) => (
+              <div key={file.localId} className="conv-pending-file">
+                {file.kind === "image" ? <img src={file.previewUrl} alt="" /> : null}
+                {file.kind === "video" ? <video src={file.previewUrl} muted /> : null}
+                <span>{file.fileName}</span>
+                <button type="button" className="btn secondary" onClick={() => removePendingFile(file.localId)}>
+                  Убрать
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        <button
+          type="button"
+          className="btn secondary conv-attach-btn"
+          disabled={workspace.conversation.mode !== "human" || busy}
+          aria-label="Прикрепить файл"
+          {...tip("Прикрепить фото, видео, документ или другой файл")}
+          onClick={() => fileInputRef.current?.click()}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path
+              d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
         <textarea
           ref={replyRef}
           value={text}
@@ -330,11 +546,13 @@ export function ConversationsPage() {
         />
         <button
           className="btn"
-          disabled={workspace.conversation.mode !== "human" || busy || !text.trim()}
+          disabled={workspace.conversation.mode !== "human" || busy || (!text.trim() && !pendingFiles.length)}
           {...tip(
             workspace.conversation.mode !== "human"
               ? "Сначала нажмите «Передать менеджеру» — иначе сообщение не уйдёт"
-              : "Отправить сообщение клиенту в WhatsApp",
+              : pendingFiles.length
+                ? "Отправить сообщение и вложения клиенту в WhatsApp"
+                : "Отправить сообщение клиенту в WhatsApp",
           )}
         >
           Отправить
@@ -402,7 +620,6 @@ export function ConversationsPage() {
                 (analysis.agreements || []).length
                   ? `Договорённости: ${analysis.agreements.length}`
                   : null,
-                result?.llmUsed === false ? "Разбор по правилам: языковая модель сейчас не ответила." : null,
               ].filter(Boolean);
               setContextNote(parts.join(" ") || "Контекст разобран, новых фактов нет.");
             } catch (err) {

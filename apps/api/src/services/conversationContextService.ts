@@ -22,37 +22,153 @@ function tenantId(auth: AuthContext) {
   return auth.activeMembership.tenantId;
 }
 
-function fillFallbackSummary(
-  analysis: ConversationAnalysis,
-  messages: Array<{ text?: string | null; senderKind: string; direction: string; internal?: boolean }>,
-) {
-  if (analysis.summaryUpdate) return;
-  const visible = messages.filter((item) => !item.internal && (item.text || "").trim());
-  if (!visible.length) {
-    analysis.summaryUpdate = "В диалоге нет сообщений — потребность и договорённости выделить нельзя.";
-    analysis.confidence = "LOW";
-    return;
+type SituationAttachment = {
+  fileName?: string | null;
+  originalFileName?: string | null;
+  documentType?: string | null;
+  mimeType?: string | null;
+};
+
+export type SituationMessage = {
+  id?: string;
+  text?: string | null;
+  senderKind: string;
+  direction: string;
+  internal?: boolean;
+  type?: string | null;
+  createdAt?: Date;
+  attachments?: SituationAttachment[];
+};
+
+function messageHaystack(message: SituationMessage) {
+  const files = (message.attachments || [])
+    .map((item) => `${item.originalFileName || ""} ${item.fileName || ""} ${item.documentType || ""}`)
+    .join(" ");
+  return normalizeText(`${message.text || ""} ${message.type || ""} ${files}`);
+}
+
+function isOutbound(message: SituationMessage) {
+  return message.direction === "outbound" || message.senderKind === "staff" || message.senderKind === "ai";
+}
+
+function isInboundClient(message: SituationMessage) {
+  return message.direction === "inbound" || message.senderKind === "client";
+}
+
+export function isCommercialOfferText(text: string) {
+  return /(?:^|[^a-zа-яё0-9])кп(?:[^a-zа-яё0-9]|$)|коммерческ|proposal|\boffer\b|питч[- ]?дек/i.test(text);
+}
+
+export function isPriceOfferText(text: string) {
+  return /(прайс|стоимост|расценк|смет[ауы]|тариф|цен[аыуе]\s*:|\d[\d\s]{0,12}(тг|тенге|₸|kzt))/.test(text);
+}
+
+export function isWaitingManagementText(text: string) {
+  return /(руководств|директор|начальств|у руководителя|их руковод|они решают|на согласован|согласу(ем|ют)|передал[аи].{0,40}(руковод|директор|начальн)|направил[аи].{0,40}(руковод|директор)|отправил[аи].{0,40}(руковод|директор)|вынесл[аи].{0,24}(на рассмотрен|руковод)|рассматрива(ет|ют)|ждут решения|решают кого|на рассмотрен)/.test(
+    text,
+  );
+}
+
+export function detectSituationFacts(messages: SituationMessage[]) {
+  let proposalSent = false;
+  let pricesSent = false;
+  let waitingForManagement = false;
+  for (const message of messages) {
+    if (message.internal) continue;
+    const text = messageHaystack(message);
+    if (isOutbound(message) && isCommercialOfferText(text)) proposalSent = true;
+    if (isOutbound(message) && isPriceOfferText(text)) pricesSent = true;
+    if (isInboundClient(message) && isWaitingManagementText(text)) waitingForManagement = true;
   }
-  const lastClient = [...visible]
-    .reverse()
-    .find((item) => item.direction === "inbound" || item.senderKind === "client")
-    ?.text?.replace(/\s+/g, " ")
+  return { proposalSent, pricesSent, waitingForManagement };
+}
+
+export function enrichSituationSummary(analysis: ConversationAnalysis, messages: SituationMessage[]) {
+  const facts = detectSituationFacts(messages);
+  analysis.facts = {
+    ...analysis.facts,
+    proposalSent: Boolean(analysis.facts.proposalSent || facts.proposalSent),
+    pricesSent: Boolean(analysis.facts.pricesSent || facts.pricesSent),
+    waitingForManagement: Boolean(analysis.facts.waitingForManagement || facts.waitingForManagement),
+  };
+  const proposalSent = Boolean(analysis.facts.proposalSent);
+  const pricesSent = Boolean(analysis.facts.pricesSent);
+  const waitingForManagement = Boolean(analysis.facts.waitingForManagement);
+
+  if (waitingForManagement) {
+    const last = [...messages].reverse().find((item) => !item.internal);
+    const lastIsClient = last ? isInboundClient(last) : false;
+    const lastHolds = lastIsClient && isWaitingManagementText(messageHaystack(last!));
+    if (!lastIsClient || lastHolds) {
+      analysis.waitingFor = "CLIENT";
+      analysis.needsReply = false;
+      if (!analysis.suggestedNextAction || analysis.suggestedNextAction === "Ответить клиенту") {
+        analysis.suggestedNextAction = "Дождаться решения руководства";
+      }
+    }
+  }
+  if (proposalSent && !analysis.suggestedDealStage) analysis.suggestedDealStage = "proposal_sent";
+
+  const existing = String(analysis.summaryUpdate || "").replace(/\s+/g, " ").trim();
+  const need = String(analysis.detectedNeed || "")
+    .replace(/\s+/g, " ")
     .trim();
-  const need =
-    analysis.detectedNeed ||
-    (lastClient ? (lastClient.length > 180 ? `${lastClient.slice(0, 177)}…` : lastClient) : null);
-  const wait =
-    analysis.waitingFor === "MANAGER"
+  const offerLine = proposalSent ? (pricesSent ? "КП и цены высланы." : "КП выслано.") : pricesSent ? "Цены отправлены." : "";
+  const waitLine = waitingForManagement
+    ? "Ждём ответа руководства клиента."
+    : analysis.waitingFor === "MANAGER"
       ? "Клиент ждёт ответа."
       : analysis.waitingFor === "CLIENT"
         ? "Ждём ответа клиента."
         : "";
-  const agr = analysis.agreements.length
-    ? `Договорённости: ${analysis.agreements.map((item) => item.title || AGREEMENT_TYPE_LABEL[item.type] || item.type).join(", ")}.`
-    : "Явных договорённостей пока нет.";
-  analysis.summaryUpdate = [need ? `Потребность: ${need}.` : "Потребность по тексту пока неясна.", wait, agr]
-    .filter(Boolean)
-    .join(" ");
+  const openAgreements = analysis.agreements.filter((item) => item.status !== "COMPLETED" && item.status !== "CANCELLED");
+  const agrLine = openAgreements.length
+    ? `Договорённости: ${openAgreements.map((item) => item.title || AGREEMENT_TYPE_LABEL[item.type] || item.type).join(", ")}.`
+    : proposalSent || pricesSent
+      ? ""
+      : "Явных договорённостей пока нет.";
+
+  if (!existing) {
+    const visible = messages.filter((item) => !item.internal && (messageHaystack(item) || "").trim());
+    if (!visible.length) {
+      analysis.summaryUpdate = "В диалоге нет сообщений — потребность и договорённости выделить нельзя.";
+      analysis.confidence = "LOW";
+      return;
+    }
+    analysis.summaryUpdate = [
+      need ? `Потребность: ${need.replace(/\.$/, "")}.` : "Потребность по тексту пока неясна.",
+      offerLine,
+      waitLine,
+      agrLine,
+    ]
+      .filter(Boolean)
+      .join(" ");
+    return;
+  }
+
+  const extras: string[] = [];
+  if (need && !existing.includes(need.slice(0, Math.min(24, need.length))) && !/потребност/i.test(existing)) {
+    extras.unshift(`Потребность: ${need.replace(/\.$/, "")}.`);
+  }
+  if (offerLine && !/кп высл|кп и цены|цен[аы].{0,16}(высл|отправ)|стоимост.{0,16}(высл|отправ)|коммерческ.{0,24}(высл|отправ|направ)/i.test(existing)) {
+    extras.push(offerLine);
+  }
+  if (waitingForManagement && !/руководств|директор|решен/i.test(existing)) {
+    extras.push(waitLine);
+  }
+  let next = extras.length ? `${extras.join(" ")} ${existing}`.replace(/\s+/g, " ").trim() : existing;
+  if (proposalSent || pricesSent) {
+    next = next.replace(/\s*Явных договорённостей пока нет\.?/gi, "").trim();
+  }
+  if (waitingForManagement) {
+    next = next.replace(/\s*(Клиент ждёт ответа|Ждём ответа клиента)\.?/gi, "").trim();
+    if (!/руководств|директор|решен/i.test(next)) next = `${next} ${waitLine}`.trim();
+  }
+  analysis.summaryUpdate = next;
+}
+
+function fillFallbackSummary(analysis: ConversationAnalysis, messages: SituationMessage[]) {
+  enrichSituationSummary(analysis, messages);
 }
 
 function emptyAnalysis(): ConversationAnalysis {
@@ -298,12 +414,22 @@ export function parseScheduleHint(
   return { datePart, timePart, at: datePart ? at : null, label };
 }
 
-function windowMessages<T extends { text?: string | null; id: string }>(messages: T[], max = 24) {
-  return messages.filter((m) => (m.text || "").trim()).slice(-max);
+function windowMessages<T extends { text?: string | null; type?: string | null; attachments?: SituationAttachment[] }>(
+  messages: T[],
+  max = 40,
+) {
+  return messages
+    .filter((m) => (m.text || "").trim() || (m.attachments && m.attachments.length) || (m.type && m.type !== "text"))
+    .slice(-max);
 }
 
 function ruleAnalyze(input: {
-  messages: Array<{ id: string; text?: string | null; senderKind: string; direction: string; createdAt: Date }>;
+  messages: Array<
+    SituationMessage & {
+      id: string;
+      createdAt: Date;
+    }
+  >;
   existingAgreements: Array<{ id: string; type: string; status: string; scheduledAt: Date | null }>;
   inquiryStatus?: string | null;
   dealStageKey?: string | null;
@@ -312,6 +438,10 @@ function ruleAnalyze(input: {
   timeZone: string;
 }): ConversationAnalysis {
   const analysis = emptyAnalysis();
+  const situation = detectSituationFacts(input.messages);
+  analysis.facts.proposalSent = situation.proposalSent;
+  analysis.facts.pricesSent = situation.pricesSent;
+  analysis.facts.waitingForManagement = situation.waitingForManagement;
   const msgs = windowMessages(input.messages);
   if (msgs.length < 2) {
     const interest = inferClientInterest(input.messages);
@@ -334,8 +464,14 @@ function ruleAnalyze(input: {
   const lastOutbound = [...msgs].reverse().find((m) => m.direction === "outbound");
 
   if (lastInbound && (!lastOutbound || lastInbound.createdAt >= lastOutbound.createdAt)) {
-    analysis.waitingFor = "MANAGER";
-    analysis.needsReply = true;
+    if (isWaitingManagementText(messageHaystack(lastInbound))) {
+      analysis.waitingFor = "CLIENT";
+      analysis.needsReply = false;
+      analysis.suggestedNextAction = "Дождаться решения руководства";
+    } else {
+      analysis.waitingFor = "MANAGER";
+      analysis.needsReply = true;
+    }
   } else if (
     lastOutbound &&
     (hasWord(normalizeText(lastOutbound.text || ""), "ждём") ||
@@ -348,6 +484,18 @@ function ruleAnalyze(input: {
     analysis.needsReply = false;
   } else if (lastOutbound) {
     analysis.waitingFor = "CLIENT";
+  }
+
+  if (situation.waitingForManagement) {
+    const lastInboundHold = Boolean(lastInbound && isWaitingManagementText(messageHaystack(lastInbound)));
+    const lastIsOutbound = Boolean(last && isOutbound(last));
+    if (lastIsOutbound || lastInboundHold || analysis.waitingFor !== "MANAGER") {
+      analysis.waitingFor = "CLIENT";
+      analysis.needsReply = false;
+      if (!analysis.suggestedNextAction || analysis.suggestedNextAction === "Ответить клиенту") {
+        analysis.suggestedNextAction = "Дождаться решения руководства";
+      }
+    }
   }
 
   const interest = inferClientInterest(input.messages);
@@ -363,8 +511,9 @@ function ruleAnalyze(input: {
     }
   }
   if (
-    (hasWord(corpus, "кп") || hasWord(corpus, "коммерческ") || hasWord(corpus, "proposal")) &&
-    (hasWord(corpus, "отправ") || hasWord(corpus, "выслал") || hasWord(corpus, "прислал") || hasWord(corpus, "вот кп"))
+    situation.proposalSent ||
+    ((hasWord(corpus, "кп") || hasWord(corpus, "коммерческ") || hasWord(corpus, "proposal")) &&
+      (hasWord(corpus, "отправ") || hasWord(corpus, "выслал") || hasWord(corpus, "прислал") || hasWord(corpus, "вот кп")))
   ) {
     analysis.suggestedDealStage = "proposal_sent";
   } else if (hasWord(corpus, "условия") || hasWord(corpus, "дорого") || hasWord(corpus, "скидк") || hasWord(corpus, "торг") || hasWord(corpus, "переговор")) {
@@ -513,7 +662,7 @@ function ruleAnalyze(input: {
     }
   }
 
-  if (deliveryType && !meetingKind) {
+  if (deliveryType && !meetingKind && !(deliveryType === "SEND_PROPOSAL" && situation.proposalSent)) {
     const schedule = parseScheduleHint(recentCorpus, input.now, input.timeZone);
     const confirmLike = confirm || /\b(отправьте|пришлите|нужно|надо)\b/.test(lastText);
     const confidence: Confidence = confirmLike && (schedule.datePart || /сегодня|завтра|до обеда/.test(recentCorpus)) ? "HIGH" : "MEDIUM";
@@ -553,11 +702,12 @@ function ruleAnalyze(input: {
     }
   }
 
-  if (analysis.agreements.length === 0 && analysis.needsReply) {
+  if (analysis.agreements.length === 0 && analysis.needsReply && !situation.waitingForManagement) {
     analysis.suggestedNextAction = "Ответить клиенту";
     analysis.confidence = "MEDIUM";
   }
 
+  fillFallbackSummary(analysis, input.messages);
   return analysis;
 }
 
@@ -588,6 +738,7 @@ export async function analyzeConversationContext(
   const threadIds = await listThreadConversationIds(prisma, tid, conversation, phone);
   const messages = await prisma.message.findMany({
     where: { tenantId: tid, conversationId: { in: threadIds }, internal: false },
+    include: { attachments: { orderBy: { createdAt: "asc" } } },
     orderBy: { createdAt: "asc" },
     take: 80,
   });
@@ -643,7 +794,9 @@ export async function analyzeConversationContext(
     const llm = await refineConversationContextWithLlm({
       messages: messages.slice(-20).map((m) => ({
         role: m.senderKind === "client" || m.direction === "inbound" ? "client" : m.senderKind === "ai" ? "ai" : "staff",
-        text: m.text || "",
+        text: [m.text, ...(m.attachments || []).map((file) => `[файл: ${file.originalFileName || file.fileName}]`)]
+          .filter(Boolean)
+          .join(" "),
         at: m.createdAt.toISOString(),
         id: m.id,
       })),
@@ -671,10 +824,17 @@ export async function analyzeConversationContext(
 }
 
 function mergeAnalysis(base: ConversationAnalysis, llm: Partial<ConversationAnalysis>): ConversationAnalysis {
+  const llmFacts = llm.facts || {};
   return {
     ...base,
     ...llm,
-    facts: { ...base.facts, ...(llm.facts || {}) },
+    facts: {
+      ...base.facts,
+      ...llmFacts,
+      proposalSent: Boolean(base.facts.proposalSent || llmFacts.proposalSent),
+      pricesSent: Boolean(base.facts.pricesSent || llmFacts.pricesSent),
+      waitingForManagement: Boolean(base.facts.waitingForManagement || llmFacts.waitingForManagement),
+    },
     agreements: llm.agreements?.length ? llm.agreements : base.agreements,
     suggestedTasks: llm.suggestedTasks?.length ? llm.suggestedTasks : base.suggestedTasks,
     evidenceMessageIds: llm.evidenceMessageIds?.length ? llm.evidenceMessageIds : base.evidenceMessageIds,
