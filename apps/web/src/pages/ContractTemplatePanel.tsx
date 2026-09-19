@@ -194,6 +194,8 @@ export function ContractTemplatePanel() {
       setBusy(false);
     }
   }
+
+  async function generateForCompany() {
     if (!companyId || !templateId || formBusy) return;
     let items;
     try {
