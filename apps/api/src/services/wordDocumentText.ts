@@ -46,20 +46,43 @@ export async function docxToText(bytes: Buffer) {
   }
   const xml = await zip.file("word/document.xml")?.async("string");
   if (!xml) throw new ApiError(422, "word_invalid", "В файле Word нет текста документа.");
-  return decodeXmlEntities(
-    xml
-      .replace(/<w:tab\b[^>]*\/>/g, "\t")
-      .replace(/<w:br\b[^>]*\/>/g, "\n")
-      .replace(/<\/w:p>/g, "\n")
-      .replace(/<\/w:tc>/g, "\n")
-      .replace(/<[^>]+>/g, "")
-      .replace(/\n{3,}/g, "\n\n"),
-  ).trim();
+  return cleanWordExtractedText(
+    decodeXmlEntities(
+      xml
+        .replace(/<w:instrText\b[^>]*>[\s\S]*?<\/w:instrText>/g, "")
+        .replace(/<w:tab\b[^>]*\/>/g, "\t")
+        .replace(/<w:br\b[^>]*\/>/g, "\n")
+        .replace(/<\/w:p>/g, "\n")
+        .replace(/<\/w:tc>/g, "\n")
+        .replace(/<[^>]+>/g, "")
+        .replace(/\n{3,}/g, "\n\n"),
+    ),
+  );
 }
 
 function looksLikeContractText(text: string) {
   const compact = text.replace(/\s+/g, " ");
   return compact.length >= 200 && /договор/i.test(compact) && /исполнител|заказчик|сторон/i.test(compact);
+}
+
+const WORD_CHROME_LINE =
+  /^(?:текст примечания|тема примечания|сетка таблицы|без интервала|основной текст(?:\s+\d+)?|абзац списка|рецензия|гиперссылка|обычный(?:\s+\d+)?|заголовок\s*\d*|название|подзаголовок|(?:верхний|нижний) колонтитул|сноска|концевая сноска|оглавление\s*\d*|table grid|no spacing|list paragraph|comment (?:text|subject)|balloon text|normal|heading \d*|title|subtitle|emphasis|strong|quote)(?:\s+знак)?$/i;
+
+export function cleanWordExtractedText(raw: string) {
+  const lines = String(raw || "")
+    .replace(/\u0000/g, "\n")
+    .split(/\n/)
+    .map((line) => line.replace(/[ \t]+/g, " ").trim())
+    .filter((line) => {
+      if (!line) return false;
+      if (WORD_CHROME_LINE.test(line)) return false;
+      if (/^[@&%#<>\\/|*+=~^]+$/.test(line)) return false;
+      if (line.length <= 2 && !/[0-9А-Яа-яЁёA-Za-z]{2}/.test(line)) return false;
+      const letters = (line.match(/[А-Яа-яЁёA-Za-z]/g) || []).length;
+      if (line.length >= 4 && letters / line.length < 0.2 && !/\d/.test(line)) return false;
+      return true;
+    });
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 function fromCharCodes(codes: number[]) {
@@ -68,6 +91,32 @@ function fromCharCodes(codes: number[]) {
     parts.push(String.fromCharCode(...codes.slice(i, i + 8000)));
   }
   return parts.join("");
+}
+
+function oleCharOk(c: number) {
+  return (
+    (c >= 32 && c <= 126) ||
+    (c >= 0x0400 && c <= 0x052f) ||
+    c === 9 ||
+    c === 0x00a0 ||
+    c === 0x00ab ||
+    c === 0x00bb ||
+    c === 0x2013 ||
+    c === 0x2014 ||
+    c === 0x201c ||
+    c === 0x201d ||
+    c === 0x2026 ||
+    c === 0x2116
+  );
+}
+
+function isUsefulOleRun(text: string) {
+  const cleaned = cleanWordExtractedText(text);
+  const letters = (cleaned.match(/[А-Яа-яЁё]{3,}/g) || []).join("").length;
+  if (letters < 12) return false;
+  const lines = cleaned.split(/\n/).filter(Boolean);
+  const short = lines.filter((line) => line.length <= 2).length;
+  return !(lines.length >= 8 && short / lines.length > 0.5);
 }
 
 /** Read UTF-16LE runs from an OLE .doc when LibreOffice is not available. */
@@ -84,35 +133,13 @@ export function extractDocUnicodeText(bytes: Buffer) {
     let j = i;
     while (j + 1 < bytes.length) {
       const c = bytes[j] + bytes[j + 1] * 256;
-      if (c === 0 || c === 0x0d || c === 0x07 || c === 0x0b || c === 0x0c) {
+      if (c === 0) break;
+      if (c === 0x0d || c === 0x07 || c === 0x0b || c === 0x0c || c === 0x0a) {
         chars.push(10);
         j += 2;
         continue;
       }
-      if (c === 0x0a) {
-        chars.push(10);
-        j += 2;
-        continue;
-      }
-      if (c === 9) {
-        chars.push(9);
-        j += 2;
-        continue;
-      }
-      const ok =
-        (c >= 32 && c <= 126) ||
-        (c >= 160 && c <= 255) ||
-        (c >= 0x0400 && c <= 0x052f) ||
-        c === 0x2116 ||
-        c === 0x2013 ||
-        c === 0x2014 ||
-        c === 0x00ab ||
-        c === 0x00bb ||
-        c === 0x201c ||
-        c === 0x201d ||
-        c === 0x2026 ||
-        c === 0x00a0;
-      if (!ok) break;
+      if (!oleCharOk(c)) break;
       chars.push(c);
       j += 2;
     }
@@ -120,10 +147,12 @@ export function extractDocUnicodeText(bytes: Buffer) {
       .replace(/[ \t]+\n/g, "\n")
       .replace(/\n{3,}/g, "\n\n")
       .trim();
-    if (text.length >= 8 && /[А-Яа-яЁё]/.test(text)) runs.push(text);
+    if (isUsefulOleRun(text)) runs.push(cleanWordExtractedText(text));
     i = Math.max(j, i + 2);
   }
-  return runs.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  const unique = [...new Set(runs.filter(Boolean))];
+  const contractRun = [...unique].sort((a, b) => b.length - a.length).find(looksLikeContractText);
+  return (contractRun || unique.join("\n\n")).replace(/\n{3,}/g, "\n\n").trim();
 }
 
 async function sofficeToText(bytes: Buffer, extension: "doc" | "docx") {
@@ -211,14 +240,25 @@ export async function wordFileToText(bytes: Buffer, fileName: string) {
     const xmlText = await docxToText(bytes);
     if (looksLikeContractText(xmlText) || xmlText.length >= 80) return xmlText;
   } else {
+    const asDocx = await textutilConvert(bytes, "doc", "docx");
+    if (asDocx) {
+      try {
+        const xmlText = await docxToText(asDocx);
+        if (xmlText.length >= 80) return xmlText;
+      } catch {
+        /* read .doc another way */
+      }
+    }
     const fromTextutil = await textutilToText(bytes, kind);
-    if (looksLikeContractText(fromTextutil)) return fromTextutil;
+    if (fromTextutil.length >= 80 && /[А-Яа-яЁё]/.test(fromTextutil)) {
+      return cleanWordExtractedText(fromTextutil);
+    }
     const ole = extractDocUnicodeText(bytes);
-    if (looksLikeContractText(ole)) return ole;
+    if (looksLikeContractText(ole) || ole.length >= 80) return ole;
   }
   try {
     const converted = await sofficeToText(bytes, kind);
-    if (converted) return converted;
+    if (converted) return cleanWordExtractedText(converted);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
       try {
@@ -230,7 +270,7 @@ export async function wordFileToText(bytes: Buffer, fileName: string) {
     }
   }
   const fromTextutil = await textutilToText(bytes, kind);
-  if (fromTextutil) return fromTextutil;
+  if (fromTextutil) return cleanWordExtractedText(fromTextutil);
   if (kind === "docx") {
     const xmlText = await docxToText(bytes);
     if (xmlText) return xmlText;

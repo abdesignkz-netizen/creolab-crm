@@ -2536,6 +2536,20 @@ button.linkish {
   padding: 12px;
   margin: 0;
 }
+.contract-template-upload {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fafbfc;
+}
+.contract-template-saved-row {
+  outline: 2px solid var(--ok, #1b7f4e);
+  outline-offset: 6px;
+  border-radius: 8px;
+}
 .contract-delete { max-width: 440px; }
 .contract-delete p { margin: 8px 0; }
 .documents-row-meta {

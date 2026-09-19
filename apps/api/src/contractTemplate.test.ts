@@ -180,6 +180,22 @@ KZ111111111111111111
     assert.match(text, /АрыстанТехСервис/);
   });
 
+  it("не показывает названия стилей Word вместо текста договора", () => {
+    const junk = "Текст примечания\nТекст примечания Знак\nСетка таблицы\nБез интервала\nОсновной текст 2 Знак\nРецензия\n";
+    const bytes = Buffer.concat([
+      Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]),
+      Buffer.from(junk, "utf16le"),
+      Buffer.alloc(2),
+      Buffer.from(SAMPLE, "utf16le"),
+    ]);
+    const text = extractDocUnicodeText(bytes);
+    assert.doesNotMatch(text, /Сетка таблицы/);
+    assert.doesNotMatch(text, /Текст примечания/);
+    assert.doesNotMatch(text, /Основной текст 2/);
+    assert.match(text, /Разработать презентацию компании/);
+    assert.match(text, /РЕКВИЗИТЫ СТОРОН/);
+  });
+
   before(async () => {
     process.env.SEED_PASSWORD ||= "ChangeMeLocal1!";
     prisma = await createPrismaClient();

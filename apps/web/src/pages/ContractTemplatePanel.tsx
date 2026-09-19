@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import { notifySaved } from "../components/SaveNotice";
@@ -50,6 +50,27 @@ export function ContractTemplatePanel() {
   const [templateId, setTemplateId] = useState("");
   const [formBusy, setFormBusy] = useState(false);
   const [lines, setLines] = useState<ContractDraftLine[]>([newContractDraftLine()]);
+  const [savedNotice, setSavedNotice] = useState("");
+  const [justSavedId, setJustSavedId] = useState("");
+  const [renameId, setRenameId] = useState("");
+  const [renameValue, setRenameValue] = useState("");
+  const nameRef = useRef<HTMLInputElement>(null);
+
+  function closeUpload() {
+    setOpen(false);
+    setFile(null);
+    setPreview(null);
+    setBusy(false);
+  }
+
+  function openUpload() {
+    setOpen(true);
+    setError("");
+    setSavedNotice("");
+    setFile(null);
+    setPreview(null);
+    setName("");
+  }
 
   async function loadTemplates() {
     try {
@@ -92,6 +113,10 @@ export function ContractTemplatePanel() {
       });
       setPreview(scanned);
       setName(scanned.name || file.name.replace(/\.[^.]+$/, ""));
+      window.setTimeout(() => {
+        nameRef.current?.focus();
+        nameRef.current?.select();
+      }, 0);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось распознать шаблон");
     } finally {
@@ -104,17 +129,20 @@ export function ContractTemplatePanel() {
     setBusy(true);
     setError("");
     try {
-      await api.createContractTemplate({
+      const created: any = await api.createContractTemplate({
         name: name.trim(),
         body: preview.body,
         isDefault: true,
         fileName: file?.name,
         fileBase64: file ? await readBase64(file) : undefined,
       });
-      notifySaved("Шаблон договора сохранён");
-      setOpen(false);
-      setFile(null);
-      setPreview(null);
+      const saved = created.template;
+      const title = saved?.name || name.trim();
+      notifySaved(`Шаблон «${title}» сохранён`);
+      setSavedNotice(`Шаблон «${title}» сохранён. Он в списке ниже и выбран для формирования договора.`);
+      setJustSavedId(saved?.id || "");
+      if (saved?.id) setTemplateId(saved.id);
+      closeUpload();
       await loadTemplates();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось сохранить шаблон");
@@ -148,7 +176,24 @@ export function ContractTemplatePanel() {
     }
   }
 
-  async function generateForCompany() {
+  async function saveRename() {
+    if (busy || !renameId || !renameValue.trim()) return;
+    setBusy(true);
+    setError("");
+    try {
+      const title = renameValue.trim();
+      await api.updateContractTemplate(renameId, { name: title });
+      notifySaved(`Шаблон переименован в «${title}»`);
+      setSavedNotice(`Шаблон теперь называется «${title}».`);
+      setJustSavedId(renameId);
+      setRenameId("");
+      await loadTemplates();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось переименовать шаблон");
+    } finally {
+      setBusy(false);
+    }
+  }
     if (!companyId || !templateId || formBusy) return;
     let items;
     try {
@@ -179,15 +224,19 @@ export function ContractTemplatePanel() {
             Загрузите договор в Word — PDF соберётся из этого файла: все пункты, приложения и реквизиты останутся как в шаблоне, подставятся только стороны, номер, дата и сумма.
           </p>
         </div>
-        {!open ? (
-          <button type="button" className="btn" onClick={() => { setOpen(true); setError(""); setPreview(null); setFile(null); }}>
-            Загрузить шаблон
-          </button>
-        ) : null}
+        <button
+          type="button"
+          className={open ? "btn secondary" : "btn"}
+          disabled={busy}
+          onClick={() => (open ? closeUpload() : openUpload())}
+        >
+          {open ? "Закрыть" : "Загрузить шаблон"}
+        </button>
       </div>
+      {savedNotice ? <p className="ok" role="status">{savedNotice}</p> : null}
       {error ? <p className="error" role="alert">{error}</p> : null}
       {open ? (
-        <div className="stack">
+        <div className="contract-template-upload" role="region" aria-label="Загрузка шаблона договора">
           {!preview ? (
             <>
               <label>
@@ -196,16 +245,16 @@ export function ContractTemplatePanel() {
                   type="file"
                   accept=".docx,.doc,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                   disabled={busy}
-                  onChange={(e) => { setFile(e.target.files?.[0] || null); setError(""); }}
+                  onChange={(e) => { setFile(e.target.files?.[0] || null); setError(""); setSavedNotice(""); }}
                 />
               </label>
-              <p className="muted">До 20 МБ. Реквизиты исполнителя и заказчика заменяются на поля шаблона, текст услуги сохраняется.</p>
+              <p className="muted">До 20 МБ. После распознавания можно задать своё название и сохранить шаблон в список.</p>
               <div className="actions">
                 <button type="button" className="btn" disabled={busy || !file} onClick={() => void recognize()}>
                   {busy ? "Распознаём…" : "Распознать шаблон"}
                 </button>
-                <button type="button" className="btn secondary" disabled={busy} onClick={() => { setOpen(false); setPreview(null); setFile(null); }}>
-                  Отмена
+                <button type="button" className="btn secondary" disabled={busy} onClick={closeUpload}>
+                  Закрыть
                 </button>
               </div>
             </>
@@ -213,8 +262,15 @@ export function ContractTemplatePanel() {
             <>
               <label>
                 Название шаблона
-                <input value={name} maxLength={200} onChange={(e) => setName(e.target.value)} />
+                <input
+                  ref={nameRef}
+                  value={name}
+                  maxLength={200}
+                  placeholder="Например: Договор на презентацию"
+                  onChange={(e) => setName(e.target.value)}
+                />
               </label>
+              <p className="muted">Так шаблон будет называться в списке. Предложенное имя можно заменить на своё.</p>
               <p className="muted">
                 Исполнитель: {preview.seller.name || "—"}{preview.seller.bin ? ` · БИН ${preview.seller.bin}` : ""}
                 {" · "}
@@ -230,10 +286,13 @@ export function ContractTemplatePanel() {
               <pre className="contract-template-preview">{preview.body}</pre>
               <div className="actions">
                 <button type="button" className="btn" disabled={busy || !name.trim()} onClick={() => void save()}>
-                  {busy ? "Сохраняем…" : "Сохранить шаблон"}
+                  {busy ? "Сохраняем…" : name.trim() ? `Сохранить как «${name.trim()}»` : "Сохранить шаблон"}
                 </button>
-                <button type="button" className="btn secondary" disabled={busy} onClick={() => setPreview(null)}>
+                <button type="button" className="btn secondary" disabled={busy} onClick={() => { setPreview(null); setFile(null); }}>
                   Другой файл
+                </button>
+                <button type="button" className="btn secondary" disabled={busy} onClick={closeUpload}>
+                  Закрыть
                 </button>
               </div>
             </>
@@ -244,22 +303,58 @@ export function ContractTemplatePanel() {
       {items.length ? (
         <div className="stack" style={{ marginTop: 12 }}>
           {items.map((row) => (
-            <div className="row" key={row.id}>
+            <div className={`row${row.id === justSavedId ? " contract-template-saved-row" : ""}`} key={row.id}>
               <div>
-                <b>{row.name}</b>
-                {row.isDefault ? <span className="muted"> · по умолчанию</span> : null}
-                {row.fromWord ? <span className="muted"> · Word</span> : null}
-                <div className="muted">{row.placeholders.slice(0, 8).join(", ")}</div>
+                {renameId === row.id ? (
+                  <label>
+                    Новое название
+                    <input
+                      value={renameValue}
+                      maxLength={200}
+                      autoFocus
+                      onChange={(e) => setRenameValue(e.target.value)}
+                    />
+                  </label>
+                ) : (
+                  <>
+                    <b>{row.name}</b>
+                    {row.id === justSavedId ? <span className="muted"> · только что сохранён</span> : null}
+                    {row.isDefault ? <span className="muted"> · по умолчанию</span> : null}
+                    {row.fromWord ? <span className="muted"> · Word</span> : null}
+                    <div className="muted">{row.placeholders.slice(0, 8).join(", ")}</div>
+                  </>
+                )}
               </div>
               <div className="actions">
-                {!row.isDefault ? (
-                  <button type="button" className="btn secondary" disabled={busy} onClick={() => void makeDefault(row.id)}>
-                    По умолчанию
-                  </button>
-                ) : null}
-                <button type="button" className="btn secondary" disabled={busy} onClick={() => void remove(row.id)}>
-                  Удалить
-                </button>
+                {renameId === row.id ? (
+                  <>
+                    <button type="button" className="btn" disabled={busy || !renameValue.trim()} onClick={() => void saveRename()}>
+                      Сохранить имя
+                    </button>
+                    <button type="button" className="btn secondary" disabled={busy} onClick={() => setRenameId("")}>
+                      Отмена
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      className="btn secondary"
+                      disabled={busy}
+                      onClick={() => { setRenameId(row.id); setRenameValue(row.name); }}
+                    >
+                      Переименовать
+                    </button>
+                    {!row.isDefault ? (
+                      <button type="button" className="btn secondary" disabled={busy} onClick={() => void makeDefault(row.id)}>
+                        По умолчанию
+                      </button>
+                    ) : null}
+                    <button type="button" className="btn secondary" disabled={busy} onClick={() => void remove(row.id)}>
+                      Удалить
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           ))}
