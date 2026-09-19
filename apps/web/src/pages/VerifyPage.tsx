@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { api } from "../lib/api";
+import { CONTRACT_SIGNING_ENABLED } from "../lib/featureFlags";
 
 export function VerifyPage() {
   const { verificationId = "" } = useParams();
@@ -8,11 +9,25 @@ export function VerifyPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
+    if (!CONTRACT_SIGNING_ENABLED) return;
     void api
       .publicVerify(verificationId)
       .then(setData)
       .catch((err) => setError(err instanceof Error ? err.message : "Проверка не найдена"));
   }, [verificationId]);
+
+  if (!CONTRACT_SIGNING_ENABLED) {
+    return (
+      <div className="login">
+        <div className="login-stage">
+          <div className="panel" style={{ maxWidth: 560 }}>
+            <h2>Проверка договора</h2>
+            <p className="muted">Проверка подписи договора пока недоступна.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!data && !error) return <div className="state">Загрузка…</div>;
 

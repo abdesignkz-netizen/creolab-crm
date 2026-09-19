@@ -8,10 +8,11 @@ import { api, downloadAvrExcel, downloadAvrPdf } from "../lib/api";
 import { signAndSendEsfDocument } from "../lib/signing/esfSignAndSend";
 import { ensureEsfCabinetSession } from "../lib/signing/esfConnect";
 import { createSigningClient } from "../lib/signing/ncalayerClient";
+import { CONTRACT_SIGNING_ENABLED } from "../lib/featureFlags";
 
 const CONTRACT_STATUS_LABEL: Record<string, string> = {
   DRAFT: "Черновик",
-  READY_TO_SIGN: "Готов к подписи",
+  READY_TO_SIGN: "Сформирован",
   PENDING_SIGNATURE: "На подписи",
   PARTIALLY_SIGNED: "Частично подписан",
   SIGNED: "Подписан",
@@ -400,6 +401,7 @@ export function DealDocumentsPanel(props: {
           </div>
         </div>
 
+        {CONTRACT_SIGNING_ENABLED ? (
         <div className="doc-step">
           <div className="doc-step-title">
             <b>Подпись договора</b>
@@ -486,6 +488,7 @@ export function DealDocumentsPanel(props: {
             </button>
           </div>
         </div>
+        ) : null}
 
         <div className="doc-step">
           <div className="doc-step-title">
@@ -493,7 +496,7 @@ export function DealDocumentsPanel(props: {
           </div>
           <MissingList
             ready={invoiceReadiness?.ready}
-            ok="Можно сформировать счёт. Подпись договора не обязательна."
+            ok="Можно сформировать счёт."
             title="Не хватает данных для счёта:"
             fields={invoiceReadiness?.missingFields}
             labels={invoiceReadiness?.missingFieldLabels}

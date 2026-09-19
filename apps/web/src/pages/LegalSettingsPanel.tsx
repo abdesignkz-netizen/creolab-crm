@@ -2,6 +2,7 @@ import { notifySaved } from "../components/SaveNotice";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
+import { CONTRACT_SIGNING_ENABLED } from "../lib/featureFlags";
 
 type Profile = {
   legalName: string | null;
@@ -243,6 +244,7 @@ export function LegalSettingsPanel() {
           />{" "}
           Черновики договора, счёта, АВР и ЭСФ. Раздел «Документы» в меню
         </label>
+        {CONTRACT_SIGNING_ENABLED ? (
         <label>
           <input
             type="checkbox"
@@ -251,6 +253,7 @@ export function LegalSettingsPanel() {
           />{" "}
           Подписание договора ЭЦП (NCALayer)
         </label>
+        ) : null}
         <label>
           <input
             type="checkbox"

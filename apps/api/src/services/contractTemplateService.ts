@@ -14,7 +14,7 @@ import { beginDocumentExtraction } from "./documentExtractionGate.ts";
 import { requireDocumentsEnabled } from "./legalProfileService.ts";
 import { ensureDefaultTemplate } from "./contractTemplate.ts";
 import { rewriteScannedFragment, scanContractTemplateText, type TemplateSellerProfile } from "./contractTemplateScan.ts";
-import { sniffWordKind, textutilConvert, wordFileToText } from "./wordDocumentText.ts";
+import { sniffWordKind, convertDocToDocx, wordFileToText } from "./wordDocumentText.ts";
 import { rewriteDocxText, ensureDocxItemsPlaceholder } from "./docxTemplateFill.ts";
 import { createContractDraft } from "./documentDraftService.ts";
 import { generateContractPdfFile } from "./contractGenerationService.ts";
@@ -61,7 +61,7 @@ async function storeTemplateWord(
   let stored = bytes;
   let kind = sniffWordKind(bytes, fileName);
   if (kind === "doc") {
-    const asDocx = await textutilConvert(bytes, "doc", "docx");
+    const asDocx = await convertDocToDocx(bytes);
     if (asDocx) {
       stored = asDocx;
       kind = "docx";

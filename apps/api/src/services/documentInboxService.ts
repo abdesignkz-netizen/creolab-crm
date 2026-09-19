@@ -17,7 +17,7 @@ export const DOCUMENT_KIND_LABEL: Record<DocumentKind, string> = {
 
 const CONTRACT_STATUS_LABEL: Record<string, string> = {
   DRAFT: "Черновик",
-  READY_TO_SIGN: "Готов к подписи",
+  READY_TO_SIGN: "Сформирован",
   PENDING_SIGNATURE: "На подписи",
   PARTIALLY_SIGNED: "Частично подписан",
   SIGNED: "Подписан",
@@ -43,7 +43,7 @@ const EDOC_STATUS_LABEL: Record<string, string> = {
   ACCEPTED: "Принят",
 };
 
-const CONTRACT_ATTENTION = new Set(["READY_TO_SIGN", "PENDING_SIGNATURE", "PARTIALLY_SIGNED"]);
+const CONTRACT_ATTENTION = new Set(["PENDING_SIGNATURE", "PARTIALLY_SIGNED"]);
 const INVOICE_ATTENTION = new Set(["DRAFT", "ISSUED", "PARTIALLY_PAID", "OVERDUE"]);
 
 function requireTenant(auth: AuthContext) {

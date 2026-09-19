@@ -10,6 +10,7 @@ import { api } from "../lib/api";
 import { useCapabilities } from "../lib/session";
 import { tip } from "../lib/tip";
 import { DealDocumentsPanel } from "./DealDocumentsPanel";
+import { CONTRACT_SIGNING_ENABLED } from "../lib/featureFlags";
 
 type Scope = "all" | "mine" | "unassigned";
 type TimeMode = "now" | "period";
@@ -568,7 +569,7 @@ export function DealDetailPage() {
       setEsfInvoiceReadiness(esfReady);
       setCloseReadiness(closeReady);
       const contractId = (documents as any)?.contracts?.[0]?.id;
-      setSigning(contractId ? await api.contractSigning(contractId).catch(() => null) : null);
+      setSigning(CONTRACT_SIGNING_ENABLED && contractId ? await api.contractSigning(contractId).catch(() => null) : null);
       const d = (detail as any).deal;
       if (itemLoadedDeal.current !== dealId) {
         itemLoadedDeal.current = dealId;

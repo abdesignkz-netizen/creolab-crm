@@ -16,7 +16,7 @@ import { serializeContract } from "./documentDraftService.ts";
 import { assessContractReadiness, missingFieldsError } from "./contractReadiness.ts";
 import { ensureDefaultTemplate } from "./contractTemplate.ts";
 import { type ContractPdfInput } from "./contractPdf.ts";
-import { sniffWordKind, textutilConvert } from "./wordDocumentText.ts";
+import { sniffWordKind, convertDocToDocx } from "./wordDocumentText.ts";
 import { DOCX_MIME, contractFileDownload, renderContractDocx } from "./contractDocx.ts";
 
 const MUTABLE_STATUSES = new Set(["DRAFT", "READY_TO_SIGN"]);
@@ -46,7 +46,7 @@ async function renderContractFromTemplate(
       let bytes = await readFile(resolveUploadPath(sourceKey));
       let kind = sniffWordKind(bytes, template.sourceFileName || "template.docx");
       if (kind === "doc") {
-        const asDocx = await textutilConvert(bytes, "doc", "docx");
+        const asDocx = await convertDocToDocx(bytes);
         if (asDocx) {
           bytes = asDocx;
           kind = "docx";

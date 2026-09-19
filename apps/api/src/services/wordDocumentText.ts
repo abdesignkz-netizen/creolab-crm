@@ -188,6 +188,52 @@ async function sofficeToText(bytes: Buffer, extension: "doc" | "docx") {
   }
 }
 
+export async function sofficeConvert(bytes: Buffer, fromExt: "doc" | "docx", toExt: "docx" | "pdf") {
+  const dir = await mkdtemp(path.join(tmpdir(), "crm-soffice-"));
+  try {
+    const profile = path.join(dir, "profile");
+    await mkdir(path.join(profile, "user"), { recursive: true });
+    await writeFile(
+      path.join(profile, "user", "registrymodifications.xcu"),
+      `<?xml version="1.0"?><oor:items xmlns:oor="http://openoffice.org/2001/registry"><item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="MacroSecurityLevel" oor:op="fuse"><value>3</value></prop></item></oor:items>`,
+    );
+    const input = path.join(dir, `contract.${fromExt}`);
+    await writeFile(input, bytes);
+    const target = toExt === "pdf" ? "pdf:writer_pdf_Export" : "docx:Office Open XML Text";
+    await run(
+      process.env.CRM_SOFFICE_PATH || "soffice",
+      [
+        `-env:UserInstallation=${pathToFileURL(profile).href}`,
+        "--headless",
+        "--nologo",
+        "--nodefault",
+        "--norestore",
+        "--convert-to",
+        target,
+        "--outdir",
+        dir,
+        input,
+      ],
+      { timeout: 60_000, maxBuffer: 8_000_000 },
+    );
+    const output = path.join(dir, `contract.${toExt}`);
+    const converted = await readFile(output);
+    if (toExt === "pdf" && !converted.subarray(0, 5).equals(Buffer.from("%PDF-"))) return null;
+    if (toExt === "docx" && !converted.subarray(0, 4).equals(DOCX_MAGIC)) return null;
+    return converted;
+  } catch {
+    return null;
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+export async function convertDocToDocx(bytes: Buffer) {
+  const fromSoffice = await sofficeConvert(bytes, "doc", "docx");
+  if (fromSoffice) return fromSoffice;
+  return textutilConvert(bytes, "doc", "docx");
+}
+
 export async function textutilConvert(bytes: Buffer, fromExt: "doc" | "docx", toExt: "docx" | "pdf") {
   if (process.platform !== "darwin") return null;
   const dir = await mkdtemp(path.join(tmpdir(), "crm-textutil-"));
@@ -240,7 +286,7 @@ export async function wordFileToText(bytes: Buffer, fileName: string) {
     const xmlText = await docxToText(bytes);
     if (looksLikeContractText(xmlText) || xmlText.length >= 80) return xmlText;
   } else {
-    const asDocx = await textutilConvert(bytes, "doc", "docx");
+    const asDocx = await convertDocToDocx(bytes);
     if (asDocx) {
       try {
         const xmlText = await docxToText(asDocx);

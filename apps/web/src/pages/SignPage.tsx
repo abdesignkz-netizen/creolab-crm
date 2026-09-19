@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { api } from "../lib/api";
 import { createSigningClient } from "../lib/signing/ncalayerClient";
+import { CONTRACT_SIGNING_ENABLED } from "../lib/featureFlags";
 
 export function SignPage() {
   const { token = "" } = useParams();
@@ -20,8 +21,22 @@ export function SignPage() {
   }
 
   useEffect(() => {
+    if (!CONTRACT_SIGNING_ENABLED) return;
     void load();
   }, [token]);
+
+  if (!CONTRACT_SIGNING_ENABLED) {
+    return (
+      <div className="login">
+        <div className="login-stage">
+          <div className="panel" style={{ maxWidth: 560 }}>
+            <h2>Подписание договора</h2>
+            <p className="muted">Подписание договора пока недоступно.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   async function sign() {
     setBusy(true);

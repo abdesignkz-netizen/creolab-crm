@@ -124,6 +124,22 @@ export function formatContractItemsTable(input: ContractPdfInput) {
   return lines.join("\n");
 }
 
+export function contractItemTableRows(input: ContractPdfInput) {
+  if (!input.items.length) return [] as string[][];
+  return [
+    ["№", "Наименование", "Кол-во", "Ед.", "Цена", "Сумма"],
+    ...input.items.map((item, index) => [
+      String(index + 1),
+      item.name,
+      String(item.quantity),
+      esfMeasureUnitSymbol(item.unit),
+      formatKzt(item.unitPrice),
+      formatKzt(item.amountWithoutVat ?? item.totalAmount),
+    ]),
+    ["", `Итого: ${formatKzt(input.totalAmount)}`, "", "", "", vatLine(input)],
+  ];
+}
+
 export function applyPlaceholders(text: string, values: Record<string, string>) {
   return text.replace(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi, (_, key: string) => values[key] ?? "");
 }
