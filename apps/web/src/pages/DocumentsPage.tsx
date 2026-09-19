@@ -191,8 +191,12 @@ export function DocumentsPage() {
         </Link>
       </div>
 
-      {!disabled ? <ManualPdfImportPanel onSaved={() => void load()} /> : null}
-      {!disabled ? <ContractTemplatePanel /> : null}
+      {!disabled ? (
+        <div className="documents-start-grid">
+          <ManualPdfImportPanel onSaved={() => void load()} />
+          <ContractTemplatePanel />
+        </div>
+      ) : null}
 
       <form
         className="panel command-compose"
@@ -352,7 +356,75 @@ export function DocumentsPage() {
         </form> : null}
         {kind === "ESF" && createdEsf ? <p role="status">ЭСФ {createdEsf.number} сохранён. <Link to={`/deals/${createdEsf.dealId}#esf`}>Открыть ЭСФ</Link></p> : null}
         {!loading && !items.length ? <p className="empty">{kind === "INVOICE" ? "Счетов пока нет. Нажмите «Создать счёт»." : kind === "AVR" ? "АВР пока нет. Нажмите «Создать АВР»." : kind === "ESF" ? "ЭСФ пока нет. Нажмите «Создать ЭСФ»." : "Документов пока нет. Загрузите документ или создайте его в карточке сделки."}</p> : null}
-        {items.length > 0 ? <div className="documents-table-wrap"><table className="documents-table"><thead><tr><th>№ документа</th><th>Клиент</th><th>Сделка</th><th>Сумма</th><th>Дата</th><th>Тип</th><th>Статус</th><th>ЭСФ</th><th>Ответственный</th><th>Действия</th></tr></thead><tbody>{items.map(item=><tr key={`${item.kind}-${item.id}`}><td><Link to={item.href}>{item.number}</Link></td><td>{item.companyName||"Не указан"}</td><td><Link to={`/deals/${item.dealId}`}>{item.dealTitle}</Link></td><td>{Number(item.totalAmount).toLocaleString("ru-RU")} ₸</td><td>{new Date(item.date||item.updatedAt).toLocaleDateString("ru-RU")}</td><td>{item.kindLabel}</td><td><span className={`document-status status-${item.errorCode?"ERROR":item.status}`}>{item.statusLabel}</span></td><td>{item.esfStatus}</td><td>{item.responsible||"Не назначен"}</td><td><Link to={item.href}>Открыть</Link>{item.kind==="CONTRACT"?<DeleteContractButton id={item.id} number={item.number} onDeleted={async()=>{setOffset("0");await load(0);}}/>:null}</td></tr>)}</tbody></table></div> : null}
+        {items.length > 0 ? (
+          <div className="documents-table-wrap">
+            <table className={`documents-table${kind ? " documents-table-kind-filtered" : ""}`}>
+              <colgroup>
+                <col className="documents-col-number" />
+                <col className="documents-col-client" />
+                <col className="documents-col-deal" />
+                <col className="documents-col-amount" />
+                <col className="documents-col-date" />
+                {kind ? null : <col className="documents-col-kind" />}
+                <col className="documents-col-status" />
+                {kind === "AVR" ? null : <col className="documents-col-avr" />}
+                {kind === "ESF" ? null : <col className="documents-col-esf" />}
+                <col className="documents-col-owner" />
+                <col className="documents-col-actions" />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>№ документа</th>
+                  <th>Клиент</th>
+                  <th>Сделка</th>
+                  <th>Сумма</th>
+                  <th>Дата</th>
+                  {kind ? null : <th>Тип</th>}
+                  <th>Статус</th>
+                  {kind === "AVR" ? null : <th>АВР</th>}
+                  {kind === "ESF" ? null : <th>ЭСФ</th>}
+                  <th>Ответственный</th>
+                  <th>Действия</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((item) => (
+                  <tr key={`${item.kind}-${item.id}`}>
+                    <td className="documents-cell-number">
+                      <Link to={item.href}>{item.number}</Link>
+                    </td>
+                    <td className="documents-cell-client">{item.companyName || "Не указан"}</td>
+                    <td className="documents-cell-deal">
+                      <Link to={`/deals/${item.dealId}`}>{item.dealTitle}</Link>
+                    </td>
+                    <td className="documents-cell-amount">{Number(item.totalAmount).toLocaleString("ru-RU")} ₸</td>
+                    <td className="documents-cell-date">{new Date(item.date || item.updatedAt).toLocaleDateString("ru-RU")}</td>
+                    {kind ? null : <td className="documents-cell-kind">{item.kindLabel}</td>}
+                    <td className="documents-cell-status">
+                      <span className={`document-status status-${item.errorCode ? "ERROR" : item.status}`}>{item.statusLabel}</span>
+                    </td>
+                    {kind === "AVR" ? null : <td className="documents-cell-avr">{item.avrStatus || "Требуется"}</td>}
+                    {kind === "ESF" ? null : <td className="documents-cell-esf">{item.esfStatus}</td>}
+                    <td className="documents-cell-owner">{item.responsible || "Не назначен"}</td>
+                    <td className="documents-cell-actions">
+                      <Link to={item.href}>Открыть</Link>
+                      {item.kind === "CONTRACT" ? (
+                        <DeleteContractButton
+                          id={item.id}
+                          number={item.number}
+                          onDeleted={async () => {
+                            setOffset("0");
+                            await load(0);
+                          }}
+                        />
+                      ) : null}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
       </div> : null}
 
       {!disabled && total > 0 ? (

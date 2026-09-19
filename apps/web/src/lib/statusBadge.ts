@@ -2,7 +2,7 @@
 export function statusBadgeTone(label?: string | null): "ok" | "warn" | "danger" | "" {
   const t = String(label || "").trim().toLowerCase();
   if (!t) return "";
-  if (/^не подключ|^не отвечает|^ожидает|^приостановл/.test(t)) return "warn";
+  if (/^не подключ|^не отвечает|^ожидает|^приостановл|^не активн|^не задан/.test(t)) return "warn";
   if (/^ошибк/.test(t)) return "danger";
   if (/^активн/.test(t) || /^(подключ[её]н|работает)/.test(t)) return "ok";
   return "";

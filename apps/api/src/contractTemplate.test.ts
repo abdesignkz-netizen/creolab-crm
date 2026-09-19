@@ -20,6 +20,7 @@ const SAMPLE = `Договор №05082026/01
 
 ПОРЯДОК ОПЛАТЫ
 4.5.1. Не позднее 3 рабочих дней Заказчик производит предоплату в размере 50% от Стоимости оказания Услуг, которая составляет 60 000 (Шестьдесят тысяч) тенге.
+4.5.2. Не позднее 3 рабочих дней Заказчик обязан оплатить оставшиеся 50% от Стоимости оказанных Услуг, которая составляет 60 000 (Шестьдесят тысяч) тенге.
 
 Приложение №2
 Итого: 120 000
@@ -94,12 +95,18 @@ describe("Contract Word templates", () => {
     assert.match(scanned.body, /\{\{seller_bin\}\}/);
     assert.match(scanned.body, /\{\{buyer_bin\}\}/);
     assert.match(scanned.body, /\{\{contract_number\}\}/);
+    assert.match(scanned.body, /\{\{contract_date\}\}/);
+    assert.match(scanned.body, /\{\{prepayment_amount\}\}/);
+    assert.match(scanned.body, /\{\{remainder_amount\}\}/);
     assert.match(scanned.body, /\{\{items_table\}\}/);
     assert.match(scanned.body, /Разработать презентацию компании/);
     assert.doesNotMatch(scanned.body, /АрыстанТехСервис/);
     assert.equal(scanned.buyer.bin, "222222222220");
     assert.equal(scanned.seller.bin, "123456789013");
-    assert.match(scanned.name, /презентац/i);
+    assert.match(scanned.name, /возмездн|презентац/i);
+    assert.equal(scanned.fields.find((field) => field.key === "contract_number")?.found, true);
+    assert.equal(scanned.fields.find((field) => field.key === "prepayment_amount")?.found, true);
+    assert.match(scanned.fields.find((field) => field.key === "contract_number")?.sample || "", /05082026/);
   });
 
   it("находит заказчика в преамбуле даже без запятой перед «именуемое»", () => {
@@ -199,6 +206,63 @@ KZ111111111111111111
     assert.match(scanned.body, /\{\{seller_name\}\}/);
   });
 
+  it("по контексту отличает переменные в договоре другого вида", () => {
+    const text = `ДОГОВОР ПОСТАВКИ № 15/К-26
+
+г. Астана                                                                 03.09.2026
+
+ТОО «Creolab», именуемое в дальнейшем «Поставщик», в лице Директора Иванов Иван, действующего на основании Устава, с одной стороны, и ТОО «АрыстанТехСервис», именуемое в дальнейшем «Покупатель», в лице Директора Шайдуллинов Р. К., действующего на основании Устава, с другой стороны, заключили настоящий Договор о нижеследующем.
+
+1. ПРЕДМЕТ
+1.1. Поставщик обязуется передать Товар, а Покупатель принять и оплатить его.
+
+3. СТОИМОСТЬ
+3.1. Общая стоимость Товара составляет 450 000 (Четыреста пятьдесят тысяч) тенге.
+3.2. Покупатель оплачивает 100% стоимости в течение 10 банковских дней.
+3.3. За просрочку оплаты Покупатель уплачивает неустойку в размере 10 000 (Десять тысяч) тенге.
+
+4. СРОКИ
+4.1. Срок поставки: 12 рабочих дней.
+
+Приложение № 1 к Договору № 15/К-26 от 03.09.2026
+
+11. РЕКВИЗИТЫ СТОРОН
+
+ТОО «АрыстанТехСервис»
+РК, город Астана
+БИН 222222222220
+KZ5396503F0007969139
+АО «ForteBank»
+БИК: IRTYKZKA
+
+ТОО «Creolab»
+РК, г. Алматы, пр. Абая 1
+БИН 123456789013
+АО «Банк ЦентрКредит»
+KZ111111111111111111
+БИК: KCJBKZKX`;
+    const scanned = scanContractTemplateText(text, {
+      legalName: "ТОО CREOLAB",
+      bin: "123456789013",
+      directorName: "Иванов Иван",
+    }, "Договор поставки.docx");
+    assert.equal(scanned.name, "Договор поставки");
+    assert.match(scanned.seller.name, /Creolab/i);
+    assert.match(scanned.buyer.name, /АрыстанТехСервис/);
+    assert.match(scanned.body, /Договор[^\n]*№ \{\{contract_number\}\}/i);
+    assert.match(scanned.body, /Приложение № 1 к Договору № \{\{contract_number\}\}/);
+    assert.match(scanned.body, /\{\{contract_date\}\}/);
+    assert.match(scanned.body, /\{\{amount\}\}/);
+    assert.match(scanned.body, /10 банковских дней/);
+    assert.match(scanned.body, /неустойку в размере 10 000/);
+    assert.doesNotMatch(scanned.body, /15\/К-26/);
+    assert.doesNotMatch(scanned.body, /450 000/);
+    assert.match(scanned.body, /Срок поставки:\s*\{\{completion_terms\}\}/);
+    assert.equal(scanned.fields.find((field) => field.key === "prepayment_amount")?.found, false);
+    assert.equal(scanned.fields.find((field) => field.key === "amount")?.found, true);
+    assert.equal(scanned.fields.find((field) => field.key === "completion_terms")?.found, true);
+  });
+
   it("вписывает поля в исходный Word, сохраняя пункты шаблона", async () => {
     const bytes = await makeDocx(SAMPLE);
     const scanned = scanContractTemplateText(SAMPLE, {
@@ -220,14 +284,22 @@ KZ111111111111111111
       seller_bin: "221140036408",
       buyer_bin: "140540016755",
       contract_number: "DOG-2026-0005",
-      contract_date: "19 сентября 2026 г.",
+      contract_date: "«19» сентября 2026 г.",
       amount: "200 000,00 ₸",
       amount_words: "двести тысяч тенге",
+      prepayment_amount: "100 000",
+      prepayment_amount_words: "Сто тысяч",
+      remainder_amount: "100 000",
+      remainder_amount_words: "Сто тысяч",
     });
     const asContract = await docxToText(filled);
     assert.match(asContract, /ТОО Creolab/);
     assert.match(asContract, /Minerals Supply Services Atyrau/);
     assert.match(asContract, /Разработать презентацию компании/);
+    assert.match(asContract, /DOG-2026-0005/);
+    assert.match(asContract, /100 000 \(Сто тысяч\) тенге/);
+    assert.doesNotMatch(asContract, /05082026/);
+    assert.doesNotMatch(asContract, /60 000/);
     assert.doesNotMatch(asContract, /\{\{seller_name\}\}/);
     assert.doesNotMatch(asContract, /5\.\s*Заключительные положения/);
   });
@@ -272,6 +344,66 @@ KZ111111111111111111
     const text = await docxToText(filled);
     assert.match(text, /выполненных работ ТОО Creolab/);
     assert.doesNotMatch(text, /^ыполненных/m);
+  });
+
+  it("подставляет номер, дату, 50% оплаты и позиции приложений в исходный Word", async () => {
+    const zip = new JSZip();
+    zip.file(
+      "[Content_Types].xml",
+      `<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/></Types>`,
+    );
+    zip.file(
+      "_rels/.rels",
+      `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`,
+    );
+    zip.file(
+      "word/settings.xml",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:writeProtection w:recommended="1"/><w:documentProtection w:edit="readOnly" w:enforcement="1"/></w:settings>`,
+    );
+    zip.file(
+      "word/document.xml",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>
+<w:p><w:r><w:t>Договор №</w:t></w:r><w:proofErr w:type="spellStart"/><w:r><w:t>03092026/01</w:t></w:r></w:p>
+<w:p><w:r><w:t>«3» сентября 2026 г.</w:t></w:r></w:p>
+<w:p><w:r><w:t>4.5.1. Заказчик производит предоплату в размере 50% от Стоимости оказания Услуг, которая составляет 150 000 (Сто пятьдесят тысяч) тенге.</w:t></w:r></w:p>
+<w:p><w:r><w:t>4.5.2. Заказчик обязан оплатить оставшиеся 50% от Стоимости оказанных Услуг, которая составляет 150 000 (Сто пятьдесят тысяч) тенге.</w:t></w:r></w:p>
+<w:tbl><w:tr><w:tc><w:p><w:r><w:t>1</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Разработка презентации компании до 15 слайдов/страниц</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>300 000 тенге</w:t></w:r></w:p></w:tc></w:tr></w:tbl>
+<w:tbl><w:tr><w:tc><w:p><w:r><w:t>№</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Вид Услуг, требования к результату</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Сроки выполнения</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Стоимость в тенге</w:t></w:r></w:p></w:tc></w:tr><w:tr><w:tc><w:p><w:r><w:t>1</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Разработка презентации компании до 15 слайдов/страниц</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>5-7 рабочих дней</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>300 000</w:t></w:r></w:p></w:tc></w:tr></w:tbl>
+<w:sectPr><w:pgSz w:w="11906" w:h="16838"/></w:sectPr></w:body></w:document>`,
+    );
+    const bytes = Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
+    const filled = await fillDocxPlaceholders(
+      bytes,
+      {
+        contract_number: "DOG-2026-0008",
+        contract_date: "«19» сентября 2026 г.",
+        prepayment_amount: "100 000",
+        prepayment_amount_words: "Сто тысяч",
+        remainder_amount: "100 000",
+        remainder_amount_words: "Сто тысяч",
+        completion_terms: "10 рабочих дней",
+      },
+      [],
+      {
+        items: [{ name: "Дизайн сайта", totalAmount: 200000 }],
+        completionTerms: "10 рабочих дней",
+        totalAmount: 200000,
+      },
+    );
+    const text = await docxToText(filled);
+    assert.match(text, /DOG-2026-0008/);
+    assert.match(text, /«19» сентября 2026/);
+    assert.match(text, /Дизайн сайта/);
+    assert.match(text, /10 рабочих дней/);
+    assert.match(text, /100 000 \(Сто тысяч\) тенге/);
+    assert.doesNotMatch(text, /03092026/);
+    assert.doesNotMatch(text, /до 15 слайдов/);
+    assert.doesNotMatch(text, /150 000/);
+    const out = await JSZip.loadAsync(filled);
+    const settings = await out.file("word/settings.xml")?.async("string");
+    assert.ok(settings);
+    assert.doesNotMatch(settings, /documentProtection/);
+    assert.doesNotMatch(settings, /writeProtection/);
   });
 
   it("собирает Word-файл с позициями без PDF", async () => {

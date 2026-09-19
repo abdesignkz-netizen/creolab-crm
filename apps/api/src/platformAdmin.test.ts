@@ -350,4 +350,37 @@ describe("platform admin panel", () => {
     });
     assert.equal(platform.status, 200, await platform.text());
   });
+
+  it("accepts a public signup request and shows it only to the service admin", async () => {
+    const created = await fetch(`${url}/api/v1/auth/signup-request`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "new-company@example.test", companyName: "Студия Север" }),
+    });
+    assert.equal(created.status, 200, await created.text());
+    const again = await fetch(`${url}/api/v1/auth/signup-request`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "new-company@example.test", companyName: "Студия Север" }),
+    });
+    assert.equal(again.status, 200);
+    const owner = await req(ownerCookie, "/api/v1/admin/signup-requests");
+    assert.equal(owner.status, 403);
+    const listed = await req(platformCookie, "/api/v1/admin/signup-requests");
+    assert.equal(listed.status, 200, JSON.stringify(listed.data));
+    const match = (listed.data.items || []).find((item: { email: string }) => item.email === "new-company@example.test");
+    assert.ok(match);
+    assert.equal(match.companyName, "Студия Север");
+    assert.equal(match.status, "NEW");
+    const overview = await req(platformCookie, "/api/v1/admin/overview");
+    assert.ok(Number(overview.data.signupPending) >= 1);
+    const unread = await req(platformCookie, "/api/v1/admin/support/unread");
+    assert.ok(Number(unread.data.signupPending) >= 1);
+    const done = await req(platformCookie, `/api/v1/admin/signup-requests/${match.id}`, {
+      method: "PATCH",
+      body: { status: "DONE" },
+    });
+    assert.equal(done.status, 200, JSON.stringify(done.data));
+    assert.equal(done.data.status, "DONE");
+  });
 });

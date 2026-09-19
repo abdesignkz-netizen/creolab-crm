@@ -2,9 +2,13 @@ import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { DEFAULT_CONTRACT_BODY } from "./services/contractTemplate.ts";
-import { renderContractPdf } from "./services/contractPdf.ts";
+import { paymentHalves, renderContractPdf } from "./services/contractPdf.ts";
 
 describe("contract pdf", () => {
+  it("делит сумму сделки пополам для предоплаты и остатка", () => {
+    assert.deepEqual(paymentHalves(300000), { prepayment: 150000, remainder: 150000 });
+    assert.deepEqual(paymentHalves(200001), { prepayment: 100000.5, remainder: 100000.5 });
+  });
   it("собирает PDF с кириллицей и таблицей позиций", async () => {
     const pdf = await renderContractPdf({
       number: "DOG-2026-0001",

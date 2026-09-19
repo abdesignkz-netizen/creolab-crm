@@ -1,22 +1,37 @@
 import { useEffect, useState } from "react";
 import { api } from "../../lib/api";
 import { notifySaved } from "../../components/SaveNotice";
+import { formatDateTime } from "../../lib/datetime";
 import { statusBadgeClass } from "../../lib/statusBadge";
-import { PlatformAiUsagePage } from "./PlatformAiUsagePage";
 
-const INNER = [
-  ["prompt", "Основной промт"],
-  ["knowledge", "База знаний"],
-  ["settings", "Настройки модели"],
-  ["integrations", "Интеграции"],
-  ["usage", "AI Usage"],
-  ["preview", "Протестировать AI"],
-] as const;
+type KnowledgeItem = {
+  id: string;
+  title: string;
+  content: string;
+  sourceType: string;
+  status: string;
+};
+
+type ActivationPiece = {
+  ready?: boolean;
+  live?: boolean;
+  label?: string;
+  reason?: string;
+};
+
+type Activation = {
+  whatsappConnected?: boolean;
+  prompt?: ActivationPiece;
+  knowledge?: ActivationPiece;
+  syncedAt?: string | null;
+  note?: string;
+};
 
 export function PlatformCompanyAiManager({ tenantId }: { tenantId: string }) {
-  const [tab, setTab] = useState<(typeof INNER)[number][0]>("prompt");
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState("");
+  const [syncBusy, setSyncBusy] = useState(false);
+  const [syncError, setSyncError] = useState("");
 
   async function load() {
     setData(await api.adminCompanyAiManager(tenantId));
@@ -29,68 +44,103 @@ export function PlatformCompanyAiManager({ tenantId }: { tenantId: string }) {
   if (error) return <p className="error">{error}</p>;
   if (!data) return <div className="state">Загрузка…</div>;
 
+  const promptText = String(data.prompt?.published || data.prompt?.draft || "");
+  const activation = (data.activation || {}) as Activation;
+  const promptState = activation.prompt || {};
+  const knowledgeState = activation.knowledge || {};
+  const whatsappLabel = data.integration ? "Подключён" : "Не подключён";
+
+  async function sendToWhatsApp() {
+    setSyncBusy(true);
+    setSyncError("");
+    try {
+      const result = (await api.adminSyncCompanyAiManager(tenantId)) as { activation?: Activation };
+      const next = result.activation || {};
+      const live = Boolean(next.prompt?.live && next.knowledge?.live);
+      notifySaved(live ? "Промт и база активны в WhatsApp" : "Отправлено, но в WhatsApp пока не активно");
+      await load();
+    } catch (err) {
+      setSyncError(err instanceof Error ? err.message : "Не удалось отправить в WhatsApp");
+    } finally {
+      setSyncBusy(false);
+    }
+  }
+
   return (
     <div className="stack">
-      <div className="panel">
-        <p className="integ-status-line">
-          Статус
-          <span className={statusBadgeClass(data.status === "active" ? "Активен" : data.status)}>
-            {data.status === "active" ? "Активен" : data.status}
-          </span>
+      <div className="panel stack">
+        <p>
+          Промт и база знаний WhatsApp AI этой компании хранятся здесь. Клиенты CRM их не редактируют. Зелёный статус
+          значит, что бот уже отвечает по этим текстам. Если статус жёлтый — в админке сохранено, в WhatsApp ещё нет.
         </p>
-        <p>Модель · {data.model || "инфраструктура сервиса"}</p>
-        <p>Knowledge Base · {data.knowledgeCount} материала</p>
-        <p>WhatsApp · {data.integration ? "Connected" : "не подключён"}</p>
-        <p className="muted">
-          Последнее изменение · {data.prompt?.updatedAt ? new Date(data.prompt.updatedAt).toLocaleString("ru-RU") : "нет"}
-        </p>
-      </div>
-      <nav className="settings-nav horizontal">
-        {INNER.map(([key, label]) => (
-          <button key={key} type="button" className={tab === key ? "active" : ""} onClick={() => setTab(key)}>
-            {label}
-          </button>
-        ))}
-      </nav>
-      {tab === "prompt" ? <PromptEditor tenantId={tenantId} data={data} onSaved={load} /> : null}
-      {tab === "knowledge" ? <KnowledgeEditor tenantId={tenantId} data={data} onSaved={load} /> : null}
-      {tab === "settings" ? <ModelSettings tenantId={tenantId} data={data} onSaved={load} /> : null}
-      {tab === "integrations" ? (
-        <div className="panel">
-          {data.integration ? (
-            <>
-              <p>Integration ID · {data.integration.id}</p>
-              <p>Instance ID · {data.integration.instanceId || "не задан"}</p>
-              <p>Секрет · {data.integration.secretSet ? "задан" : "нет"}</p>
-            </>
-          ) : (
-            <p className="muted">WhatsApp ещё не подключён. Подключение — во вкладке «Интеграции» карточки компании.</p>
-          )}
+        <div className="ai-activation">
+          <p className="integ-status-line">
+            Промт
+            <span className={statusBadgeClass(promptState.label || "Не задан")}>{promptState.label || "Не задан"}</span>
+          </p>
+          {promptState.reason ? <p className="muted">{promptState.reason}</p> : null}
+          <p className="integ-status-line">
+            База знаний
+            <span className={statusBadgeClass(knowledgeState.label || "Не задана")}>
+              {knowledgeState.label || "Не задана"}
+            </span>
+          </p>
+          {knowledgeState.reason ? <p className="muted">{knowledgeState.reason}</p> : null}
+          <p className="integ-status-line">
+            WhatsApp
+            <span className={statusBadgeClass(whatsappLabel)}>{whatsappLabel}</span>
+          </p>
+          <p className="muted">
+            Материалов в базе: {data.knowledgeCount || 0}
+            {activation.syncedAt ? ` · последняя отправка ${formatDateTime(activation.syncedAt)}` : ""}
+          </p>
         </div>
-      ) : null}
-      {tab === "usage" ? <PlatformAiUsagePage lockedTenantId={tenantId} /> : null}
-      {tab === "preview" ? <PreviewChat tenantId={tenantId} /> : null}
+        {syncError ? <p className="error">{syncError}</p> : null}
+        {data.integration ? (
+          <div className="actions">
+            <button type="button" className="btn secondary" disabled={syncBusy} onClick={() => void sendToWhatsApp()}>
+              {syncBusy ? "Отправляем…" : "Отправить в WhatsApp"}
+            </button>
+          </div>
+        ) : null}
+      </div>
+      <PromptEditor tenantId={tenantId} initial={promptText} activation={promptState} onSaved={load} />
+      <KnowledgeEditor tenantId={tenantId} items={data.knowledge || []} activation={knowledgeState} onSaved={load} />
     </div>
   );
 }
 
-function PromptEditor({ tenantId, data, onSaved }: { tenantId: string; data: any; onSaved: () => Promise<void> }) {
-  const [draft, setDraft] = useState(String(data.prompt?.draft || data.prompt?.published || ""));
+function PromptEditor({
+  tenantId,
+  initial,
+  activation,
+  onSaved,
+}: {
+  tenantId: string;
+  initial: string;
+  activation: ActivationPiece;
+  onSaved: () => Promise<void>;
+}) {
+  const [draft, setDraft] = useState(initial);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => {
-    setDraft(String(data.prompt?.draft || data.prompt?.published || ""));
-  }, [data.prompt?.draft, data.prompt?.published]);
+    setDraft(initial);
+  }, [initial]);
 
-  async function save(publish: boolean) {
+  async function save() {
     setBusy(true);
     setError("");
     try {
-      await api.adminSaveCompanyAiPrompt(tenantId, { draftPrompt: draft, publish });
-      notifySaved(publish ? "Промт опубликован" : "Черновик сохранён");
+      const saved = (await api.adminSaveCompanyAiPrompt(tenantId, { draftPrompt: draft, publish: true })) as {
+        activation?: Activation;
+      };
+      notifySaved(
+        saved.activation?.prompt?.live ? "Промт активен в WhatsApp" : "Промт сохранён. В WhatsApp пока не активен",
+      );
       await onSaved();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось сохранить");
+      setError(err instanceof Error ? err.message : "Не удалось сохранить промт");
     } finally {
       setBusy(false);
     }
@@ -98,58 +148,96 @@ function PromptEditor({ tenantId, data, onSaved }: { tenantId: string; data: any
 
   return (
     <div className="panel stack">
-      <p className="muted">Статус: {data.prompt?.status === "published" ? "опубликован" : "черновик"}. AI использует только опубликованную версию.</p>
+      <div className="integ-status-line">
+        <b>Промт</b>
+        <span className={statusBadgeClass(activation.label || "Не задан")}>{activation.label || "Не задан"}</span>
+      </div>
+      <p className="muted">
+        Как бот представляется, как здоровается, что можно обещать и чего нельзя. Юридический тон и стиль — тоже здесь.
+      </p>
       <label>
-        System Prompt
-        <textarea rows={16} value={draft} onChange={(event) => setDraft(event.target.value)} />
+        Текст промта
+        <textarea
+          rows={14}
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          placeholder="Например: ты менеджер компании… отвечай коротко… цены только из базы знаний…"
+        />
       </label>
       {error ? <p className="error">{error}</p> : null}
       <div className="actions">
-        <button type="button" className="btn secondary" disabled={busy} onClick={() => void save(false)}>
-          Сохранить черновик
-        </button>
-        <button type="button" className="btn" disabled={busy} onClick={() => void save(true)}>
-          Опубликовать
-        </button>
-        <button type="button" className="btn secondary" onClick={() => setDraft(String(data.prompt?.draft || data.prompt?.published || ""))}>
-          Отменить изменения
+        <button type="button" className="btn" disabled={busy} onClick={() => void save()}>
+          {busy ? "Сохраняем…" : "Сохранить промт"}
         </button>
       </div>
     </div>
   );
 }
 
-function KnowledgeEditor({ tenantId, data, onSaved }: { tenantId: string; data: any; onSaved: () => Promise<void> }) {
+function KnowledgeEditor({
+  tenantId,
+  items,
+  activation,
+  onSaved,
+}: {
+  tenantId: string;
+  items: KnowledgeItem[];
+  activation: ActivationPiece;
+  onSaved: () => Promise<void>;
+}) {
   const [title, setTitle] = useState("");
   const [sourceType, setSourceType] = useState("text");
   const [content, setContent] = useState("");
   const [editingId, setEditingId] = useState("");
-  const [query, setQuery] = useState("");
-  const [hits, setHits] = useState<any[]>([]);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  async function save(publish: boolean) {
+  function resetForm() {
+    setTitle("");
+    setContent("");
+    setSourceType("text");
+    setEditingId("");
+  }
+
+  async function save() {
+    if (busy) return;
+    setBusy(true);
+    setError("");
     try {
-      if (editingId) {
-        await api.adminUpdateCompanyKnowledge(tenantId, editingId, { title, content, sourceType, publish });
-      } else {
-        await api.adminSaveCompanyKnowledge(tenantId, { title, content, sourceType, publish });
-      }
-      setTitle("");
-      setContent("");
-      setEditingId("");
-      notifySaved(publish ? "Материал опубликован" : "Материал сохранён");
+      const body = { title, content, sourceType, publish: true };
+      const saved = (
+        editingId
+          ? await api.adminUpdateCompanyKnowledge(tenantId, editingId, body)
+          : await api.adminSaveCompanyKnowledge(tenantId, body)
+      ) as { activation?: Activation };
+      notifySaved(
+        saved.activation?.knowledge?.live
+          ? "База знаний активна в WhatsApp"
+          : "Материал сохранён. В WhatsApp пока не активен",
+      );
+      resetForm();
       await onSaved();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось сохранить");
+      setError(err instanceof Error ? err.message : "Не удалось сохранить материал");
+    } finally {
+      setBusy(false);
     }
   }
 
   return (
     <div className="stack">
       <div className="panel stack">
-        <h4>{editingId ? "Изменить материал" : "Добавить материал"}</h4>
-        <label>Название<input value={title} onChange={(event) => setTitle(event.target.value)} /></label>
+        <div className="integ-status-line">
+          <b>{editingId ? "Изменить материал" : "База знаний"}</b>
+          <span className={statusBadgeClass(activation.label || "Не задана")}>{activation.label || "Не задана"}</span>
+        </div>
+        <p className="muted">
+          Цены, услуги, FAQ, адреса, условия — то, на что бот должен опираться и не выдумывать.
+        </p>
+        <label>
+          Название
+          <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Прайс, FAQ, филиалы" />
+        </label>
         <label>
           Тип
           <select value={sourceType} onChange={(event) => setSourceType(event.target.value)}>
@@ -160,122 +248,63 @@ function KnowledgeEditor({ tenantId, data, onSaved }: { tenantId: string; data: 
         </label>
         <label>
           Содержание
-          <textarea rows={8} value={content} onChange={(event) => setContent(event.target.value)} />
+          <textarea
+            rows={10}
+            value={content}
+            onChange={(event) => setContent(event.target.value)}
+            placeholder="Факты для ответов клиенту"
+          />
         </label>
         {error ? <p className="error">{error}</p> : null}
         <div className="actions">
-          <button type="button" className="btn secondary" onClick={() => void save(false)}>Сохранить</button>
-          <button type="button" className="btn" onClick={() => void save(true)}>Опубликовать</button>
+          <button type="button" className="btn" disabled={busy || !title.trim()} onClick={() => void save()}>
+            {busy ? "Сохраняем…" : editingId ? "Сохранить материал" : "Добавить в базу"}
+          </button>
+          {editingId ? (
+            <button type="button" className="btn secondary" disabled={busy} onClick={resetForm}>
+              Отмена
+            </button>
+          ) : null}
         </div>
       </div>
       <div className="panel stack">
-        <h4>База знаний</h4>
-        {(data.knowledge || []).map((item: any) => (
+        <b>Материалы этой компании</b>
+        {!items.length ? <p className="muted">Пока пусто. Добавьте хотя бы цены и список услуг.</p> : null}
+        {items.map((item) => (
           <div className="row" key={item.id}>
             <div>
               <b>{item.title}</b>
-              <div className="muted">{item.sourceType} · {item.status}</div>
+              <div className="muted">{item.sourceType === "faq" ? "FAQ" : item.sourceType === "document" ? "Документ" : "Текст"}</div>
             </div>
             <div className="actions">
-              <button type="button" className="btn secondary" onClick={() => {
-                setEditingId(item.id);
-                setTitle(item.title);
-                setSourceType(item.sourceType);
-                setContent(item.content || "");
-              }}>Изменить</button>
-              <button type="button" className="btn secondary" onClick={async () => {
-                await api.adminDeleteCompanyKnowledge(tenantId, item.id);
-                await onSaved();
-              }}>Удалить</button>
+              <button
+                type="button"
+                className="btn secondary"
+                onClick={() => {
+                  setEditingId(item.id);
+                  setTitle(item.title);
+                  setSourceType(item.sourceType);
+                  setContent(item.content || "");
+                }}
+              >
+                Изменить
+              </button>
+              <button
+                type="button"
+                className="btn secondary"
+                onClick={async () => {
+                  if (!window.confirm(`Удалить «${item.title}»?`)) return;
+                  await api.adminDeleteCompanyKnowledge(tenantId, item.id);
+                  if (editingId === item.id) resetForm();
+                  await onSaved();
+                }}
+              >
+                Удалить
+              </button>
             </div>
           </div>
         ))}
       </div>
-      <div className="panel stack">
-        <h4>Проверить базу знаний</h4>
-        <label>
-          Запрос
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Какая стоимость массажа?" />
-        </label>
-        <button
-          type="button"
-          className="btn secondary"
-          onClick={async () => {
-            const result = (await api.adminSearchCompanyKnowledge(tenantId, query)) as any;
-            setHits(result.items || []);
-          }}
-        >
-          Найти
-        </button>
-        {hits.map((item) => (
-          <p key={item.id}><b>{item.title}</b> · {item.excerpt || item.sourceType}</p>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function ModelSettings({ tenantId, data, onSaved }: { tenantId: string; data: any; onSaved: () => Promise<void> }) {
-  const [error, setError] = useState("");
-  return (
-    <form
-      className="panel stack"
-      onSubmit={async (event) => {
-        event.preventDefault();
-        const form = new FormData(event.currentTarget);
-        try {
-          await api.adminUpdateCompanyAi(tenantId, {
-            provider: String(form.get("provider") || ""),
-            model: String(form.get("model") || ""),
-            temperature: form.get("temperature") ? Number(form.get("temperature")) : null,
-            maxOutputTokens: form.get("maxOutputTokens") ? Number(form.get("maxOutputTokens")) : null,
-            enabled: true,
-          });
-          notifySaved("Настройки модели сохранены");
-          await onSaved();
-        } catch (err) {
-          setError(err instanceof Error ? err.message : "Ошибка");
-        }
-      }}
-    >
-      <label>Провайдер<input name="provider" defaultValue={data.provider || ""} /></label>
-      <label>Модель<input name="model" defaultValue={data.model || ""} /></label>
-      <label>Temperature<input name="temperature" type="number" step="0.1" defaultValue="" /></label>
-      <label>Max output tokens<input name="maxOutputTokens" type="number" defaultValue="" /></label>
-      {error ? <p className="error">{error}</p> : null}
-      <button className="btn">Сохранить</button>
-    </form>
-  );
-}
-
-function PreviewChat({ tenantId }: { tenantId: string }) {
-  const [message, setMessage] = useState("Здравствуйте, сколько стоит услуга?");
-  const [reply, setReply] = useState("");
-  const [busy, setBusy] = useState(false);
-  return (
-    <div className="panel stack">
-      <p className="muted">Sandbox: не создаёт заявку, не пишет в WhatsApp и не выполняет CRM-команды.</p>
-      <label>
-        Сообщение клиента
-        <textarea rows={4} value={message} onChange={(event) => setMessage(event.target.value)} />
-      </label>
-      <button
-        type="button"
-        className="btn"
-        disabled={busy}
-        onClick={async () => {
-          setBusy(true);
-          try {
-            const result = (await api.adminPreviewCompanyAi(tenantId, message)) as any;
-            setReply(result.reply || "");
-          } finally {
-            setBusy(false);
-          }
-        }}
-      >
-        Протестировать AI
-      </button>
-      {reply ? <pre className="code">{reply}</pre> : null}
     </div>
   );
 }

@@ -88,6 +88,8 @@ export function createApiClient(options: ClientOptions) {
       request("/api/v1/auth/login", { method: "POST", body: JSON.stringify({ email, password, client }) }),
     platformLogin: (email: string, password: string, client: "web" | "mobile" = "web") =>
       request("/api/v1/auth/platform-login", { method: "POST", body: JSON.stringify({ email, password, client }) }),
+    requestSignup: (email: string, companyName: string) =>
+      request("/api/v1/auth/signup-request", { method: "POST", body: JSON.stringify({ email, companyName }) }),
     me: () => request("/api/v1/me"),
     updateProfile: (body: Record<string, unknown>) =>
       request("/api/v1/me/profile", { method: "PATCH", body: JSON.stringify(body) }),
@@ -588,6 +590,14 @@ export function createApiClient(options: ClientOptions) {
       return request(`/api/v1/admin/tenants${qs ? `?${qs}` : ""}`);
     },
     adminOverview: () => request("/api/v1/admin/overview"),
+    adminSignupRequests: (query: { status?: string } = {}) => {
+      const params = new URLSearchParams();
+      if (query.status) params.set("status", query.status);
+      const qs = params.toString();
+      return request(`/api/v1/admin/signup-requests${qs ? `?${qs}` : ""}`);
+    },
+    adminUpdateSignupRequest: (id: string, body: { status: "NEW" | "DONE" }) =>
+      request(`/api/v1/admin/signup-requests/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
     adminCompany: (id: string) => request(`/api/v1/admin/tenants/${id}`),
     adminCreateCompany: (body: Record<string, unknown>) =>
       request("/api/v1/admin/tenants", { method: "POST", body: JSON.stringify(body) }),
@@ -636,6 +646,12 @@ export function createApiClient(options: ClientOptions) {
       return request(`/api/v1/admin/tenants/${tenantId}/ai-usage${qs ? `?${qs}` : ""}`);
     },
     adminCompanyAiManager: (tenantId: string) => request(`/api/v1/admin/tenants/${tenantId}/ai-manager`),
+    adminAiManagers: (query: { q?: string } = {}) => {
+      const params = new URLSearchParams();
+      if (query.q) params.set("q", query.q);
+      const qs = params.toString();
+      return request(`/api/v1/admin/ai-managers${qs ? `?${qs}` : ""}`);
+    },
     adminSaveCompanyAiPrompt: (tenantId: string, body: Record<string, unknown>) =>
       request(`/api/v1/admin/tenants/${tenantId}/ai-manager/prompt`, { method: "PATCH", body: JSON.stringify(body) }),
     adminSaveCompanyKnowledge: (tenantId: string, body: Record<string, unknown>) =>
@@ -657,6 +673,8 @@ export function createApiClient(options: ClientOptions) {
         method: "POST",
         body: JSON.stringify({ message }),
       }),
+    adminSyncCompanyAiManager: (tenantId: string) =>
+      request(`/api/v1/admin/tenants/${tenantId}/ai-manager/sync`, { method: "POST" }),
     adminMembers: (query?: Record<string, string | number | undefined>) => {
       const params = new URLSearchParams();
       Object.entries(query || {}).forEach(([key, value]) => {

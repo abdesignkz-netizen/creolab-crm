@@ -5,7 +5,7 @@ import { useUrlState, useRequestVersion } from "../lib/useUrlState";
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { PeriodSelector, type PeriodPreset } from "../components/PeriodSelector";
-import { nameWithPhone } from "../lib/contactDisplay";
+import { nameWithPhone, phoneText } from "../lib/contactDisplay";
 import { api } from "../lib/api";
 import { useCapabilities } from "../lib/session";
 import { tip } from "../lib/tip";
@@ -60,9 +60,73 @@ function electronicDocKpi(docs: any, type: "AVR" | "ESF") {
   return EDOC_KPI_LABEL[best.status || ""] || "Черновик";
 }
 
-function Flag({ on, label }: { on?: boolean; label: string }) {
-  if (!on) return null;
-  return <span className="deal-flag">{label}</span>;
+function dealAttention(deal: any): { text: string; tone: "ok" | "warn" | "next" | "muted" } | null {
+  if (deal.outcome === "won") return { text: "Продажа", tone: "ok" };
+  if (deal.outcome === "lost") return { text: "Потеря", tone: "muted" };
+  if (deal.flags?.overdueTask) return { text: "Просрочена задача", tone: "warn" };
+  if (deal.flags?.needsReply) return { text: "Нужен ответ", tone: "warn" };
+  if (deal.flags?.proposalWithoutReply) return { text: "КП без ответа", tone: "warn" };
+  if (deal.flags?.stalled) return { text: "Зависла", tone: "warn" };
+  if (deal.nextAction) return { text: deal.nextAction, tone: "next" };
+  if (deal.outcome === "open") return { text: "Нет следующего шага", tone: "warn" };
+  return null;
+}
+
+function DealBoardCard({
+  deal,
+  dragging,
+  canDrag,
+  onOpen,
+  onDragStart,
+  onDragEnd,
+}: {
+  deal: any;
+  dragging: boolean;
+  canDrag: boolean;
+  onOpen: () => void;
+  onDragStart: () => void;
+  onDragEnd: () => void;
+}) {
+  const companyName = String(deal.company?.name || "").trim();
+  const contactName = String(deal.contact?.name || "").trim();
+  const client = companyName || contactName || "Клиент не указан";
+  const person = companyName && contactName && contactName !== companyName ? contactName : "";
+  const phone = deal.contact ? phoneText(deal.contact.phone) : "";
+  const attention = dealAttention(deal);
+
+  return (
+    <article
+      className={`deal-card${dragging ? " dragging" : ""}`}
+      role="button"
+      tabIndex={0}
+      aria-label={`Открыть сделку: ${deal.title}`}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpen();
+        }
+      }}
+      draggable={canDrag}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      onClick={onOpen}
+    >
+      <b className="deal-card-title">{deal.title}</b>
+      <div className="deal-card-who">
+        <span className="deal-card-client">{client}</span>
+        {person ? <span className="deal-card-person">{person}</span> : null}
+        {phone ? <span className="deal-card-phone">{phone}</span> : null}
+      </div>
+      <div className="deal-card-meta">
+        <span className="deal-card-amount">{deal.amountLabel || "Сумма не указана"}</span>
+        {deal.outcome === "open" && deal.stageDurationLabel ? (
+          <span className="deal-card-age">{deal.stageDurationLabel} на этапе</span>
+        ) : null}
+      </div>
+      {attention ? <div className={`deal-card-status ${attention.tone}`}>{attention.text}</div> : null}
+      {deal.assigneeName ? <div className="deal-card-owner">{deal.assigneeName}</div> : null}
+    </article>
+  );
 }
 
 export function DealsPage() {
@@ -376,7 +440,7 @@ export function DealsPage() {
         {(data.columns || []).map((col: any) => (
           <div
             key={col.stageId}
-            className="deal-column"
+            className={`deal-column${col.deals.length ? "" : " is-empty"}`}
             onDragOver={(e) => {
               if (timeMode === "now") e.preventDefault();
             }}
@@ -385,49 +449,24 @@ export function DealsPage() {
             <div className="deal-column-head">
               <b>{col.name}</b>
               <span className="muted">
-                {col.count} · {col.amountLabel || "без сумм"}
+                {col.count
+                  ? `${col.count} · ${col.amountLabel || "без сумм"}`
+                  : "Пусто"}
               </span>
             </div>
             <div className="deal-column-body">
               {col.deals.map((deal: any) => (
-                <article
+                <DealBoardCard
                   key={deal.id}
-                  className={`deal-card${dragId === deal.id ? " dragging" : ""}`}
-                  role="button"
-                  tabIndex={0}
-                  aria-label={`Открыть сделку: ${deal.title}`}
-                  onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); navigate(`/deals/${deal.id}`); } }}
-                  draggable={timeMode === "now" && deal.outcome === "open"}
+                  deal={deal}
+                  dragging={dragId === deal.id}
+                  canDrag={timeMode === "now" && deal.outcome === "open"}
+                  onOpen={() => navigate(`/deals/${deal.id}`)}
                   onDragStart={() => setDragId(deal.id)}
                   onDragEnd={() => setDragId(null)}
-                  onClick={() => navigate(`/deals/${deal.id}`)}
-                >
-                  <b>{deal.title}</b>
-                  <div className="muted">{nameWithPhone(deal.contact?.name, deal.contact?.phone)}</div>
-                  <div className="deal-card-meta">
-                    <span>{deal.amountLabel || "сумма не указана"}</span>
-                  </div>
-                  {deal.outcome === "won" || deal.outcome === "lost" ? (
-                    <div className="deal-flag">{deal.outcome === "won" ? "Продажа" : "Потеря"}</div>
-                  ) : (
-                    <div className="muted">На этапе: {deal.stageDurationLabel}</div>
-                  )}
-                  {deal.nextAction ? (
-                    <div className="deal-next">След.: {deal.nextAction}</div>
-                  ) : deal.outcome === "open" ? (
-                    <div className="deal-next warn">Нет следующего шага</div>
-                  ) : null}
-                  {deal.assigneeName ? <div className="muted">{deal.assigneeName}</div> : null}
-                  <div className="deal-flags">
-                    <Flag on={deal.flags?.needsReply} label="Нужен ответ" />
-                    <Flag on={deal.flags?.overdueTask} label="Просрочено" />
-                    <Flag on={deal.flags?.noNextAction} label="Без шага" />
-                    <Flag on={deal.flags?.waitingClient} label="Ждём клиента" />
-                    <Flag on={deal.flags?.stalled} label="Зависла" />
-                  </div>
-                </article>
+                />
               ))}
-              {col.deals.length === 0 ? <p className="empty">Пока нет сделок</p> : null}
+              {col.deals.length === 0 ? <p className="deal-column-empty">Нет сделок</p> : null}
             </div>
           </div>
         ))}

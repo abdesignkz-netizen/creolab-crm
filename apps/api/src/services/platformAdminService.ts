@@ -97,6 +97,7 @@ export async function platformOverview(prisma: PrismaClient, auth: AuthContext) 
     tenantsSuspended,
     membersActive,
     invitationsPending,
+    signupPending,
     integrations,
   ] = await Promise.all([
     prisma.tenant.count(),
@@ -106,6 +107,7 @@ export async function platformOverview(prisma: PrismaClient, auth: AuthContext) 
     prisma.invitation.count({
       where: { acceptedAt: null, revokedAt: null, expiresAt: { gt: now } },
     }),
+    prisma.serviceSignupRequest.count({ where: { status: "NEW" } }),
     prisma.integration.findMany({
       select: { status: true, connectionStatus: true, healthStatus: true, lastError: true, lastErrorCode: true, lastSuccessAt: true, type: true, schemaJson: true },
     }),
@@ -125,6 +127,7 @@ export async function platformOverview(prisma: PrismaClient, auth: AuthContext) 
     tenantsSuspended,
     membersActive,
     invitationsPending,
+    signupPending,
     integrationsConnected: connected,
     integrationsUnhealthy: unhealthy,
     integrationsNeedsAssignment: needsAssignment,

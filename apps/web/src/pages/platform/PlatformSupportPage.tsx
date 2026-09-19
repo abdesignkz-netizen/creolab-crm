@@ -4,6 +4,7 @@ import { api } from "../../lib/api";
 import { formatDateTime } from "../../lib/datetime";
 import { notifySaved } from "../../components/SaveNotice";
 import { useSession } from "../../lib/session";
+import { PlatformSignupRequests } from "./PlatformSignupRequests";
 
 type Ticket = {
   id: string;
@@ -55,6 +56,7 @@ type Reply = {
 };
 
 const TABS = [
+  ["signups", "Подключение"],
   ["tickets", "Обращения"],
   ["articles", "База знаний"],
   ["replies", "Шаблоны"],
@@ -105,7 +107,7 @@ export function PlatformSupportPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const ticketId = location.pathname.match(/^\/admin\/support\/([^/]+)$/)?.[1] || "";
-  const [tab, setTab] = useState<"tickets" | "articles" | "replies">(ticketId ? "tickets" : "tickets");
+  const [tab, setTab] = useState<"signups" | "tickets" | "articles" | "replies">(ticketId ? "tickets" : "signups");
   const [status, setStatus] = useState("");
   const [q, setQ] = useState("");
   const [tickets, setTickets] = useState<Ticket[]>([]);
@@ -278,6 +280,8 @@ export function PlatformSupportPage() {
         ))}
       </div>
       {error ? <p className="error">{error}</p> : null}
+
+      {tab === "signups" ? <PlatformSignupRequests title="Запросы с экрана входа" /> : null}
 
       {tab === "tickets" ? (
         <div className="support-admin-layout">

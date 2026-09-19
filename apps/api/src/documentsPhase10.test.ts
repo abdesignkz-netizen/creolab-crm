@@ -132,7 +132,10 @@ describe("Documents phase 10 общий список", () => {
     );
 
     const invoices = await json("/api/v1/documents?kind=INVOICE");
-    assert.ok(invoices.body.items.some((row: { kind: string; dealId: string }) => row.kind === "INVOICE" && row.dealId === dealId));
+    const invoiceRow = invoices.body.items.find((row: { kind: string; dealId: string }) => row.kind === "INVOICE" && row.dealId === dealId);
+    assert.ok(invoiceRow);
+    assert.equal(invoiceRow.avrStatus, "Требуется");
+    assert.equal(invoiceRow.esfStatus, "Требуется");
     assert.ok(Number(invoices.body.counts.invoice) >= 1);
 
     const createdInvoice = await prisma.invoice.findFirst({ where: { dealId }, orderBy: { createdAt: "desc" } });
@@ -181,5 +184,41 @@ describe("Documents phase 10 общий список", () => {
 
     const otherBadges = await json("/api/v1/nav-badges", {}, otherCookie);
     assert.equal(Number(otherBadges.body.badges["/documents"] || 0), 0);
+  });
+
+  it("показывает статус АВР и ЭСФ сделки в строке счёта", async () => {
+    const deal = await prisma.deal.findUniqueOrThrow({ where: { id: dealId } });
+    await prisma.electronicDocument.create({
+      data: {
+        tenantId: deal.tenantId,
+        dealId,
+        type: "AVR",
+        number: "AVR-PHASE10-1",
+        amountWithoutVat: 100,
+        vatAmount: 12,
+        totalAmount: 112,
+        status: "VALIDATED",
+      },
+    });
+    await prisma.electronicDocument.create({
+      data: {
+        tenantId: deal.tenantId,
+        dealId,
+        type: "ESF",
+        number: "ESF-PHASE10-1",
+        amountWithoutVat: 100,
+        vatAmount: 12,
+        totalAmount: 112,
+        status: "SENT",
+      },
+    });
+    const invoices = await json("/api/v1/documents?kind=INVOICE");
+    const invoiceRow = invoices.body.items.find((row: { dealId: string }) => row.dealId === dealId);
+    assert.equal(invoiceRow?.avrStatus, "Готов");
+    assert.equal(invoiceRow?.esfStatus, "Отправлен");
+    const contracts = await json("/api/v1/documents?kind=CONTRACT");
+    const contractRow = contracts.body.items.find((row: { id: string }) => row.id === contractId);
+    assert.equal(contractRow?.avrStatus, "Готов");
+    assert.equal(contractRow?.esfStatus, "Отправлен");
   });
 });

@@ -328,6 +328,15 @@ h1, h2, h3, .card strong, .client-row-title, .nav h1, .brand-wordmark {
   gap: 8px;
   flex-wrap: wrap;
 }
+.ai-activation {
+  display: grid;
+  gap: 6px;
+}
+.ai-live-cell {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+}
 .status { font-size: 13px; }
 
 /* ——— Forms ——— */
@@ -1367,7 +1376,7 @@ fieldset.field-block legend { padding: 0 6px; font-weight: 600; }
 }
 .login-brand p {
   margin: 0;
-  max-width: 28ch;
+  max-width: 42ch;
   color: var(--muted);
   font-size: 15px;
 }
@@ -1385,11 +1394,24 @@ fieldset.field-block legend { padding: 0 6px; font-weight: 600; }
   font-size: 1.2rem;
 }
 .login .btn { width: 100%; min-height: 46px; margin-top: 4px; }
+.login .btn.secondary { margin-top: 8px; }
 .login-alt {
   margin: 12px 0 0;
   text-align: center;
 }
 .login-alt a { color: inherit; }
+.signup-request-list { display: grid; gap: 8px; }
+.signup-request-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.signup-request-row:last-child { border-bottom: 0; }
+.signup-request-row.is-new b { color: var(--text); }
+.signup-request-row .btn { width: auto; min-height: 36px; margin: 0; flex: 0 0 auto; }
 .tenant-choice-list { display: grid; gap: 8px; margin: 12px 0; }
 .tenant-choice-list .btn { width: 100%; }
 
@@ -1990,7 +2012,7 @@ fieldset.field-block legend { padding: 0 6px; font-weight: 600; }
 .sit-chip { padding: 6px 10px !important; min-height: 34px !important; font-size: 12.5px !important; }
 .period-selector { display: grid; gap: 8px; }
 .period-active-label { font-size: 12.5px; }
-.deals-filters-row { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0; align-items: center; }
+.deals-filters-row { display: flex; flex-wrap: wrap; gap: 10px; margin: 0; align-items: center; }
 .sit-toolbar-side { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .sit-period-bar { width: 100%; }
 .sit-period-bar .period-selector { width: 100%; }
@@ -2171,30 +2193,43 @@ fieldset.field-block legend { padding: 0 6px; font-weight: 600; }
 }
 
 /* ——— Deals Kanban ——— */
-.deals-page { display: grid; gap: 14px; }
-.deals-summary { margin-bottom: 4px; }
+.deals-page { display: grid; gap: 12px; }
+.deals-summary { margin-bottom: 0; }
+.deals-page .sit-kpi { padding: 12px 14px; }
+.deals-page .sit-kpi strong { font-size: 22px; }
 .deal-kanban {
   display: grid;
   grid-auto-flow: column;
-  grid-auto-columns: minmax(220px, 1fr);
-  gap: 10px;
+  grid-auto-columns: minmax(300px, 1fr);
+  gap: 12px;
   overflow-x: auto;
+  align-items: start;
   padding-bottom: 8px;
 }
 .deal-column {
   background: #fff;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  min-height: 280px;
+  min-height: 0;
+  max-height: min(72vh, 820px);
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
+.deal-column.is-empty { min-height: 132px; }
 .deal-column-head {
   display: grid;
   gap: 2px;
-  padding: 10px 12px;
+  padding: 12px 14px 10px;
   border-bottom: 1px solid var(--line);
   background: #f8f9fa;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.deal-column-head b {
+  font-size: 13px;
+  letter-spacing: -0.02em;
 }
 .deal-column-body {
   display: grid;
@@ -2202,23 +2237,84 @@ fieldset.field-block legend { padding: 0 6px; font-weight: 600; }
   padding: 10px;
   align-content: start;
   flex: 1;
+  overflow-y: auto;
+  min-height: 0;
 }
-.deal-card {
+.deal-column-empty {
+  margin: 0;
+  padding: 18px 8px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+  background: transparent;
+  border: 0;
+}
+.deal-kanban .deal-card {
   display: grid;
-  gap: 4px;
-  padding: 10px;
+  gap: 8px;
+  padding: 12px 14px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 12px;
   background: #fff;
   cursor: grab;
+  min-width: 0;
 }
 .deal-card.dragging { opacity: 0.55; }
+.deal-card-title {
+  font-size: 14px;
+  line-height: 1.35;
+  letter-spacing: -0.02em;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+.deal-card-who {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.deal-card-client {
+  color: var(--ink-soft);
+  font-size: 13px;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+.deal-card-person,
+.deal-card-phone,
+.deal-card-owner,
+.deal-card-age {
+  color: var(--muted);
+  font-size: 12px;
+}
+.deal-card-phone {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
 .deal-card-meta {
   display: flex;
   justify-content: space-between;
+  align-items: baseline;
   gap: 8px;
+  font-size: 13px;
+  font-weight: 650;
+}
+.deal-card-amount { font-variant-numeric: tabular-nums; }
+.deal-card-status {
   font-size: 12.5px;
-  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: break-word;
+}
+.deal-card-status.warn { color: var(--warn); font-weight: 600; }
+.deal-card-status.next { color: var(--ink); }
+.deal-card-status.ok { color: var(--ok); font-weight: 600; }
+.deal-card-status.muted { color: var(--muted); }
+.deal-card-owner {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .deal-next { font-size: 12.5px; color: var(--ink); }
 .deal-next.warn { color: #8a4b00; }
@@ -2567,6 +2663,16 @@ button.linkish {
 
 /* ——— Documents ——— */
 .documents-page { display: grid; gap: 14px; }
+.documents-start-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+.documents-start-grid > .panel { margin: 0; min-width: 0; }
+@media (max-width: 900px) {
+  .documents-start-grid { grid-template-columns: 1fr; }
+}
 .documents-list { display: grid; gap: 0; }
 .document-list-entry { padding: 8px 0 14px; border-bottom: 1px solid var(--line); }
 .document-list-entry:last-child { border-bottom: 0; }
@@ -2591,6 +2697,13 @@ button.linkish {
   border: 1px solid var(--line);
   border-radius: 12px;
   background: #fafbfc;
+}
+.template-field-map ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+.template-field-map li {
+  margin: 4px 0;
 }
 .contract-template-saved-row {
   outline: 2px solid var(--ok, #1b7f4e);
@@ -2638,6 +2751,16 @@ button.linkish {
   gap: 8px;
   margin-bottom: 6px;
 }
+.doc-step .actions label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.doc-step .actions input,
+.doc-step .actions select {
+  min-width: 180px;
+}
 @media (max-width: 700px) {
   .documents-row-meta { text-align: left; min-width: 0; }
 }
@@ -2658,10 +2781,56 @@ button.linkish {
 }
 .avr-line { display: grid; grid-template-columns: minmax(180px,3fr) minmax(72px,0.7fr) minmax(210px,1.6fr) minmax(90px,1fr) minmax(70px,0.7fr) auto auto; gap: 10px; border: 1px solid var(--border,#ddd); border-radius: 12px; padding: 16px; align-items: end; }
 .avr-line input, .avr-line select, .esf-measure-unit { min-width: 0; width: 100%; }
-.documents-table-wrap { overflow-x: auto; }
-.documents-table { width: 100%; border-collapse: collapse; background: var(--surface,#fff); }
-.documents-table th,.documents-table td { padding: 14px; text-align: left; border-bottom: 1px solid var(--border,#ddd); vertical-align: top; }
+.documents-table-wrap {
+  overflow-x: auto;
+  min-width: 0;
+  width: 100%;
+}
+.documents-table {
+  width: 100%;
+  min-width: 1240px;
+  border-collapse: collapse;
+  background: var(--surface,#fff);
+}
+.documents-table-kind-filtered { min-width: 1160px; }
+.documents-table th,
+.documents-table td {
+  padding: 12px 14px;
+  text-align: left;
+  border-bottom: 1px solid var(--border,#ddd);
+  vertical-align: top;
+}
 .documents-table th { white-space: nowrap; }
+.documents-cell-number,
+.documents-cell-amount,
+.documents-cell-date,
+.documents-cell-kind,
+.documents-cell-status,
+.documents-cell-avr,
+.documents-cell-esf,
+.documents-cell-actions {
+  white-space: nowrap;
+}
+.documents-cell-amount { font-variant-numeric: tabular-nums; }
+.documents-cell-client {
+  min-width: 180px;
+  width: 18%;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+.documents-cell-deal {
+  min-width: 320px;
+  width: 42%;
+  overflow-wrap: break-word;
+  word-break: normal;
+  hyphens: none;
+  font-weight: 500;
+}
+.documents-cell-owner {
+  min-width: 120px;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
 @media(max-width:900px) { .avr-line { grid-template-columns: 1fr 1fr; } .avr-line label:first-child { grid-column: 1 / -1; } }
 
 .avr-editor .panel { gap: 10px; align-content: start; }

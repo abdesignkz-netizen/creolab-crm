@@ -93,7 +93,11 @@ export async function renderContractDocx(input: ContractPdfInput, sourceDocx?: B
   const values = buildContractPlaceholders(input);
   const itemRows = contractItemTableRows(input);
   if (sourceDocx && isDocxBytes(sourceDocx)) {
-    return fillDocxPlaceholders(sourceDocx, values, itemRows);
+    return fillDocxPlaceholders(sourceDocx, values, itemRows, {
+      items: input.items,
+      completionTerms: input.completionTerms,
+      totalAmount: input.totalAmount,
+    });
   }
   const body = applyPlaceholders(input.templateBody || "", { ...values, items_table: "{{items_table}}" })
     .replace(/\n{3,}/g, "\n\n")

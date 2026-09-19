@@ -23,24 +23,48 @@ export type TemplateSellerProfile = {
   email?: string | null;
 };
 
+export type RecognizedTemplateField = {
+  key: string;
+  label: string;
+  found: boolean;
+  sample: string;
+};
+
 export type ScannedContractTemplate = {
   name: string;
   body: string;
   placeholders: string[];
+  fields: RecognizedTemplateField[];
   seller: TemplateParty;
   buyer: TemplateParty;
   warnings: string[];
 };
 
-const emptyParty = (): TemplateParty => ({
-  name: "",
-  bin: "",
-  legalAddress: "",
-  directorName: "",
-  iban: "",
-  bankName: "",
-  bik: "",
-});
+export const TEMPLATE_FIELD_CATALOG: Array<{ key: string; label: string; anyOf?: string[] }> = [
+  { key: "contract_number", label: "Номер договора" },
+  { key: "contract_date", label: "Дата договора" },
+  { key: "seller_name", label: "Ваша организация" },
+  { key: "seller_bin", label: "БИН вашей организации" },
+  { key: "seller_director", label: "Руководитель вашей стороны" },
+  { key: "seller_address", label: "Адрес вашей организации" },
+  { key: "seller_iban", label: "Счёт вашей организации" },
+  { key: "buyer_name", label: "Заказчик" },
+  { key: "buyer_bin", label: "БИН заказчика" },
+  { key: "buyer_director", label: "Руководитель заказчика" },
+  { key: "buyer_address", label: "Адрес заказчика" },
+  { key: "amount", label: "Сумма договора", anyOf: ["amount"] },
+  { key: "prepayment_amount", label: "Предоплата" },
+  { key: "remainder_amount", label: "Остаток оплаты" },
+  { key: "completion_terms", label: "Срок исполнения" },
+  { key: "items_table", label: "Состав работ и услуг" },
+];
+
+const RU_MONTH = "января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря";
+const CONTRACT_NO = "[A-ZА-ЯЁ0-9][A-ZА-ЯЁA-Za-zа-яё0-9./\\-]*";
+const SELLER_ROLE = "(?:Исполнитель|Подрядчик|Поставщик|Продавец|Арендодатель)";
+const BUYER_ROLE = "(?:Заказчик|Покупатель|Клиент|Арендатор)";
+const SELLER_LABELS = ["Исполнитель", "Подрядчик", "Поставщик", "Продавец", "Арендодатель"];
+const BUYER_LABELS = ["Заказчик", "Покупатель", "Клиент", "Арендатор"];
 
 function taxDigits(value: string | null | undefined) {
   return String(value || "").replace(/\D/g, "");
@@ -81,7 +105,7 @@ function orgName(block: string) {
 
 function directorIn(block: string) {
   const labeled = block.match(
-    /в\s+лице\s+(?:Директора|Генерального\s+директора|руководителя)?\s*([А-ЯЁ][А-ЯЁа-яё\-]+(?:\s+[А-ЯЁ][А-ЯЁа-яё\-]+|\s+[А-ЯЁA-Z]\.\s*[А-ЯЁA-Z]\.){0,2})/i,
+    /в\s+лице\s+(?:генерального\s+директора|директора|руководителя|управляющего|индивидуального\s+предпринимателя)?\s*([А-ЯЁ][А-ЯЁа-яё\-]+(?:\s+[А-ЯЁ][А-ЯЁа-яё\-]+|\s+[А-ЯЁA-Z]\.\s*[А-ЯЁA-Z]\.){0,2})/i,
   );
   if (labeled) return clean(labeled[1]).slice(0, 80);
   const initials = block.match(/([А-ЯЁ][а-яё]+\s+[А-ЯЁA-Z]\.\s*[А-ЯЁA-Z]\.)/);
@@ -129,7 +153,7 @@ function windowAfter(text: string, name: string, size = 700) {
 }
 
 function partyBeforeRole(text: string, role: "seller" | "buyer") {
-  const roleWord = role === "buyer" ? "(?:Заказчик|Покупатель|Клиент)" : "(?:Исполнитель|Подрядчик|Поставщик)";
+  const roleWord = role === "buyer" ? BUYER_ROLE : SELLER_ROLE;
   const re = new RegExp(
     `именуем[аоы]е?\\s+(?:в\\s+дальнейшем|далее)\\s*[«"“”']?${roleWord}[»"“”']?`,
     "i",
@@ -154,26 +178,31 @@ function sidesByOrder(text: string) {
   return { first: unique[0] || "", second: unique[1] || "" };
 }
 
-function partyByRole(text: string, role: "Исполнитель" | "Заказчик") {
-  const found = partyBeforeRole(text, role === "Заказчик" ? "buyer" : "seller");
+function partyBySide(text: string, side: "seller" | "buyer") {
+  const found = partyBeforeRole(text, side);
   if (found.name) return found;
-  const matched = text.match(
-    new RegExp(
-      `((?:${ORG_PATTERN}))\\s*,?\\s*именуем[аоы]е?\\s+(?:в\\s+дальнейшем|далее)\\s+[«"“”']${role}[»"“”']`,
-      "i",
-    ),
-  );
-  const name = matched ? orgName(matched[1]) || clean(matched[1]) : "";
-  const after =
-    matched && matched.index != null
-      ? text.slice(matched.index + matched[0].length, matched.index + matched[0].length + 220)
-      : "";
-  return { name, director: directorIn(after) || (matched ? directorIn(matched[0]) : "") };
+  const roles = side === "buyer" ? BUYER_LABELS : SELLER_LABELS;
+  for (const role of roles) {
+    const matched = text.match(
+      new RegExp(
+        `((?:${ORG_PATTERN}))\\s*,?\\s*именуем[аоы]е?\\s+(?:в\\s+дальнейшем|далее)\\s+[«"“”']${role}[»"“”']`,
+        "i",
+      ),
+    );
+    if (!matched) continue;
+    const name = orgName(matched[1]) || clean(matched[1]);
+    const after =
+      matched.index != null
+        ? text.slice(matched.index + matched[0].length, matched.index + matched[0].length + 220)
+        : "";
+    return { name, director: directorIn(after) || directorIn(matched[0]) };
+  }
+  return { name: "", director: "" };
 }
 
 function preambleRoles(text: string) {
-  const executor = partyByRole(text, "Исполнитель");
-  const customer = partyByRole(text, "Заказчик");
+  const executor = partyBySide(text, "seller");
+  const customer = partyBySide(text, "buyer");
   const ordered = sidesByOrder(text);
   return {
     sellerName: executor.name || ordered.first,
@@ -183,18 +212,22 @@ function preambleRoles(text: string) {
   };
 }
 
-function windowForParty(text: string, name: string, roleLabel: string) {
+function windowForParty(text: string, name: string, side: "seller" | "buyer") {
   const requisites = text.split(/РЕКВИЗИТЫ\s+СТОРОН/i)[1] || text;
   if (name) {
     const byName = windowAfter(requisites, name) || windowAfter(text, name);
     if (byName) return byName;
   }
-  const parts = requisites.split(new RegExp(`(?:^|\\n)\\s*${roleLabel}\\b\\s*:?\\s*\\n`, "i"));
-  return parts[1] ? parts[1].slice(0, 700) : "";
+  const labels = side === "buyer" ? BUYER_LABELS : SELLER_LABELS;
+  for (const roleLabel of labels) {
+    const parts = requisites.split(new RegExp(`(?:^|\\n)\\s*${roleLabel}\\b\\s*:?\\s*\\n`, "i"));
+    if (parts[1]) return parts[1].slice(0, 700);
+  }
+  return "";
 }
 
-function fillParty(text: string, name: string, director: string, roleLabel: "Исполнитель" | "Заказчик"): TemplateParty {
-  const block = windowForParty(text, name, roleLabel);
+function fillParty(text: string, name: string, director: string, side: "seller" | "buyer"): TemplateParty {
+  const block = windowForParty(text, name, side);
   return {
     name,
     bin: binIn(block),
@@ -224,44 +257,207 @@ function replaceIban(text: string, iban: string, placeholder: string) {
 }
 
 function moneyAmounts(text: string) {
-  const found = [...text.matchAll(/\b(\d{1,3}(?:\s\d{3}){1,3}|\d{4,7})(?:\s*\([^)]{3,80}\))?\s*(?:тенге|₸)/gi)];
+  const found = [
+    ...text.matchAll(/\b(\d{1,3}(?:\s\d{3}){1,3}|\d{4,7})(?:\s*\([^)]{3,80}\))?\s*(?:тенге|₸)/gi),
+    ...text.matchAll(/Итого:\s*(\d{1,3}(?:\s\d{3}){1,3}|\d{4,7})/gi),
+  ];
   return [...new Set(found.map((match) => Number(String(match[1]).replace(/\s/g, ""))).filter((n) => n >= 1000))];
 }
 
-function groupedAmountPattern(amount: number) {
-  const digits = String(Math.round(amount));
-  const parts: string[] = [];
-  let rest = digits;
-  while (rest.length > 3) {
-    parts.unshift(rest.slice(-3));
-    rest = rest.slice(0, -3);
-  }
-  parts.unshift(rest);
-  return parts.join("\\s");
+function ruDatePattern(flags = "gi") {
+  return new RegExp(
+    `[«"“']?\\d{1,2}[»"”']?\\s+(?:${RU_MONTH})\\s+20\\d{2}(?:\\s*г(?:ода)?\\.?)?`,
+    flags,
+  );
 }
 
-function replaceTotalAmount(text: string) {
-  const amounts = moneyAmounts(text).sort((a, b) => b - a);
-  const total = amounts[0];
-  if (!total) return text;
-  const grouped = groupedAmountPattern(total);
-  text = text.replace(
-    new RegExp(`(?:${grouped}|${total})\\s*\\(([^)]{3,80})\\)\\s*(тенге|₸)`, "gi"),
-    "{{amount}} ({{amount_words}}) $2",
+function lastMatchIndex(pattern: RegExp, text: string) {
+  const re = new RegExp(pattern.source, pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`);
+  let last = -1;
+  for (const match of text.matchAll(re)) {
+    if (match.index != null) last = match.index;
+  }
+  return last;
+}
+
+function amountRole(before: string): "prepayment" | "remainder" | "total" | "skip" {
+  const slice = before.replace(/\s+/g, " ");
+  if (/неустойк|штраф|пен[яи]|госпошлин|нотариал|гербов/i.test(slice)) return "skip";
+  const prepayAt = lastMatchIndex(/предоплат|аванс|перв(?:ая|ую)\s+част/gi, slice);
+  const remainAt = lastMatchIndex(/оставши|остат(?:ок|ка|ную)|втор(?:ая|ую)\s+част|окончательн(?:ая|ую)\s+(?:оплат|сумм)/gi, slice);
+  if (remainAt > prepayAt) return "remainder";
+  if (prepayAt > remainAt) return "prepayment";
+  if (/итого|общая\s+стоимость|цена\s+договора|сумма\s+договора|стоимость\s+(?:договора|оказания|услуг|работ|товара)/i.test(slice)) {
+    return "total";
+  }
+  if (/50\s*%|50\s*процент/i.test(slice) && /оплат|составляет|в размере/i.test(slice)) {
+    return /оста|втор/i.test(slice) ? "remainder" : "prepayment";
+  }
+  if (/составляет/i.test(slice) && /(?:стоимость|сумма|цена|договор)/i.test(slice)) return "total";
+  return "skip";
+}
+
+function moneyPlaceholder(role: "prepayment" | "remainder" | "total", currency: string) {
+  if (role === "prepayment") return `{{prepayment_amount}} ({{prepayment_amount_words}}) ${currency}`;
+  if (role === "remainder") return `{{remainder_amount}} ({{remainder_amount_words}}) ${currency}`;
+  return `{{amount}} ({{amount_words}}) ${currency}`;
+}
+
+export function markPaymentAmountPlaceholders(text: string) {
+  return text
+    .replace(
+      /(предоплат[\s\S]{0,180}?(?:которая\s+составляет|составляет|в\s+размере)\s+)(?:\{\{\s*amount\s*\}\}(?:\s*\(\{\{\s*amount_words\s*\}\}\))?|(?:\d{1,3}(?:\s\d{3})+|\d{4,7})(?:\s*\([^)]{3,90}\))?)(\s*(?:тенге|₸))/gi,
+      "$1{{prepayment_amount}} ({{prepayment_amount_words}})$2",
+    )
+    .replace(
+      /(аванс[\s\S]{0,240}?(?:который\s+составляет|составляет|в\s+размере)\s+)(?:\{\{\s*amount\s*\}\}(?:\s*\(\{\{\s*amount_words\s*\}\}\))?|(?:\d{1,3}(?:\s\d{3})+|\d{4,7})(?:\s*\([^)]{3,90}\))?)(\s*(?:тенге|₸))/gi,
+      "$1{{prepayment_amount}} ({{prepayment_amount_words}})$2",
+    )
+    .replace(
+      /(оставши[\s\S]{0,180}?(?:которая\s+составляет|составляет|в\s+размере)\s+)(?:\{\{\s*amount\s*\}\}(?:\s*\(\{\{\s*amount_words\s*\}\}\))?|(?:\d{1,3}(?:\s\d{3})+|\d{4,7})(?:\s*\([^)]{3,90}\))?)(\s*(?:тенге|₸))/gi,
+      "$1{{remainder_amount}} ({{remainder_amount_words}})$2",
+    );
+}
+
+function replaceMoneyByContext(text: string) {
+  const re = /(?:\d{1,3}(?:\s\d{3}){1,3}|\d{4,7})(?:\s*\([^)]{3,90}\))?\s*(тенге|₸)/gi;
+  let next = text.replace(re, (match, currency: string, offset: number) => {
+    const role = amountRole(text.slice(Math.max(0, offset - 160), offset));
+    if (role === "skip") return match;
+    return moneyPlaceholder(role, currency);
+  });
+  next = markPaymentAmountPlaceholders(next);
+  next = next.replace(/Итого:\s*(?:\d{1,3}(?:\s\d{3}){1,3}|\d{4,7})/gi, "Итого: {{amount}}");
+  return next;
+}
+
+function replaceContractNumbers(text: string) {
+  let next = text.replace(
+    new RegExp(`(договору?(?:\\s+[^\\n№]{0,80})?)\\s*(?:№|N|No\\.?)\\s*${CONTRACT_NO}`, "gi"),
+    (_, title: string) => `${String(title).trimEnd()} № {{contract_number}}`,
   );
-  text = text.replace(new RegExp(`Итого:\\s*(?:${grouped}|${total})`, "gi"), "Итого: {{amount}}");
-  text = text.replace(new RegExp(grouped, "g"), "{{amount}}");
-  text = text.replace(new RegExp(`\\b${total}\\b`, "g"), "{{amount}}");
-  return text;
+  next = next.replace(new RegExp(`(^|\\n)\\s*№\\s*${CONTRACT_NO}`, "g"), "$1№ {{contract_number}}");
+  return next;
+}
+
+function replaceSigningDates(text: string) {
+  const ru = ruDatePattern("gi");
+  const dotted = /\b\d{1,2}\.\d{1,2}\.20\d{2}\b/g;
+  const cut = Math.min(text.length, 1000);
+  const head = text.slice(0, cut).replace(ru, "{{contract_date}}").replace(dotted, "{{contract_date}}");
+  const tail = text.slice(cut)
+    .replace(new RegExp(`(от\\s+)(?:${ruDatePattern("").source}|\\d{1,2}\\.\\d{1,2}\\.20\\d{2})`, "gi"), "$1{{contract_date}}")
+    .replace(
+      new RegExp(`(\\{\\{\\s*contract_number\\s*\\}\\}\\s+)(?:${ruDatePattern("").source}|\\d{1,2}\\.\\d{1,2}\\.20\\d{2})`, "gi"),
+      "$1{{contract_date}}",
+    );
+  return head + tail;
+}
+
+function replaceCompletionTerms(text: string) {
+  return text
+    .replace(/\d+\s*[-–—]\s*\d+\s*рабоч(?:их)?\s*дн[ея](?:й)?/gi, "{{completion_terms}}")
+    .replace(
+      /(срок(?:и)?\s*(?:выполнения|оказания(?:\s+услуг)?|исполнения|поставки)\s*[:—–-]?\s*)(\d+[^\n.]{0,48}(?:рабоч|календарн|дн)[^\n.]{0,24})/gi,
+      "$1{{completion_terms}}",
+    );
+}
+
+function headingContractNumber(text: string) {
+  const head = text.slice(0, 500);
+  return (
+    head.match(new RegExp(`договору?[^\\n№]{0,80}(?:№|N|No\\.?)\\s*(${CONTRACT_NO})`, "i"))?.[1] ||
+    head.match(new RegExp(`^\\s*(?:№|N)\\s*(${CONTRACT_NO})`, "m"))?.[1] ||
+    ""
+  );
+}
+
+function headingContractDate(text: string) {
+  const head = text.slice(0, 1000);
+  return head.match(ruDatePattern("i"))?.[0] || head.match(/\b\d{1,2}\.\d{1,2}\.20\d{2}\b/)?.[0] || "";
+}
+
+function sampleAmount(text: string, role: "prepayment" | "remainder" | "total") {
+  const re = /(?:\d{1,3}(?:\s\d{3}){1,3}|\d{4,7})(?:\s*\([^)]{3,90}\))?\s*(?:тенге|₸)/gi;
+  for (const match of text.matchAll(re)) {
+    if (match.index == null) continue;
+    if (amountRole(text.slice(Math.max(0, match.index - 160), match.index)) === role) return clean(match[0]);
+  }
+  if (role === "total") {
+    const total = text.match(/Итого:\s*((?:\d{1,3}(?:\s\d{3}){1,3}|\d{4,7}))/i);
+    if (total) return clean(total[1]);
+  }
+  return "";
+}
+
+function sampleCompletion(text: string) {
+  return (
+    text.match(/\d+\s*[-–—]\s*\d+\s*рабоч(?:их)?\s*дн[ея](?:й)?/i)?.[0] ||
+    text.match(/срок(?:и)?\s*(?:выполнения|оказания(?:\s+услуг)?|исполнения|поставки)\s*[:—–-]?\s*(\d+[^\n.]{0,48}(?:рабоч|календарн|дн)[^\n.]{0,24})/i)?.[1] ||
+    ""
+  );
+}
+
+export function describeTemplateFields(
+  placeholders: string[],
+  samples: Record<string, string> = {},
+): RecognizedTemplateField[] {
+  return TEMPLATE_FIELD_CATALOG.map((field) => {
+    const keys = field.anyOf || [field.key];
+    const found = keys.some((key) => placeholders.includes(key));
+    return { key: field.key, label: field.label, found, sample: found ? samples[field.key] || "" : "" };
+  });
+}
+
+export function fillContextualLeftovers(text: string, values: Record<string, string>) {
+  let next = text;
+  if (values.contract_number) {
+    next = next.replace(
+      new RegExp(`(договору?(?:\\s+[^\\n№]{0,80})?)\\s*(?:№|N|No\\.?)\\s*${CONTRACT_NO}`, "gi"),
+      (_, title: string) => `${String(title).trimEnd()} № ${values.contract_number}`,
+    );
+    next = next.replace(/№\s*\d{6,}\/\d{1,4}/g, `№ ${values.contract_number}`);
+  }
+  if (values.contract_date) {
+    next = next.replace(ruDatePattern("gi"), values.contract_date);
+    const cut = Math.min(next.length, 1000);
+    next = `${next.slice(0, cut).replace(/\b\d{1,2}\.\d{1,2}\.20\d{2}\b/g, values.contract_date)}${next.slice(cut)}`;
+    next = next.replace(/\bот\s+\d{1,2}\.\d{1,2}\.20\d{2}\b/gi, `от ${values.contract_date}`);
+  }
+  if (values.prepayment_amount && values.prepayment_amount_words) {
+    next = next.replace(
+      /(предоплат[\s\S]{0,180}?(?:которая\s+составляет|составляет|в\s+размере)\s+)(?:\d{1,3}(?:\s\d{3})+|\d{4,7})(?:\s*\([^)]{3,90}\))?\s*(тенге|₸)/gi,
+      `$1${values.prepayment_amount} (${values.prepayment_amount_words}) $2`,
+    );
+    next = next.replace(
+      /(аванс[\s\S]{0,240}?(?:который\s+составляет|составляет|в\s+размере)\s+)(?:\d{1,3}(?:\s\d{3})+|\d{4,7})(?:\s*\([^)]{3,90}\))?\s*(тенге|₸)/gi,
+      `$1${values.prepayment_amount} (${values.prepayment_amount_words}) $2`,
+    );
+  }
+  if (values.remainder_amount && values.remainder_amount_words) {
+    next = next.replace(
+      /(оставши[\s\S]{0,180}?(?:которая\s+составляет|составляет|в\s+размере)\s+)(?:\d{1,3}(?:\s\d{3})+|\d{4,7})(?:\s*\([^)]{3,90}\))?\s*(тенге|₸)/gi,
+      `$1${values.remainder_amount} (${values.remainder_amount_words}) $2`,
+    );
+  }
+  if (values.completion_terms) {
+    next = next.replace(/\d+\s*[-–—]\s*\d+\s*рабоч(?:их)?\s*дн[ея](?:й)?/gi, values.completion_terms);
+    next = next.replace(
+      /(срок(?:и)?\s*(?:выполнения|оказания(?:\s+услуг)?|исполнения|поставки)\s*[:—–-]?\s*)(\d+[^\n.]{0,48}(?:рабоч|календарн|дн)[^\n.]{0,24})/gi,
+      `$1${values.completion_terms}`,
+    );
+  }
+  return next;
 }
 
 function inferTemplateName(text: string, fileName?: string) {
   const fromFile = pathStem(fileName);
+  if (fromFile) return fromFile;
   if (/презентац/i.test(text)) return "Договор на разработку презентации";
-  if (/возмездн/i.test(text) && /услуг/i.test(text)) return fromFile || "Договор на возмездные услуги";
+  if (/возмездн/i.test(text) && /услуг/i.test(text)) return "Договор на возмездные услуги";
   const heading = text.match(/договор[^\n]{0,80}/i)?.[0];
   if (heading && heading.length > 8 && heading.length < 80) return clean(heading.replace(/№.*/, ""));
-  return fromFile || "Шаблон договора";
+  return "Шаблон договора";
 }
 
 function pathStem(fileName?: string) {
@@ -302,11 +498,10 @@ export function rewriteScannedFragment(text: string, scanned: Pick<ScannedContra
   next = replaceIban(next, scanned.buyer.iban, "{{buyer_iban}}");
   if (scanned.seller.bik) next = next.replace(new RegExp(escapeRegExp(scanned.seller.bik), "gi"), "{{seller_bik}}");
   if (scanned.buyer.bik) next = next.replace(new RegExp(escapeRegExp(scanned.buyer.bik), "gi"), "{{buyer_bik}}");
-  next = next.replace(/(договор(?:\s+[^\n№]{0,50})?)\s*№\s*[\w./-]+/i, "$1 № {{contract_number}}");
-  next = next.replace(/№\s*\d{6,}\/\d{1,4}/, "№ {{contract_number}}");
-  next = next.replace(/[«"“]?\d{1,2}[»"”]?\s+[а-яё]{3,}\s+20\d{2}(?:\s*г(?:ода)?\.?)?/i, "{{contract_date}}");
-  next = next.replace(/\b\d{1,2}\.\d{1,2}\.20\d{2}\b/, "{{contract_date}}");
-  next = replaceTotalAmount(next);
+  next = replaceContractNumbers(next);
+  next = replaceSigningDates(next);
+  next = replaceMoneyByContext(next);
+  next = replaceCompletionTerms(next);
   if (!/\{\{\s*buyer_address\s*\}\}/i.test(next)) {
     next = next.replace(
       /(\{\{\s*buyer_name\s*\}\}[ \t]*\n)(?!\{\{\s*buyer_address)([\s\S]{8,280}?)(\n[ \t]*БИН[ \t]*\{\{\s*buyer_bin\s*\}\})/i,
@@ -338,8 +533,8 @@ export function scanContractTemplateText(
   }
 
   const roles = preambleRoles(text);
-  let seller = fillParty(text, roles.sellerName, roles.sellerDirector, "Исполнитель");
-  let buyer = fillParty(text, roles.buyerName, roles.buyerDirector, "Заказчик");
+  let seller = fillParty(text, roles.sellerName, roles.sellerDirector, "seller");
+  let buyer = fillParty(text, roles.buyerName, roles.buyerDirector, "buyer");
 
   const tenantBin = taxDigits(profile.bin || profile.iin);
   const tenantOwnsBuyer = tenantBin && buyer.bin === tenantBin && seller.bin !== tenantBin;
@@ -370,6 +565,25 @@ export function scanContractTemplateText(
   if (profile.email && new RegExp(escapeRegExp(profile.email), "i").test(text)) {
     text = replaceFlexible(text, profile.email, "{{seller_email}}");
   }
+  const samples: Record<string, string> = {
+    contract_number: headingContractNumber(text),
+    contract_date: headingContractDate(text),
+    seller_name: seller.name,
+    seller_bin: seller.bin,
+    seller_director: seller.directorName,
+    seller_address: seller.legalAddress,
+    seller_iban: seller.iban,
+    buyer_name: buyer.name,
+    buyer_bin: buyer.bin,
+    buyer_director: buyer.directorName,
+    buyer_address: buyer.legalAddress,
+    amount: sampleAmount(text, "total") || (moneyAmounts(text).sort((a, b) => b - a)[0] ? String(moneyAmounts(text).sort((a, b) => b - a)[0]) : ""),
+    prepayment_amount: sampleAmount(text, "prepayment"),
+    remainder_amount: sampleAmount(text, "remainder"),
+    completion_terms: sampleCompletion(text),
+    items_table: /приложение|позиц|наименование|состав\s+(?:работ|услуг)|предмет/i.test(text) ? "из сделки" : "",
+  };
+
   text = rewriteScannedFragment(text, { seller, buyer });
   text = insertItemsTable(text).replace(/\n{3,}/g, "\n\n").trim();
 
@@ -377,11 +591,15 @@ export function scanContractTemplateText(
   if (!placeholders.includes("seller_name") || !placeholders.includes("buyer_name")) {
     warnings.push("Не все названия сторон заменены на поля. Договор можно сохранить — при формировании подставятся данные из карточек, только если поле есть в тексте.");
   }
+  if (!placeholders.includes("contract_number")) {
+    warnings.push("Номер в шаблоне не размечен. При формировании возьмём номер из CRM, если в тексте есть «Договор №».");
+  }
 
   return {
     name: inferTemplateName(raw, fileName),
     body: text,
     placeholders,
+    fields: describeTemplateFields(placeholders, samples),
     seller,
     buyer,
     warnings,

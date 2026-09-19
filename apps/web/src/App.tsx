@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { api, setTenant } from "./lib/api";
+import { api, clearTenant, setTenant } from "./lib/api";
 import { NavIcon } from "./components/NavIcon";
 import { BrandLogo } from "./components/BrandLogo";
 import { SupportCenter, SupportHelpButton } from "./components/SupportCenter";
@@ -143,6 +143,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
   const platformLinks: Array<[string, string]> = platformAdmin ? [
     ["/admin", t(locale, "nav.platformOverview")],
     ["/admin/companies", t(locale, "nav.platformCompanies")],
+    ["/admin/ai-managers", t(locale, "nav.platformAiManagers")],
     ["/admin/members", t(locale, "nav.platformMembers")],
     ["/admin/support", t(locale, "nav.platformSupport")],
     ["/admin/integrations", t(locale, "nav.platformCatalog")],
@@ -153,6 +154,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
 
   const moreLinks = (platformAdmin && !hasCompany
     ? [
+        ["/admin/ai-managers", t(locale, "nav.platformAiManagers")],
         ["/admin/support", t(locale, "nav.platformSupport")],
         ["/admin/integrations", t(locale, "nav.platformCatalog")],
         ["/admin/ai-usage", t(locale, "nav.platformUsage")],
@@ -336,9 +338,13 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
     let cancelled = false;
     async function loadAdminHelp() {
       try {
-        const data = (await api.adminSupportUnread()) as { unread?: number };
+        const data = (await api.adminSupportUnread()) as { unread?: number; signupPending?: number };
         if (cancelled) return;
-        setNavBadges((prev) => ({ ...prev, "/admin/support": Number(data.unread || 0) }));
+        setNavBadges((prev) => ({
+          ...prev,
+          "/admin/support": Number(data.unread || 0) + Number(data.signupPending || 0),
+          "/admin": Number(data.signupPending || 0),
+        }));
       } catch {
         /* keep previous */
       }
@@ -421,8 +427,13 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
   }, []);
 
   async function logout() {
-    await api.request("/api/v1/auth/logout", { method: "POST", body: "{}" });
-    navigate(platformAdmin ? "/admin/login" : "/login");
+    try {
+      await api.request("/api/v1/auth/logout", { method: "POST", body: "{}" });
+    } catch {
+      // сессия могла уже истечь — всё равно открываем вход
+    }
+    clearTenant();
+    window.location.assign(inServiceAdmin || (platformAdmin && !hasCompany) ? "/admin/login" : "/login");
   }
 
   return (
@@ -667,57 +678,137 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
 }
 
 function Login() {
+  const locale = normalizeLocale(null);
+  const [mode, setMode] = useState<"login" | "signup">("login");
   const [error, setError] = useState("");
+  const [sent, setSent] = useState(false);
+  const [busy, setBusy] = useState(false);
+
   return (
     <div className="login">
       <div className="login-stage">
         <div className="login-brand">
           <BrandLogo variant="login" />
-          <p>{t(normalizeLocale(null), "login.brand")}</p>
+          <p>{t(locale, "login.brand")}</p>
         </div>
-        <form
-          className="panel"
-          onSubmit={async (event) => {
-            event.preventDefault();
-            const form = new FormData(event.currentTarget);
-            try {
-              const result = (await api.login(String(form.get("email")), String(form.get("password")))) as any;
-              const tenantId =
-                result.user?.activeTenant?.tenant?.id || result.user?.memberships?.[0]?.tenant?.id;
-              if (tenantId) setTenant(tenantId);
-              const dest = result.user?.user?.platformAdmin && !tenantId ? "/admin" : "/today";
-              window.location.assign(dest);
-            } catch (err) {
-              const message = err instanceof Error ? err.message : "Ошибка входа";
-              setError(
-                message === "Failed to fetch" || message === "HTTP 500"
-                  ? "Сейчас не удаётся войти. Попробуйте ещё раз через минуту."
-                  : message,
-              );
-            }
-          }}
-        >
-          <h2>{t(normalizeLocale(null), "login.title")}</h2>
-          <p className="muted">{t(normalizeLocale(null), "login.hint")}</p>
-          <label>
-            {t(normalizeLocale(null), "login.email")}
-            <input name="email" type="email" required autoComplete="username" />
-          </label>
-          <label>
-            {t(normalizeLocale(null), "login.password")}
-            <input
-              name="password"
-              type="password"
-              required
-              autoComplete="current-password"
-            />
-          </label>
-          {error ? <p className="error">{error}</p> : null}
-          <button className="btn">{t(normalizeLocale(null), "login.submit")}</button>
-          <p className="muted login-alt">
-            <Link to="/admin/login">{t(normalizeLocale(null), "login.platformLink")}</Link>
-          </p>
-        </form>
+        {mode === "login" ? (
+          <form
+            className="panel"
+            onSubmit={async (event) => {
+              event.preventDefault();
+              const form = new FormData(event.currentTarget);
+              try {
+                const result = (await api.login(String(form.get("email")), String(form.get("password")))) as any;
+                const tenantId =
+                  result.user?.activeTenant?.tenant?.id || result.user?.memberships?.[0]?.tenant?.id;
+                if (tenantId) setTenant(tenantId);
+                const dest = result.user?.user?.platformAdmin && !tenantId ? "/admin" : "/today";
+                window.location.assign(dest);
+              } catch (err) {
+                const message = err instanceof Error ? err.message : "Ошибка входа";
+                setError(
+                  message === "Failed to fetch" || message === "HTTP 500"
+                    ? "Сейчас не удаётся войти. Попробуйте ещё раз через минуту."
+                    : message,
+                );
+              }
+            }}
+          >
+            <h2>{t(locale, "login.title")}</h2>
+            <p className="muted">{t(locale, "login.hint")}</p>
+            <label>
+              {t(locale, "login.email")}
+              <input name="email" type="email" required autoComplete="username" />
+            </label>
+            <label>
+              {t(locale, "login.password")}
+              <input
+                name="password"
+                type="password"
+                required
+                autoComplete="current-password"
+              />
+            </label>
+            {error ? <p className="error">{error}</p> : null}
+            <button className="btn">{t(locale, "login.submit")}</button>
+            <button
+              type="button"
+              className="btn secondary"
+              onClick={() => {
+                setMode("signup");
+                setError("");
+                setSent(false);
+              }}
+            >
+              {t(locale, "login.register")}
+            </button>
+          </form>
+        ) : (
+          <form
+            className="panel"
+            onSubmit={async (event) => {
+              event.preventDefault();
+              const form = new FormData(event.currentTarget);
+              setBusy(true);
+              setError("");
+              try {
+                await api.requestSignup(String(form.get("email")), String(form.get("companyName")));
+                setSent(true);
+              } catch (err) {
+                const message = err instanceof Error ? err.message : "Не удалось отправить запрос";
+                setError(
+                  message === "Failed to fetch" || message === "HTTP 500"
+                    ? "Сейчас не удаётся отправить запрос. Попробуйте ещё раз через минуту."
+                    : message,
+                );
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            <h2>{t(locale, "login.registerTitle")}</h2>
+            {sent ? (
+              <>
+                <p>{t(locale, "login.requestSent")}</p>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => {
+                    setMode("login");
+                    setError("");
+                    setSent(false);
+                  }}
+                >
+                  {t(locale, "login.backToLogin")}
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="muted">{t(locale, "login.registerHint")}</p>
+                <label>
+                  {t(locale, "login.email")}
+                  <input name="email" type="email" required autoComplete="email" />
+                </label>
+                <label>
+                  {t(locale, "login.companyName")}
+                  <input name="companyName" required minLength={2} autoComplete="organization" maxLength={160} />
+                </label>
+                {error ? <p className="error">{error}</p> : null}
+                <button className="btn" disabled={busy}>{t(locale, "login.sendRequest")}</button>
+                <button
+                  type="button"
+                  className="btn secondary"
+                  onClick={() => {
+                    setMode("login");
+                    setError("");
+                  }}
+                >
+                  {t(locale, "login.backToLogin")}
+                </button>
+              </>
+            )}
+          </form>
+        )}
       </div>
     </div>
   );

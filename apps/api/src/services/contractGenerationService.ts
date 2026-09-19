@@ -128,9 +128,10 @@ export async function generateContractPdfFile(
     : await ensureDefaultTemplate(prisma, tid);
 
   const company = deal.company!;
+  const contractDate = new Date();
   const docxInput: ContractPdfInput = {
     number: contract.number,
-    date: contract.date,
+    date: contractDate,
     subject,
     dealName: deal.title,
     paymentTerms: paymentTerms || "По согласованию сторон.",
@@ -170,6 +171,7 @@ export async function generateContractPdfFile(
         subject,
         paymentTerms,
         completionTerms,
+        date: contractDate,
         companyId: deal.companyId,
         amountWithoutVat: totals.amountWithoutVat,
         vatRate: totals.vatRate,
@@ -244,6 +246,7 @@ export async function generateContractPdfFile(
         subject,
         paymentTerms,
         completionTerms,
+        date: contractDate,
         companyId: deal.companyId,
         amountWithoutVat: totals.amountWithoutVat,
         vatRate: totals.vatRate,

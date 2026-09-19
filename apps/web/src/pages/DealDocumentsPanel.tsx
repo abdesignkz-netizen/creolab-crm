@@ -180,6 +180,7 @@ export function DealDocumentsPanel(props: {
   const [askCabinet, setAskCabinet] = useState(false);
   const [templates, setTemplates] = useState<Array<{ id: string; name: string; isDefault: boolean }>>([]);
   const [templateId, setTemplateId] = useState("");
+  const [completionTerms, setCompletionTerms] = useState("5–7 рабочих дней");
   const sendFlight = useRef(false);
   useEffect(() => { setSubmissions({}); }, [d.id]);
   useEffect(() => {
@@ -191,7 +192,8 @@ export function DealDocumentsPanel(props: {
   }, [d.id]);
   useEffect(() => {
     if (contracts[0]?.templateId) setTemplateId(contracts[0].templateId);
-  }, [contracts[0]?.templateId]);
+    if (contracts[0]?.completionTerms) setCompletionTerms(contracts[0].completionTerms);
+  }, [contracts[0]?.templateId, contracts[0]?.completionTerms]);
   function submission(type: string, value: EsfSubmission) {
     setSubmissions(previous => ({ ...previous, [type]: value }));
   }
@@ -352,6 +354,15 @@ export function DealDocumentsPanel(props: {
                 </select>
               </label>
             ) : null}
+            <label>
+              Срок исполнения
+              <input
+                value={completionTerms}
+                disabled={busy || contracts[0]?.importedPdf}
+                placeholder="5–7 рабочих дней"
+                onChange={(e) => setCompletionTerms(e.target.value)}
+              />
+            </label>
             <button
               type="button"
               className="btn"
@@ -362,10 +373,16 @@ export function DealDocumentsPanel(props: {
                 void (async () => {
                   let contractId = contracts[0]?.id as string | undefined;
                   if (!contractId) {
-                    const created: any = await api.createContractDraft(d.id, templateId ? { templateId } : {});
+                    const created: any = await api.createContractDraft(d.id, {
+                      ...(templateId ? { templateId } : {}),
+                      completionTerms: completionTerms.trim() || null,
+                    });
                     contractId = created.contract.id;
                   }
-                  await api.generateContract(contractId!, templateId ? { templateId } : {});
+                  await api.generateContract(contractId!, {
+                    ...(templateId ? { templateId } : {}),
+                    completionTerms: completionTerms.trim() || null,
+                  });
                   await load();
                 })()
                   .catch((err: any) => {
@@ -391,7 +408,10 @@ export function DealDocumentsPanel(props: {
               onClick={() => {
                 setBusy(true);
                 void api
-                  .createContractDraft(d.id, templateId ? { templateId } : {})
+                  .createContractDraft(d.id, {
+                    ...(templateId ? { templateId } : {}),
+                    completionTerms: completionTerms.trim() || null,
+                  })
                   .then(() => load())
                   .catch((err) => setError(err instanceof Error ? err.message : "Не удалось создать договор"))
                   .finally(() => setBusy(false));

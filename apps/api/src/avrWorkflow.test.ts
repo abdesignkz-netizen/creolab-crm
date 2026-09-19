@@ -254,6 +254,10 @@ describe("AVR editor workflow", () => {
     assert.equal(inbox.response.status,200,JSON.stringify(inbox.body));
     const row=inbox.body.items.find((d:any)=>d.id===documentId);
     assert.equal(row.href,`/documents/avr/${documentId}`);assert.equal(row.status,"SENT");assert.ok(row.date);
+    assert.equal(row.avrStatus,"Отправлен");assert.equal(row.esfStatus,"Требуется");
+    const dealDocs=await json(`/api/v1/documents?dealId=${dealId}`);
+    const related=dealDocs.body.items.find((d:any)=>d.kind!=="AVR"&&d.dealId===dealId);
+    if(related){assert.equal(related.avrStatus,"Отправлен");}
   });
   it("отклоняет второй документ по сделке, даже если он был создан ранее",async()=>{
     const first=await prisma.electronicDocument.findUniqueOrThrow({where:{id:documentId}});

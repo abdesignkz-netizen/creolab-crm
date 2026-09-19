@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import { notifySaved } from "../components/SaveNotice";
@@ -15,6 +15,7 @@ type TemplateRow = {
   isDefault: boolean;
   fromWord?: boolean;
   placeholders: string[];
+  fields?: Array<{ key: string; label: string; found: boolean; sample?: string }>;
   preview: string;
 };
 
@@ -22,6 +23,7 @@ type Preview = {
   name: string;
   body: string;
   placeholders: string[];
+  fields?: Array<{ key: string; label: string; found: boolean; sample: string }>;
   seller: { name: string; bin: string };
   buyer: { name: string; bin: string };
   warnings: string[];
@@ -42,6 +44,7 @@ export function ContractTemplatePanel() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
+  const [generateOpen, setGenerateOpen] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [name, setName] = useState("");
@@ -49,6 +52,7 @@ export function ContractTemplatePanel() {
   const [companyId, setCompanyId] = useState("");
   const [templateId, setTemplateId] = useState("");
   const [formBusy, setFormBusy] = useState(false);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
   const [lines, setLines] = useState<ContractDraftLine[]>([newContractDraftLine()]);
   const [savedNotice, setSavedNotice] = useState("");
   const [justSavedId, setJustSavedId] = useState("");
@@ -64,6 +68,7 @@ export function ContractTemplatePanel() {
   }
 
   function openUpload() {
+    setGenerateOpen(false);
     setOpen(true);
     setError("");
     setSavedNotice("");
@@ -72,7 +77,27 @@ export function ContractTemplatePanel() {
     setName("");
   }
 
+  function closeGenerate() {
+    setGenerateOpen(false);
+  }
+
+  function openGenerate() {
+    setOpen(false);
+    setFile(null);
+    setPreview(null);
+    setGenerateOpen(true);
+    setError("");
+    void loadTemplates();
+    if (!companies.length) {
+      void api
+        .companies({})
+        .then((data: any) => setCompanies(data.items || []))
+        .catch(() => setCompanies([]));
+    }
+  }
+
   async function loadTemplates() {
+    setTemplatesLoading(true);
     try {
       const data: any = await api.contractTemplates();
       const list = data.items || [];
@@ -87,16 +112,10 @@ export function ContractTemplatePanel() {
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось загрузить шаблоны");
+    } finally {
+      setTemplatesLoading(false);
     }
   }
-
-  useEffect(() => {
-    void loadTemplates();
-    void api
-      .companies({})
-      .then((data: any) => setCompanies(data.items || []))
-      .catch(() => setCompanies([]));
-  }, []);
 
   async function recognize() {
     if (busy || !file) return;
@@ -139,10 +158,17 @@ export function ContractTemplatePanel() {
       const saved = created.template;
       const title = saved?.name || name.trim();
       notifySaved(`Шаблон «${title}» сохранён`);
-      setSavedNotice(`Шаблон «${title}» сохранён. Он в списке ниже и выбран для формирования договора.`);
+      setSavedNotice(`Шаблон «${title}» сохранён.`);
       setJustSavedId(saved?.id || "");
       if (saved?.id) setTemplateId(saved.id);
       closeUpload();
+      setGenerateOpen(true);
+      if (!companies.length) {
+        void api
+          .companies({})
+          .then((data: any) => setCompanies(data.items || []))
+          .catch(() => setCompanies([]));
+      }
       await loadTemplates();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось сохранить шаблон");
@@ -223,17 +249,27 @@ export function ContractTemplatePanel() {
         <div>
           <b>Шаблоны договоров</b>
           <p className="muted">
-            Загрузите договор в Word — новые договоры соберутся как Word: пункты, приложения и реквизиты останутся как в шаблоне, подставятся стороны, номер, дата и сумма. Файл можно править.
+            Word-шаблон для новых договоров: стороны, номер, дата и сумма подставятся, юридический текст останется как в файле.
           </p>
         </div>
-        <button
-          type="button"
-          className={open ? "btn secondary" : "btn"}
-          disabled={busy}
-          onClick={() => (open ? closeUpload() : openUpload())}
-        >
-          {open ? "Закрыть" : "Загрузить шаблон"}
-        </button>
+        <div className="actions">
+          <button
+            type="button"
+            className="btn secondary"
+            disabled={busy}
+            onClick={() => (open ? closeUpload() : openUpload())}
+          >
+            {open ? "Закрыть" : "Загрузить шаблон"}
+          </button>
+          <button
+            type="button"
+            className={generateOpen ? "btn secondary" : "btn"}
+            disabled={busy}
+            onClick={() => (generateOpen ? closeGenerate() : openGenerate())}
+          >
+            {generateOpen ? "Скрыть шаблоны" : "Сформировать по шаблону"}
+          </button>
+        </div>
       </div>
       {savedNotice ? <p className="ok" role="status">{savedNotice}</p> : null}
       {error ? <p className="error" role="alert">{error}</p> : null}
@@ -250,7 +286,7 @@ export function ContractTemplatePanel() {
                   onChange={(e) => { setFile(e.target.files?.[0] || null); setError(""); setSavedNotice(""); }}
                 />
               </label>
-              <p className="muted">До 20 МБ. После распознавания можно задать своё название и сохранить шаблон в список.</p>
+              <p className="muted">До 20 МБ. После разбора видно, какие данные система считает переменными. Название шаблона можно задать своё.</p>
               <div className="actions">
                 <button type="button" className="btn" disabled={busy || !file} onClick={() => void recognize()}>
                   {busy ? "Распознаём…" : "Распознать шаблон"}
@@ -278,7 +314,22 @@ export function ContractTemplatePanel() {
                 {" · "}
                 Заказчик: {preview.buyer.name || "—"}{preview.buyer.bin ? ` · БИН ${preview.buyer.bin}` : ""}
               </p>
-              <p className="muted">Поля: {preview.placeholders.join(", ") || "не найдены"}</p>
+              {preview.fields?.some((field) => field.found) ? (
+                <div className="template-field-map">
+                  <p className="muted">Что меняется от сделки к сделке</p>
+                  <ul>
+                    {preview.fields.filter((field) => field.found).map((field) => (
+                      <li key={field.key}>
+                        <b>{field.label}</b>
+                        {field.sample ? <span className="muted"> · в файле: {field.sample}</span> : null}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="muted">Остальной текст пунктов, приложений и формулировок остаётся как в файле.</p>
+                </div>
+              ) : (
+                <p className="muted">Поля: {preview.placeholders.join(", ") || "не найдены"}</p>
+              )}
               {preview.warnings.length ? (
                 <ul className="pdf-import-warnings">
                   {preview.warnings.map((warning) => <li key={warning}>{warning}</li>)}
@@ -302,109 +353,118 @@ export function ContractTemplatePanel() {
         </div>
       ) : null}
 
-      {items.length ? (
-        <div className="stack" style={{ marginTop: 12 }}>
-          {items.map((row) => (
-            <div className={`row${row.id === justSavedId ? " contract-template-saved-row" : ""}`} key={row.id}>
-              <div>
-                {renameId === row.id ? (
-                  <label>
-                    Новое название
-                    <input
-                      value={renameValue}
-                      maxLength={200}
-                      autoFocus
-                      onChange={(e) => setRenameValue(e.target.value)}
-                    />
-                  </label>
-                ) : (
-                  <>
-                    <b>{row.name}</b>
-                    {row.id === justSavedId ? <span className="muted"> · только что сохранён</span> : null}
-                    {row.isDefault ? <span className="muted"> · по умолчанию</span> : null}
-                    {row.fromWord ? <span className="muted"> · Word</span> : null}
-                    <div className="muted">{row.placeholders.slice(0, 8).join(", ")}</div>
-                  </>
-                )}
-              </div>
-              <div className="actions">
-                {renameId === row.id ? (
-                  <>
-                    <button type="button" className="btn" disabled={busy || !renameValue.trim()} onClick={() => void saveRename()}>
-                      Сохранить имя
-                    </button>
-                    <button type="button" className="btn secondary" disabled={busy} onClick={() => setRenameId("")}>
-                      Отмена
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      type="button"
-                      className="btn secondary"
-                      disabled={busy}
-                      onClick={() => { setRenameId(row.id); setRenameValue(row.name); }}
-                    >
-                      Переименовать
-                    </button>
-                    {!row.isDefault ? (
-                      <button type="button" className="btn secondary" disabled={busy} onClick={() => void makeDefault(row.id)}>
-                        По умолчанию
-                      </button>
-                    ) : null}
-                    <button type="button" className="btn secondary" disabled={busy} onClick={() => void remove(row.id)}>
-                      Удалить
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : null}
-
-      {items.length ? (
-        <div className="stack" style={{ marginTop: 12 }}>
-          <b>Сформировать договор по шаблону</b>
-          <p className="muted">После загрузки реквизитов компании выберите шаблон Word — договор повторит его текст, а не короткую форму CRM.</p>
-          <label>
-            Компания
-            <select value={companyId} onChange={(e) => setCompanyId(e.target.value)}>
-              <option value="">Выберите компанию</option>
-              {companies.map((company) => (
-                <option key={company.id} value={company.id}>{company.name}</option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Шаблон
-            <select
-              value={templateId}
-              onChange={(e) => {
-                const id = e.target.value;
-                const previous = items.find((row) => row.id === templateId)?.name || "";
-                setTemplateId(id);
-                const nextName = items.find((row) => row.id === id)?.name || "";
-                setLines((current) => {
-                  if (current.length === 1 && (!current[0].name.trim() || current[0].name === previous)) {
-                    return [{ ...current[0], name: nextName }];
-                  }
-                  return current;
-                });
-              }}
-            >
+      {generateOpen ? (
+        <div className="stack" style={{ marginTop: 12 }} role="region" aria-label="Формирование договора по шаблону">
+          {templatesLoading ? (
+            <p className="muted">Загрузка шаблонов…</p>
+          ) : !items.length ? (
+            <p className="muted">Нет шаблонов. Сначала загрузите договор в Word.</p>
+          ) : (
+            <>
               {items.map((row) => (
-                <option key={row.id} value={row.id}>{row.name}{row.isDefault ? " (по умолчанию)" : ""}</option>
+                <div className={`row${row.id === justSavedId ? " contract-template-saved-row" : ""}`} key={row.id}>
+                  <div>
+                    {renameId === row.id ? (
+                      <label>
+                        Новое название
+                        <input
+                          value={renameValue}
+                          maxLength={200}
+                          autoFocus
+                          onChange={(e) => setRenameValue(e.target.value)}
+                        />
+                      </label>
+                    ) : (
+                      <>
+                        <b>{row.name}</b>
+                        {row.id === justSavedId ? <span className="muted"> · только что сохранён</span> : null}
+                        {row.isDefault ? <span className="muted"> · по умолчанию</span> : null}
+                        {row.fromWord ? <span className="muted"> · Word</span> : null}
+                        <div className="muted">
+                          {(row.fields || [])
+                            .filter((field: { found: boolean }) => field.found)
+                            .slice(0, 6)
+                            .map((field: { label: string }) => field.label)
+                            .join(" · ") || row.placeholders.slice(0, 8).join(", ")}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  <div className="actions">
+                    {renameId === row.id ? (
+                      <>
+                        <button type="button" className="btn" disabled={busy || !renameValue.trim()} onClick={() => void saveRename()}>
+                          Сохранить имя
+                        </button>
+                        <button type="button" className="btn secondary" disabled={busy} onClick={() => setRenameId("")}>
+                          Отмена
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          className="btn secondary"
+                          disabled={busy}
+                          onClick={() => { setRenameId(row.id); setRenameValue(row.name); }}
+                        >
+                          Переименовать
+                        </button>
+                        {!row.isDefault ? (
+                          <button type="button" className="btn secondary" disabled={busy} onClick={() => void makeDefault(row.id)}>
+                            По умолчанию
+                          </button>
+                        ) : null}
+                        <button type="button" className="btn secondary" disabled={busy} onClick={() => void remove(row.id)}>
+                          Удалить
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
               ))}
-            </select>
-          </label>
-          <ContractGenerateItems lines={lines} onChange={setLines} disabled={formBusy} />
-          <div className="actions">
-            <button type="button" className="btn" disabled={formBusy || !companyId || !templateId} onClick={() => void generateForCompany()}>
-              {formBusy ? "Формируем…" : "Сформировать по шаблону"}
-            </button>
-            {companyId ? <Link className="btn secondary" to={`/companies/${companyId}`}>Карточка компании</Link> : null}
-          </div>
+              <b>Сформировать договор по шаблону</b>
+              <p className="muted">Выберите компанию и шаблон Word — договор повторит его текст, а не короткую форму CRM.</p>
+              <label>
+                Компания
+                <select value={companyId} onChange={(e) => setCompanyId(e.target.value)}>
+                  <option value="">Выберите компанию</option>
+                  {companies.map((company) => (
+                    <option key={company.id} value={company.id}>{company.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Шаблон
+                <select
+                  value={templateId}
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    const previous = items.find((row) => row.id === templateId)?.name || "";
+                    setTemplateId(id);
+                    const nextName = items.find((row) => row.id === id)?.name || "";
+                    setLines((current) => {
+                      if (current.length === 1 && (!current[0].name.trim() || current[0].name === previous)) {
+                        return [{ ...current[0], name: nextName }];
+                      }
+                      return current;
+                    });
+                  }}
+                >
+                  {items.map((row) => (
+                    <option key={row.id} value={row.id}>{row.name}{row.isDefault ? " (по умолчанию)" : ""}</option>
+                  ))}
+                </select>
+              </label>
+              <ContractGenerateItems lines={lines} onChange={setLines} disabled={formBusy} />
+              <div className="actions">
+                <button type="button" className="btn" disabled={formBusy || !companyId || !templateId} onClick={() => void generateForCompany()}>
+                  {formBusy ? "Формируем…" : "Сформировать по шаблону"}
+                </button>
+                {companyId ? <Link className="btn secondary" to={`/companies/${companyId}`}>Карточка компании</Link> : null}
+              </div>
+            </>
+          )}
         </div>
       ) : null}
     </div>

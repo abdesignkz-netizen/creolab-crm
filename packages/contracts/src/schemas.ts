@@ -29,6 +29,15 @@ export const passwordResetRequestSchema = z.object({
   email: z.string().email(),
 });
 
+export const signupRequestSchema = z.object({
+  email: z.string().trim().email().max(200),
+  companyName: z.string().trim().min(2, "Укажите название компании").max(160),
+});
+
+export const updateSignupRequestSchema = z.object({
+  status: z.enum(["NEW", "DONE"]),
+});
+
 export const passwordResetCompleteSchema = z.object({
   token: z.string().min(20).max(200),
   password: z.string().min(10).max(200),

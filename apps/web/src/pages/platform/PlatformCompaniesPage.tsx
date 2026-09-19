@@ -71,6 +71,7 @@ function CompanyList() {
                   <th>Контакт</th>
                   <th>Участники</th>
                   <th>Подключения</th>
+                  <th>WhatsApp AI</th>
                   <th>Статус</th>
                   <th>Создана</th>
                 </tr>
@@ -84,6 +85,7 @@ function CompanyList() {
                     <td>{[item.contactEmail, item.contactPhone].filter(Boolean).join(" · ") || "—"}</td>
                     <td>{item.memberCount}</td>
                     <td>{item.connectionsLabel}</td>
+                    <td><Link to={`/admin/ai-managers/${item.id}`}>Промт и база</Link></td>
                     <td>
                       <span className={statusBadgeClass(STATUS_LABEL[item.status] || item.status)}>
                         {STATUS_LABEL[item.status] || item.status}

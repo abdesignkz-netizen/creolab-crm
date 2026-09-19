@@ -312,7 +312,8 @@ describe("shared AI Manager SaaS", () => {
     await saveTenantAiPrompt(prisma, platformAuth, tenantA, { draftPrompt: "Prompt A draft", publish: false });
     await saveTenantAiPrompt(prisma, platformAuth, tenantB, { draftPrompt: "Prompt B published", publish: true });
     const draftA = await getPublishedTenantAiContext(prisma, tenantA);
-    assert.equal(draftA.tenantPrompt, "");
+    assert.equal(draftA.tenantPrompt.includes("Prompt A draft"), false);
+    assert.match(draftA.tenantPrompt, /CreoLab/i);
     await saveTenantAiPrompt(prisma, platformAuth, tenantA, { draftPrompt: "Prompt A published", publish: true });
     const publishedA = await getPublishedTenantAiContext(prisma, tenantA);
     const publishedB = await getPublishedTenantAiContext(prisma, tenantB);
@@ -333,6 +334,86 @@ describe("shared AI Manager SaaS", () => {
     assert.ok(hitsA.items.some((item) => item.title === "Прайс A"));
     assert.ok(!hitsA.items.some((item) => item.title === "Прайс B"));
     await assert.rejects(() => getTenantAiManagerAdmin(prisma, ownerAuth, tenantA), (error: { status?: number }) => error.status === 403);
+  });
+
+  it("loads Creolab acting WhatsApp prompt and knowledge into the creolab tenant", async () => {
+    const { readCreolabAiManagerDefaults } = await import("../../../packages/db/src/creolabAiManagerDefaults.ts");
+    const defaults = readCreolabAiManagerDefaults();
+    assert.match(defaults.prompt, /AI-менеджер по продажам компании CreoLab/);
+    assert.match(defaults.knowledge, /50 000/);
+    const docs = await prisma.knowledgeDocument.findMany({ where: { tenantId: tenantA } });
+    const kb = docs.find((item) => item.title === "База знаний CreoLab");
+    assert.ok(kb);
+    assert.match(kb.content, /экспресс-сайт/i);
+    assert.equal(kb.status, "published");
+  });
+
+  it("stores each client WhatsApp prompt and knowledge in service admin", async () => {
+    const listed = await fetch(`${url}/api/v1/admin/ai-managers`, { headers: { cookie: platformCookie } });
+    assert.equal(listed.status, 200);
+    const listedBody = await listed.json();
+    assert.ok(Array.isArray(listedBody.items));
+    assert.ok(listedBody.items.some((row: { tenantId: string }) => row.tenantId === tenantA || row.tenantId === tenantB));
+    const ownerListed = await fetch(`${url}/api/v1/admin/ai-managers`, { headers: { cookie: ownerCookie } });
+    assert.equal(ownerListed.status, 403);
+    const saved = await fetch(`${url}/api/v1/admin/tenants/${tenantB}/ai-manager/prompt`, {
+      method: "PATCH",
+      headers: { cookie: platformCookie, "content-type": "application/json" },
+      body: JSON.stringify({ draftPrompt: "Ты менеджер компании Tenant B. Цены только из базы знаний.", publish: true }),
+    });
+    assert.equal(saved.status, 200);
+    const knowledge = await fetch(`${url}/api/v1/admin/tenants/${tenantB}/ai-manager/knowledge`, {
+      method: "POST",
+      headers: { cookie: platformCookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Услуги B", content: "Консультация 15 000 тенге", sourceType: "faq", publish: true }),
+    });
+    assert.equal(knowledge.status, 201);
+    const detail = await fetch(`${url}/api/v1/admin/tenants/${tenantB}/ai-manager`, { headers: { cookie: platformCookie } });
+    assert.equal(detail.status, 200);
+    const detailBody = await detail.json();
+    assert.match(String(detailBody.prompt?.published || ""), /Цены только из базы знаний/);
+    assert.ok((detailBody.knowledge || []).some((item: { title: string }) => item.title === "Услуги B"));
+    const listedAgain = await fetch(`${url}/api/v1/admin/ai-managers`, { headers: { cookie: platformCookie } });
+    const againBody = await listedAgain.json();
+    const row = (againBody.items || []).find((item: { tenantId: string }) => item.tenantId === tenantB);
+    assert.equal(row?.promptReady, true);
+    assert.ok(row?.knowledgeCount >= 1);
+    assert.equal(detailBody.activation?.prompt?.live, true);
+    assert.equal(detailBody.activation?.knowledge?.live, true);
+    assert.match(String(detailBody.activation?.prompt?.label || ""), /Активен в WhatsApp/);
+    assert.match(String(detailBody.activation?.knowledge?.label || ""), /Активна в WhatsApp/);
+    assert.equal(row?.promptLive, true);
+    assert.equal(row?.knowledgeLive, true);
+    assert.match(String(row?.promptActivation?.label || ""), /Активен в WhatsApp/);
+
+    const orphan = await prisma.tenant.create({ data: { name: "No WhatsApp", slug: `no-wa-${Date.now()}` } });
+    const orphanSaved = await fetch(`${url}/api/v1/admin/tenants/${orphan.id}/ai-manager/prompt`, {
+      method: "PATCH",
+      headers: { cookie: platformCookie, "content-type": "application/json" },
+      body: JSON.stringify({ draftPrompt: "Промт без WhatsApp", publish: true }),
+    });
+    assert.equal(orphanSaved.status, 200);
+    const orphanBody = await orphanSaved.json();
+    assert.equal(orphanBody.activation?.prompt?.live, false);
+    assert.match(String(orphanBody.activation?.prompt?.label || ""), /Не активен в WhatsApp/);
+    assert.match(String(orphanBody.activation?.prompt?.reason || ""), /не подключ/i);
+    const orphanListed = await fetch(`${url}/api/v1/admin/ai-managers`, { headers: { cookie: platformCookie } });
+    const orphanList = await orphanListed.json();
+    const orphanRow = (orphanList.items || []).find((item: { tenantId: string }) => item.tenantId === orphan.id);
+    assert.equal(orphanRow?.promptLive, false);
+    assert.match(String(orphanRow?.promptActivation?.label || ""), /Не активен в WhatsApp/);
+    const ownerSync = await fetch(`${url}/api/v1/admin/tenants/${tenantB}/ai-manager/sync`, {
+      method: "POST",
+      headers: { cookie: ownerCookie },
+    });
+    assert.equal(ownerSync.status, 403);
+    const platformSync = await fetch(`${url}/api/v1/admin/tenants/${tenantB}/ai-manager/sync`, {
+      method: "POST",
+      headers: { cookie: platformCookie },
+    });
+    assert.equal(platformSync.status, 200);
+    const syncBody = await platformSync.json();
+    assert.equal(syncBody.activation?.prompt?.live, true);
   });
 
   it("forbids tenant admin from AI usage and allows platform admin", async () => {

@@ -11,6 +11,15 @@ export type WhatsAppSellerSchema = {
   webhookToken?: string;
   webhookUrl?: string;
   greenApiHost?: string;
+  aiSync?: {
+    lastAttemptAt?: string;
+    lastAttemptOk?: boolean;
+    lastAttemptRegistered?: boolean;
+    lastAttemptNote?: string;
+    liveAt?: string;
+    livePromptFp?: string;
+    liveKnowledgeFp?: string;
+  };
 };
 
 export function sharedAiManagerUrl() {

@@ -147,9 +147,26 @@ export async function listTenantDocuments(
   });
 
   const include = {
-    deal: { select: { id: true, title: true, contact:{select:{name:true}}, assignee:{select:{user:{select:{name:true}}}}, electronicDocuments:{where:{type:"ESF"},orderBy:{createdAt:"desc" as const},take:1,select:{status:true}} } },
+    deal: {
+      select: {
+        id: true,
+        title: true,
+        contact: { select: { name: true } },
+        assignee: { select: { user: { select: { name: true } } } },
+        electronicDocuments: {
+          where: { type: { in: ["AVR", "ESF"] } },
+          orderBy: { createdAt: "desc" as const },
+          take: 50,
+          select: { type: true, status: true },
+        },
+      },
+    },
     company: { select: { id: true, name: true } },
   } as const;
+
+  function latestEdocStatus(docs: Array<{ type: string; status: string }> | undefined, type: "AVR" | "ESF") {
+    return docs?.find((row) => row.type === type)?.status || null;
+  }
 
   const [contracts, invoices, avrs, esfs, contractCount, invoiceCount, avrCount, esfCount, attention, contractKindCount, invoiceKindCount, avrKindCount, esfKindCount] =
     await Promise.all([
@@ -198,7 +215,8 @@ export async function listTenantDocuments(
         updatedAt: row.updatedAt,
         date: row.date,
         responsible: row.deal.assignee?.user.name || null,
-        esfStatus: row.deal.electronicDocuments[0]?.status || null,
+        avrStatus: latestEdocStatus(row.deal.electronicDocuments, "AVR"),
+        esfStatus: latestEdocStatus(row.deal.electronicDocuments, "ESF"),
         dealId: row.deal.id,
         dealTitle: row.deal.title,
         companyId: row.company?.id || null,
@@ -218,7 +236,8 @@ export async function listTenantDocuments(
         updatedAt: row.updatedAt,
         date: row.date,
         responsible: row.deal.assignee?.user.name || null,
-        esfStatus: row.deal.electronicDocuments[0]?.status || null,
+        avrStatus: latestEdocStatus(row.deal.electronicDocuments, "AVR"),
+        esfStatus: latestEdocStatus(row.deal.electronicDocuments, "ESF"),
         dealId: row.deal.id,
         dealTitle: row.deal.title,
         companyId: row.company?.id || null,
@@ -238,7 +257,8 @@ export async function listTenantDocuments(
         updatedAt: row.updatedAt,
         date: row.documentDate,
         responsible: row.deal.assignee?.user.name || null,
-        esfStatus: row.deal.electronicDocuments[0]?.status || null,
+        avrStatus: row.status,
+        esfStatus: latestEdocStatus(row.deal.electronicDocuments, "ESF"),
         dealId: row.deal.id,
         dealTitle: row.deal.title,
         companyId: row.company?.id || null,
@@ -258,7 +278,8 @@ export async function listTenantDocuments(
         updatedAt: row.updatedAt,
         date: row.documentDate,
         responsible: row.deal.assignee?.user.name || null,
-        esfStatus: row.deal.electronicDocuments[0]?.status || null,
+        avrStatus: latestEdocStatus(row.deal.electronicDocuments, "AVR"),
+        esfStatus: row.status,
         dealId: row.deal.id,
         dealTitle: row.deal.title,
         companyId: row.company?.id || null,
@@ -295,6 +316,7 @@ function serializeInboxItem(row: {
   updatedAt: Date;
   date: Date;
   responsible: string | null;
+  avrStatus: string | null;
   esfStatus: string | null;
   dealId: string;
   dealTitle: string;
@@ -312,7 +334,8 @@ function serializeInboxItem(row: {
     statusLabel: row.errorCode ? "Ошибка" : documentStatusLabel(row.kind, row.status),
     date: row.date.toISOString(),
     responsible: row.responsible,
-    esfStatus: row.esfStatus ? documentStatusLabel("ESF",row.esfStatus) : "Требуется",
+    avrStatus: row.avrStatus ? documentStatusLabel("AVR", row.avrStatus) : "Требуется",
+    esfStatus: row.esfStatus ? documentStatusLabel("ESF", row.esfStatus) : "Требуется",
     attention: isDocumentAttention(row.kind, row.status, row.errorCode),
     totalAmount: asMoney(row.totalAmount),
     currency: row.currency,

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import argon2 from "argon2";
 import { createPrismaClient } from "./client.ts";
+import { applyCreolabAiManagerDefaults } from "./creolabAiManagerDefaults.ts";
 
 function hashToken(value: string) {
   return createHash("sha256").update(value).digest("hex");
@@ -188,6 +189,8 @@ export async function seedDatabase() {
       },
     });
   }
+
+  await applyCreolabAiManagerDefaults(prisma, creolab.id);
 
   const formPublicKey = "frm_creolab_site_demo";
   let formIntegration = await prisma.integration.findFirst({

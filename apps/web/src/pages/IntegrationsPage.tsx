@@ -230,6 +230,7 @@ export function IntegrationsPage() {
         <h3>WhatsApp</h3>
         {setup?.whatsapp?.warning ? <div className="banner warn">{setup.whatsapp.warning}</div> : null}
         <p className="muted">{whatsappStatusNote(setup?.whatsapp)}</p>
+        <p className="muted">Как бот отвечает клиентам, задаёт администратор сервиса: промт и база знаний компании.</p>
         <p className="integ-status-line">
           Статус подключения
           <span className={statusBadgeClass(setup?.whatsapp?.configured ? "Подключён" : "Не подключён")}>

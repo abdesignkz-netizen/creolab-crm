@@ -24,6 +24,8 @@ import {
   loginSchema,
   passwordResetCompleteSchema,
   passwordResetRequestSchema,
+  signupRequestSchema,
+  updateSignupRequestSchema,
   lookupInquiryContactSchema,
   loseInquirySchema,
   nextActionSchema,
@@ -255,6 +257,11 @@ import {
   submitSupportArticleFeedback,
   upsertAdminSupportArticle,
 } from "./services/supportKnowledgeService.ts";
+import {
+  createSignupRequest,
+  listSignupRequests,
+  updateSignupRequest,
+} from "./services/signupRequestService.ts";
 import {
   createTenantConnection,
   disableTenantConnection,
@@ -523,6 +530,19 @@ export function createApp(prisma: PrismaClient) {
     rateLimit(`password-reset-complete:ip:${clientIp(req)}`, 8);
     const parsed = passwordResetCompleteSchema.parse(req.body || {});
     res.json(await completePasswordReset(prisma, parsed));
+  });
+
+  app.post("/api/v1/auth/signup-request", json, async (req, res) => {
+    const ip = clientIp(req);
+    rateLimit(`signup-request:ip:${ip}`, 5, 60 * 60 * 1000);
+    const parsed = signupRequestSchema.parse(req.body || {});
+    rateLimit(`signup-request:email:${parsed.email.toLowerCase()}`, 3, 60 * 60 * 1000);
+    res.json(
+      await createSignupRequest(prisma, parsed, {
+        ip,
+        userAgent: String(req.header("user-agent") || ""),
+      }),
+    );
   });
 
   app.get("/api/v1/me", async (req, res) => {
@@ -1886,6 +1906,15 @@ export function createApp(prisma: PrismaClient) {
     res.json(await platformOverview(prisma, await requireAuth(req)));
   });
 
+  app.get("/api/v1/admin/signup-requests", async (req, res) => {
+    res.json(await listSignupRequests(prisma, await requireAuth(req), req.query as Record<string, string>));
+  });
+
+  app.patch("/api/v1/admin/signup-requests/:id", json, async (req, res) => {
+    const parsed = updateSignupRequestSchema.parse(req.body || {});
+    res.json(await updateSignupRequest(prisma, await requireAuth(req), req.params.id, parsed));
+  });
+
   app.get("/api/v1/admin/tenants", async (req, res) => {
     res.json(await listPlatformCompanies(prisma, await requireAuth(req), req.query as Record<string, string>));
   });
@@ -1976,6 +2005,11 @@ export function createApp(prisma: PrismaClient) {
     res.json(await getTenantAiUsage(prisma, await requireAuth(req), req.params.id, req.query as Record<string, string>));
   });
 
+  app.get("/api/v1/admin/ai-managers", async (req, res) => {
+    const { listWhatsAppAiManagersAdmin } = await import("./services/tenantAiConfigService.ts");
+    res.json(await listWhatsAppAiManagersAdmin(prisma, await requireAuth(req), req.query as Record<string, string>));
+  });
+
   app.get("/api/v1/admin/tenants/:id/ai-manager", async (req, res) => {
     const { getTenantAiManagerAdmin } = await import("./services/tenantAiConfigService.ts");
     res.json(await getTenantAiManagerAdmin(prisma, await requireAuth(req), req.params.id));
@@ -2014,6 +2048,11 @@ export function createApp(prisma: PrismaClient) {
   app.post("/api/v1/admin/tenants/:id/ai-manager/preview", json, async (req, res) => {
     const { previewTenantAi } = await import("./services/tenantAiConfigService.ts");
     res.json(await previewTenantAi(prisma, await requireAuth(req), req.params.id, String(req.body?.message || "")));
+  });
+
+  app.post("/api/v1/admin/tenants/:id/ai-manager/sync", async (req, res) => {
+    const { syncTenantAiToWhatsApp } = await import("./services/tenantAiConfigService.ts");
+    res.json(await syncTenantAiToWhatsApp(prisma, await requireAuth(req), req.params.id));
   });
 
   app.get("/api/v1/admin/members", async (req, res) => {

@@ -1928,3 +1928,19 @@ model SupportQuickReply {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+model ServiceSignupRequest {
+  id                String    @id @default(uuid())
+  email             String
+  companyName       String
+  status            String    @default("NEW")
+  sourceIp          String?
+  userAgent         String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  processedAt       DateTime?
+  processedByUserId String?
+
+  @@index([status, createdAt])
+  @@index([email, createdAt])
+}

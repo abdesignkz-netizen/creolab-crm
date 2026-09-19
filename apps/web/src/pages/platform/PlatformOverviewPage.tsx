@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../../lib/api";
+import { PlatformSignupRequests } from "./PlatformSignupRequests";
 
 export function PlatformOverviewPage() {
   const [data, setData] = useState<any>(null);
@@ -16,6 +17,7 @@ export function PlatformOverviewPage() {
   if (!data) return <div className="state">Загрузка…</div>;
 
   const cards = [
+    ["Запросы на подключение", data.signupPending],
     ["Всего компаний", data.tenantsTotal],
     ["Активные", data.tenantsActive],
     ["Приостановленные", data.tenantsSuspended],
@@ -33,9 +35,11 @@ export function PlatformOverviewPage() {
         <div className="actions">
         <Link className="btn" to="/admin/companies/new">Добавить компанию</Link>
         <Link className="btn secondary" to="/admin/members">Пригласить участника</Link>
+        <Link className="btn secondary" to="/admin/ai-managers">Промт и база знаний</Link>
         <Link className="btn secondary" to="/admin/integrations?type=whatsapp_seller">Подключить интеграцию</Link>
         </div>
       </div>
+      <PlatformSignupRequests />
       <div className="kpi-grid">
         {cards.map(([label, value]) => (
           <div className="panel" key={label}>

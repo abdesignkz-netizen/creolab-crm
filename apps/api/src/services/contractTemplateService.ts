@@ -13,7 +13,7 @@ import { requireTenant } from "../lib/access.ts";
 import { beginDocumentExtraction } from "./documentExtractionGate.ts";
 import { requireDocumentsEnabled } from "./legalProfileService.ts";
 import { ensureDefaultTemplate } from "./contractTemplate.ts";
-import { rewriteScannedFragment, scanContractTemplateText, type TemplateSellerProfile } from "./contractTemplateScan.ts";
+import { rewriteScannedFragment, scanContractTemplateText, describeTemplateFields, type TemplateSellerProfile } from "./contractTemplateScan.ts";
 import { sniffWordKind, convertDocToDocx, wordFileToText } from "./wordDocumentText.ts";
 import { rewriteDocxText, ensureDocxItemsPlaceholder } from "./docxTemplateFill.ts";
 import { createContractDraft } from "./documentDraftService.ts";
@@ -44,6 +44,7 @@ function serializeTemplate(row: {
     isDefault: row.isDefault,
     fromWord: Boolean(row.sourceStorageKey),
     placeholders,
+    fields: describeTemplateFields(placeholders),
     preview: row.body.slice(0, 280),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),

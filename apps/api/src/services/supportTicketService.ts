@@ -190,14 +190,15 @@ export async function tenantSupportUnread(prisma: PrismaClient, auth: AuthContex
 
 export async function adminSupportUnread(prisma: PrismaClient, auth: AuthContext) {
   requirePlatformAdmin(auth);
-  const [open, unread] = await Promise.all([
+  const [open, unread, signupPending] = await Promise.all([
     prisma.supportTicket.count({ where: { status: { in: ["OPEN", "IN_PROGRESS"] } } }),
     prisma.supportTicket.aggregate({
       where: { status: { notIn: ["CLOSED", "RESOLVED"] }, adminUnread: { gt: 0 } },
       _sum: { adminUnread: true },
     }),
+    prisma.serviceSignupRequest.count({ where: { status: "NEW" } }),
   ]);
-  return { open, unread: unread._sum.adminUnread || 0 };
+  return { open, unread: unread._sum.adminUnread || 0, signupPending };
 }
 
 export async function listMySupportTickets(prisma: PrismaClient, auth: AuthContext) {

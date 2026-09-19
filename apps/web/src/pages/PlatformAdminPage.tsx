@@ -8,6 +8,7 @@ import { PlatformCatalogPage } from "./platform/PlatformCatalogPage";
 import { PlatformServiceSettingsPage } from "./platform/PlatformServiceSettingsPage";
 import { PlatformAuditPage } from "./platform/PlatformAuditPage";
 import { PlatformAiUsagePage } from "./platform/PlatformAiUsagePage";
+import { PlatformAiManagersPage } from "./platform/PlatformAiManagersPage";
 import { PlatformSupportPage } from "./platform/PlatformSupportPage";
 
 function AdminSection() {
@@ -20,6 +21,7 @@ function AdminSection() {
   if (pathname === "/admin/support" || pathname.startsWith("/admin/support/")) return <PlatformSupportPage />;
   if (pathname === "/admin/integrations") return <PlatformCatalogPage />;
   if (pathname === "/admin/settings") return <PlatformServiceSettingsPage />;
+  if (pathname === "/admin/ai-managers" || pathname.startsWith("/admin/ai-managers/")) return <PlatformAiManagersPage />;
   if (pathname === "/admin/ai-usage") return <PlatformAiUsagePage />;
   if (pathname === "/admin/audit") return <PlatformAuditPage />;
   return <Navigate to="/admin" replace />;

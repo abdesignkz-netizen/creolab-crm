@@ -74,6 +74,37 @@ export function formatDate(date: Date) {
   }).format(date);
 }
 
+export function formatContractHeadingDate(date: Date, timeZone = "Asia/Almaty") {
+  const parts = new Intl.DateTimeFormat("ru-RU", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    timeZone,
+  }).formatToParts(date);
+  const day = parts.find((part) => part.type === "day")?.value || "";
+  const month = parts.find((part) => part.type === "month")?.value || "";
+  const year = parts.find((part) => part.type === "year")?.value || "";
+  return `«${day}» ${month} ${year} г.`;
+}
+
+export function formatGroupedInt(amount: number) {
+  return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(Math.round(Number(amount) || 0));
+}
+
+export function amountWordsCapitalized(amount: number) {
+  const words = amountToKztWords(amount).replace(/\s+тенге[\s\S]*$/i, "").trim();
+  return words ? words[0].toUpperCase() + words.slice(1) : "";
+}
+
+export function paymentHalves(total: number) {
+  const cents = Math.round(Number(total) * 100);
+  const prepaymentCents = Math.floor(cents / 2);
+  return {
+    prepayment: prepaymentCents / 100,
+    remainder: (cents - prepaymentCents) / 100,
+  };
+}
+
 function vatLine(input: ContractPdfInput) {
   if (input.vatAmount > 0) {
     const rate = input.vatRate != null ? ` ${input.vatRate}%` : "";
@@ -83,9 +114,10 @@ function vatLine(input: ContractPdfInput) {
 }
 
 export function buildContractPlaceholders(input: ContractPdfInput) {
+  const halves = paymentHalves(input.totalAmount);
   return {
     contract_number: input.number,
-    contract_date: formatDate(input.date),
+    contract_date: formatContractHeadingDate(input.date),
     seller_name: input.sellerName,
     seller_bin: input.sellerBin,
     seller_address: input.sellerAddress,
@@ -107,6 +139,11 @@ export function buildContractPlaceholders(input: ContractPdfInput) {
     subject: input.subject,
     amount: formatKzt(input.totalAmount),
     amount_words: amountToKztWords(input.totalAmount),
+    amount_plain: formatGroupedInt(input.totalAmount),
+    prepayment_amount: formatGroupedInt(halves.prepayment),
+    prepayment_amount_words: amountWordsCapitalized(halves.prepayment),
+    remainder_amount: formatGroupedInt(halves.remainder),
+    remainder_amount_words: amountWordsCapitalized(halves.remainder),
     vat: vatLine(input),
     payment_terms: input.paymentTerms,
     completion_terms: input.completionTerms,

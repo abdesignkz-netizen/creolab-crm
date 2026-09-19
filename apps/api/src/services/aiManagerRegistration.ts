@@ -9,7 +9,7 @@ import {
   type WhatsAppSellerSchema,
 } from "./aiManagerConfig.ts";
 import { applyGreenApiWebhookUrl } from "./greenApiWebhook.ts";
-import { getPublishedTenantAiContext } from "./tenantAiConfigService.ts";
+import { getPublishedTenantAiContext, publishedAiFingerprints } from "./tenantAiConfigService.ts";
 
 function integrationSecretPlain(schema: WhatsAppSellerSchema) {
   if (!schema.secretEnc) return "";
@@ -128,11 +128,23 @@ export async function syncWhatsAppAiManagerRegistration(
     }
   }
 
+  const fps = publishedAiFingerprints(await getPublishedTenantAiContext(prisma, tenantId));
+  const attemptedAt = new Date().toISOString();
   const nextSchema: WhatsAppSellerSchema = {
     ...schema,
     sellerUrl,
     webhookToken,
     webhookUrl,
+    aiSync: {
+      ...(schema.aiSync || {}),
+      lastAttemptAt: attemptedAt,
+      lastAttemptOk: true,
+      lastAttemptRegistered: true,
+      lastAttemptNote: note,
+      liveAt: attemptedAt,
+      livePromptFp: fps.promptFp,
+      liveKnowledgeFp: fps.knowledgeFp,
+    },
   };
   await prisma.integration.update({
     where: { id: integrationId },
