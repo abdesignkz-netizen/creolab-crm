@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
+import { BrandLogo } from "../components/BrandLogo";
 import { normalizeLocale, t } from "../i18n";
 
 export function PlatformLoginPage() {
@@ -10,10 +11,7 @@ export function PlatformLoginPage() {
     <div className="login">
       <div className="login-stage">
         <div className="login-brand">
-          <div className="brand-mark" aria-hidden>
-            C
-          </div>
-          <h1 className="brand-wordmark">CREOLAB</h1>
+          <BrandLogo variant="login" />
           <p>{t(locale, "login.platformBrand")}</p>
         </div>
         <form

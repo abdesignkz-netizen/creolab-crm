@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useRef, useState, type MouseEvent, type Reac
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { api, setTenant } from "./lib/api";
 import { NavIcon } from "./components/NavIcon";
+import { BrandLogo } from "./components/BrandLogo";
 import { tip } from "./lib/tip";
 import { applyAppearance, emptyCaps, SessionContext, type Capabilities } from "./lib/session";
 import { normalizeLocale, t } from "./i18n";
@@ -205,7 +206,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
   };
   const pageTitle =
     Object.entries(titleMap).find(([path]) => location.pathname === path || location.pathname.startsWith(`${path}/`))?.[1] ||
-    "CREOLAB CRM";
+    "BasQar CRM";
   const inquiriesActive = location.pathname === "/inquiries" || location.pathname.startsWith("/requests/");
   const moreActive = moreLinks.some(([path]) => location.pathname === path || location.pathname.startsWith(`${path}/`));
 
@@ -354,13 +355,8 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
 
       <aside className="nav desktop-nav">
         <div className="nav-brand">
-          <div className="brand-mark" aria-hidden>
-            C
-          </div>
-          <div>
-            <h1>CREOLAB</h1>
-            <p>{me.activeTenant?.tenant?.name || "Нет компании"}</p>
-          </div>
+          <BrandLogo />
+          <p>{me.activeTenant?.tenant?.name || "Нет компании"}</p>
         </div>
         <nav className="nav-links">
           {workLinks.length ? <p className="nav-section">{t(locale, "nav.work")}</p> : null}
@@ -574,10 +570,7 @@ function Login() {
     <div className="login">
       <div className="login-stage">
         <div className="login-brand">
-          <div className="brand-mark" aria-hidden>
-            C
-          </div>
-          <h1 className="brand-wordmark">CREOLAB</h1>
+          <BrandLogo variant="login" />
           <p>CRM для продаж и диалогов — спокойный рабочий контур команды.</p>
         </div>
         <form
@@ -696,8 +689,7 @@ export function App() {
       <div className="login">
         <div className="login-stage">
           <div className="login-brand">
-            <div className="brand-mark" aria-hidden>C</div>
-            <h1 className="brand-wordmark">CREOLAB</h1>
+            <BrandLogo variant="login" />
           </div>
           <div className="panel">
             <h2>Компания недоступна</h2>
