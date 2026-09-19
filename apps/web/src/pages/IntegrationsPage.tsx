@@ -14,10 +14,9 @@ export function IntegrationsPage() {
   const [setup, setSetup] = useState<any>(null);
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
-  const [webhookSecret, setWebhookSecret] = useState("");
-  const [telegram, setTelegram] = useState<any>(null);
   const [formMethod, setFormMethod] = useState<ConnectMethod>("html");
   const [health, setHealth] = useState<any>(null);
+  const [telegram, setTelegram] = useState<any>(null);
 
   async function load() {
     setError("");
@@ -47,8 +46,8 @@ export function IntegrationsPage() {
   }
 
   const formCard = catalog?.leads?.find((i: any) => i.catalogType === "WEBSITE_FORM");
-  const webhookCard = catalog?.leads?.find((i: any) => i.catalogType === "WEBHOOK_API");
   const submitUrl = formCard?.submitUrl || setup?.form?.submitUrl;
+  const leadCards = (catalog?.leads || []).filter((card: any) => card.catalogType !== "WEBHOOK_API");
 
   return (
     <section className="integrations-page">
@@ -64,7 +63,7 @@ export function IntegrationsPage() {
 
       <h3 className="integ-section-title">Приём заявок и обращений</h3>
       <div className="integ-grid">
-        {(catalog?.leads || []).map((card: any) => (
+        {(leadCards).map((card: any) => (
           <div className="panel integ-card" key={card.catalogType}>
             <div className="integ-card-head">
               <b>{card.title}</b>
@@ -216,28 +215,6 @@ export function IntegrationsPage() {
               Включить тестовый режим
             </button>
           ) : null}
-        </div>
-      ) : null}
-
-      {setup?.webhook?.connected ? (
-        <div className="panel">
-          <h3>Webhook / API</h3>
-          <p>POST {setup.webhook.eventsUrl}</p>
-          <p className="muted">
-            Authorization: Bearer SECRET · X-CRM-Timestamp · X-CRM-Signature = HMAC-SHA256(secret, timestamp + "." +
-            rawBody). Replay window 5 мин. Idempotency: event_id.
-          </p>
-          <button
-            className="btn secondary"
-            onClick={async () => {
-              const result = (await api.rotateWebhook(setup.webhook.id)) as any;
-              setWebhookSecret(result.secret);
-              setNote(result.note);
-            }}
-          >
-            Выдать новый секрет
-          </button>
-          {webhookSecret ? <pre className="code">{webhookSecret}</pre> : null}
         </div>
       ) : null}
 
@@ -421,26 +398,6 @@ export function IntegrationsPage() {
         <p className="muted" style={{ marginTop: 8 }}>
           Также: <Link to="/settings">Настройки</Link> · это не источник заявок.
         </p>
-      </div>
-
-      <h3 className="integ-section-title">Журнал событий</h3>
-      <div className="panel">
-        {(catalog?.eventLog || []).length === 0 ? <p className="muted">Пока пусто</p> : null}
-        <div className="timeline">
-          {(catalog?.eventLog || []).slice(0, 20).map((e: any) => (
-            <div className="timeline-item" key={e.id}>
-              <div className="muted">{new Date(e.at).toLocaleString("ru-RU")}</div>
-              <b>
-                {e.integrationName} · {e.eventType}
-              </b>
-              <div className="muted">
-                {e.statusLabel}
-                {e.test ? " · тест" : ""}
-                {e.error ? ` · ${e.error}` : ""}
-              </div>
-            </div>
-          ))}
-        </div>
       </div>
 
       {health ? (
