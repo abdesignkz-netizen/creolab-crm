@@ -354,7 +354,7 @@ export function ContractTemplatePanel() {
       ) : null}
 
       {generateOpen ? (
-        <div className="stack" style={{ marginTop: 12 }} role="region" aria-label="Формирование договора по шаблону">
+        <div className="contract-template-expand stack" role="region" aria-label="Формирование договора по шаблону">
           {templatesLoading ? (
             <p className="muted">Загрузка шаблонов…</p>
           ) : !items.length ? (

@@ -193,8 +193,8 @@ export function DocumentsPage() {
 
       {!disabled ? (
         <div className="documents-start-grid">
-          <ManualPdfImportPanel onSaved={() => void load()} />
           <ContractTemplatePanel />
+          <ManualPdfImportPanel onSaved={() => void load()} />
         </div>
       ) : null}
 

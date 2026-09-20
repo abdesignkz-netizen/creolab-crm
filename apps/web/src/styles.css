@@ -2669,7 +2669,44 @@ button.linkish {
   gap: 14px;
   align-items: start;
 }
-.documents-start-grid > .panel { margin: 0; min-width: 0; }
+.documents-start-grid > .panel {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.documents-start-grid .saved-editor-summary {
+  align-items: flex-start;
+}
+.contract-template-expand {
+  margin-top: 12px;
+  min-width: 0;
+}
+.contract-template-expand .row {
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+.contract-template-expand .row > :first-child {
+  min-width: 0;
+  flex: 1 1 12rem;
+}
+.contract-template-expand .row .actions {
+  flex: 1 1 auto;
+  justify-content: flex-start;
+}
+.contract-template-expand select,
+.contract-template-expand input,
+.contract-template-expand textarea {
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.documents-start-grid .contract-gen-line {
+  grid-template-columns: 1fr 1fr;
+}
+.documents-start-grid .contract-gen-line label:first-child,
+.documents-start-grid .contract-gen-line .btn {
+  grid-column: 1 / -1;
+}
 @media (max-width: 900px) {
   .documents-start-grid { grid-template-columns: 1fr; }
 }
