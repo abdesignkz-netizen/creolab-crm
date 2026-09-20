@@ -63,9 +63,40 @@ h1, h2, h3, .card strong, .client-row-title, .nav h1, .brand-wordmark {
 .app-shell {
   display: grid;
   grid-template-columns: var(--nav-w) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-areas: "nav main";
   min-height: 100vh;
   min-height: 100dvh;
   background: var(--bg);
+}
+.app-shell.has-preview {
+  height: 100vh;
+  height: 100dvh;
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas:
+    "banner banner"
+    "nav main";
+}
+.preview-banner {
+  grid-area: banner;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 16px 8px 18px;
+  background: var(--accent-soft);
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.35;
+  z-index: 6;
+}
+.preview-banner .btn {
+  min-height: 34px;
+  width: auto;
+  margin: 0;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .nav {
@@ -79,6 +110,12 @@ h1, h2, h3, .card strong, .client-row-title, .nav h1, .brand-wordmark {
   padding: 12px 8px 12px;
   border-right: 1px solid var(--line);
   background: #fff;
+  min-width: 0;
+}
+.app-shell.has-preview .nav {
+  height: auto;
+  max-height: none;
+  position: relative;
 }
 
 .nav-brand {
@@ -93,7 +130,8 @@ h1, h2, h3, .card strong, .client-row-title, .nav h1, .brand-wordmark {
 
 .brand-logo {
   display: block;
-  width: 64%;
+  width: 148px;
+  max-width: 100%;
   height: auto;
   background: transparent;
 }
@@ -214,6 +252,15 @@ h1, h2, h3, .card strong, .client-row-title, .nav h1, .brand-wordmark {
   width: 100%;
   margin: 0;
   animation: none;
+  grid-area: main;
+  min-width: 0;
+}
+.app-shell.has-preview .main {
+  min-height: 0;
+  overflow: auto;
+}
+.desktop-nav {
+  grid-area: nav;
 }
 
 @keyframes rise-in {
@@ -1455,17 +1502,6 @@ fieldset.field-block legend { padding: 0 6px; font-weight: 600; }
   place-items: center;
   text-decoration: none;
 }
-.preview-banner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 16px;
-  background: #eef6ff;
-  border-bottom: 1px solid var(--line, #d7e4f2);
-  font-size: 0.95rem;
-}
-.preview-banner .btn { min-height: 36px; width: auto; }
 .paywall-backdrop {
   position: fixed;
   inset: 0;
@@ -1474,12 +1510,27 @@ fieldset.field-block legend { padding: 0 6px; font-weight: 600; }
   place-items: center;
   z-index: 80;
   padding: 16px;
+  grid-column: 1 / -1;
+  grid-row: 1 / -1;
 }
 .paywall-card { max-width: 420px; width: 100%; }
 .onboarding-steps { display: grid; gap: 12px; padding-left: 18px; }
 .onboarding-steps li { display: grid; gap: 8px; }
 .onboarding-steps li.is-done { opacity: 0.7; }
 .preview-demo { margin: 0 0 16px; }
+.preview-demo .dash-spot-grid { margin-top: 12px; }
+.onboarding-card {
+  display: grid;
+  gap: 12px;
+  margin: 0 0 18px;
+  padding: 20px 22px;
+}
+.preview-welcome {
+  max-width: none;
+  align-items: start;
+}
+.preview-welcome h3 { margin: 0; }
+.preview-welcome .btn { width: auto; min-height: 40px; justify-self: start; }
 .signup-request-list { display: grid; gap: 8px; }
 .signup-request-row {
   display: flex;
@@ -1593,6 +1644,16 @@ fieldset.field-block legend { padding: 0 6px; font-weight: 600; }
   .main {
     padding: 14px 14px 28px;
     max-width: 100%;
+    grid-column: auto;
+    grid-row: auto;
+  }
+  .app-shell.has-preview {
+    height: auto;
+  }
+  .preview-banner {
+    position: sticky;
+    top: 0;
+    z-index: 41;
   }
 
   .mobile-tabbar {

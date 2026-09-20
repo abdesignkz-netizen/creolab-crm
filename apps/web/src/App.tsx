@@ -444,7 +444,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
   }
 
   return (
-    <div className={`app-shell ${moreOpen ? "more-open" : ""}`}>
+    <div className={`app-shell ${moreOpen ? "more-open" : ""} ${hasCompany && me?.billing?.previewMode && !inServiceAdmin ? "has-preview" : ""}`}>
       {hasCompany && me?.billing?.previewMode && !inServiceAdmin ? (
         <div className="preview-banner" role="status">
           <span>{t(locale, "preview.banner")}</span>
