@@ -51,6 +51,50 @@ function timeShort(iso: string | null | undefined) {
   return new Date(iso).toLocaleString("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
+function dayGreeting() {
+  const hour = new Date().getHours();
+  if (hour < 5) return "Доброй ночи";
+  if (hour < 12) return "Доброе утро";
+  if (hour < 18) return "Добрый день";
+  return "Добрый вечер";
+}
+
+function firstName(me: { user?: { name?: string } } | null | undefined) {
+  const raw = String(me?.user?.name || "").trim();
+  return raw ? raw.split(/\s+/)[0] : "";
+}
+
+const ICONS = {
+  home: "M3 10 12 3l9 7M5 9v11h5v-6h4v6h5V9",
+  inquiries: "M5 3h14v18H5V3m4 5h6m-6 4h6m-6 4h3",
+  contacts: "M16 21v-2a5 5 0 0 0-10 0v2m5-18a4 4 0 1 0 0 8 4 4 0 0 0 0-8",
+  deals: "M3 5h5v14H3V5m7 0h5v10h-5V5m7 0h4v7h-4V5",
+  tasks: "M8 4h12v17H4V4h4m0-2h8v4H8V2m0 9 2 2 5-5",
+  conversations: "M4 4h16v12H9l-5 4V4m4 5h8m-8 3h5",
+  documents: "M7 3h8l5 5v13H7V3m8 0v5h5",
+  reply: "M4 4h16v12H9l-5 4V4",
+  clock: "M12 8v5l3 2m6-3a9 9 0 1 1-18 0 9 9 0 0 1 18 0",
+  human: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8m-7 9a7 7 0 0 1 14 0",
+  stalled: "M4 12h4l3-8 4 16 3-8h4",
+  money: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18m-3 6h5a2 2 0 0 1 0 4h-4a2 2 0 0 0 0 4h6M12 7v2m0 8v2",
+  lost: "M16 8l-8 8m0-8 8 8",
+  conversion: "M4 16l5-5 4 4 7-7M14 8h6v6",
+  ai: "M12 3v3m0 12v3M3 12h3m12 0h3M7.2 7.2l2.1 2.1m5.4 5.4 2.1 2.1m0-9.6-2.1 2.1M7.2 16.8l2.1-2.1",
+  phone: "M7 3h10v18H7V3m3 15h4",
+  contract: "M7 3h8l5 5v13H7V3m8 0v5h5M9 13h6m-6 4h4",
+  warning: "M12 9v4m0 3h.01M10.3 4.7 2.8 18a2 2 0 0 0 1.7 3h15a2 2 0 0 0 1.7-3L13.7 4.7a2 2 0 0 0-3.4 0Z",
+};
+
+type DashTone = "sky" | "mint" | "amber" | "rose" | "violet" | "slate";
+
+function DashIcon({ d }: { d: string }) {
+  return (
+    <svg className="dash-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d={d} />
+    </svg>
+  );
+}
+
 function Kpi({
   label,
   value,
@@ -59,6 +103,8 @@ function Kpi({
   deltaPercent,
   to,
   emphasize,
+  tone,
+  icon,
 }: {
   label: string;
   value: ReactNode;
@@ -67,24 +113,61 @@ function Kpi({
   deltaPercent?: number | null;
   to?: string;
   emphasize?: boolean;
+  tone?: DashTone;
+  icon?: string;
 }) {
   const change = deltaText(delta, deltaPercent);
   const inner = (
     <>
-      <span className="muted">{label}</span>
+      <span className="dash-kpi-top">
+        {icon ? (
+          <span className="dash-kpi-icon">
+            <DashIcon d={icon} />
+          </span>
+        ) : null}
+        <span className="muted">{label}</span>
+      </span>
       <strong className={emphasize ? "kpi-emphasize" : undefined}>{value}</strong>
       {hint ? <span className="kpi-hint">{hint}</span> : null}
       {change ? <span className="kpi-delta">{change}</span> : null}
     </>
   );
+  const className = `sit-kpi dash-kpi${tone ? ` dash-kpi-${tone}` : ""}`;
   if (to) {
     return (
-      <Link className="sit-kpi" to={to}>
+      <Link className={className} to={to}>
         {inner}
       </Link>
     );
   }
-  return <div className="sit-kpi">{inner}</div>;
+  return <div className={className}>{inner}</div>;
+}
+
+function SpotCard({
+  label,
+  value,
+  to,
+  tone,
+  icon,
+}: {
+  label: string;
+  value: number;
+  to: string;
+  tone: DashTone;
+  icon: string;
+}) {
+  const count = Number(value) || 0;
+  return (
+    <Link className={`dash-spot dash-spot-${tone}${count ? " is-live" : ""}`} to={to}>
+      <span className="dash-spot-icon">
+        <DashIcon d={icon} />
+      </span>
+      <span className="dash-spot-copy">
+        <strong>{count}</strong>
+        <span>{label}</span>
+      </span>
+    </Link>
+  );
 }
 
 export function SituationPage() {
@@ -200,25 +283,36 @@ export function SituationPage() {
     const tasks = items.filter((item: any) => String(item.kind || "").startsWith("task"));
     const dialogs = items.filter((item: any) => String(item.kind || "").startsWith("conversation"));
     return (
-      <section className="situation-page">
+      <section className="situation-page dash-home">
         <div className="page-head sit-head">
           <div>
-            <h2>Главная</h2>
-            {badgeHint ? <p className="muted sit-badge-explain">{badgeHint}</p> : null}
+            <h2 className="dash-title">
+              {dayGreeting()}
+              {firstName(me) ? (
+                <>
+                  , <span className="dash-title-name">{firstName(me)}</span>
+                </>
+              ) : null}
+            </h2>
+            {badgeHint ? <p className="muted sit-badge-explain">{badgeHint}</p> : <p className="muted">Что нужно сделать сейчас.</p>}
           </div>
         </div>
         {error ? <p className="error">{error}</p> : null}
-        <div className="sit-kpi-grid">
-          <Kpi label="Доступные заявки" value={inquiries.length} to="/inquiries" />
-          <Kpi label="Сделки" value={deals.length} to="/deals" />
-          <Kpi label="Задачи" value={tasks.length} to="/tasks" />
-          <Kpi label="Диалоги" value={dialogs.length} to="/conversations" />
+        <p className="dash-block-label">Сейчас важно</p>
+        <div className="dash-spot-grid">
+          <SpotCard label="Заявки" value={inquiries.length} to="/inquiries" tone="sky" icon={ICONS.inquiries} />
+          <SpotCard label="Сделки" value={deals.length} to="/deals" tone="mint" icon={ICONS.deals} />
+          <SpotCard label="Задачи" value={tasks.length} to="/tasks" tone="amber" icon={ICONS.tasks} />
+          <SpotCard label="Диалоги" value={dialogs.length} to="/conversations" tone="violet" icon={ICONS.conversations} />
         </div>
-        <div className="panel">
-          <b>Что требует внимания</b>
-          {!items.length ? <p className="empty">Сейчас ничего не требует внимания</p> : null}
+        <div className="sit-section dash-panel">
+          <div className="sit-section-head">
+            <h3>Что требует внимания</h3>
+            <span className="muted">{items.length ? `${items.length}` : "Пусто"}</span>
+          </div>
+          {!items.length ? <p className="empty sit-empty-ok">Сейчас ничего не требует внимания</p> : null}
           {items.slice(0, 40).map((item: any) => (
-            <div className="row" key={item.id}>
+            <div className="dash-attn-item" key={item.id}>
               <div>
                 <b>{item.title}</b>
                 <div className="muted">{item.subtitle || item.reason || item.kind}</div>
@@ -308,11 +402,18 @@ export function SituationPage() {
 
 
   return (
-    <section className="situation-page">
+    <section className="situation-page dash-home">
       <div className="page-head sit-head">
         <div>
-          <h2>Главная</h2>
-          {badgeHint ? <p className="muted sit-badge-explain">{badgeHint}</p> : null}
+          <h2 className="dash-title">
+            {dayGreeting()}
+            {firstName(me) ? (
+              <>
+                , <span className="dash-title-name">{firstName(me)}</span>
+              </>
+            ) : null}
+          </h2>
+          {badgeHint ? <p className="muted sit-badge-explain">{badgeHint}</p> : <p className="muted">Обзор работы компании на одном экране.</p>}
         </div>
         <div className="sit-meta">
           <span className={data.aiManager?.status === "error" ? "error" : "muted"}>{data.aiManager?.label}</span>
@@ -320,16 +421,53 @@ export function SituationPage() {
         </div>
       </div>
 
-      {data.aiManager?.newRequests && Object.values(data.aiManager.newRequests).some(value => Number(value) > 0) ? (
-        <div className="sit-kpi-grid" style={{ marginBottom: 12 }}>
-          <Kpi label="AI обрабатывает заявки" value={data.aiManager.newRequests.processing} to="/inquiries?filter=ai_processing" />
-          <Kpi label="Ожидают менеджера" value={data.aiManager.newRequests.needsHuman} to="/inquiries?filter=ai_needs_human" />
-          <Kpi label="Ошибка обработки AI" value={data.aiManager.newRequests.analysisFailed} to="/inquiries?filter=ai_failed" />
+      <div className="dash-controls">
+        <div className="sit-toolbar">
+          <div className="sit-toolbar-side">
+            <div className="segmented sit-scope">
+              {(
+                [
+                  ["all", "Все"],
+                  ["mine", "Мои"],
+                  ["unassigned", "Без ответственного"],
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={scope === value ? "btn" : "btn secondary"}
+                  onClick={() => setScope(value)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              className={onlyImportant ? "btn" : "btn secondary"}
+              onClick={() => setOnlyImportant((v) => !v)}
+            >
+              Только важное
+            </button>
+          </div>
         </div>
-      ) : null}
+        <div className="sit-period-bar">
+          <PeriodSelector
+            period={period}
+            onPeriodChange={setPeriod}
+            dateFrom={dateFrom}
+            dateTo={dateTo}
+            onDateFromChange={setDateFrom}
+            onDateToChange={setDateTo}
+            activeLabel={data.period?.label}
+          />
+        </div>
+      </div>
+
+      {error ? <p className="error">{error}</p> : null}
 
       {(data.integrationAlerts || []).length > 0 ? (
-        <div className="banner warn" style={{ marginBottom: 12 }}>
+        <div className="banner warn dash-alert">
           <div>
             {(data.integrationAlerts as any[]).map((a) => (
               <div key={a.id}>
@@ -344,9 +482,27 @@ export function SituationPage() {
         </div>
       ) : null}
 
-      {error ? <p className="error">{error}</p> : null}
+      <p className="dash-block-label">Сейчас важно</p>
+      <div className="dash-spot-grid">
+        <SpotCard label="Нужно ответить" value={attention.summary.needsReply} to="/contacts?filter=needs_reply" tone="amber" icon={ICONS.reply} />
+        <SpotCard label="Нужен человек" value={attention.summary.needsHuman} to="/conversations?filter=attention" tone="rose" icon={ICONS.human} />
+        <SpotCard label="Просрочено" value={attention.summary.overdueTasks} to="/tasks?filter=overdue" tone="rose" icon={ICONS.clock} />
+        <SpotCard label="Без шага" value={attention.summary.noNextAction ?? nextActionItems.length} to={noNextHref} tone="amber" icon={ICONS.tasks} />
+        <SpotCard label="Зависли" value={attention.summary.stalledDeals} to={path("/deals", { focus: "stalled" })} tone="slate" icon={ICONS.stalled} />
+        <SpotCard label="КП без ответа" value={attention.summary.proposalWithoutReply ?? 0} to={path("/deals", { focus: "proposal_no_reply" })} tone="violet" icon={ICONS.documents} />
+        <SpotCard label="Документы" value={attention.summary.documentsToClose ?? 0} to="/documents/avr/new?filter=all" tone="sky" icon={ICONS.contract} />
+        <SpotCard label="Нет контакта" value={attention.summary.noContact} to={path("/today", { ...periodParams, attention: "no_contact" }) + "#attention"} tone="slate" icon={ICONS.phone} />
+        {data.aiManager?.newRequests && Object.values(data.aiManager.newRequests).some((value) => Number(value) > 0) ? (
+          <>
+            <SpotCard label="AI обрабатывает" value={data.aiManager.newRequests.processing} to="/inquiries?filter=ai_processing" tone="violet" icon={ICONS.ai} />
+            <SpotCard label="Ждут менеджера" value={data.aiManager.newRequests.needsHuman} to="/inquiries?filter=ai_needs_human" tone="amber" icon={ICONS.human} />
+            <SpotCard label="Ошибка AI" value={data.aiManager.newRequests.analysisFailed} to="/inquiries?filter=ai_failed" tone="rose" icon={ICONS.warning} />
+          </>
+        ) : null}
+      </div>
 
-      <div className="sit-section sit-attention" id="attention">
+      <div className="dash-home-split">
+      <div className="sit-section sit-attention dash-panel" id="attention">
         <div className="sit-section-head">
           <div>
             <h3>Требует внимания</h3>
@@ -356,23 +512,13 @@ export function SituationPage() {
             </p>
           </div>
         </div>
-        <div className="sit-attn-summary">
-          <Link to="/documents/avr/new?filter=all">Документы требуют закрытия · {attention.summary.documentsToClose ?? 0}</Link>
-          <Link to="/contacts?filter=needs_reply">Нужно ответить · {attention.summary.needsReply}</Link>
-          <Link to="/tasks?filter=overdue">Просрочено · {attention.summary.overdueTasks}</Link>
-          <Link to={path("/deals", { focus: "proposal_no_reply" })}>КП без ответа · {attention.summary.proposalWithoutReply ?? 0}</Link>
-          <Link to={noNextHref}>Без шага · {attention.summary.noNextAction ?? nextActionItems.length}</Link>
-          <Link to={path("/deals", { focus: "stalled" })}>Зависли · {attention.summary.stalledDeals}</Link>
-          <Link to="/conversations?filter=attention">Нужен человек · {attention.summary.needsHuman}</Link>
-          <Link to={path("/today", { ...periodParams, attention: "no_contact" }) + "#attention"}>Нет контакта · {attention.summary.noContact}</Link>
-        </div>
 
         {attentionFilter ? <button className="btn secondary" onClick={() => setAttentionFilter("")}>Показать все действия</button> : null}
         {visibleAttention.length === 0 ? (
           <p className="empty sit-empty-ok">{attention.emptyLabel}</p>
         ) : (
           visibleAttention.map((item: any) => (
-            <div className={`row severity-${item.severity} sit-attn-row`} key={item.id}>
+            <div className={`dash-attn-item severity-${item.severity}`} key={item.id}>
               <div>
                 <b>{nameWithPhone(item.contactName || item.title, item.phone)}</b>
                 {item.interest && item.interest !== item.reason ? <div className="muted">{item.interest}</div> : null}
@@ -449,39 +595,10 @@ export function SituationPage() {
         )}
       </div>
 
-      <div className="sit-toolbar">
-        <div className="sit-toolbar-side">
-          <div className="segmented sit-scope">
-            {(
-              [
-                ["all", "Все"],
-                ["mine", "Мои"],
-                ["unassigned", "Без ответственного"],
-              ] as const
-            ).map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                className={scope === value ? "btn" : "btn secondary"}
-                onClick={() => setScope(value)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <button
-            type="button"
-            className={onlyImportant ? "btn" : "btn secondary"}
-            onClick={() => setOnlyImportant((v) => !v)}
-          >
-            Только важное
-          </button>
-        </div>
-      </div>
-
-      <form className="sit-section sit-ask" id="ask-ai" onSubmit={onAsk}>
+      <div className="dash-side">
+      <form className="sit-section sit-ask dash-panel dash-ask" id="ask-ai" onSubmit={onAsk}>
         <div className="sit-section-head">
-          <h3>Спросите CreoLab AI о Вашем бизнесе</h3>
+          <h3>Спросите о бизнесе</h3>
         </div>
         <div className="sit-ask-row">
           <input
@@ -545,11 +662,11 @@ export function SituationPage() {
           </div>
         ) : null}
         <p className="muted sit-ask-note">
-          AI смотрит текущие заявки, сделки, задачи и диалоги и отвечает по смыслу вопроса. Команды вроде «напиши» или «отправь КП» открывают постановку задачи.
+          AI смотрит заявки, сделки, задачи и диалоги. Команды вроде «напиши» открывают постановку задачи.
         </p>
       </form>
 
-      <div className="sit-brief" id="insights">
+      <div className="sit-brief dash-brief" id="insights">
         <b>AI-сводка</b>
         {insights.length ? (
           <ul className="sit-insights">
@@ -569,17 +686,7 @@ export function SituationPage() {
           <p>{data.brief}</p>
         )}
       </div>
-
-      <div className="sit-period-bar">
-        <PeriodSelector
-          period={period}
-          onPeriodChange={setPeriod}
-          dateFrom={dateFrom}
-          dateTo={dateTo}
-          onDateFromChange={setDateFrom}
-          onDateToChange={setDateTo}
-          activeLabel={data.period?.label}
-        />
+      </div>
       </div>
 
       <div className="sit-section sit-result" id="sit-result">
@@ -588,10 +695,10 @@ export function SituationPage() {
           <span className="muted">Результат выбранного периода</span>
         </div>
         <div className="sit-kpi-grid">
-          <Kpi label="Обращения" value={r.inquiries} delta={r.deltas?.inquiries} deltaPercent={r.deltas?.inquiriesPct} to={path("/inquiries", { test: "false" }, true)} />
-          <Kpi label="Новые клиенты" value={r.newClients} delta={r.deltas?.newClients} deltaPercent={r.deltas?.newClientsPct} to={path("/contacts", { owner: scope === "mine" ? "me" : scope === "unassigned" ? "unassigned" : "" }, true)} />
-          <Kpi label="Сделки" value={r.dealsCreated} delta={r.deltas?.dealsCreated} deltaPercent={r.deltas?.dealsCreatedPct} to={path("/deals", { timeMode: "period", basis: "created" }, true)} />
-          <Kpi label="Продажи" value={r.wonDeals} delta={r.deltas?.wonDeals} deltaPercent={r.deltas?.wonDealsPct} to={path("/deals", { timeMode: "period", basis: "closed", outcome: "won" }, true)} emphasize />
+          <Kpi label="Обращения" value={r.inquiries} delta={r.deltas?.inquiries} deltaPercent={r.deltas?.inquiriesPct} to={path("/inquiries", { test: "false" }, true)} tone="sky" icon={ICONS.inquiries} />
+          <Kpi label="Новые клиенты" value={r.newClients} delta={r.deltas?.newClients} deltaPercent={r.deltas?.newClientsPct} to={path("/contacts", { owner: scope === "mine" ? "me" : scope === "unassigned" ? "unassigned" : "" }, true)} tone="sky" icon={ICONS.contacts} />
+          <Kpi label="Сделки" value={r.dealsCreated} delta={r.deltas?.dealsCreated} deltaPercent={r.deltas?.dealsCreatedPct} to={path("/deals", { timeMode: "period", basis: "created" }, true)} tone="slate" icon={ICONS.deals} />
+          <Kpi label="Продажи" value={r.wonDeals} delta={r.deltas?.wonDeals} deltaPercent={r.deltas?.wonDealsPct} to={path("/deals", { timeMode: "period", basis: "closed", outcome: "won" }, true)} emphasize tone="mint" icon={ICONS.money} />
           <Kpi
             label="Продано"
             value={r.wonAmountLabel || "—"}
@@ -606,12 +713,16 @@ export function SituationPage() {
             deltaPercent={r.deltas?.wonAmountPct}
             to={path("/deals", { timeMode: "period", basis: "closed", outcome: "won" }, true)}
             emphasize
+            tone="mint"
+            icon={ICONS.money}
           />
           <Kpi
             label="Потеряно"
             value={r.lostDeals}
             hint={r.lostReasons?.[0] ? `${r.lostReasons[0].reason} · ${r.lostReasons[0].count}` : undefined}
             to={path("/deals", { timeMode: "period", basis: "closed", outcome: "lost" }, true)}
+            tone="rose"
+            icon={ICONS.lost}
           />
           {r.conversionRate != null ? (
             <Kpi
@@ -620,6 +731,8 @@ export function SituationPage() {
               hint={`${r.wonDeals} продаж из ${r.inquiries} обращений`}
               deltaPercent={r.deltas?.conversionPct}
               to={path("/deals", { timeMode: "period", basis: "closed", outcome: "won" }, true)}
+              tone="violet"
+              icon={ICONS.conversion}
             />
           ) : null}
         </div>
@@ -643,9 +756,9 @@ export function SituationPage() {
           <span className="muted">Не за период — как сейчас</span>
         </div>
         <div className="sit-kpi-grid sit-kpi-grid-current">
-          <Kpi label="Новые заявки" value={c.newInquiries ?? 0} to={path("/inquiries", { filter: "new", test: "false" })} emphasize />
-          <Kpi label="Заявки в работе" value={c.inWorkInquiries ?? 0} to={path("/inquiries", { filter: "in_progress", test: "false" })} />
-          <Kpi label="Активные сделки" value={c.activeDeals} to={path("/deals")} emphasize />
+          <Kpi label="Новые заявки" value={c.newInquiries ?? 0} to={path("/inquiries", { filter: "new", test: "false" })} emphasize tone="sky" icon={ICONS.inquiries} />
+          <Kpi label="Заявки в работе" value={c.inWorkInquiries ?? 0} to={path("/inquiries", { filter: "in_progress", test: "false" })} tone="slate" icon={ICONS.inquiries} />
+          <Kpi label="Активные сделки" value={c.activeDeals} to={path("/deals")} emphasize tone="mint" icon={ICONS.deals} />
             <Kpi
               label="Сумма сделок"
               value={c.activePipelineAmountLabel || "—"}
@@ -656,14 +769,16 @@ export function SituationPage() {
               }
               to={path("/deals")}
               emphasize
+              tone="mint"
+              icon={ICONS.money}
             />
-          <Kpi label="На договоре" value={c.contractStage} to={path("/deals", { stage: "contract" })} />
-          <Kpi label="Заявки ждут клиента" value={c.waitingClientInquiries} to={path("/inquiries", {filter: "waiting_client", test: "false"})} />
-          <Kpi label="Нужен ответ" value={c.needsReply} to="/contacts?filter=needs_reply" />
-          <Kpi label="Без следующего шага" value={nextActionItems.length} to={noNextHref} />
-          <Kpi label="Просрочено" value={c.overdueTasks} to="/tasks?filter=overdue" />
-          <Kpi label="Зависли" value={c.stalledDeals} to={path("/deals", { focus: "stalled" })} />
-          <Kpi label="КП без ответа" value={c.proposalWithoutReply ?? 0} to={path("/deals", { focus: "proposal_no_reply" })} />
+          <Kpi label="На договоре" value={c.contractStage} to={path("/deals", { stage: "contract" })} tone="violet" icon={ICONS.contract} />
+          <Kpi label="Заявки ждут клиента" value={c.waitingClientInquiries} to={path("/inquiries", {filter: "waiting_client", test: "false"})} tone="amber" icon={ICONS.clock} />
+          <Kpi label="Нужен ответ" value={c.needsReply} to="/contacts?filter=needs_reply" tone="amber" icon={ICONS.reply} />
+          <Kpi label="Без следующего шага" value={nextActionItems.length} to={noNextHref} tone="amber" icon={ICONS.tasks} />
+          <Kpi label="Просрочено" value={c.overdueTasks} to="/tasks?filter=overdue" tone="rose" icon={ICONS.clock} />
+          <Kpi label="Зависли" value={c.stalledDeals} to={path("/deals", { focus: "stalled" })} tone="rose" icon={ICONS.stalled} />
+          <Kpi label="КП без ответа" value={c.proposalWithoutReply ?? 0} to={path("/deals", { focus: "proposal_no_reply" })} tone="violet" icon={ICONS.documents} />
         </div>
         <div className="sit-pipeline" id="funnel">
           <b>На стадиях сейчас</b>
@@ -727,10 +842,10 @@ export function SituationPage() {
             <span className={ai.status === "error" ? "error" : "muted"}>{ai.label}</span>
           </div>
           <div className="sit-kpi-grid sit-kpi-grid-ai">
-            <Kpi label="Диалоги AI" value={ai.conversations?.ai ?? 0} to="/conversations?filter=ai" />
-            <Kpi label="У менеджера" value={ai.conversations?.human ?? 0} to="/conversations?filter=human" />
-            <Kpi label="Требуют вмешательства" value={ai.conversations?.needsAttention ?? 0} to="/conversations?filter=attention" emphasize />
-            <Kpi label="Заявки из WhatsApp" value={ai.whatsappInquiries ?? 0} to={path("/inquiries", { source: "whatsapp", test: "false" }, true)} />
+            <Kpi label="Диалоги AI" value={ai.conversations?.ai ?? 0} to="/conversations?filter=ai" tone="violet" icon={ICONS.ai} />
+            <Kpi label="У менеджера" value={ai.conversations?.human ?? 0} to="/conversations?filter=human" tone="sky" icon={ICONS.human} />
+            <Kpi label="Требуют вмешательства" value={ai.conversations?.needsAttention ?? 0} to="/conversations?filter=attention" emphasize tone="rose" icon={ICONS.warning} />
+            <Kpi label="Заявки из WhatsApp" value={ai.whatsappInquiries ?? 0} to={path("/inquiries", { source: "whatsapp", test: "false" }, true)} tone="mint" icon={ICONS.conversations} />
           </div>
         </div>
       </div>
