@@ -7,24 +7,33 @@ import type { AuthContext } from "../lib/types.ts";
 const STATUS_LABEL: Record<string, string> = {
   NEW: "Новый",
   DONE: "Обработан",
+  REGISTERED: "Зарегистрирован",
 };
 
 function serialize(row: {
   id: string;
   email: string;
   companyName: string;
+  name?: string | null;
   status: string;
   createdAt: Date;
   processedAt: Date | null;
+  userId?: string | null;
+  tenantId?: string | null;
+  convertedAt?: Date | null;
 }) {
   return {
     id: row.id,
     email: row.email,
     companyName: row.companyName,
+    name: row.name || null,
     status: row.status,
     statusLabel: STATUS_LABEL[row.status] || row.status,
     createdAt: row.createdAt.toISOString(),
     processedAt: row.processedAt?.toISOString() || null,
+    userId: row.userId || null,
+    tenantId: row.tenantId || null,
+    convertedAt: row.convertedAt?.toISOString() || null,
   };
 }
 

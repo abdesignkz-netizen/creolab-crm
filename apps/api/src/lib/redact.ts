@@ -1,5 +1,5 @@
 const SECRET_KEYS =
-  /secret|password|passwd|token|authorization|cookie|sessionid|accesstoken|refreshtoken|apikey|apisecret|credential|privatekey|encrypted|pem|nca|pin|certificate/i;
+  /secret|password|passwd|token|authorization|cookie|sessionid|accesstoken|refreshtoken|apikey|apisecret|credential|privatekey|encrypted|pem|nca|pin|certificate|codehash|verificationcode|resetcode/i;
 
 export function redactSensitive(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(redactSensitive);

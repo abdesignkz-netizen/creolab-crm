@@ -1,3 +1,4 @@
+export * from "./entitlements.ts";
 export * from "./amountWords.ts";
 export * from "./duration.ts";
 export * from "./esfMeasureUnits.ts";

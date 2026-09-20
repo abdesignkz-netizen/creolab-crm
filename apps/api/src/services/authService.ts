@@ -168,6 +168,57 @@ async function loadUser(prisma: PrismaClient, userId: string) {
   };
 }
 
+export async function issueSession(
+  prisma: PrismaClient,
+  userId: string,
+  client: "web" | "mobile" = "web",
+  meta: { userAgent?: string; ip?: string } = {},
+) {
+  const sessionToken = randomToken();
+  const refreshToken = client === "mobile" ? randomToken() : null;
+  const session = await prisma.session.create({
+    data: {
+      userId,
+      type: client,
+      secretHash: sha256(sessionToken),
+      refreshHash: refreshToken ? sha256(refreshToken) : null,
+      expiresAt: new Date(Date.now() + (client === "mobile" ? 15 : 60 * 12) * 60 * 1000),
+      refreshExpiresAt: refreshToken ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) : null,
+      deviceLabel: deviceLabelFromUa(meta.userAgent),
+      userAgent: meta.userAgent || null,
+      ip: meta.ip || null,
+      lastSeenAt: new Date(),
+    },
+  });
+  await prisma.user.update({
+    where: { id: userId },
+    data: { lastLoginAt: new Date() },
+  }).catch(() => undefined);
+  await writeAudit(prisma, {
+    actorUserId: userId,
+    action: "auth.login",
+    entityType: "session",
+    entityId: session.id,
+    changes: { client },
+  }).catch(() => undefined);
+  const loaded = await loadUser(prisma, userId);
+  const auth = toAuth(loaded, session.id, client);
+  let accessToken: string | undefined;
+  if (client === "mobile") {
+    accessToken = await new SignJWT({ sid: session.id, sub: userId })
+      .setProtectedHeader({ alg: "HS256" })
+      .setExpirationTime("15m")
+      .sign(accessKey);
+  }
+  return {
+    auth,
+    sessionToken,
+    refreshToken,
+    accessToken,
+    cookieName: "crm_session" as const,
+  };
+}
+
 export async function login(
   prisma: PrismaClient,
   input: unknown,
@@ -186,49 +237,7 @@ export async function login(
   if (user.status !== "active") {
     throw new ApiError(403, "account_disabled", "Учётная запись отключена");
   }
-  const sessionToken = randomToken();
-  const refreshToken = parsed.client === "mobile" ? randomToken() : null;
-  const session = await prisma.session.create({
-    data: {
-      userId: user.id,
-      type: parsed.client,
-      secretHash: sha256(sessionToken),
-      refreshHash: refreshToken ? sha256(refreshToken) : null,
-      expiresAt: new Date(Date.now() + (parsed.client === "mobile" ? 15 : 60 * 12) * 60 * 1000),
-      refreshExpiresAt: refreshToken ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) : null,
-      deviceLabel: deviceLabelFromUa(meta.userAgent),
-      userAgent: meta.userAgent || null,
-      ip: meta.ip || null,
-      lastSeenAt: new Date(),
-    },
-  });
-  await prisma.user.update({
-    where: { id: user.id },
-    data: { lastLoginAt: new Date() },
-  }).catch(() => undefined);
-  await writeAudit(prisma, {
-    actorUserId: user.id,
-    action: "auth.login",
-    entityType: "session",
-    entityId: session.id,
-    changes: { client: parsed.client },
-  }).catch(() => undefined);
-  const loaded = await loadUser(prisma, user.id);
-  const auth = toAuth(loaded, session.id, parsed.client);
-  let accessToken: string | undefined;
-  if (parsed.client === "mobile") {
-    accessToken = await new SignJWT({ sid: session.id, sub: user.id })
-      .setProtectedHeader({ alg: "HS256" })
-      .setExpirationTime("15m")
-      .sign(accessKey);
-  }
-  return {
-    auth,
-    sessionToken,
-    refreshToken,
-    accessToken,
-    cookieName: "crm_session",
-  };
+  return issueSession(prisma, user.id, parsed.client, meta);
 }
 
 export async function loginPlatformAdmin(
@@ -360,5 +369,13 @@ export function publicAuth(auth: AuthContext) {
         }
       : null,
     capabilities: caps,
+  };
+}
+
+export async function publicAuthWithBilling(prisma: PrismaClient, auth: AuthContext) {
+  const { getBillingForAuth } = await import("./billingService.ts");
+  return {
+    ...publicAuth(auth),
+    billing: await getBillingForAuth(prisma, auth),
   };
 }

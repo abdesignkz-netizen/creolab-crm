@@ -1405,6 +1405,70 @@ fieldset.field-block legend { padding: 0 6px; font-weight: 600; }
   text-align: center;
 }
 .login-alt a { color: inherit; }
+.login .linkish,
+.login-alt .linkish {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+}
+.login-otp {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.login-otp input {
+  width: 44px;
+  min-width: 44px;
+  flex: 0 0 44px;
+  height: 48px;
+  padding: 0;
+  text-align: center;
+  font-size: 1.2rem;
+}
+.login .login-reset-done {
+  padding: 32px;
+  border-radius: 23px;
+  display: grid;
+  gap: 16px;
+  box-shadow: var(--shadow);
+}
+.login .login-reset-done h2 { margin: 0; font-size: 1.2rem; }
+.login .login-reset-done .btn {
+  width: 100%;
+  min-height: 46px;
+  display: grid;
+  place-items: center;
+  text-decoration: none;
+}
+.preview-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  background: #eef6ff;
+  border-bottom: 1px solid var(--line, #d7e4f2);
+  font-size: 0.95rem;
+}
+.preview-banner .btn { min-height: 36px; width: auto; }
+.paywall-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(16, 24, 40, 0.45);
+  display: grid;
+  place-items: center;
+  z-index: 80;
+  padding: 16px;
+}
+.paywall-card { max-width: 420px; width: 100%; }
+.onboarding-steps { display: grid; gap: 12px; padding-left: 18px; }
+.onboarding-steps li { display: grid; gap: 8px; }
+.onboarding-steps li.is-done { opacity: 0.7; }
+.preview-demo { margin: 0 0 16px; }
 .signup-request-list { display: grid; gap: 8px; }
 .signup-request-row {
   display: flex;
@@ -2219,8 +2283,8 @@ fieldset.field-block legend { padding: 0 6px; font-weight: 600; }
   border: 1px solid var(--line);
   border-radius: var(--radius);
 }
-.dash-controls .sit-toolbar,
-.dash-controls .sit-period-bar { margin: 0; }
+.dash-controls .sit-toolbar { margin: 0; }
+.dash-period { margin: 4px 0 0; }
 .dash-alert { align-items: center; }
 .dash-spot-grid {
   display: grid;

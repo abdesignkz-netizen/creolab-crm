@@ -1,9 +1,11 @@
 import { lazy, Suspense, useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
-import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { api, clearTenant, setTenant } from "./lib/api";
 import { NavIcon } from "./components/NavIcon";
 import { BrandLogo } from "./components/BrandLogo";
 import { SupportCenter, SupportHelpButton } from "./components/SupportCenter";
+import { PaywallDialog } from "./components/PaywallDialog";
+import { OnboardingWizard } from "./components/OnboardingWizard";
 import { tip } from "./lib/tip";
 import { applyAppearance, emptyCaps, SessionContext, type Capabilities } from "./lib/session";
 import { normalizeLocale, t } from "./i18n";
@@ -38,12 +40,14 @@ const RequestDetailPage = lazy(() => import("./pages/RequestDetailPage").then(m 
 const RequestsPage = lazy(() => import("./pages/RequestsPage").then(m => ({ default: m.RequestsPage })));
 const AiAutomationSettingsPage = lazy(() => import("./pages/AiAutomationSettingsPage").then(m => ({ default: m.AiAutomationSettingsPage })));
 const SituationPage = lazy(() => import("./pages/SituationPage").then(m => ({ default: m.SituationPage })));
+const BillingPage = lazy(() => import("./pages/BillingPage").then(m => ({ default: m.BillingPage })));
 const StatsPage = lazy(() => import("./pages/StatsPage").then(m => ({ default: m.StatsPage })));
 const TasksPage = lazy(() => import("./pages/TasksPage").then(m => ({ default: m.TasksPage })));
 const SettingsPage = lazy(() => import("./pages/SettingsPage").then(m => ({ default: m.SettingsPage })));
 const PlatformAdminPage = lazy(() => import("./pages/PlatformAdminPage").then(m => ({ default: m.PlatformAdminPage })));
 const PlatformLoginPage = lazy(() => import("./pages/PlatformLoginPage").then(m => ({ default: m.PlatformLoginPage })));
 const InvitePage = lazy(() => import("./pages/InvitePage").then(m => ({ default: m.InvitePage })));
+const ForgotPasswordPage = lazy(() => import("./pages/ForgotPasswordPage").then(m => ({ default: m.ForgotPasswordPage })));
 
 type LoadState<T> = { status: "loading" | "ready" | "error" | "empty"; data?: T; error?: string };
 
@@ -138,6 +142,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
     ...(!caps.manager ? [["/control", t(locale, "nav.control")] as [string, string]] : []),
     ...(caps.integrations ? [["/integrations", t(locale, "nav.integrations")] as [string, string]] : []),
     ...(caps.analytics ? [["/stats", t(locale, "nav.stats")] as [string, string]] : []),
+    ["/billing", t(locale, "nav.billing")],
     ["/settings", t(locale, "nav.settings")],
   ] : ([["/settings", t(locale, "nav.settings")] as [string, string]]);
   const platformLinks: Array<[string, string]> = platformAdmin ? [
@@ -171,6 +176,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
         ["/documents", t(locale, "nav.documents"), hasCompany && caps.documents],
         ["/integrations", t(locale, "nav.integrations"), hasCompany && caps.integrations],
         ["/stats", t(locale, "nav.stats"), hasCompany && caps.analytics],
+        ["/billing", t(locale, "nav.billing"), hasCompany],
         ["/settings", t(locale, "nav.settings"), true],
       ].filter((item) => item[2]) as Array<[string, string]>);
 
@@ -228,6 +234,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
     "/integrations": t(locale, "nav.integrations"),
     "/stats": t(locale, "nav.stats"),
     "/settings": t(locale, "nav.settings"),
+    "/billing": t(locale, "nav.billing"),
     "/admin/companies": t(locale, "nav.platformCompanies"),
     "/admin/members": t(locale, "nav.platformMembers"),
     "/admin/support": t(locale, "nav.platformSupport"),
@@ -246,7 +253,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
   const moreActive = moreLinks.some(([path]) => location.pathname === path || location.pathname.startsWith(`${path}/`));
 
   useEffect(() => {
-    if (!tenantId) return;
+    if (!tenantId || me?.billing?.previewMode) return;
     let cancelled = false;
     async function syncQuietly() {
       try {
@@ -263,7 +270,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [tenantId]);
+  }, [tenantId, me?.billing?.previewMode]);
 
   useEffect(() => {
     if (!tenantId) return;
@@ -438,6 +445,15 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
 
   return (
     <div className={`app-shell ${moreOpen ? "more-open" : ""}`}>
+      {hasCompany && me?.billing?.previewMode && !inServiceAdmin ? (
+        <div className="preview-banner" role="status">
+          <span>{t(locale, "preview.banner")}</span>
+          <button type="button" className="btn" onClick={() => navigate("/billing")}>
+            {t(locale, "preview.choosePlan")}
+          </button>
+        </div>
+      ) : null}
+      <PaywallDialog />
       <header className="mobile-topbar">
           <div className="mobile-topbar-title">
           <b>{pageTitle}</b>
@@ -679,10 +695,24 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
 
 function Login() {
   const locale = normalizeLocale(null);
-  const [mode, setMode] = useState<"login" | "signup">("login");
+  const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const [mode, setMode] = useState<"login" | "signup" | "verify" | "exists">("login");
   const [error, setError] = useState("");
-  const [sent, setSent] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [email, setEmail] = useState("");
+  const [info, setInfo] = useState("");
+
+  useEffect(() => {
+    if (params.get("reset") === "1") navigate("/forgot-password", { replace: true });
+  }, [navigate, params]);
+
+  async function enterSession(result: any) {
+    const tenantId = result.user?.activeTenant?.tenant?.id || result.user?.memberships?.[0]?.tenant?.id;
+    if (tenantId) setTenant(tenantId);
+    const dest = result.user?.user?.platformAdmin && !tenantId ? "/admin" : "/today";
+    window.location.assign(dest);
+  }
 
   return (
     <div className="login">
@@ -699,11 +729,7 @@ function Login() {
               const form = new FormData(event.currentTarget);
               try {
                 const result = (await api.login(String(form.get("email")), String(form.get("password")))) as any;
-                const tenantId =
-                  result.user?.activeTenant?.tenant?.id || result.user?.memberships?.[0]?.tenant?.id;
-                if (tenantId) setTenant(tenantId);
-                const dest = result.user?.user?.platformAdmin && !tenantId ? "/admin" : "/today";
-                window.location.assign(dest);
+                await enterSession(result);
               } catch (err) {
                 const message = err instanceof Error ? err.message : "Ошибка входа";
                 setError(
@@ -718,32 +744,116 @@ function Login() {
             <p className="muted">{t(locale, "login.hint")}</p>
             <label>
               {t(locale, "login.email")}
-              <input name="email" type="email" required autoComplete="username" />
+              <input name="email" type="email" required autoComplete="username" defaultValue={email} />
             </label>
             <label>
               {t(locale, "login.password")}
-              <input
-                name="password"
-                type="password"
-                required
-                autoComplete="current-password"
-              />
+              <input name="password" type="password" required autoComplete="current-password" />
             </label>
             {error ? <p className="error">{error}</p> : null}
             <button className="btn">{t(locale, "login.submit")}</button>
-            <button
-              type="button"
-              className="btn secondary"
-              onClick={() => {
-                setMode("signup");
-                setError("");
-                setSent(false);
-              }}
-            >
-              {t(locale, "login.register")}
-            </button>
+            <p className="muted login-alt">
+              <Link to="/forgot-password">{t(locale, "login.forgot")}</Link>
+            </p>
+            <p className="muted login-alt">
+              {t(locale, "login.noAccount")}{" "}
+              <button
+                type="button"
+                className="linkish"
+                onClick={() => {
+                  setMode("signup");
+                  setError("");
+                  setInfo("");
+                }}
+              >
+                {t(locale, "login.register")}
+              </button>
+            </p>
           </form>
-        ) : (
+        ) : null}
+        {mode === "signup" ? (
+          <form
+            className="panel"
+            onSubmit={async (event) => {
+              event.preventDefault();
+              const form = new FormData(event.currentTarget);
+              const password = String(form.get("password") || "");
+              const passwordConfirm = String(form.get("passwordConfirm") || "");
+              if (password !== passwordConfirm) {
+                setError("Пароли не совпадают");
+                return;
+              }
+              setBusy(true);
+              setError("");
+              try {
+                const nextEmail = String(form.get("email"));
+                await api.registerAccount({
+                  name: String(form.get("name")),
+                  companyName: String(form.get("companyName")),
+                  email: nextEmail,
+                  password,
+                  passwordConfirm,
+                });
+                setEmail(nextEmail);
+                setMode("verify");
+              } catch (err: any) {
+                if (err?.code === "account_exists") {
+                  setEmail(String(form.get("email")));
+                  setMode("exists");
+                  setError(err.message);
+                } else {
+                  const message = err instanceof Error ? err.message : "Не удалось создать аккаунт";
+                  setError(
+                    message === "Failed to fetch" || message === "HTTP 500"
+                      ? "Сейчас не удаётся отправить запрос. Попробуйте ещё раз через минуту."
+                      : message,
+                  );
+                }
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            <h2>{t(locale, "login.registerTitle")}</h2>
+            <p className="muted">{t(locale, "login.registerHint")}</p>
+            <label>
+              {t(locale, "login.name")}
+              <input name="name" required autoComplete="name" maxLength={120} />
+            </label>
+            <label>
+              {t(locale, "login.companyName")}
+              <input name="companyName" required minLength={2} autoComplete="organization" maxLength={160} />
+            </label>
+            <label>
+              {t(locale, "login.email")}
+              <input name="email" type="email" required autoComplete="email" />
+            </label>
+            <label>
+              {t(locale, "login.password")}
+              <input name="password" type="password" required minLength={8} autoComplete="new-password" />
+            </label>
+            <label>
+              {t(locale, "login.passwordRepeat")}
+              <input name="passwordConfirm" type="password" required minLength={8} autoComplete="new-password" />
+            </label>
+            {error ? <p className="error">{error}</p> : null}
+            <button className="btn" disabled={busy}>{t(locale, "login.sendRequest")}</button>
+            <p className="muted login-alt">
+              {t(locale, "login.hasAccount")}{" "}
+              <button
+                type="button"
+                className="linkish"
+                onClick={() => {
+                  setMode("login");
+                  setError("");
+                }}
+              >
+                {t(locale, "login.submit")}
+              </button>
+            </p>
+          </form>
+        ) : null}
+        {mode === "verify" ? (
           <form
             className="panel"
             onSubmit={async (event) => {
@@ -752,70 +862,74 @@ function Login() {
               setBusy(true);
               setError("");
               try {
-                await api.requestSignup(String(form.get("email")), String(form.get("companyName")));
-                setSent(true);
+                const result = (await api.verifyRegistration(email, String(form.get("code")))) as any;
+                await enterSession(result);
               } catch (err) {
-                const message = err instanceof Error ? err.message : "Не удалось отправить запрос";
-                setError(
-                  message === "Failed to fetch" || message === "HTTP 500"
-                    ? "Сейчас не удаётся отправить запрос. Попробуйте ещё раз через минуту."
-                    : message,
-                );
+                setError(err instanceof Error ? err.message : "Не удалось подтвердить код");
               } finally {
                 setBusy(false);
               }
             }}
           >
-            <h2>{t(locale, "login.registerTitle")}</h2>
-            {sent ? (
-              <>
-                <p>{t(locale, "login.requestSent")}</p>
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={() => {
-                    setMode("login");
-                    setError("");
-                    setSent(false);
-                  }}
-                >
-                  {t(locale, "login.backToLogin")}
-                </button>
-              </>
-            ) : (
-              <>
-                <p className="muted">{t(locale, "login.registerHint")}</p>
-                <label>
-                  {t(locale, "login.email")}
-                  <input name="email" type="email" required autoComplete="email" />
-                </label>
-                <label>
-                  {t(locale, "login.companyName")}
-                  <input name="companyName" required minLength={2} autoComplete="organization" maxLength={160} />
-                </label>
-                {error ? <p className="error">{error}</p> : null}
-                <button className="btn" disabled={busy}>{t(locale, "login.sendRequest")}</button>
-                <button
-                  type="button"
-                  className="btn secondary"
-                  onClick={() => {
-                    setMode("login");
-                    setError("");
-                  }}
-                >
-                  {t(locale, "login.backToLogin")}
-                </button>
-              </>
-            )}
+            <h2>{t(locale, "login.verifyTitle")}</h2>
+            <p className="muted">
+              {t(locale, "login.verifyHint")} <b>{email}</b>
+            </p>
+            <label>
+              Код
+              <input name="code" inputMode="numeric" pattern="\d{6}" maxLength={6} required autoComplete="one-time-code" />
+            </label>
+            {error ? <p className="error">{error}</p> : null}
+            <button className="btn" disabled={busy}>{t(locale, "login.verifySubmit")}</button>
+            <button
+              type="button"
+              className="btn secondary"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true);
+                setError("");
+                try {
+                  await api.resendRegistration(email);
+                  setInfo("Новый код отправлен");
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : "Не удалось отправить код");
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              {t(locale, "login.resendCode")}
+            </button>
+            {info ? <p className="ok">{info}</p> : null}
           </form>
-        )}
+        ) : null}
+        {mode === "exists" ? (
+          <div className="panel">
+            <h2>{t(locale, "login.accountExists")}</h2>
+            <p className="muted">{email}</p>
+            {error ? <p className="error">{error}</p> : null}
+            <button className="btn" type="button" onClick={() => { setMode("login"); setError(""); }}>
+              {t(locale, "login.submit")}
+            </button>
+            <p className="muted login-alt">
+              <Link to={email ? `/forgot-password?email=${encodeURIComponent(email)}` : "/forgot-password"}>
+                {t(locale, "login.forgot")}
+              </Link>
+            </p>
+          </div>
+        ) : null}
       </div>
     </div>
   );
 }
 
 function Today() {
-  return <SituationPage />;
+  return (
+    <>
+      <OnboardingWizard />
+      <SituationPage />
+    </>
+  );
 }
 
 function SimpleList({ title, load, render }: { title: string; load: () => Promise<any>; render: (item: any) => ReactNode }) {
@@ -921,6 +1035,14 @@ export function App() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route
+        path="/forgot-password"
+        element={
+          <Suspense fallback={<div className="state">{t(normalizeLocale(null), "common.loading")}</div>}>
+            <ForgotPasswordPage />
+          </Suspense>
+        }
+      />
+      <Route
         path="/admin/login"
         element={
           boot === "ready" && me?.user?.platformAdmin ? (
@@ -967,6 +1089,7 @@ export function App() {
               <Suspense fallback={<div className="state" role="status">Загрузка раздела…</div>}>
               <Routes>
                 <Route path="/today" element={!me?.activeTenant && me?.user?.platformAdmin ? <Navigate to="/admin" replace /> : <Today />} />
+                <Route path="/billing" element={<BillingPage />} />
                 <Route path="/control" element={me?.capabilities?.manager ? <Navigate to="/today" replace /> : <ControlPage />} />
                 <Route path="/integrations" element={me?.capabilities?.integrations ? <IntegrationsPage /> : <Navigate to="/today" replace />} />
                 <Route path="/integrations/esf" element={me?.capabilities?.documents ? <EsfIntegrationPage /> : <Navigate to="/today" replace />} />

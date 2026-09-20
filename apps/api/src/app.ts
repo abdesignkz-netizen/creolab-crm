@@ -25,7 +25,11 @@ import {
   loginSchema,
   passwordResetCompleteSchema,
   passwordResetRequestSchema,
+  passwordResetVerifySchema,
   signupRequestSchema,
+  selfRegisterSchema,
+  verifyRegistrationSchema,
+  resendRegistrationSchema,
   updateSignupRequestSchema,
   lookupInquiryContactSchema,
   loseInquirySchema,
@@ -83,7 +87,7 @@ import {
   login,
   loginPlatformAdmin,
   logout,
-  publicAuth,
+  publicAuthWithBilling,
   refreshMobile,
 } from "./services/authService.ts";
 import {
@@ -217,7 +221,12 @@ import {
   syncSellerLeads,
 } from "./services/sellerLink.ts";
 import { acceptInvitation, previewInvitation } from "./services/invitationService.ts";
-import { completePasswordReset, requestPasswordReset } from "./services/passwordResetService.ts";
+import {
+  completePasswordReset,
+  requestPasswordReset,
+  resendPasswordReset,
+  verifyPasswordReset,
+} from "./services/passwordResetService.ts";
 import {
   createPlatformCompany,
   getPlatformCompany,
@@ -264,6 +273,20 @@ import {
   listSignupRequests,
   updateSignupRequest,
 } from "./services/signupRequestService.ts";
+import {
+  resendRegistrationCode,
+  startSelfRegistration,
+  verifySelfRegistration,
+} from "./services/selfRegistrationService.ts";
+import { matchPaidFeature, requireFeature, FEATURES } from "./services/entitlementService.ts";
+import {
+  activateSubscriptionAsPlatformAdmin,
+  activateTenantSubscription,
+  completeOnboardingStep,
+  getBillingState,
+  listPublicPlans,
+  skipOnboarding,
+} from "./services/billingService.ts";
 import {
   createTenantConnection,
   disableTenantConnection,
@@ -464,6 +487,18 @@ export function createApp(prisma: PrismaClient) {
     return auth;
   }
 
+  app.use(async (req, res, next) => {
+    try {
+      const feature = matchPaidFeature(req.method, req.path);
+      if (!feature) return next();
+      const auth = await requireAuth(req);
+      await requireFeature(prisma, auth, feature);
+      next();
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.post("/api/v1/auth/login", json, async (req, res) => {
     const ip = clientIp(req);
     const email = String(req.body?.email || "").toLowerCase();
@@ -477,7 +512,7 @@ export function createApp(prisma: PrismaClient) {
       res.cookie("crm_session", result.sessionToken, SESSION_COOKIE);
     }
     res.json({
-      user: publicAuth(result.auth),
+      user: await publicAuthWithBilling(prisma, result.auth),
       accessToken: result.accessToken,
       refreshToken: result.refreshToken,
     });
@@ -496,7 +531,7 @@ export function createApp(prisma: PrismaClient) {
       res.cookie("crm_session", result.sessionToken, SESSION_COOKIE);
     }
     res.json({
-      user: publicAuth(result.auth),
+      user: await publicAuthWithBilling(prisma, result.auth),
       accessToken: result.accessToken,
       refreshToken: result.refreshToken,
     });
@@ -528,6 +563,22 @@ export function createApp(prisma: PrismaClient) {
     res.json(await requestPasswordReset(prisma, parsed));
   });
 
+  app.post("/api/v1/auth/password-reset/resend", json, async (req, res) => {
+    const ip = clientIp(req);
+    rateLimit(`password-reset:ip:${ip}`, 5);
+    const parsed = passwordResetRequestSchema.parse(req.body || {});
+    rateLimit(`password-reset:email:${parsed.email.toLowerCase()}`, 3);
+    res.json(await resendPasswordReset(prisma, parsed));
+  });
+
+  app.post("/api/v1/auth/password-reset/verify", json, async (req, res) => {
+    const ip = clientIp(req);
+    rateLimit(`password-reset-verify:ip:${ip}`, 20);
+    const parsed = passwordResetVerifySchema.parse(req.body || {});
+    rateLimit(`password-reset-verify:email:${parsed.email.toLowerCase()}`, 10);
+    res.json(await verifyPasswordReset(prisma, parsed));
+  });
+
   app.post("/api/v1/auth/password-reset/complete", json, async (req, res) => {
     rateLimit(`password-reset-complete:ip:${clientIp(req)}`, 8);
     const parsed = passwordResetCompleteSchema.parse(req.body || {});
@@ -547,8 +598,46 @@ export function createApp(prisma: PrismaClient) {
     );
   });
 
+  app.post("/api/v1/auth/register", json, async (req, res) => {
+    const ip = clientIp(req);
+    rateLimit(`register:ip:${ip}`, 8, 60 * 60 * 1000);
+    const parsed = selfRegisterSchema.parse(req.body || {});
+    rateLimit(`register:email:${parsed.email.toLowerCase()}`, 5, 60 * 60 * 1000);
+    res.json(
+      await startSelfRegistration(prisma, parsed, {
+        ip,
+        userAgent: String(req.header("user-agent") || ""),
+      }),
+    );
+  });
+
+  app.post("/api/v1/auth/register/resend", json, async (req, res) => {
+    const ip = clientIp(req);
+    rateLimit(`register-resend:ip:${ip}`, 8, 60 * 60 * 1000);
+    const parsed = resendRegistrationSchema.parse(req.body || {});
+    rateLimit(`register-resend:email:${parsed.email.toLowerCase()}`, 5, 60 * 60 * 1000);
+    res.json(await resendRegistrationCode(prisma, parsed, { ip }));
+  });
+
+  app.post("/api/v1/auth/register/verify", json, async (req, res) => {
+    const ip = clientIp(req);
+    rateLimit(`register-verify:ip:${ip}`, 20);
+    const parsed = verifyRegistrationSchema.parse(req.body || {});
+    rateLimit(`register-verify:email:${parsed.email.toLowerCase()}`, 10);
+    const result = await verifySelfRegistration(prisma, parsed, {
+      ip,
+      userAgent: String(req.header("user-agent") || ""),
+    });
+    res.cookie("crm_session", result.sessionToken, SESSION_COOKIE);
+    res.json({
+      user: await publicAuthWithBilling(prisma, result.auth),
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
+    });
+  });
+
   app.get("/api/v1/me", async (req, res) => {
-    res.json(publicAuth(await requireAuth(req)));
+    res.json(await publicAuthWithBilling(prisma, await requireAuth(req)));
   });
 
   app.patch("/api/v1/me/profile", json, async (req, res) => {
@@ -624,6 +713,46 @@ export function createApp(prisma: PrismaClient) {
     );
     if (!membership) throw new ApiError(403, "forbidden", "Нет доступа к компании");
     res.json({ activeTenant: { membershipId: membership.id, role: membership.role, tenant: membership.tenant } });
+  });
+
+  app.get("/api/v1/billing", async (req, res) => {
+    const auth = await requireAuth(req);
+    const membership = auth.activeMembership;
+    if (!membership) throw new ApiError(403, "no_tenant", "Нет активной компании");
+    res.json(await getBillingState(prisma, membership.tenantId));
+  });
+
+  app.get("/api/v1/billing/plans", async (req, res) => {
+    await requireAuth(req);
+    res.json(await listPublicPlans(prisma));
+  });
+
+  app.post("/api/v1/billing/onboarding/skip", json, async (req, res) => {
+    res.json(await skipOnboarding(prisma, await requireAuth(req)));
+  });
+
+  app.post("/api/v1/billing/onboarding/complete-step", json, async (req, res) => {
+    res.json(await completeOnboardingStep(prisma, await requireAuth(req), String(req.body?.step || "")));
+  });
+
+  app.post("/api/v1/internal/billing/activate", json, async (req, res) => {
+    const expected = config.internalServiceSecret;
+    if (!expected) throw new ApiError(503, "not_configured", "INTERNAL_SERVICE_SECRET не задан");
+    const got =
+      String(req.header("authorization") || "").replace(/^Bearer\s+/i, "") ||
+      String(req.header("x-internal-secret") || "");
+    if (!got || got !== expected) throw new ApiError(401, "unauthorized", "Недействительный сервисный ключ");
+    const tenantId = String(req.body?.tenantId || "").trim();
+    if (!tenantId) throw new ApiError(422, "invalid", "Укажите tenantId");
+    if (req.body?.paid === true && !req.body?.tenantId) {
+      throw new ApiError(400, "invalid", "Активация только по доверенному серверному вызову");
+    }
+    res.json(
+      await activateTenantSubscription(prisma, tenantId, {
+        planCode: req.body?.planCode ? String(req.body.planCode) : undefined,
+        source: "internal_webhook",
+      }),
+    );
   });
 
   app.get("/api/v1/today", async (req, res) => {
@@ -1864,7 +1993,9 @@ export function createApp(prisma: PrismaClient) {
   });
 
   app.post("/api/v1/integrations/whatsapp-seller/connect", json, async (req, res) => {
-    res.json(await connectWhatsAppSeller(prisma, await requireAuth(req), req.body || {}));
+    const auth = await requireAuth(req);
+    await requireFeature(prisma, auth, FEATURES.WHATSAPP);
+    res.json(await connectWhatsAppSeller(prisma, auth, req.body || {}));
   });
 
   app.post("/api/v1/integrations/whatsapp-seller/rotate-secret", async (req, res) => {
@@ -1948,6 +2079,17 @@ export function createApp(prisma: PrismaClient) {
 
   app.post("/api/v1/admin/tenants/:id/restore", async (req, res) => {
     res.json(await setPlatformCompanyStatus(prisma, await requireAuth(req), req.params.id, "active"));
+  });
+
+  app.post("/api/v1/admin/tenants/:id/subscription/activate", json, async (req, res) => {
+    res.json(
+      await activateSubscriptionAsPlatformAdmin(
+        prisma,
+        await requireAuth(req),
+        req.params.id,
+        req.body?.planCode ? String(req.body.planCode) : undefined,
+      ),
+    );
   });
 
   app.get("/api/v1/admin/tenants/:id/members", async (req, res) => {

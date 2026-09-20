@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { ROLES, ROLE_LABELS, isCompanyAdminRole } from "@creolab/contracts";
 import { ApiError } from "../errors.ts";
@@ -6,7 +5,7 @@ import { writeAudit } from "../lib/audit.ts";
 import { cursorPage } from "../lib/hash.ts";
 import { requirePlatformAdmin } from "../lib/access.ts";
 import type { AuthContext } from "../lib/types.ts";
-import { PIPELINE_STAGES } from "./dealPipeline.ts";
+import { provisionOrganization } from "./organizationProvisioning.ts";
 import {
   createTenantInvitation,
   revokeInvitation,
@@ -21,24 +20,6 @@ import {
 } from "./runtimeSettings.ts";
 
 const COMPANY_ADMIN_ROLES = [ROLES.owner, ROLES.director];
-
-function slugify(name: string) {
-  const translit: Record<string, string> = {
-    а: "a", б: "b", в: "v", г: "g", д: "d", е: "e", ё: "e", ж: "zh", з: "z", и: "i", й: "y",
-    к: "k", л: "l", м: "m", н: "n", о: "o", п: "p", р: "r", с: "s", т: "t", у: "u", ф: "f",
-    х: "h", ц: "ts", ч: "ch", ш: "sh", щ: "sch", ъ: "", ы: "y", ь: "", э: "e", ю: "yu", я: "ya",
-  };
-  const base = name
-    .trim()
-    .toLowerCase()
-    .split("")
-    .map((ch) => translit[ch] ?? ch)
-    .join("")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 40);
-  return base || "company";
-}
 
 function asTrimmed(value: unknown) {
   const text = String(value ?? "").trim();
@@ -167,6 +148,12 @@ export async function listPlatformCompanies(
         integrations: {
           select: { type: true, status: true, connectionStatus: true, healthStatus: true, lastError: true, lastErrorCode: true, lastSuccessAt: true, schemaJson: true },
         },
+        plans: {
+          orderBy: { startsAt: "desc" },
+          take: 1,
+          include: { plan: { select: { name: true, code: true } } },
+        },
+        aiConfigurations: { take: 1, select: { enabled: true } },
       },
     }),
   ]);
@@ -178,20 +165,37 @@ export async function listPlatformCompanies(
       const settings = tenant.settingsJson && typeof tenant.settingsJson === "object"
         ? (tenant.settingsJson as Record<string, unknown>)
         : {};
-      const admin = tenant.memberships.find((item) => isCompanyAdminRole(item.role));
+      const admin = tenant.memberships.find((item) => isCompanyAdminRole(item.role))
+        || tenant.memberships.find((item) => item.role === ROLES.owner)
+        || tenant.memberships[0];
+      const owner = tenant.memberships.find((item) => item.role === ROLES.owner) || admin;
       const connectionSummary = tenant.integrations.map((row) => publicConnectionStatus(row));
+      const wa = tenant.integrations.find((row) => row.type === "whatsapp-seller" || row.type === "whatsapp");
+      const planRow = tenant.plans[0];
+      const subscriptionStatus = planRow?.status || "active";
+      const onboarding = settings.onboarding && typeof settings.onboarding === "object"
+        ? (settings.onboarding as Record<string, unknown>)
+        : {};
       return {
         id: tenant.id,
         name: tenant.name,
         slug: tenant.slug,
         status: tenant.status,
+        organizationStatus: tenant.status,
+        subscriptionStatus,
+        planCode: planRow?.plan.code || null,
+        planName: planRow?.plan.name || null,
+        activatedAt: subscriptionStatus === "active" ? planRow?.startsAt || tenant.createdAt : null,
         timezone: tenant.timezone,
         createdAt: tenant.createdAt,
         bin: tenant.legalProfile?.bin || tenant.legalProfile?.iin || null,
         legalName: tenant.legalProfile?.legalName || null,
-        contactEmail: tenant.legalProfile?.email || settings.contactEmail || null,
+        contactEmail: tenant.legalProfile?.email || settings.contactEmail || owner?.user.email || null,
         contactPhone: tenant.legalProfile?.phone || settings.contactPhone || null,
         city: settings.city || null,
+        owner: owner
+          ? { name: owner.user.name, email: owner.user.email, role: owner.role }
+          : null,
         admin: admin
           ? { name: admin.user.name, email: admin.user.email, role: admin.role, roleLabel: ROLE_LABELS[admin.role as keyof typeof ROLE_LABELS] || admin.role }
           : null,
@@ -201,6 +205,9 @@ export async function listPlatformCompanies(
         connectionsLabel: connectionSummary.length
           ? [...new Set(connectionSummary.map((item) => item))].join(", ")
           : "нет",
+        whatsappConnected: Boolean(wa && (wa.connectionStatus === "CONNECTED" || wa.status === "active")),
+        aiEnabled: Boolean(tenant.aiConfigurations[0]?.enabled),
+        onboardingStatus: String(onboarding.status || "completed"),
       };
     }),
   };
@@ -216,11 +223,36 @@ async function companyCard(prisma: PrismaClient, tenantId: string) {
   const raw = tenant.settingsJson && typeof tenant.settingsJson === "object"
     ? (tenant.settingsJson as Record<string, unknown>)
     : {};
+  const { getBillingState } = await import("./billingService.ts");
+  const billing = await getBillingState(prisma, tenantId);
+  const owner = await prisma.membership.findFirst({
+    where: { tenantId, role: ROLES.owner, active: true },
+    include: { user: { select: { id: true, name: true, email: true } } },
+  });
+  const wa = await prisma.integration.findFirst({
+    where: { tenantId, type: { in: ["whatsapp-seller", "whatsapp"] } },
+    select: { status: true, connectionStatus: true },
+  });
+  const ai = await prisma.aIConfiguration.findFirst({
+    where: { tenantId },
+    select: { enabled: true },
+  });
   return {
     id: tenant.id,
     name: tenant.name,
     slug: tenant.slug,
     status: tenant.status,
+    organizationStatus: billing.organizationStatus,
+    subscriptionStatus: billing.subscriptionStatus,
+    planCode: billing.planCode,
+    planName: billing.planName,
+    activatedAt: billing.startsAt,
+    previewMode: billing.previewMode,
+    owner: owner ? { id: owner.user.id, name: owner.user.name, email: owner.user.email } : null,
+    ownerEmail: owner?.user.email || null,
+    whatsappConnected: Boolean(wa && (wa.connectionStatus === "CONNECTED" || wa.status === "active")),
+    aiEnabled: Boolean(ai?.enabled),
+    onboardingStatus: billing.onboarding.status,
     timezone: tenant.timezone,
     currency: tenant.currency,
     createdAt: tenant.createdAt,
@@ -268,61 +300,21 @@ export async function createPlatformCompany(prisma: PrismaClient, auth: AuthCont
       });
     }
   }
-  let slug = slugify(name);
-  const slugTaken = await prisma.tenant.findUnique({ where: { slug } });
-  if (slugTaken) slug = `${slug}-${randomBytes(3).toString("hex")}`;
-
   const existingUser = await prisma.user.findUnique({ where: { email: adminEmail }, select: { id: true, email: true } });
-  const starter = await prisma.plan.findUnique({ where: { code: "starter" } });
 
   const created = await prisma.$transaction(async (tx) => {
-    const tenant = await tx.tenant.create({
-      data: {
-        name,
-        slug,
-        timezone: String(input.timezone || "Asia/Almaty"),
-        settingsJson: {
-          city: asTrimmed(input.city),
-          contactEmail: asTrimmed(input.contactEmail) || adminEmail,
-          contactPhone: asTrimmed(input.contactPhone) || asTrimmed(input.adminPhone),
-        } as Prisma.InputJsonValue,
-      },
-    });
-    await tx.tenantLegalProfile.create({
-      data: {
-        tenantId: tenant.id,
-        legalName: asTrimmed(input.legalName),
-        bin,
-        iin: asTrimmed(input.iin),
-        email: asTrimmed(input.contactEmail) || adminEmail,
-        phone: asTrimmed(input.contactPhone) || asTrimmed(input.adminPhone),
-      },
-    });
-    if (starter) {
-      await tx.tenantPlan.create({ data: { tenantId: tenant.id, planId: starter.id, status: "active" } });
-    }
-    for (const def of PIPELINE_STAGES) {
-      await tx.dealStage.create({
-        data: {
-          tenantId: tenant.id,
-          systemKey: def.systemKey,
-          name: def.name,
-          sortOrder: def.sortOrder,
-          defaultProbability: def.defaultProbability,
-        },
-      });
-    }
-    await tx.knowledgeVersion.create({
-      data: {
-        tenantId: tenant.id,
-        version: 1,
-        status: "published",
-        publishedAt: new Date(),
-        contentJson: { about: name, services: [] },
-      },
-    });
-    await tx.aIConfiguration.create({
-      data: { tenantId: tenant.id, enabled: true, provider: null },
+    const tenant = await provisionOrganization(tx, {
+      name,
+      timezone: String(input.timezone || "Asia/Almaty"),
+      city: asTrimmed(input.city),
+      contactEmail: asTrimmed(input.contactEmail) || adminEmail,
+      contactPhone: asTrimmed(input.contactPhone) || asTrimmed(input.adminPhone),
+      legalName: asTrimmed(input.legalName),
+      bin,
+      iin: asTrimmed(input.iin),
+      subscriptionStatus: "active",
+      aiEnabled: true,
+      source: "platform_admin",
     });
     const invite = await createTenantInvitation(tx, {
       tenantId: tenant.id,
@@ -339,7 +331,7 @@ export async function createPlatformCompany(prisma: PrismaClient, auth: AuthCont
       action: "company.created",
       entityType: "tenant",
       entityId: tenant.id,
-      changes: { name, slug, existingUser: Boolean(existingUser) },
+      changes: { name, slug: tenant.slug, existingUser: Boolean(existingUser) },
     });
     return { tenant, invite };
   });

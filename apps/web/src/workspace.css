@@ -134,6 +134,7 @@ a.sit-kpi:hover, button.sit-kpi:hover { background: #f2f7ff; border-color: #cfde
 .sit-brief p { font-size: 13px; color: #324663; }
 .sit-toolbar { padding: 0; gap: 16px; margin-bottom: 2px; }
 .sit-period-bar { margin: 16px 0 8px; }
+.dash-home .dash-period { margin: 4px 0 0; }
 .sit-periods { gap: 5px; }
 .sit-list-row { border-color: #eff0f3; padding-block: 13px; }
 .sit-pipe-chip { background: #f5f6f9; border: 1px solid #eceef3; border-radius: 9px; padding: 7px 10px; }

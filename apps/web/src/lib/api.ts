@@ -4,6 +4,9 @@ export const api = createApiClient({
   baseUrl: "",
   getTenantId: () => localStorage.getItem("crm_tenant"),
   onUnknownTenant: () => localStorage.removeItem("crm_tenant"),
+  onFeatureRequired: (info) => {
+    window.dispatchEvent(new CustomEvent("basqar:paywall", { detail: info }));
+  },
 });
 
 export function setTenant(id: string) {

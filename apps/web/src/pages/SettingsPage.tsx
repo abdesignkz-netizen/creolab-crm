@@ -22,7 +22,8 @@ type Section =
   | "members"
   | "ai"
   | "tasks"
-  | "integrations";
+  | "integrations"
+  | "billing";
 
 function FieldError({ message }: { message?: string }) {
   if (!message) return null;
@@ -52,6 +53,7 @@ export function SettingsPage() {
     ...(caps.aiSettings ? (["ai"] as const) : []),
     ...(!caps.manager ? (["tasks"] as const) : []),
     ...(caps.integrations || caps.companyAdmin ? (["integrations"] as const) : []),
+    "billing" as const,
   ];
   const personal: Section[] = ["profile", "security", "notifications", "interface"];
   const section = [...personal, ...allowedCompany].includes(requested) ? requested : "profile";
@@ -70,6 +72,7 @@ export function SettingsPage() {
     ...(caps.integrations || caps.companyAdmin
       ? [{ id: "integrations" as const, group: "company" as const, label: t(locale, "settings.integrations"), to: "/integrations" }]
       : []),
+    { id: "billing" as const, group: "company" as const, label: t(locale, "settings.billing"), to: "/billing" },
   ];
 
   return (

@@ -69,6 +69,7 @@ export function IntegrationsPage() {
         <div>
           <h2>Интеграции</h2>
           <p className="muted">Форма сайта, WhatsApp и кабинет ИС ЭСФ.</p>
+          <p className="muted">Подключение каналов доступно после активации тарифа. Сейчас можно изучить интерфейс.</p>
         </div>
       </div>
       {error ? <p className="error">{error}</p> : null}

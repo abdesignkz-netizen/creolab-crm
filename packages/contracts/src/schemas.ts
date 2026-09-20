@@ -26,7 +26,12 @@ export const loginSchema = z.object({
 });
 
 export const passwordResetRequestSchema = z.object({
-  email: z.string().email(),
+  email: z.string().trim().email().max(200),
+});
+
+export const passwordResetVerifySchema = z.object({
+  email: z.string().trim().email().max(200),
+  code: z.string().trim().regex(/^\d{6}$/, "Введите 6-значный код"),
 });
 
 export const signupRequestSchema = z.object({
@@ -34,14 +39,44 @@ export const signupRequestSchema = z.object({
   companyName: z.string().trim().min(2, "Укажите название компании").max(160),
 });
 
+export const selfRegisterSchema = z
+  .object({
+    name: z.string().trim().min(1, "Укажите имя").max(120),
+    companyName: z.string().trim().min(2, "Укажите название компании").max(160),
+    email: z.string().trim().email().max(200),
+    password: z.string().min(8, "Минимум 8 символов").max(200),
+    passwordConfirm: z.string().min(8).max(200).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.passwordConfirm != null && value.passwordConfirm !== value.password) {
+      ctx.addIssue({ code: "custom", path: ["passwordConfirm"], message: "Пароли не совпадают" });
+    }
+  });
+
+export const verifyRegistrationSchema = z.object({
+  email: z.string().trim().email().max(200),
+  code: z.string().trim().regex(/^\d{6}$/, "Введите 6-значный код"),
+});
+
+export const resendRegistrationSchema = z.object({
+  email: z.string().trim().email().max(200),
+});
+
 export const updateSignupRequestSchema = z.object({
   status: z.enum(["NEW", "DONE"]),
 });
 
-export const passwordResetCompleteSchema = z.object({
-  token: z.string().min(20).max(200),
-  password: z.string().min(10).max(200),
-});
+export const passwordResetCompleteSchema = z
+  .object({
+    token: z.string().min(20).max(200),
+    password: z.string().min(10, "Минимум 10 символов").max(200),
+    passwordConfirm: z.string().min(10).max(200).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.passwordConfirm != null && value.passwordConfirm !== value.password) {
+      ctx.addIssue({ code: "custom", path: ["passwordConfirm"], message: "Пароли не совпадают" });
+    }
+  });
 
 export const createInquirySchema = z.object({
   name: z.string().trim().min(1).max(160),

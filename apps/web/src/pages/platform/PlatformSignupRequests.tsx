@@ -44,7 +44,7 @@ export function PlatformSignupRequests({ title = "Запросы на подкл
     <div className="panel stack">
       <div>
         <h3>{title}{pendingCount > 0 ? ` · ${pendingCount}` : ""}</h3>
-        <p className="muted">Заявки с экрана входа. Свяжитесь с компанией и заведите кабинет вручную.</p>
+        <p className="muted">Заявки с экрана входа и самостоятельные регистрации. Новые компании создаются автоматически — вручную заводить кабинет больше не обязательно.</p>
       </div>
       {error ? <p className="error">{error}</p> : null}
       {items.length === 0 ? (

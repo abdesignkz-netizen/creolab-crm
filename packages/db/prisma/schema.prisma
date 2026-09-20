@@ -196,8 +196,10 @@ model PasswordResetToken {
   id        String    @id @default(uuid())
   userId    String
   tokenHash String    @unique
+  purpose   String    @default("code")
   expiresAt DateTime
   usedAt    DateTime?
+  attempts  Int       @default(0)
   createdAt DateTime  @default(now())
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -1933,6 +1935,7 @@ model ServiceSignupRequest {
   id                String    @id @default(uuid())
   email             String
   companyName       String
+  name              String?
   status            String    @default("NEW")
   sourceIp          String?
   userAgent         String?
@@ -1940,7 +1943,32 @@ model ServiceSignupRequest {
   updatedAt         DateTime  @updatedAt
   processedAt       DateTime?
   processedByUserId String?
+  userId            String?
+  tenantId          String?
+  convertedAt       DateTime?
 
   @@index([status, createdAt])
   @@index([email, createdAt])
+}
+
+/// Unverified self-registration. User/Tenant are created only after email confirmation.
+model PendingRegistration {
+  id           String    @id @default(uuid())
+  email        String
+  name         String
+  companyName  String
+  passwordHash String
+  codeHash     String
+  attempts     Int       @default(0)
+  resendCount  Int       @default(0)
+  expiresAt    DateTime
+  lastSentAt   DateTime  @default(now())
+  consumedAt   DateTime?
+  sourceIp     String?
+  userAgent    String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([email, consumedAt])
+  @@index([expiresAt])
 }

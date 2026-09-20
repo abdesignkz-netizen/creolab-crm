@@ -45,6 +45,9 @@ export function PlatformLoginPage() {
           {error ? <p className="error">{error}</p> : null}
           <button className="btn">{t(locale, "login.submit")}</button>
           <p className="muted login-alt">
+            <Link to="/forgot-password">{t(locale, "login.forgot")}</Link>
+          </p>
+          <p className="muted login-alt">
             <Link to="/login">{t(locale, "login.companyLink")}</Link>
           </p>
         </form>

@@ -420,6 +420,17 @@ export function SituationPage() {
           <span className="muted">Обновлено {timeShort(data.asOf)}</span>
         </div>
       </div>
+      {me?.billing?.previewMode && me?.billing?.preview?.situation ? (
+        <div className="panel preview-demo">
+          <p className="muted">Пример показателей — так выглядит живой кабинет. После подключения тарифа здесь останутся только ваши данные.</p>
+          <div className="dash-spot-grid">
+            <div><b>{me.billing.preview.situation.inquiries}</b><div className="muted">обращений</div></div>
+            <div><b>{me.billing.preview.situation.inProgress}</b><div className="muted">в работе</div></div>
+            <div><b>{me.billing.preview.situation.needsAttention}</b><div className="muted">требуют внимания</div></div>
+            <div><b>{me.billing.preview.situation.dialogs}</b><div className="muted">диалогов</div></div>
+          </div>
+        </div>
+      ) : null}
 
       <div className="dash-controls">
         <div className="sit-toolbar">
@@ -450,17 +461,6 @@ export function SituationPage() {
               Только важное
             </button>
           </div>
-        </div>
-        <div className="sit-period-bar">
-          <PeriodSelector
-            period={period}
-            onPeriodChange={setPeriod}
-            dateFrom={dateFrom}
-            dateTo={dateTo}
-            onDateFromChange={setDateFrom}
-            onDateToChange={setDateTo}
-            activeLabel={data.period?.label}
-          />
         </div>
       </div>
 
@@ -689,7 +689,19 @@ export function SituationPage() {
       </div>
       </div>
 
-      <div className="sit-section sit-result" id="sit-result">
+      <div className="sit-period-bar dash-period" id="sit-result">
+        <PeriodSelector
+          period={period}
+          onPeriodChange={setPeriod}
+          dateFrom={dateFrom}
+          dateTo={dateTo}
+          onDateFromChange={setDateFrom}
+          onDateToChange={setDateTo}
+          activeLabel={data.period?.label}
+        />
+      </div>
+
+      <div className="sit-section sit-result">
         <div className="sit-section-head">
           <h3>За {data.period.label.toLowerCase()}</h3>
           <span className="muted">Результат выбранного периода</span>

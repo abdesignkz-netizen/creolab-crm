@@ -66,6 +66,8 @@ function CompanyList() {
               <thead>
                 <tr>
                   <th>Название</th>
+                  <th>Владелец</th>
+                  <th>Тариф</th>
                   <th>БИН/ИИН</th>
                   <th>Администратор</th>
                   <th>Контакт</th>
@@ -80,6 +82,12 @@ function CompanyList() {
                 {(data.items || []).map((item: any) => (
                   <tr key={item.id}>
                     <td><Link to={`/admin/companies/${item.id}`}>{item.name}</Link></td>
+                    <td>{item.owner?.email || item.admin?.email || "—"}</td>
+                    <td>
+                      {item.subscriptionStatus === "none" || item.previewMode
+                        ? "Просмотр"
+                        : item.planName || item.subscriptionStatus || "—"}
+                    </td>
                     <td>{item.bin || "—"}</td>
                     <td>{item.admin ? `${item.admin.name} (${item.admin.email})` : "—"}</td>
                     <td>{[item.contactEmail, item.contactPhone].filter(Boolean).join(" · ") || "—"}</td>

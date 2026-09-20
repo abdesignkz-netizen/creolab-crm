@@ -47,6 +47,7 @@ export function PlatformCompanyPage() {
             <span className={statusBadgeClass(company.status === "suspended" ? "Приостановлена" : "Активна")}>
               {company.status === "suspended" ? "Приостановлена" : "Активна"}
             </span>
+            {company.subscriptionStatus === "none" ? " · режим просмотра" : company.planName ? ` · ${company.planName}` : ""}
             {company.slug}
           </p>
         </div>
@@ -62,6 +63,13 @@ export function PlatformCompanyPage() {
               notifySaved("Доступ восстановлен");
             }}>Восстановить</button>
           )}
+          {company.subscriptionStatus === "none" || company.previewMode ? (
+            <button className="btn" onClick={async () => {
+              const billing = await api.adminActivateSubscription(id);
+              setCompany({ ...company, ...billing, subscriptionStatus: billing.subscriptionStatus, previewMode: billing.previewMode, planName: billing.planName });
+              notifySaved("Тариф активирован");
+            }}>Активировать тариф</button>
+          ) : null}
         </div>
       </div>
       <nav className="settings-nav horizontal">
@@ -103,6 +111,16 @@ function CompanyInfo({ company, onSaved }: { company: any; onSaved: (row: any) =
   }
   return (
     <form className="panel stack" onSubmit={onSubmit}>
+      <p className="muted">
+        Владелец: {company.owner?.name || "—"} · {company.ownerEmail || company.owner?.email || "—"}
+      </p>
+      <p className="muted">
+        Подписка: {company.subscriptionStatus || "—"}
+        {company.planName ? ` · ${company.planName}` : ""}
+        {company.whatsappConnected ? " · WhatsApp подключён" : " · WhatsApp не подключён"}
+        {company.aiEnabled ? " · AI включён" : " · AI выключен"}
+        {company.onboardingStatus ? ` · onboarding: ${company.onboardingStatus}` : ""}
+      </p>
       <label>Название<input name="name" defaultValue={company.name} required /></label>
       <label>Юридическое название<input name="legalName" defaultValue={company.legalName || ""} /></label>
       <label>БИН<input name="bin" defaultValue={company.bin || ""} /></label>

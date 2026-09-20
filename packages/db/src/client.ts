@@ -841,6 +841,8 @@ const ACCOUNT_DOMAIN_SQL = `
     );
     CREATE UNIQUE INDEX IF NOT EXISTS "PasswordResetToken_tokenHash_key" ON "PasswordResetToken"("tokenHash");
     CREATE INDEX IF NOT EXISTS "PasswordResetToken_userId_usedAt_idx" ON "PasswordResetToken"("userId", "usedAt");
+    ALTER TABLE "PasswordResetToken" ADD COLUMN IF NOT EXISTS "attempts" INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE "PasswordResetToken" ADD COLUMN IF NOT EXISTS "purpose" TEXT NOT NULL DEFAULT 'code';
     CREATE UNIQUE INDEX IF NOT EXISTS "Campaign_tenantId_id_key" ON "Campaign"("tenantId", "id");
 `;
 
@@ -887,6 +889,31 @@ const PLATFORM_DOMAIN_SQL = `
     );
     CREATE INDEX IF NOT EXISTS "ServiceSignupRequest_status_createdAt_idx" ON "ServiceSignupRequest"("status", "createdAt");
     CREATE INDEX IF NOT EXISTS "ServiceSignupRequest_email_createdAt_idx" ON "ServiceSignupRequest"("email", "createdAt");
+    ALTER TABLE "ServiceSignupRequest" ADD COLUMN IF NOT EXISTS "name" TEXT;
+    ALTER TABLE "ServiceSignupRequest" ADD COLUMN IF NOT EXISTS "userId" TEXT;
+    ALTER TABLE "ServiceSignupRequest" ADD COLUMN IF NOT EXISTS "tenantId" TEXT;
+    ALTER TABLE "ServiceSignupRequest" ADD COLUMN IF NOT EXISTS "convertedAt" TIMESTAMP(3);
+
+    CREATE TABLE IF NOT EXISTS "PendingRegistration" (
+      "id" TEXT NOT NULL,
+      "email" TEXT NOT NULL,
+      "name" TEXT NOT NULL,
+      "companyName" TEXT NOT NULL,
+      "passwordHash" TEXT NOT NULL,
+      "codeHash" TEXT NOT NULL,
+      "attempts" INTEGER NOT NULL DEFAULT 0,
+      "resendCount" INTEGER NOT NULL DEFAULT 0,
+      "expiresAt" TIMESTAMP(3) NOT NULL,
+      "lastSentAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "consumedAt" TIMESTAMP(3),
+      "sourceIp" TEXT,
+      "userAgent" TEXT,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "PendingRegistration_pkey" PRIMARY KEY ("id")
+    );
+    CREATE INDEX IF NOT EXISTS "PendingRegistration_email_consumedAt_idx" ON "PendingRegistration"("email", "consumedAt");
+    CREATE INDEX IF NOT EXISTS "PendingRegistration_expiresAt_idx" ON "PendingRegistration"("expiresAt");
 `;
 
 const AI_DOMAIN_SQL = `

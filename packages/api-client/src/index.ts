@@ -11,6 +11,7 @@ export type ClientOptions = {
   getToken?: () => string | null | Promise<string | null>;
   getTenantId?: () => string | null;
   onUnknownTenant?: () => void;
+  onFeatureRequired?: (info: { message: string; feature?: string; body: unknown }) => void;
 };
 
 export function createApiClient(options: ClientOptions) {
@@ -39,6 +40,13 @@ export function createApiClient(options: ClientOptions) {
       error.status = response.status;
       error.code = (data as { code?: string }).code;
       error.body = data;
+      if (error.code === "feature_required") {
+        options.onFeatureRequired?.({
+          message: String((data as { message?: string }).message || "Эта функция доступна после активации тарифа BasQar."),
+          feature: (data as { details?: { feature?: string } }).details?.feature,
+          body: data,
+        });
+      }
       throw error;
     }
     return data as T;
@@ -90,6 +98,38 @@ export function createApiClient(options: ClientOptions) {
       request("/api/v1/auth/platform-login", { method: "POST", body: JSON.stringify({ email, password, client }) }),
     requestSignup: (email: string, companyName: string) =>
       request("/api/v1/auth/signup-request", { method: "POST", body: JSON.stringify({ email, companyName }) }),
+    registerAccount: (body: {
+      name: string;
+      companyName: string;
+      email: string;
+      password: string;
+      passwordConfirm?: string;
+    }) => request("/api/v1/auth/register", { method: "POST", body: JSON.stringify(body) }),
+    verifyRegistration: (email: string, code: string) =>
+      request("/api/v1/auth/register/verify", { method: "POST", body: JSON.stringify({ email, code }) }),
+    resendRegistration: (email: string) =>
+      request("/api/v1/auth/register/resend", { method: "POST", body: JSON.stringify({ email }) }),
+    requestPasswordReset: (email: string) =>
+      request("/api/v1/auth/password-reset/request", { method: "POST", body: JSON.stringify({ email }) }),
+    resendPasswordReset: (email: string) =>
+      request("/api/v1/auth/password-reset/resend", { method: "POST", body: JSON.stringify({ email }) }),
+    verifyPasswordReset: (email: string, code: string) =>
+      request("/api/v1/auth/password-reset/verify", { method: "POST", body: JSON.stringify({ email, code }) }),
+    completePasswordReset: (token: string, password: string, passwordConfirm?: string) =>
+      request("/api/v1/auth/password-reset/complete", {
+        method: "POST",
+        body: JSON.stringify({ token, password, passwordConfirm }),
+      }),
+    billing: () => request("/api/v1/billing"),
+    billingPlans: () => request("/api/v1/billing/plans"),
+    skipOnboarding: () => request("/api/v1/billing/onboarding/skip", { method: "POST", body: "{}" }),
+    completeOnboardingStep: (step: string) =>
+      request("/api/v1/billing/onboarding/complete-step", { method: "POST", body: JSON.stringify({ step }) }),
+    adminActivateSubscription: (tenantId: string, planCode?: string) =>
+      request(`/api/v1/admin/tenants/${tenantId}/subscription/activate`, {
+        method: "POST",
+        body: JSON.stringify(planCode ? { planCode } : {}),
+      }),
     me: () => request("/api/v1/me"),
     updateProfile: (body: Record<string, unknown>) =>
       request("/api/v1/me/profile", { method: "PATCH", body: JSON.stringify(body) }),

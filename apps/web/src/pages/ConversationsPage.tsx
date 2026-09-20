@@ -281,7 +281,7 @@ export function ConversationsPage() {
       </div>
       {listLoading ? <p className="muted" role="status">Загрузка диалогов…</p> : null}
       {!listLoading && items.length === 0 ? (
-        <p className="empty">{q || filter !== "all" ? "По выбранным условиям диалоги не найдены." : "Пока нет диалогов. Новые обращения из подключённых каналов появятся здесь автоматически."}</p>
+        <p className="empty">{q || filter !== "all" ? "По выбранным условиям диалоги не найдены." : "Диалоги появятся после подключения каналов. Сейчас можно посмотреть, как устроен этот раздел."}</p>
       ) : null}
       <div className="conv-list">
         {items.map((item) => (
