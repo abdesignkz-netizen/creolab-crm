@@ -5,6 +5,7 @@ import { nameWithPhone, phoneText } from "../lib/contactDisplay";
 import { api } from "../lib/api";
 import { useCapabilities } from "../lib/session";
 import { dealOutcomeLabel } from "../lib/labels";
+import { ContractPreviewModal } from "../components/ContractPreviewModal";
 import {
   ContractGenerateItems,
   newContractDraftLine,
@@ -99,6 +100,8 @@ export function CompanyPage() {
   const [templateId, setTemplateId] = useState("");
   const [templateBusy, setTemplateBusy] = useState(false);
   const [contractLines, setContractLines] = useState<ContractDraftLine[]>([newContractDraftLine()]);
+  const [formed, setFormed] = useState<{ previewId: string; number: string } | null>(null);
+  const [viewOpen, setViewOpen] = useState(false);
 
   async function load() {
     try {
@@ -117,6 +120,8 @@ export function CompanyPage() {
 
   useEffect(() => {
     void load();
+    setFormed(null);
+    setViewOpen(false);
   }, [id, caps.documents]);
 
   useEffect(() => {
@@ -476,6 +481,7 @@ export function CompanyPage() {
                   const nextId = e.target.value;
                   const previous = templates.find((row) => row.id === templateId)?.name || "";
                   setTemplateId(nextId);
+                  setFormed(null);
                   const nextName = templates.find((row) => row.id === nextId)?.name || "";
                   setContractLines((current) => {
                     if (current.length === 1 && (!current[0].name.trim() || current[0].name === previous)) {
@@ -491,31 +497,64 @@ export function CompanyPage() {
               </select>
             </label>
             <ContractGenerateItems lines={contractLines} onChange={setContractLines} disabled={templateBusy} />
-            <button
-              type="button"
-              className="btn"
-              disabled={templateBusy || !templateId}
-              onClick={() => {
-                let items;
-                try {
-                  items = parseContractDraftLines(contractLines);
-                } catch (err) {
-                  setError(err instanceof Error ? err.message : "Проверьте услуги");
-                  return;
-                }
-                setTemplateBusy(true);
-                setError("");
-                void api.createCompanyContractFromTemplate(id, { templateId, items })
-                  .then((result: any) => {
-                    notifySaved(result.generated ? "Договор сформирован по шаблону" : "Черновик договора создан");
-                    if (result.dealId) navigate(`/deals/${result.dealId}`);
-                  })
-                  .catch((err) => setError(err instanceof Error ? err.message : "Не удалось сформировать договор"))
-                  .finally(() => setTemplateBusy(false));
-              }}
-            >
-              {templateBusy ? "Формируем…" : "Сформировать по шаблону"}
-            </button>
+            <div className="actions">
+              {formed ? (
+                <>
+                  <button type="button" className="btn" disabled={templateBusy} onClick={() => setViewOpen(true)}>
+                    Посмотреть договор
+                  </button>
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    disabled={templateBusy}
+                    onClick={() => {
+                      setTemplateBusy(true);
+                      setError("");
+                      void api
+                        .createCompanyContractFromTemplate(id, { save: true, previewId: formed.previewId })
+                        .then(async () => {
+                          notifySaved("Договор сохранён");
+                          setFormed(null);
+                          setViewOpen(false);
+                          await load();
+                        })
+                        .catch((err) => setError(err instanceof Error ? err.message : "Не удалось сохранить договор"))
+                        .finally(() => setTemplateBusy(false));
+                    }}
+                  >
+                    {templateBusy ? "Сохраняем…" : "Сохранить договор"}
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={templateBusy || !templateId}
+                  onClick={() => {
+                    let items;
+                    try {
+                      items = parseContractDraftLines(contractLines);
+                    } catch (err) {
+                      setError(err instanceof Error ? err.message : "Проверьте услуги");
+                      return;
+                    }
+                    setTemplateBusy(true);
+                    setError("");
+                    void api.createCompanyContractFromTemplate(id, { templateId, items })
+                      .then((result: any) => {
+                        if (!result.previewId) throw new Error("Не удалось сформировать договор");
+                        setFormed({ previewId: result.previewId, number: result.number });
+                        setViewOpen(true);
+                        notifySaved("Договор сформирован по шаблону");
+                      })
+                      .catch((err) => setError(err instanceof Error ? err.message : "Не удалось сформировать договор"))
+                      .finally(() => setTemplateBusy(false));
+                  }}
+                >
+                  {templateBusy ? "Формируем…" : "Сформировать по шаблону"}
+                </button>
+              )}
+            </div>
           </div>
         ) : null}
         {!documents.length ? <p className="empty">Документов по этой компании пока нет.</p> : null}
@@ -529,6 +568,13 @@ export function CompanyPage() {
           </Link>
         ))}
       </div>
+      ) : null}
+
+      {viewOpen && formed ? (
+        <ContractPreviewModal
+          contract={{ id: formed.previewId, number: formed.number, preview: true }}
+          onClose={() => setViewOpen(false)}
+        />
       ) : null}
 
       <div className="sit-section">

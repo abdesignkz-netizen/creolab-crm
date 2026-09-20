@@ -29,6 +29,16 @@ export async function downloadInvoicePdf(invoiceId: string, stamped = false) {
   triggerDownload(blob, filename);
 }
 
+export async function downloadContractFile(contractId: string) {
+  const { blob, filename } = await api.downloadContractFile(contractId);
+  triggerDownload(blob, filename);
+}
+
+export async function downloadContractPreview(previewId: string) {
+  const { blob, filename } = await api.downloadContractPreview(previewId);
+  triggerDownload(blob, filename);
+}
+
 function triggerDownload(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");

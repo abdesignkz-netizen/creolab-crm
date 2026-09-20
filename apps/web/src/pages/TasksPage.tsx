@@ -1,3 +1,4 @@
+import { taskBoardLane, type TaskBoardLane } from "@creolab/contracts";
 import { notifySaved } from "../components/SaveNotice";
 import { useUrlState, useRequestVersion } from "../lib/useUrlState";
 import { useEffect, useMemo, useState, type DragEvent, type FormEvent } from "react";
@@ -11,7 +12,10 @@ import { CampaignMassPanel } from "./CampaignMassPanel";
 import { formatDateTimeLocalInput, formatDateTimeRu, parseDateTimeLocalInput, toDateTimeLocalValue } from "../lib/period";
 
 type Filter = "open" | "waiting" | "scheduled" | "overdue" | "mine" | "done" | "all";
+type Board = TaskBoardLane;
+type NoteFilter = "active" | "todo" | "in_progress" | "done" | "all";
 type TargetMode = "client" | "group" | "none";
+type TaskStatusMark = "open" | "in_progress" | "waiting" | "done";
 
 type PickerClient = {
   id: string;
@@ -202,6 +206,37 @@ function isClosedTask(item: { status?: string }) {
   return item.status === "done" || item.status === "canceled";
 }
 
+function itemBoardLane(item: any): Board {
+  if (item?.boardLane === "ai" || item?.boardLane === "managers" || item?.boardLane === "notes") {
+    return item.boardLane;
+  }
+  return taskBoardLane(item || {});
+}
+
+const NOTE_STATUS_LABEL: Record<string, string> = {
+  open: "К выполнению",
+  in_progress: "В работе",
+  waiting: "Жду",
+  done: "Сделано",
+  canceled: "Отменена",
+};
+
+const NOTE_STATUS_MARKS: Array<[TaskStatusMark, string]> = [
+  ["open", "К выполнению"],
+  ["in_progress", "В работе"],
+  ["waiting", "Жду"],
+  ["done", "Сделано"],
+];
+
+function noteStatusRank(status?: string) {
+  if (status === "in_progress") return 0;
+  if (status === "open") return 1;
+  if (status === "waiting") return 2;
+  if (status === "done") return 3;
+  if (status === "canceled") return 4;
+  return 9;
+}
+
 function startOfDay(value: Date) {
   return new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime();
 }
@@ -270,6 +305,10 @@ export function TasksPage() {
   const [items, setItems] = useState<any[]>([]);
   const [error, setError] = useState("");
   const [filter, setFilter] = useUrlState<Filter>("filter", "open", ["open", "waiting", "scheduled", "overdue", "mine", "done", "all"]);
+  const [board, setBoard] = useUrlState<Board>("board", "managers", ["ai", "managers", "notes"]);
+  const [noteFilter, setNoteFilter] = useUrlState<NoteFilter>("notes", "active", ["active", "todo", "in_progress", "done", "all"]);
+  const [noteTitle, setNoteTitle] = useState("");
+  const [noteDescription, setNoteDescription] = useState("");
   const [me, setMe] = useState<any>(null);
   const [members, setMembers] = useState<any[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -606,7 +645,15 @@ export function TasksPage() {
 
   const membershipId = me?.activeTenant?.membershipId;
   const now = new Date();
-  const visible = items.filter((item) => {
+  const boardItems = items.filter((item) => itemBoardLane(item) === board);
+  const visible = boardItems.filter((item) => {
+    if (board === "notes") {
+      if (noteFilter === "all") return true;
+      if (noteFilter === "done") return isClosedTask(item);
+      if (noteFilter === "in_progress") return item.status === "in_progress";
+      if (noteFilter === "todo") return item.status === "open";
+      return !isClosedTask(item);
+    }
     if (filter === "all") return true;
     if (filter === "done") return isClosedTask(item);
     if (filter === "waiting") return item.status === "waiting";
@@ -625,8 +672,15 @@ export function TasksPage() {
         !isScheduledSend(item)
       );
     }
-    if (filter === "mine") return item.ownerMembershipId === membershipId && ["open", "waiting"].includes(item.status);
-    return item.status === "open";
+    if (filter === "mine") {
+      return item.ownerMembershipId === membershipId && ["open", "in_progress", "waiting"].includes(item.status);
+    }
+    return item.status === "open" || item.status === "in_progress";
+  });
+  const noteItems = [...visible].sort((a, b) => {
+    const rank = noteStatusRank(a.status) - noteStatusRank(b.status);
+    if (rank !== 0) return rank;
+    return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
   });
 
   const activeItems = visible.filter((item) => !isClosedTask(item));
@@ -636,8 +690,8 @@ export function TasksPage() {
     items: activeItems.filter((item) => dueGroup(item, now) === key),
   }));
   const doneGroups = groupDoneByDate(doneItems, now);
-  const showActiveGroups = filter !== "done";
-  const showDoneGroups = filter === "done" || filter === "all";
+  const showActiveGroups = board !== "notes" && filter !== "done";
+  const showDoneGroups = board !== "notes" && (filter === "done" || filter === "all");
 
   async function submitTask(event: FormEvent) {
     event.preventDefault();
@@ -705,10 +759,43 @@ export function TasksPage() {
       setSegmentTotal(0);
       setShowCreate(false);
       notifySaved("Задача создана");
+      setBoard(targetMode === "none" || type === "note" ? "notes" : "managers");
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось создать");
     }
+  }
+
+  async function submitNote(event: FormEvent) {
+    event.preventDefault();
+    const titleText = noteTitle.trim();
+    if (!titleText) {
+      setError("Напишите, что нужно сделать");
+      return;
+    }
+    try {
+      await api.createTask({
+        type: "note",
+        title: titleText,
+        description: noteDescription.trim() || undefined,
+        targetType: "none",
+      });
+      setNoteTitle("");
+      setNoteDescription("");
+      setNoteFilter("active");
+      notifySaved("Заметка добавлена");
+      setError("");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось добавить заметку");
+    }
+  }
+
+  function setNoteStatus(id: string, status: TaskStatusMark) {
+    api
+      .setTaskStatus(id, status)
+      .then(() => load())
+      .catch((err) => setError(err instanceof Error ? err.message : "Не удалось обновить статус"));
   }
 
   async function openTaskEditor(taskId: string) {
@@ -1074,8 +1161,9 @@ export function TasksPage() {
         setCmdPhones([]);
         setCmdPhonesUnresolved([]);
       }
-      await load();
       setError("");
+      setBoard("ai");
+      await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось создать из команды");
     } finally {
@@ -1178,14 +1266,14 @@ export function TasksPage() {
   }
 
   const filterCounts = {
-    open: items.filter((item) => item.status === "open").length,
-    waiting: items.filter((item) => item.status === "waiting").length,
-    scheduled: items.filter(
+    open: boardItems.filter((item) => item.status === "open" || item.status === "in_progress").length,
+    waiting: boardItems.filter((item) => item.status === "waiting").length,
+    scheduled: boardItems.filter(
       (item) =>
         !isClosedTask(item) &&
         (isScheduledSend(item) || Boolean(item.dueAt && new Date(item.dueAt).getTime() > now.getTime())),
     ).length,
-    overdue: items.filter(
+    overdue: boardItems.filter(
       (item) =>
         item.dueAt &&
         new Date(item.dueAt) < now &&
@@ -1193,9 +1281,23 @@ export function TasksPage() {
         item.status !== "canceled" &&
         !isScheduledSend(item),
     ).length,
-    mine: items.filter((item) => item.ownerMembershipId === membershipId && ["open", "waiting"].includes(item.status)).length,
-    done: items.filter((item) => isClosedTask(item)).length,
-    all: items.length,
+    mine: boardItems.filter(
+      (item) => item.ownerMembershipId === membershipId && ["open", "in_progress", "waiting"].includes(item.status),
+    ).length,
+    done: boardItems.filter((item) => isClosedTask(item)).length,
+    all: boardItems.length,
+  };
+  const boardCounts = {
+    ai: items.filter((item) => itemBoardLane(item) === "ai" && !isClosedTask(item)).length,
+    managers: items.filter((item) => itemBoardLane(item) === "managers" && !isClosedTask(item)).length,
+    notes: items.filter((item) => itemBoardLane(item) === "notes" && !isClosedTask(item)).length,
+  };
+  const noteFilterCounts = {
+    active: boardItems.filter((item) => !isClosedTask(item)).length,
+    todo: boardItems.filter((item) => item.status === "open").length,
+    in_progress: boardItems.filter((item) => item.status === "in_progress").length,
+    done: boardItems.filter((item) => isClosedTask(item)).length,
+    all: boardItems.length,
   };
   const commandWillSchedule = commandDueMode === "scheduled" && Boolean(commandDueAt);
 
@@ -1204,51 +1306,120 @@ export function TasksPage() {
       <div className="page-head">
         <div>
           <h2>Задачи</h2>
+          <p className="muted page-head-sub">
+            {board === "ai"
+              ? "Что поставил AI: обработка заявок, договорённости из WhatsApp, команды"
+              : board === "notes"
+                ? "Личные дела без клиента — отмечайте «в работе» или «сделано»"
+                : "Что нужно сделать менеджерам: звонки, сообщения, встречи, рассылки"}
+          </p>
         </div>
         <div className="actions">
-          {caps.manageTasks ? (
+          {caps.manageTasks && board === "ai" ? (
+            <button
+              type="button"
+              className={showCreate && composeMode === "command" ? "btn" : "btn secondary"}
+              {...tip("Опишите задачу своими словами — система разберёт, кому и что сделать")}
+              onClick={() => {
+                setComposeMode("command");
+                setShowCampaignPanel(false);
+                setShowCreate(true);
+              }}
+            >
+              Описать задачу
+            </button>
+          ) : null}
+          {caps.manageTasks && board === "managers" ? (
             <>
-          <button
-            type="button"
-            className={showCreate && composeMode === "command" ? "btn" : "btn secondary"}
-            {...tip("Опишите задачу своими словами — система разберёт, кому и что отправить")}
-            onClick={() => {
-              setComposeMode("command");
-              setShowCampaignPanel(false);
-              setShowCreate(true);
-            }}
-          >
-            Описать задачу
-          </button>
-          <button
-            type="button"
-            className={showCreate && (composeMode === "campaign" || showCampaignPanel) ? "btn" : "btn secondary"}
-            {...tip("Рассылка одного сообщения или файла списку номеров / сегменту CRM")}
-            onClick={() => {
-              setComposeMode("campaign");
-              setShowCampaignPanel(true);
-              setCampaignSeed({ whoMode: "phones" });
-              setShowCreate(true);
-            }}
-          >
-            Массовая отправка
-          </button>
-          <button
-            type="button"
-            className={showCreate && composeMode === "manual" ? "btn" : "btn secondary"}
-            {...tip("Создать задачу вручную: тип, клиент, срок, текст")}
-            onClick={() => {
-              setComposeMode("manual");
-              setShowCampaignPanel(false);
-              setShowCreate(true);
-            }}
-          >
-            Заполнить форму
-          </button>
+              <button
+                type="button"
+                className={showCreate && (composeMode === "campaign" || showCampaignPanel) ? "btn" : "btn secondary"}
+                {...tip("Рассылка одного сообщения или файла списку номеров / сегменту CRM")}
+                onClick={() => {
+                  setComposeMode("campaign");
+                  setShowCampaignPanel(true);
+                  setCampaignSeed({ whoMode: "phones" });
+                  setShowCreate(true);
+                }}
+              >
+                Массовая отправка
+              </button>
+              <button
+                type="button"
+                className={showCreate && composeMode === "manual" ? "btn" : "btn secondary"}
+                {...tip("Создать задачу вручную: тип, клиент, срок, текст")}
+                onClick={() => {
+                  setComposeMode("manual");
+                  setShowCampaignPanel(false);
+                  setShowCreate(true);
+                }}
+              >
+                Заполнить форму
+              </button>
             </>
           ) : null}
         </div>
       </div>
+      <div className="actions task-board-tabs">
+        {(
+          [
+            ["ai", "От AI"],
+            ["managers", "Менеджерам"],
+            ["notes", "Заметки"],
+          ] as const
+        ).map(([value, label]) => (
+          <button
+            key={value}
+            className={board === value ? "btn" : "btn secondary"}
+            {...tip(
+              value === "ai"
+                ? "Задачи, которые поставил AI"
+                : value === "managers"
+                  ? "Задачи, назначенные менеджерам"
+                  : "Что нужно сделать: как записи в заметках",
+            )}
+            onClick={() => {
+              setBoard(value);
+              setShowCreate(false);
+              setShowCampaignPanel(false);
+            }}
+          >
+            {label} · {boardCounts[value]}
+          </button>
+        ))}
+      </div>
+      {board === "notes" ? (
+        <div className="actions">
+          {(
+            [
+              ["active", "Активные"],
+              ["todo", "К выполнению"],
+              ["in_progress", "В работе"],
+              ["done", "Сделано"],
+              ["all", "Все"],
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              className={noteFilter === value ? "btn" : "btn secondary"}
+              {...tip(
+                value === "active"
+                  ? "Ещё не сделанные заметки"
+                  : value === "todo"
+                    ? "Пока не начаты"
+                    : value === "in_progress"
+                      ? "Сейчас в работе"
+                      : value === "done"
+                        ? "Уже сделано"
+                        : "Все заметки",
+              )}
+              onClick={() => setNoteFilter(value)}
+            >
+              {label} · {noteFilterCounts[value]}
+            </button>
+          ))}
+        </div>
+      ) : (
       <div className="actions">
         {(
           [
@@ -1285,8 +1456,9 @@ export function TasksPage() {
           </button>
         ))}
       </div>
+      )}
 
-      {whatsappReady === false ? (
+      {whatsappReady === false && board !== "notes" ? (
         <div className="banner warn">
           <span>
             WhatsApp-бот не подключён или недоступен. Создавать и закрывать задачи можно, а отправка сообщений/КП из задачи —
@@ -1296,7 +1468,37 @@ export function TasksPage() {
         </div>
       ) : null}
 
-      {showCreate && (composeMode === "campaign" || showCampaignPanel) ? (
+      {board === "notes" && caps.manageTasks ? (
+        <form className="panel task-form task-note-compose" onSubmit={submitNote}>
+          <b>Новая заметка</b>
+          <label>
+            Что нужно сделать
+            <input
+              value={noteTitle}
+              onChange={(event) => setNoteTitle(event.target.value)}
+              placeholder="Например: подготовить смету к понедельнику"
+              maxLength={200}
+            />
+          </label>
+          <label>
+            Подробности
+            <textarea
+              value={noteDescription}
+              onChange={(event) => setNoteDescription(event.target.value)}
+              rows={2}
+              placeholder="Необязательно"
+              maxLength={2000}
+            />
+          </label>
+          <div className="actions">
+            <button className="btn" type="submit" {...tip("Сохранить как заметку со статусом «к выполнению»")}>
+              Добавить заметку
+            </button>
+          </div>
+        </form>
+      ) : null}
+
+      {board === "managers" && showCreate && (composeMode === "campaign" || showCampaignPanel) ? (
         <CampaignMassPanel
           key={`${campaignSeed.whoMode || "phones"}-${(campaignSeed.contactIds || []).join(",")}-${(campaignSeed.phones || "").slice(0, 40)}`}
           initialPhoneText={campaignSeed.phones || ""}
@@ -1321,7 +1523,7 @@ export function TasksPage() {
         />
       ) : null}
 
-      {showCreate && composeMode === "command" && !showCampaignPanel ? (
+      {board === "ai" && showCreate && composeMode === "command" && !showCampaignPanel ? (
         <div className="panel task-form command-compose">
           <div className="command-compose-head">
             <div>
@@ -1930,7 +2132,7 @@ export function TasksPage() {
         </div>
       ) : null}
 
-      {showCreate && composeMode === "manual" ? (
+      {board === "managers" && showCreate && composeMode === "manual" ? (
       <form className="panel task-form" onSubmit={submitTask}>
         <b>Новая задача</b>
 
@@ -1988,6 +2190,11 @@ export function TasksPage() {
               </button>
             ))}
           </div>
+          {targetMode === "none" ? (
+            <p className="muted" style={{ marginTop: 8 }}>
+              Появится в разделе «Заметки» — как запись, что нужно сделать.
+            </p>
+          ) : null}
         </div>
 
         {targetMode === "client" ? (
@@ -2618,7 +2825,15 @@ export function TasksPage() {
 
       {visible.length === 0 ? (
         <p className="empty">
-          {filter === "open"
+          {board === "notes"
+            ? noteFilter === "done"
+              ? "Сделанных заметок пока нет."
+              : noteFilter === "in_progress"
+                ? "Нет заметок в работе."
+                : noteFilter === "todo"
+                  ? "Нет заметок к выполнению."
+                  : "Заметок пока нет. Добавьте, что нужно сделать."
+            : filter === "open"
             ? "Открытых задач нет."
             : filter === "waiting"
               ? "Задач в ожидании нет."
@@ -2633,6 +2848,54 @@ export function TasksPage() {
                     : "Задач пока нет."}
         </p>
       ) : null}
+
+      {board === "notes"
+        ? noteItems.map((item) => (
+            <div
+              className={`row task-row task-note-row${item.status === "in_progress" ? " task-row-progress" : ""}${
+                item.status === "done" ? " task-row-done" : ""
+              }${item.status === "canceled" ? " task-row-canceled" : ""}${item.status === "waiting" ? " task-row-waiting" : ""}`}
+              key={item.id}
+            >
+              <div className="task-row-main">
+                <div className="task-row-title">
+                  <b>{item.title}</b>
+                  <span
+                    className={`deal-flag${item.status === "done" ? " deal-flag-done" : ""}${
+                      item.status === "in_progress" ? " deal-flag-progress" : ""
+                    }`}
+                  >
+                    {NOTE_STATUS_LABEL[item.status] || item.statusLabel || item.status}
+                  </span>
+                </div>
+                {item.descriptionPreview ? <div className="task-desc muted">{item.descriptionPreview}</div> : null}
+                {caps.manageTasks ? (
+                  <div className="chip-row task-note-marks">
+                    {NOTE_STATUS_MARKS.map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        className={item.status === value ? "chip active" : "chip"}
+                        {...tip(
+                          value === "open"
+                            ? "Ещё не начато"
+                            : value === "in_progress"
+                              ? "Сейчас делаете"
+                              : value === "waiting"
+                                ? "Ждёте кого-то или чего-то"
+                                : "Отметить сделанным",
+                        )}
+                        onClick={() => setNoteStatus(item.id, value)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          ))
+        : null}
 
       {showActiveGroups
         ? groups.map((group) =>

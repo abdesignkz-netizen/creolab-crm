@@ -562,11 +562,29 @@ KZ111111111111111111
       body: JSON.stringify({ templateId }),
     });
     assert.equal(formed.response.status, 201, JSON.stringify(formed.body));
-    assert.equal(formed.body.contract.templateId, templateId);
-    assert.ok(formed.body.dealId);
+    assert.equal(formed.body.dealId, null);
+    assert.ok(formed.body.previewId);
     assert.equal(formed.body.generated, true, JSON.stringify(formed.body));
 
-    const file = await fetch(`${base}/api/v1/contracts/${formed.body.contract.id}/pdf`, { headers: { cookie } });
+    const previewFile = await fetch(`${base}/api/v1/documents/contract-previews/${formed.body.previewId}`, { headers: { cookie } });
+    assert.equal(previewFile.status, 200);
+    const previewBytes = Buffer.from(await previewFile.arrayBuffer());
+    assert.ok(previewBytes.subarray(0, 2).equals(Buffer.from("PK")));
+    const previewText = await docxToText(previewBytes);
+    assert.match(previewText, /Разработать презентацию компании/);
+    assert.match(previewText, /реквизит/i);
+    assert.doesNotMatch(previewText, /5\.\s*Заключительные положения/);
+
+    const saved = await json(`/api/v1/companies/${company.body.id}/contract-from-template`, {
+      method: "POST",
+      body: JSON.stringify({ save: true, previewId: formed.body.previewId }),
+    });
+    assert.equal(saved.response.status, 201, JSON.stringify(saved.body));
+    assert.equal(saved.body.contract.templateId, templateId);
+    assert.ok(saved.body.dealId);
+    assert.equal(saved.body.contract.status, "READY_TO_SIGN");
+
+    const file = await fetch(`${base}/api/v1/contracts/${saved.body.contract.id}/pdf`, { headers: { cookie } });
     assert.equal(file.status, 200);
     const fileBytes = Buffer.from(await file.arrayBuffer());
     assert.ok(fileBytes.subarray(0, 2).equals(Buffer.from("PK")));
@@ -574,7 +592,6 @@ KZ111111111111111111
     assert.match(wordText, /Разработать презентацию компании/);
     assert.match(wordText, /реквизит/i);
     assert.doesNotMatch(wordText, /5\.\s*Заключительные положения/);
-    assert.equal(formed.body.contract.status, "READY_TO_SIGN");
 
     const list = await json("/api/v1/documents/contract-templates");
     assert.ok((list.body.items || []).some((row: { id: string }) => row.id === templateId));
@@ -603,7 +620,12 @@ KZ111111111111111111
       }),
     });
     assert.equal(formed.response.status, 201, JSON.stringify(formed.body));
-    const deal = await json(`/api/v1/deals/${formed.body.dealId}`);
+    const saved = await json(`/api/v1/companies/${companyId}/contract-from-template`, {
+      method: "POST",
+      body: JSON.stringify({ save: true, previewId: formed.body.previewId }),
+    });
+    assert.equal(saved.response.status, 201, JSON.stringify(saved.body));
+    const deal = await json(`/api/v1/deals/${saved.body.dealId}`);
     assert.equal(deal.response.status, 200, JSON.stringify(deal.body));
     const items = deal.body.deal?.items || [];
     assert.equal(items.length, 2);

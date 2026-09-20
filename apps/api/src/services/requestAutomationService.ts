@@ -1,5 +1,5 @@
 import type { Prisma, PrismaClient } from "@creolab/db";
-import { parseAIAutomationSettings, isWithinAiSchedule } from "./aiAutomationSettings.ts";
+import { parseAIAutomationSettings, isWithinAiSchedule, offHoursBlocksAnalysis } from "./aiAutomationSettings.ts";
 import { decideAutomationPolicy, type AutomationDecision } from "./aiAutomationPolicyService.ts";
 import { analyzeRequestWithOptionalLlm, type RequestAnalysis } from "./requestAnalysisService.ts";
 import { writeActivity } from "./contactService.ts";
@@ -193,7 +193,13 @@ export async function processNewRequestAutomation(
   const withinSchedule =
     options.forceStart ||
     isWithinAiSchedule(new Date(), tenant?.timezone || "Asia/Almaty", settings);
-  if (!withinSchedule && (decision.autoStart || decision.allowOutbound)) {
+  if (!withinSchedule && offHoursBlocksAnalysis(settings) && !options.forceStart) {
+    decision.analyze = false;
+    decision.createTask = false;
+    decision.autoStart = false;
+    decision.allowOutbound = false;
+    decision.reason = `${decision.reason}; вне рабочего времени AI не отвечает`;
+  } else if (!withinSchedule && (decision.autoStart || decision.allowOutbound)) {
     decision.autoStart = false;
     decision.allowOutbound = false;
     decision.reason = `${decision.reason}; вне окна автообработки`;
@@ -657,6 +663,11 @@ export async function startAiManagerForInquiry(prisma: PrismaClient, tenantId: s
     });
   });
 
+  const { refreshConversationFollowUp } = await import("./aiConversationPolicyService.ts");
+  await refreshConversationFollowUp(prisma, tenantId, conversation.id).catch((error) =>
+    console.warn("[ai-policy] follow-up after start", error instanceof Error ? error.message : error),
+  );
+
   return { inquiryId, status: "in_progress" as const, conversationId: conversation.id };
 }
 
@@ -688,6 +699,8 @@ export async function handoffInquiryToHuman(
         where: { id: inquiry.conversationId },
         data: { mode: "human" },
       });
+      const { cancelConversationFollowUps } = await import("./aiConversationPolicyService.ts");
+      await cancelConversationFollowUps(prisma, tenantId, inquiry.conversationId, "handed_to_human");
     } catch {
       /* keep local pause even if bridge fails */
     }

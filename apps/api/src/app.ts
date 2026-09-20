@@ -7,6 +7,7 @@ import path from "node:path";
 import type { PrismaClient } from "@creolab/db";
 import {
   assignTaskSchema,
+  setTaskStatusSchema,
   assignConversationSchema,
   completeIntakeSchema,
   contactNoteSchema,
@@ -115,6 +116,7 @@ import {
   listTasks,
   markNotificationRead,
   reopenTask,
+  setTaskStatus,
   setConversationMode,
   assignConversation,
   statsSummary,
@@ -1267,12 +1269,16 @@ export function createApp(prisma: PrismaClient) {
     const { createContractFromTemplateForCompany } = await import("./services/contractTemplateService.ts");
     const result = await withIdempotency(prisma, {
       scope: "contract.from_template",
-      actorKey: `${auth.activeMembership?.tenantId}:${req.params.id}:${input.templateId}`,
+      actorKey: `${auth.activeMembership?.tenantId}:${req.params.id}:${input.save ? input.previewId : input.templateId}`,
       key: String(req.header("idempotency-key") || ""),
       payload: { companyId: req.params.id, ...input },
       run: () => createContractFromTemplateForCompany(prisma, auth, req.params.id, input),
     });
     res.status(201).json(result);
+  });
+  app.get("/api/v1/documents/contract-previews/:id", async (req, res) => {
+    const { sendContractPreviewFile } = await import("./services/contractTemplateService.ts");
+    await sendContractPreviewFile(prisma, await requireAuth(req), req.params.id, res);
   });
   app.get("/api/v1/deals/:id/avr-context", async (req, res) => {
     const { getAvrEditorContext } = await import("./services/documentWorkflow.ts");
@@ -1559,6 +1565,11 @@ export function createApp(prisma: PrismaClient) {
   app.post("/api/v1/tasks/:id/assign", json, async (req, res) => {
     const input = assignTaskSchema.parse(req.body || {});
     res.json(await assignTask(prisma, await requireAuth(req), req.params.id, input.membershipId));
+  });
+
+  app.post("/api/v1/tasks/:id/status", json, async (req, res) => {
+    const input = setTaskStatusSchema.parse(req.body || {});
+    res.json(await setTaskStatus(prisma, await requireAuth(req), req.params.id, input.status));
   });
 
   app.get("/api/v1/conversations", async (req, res) => {

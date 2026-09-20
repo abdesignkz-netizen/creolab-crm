@@ -1,7 +1,8 @@
 import { useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import { notifySaved } from "../components/SaveNotice";
+import { ContractPreviewModal } from "../components/ContractPreviewModal";
 import {
   ContractGenerateItems,
   newContractDraftLine,
@@ -38,8 +39,7 @@ function readBase64(file: File) {
   });
 }
 
-export function ContractTemplatePanel() {
-  const navigate = useNavigate();
+export function ContractTemplatePanel({ onSaved }: { onSaved?: () => void }) {
   const [items, setItems] = useState<TemplateRow[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -58,6 +58,8 @@ export function ContractTemplatePanel() {
   const [justSavedId, setJustSavedId] = useState("");
   const [renameId, setRenameId] = useState("");
   const [renameValue, setRenameValue] = useState("");
+  const [formed, setFormed] = useState<{ previewId: string; number: string; companyId: string } | null>(null);
+  const [viewOpen, setViewOpen] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
 
   function closeUpload() {
@@ -234,10 +236,39 @@ export function ContractTemplatePanel() {
     setError("");
     try {
       const result: any = await api.createCompanyContractFromTemplate(companyId, { templateId, items });
-      notifySaved(result.generated ? "Договор сформирован по шаблону" : "Черновик договора создан");
-      if (result.dealId) navigate(`/deals/${result.dealId}`);
+      if (!result.previewId) throw new Error("Не удалось сформировать договор");
+      setFormed({ previewId: result.previewId, number: result.number, companyId });
+      setViewOpen(true);
+      notifySaved("Договор сформирован по шаблону");
+    } catch (err: any) {
+      const missing = err?.body?.details?.missingFields || err?.body?.missingFields;
+      if (Array.isArray(missing) && missing.length) {
+        setError(
+          `Не хватает данных для договора: ${(err.body?.details?.missingFieldLabels
+            ? missing.map((code: string) => err.body.details.missingFieldLabels[code] || code)
+            : missing
+          ).join("; ")}`,
+        );
+      } else {
+        setError(err instanceof Error ? err.message : "Не удалось сформировать договор");
+      }
+    } finally {
+      setFormBusy(false);
+    }
+  }
+
+  async function saveFormedContract() {
+    if (!formed || formBusy) return;
+    setFormBusy(true);
+    setError("");
+    try {
+      await api.createCompanyContractFromTemplate(formed.companyId, { save: true, previewId: formed.previewId });
+      notifySaved("Договор сохранён");
+      setFormed(null);
+      setViewOpen(false);
+      onSaved?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось сформировать договор");
+      setError(err instanceof Error ? err.message : "Не удалось сохранить договор");
     } finally {
       setFormBusy(false);
     }
@@ -427,7 +458,13 @@ export function ContractTemplatePanel() {
               <p className="muted">Выберите компанию и шаблон Word — договор повторит его текст, а не короткую форму CRM.</p>
               <label>
                 Компания
-                <select value={companyId} onChange={(e) => setCompanyId(e.target.value)}>
+                <select
+                  value={companyId}
+                  onChange={(e) => {
+                    setCompanyId(e.target.value);
+                    setFormed(null);
+                  }}
+                >
                   <option value="">Выберите компанию</option>
                   {companies.map((company) => (
                     <option key={company.id} value={company.id}>{company.name}</option>
@@ -458,14 +495,31 @@ export function ContractTemplatePanel() {
               </label>
               <ContractGenerateItems lines={lines} onChange={setLines} disabled={formBusy} />
               <div className="actions">
-                <button type="button" className="btn" disabled={formBusy || !companyId || !templateId} onClick={() => void generateForCompany()}>
-                  {formBusy ? "Формируем…" : "Сформировать по шаблону"}
-                </button>
+                {formed ? (
+                  <>
+                    <button type="button" className="btn" disabled={formBusy} onClick={() => setViewOpen(true)}>
+                      Посмотреть договор
+                    </button>
+                    <button type="button" className="btn secondary" disabled={formBusy} onClick={() => void saveFormedContract()}>
+                      {formBusy ? "Сохраняем…" : "Сохранить договор"}
+                    </button>
+                  </>
+                ) : (
+                  <button type="button" className="btn" disabled={formBusy || !companyId || !templateId} onClick={() => void generateForCompany()}>
+                    {formBusy ? "Формируем…" : "Сформировать по шаблону"}
+                  </button>
+                )}
                 {companyId ? <Link className="btn secondary" to={`/companies/${companyId}`}>Карточка компании</Link> : null}
               </div>
             </>
           )}
         </div>
+      ) : null}
+      {viewOpen && formed ? (
+        <ContractPreviewModal
+          contract={{ id: formed.previewId, number: formed.number, preview: true }}
+          onClose={() => setViewOpen(false)}
+        />
       ) : null}
     </div>
   );

@@ -2,6 +2,7 @@ import { EsfSubmissionStatus, ESF_SEND_PHASES, type EsfSubmission } from "../com
 import { notifySaved } from "../components/SaveNotice";
 import { esfMeasureUnitShortLabel, INVOICE_PAYMENT_KIND_LABEL, type PdfImportDraft } from "@creolab/contracts";
 import { DeleteContractButton } from "../components/DeleteContractButton";
+import { ContractPreviewModal } from "../components/ContractPreviewModal";
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { api, downloadAvrExcel, downloadAvrPdf } from "../lib/api";
@@ -181,6 +182,7 @@ export function DealDocumentsPanel(props: {
   const [templates, setTemplates] = useState<Array<{ id: string; name: string; isDefault: boolean }>>([]);
   const [templateId, setTemplateId] = useState("");
   const [completionTerms, setCompletionTerms] = useState("5–7 рабочих дней");
+  const [previewContract, setPreviewContract] = useState<{ id: string; number?: string } | null>(null);
   const sendFlight = useRef(false);
   useEffect(() => { setSubmissions({}); }, [d.id]);
   useEffect(() => {
@@ -269,6 +271,60 @@ export function DealDocumentsPanel(props: {
   }, []);
   const contract = contracts[0];
   const invoice = invoices[0];
+  const importedContract = Boolean(contract?.importedPdf);
+  const formedContract = Boolean(contract?.generatedFileId) && !importedContract;
+
+  function contractPayload() {
+    return {
+      ...(templateId ? { templateId } : {}),
+      completionTerms: completionTerms.trim() || null,
+    };
+  }
+
+  async function generateWord() {
+    setBusy(true);
+    setError("");
+    try {
+      let contractId = contracts[0]?.id as string | undefined;
+      if (!contractId) {
+        const created: any = await api.createContractDraft(d.id, contractPayload());
+        contractId = created.contract.id;
+      }
+      const generated: any = await api.generateContract(contractId!, contractPayload());
+      notifySaved("Договор сформирован");
+      await load();
+      setPreviewContract({
+        id: generated.contract?.id || contractId,
+        number: generated.contract?.number,
+      });
+    } catch (err: any) {
+      const missing = err?.body?.details?.missingFields || err?.body?.missingFields;
+      if (Array.isArray(missing) && missing.length) {
+        setReadiness({
+          ready: false,
+          missingFields: missing,
+          missingFieldLabels: err.body?.details?.missingFieldLabels || err.body?.missingFieldLabels || {},
+        });
+      }
+      setError(err instanceof Error ? err.message : "Не удалось сформировать договор");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveContract() {
+    setBusy(true);
+    setError("");
+    try {
+      await api.createContractDraft(d.id, contractPayload());
+      notifySaved("Договор сохранён");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось сохранить договор");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   const steps = [
     { id: "contract", label: "Договор", tone: stepTone(contract?.status === "SIGNED", Boolean(contract)) },
@@ -363,62 +419,36 @@ export function DealDocumentsPanel(props: {
                 onChange={(e) => setCompletionTerms(e.target.value)}
               />
             </label>
-            <button
-              type="button"
-              className="btn"
-              disabled={busy || readiness?.ready === false || contracts[0]?.importedPdf}
-              title={contracts[0]?.importedPdf ? "Загруженный PDF уже сохранён в исходном виде" : undefined}
-              onClick={() => {
-                setBusy(true);
-                void (async () => {
-                  let contractId = contracts[0]?.id as string | undefined;
-                  if (!contractId) {
-                    const created: any = await api.createContractDraft(d.id, {
-                      ...(templateId ? { templateId } : {}),
-                      completionTerms: completionTerms.trim() || null,
-                    });
-                    contractId = created.contract.id;
-                  }
-                  await api.generateContract(contractId!, {
-                    ...(templateId ? { templateId } : {}),
-                    completionTerms: completionTerms.trim() || null,
-                  });
-                  await load();
-                })()
-                  .catch((err: any) => {
-                    const missing = err?.body?.details?.missingFields || err?.body?.missingFields;
-                    if (Array.isArray(missing) && missing.length) {
-                      setReadiness({
-                        ready: false,
-                        missingFields: missing,
-                        missingFieldLabels: err.body?.details?.missingFieldLabels || err.body?.missingFieldLabels || {},
-                      });
-                    }
-                    setError(err instanceof Error ? err.message : "Не удалось сформировать договор");
-                  })
-                  .finally(() => setBusy(false));
-              }}
-            >
-              Сформировать Word
-            </button>
-            <button
-              type="button"
-              className="btn secondary"
-              disabled={busy}
-              onClick={() => {
-                setBusy(true);
-                void api
-                  .createContractDraft(d.id, {
-                    ...(templateId ? { templateId } : {}),
-                    completionTerms: completionTerms.trim() || null,
-                  })
-                  .then(() => load())
-                  .catch((err) => setError(err instanceof Error ? err.message : "Не удалось создать договор"))
-                  .finally(() => setBusy(false));
-              }}
-            >
-              Черновик договора
-            </button>
+            {formedContract ? (
+              <button
+                type="button"
+                className="btn"
+                disabled={busy}
+                onClick={() => setPreviewContract({ id: contracts[0].id, number: contracts[0].number })}
+              >
+                Посмотреть договор
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn"
+                disabled={busy || readiness?.ready === false || importedContract}
+                title={importedContract ? "Загруженный PDF уже сохранён в исходном виде" : undefined}
+                onClick={() => void generateWord()}
+              >
+                Сформировать Word
+              </button>
+            )}
+            {importedContract ? null : (
+              <button
+                type="button"
+                className="btn secondary"
+                disabled={busy}
+                onClick={() => void saveContract()}
+              >
+                Сохранить договор
+              </button>
+            )}
           </div>
         </div>
 
@@ -1047,6 +1077,9 @@ export function DealDocumentsPanel(props: {
           </div>
         </div>
       </div>
+    {previewContract ? (
+      <ContractPreviewModal contract={previewContract} onClose={() => setPreviewContract(null)} />
+    ) : null}
     </>
   );
 }

@@ -289,6 +289,10 @@ export function createApiClient(options: ClientOptions) {
     generateContract: (contractId: string, body: unknown = {}) =>
       request(`/api/v1/contracts/${contractId}/generate`, { method: "POST", body: JSON.stringify(body) }),
     contractPdfUrl: (contractId: string) => `/api/v1/contracts/${contractId}/pdf`,
+    downloadContractFile: (contractId: string) =>
+      downloadBlob(`/api/v1/contracts/${contractId}/pdf`, "contract.docx"),
+    downloadContractPreview: (previewId: string) =>
+      downloadBlob(`/api/v1/documents/contract-previews/${previewId}`, "contract.docx"),
     contractTemplates: () => request("/api/v1/documents/contract-templates"),
     previewContractTemplate: (body: unknown) =>
       request("/api/v1/documents/contract-templates/preview", { method: "POST", body: JSON.stringify(body) }),
@@ -454,6 +458,8 @@ export function createApiClient(options: ClientOptions) {
     cancelTask: (id: string) => request(`/api/v1/tasks/${id}/cancel`, { method: "POST" }),
     assignTask: (id: string, membershipId?: string) =>
       request(`/api/v1/tasks/${id}/assign`, { method: "POST", body: JSON.stringify({ membershipId }) }),
+    setTaskStatus: (id: string, status: "open" | "in_progress" | "waiting" | "done" | "canceled") =>
+      request(`/api/v1/tasks/${id}/status`, { method: "POST", body: JSON.stringify({ status }) }),
     conversations: (query: Record<string, string> = {}) => {
       const params = new URLSearchParams(query);
       const suffix = params.toString() ? `?${params}` : "";

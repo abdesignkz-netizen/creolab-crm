@@ -552,6 +552,17 @@ export async function applyConversationAnalysis(
     });
   }
 
+  if (!options.dryRun) {
+    const { applyConfiguredHandoff, refreshConversationFollowUp } = await import("./aiConversationPolicyService.ts");
+    await applyConfiguredHandoff(prisma, tid, conversationId, {
+      text: conversation.messages.find((item) => item.direction === "inbound" || item.senderKind === "client")?.text || "",
+      analysis,
+    }).catch((error) => console.warn("[ai-policy] handoff", error instanceof Error ? error.message : error));
+    await refreshConversationFollowUp(prisma, tid, conversationId).catch((error) =>
+      console.warn("[ai-policy] follow-up", error instanceof Error ? error.message : error),
+    );
+  }
+
   return { dryRun: false, analysis, applied, llmUsed };
 }
 

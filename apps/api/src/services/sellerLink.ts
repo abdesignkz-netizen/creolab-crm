@@ -1241,6 +1241,12 @@ export async function ingestSellerBridgeEvent(
     lead,
     connectionId: connection?.id || null,
   });
+  if (!synced.skipped && synced.conversationId) {
+    const { afterConversationActivity } = await import("./aiConversationPolicyService.ts");
+    await afterConversationActivity(prisma, integration.tenantId, synced.conversationId).catch((error) => {
+      console.warn("[ai-policy] after ingest", error instanceof Error ? error.message : error);
+    });
+  }
   await prisma.integration.update({
     where: { id: integration.id },
     data: { lastEventAt: new Date(), lastError: null, status: "active" },

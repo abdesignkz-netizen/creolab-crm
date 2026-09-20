@@ -878,6 +878,11 @@ export async function markDealWon(
     });
   });
 
+  if (deal.contactId) {
+    const { cancelFollowUpsForContact } = await import("./aiConversationPolicyService.ts");
+    await cancelFollowUpsForContact(prisma, tid, deal.contactId, "deal_closed");
+  }
+
   return getDeal(prisma, auth, dealId);
 }
 
@@ -924,6 +929,11 @@ export async function markDealLost(
       },
     });
   });
+
+  if (deal.contactId) {
+    const { cancelFollowUpsForContact } = await import("./aiConversationPolicyService.ts");
+    await cancelFollowUpsForContact(prisma, tid, deal.contactId, "deal_closed");
+  }
 
   return getDeal(prisma, auth, dealId);
 }

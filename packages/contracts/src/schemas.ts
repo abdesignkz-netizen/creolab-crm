@@ -152,6 +152,7 @@ export const createTaskSchema = z.object({
       "wait_client",
       "payment",
       "other",
+      "note",
     ])
     .default("other"),
   title: z.string().trim().min(1).max(200),
@@ -344,6 +345,10 @@ export const parseContactImportSchema = z.object({
 
 export const assignTaskSchema = z.object({
   membershipId: z.string().uuid().optional(),
+});
+
+export const setTaskStatusSchema = z.object({
+  status: z.enum(["open", "in_progress", "waiting", "done", "canceled"]),
 });
 
 export const assignConversationSchema = z.object({
@@ -614,10 +619,18 @@ export const patchContractTemplateSchema = z.object({
 });
 
 export const companyContractFromTemplateSchema = z.object({
-  templateId: z.string().uuid(),
+  templateId: z.string().uuid().optional(),
+  previewId: z.string().uuid().optional(),
+  save: z.boolean().optional(),
   dealId: z.string().uuid().optional(),
   generate: z.boolean().optional(),
   items: z.array(dealItemInputSchema).min(1).max(200).optional(),
+}).superRefine((value, ctx) => {
+  if (value.save) {
+    if (!value.previewId) ctx.addIssue({ code: "custom", path: ["previewId"], message: "Нет сформированного договора" });
+  } else if (!value.templateId) {
+    ctx.addIssue({ code: "custom", path: ["templateId"], message: "Выберите шаблон" });
+  }
 });
 
 export const declineSignatureSchema = z.object({

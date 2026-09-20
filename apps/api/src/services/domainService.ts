@@ -1,5 +1,5 @@
 import type { PrismaClient } from "@creolab/db";
-import { crmModeToSeller } from "@creolab/contracts";
+import { crmModeToSeller, taskBoardLane } from "@creolab/contracts";
 import { ApiError } from "../errors.ts";
 import { CALLS_ENABLED } from "../lib/featureFlags.ts";
 import type { AuthContext } from "../lib/types.ts";
@@ -134,10 +134,13 @@ function taskContextLabel(item: {
 
 const TASK_STATUS_LABEL: Record<string, string> = {
   open: "Открыта",
+  in_progress: "В работе",
   waiting: "В ожидании",
   done: "Сделано",
   canceled: "Отменена",
 };
+
+const OPEN_TASK_STATUSES = ["open", "in_progress", "waiting"];
 
 const TASK_RESULT_LABEL: Record<string, string> = {
   sent: "Отправлено",
@@ -189,6 +192,7 @@ const TASK_TYPE_LABEL: Record<string, string> = {
   payment: "Проверить оплату",
   process_inquiry: "Обработать обращение",
   other: "Другое",
+  note: "Заметка",
 };
 
 function contactDisplayName(contact?: {
@@ -357,6 +361,7 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
       executionStatus: item.executionStatus,
       scheduledSendAt: scheduledSendAtByTask.get(item.id) || null,
       sendScheduled,
+      boardLane: taskBoardLane(item),
       campaignId:
         (typeof item.parsedCommandJson === "object" && item.parsedCommandJson
           ? (item.parsedCommandJson as { campaignId?: string }).campaignId
@@ -470,6 +475,12 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
       scheduledSendAt: campaign.scheduledAt,
       sendScheduled: campaignDueLater,
       campaignId: campaign.id,
+      boardLane: taskBoardLane({
+        source: campaign.source,
+        type: "message",
+        targetType: "group",
+        campaignId: campaign.id,
+      }),
     } as (typeof rows)[number]);
   }
 
@@ -625,7 +636,8 @@ export async function createTask(
     throw new ApiError(422, "calls_disabled", "Звонки временно отключены. Создайте задачу «Написать».");
   }
   const tid = tenantId(auth);
-  const targetType = input.targetType || (input.contactId || input.clientIds?.length ? "client" : "none");
+  const isNote = input.type === "note";
+  const targetType = isNote ? "none" : input.targetType || (input.contactId || input.clientIds?.length ? "client" : "none");
   const ownerMembershipId = input.ownerMembershipId || auth.activeMembership?.id;
   if (ownerMembershipId) {
     const owner = await prisma.membership.findFirst({ where: { id: ownerMembershipId, tenantId: tid, active: true } });
@@ -761,7 +773,7 @@ export async function completeTask(prisma: PrismaClient, auth: AuthContext, id: 
   const completedAt = new Date();
   if (task.targetType === "group" && !task.parentTaskId) {
     await prisma.task.updateMany({
-      where: { tenantId: tid, parentTaskId: id, status: { in: ["open", "waiting"] } },
+      where: { tenantId: tid, parentTaskId: id, status: { in: OPEN_TASK_STATUSES } },
       data: { status: "done", completedAt },
     });
   }
@@ -771,11 +783,11 @@ export async function completeTask(prisma: PrismaClient, auth: AuthContext, id: 
   });
   if (task.parentTaskId) {
     const openChildren = await prisma.task.count({
-      where: { tenantId: tid, parentTaskId: task.parentTaskId, status: { in: ["open", "waiting"] } },
+      where: { tenantId: tid, parentTaskId: task.parentTaskId, status: { in: OPEN_TASK_STATUSES } },
     });
     if (openChildren === 0) {
       await prisma.task.updateMany({
-        where: { id: task.parentTaskId, tenantId: tid, status: { in: ["open", "waiting"] } },
+        where: { id: task.parentTaskId, tenantId: tid, status: { in: OPEN_TASK_STATUSES } },
         data: { status: "done", completedAt },
       });
     }
@@ -786,15 +798,35 @@ export async function completeTask(prisma: PrismaClient, auth: AuthContext, id: 
 export async function waitTask(prisma: PrismaClient, auth: AuthContext, id: string) {
   requireManageTasks(auth);
   const { task } = await taskInTenant(prisma, auth, id);
-  if (task.status !== "open") throw new ApiError(409, "invalid_state", "В ожидание можно перевести только открытую задачу");
+  if (task.status !== "open" && task.status !== "in_progress") {
+    throw new ApiError(409, "invalid_state", "В ожидание можно перевести только открытую задачу");
+  }
   return prisma.task.update({ where: { id }, data: { status: "waiting" } });
 }
 
 export async function reopenTask(prisma: PrismaClient, auth: AuthContext, id: string) {
   requireManageTasks(auth);
   const { task } = await taskInTenant(prisma, auth, id);
-  if (task.status !== "waiting") throw new ApiError(409, "invalid_state", "Вернуть можно только задачу в ожидании");
+  if (task.status !== "waiting" && task.status !== "done" && task.status !== "canceled" && task.status !== "in_progress") {
+    throw new ApiError(409, "invalid_state", "Вернуть можно только закрытую задачу или задачу в ожидании");
+  }
   return prisma.task.update({ where: { id }, data: { status: "open", completedAt: null } });
+}
+
+export async function setTaskStatus(
+  prisma: PrismaClient,
+  auth: AuthContext,
+  id: string,
+  status: "open" | "in_progress" | "waiting" | "done" | "canceled",
+) {
+  requireManageTasks(auth);
+  if (status === "done") return completeTask(prisma, auth, id);
+  if (status === "canceled") return cancelTask(prisma, auth, id);
+  await taskInTenant(prisma, auth, id);
+  return prisma.task.update({
+    where: { id },
+    data: { status, completedAt: null },
+  });
 }
 
 export async function cancelTask(prisma: PrismaClient, auth: AuthContext, id: string) {
@@ -962,6 +994,12 @@ export async function setConversationMode(
       },
     });
     return { ...updated, appliedOnSeller, sellerError };
+  }).then(async (result) => {
+    if (mode === "human" || mode === "paused") {
+      const { cancelConversationFollowUps } = await import("./aiConversationPolicyService.ts");
+      await cancelConversationFollowUps(prisma, tid, id, "handed_to_human").catch(() => undefined);
+    }
+    return result;
   });
 }
 

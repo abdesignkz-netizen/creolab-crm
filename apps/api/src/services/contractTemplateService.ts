@@ -1,6 +1,9 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile, readFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import type { PrismaClient } from "@creolab/db";
+import type { Response } from "express";
 import {
   companyContractFromTemplateSchema,
   patchContractTemplateSchema,
@@ -9,17 +12,20 @@ import {
 } from "@creolab/contracts";
 import { ApiError } from "../errors.ts";
 import { can, type AuthContext } from "../lib/types.ts";
-import { requireTenant } from "../lib/access.ts";
+import { requireDocumentsAccess, requireTenant } from "../lib/access.ts";
 import { beginDocumentExtraction } from "./documentExtractionGate.ts";
 import { requireDocumentsEnabled } from "./legalProfileService.ts";
 import { ensureDefaultTemplate } from "./contractTemplate.ts";
 import { rewriteScannedFragment, scanContractTemplateText, describeTemplateFields, type TemplateSellerProfile } from "./contractTemplateScan.ts";
 import { sniffWordKind, convertDocToDocx, wordFileToText } from "./wordDocumentText.ts";
 import { rewriteDocxText, ensureDocxItemsPlaceholder } from "./docxTemplateFill.ts";
-import { createContractDraft } from "./documentDraftService.ts";
-import { generateContractPdfFile } from "./contractGenerationService.ts";
+import { createContractDraft, serializeContract } from "./documentDraftService.ts";
+import { generateContractPdfFile, renderContractFromTemplate } from "./contractGenerationService.ts";
 import { addDealItem } from "./dealItemService.ts";
 import { resolveUploadPath } from "../lib/storage.ts";
+import { lineAmounts, sumLines } from "./documentMoney.ts";
+import { assessContractReadiness, missingFieldsError } from "./contractReadiness.ts";
+import { DOCX_MIME, contractFileDownload } from "./contractDocx.ts";
 
 function requireManageDocuments(auth: AuthContext) {
   if (!can(auth, "manage_documents")) {
@@ -261,6 +267,321 @@ export async function deleteContractTemplate(prisma: PrismaClient, auth: AuthCon
   return { ok: true };
 }
 
+type PreviewItem = {
+  name: string;
+  description?: string | null;
+  quantity: number;
+  unit?: string;
+  unitPrice: number;
+  vatRate: number;
+  catalogItemId?: string | null;
+  catalogTruId?: string | null;
+};
+
+type PreviewMeta = {
+  companyId: string;
+  templateId: string;
+  number: string;
+  subject: string;
+  items: PreviewItem[];
+};
+
+function previewMetaPath(storageKey: string) {
+  return resolveUploadPath(`${storageKey}.meta.json`);
+}
+
+async function nextContractNumber(prisma: PrismaClient, tenantId: string) {
+  const year = new Date().getFullYear();
+  const count =
+    (await prisma.contract.count({ where: { tenantId } })) +
+    (await prisma.auditEvent.count({ where: { tenantId, entityType: "contract", action: "contract.delete" } }));
+  return `DOG-${year}-${String(count + 1).padStart(4, "0")}`;
+}
+
+async function ensureDealForCompany(
+  prisma: PrismaClient,
+  auth: AuthContext,
+  company: { id: string; name: string; legalName: string | null; directorName: string | null },
+  templateName: string,
+  itemRows: PreviewItem[],
+  dealId?: string,
+) {
+  const membership = requireTenant(auth);
+  if (dealId) {
+    const deal = await prisma.deal.findFirst({
+      where: { id: dealId, tenantId: membership.tenantId, companyId: company.id },
+      include: { items: { select: { id: true } } },
+    });
+    if (!deal) throw new ApiError(404, "not_found", "Сделка не найдена");
+    if (!deal.items.length) {
+      for (const item of itemRows) {
+        await addDealItem(prisma, auth, deal.id, item);
+      }
+    }
+    return { dealId: deal.id, createdDeal: false };
+  }
+  const linked = await prisma.companyContact.findFirst({
+    where: { tenantId: membership.tenantId, companyId: company.id, isActive: true, contact: { archivedAt: null } },
+    orderBy: { isPrimary: "desc" },
+    select: { contactId: true },
+  });
+  let contactId = linked?.contactId || "";
+  if (!contactId) {
+    const contact = await prisma.contact.create({
+      data: {
+        tenantId: membership.tenantId,
+        name: company.directorName || company.legalName || company.name,
+        companyName: company.name,
+        ownerMembershipId: membership.id,
+        attributionJson: { source: "contract_template" },
+      },
+    });
+    contactId = contact.id;
+    await prisma.companyContact.create({
+      data: { tenantId: membership.tenantId, companyId: company.id, contactId, isPrimary: true },
+    });
+  }
+  const { createDeal } = await import("./dealService.ts");
+  const created = await createDeal(prisma, auth, {
+    title: templateName.slice(0, 200),
+    contactId,
+    companyId: company.id,
+    description: `Договор по шаблону «${templateName}».`,
+    items: itemRows,
+  });
+  return { dealId: created.deal.id, createdDeal: true };
+}
+
+async function previewContractFromTemplate(
+  prisma: PrismaClient,
+  auth: AuthContext,
+  companyId: string,
+  input: { templateId: string; items?: PreviewItem[] },
+) {
+  const membership = requireTenant(auth);
+  const tid = membership.tenantId;
+  const template = await prisma.contractTemplate.findFirst({ where: { id: input.templateId, tenantId: tid } });
+  if (!template) throw new ApiError(404, "not_found", "Шаблон не найден");
+  const company = await prisma.company.findFirst({
+    where: { id: companyId, tenantId: tid, archivedAt: null },
+  });
+  if (!company) throw new ApiError(404, "not_found", "Компания не найдена");
+  const itemRows = (input.items?.length
+    ? input.items
+    : [{ name: template.name, quantity: 1, unitPrice: 0, vatRate: 0 }]
+  ).map((item) => ({ ...item, vatRate: item.vatRate ?? 0 }));
+  const pdfItems = itemRows.map((item) => {
+    const amounts = lineAmounts(item.quantity, item.unitPrice, item.vatRate);
+    return {
+      name: item.name,
+      quantity: item.quantity,
+      unit: item.unit || "шт",
+      unitPrice: item.unitPrice,
+      ...amounts,
+    };
+  });
+  const [profile, tenant] = await Promise.all([
+    prisma.tenantLegalProfile.findUnique({ where: { tenantId: tid } }),
+    prisma.tenant.findUnique({ where: { id: tid }, select: { name: true } }),
+  ]);
+  const readiness = assessContractReadiness({
+    dealId: "",
+    itemCount: pdfItems.length,
+    profile,
+    company,
+  });
+  if (!readiness.ready) throw missingFieldsError(readiness);
+  const totals = sumLines(pdfItems);
+  const number = await nextContractNumber(prisma, tid);
+  const contractDate = new Date();
+  const filled = (value: string | null | undefined) => Boolean(value && String(value).trim());
+  const docx = await renderContractFromTemplate(template, {
+    number,
+    date: contractDate,
+    subject: template.name,
+    dealName: template.name,
+    paymentTerms: "По согласованию сторон.",
+    completionTerms: "По согласованию сторон.",
+    amountWithoutVat: totals.amountWithoutVat,
+    vatRate: totals.vatRate,
+    vatAmount: totals.vatAmount,
+    totalAmount: totals.totalAmount,
+    sellerName: profile!.legalName || profile!.shortName || tenant?.name || "",
+    sellerBin: profile!.bin || profile!.iin || "",
+    sellerAddress: profile!.legalAddress || "",
+    sellerDirector: profile!.directorName || "",
+    sellerDirectorPosition: filled(profile!.directorPosition) ? profile!.directorPosition! : "Директор",
+    sellerIban: profile!.iban || "",
+    sellerBank: profile!.bankName || "",
+    sellerBik: profile!.bik || "",
+    sellerPhone: profile!.phone || "",
+    sellerEmail: profile!.email || "",
+    buyerName: company.legalName || company.name,
+    buyerBin: company.bin || company.iin || "",
+    buyerAddress: company.legalAddress || company.address || "",
+    buyerDirector: filled(company.directorName) ? company.directorName! : "________________",
+    buyerIban: company.iban || "",
+    buyerBank: company.bankName || "",
+    buyerBik: company.bik || "",
+    items: pdfItems,
+    templateBody: template.body,
+  });
+  const previewId = randomUUID();
+  const fileName = `${number}.docx`;
+  const storageKey = path.posix.join(tid, "contract-previews", previewId, fileName);
+  const abs = resolveUploadPath(storageKey);
+  await mkdir(path.dirname(abs), { recursive: true });
+  await writeFile(abs, docx);
+  const meta: PreviewMeta = {
+    companyId,
+    templateId: template.id,
+    number,
+    subject: template.name,
+    items: itemRows,
+  };
+  await writeFile(previewMetaPath(storageKey), JSON.stringify(meta));
+  await prisma.attachment.create({
+    data: {
+      id: previewId,
+      tenantId: tid,
+      parentType: "contract_preview",
+      parentId: previewId,
+      storageKey,
+      fileName,
+      originalFileName: fileName,
+      mimeType: DOCX_MIME,
+      sizeBytes: docx.length,
+      checksum: createHash("sha256").update(docx).digest("hex"),
+      documentType: "contract",
+      uploadedById: auth.user.id,
+      status: "preview",
+    },
+  });
+  return {
+    previewId,
+    number,
+    generated: true,
+    dealId: null,
+    createdDeal: false,
+    contract: null,
+  };
+}
+
+async function saveContractPreview(
+  prisma: PrismaClient,
+  auth: AuthContext,
+  companyId: string,
+  previewId: string,
+) {
+  const membership = requireTenant(auth);
+  const tid = membership.tenantId;
+  const attachment = await prisma.attachment.findFirst({
+    where: { id: previewId, tenantId: tid, parentType: "contract_preview" },
+  });
+  if (!attachment) throw new ApiError(404, "not_found", "Сформированный договор не найден. Сформируйте его ещё раз.");
+  if (attachment.status !== "preview") {
+    const existing = await prisma.contract.findFirst({
+      where: { tenantId: tid, generatedFileId: attachment.id },
+    });
+    if (existing) {
+      return { contract: serializeContract({ ...existing, generatedMimeType: DOCX_MIME }), dealId: existing.dealId, createdDeal: false, generated: true, previewId };
+    }
+  }
+  let meta: PreviewMeta;
+  try {
+    meta = JSON.parse(await readFile(previewMetaPath(attachment.storageKey), "utf8")) as PreviewMeta;
+  } catch {
+    throw new ApiError(404, "not_found", "Сформированный договор не найден. Сформируйте его ещё раз.");
+  }
+  if (meta.companyId !== companyId) throw new ApiError(404, "not_found", "Сформированный договор не найден");
+  const template = await prisma.contractTemplate.findFirst({ where: { id: meta.templateId, tenantId: tid } });
+  if (!template) throw new ApiError(404, "not_found", "Шаблон не найден");
+  const company = await prisma.company.findFirst({
+    where: { id: companyId, tenantId: tid, archivedAt: null },
+  });
+  if (!company) throw new ApiError(404, "not_found", "Компания не найдена");
+  const { dealId, createdDeal } = await ensureDealForCompany(prisma, auth, company, template.name, meta.items);
+  const totals = sumLines(
+    meta.items.map((item) => {
+      const amounts = lineAmounts(item.quantity, item.unitPrice, item.vatRate);
+      return { ...amounts, vatRate: item.vatRate };
+    }),
+  );
+  const saved = await prisma.$transaction(async (tx) => {
+    const contract = await tx.contract.create({
+      data: {
+        tenantId: tid,
+        dealId,
+        companyId,
+        number: meta.number,
+        subject: meta.subject,
+        amountWithoutVat: totals.amountWithoutVat,
+        vatRate: totals.vatRate,
+        vatAmount: totals.vatAmount,
+        totalAmount: totals.totalAmount,
+        status: "READY_TO_SIGN",
+        templateId: template.id,
+        generatedFileId: attachment.id,
+        createdByUserId: auth.user.id,
+      },
+    });
+    await tx.contractVersion.create({
+      data: {
+        tenantId: tid,
+        contractId: contract.id,
+        version: 1,
+        fileId: attachment.id,
+        sha256: attachment.checksum,
+      },
+    });
+    await tx.attachment.update({
+      where: { id: attachment.id },
+      data: { parentType: "contract", parentId: contract.id, status: "stored" },
+    });
+    await tx.auditEvent.create({
+      data: {
+        tenantId: tid,
+        actorUserId: auth.user.id,
+        action: "contract.from_template",
+        entityType: "contract",
+        entityId: contract.id,
+        changesJson: { dealId, previewId, number: contract.number },
+      },
+    });
+    return contract;
+  });
+  return {
+    contract: serializeContract({ ...saved, generatedMimeType: DOCX_MIME }),
+    dealId,
+    createdDeal,
+    generated: true,
+    previewId,
+  };
+}
+
+export async function sendContractPreviewFile(
+  prisma: PrismaClient,
+  auth: AuthContext,
+  previewId: string,
+  res: Response,
+) {
+  requireDocumentsAccess(auth);
+  const tid = requireTenant(auth).tenantId;
+  const attachment = await prisma.attachment.findFirst({
+    where: { id: previewId, tenantId: tid, parentType: { in: ["contract_preview", "contract"] } },
+  });
+  if (!attachment) throw new ApiError(404, "not_found", "Сформированный договор не найден");
+  const headers = contractFileDownload(attachment.fileName.replace(/\.docx$/i, ""), attachment);
+  res.setHeader("Content-Type", headers.contentType);
+  res.setHeader("Content-Disposition", headers.disposition);
+  await new Promise<void>((resolve, reject) => {
+    const stream = createReadStream(resolveUploadPath(attachment.storageKey));
+    stream.on("error", () => reject(new ApiError(404, "not_found", "Файл договора не найден на диске")));
+    stream.on("end", () => resolve());
+    stream.pipe(res);
+  });
+}
+
 export async function createContractFromTemplateForCompany(
   prisma: PrismaClient,
   auth: AuthContext,
@@ -271,87 +592,35 @@ export async function createContractFromTemplateForCompany(
   requireManageDocuments(auth);
   await requireDocumentsEnabled(prisma, membership.tenantId);
   const input = companyContractFromTemplateSchema.parse(raw || {});
-  const template = await prisma.contractTemplate.findFirst({
-    where: { id: input.templateId, tenantId: membership.tenantId },
-  });
-  if (!template) throw new ApiError(404, "not_found", "Шаблон не найден");
-  const company = await prisma.company.findFirst({
-    where: { id: companyId, tenantId: membership.tenantId, archivedAt: null },
-  });
-  if (!company) throw new ApiError(404, "not_found", "Компания не найдена");
-
-  const itemRows = (input.items?.length
-    ? input.items
-    : [{ name: template.name, quantity: 1, unitPrice: 0, vatRate: 0 }]
-  ).map((item) => ({ ...item, vatRate: item.vatRate ?? 0 }));
-
-  let dealId = input.dealId || "";
-  let createdDeal = false;
-  if (dealId) {
-    const deal = await prisma.deal.findFirst({
-      where: { id: dealId, tenantId: membership.tenantId, companyId },
-      include: { items: { select: { id: true } } },
-    });
-    if (!deal) throw new ApiError(404, "not_found", "Сделка не найдена");
-    if (!deal.items.length) {
-      for (const item of itemRows) {
-        await addDealItem(prisma, auth, deal.id, item);
-      }
-    }
-  } else {
-    const linked = await prisma.companyContact.findFirst({
-      where: { tenantId: membership.tenantId, companyId, isActive: true, contact: { archivedAt: null } },
-      orderBy: { isPrimary: "desc" },
-      select: { contactId: true },
-    });
-    let contactId = linked?.contactId || "";
-    if (!contactId) {
-      const contact = await prisma.contact.create({
-        data: {
-          tenantId: membership.tenantId,
-          name: company.directorName || company.legalName || company.name,
-          companyName: company.name,
-          ownerMembershipId: membership.id,
-          attributionJson: { source: "contract_template" },
-        },
-      });
-      contactId = contact.id;
-      await prisma.companyContact.create({
-        data: { tenantId: membership.tenantId, companyId, contactId, isPrimary: true },
-      });
-    }
-    const { createDeal } = await import("./dealService.ts");
-    const created = await createDeal(prisma, auth, {
-      title: template.name.slice(0, 200),
-      contactId,
-      companyId,
-      description: `Договор по шаблону «${template.name}».`,
-      items: itemRows,
-    });
-    dealId = created.deal.id;
-    createdDeal = true;
+  if (input.save) {
+    return saveContractPreview(prisma, auth, companyId, input.previewId!);
   }
-
-  const draft = await createContractDraft(prisma, auth, dealId, {
-    subject: template.name,
-    templateId: template.id,
-  });
-  if (input.generate === false) {
-    return { ...draft, dealId, createdDeal, generated: false };
-  }
-  try {
+  if (input.dealId) {
+    const template = await prisma.contractTemplate.findFirst({
+      where: { id: input.templateId, tenantId: membership.tenantId },
+    });
+    if (!template) throw new ApiError(404, "not_found", "Шаблон не найден");
+    const company = await prisma.company.findFirst({
+      where: { id: companyId, tenantId: membership.tenantId, archivedAt: null },
+    });
+    if (!company) throw new ApiError(404, "not_found", "Компания не найдена");
+    const itemRows = (input.items?.length
+      ? input.items
+      : [{ name: template.name, quantity: 1, unitPrice: 0, vatRate: 0 }]
+    ).map((item) => ({ ...item, vatRate: item.vatRate ?? 0 }));
+    const { dealId, createdDeal } = await ensureDealForCompany(prisma, auth, company, template.name, itemRows, input.dealId);
+    const draft = await createContractDraft(prisma, auth, dealId, {
+      subject: template.name,
+      templateId: template.id,
+    });
+    if (input.generate === false) {
+      return { ...draft, dealId, createdDeal, generated: false };
+    }
     const generated = await generateContractPdfFile(prisma, auth, draft.contract.id, { templateId: template.id });
     return { ...generated, dealId, createdDeal, generated: true };
-  } catch (error) {
-    if (error instanceof ApiError && error.code === "missing_fields") {
-      return {
-        ...draft,
-        dealId,
-        createdDeal,
-        generated: false,
-        missingFields: error.details && typeof error.details === "object" ? error.details : { message: error.message },
-      };
-    }
-    throw error;
   }
+  return previewContractFromTemplate(prisma, auth, companyId, {
+    templateId: input.templateId!,
+    items: input.items?.map((item) => ({ ...item, vatRate: item.vatRate ?? 0 })),
+  });
 }

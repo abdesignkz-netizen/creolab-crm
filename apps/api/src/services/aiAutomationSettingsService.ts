@@ -8,6 +8,7 @@ import {
   MODE_LABEL,
   parseAIAutomationSettings,
   parseScheduleWindow,
+  normalizeCompanyTimezone,
   DEFAULT_CUSTOM_SCHEDULE,
   DEFAULT_WORKING_HOURS,
   type AutomationMode,
@@ -47,7 +48,7 @@ export async function getAIAutomationSettings(prisma: PrismaClient, auth: AuthCo
 export async function updateAIAutomationSettings(
   prisma: PrismaClient,
   auth: AuthContext,
-  input: Partial<AIAutomationSettings> & { defaultMode?: AutomationMode },
+  input: Partial<AIAutomationSettings> & { defaultMode?: AutomationMode; timezone?: string },
 ) {
   requireAiSettingsAccess(auth);
   const membership = requireTenant(auth);
@@ -88,13 +89,32 @@ export async function updateAIAutomationSettings(
   if (input.integrationModes && typeof input.integrationModes === "object") {
     next.integrationModes = { ...next.integrationModes, ...input.integrationModes };
   }
+  if (input.handoff) {
+    next.handoff = parseAIAutomationSettings({ aiAutomation: { handoff: input.handoff } }).handoff;
+  }
+  if (input.followUp) {
+    next.followUp = parseAIAutomationSettings({ aiAutomation: { followUp: input.followUp } }).followUp;
+  }
+  if (input.conversationHours) {
+    next.conversationHours = parseAIAutomationSettings({
+      aiAutomation: { conversationHours: input.conversationHours },
+    }).conversationHours;
+  }
   next.sourceModes = applyModeToSettings(next, next.defaultMode).sourceModes;
 
   const settingsJson = mergeAIAutomationIntoSettingsJson(tenant.settingsJson, next);
   const workingHoursJson = next.workingHours as unknown as Prisma.InputJsonValue;
+  const timezone = normalizeCompanyTimezone(
+    typeof input.timezone === "string" ? input.timezone : tenant.timezone,
+    tenant.timezone || "Asia/Almaty",
+  );
   await prisma.tenant.update({
     where: { id: tenant.id },
-    data: { settingsJson: settingsJson as Prisma.InputJsonObject, workingHoursJson },
+    data: {
+      settingsJson: settingsJson as Prisma.InputJsonObject,
+      workingHoursJson,
+      timezone,
+    },
   });
 
   if (next.autoStartAiManager) {
@@ -106,7 +126,7 @@ export async function updateAIAutomationSettings(
 
   return {
     ...next,
-    timezone: tenant.timezone || "Asia/Almaty",
+    timezone,
     modeLabel: MODE_LABEL[next.defaultMode],
     message: `Режим обработки новых заявок изменён на «${MODE_LABEL[next.defaultMode]}». Новые заявки будут обрабатываться по новым правилам. Уже запущенные AI-задачи не меняются.`,
   };

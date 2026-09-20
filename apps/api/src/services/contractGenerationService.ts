@@ -36,7 +36,7 @@ function filled(value: string | null | undefined) {
   return Boolean(value && String(value).trim());
 }
 
-async function renderContractFromTemplate(
+export async function renderContractFromTemplate(
   template: { body: string; sourceFileName?: string | null; sourceStorageKey?: string | null },
   input: ContractPdfInput,
 ) {

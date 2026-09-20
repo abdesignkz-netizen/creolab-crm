@@ -164,9 +164,13 @@ export async function processDueScheduledActions(prisma: PrismaClient) {
     }
 
     if (item.type === "client_followup") {
-      await prisma.scheduledAction.update({
-        where: { id: item.id },
-        data: { state: "canceled", cancelReason: "module_disabled" },
+      const { processClientFollowUp } = await import("./aiConversationPolicyService.ts");
+      await processClientFollowUp(prisma, item).catch(async (error: unknown) => {
+        console.error("client followup", error);
+        await prisma.scheduledAction.update({
+          where: { id: item.id },
+          data: { state: "failed", cancelReason: error instanceof Error ? error.message : "error" },
+        });
       });
       continue;
     }
