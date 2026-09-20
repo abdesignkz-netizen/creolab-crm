@@ -702,6 +702,7 @@ function Login() {
   const [busy, setBusy] = useState(false);
   const [email, setEmail] = useState("");
   const [info, setInfo] = useState("");
+  const [devCode, setDevCode] = useState("");
 
   useEffect(() => {
     if (params.get("reset") === "1") navigate("/forgot-password", { replace: true });
@@ -787,14 +788,15 @@ function Login() {
               setError("");
               try {
                 const nextEmail = String(form.get("email"));
-                await api.registerAccount({
+                const started = (await api.registerAccount({
                   name: String(form.get("name")),
                   companyName: String(form.get("companyName")),
                   email: nextEmail,
                   password,
                   passwordConfirm,
-                });
+                })) as { verificationCode?: string; delivered?: boolean };
                 setEmail(nextEmail);
+                setDevCode(started.verificationCode || "");
                 setMode("verify");
               } catch (err: any) {
                 if (err?.code === "account_exists") {
@@ -873,8 +875,14 @@ function Login() {
           >
             <h2>{t(locale, "login.verifyTitle")}</h2>
             <p className="muted">
-              {t(locale, "login.verifyHint")} <b>{email}</b>
+              {devCode ? t(locale, "login.verifyNoMail") : t(locale, "login.verifyHint")}{" "}
+              <b>{email}</b>
             </p>
+            {devCode ? (
+              <p className="ok login-dev-code">
+                {t(locale, "login.verifyCodeLabel")} <b>{devCode}</b>
+              </p>
+            ) : null}
             <label>
               Код
               <input name="code" inputMode="numeric" pattern="\d{6}" maxLength={6} required autoComplete="one-time-code" />
@@ -889,8 +897,9 @@ function Login() {
                 setBusy(true);
                 setError("");
                 try {
-                  await api.resendRegistration(email);
-                  setInfo("Новый код отправлен");
+                  const resent = (await api.resendRegistration(email)) as { verificationCode?: string };
+                  setDevCode(resent.verificationCode || "");
+                  setInfo(resent.verificationCode ? t(locale, "login.verifyCodeUpdated") : "Новый код отправлен");
                 } catch (err) {
                   setError(err instanceof Error ? err.message : "Не удалось отправить код");
                 } finally {

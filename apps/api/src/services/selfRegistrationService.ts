@@ -45,14 +45,17 @@ function sixDigitCode() {
 function publicRegisterResult(
   email: string,
   expiresAt: Date,
-  extras: { verificationCode?: string } = {},
+  extras: { verificationCode?: string; delivered?: boolean } = {},
 ) {
   return {
     ok: true as const,
     email,
     expiresAt: expiresAt.toISOString(),
-    message: "Мы отправили код подтверждения на указанный email.",
-    ...extras,
+    delivered: extras.delivered ?? false,
+    message: extras.delivered
+      ? "Мы отправили код подтверждения на указанный email."
+      : "Код подтверждения создан. Если письмо не пришло, введите код с экрана или запросите его повторно.",
+    ...(extras.verificationCode ? { verificationCode: extras.verificationCode } : {}),
   };
 }
 
@@ -140,17 +143,16 @@ export async function startSelfRegistration(
     ip: meta.ip,
     userAgent: meta.userAgent,
   });
-  await sendMail(verificationEmail(email, code));
+  const mailed = await sendMail(verificationEmail(email, code));
   await writeAudit(prisma, {
     action: "auth.register_started",
     entityType: "PendingRegistration",
     changes: { email, companyName },
   }).catch(() => undefined);
-  return publicRegisterResult(
-    email,
-    expiresAt,
-    config.nodeEnv === "production" ? {} : { verificationCode: code },
-  );
+  return publicRegisterResult(email, expiresAt, {
+    delivered: mailed.delivered,
+    ...(config.nodeEnv === "production" ? {} : { verificationCode: code }),
+  });
 }
 
 export async function resendRegistrationCode(
@@ -186,12 +188,11 @@ export async function resendRegistrationCode(
       sourceIp: (meta.ip || "").slice(0, 80) || pending.sourceIp,
     },
   });
-  await sendMail(verificationEmail(email, code));
-  return publicRegisterResult(
-    email,
-    expiresAt,
-    config.nodeEnv === "production" ? {} : { verificationCode: code },
-  );
+  const mailed = await sendMail(verificationEmail(email, code));
+  return publicRegisterResult(email, expiresAt, {
+    delivered: mailed.delivered,
+    ...(config.nodeEnv === "production" ? {} : { verificationCode: code }),
+  });
 }
 
 export async function verifySelfRegistration(

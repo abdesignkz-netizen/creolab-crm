@@ -1415,6 +1415,17 @@ fieldset.field-block legend { padding: 0 6px; font-weight: 600; }
   cursor: pointer;
   font: inherit;
 }
+.login-dev-code {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--ok-soft);
+  letter-spacing: 0.04em;
+}
+.login-dev-code b {
+  font-size: 1.35rem;
+  letter-spacing: 0.18em;
+}
 .login-otp {
   display: flex;
   justify-content: space-between;
