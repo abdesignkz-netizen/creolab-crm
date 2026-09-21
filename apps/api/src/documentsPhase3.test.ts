@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile, writeFile } from "node:fs/promises";
 import { after, before, describe, it } from "node:test";
 import { createPrismaClient } from "@creolab/db";
 import { createApp } from "./app.ts";
@@ -163,8 +164,25 @@ describe("Documents phase 3", () => {
 
     const publicView = await json(`/public/sign/${buyerToken}`, {}, "");
     assert.equal(publicView.body.canSign, true);
+    assert.equal(publicView.body.version, 1);
 
     const buyerCms = makeTestCms(bytes, { iin: "222222222220", bin: "222222222220" });
+    const stored = await prisma.contract.findFirst({ where: { id: contractId } });
+    const attachment = await prisma.attachment.findFirst({ where: { id: stored?.generatedFileId || "" } });
+    assert.ok(attachment);
+    const { resolveUploadPath } = await import("./lib/storage.ts");
+    const abs = resolveUploadPath(attachment.storageKey);
+    const original = await readFile(abs);
+    await writeFile(abs, Buffer.concat([original, Buffer.from("x")]));
+    const tampered = await json(
+      `/public/sign/${buyerToken}/sign`,
+      { method: "POST", body: JSON.stringify({ cmsBase64: buyerCms }) },
+      "",
+    );
+    assert.equal(tampered.response.status, 409, JSON.stringify(tampered.body));
+    assert.equal(tampered.body.code, "DOCUMENT_CHANGED");
+    await writeFile(abs, original);
+
     const buyer = await json(
       `/public/sign/${buyerToken}/sign`,
       { method: "POST", body: JSON.stringify({ cmsBase64: buyerCms }) },
@@ -181,6 +199,14 @@ describe("Documents phase 3", () => {
     assert.equal(verify.body.status, "SIGNED");
     assert.equal(verify.body.signers.length, 2);
     assert.ok(verify.body.documentHash);
+    assert.equal(verify.body.hashAlgorithm, "SHA-256");
+    assert.equal("tenantId" in verify.body, false);
+    assert.equal("dealId" in verify.body, false);
+    for (const signer of verify.body.signers) {
+      assert.equal(String(signer.iin || "").includes("222222222220"), false);
+      assert.equal(String(signer.iin || "").includes("123456789013"), false);
+      if (signer.iin) assert.match(String(signer.iin), /•+\d{4}$/);
+    }
 
     const regen = await json(`/api/v1/contracts/${contractId}/generate`, {
       method: "POST",

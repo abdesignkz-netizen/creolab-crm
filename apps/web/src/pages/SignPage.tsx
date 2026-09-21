@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { api } from "../lib/api";
-import { createSigningClient } from "../lib/signing/ncalayerClient";
+import { createSigningClient, ncalayerUserMessage } from "../lib/signing/ncalayerClient";
 import { CONTRACT_SIGNING_ENABLED } from "../lib/featureFlags";
 
 export function SignPage() {
@@ -57,7 +57,7 @@ export function SignPage() {
       setDone("Договор подписан");
       await load();
     } catch (err: any) {
-      setError(err?.canceledByUser ? "Подпись отменена" : err instanceof Error ? err.message : "Не удалось подписать");
+      setError(ncalayerUserMessage(err));
     } finally {
       client.disconnect();
       setBusy(false);
@@ -79,7 +79,9 @@ export function SignPage() {
                 <b>{data.subject || `Договор ${data.number}`}</b>
               </p>
               <p className="muted">
-                № {data.number} · {data.date ? new Date(data.date).toLocaleDateString("ru-RU") : ""}
+                № {data.number}
+                {data.version ? ` · версия ${data.version}` : ""}
+                {data.date ? ` · ${new Date(data.date).toLocaleDateString("ru-RU")}` : ""}
               </p>
               <p className="muted">
                 {data.sellerName || "Исполнитель"} → {data.buyerName || "Заказчик"}

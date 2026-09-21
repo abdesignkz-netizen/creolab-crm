@@ -50,7 +50,7 @@ export function VerifyPage() {
                 {data.sellerName || "Исполнитель"} / {data.buyerName || "Заказчик"}
               </p>
               <p>
-                SHA-256: <code style={{ wordBreak: "break-all" }}>{data.documentHash || "—"}</code>
+                {data.hashAlgorithm || "SHA-256"}: <code style={{ wordBreak: "break-all" }}>{data.documentHash || "—"}</code>
               </p>
               {(data.signers || []).map((signer: any, index: number) => (
                 <p key={`${signer.iin}-${index}`}>

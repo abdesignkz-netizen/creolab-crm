@@ -303,4 +303,73 @@ describe("BasQar Control", () => {
     assert.equal(me.status, 200);
     assert.equal(me.body.user.email, "owner@creolab.example");
   });
+
+  it("принимает живой контракт WhatsApp AI Manager", async () => {
+    const requestId = `wa_${randomUUID()}`;
+    const result = await json("/api/integrations/ai-control/execute", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${WEBHOOK_SECRET}`,
+        "x-crm-integration-id": webhookId,
+        "x-crm-sender-phone": "77011111111",
+      },
+      body: JSON.stringify({
+        action: "GET_LEADS_STATS",
+        params: { period: "last_7_days" },
+        requestId,
+        senderPhone: "77011111111",
+      }),
+    });
+    assert.equal(result.status, 200, JSON.stringify(result.body));
+    assert.equal(result.body.status, "OK");
+    assert.equal(result.body.action, "GET_LEADS_STATS");
+    assert.equal(typeof result.body.data.total, "number");
+    assert.equal(result.body.data.stats.totalLeads, result.body.data.total);
+    assert.match(String(result.body.data.periodLabel), /недел/i);
+  });
+
+  it("GET_DEAL_DETAILS с алиаса менеджера выполняется как GET_DEAL", async () => {
+    const result = await execute("GET_DEAL_DETAILS", { dealId: randomUUID() });
+    assert.notEqual(result.body.code, "invalid", JSON.stringify(result.body));
+    assert.ok(
+      result.status === 200 || result.status === 404 || result.status === 422,
+      JSON.stringify(result.body),
+    );
+    if (result.status === 200) assert.equal(result.body.action, "GET_DEAL");
+  });
+
+  it("confirm из WhatsApp идёт тем же POST execute", async () => {
+    const contact = await prisma.contact.create({
+      data: { tenantId: creolabId, name: `WA confirm ${Date.now()}`, lifecycleStatus: "new" },
+    });
+    const pending = await execute("DELETE_CLIENT", { clientId: contact.id });
+    assert.equal(pending.body.status, "CONFIRMATION_REQUIRED");
+    const confirmed = await json("/api/v1/integrations/ai-control/execute", {
+      method: "POST",
+      headers: controlHeaders(`cnf_wa_${randomUUID()}`),
+      body: JSON.stringify({
+        action: "DELETE_CLIENT",
+        params: { clientId: contact.id },
+        requestId: pending.body.meta?.requestId || `req_${randomUUID()}`,
+        senderPhone: "+77011111111",
+        confirmationId: pending.body.confirmationId,
+        confirm: true,
+      }),
+    });
+    assert.equal(confirmed.status, 200, JSON.stringify(confirmed.body));
+    assert.equal(confirmed.body.status, "OK");
+    const gone = await prisma.contact.findFirst({ where: { id: contact.id } });
+    assert.equal(gone, null);
+  });
+
+  it("без credentials Control остаётся 401", async () => {
+    const result = await json("/api/v1/integrations/ai-control/execute", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "GET_LEADS_STATS", requestId: "req_no_auth_1", senderPhone: "77011111111" }),
+    });
+    assert.equal(result.status, 401);
+    assert.equal(result.body.status, "UNAUTHORIZED");
+  });
 });

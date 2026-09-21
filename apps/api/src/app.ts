@@ -81,7 +81,7 @@ import {
 } from "@creolab/contracts";
 import { listTenantAudit } from "./lib/audit.ts";
 import { config } from "./config.ts";
-import { ApiError, errorBody } from "./errors.ts";
+import { ApiError, errorBody, withControlClientFields } from "./errors.ts";
 import { clientIp, rateLimit } from "./lib/rateLimit.ts";
 import { logServerError } from "./lib/redact.ts";
 import { fileStorageStatus } from "./lib/storage.ts";
@@ -1427,6 +1427,7 @@ export function createApp(prisma: PrismaClient) {
   });
 
   app.get("/public/verify/:verificationId", async (req, res) => {
+    rateLimit(`verify:${req.ip}`, 40);
     const { getPublicVerification } = await import("./services/contractSigningService.ts");
     res.json(await getPublicVerification(prisma, req.params.verificationId));
   });
@@ -2447,53 +2448,32 @@ export function createApp(prisma: PrismaClient) {
     res.status(202).json(result);
   });
 
-  app.post("/api/v1/integrations/ai-control/execute", json, async (req, res) => {
-    const secret = String(req.header("authorization") || "").replace(/^Bearer\s+/i, "");
-    res.json(
-      await executeAiControlCommand(
-        prisma,
-        {
-          secret,
-          integrationId: req.header("x-crm-integration-id") || req.body?.integrationId || null,
-          timestamp: req.header("x-crm-timestamp") || undefined,
-          signature: req.header("x-crm-signature") || undefined,
-          requestIdHeader: req.header("x-crm-request-id") || undefined,
-        },
-        req.body,
-      ),
-    );
+  const controlHeaders = (req: express.Request) => ({
+    secret: String(req.header("authorization") || "").replace(/^Bearer\s+/i, ""),
+    integrationId: req.header("x-crm-integration-id") || req.body?.integrationId || null,
+    timestamp: req.header("x-crm-timestamp") || undefined,
+    signature: req.header("x-crm-signature") || undefined,
+    requestIdHeader: req.header("x-crm-request-id") || undefined,
+    senderPhone: req.header("x-crm-sender-phone") || undefined,
   });
 
-  app.post("/api/v1/integrations/ai-control/confirm", json, async (req, res) => {
-    const secret = String(req.header("authorization") || "").replace(/^Bearer\s+/i, "");
-    res.json(
-      await confirmAiControlCommand(
-        prisma,
-        {
-          secret,
-          integrationId: req.header("x-crm-integration-id") || req.body?.integrationId || null,
-          timestamp: req.header("x-crm-timestamp") || undefined,
-          signature: req.header("x-crm-signature") || undefined,
-        },
-        req.body,
-      ),
-    );
-  });
+  const executeControl = async (req: express.Request, res: express.Response) => {
+    res.json(await executeAiControlCommand(prisma, controlHeaders(req), req.body));
+  };
+  const confirmControl = async (req: express.Request, res: express.Response) => {
+    res.json(await confirmAiControlCommand(prisma, controlHeaders(req), req.body));
+  };
+  const verifyControl = async (req: express.Request, res: express.Response) => {
+    res.json(await verifyAiControlIdentity(prisma, controlHeaders(req), req.body));
+  };
 
-  app.post("/api/v1/integrations/ai-control/verify", json, async (req, res) => {
-    const secret = String(req.header("authorization") || "").replace(/^Bearer\s+/i, "");
-    res.json(
-      await verifyAiControlIdentity(
-        prisma,
-        {
-          secret,
-          integrationId: req.header("x-crm-integration-id") || req.body?.integrationId || null,
-          timestamp: req.header("x-crm-timestamp") || undefined,
-        },
-        req.body,
-      ),
-    );
-  });
+  app.post("/api/v1/integrations/ai-control/execute", json, executeControl);
+  app.post("/api/v1/integrations/ai-control/confirm", json, confirmControl);
+  app.post("/api/v1/integrations/ai-control/verify", json, verifyControl);
+  // WhatsApp AI Manager historically called /api/integrations/... without /v1.
+  app.post("/api/integrations/ai-control/execute", json, executeControl);
+  app.post("/api/integrations/ai-control/confirm", json, confirmControl);
+  app.post("/api/integrations/ai-control/verify", json, verifyControl);
 
   // Кабинет (Vite build) с того же origin — для Render / одного домена crm.creolab.kz
   const webDistCandidates = [
@@ -2518,30 +2498,33 @@ export function createApp(prisma: PrismaClient) {
     });
   }
 
-  app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  app.use((error: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    const pathHint = String(req.originalUrl || req.path || "");
     if (error && typeof error === "object" && "name" in error && error.name === "ZodError") {
-      res.status(422).json({
-        code: "invalid",
-        message: "Проверьте поля",
-        field_issues: (error as { issues?: Array<{ path: (string | number)[]; message: string }> }).issues?.map(issue => ({
-          path: issue.path.join(".") || "body",
-          message: issue.message,
-        })) || [],
-        field_errors: Object.fromEntries(
-          (error as { issues?: Array<{ path: (string | number)[]; message: string }> }).issues?.map((issue) => [
-            String(issue.path[0] || "body"),
-            issue.message,
-          ]) || [],
-        ),
-        request_id: res.locals.requestId,
-      });
+      res.status(422).json(
+        withControlClientFields(pathHint, 422, {
+          code: "invalid",
+          message: "Проверьте поля",
+          field_issues: (error as { issues?: Array<{ path: (string | number)[]; message: string }> }).issues?.map(issue => ({
+            path: issue.path.join(".") || "body",
+            message: issue.message,
+          })) || [],
+          field_errors: Object.fromEntries(
+            (error as { issues?: Array<{ path: (string | number)[]; message: string }> }).issues?.map((issue) => [
+              String(issue.path[0] || "body"),
+              issue.message,
+            ]) || [],
+          ),
+          request_id: res.locals.requestId,
+        }),
+      );
       return;
     }
     const mapped = errorBody(error, res.locals.requestId);
     if (mapped.status >= 500) {
       logServerError(error);
     }
-    res.status(mapped.status).json(mapped.body);
+    res.status(mapped.status).json(withControlClientFields(pathHint, mapped.status, mapped.body));
   });
 
   void loginSchema;

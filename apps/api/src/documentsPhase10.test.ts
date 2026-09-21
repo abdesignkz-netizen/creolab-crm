@@ -221,4 +221,33 @@ describe("Documents phase 10 общий список", () => {
     assert.equal(contractRow?.avrStatus, "Готов");
     assert.equal(contractRow?.esfStatus, "Отправлен");
   });
+
+  it("ищет по БИН и фильтрует по статусу, включая ошибку АВР с errorCode", async () => {
+    const byBin = await json("/api/v1/documents?q=222222222220");
+    assert.equal(byBin.response.status, 200, JSON.stringify(byBin.body));
+    assert.ok(byBin.body.items.some((row: { id: string }) => row.id === contractId));
+
+    const signed = await json("/api/v1/documents?kind=CONTRACT&status=SIGNED");
+    assert.equal(signed.body.items.some((row: { id: string }) => row.id === contractId), false);
+
+    const pending = await json("/api/v1/documents?kind=CONTRACT&status=PENDING_SIGNATURE");
+    assert.ok(pending.body.items.some((row: { id: string }) => row.id === contractId));
+
+    const deal = await prisma.deal.findUniqueOrThrow({ where: { id: dealId } });
+    const failed = await prisma.electronicDocument.create({
+      data: {
+        tenantId: deal.tenantId,
+        dealId,
+        type: "AVR",
+        number: "AVR-PHASE10-ERR",
+        amountWithoutVat: 1,
+        vatAmount: 0,
+        totalAmount: 1,
+        status: "VALIDATED",
+        errorCode: "esf_payload_mismatch",
+      },
+    });
+    const errors = await json("/api/v1/documents?kind=AVR&status=ERROR");
+    assert.ok(errors.body.items.some((row: { id: string }) => row.id === failed.id));
+  });
 });

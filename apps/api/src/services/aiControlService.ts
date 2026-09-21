@@ -57,6 +57,13 @@ const CONFIRM_TTL_MS = 10 * 60 * 1000;
 const TIMESTAMP_SKEW_MS = 5 * 60 * 1000;
 const BULK_MAX = 100;
 
+const CONTROL_ACTION_ALIASES: Record<string, ControlAction> = {
+  GET_DEAL_DETAILS: "GET_DEAL",
+  GET_PERIOD_SUMMARY: "GENERATE_REPORT",
+  GET_SALES_REPORT: "GENERATE_REPORT",
+  GET_TEAM_REPORT: "GENERATE_REPORT",
+};
+
 type ControlAccessRow = {
   id: string;
   tenantId: string;
@@ -105,11 +112,24 @@ function defaultAccessFlags(role: string) {
 }
 
 function mapControlPeriod(params: Record<string, unknown>, timeZone: string, now = new Date()) {
-  const raw = asString(params.period || params.periodPreset || "today").toLowerCase();
+  const periodVal = params.period ?? params.periodPreset;
+  if (periodVal && typeof periodVal === "object" && !Array.isArray(periodVal)) {
+    const rec = asRecord(periodVal);
+    const dateFrom = asString(rec.from || rec.dateFrom || params.dateFrom) || undefined;
+    const dateTo = asString(rec.to || rec.dateTo || params.dateTo) || undefined;
+    return { period: "custom" as PeriodPreset, dateFrom, dateTo, label: "custom" };
+  }
+  const raw = asString(periodVal || "today").toLowerCase();
   const dateFrom = asString(params.dateFrom || params.from) || undefined;
   const dateTo = asString(params.dateTo || params.to) || undefined;
   if (raw === "this_week") {
     return { period: "last_7" as PeriodPreset, dateFrom, dateTo, label: "this_week" };
+  }
+  if (raw === "last_7_days") {
+    return { period: "last_7" as PeriodPreset, dateFrom, dateTo, label: "last_7_days" };
+  }
+  if (raw === "last_30_days") {
+    return { period: "last_30" as PeriodPreset, dateFrom, dateTo, label: "last_30_days" };
   }
   if (raw === "last_week") {
     const today = zonedYmd(now, timeZone);
@@ -144,6 +164,91 @@ function parseTimestamp(value: string | undefined) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function periodLabelRu(label: string) {
+  switch (label) {
+    case "today":
+      return "Сегодня";
+    case "yesterday":
+      return "Вчера";
+    case "this_week":
+    case "last_7":
+    case "last_7_days":
+      return "За неделю";
+    case "last_week":
+      return "Прошлая неделя";
+    case "last_30":
+    case "last_30_days":
+      return "За 30 дней";
+    case "this_month":
+      return "Этот месяц";
+    case "last_month":
+      return "Прошлый месяц";
+    default:
+      return label || "Сегодня";
+  }
+}
+
+function presentControlData(action: ControlAction, data: Record<string, unknown>, periodLabel: string) {
+  const next = { ...data };
+  if (!next.periodLabel) next.periodLabel = periodLabel;
+  if (action === "GET_LEADS_STATS") {
+    next.stats = {
+      totalLeads: next.total,
+      leads: next.total,
+      total: next.total,
+      new: next.new,
+      newLeads: next.new,
+      inProgress: next.inProgress,
+      closed: next.closed,
+    };
+  }
+  if (action === "GET_BUSINESS_SUMMARY") {
+    next.stats = {
+      newLeads: next.inquiries,
+      leads: next.inquiries,
+      deals: next.dealsCreated,
+      needAttention: asRecord(next.attention).count ?? next.attention ?? null,
+      revenue: next.revenueLabel || next.revenue,
+    };
+  }
+  if (action === "GET_DEALS_STATS") {
+    next.stats = {
+      deals: next.created,
+      closed: Number(next.won || 0) + Number(next.lost || 0),
+      revenue: next.revenueLabel || next.revenue,
+    };
+  }
+  if (action === "GET_REVENUE_STATS") {
+    next.stats = { revenue: next.revenueLabel || next.revenue };
+  }
+  if (action === "GET_STUCK_DEALS") {
+    next.stats = { stuckDeals: next.total ?? (Array.isArray(next.items) ? next.items.length : 0) };
+  }
+  if (action === "GET_OVERDUE_TASKS") {
+    next.stats = { overdueTasks: next.total ?? (Array.isArray(next.items) ? next.items.length : 0) };
+  }
+  return next;
+}
+
+function normalizeExecuteBody(
+  body: unknown,
+  headers: { requestIdHeader?: string; senderPhone?: string },
+) {
+  const raw = asRecord(body);
+  const actionRaw = asString(raw.action).toUpperCase();
+  return {
+    action: CONTROL_ACTION_ALIASES[actionRaw] || actionRaw,
+    params: asRecord(raw.params),
+    requestId: asString(raw.requestId) || asString(headers.requestIdHeader),
+    externalIdentity:
+      asString(raw.externalIdentity) || asString(raw.senderPhone) || asString(headers.senderPhone),
+    source: asString(raw.source) || "WHATSAPP",
+    tenantId: asString(raw.tenantId) || undefined,
+    confirm: Boolean(raw.confirm),
+    confirmationId: asString(raw.confirmationId),
+  };
+}
+
 function sellerSecretPlain(schemaJson: unknown) {
   const secretEnc = asString(asRecord(schemaJson).secretEnc);
   if (!secretEnc) return "";
@@ -159,38 +264,71 @@ async function resolveControlIntegration(
   input: { secret: string; integrationId?: string | null },
 ) {
   const secret = String(input.secret || "").trim();
-  const integrationId = String(input.integrationId || "").trim();
-  if (!secret || !integrationId) {
+  const rawId = String(input.integrationId || "").trim();
+  const hinted = rawId && rawId.toLowerCase() !== "legacy" ? rawId : "";
+  if (!secret) {
     throw new ApiError(401, "unauthorized", "Нужны интеграция и секрет");
   }
-  const integration = await prisma.integration.findFirst({
-    where: { id: integrationId },
+
+  const bearerHash = sha256(secret);
+  const secretMatches = (integration: {
+    secretHash: string | null;
+    previousSecretHash: string | null;
+    previousSecretExpiresAt: Date | null;
+    schemaJson: unknown;
+  }) => {
+    const hashOk = Boolean(integration.secretHash && safeEqual(bearerHash, integration.secretHash));
+    const prevOk = Boolean(
+      integration.previousSecretHash &&
+        integration.previousSecretExpiresAt &&
+        integration.previousSecretExpiresAt.getTime() > Date.now() &&
+        safeEqual(bearerHash, integration.previousSecretHash),
+    );
+    const plain = sellerSecretPlain(integration.schemaJson);
+    const plainOk = Boolean(plain && safeEqual(secret, plain));
+    return hashOk || prevOk || plainOk;
+  };
+
+  const assertUsable = <T extends { status: string; connectionStatus: string; tenant: { status: string } }>(
+    integration: T,
+  ) => {
+    if (integration.status === "disabled" || integration.connectionStatus === "DISCONNECTED") {
+      throw new ApiError(403, "disabled", "Интеграция отключена");
+    }
+    if (integration.tenant.status !== "active") {
+      throw new ApiError(403, "tenant_suspended", "Компания приостановлена");
+    }
+    return integration;
+  };
+
+  if (hinted) {
+    const integration = await prisma.integration.findFirst({
+      where: { id: hinted },
+      include: { tenant: true },
+    });
+    if (integration) {
+      if (!secretMatches(integration)) {
+        throw new ApiError(401, "unauthorized", "Секрет интеграции не принят");
+      }
+      return assertUsable(integration);
+    }
+  }
+
+  const sellers = await prisma.integration.findMany({
+    where: { type: "whatsapp_seller" },
     include: { tenant: true },
   });
-  if (!integration) throw new ApiError(401, "unauthorized", "Интеграция не найдена");
-  if (integration.status === "disabled" || integration.connectionStatus === "DISCONNECTED") {
-    throw new ApiError(403, "disabled", "Интеграция отключена");
+  const matches = sellers.filter((row) => secretMatches(row));
+  if (matches.length === 1) return assertUsable(matches[0]);
+  if (matches.length > 1) {
+    throw new ApiError(401, "unauthorized", "Секрет интеграции неоднозначен");
   }
-  if (integration.tenant.status !== "active") {
-    throw new ApiError(403, "tenant_suspended", "Компания приостановлена");
-  }
-  const bearerHash = sha256(secret);
-  const hashOk = Boolean(integration.secretHash && safeEqual(bearerHash, integration.secretHash));
-  const prevOk = Boolean(
-    integration.previousSecretHash &&
-      integration.previousSecretExpiresAt &&
-      integration.previousSecretExpiresAt.getTime() > Date.now() &&
-      safeEqual(bearerHash, integration.previousSecretHash),
-  );
-  const plain = sellerSecretPlain(integration.schemaJson);
-  const plainOk = Boolean(plain && safeEqual(secret, plain));
-  if (!hashOk && !prevOk && !plainOk) {
-    throw new ApiError(401, "unauthorized", "Секрет интеграции не принят");
-  }
-  return integration;
+  throw new ApiError(401, "unauthorized", hinted ? "Интеграция не найдена" : "Нужны интеграция и секрет");
 }
 
 function assertFreshTimestamp(timestampHeader: string | undefined) {
+  const raw = String(timestampHeader || "").trim();
+  if (!raw) return;
   const ts = parseTimestamp(timestampHeader);
   if (ts == null) throw new ApiError(401, "replay_protection", "Нужен x-crm-timestamp");
   if (Math.abs(Date.now() - ts) > TIMESTAMP_SKEW_MS) {
@@ -301,6 +439,7 @@ function compactDeal(item: Record<string, unknown>, financial: boolean) {
     outcome: item.outcome,
     stage: stage.name || item.stageName || stage.systemKey || null,
     contactName: asRecord(item.contact).name || item.contactName || null,
+    assigneeName: asRecord(item.owner).name || item.ownerName || item.assigneeName || null,
     ...(financial
       ? {
           amountMinor: item.offerAmountMinor ?? item.amountMinor ?? null,
@@ -331,12 +470,17 @@ function compactInquiry(item: Record<string, unknown>) {
 }
 
 function ok(action: ControlAction, data: unknown, meta: Record<string, unknown> = {}) {
+  const periodLabel = periodLabelRu(asString(meta.period));
+  const presented =
+    data && typeof data === "object" && !Array.isArray(data)
+      ? presentControlData(action, asRecord(data), periodLabel)
+      : data;
   return {
     success: true as const,
     status: "OK" as const,
     action,
-    data,
-    meta,
+    data: presented,
+    meta: { ...meta, periodLabel },
   };
 }
 
@@ -1271,11 +1415,28 @@ export async function executeAiControlCommand(
     timestamp?: string;
     signature?: string;
     requestIdHeader?: string;
+    senderPhone?: string;
   },
   body: unknown,
 ) {
   const integration = await resolveControlIntegration(prisma, headers);
-  const parsed = controlExecuteSchema.parse(body || {});
+  const incoming = normalizeExecuteBody(body, headers);
+  if (incoming.confirm && incoming.confirmationId) {
+    return confirmAiControlCommand(prisma, headers, {
+      confirmationId: incoming.confirmationId,
+      externalIdentity: incoming.externalIdentity,
+      source: incoming.source,
+      requestId: incoming.requestId,
+    });
+  }
+  const parsed = controlExecuteSchema.parse({
+    action: incoming.action,
+    params: incoming.params,
+    requestId: incoming.requestId,
+    externalIdentity: incoming.externalIdentity,
+    source: incoming.source,
+    tenantId: incoming.tenantId,
+  });
   const requestId = parsed.requestId || String(headers.requestIdHeader || "").trim();
   if (!requestId) throw new ApiError(422, "invalid", "Нужен requestId");
   assertFreshTimestamp(headers.timestamp);
@@ -1333,11 +1494,20 @@ export async function confirmAiControlCommand(
     integrationId?: string | null;
     timestamp?: string;
     signature?: string;
+    senderPhone?: string;
   },
   body: unknown,
 ) {
   const integration = await resolveControlIntegration(prisma, headers);
-  const parsed = controlConfirmSchema.parse(body || {});
+  const incoming = asRecord(body);
+  const parsed = controlConfirmSchema.parse({
+    confirmationId: incoming.confirmationId,
+    externalIdentity:
+      asString(incoming.externalIdentity) || asString(incoming.senderPhone) || asString(headers.senderPhone),
+    source: asString(incoming.source) || "WHATSAPP",
+    requestId: asString(incoming.requestId) || undefined,
+    tenantId: asString(incoming.tenantId) || undefined,
+  });
   const requestId = parsed.requestId || parsed.confirmationId;
   assertFreshTimestamp(headers.timestamp);
   assertOptionalSignature({
@@ -1434,12 +1604,19 @@ export async function confirmAiControlCommand(
 
 export async function verifyAiControlIdentity(
   prisma: PrismaClient,
-  headers: { secret: string; integrationId?: string | null; timestamp?: string },
+  headers: { secret: string; integrationId?: string | null; timestamp?: string; senderPhone?: string },
   body: unknown,
 ) {
   const integration = await resolveControlIntegration(prisma, headers);
   assertFreshTimestamp(headers.timestamp);
-  const parsed = controlVerifySchema.parse(body || {});
+  const incoming = asRecord(body);
+  const parsed = controlVerifySchema.parse({
+    externalIdentity:
+      asString(incoming.externalIdentity) || asString(incoming.senderPhone) || asString(headers.senderPhone),
+    code: incoming.code,
+    source: asString(incoming.source) || "WHATSAPP",
+    tenantId: asString(incoming.tenantId) || undefined,
+  });
   void parsed.tenantId;
   const ident = normalizeIdentity(parsed.source, parsed.externalIdentity, integration.tenant.defaultRegion || "KZ");
   const row = await prisma.controlIdentity.findFirst({

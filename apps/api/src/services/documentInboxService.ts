@@ -92,6 +92,7 @@ function searchWhere(q: string) {
       { number: { contains: q, mode: "insensitive" as const } },
       { deal: { title: { contains: q, mode: "insensitive" as const } } },
       { company: { name: { contains: q, mode: "insensitive" as const } } },
+      { company: { bin: { contains: q, mode: "insensitive" as const } } },
     ],
   };
 }
@@ -138,7 +139,11 @@ export async function listTenantDocuments(
   const edocWhere = (type: "AVR" | "ESF"): Prisma.ElectronicDocumentWhereInput => ({
     ...base,
     type,
-    ...(status ? { status } : {}),
+    ...(status === "ERROR"
+      ? { OR: [{ status: "ERROR" }, { errorCode: { not: null } }] }
+      : status
+        ? { status }
+        : {}),
     ...(attentionOnly
       ? {
           OR: [{ status: "SENT" }, { errorCode: { not: null } }],

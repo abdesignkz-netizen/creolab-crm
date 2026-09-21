@@ -15,10 +15,46 @@ const KINDS = [
   ["ESF", "ЭСФ"],
 ] as const;
 
+const STATUS_FILTERS: Record<string, Array<[string, string]>> = {
+  CONTRACT: [
+    ["DRAFT", "Черновик"],
+    ["READY_TO_SIGN", "Сформирован"],
+    ["PENDING_SIGNATURE", "На подписи"],
+    ["PARTIALLY_SIGNED", "Частично подписан"],
+    ["SIGNED", "Подписан"],
+  ],
+  INVOICE: [
+    ["DRAFT", "Черновик"],
+    ["ISSUED", "Выставлен"],
+    ["PARTIALLY_PAID", "Частично оплачен"],
+    ["PAID", "Оплачен"],
+    ["OVERDUE", "Просрочен"],
+    ["CANCELLED", "Отменён"],
+  ],
+  AVR: [
+    ["DRAFT", "Черновик"],
+    ["VALIDATED", "Готов"],
+    ["SIGNED", "Подписан"],
+    ["SENT", "Отправлен"],
+    ["ACCEPTED", "Принят"],
+    ["ERROR", "Ошибка"],
+  ],
+  ESF: [
+    ["DRAFT", "Черновик"],
+    ["VALIDATED", "Готов"],
+    ["SIGNED", "Подписан"],
+    ["SENT", "Отправлен"],
+    ["ACCEPTED", "Принят"],
+    ["ERROR", "Ошибка"],
+  ],
+};
+
 export function DocumentsPage() {
   const requestVersion = useRequestVersion();
   const [searchParams, setSearchParams] = useSearchParams();
   const [kind] = useUrlState<(typeof KINDS)[number][0]>("kind", "", KINDS.map(([value]) => value));
+  const statusAllowed = ["", ...(STATUS_FILTERS[kind] || []).map(([value]) => value)] as const;
+  const [status, setStatus] = useUrlState<string>("status", "", statusAllowed);
   const [attention] = useUrlState<"" | "1">("attention", "", ["", "1"]);
   const [q, setQ] = useState("");
   const [offset, setOffset] = useUrlState<string>("offset", "0");
@@ -80,6 +116,7 @@ export function DocumentsPage() {
       const data: any = await api.documents({
         kind: kind || undefined,
         attention: attention === "1" ? "1" : undefined,
+        status: status || undefined,
         q: q.trim() || undefined,
         offset: String(nextOffset),
         limit: String(limit),
@@ -107,7 +144,7 @@ export function DocumentsPage() {
 
   useEffect(() => {
     void load(Number(offset) || 0);
-  }, [kind, attention, offset]);
+  }, [kind, attention, status, offset]);
 
   async function onSearch(e: FormEvent) {
     e.preventDefault();
@@ -137,6 +174,7 @@ export function DocumentsPage() {
       const result = new URLSearchParams(previous);
       result.delete("offset");
       result.delete("attention");
+      result.delete("status");
       if (!nextKind) result.delete("kind");
       else result.set("kind", nextKind);
       return result;
@@ -309,10 +347,20 @@ export function DocumentsPage() {
           </button>
         </div>
         <form className="companies-search" onSubmit={onSearch}>
+          {STATUS_FILTERS[kind] ? (
+            <select value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Статус">
+              <option value="">Все статусы</option>
+              {STATUS_FILTERS[kind].map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          ) : null}
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Номер, сделка или компания"
+            placeholder="Номер, сделка, компания или БИН"
           />
           <button type="submit" className="btn secondary">
             Найти

@@ -1,7 +1,7 @@
 import { documentOrganization } from "./documentOrganization.ts";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { PrismaClient } from "@creolab/db";
 import type { Response } from "express";
@@ -24,6 +24,12 @@ function requireTenant(auth: AuthContext) {
 
 function hashToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
+}
+
+function maskTaxId(value: string | null | undefined) {
+  const digits = String(value || "").replace(/\D/g, "");
+  if (digits.length < 4) return null;
+  return `${"•".repeat(Math.max(0, digits.length - 4))}${digits.slice(-4)}`;
 }
 
 function newToken() {
@@ -90,6 +96,25 @@ function currentVersion(contract: { versions: Array<{ id: string; version: numbe
     throw new ApiError(422, "pdf_not_ready", "Сначала сформируйте договор");
   }
   return latest;
+}
+
+async function assertVersionFileHash(
+  prisma: PrismaClient,
+  tenantId: string,
+  version: { fileId: string | null; sha256: string | null },
+) {
+  if (!version.fileId || !version.sha256) {
+    throw new ApiError(422, "pdf_not_ready", "Сначала сформируйте договор");
+  }
+  const attachment = await prisma.attachment.findFirst({
+    where: { id: version.fileId, tenantId },
+  });
+  if (!attachment) throw new ApiError(404, "not_found", "Файл договора не найден");
+  const bytes = await readFile(resolveUploadPath(attachment.storageKey));
+  const liveHash = createHash("sha256").update(bytes).digest("hex");
+  if (liveHash !== version.sha256) {
+    throw new ApiError(409, "DOCUMENT_CHANGED", "Файл договора изменился. Сформируйте новую версию перед подписью.");
+  }
 }
 
 function expireIfNeeded<T extends { status: string; expiresAt: Date | null }>(row: T): T {
@@ -299,6 +324,7 @@ async function applySignature(
   if (request.contractVersionId && request.contractVersionId !== version.id) {
     throw new ApiError(422, "version_mismatch", "Подпись относится к другой версии договора");
   }
+  await assertVersionFileHash(prisma, input.tenantId, version);
 
   const verification = verifyDocumentSignature({
     cmsBase64: input.cmsBase64,
@@ -520,6 +546,7 @@ function publicContractView(
     subject: contract.subject,
     amount: asMoney(contract.totalAmount),
     currency: contract.currency,
+    version: contract.versions[contract.versions.length - 1]?.version || null,
     sellerName: null as string | null,
     buyerName: company?.legalName || company?.name || request.signerName,
     status: request.status,
@@ -621,13 +648,14 @@ export async function getPublicVerification(prisma: PrismaClient, verificationId
     date: contract.date.toISOString(),
     version: latest?.version || null,
     documentHash: latest?.sha256 || null,
+    hashAlgorithm: latest?.sha256 ? "SHA-256" : null,
     status: contract.status,
     signedAt: contract.signedAt?.toISOString() || null,
     sellerName: profile?.legalName || profile?.shortName || null,
     buyerName: contract.deal.company?.legalName || contract.deal.company?.name || null,
     signers: signatures.map((row) => ({
       name: row.signerName,
-      iin: row.signerIin,
+      iin: maskTaxId(row.signerIin),
       signedAt: row.signedAt.toISOString(),
       verificationStatus: row.verificationStatus,
     })),

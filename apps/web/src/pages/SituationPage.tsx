@@ -86,7 +86,21 @@ const ICONS = {
   warning: "M12 9v4m0 3h.01M10.3 4.7 2.8 18a2 2 0 0 0 1.7 3h15a2 2 0 0 0 1.7-3L13.7 4.7a2 2 0 0 0-3.4 0Z",
 };
 
-type DashTone = "sky" | "mint" | "amber" | "rose" | "violet" | "slate";
+type DashTone =
+  | "sky"
+  | "mint"
+  | "amber"
+  | "rose"
+  | "violet"
+  | "slate"
+  | "coral"
+  | "orange"
+  | "teal"
+  | "gold"
+  | "blush"
+  | "indigo"
+  | "stone"
+  | "crimson";
 
 function DashIcon({ d }: { d: string }) {
   return (
@@ -486,21 +500,21 @@ export function SituationPage() {
       <p className="dash-block-label">Сейчас важно</p>
       <div className="dash-spot-grid">
         <SpotCard label="Нужно ответить" value={attention.summary.needsReply} to="/contacts?filter=needs_reply" tone="amber" icon={ICONS.reply} />
-        <SpotCard label="Нужен человек" value={attention.summary.needsHuman} to="/conversations?filter=attention" tone="rose" icon={ICONS.human} />
+        <SpotCard label="Нужен человек" value={attention.summary.needsHuman} to="/conversations?filter=attention" tone="coral" icon={ICONS.human} />
         <SpotCard label="Просрочено" value={attention.summary.overdueTasks} to="/tasks?filter=overdue" tone="rose" icon={ICONS.clock} />
-        <SpotCard label="Без шага" value={attention.summary.noNextAction ?? nextActionItems.length} to={noNextHref} tone="amber" icon={ICONS.tasks} />
+        <SpotCard label="Без шага" value={attention.summary.noNextAction ?? nextActionItems.length} to={noNextHref} tone="orange" icon={ICONS.tasks} />
         <SpotCard label="Зависли" value={attention.summary.stalledDeals} to={path("/deals", { focus: "stalled" })} tone="slate" icon={ICONS.stalled} />
-        <SpotCard label="Сверх SLA" value={attention.summary.overSlaDeals ?? 0} to={path("/deals", { focus: "over_sla" })} tone="rose" icon={ICONS.clock} />
-        <SpotCard label="Просрочена оплата" value={attention.summary.paymentOverdue ?? 0} to={path("/deals", { focus: "payment_overdue" })} tone="amber" icon={ICONS.money} />
-        <SpotCard label="Договорённости" value={attention.summary.overdueAgreements ?? 0} to={path("/today", { ...periodParams, attention: "overdue" }) + "#attention"} tone="rose" icon={ICONS.warning} />
-        <SpotCard label="КП без ответа" value={attention.summary.proposalWithoutReply ?? 0} to={path("/deals", { focus: "proposal_no_reply" })} tone="violet" icon={ICONS.documents} />
+        <SpotCard label="Сверх SLA" value={attention.summary.overSlaDeals ?? 0} to={path("/deals", { focus: "over_sla" })} tone="teal" icon={ICONS.clock} />
+        <SpotCard label="Просрочена оплата" value={attention.summary.paymentOverdue ?? 0} to={path("/deals", { focus: "payment_overdue" })} tone="gold" icon={ICONS.money} />
+        <SpotCard label="Договорённости" value={attention.summary.overdueAgreements ?? 0} to={path("/today", { ...periodParams, attention: "overdue" }) + "#attention"} tone="blush" icon={ICONS.warning} />
+        <SpotCard label="КП без ответа" value={attention.summary.proposalWithoutReply ?? 0} to={path("/deals", { focus: "proposal_no_reply" })} tone="indigo" icon={ICONS.documents} />
         <SpotCard label="Документы" value={attention.summary.documentsToClose ?? 0} to="/documents/avr/new?filter=all" tone="sky" icon={ICONS.contract} />
-        <SpotCard label="Нет контакта" value={attention.summary.noContact} to={path("/today", { ...periodParams, attention: "no_contact" }) + "#attention"} tone="slate" icon={ICONS.phone} />
+        <SpotCard label="Нет контакта" value={attention.summary.noContact} to={path("/today", { ...periodParams, attention: "no_contact" }) + "#attention"} tone="stone" icon={ICONS.phone} />
         {data.aiManager?.newRequests && Object.values(data.aiManager.newRequests).some((value) => Number(value) > 0) ? (
           <>
             <SpotCard label="AI обрабатывает" value={data.aiManager.newRequests.processing} to="/inquiries?filter=ai_processing" tone="violet" icon={ICONS.ai} />
-            <SpotCard label="Ждут менеджера" value={data.aiManager.newRequests.needsHuman} to="/inquiries?filter=ai_needs_human" tone="amber" icon={ICONS.human} />
-            <SpotCard label="Ошибка AI" value={data.aiManager.newRequests.analysisFailed} to="/inquiries?filter=ai_failed" tone="rose" icon={ICONS.warning} />
+            <SpotCard label="Ждут менеджера" value={data.aiManager.newRequests.needsHuman} to="/inquiries?filter=ai_needs_human" tone="mint" icon={ICONS.human} />
+            <SpotCard label="Ошибка AI" value={data.aiManager.newRequests.analysisFailed} to="/inquiries?filter=ai_failed" tone="crimson" icon={ICONS.warning} />
           </>
         ) : null}
       </div>

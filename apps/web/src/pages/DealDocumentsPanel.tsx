@@ -8,7 +8,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { api, downloadAvrExcel, downloadAvrPdf } from "../lib/api";
 import { signAndSendEsfDocument } from "../lib/signing/esfSignAndSend";
 import { ensureEsfCabinetSession } from "../lib/signing/esfConnect";
-import { createSigningClient } from "../lib/signing/ncalayerClient";
+import { createSigningClient, ncalayerUserMessage } from "../lib/signing/ncalayerClient";
 import { CONTRACT_SIGNING_ENABLED } from "../lib/featureFlags";
 
 const CONTRACT_STATUS_LABEL: Record<string, string> = {
@@ -183,8 +183,12 @@ export function DealDocumentsPanel(props: {
   const [templateId, setTemplateId] = useState("");
   const [completionTerms, setCompletionTerms] = useState("5–7 рабочих дней");
   const [previewContract, setPreviewContract] = useState<{ id: string; number?: string } | null>(null);
+  const [confirmSellerSign, setConfirmSellerSign] = useState(false);
   const sendFlight = useRef(false);
-  useEffect(() => { setSubmissions({}); }, [d.id]);
+  useEffect(() => {
+    setSubmissions({});
+    setConfirmSellerSign(false);
+  }, [d.id]);
   useEffect(() => {
     void api.contractTemplates().then((data: any) => {
       const list = data.items || [];
@@ -500,6 +504,63 @@ export function DealDocumentsPanel(props: {
             >
               Отправить на подпись
             </button>
+            {confirmSellerSign ? (
+              <div className="panel" style={{ marginTop: 8 }}>
+                <p>
+                  Подписать ЭЦП договор <b>{contracts[0]?.number}</b>?
+                </p>
+                <p className="muted">
+                  {d.company?.name || d.companyName || contracts[0]?.companyName || "Контрагент"}
+                  {contracts[0]?.totalAmount != null
+                    ? ` · ${Number(contracts[0].totalAmount).toLocaleString("ru-RU")} ${contracts[0].currency || "KZT"}`
+                    : ""}
+                </p>
+                <div className="actions">
+                  <button type="button" className="btn secondary" disabled={busy} onClick={() => setConfirmSellerSign(false)}>
+                    Отмена
+                  </button>
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={busy}
+                    onClick={() => {
+                      const current = contracts[0];
+                      const seller = signing?.requests?.find((row: any) => row.signerType === "SELLER");
+                      if (!current || !seller) {
+                        setError("Сначала отправьте договор на подпись");
+                        setConfirmSellerSign(false);
+                        return;
+                      }
+                      setBusy(true);
+                      const client = createSigningClient();
+                      void (async () => {
+                        const pdf = await fetch(api.contractPdfUrl(current.id), { credentials: "include" });
+                        if (!pdf.ok) throw new Error("Не удалось открыть договор");
+                        const bytes = new Uint8Array(await pdf.arrayBuffer());
+                        let binary = "";
+                        bytes.forEach((byte) => {
+                          binary += String.fromCharCode(byte);
+                        });
+                        await client.connect();
+                        const cms = await client.signDocument(btoa(binary));
+                        await api.signSignatureRequest(seller.id, cms);
+                        setConfirmSellerSign(false);
+                        await load();
+                      })()
+                        .catch((err: unknown) => {
+                          setError(ncalayerUserMessage(err));
+                        })
+                        .finally(() => {
+                          client.disconnect();
+                          setBusy(false);
+                        });
+                    }}
+                  >
+                    {busy ? "Подписываем…" : "Подписать ЭЦП"}
+                  </button>
+                </div>
+              </div>
+            ) : (
             <button
               type="button"
               className="btn secondary"
@@ -511,32 +572,12 @@ export function DealDocumentsPanel(props: {
                   setError("Сначала отправьте договор на подпись");
                   return;
                 }
-                setBusy(true);
-                const client = createSigningClient();
-                void (async () => {
-                  const pdf = await fetch(api.contractPdfUrl(current.id), { credentials: "include" });
-                  if (!pdf.ok) throw new Error("Не удалось открыть договор");
-                  const bytes = new Uint8Array(await pdf.arrayBuffer());
-                  let binary = "";
-                  bytes.forEach((byte) => {
-                    binary += String.fromCharCode(byte);
-                  });
-                  await client.connect();
-                  const cms = await client.signDocument(btoa(binary));
-                  await api.signSignatureRequest(seller.id, cms);
-                  await load();
-                })()
-                  .catch((err: any) => {
-                    setError(err?.canceledByUser ? "Подпись отменена" : err instanceof Error ? err.message : "Не удалось подписать");
-                  })
-                  .finally(() => {
-                    client.disconnect();
-                    setBusy(false);
-                  });
+                setConfirmSellerSign(true);
               }}
             >
               Подписать со стороны компании
             </button>
+            )}
           </div>
         </div>
         ) : null}

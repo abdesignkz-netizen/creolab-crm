@@ -244,3 +244,14 @@ export function createSigningClient(): SigningClient {
 export function createNcalayerClient() {
   return new NCALayerSigningClient();
 }
+
+export function ncalayerUserMessage(error: unknown, fallback = "Не удалось подписать") {
+  if (error instanceof NcalayerError) {
+    if (error.code === "USER_CANCELLED") return "Подпись отменена";
+    return error.message;
+  }
+  if (error && typeof error === "object" && "canceledByUser" in error && (error as { canceledByUser?: boolean }).canceledByUser) {
+    return "Подпись отменена";
+  }
+  return error instanceof Error ? error.message : fallback;
+}
