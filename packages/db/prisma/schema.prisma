@@ -23,6 +23,9 @@ model Tenant {
   memberships          Membership[]
   invitations          Invitation[]
   plans                TenantPlan[]
+  subscriptionRequests SubscriptionRequest[]
+  billingPayments      BillingPayment[]
+  billingOverride      TenantBillingOverride?
   credentials          Credential[]
   integrations         Integration[]
   channelConnections   ChannelConnection[]
@@ -96,25 +99,113 @@ model Tenant {
 }
 
 model Plan {
-  id           String       @id @default(uuid())
-  name         String
-  code         String       @unique
-  limitsJson   Json         @default("{}")
-  featuresJson Json         @default("{}")
-  assignments  TenantPlan[]
+  id                 String       @id @default(uuid())
+  name               String
+  code               String       @unique
+  limitsJson         Json         @default("{}")
+  featuresJson       Json         @default("{}")
+  kind               String       @default("legacy")
+  product            String       @default("CRM")
+  monthlyPriceMinor  Int          @default(0)
+  yearlyPriceMinor   Int          @default(0)
+  public             Boolean      @default(false)
+  active             Boolean      @default(true)
+  catalogStatus      String       @default("HIDDEN")
+  chargeType         String       @default("RECURRING")
+  recommended        Boolean      @default(false)
+  sortOrder          Int          @default(100)
+  description        String       @default("")
+  includedJson       Json         @default("[]")
+  version            Int          @default(1)
+  assignments        TenantPlan[]
 }
 
 model TenantPlan {
-  id        String    @id @default(uuid())
-  tenantId  String
-  planId    String
-  status    String    @default("active")
-  startsAt  DateTime  @default(now())
-  endsAt    DateTime?
-  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  plan      Plan      @relation(fields: [planId], references: [id])
+  id                    String    @id @default(uuid())
+  tenantId              String
+  planId                String
+  status                String    @default("active")
+  startsAt              DateTime  @default(now())
+  endsAt                DateTime?
+  billingPeriod         String    @default("MONTHLY")
+  amountMinor           Int       @default(0)
+  currency              String    @default("KZT")
+  itemsJson             Json      @default("[]")
+  priceSnapshotJson     Json      @default("{}")
+  limitsSnapshotJson    Json      @default("{}")
+  featuresSnapshotJson  Json      @default("{}")
+  paymentMethod         String    @default("MANUAL")
+  confirmedByUserId     String?
+  confirmedAt           DateTime?
+  requestId             String?
+  notes                 String?
+  tenant                Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  plan                  Plan      @relation(fields: [planId], references: [id])
 
   @@index([tenantId, status])
+}
+
+model SubscriptionRequest {
+  id                      String    @id @default(uuid())
+  tenantId                String
+  requestedByUserId       String?
+  requestType             String
+  requestedPlanCode       String?
+  billingPeriod           String    @default("MONTHLY")
+  requestedAddOnsJson     Json      @default("[]")
+  baseAmountMinor         Int       @default(0)
+  discountAmountMinor     Int       @default(0)
+  finalAmountMinor        Int       @default(0)
+  currency                String    @default("KZT")
+  status                  String    @default("AWAITING_PAYMENT")
+  snapshotJson            Json      @default("{}")
+  reviewedByAdminId       String?
+  reviewedAt              DateTime?
+  paymentId               String?
+  activatedSubscriptionId String?
+  adminComment            String?
+  rejectionReason         String?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+  tenant                  Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  payments                BillingPayment[]
+
+  @@index([tenantId, status, createdAt])
+  @@index([status, createdAt])
+}
+
+model BillingPayment {
+  id                     String    @id @default(uuid())
+  tenantId               String
+  subscriptionRequestId  String?
+  amountMinor            Int
+  currency               String    @default("KZT")
+  method                 String    @default("MANUAL")
+  status                 String    @default("PENDING")
+  externalReference      String?
+  confirmedByAdminId     String?
+  confirmedAt            DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+  tenant                 Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  request                SubscriptionRequest? @relation(fields: [subscriptionRequestId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt])
+  @@index([subscriptionRequestId])
+}
+
+model TenantBillingOverride {
+  id              String   @id @default(uuid())
+  tenantId        String   @unique
+  featuresJson    Json     @default("{}")
+  limitsJson      Json     @default("{}")
+  customPriceMinor Int?
+  reason          String?
+  createdByUserId String?
+  updatedByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 }
 
 model User {

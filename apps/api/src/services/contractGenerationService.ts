@@ -1,8 +1,6 @@
 import { documentOrganization } from "./documentOrganization.ts";
-import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { createReadStream } from "node:fs";
-import path from "node:path";
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import type { PrismaClient } from "@creolab/db";
 import type { Response } from "express";
 import { ApiError } from "../errors.ts";
@@ -17,9 +15,19 @@ import { assessContractReadiness, missingFieldsError } from "./contractReadiness
 import { ensureDefaultTemplate } from "./contractTemplate.ts";
 import { type ContractPdfInput } from "./contractPdf.ts";
 import { sniffWordKind, convertDocToDocx } from "./wordDocumentText.ts";
-import { DOCX_MIME, contractFileDownload, renderContractDocx } from "./contractDocx.ts";
+import { DOCX_MIME, renderContractDocx } from "./contractDocx.ts";
+import {
+  PDF_MIME,
+  ensureContractPdfAttachment,
+  isPdfAttachment,
+  pdfDownloadHeaders,
+  sendStoredFile,
+  storeContractBytes,
+  wordFileToContractPdf,
+} from "./contractPdfCopy.ts";
 
 const MUTABLE_STATUSES = new Set(["DRAFT", "READY_TO_SIGN"]);
+
 
 function requireTenant(auth: AuthContext) {
   if (!auth.activeMembership) throw new ApiError(403, "no_tenant", "Нет активной компании");
@@ -161,8 +169,8 @@ export async function generateContractPdfFile(
     templateBody: template.body,
   };
   const docx = await renderContractFromTemplate(template, docxInput);
-
-  const sha256 = createHash("sha256").update(docx).digest("hex");
+  const pdf = await wordFileToContractPdf(docx, `${contract.number}.docx`, docxInput);
+  const sha256 = createHash("sha256").update(pdf).digest("hex");
   const latest = contract.versions[contract.versions.length - 1] || null;
   if (latest?.sha256 === sha256 && latest.fileId) {
     const reused = await prisma.contract.update({
@@ -184,7 +192,7 @@ export async function generateContractPdfFile(
       },
     });
     return {
-      contract: serializeContract({ ...reused, generatedMimeType: DOCX_MIME }),
+      contract: serializeContract({ ...reused, generatedMimeType: PDF_MIME }),
       version: {
         id: latest.id,
         version: latest.version,
@@ -198,44 +206,39 @@ export async function generateContractPdfFile(
     };
   }
 
-  const attachmentId = randomUUID();
-  const fileName = `${contract.number}.docx`;
-  const storageKey = path.posix.join(tid, "contracts", contract.id, `${attachmentId}-${fileName}`);
-  const abs = resolveUploadPath(storageKey);
-  await mkdir(path.dirname(abs), { recursive: true });
-  await writeFile(abs, docx);
+  const sourceAttachment = await storeContractBytes(prisma, {
+    tenantId: tid,
+    parentType: "contract",
+    parentId: contract.id,
+    fileName: `${contract.number}.docx`,
+    mimeType: DOCX_MIME,
+    bytes: docx,
+    documentType: "contract_source",
+    uploadedById: auth.user.id,
+  });
+  const pdfAttachment = await storeContractBytes(prisma, {
+    tenantId: tid,
+    parentType: "contract",
+    parentId: contract.id,
+    fileName: `${contract.number}.pdf`,
+    mimeType: PDF_MIME,
+    bytes: pdf,
+    uploadedById: auth.user.id,
+  });
 
   const nextVersion = latest?.fileId ? (latest.version || 0) + 1 : latest?.version || 1;
   const saved = await prisma.$transaction(async (tx) => {
-    await tx.attachment.create({
-      data: {
-        id: attachmentId,
-        tenantId: tid,
-        parentType: "contract",
-        parentId: contract.id,
-        storageKey,
-        fileName,
-        originalFileName: fileName,
-        mimeType: DOCX_MIME,
-        sizeBytes: docx.length,
-        checksum: sha256,
-        documentType: "contract",
-        uploadedById: auth.user.id,
-        status: "stored",
-      },
-    });
-
     const versionRow = latest && !latest.fileId
       ? await tx.contractVersion.update({
           where: { id: latest.id },
-          data: { fileId: attachmentId, sha256 },
+          data: { fileId: pdfAttachment.id, sha256 },
         })
       : await tx.contractVersion.create({
           data: {
             tenantId: tid,
             contractId: contract.id,
             version: nextVersion,
-            fileId: attachmentId,
+            fileId: pdfAttachment.id,
             sha256,
           },
         });
@@ -254,7 +257,7 @@ export async function generateContractPdfFile(
         totalAmount: totals.totalAmount,
         currency: deal.currency || "KZT",
         status: "READY_TO_SIGN",
-        generatedFileId: attachmentId,
+        generatedFileId: pdfAttachment.id,
         templateId: template.id,
       },
     });
@@ -266,7 +269,13 @@ export async function generateContractPdfFile(
         action: "contract.generate",
         entityType: "contract",
         entityId: contract.id,
-        changesJson: { number: contract.number, sha256, version: versionRow.version, reused: false },
+        changesJson: {
+          number: contract.number,
+          sha256,
+          version: versionRow.version,
+          reused: false,
+          sourceFileId: sourceAttachment.id,
+        },
       },
     });
 
@@ -274,7 +283,7 @@ export async function generateContractPdfFile(
   });
 
   return {
-    contract: serializeContract({ ...saved.updated, generatedMimeType: DOCX_MIME }),
+    contract: serializeContract({ ...saved.updated, generatedMimeType: PDF_MIME }),
     version: {
       id: saved.versionRow.id,
       version: saved.versionRow.version,
@@ -297,35 +306,31 @@ export async function sendContractPdf(
   requireDocumentsAccess(auth);
   const membership = requireTenant(auth);
   const tid = membership.tenantId;
-  const contract = await prisma.contract.findFirst({
+  const exists = await prisma.contract.findFirst({
     where: { id: contractId, tenantId: tid },
-    select: { id: true, number: true, generatedFileId: true },
+    select: { id: true },
   });
-  if (!contract) throw new ApiError(404, "not_found", "Договор не найден");
-  if (!contract.generatedFileId) {
-    throw new ApiError(404, "pdf_not_ready", "Договор ещё не сформирован");
-  }
-  const attachment = await prisma.attachment.findFirst({
-    where: { id: contract.generatedFileId, tenantId: tid, parentType: "contract", parentId: contract.id },
-  });
-  if (!attachment) throw new ApiError(404, "not_found", "Файл договора не найден");
-  const abs = resolveUploadPath(attachment.storageKey);
-  const headers = contractFileDownload(contract.number, attachment);
-  res.setHeader("Content-Type", headers.contentType);
-  res.setHeader("Content-Disposition", headers.disposition);
-  await new Promise<void>((resolve, reject) => {
-    const stream = createReadStream(abs);
-    stream.on("error", () => reject(new ApiError(404, "not_found", "Файл договора не найден на диске")));
-    stream.on("end", () => resolve());
-    stream.pipe(res);
-  });
+  if (!exists) throw new ApiError(404, "not_found", "Договор не найден");
+  const { contract, attachment } = await ensureContractPdfAttachment(prisma, { tenantId: tid, contractId });
+  const headers = isPdfAttachment(attachment)
+    ? pdfDownloadHeaders(contract.number)
+    : {
+        contentType: attachment.mimeType || "application/octet-stream",
+        disposition: `inline; filename="${encodeURIComponent(attachment.fileName)}"`,
+      };
+  await sendStoredFile(res, resolveUploadPath(attachment.storageKey), headers);
 }
 
 export async function sendContractOriginal(prisma: PrismaClient, auth: AuthContext, contractId: string, res: Response) {
   requireDocumentsAccess(auth);
   const tid = requireTenant(auth).tenantId;
   const contract = await prisma.contract.findFirst({where:{id:contractId,tenantId:tid}});
-  const file = contract?.originalFileId ? await prisma.attachment.findFirst({where:{id:contract.originalFileId,tenantId:tid,parentId:contractId,parentType:"contract"}}) : null;
+  const file = contract?.originalFileId
+    ? await prisma.attachment.findFirst({where:{id:contract.originalFileId,tenantId:tid,parentId:contractId,parentType:"contract"}})
+    : await prisma.attachment.findFirst({
+        where: { tenantId: tid, parentId: contractId, parentType: "contract", documentType: "contract_source" },
+        orderBy: { createdAt: "desc" },
+      });
   if (!file) throw new ApiError(404,"not_found","Исходный документ не найден");
   res.setHeader("Content-Type",file.mimeType);
   res.setHeader("Content-Disposition",`attachment; filename*=UTF-8''${encodeURIComponent(file.originalFileName || file.fileName)}`);

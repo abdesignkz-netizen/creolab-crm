@@ -251,6 +251,9 @@ export function startBackgroundJobs(prisma: PrismaClient) {
       .catch((error) => console.error("esf polls", error));
     processDueScheduledActions(prisma).catch((error) => console.error("scheduled", error));
     resumeRunningCampaigns(prisma).catch((error) => console.error("campaign resume", error));
+    import("./subscriptionActivationService.ts")
+      .then(({ expireDueSubscriptions }) => expireDueSubscriptions(prisma))
+      .catch((error) => console.error("billing expire", error));
   };
   tick();
   const timer = setInterval(tick, TICK_MS);

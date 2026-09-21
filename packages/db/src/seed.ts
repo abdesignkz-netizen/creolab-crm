@@ -24,8 +24,13 @@ export async function seedDatabase() {
       code: "starter",
       limitsJson: { whatsappActive: 1, members: 20, aiMonthly: 20000 },
       featuresJson: { forms: true, webhook: true, whatsapp: true },
+      kind: "legacy",
+      catalogStatus: "HIDDEN",
+      public: false,
     },
   });
+  const { syncPricingCatalog } = await import("./pricingCatalogSeed.ts");
+  await syncPricingCatalog(prisma);
 
   const users = {
     platform: await prisma.user.upsert({

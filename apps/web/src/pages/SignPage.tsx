@@ -68,8 +68,8 @@ export function SignPage() {
 
   return (
     <div className="login">
-      <div className="login-stage">
-          <div className="panel" style={{ maxWidth: 560 }}>
+      <div className="login-stage sign-doc-stage">
+          <div className="panel" style={{ maxWidth: 920 }}>
             <h2>Подписание договора</h2>
             <p className="muted">Нужен NCALayer с ключом подписи НУЦ. PIN на сервер не передаётся.</p>
             {error ? <p className="error">{error}</p> : null}
@@ -90,10 +90,11 @@ export function SignPage() {
               <p>
                 Сумма: <b>{Number(data.amount || 0).toLocaleString("ru-RU")} {data.currency}</b>
               </p>
+              <iframe className="sign-doc-frame" title="Договор PDF" src={api.publicSignPdfUrl(token)} />
               {data.waitingForSeller ? <p className="muted">Сначала должен подписать исполнитель.</p> : null}
               <div className="actions">
                 <a className="btn secondary" href={api.publicSignPdfUrl(token)}>
-                  Скачать договор
+                  Скачать PDF
                 </a>
                 <button type="button" className="btn" disabled={busy || !data.canSign} onClick={() => void sign()}>
                   {busy ? "Подписываем…" : "Подписать ЭЦП"}

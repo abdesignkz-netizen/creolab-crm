@@ -10,6 +10,7 @@ import { PlatformAiUsagePage } from "./PlatformAiUsagePage";
 
 const TABS = [
   ["info", "Основные данные"],
+  ["subscription", "Подписка"],
   ["members", "Участники"],
   ["integrations", "Интеграции"],
   ["ai-manager", "AI-менеджер"],
@@ -65,7 +66,11 @@ export function PlatformCompanyPage() {
           )}
           {company.subscriptionStatus === "none" || company.previewMode ? (
             <button className="btn" onClick={async () => {
-              const billing = await api.adminActivateSubscription(id);
+              const billing = (await api.adminActivateSubscription(id)) as {
+                subscriptionStatus?: string;
+                previewMode?: boolean;
+                planName?: string;
+              };
               setCompany({ ...company, ...billing, subscriptionStatus: billing.subscriptionStatus, previewMode: billing.previewMode, planName: billing.planName });
               notifySaved("Тариф активирован");
             }}>Активировать тариф</button>
@@ -78,6 +83,7 @@ export function PlatformCompanyPage() {
         ))}
       </nav>
       {tab === "info" ? <CompanyInfo company={company} onSaved={setCompany} /> : null}
+      {tab === "subscription" ? <CompanySubscription company={company} onSaved={setCompany} /> : null}
       {tab === "members" ? <CompanyMembers tenantId={id} /> : null}
       {tab === "integrations" ? <CompanyIntegrations tenantId={id} /> : null}
       {tab === "ai-manager" ? <PlatformCompanyAiManager tenantId={id} /> : null}
@@ -131,6 +137,70 @@ function CompanyInfo({ company, onSaved }: { company: any; onSaved: (row: any) =
       {error ? <p className="error">{error}</p> : null}
       <button className="btn">Сохранить</button>
     </form>
+  );
+}
+
+function CompanySubscription({ company, onSaved }: { company: any; onSaved: (row: any) => void }) {
+  const [planCode, setPlanCode] = useState(company.planCode && company.planCode !== "starter" ? company.planCode : "CRM_BUSINESS");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState("");
+
+  async function run(label: string, fn: () => Promise<any>) {
+    setBusy(label);
+    setError("");
+    try {
+      await fn();
+      onSaved(await api.adminCompany(company.id));
+      notifySaved("Подписка обновлена");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Ошибка");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  return (
+    <div className="panel stack">
+      <h3>Подписка</h3>
+      <p>Тариф: <b>{company.planName || "Нет"}</b></p>
+      <p>Статус: <b>{company.subscriptionStatus || "—"}</b></p>
+      <p>Стоимость: {company.amountMinor != null ? `${Number(company.amountMinor).toLocaleString("ru-RU")} ₸` : "—"}</p>
+      <p>Начало: {company.activatedAt ? new Date(company.activatedAt).toLocaleDateString("ru-RU") : "—"}</p>
+      <p>Окончание: {company.expiresAt ? new Date(company.expiresAt).toLocaleDateString("ru-RU") : "—"}</p>
+      <p>Оплата: {company.paymentMethod === "MANUAL" ? "Подтверждена вручную" : company.paymentMethod || "—"}</p>
+      <p>Подтвердил: {company.confirmedBy?.name || "—"}</p>
+      {company.currentRequest ? (
+        <p className="muted">
+          Открытый запрос: {company.currentRequest.planName} · {company.currentRequest.statusLabel} ·{" "}
+          <Link to="/admin/billing">открыть</Link>
+        </p>
+      ) : null}
+      {(company.usage || []).map((row: { key: string; label: string; used: number; cap: number }) => (
+        <p key={row.key} className="muted">{row.label}: {row.used} / {row.cap || "—"}</p>
+      ))}
+      <label>
+        Тариф
+        <select value={planCode} onChange={(event) => setPlanCode(event.target.value)}>
+          <option value="CRM_START">CRM Start</option>
+          <option value="CRM_BUSINESS">CRM Business</option>
+          <option value="CRM_PRO">CRM Pro</option>
+          <option value="AI_SALES">BasQar AI Sales</option>
+          <option value="CONTROL_STANDALONE">BasQar Control</option>
+          <option value="BUNDLE_CRM_AI">CRM + AI</option>
+          <option value="BUNDLE_FULL">BasQar Full</option>
+          <option value="CRM_ENTERPRISE">Enterprise</option>
+        </select>
+      </label>
+      {error ? <p className="error">{error}</p> : null}
+      <div className="actions" style={{ flexWrap: "wrap" }}>
+        <button className="btn" disabled={Boolean(busy)} onClick={() => void run("plan", () => api.adminActivateSubscription(company.id, { planCode, source: "platform_admin", reason: "Ручная активация" }))}>Изменить тариф</button>
+        <button className="btn secondary" disabled={Boolean(busy)} onClick={() => void run("extend", () => api.adminExtendSubscription(company.id, { reason: "Продление администратором" }))}>Продлить</button>
+        <button className="btn secondary" disabled={Boolean(busy)} onClick={() => void run("addon", () => api.adminActivateSubscription(company.id, { planCode, addOns: [{ code: "ADDON_CONTROL", qty: 1 }], reason: "Добавлен Control" }))}>Добавить Control</button>
+        <button className="btn secondary" disabled={Boolean(busy)} onClick={() => void run("suspend", () => api.adminSuspendSubscription(company.id, { reason: "Приостановлено администратором" }))}>Приостановить</button>
+        <button className="btn secondary" disabled={Boolean(busy)} onClick={() => void run("reactivate", () => api.adminReactivateSubscription(company.id, { reason: "Восстановлено администратором" }))}>Активировать</button>
+        <button className="btn secondary" disabled={Boolean(busy)} onClick={() => void run("free", () => api.adminActivateSubscription(company.id, { planCode, source: "complimentary", reason: "Бесплатный период" }))}>Дать бесплатный период</button>
+      </div>
+    </div>
   );
 }
 

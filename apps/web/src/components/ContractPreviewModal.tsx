@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { api, downloadContractFile, downloadContractPreview } from "../lib/api";
 
 function isPdfFile(blob: Blob, filename: string) {
@@ -12,7 +12,6 @@ export function ContractPreviewModal({
   contract: { id: string; number?: string; preview?: boolean };
   onClose: () => void;
 }) {
-  const host = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [pdfUrl, setPdfUrl] = useState("");
@@ -37,22 +36,14 @@ export function ContractPreviewModal({
           ? await api.downloadContractPreview(contract.id)
           : await api.downloadContractFile(contract.id);
         if (cancelled) return;
-        if (isPdfFile(file.blob, file.filename)) {
-          objectUrl = URL.createObjectURL(file.blob);
-          setPdfUrl(objectUrl);
+        if (!isPdfFile(file.blob, file.filename)) {
+          setError("Договор должен открываться как PDF. Сформируйте его ещё раз.");
           setLoading(false);
           return;
         }
-        const { renderAsync } = await import("docx-preview");
-        if (cancelled || !host.current) return;
-        host.current.replaceChildren();
-        await renderAsync(file.blob, host.current, undefined, {
-          inWrapper: true,
-          ignoreWidth: false,
-          breakPages: true,
-          useBase64URL: true,
-        });
-        if (!cancelled) setLoading(false);
+        objectUrl = URL.createObjectURL(file.blob);
+        setPdfUrl(objectUrl);
+        setLoading(false);
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : "Не удалось открыть договор");
@@ -82,13 +73,8 @@ export function ContractPreviewModal({
           </button>
         </div>
         {error ? <p className="error">{error}</p> : null}
-        {loading ? <p className="muted">Открываем Word…</p> : null}
+        {loading ? <p className="muted">Открываем PDF…</p> : null}
         {pdfUrl ? <iframe title="Просмотр договора" src={pdfUrl} /> : null}
-        <div
-          ref={host}
-          className="contract-preview-host"
-          hidden={Boolean(pdfUrl) || Boolean(error)}
-        />
         <div className="actions">
           <button
             type="button"
@@ -98,7 +84,7 @@ export function ContractPreviewModal({
               void (contract.preview ? downloadContractPreview(contract.id) : downloadContractFile(contract.id))
             }
           >
-            Скачать Word
+            Скачать PDF
           </button>
           <button type="button" className="btn secondary" onClick={onClose}>
             Закрыть

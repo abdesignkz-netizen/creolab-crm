@@ -7,6 +7,21 @@ import { scanContractTemplateText, rewriteScannedFragment } from "./services/con
 import { extractDocUnicodeText, docxToText } from "./services/wordDocumentText.ts";
 import { fillDocxPlaceholders, rewriteDocxText } from "./services/docxTemplateFill.ts";
 
+async function pdfText(bytes: Buffer) {
+  const { DOMMatrix, ImageData, Path2D } = await import("@napi-rs/canvas");
+  Object.assign(globalThis, { DOMMatrix, ImageData, Path2D });
+  const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const parsed = await getDocument({ data: new Uint8Array(bytes), useSystemFonts: true }).promise;
+  const parts: string[] = [];
+  for (let pageNo = 1; pageNo <= parsed.numPages; pageNo += 1) {
+    const page = await parsed.getPage(pageNo);
+    const content = await page.getTextContent();
+    page.cleanup();
+    parts.push(content.items.map((item) => ("str" in item ? item.str : "")).join(" "));
+  }
+  return parts.join("\n");
+}
+
 const SAMPLE = `Договор №05082026/01
 об оказании возмездных услуг
 
@@ -567,10 +582,11 @@ KZ111111111111111111
     assert.equal(formed.body.generated, true, JSON.stringify(formed.body));
 
     const previewFile = await fetch(`${base}/api/v1/documents/contract-previews/${formed.body.previewId}`, { headers: { cookie } });
-    assert.equal(previewFile.status, 200);
+    assert.equal(previewFile.status, 200, await previewFile.clone().text());
+    assert.match(previewFile.headers.get("content-type") || "", /pdf/);
     const previewBytes = Buffer.from(await previewFile.arrayBuffer());
-    assert.ok(previewBytes.subarray(0, 2).equals(Buffer.from("PK")));
-    const previewText = await docxToText(previewBytes);
+    assert.equal(previewBytes.subarray(0, 4).toString("utf8"), "%PDF");
+    const previewText = await pdfText(previewBytes);
     assert.match(previewText, /Разработать презентацию компании/);
     assert.match(previewText, /реквизит/i);
     assert.doesNotMatch(previewText, /5\.\s*Заключительные положения/);
@@ -586,12 +602,13 @@ KZ111111111111111111
 
     const file = await fetch(`${base}/api/v1/contracts/${saved.body.contract.id}/pdf`, { headers: { cookie } });
     assert.equal(file.status, 200);
+    assert.match(file.headers.get("content-type") || "", /pdf/);
     const fileBytes = Buffer.from(await file.arrayBuffer());
-    assert.ok(fileBytes.subarray(0, 2).equals(Buffer.from("PK")));
-    const wordText = await docxToText(fileBytes);
-    assert.match(wordText, /Разработать презентацию компании/);
-    assert.match(wordText, /реквизит/i);
-    assert.doesNotMatch(wordText, /5\.\s*Заключительные положения/);
+    assert.equal(fileBytes.subarray(0, 4).toString("utf8"), "%PDF");
+    const pdfBody = await pdfText(fileBytes);
+    assert.match(pdfBody, /Разработать презентацию компании/);
+    assert.match(pdfBody, /реквизит/i);
+    assert.doesNotMatch(pdfBody, /5\.\s*Заключительные положения/);
 
     const list = await json("/api/v1/documents/contract-templates");
     assert.ok((list.body.items || []).some((row: { id: string }) => row.id === templateId));

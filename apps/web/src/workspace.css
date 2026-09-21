@@ -196,6 +196,7 @@ a.sit-kpi:hover, button.sit-kpi:hover { background: #f2f7ff; border-color: #cfde
 .hover-hint { background: rgba(32, 34, 41, .96); border-radius: 9px; padding: 9px 12px; font-size: 11px; box-shadow: 0 6px 24px #12182626; }
 .login::before { background: radial-gradient(ellipse at 45% 30%, #dce8fb 0%, transparent 60%); opacity: .7; }
 .login-stage { width: min(440px, 100%); gap: 28px; }
+.login-stage.sign-doc-stage { width: min(960px, 100%); }
 .login-brand { justify-items: center; text-align: center; gap: 13px; }
 .login-brand .brand-wordmark { font-size: 27px; letter-spacing: .05em; }
 .login-brand p { font-size: 13px; max-width: 42ch; }

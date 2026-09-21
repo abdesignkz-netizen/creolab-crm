@@ -398,7 +398,7 @@ export function DealDocumentsPanel(props: {
               </div>
               {doc.generatedFileId ? (
                 <a className="btn secondary" href={api.contractPdfUrl(doc.id)}>
-                  {doc.importedPdf || /pdf/i.test(doc.generatedMimeType || "") ? "Открыть PDF" : "Скачать Word"}
+                  Открыть PDF
                 </a>
               ) : null}
               <DeleteContractButton id={doc.id} number={doc.number} disabled={busy} onDeleted={async()=>{setBuyerLink("");await load();}} />
@@ -441,7 +441,7 @@ export function DealDocumentsPanel(props: {
                 title={importedContract ? "Загруженный PDF уже сохранён в исходном виде" : undefined}
                 onClick={() => void generateWord()}
               >
-                Сформировать Word
+                Сформировать договор
               </button>
             )}
             {importedContract ? null : (

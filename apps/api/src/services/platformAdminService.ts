@@ -112,6 +112,9 @@ export async function platformOverview(prisma: PrismaClient, auth: AuthContext) 
     integrationsConnected: connected,
     integrationsUnhealthy: unhealthy,
     integrationsNeedsAssignment: needsAssignment,
+    billingPending: await prisma.subscriptionRequest
+      .count({ where: { status: { in: ["PENDING", "AWAITING_PAYMENT", "PAYMENT_REVIEW", "APPROVED"] } } })
+      .catch(() => 0),
   };
 }
 
@@ -247,6 +250,15 @@ async function companyCard(prisma: PrismaClient, tenantId: string) {
     planCode: billing.planCode,
     planName: billing.planName,
     activatedAt: billing.startsAt,
+    expiresAt: billing.expiresAt,
+    amountMinor: billing.amountMinor,
+    billingPeriod: billing.billingPeriod,
+    paymentMethod: billing.paymentMethod,
+    confirmedAt: billing.confirmedAt,
+    confirmedBy: billing.confirmedBy,
+    daysLeft: billing.daysLeft,
+    usage: billing.usage,
+    currentRequest: billing.currentRequest,
     previewMode: billing.previewMode,
     owner: owner ? { id: owner.user.id, name: owner.user.name, email: owner.user.email } : null,
     ownerEmail: owner?.user.email || null,
@@ -324,6 +336,7 @@ export async function createPlatformCompany(prisma: PrismaClient, auth: AuthCont
       phone: asTrimmed(input.adminPhone),
       inviterId: auth.user.id,
       actorUserId: auth.user.id,
+      skipEntitlementLimit: true,
     });
     await writeAudit(tx, {
       tenantId: tenant.id,
@@ -534,6 +547,7 @@ export async function invitePlatformMember(
     phone: asTrimmed(input.phone),
     inviterId: auth.user.id,
     actorUserId: auth.user.id,
+    skipEntitlementLimit: true,
   });
   return {
     id: result.invitation.id,

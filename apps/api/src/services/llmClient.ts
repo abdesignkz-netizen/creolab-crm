@@ -62,6 +62,26 @@ async function completeChat(input: {
   const runtime = input.runtime || {};
   const { apiKey, baseUrl, model, provider } = await resolveLlm(runtime);
   if (!apiKey) return { content: null as string | null };
+  if (runtime.prisma && runtime.tenantId) {
+    try {
+      const { getEntitlements } = await import("./entitlementService.ts");
+      const { LIMITS } = await import("@creolab/contracts");
+      const resolved = await getEntitlements(runtime.prisma, runtime.tenantId);
+      if (!resolved.snapshot.grandfathered) {
+        const cap = Number(resolved.limits[LIMITS.AI_USAGE] || 0);
+        if (cap <= 0) return { content: null as string | null };
+        const start = new Date();
+        start.setDate(1);
+        start.setHours(0, 0, 0, 0);
+        const used = await runtime.prisma.aIUsageEvent.count({
+          where: { tenantId: runtime.tenantId, createdAt: { gte: start }, status: "ok" },
+        });
+        if (used >= cap) return { content: null as string | null };
+      }
+    } catch {
+      /* limit check is best-effort */
+    }
+  }
   const started = Date.now();
   let status: "ok" | "failed" = "failed";
   let errorCode: string | null = "llm_request_failed";

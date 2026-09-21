@@ -148,6 +148,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
   const platformLinks: Array<[string, string]> = platformAdmin ? [
     ["/admin", t(locale, "nav.platformOverview")],
     ["/admin/companies", t(locale, "nav.platformCompanies")],
+    ["/admin/billing", t(locale, "nav.platformBilling")],
     ["/admin/ai-managers", t(locale, "nav.platformAiManagers")],
     ["/admin/members", t(locale, "nav.platformMembers")],
     ["/admin/support", t(locale, "nav.platformSupport")],
@@ -160,6 +161,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
   const moreLinks = (platformAdmin && !hasCompany
     ? [
         ["/admin/ai-managers", t(locale, "nav.platformAiManagers")],
+        ["/admin/billing", t(locale, "nav.platformBilling")],
         ["/admin/support", t(locale, "nav.platformSupport")],
         ["/admin/integrations", t(locale, "nav.platformCatalog")],
         ["/admin/ai-usage", t(locale, "nav.platformUsage")],
@@ -236,6 +238,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
     "/settings": t(locale, "nav.settings"),
     "/billing": t(locale, "nav.billing"),
     "/admin/companies": t(locale, "nav.platformCompanies"),
+    "/admin/billing": t(locale, "nav.platformBilling"),
     "/admin/members": t(locale, "nav.platformMembers"),
     "/admin/support": t(locale, "nav.platformSupport"),
     "/admin/integrations": t(locale, "nav.platformCatalog"),
@@ -345,12 +348,13 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
     let cancelled = false;
     async function loadAdminHelp() {
       try {
-        const data = (await api.adminSupportUnread()) as { unread?: number; signupPending?: number };
+        const data = (await api.adminSupportUnread()) as { unread?: number; signupPending?: number; billingPending?: number };
         if (cancelled) return;
         setNavBadges((prev) => ({
           ...prev,
           "/admin/support": Number(data.unread || 0) + Number(data.signupPending || 0),
-          "/admin": Number(data.signupPending || 0),
+          "/admin": Number(data.signupPending || 0) + Number(data.billingPending || 0),
+          "/admin/billing": Number(data.billingPending || 0),
         }));
       } catch {
         /* keep previous */

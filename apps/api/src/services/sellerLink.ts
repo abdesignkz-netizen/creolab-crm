@@ -1000,6 +1000,24 @@ export async function connectWhatsAppSeller(
     throw new ApiError(403, "forbidden", "Нет права управлять интеграциями");
   }
   const existing = await getSellerIntegration(prisma, membership.tenantId);
+  if (!existing) {
+    const { requireLimitAvailable } = await import("./entitlementService.ts");
+    const { LIMITS } = await import("@creolab/contracts");
+    const used = await prisma.integration.count({
+      where: {
+        tenantId: membership.tenantId,
+        type: "whatsapp_seller",
+        NOT: { OR: [{ status: "disabled" }, { connectionStatus: "DISCONNECTED" }] },
+      },
+    });
+    await requireLimitAvailable(
+      prisma,
+      membership.tenantId,
+      LIMITS.WHATSAPP_CONNECTIONS,
+      used,
+      "Лимит WhatsApp исчерпан. Подключите дополнительный номер.",
+    );
+  }
   const instanceId = String(input.instanceId || "").trim();
   const apiToken = String(input.apiToken || "").trim();
   const legacySecret = String(input.secret || "").trim();

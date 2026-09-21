@@ -45,7 +45,10 @@ export function ManualPdfImportPanel({ onSaved }: { onSaved: () => void }) {
   useEffect(()=>{
     if (!preview) { setOwnOrg({bin:"",name:""}); return; }
     let active=true;
-    void api.legalProfile().then((profile: {bin?:string|null;legalName?:string|null})=>{ if(active) setOwnOrg({bin:taxId(profile.bin||""),name:String(profile.legalName||"").trim()}); }).catch(()=>{ if(active) setOwnOrg({bin:"",name:""}); });
+    void api.legalProfile().then((raw) => {
+      const profile = raw as { bin?: string | null; legalName?: string | null };
+      if (active) setOwnOrg({ bin: taxId(profile.bin || ""), name: String(profile.legalName || "").trim() });
+    }).catch(() => { if (active) setOwnOrg({ bin: "", name: "" }); });
     return ()=>{active=false;};
   },[preview?.importId]);
   useEffect(()=>{

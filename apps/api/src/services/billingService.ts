@@ -1,16 +1,19 @@
 import type { Prisma, PrismaClient } from "@creolab/db";
-import { SUBSCRIPTION_STATUSES } from "@creolab/contracts";
 import { ApiError } from "../errors.ts";
 import { writeAudit } from "../lib/audit.ts";
 import { requirePlatformAdmin, requireTenant } from "../lib/access.ts";
 import type { AuthContext } from "../lib/types.ts";
 import {
   entitlementsFromSnapshot,
+  getEntitlements,
   getSubscriptionSnapshot,
   loadCurrentTenantPlan,
   snapshotFromPlan,
 } from "./entitlementService.ts";
 import { PREVIEW_DATASET } from "./previewDataset.ts";
+import { loadPublicCatalog, publicOfferCards, quoteSubscription, serializeCatalogItem } from "./pricingEngine.ts";
+import { activateSubscription } from "./subscriptionActivationService.ts";
+import { collectTenantUsage, usageWarnings } from "./billingUsageService.ts";
 
 function onboardingFromSettings(settings: unknown) {
   const raw = settings && typeof settings === "object" ? (settings as Record<string, unknown>) : {};
@@ -26,22 +29,69 @@ function onboardingFromSettings(settings: unknown) {
   };
 }
 
+function daysLeft(expiresAt: string | null) {
+  if (!expiresAt) return null;
+  const end = new Date(expiresAt).getTime();
+  if (!Number.isFinite(end)) return null;
+  return Math.ceil((end - Date.now()) / (24 * 60 * 60 * 1000));
+}
+
 export async function getBillingState(prisma: PrismaClient, tenantId: string) {
   const tenant = await prisma.tenant.findUnique({
     where: { id: tenantId },
     select: { id: true, name: true, status: true, createdAt: true, settingsJson: true },
   });
   if (!tenant) throw new ApiError(404, "not_found", "Компания не найдена");
-  const row = await loadCurrentTenantPlan(prisma, tenantId);
-  const snapshot = snapshotFromPlan(tenant.status, row);
+  const resolved = await getEntitlements(prisma, tenantId);
+  const snapshot = resolved.snapshot;
+  const remaining = daysLeft(snapshot.expiresAt);
+  const usage = await collectTenantUsage(prisma, tenantId);
+  const openRequest = await prisma.subscriptionRequest.findFirst({
+    where: { tenantId, status: { in: ["PENDING", "AWAITING_PAYMENT", "PAYMENT_REVIEW", "APPROVED"] } },
+    orderBy: { createdAt: "desc" },
+  }).catch(() => null);
+  const addOns = Array.isArray(resolved.plan?.itemsJson) ? resolved.plan?.itemsJson : [];
+  const confirmer = resolved.plan?.confirmedByUserId
+    ? await prisma.user.findUnique({
+        where: { id: resolved.plan.confirmedByUserId },
+        select: { id: true, name: true, email: true },
+      }).catch(() => null)
+    : null;
   return {
     tenantId: tenant.id,
     companyName: tenant.name,
     createdAt: tenant.createdAt.toISOString(),
     ...snapshot,
-    entitlements: entitlementsFromSnapshot(snapshot, row),
+    entitlements: resolved.entitlements,
+    limits: resolved.limits,
+    usage: usage.rows,
+    warnings: usageWarnings(usage, remaining),
+    daysLeft: remaining,
+    addOns,
+    paymentMethod: resolved.plan?.paymentMethod || null,
+    confirmedAt: resolved.plan?.confirmedAt?.toISOString() || null,
+    confirmedBy: confirmer,
     onboarding: onboardingFromSettings(tenant.settingsJson),
     preview: snapshot.previewMode ? PREVIEW_DATASET : null,
+    currentRequest: openRequest
+      ? {
+          id: openRequest.id,
+          planCode: openRequest.requestedPlanCode,
+          planName: (openRequest.snapshotJson as { planName?: string } | null)?.planName || openRequest.requestedPlanCode,
+          billingPeriod: openRequest.billingPeriod,
+          finalAmountMinor: openRequest.finalAmountMinor,
+          status: openRequest.status,
+          statusLabel:
+            {
+              PENDING: "Черновик",
+              AWAITING_PAYMENT: "Ожидает подтверждения оплаты",
+              PAYMENT_REVIEW: "Оплата на проверке",
+              APPROVED: "Одобрен",
+            }[openRequest.status] || openRequest.status,
+          addOns: openRequest.requestedAddOnsJson,
+          createdAt: openRequest.createdAt.toISOString(),
+        }
+      : null,
   };
 }
 
@@ -50,20 +100,28 @@ export async function getBillingForAuth(prisma: PrismaClient, auth: AuthContext)
   return getBillingState(prisma, auth.activeMembership.tenantId);
 }
 
-export async function listPublicPlans(prisma: PrismaClient) {
-  const plans = await prisma.plan.findMany({ orderBy: { name: "asc" } });
+export async function listPublicPlans(prisma: PrismaClient, period: string = "MONTHLY") {
+  const billingPeriod = period === "YEARLY" ? "YEARLY" : "MONTHLY";
+  const items = await loadPublicCatalog(prisma);
+  const serialized = items.map((item) => serializeCatalogItem(item, billingPeriod));
   return {
-    items: plans.map((plan) => ({
-      id: plan.id,
-      code: plan.code,
-      name: plan.name,
-      features: plan.featuresJson,
-      limits: plan.limitsJson,
-      billingPeriod: "month",
-      price: null,
-      isActive: true,
-    })),
+    billingPeriod,
+    items: serialized,
+    plans: serialized.filter((item) => item.kind === "plan"),
+    bundles: serialized.filter((item) => item.kind === "bundle"),
+    addOns: serialized.filter((item) => item.kind === "addon"),
+    offers: publicOfferCards(items, billingPeriod),
   };
+}
+
+export async function quotePublic(prisma: PrismaClient, auth: AuthContext, input: unknown) {
+  requireTenant(auth);
+  const body = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+  return quoteSubscription(prisma, {
+    planCode: body.planCode ? String(body.planCode) : null,
+    addOns: Array.isArray(body.addOns) ? (body.addOns as Array<{ code: string; qty?: number }>) : [],
+    billingPeriod: String(body.billingPeriod || "MONTHLY"),
+  });
 }
 
 export async function skipOnboarding(prisma: PrismaClient, auth: AuthContext) {
@@ -115,61 +173,120 @@ export async function completeOnboardingStep(prisma: PrismaClient, auth: AuthCon
 export async function activateTenantSubscription(
   prisma: PrismaClient,
   tenantId: string,
-  input: { planCode?: string; actorUserId?: string | null; source?: string } = {},
+  input: {
+    planCode?: string;
+    actorUserId?: string | null;
+    source?: string;
+    addOns?: Array<{ code: string; qty?: number }>;
+    billingPeriod?: string;
+    startDate?: string;
+    endDate?: string;
+    notes?: string;
+  } = {},
 ) {
-  const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
-  if (!tenant) throw new ApiError(404, "not_found", "Компания не найдена");
-  const planCode = input.planCode || "starter";
-  const plan = await prisma.plan.findUnique({ where: { code: planCode } });
-  if (!plan) throw new ApiError(404, "not_found", "Тариф не найден");
-  const current = await loadCurrentTenantPlan(prisma, tenantId);
-  const now = new Date();
-  if (current) {
-    await prisma.tenantPlan.update({
-      where: { id: current.id },
-      data: { status: SUBSCRIPTION_STATUSES.ACTIVE, planId: plan.id, startsAt: now, endsAt: null },
-    });
-  } else {
-    await prisma.tenantPlan.create({
-      data: { tenantId, planId: plan.id, status: SUBSCRIPTION_STATUSES.ACTIVE, startsAt: now },
-    });
-  }
-  const settings = tenant.settingsJson && typeof tenant.settingsJson === "object"
-    ? { ...(tenant.settingsJson as Record<string, unknown>) }
-    : {};
-  const prevOnboarding = typeof settings.onboarding === "object" && settings.onboarding
-    ? (settings.onboarding as Record<string, unknown>)
-    : {};
-  if (prevOnboarding.status === "not_started" || !prevOnboarding.status) {
-    settings.onboarding = { ...prevOnboarding, status: "in_progress", deferred: false };
-    await prisma.tenant.update({
-      where: { id: tenantId },
-      data: { settingsJson: settings as Prisma.InputJsonValue },
-    });
-  }
-  await writeAudit(prisma, {
+  return activateSubscription(prisma, {
     tenantId,
+    planCode: input.planCode || "starter",
+    addOns: input.addOns,
+    billingPeriod: input.billingPeriod,
+    startDate: input.startDate,
+    endDate: input.endDate,
     actorUserId: input.actorUserId || null,
-    action: "subscription.activated",
-    entityType: "tenant",
-    entityId: tenantId,
-    changes: { planCode, source: input.source || "trusted" },
+    source: input.source || "trusted",
+    notes: input.notes || null,
   });
-  return getBillingState(prisma, tenantId);
 }
 
 export async function activateSubscriptionAsPlatformAdmin(
   prisma: PrismaClient,
   auth: AuthContext,
   tenantId: string,
-  planCode?: string,
+  input: unknown = {},
 ) {
   requirePlatformAdmin(auth);
+  const body = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+  const planCode = body.planCode ? String(body.planCode) : undefined;
   return activateTenantSubscription(prisma, tenantId, {
     planCode,
     actorUserId: auth.user.id,
-    source: "platform_admin",
+    source: String(body.source || "platform_admin"),
+    addOns: Array.isArray(body.addOns) ? (body.addOns as Array<{ code: string; qty?: number }>) : undefined,
+    billingPeriod: body.billingPeriod ? String(body.billingPeriod) : undefined,
+    startDate: body.startDate ? String(body.startDate) : undefined,
+    endDate: body.endDate ? String(body.endDate) : undefined,
+    notes: body.reason ? String(body.reason) : body.notes ? String(body.notes) : undefined,
   });
 }
 
-export { getSubscriptionSnapshot };
+export async function suspendSubscriptionAsPlatformAdmin(
+  prisma: PrismaClient,
+  auth: AuthContext,
+  tenantId: string,
+  input: unknown = {},
+) {
+  requirePlatformAdmin(auth);
+  const body = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+  const { suspendSubscription } = await import("./subscriptionActivationService.ts");
+  return suspendSubscription(prisma, tenantId, auth.user.id, body.reason ? String(body.reason) : null);
+}
+
+export async function reactivateSubscriptionAsPlatformAdmin(
+  prisma: PrismaClient,
+  auth: AuthContext,
+  tenantId: string,
+  input: unknown = {},
+) {
+  requirePlatformAdmin(auth);
+  const body = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+  const { reactivateSubscription } = await import("./subscriptionActivationService.ts");
+  return reactivateSubscription(prisma, tenantId, auth.user.id, body.reason ? String(body.reason) : null);
+}
+
+export async function extendSubscriptionAsPlatformAdmin(
+  prisma: PrismaClient,
+  auth: AuthContext,
+  tenantId: string,
+  input: unknown = {},
+) {
+  requirePlatformAdmin(auth);
+  const body = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+  const { extendSubscription } = await import("./subscriptionActivationService.ts");
+  return extendSubscription(prisma, tenantId, {
+    endDate: body.endDate ? String(body.endDate) : null,
+    actorUserId: auth.user.id,
+    reason: body.reason ? String(body.reason) : null,
+  });
+}
+
+export async function upsertBillingOverride(
+  prisma: PrismaClient,
+  auth: AuthContext,
+  tenantId: string,
+  input: unknown,
+) {
+  requirePlatformAdmin(auth);
+  const body = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+  const data = {
+    featuresJson: (body.features && typeof body.features === "object" ? body.features : {}) as Prisma.InputJsonValue,
+    limitsJson: (body.limits && typeof body.limits === "object" ? body.limits : {}) as Prisma.InputJsonValue,
+    customPriceMinor: body.customPriceMinor != null ? Number(body.customPriceMinor) : null,
+    reason: String(body.reason || "").trim() || null,
+    updatedByUserId: auth.user.id,
+  };
+  const row = await prisma.tenantBillingOverride.upsert({
+    where: { tenantId },
+    update: data,
+    create: { tenantId, ...data, createdByUserId: auth.user.id },
+  });
+  await writeAudit(prisma, {
+    tenantId,
+    actorUserId: auth.user.id,
+    action: "admin_override.added",
+    entityType: "billing_override",
+    entityId: row.id,
+    changes: data,
+  });
+  return getBillingState(prisma, tenantId);
+}
+
+export { getSubscriptionSnapshot, loadCurrentTenantPlan, entitlementsFromSnapshot, snapshotFromPlan };

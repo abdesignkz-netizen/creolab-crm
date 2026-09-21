@@ -11,7 +11,7 @@ type SignupRequest = {
   createdAt: string;
 };
 
-export function PlatformSignupRequests({ title = "Запросы на подключение" }: { title?: string }) {
+export function PlatformSignupRequests({ title = "Регистрации" }: { title?: string }) {
   const [items, setItems] = useState<SignupRequest[]>([]);
   const [pendingCount, setPendingCount] = useState(0);
   const [error, setError] = useState("");

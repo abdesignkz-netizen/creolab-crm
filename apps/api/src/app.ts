@@ -305,9 +305,14 @@ import {
   activateSubscriptionAsPlatformAdmin,
   activateTenantSubscription,
   completeOnboardingStep,
+  extendSubscriptionAsPlatformAdmin,
   getBillingState,
   listPublicPlans,
+  quotePublic,
+  reactivateSubscriptionAsPlatformAdmin,
   skipOnboarding,
+  suspendSubscriptionAsPlatformAdmin,
+  upsertBillingOverride,
 } from "./services/billingService.ts";
 import {
   createTenantConnection,
@@ -746,7 +751,26 @@ export function createApp(prisma: PrismaClient) {
 
   app.get("/api/v1/billing/plans", async (req, res) => {
     await requireAuth(req);
-    res.json(await listPublicPlans(prisma));
+    res.json(await listPublicPlans(prisma, String(req.query.period || "MONTHLY")));
+  });
+
+  app.post("/api/v1/billing/quote", json, async (req, res) => {
+    res.json(await quotePublic(prisma, await requireAuth(req), req.body || {}));
+  });
+
+  app.get("/api/v1/billing/requests", async (req, res) => {
+    const { listTenantBillingRequests } = await import("./services/subscriptionRequestService.ts");
+    res.json(await listTenantBillingRequests(prisma, await requireAuth(req)));
+  });
+
+  app.post("/api/v1/billing/requests", json, async (req, res) => {
+    const { createSubscriptionRequest } = await import("./services/subscriptionRequestService.ts");
+    res.status(201).json(await createSubscriptionRequest(prisma, await requireAuth(req), req.body || {}));
+  });
+
+  app.post("/api/v1/billing/requests/:id/cancel", async (req, res) => {
+    const { cancelSubscriptionRequest } = await import("./services/subscriptionRequestService.ts");
+    res.json(await cancelSubscriptionRequest(prisma, await requireAuth(req), req.params.id));
   });
 
   app.post("/api/v1/billing/onboarding/skip", json, async (req, res) => {
@@ -773,6 +797,8 @@ export function createApp(prisma: PrismaClient) {
       await activateTenantSubscription(prisma, tenantId, {
         planCode: req.body?.planCode ? String(req.body.planCode) : undefined,
         source: "internal_webhook",
+        addOns: Array.isArray(req.body?.addOns) ? req.body.addOns : undefined,
+        billingPeriod: req.body?.billingPeriod ? String(req.body.billingPeriod) : undefined,
       }),
     );
   });
@@ -2174,14 +2200,43 @@ export function createApp(prisma: PrismaClient) {
   });
 
   app.post("/api/v1/admin/tenants/:id/subscription/activate", json, async (req, res) => {
-    res.json(
-      await activateSubscriptionAsPlatformAdmin(
-        prisma,
-        await requireAuth(req),
-        req.params.id,
-        req.body?.planCode ? String(req.body.planCode) : undefined,
-      ),
-    );
+    res.json(await activateSubscriptionAsPlatformAdmin(prisma, await requireAuth(req), req.params.id, req.body || {}));
+  });
+
+  app.post("/api/v1/admin/tenants/:id/subscription/suspend", json, async (req, res) => {
+    res.json(await suspendSubscriptionAsPlatformAdmin(prisma, await requireAuth(req), req.params.id, req.body || {}));
+  });
+
+  app.post("/api/v1/admin/tenants/:id/subscription/reactivate", json, async (req, res) => {
+    res.json(await reactivateSubscriptionAsPlatformAdmin(prisma, await requireAuth(req), req.params.id, req.body || {}));
+  });
+
+  app.post("/api/v1/admin/tenants/:id/subscription/extend", json, async (req, res) => {
+    res.json(await extendSubscriptionAsPlatformAdmin(prisma, await requireAuth(req), req.params.id, req.body || {}));
+  });
+
+  app.post("/api/v1/admin/tenants/:id/billing/override", json, async (req, res) => {
+    res.json(await upsertBillingOverride(prisma, await requireAuth(req), req.params.id, req.body || {}));
+  });
+
+  app.get("/api/v1/admin/billing/requests", async (req, res) => {
+    const { listAdminBillingRequests } = await import("./services/subscriptionRequestService.ts");
+    res.json(await listAdminBillingRequests(prisma, await requireAuth(req), req.query as Record<string, string>));
+  });
+
+  app.get("/api/v1/admin/billing/requests/:id", async (req, res) => {
+    const { getAdminBillingRequest } = await import("./services/subscriptionRequestService.ts");
+    res.json(await getAdminBillingRequest(prisma, await requireAuth(req), req.params.id));
+  });
+
+  app.post("/api/v1/admin/billing/requests/:id/confirm", json, async (req, res) => {
+    const { confirmBillingPaymentAndActivate } = await import("./services/subscriptionRequestService.ts");
+    res.json(await confirmBillingPaymentAndActivate(prisma, await requireAuth(req), req.params.id, req.body || {}));
+  });
+
+  app.post("/api/v1/admin/billing/requests/:id/reject", json, async (req, res) => {
+    const { rejectBillingRequest } = await import("./services/subscriptionRequestService.ts");
+    res.json(await rejectBillingRequest(prisma, await requireAuth(req), req.params.id, req.body || {}));
   });
 
   app.get("/api/v1/admin/tenants/:id/members", async (req, res) => {

@@ -10,6 +10,7 @@ import { PlatformAuditPage } from "./platform/PlatformAuditPage";
 import { PlatformAiUsagePage } from "./platform/PlatformAiUsagePage";
 import { PlatformAiManagersPage } from "./platform/PlatformAiManagersPage";
 import { PlatformSupportPage } from "./platform/PlatformSupportPage";
+import { PlatformBillingPage } from "./platform/PlatformBillingPage";
 
 function AdminSection() {
   const { pathname } = useLocation();
@@ -19,6 +20,7 @@ function AdminSection() {
   if (pathname.startsWith("/admin/companies/")) return <PlatformCompanyPage />;
   if (pathname === "/admin/members") return <PlatformMembersPage />;
   if (pathname === "/admin/support" || pathname.startsWith("/admin/support/")) return <PlatformSupportPage />;
+  if (pathname === "/admin/billing" || pathname.startsWith("/admin/billing/")) return <PlatformBillingPage />;
   if (pathname === "/admin/integrations") return <PlatformCatalogPage />;
   if (pathname === "/admin/settings") return <PlatformServiceSettingsPage />;
   if (pathname === "/admin/ai-managers" || pathname.startsWith("/admin/ai-managers/")) return <PlatformAiManagersPage />;

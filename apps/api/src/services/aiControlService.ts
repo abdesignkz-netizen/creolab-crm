@@ -1450,6 +1450,16 @@ export async function executeAiControlCommand(
   if (!controlCompanyEnabled(integration.tenant.settingsJson)) {
     throw new ApiError(403, "control_disabled", "BasQar Control выключен для компании");
   }
+  {
+    const { canUseFeature } = await import("./entitlementService.ts");
+    const { FEATURES } = await import("@creolab/contracts");
+    if (!(await canUseFeature(prisma, integration.tenantId, FEATURES.AI_CONTROL))) {
+      throw new ApiError(403, "feature_required", "BasQar Control не подключён.", undefined, {
+        feature: FEATURES.AI_CONTROL,
+        billingPath: "/billing",
+      });
+    }
+  }
   const identity = await resolveLinkedIdentity(
     prisma,
     integration.tenantId,
@@ -1519,6 +1529,16 @@ export async function confirmAiControlCommand(
   void parsed.tenantId;
   if (!controlCompanyEnabled(integration.tenant.settingsJson)) {
     throw new ApiError(403, "control_disabled", "BasQar Control выключен для компании");
+  }
+  {
+    const { canUseFeature } = await import("./entitlementService.ts");
+    const { FEATURES } = await import("@creolab/contracts");
+    if (!(await canUseFeature(prisma, integration.tenantId, FEATURES.AI_CONTROL))) {
+      throw new ApiError(403, "feature_required", "BasQar Control не подключён.", undefined, {
+        feature: FEATURES.AI_CONTROL,
+        billingPath: "/billing",
+      });
+    }
   }
   const confirmation = await prisma.controlConfirmation.findFirst({
     where: { id: parsed.confirmationId, tenantId: integration.tenantId },

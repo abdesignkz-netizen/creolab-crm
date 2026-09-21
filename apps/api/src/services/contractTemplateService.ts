@@ -1,5 +1,4 @@
 import { mkdir, writeFile, readFile } from "node:fs/promises";
-import { createReadStream } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import type { PrismaClient } from "@creolab/db";
@@ -25,7 +24,13 @@ import { addDealItem } from "./dealItemService.ts";
 import { resolveUploadPath } from "../lib/storage.ts";
 import { lineAmounts, sumLines } from "./documentMoney.ts";
 import { assessContractReadiness, missingFieldsError } from "./contractReadiness.ts";
-import { DOCX_MIME, contractFileDownload } from "./contractDocx.ts";
+import {
+  PDF_MIME,
+  isPdfAttachment,
+  pdfDownloadHeaders,
+  sendStoredFile,
+  wordFileToContractPdf,
+} from "./contractPdfCopy.ts";
 
 function requireManageDocuments(auth: AuthContext) {
   if (!can(auth, "manage_documents")) {
@@ -377,6 +382,7 @@ async function previewContractFromTemplate(
       quantity: item.quantity,
       unit: item.unit || "шт",
       unitPrice: item.unitPrice,
+      vatRate: item.vatRate,
       ...amounts,
     };
   });
@@ -395,7 +401,7 @@ async function previewContractFromTemplate(
   const number = await nextContractNumber(prisma, tid);
   const contractDate = new Date();
   const filled = (value: string | null | undefined) => Boolean(value && String(value).trim());
-  const docx = await renderContractFromTemplate(template, {
+  const pdfInput = {
     number,
     date: contractDate,
     subject: template.name,
@@ -425,13 +431,15 @@ async function previewContractFromTemplate(
     buyerBik: company.bik || "",
     items: pdfItems,
     templateBody: template.body,
-  });
+  };
+  const docx = await renderContractFromTemplate(template, pdfInput);
+  const pdf = await wordFileToContractPdf(docx, `${number}.docx`, pdfInput);
   const previewId = randomUUID();
-  const fileName = `${number}.docx`;
+  const fileName = `${number}.pdf`;
   const storageKey = path.posix.join(tid, "contract-previews", previewId, fileName);
   const abs = resolveUploadPath(storageKey);
   await mkdir(path.dirname(abs), { recursive: true });
-  await writeFile(abs, docx);
+  await writeFile(abs, pdf);
   const meta: PreviewMeta = {
     companyId,
     templateId: template.id,
@@ -449,9 +457,9 @@ async function previewContractFromTemplate(
       storageKey,
       fileName,
       originalFileName: fileName,
-      mimeType: DOCX_MIME,
-      sizeBytes: docx.length,
-      checksum: createHash("sha256").update(docx).digest("hex"),
+      mimeType: PDF_MIME,
+      sizeBytes: pdf.length,
+      checksum: createHash("sha256").update(pdf).digest("hex"),
       documentType: "contract",
       uploadedById: auth.user.id,
       status: "preview",
@@ -484,7 +492,7 @@ async function saveContractPreview(
       where: { tenantId: tid, generatedFileId: attachment.id },
     });
     if (existing) {
-      return { contract: serializeContract({ ...existing, generatedMimeType: DOCX_MIME }), dealId: existing.dealId, createdDeal: false, generated: true, previewId };
+      return { contract: serializeContract({ ...existing, generatedMimeType: PDF_MIME }), dealId: existing.dealId, createdDeal: false, generated: true, previewId };
     }
   }
   let meta: PreviewMeta;
@@ -500,6 +508,22 @@ async function saveContractPreview(
     where: { id: companyId, tenantId: tid, archivedAt: null },
   });
   if (!company) throw new ApiError(404, "not_found", "Компания не найдена");
+  let previewFile = attachment;
+  if (!isPdfAttachment(previewFile)) {
+    const source = await readFile(resolveUploadPath(previewFile.storageKey));
+    const pdf = await wordFileToContractPdf(source, previewFile.fileName || "contract.docx");
+    await writeFile(resolveUploadPath(previewFile.storageKey), pdf);
+    previewFile = await prisma.attachment.update({
+      where: { id: previewFile.id },
+      data: {
+        fileName: `${meta.number}.pdf`,
+        originalFileName: `${meta.number}.pdf`,
+        mimeType: PDF_MIME,
+        sizeBytes: pdf.length,
+        checksum: createHash("sha256").update(pdf).digest("hex"),
+      },
+    });
+  }
   const { dealId, createdDeal } = await ensureDealForCompany(prisma, auth, company, template.name, meta.items);
   const totals = sumLines(
     meta.items.map((item) => {
@@ -521,7 +545,7 @@ async function saveContractPreview(
         totalAmount: totals.totalAmount,
         status: "READY_TO_SIGN",
         templateId: template.id,
-        generatedFileId: attachment.id,
+        generatedFileId: previewFile.id,
         createdByUserId: auth.user.id,
       },
     });
@@ -530,12 +554,12 @@ async function saveContractPreview(
         tenantId: tid,
         contractId: contract.id,
         version: 1,
-        fileId: attachment.id,
-        sha256: attachment.checksum,
+        fileId: previewFile.id,
+        sha256: previewFile.checksum,
       },
     });
     await tx.attachment.update({
-      where: { id: attachment.id },
+      where: { id: previewFile.id },
       data: { parentType: "contract", parentId: contract.id, status: "stored" },
     });
     await tx.auditEvent.create({
@@ -551,7 +575,7 @@ async function saveContractPreview(
     return contract;
   });
   return {
-    contract: serializeContract({ ...saved, generatedMimeType: DOCX_MIME }),
+    contract: serializeContract({ ...saved, generatedMimeType: PDF_MIME }),
     dealId,
     createdDeal,
     generated: true,
@@ -571,15 +595,29 @@ export async function sendContractPreviewFile(
     where: { id: previewId, tenantId: tid, parentType: { in: ["contract_preview", "contract"] } },
   });
   if (!attachment) throw new ApiError(404, "not_found", "Сформированный договор не найден");
-  const headers = contractFileDownload(attachment.fileName.replace(/\.docx$/i, ""), attachment);
-  res.setHeader("Content-Type", headers.contentType);
-  res.setHeader("Content-Disposition", headers.disposition);
-  await new Promise<void>((resolve, reject) => {
-    const stream = createReadStream(resolveUploadPath(attachment.storageKey));
-    stream.on("error", () => reject(new ApiError(404, "not_found", "Файл договора не найден на диске")));
-    stream.on("end", () => resolve());
-    stream.pipe(res);
-  });
+  if (!isPdfAttachment(attachment)) {
+    const source = await readFile(resolveUploadPath(attachment.storageKey));
+    const pdf = await wordFileToContractPdf(source, attachment.fileName || "contract.docx");
+    const pdfName = (attachment.fileName || "contract").replace(/\.docx?$/i, "") + ".pdf";
+    await writeFile(resolveUploadPath(attachment.storageKey), pdf);
+    await prisma.attachment.update({
+      where: { id: attachment.id },
+      data: {
+        fileName: pdfName,
+        originalFileName: pdfName,
+        mimeType: PDF_MIME,
+        sizeBytes: pdf.length,
+        checksum: createHash("sha256").update(pdf).digest("hex"),
+      },
+    });
+    await sendStoredFile(res, resolveUploadPath(attachment.storageKey), pdfDownloadHeaders(pdfName.replace(/\.pdf$/i, "")));
+    return;
+  }
+  await sendStoredFile(
+    res,
+    resolveUploadPath(attachment.storageKey),
+    pdfDownloadHeaders(attachment.fileName.replace(/\.pdf$/i, "")),
+  );
 }
 
 export async function createContractFromTemplateForCompany(

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { FEATURE_LABEL, type Feature } from "@creolab/contracts";
 
 type PaywallDetail = { message?: string; feature?: string };
 
@@ -11,7 +12,7 @@ export function PaywallDialog() {
     function onPaywall(event: Event) {
       const detail = (event as CustomEvent<PaywallDetail>).detail || {};
       setOpen({
-        message: detail.message || "Эта функция доступна после активации тарифа BasQar.",
+        message: detail.message || "Эта функция доступна после подключения тарифа.",
         feature: detail.feature,
       });
     }
@@ -20,12 +21,19 @@ export function PaywallDialog() {
   }, []);
 
   if (!open) return null;
+  const label = open.feature ? FEATURE_LABEL[open.feature as Feature] : "";
+  const isAddon = open.feature === "AI_CONTROL" || open.feature === "AI_MANAGER" || open.feature === "WHATSAPP";
 
   return (
     <div className="paywall-backdrop" role="dialog" aria-modal="true" aria-labelledby="paywall-title">
       <div className="panel paywall-card">
-        <h2 id="paywall-title">Подключите тариф</h2>
-        <p>{open.message || "Эта функция доступна после активации тарифа BasQar."}</p>
+        <h2 id="paywall-title">{isAddon && label ? `${label} не подключён` : "Подключите тариф"}</h2>
+        <p>
+          {open.message ||
+            (label
+              ? `Эта функция доступна в тарифе с модулем «${label}».`
+              : "Эта функция доступна после подключения тарифа.")}
+        </p>
         <div className="actions">
           <button
             className="btn"
@@ -35,7 +43,17 @@ export function PaywallDialog() {
               navigate("/billing");
             }}
           >
-            Посмотреть тарифы
+            Посмотреть тариф
+          </button>
+          <button
+            className="btn secondary"
+            type="button"
+            onClick={() => {
+              setOpen(null);
+              navigate("/billing");
+            }}
+          >
+            {isAddon ? "Подключить модуль" : "Отправить запрос на подключение"}
           </button>
           <button className="btn secondary" type="button" onClick={() => setOpen(null)}>
             Отмена
@@ -49,7 +67,7 @@ export function PaywallDialog() {
 export function openPaywall(message?: string) {
   window.dispatchEvent(
     new CustomEvent("basqar:paywall", {
-      detail: { message: message || "Эта функция доступна после активации тарифа BasQar." },
+      detail: { message: message || "Эта функция доступна после подключения тарифа." },
     }),
   );
 }

@@ -1,6 +1,5 @@
 import { documentOrganization } from "./documentOrganization.ts";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { createReadStream } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { PrismaClient } from "@creolab/db";
@@ -12,7 +11,7 @@ import { asMoney } from "./documentMoney.ts";
 import { getTenantDocumentFlags, requireDocumentsEnabled } from "./legalProfileService.ts";
 import { serializeContract } from "./documentDraftService.ts";
 import { verifyDocumentSignature } from "./signatureVerificationService.ts";
-import { contractFileDownload } from "./contractDocx.ts";
+import { ensureContractPdfAttachment, isPdfAttachment, pdfDownloadHeaders, sendStoredFile } from "./contractPdfCopy.ts";
 
 const SIGN_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 const OPEN_REQUESTS = ["PENDING", "OPENED"];
@@ -154,6 +153,7 @@ export async function sendContractForSign(
   if (!can(auth, "manage_documents")) throw new ApiError(403, "forbidden", "Недостаточно прав для документов");
   const tid = membership.tenantId;
   await requireSigningEnabled(prisma, tid);
+  await ensureContractPdfAttachment(prisma, { tenantId: tid, contractId });
   const contract = await loadContractBundle(prisma, tid, contractId);
   if (contract.status === "SIGNED" || contract.signedAt) {
     throw new ApiError(422, "contract_immutable", "Договор уже подписан");
@@ -603,24 +603,17 @@ export async function getPublicSign(prisma: PrismaClient, token: string) {
 export async function sendPublicSignPdf(prisma: PrismaClient, token: string, res: Response) {
   const request = await loadPublicRequest(prisma, token);
   if (!request.contract.generatedFileId) throw new ApiError(404, "pdf_not_ready", "Договор ещё не сформирован");
-  const attachment = await prisma.attachment.findFirst({
-    where: {
-      id: request.contract.generatedFileId,
-      tenantId: request.tenantId,
-      parentType: "contract",
-      parentId: request.contractId,
-    },
+  const { contract, attachment } = await ensureContractPdfAttachment(prisma, {
+    tenantId: request.tenantId,
+    contractId: request.contractId,
   });
-  if (!attachment) throw new ApiError(404, "not_found", "Файл договора не найден");
-  const headers = contractFileDownload(request.contract.number, attachment);
-  res.setHeader("Content-Type", headers.contentType);
-  res.setHeader("Content-Disposition", headers.disposition);
-  await new Promise<void>((resolve, reject) => {
-    const stream = createReadStream(resolveUploadPath(attachment.storageKey));
-    stream.on("error", () => reject(new ApiError(404, "not_found", "Файл договора не найден на диске")));
-    stream.on("end", () => resolve());
-    stream.pipe(res);
-  });
+  const headers = isPdfAttachment(attachment)
+    ? pdfDownloadHeaders(contract.number)
+    : {
+        contentType: attachment.mimeType || "application/octet-stream",
+        disposition: `inline; filename="${encodeURIComponent(attachment.fileName)}"`,
+      };
+  await sendStoredFile(res, resolveUploadPath(attachment.storageKey), headers);
 }
 
 export async function signPublicContract(prisma: PrismaClient, token: string, cmsBase64: string) {

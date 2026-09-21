@@ -1514,6 +1514,48 @@ fieldset.field-block legend { padding: 0 6px; font-weight: 600; }
   grid-row: 1 / -1;
 }
 .paywall-card { max-width: 420px; width: 100%; }
+.billing-period-toggle { display: flex; gap: 8px; }
+.billing-offers .billing-offer {
+  text-align: left;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+.billing-offer.is-selected { border-color: var(--accent, #2563eb); }
+.billing-offer.is-recommended { box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25); }
+.billing-recommend {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1d4ed8;
+  margin-bottom: 6px;
+}
+.billing-usage-grid { display: grid; gap: 10px; }
+.billing-usage-label { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; }
+.usage-bar {
+  height: 6px;
+  background: rgba(15, 23, 42, 0.08);
+  border-radius: 99px;
+  overflow: hidden;
+}
+.usage-bar span {
+  display: block;
+  height: 100%;
+  background: #2563eb;
+}
+.billing-addons { display: grid; gap: 8px; }
+.billing-addon {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+.billing-addon.is-soon { opacity: 0.6; }
+.billing-stepper { display: flex; align-items: center; gap: 8px; }
+.billing-stepper button {
+  width: 28px;
+  height: 28px;
+}
+.billing-best-value { background: rgba(37, 99, 235, 0.06); }
 .onboarding-steps { display: grid; gap: 12px; padding-left: 18px; }
 .onboarding-steps li { display: grid; gap: 8px; }
 .onboarding-steps li.is-done { opacity: 0.7; }
@@ -3166,6 +3208,8 @@ button.linkish {
 .avr-editor label { display: grid; gap: 6px; }
 .stats-modal.invoice-preview-modal { width: min(920px, 100%); max-height: calc(100dvh - 24px); overflow: auto; display: grid; gap: 12px; }
 .stats-modal.invoice-preview-modal iframe { width: 100%; height: min(68dvh, 720px); border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.login-stage.sign-doc-stage { width: min(960px, 100%); }
+.sign-doc-frame { width: 100%; height: min(62dvh, 640px); border: 1px solid var(--line); border-radius: 12px; background: #fff; }
 .contract-preview-host {
   min-height: min(68dvh, 720px);
   max-height: min(68dvh, 720px);

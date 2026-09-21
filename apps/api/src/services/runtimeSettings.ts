@@ -150,7 +150,7 @@ export async function getEffectiveTenantSettings(
     getPlatformSettings(prisma),
     prisma.tenant.findUnique({ where: { id: tenantId }, select: { settingsJson: true } }),
     prisma.tenantPlan.findFirst({
-      where: { tenantId, status: "active" },
+      where: { tenantId },
       include: { plan: true },
       orderBy: { startsAt: "desc" },
     }),
@@ -159,8 +159,10 @@ export async function getEffectiveTenantSettings(
   const tenantSettings = asRecord(tenant?.settingsJson);
   const tenantFeatures = asRecord(tenantSettings.features);
   const tenantLimits = asRecord(tenantSettings.limits);
-  const planFeatures = asRecord(planRow?.plan.featuresJson);
-  const planLimits = asRecord(planRow?.plan.limitsJson);
+  const snapshotLimits = asRecord((planRow as { limitsSnapshotJson?: unknown } | null)?.limitsSnapshotJson);
+  const snapshotFeatures = asRecord((planRow as { featuresSnapshotJson?: unknown } | null)?.featuresSnapshotJson);
+  const planFeatures = { ...asRecord(planRow?.plan.featuresJson), ...snapshotFeatures };
+  const planLimits = { ...asRecord(planRow?.plan.limitsJson), ...snapshotLimits };
 
   function flag(key: keyof PlatformSettings["features"]): { value: boolean; source: Source } {
     if (key in tenantFeatures) return { value: Boolean(tenantFeatures[key]), source: "tenant" };

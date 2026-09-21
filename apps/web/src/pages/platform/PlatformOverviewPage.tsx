@@ -17,7 +17,8 @@ export function PlatformOverviewPage() {
   if (!data) return <div className="state">Загрузка…</div>;
 
   const cards = [
-    ["Запросы на подключение", data.signupPending],
+    ["Запросы на подключение", data.billingPending],
+    ["Регистрации", data.signupPending],
     ["Всего компаний", data.tenantsTotal],
     ["Активные", data.tenantsActive],
     ["Приостановленные", data.tenantsSuspended],
@@ -34,6 +35,7 @@ export function PlatformOverviewPage() {
         <h2>Обзор</h2>
         <div className="actions">
         <Link className="btn" to="/admin/companies/new">Добавить компанию</Link>
+        <Link className="btn secondary" to="/admin/billing">Запросы на тариф</Link>
         <Link className="btn secondary" to="/admin/members">Пригласить участника</Link>
         <Link className="btn secondary" to="/admin/ai-managers">Промт и база знаний</Link>
         <Link className="btn secondary" to="/admin/integrations?type=whatsapp_seller">Подключить интеграцию</Link>

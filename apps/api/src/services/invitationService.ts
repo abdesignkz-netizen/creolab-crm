@@ -38,6 +38,7 @@ export async function createTenantInvitation(
     phone?: string | null;
     inviterId?: string | null;
     actorUserId?: string | null;
+    skipEntitlementLimit?: boolean;
   },
 ) {
   assertInviteRole(input.role);
@@ -46,7 +47,28 @@ export async function createTenantInvitation(
     throw new ApiError(422, "invalid", "Укажите email", { email: "Обязательно" });
   }
   const settings = await getEffectiveTenantSettings(prisma as PrismaClient, input.tenantId);
-  const memberLimit = settings.limits.members.value;
+  let memberLimit = settings.limits.members.value;
+  if (!input.skipEntitlementLimit) {
+    try {
+      const { getEntitlements, isLegacyPlan } = await import("./entitlementService.ts");
+      const { FEATURES } = await import("@creolab/contracts");
+      const resolved = await getEntitlements(prisma as PrismaClient, input.tenantId);
+      if (!resolved.snapshot.entitled) {
+        throw new ApiError(
+          403,
+          "feature_required",
+          "Приглашение команды доступно после подключения тарифа.",
+          undefined,
+          { feature: FEATURES.TEAM, billingPath: "/billing", label: "Команда" },
+        );
+      }
+      if (!resolved.snapshot.grandfathered && !isLegacyPlan(resolved.plan?.plan)) {
+        memberLimit = Math.min(memberLimit, Number(resolved.limits.USERS || resolved.limits.members || memberLimit));
+      }
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+    }
+  }
   const [activeCount, pendingCount] = await Promise.all([
     prisma.membership.count({ where: { tenantId: input.tenantId, active: true } }),
     prisma.invitation.count({

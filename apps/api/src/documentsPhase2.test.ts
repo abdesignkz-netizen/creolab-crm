@@ -165,7 +165,7 @@ describe("Documents phase 2", () => {
       where: { id: generatedFileId },
     });
     assert.ok(attachment);
-    assert.match(attachment?.mimeType || "", /wordprocessingml/);
+    assert.match(attachment?.mimeType || "", /pdf/);
     assert.equal(attachment?.checksum, first.body.version.sha256);
 
     const second = await json(`/api/v1/contracts/${contractId}/generate`, {
@@ -178,9 +178,9 @@ describe("Documents phase 2", () => {
 
     const file = await fetch(`${base}/api/v1/contracts/${contractId}/pdf`, { headers: { cookie } });
     assert.equal(file.status, 200);
-    assert.match(file.headers.get("content-type") || "", /wordprocessingml|officedocument/);
+    assert.match(file.headers.get("content-type") || "", /pdf/);
     const bytes = Buffer.from(await file.arrayBuffer());
-    assert.equal(bytes.subarray(0, 2).toString("utf8"), "PK");
+    assert.equal(bytes.subarray(0, 4).toString("utf8"), "%PDF");
   });
 
   it("не отдаёт PDF другому тенанту и блокирует пересборку после ухода в подпись", async () => {

@@ -121,14 +121,60 @@ export function createApiClient(options: ClientOptions) {
         body: JSON.stringify({ token, password, passwordConfirm }),
       }),
     billing: () => request("/api/v1/billing"),
-    billingPlans: () => request("/api/v1/billing/plans"),
+    billingPlans: (period = "MONTHLY") => request(`/api/v1/billing/plans?period=${encodeURIComponent(period)}`),
+    billingQuote: (body: Record<string, unknown>) =>
+      request("/api/v1/billing/quote", { method: "POST", body: JSON.stringify(body) }),
+    billingRequests: () => request("/api/v1/billing/requests"),
+    createBillingRequest: (body: Record<string, unknown>) =>
+      request("/api/v1/billing/requests", { method: "POST", body: JSON.stringify(body) }),
+    cancelBillingRequest: (id: string) =>
+      request(`/api/v1/billing/requests/${id}/cancel`, { method: "POST" }),
     skipOnboarding: () => request("/api/v1/billing/onboarding/skip", { method: "POST", body: "{}" }),
     completeOnboardingStep: (step: string) =>
       request("/api/v1/billing/onboarding/complete-step", { method: "POST", body: JSON.stringify({ step }) }),
-    adminActivateSubscription: (tenantId: string, planCode?: string) =>
+    adminActivateSubscription: (tenantId: string, planCodeOrBody?: string | Record<string, unknown>) =>
       request(`/api/v1/admin/tenants/${tenantId}/subscription/activate`, {
         method: "POST",
-        body: JSON.stringify(planCode ? { planCode } : {}),
+        body: JSON.stringify(
+          typeof planCodeOrBody === "string" ? { planCode: planCodeOrBody } : planCodeOrBody || {},
+        ),
+      }),
+    adminSuspendSubscription: (tenantId: string, body: Record<string, unknown> = {}) =>
+      request(`/api/v1/admin/tenants/${tenantId}/subscription/suspend`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    adminReactivateSubscription: (tenantId: string, body: Record<string, unknown> = {}) =>
+      request(`/api/v1/admin/tenants/${tenantId}/subscription/reactivate`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    adminExtendSubscription: (tenantId: string, body: Record<string, unknown> = {}) =>
+      request(`/api/v1/admin/tenants/${tenantId}/subscription/extend`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    adminBillingOverride: (tenantId: string, body: Record<string, unknown>) =>
+      request(`/api/v1/admin/tenants/${tenantId}/billing/override`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    adminBillingRequests: (query: { status?: string } = {}) => {
+      const params = new URLSearchParams();
+      if (query.status) params.set("status", query.status);
+      const qs = params.toString();
+      return request(`/api/v1/admin/billing/requests${qs ? `?${qs}` : ""}`);
+    },
+    adminBillingRequest: (id: string) => request(`/api/v1/admin/billing/requests/${id}`),
+    adminConfirmBillingRequest: (id: string, body: Record<string, unknown> = {}) =>
+      request(`/api/v1/admin/billing/requests/${id}/confirm`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    adminRejectBillingRequest: (id: string, body: Record<string, unknown> = {}) =>
+      request(`/api/v1/admin/billing/requests/${id}/reject`, {
+        method: "POST",
+        body: JSON.stringify(body),
       }),
     me: () => request("/api/v1/me"),
     updateProfile: (body: Record<string, unknown>) =>
@@ -375,9 +421,9 @@ export function createApiClient(options: ClientOptions) {
       request(`/api/v1/contracts/${contractId}/generate`, { method: "POST", body: JSON.stringify(body) }),
     contractPdfUrl: (contractId: string) => `/api/v1/contracts/${contractId}/pdf`,
     downloadContractFile: (contractId: string) =>
-      downloadBlob(`/api/v1/contracts/${contractId}/pdf`, "contract.docx"),
+      downloadBlob(`/api/v1/contracts/${contractId}/pdf`, "contract.pdf"),
     downloadContractPreview: (previewId: string) =>
-      downloadBlob(`/api/v1/documents/contract-previews/${previewId}`, "contract.docx"),
+      downloadBlob(`/api/v1/documents/contract-previews/${previewId}`, "contract.pdf"),
     contractTemplates: () => request("/api/v1/documents/contract-templates"),
     previewContractTemplate: (body: unknown) =>
       request("/api/v1/documents/contract-templates/preview", { method: "POST", body: JSON.stringify(body) }),
