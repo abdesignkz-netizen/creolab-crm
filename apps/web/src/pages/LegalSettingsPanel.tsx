@@ -150,6 +150,9 @@ export function LegalSettingsPanel() {
           ["Банк", profile.bankName],
           ["ИИК / IBAN", profile.iban],
           ["БИК", profile.bik],
+          ...(CONTRACT_SIGNING_ENABLED
+            ? [["Подписание ЭЦП", profile.contractSigningEnabled ? "Включено" : "Выключено"] as const]
+            : []),
         ]).map(([label, value]) => <div key={label}><dt className="muted">{label}</dt><dd style={{margin:0}}>{value || "Не заполнено"}</dd></div>)}
       </dl>
       <div className="actions">

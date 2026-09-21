@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { api } from "../lib/api";
 import { CONTRACT_SIGNING_ENABLED } from "../lib/featureFlags";
+import { signatureCheckLabel } from "../lib/signing/verificationLabels";
 
 export function VerifyPage() {
   const { verificationId = "" } = useParams();
@@ -57,7 +58,11 @@ export function VerifyPage() {
                   Подписант {index + 1}: {signer.name || "—"}
                   {signer.iin ? ` · ИИН ${signer.iin}` : ""}
                   {signer.signedAt ? ` · ${new Date(signer.signedAt).toLocaleString("ru-RU")}` : ""}
-                  {signer.verificationStatus ? ` · ${signer.verificationStatus}` : ""}
+                  {signatureCheckLabel(signer)
+                    ? ` · ${signatureCheckLabel(signer)}`
+                    : signer.verificationStatus
+                      ? ` · ${signer.verificationStatus}`
+                      : ""}
                 </p>
               ))}
             </>

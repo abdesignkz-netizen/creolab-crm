@@ -69,9 +69,10 @@ export function SignPage() {
   return (
     <div className="login">
       <div className="login-stage">
-        <div className="panel" style={{ maxWidth: 560 }}>
-          <h2>Подписание договора</h2>
-          {error ? <p className="error">{error}</p> : null}
+          <div className="panel" style={{ maxWidth: 560 }}>
+            <h2>Подписание договора</h2>
+            <p className="muted">Нужен NCALayer с ключом подписи НУЦ. PIN на сервер не передаётся.</p>
+            {error ? <p className="error">{error}</p> : null}
           {done ? <p className="muted">{done}</p> : null}
           {data ? (
             <>

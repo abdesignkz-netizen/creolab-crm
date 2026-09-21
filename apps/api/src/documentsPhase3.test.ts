@@ -16,6 +16,7 @@ describe("Documents phase 3", () => {
   let sellerRequestId = "";
   let buyerToken = "";
   let verificationId = "";
+  let previousKalkanUrl: string | undefined;
 
   async function json(path: string, init: RequestInit = {}, useCookie = cookie) {
     const response = await fetch(`${base}${path}`, {
@@ -31,6 +32,8 @@ describe("Documents phase 3", () => {
   }
 
   before(async () => {
+    previousKalkanUrl = process.env.KALKAN_VERIFY_URL;
+    delete process.env.KALKAN_VERIFY_URL;
     process.env.SEED_PASSWORD ||= "ChangeMeLocal1!";
     prisma = await createPrismaClient();
     const { seedDatabase } = await import("../../../packages/db/src/seed.ts");
@@ -117,6 +120,8 @@ describe("Documents phase 3", () => {
   });
 
   after(() => {
+    if (previousKalkanUrl === undefined) delete process.env.KALKAN_VERIFY_URL;
+    else process.env.KALKAN_VERIFY_URL = previousKalkanUrl;
     server?.close();
   });
 

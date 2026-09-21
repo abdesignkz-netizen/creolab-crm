@@ -44,6 +44,7 @@ before(async () => {
   assert.equal(process.env.CRM_USE_PGLITE, "1", "Use the isolated test runner");
   assert.ok(process.env.CRM_PGLITE_DIR);
   assert.ok(process.env.STORAGE_DIR);
+  delete process.env.KALKAN_VERIFY_URL;
   process.env.ESF_PROVIDER = "mock";
   process.env.ESF_ENV = "off";
   process.env.ESF_ALLOW_LIVE_SEND = "0";

@@ -10,6 +10,7 @@ import { signAndSendEsfDocument } from "../lib/signing/esfSignAndSend";
 import { ensureEsfCabinetSession } from "../lib/signing/esfConnect";
 import { createSigningClient, ncalayerUserMessage } from "../lib/signing/ncalayerClient";
 import { CONTRACT_SIGNING_ENABLED } from "../lib/featureFlags";
+import { signatureCheckLabel } from "../lib/signing/verificationLabels";
 
 const CONTRACT_STATUS_LABEL: Record<string, string> = {
   DRAFT: "Черновик",
@@ -461,17 +462,27 @@ export function DealDocumentsPanel(props: {
           <div className="doc-step-title">
             <b>Подпись договора</b>
           </div>
-          <p className="muted">Сначала исполнитель в кабинете, затем заказчик по ссылке. Нужен NCALayer.</p>
-          {(signing?.requests || []).map((row: any) => (
+          <p className="muted">Сначала исполнитель в кабинете, затем заказчик по ссылке. Нужен NCALayer с ключом подписи НУЦ.</p>
+          {(signing?.requests || []).map((row: any) => {
+            const signature = (signing?.signatures || []).find(
+              (item: any) =>
+                (item.signatureRequestId && item.signatureRequestId === row.id) ||
+                (row.signerIin && item.signerIin === row.signerIin) ||
+                (row.signerName && item.signerName === row.signerName),
+            );
+            const check = row.status === "SIGNED" ? signatureCheckLabel(signature || {}) : "";
+            return (
             <div className="row" key={row.id}>
               <div>
                 <b>{row.signerType === "SELLER" ? "Исполнитель" : "Заказчик"}</b>
                 <div className="muted">
                   {row.signerName || "—"} · {row.status}
+                  {check ? ` · ${check}` : ""}
                 </div>
               </div>
             </div>
-          ))}
+            );
+          })}
           {buyerLink ? (
             <p className="muted" style={{ wordBreak: "break-all" }}>
               Ссылка заказчику: <a href={buyerLink}>{buyerLink}</a>
@@ -486,7 +497,7 @@ export function DealDocumentsPanel(props: {
             <button
               type="button"
               className="btn"
-              disabled={busy || !contracts[0]?.generatedFileId}
+              disabled={busy || !contracts[0]?.generatedFileId || contracts[0]?.status === "SIGNED"}
               onClick={() => {
                 const contractId = contracts[0]?.id;
                 if (!contractId) return;

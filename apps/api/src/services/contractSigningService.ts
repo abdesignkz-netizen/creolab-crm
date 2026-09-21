@@ -44,6 +44,25 @@ async function requireSigningEnabled(prisma: PrismaClient, tenantId: string) {
   return flags;
 }
 
+function signatureCheckView(row: { verificationStatus: string; verificationDetails: unknown }) {
+  const details =
+    row.verificationDetails && typeof row.verificationDetails === "object"
+      ? (row.verificationDetails as Record<string, unknown>)
+      : {};
+  const authorityRaw = String(details.authority || "");
+  const cryptoRaw = String(details.crypto || "");
+  return {
+    verificationStatus: row.verificationStatus,
+    cryptoStatus:
+      cryptoRaw === "kalkan_cms_verified" || row.verificationStatus === "VERIFIED"
+        ? "VERIFIED"
+        : row.verificationStatus === "FAILED"
+          ? "FAILED"
+          : "PARSED",
+    authorityStatus: authorityRaw === "VALID" || authorityRaw === "REVOKED" ? authorityRaw : "UNCHECKED",
+  };
+}
+
 function serializeRequest(
   row: {
     id: string;
@@ -115,6 +134,7 @@ async function assertVersionFileHash(
   if (liveHash !== version.sha256) {
     throw new ApiError(409, "DOCUMENT_CHANGED", "Файл договора изменился. Сформируйте новую версию перед подписью.");
   }
+  return bytes;
 }
 
 function expireIfNeeded<T extends { status: string; expiresAt: Date | null }>(row: T): T {
@@ -269,10 +289,11 @@ export async function getContractSigning(prisma: PrismaClient, auth: AuthContext
     requests: requests.map((row) => serializeRequest(expireIfNeeded(row))),
     signatures: signatures.map((row) => ({
       id: row.id,
+      signatureRequestId: row.signatureRequestId,
       signerName: row.signerName,
       signerIin: row.signerIin,
       signedAt: row.signedAt.toISOString(),
-      verificationStatus: row.verificationStatus,
+      ...signatureCheckView(row),
     })),
   };
 }
@@ -324,11 +345,12 @@ async function applySignature(
   if (request.contractVersionId && request.contractVersionId !== version.id) {
     throw new ApiError(422, "version_mismatch", "Подпись относится к другой версии договора");
   }
-  await assertVersionFileHash(prisma, input.tenantId, version);
+  const documentBytes = await assertVersionFileHash(prisma, input.tenantId, version);
 
-  const verification = verifyDocumentSignature({
+  const verification = await verifyDocumentSignature({
     cmsBase64: input.cmsBase64,
     documentHash: version.sha256!,
+    documentBytes,
     expectedBin: request.signerBin,
   });
   if (verification.status === "FAILED") {
@@ -380,7 +402,7 @@ async function applySignature(
         signatureFormat: "CMS_DETACHED",
         signatureFileId: attachmentId,
         documentHash: version.sha256!,
-        verificationStatus: verification.status,
+        verificationStatus: verification.status === "VERIFIED" ? "VERIFIED" : verification.status,
         verificationDetails: verification.details as object,
       },
     });
@@ -657,7 +679,7 @@ export async function getPublicVerification(prisma: PrismaClient, verificationId
       name: row.signerName,
       iin: maskTaxId(row.signerIin),
       signedAt: row.signedAt.toISOString(),
-      verificationStatus: row.verificationStatus,
+      ...signatureCheckView(row),
     })),
   };
 }
