@@ -627,7 +627,16 @@ export function DealDetailPage() {
   const [itemUnit, setItemUnit] = useState("шт");
   const [itemVat, setItemVat] = useState("0");
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [itemFormOpen, setItemFormOpen] = useState(false);
   const itemLoadedDeal = useRef<string | null>(null);
+  function resetItemForm() {
+    setEditingItemId(null);
+    setItemName("");
+    setItemQty("1");
+    setItemPrice("");
+    setItemUnit("шт");
+    setItemVat("0");
+  }
   function editItem(item: any) {
     setEditingItemId(item.id);
     setItemName(item.name);
@@ -635,9 +644,15 @@ export function DealDetailPage() {
     setItemPrice(String(item.unitPrice));
     setItemUnit(esfMeasureUnitSymbol(item.unit));
     setItemVat(String(item.vatRate ?? 0));
+    setItemFormOpen(true);
   }
   function newItem() {
-    setEditingItemId(null); setItemName(""); setItemQty("1"); setItemPrice(""); setItemUnit("шт"); setItemVat("0");
+    resetItemForm();
+    setItemFormOpen(true);
+  }
+  function closeItemForm() {
+    setItemFormOpen(false);
+    resetItemForm();
   }
   const [docs, setDocs] = useState<any>(null);
   const [readiness, setReadiness] = useState<any>(null);
@@ -678,7 +693,8 @@ export function DealDetailPage() {
       const d = (detail as any).deal;
       if (itemLoadedDeal.current !== dealId) {
         itemLoadedDeal.current = dealId;
-        if (d.items?.length) editItem(d.items[0]); else newItem();
+        setItemFormOpen(false);
+        resetItemForm();
       }
       setAmount(d.amount != null ? String(d.amount) : "");
       setProbability(String(d.probability ?? 10));
@@ -846,7 +862,7 @@ export function DealDetailPage() {
                     setBusy(true);
                     void api
                       .deleteDealItem(d.id, item.id)
-                      .then(() => { if (editingItemId === item.id) newItem(); return load(); })
+                      .then(() => { if (editingItemId === item.id) closeItemForm(); return load(); })
                       .catch((err) => setError(err instanceof Error ? err.message : "Не удалось удалить"))
                       .finally(() => setBusy(false));
                   }}
@@ -863,6 +879,7 @@ export function DealDetailPage() {
             {d.itemTotals.vatAmount ? ` · НДС ${Number(d.itemTotals.vatAmount).toLocaleString("ru-RU")} ₸` : ""}
           </p>
         ) : null}
+        {itemFormOpen ? (
         <div className="deal-edit" style={{ marginTop: 12 }}>
           <b>{editingItemId ? "Редактирование позиции" : "Новая позиция"}</b>
           <label>
@@ -906,7 +923,7 @@ export function DealDetailPage() {
                 void (editingItemId ? api.updateDealItem(d.id, editingItemId, input) : api.addDealItem(d.id, input))
                   .then(() => {
                     notifySaved(editingItemId ? "Позиция сохранена" : "Позиция добавлена");
-                    if (!editingItemId) newItem();
+                    closeItemForm();
                     return load();
                   })
                   .catch((err) => setError(err instanceof Error ? err.message : "Не удалось добавить позицию"))
@@ -915,8 +932,12 @@ export function DealDetailPage() {
             >
               {editingItemId ? "Сохранить позицию" : "Добавить позицию"}
             </button>
+            <button type="button" className="btn secondary" disabled={busy} onClick={closeItemForm}>
+              Отмена
+            </button>
           </div>
         </div>
+        ) : null}
       </div>
 
       <div className="panel">

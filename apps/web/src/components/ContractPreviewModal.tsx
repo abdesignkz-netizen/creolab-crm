@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, downloadContractFile, downloadContractPreview } from "../lib/api";
 
 function isPdfFile(blob: Blob, filename: string) {
@@ -8,13 +8,21 @@ function isPdfFile(blob: Blob, filename: string) {
 export function ContractPreviewModal({
   contract,
   onClose,
+  onViewed,
+  onConfirm,
+  confirmed,
 }: {
   contract: { id: string; number?: string; preview?: boolean };
   onClose: () => void;
+  onViewed?: () => void;
+  onConfirm?: () => void;
+  confirmed?: boolean;
 }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [pdfUrl, setPdfUrl] = useState("");
+  const onViewedRef = useRef(onViewed);
+  onViewedRef.current = onViewed;
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -44,6 +52,7 @@ export function ContractPreviewModal({
         objectUrl = URL.createObjectURL(file.blob);
         setPdfUrl(objectUrl);
         setLoading(false);
+        onViewedRef.current?.();
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : "Не удалось открыть договор");
@@ -86,6 +95,19 @@ export function ContractPreviewModal({
           >
             Скачать PDF
           </button>
+          {onConfirm && !contract.preview ? (
+            <button
+              type="button"
+              className="btn"
+              disabled={loading || Boolean(error) || confirmed}
+              onClick={() => {
+                onConfirm();
+                onClose();
+              }}
+            >
+              {confirmed ? "Подтверждён" : "Подтвердить"}
+            </button>
+          ) : null}
           <button type="button" className="btn secondary" onClick={onClose}>
             Закрыть
           </button>

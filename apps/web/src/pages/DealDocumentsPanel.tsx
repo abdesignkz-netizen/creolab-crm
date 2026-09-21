@@ -11,6 +11,28 @@ import { ensureEsfCabinetSession } from "../lib/signing/esfConnect";
 import { createSigningClient, ncalayerUserMessage } from "../lib/signing/ncalayerClient";
 import { CONTRACT_SIGNING_ENABLED } from "../lib/featureFlags";
 import { signatureCheckLabel } from "../lib/signing/verificationLabels";
+import { tip } from "../lib/tip";
+
+type ContractReviewState = { viewed: boolean; confirmed: boolean };
+
+function contractReviewKey(fileKey: string) {
+  return `basqar-contract-review:${fileKey}`;
+}
+
+function readContractReview(fileKey: string): ContractReviewState {
+  if (!fileKey) return { viewed: false, confirmed: false };
+  try {
+    const parsed = JSON.parse(sessionStorage.getItem(contractReviewKey(fileKey)) || "null");
+    return { viewed: Boolean(parsed?.viewed), confirmed: Boolean(parsed?.confirmed) };
+  } catch {
+    return { viewed: false, confirmed: false };
+  }
+}
+
+function writeContractReview(fileKey: string, state: ContractReviewState) {
+  if (!fileKey) return;
+  sessionStorage.setItem(contractReviewKey(fileKey), JSON.stringify(state));
+}
 
 const CONTRACT_STATUS_LABEL: Record<string, string> = {
   DRAFT: "Черновик",
@@ -169,8 +191,10 @@ export function DealDocumentsPanel(props: {
   const invoices = docs?.invoices || [];
   const { hash } = useLocation();
   useEffect(() => {
-    if (hash === "#esf" && docs) document.getElementById("esf")?.scrollIntoView({ block: "start" });
-    if (hash === "#avr" && docs) document.getElementById("avr")?.scrollIntoView({ block: "start" });
+    if (!docs) return;
+    if (hash === "#esf") document.getElementById("esf")?.scrollIntoView({ block: "start" });
+    if (hash === "#avr") document.getElementById("avr")?.scrollIntoView({ block: "start" });
+    if (hash === "#contract") document.getElementById("contract")?.scrollIntoView({ block: "start" });
   }, [hash, docs]);
   const edocs = docs?.electronicDocuments || [];
   const avr = edocs.find((row: any) => row.type === "AVR");
@@ -185,10 +209,14 @@ export function DealDocumentsPanel(props: {
   const [completionTerms, setCompletionTerms] = useState("5–7 рабочих дней");
   const [previewContract, setPreviewContract] = useState<{ id: string; number?: string } | null>(null);
   const [confirmSellerSign, setConfirmSellerSign] = useState(false);
+  const [contractEditOpen, setContractEditOpen] = useState(false);
+  const [review, setReview] = useState<ContractReviewState>({ viewed: false, confirmed: false });
   const sendFlight = useRef(false);
   useEffect(() => {
     setSubmissions({});
     setConfirmSellerSign(false);
+    setContractEditOpen(false);
+    setPreviewContract(null);
   }, [d.id]);
   useEffect(() => {
     void api.contractTemplates().then((data: any) => {
@@ -277,7 +305,69 @@ export function DealDocumentsPanel(props: {
   const contract = contracts[0];
   const invoice = invoices[0];
   const importedContract = Boolean(contract?.importedPdf);
-  const formedContract = Boolean(contract?.generatedFileId) && !importedContract;
+  const fileKey = contract?.id && contract?.generatedFileId ? `${contract.id}:${contract.generatedFileId}` : "";
+  const hasContractFile = Boolean(contract?.generatedFileId);
+  const readyView = hasContractFile && !contractEditOpen;
+  const canEditContract = Boolean(contract && !importedContract && ["DRAFT", "READY_TO_SIGN"].includes(contract.status));
+  const needsReview = Boolean(
+    CONTRACT_SIGNING_ENABLED && hasContractFile && contract?.status === "READY_TO_SIGN",
+  );
+  const canSendForSign = Boolean(CONTRACT_SIGNING_ENABLED && hasContractFile && contract?.status !== "SIGNED");
+
+  useEffect(() => {
+    setReview(readContractReview(fileKey));
+  }, [fileKey]);
+
+  function setReviewState(next: ContractReviewState) {
+    setReview(next);
+    writeContractReview(fileKey, next);
+  }
+
+  function openContractPreview() {
+    if (!contract?.id) return;
+    setPreviewContract({ id: contract.id, number: contract.number });
+  }
+
+  function markContractViewed() {
+    if (!fileKey) return;
+    setReview((current) => {
+      const next = { viewed: true, confirmed: current.confirmed };
+      writeContractReview(fileKey, next);
+      return next;
+    });
+  }
+
+  function confirmContract(fromPreview = false) {
+    if (!fileKey || !contract?.id) return;
+    if (!fromPreview && !review.viewed) {
+      openContractPreview();
+      setError("Просмотрите договор, затем нажмите «Подтвердить».");
+      return;
+    }
+    setReviewState({ viewed: true, confirmed: true });
+    setError("");
+    notifySaved("Договор подтверждён");
+  }
+
+  function sendContractForSignature() {
+    const contractId = contract?.id;
+    if (!contractId) return;
+    if (needsReview && !review.confirmed) {
+      setError("Сначала просмотрите и подтвердите договор");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    void api
+      .sendContractForSign(contractId)
+      .then((res: any) => {
+        const url = res.requests?.find((row: any) => row.signerType === "BUYER")?.signUrl;
+        if (url) setBuyerLink(url);
+        return load();
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : "Не удалось отправить на подпись"))
+      .finally(() => setBusy(false));
+  }
 
   function contractPayload() {
     return {
@@ -297,6 +387,7 @@ export function DealDocumentsPanel(props: {
       }
       const generated: any = await api.generateContract(contractId!, contractPayload());
       notifySaved("Договор сформирован");
+      setContractEditOpen(false);
       await load();
       setPreviewContract({
         id: generated.contract?.id || contractId,
@@ -364,7 +455,7 @@ export function DealDocumentsPanel(props: {
           ))}
         </div>
 
-        <div className="doc-step">
+        <div className="doc-step" id="contract">
           <div className="doc-step-title">
             <b>Договор</b>
           </div>
@@ -396,65 +487,128 @@ export function DealDocumentsPanel(props: {
                   {CONTRACT_STATUS_LABEL[doc.status] || doc.status} · {Number(doc.totalAmount).toLocaleString("ru-RU")} ₸
                 </div>
               </div>
-              {doc.generatedFileId ? (
-                <a className="btn secondary" href={api.contractPdfUrl(doc.id)}>
-                  Открыть PDF
-                </a>
-              ) : null}
-              <DeleteContractButton id={doc.id} number={doc.number} disabled={busy} onDeleted={async()=>{setBuyerLink("");await load();}} />
+              <DeleteContractButton id={doc.id} number={doc.number} disabled={busy} onDeleted={async()=>{setBuyerLink("");setContractEditOpen(false);await load();}} />
             </div>
           ))}
-          <div className="actions" style={{ marginTop: 8 }}>
-            {templates.length ? (
-              <label>
-                Шаблон договора
-                <select value={templateId} disabled={busy || contracts[0]?.importedPdf} onChange={(e) => setTemplateId(e.target.value)}>
-                  {templates.map((row) => (
-                    <option key={row.id} value={row.id}>{row.name}{row.isDefault ? " (по умолчанию)" : ""}</option>
-                  ))}
-                </select>
-              </label>
-            ) : null}
-            <label>
-              Срок исполнения
-              <input
-                value={completionTerms}
-                disabled={busy || contracts[0]?.importedPdf}
-                placeholder="5–7 рабочих дней"
-                onChange={(e) => setCompletionTerms(e.target.value)}
-              />
-            </label>
-            {formedContract ? (
-              <button
-                type="button"
-                className="btn"
-                disabled={busy}
-                onClick={() => setPreviewContract({ id: contracts[0].id, number: contracts[0].number })}
-              >
-                Посмотреть договор
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="btn"
-                disabled={busy || readiness?.ready === false || importedContract}
-                title={importedContract ? "Загруженный PDF уже сохранён в исходном виде" : undefined}
-                onClick={() => void generateWord()}
-              >
-                Сформировать договор
-              </button>
-            )}
-            {importedContract ? null : (
-              <button
-                type="button"
-                className="btn secondary"
-                disabled={busy}
-                onClick={() => void saveContract()}
-              >
-                Сохранить договор
-              </button>
-            )}
-          </div>
+          {readyView ? (
+            <>
+              {needsReview && review.confirmed ? (
+                <p className="muted">Договор просмотрен и подтверждён. Можно отправить на подпись.</p>
+              ) : needsReview && review.viewed ? (
+                <p className="muted">Договор просмотрен. Подтвердите его перед отправкой на подпись.</p>
+              ) : needsReview ? (
+                <p className="muted">Просмотрите PDF, подтвердите текст, затем отправьте на подпись.</p>
+              ) : contract?.status === "SIGNED" ? (
+                <p className="muted">Договор подписан.</p>
+              ) : contract?.status === "PENDING_SIGNATURE" || contract?.status === "PARTIALLY_SIGNED" ? (
+                <p className="muted">Договор уже отправлен на подпись.</p>
+              ) : null}
+              <div className="actions" style={{ marginTop: 8 }}>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={busy}
+                  {...tip("Открыть сформированный PDF для проверки")}
+                  onClick={openContractPreview}
+                >
+                  Просмотр договора
+                </button>
+                {canEditContract ? (
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    disabled={busy}
+                    {...tip("Открыть шаблон и условия, чтобы сформировать договор заново")}
+                    onClick={() => { setError(""); setContractEditOpen(true); }}
+                  >
+                    Изменить
+                  </button>
+                ) : null}
+                {needsReview ? (
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    disabled={busy || review.confirmed}
+                    {...tip("Подтвердить, что текст договора проверен и его можно отправлять на подпись")}
+                    onClick={() => confirmContract()}
+                  >
+                    {review.confirmed ? "Подтверждён" : "Подтвердить"}
+                  </button>
+                ) : null}
+                {canSendForSign ? (
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={busy || (needsReview && !review.confirmed)}
+                    {...tip(
+                      needsReview && !review.confirmed
+                        ? "Сначала просмотрите и подтвердите договор"
+                        : "Отправить договор исполнителю и заказчику на подпись ЭЦП",
+                    )}
+                    onClick={sendContractForSignature}
+                  >
+                    Отправить на подпись
+                  </button>
+                ) : null}
+              </div>
+            </>
+          ) : (
+            <>
+              {contractEditOpen ? (
+                <p className="muted">После изменения позиций, шаблона или срока сформируйте договор заново — на подпись уйдёт новая PDF-копия.</p>
+              ) : null}
+              <div className="actions" style={{ marginTop: 8 }}>
+                {templates.length ? (
+                  <label>
+                    Шаблон договора
+                    <select value={templateId} disabled={busy || importedContract} onChange={(e) => setTemplateId(e.target.value)}>
+                      {templates.map((row) => (
+                        <option key={row.id} value={row.id}>{row.name}{row.isDefault ? " (по умолчанию)" : ""}</option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
+                <label>
+                  Срок исполнения
+                  <input
+                    value={completionTerms}
+                    disabled={busy || importedContract}
+                    placeholder="5–7 рабочих дней"
+                    onChange={(e) => setCompletionTerms(e.target.value)}
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={busy || readiness?.ready === false || importedContract}
+                  title={importedContract ? "Загруженный PDF уже сохранён в исходном виде" : undefined}
+                  onClick={() => void generateWord()}
+                >
+                  Сформировать договор
+                </button>
+                {importedContract ? null : (
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    disabled={busy}
+                    onClick={() => void saveContract()}
+                  >
+                    Сохранить договор
+                  </button>
+                )}
+                {contractEditOpen ? (
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    disabled={busy}
+                    onClick={() => setContractEditOpen(false)}
+                  >
+                    Отмена
+                  </button>
+                ) : null}
+              </div>
+            </>
+          )}
         </div>
 
         {CONTRACT_SIGNING_ENABLED ? (
@@ -494,27 +648,6 @@ export function DealDocumentsPanel(props: {
             </p>
           ) : null}
           <div className="actions" style={{ marginTop: 8 }}>
-            <button
-              type="button"
-              className="btn"
-              disabled={busy || !contracts[0]?.generatedFileId || contracts[0]?.status === "SIGNED"}
-              onClick={() => {
-                const contractId = contracts[0]?.id;
-                if (!contractId) return;
-                setBusy(true);
-                void api
-                  .sendContractForSign(contractId)
-                  .then((res: any) => {
-                    const url = res.requests?.find((row: any) => row.signerType === "BUYER")?.signUrl;
-                    if (url) setBuyerLink(url);
-                    return load();
-                  })
-                  .catch((err) => setError(err instanceof Error ? err.message : "Не удалось отправить на подпись"))
-                  .finally(() => setBusy(false));
-              }}
-            >
-              Отправить на подпись
-            </button>
             {confirmSellerSign ? (
               <div className="panel" style={{ marginTop: 8 }}>
                 <p>
@@ -1130,7 +1263,13 @@ export function DealDocumentsPanel(props: {
         </div>
       </div>
     {previewContract ? (
-      <ContractPreviewModal contract={previewContract} onClose={() => setPreviewContract(null)} />
+      <ContractPreviewModal
+        contract={previewContract}
+        onClose={() => setPreviewContract(null)}
+        onViewed={markContractViewed}
+        onConfirm={needsReview && !review.confirmed ? () => confirmContract(true) : undefined}
+        confirmed={review.confirmed}
+      />
     ) : null}
     </>
   );
