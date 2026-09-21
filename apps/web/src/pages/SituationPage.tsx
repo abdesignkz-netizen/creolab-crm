@@ -158,6 +158,11 @@ function Kpi({
   return <div className={className}>{inner}</div>;
 }
 
+function liveSpotCount(value: unknown) {
+  const count = Number(value);
+  return Number.isFinite(count) && count > 0 ? count : 0;
+}
+
 function SpotCard({
   label,
   value,
@@ -166,14 +171,15 @@ function SpotCard({
   icon,
 }: {
   label: string;
-  value: number;
+  value: unknown;
   to: string;
   tone: DashTone;
   icon: string;
 }) {
-  const count = Number(value) || 0;
+  const count = liveSpotCount(value);
+  if (!count) return null;
   return (
-    <Link className={`dash-spot dash-spot-${tone}${count ? " is-live" : ""}`} to={to}>
+    <Link className={`dash-spot dash-spot-${tone} is-live`} to={to}>
       <span className="dash-spot-icon">
         <DashIcon d={icon} />
       </span>
@@ -313,13 +319,17 @@ export function SituationPage() {
           </div>
         </div>
         {error ? <p className="error">{error}</p> : null}
-        <p className="dash-block-label">Сейчас важно</p>
-        <div className="dash-spot-grid">
-          <SpotCard label="Заявки" value={inquiries.length} to="/inquiries" tone="sky" icon={ICONS.inquiries} />
-          <SpotCard label="Сделки" value={deals.length} to="/deals" tone="mint" icon={ICONS.deals} />
-          <SpotCard label="Задачи" value={tasks.length} to="/tasks" tone="amber" icon={ICONS.tasks} />
-          <SpotCard label="Диалоги" value={dialogs.length} to="/conversations" tone="violet" icon={ICONS.conversations} />
-        </div>
+        {liveSpotCount(inquiries.length) || liveSpotCount(deals.length) || liveSpotCount(tasks.length) || liveSpotCount(dialogs.length) ? (
+          <>
+            <p className="dash-block-label">Сейчас важно</p>
+            <div className="dash-spot-grid">
+              <SpotCard label="Заявки" value={inquiries.length} to="/inquiries" tone="sky" icon={ICONS.inquiries} />
+              <SpotCard label="Сделки" value={deals.length} to="/deals" tone="mint" icon={ICONS.deals} />
+              <SpotCard label="Задачи" value={tasks.length} to="/tasks" tone="amber" icon={ICONS.tasks} />
+              <SpotCard label="Диалоги" value={dialogs.length} to="/conversations" tone="violet" icon={ICONS.conversations} />
+            </div>
+          </>
+        ) : null}
         <div className="sit-section dash-panel">
           <div className="sit-section-head">
             <h3>Что требует внимания</h3>
@@ -355,6 +365,24 @@ export function SituationPage() {
     ? attention.items.filter((item: any) => item.group === attentionFilter)
     : attention.items;
   const noNextHref = path("/today", { ...periodParams, attention: "no_next_action" }) + "#attention";
+  const summary = attention.summary || {};
+  const aiRequests = data.aiManager?.newRequests;
+  const hasAttentionSpots = [
+    summary.needsReply,
+    summary.needsHuman,
+    summary.overdueTasks,
+    summary.noNextAction ?? nextActionItems.length,
+    summary.stalledDeals,
+    summary.overSlaDeals,
+    summary.paymentOverdue,
+    summary.overdueAgreements,
+    summary.proposalWithoutReply,
+    summary.documentsToClose,
+    summary.noContact,
+    aiRequests?.processing,
+    aiRequests?.needsHuman,
+    aiRequests?.analysisFailed,
+  ].some((value) => liveSpotCount(value) > 0);
   const insights = Array.isArray(data.insights) ? data.insights : [];
   const sources = Array.isArray(data.sources) ? data.sources : [];
   const team = Array.isArray(data.team) ? data.team : [];
@@ -497,27 +525,27 @@ export function SituationPage() {
         </div>
       ) : null}
 
-      <p className="dash-block-label">Сейчас важно</p>
-      <div className="dash-spot-grid">
-        <SpotCard label="Нужно ответить" value={attention.summary.needsReply} to="/contacts?filter=needs_reply" tone="amber" icon={ICONS.reply} />
-        <SpotCard label="Нужен человек" value={attention.summary.needsHuman} to="/conversations?filter=attention" tone="coral" icon={ICONS.human} />
-        <SpotCard label="Просрочено" value={attention.summary.overdueTasks} to="/tasks?filter=overdue" tone="rose" icon={ICONS.clock} />
-        <SpotCard label="Без шага" value={attention.summary.noNextAction ?? nextActionItems.length} to={noNextHref} tone="orange" icon={ICONS.tasks} />
-        <SpotCard label="Зависли" value={attention.summary.stalledDeals} to={path("/deals", { focus: "stalled" })} tone="slate" icon={ICONS.stalled} />
-        <SpotCard label="Сверх SLA" value={attention.summary.overSlaDeals ?? 0} to={path("/deals", { focus: "over_sla" })} tone="teal" icon={ICONS.clock} />
-        <SpotCard label="Просрочена оплата" value={attention.summary.paymentOverdue ?? 0} to={path("/deals", { focus: "payment_overdue" })} tone="gold" icon={ICONS.money} />
-        <SpotCard label="Договорённости" value={attention.summary.overdueAgreements ?? 0} to={path("/today", { ...periodParams, attention: "overdue" }) + "#attention"} tone="blush" icon={ICONS.warning} />
-        <SpotCard label="КП без ответа" value={attention.summary.proposalWithoutReply ?? 0} to={path("/deals", { focus: "proposal_no_reply" })} tone="indigo" icon={ICONS.documents} />
-        <SpotCard label="Документы" value={attention.summary.documentsToClose ?? 0} to="/documents/avr/new?filter=all" tone="sky" icon={ICONS.contract} />
-        <SpotCard label="Нет контакта" value={attention.summary.noContact} to={path("/today", { ...periodParams, attention: "no_contact" }) + "#attention"} tone="stone" icon={ICONS.phone} />
-        {data.aiManager?.newRequests && Object.values(data.aiManager.newRequests).some((value) => Number(value) > 0) ? (
-          <>
-            <SpotCard label="AI обрабатывает" value={data.aiManager.newRequests.processing} to="/inquiries?filter=ai_processing" tone="violet" icon={ICONS.ai} />
-            <SpotCard label="Ждут менеджера" value={data.aiManager.newRequests.needsHuman} to="/inquiries?filter=ai_needs_human" tone="mint" icon={ICONS.human} />
-            <SpotCard label="Ошибка AI" value={data.aiManager.newRequests.analysisFailed} to="/inquiries?filter=ai_failed" tone="crimson" icon={ICONS.warning} />
-          </>
-        ) : null}
-      </div>
+      {hasAttentionSpots ? (
+        <>
+          <p className="dash-block-label">Сейчас важно</p>
+          <div className="dash-spot-grid">
+            <SpotCard label="Нужно ответить" value={summary.needsReply} to="/contacts?filter=needs_reply" tone="amber" icon={ICONS.reply} />
+            <SpotCard label="Нужен человек" value={summary.needsHuman} to="/conversations?filter=attention" tone="coral" icon={ICONS.human} />
+            <SpotCard label="Просрочено" value={summary.overdueTasks} to="/tasks?filter=overdue" tone="rose" icon={ICONS.clock} />
+            <SpotCard label="Без шага" value={summary.noNextAction ?? nextActionItems.length} to={noNextHref} tone="orange" icon={ICONS.tasks} />
+            <SpotCard label="Зависли" value={summary.stalledDeals} to={path("/deals", { focus: "stalled" })} tone="slate" icon={ICONS.stalled} />
+            <SpotCard label="Сверх SLA" value={summary.overSlaDeals ?? 0} to={path("/deals", { focus: "over_sla" })} tone="teal" icon={ICONS.clock} />
+            <SpotCard label="Просрочена оплата" value={summary.paymentOverdue ?? 0} to={path("/deals", { focus: "payment_overdue" })} tone="gold" icon={ICONS.money} />
+            <SpotCard label="Договорённости" value={summary.overdueAgreements ?? 0} to={path("/today", { ...periodParams, attention: "overdue" }) + "#attention"} tone="blush" icon={ICONS.warning} />
+            <SpotCard label="КП без ответа" value={summary.proposalWithoutReply ?? 0} to={path("/deals", { focus: "proposal_no_reply" })} tone="indigo" icon={ICONS.documents} />
+            <SpotCard label="Документы" value={summary.documentsToClose ?? 0} to="/documents/avr/new?filter=all" tone="sky" icon={ICONS.contract} />
+            <SpotCard label="Нет контакта" value={summary.noContact} to={path("/today", { ...periodParams, attention: "no_contact" }) + "#attention"} tone="stone" icon={ICONS.phone} />
+            <SpotCard label="AI обрабатывает" value={aiRequests?.processing} to="/inquiries?filter=ai_processing" tone="violet" icon={ICONS.ai} />
+            <SpotCard label="Ждут менеджера" value={aiRequests?.needsHuman} to="/inquiries?filter=ai_needs_human" tone="mint" icon={ICONS.human} />
+            <SpotCard label="Ошибка AI" value={aiRequests?.analysisFailed} to="/inquiries?filter=ai_failed" tone="crimson" icon={ICONS.warning} />
+          </div>
+        </>
+      ) : null}
 
       <div className="dash-home-split">
       <div className="sit-section sit-attention dash-panel" id="attention">
