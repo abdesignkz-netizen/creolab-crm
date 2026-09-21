@@ -402,4 +402,74 @@ describe("Contact 360", () => {
     }
   });
 
+  it("duplicate phone returns existing client instead of creating a second one", async () => {
+    const phone = `+7701${String(Math.floor(Math.random() * 1e7)).padStart(7, "0")}`;
+    const first = await fetch(`${base}/api/v1/contacts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({ name: "Первый дубликат", phone }),
+    });
+    const firstBody = await first.json();
+    assert.equal(first.status, 201, JSON.stringify(firstBody));
+    const dup = await fetch(`${base}/api/v1/contacts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({ name: "Второй дубликат", phone }),
+    });
+    const dupBody = await dup.json();
+    assert.equal(dup.status, 409, JSON.stringify(dupBody));
+    assert.equal(dupBody.code, "duplicate_phone");
+    assert.equal(dupBody.details?.duplicates?.[0]?.id, firstBody.client.id);
+    const forced = await fetch(`${base}/api/v1/contacts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({ name: "Принудительный дубликат", phone, forceCreate: true }),
+    });
+    const forcedBody = await forced.json();
+    assert.equal(forced.status, 201, JSON.stringify(forcedBody));
+    const merged = await fetch(`${base}/api/v1/contacts/merge`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({ keepId: firstBody.client.id, mergeId: forcedBody.client.id }),
+    });
+    const mergedBody = await merged.json();
+    assert.equal(merged.status, 200, JSON.stringify(mergedBody));
+    const source = await prisma.contact.findUniqueOrThrow({ where: { id: forcedBody.client.id } });
+    assert.ok(source.archivedAt);
+  });
+
+  it("workspace search and contact import stay inside the tenant", async () => {
+    const unique = `Поиск ${Date.now()}`;
+    const created = await fetch(`${base}/api/v1/contacts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({ name: unique, phone: `+7701${String(Math.floor(Math.random() * 1e7)).padStart(7, "0")}` }),
+    });
+    assert.equal(created.status, 201, await created.text());
+    const search = await fetch(`${base}/api/v1/search?q=${encodeURIComponent(unique)}`, { headers: { cookie } });
+    const searchBody = await search.json();
+    assert.equal(search.status, 200, JSON.stringify(searchBody));
+    assert.ok((searchBody.items || []).some((item: { title: string; type: string }) => item.type === "contact" && item.title.includes("Поиск")));
+    const csv = Buffer.from("Имя,Телефон\nИмпорт Аудит,+77015550123\n", "utf8").toString("base64");
+    const imported = await fetch(`${base}/api/v1/contacts/import`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({ fileName: "clients.csv", contentBase64: csv }),
+    });
+    const importedBody = await imported.json();
+    assert.equal(imported.status, 200, JSON.stringify(importedBody));
+    assert.ok(importedBody.created >= 1 || importedBody.skipped >= 1);
+    const ops = await fetch(`${base}/api/v1/workspace/ops`, { headers: { cookie } });
+    assert.equal(ops.status, 200, await ops.text());
+    const audit = await fetch(`${base}/api/v1/workspace/audit`, { headers: { cookie } });
+    assert.equal(audit.status, 200, await audit.text());
+    const managerSession = await login("manager@creolab.example");
+    const forbidden = await fetch(`${base}/api/v1/workspace/audit`, { headers: { cookie: managerSession } });
+    assert.equal(forbidden.status, 403);
+    const exported = await fetch(`${base}/api/v1/contacts/export`, { headers: { cookie } });
+    const exportedBody = await exported.json();
+    assert.equal(exported.status, 200, JSON.stringify(exportedBody));
+    assert.match(exportedBody.csv, /name,phone,email/);
+  });
+
 });

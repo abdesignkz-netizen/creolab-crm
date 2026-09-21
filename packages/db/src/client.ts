@@ -40,6 +40,9 @@ async function applyLivePostgresPatches(prisma: PrismaClient) {
     ...SUPPORT_DOMAIN_SQL.split(";")
       .map((s) => s.trim())
       .filter(Boolean),
+    ...CONTROL_DOMAIN_SQL.split(";")
+      .map((s) => s.trim())
+      .filter(Boolean),
   ];
   for (const sql of statements) {
     try {
@@ -517,6 +520,7 @@ async function applyAdditiveSchema(pglite: PGlite) {
     ${PLATFORM_DOMAIN_SQL}
     ${AI_DOMAIN_SQL}
     ${SUPPORT_DOMAIN_SQL}
+    ${CONTROL_DOMAIN_SQL}
   `);
 }
 
@@ -1075,6 +1079,76 @@ const SUPPORT_DOMAIN_SQL = `
       CONSTRAINT "SupportQuickReply_pkey" PRIMARY KEY ("id")
     );
     CREATE UNIQUE INDEX IF NOT EXISTS "SupportQuickReply_shortcut_key" ON "SupportQuickReply"("shortcut");
+`;
+
+const CONTROL_DOMAIN_SQL = `
+    CREATE TABLE IF NOT EXISTS "ControlAccess" (
+      "id" TEXT NOT NULL,
+      "tenantId" TEXT NOT NULL,
+      "userId" TEXT NOT NULL,
+      "enabled" BOOLEAN NOT NULL DEFAULT false,
+      "allowedSources" JSONB NOT NULL DEFAULT '[]',
+      "allowedActions" JSONB NOT NULL DEFAULT '[]',
+      "canReadFinancialData" BOOLEAN NOT NULL DEFAULT false,
+      "canReadTeamData" BOOLEAN NOT NULL DEFAULT false,
+      "canCreateTasks" BOOLEAN NOT NULL DEFAULT false,
+      "canModifyDeals" BOOLEAN NOT NULL DEFAULT false,
+      "canPerformBulkActions" BOOLEAN NOT NULL DEFAULT false,
+      "requiresConfirmationForWrites" BOOLEAN NOT NULL DEFAULT true,
+      "status" TEXT NOT NULL DEFAULT 'disabled',
+      "lastActivityAt" TIMESTAMP(3),
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "ControlAccess_pkey" PRIMARY KEY ("id")
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS "ControlAccess_tenantId_userId_key" ON "ControlAccess"("tenantId", "userId");
+    CREATE INDEX IF NOT EXISTS "ControlAccess_tenantId_enabled_status_idx" ON "ControlAccess"("tenantId", "enabled", "status");
+
+    CREATE TABLE IF NOT EXISTS "ControlIdentity" (
+      "id" TEXT NOT NULL,
+      "tenantId" TEXT NOT NULL,
+      "userId" TEXT NOT NULL,
+      "provider" TEXT NOT NULL,
+      "externalUserId" TEXT NOT NULL,
+      "phoneNormalized" TEXT,
+      "verifiedAt" TIMESTAMP(3),
+      "enabled" BOOLEAN NOT NULL DEFAULT true,
+      "verificationCodeHash" TEXT,
+      "verificationExpiresAt" TIMESTAMP(3),
+      "metadata" JSONB NOT NULL DEFAULT '{}',
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "ControlIdentity_pkey" PRIMARY KEY ("id")
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS "ControlIdentity_tenantId_provider_externalUserId_key"
+      ON "ControlIdentity"("tenantId", "provider", "externalUserId");
+    CREATE INDEX IF NOT EXISTS "ControlIdentity_tenantId_phoneNormalized_idx"
+      ON "ControlIdentity"("tenantId", "phoneNormalized");
+    CREATE INDEX IF NOT EXISTS "ControlIdentity_tenantId_userId_provider_idx"
+      ON "ControlIdentity"("tenantId", "userId", "provider");
+
+    CREATE TABLE IF NOT EXISTS "ControlConfirmation" (
+      "id" TEXT NOT NULL,
+      "tenantId" TEXT NOT NULL,
+      "userId" TEXT NOT NULL,
+      "identityId" TEXT,
+      "source" TEXT NOT NULL,
+      "action" TEXT NOT NULL,
+      "paramsJson" JSONB NOT NULL DEFAULT '{}',
+      "summary" TEXT NOT NULL,
+      "status" TEXT NOT NULL DEFAULT 'pending',
+      "requestId" TEXT NOT NULL,
+      "expiresAt" TIMESTAMP(3) NOT NULL,
+      "confirmedAt" TIMESTAMP(3),
+      "executedAt" TIMESTAMP(3),
+      "resultJson" JSONB,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "ControlConfirmation_pkey" PRIMARY KEY ("id")
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS "ControlConfirmation_tenantId_requestId_key"
+      ON "ControlConfirmation"("tenantId", "requestId");
+    CREATE INDEX IF NOT EXISTS "ControlConfirmation_tenantId_status_expiresAt_idx"
+      ON "ControlConfirmation"("tenantId", "status", "expiresAt");
 `;
 
 export async function createPrismaClient(): Promise<PrismaClient> {

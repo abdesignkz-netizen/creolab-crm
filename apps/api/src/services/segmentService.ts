@@ -412,3 +412,141 @@ export async function resolveContactLinks(
 
   return { contact, inquiryId, dealId, conversationId };
 }
+
+export async function searchWorkspace(prisma: PrismaClient, auth: AuthContext, q: string) {
+  const membership = requireTenant(auth);
+  const tid = membership.tenantId;
+  const query = String(q || "").trim();
+  if (query.length < 2) return { q: query, items: [] as Array<Record<string, string>> };
+  const digits = digitsOnly(query);
+  const assignee = isManager(auth) ? membership.id : undefined;
+
+  const [contacts, companies, deals, inquiries, tasks, conversations] = await Promise.all([
+    prisma.contact.findMany({
+      where: {
+        tenantId: tid,
+        archivedAt: null,
+        ...(assignee ? { ownerMembershipId: assignee } : {}),
+        OR: [
+          { name: { contains: query, mode: "insensitive" } },
+          { companyName: { contains: query, mode: "insensitive" } },
+          ...(digits.length >= 4
+            ? [{ methods: { some: { normalizedValue: { contains: digits } } } }]
+            : []),
+          { methods: { some: { type: "email", rawValue: { contains: query, mode: "insensitive" } } } },
+        ],
+      },
+      select: { id: true, name: true, companyName: true, methods: { where: { type: "phone" }, take: 1 } },
+      take: 6,
+    }),
+    prisma.company.findMany({
+      where: {
+        tenantId: tid,
+        archivedAt: null,
+        OR: [
+          { name: { contains: query, mode: "insensitive" } },
+          { bin: { contains: query } },
+        ],
+      },
+      select: { id: true, name: true, bin: true },
+      take: 5,
+    }),
+    prisma.deal.findMany({
+      where: {
+        tenantId: tid,
+        ...(assignee ? { assigneeMembershipId: assignee } : {}),
+        title: { contains: query, mode: "insensitive" },
+      },
+      select: { id: true, title: true, outcome: true },
+      take: 5,
+    }),
+    prisma.inquiry.findMany({
+      where: {
+        tenantId: tid,
+        ...(assignee ? { assigneeMembershipId: assignee } : {}),
+        OR: [
+          { subject: { contains: query, mode: "insensitive" } },
+          ...(digits.length >= 4 ? [{ phoneNormalized: { contains: digits } }] : []),
+        ],
+      },
+      select: { id: true, subject: true, status: true },
+      take: 5,
+    }),
+    prisma.task.findMany({
+      where: {
+        tenantId: tid,
+        parentTaskId: null,
+        ...(assignee ? { ownerMembershipId: assignee } : {}),
+        title: { contains: query, mode: "insensitive" },
+      },
+      select: { id: true, title: true, status: true },
+      take: 5,
+    }),
+    prisma.conversation.findMany({
+      where: {
+        tenantId: tid,
+        status: "open",
+        ...(assignee ? { assigneeMembershipId: assignee } : {}),
+        contact: {
+          OR: [
+            { name: { contains: query, mode: "insensitive" } },
+            { companyName: { contains: query, mode: "insensitive" } },
+            ...(digits.length >= 4
+              ? [{ methods: { some: { normalizedValue: { contains: digits } } } }]
+              : []),
+          ],
+        },
+      },
+      select: { id: true, mode: true, contact: { select: { name: true, companyName: true } } },
+      take: 5,
+    }),
+  ]);
+
+  return {
+    q: query,
+    items: [
+      ...contacts.map((item) => ({
+        type: "contact",
+        id: item.id,
+        title: displayName(item),
+        subtitle: item.companyName || item.methods[0]?.rawValue || "Клиент",
+        href: `/contacts/${item.id}`,
+      })),
+      ...companies.map((item) => ({
+        type: "company",
+        id: item.id,
+        title: item.name,
+        subtitle: item.bin || "Компания",
+        href: `/companies/${item.id}`,
+      })),
+      ...deals.map((item) => ({
+        type: "deal",
+        id: item.id,
+        title: item.title,
+        subtitle: item.outcome === "open" ? "Сделка" : item.outcome,
+        href: `/deals/${item.id}`,
+      })),
+      ...inquiries.map((item) => ({
+        type: "inquiry",
+        id: item.id,
+        title: item.subject || "Заявка",
+        subtitle: INQUIRY_STATUS_LABEL[item.status] || item.status,
+        href: `/requests/${item.id}`,
+      })),
+      ...tasks.map((item) => ({
+        type: "task",
+        id: item.id,
+        title: item.title,
+        subtitle: item.status,
+        href: `/tasks?open=${item.id}`,
+      })),
+      ...conversations.map((item) => ({
+        type: "conversation",
+        id: item.id,
+        title: item.contact ? displayName(item.contact) : "Диалог",
+        subtitle: item.mode === "ai" ? "AI" : "Человек",
+        href: `/conversations/${item.id}`,
+      })),
+    ],
+  };
+}

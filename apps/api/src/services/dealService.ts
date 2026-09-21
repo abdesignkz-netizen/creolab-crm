@@ -3,17 +3,19 @@ import { resolveEsfMeasureUnitCode } from "@creolab/contracts";
 import type { PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
-import { assertDealVisible, isManager, managerDealWriteFields, seesAllCompanyRecords } from "../lib/access.ts";
+import { assertDealVisible, isManager, managerDealWriteFields, requireCompanyAdmin, seesAllCompanyRecords } from "../lib/access.ts";
 import {
   LEGACY_STAGE_MAP,
-  LOST_REASONS,
   PAYMENT_STATUSES,
   PIPELINE_STAGES,
   amountNumber,
   formatMoney,
+  lostReasonCatalog,
   parseOpsSettings,
+  slaStatusForDays,
   stageDurationLabel,
 } from "./dealPipeline.ts";
+import { writeAudit } from "../lib/audit.ts";
 import { displayName, phoneFromContact } from "./contactLabels.ts";
 import { writeActivity } from "./contactService.ts";
 import { serializeDealItem, totalsFromItems } from "./dealItemService.ts";
@@ -23,7 +25,15 @@ import { resolvePeriodRange, periodLabel, type PeriodPreset } from "./periodRang
 
 type DealTimeMode = "now" | "period";
 type DealPeriodBasis = "created" | "activity" | "closed";
-type DealFocus = "all" | "stalled" | "needs_reply" | "no_next_action" | "proposal_no_reply";
+type DealFocus =
+  | "all"
+  | "stalled"
+  | "needs_reply"
+  | "no_next_action"
+  | "proposal_no_reply"
+  | "over_sla"
+  | "payment_overdue"
+  | "overdue_next_action";
 
 function dateRangeFilter(from: Date | null, to: Date | null) {
   if (!from && !to) return undefined;
@@ -189,6 +199,7 @@ export function flagsForDeal(
     nextAction: string | null;
     nextActionAt: Date | null;
     stageEnteredAt: Date;
+    paymentStatus?: string | null;
     stage: { systemKey: string };
     tasks: Array<{ dueAt: Date | null; status: string }>;
     contact?: {
@@ -212,13 +223,19 @@ export function flagsForDeal(
   const noNextAction = !deal.nextAction && !hasOpenTask;
   const daysOnStage = (now.getTime() - deal.stageEnteredAt.getTime()) / 86400000;
   const sla = ops.stageSlaDays[deal.stage.systemKey];
-  const overSla = typeof sla === "number" && daysOnStage > sla;
+  const slaStatus = slaStatusForDays(daysOnStage, sla);
+  const overSla = slaStatus === "OVERDUE";
   const lastTouch = deal.contact?.lastContactAt
     ? new Date(deal.contact.lastContactAt).getTime()
     : deal.stageEnteredAt.getTime();
-  const stalledBySilence = now.getTime() - lastTouch > ops.stalledDealDays * 86400000;
+  const stalledBySilence = now.getTime() - lastTouch > ops.silenceReturnDays * 86400000;
+  const stalledByIdle = daysOnStage > ops.stalledDealDays && !hasFutureTask && !waitingClient;
   const stalled =
-    (stalledBySilence && !hasFutureTask && !waitingClient) || overSla || (noNextAction && daysOnStage > 2);
+    (stalledBySilence && !hasFutureTask && !waitingClient) || stalledByIdle || overSla || (noNextAction && daysOnStage > 2);
+  const overdueNextAction = Boolean(
+    deal.nextActionAt && new Date(deal.nextActionAt).getTime() < now.getTime() && !waitingClient,
+  );
+  const paymentOverdue = deal.paymentStatus === "OVERDUE";
 
   return {
     proposalWithoutReply: deal.stage.systemKey === "proposal_sent" && daysOnStage > ops.proposalFollowUpThresholdDays,
@@ -228,6 +245,9 @@ export function flagsForDeal(
     waitingClient,
     stalled,
     overSla,
+    slaStatus,
+    overdueNextAction,
+    paymentOverdue,
     daysOnStage: Math.floor(daysOnStage),
   };
 }
@@ -349,7 +369,13 @@ export async function getDealBoard(
   const basis: DealPeriodBasis =
     query.basis === "activity" || query.basis === "closed" ? query.basis : "created";
   const focus: DealFocus =
-    query.focus === "stalled" || query.focus === "needs_reply" || query.focus === "no_next_action" || query.focus === "proposal_no_reply"
+    query.focus === "stalled" ||
+    query.focus === "needs_reply" ||
+    query.focus === "no_next_action" ||
+    query.focus === "proposal_no_reply" ||
+    query.focus === "over_sla" ||
+    query.focus === "payment_overdue" ||
+    query.focus === "overdue_next_action"
       ? query.focus
       : "all";
   const includeClosed =
@@ -452,6 +478,9 @@ export async function getDealBoard(
     if (focus === "stalled") return Boolean(d.flags.stalled);
     if (focus === "needs_reply") return Boolean(d.flags.needsReply);
     if (focus === "no_next_action") return Boolean(d.flags.noNextAction);
+    if (focus === "over_sla") return Boolean(d.flags.overSla);
+    if (focus === "payment_overdue") return Boolean(d.flags.paymentOverdue);
+    if (focus === "overdue_next_action") return Boolean(d.flags.overdueNextAction);
     return true;
   };
 
@@ -616,6 +645,7 @@ export async function getDealBoard(
             expectedPaymentsLabel: formatMoney(expectedList.length ? expectedPayments : null, currency),
             stalledCount: openSerialized.filter((d) => d.flags.stalled).length,
             noNextActionCount: openSerialized.filter((d) => d.flags.noNextAction).length,
+            overSlaCount: openSerialized.filter((d) => d.flags.overSla).length,
             needsReplyCount: openSerialized.filter((d) => d.flags.needsReply).length,
           }
         : {
@@ -641,7 +671,7 @@ export async function getDealBoard(
               .filter((d) => d.outcome === "won" || d.outcome === "lost")
               .map((d) => serializeDeal(d, ops, currency, now))
           : [],
-    lostReasons: [...LOST_REASONS],
+    lostReasons: lostReasonCatalog(ops),
     paymentStatuses: [...PAYMENT_STATUSES],
   };
 }
@@ -743,6 +773,29 @@ export async function updateDeal(
       version: { increment: 1 },
     },
   });
+  await writeAudit(prisma, {
+    tenantId: tid,
+    actorUserId: auth.user.id,
+    action: "deal.update",
+    entityType: "deal",
+    entityId: dealId,
+    changes: {
+      before: {
+        offerAmountMinor: deal.offerAmountMinor,
+        probability: deal.probability,
+        nextAction: deal.nextAction,
+        nextActionAt: deal.nextActionAt,
+        paymentStatus: deal.paymentStatus,
+      },
+      after: {
+        offerAmountMinor: input.offerAmountMinor !== undefined ? input.offerAmountMinor : deal.offerAmountMinor,
+        probability: probability ?? deal.probability,
+        nextAction: input.nextAction !== undefined ? input.nextAction : deal.nextAction,
+        nextActionAt: input.nextActionAt !== undefined ? input.nextActionAt : deal.nextActionAt,
+        paymentStatus: paymentStatus || deal.paymentStatus,
+      },
+    },
+  });
 
   return getDeal(prisma, auth, dealId);
 }
@@ -829,6 +882,14 @@ export async function changeDealStage(
         metadataJson: { from: deal.stage.systemKey, to: toStage.systemKey },
       },
     });
+    await writeAudit(tx, {
+      tenantId: tid,
+      actorUserId: auth.user.id,
+      action: "deal.stage_changed",
+      entityType: "deal",
+      entityId: dealId,
+      changes: { from: deal.stage.name, to: toStage.name, fromKey: deal.stage.systemKey, toKey: toStage.systemKey },
+    });
   });
 
   return getDeal(prisma, auth, dealId);
@@ -875,6 +936,14 @@ export async function markDealWon(
         actorId: auth.user.id,
         metadataJson: { wonAmountMinor: wonAmount },
       },
+    });
+    await writeAudit(tx, {
+      tenantId: tid,
+      actorUserId: auth.user.id,
+      action: "deal.won",
+      entityType: "deal",
+      entityId: dealId,
+      changes: { wonAmountMinor: wonAmount, wonAt: now.toISOString() },
     });
   });
 
@@ -927,6 +996,14 @@ export async function markDealLost(
         actorId: auth.user.id,
         metadataJson: { lossReason: reason },
       },
+    });
+    await writeAudit(tx, {
+      tenantId: tid,
+      actorUserId: auth.user.id,
+      action: "deal.lost",
+      entityType: "deal",
+      entityId: dealId,
+      changes: { lossReason: reason, lostAt: now.toISOString(), lostBy: auth.user.id },
     });
   });
 
@@ -1077,4 +1154,68 @@ export async function createDeal(
   });
 
   return getDeal(prisma, auth, dealId);
+}
+
+export async function getTenantOps(prisma: PrismaClient, auth: AuthContext) {
+  requireCompanyAdmin(auth);
+  const membership = requireTenant(auth);
+  const tenant = await prisma.tenant.findUnique({ where: { id: membership.tenantId } });
+  const ops = parseOpsSettings(tenant?.settingsJson);
+  return {
+    ...ops,
+    lostReasons: lostReasonCatalog(ops),
+    lostReasonsCustom: ops.lostReasons.length > 0,
+    stages: PIPELINE_STAGES.map((stage) => ({
+      systemKey: stage.systemKey,
+      name: stage.name,
+      slaDays: ops.stageSlaDays[stage.systemKey] ?? null,
+    })),
+  };
+}
+
+export async function updateTenantOps(
+  prisma: PrismaClient,
+  auth: AuthContext,
+  input: {
+    stalledDealDays?: number;
+    proposalFollowUpThresholdDays?: number;
+    silenceReturnDays?: number;
+    lostReasons?: string[];
+    salesPlanMinor?: number | null;
+    stageSlaDays?: Record<string, number>;
+  },
+) {
+  requireCompanyAdmin(auth);
+  const membership = requireTenant(auth);
+  const tenant = await prisma.tenant.findUnique({ where: { id: membership.tenantId } });
+  const current = tenant?.settingsJson && typeof tenant.settingsJson === "object"
+    ? { ...(tenant.settingsJson as Record<string, unknown>) }
+    : {};
+  const ops = parseOpsSettings(current);
+  if (typeof input.stalledDealDays === "number") ops.stalledDealDays = Math.max(1, Math.min(90, input.stalledDealDays));
+  if (typeof input.proposalFollowUpThresholdDays === "number") {
+    ops.proposalFollowUpThresholdDays = Math.max(1, Math.min(90, input.proposalFollowUpThresholdDays));
+  }
+  if (typeof input.silenceReturnDays === "number") ops.silenceReturnDays = Math.max(1, Math.min(180, input.silenceReturnDays));
+  if (input.salesPlanMinor === null) ops.salesPlanMinor = null;
+  if (typeof input.salesPlanMinor === "number") ops.salesPlanMinor = Math.max(0, Math.round(input.salesPlanMinor));
+  if (Array.isArray(input.lostReasons)) {
+    ops.lostReasons = input.lostReasons.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 40);
+  }
+  if (input.stageSlaDays && typeof input.stageSlaDays === "object") {
+    ops.stageSlaDays = { ...ops.stageSlaDays, ...input.stageSlaDays };
+  }
+  await prisma.tenant.update({
+    where: { id: membership.tenantId },
+    data: { settingsJson: { ...current, ops } as never },
+  });
+  await writeAudit(prisma, {
+    tenantId: membership.tenantId,
+    actorUserId: auth.user.id,
+    action: "settings.ops_updated",
+    entityType: "tenant",
+    entityId: membership.tenantId,
+    changes: { ops },
+  });
+  return getTenantOps(prisma, auth);
 }

@@ -6,7 +6,11 @@ export type TenantOpsSettings = {
   silenceReturnDays: number;
   largeDealAmountMinor: number;
   stageSlaDays: Record<string, number>;
+  lostReasons: string[];
+  salesPlanMinor: number | null;
 };
+
+export type SlaStatus = "OK" | "WARNING" | "OVERDUE";
 
 export const DEFAULT_OPS_SETTINGS: TenantOpsSettings = {
   stalledDealDays: 5,
@@ -19,6 +23,8 @@ export const DEFAULT_OPS_SETTINGS: TenantOpsSettings = {
     contract: 5,
     invoiced: 3,
   },
+  lostReasons: [],
+  salesPlanMinor: null,
 };
 
 export const PIPELINE_STAGES: Array<{
@@ -63,7 +69,11 @@ export const LOST_REASONS = [
 ] as const;
 
 export function parseOpsSettings(raw: unknown): TenantOpsSettings {
-  const base = { ...DEFAULT_OPS_SETTINGS, stageSlaDays: { ...DEFAULT_OPS_SETTINGS.stageSlaDays } };
+  const base: TenantOpsSettings = {
+    ...DEFAULT_OPS_SETTINGS,
+    stageSlaDays: { ...DEFAULT_OPS_SETTINGS.stageSlaDays },
+    lostReasons: [],
+  };
   if (!raw || typeof raw !== "object") return base;
   const ops = (raw as { ops?: Record<string, unknown> }).ops;
   if (!ops || typeof ops !== "object") return base;
@@ -73,10 +83,28 @@ export function parseOpsSettings(raw: unknown): TenantOpsSettings {
   }
   if (typeof ops.silenceReturnDays === "number") base.silenceReturnDays = ops.silenceReturnDays;
   if (typeof ops.largeDealAmountMinor === "number") base.largeDealAmountMinor = ops.largeDealAmountMinor;
+  if (typeof ops.salesPlanMinor === "number" && Number.isFinite(ops.salesPlanMinor)) {
+    base.salesPlanMinor = Math.max(0, Math.round(ops.salesPlanMinor));
+  }
+  if (ops.salesPlanMinor === null) base.salesPlanMinor = null;
   if (ops.stageSlaDays && typeof ops.stageSlaDays === "object") {
     base.stageSlaDays = { ...base.stageSlaDays, ...(ops.stageSlaDays as Record<string, number>) };
   }
+  if (Array.isArray(ops.lostReasons)) {
+    base.lostReasons = ops.lostReasons.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 40);
+  }
   return base;
+}
+
+export function lostReasonCatalog(ops: TenantOpsSettings) {
+  return ops.lostReasons.length ? ops.lostReasons : [...LOST_REASONS];
+}
+
+export function slaStatusForDays(daysOnStage: number, slaDays: number | undefined): SlaStatus {
+  if (typeof slaDays !== "number" || slaDays <= 0) return "OK";
+  if (daysOnStage > slaDays) return "OVERDUE";
+  if (daysOnStage > slaDays * 0.7) return "WARNING";
+  return "OK";
 }
 
 export function stageDurationLabel(enteredAt: Date, now = new Date()) {

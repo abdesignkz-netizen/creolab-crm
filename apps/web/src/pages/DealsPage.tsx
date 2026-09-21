@@ -16,9 +16,26 @@ import { dealOutcomeLabel } from "../lib/labels";
 type Scope = "all" | "mine" | "unassigned";
 type TimeMode = "now" | "period";
 type PeriodBasis = "created" | "activity" | "closed";
-type Focus = "all" | "stalled" | "needs_reply" | "no_next_action" | "proposal_no_reply";
+type Focus =
+  | "all"
+  | "stalled"
+  | "needs_reply"
+  | "no_next_action"
+  | "proposal_no_reply"
+  | "over_sla"
+  | "payment_overdue"
+  | "overdue_next_action";
 
-const FOCUS_VALUES = new Set<Focus>(["all", "stalled", "needs_reply", "no_next_action", "proposal_no_reply"]);
+const FOCUS_VALUES = new Set<Focus>([
+  "all",
+  "stalled",
+  "needs_reply",
+  "no_next_action",
+  "proposal_no_reply",
+  "over_sla",
+  "payment_overdue",
+  "overdue_next_action",
+]);
 
 const PAYMENT_STATUS_LABEL: Record<string, string> = {
   NOT_REQUIRED: "Не требуется",
@@ -60,14 +77,33 @@ function electronicDocKpi(docs: any, type: "AVR" | "ESF") {
   return EDOC_KPI_LABEL[best.status || ""] || "Черновик";
 }
 
+function toDatetimeLocal(iso?: string | null) {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 function dealAttention(deal: any): { text: string; tone: "ok" | "warn" | "next" | "muted" } | null {
   if (deal.outcome === "won") return { text: "Продажа", tone: "ok" };
-  if (deal.outcome === "lost") return { text: "Потеря", tone: "muted" };
+  if (deal.outcome === "lost") return { text: deal.lossReason ? `Потеря · ${deal.lossReason}` : "Потеря", tone: "muted" };
   if (deal.flags?.overdueTask) return { text: "Просрочена задача", tone: "warn" };
+  if (deal.flags?.paymentOverdue) return { text: "Просрочена оплата", tone: "warn" };
+  if (deal.flags?.overdueNextAction) return { text: "Просрочен follow-up", tone: "warn" };
+  if (deal.flags?.overSla || deal.flags?.slaStatus === "OVERDUE") return { text: "Просрочен SLA", tone: "warn" };
   if (deal.flags?.needsReply) return { text: "Нужен ответ", tone: "warn" };
   if (deal.flags?.proposalWithoutReply) return { text: "КП без ответа", tone: "warn" };
+  if (deal.flags?.slaStatus === "WARNING") return { text: "SLA близко", tone: "warn" };
   if (deal.flags?.stalled) return { text: "Зависла", tone: "warn" };
-  if (deal.nextAction) return { text: deal.nextAction, tone: "next" };
+  if (deal.nextAction) {
+    return {
+      text: deal.nextActionAt
+        ? `${deal.nextAction} · ${new Date(deal.nextActionAt).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`
+        : deal.nextAction,
+      tone: "next",
+    };
+  }
   if (deal.outcome === "open") return { text: "Нет следующего шага", tone: "warn" };
   return null;
 }
@@ -421,6 +457,9 @@ export function DealsPage() {
                 ["stalled", "Зависшие"],
                 ["needs_reply", "Нужен ответ"],
                 ["no_next_action", "Без следующего шага"],
+                ["over_sla", "Сверх SLA"],
+                ["overdue_next_action", "Просрочен шаг"],
+                ["payment_overdue", "Оплата"],
               ] as const
             ).map(([value, label]) => (
               <button
@@ -574,8 +613,10 @@ export function DealDetailPage() {
   const [amount, setAmount] = useState("");
   const [probability, setProbability] = useState("");
   const [nextAction, setNextAction] = useState("");
+  const [nextActionAt, setNextActionAt] = useState("");
   const [paymentStatus, setPaymentStatus] = useState("NOT_INVOICED");
   const [lossReason, setLossReason] = useState("Дорого");
+  const [lossNote, setLossNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [board, setBoard] = useState<any>(null);
   const [payAmount, setPayAmount] = useState("");
@@ -642,7 +683,9 @@ export function DealDetailPage() {
       setAmount(d.amount != null ? String(d.amount) : "");
       setProbability(String(d.probability ?? 10));
       setNextAction(d.nextAction || "");
+      setNextActionAt(toDatetimeLocal(d.nextActionAt));
       setPaymentStatus(d.paymentStatus || "NOT_INVOICED");
+      if (d.lossReason) setLossReason(d.lossReason);
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Ошибка");
@@ -675,6 +718,7 @@ export function DealDetailPage() {
           : { offerAmountMinor: amount === "" ? null : Number(amount) }),
         probability: Number(probability),
         nextAction: nextAction || null,
+        nextActionAt: nextActionAt ? new Date(nextActionAt).toISOString() : null,
         ...(caps.confirmPayments ? { paymentStatus } : {}),
       });
       setEditing(false);
@@ -980,7 +1024,11 @@ export function DealDetailPage() {
         </label>
         <label>
           Следующий шаг
-          <input value={nextAction} onChange={(e) => setNextAction(e.target.value)} />
+          <input value={nextAction} onChange={(e) => setNextAction(e.target.value)} placeholder="Позвонить клиенту" />
+        </label>
+        <label>
+          Когда
+          <input type="datetime-local" value={nextActionAt} onChange={(e) => setNextActionAt(e.target.value)} />
         </label>
         {caps.confirmPayments ? (
         <label>
@@ -1132,6 +1180,12 @@ export function DealDetailPage() {
             </option>
           ))}
         </select>
+        <input
+          value={lossNote}
+          onChange={(e) => setLossNote(e.target.value)}
+          placeholder="Комментарий к потере"
+          style={{ minWidth: 160 }}
+        />
         <button
           type="button"
           className="btn danger"
@@ -1140,7 +1194,7 @@ export function DealDetailPage() {
           onClick={() => {
             setBusy(true);
             void api
-              .markDealLost(d.id, { lossReason })
+              .markDealLost(d.id, { lossReason, note: lossNote || undefined })
               .then(() => load())
               .catch((err) => setError(err instanceof Error ? err.message : "Ошибка"))
               .finally(() => setBusy(false));

@@ -14,6 +14,9 @@ import {
   contactTagSchema,
   conversationModeSchema,
   createContactSchema,
+  mergeContactsSchema,
+  importContactsSchema,
+  updateTenantOpsSchema,
   createInquirySchema,
   createTaskSchema,
   createFromCommandSchema,
@@ -76,6 +79,7 @@ import {
   updateCompanyContactSchema,
   dealContactSchema,
 } from "@creolab/contracts";
+import { listTenantAudit } from "./lib/audit.ts";
 import { config } from "./config.ts";
 import { ApiError, errorBody } from "./errors.ts";
 import { clientIp, rateLimit } from "./lib/rateLimit.ts";
@@ -147,14 +151,18 @@ import {
   addContactNote,
   addContactTag,
   createContact,
+  findContactDuplicates,
   getContactOverview,
+  importContacts,
+  mergeContacts,
   deleteContact,
+  exportContacts,
   listContactActivities,
   listContactsBoard,
   removeContactTag,
   updateContact,
 } from "./services/contactService.ts";
-import { listWorkspaceMembers, previewContactSegment, searchContactsForPicker } from "./services/segmentService.ts";
+import { listWorkspaceMembers, previewContactSegment, searchContactsForPicker, searchWorkspace } from "./services/segmentService.ts";
 import { getConversationWorkspace, listConversationsBoard, markConversationRead, getConversationMessages, getConversationAttachment } from "./services/conversationService.ts";
 import {
   addTaskAttachment,
@@ -192,11 +200,25 @@ import {
   createDeal,
   getDeal,
   getDealBoard,
+  getTenantOps,
   markDealLost,
   markDealWon,
   setDealOnHold,
   updateDeal,
+  updateTenantOps,
 } from "./services/dealService.ts";
+import {
+  adminVerifyControlIdentity,
+  confirmAiControlCommand,
+  createControlIdentity,
+  disableControlIdentity,
+  executeAiControlCommand,
+  getControlSettings,
+  listControlHistory,
+  updateControlCompany,
+  upsertControlAccess,
+  verifyAiControlIdentity,
+} from "./services/aiControlService.ts";
 import { analyzeAndApplyConversation } from "./services/conversationContextApplyService.ts";
 import { analyzeConversationContext, listAgreementsForConversation } from "./services/conversationContextService.ts";
 import { getSituation, snoozeSituation } from "./services/situationService.ts";
@@ -1058,6 +1080,34 @@ export function createApp(prisma: PrismaClient) {
     res.json(await searchContactsForPicker(prisma, await requireAuth(req), String(req.query.q || "")));
   });
 
+  app.get("/api/v1/search", async (req, res) => {
+    res.json(await searchWorkspace(prisma, await requireAuth(req), String(req.query.q || "")));
+  });
+
+  app.get("/api/v1/contacts/duplicates", async (req, res) => {
+    res.json(
+      await findContactDuplicates(prisma, await requireAuth(req), {
+        phone: req.query.phone ? String(req.query.phone) : undefined,
+        name: req.query.name ? String(req.query.name) : undefined,
+        excludeId: req.query.excludeId ? String(req.query.excludeId) : undefined,
+      }),
+    );
+  });
+
+  app.post("/api/v1/contacts/merge", json, async (req, res) => {
+    const input = mergeContactsSchema.parse(req.body || {});
+    res.json(await mergeContacts(prisma, await requireAuth(req), input));
+  });
+
+  app.post("/api/v1/contacts/import", jsonLarge, async (req, res) => {
+    const input = importContactsSchema.parse(req.body || {});
+    res.json(await importContacts(prisma, await requireAuth(req), input));
+  });
+
+  app.get("/api/v1/contacts/export", async (req, res) => {
+    res.json(await exportContacts(prisma, await requireAuth(req)));
+  });
+
   app.post("/api/v1/contacts/segment-preview", json, async (req, res) => {
     const input = segmentPreviewSchema.parse(req.body || {});
     res.json(await previewContactSegment(prisma, await requireAuth(req), input));
@@ -1065,6 +1115,47 @@ export function createApp(prisma: PrismaClient) {
 
   app.get("/api/v1/workspace/members", async (req, res) => {
     res.json(await listWorkspaceMembers(prisma, await requireAuth(req)));
+  });
+
+  app.get("/api/v1/workspace/ops", async (req, res) => {
+    res.json(await getTenantOps(prisma, await requireAuth(req)));
+  });
+
+  app.patch("/api/v1/workspace/ops", json, async (req, res) => {
+    const input = updateTenantOpsSchema.parse(req.body || {});
+    res.json(await updateTenantOps(prisma, await requireAuth(req), input));
+  });
+
+  app.get("/api/v1/workspace/audit", async (req, res) => {
+    res.json(await listTenantAudit(prisma, await requireAuth(req), req.query as Record<string, string>));
+  });
+
+  app.get("/api/v1/workspace/control", async (req, res) => {
+    res.json(await getControlSettings(prisma, await requireAuth(req)));
+  });
+
+  app.patch("/api/v1/workspace/control", json, async (req, res) => {
+    res.json(await updateControlCompany(prisma, await requireAuth(req), req.body || {}));
+  });
+
+  app.put("/api/v1/workspace/control/access/:userId", json, async (req, res) => {
+    res.json(await upsertControlAccess(prisma, await requireAuth(req), req.params.userId, req.body || {}));
+  });
+
+  app.post("/api/v1/workspace/control/identities", json, async (req, res) => {
+    res.status(201).json(await createControlIdentity(prisma, await requireAuth(req), req.body || {}));
+  });
+
+  app.post("/api/v1/workspace/control/identities/:id/verify", async (req, res) => {
+    res.json(await adminVerifyControlIdentity(prisma, await requireAuth(req), req.params.id));
+  });
+
+  app.post("/api/v1/workspace/control/identities/:id/disable", async (req, res) => {
+    res.json(await disableControlIdentity(prisma, await requireAuth(req), req.params.id));
+  });
+
+  app.get("/api/v1/workspace/control/history", async (req, res) => {
+    res.json(await listControlHistory(prisma, await requireAuth(req), req.query as Record<string, string>));
   });
 
   app.post("/api/v1/contacts", json, async (req, res) => {
@@ -2354,6 +2445,54 @@ export function createApp(prisma: PrismaClient) {
       integrationId: req.params.integrationId,
     });
     res.status(202).json(result);
+  });
+
+  app.post("/api/v1/integrations/ai-control/execute", json, async (req, res) => {
+    const secret = String(req.header("authorization") || "").replace(/^Bearer\s+/i, "");
+    res.json(
+      await executeAiControlCommand(
+        prisma,
+        {
+          secret,
+          integrationId: req.header("x-crm-integration-id") || req.body?.integrationId || null,
+          timestamp: req.header("x-crm-timestamp") || undefined,
+          signature: req.header("x-crm-signature") || undefined,
+          requestIdHeader: req.header("x-crm-request-id") || undefined,
+        },
+        req.body,
+      ),
+    );
+  });
+
+  app.post("/api/v1/integrations/ai-control/confirm", json, async (req, res) => {
+    const secret = String(req.header("authorization") || "").replace(/^Bearer\s+/i, "");
+    res.json(
+      await confirmAiControlCommand(
+        prisma,
+        {
+          secret,
+          integrationId: req.header("x-crm-integration-id") || req.body?.integrationId || null,
+          timestamp: req.header("x-crm-timestamp") || undefined,
+          signature: req.header("x-crm-signature") || undefined,
+        },
+        req.body,
+      ),
+    );
+  });
+
+  app.post("/api/v1/integrations/ai-control/verify", json, async (req, res) => {
+    const secret = String(req.header("authorization") || "").replace(/^Bearer\s+/i, "");
+    res.json(
+      await verifyAiControlIdentity(
+        prisma,
+        {
+          secret,
+          integrationId: req.header("x-crm-integration-id") || req.body?.integrationId || null,
+          timestamp: req.header("x-crm-timestamp") || undefined,
+        },
+        req.body,
+      ),
+    );
   });
 
   // Кабинет (Vite build) с того же origin — для Render / одного домена crm.creolab.kz

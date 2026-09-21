@@ -2,7 +2,7 @@ import type { PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { requireAnalyticsAccess } from "../lib/access.ts";
-import { getSituation, type SituationItem, type SituationScope } from "./situationService.ts";
+import { getSituation, type SituationScope } from "./situationService.ts";
 import {
   conversationsAttentionWhere,
   conversationsHumanWhere,
@@ -375,12 +375,14 @@ function taskTypeBucket(type: string, title: string) {
   return "Другое";
 }
 
-function attentionGroup(item: Pick<SituationItem, "kind" | "waitingReply">): string {
+function attentionGroup(item: { kind: string; waitingReply?: boolean }): string {
   if (item.kind === "contact_needs_reply" || (item.kind.startsWith("conversation_") && item.waitingReply)) {
     return "needs_reply";
   }
-  if (item.kind === "task_overdue") return "overdue";
+  if (item.kind === "task_overdue" || item.kind === "overdue_next_action" || item.kind === "agreement_overdue") return "overdue";
   if (item.kind === "missing_next_action") return "no_next_action";
+  if (item.kind === "deal_over_sla") return "over_sla";
+  if (item.kind === "payment_overdue") return "payment_overdue";
   if (item.kind.startsWith("conversation_")) return "needs_human";
   if (item.kind === "inquiry_ai_blocked") return "needs_human";
   if (item.kind === "needs_phone") return "no_contact";
@@ -393,6 +395,8 @@ const ATTENTION_WHY_LABEL: Record<string, string> = {
   needs_human: "Нужен человек",
   overdue: "Срок прошёл",
   no_next_action: "Нет следующего шага",
+  over_sla: "Просрочен SLA этапа",
+  payment_overdue: "Просрочена оплата",
   no_contact: "Нет телефона",
   inquiry: "Заявку не взяли",
   needs_clarification: "Нужно уточнение",
@@ -765,6 +769,9 @@ export async function getSituationOverview(
   const waitingClientDeals: typeof openDeals = [];
   const noNextActionDeals: typeof openDeals = [];
   const stalledDealsList: typeof openDeals = [];
+  const overSlaDeals: typeof openDeals = [];
+  const overdueNextDeals: typeof openDeals = [];
+  const paymentOverdueDeals: typeof openDeals = [];
   const contractDeals: typeof openDeals = [];
   const importantDeals: Array<{
     id: string;
@@ -789,30 +796,28 @@ export async function getSituationOverview(
     const onContract = negotiationStageIds.has(deal.stageId);
     if (onContract) contractDeals.push(deal);
 
-    const hasFutureTask = deal.tasks.some((t) => t.dueAt && t.dueAt.getTime() >= now.getTime());
-    const hasOpenTask = deal.tasks.length > 0;
-    const waiting =
-      flagsForDeal(deal, ops, now).waitingClient;
-    if (waiting) waitingClientDeals.push(deal);
-
-    if (!deal.nextAction && !hasOpenTask) noNextActionDeals.push(deal);
+    const flags = flagsForDeal(deal, ops, now);
+    if (flags.waitingClient) waitingClientDeals.push(deal);
+    if (flags.noNextAction) noNextActionDeals.push(deal);
+    if (flags.stalled) stalledDealsList.push(deal);
+    if (flags.overSla) overSlaDeals.push(deal);
+    if (flags.overdueNextAction) overdueNextDeals.push(deal);
+    if (flags.paymentOverdue) paymentOverdueDeals.push(deal);
 
     const stageEntered = (deal as { stageEnteredAt?: Date }).stageEnteredAt || deal.createdAt;
-    const lastTouch = deal.nextActionAt || stageEntered;
-    const stalled = flagsForDeal(deal, ops, now).stalled;
-    if (stalled) stalledDealsList.push(deal);
-
     const onProposalTooLong =
-      proposalStageIds.has(deal.stageId) && stageEntered < proposalCutoff && !waiting;
+      proposalStageIds.has(deal.stageId) && stageEntered < proposalCutoff && !flags.waitingClient;
 
     const reasons: string[] = [];
     if (onContract) reasons.push("На договоре");
     if (onProposalTooLong) reasons.push(`КП без ответа >${ops.proposalFollowUpThresholdDays} дн.`);
-    if (stalled) reasons.push(`Нет активности ${ops.stalledDealDays}+ дн.`);
-    if (!deal.nextAction && !hasOpenTask) reasons.push("Нет следующего действия");
-    if (deal.nextActionAt && deal.nextActionAt < now) reasons.push("Просрочен follow-up");
+    if (flags.stalled) reasons.push(`Нет активности ${ops.stalledDealDays}+ дн.`);
+    if (flags.overSla) reasons.push("Просрочен SLA этапа");
+    if (flags.noNextAction) reasons.push("Нет следующего действия");
+    if (flags.overdueNextAction) reasons.push("Просрочен follow-up");
+    if (flags.paymentOverdue) reasons.push("Просрочена оплата");
     if (amount != null && amount >= ops.largeDealAmountMinor) reasons.push("Крупная сумма");
-    if (waiting) reasons.push("Ждём клиента");
+    if (flags.waitingClient) reasons.push("Ждём клиента");
     if (reasons.length) {
       importantDeals.push({
         id: deal.id,
@@ -877,6 +882,33 @@ export async function getSituationOverview(
       severity: "normal", ownerMembershipId: deal.assigneeMembershipId, links: { dealId: deal.id, contactId: deal.contactId },
       href: `/deals/${deal.id}`, ageMinutes: Math.max(0, Math.floor((now.getTime() - deal.stageEnteredAt.getTime()) / 60000)),
     })),
+    ...overSlaDeals.slice(0, 8).map((deal) => ({
+      id: `deal-sla:${deal.id}`, kind: "deal_over_sla", group: "over_sla", whyLabel: ATTENTION_WHY_LABEL.over_sla, entityId: deal.id,
+      title: deal.title, reason: "Сделка дольше SLA на текущем этапе", nextAction: "open_deal",
+      contactName: deal.contact ? displayName(deal.contact) : null,
+      phone: phoneFromContact(deal.contact),
+      interest: deal.stage?.name || null,
+      severity: "high", ownerMembershipId: deal.assigneeMembershipId, links: { dealId: deal.id, contactId: deal.contactId },
+      href: `/deals/${deal.id}`,
+    })),
+    ...overdueNextDeals.slice(0, 8).map((deal) => ({
+      id: `deal-followup:${deal.id}`, kind: "overdue_next_action", group: "overdue", whyLabel: ATTENTION_WHY_LABEL.overdue, entityId: deal.id,
+      title: deal.title, reason: deal.nextAction ? `Просрочено: ${deal.nextAction}` : "Просрочено следующее действие", nextAction: "open_deal",
+      contactName: deal.contact ? displayName(deal.contact) : null,
+      phone: phoneFromContact(deal.contact),
+      interest: deal.stage?.name || null,
+      severity: "high", ownerMembershipId: deal.assigneeMembershipId, links: { dealId: deal.id, contactId: deal.contactId },
+      href: `/deals/${deal.id}`,
+    })),
+    ...paymentOverdueDeals.slice(0, 8).map((deal) => ({
+      id: `deal-pay:${deal.id}`, kind: "payment_overdue", group: "payment_overdue", whyLabel: ATTENTION_WHY_LABEL.payment_overdue, entityId: deal.id,
+      title: deal.title, reason: "Оплата по сделке просрочена", nextAction: "open_deal",
+      contactName: deal.contact ? displayName(deal.contact) : null,
+      phone: phoneFromContact(deal.contact),
+      interest: deal.stage?.name || null,
+      severity: "high", ownerMembershipId: deal.assigneeMembershipId, links: { dealId: deal.id, contactId: deal.contactId },
+      href: `/deals/${deal.id}`,
+    })),
     ...activeAgreements
       .filter((a) => a.status === "NEEDS_CLARIFICATION" || a.clarificationNeeded || (a.type === "ONLINE_MEETING" && !a.meetingUrl))
       .slice(0, 5)
@@ -901,6 +933,29 @@ export async function getSituationOverview(
           ownerMembershipId: null,
         };
       }),
+    ...activeAgreements
+      .filter((a) => a.scheduledAt && a.scheduledAt < now && ["CONFIRMED", "SCHEDULED", "RESCHEDULED"].includes(a.status))
+      .slice(0, 5)
+      .map((a) => {
+        const mapped = mapAgreementSit(a);
+        return {
+          id: `agreement-overdue:${a.id}`,
+          kind: "agreement_overdue",
+          title: a.title,
+          reason: "Договорённость просрочена",
+          nextAction: mapped.taskId ? "complete_task" : "open_contact",
+          contactName: mapped.contactName,
+          phone: mapped.phone,
+          interest: mapped.inquiryTitle,
+          entityId: a.id,
+          entityType: "agreement",
+          group: "overdue",
+          whyLabel: ATTENTION_WHY_LABEL.overdue,
+          href: mapped.href,
+          urgency: "high",
+          ownerMembershipId: null,
+        };
+      }),
   ];
 
   const attentionSummary = {
@@ -908,6 +963,9 @@ export async function getSituationOverview(
     overdueTasks: tasksOverdueCount,
     noNextAction: board.items.filter((i) => i.kind === "missing_next_action").length + noNextActionDeals.length,
     stalledDeals: stalledDealsList.length,
+    overSlaDeals: overSlaDeals.length,
+    paymentOverdue: paymentOverdueDeals.length,
+    overdueAgreements: activeAgreements.filter((a) => a.scheduledAt && a.scheduledAt < now && ["CONFIRMED", "SCHEDULED", "RESCHEDULED"].includes(a.status)).length,
     needsHuman: conversationNeedsHuman,
     noContact: intakesPending,
     unassigned: board.items.filter((i) => !i.ownerMembershipId).length,
@@ -1175,7 +1233,7 @@ export async function getSituationOverview(
       summary: {...attentionSummary,documentsToClose},
       items: onlyImportant
         ? attentionItems.filter((i) =>
-            ["needs_reply", "overdue", "no_next_action", "needs_human", "no_contact"].includes(i.group),
+            ["needs_reply", "overdue", "no_next_action", "needs_human", "no_contact", "over_sla", "payment_overdue"].includes(i.group),
           )
         : attentionItems,
       emptyLabel: "Критических действий сейчас нет.",

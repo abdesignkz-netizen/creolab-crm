@@ -40,7 +40,8 @@ export type SituationNextAction =
   | "assign_owner"
   | "instruct_ai"
   | "open_contact"
-  | "create_next_action";
+  | "create_next_action"
+  | "open_deal";
 
 export type SituationItem = {
   id: string;

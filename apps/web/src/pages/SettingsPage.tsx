@@ -20,6 +20,9 @@ type Section =
   | "interface"
   | "company"
   | "members"
+  | "ops"
+  | "audit"
+  | "control"
   | "ai"
   | "tasks"
   | "integrations"
@@ -50,6 +53,7 @@ export function SettingsPage() {
   const allowedCompany: Section[] = [
     ...(caps.documents || caps.companyAdmin ? (["company"] as const) : []),
     ...(caps.members ? (["members"] as const) : []),
+    ...(caps.companyAdmin ? (["ops", "audit", "control"] as const) : []),
     ...(caps.aiSettings ? (["ai"] as const) : []),
     ...(!caps.manager ? (["tasks"] as const) : []),
     ...(caps.integrations || caps.companyAdmin ? (["integrations"] as const) : []),
@@ -67,6 +71,13 @@ export function SettingsPage() {
       ? [{ id: "company" as const, group: "company" as const, label: t(locale, "settings.legal") }]
       : []),
     ...(caps.members ? [{ id: "members" as const, group: "company" as const, label: t(locale, "settings.members") }] : []),
+    ...(caps.companyAdmin
+      ? [
+          { id: "ops" as const, group: "company" as const, label: t(locale, "settings.ops") },
+          { id: "audit" as const, group: "company" as const, label: t(locale, "settings.audit") },
+          { id: "control" as const, group: "company" as const, label: t(locale, "settings.control") },
+        ]
+      : []),
     ...(caps.aiSettings ? [{ id: "ai" as const, group: "company" as const, label: t(locale, "settings.ai"), to: "/settings/ai-automation" }] : []),
     ...(!caps.manager ? [{ id: "tasks" as const, group: "company" as const, label: t(locale, "settings.tasks"), to: "/control" }] : []),
     ...(caps.integrations || caps.companyAdmin
@@ -120,6 +131,9 @@ export function SettingsPage() {
           {section === "interface" ? <InterfaceSection locale={locale} /> : null}
           {section === "company" && (caps.documents || caps.companyAdmin) ? <LegalSettingsPanel /> : null}
           {section === "members" && caps.members ? <MembersSection locale={locale} /> : null}
+          {section === "ops" && caps.companyAdmin ? <OpsSection locale={locale} /> : null}
+          {section === "audit" && caps.companyAdmin ? <AuditSection locale={locale} /> : null}
+          {section === "control" && caps.companyAdmin ? <ControlSection locale={locale} /> : null}
         </div>
       </div>
     </section>
@@ -572,5 +586,453 @@ function MembersSection({ locale }: { locale: Locale }) {
         </form>
       ))}
     </div>
+  );
+}
+
+function OpsSection({ locale }: { locale: Locale }) {
+  const [ops, setOps] = useState<any>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [lostText, setLostText] = useState("");
+  const [plan, setPlan] = useState("");
+
+  async function load() {
+    const data: any = await api.workspaceOps();
+    setOps(data);
+    setLostText((data.lostReasons || []).join("\n"));
+    setPlan(data.salesPlanMinor != null ? String(data.salesPlanMinor) : "");
+  }
+
+  useEffect(() => {
+    void load().catch((err) => setError(err instanceof Error ? err.message : "Ошибка"));
+  }, []);
+
+  async function save() {
+    setBusy(true);
+    setError("");
+    try {
+      const stageSlaDays: Record<string, number> = {};
+      for (const stage of ops?.stages || []) {
+        const value = Number(stage.slaDays);
+        if (Number.isFinite(value) && value > 0) stageSlaDays[stage.systemKey] = value;
+      }
+      const planNumber = plan.trim() ? Math.round(Number(plan.replace(/\s+/g, "").replace(",", "."))) : null;
+      await api.updateWorkspaceOps({
+        stalledDealDays: Number(ops.stalledDealDays),
+        proposalFollowUpThresholdDays: Number(ops.proposalFollowUpThresholdDays),
+        silenceReturnDays: Number(ops.silenceReturnDays),
+        salesPlanMinor: planNumber,
+        lostReasons: lostText.split("\n").map((line) => line.trim()).filter(Boolean),
+        stageSlaDays,
+      });
+      notifySaved("Операционные настройки сохранены");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не сохранено");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!ops) return <p className="muted">{t(locale, "common.loading")}</p>;
+
+  return (
+    <div className="panel">
+      <b>{t(locale, "settings.ops")}</b>
+      <p className="muted">SLA этапов, причины потери и план продаж. Эти же значения использует «Ситуация».</p>
+      {error ? <p className="error">{error}</p> : null}
+      <label>
+        Дней без движения, чтобы сделка считалась зависшей
+        <input
+          type="number"
+          min={1}
+          max={90}
+          value={ops.stalledDealDays}
+          onChange={(e) => setOps({ ...ops, stalledDealDays: Number(e.target.value) })}
+        />
+      </label>
+      <label>
+        Дней после КП без ответа
+        <input
+          type="number"
+          min={1}
+          max={90}
+          value={ops.proposalFollowUpThresholdDays}
+          onChange={(e) => setOps({ ...ops, proposalFollowUpThresholdDays: Number(e.target.value) })}
+        />
+      </label>
+      <label>
+        Дней тишины по клиенту
+        <input
+          type="number"
+          min={1}
+          max={180}
+          value={ops.silenceReturnDays}
+          onChange={(e) => setOps({ ...ops, silenceReturnDays: Number(e.target.value) })}
+        />
+      </label>
+      <label>
+        План продаж за период, ₸
+        <input value={plan} onChange={(e) => setPlan(e.target.value)} placeholder="например 10000000" />
+      </label>
+      <b>SLA по этапам, дни</b>
+      {(ops.stages || []).map((stage: any, index: number) => (
+        <label key={stage.systemKey}>
+          {stage.name}
+          <input
+            type="number"
+            min={1}
+            max={90}
+            value={stage.slaDays ?? ""}
+            onChange={(e) => {
+              const next = [...(ops.stages || [])];
+              next[index] = { ...stage, slaDays: e.target.value === "" ? null : Number(e.target.value) };
+              setOps({ ...ops, stages: next });
+            }}
+          />
+        </label>
+      ))}
+      <label>
+        Причины потери — по одной на строку
+        <textarea rows={8} value={lostText} onChange={(e) => setLostText(e.target.value)} />
+      </label>
+      <button type="button" className="btn" disabled={busy} onClick={() => void save()}>
+        {t(locale, "settings.save")}
+      </button>
+    </div>
+  );
+}
+
+function AuditSection({ locale }: { locale: Locale }) {
+  const { me } = useSession();
+  const [q, setQ] = useState("");
+  const [page, setPage] = useState(1);
+  const [data, setData] = useState<any>(null);
+  const [error, setError] = useState("");
+
+  async function load(nextPage = page, query = q) {
+    try {
+      const result = await api.workspaceAudit({ page: nextPage, q: query || undefined, limit: 40 });
+      setData(result);
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Ошибка");
+    }
+  }
+
+  useEffect(() => {
+    void load(1, "");
+  }, []);
+
+  return (
+    <div className="panel">
+      <b>{t(locale, "settings.audit")}</b>
+      <p className="muted">Кто что изменил в этой компании. Журнал доступен администратору и директору.</p>
+      {error ? <p className="error">{error}</p> : null}
+      <form
+        className="row"
+        onSubmit={(event) => {
+          event.preventDefault();
+          setPage(1);
+          void load(1, q);
+        }}
+      >
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="сделка, клиент, настройки…" />
+        <button className="btn secondary">Найти</button>
+      </form>
+      {(data?.items || []).map((item: any) => (
+        <div className="row" key={item.id} style={{ alignItems: "flex-start" }}>
+          <div>
+            <b>{item.actionLabel || item.action}</b>
+            <div className="muted">
+              {item.actorLabel}
+              {item.entityType ? ` · ${item.entityType}` : ""}
+              {item.entityId ? ` #${String(item.entityId).slice(0, 8)}` : ""}
+              {" · "}
+              {formatDateTime(item.createdAt, { timeZone: me?.user?.timezone, locale })}
+            </div>
+            {item.changes && typeof item.changes === "object" ? (
+              <div className="muted">
+                {Object.entries(item.changes)
+                  .slice(0, 4)
+                  .map(([key, value]) => `${key}: ${typeof value === "object" ? JSON.stringify(value) : String(value ?? "")}`)
+                  .join(" · ")}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ))}
+      {data && data.total > data.pageSize ? (
+        <div className="actions">
+          <button
+            type="button"
+            className="btn secondary"
+            disabled={page <= 1}
+            onClick={() => {
+              const next = page - 1;
+              setPage(next);
+              void load(next);
+            }}
+          >
+            Назад
+          </button>
+          <button
+            type="button"
+            className="btn secondary"
+            disabled={page * data.pageSize >= data.total}
+            onClick={() => {
+              const next = page + 1;
+              setPage(next);
+              void load(next);
+            }}
+          >
+            Дальше
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+type ControlUser = {
+  userId: string;
+  name: string;
+  email: string;
+  role: string;
+  enabled: boolean;
+  status: string;
+  canReadFinancialData: boolean;
+  canReadTeamData: boolean;
+  canCreateTasks: boolean;
+  canModifyDeals: boolean;
+  canPerformBulkActions: boolean;
+  requiresConfirmationForWrites: boolean;
+  lastActivityAt: string | null;
+  identities: Array<{
+    id: string;
+    provider: string;
+    externalUserId: string;
+    phoneNormalized: string | null;
+    verified: boolean;
+    verifiedAt: string | null;
+    enabled: boolean;
+  }>;
+};
+
+function ControlSection({ locale }: { locale: Locale }) {
+  const { me } = useSession();
+  const [data, setData] = useState<{ enabled: boolean; users: ControlUser[] } | null>(null);
+  const [history, setHistory] = useState<any>(null);
+  const [error, setError] = useState("");
+  const [phoneByUser, setPhoneByUser] = useState<Record<string, string>>({});
+  const [filters, setFilters] = useState({ action: "", source: "", status: "" });
+
+  async function load() {
+    try {
+      const [settings, hist] = await Promise.all([
+        api.controlSettings(),
+        api.controlHistory({ limit: 30 }),
+      ]);
+      setData(settings as { enabled: boolean; users: ControlUser[] });
+      setHistory(hist);
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Ошибка");
+    }
+  }
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  async function toggleCompany(enabled: boolean) {
+    await api.updateControlSettings({ enabled });
+    notifySaved(enabled ? "BasQar Control включён" : "BasQar Control выключен");
+    await load();
+  }
+
+  async function toggleUser(user: ControlUser, enabled: boolean) {
+    await api.upsertControlAccess(user.userId, { enabled });
+    notifySaved(enabled ? `${user.name}: доступ включён` : `${user.name}: доступ выключен`);
+    await load();
+  }
+
+  async function saveFlags(user: ControlUser, patch: Record<string, boolean>) {
+    await api.upsertControlAccess(user.userId, patch);
+    notifySaved("Разрешения сохранены");
+    await load();
+  }
+
+  async function linkPhone(user: ControlUser) {
+    const phone = phoneByUser[user.userId];
+    if (!phone) return;
+    const result = (await api.createControlIdentity({
+      userId: user.userId,
+      provider: "WHATSAPP",
+      phone,
+    })) as { verificationCode?: string | null };
+    if (result.verificationCode) {
+      notifySaved(`Код подтверждения: ${result.verificationCode}`);
+    } else {
+      notifySaved("Номер привязан");
+    }
+    await load();
+  }
+
+  async function applyHistory() {
+    const hist = await api.controlHistory({
+      limit: 30,
+      action: filters.action || undefined,
+      source: filters.source || undefined,
+      status: filters.status || undefined,
+    });
+    setHistory(hist);
+  }
+
+  if (!data) {
+    return (
+      <div className="panel">
+        <b>{t(locale, "settings.control")}</b>
+        {error ? <p className="error">{error}</p> : <p className="muted">{t(locale, "common.loading")}</p>}
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="panel">
+        <b>{t(locale, "settings.control")}</b>
+        <p className="muted">
+          Внешний AI (WhatsApp и другие каналы) получает данные и выполняет команды только через CRM, от имени
+          конкретного сотрудника и с его правами. Совпадение номера само по себе не является входом.
+        </p>
+        {error ? <p className="error">{error}</p> : null}
+        <label className="row" style={{ alignItems: "center", gap: 8 }}>
+          <input type="checkbox" checked={data.enabled} onChange={(e) => void toggleCompany(e.target.checked)} />
+          BasQar Control включён для компании
+        </label>
+      </div>
+      {data.users.map((user) => (
+        <div className="panel" key={user.userId}>
+          <div className="row" style={{ justifyContent: "space-between" }}>
+            <div>
+              <b>{user.name}</b>
+              <div className="muted">
+                {user.email} · {user.role}
+                {user.lastActivityAt
+                  ? ` · последняя активность ${formatDateTime(user.lastActivityAt, { timeZone: me?.user?.timezone, locale })}`
+                  : ""}
+              </div>
+            </div>
+            <button type="button" className="btn secondary" onClick={() => void toggleUser(user, !user.enabled)}>
+              {user.enabled ? "Отключить доступ" : "Включить доступ"}
+            </button>
+          </div>
+          <div className="row" style={{ flexWrap: "wrap", gap: 12 }}>
+            {(
+              [
+                ["canReadFinancialData", "Финансы"],
+                ["canReadTeamData", "Команда"],
+                ["canCreateTasks", "Задачи"],
+                ["canModifyDeals", "Сделки"],
+                ["canPerformBulkActions", "Массовые действия"],
+                ["requiresConfirmationForWrites", "Подтверждать записи"],
+              ] as const
+            ).map(([key, label]) => (
+              <label key={key} className="muted">
+                <input
+                  type="checkbox"
+                  checked={Boolean(user[key])}
+                  onChange={(e) => void saveFlags(user, { [key]: e.target.checked })}
+                />{" "}
+                {label}
+              </label>
+            ))}
+          </div>
+          {(user.identities || []).map((ident) => (
+            <div className="row" key={ident.id} style={{ justifyContent: "space-between" }}>
+              <div>
+                <b>
+                  {ident.provider} · {ident.phoneNormalized || ident.externalUserId}
+                </b>
+                <div className="muted">
+                  {ident.verified ? "подтверждён" : "ожидает подтверждения"}
+                  {ident.enabled ? "" : " · отключён"}
+                </div>
+              </div>
+              <div className="actions">
+                {!ident.verified ? (
+                  <button type="button" className="btn secondary" onClick={() => void api.verifyControlIdentity(ident.id).then(load)}>
+                    Подтвердить в CRM
+                  </button>
+                ) : null}
+                {ident.enabled ? (
+                  <button type="button" className="btn secondary" onClick={() => void api.disableControlIdentity(ident.id).then(load)}>
+                    Отключить канал
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ))}
+          <form
+            className="row"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void linkPhone(user);
+            }}
+          >
+            <input
+              placeholder="WhatsApp номер, +7…"
+              value={phoneByUser[user.userId] || ""}
+              onChange={(e) => setPhoneByUser((prev) => ({ ...prev, [user.userId]: e.target.value }))}
+            />
+            <button className="btn secondary" type="submit">
+              Привязать WhatsApp
+            </button>
+          </form>
+        </div>
+      ))}
+      <div className="panel">
+        <b>История команд</b>
+        <form
+          className="row"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void applyHistory();
+          }}
+        >
+          <input
+            placeholder="действие, GET_LEADS_STATS"
+            value={filters.action}
+            onChange={(e) => setFilters({ ...filters, action: e.target.value })}
+          />
+          <input
+            placeholder="источник, WHATSAPP"
+            value={filters.source}
+            onChange={(e) => setFilters({ ...filters, source: e.target.value })}
+          />
+          <input
+            placeholder="статус, OK"
+            value={filters.status}
+            onChange={(e) => setFilters({ ...filters, status: e.target.value })}
+          />
+          <button className="btn secondary">Найти</button>
+        </form>
+        {(history?.items || []).map((item: any) => (
+          <div className="row" key={item.id}>
+            <div>
+              <b>{item.action}</b>
+              <div className="muted">
+                {item.actor?.name || item.actor?.email || "сотрудник"}
+                {item.source ? ` · ${item.source}` : ""}
+                {item.status ? ` · ${item.status}` : ""}
+                {" · "}
+                {formatDateTime(item.createdAt, { timeZone: me?.user?.timezone, locale })}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </>
   );
 }

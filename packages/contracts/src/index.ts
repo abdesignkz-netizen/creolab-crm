@@ -7,6 +7,7 @@ export * from "./kzTaxId.ts";
 export * from "./phone.ts";
 export * from "./roles.ts";
 export * from "./schemas.ts";
+export * from "./control.ts";
 export * from "./taskBoard.ts";
 
 export const PAGE_SIZE_DEFAULT = 30;

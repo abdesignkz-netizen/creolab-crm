@@ -168,6 +168,16 @@ async function loadUser(prisma: PrismaClient, userId: string) {
   };
 }
 
+export async function authForUserInTenant(
+  prisma: PrismaClient,
+  userId: string,
+  tenantId: string,
+  sessionId = "control",
+) {
+  const loaded = await loadUser(prisma, userId);
+  return toAuth(loaded, sessionId, "web", tenantId);
+}
+
 export async function issueSession(
   prisma: PrismaClient,
   userId: string,

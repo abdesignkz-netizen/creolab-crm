@@ -539,6 +539,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
       <main className="main">
         <div className="workspace-toolbar">
           <div className="workspace-breadcrumb"><span>{pageTitle}</span></div>
+          {hasCompany && !inServiceAdmin ? <WorkspaceSearch /> : null}
           <div className="workspace-identity">
             {inServiceAdmin ? null : (
             <SupportHelpButton unread={helpUnread} onClick={() => { setHelpTicketId(null); setHelpOpen(true); }} />
@@ -928,6 +929,82 @@ function Login() {
           </div>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+function WorkspaceSearch() {
+  const navigate = useNavigate();
+  const [q, setQ] = useState("");
+  const [items, setItems] = useState<Array<{ type: string; id: string; title: string; subtitle?: string; href: string }>>([]);
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const query = q.trim();
+    if (query.length < 2) {
+      setItems([]);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void api.searchWorkspace(query).then((result: any) => {
+        if (q.trim() === query) setItems(result.items || []);
+      }).catch(() => {
+        if (q.trim() === query) setItems([]);
+      });
+    }, 220);
+    return () => window.clearTimeout(timer);
+  }, [q]);
+
+  useEffect(() => {
+    function onDoc(event: globalThis.MouseEvent) {
+      if (!boxRef.current?.contains(event.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
+
+  const typeLabel: Record<string, string> = {
+    contact: "Клиент",
+    company: "Компания",
+    deal: "Сделка",
+    inquiry: "Заявка",
+    task: "Задача",
+    conversation: "Диалог",
+  };
+
+  return (
+    <div className="workspace-search" ref={boxRef}>
+      <input
+        value={q}
+        onChange={(event) => {
+          setQ(event.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        placeholder="Поиск: клиент, телефон, сделка, заявка…"
+        aria-label="Поиск по компании"
+      />
+      {open && q.trim().length >= 2 ? (
+        <div className="workspace-search-results">
+          {items.length === 0 ? <div className="muted">Ничего не найдено</div> : null}
+          {items.map((item) => (
+            <button
+              type="button"
+              key={`${item.type}:${item.id}`}
+              className="workspace-search-item"
+              onClick={() => {
+                setOpen(false);
+                setQ("");
+                navigate(item.href);
+              }}
+            >
+              <span>{item.title}</span>
+              <span className="muted">{[typeLabel[item.type] || item.type, item.subtitle].filter(Boolean).join(" · ")}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

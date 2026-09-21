@@ -731,6 +731,15 @@ export function StatsPage() {
             <KpiCard label="Медианный чек" value={sales.medianCheckLabel || "—"} />
             <KpiCard label="Максимальная сделка" value={sales.maxCheckLabel || "—"} />
             <KpiCard label="В работе" value={sales.pipelineLabel || "—"} />
+            <KpiCard
+              label="Прогноз"
+              value={sales.weightedPipelineLabel || "—"}
+            />
+            <KpiCard label="План" value={sales.planLabel || "не задан"} />
+            <KpiCard
+              label="План / факт"
+              value={sales.planPercent != null ? `${sales.planPercent}%` : "—"}
+            />
           </div>
           <div className="stats-metric-switch">
             {(["won", "revenue"] as TrendMetric[]).map((m) => (

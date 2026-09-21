@@ -3,7 +3,7 @@ import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { requireAnalyticsAccess } from "../lib/access.ts";
 import { displayName, formatPhoneDisplay } from "./contactLabels.ts";
-import { PIPELINE_STAGES, amountNumber, formatMoney } from "./dealPipeline.ts";
+import { PIPELINE_STAGES, amountNumber, formatMoney, parseOpsSettings } from "./dealPipeline.ts";
 import {
   addDaysYmd,
   enumerateBucketKeys,
@@ -594,7 +594,7 @@ export async function getAnalyticsDashboard(prisma: PrismaClient, auth: AuthCont
   const cmp = compareRange(timeZone, compareMode, range.from, range.to, now);
   const { inquiryExtra, dealExtra } = await buildFilters(prisma, query, tid);
 
-  const [current, previous, funnel, trendInquiries, stageDurations, stage2] = await Promise.all([
+  const [current, previous, funnel, trendInquiries, stageDurations, stage2, tenantRow] = await Promise.all([
     metricBundle(prisma, tid, range.from, range.to, inquiryExtra, dealExtra),
     compareMode === "none"
       ? null
@@ -611,6 +611,7 @@ export async function getAnalyticsDashboard(prisma: PrismaClient, auth: AuthCont
         return emptyStage2();
       },
     ),
+    prisma.tenant.findUnique({ where: { id: tid }, select: { settingsJson: true } }),
   ]);
 
   const trendCompare =
@@ -773,6 +774,10 @@ export async function getAnalyticsDashboard(prisma: PrismaClient, auth: AuthCont
   };
 
   const biggestLoss = funnel.transitions.slice().sort((a, b) => b.lost - a.lost)[0] || null;
+  const ops = parseOpsSettings(tenantRow?.settingsJson);
+  const planMinor = ops.salesPlanMinor;
+  const planPercent =
+    planMinor && planMinor > 0 && current.revenueKnown ? Math.round((current.revenue / planMinor) * 100) : null;
 
   const filterLabels = [
     query.serviceCategory,
@@ -825,6 +830,9 @@ export async function getAnalyticsDashboard(prisma: PrismaClient, auth: AuthCont
       pipelineLabel: formatMoney(current.pipelineKnown ? current.pipeline : null, currency),
       weightedPipeline: current.pipelineKnown ? current.weighted : null,
       weightedPipelineLabel: formatMoney(current.pipelineKnown ? current.weighted : null, currency),
+      planMinor,
+      planLabel: formatMoney(planMinor, currency),
+      planPercent,
       cycle: {
         avgDays: cycleDays.length ? Math.round((cycleDays.reduce((a, b) => a + b, 0) / cycleDays.length) * 10) / 10 : null,
         medianDays: median(cycleDays) != null ? Math.round(median(cycleDays)! * 10) / 10 : null,

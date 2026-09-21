@@ -411,6 +411,23 @@ export const createContactSchema = z.object({
   source: z.string().trim().max(80).default("manual"),
   comment: z.string().trim().max(2000).optional(),
   companyName: z.string().trim().max(200).optional(),
+  forceCreate: z.boolean().optional(),
+});
+
+export const mergeContactsSchema = z.object({
+  keepId: z.string().uuid(),
+  mergeId: z.string().uuid(),
+});
+
+export const importContactsSchema = parseContactImportSchema;
+
+export const updateTenantOpsSchema = z.object({
+  stalledDealDays: z.number().int().min(1).max(90).optional(),
+  proposalFollowUpThresholdDays: z.number().int().min(1).max(90).optional(),
+  silenceReturnDays: z.number().int().min(1).max(180).optional(),
+  salesPlanMinor: z.number().min(0).nullable().optional(),
+  lostReasons: z.array(z.string().trim().min(1).max(80)).max(40).optional(),
+  stageSlaDays: z.record(z.string(), z.number().min(1).max(90)).optional(),
 });
 
 export const updateContactSchema = z

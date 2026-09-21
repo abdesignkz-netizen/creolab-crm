@@ -71,6 +71,41 @@ describe("CRM audit regressions", () => {
     assert.equal(flagsForDeal({ ...deal, nextAction: "Ждём решение клиента" }, DEFAULT_OPS_SETTINGS, new Date()).waitingClient, true);
   });
 
+  it("SLA and overdue next action reuse flagsForDeal without a second engine", () => {
+    const now = new Date("2026-09-21T10:00:00Z");
+    const overdue = flagsForDeal(
+      {
+        nextAction: "Позвонить",
+        nextActionAt: new Date("2026-09-20T10:00:00Z"),
+        stageEnteredAt: new Date("2026-09-10T10:00:00Z"),
+        paymentStatus: "OVERDUE",
+        stage: { systemKey: "proposal_sent" },
+        tasks: [],
+      },
+      DEFAULT_OPS_SETTINGS,
+      now,
+    );
+    assert.equal(overdue.slaStatus, "OVERDUE");
+    assert.equal(overdue.overSla, true);
+    assert.equal(overdue.overdueNextAction, true);
+    assert.equal(overdue.paymentOverdue, true);
+    const ok = flagsForDeal(
+      {
+        nextAction: "Позвонить",
+        nextActionAt: new Date("2026-09-22T10:00:00Z"),
+        stageEnteredAt: now,
+        paymentStatus: "INVOICED",
+        stage: { systemKey: "new" },
+        tasks: [],
+      },
+      DEFAULT_OPS_SETTINGS,
+      now,
+    );
+    assert.equal(ok.slaStatus, "OK");
+    assert.equal(ok.overdueNextAction, false);
+    assert.equal(ok.paymentOverdue, false);
+  });
+
   it("text search and inquiry counters honor the same source, owner and test selection", async () => {
     const contact = await prisma.contact.create({ data: { tenantId, name: "Проверка текстового поиска" } });
     await prisma.inquiry.createMany({ data: [

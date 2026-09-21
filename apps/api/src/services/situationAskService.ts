@@ -175,8 +175,8 @@ function fallbackAnswer(
 
   if (intent === "attention" || intent === "other") {
     const headline =
-      s.needsReply || s.overdueTasks || s.needsHuman || c.newInquiries
-        ? `Сейчас требуют внимания: ${s.needsReply} ждут ответа, ${s.needsHuman} диалогов без человека, ${s.overdueTasks} просроченных задач, ${c.newInquiries} новых заявок.`
+      s.needsReply || s.overdueTasks || s.needsHuman || c.newInquiries || s.overSlaDeals || s.paymentOverdue || s.noNextAction
+        ? `Сейчас требуют внимания: ${s.needsReply} ждут ответа, ${s.needsHuman} диалогов без человека, ${s.overdueTasks} просроченных задач, ${s.noNextAction ?? 0} без следующего шага, ${s.overSlaDeals ?? 0} сверх SLA, ${s.paymentOverdue ?? 0} с просроченной оплатой.`
         : "Критических действий сейчас нет — можно разобрать плановые задачи и сделки в работе.";
     const bullets = items.slice(0, 6).map((item) => ({ text: itemLabel(item), href: safeHref(item.href) }));
     return {
@@ -204,8 +204,8 @@ function fallbackAnswer(
   if (intent === "deals") {
     const deals = (overview.importantDeals || []) as Array<{ title?: string; reason?: string; href?: string }>;
     return {
-      headline: c.stalledDeals
-        ? `${c.stalledDeals} сделок зависли без активности. В работе ${c.activeDeals}.`
+      headline: c.stalledDeals || s.overSlaDeals || s.noNextAction
+        ? `${c.stalledDeals} сделок зависли. ${s.overSlaDeals ?? 0} сверх SLA. ${s.noNextAction ?? 0} без следующего шага. В работе ${c.activeDeals}.`
         : `Открытых сделок: ${c.activeDeals}. Зависших по активности нет.`,
       bullets: deals.slice(0, 6).map((deal) => ({
         text: [deal.title, deal.reason].filter(Boolean).join(" — "),

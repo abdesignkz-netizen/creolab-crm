@@ -62,6 +62,9 @@ model Tenant {
   notificationDeliveries NotificationDelivery[]
   notificationPrefs    NotificationPreference[]
   auditEvents          AuditEvent[]
+  controlAccesses      ControlAccess[]
+  controlIdentities    ControlIdentity[]
+  controlConfirmations ControlConfirmation[]
   supportSessions      SupportSession[]
   supportTickets       SupportTicket[]
   supportArticleFeedbacks SupportArticleFeedback[]
@@ -143,6 +146,8 @@ model User {
   devices              DeviceInstallation[]
   webPush              WebPushSubscription[]
   telegramBindings     TelegramBinding[]
+  controlAccesses      ControlAccess[]
+  controlIdentities    ControlIdentity[]
   platformAdmin        Boolean                @default(false)
 }
 
@@ -1481,6 +1486,76 @@ model NotificationPreference {
   tenant       Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@unique([tenantId, membershipId])
+}
+
+/// Staff access for BasQar Control (external AI command layer). Not Contact ExternalIdentity.
+model ControlAccess {
+  id                            String    @id @default(uuid())
+  tenantId                      String
+  userId                        String
+  enabled                       Boolean   @default(false)
+  allowedSources                Json      @default("[]")
+  allowedActions                Json      @default("[]")
+  canReadFinancialData          Boolean   @default(false)
+  canReadTeamData               Boolean   @default(false)
+  canCreateTasks                Boolean   @default(false)
+  canModifyDeals                Boolean   @default(false)
+  canPerformBulkActions         Boolean   @default(false)
+  requiresConfirmationForWrites Boolean   @default(true)
+  status                        String    @default("disabled")
+  lastActivityAt                DateTime?
+  createdAt                     DateTime  @default(now())
+  updatedAt                     DateTime  @updatedAt
+  tenant                        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user                          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, userId])
+  @@index([tenantId, enabled, status])
+}
+
+/// Verified external staff identity (WhatsApp number, Telegram, etc.). Phone match alone is not auth.
+model ControlIdentity {
+  id                     String    @id @default(uuid())
+  tenantId               String
+  userId                 String
+  provider               String
+  externalUserId         String
+  phoneNormalized        String?
+  verifiedAt             DateTime?
+  enabled                Boolean   @default(true)
+  verificationCodeHash   String?
+  verificationExpiresAt  DateTime?
+  metadata               Json      @default("{}")
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+  tenant                 Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user                   User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, provider, externalUserId])
+  @@index([tenantId, phoneNormalized])
+  @@index([tenantId, userId, provider])
+}
+
+model ControlConfirmation {
+  id          String    @id @default(uuid())
+  tenantId    String
+  userId      String
+  identityId  String?
+  source      String
+  action      String
+  paramsJson  Json      @default("{}")
+  summary     String
+  status      String    @default("pending")
+  requestId   String
+  expiresAt   DateTime
+  confirmedAt DateTime?
+  executedAt  DateTime?
+  resultJson  Json?
+  createdAt   DateTime  @default(now())
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, requestId])
+  @@index([tenantId, status, expiresAt])
 }
 
 model AuditEvent {

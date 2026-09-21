@@ -20,6 +20,7 @@ import {
 } from "./contactLabels.ts";
 
 import { countContactsNeedsReply, countContactsNew } from "./attentionCounts.ts";
+import { writeAudit } from "../lib/audit.ts";
 import { resolvePeriodRange, zonedYmd, type PeriodPreset } from "./periodRange.ts";
 import { inquiryInterest, loadConversationInterests } from "./contactInterestService.ts";
 import { pagination } from "./pagination.ts";
@@ -30,6 +31,26 @@ const CLOSED_INQUIRY = ["converted", "closed", "lost"];
 function requireTenant(auth: AuthContext) {
   if (!auth.activeMembership) throw new ApiError(403, "no_tenant", "Нет активной компании");
   return auth.activeMembership;
+}
+
+async function serializeDuplicateContact(prisma: PrismaClient, tenantId: string, contactId: string) {
+  const contact = await prisma.contact.findFirst({
+    where: { id: contactId, tenantId, archivedAt: null },
+    include: {
+      methods: true,
+      deals: { where: { outcome: "open" }, select: { id: true } },
+    },
+  });
+  if (!contact) return null;
+  const phone = primaryPhone(contact.methods);
+  return {
+    id: contact.id,
+    name: displayName(contact),
+    phone: phone?.rawValue || null,
+    companyName: contact.companyName,
+    activeDealsCount: contact.deals.length,
+    href: `/contacts/${contact.id}`,
+  };
 }
 
 export async function writeActivity(
@@ -749,7 +770,7 @@ export async function getContactOverview(prisma: PrismaClient, auth: AuthContext
 export async function createContact(
   prisma: PrismaClient,
   auth: AuthContext,
-  input: { name: string; phone?: string; source?: string; comment?: string; companyName?: string },
+  input: { name: string; phone?: string; source?: string; comment?: string; companyName?: string; forceCreate?: boolean },
 ) {
   const membership = requireTenant(auth);
   const tid = membership.tenantId;
@@ -766,7 +787,12 @@ export async function createContact(
       where: { tenantId: tid, type: "phone", normalizedValue: phoneNormalized },
     });
     if (existing) {
-      throw new ApiError(409, "duplicate_phone", "Клиент с таким телефоном уже есть", { phone: existing.contactId });
+      if (!input.forceCreate) {
+        const dup = await serializeDuplicateContact(prisma, tid, existing.contactId);
+        throw new ApiError(409, "duplicate_phone", "Клиент с таким телефоном уже есть", { phone: existing.contactId }, {
+          duplicates: dup ? [dup] : [],
+        });
+      }
     }
   }
   const source = String(input.source || "manual");
@@ -1147,4 +1173,230 @@ export async function listContactActivities(
 export async function listContacts(prisma: PrismaClient, auth: AuthContext) {
   const board = await listContactsBoard(prisma, auth, {});
   return board.items;
+}
+
+export async function findContactDuplicates(
+  prisma: PrismaClient,
+  auth: AuthContext,
+  input: { phone?: string; name?: string; excludeId?: string },
+) {
+  const membership = requireTenant(auth);
+  const tid = membership.tenantId;
+  const or: Prisma.ContactWhereInput[] = [];
+  if (input.phone?.trim()) {
+    const phone = validateClientPhone(input.phone, membership.tenant.defaultRegion);
+    if (phone.ok) {
+      const existing = await prisma.contactMethod.findMany({
+        where: { tenantId: tid, type: "phone", normalizedValue: phone.normalized },
+        select: { contactId: true },
+        take: 10,
+      });
+      if (existing.length) or.push({ id: { in: existing.map((item) => item.contactId) } });
+    }
+  }
+  const name = String(input.name || "").trim();
+  if (name.length >= 4) {
+    or.push({ name: { contains: name, mode: "insensitive" } });
+  }
+  if (!or.length) return { duplicates: [] as Awaited<ReturnType<typeof serializeDuplicateContact>>[] };
+  const rows = await prisma.contact.findMany({
+    where: {
+      tenantId: tid,
+      archivedAt: null,
+      ...(input.excludeId ? { id: { not: input.excludeId } } : {}),
+      OR: or,
+    },
+    include: { methods: true, deals: { where: { outcome: "open" }, select: { id: true } } },
+    take: 10,
+  });
+  return {
+    duplicates: rows.map((contact) => ({
+      id: contact.id,
+      name: displayName(contact),
+      phone: primaryPhone(contact.methods)?.rawValue || null,
+      companyName: contact.companyName,
+      activeDealsCount: contact.deals.length,
+      href: `/contacts/${contact.id}`,
+    })),
+  };
+}
+
+export async function mergeContacts(
+  prisma: PrismaClient,
+  auth: AuthContext,
+  input: { keepId: string; mergeId: string },
+) {
+  requireCompanyAdmin(auth, "Объединять клиентов может администратор или директор");
+  const membership = requireTenant(auth);
+  const tid = membership.tenantId;
+  if (input.keepId === input.mergeId) throw new ApiError(422, "invalid", "Нужны два разных клиента");
+  const [keep, source] = await Promise.all([
+    prisma.contact.findFirst({ where: { id: input.keepId, tenantId: tid } }),
+    prisma.contact.findFirst({
+      where: { id: input.mergeId, tenantId: tid },
+      include: { methods: true },
+    }),
+  ]);
+  if (!keep || !source) throw new ApiError(404, "not_found", "Клиент не найден");
+
+  await prisma.$transaction(async (tx) => {
+    const keepMethods = await tx.contactMethod.findMany({ where: { tenantId: tid, contactId: keep.id } });
+    const keepKeys = new Set(keepMethods.map((item) => `${item.type}:${item.normalizedValue}`));
+    for (const method of source.methods) {
+      const key = `${method.type}:${method.normalizedValue}`;
+      if (keepKeys.has(key)) {
+        await tx.contactMethod.delete({ where: { id: method.id } });
+        continue;
+      }
+      await tx.contactMethod.update({ where: { id: method.id }, data: { contactId: keep.id } });
+      keepKeys.add(key);
+    }
+
+    await tx.inquiry.updateMany({ where: { tenantId: tid, contactId: source.id }, data: { contactId: keep.id } });
+    await tx.deal.updateMany({ where: { tenantId: tid, contactId: source.id }, data: { contactId: keep.id } });
+    await tx.conversation.updateMany({ where: { tenantId: tid, contactId: source.id }, data: { contactId: keep.id } });
+    await tx.task.updateMany({ where: { tenantId: tid, contactId: source.id }, data: { contactId: keep.id } });
+    await tx.note.updateMany({ where: { tenantId: tid, contactId: source.id }, data: { contactId: keep.id } });
+    await tx.activity.updateMany({ where: { tenantId: tid, contactId: source.id }, data: { contactId: keep.id } });
+    await tx.externalIdentity.updateMany({ where: { tenantId: tid, contactId: source.id }, data: { contactId: keep.id } });
+    await tx.contactFact.updateMany({ where: { tenantId: tid, contactId: source.id }, data: { contactId: keep.id } });
+    await tx.contactPermission.updateMany({ where: { tenantId: tid, contactId: source.id }, data: { contactId: keep.id } });
+    await tx.agreement.updateMany({ where: { tenantId: tid, contactId: source.id }, data: { contactId: keep.id } });
+    await tx.campaignRecipient.updateMany({ where: { tenantId: tid, contactId: source.id }, data: { contactId: keep.id } });
+    await tx.incompleteIntake.updateMany({ where: { tenantId: tid, contactId: source.id }, data: { contactId: keep.id } });
+
+    const sourceCompanies = await tx.companyContact.findMany({ where: { tenantId: tid, contactId: source.id } });
+    for (const link of sourceCompanies) {
+      const exists = await tx.companyContact.findFirst({
+        where: { tenantId: tid, companyId: link.companyId, contactId: keep.id },
+      });
+      if (exists) await tx.companyContact.delete({ where: { id: link.id } });
+      else await tx.companyContact.update({ where: { id: link.id }, data: { contactId: keep.id } });
+    }
+    const sourceDealContacts = await tx.dealContact.findMany({ where: { tenantId: tid, contactId: source.id } });
+    for (const link of sourceDealContacts) {
+      const exists = await tx.dealContact.findFirst({
+        where: { tenantId: tid, dealId: link.dealId, contactId: keep.id },
+      });
+      if (exists) await tx.dealContact.delete({ where: { id: link.id } });
+      else await tx.dealContact.update({ where: { id: link.id }, data: { contactId: keep.id } });
+    }
+    const sourceTags = await tx.contactTag.findMany({ where: { tenantId: tid, contactId: source.id } });
+    for (const tag of sourceTags) {
+      const exists = await tx.contactTag.findFirst({
+        where: { tenantId: tid, contactId: keep.id, tagId: tag.tagId },
+      });
+      if (exists) await tx.contactTag.delete({ where: { id: tag.id } });
+      else await tx.contactTag.update({ where: { id: tag.id }, data: { contactId: keep.id } });
+    }
+
+    await tx.contact.update({
+      where: { id: source.id },
+      data: { archivedAt: new Date(), name: `${source.name} (объединён)` },
+    });
+    await writeActivity(tx, {
+      tenantId: tid,
+      contactId: keep.id,
+      type: "contact.merged",
+      title: "Клиенты объединены",
+      description: source.name,
+      actorType: "user",
+      actorId: auth.user.id,
+      metadata: { mergedId: source.id },
+    });
+    await writeAudit(tx, {
+      tenantId: tid,
+      actorUserId: auth.user.id,
+      action: "contact.merge",
+      entityType: "contact",
+      entityId: keep.id,
+      changes: { keepId: keep.id, mergeId: source.id, mergeName: source.name },
+    });
+  });
+
+  return getContactOverview(prisma, auth, keep.id);
+}
+
+export async function importContacts(
+  prisma: PrismaClient,
+  auth: AuthContext,
+  input: { fileName: string; contentBase64: string; mapping?: Record<string, "name" | "phone" | "company" | "email" | "service" | "comment" | "skip"> },
+) {
+  requireTenant(auth);
+  const { parseContactImportFile } = await import("./contactImportParse.ts");
+  const parsed = parseContactImportFile(input.fileName, input.contentBase64, input.mapping);
+  const created: string[] = [];
+  const skipped: Array<{ row: number; reason: string; existingId?: string }> = [];
+  const errors: Array<{ row: number; message: string }> = [];
+  for (const row of parsed.rows) {
+    const name = row.mapped.name || row.mapped.phone || "Клиент";
+    if (!row.mapped.phone && !row.mapped.name) {
+      errors.push({ row: row.rowIndex, message: "Нет имени и телефона" });
+      continue;
+    }
+    try {
+      const createdContact = await createContact(prisma, auth, {
+        name,
+        phone: row.mapped.phone,
+        companyName: row.mapped.company,
+        comment: row.mapped.comment,
+        source: "import",
+      });
+      created.push(createdContact.client.id);
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "duplicate_phone") {
+        const existingId = (err.details as { duplicates?: Array<{ id: string }> } | undefined)?.duplicates?.[0]?.id
+          || err.fieldErrors?.phone;
+        skipped.push({ row: row.rowIndex, reason: "уже есть в CRM", existingId });
+        continue;
+      }
+      errors.push({ row: row.rowIndex, message: err instanceof Error ? err.message : "Не импортировано" });
+    }
+  }
+  return {
+    created: created.length,
+    skipped: skipped.length,
+    errors: errors.length,
+    createdIds: created.slice(0, 50),
+    skippedRows: skipped.slice(0, 50),
+    errorRows: errors.slice(0, 50),
+  };
+}
+
+function csvCell(value: string | null | undefined) {
+  const text = String(value || "");
+  if (/[",\n\r]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
+  return text;
+}
+
+export async function exportContacts(prisma: PrismaClient, auth: AuthContext) {
+  const membership = requireTenant(auth);
+  const tid = membership.tenantId;
+  const ownerFilter = isManager(auth) ? { ownerMembershipId: membership.id } : {};
+  const rows = await prisma.contact.findMany({
+    where: { tenantId: tid, archivedAt: null, ...ownerFilter },
+    include: { methods: true },
+    orderBy: { lastSeenAt: "desc" },
+    take: 3000,
+  });
+  const lines = ["name,phone,email,company,status,source"];
+  for (const contact of rows) {
+    const phone = contact.methods.find((item) => item.type === "phone");
+    const email = contact.methods.find((item) => item.type === "email");
+    const source =
+      contact.attributionJson && typeof contact.attributionJson === "object"
+        ? String((contact.attributionJson as { source?: string }).source || "")
+        : "";
+    lines.push(
+      [
+        csvCell(contact.name),
+        csvCell(phone?.rawValue || phone?.normalizedValue),
+        csvCell(email?.rawValue || email?.normalizedValue),
+        csvCell(contact.companyName),
+        csvCell(contact.lifecycleStatus),
+        csvCell(source),
+      ].join(","),
+    );
+  }
+  return { filename: "clients.csv", count: rows.length, csv: `${lines.join("\n")}\n` };
 }

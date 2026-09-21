@@ -23,6 +23,7 @@ const ACTION_LABEL: Record<string, string> = {
   instruct_ai: "Поручить AI",
   open_contact: "Открыть клиента",
   create_next_action: "Задать шаг",
+  open_deal: "Открыть сделку",
 };
 
 function deltaText(value: number | null | undefined, percent?: number | null) {
@@ -489,6 +490,9 @@ export function SituationPage() {
         <SpotCard label="Просрочено" value={attention.summary.overdueTasks} to="/tasks?filter=overdue" tone="rose" icon={ICONS.clock} />
         <SpotCard label="Без шага" value={attention.summary.noNextAction ?? nextActionItems.length} to={noNextHref} tone="amber" icon={ICONS.tasks} />
         <SpotCard label="Зависли" value={attention.summary.stalledDeals} to={path("/deals", { focus: "stalled" })} tone="slate" icon={ICONS.stalled} />
+        <SpotCard label="Сверх SLA" value={attention.summary.overSlaDeals ?? 0} to={path("/deals", { focus: "over_sla" })} tone="rose" icon={ICONS.clock} />
+        <SpotCard label="Просрочена оплата" value={attention.summary.paymentOverdue ?? 0} to={path("/deals", { focus: "payment_overdue" })} tone="amber" icon={ICONS.money} />
+        <SpotCard label="Договорённости" value={attention.summary.overdueAgreements ?? 0} to={path("/today", { ...periodParams, attention: "overdue" }) + "#attention"} tone="rose" icon={ICONS.warning} />
         <SpotCard label="КП без ответа" value={attention.summary.proposalWithoutReply ?? 0} to={path("/deals", { focus: "proposal_no_reply" })} tone="violet" icon={ICONS.documents} />
         <SpotCard label="Документы" value={attention.summary.documentsToClose ?? 0} to="/documents/avr/new?filter=all" tone="sky" icon={ICONS.contract} />
         <SpotCard label="Нет контакта" value={attention.summary.noContact} to={path("/today", { ...periodParams, attention: "no_contact" }) + "#attention"} tone="slate" icon={ICONS.phone} />
@@ -579,6 +583,9 @@ export function SituationPage() {
                       if (item.nextAction === "open_contact") return navigate(`/contacts/${item.entityId}`);
                       if (item.nextAction === "create_next_action") {
                         return navigate(`/tasks?${new URLSearchParams({ ...(item.links?.contactId ? { contactId: item.links.contactId } : {}), ...(item.links?.dealId ? { dealId: item.links.dealId } : {}), ...(item.links?.inquiryId ? { inquiryId: item.links.inquiryId } : {}) })}`);
+                      }
+                      if (item.nextAction === "open_deal") {
+                        return navigate(item.href || `/deals/${item.entityId}`);
                       }
                       return navigate(item.href || "/today");
                     }}

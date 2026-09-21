@@ -250,6 +250,51 @@ export function createApiClient(options: ClientOptions) {
     },
     searchContacts: (q: string) =>
       request(`/api/v1/contacts/search?q=${encodeURIComponent(q)}`),
+    searchWorkspace: (q: string) =>
+      request(`/api/v1/search?q=${encodeURIComponent(q)}`),
+    contactDuplicates: (query: { phone?: string; name?: string; excludeId?: string } = {}) => {
+      const params = new URLSearchParams();
+      if (query.phone) params.set("phone", query.phone);
+      if (query.name) params.set("name", query.name);
+      if (query.excludeId) params.set("excludeId", query.excludeId);
+      const suffix = params.toString() ? `?${params}` : "";
+      return request(`/api/v1/contacts/duplicates${suffix}`);
+    },
+    mergeContacts: (body: { keepId: string; mergeId: string }) =>
+      request("/api/v1/contacts/merge", { method: "POST", body: JSON.stringify(body) }),
+    importContacts: (body: unknown) =>
+      request("/api/v1/contacts/import", { method: "POST", body: JSON.stringify(body) }),
+    exportContacts: () => request("/api/v1/contacts/export"),
+    workspaceOps: () => request("/api/v1/workspace/ops"),
+    updateWorkspaceOps: (body: unknown) =>
+      request("/api/v1/workspace/ops", { method: "PATCH", body: JSON.stringify(body) }),
+    workspaceAudit: (query: Record<string, string | number | undefined> = {}) => {
+      const params = new URLSearchParams();
+      Object.entries(query).forEach(([key, value]) => {
+        if (value != null && value !== "") params.set(key, String(value));
+      });
+      const suffix = params.toString() ? `?${params}` : "";
+      return request(`/api/v1/workspace/audit${suffix}`);
+    },
+    controlSettings: () => request("/api/v1/workspace/control"),
+    updateControlSettings: (body: { enabled: boolean }) =>
+      request("/api/v1/workspace/control", { method: "PATCH", body: JSON.stringify(body) }),
+    upsertControlAccess: (userId: string, body: unknown) =>
+      request(`/api/v1/workspace/control/access/${userId}`, { method: "PUT", body: JSON.stringify(body) }),
+    createControlIdentity: (body: unknown) =>
+      request("/api/v1/workspace/control/identities", { method: "POST", body: JSON.stringify(body) }),
+    verifyControlIdentity: (id: string) =>
+      request(`/api/v1/workspace/control/identities/${id}/verify`, { method: "POST" }),
+    disableControlIdentity: (id: string) =>
+      request(`/api/v1/workspace/control/identities/${id}/disable`, { method: "POST" }),
+    controlHistory: (query: Record<string, string | number | undefined> = {}) => {
+      const params = new URLSearchParams();
+      Object.entries(query).forEach(([key, value]) => {
+        if (value != null && value !== "") params.set(key, String(value));
+      });
+      const suffix = params.toString() ? `?${params}` : "";
+      return request(`/api/v1/workspace/control/history${suffix}`);
+    },
     segmentPreview: (body: unknown) =>
       request("/api/v1/contacts/segment-preview", { method: "POST", body: JSON.stringify(body) }),
     workspaceMembers: () => request("/api/v1/workspace/members"),
@@ -277,7 +322,7 @@ export function createApiClient(options: ClientOptions) {
         dateFrom?: string;
         dateTo?: string;
         basis?: "created" | "activity" | "closed";
-        focus?: "all" | "stalled" | "needs_reply" | "no_next_action" | "proposal_no_reply";
+        focus?: "all" | "stalled" | "needs_reply" | "no_next_action" | "proposal_no_reply" | "over_sla" | "payment_overdue" | "overdue_next_action";
         stage?: string;
         outcome?: string;
       } = {},
