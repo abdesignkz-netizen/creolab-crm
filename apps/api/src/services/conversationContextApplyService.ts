@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { Prisma, PrismaClient } from "@creolab/db";
+import { taskCreatorSnapshot } from "@creolab/contracts";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { writeActivity } from "./contactService.ts";
@@ -308,7 +309,12 @@ async function upsertAgreementAndTask(
     targetType: ctx.contactId ? "client" : "none",
     ownerMembershipId: auth.activeMembership?.id || null,
     dedupeKey: `task-agr:${agreement.id}`,
-    contextSnapshotJson: snapshot as unknown as Prisma.InputJsonValue,
+    contextSnapshotJson: taskCreatorSnapshot({
+      existing: snapshot,
+      createdByKind: "ai",
+      createdByMembershipId: auth.activeMembership?.id || null,
+      executorType: "USER",
+    }) as unknown as Prisma.InputJsonValue,
     sourceMessageIdsJson: sourceIds as unknown as Prisma.InputJsonValue,
     purpose: suggestion.purpose || null,
     briefingText: briefing,

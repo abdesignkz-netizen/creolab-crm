@@ -261,6 +261,28 @@ describe("role access and account settings", () => {
     assert.equal(assign.status, 403);
   });
 
+  it("менеджер не видит чужую задачу, назначенную на AI", async () => {
+    const task = await prisma.task.create({
+      data: {
+        tenantId: creolabId,
+        type: "message",
+        title: "AI задача владельца",
+        ownerMembershipId: null,
+        status: "open",
+        contextSnapshotJson: {
+          createdByMembershipId: ownerMembershipId,
+          createdByKind: "user",
+          executorType: "AI",
+        },
+      },
+    });
+    const hidden = await req(managerCookie, `/api/v1/tasks/${task.id}`);
+    assert.equal(hidden.status, 404);
+    const list = await req(managerCookie, "/api/v1/tasks");
+    assert.equal(list.status, 200);
+    assert.ok(!(list.data.items || []).some((item: { id: string }) => item.id === task.id));
+  });
+
   it("6. менеджер добавляет клиентов и компании без закрытых связанных данных", async () => {
     const contact = await req(managerCookie, "/api/v1/contacts", {
       method: "POST",

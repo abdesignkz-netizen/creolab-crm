@@ -39,7 +39,7 @@ const SECRET_KEY = /password|passwd|secret|token|cookie|authorization|bearer|jwt
 
 export function sanitizeSupportContext(raw: unknown) {
   const input = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
-  const out: Record<string, unknown> = {};
+  const out: Record<string, string> = {};
   const route = String(input.route || input.sourceRoute || "").slice(0, 240);
   if (route.startsWith("/")) out.route = route.split("#")[0];
   if (typeof input.appVersion === "string") out.appVersion = input.appVersion.slice(0, 40);

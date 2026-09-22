@@ -156,4 +156,68 @@ describe("Task targeting", () => {
     assert.equal((await second.json()).task.contactId, body.task.contactId);
   });
 
+  it("rejects AI assignee for an unsupported action", async () => {
+    const response = await fetch(`${base}/api/v1/tasks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({
+        type: "meeting",
+        title: "Позвонить клиенту",
+        targetType: "client",
+        contactId,
+        executorKind: "ai",
+      }),
+    });
+    assert.equal(response.status, 422);
+  });
+
+  it("stores creator on manual create and allows AI assignee for a sendable type", async () => {
+    const created = await fetch(`${base}/api/v1/tasks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({
+        type: "message",
+        title: "Уточнить решение",
+        targetType: "client",
+        contactId,
+        executorKind: "ai",
+      }),
+    });
+    assert.equal(created.status, 201);
+    const task = await created.json();
+    assert.equal(task.ownerMembershipId, null);
+    assert.equal((task.contextSnapshotJson || {}).executorType, "AI");
+    assert.ok((task.contextSnapshotJson || {}).createdByMembershipId);
+
+    const list = await fetch(`${base}/api/v1/tasks`, { headers: { cookie } });
+    const body = await list.json();
+    const found = body.items.find((item: { id: string }) => item.id === task.id);
+    assert.ok(found);
+    assert.equal(found.assigneeKind, "ai");
+    assert.equal(found.assigneeLabel, "AI Manager");
+    assert.equal(found.createdByKind, "user");
+    assert.ok(found.createdByLabel);
+    assert.notEqual(found.createdByLabel, "AI Manager");
+
+    const assigned = await fetch(`${base}/api/v1/tasks/${task.id}/assign`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({ membershipId: found.createdByMembershipId }),
+    });
+    assert.equal(assigned.status, 200);
+    const human = await assigned.json();
+    assert.ok(human.ownerMembershipId);
+    assert.equal((human.contextSnapshotJson || {}).executorType, "USER");
+
+    const backToAi = await fetch(`${base}/api/v1/tasks/${task.id}/assign`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({ executorKind: "ai" }),
+    });
+    assert.equal(backToAi.status, 200);
+    const aiAgain = await backToAi.json();
+    assert.equal(aiAgain.ownerMembershipId, null);
+    assert.equal((aiAgain.contextSnapshotJson || {}).executorType, "AI");
+    assert.ok((aiAgain.contextSnapshotJson || {}).createdByMembershipId);
+  });
 });

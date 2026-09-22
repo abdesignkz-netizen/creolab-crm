@@ -108,7 +108,8 @@ export async function syncWhatsAppAiManagerRegistration(
     };
   }
 
-  const webhookToken = String(registered.integration?.webhookToken || schema.webhookToken || "").trim();
+  const registeredIntegration = "integration" in registered ? registered.integration : undefined;
+  const webhookToken = String(registeredIntegration?.webhookToken || schema.webhookToken || "").trim();
   const webhookUrl = aiManagerWebhookUrl(sellerUrl, webhookToken);
   let note = "Компания зарегистрирована в общем AI Manager.";
   let webhookOk = false;

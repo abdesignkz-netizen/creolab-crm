@@ -95,6 +95,11 @@ export function mockUploadAwp(input: { xml: string; number: string }) {
       awpId: "",
       number: input.number,
       status: "" as const,
+      errors: validation.issues.map((issue) => ({
+        property: issue.path,
+        errorCode: "CONTENT_HAS_INVALID_CHARACTERS",
+        text: issue.message,
+      })),
       xml: `<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Body><v1:awpUploadResponse xmlns:v1="v1.awp"><acceptedList/><declinedList><awpUploadResult><errorList>${errors}</errorList><number>${input.number}</number></awpUploadResult></declinedList></v1:awpUploadResponse></soap:Body></soap:Envelope>`,
     };
   }

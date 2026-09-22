@@ -1,5 +1,14 @@
-import type { PrismaClient } from "@creolab/db";
-import { crmModeToSeller, taskBoardLane } from "@creolab/contracts";
+import type { Prisma, PrismaClient } from "@creolab/db";
+import {
+  crmModeToSeller,
+  isAiAssignableTaskType,
+  mergeTaskContextSnapshot,
+  taskAssigneeKind,
+  taskBoardLane,
+  taskCreatedByKind,
+  taskCreatedByLabel,
+  taskCreatorSnapshot,
+} from "@creolab/contracts";
 import { ApiError } from "../errors.ts";
 import { CALLS_ENABLED } from "../lib/featureFlags.ts";
 import type { AuthContext } from "../lib/types.ts";
@@ -133,11 +142,11 @@ function taskContextLabel(item: {
 }
 
 const TASK_STATUS_LABEL: Record<string, string> = {
-  open: "Открыта",
+  open: "К выполнению",
   in_progress: "В работе",
-  waiting: "В ожидании",
-  done: "Сделано",
-  canceled: "Отменена",
+  waiting: "Жду",
+  done: "Завершено",
+  canceled: "Отменено",
 };
 
 const OPEN_TASK_STATUSES = ["open", "in_progress", "waiting"];
@@ -195,6 +204,42 @@ const TASK_TYPE_LABEL: Record<string, string> = {
   note: "Заметка",
 };
 
+function jsonObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function membershipDisplayName(row?: { user?: { name?: string | null; email?: string | null } | null } | null) {
+  return row?.user?.name || row?.user?.email || null;
+}
+
+function taskPeopleFields(
+  item: {
+    source?: string | null;
+    type?: string | null;
+    ownerMembershipId?: string | null;
+    contextSnapshotJson?: unknown;
+    owner?: { user?: { name?: string | null; email?: string | null } | null } | null;
+  },
+  creatorById: Map<string, { user?: { name?: string | null; email?: string | null } | null }>,
+) {
+  const snap = jsonObject(item.contextSnapshotJson);
+  const createdByKind = taskCreatedByKind(item);
+  const createdByMembershipId = typeof snap.createdByMembershipId === "string" ? snap.createdByMembershipId : null;
+  let createdByLabel = taskCreatedByLabel(createdByKind);
+  if (createdByKind === "user") {
+    const named = createdByMembershipId ? membershipDisplayName(creatorById.get(createdByMembershipId)) : null;
+    createdByLabel = named || "Не указан";
+  }
+  const assigneeKind = taskAssigneeKind(item);
+  const assigneeLabel =
+    assigneeKind === "ai"
+      ? "AI Manager"
+      : membershipDisplayName(item.owner) ||
+        (item.ownerMembershipId ? membershipDisplayName(creatorById.get(item.ownerMembershipId)) : null) ||
+        "Не назначен";
+  return { createdByKind, createdByLabel, createdByMembershipId, assigneeKind, assigneeLabel };
+}
+
 function contactDisplayName(contact?: {
   name?: string | null;
   firstName?: string | null;
@@ -241,6 +286,7 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
       inquiry: { include: { contact: { include: { methods: true } } } },
       deal: { include: { stage: true, contact: { include: { methods: true } } } },
       contact: { include: { methods: true } },
+      company: { select: { id: true, name: true } },
       owner: { include: { user: true } },
       childTasks: {
         include: { contact: { include: { methods: true } } },
@@ -277,6 +323,42 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
     failedByTask.set(row.parentId, list);
   }
   const scheduledSendAtByTask = await scheduledSendByTaskIds(prisma, tid, taskIds);
+  const queuedCampaignIds = (
+    await prisma.scheduledAction.findMany({
+      where: { tenantId: tid, parentType: "campaign", type: "campaign_run", state: { in: ["scheduled", "running"] } },
+      select: { parentId: true },
+      take: 40,
+    })
+  ).map((row) => row.parentId);
+  const scheduledCampaigns = await prisma.campaign.findMany({
+    where: {
+      tenantId: tid,
+      OR: [
+        { status: "scheduled" },
+        ...(queuedCampaignIds.length ? [{ id: { in: queuedCampaignIds } }] : []),
+      ],
+    },
+    include: { recipients: { where: { status: { in: ["pending", "queued"] } }, take: 50, orderBy: { createdAt: "asc" } } },
+    take: 40,
+  });
+  const creatorIds = [
+    ...new Set(
+      [
+        ...items.map((item) => {
+          const snap = jsonObject(item.contextSnapshotJson);
+          return typeof snap.createdByMembershipId === "string" ? snap.createdByMembershipId : "";
+        }),
+        ...scheduledCampaigns.map((campaign) => campaign.createdByMembershipId || ""),
+      ].filter(Boolean),
+    ),
+  ];
+  const creatorRows = creatorIds.length
+    ? await prisma.membership.findMany({
+        where: { tenantId: tid, id: { in: creatorIds } },
+        include: { user: true },
+      })
+    : [];
+  const creatorById = new Map(creatorRows.map((row) => [row.id, row]));
 
   const rows = items.map((item) => {
     const conversation = item.conversationId ? byId.get(item.conversationId) || null : null;
@@ -313,6 +395,9 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
         `Сделка: ${item.deal.title}` + (item.deal.stage?.name ? ` · ${item.deal.stage.name}` : ""),
       );
     }
+    if (item.company?.name) {
+      aboutParts.push(`Компания: ${item.company.name}`);
+    }
     if (conversation && !item.inquiry && !item.deal) {
       aboutParts.push("Диалог WhatsApp");
     }
@@ -328,6 +413,7 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
       contextLabel: taskContextLabel({ ...item, conversation }),
       statusLabel: TASK_STATUS_LABEL[item.status] || item.status,
       typeLabel: TASK_TYPE_LABEL[item.type] || item.type,
+      ...taskPeopleFields(item, creatorById),
       assigneeName: item.owner?.user?.name || item.owner?.user?.email || null,
       whoName: contactName,
       whoPhone: phone,
@@ -374,24 +460,6 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
   });
 
   const knownCampaignIds = new Set(rows.map((row) => row.campaignId).filter(Boolean));
-  const queuedCampaignIds = (
-    await prisma.scheduledAction.findMany({
-      where: { tenantId: tid, parentType: "campaign", type: "campaign_run", state: { in: ["scheduled", "running"] } },
-      select: { parentId: true },
-      take: 40,
-    })
-  ).map((row) => row.parentId);
-  const scheduledCampaigns = await prisma.campaign.findMany({
-    where: {
-      tenantId: tid,
-      OR: [
-        { status: "scheduled" },
-        ...(queuedCampaignIds.length ? [{ id: { in: queuedCampaignIds } }] : []),
-      ],
-    },
-    include: { recipients: { where: { status: { in: ["pending", "queued"] } }, take: 50, orderBy: { createdAt: "asc" } } },
-    take: 40,
-  });
   for (const campaign of scheduledCampaigns) {
     if (knownCampaignIds.has(campaign.id)) continue;
     if (items.some((item) => item.dedupeKey === campaignTaskDedupeKey(campaign.id))) continue;
@@ -419,7 +487,11 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
       targetType: "group",
       parentTaskId: null,
       segmentSnapshotJson: { label: "Массовая рассылка", campaignId: campaign.id },
-      contextSnapshotJson: {},
+      contextSnapshotJson: taskCreatorSnapshot({
+        createdByKind: campaign.source === "ai_command" ? "ai" : "user",
+        createdByMembershipId: campaign.createdByMembershipId,
+        executorType: "USER",
+      }),
       sourceMessageIdsJson: [],
       purpose: null,
       briefingText: null,
@@ -442,11 +514,26 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
       inquiry: null,
       deal: null,
       contact: null,
+      company: null,
       owner: null,
       conversation: null,
       contextLabel: "Массовая рассылка",
-      statusLabel: "Открыта",
+      statusLabel: "К выполнению",
       typeLabel: "Массовая отправка",
+      ...taskPeopleFields(
+        {
+          source: campaign.source,
+          type: "message",
+          ownerMembershipId: campaign.createdByMembershipId,
+          contextSnapshotJson: taskCreatorSnapshot({
+            createdByKind: campaign.source === "ai_command" ? "ai" : "user",
+            createdByMembershipId: campaign.createdByMembershipId,
+            executorType: "USER",
+          }),
+          owner: null,
+        },
+        creatorById,
+      ),
       assigneeName: null,
       whoName: null,
       whoPhone: null,
@@ -462,7 +549,7 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
         id: row.id,
         title: row.displayName || row.phoneRaw || "Контакт",
         status: "open",
-        statusLabel: "Открыта",
+        statusLabel: "К выполнению",
         contactId: row.contactId,
         contactName: row.displayName,
         phone: row.phoneRaw,
@@ -495,6 +582,7 @@ export async function getTask(prisma: PrismaClient, auth: AuthContext, id: strin
       inquiry: true,
       deal: { include: { stage: true } },
       contact: { include: { methods: true } },
+      company: { select: { id: true, name: true } },
       owner: { include: { user: true } },
       agreement: true,
       childTasks: { include: { contact: true }, orderBy: { createdAt: "asc" } },
@@ -536,9 +624,20 @@ export async function getTask(prisma: PrismaClient, auth: AuthContext, id: strin
     item.contact?.methods?.find((m) => m.type === "phone") ||
     null;
   const scheduledSendAt = (await scheduledSendByTaskIds(prisma, tid, [id])).get(id) || null;
+  const creatorId = typeof jsonObject(item.contextSnapshotJson).createdByMembershipId === "string"
+    ? String(jsonObject(item.contextSnapshotJson).createdByMembershipId)
+    : "";
+  const creatorRow = creatorId
+    ? await prisma.membership.findFirst({
+        where: { tenantId: tid, id: creatorId },
+        include: { user: true },
+      })
+    : null;
+  const creatorById = new Map(creatorRow ? [[creatorRow.id, creatorRow]] : []);
 
   return {
     ...item,
+    ...taskPeopleFields(item, creatorById),
     scheduledSendAt,
     sendScheduled:
       Boolean(item.dueAt && item.dueAt.getTime() > new Date().getTime()) &&
@@ -623,9 +722,12 @@ export async function createTask(
     conversationId?: string;
     contactId?: string;
     dealId?: string;
+    companyId?: string;
     dueAt?: string;
     priority?: string;
     ownerMembershipId?: string;
+    executorKind?: "user" | "ai";
+    createdByKind?: "user" | "ai" | "system";
     targetType?: "client" | "group" | "none";
     clientIds?: string[];
     segmentSnapshot?: Record<string, unknown>;
@@ -638,11 +740,34 @@ export async function createTask(
   const tid = tenantId(auth);
   const isNote = input.type === "note";
   const targetType = isNote ? "none" : input.targetType || (input.contactId || input.clientIds?.length ? "client" : "none");
-  const ownerMembershipId = input.ownerMembershipId || auth.activeMembership?.id;
+  const assignToAi = input.executorKind === "ai";
+  if (assignToAi) {
+    if (!isAiAssignableTaskType(input.type)) {
+      throw new ApiError(422, "ai_capability", "AI Manager не выполняет этот тип задачи. Назначьте сотрудника.");
+    }
+    if (targetType === "group") {
+      throw new ApiError(422, "ai_capability", "AI Manager нельзя назначить на групповую рассылку.");
+    }
+    if (targetType !== "client") {
+      throw new ApiError(422, "ai_capability", "Для AI Manager нужна привязка к клиенту — иначе некуда отправить сообщение.");
+    }
+  }
+  const ownerMembershipId = assignToAi ? null : input.ownerMembershipId || auth.activeMembership?.id;
   if (ownerMembershipId) {
     const owner = await prisma.membership.findFirst({ where: { id: ownerMembershipId, tenantId: tid, active: true } });
     if (!owner) throw new ApiError(422, "invalid", "Ответственный не найден");
   }
+  let companyId: string | null = input.companyId || null;
+  if (companyId) {
+    const company = await prisma.company.findFirst({ where: { id: companyId, tenantId: tid, archivedAt: null } });
+    if (!company) throw new ApiError(422, "invalid", "Компания не найдена");
+  }
+  const createdByMembershipId = auth.activeMembership?.id || null;
+  const contextSnapshotJson = taskCreatorSnapshot({
+    createdByKind: input.createdByKind || "user",
+    createdByMembershipId,
+    executorType: assignToAi ? "AI" : "USER",
+  }) as Prisma.InputJsonValue;
   let dueAt: Date | null = null;
   if (input.dueAt) {
     dueAt = parseDateTimeInput(input.dueAt, auth.activeMembership?.tenant?.timezone || "Asia/Almaty");
@@ -666,9 +791,11 @@ export async function createTask(
           dueAt,
           priority: input.priority || "normal",
           ownerMembershipId,
+          companyId,
           source: "manual",
           targetType: "group",
           segmentSnapshotJson: (input.segmentSnapshot || {}) as object,
+          contextSnapshotJson,
         },
       });
 
@@ -690,6 +817,7 @@ export async function createTask(
             source: "manual",
             targetType: "client",
             parentTaskId: parent.id,
+            contextSnapshotJson,
           },
         });
       }
@@ -725,6 +853,12 @@ export async function createTask(
       if (!inquiry) throw new ApiError(422, "invalid", "Заявка не найдена");
       contactId = contactId || inquiry.contactId;
     }
+    if (dealId) {
+      const deal = await prisma.deal.findFirst({ where: { id: dealId, tenantId: tid } });
+      if (!deal) throw new ApiError(422, "invalid", "Сделка не найдена");
+      contactId = contactId || deal.contactId;
+      companyId = companyId || deal.companyId;
+    }
   }
 
   return prisma.task.create({
@@ -737,12 +871,14 @@ export async function createTask(
       conversationId,
       contactId,
       dealId,
+      companyId,
       dueAt,
       priority: input.priority || "normal",
       ownerMembershipId,
       source: "manual",
       targetType: targetType === "client" ? "client" : "none",
       segmentSnapshotJson: (input.segmentSnapshot || {}) as object,
+      contextSnapshotJson,
       dedupeKey: input.type === "process_inquiry" && inquiryId ? `inquiry-process:${inquiryId}` : null,
     },
     include: { contact: true, inquiry: true, deal: true },
@@ -840,14 +976,45 @@ export async function cancelTask(prisma: PrismaClient, auth: AuthContext, id: st
   return prisma.task.update({ where: { id }, data: { status: "canceled", completedAt: new Date() } });
 }
 
-export async function assignTask(prisma: PrismaClient, auth: AuthContext, id: string, membershipId?: string) {
+export async function assignTask(
+  prisma: PrismaClient,
+  auth: AuthContext,
+  id: string,
+  input: { membershipId?: string; executorKind?: "user" | "ai" } = {},
+) {
   requireManageTasks(auth);
-  const { tid } = await taskInTenant(prisma, auth, id);
-  const ownerId = membershipId || auth.activeMembership?.id;
+  const { tid, task } = await taskInTenant(prisma, auth, id);
+  const assignToAi = input.executorKind === "ai";
+  const snap = jsonObject(task.contextSnapshotJson);
+  if (assignToAi) {
+    if (!isAiAssignableTaskType(task.type)) {
+      throw new ApiError(422, "ai_capability", "AI Manager не выполняет этот тип задачи. Назначьте сотрудника.");
+    }
+    if (task.targetType === "group") {
+      throw new ApiError(422, "ai_capability", "AI Manager нельзя назначить на групповую рассылку.");
+    }
+    if (task.targetType !== "client" && !task.contactId) {
+      throw new ApiError(422, "ai_capability", "Для AI Manager нужна привязка к клиенту — иначе некуда отправить сообщение.");
+    }
+    return prisma.task.update({
+      where: { id },
+      data: {
+        ownerMembershipId: null,
+        contextSnapshotJson: mergeTaskContextSnapshot(snap, { executorType: "AI" }) as Prisma.InputJsonValue,
+      },
+    });
+  }
+  const ownerId = input.membershipId || auth.activeMembership?.id;
   if (!ownerId) throw new ApiError(422, "invalid", "Нет сотрудника для назначения");
   const owner = await prisma.membership.findFirst({ where: { id: ownerId, tenantId: tid, active: true } });
   if (!owner) throw new ApiError(422, "invalid", "Сотрудник не найден");
-  return prisma.task.update({ where: { id }, data: { ownerMembershipId: owner.id } });
+  return prisma.task.update({
+    where: { id },
+    data: {
+      ownerMembershipId: owner.id,
+      contextSnapshotJson: mergeTaskContextSnapshot(snap, { executorType: "USER" }) as Prisma.InputJsonValue,
+    },
+  });
 }
 
 export async function listConversations(prisma: PrismaClient, auth: AuthContext) {

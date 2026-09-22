@@ -15,7 +15,7 @@ import { assessContractReadiness, missingFieldsError } from "./contractReadiness
 import { ensureDefaultTemplate } from "./contractTemplate.ts";
 import { type ContractPdfInput } from "./contractPdf.ts";
 import { sniffWordKind, convertDocToDocx } from "./wordDocumentText.ts";
-import { DOCX_MIME, renderContractDocx } from "./contractDocx.ts";
+import { contractDocxContentHash, DOCX_MIME, renderContractDocx } from "./contractDocx.ts";
 import {
   PDF_MIME,
   ensureContractPdfAttachment,
@@ -28,6 +28,37 @@ import {
 
 const MUTABLE_STATUSES = new Set(["DRAFT", "READY_TO_SIGN"]);
 
+async function hasReusableContractSource(
+  prisma: PrismaClient,
+  tenantId: string,
+  contractId: string,
+  latest: { fileId: string | null; sha256: string | null } | null,
+  docx: Buffer,
+  renderingInputHash: string,
+) {
+  if (!latest?.fileId || !latest.sha256) return false;
+  const audit = await prisma.auditEvent.findFirst({
+    where: { tenantId, entityId: contractId, entityType: "contract", action: "contract.generate" },
+    orderBy: { createdAt: "desc" },
+  });
+  const changes = audit?.changesJson as { sha256?: unknown; sourceFileId?: unknown; renderingInputHash?: unknown } | null;
+  if (changes?.sha256 !== latest.sha256 || changes.renderingInputHash !== renderingInputHash || typeof changes.sourceFileId !== "string") return false;
+  const [source, pdf] = await Promise.all([
+    prisma.attachment.findFirst({ where: { id: changes.sourceFileId, tenantId, parentId: contractId, parentType: "contract", documentType: "contract_source" } }),
+    prisma.attachment.findFirst({ where: { id: latest.fileId, tenantId, parentId: contractId, parentType: "contract", mimeType: PDF_MIME } }),
+  ]);
+  if (!source || !pdf) return false;
+  try {
+    const [previousDocx, previousPdf] = await Promise.all([
+      readFile(resolveUploadPath(source.storageKey)), readFile(resolveUploadPath(pdf.storageKey)),
+    ]);
+    if (createHash("sha256").update(previousPdf).digest("hex") !== latest.sha256) return false;
+    return await contractDocxContentHash(previousDocx) === await contractDocxContentHash(docx);
+  } catch {
+    // Missing or damaged files must be rebuilt rather than reported as reused.
+    return false;
+  }
+}
 
 function requireTenant(auth: AuthContext) {
   if (!auth.activeMembership) throw new ApiError(403, "no_tenant", "Нет активной компании");
@@ -136,7 +167,7 @@ export async function generateContractPdfFile(
     : await ensureDefaultTemplate(prisma, tid);
 
   const company = deal.company!;
-  const contractDate = new Date();
+  const contractDate = contract.date;
   const docxInput: ContractPdfInput = {
     number: contract.number,
     date: contractDate,
@@ -169,10 +200,10 @@ export async function generateContractPdfFile(
     templateBody: template.body,
   };
   const docx = await renderContractFromTemplate(template, docxInput);
-  const pdf = await wordFileToContractPdf(docx, `${contract.number}.docx`, docxInput);
-  const sha256 = createHash("sha256").update(pdf).digest("hex");
   const latest = contract.versions[contract.versions.length - 1] || null;
-  if (latest?.sha256 === sha256 && latest.fileId) {
+  const renderingInputHash = createHash("sha256").update(JSON.stringify(docxInput)).digest("hex");
+  const reusable = await hasReusableContractSource(prisma, tid, contract.id, latest, docx, renderingInputHash);
+  if (reusable && latest?.fileId) {
     const reused = await prisma.contract.update({
       where: { id: contract.id },
       data: {
@@ -206,6 +237,8 @@ export async function generateContractPdfFile(
     };
   }
 
+  const pdf = await wordFileToContractPdf(docx, `${contract.number}.docx`, docxInput);
+  const sha256 = createHash("sha256").update(pdf).digest("hex");
   const sourceAttachment = await storeContractBytes(prisma, {
     tenantId: tid,
     parentType: "contract",
@@ -275,6 +308,7 @@ export async function generateContractPdfFile(
           version: versionRow.version,
           reused: false,
           sourceFileId: sourceAttachment.id,
+          renderingInputHash,
         },
       },
     });

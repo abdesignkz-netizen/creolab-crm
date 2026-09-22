@@ -15,6 +15,8 @@ export async function writeAudit(
     correlationId?: string | null;
   },
 ) {
+  const redacted = redactSensitive(input.changes || {}) ?? {};
+  const changesJson = JSON.parse(JSON.stringify(redacted)) as Prisma.InputJsonValue;
   await prisma.auditEvent.create({
     data: {
       tenantId: input.tenantId || null,
@@ -22,7 +24,7 @@ export async function writeAudit(
       action: input.action,
       entityType: input.entityType,
       entityId: input.entityId || null,
-      changesJson: (redactSensitive(input.changes || {}) || {}) as Prisma.InputJsonValue,
+      changesJson,
       correlationId: input.correlationId || null,
     },
   });

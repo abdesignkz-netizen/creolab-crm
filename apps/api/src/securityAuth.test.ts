@@ -63,6 +63,27 @@ describe("auth security", () => {
     assert.equal((scrubbed.nested as Record<string, unknown>).name, "ok");
   });
 
+  it("turns Decimal and Date into JSON before they reach the audit log", async () => {
+    const { Prisma } = await import("@creolab/db");
+    const amount = new Prisma.Decimal("500000");
+    const scrubbed = redactSensitive({
+      before: { offerAmountMinor: amount },
+      after: { offerAmountMinor: amount, nextActionAt: new Date("2026-09-22T01:00:00.000Z") },
+      password: "plain",
+    }) as {
+      before: { offerAmountMinor: unknown };
+      after: { offerAmountMinor: unknown; nextActionAt: unknown };
+      password: string;
+    };
+    assert.equal(scrubbed.before.offerAmountMinor, "500000");
+    assert.equal(scrubbed.after.offerAmountMinor, "500000");
+    assert.equal(scrubbed.after.nextActionAt, "2026-09-22T01:00:00.000Z");
+    assert.equal(scrubbed.password, "[REDACTED]");
+    const json = JSON.parse(JSON.stringify(scrubbed)) as { before: { offerAmountMinor: string } };
+    assert.equal(json.before.offerAmountMinor, "500000");
+    assert.equal(JSON.stringify(json).includes("constructor"), false);
+  });
+
   it("encrypts and decrypts integration secrets with AES-GCM", () => {
     const packed = encryptSecret("bridge-secret");
     assert.equal(packed.split(":").length, 3);

@@ -167,7 +167,7 @@ export async function listTenantDocuments(
       },
     },
     company: { select: { id: true, name: true } },
-  } as const;
+  } satisfies Prisma.ContractInclude & Prisma.InvoiceInclude & Prisma.ElectronicDocumentInclude;
 
   function latestEdocStatus(docs: Array<{ type: string; status: string }> | undefined, type: "AVR" | "ESF") {
     return docs?.find((row) => row.type === type)?.status || null;

@@ -3,7 +3,7 @@ import { after, before, describe, it } from "node:test";
 import { createPrismaClient } from "@creolab/db";
 import { createApp } from "./app.ts";
 import { buildContractPlaceholders } from "./services/contractPdf.ts";
-import { amountToKztWords } from "@creolab/contracts";
+import { amountToKztWords, esfMeasureUnitSymbol } from "@creolab/contracts";
 
 describe("Document field fill", () => {
   let prisma: Awaited<ReturnType<typeof createPrismaClient>>;
@@ -123,7 +123,10 @@ describe("Document field fill", () => {
     assert.equal(items.length, 2);
     assert.equal(items[0].name, "Сайт");
     assert.equal(items[0].quantity, 2);
-    assert.equal(items[0].unit, "шт");
+    assert.equal(items[0].unit, "796");
+    assert.equal(items[1].unit, "362");
+    assert.equal(esfMeasureUnitSymbol(items[0].unit), "шт");
+    assert.equal(esfMeasureUnitSymbol(items[1].unit), "мес");
     assert.equal(items[0].unitPrice, 100000);
     assert.equal(items[0].amountWithoutVat, 200000);
     assert.equal(items[0].vatRate, 12);
@@ -206,7 +209,8 @@ describe("Document field fill", () => {
     assert.equal(draft.body.invoice.items.length, 2);
     assert.equal(draft.body.invoice.items[0].name, "Сайт");
     assert.equal(draft.body.invoice.items[0].quantity, 2);
-    assert.equal(draft.body.invoice.items[0].unit, "шт");
+    assert.equal(draft.body.invoice.items[0].unit, "796");
+    assert.equal(draft.body.invoice.items[1].unit, "362");
     assert.equal(draft.body.invoice.items[0].unitPrice, 100000);
     assert.equal(draft.body.invoice.items[0].amountWithoutVat, 200000);
     assert.equal(draft.body.invoice.items[0].vatRate, 12);
@@ -251,7 +255,8 @@ describe("Document field fill", () => {
     assert.equal(draft.body.document.invoiceId, null);
     assert.equal(source.items[0].name, "Сайт");
     assert.equal(source.items[0].quantity, 2);
-    assert.equal(source.items[0].unit, "шт");
+    assert.equal(source.items[0].unit, "796");
+    assert.equal(source.items[1].unit, "362");
     assert.equal(source.items[0].amountWithoutVat, 200000);
     assert.equal(source.items[1].vatRate, 0);
     assert.equal(source.totals.amountWithoutVat, 250000);

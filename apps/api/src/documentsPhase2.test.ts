@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import { createPrismaClient } from "@creolab/db";
 import { createApp } from "./app.ts";
+import { readFile, unlink } from "node:fs/promises";
+import { resolveUploadPath } from "./lib/storage.ts";
+import { DEFAULT_CONTRACT_BODY } from "./services/contractTemplate.ts";
 
 describe("Documents phase 2", () => {
   let prisma: Awaited<ReturnType<typeof createPrismaClient>>;
@@ -150,6 +153,8 @@ describe("Documents phase 2", () => {
     const ready = await json(`/api/v1/deals/${dealId}/contract-readiness`);
     assert.equal(ready.body.ready, true);
 
+    const originalDate = new Date("2026-08-15T12:00:00.000Z");
+    await prisma.contract.update({ where: { id: contractId }, data: { date: originalDate } });
     const first = await json(`/api/v1/contracts/${contractId}/generate`, {
       method: "POST",
       body: JSON.stringify({}),
@@ -172,6 +177,10 @@ describe("Documents phase 2", () => {
       method: "POST",
       body: JSON.stringify({}),
     });
+    assert.equal(second.response.status, 200, JSON.stringify(second.body));
+    assert.equal(second.body.contract.date, originalDate.toISOString());
+    assert.equal(await prisma.contractVersion.count({ where: { contractId } }), 1);
+    assert.equal(await prisma.attachment.count({ where: { parentId: contractId, parentType: "contract" } }), 2);
     assert.equal(second.body.reused, true);
     assert.equal(second.body.contract.generatedFileId, generatedFileId);
     assert.equal(second.body.version.version, 1);
@@ -207,5 +216,38 @@ describe("Documents phase 2", () => {
     });
     assert.equal(locked.response.status, 422);
     assert.equal(locked.body.code, "contract_immutable");
+  });
+
+  it("tracks template formatting and rebuilds a missing PDF instead of reusing its id", async () => {
+    const original = await prisma.contract.findUniqueOrThrow({ where: { id: contractId } });
+    const template = await prisma.contractTemplate.create({ data: {
+      tenantId: original.tenantId, name: "Проверка повторной генерации", body: DEFAULT_CONTRACT_BODY,
+    } });
+    const contract = await prisma.contract.create({ data: {
+      tenantId: original.tenantId, dealId, companyId: original.companyId, number: `${original.number}-CACHE`,
+      templateId: template.id, date: original.date, amountWithoutVat: original.amountWithoutVat,
+      vatAmount: original.vatAmount, totalAmount: original.totalAmount,
+    } });
+    const generate = () => json(`/api/v1/contracts/${contract.id}/generate`, { method: "POST", body: "{}" });
+    const first = await generate();
+    assert.equal(first.response.status, 200, JSON.stringify(first.body));
+    const unchanged = await generate();
+    assert.equal(unchanged.body.reused, true);
+
+    await prisma.contractTemplate.update({ where: { id: template.id }, data: { body: `${DEFAULT_CONTRACT_BODY}\nДополнительное условие.` } });
+    const changed = await generate();
+    assert.equal(changed.response.status, 200, JSON.stringify(changed.body));
+    assert.equal(changed.body.reused, false);
+    assert.equal(changed.body.version.version, 2);
+
+    const file = await prisma.attachment.findUniqueOrThrow({ where: { id: changed.body.version.fileId } });
+    await unlink(resolveUploadPath(file.storageKey));
+    const repaired = await generate();
+    assert.equal(repaired.response.status, 200, JSON.stringify(repaired.body));
+    assert.equal(repaired.body.reused, false);
+    assert.notEqual(repaired.body.version.fileId, file.id);
+    const restored = await prisma.attachment.findUniqueOrThrow({ where: { id: repaired.body.version.fileId } });
+    assert.equal((await readFile(resolveUploadPath(restored.storageKey))).subarray(0, 4).toString("utf8"), "%PDF");
+    assert.equal((await generate()).body.reused, true);
   });
 });

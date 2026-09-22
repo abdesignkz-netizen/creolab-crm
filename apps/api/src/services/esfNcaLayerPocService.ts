@@ -729,7 +729,8 @@ async function uploadSignedDocument(input: {
     }
     const uploaded = mockUploadAwp({ xml: input.payload, number: input.number });
     if (!uploaded.ok) {
-        return { ok: false as const, code: "esf_upload_declined", message: formatUploadDecline("AVR", null, uploaded.errors), errors: uploaded.errors, provider: "mock" as const, externalId: "", externalStatus: "", externalNumber: "", httpStatus: 200 };
+        const errors = uploaded.errors;
+        return { ok: false as const, code: "esf_upload_declined", message: formatUploadDecline("AVR", null, errors), errors, provider: "mock" as const, externalId: "", externalStatus: "", externalNumber: "", httpStatus: 200 };
     }
     return {
       ok: true as const,

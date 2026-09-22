@@ -283,11 +283,17 @@ describe("SaaS billing catalog, requests and manual activation", () => {
     });
     assert.ok(new Date(renewed.data.expiresAt).getTime() > new Date(beforeEnd.endsAt || 0).getTime());
 
+    const expiredAt = new Date(Date.now() - 60_000);
     await prisma.tenantPlan.updateMany({
       where: { tenantId },
-      data: { endsAt: new Date(Date.now() - 60_000), status: "active" },
+      data: { endsAt: expiredAt, status: "active" },
     });
     await expireDueSubscriptions(prisma);
+    const expiryAudit = await prisma.auditEvent.findFirstOrThrow({
+      where: { tenantId, action: "subscription.expired" },
+      orderBy: { createdAt: "desc" },
+    });
+    assert.deepEqual(expiryAudit.changesJson, { endsAt: expiredAt.toISOString() });
     const expired = await req(cookie, "/api/v1/billing", { tenantId });
     assert.equal(expired.data.subscriptionStatus, "expired");
     assert.equal(expired.data.previewMode, true);

@@ -1,4 +1,5 @@
 import JSZip from "jszip";
+import { createHash } from "node:crypto";
 import {
   applyPlaceholders,
   buildContractPlaceholders,
@@ -12,6 +13,20 @@ import {
 } from "./docxTemplateFill.ts";
 
 export const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+/** Compare document parts, including styles and images, independently of ZIP timestamps. */
+export async function contractDocxContentHash(bytes: Buffer) {
+  const zip = await JSZip.loadAsync(bytes);
+  const hash = createHash("sha256");
+  for (const name of Object.keys(zip.files).sort()) {
+    const entry = zip.files[name];
+    if (entry.dir) continue;
+    const content = await entry.async("nodebuffer");
+    hash.update(JSON.stringify([name, content.length]));
+    hash.update(content);
+  }
+  return hash.digest("hex");
+}
 const DOCX_MAGIC = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
 const W_MAIN = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 

@@ -1053,6 +1053,7 @@ async function dispatchAction(action: ControlAction, ctx: DispatchCtx): Promise<
         inquiryId: asString(params.inquiryId) || undefined,
         dueAt: asString(params.dueAt) || undefined,
         ownerMembershipId: asString(params.ownerMembershipId || params.assigneeMembershipId) || undefined,
+        createdByKind: "ai",
       });
       return { id: created.id, title: created.title, status: created.status };
     }
@@ -1077,7 +1078,10 @@ async function dispatchAction(action: ControlAction, ctx: DispatchCtx): Promise<
     case "ASSIGN_TASK": {
       const id = asString(params.taskId || params.id);
       if (!id) throw new ApiError(422, "invalid", "Укажите taskId");
-      const updated = await assignTask(prisma, auth, id, asString(params.ownerMembershipId || params.membershipId) || undefined);
+      const updated = await assignTask(prisma, auth, id, {
+        membershipId: asString(params.ownerMembershipId || params.membershipId) || undefined,
+        executorKind: asString(params.executorKind) === "ai" ? "ai" : undefined,
+      });
       return { id: updated.id, ownerMembershipId: updated.ownerMembershipId };
     }
     case "CREATE_LEAD": {
@@ -1250,6 +1254,7 @@ async function dispatchAction(action: ControlAction, ctx: DispatchCtx): Promise<
             description: asString(row.description) || undefined,
             contactId: asString(row.contactId) || undefined,
             dueAt: asString(row.dueAt) || undefined,
+            createdByKind: "ai",
           }),
         );
       }

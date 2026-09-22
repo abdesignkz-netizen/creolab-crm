@@ -587,8 +587,11 @@ export function createApiClient(options: ClientOptions) {
     waitTask: (id: string) => request(`/api/v1/tasks/${id}/wait`, { method: "POST" }),
     reopenTask: (id: string) => request(`/api/v1/tasks/${id}/reopen`, { method: "POST" }),
     cancelTask: (id: string) => request(`/api/v1/tasks/${id}/cancel`, { method: "POST" }),
-    assignTask: (id: string, membershipId?: string) =>
-      request(`/api/v1/tasks/${id}/assign`, { method: "POST", body: JSON.stringify({ membershipId }) }),
+    assignTask: (id: string, membershipId?: string, opts?: { executorKind?: "user" | "ai" }) =>
+      request(`/api/v1/tasks/${id}/assign`, {
+        method: "POST",
+        body: JSON.stringify({ membershipId, executorKind: opts?.executorKind }),
+      }),
     setTaskStatus: (id: string, status: "open" | "in_progress" | "waiting" | "done" | "canceled") =>
       request(`/api/v1/tasks/${id}/status`, { method: "POST", body: JSON.stringify({ status }) }),
     conversations: (query: Record<string, string> = {}) => {

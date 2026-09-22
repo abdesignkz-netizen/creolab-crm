@@ -1,5 +1,6 @@
+import { taskCreatorSnapshot } from "@creolab/contracts";
 import { CALLS_ENABLED } from "../lib/featureFlags.ts";
-import type { PrismaClient } from "@creolab/db";
+import type { Prisma, PrismaClient } from "@creolab/db";
 import { createHash, randomUUID } from "node:crypto";
 import { copyFile, mkdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -1070,6 +1071,11 @@ export async function completeTaskWithResult(
         purpose: "Следующий шаг после результата",
         executionStatus: needsHitl ? "prepared" : "none",
         commandStatus: needsHitl ? "needs_confirmation" : "none",
+        contextSnapshotJson: taskCreatorSnapshot({
+          createdByKind: "system",
+          createdByMembershipId: auth.activeMembership?.id || null,
+          executorType: "USER",
+        }) as Prisma.InputJsonValue,
       },
     });
     if (task.contactId) {
@@ -1140,6 +1146,11 @@ export async function createNextActionFromSuggestion(
       executionStatus: ["proposal", "send_documents"].includes(input.type) ? "prepared" : "none",
       commandStatus: ["proposal", "send_documents"].includes(input.type) ? "needs_confirmation" : "none",
       purpose: "Подтверждённый следующий шаг",
+      contextSnapshotJson: taskCreatorSnapshot({
+        createdByKind: "system",
+        createdByMembershipId: auth.activeMembership?.id || null,
+        executorType: "USER",
+      }) as Prisma.InputJsonValue,
     },
   });
   if (task.contactId) {

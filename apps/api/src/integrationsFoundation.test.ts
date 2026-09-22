@@ -128,6 +128,17 @@ describe("integrations foundation", () => {
     assert.equal(res.status, 200);
     const body = await res.json();
     assert.ok(Array.isArray(body.checks));
-    assert.ok(body.checks.length >= 3);
+    assert.equal(body.integrationId, form.id);
+    assert.deepEqual(body.checks.map((check: { key: string }) => check.key), [
+      "credentials", "connected", "mapping", "events", "last_processed", "form", "endpoint",
+    ]);
+    assert.ok(body.checks.every((check: { ok: unknown; label: unknown }) => typeof check.ok === "boolean" && typeof check.label === "string"));
+    assert.equal(body.allOk, body.checks.every((check: { ok: boolean }) => check.ok));
+    assert.equal(body.checks.find((check: { key: string }) => check.key === "form").ok, true);
+
+    const otherTenant = await prisma.tenant.findFirstOrThrow({ where: { id: { not: form.tenantId } } });
+    const other = await prisma.integration.create({ data: { tenantId: otherTenant.id, type: "form", name: "Форма другой компании" } });
+    const forbidden = await fetch(`${url}/api/v1/integrations/${other.id}/health-check`, { method: "POST", headers: { cookie } });
+    assert.equal(forbidden.status, 404);
   });
 });

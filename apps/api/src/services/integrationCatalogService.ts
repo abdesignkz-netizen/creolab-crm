@@ -436,6 +436,7 @@ export async function runIntegrationHealthCheck(prisma: PrismaClient, auth: Auth
     connectionStatus: connected ? "CONNECTED" : "DISCONNECTED",
     healthStatus: health,
     healthLabel: healthLabel(health),
+    checks,
     allOk: checks.every((c) => c.ok),
   };
 }

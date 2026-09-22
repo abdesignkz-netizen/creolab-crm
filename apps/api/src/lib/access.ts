@@ -9,6 +9,7 @@ import {
   type Permission,
   type Role,
 } from "@creolab/contracts";
+import type { PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "./types.ts";
 
@@ -144,7 +145,19 @@ export function dealAccessWhere(auth: AuthContext) {
 export function taskAccessWhere(auth: AuthContext) {
   const membership = requireTenant(auth);
   if (seesAllCompanyRecords(auth)) return { tenantId: membership.tenantId };
-  return { tenantId: membership.tenantId, ownerMembershipId: membership.id };
+  return {
+    tenantId: membership.tenantId,
+    OR: [
+      { ownerMembershipId: membership.id },
+      {
+        ownerMembershipId: null,
+        contextSnapshotJson: {
+          path: ["createdByMembershipId"],
+          equals: membership.id,
+        },
+      },
+    ],
+  };
 }
 
 export function conversationAccessWhere(auth: AuthContext) {
@@ -182,12 +195,12 @@ export function requireCompanyOps(auth: AuthContext) {
   requireNotManager(auth, "Этот раздел доступен администратору и директору");
 }
 
-export function andWhere<T extends Record<string, unknown>>(base: T, extra: T | Record<string, unknown>): T {
-  return { AND: [base, extra] } as T;
+export function andWhere<T extends Record<string, unknown>>(base: T, extra: T | Record<string, unknown>) {
+  return { AND: [base, extra] };
 }
 
 export async function assertConversationReachable(
-  prisma: { conversation: { findFirst: (args: unknown) => Promise<{ id: string } | null> } },
+  prisma: Pick<PrismaClient, "conversation">,
   auth: AuthContext,
   conversationId: string,
 ) {
@@ -218,12 +231,20 @@ export function assertDealVisible(auth: AuthContext, deal: { assigneeMembershipI
   }
 }
 
-export function assertTaskVisible(auth: AuthContext, task: { ownerMembershipId: string | null } | null) {
+export function assertTaskVisible(
+  auth: AuthContext,
+  task: { ownerMembershipId: string | null; contextSnapshotJson?: unknown } | null,
+) {
   if (!task) throw new ApiError(404, "not_found", "Задача не найдена");
   if (seesAllCompanyRecords(auth)) return;
-  if (task.ownerMembershipId !== requireTenant(auth).id) {
-    throw new ApiError(404, "not_found", "Задача не найдена");
-  }
+  const me = requireTenant(auth).id;
+  if (task.ownerMembershipId === me) return;
+  const snap =
+    task.contextSnapshotJson && typeof task.contextSnapshotJson === "object" && !Array.isArray(task.contextSnapshotJson)
+      ? (task.contextSnapshotJson as Record<string, unknown>)
+      : {};
+  if (!task.ownerMembershipId && snap.createdByMembershipId === me) return;
+  throw new ApiError(404, "not_found", "Задача не найдена");
 }
 
 export function managerDealWriteFields(input: Record<string, unknown>) {

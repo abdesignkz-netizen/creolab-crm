@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Prisma, PrismaClient } from "@creolab/db";
-import { integrationEventSchema, validateClientPhone } from "@creolab/contracts";
+import { integrationEventSchema, taskCreatorSnapshot, validateClientPhone } from "@creolab/contracts";
 import { ApiError } from "../errors.ts";
 import { hmacSha256Hex, safeEqual, sha256 } from "../lib/hash.ts";
 import type { AuthContext } from "../lib/types.ts";
@@ -381,6 +381,11 @@ async function createInquiryTx(
       ownerMembershipId: args.assigneeMembershipId || null,
       source: "rule",
       dedupeKey: `inquiry-process:${inquiry.id}`,
+      contextSnapshotJson: taskCreatorSnapshot({
+        createdByKind: "ai",
+        createdByMembershipId: args.assigneeMembershipId || null,
+        executorType: "USER",
+      }) as Prisma.InputJsonValue,
     },
   });
   await writeActivity(tx, {
@@ -832,6 +837,11 @@ export async function ingestIntegrationEvent(
           ownerMembershipId: assignee,
           dedupeKey: `intake-phone:${intake.id}`,
           incompleteIntakeId: intake.id,
+          contextSnapshotJson: taskCreatorSnapshot({
+            createdByKind: "ai",
+            createdByMembershipId: assignee,
+            executorType: "USER",
+          }) as Prisma.InputJsonValue,
         },
       });
       await notify(

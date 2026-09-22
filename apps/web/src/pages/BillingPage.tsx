@@ -59,6 +59,17 @@ function formatKzt(value: number | null | undefined) {
   return `${Number(value).toLocaleString("ru-RU")} ₸`;
 }
 
+function formatDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    timeZone: "Asia/Almaty",
+  }).format(date);
+}
+
 function localQuote(planCode: string, selectedAddOns: Array<{ code: string; qty: number }>, period: "MONTHLY" | "YEARLY"): Quote {
   const plan = CATALOG_BY_CODE[planCode];
   const included = new Set((plan?.included || []).map((item) => item.code));

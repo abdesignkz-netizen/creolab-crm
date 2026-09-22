@@ -6,10 +6,9 @@ import {
   conversationsHumanWhere,
   countContactsNew,
   countVisibleConversations,
-  overdueTasksWhere,
 } from "./attentionCounts.ts";
 import { inquiryNeedsActionWhere, openIntakeWhere } from "./inquiryAttention.ts";
-import { isManager, inquiryAccessWhere, taskAccessWhere, conversationAccessWhere, dealAccessWhere } from "../lib/access.ts";
+import { isManager, inquiryAccessWhere, conversationAccessWhere, dealAccessWhere } from "../lib/access.ts";
 
 function requireTenant(auth: AuthContext) {
   if (!auth.activeMembership) throw new ApiError(403, "no_tenant", "Нет активной компании");
@@ -61,7 +60,13 @@ export async function getNavBadges(prisma: PrismaClient, auth: AuthContext) {
     countVisibleConversations(prisma, { AND: [conversationsAttentionWhere(tid), conversationAccessWhere(auth)] }),
     countVisibleConversations(prisma, { AND: [conversationsHumanWhere(tid), conversationAccessWhere(auth)] }),
     prisma.task.count({
-      where: { AND: [overdueTasksWhere(tid, now), taskAccessWhere(auth)] },
+      where: {
+        tenantId: tid,
+        parentTaskId: null,
+        ownerMembershipId: membership.id,
+        status: { in: ["open", "in_progress", "waiting"] },
+        dueAt: { lt: now },
+      },
     }),
     countContactsNew(prisma, tid),
     prisma.inquiry.count({ where: { AND: [inquiryAction, inquiryAccessWhere(auth)] } }),

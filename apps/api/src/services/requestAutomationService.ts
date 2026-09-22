@@ -1,3 +1,4 @@
+import { mergeTaskContextSnapshot } from "@creolab/contracts";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { parseAIAutomationSettings, isWithinAiSchedule, offHoursBlocksAnalysis } from "./aiAutomationSettings.ts";
 import { decideAutomationPolicy, type AutomationDecision } from "./aiAutomationPolicyService.ts";
@@ -335,7 +336,7 @@ export async function processNewRequestAutomation(
               ? "awaiting_confirm"
               : "queued"
             : "none",
-          contextSnapshotJson: {
+          contextSnapshotJson: mergeTaskContextSnapshot(processTask.contextSnapshotJson, {
             executorType: executorAi ? "AI" : "USER",
             executorId: executorAi ? "AI_MANAGER" : null,
             knownFields: analysis.knownFields,
@@ -345,7 +346,7 @@ export async function processNewRequestAutomation(
             aiStatus: nextExec,
             qualificationQuestions: analysis.qualificationQuestions,
             clientMessageDraft: analysis.clientMessageDraft,
-          } as Prisma.InputJsonValue,
+          }) as Prisma.InputJsonValue,
         },
       });
 
@@ -485,7 +486,7 @@ export async function startAiManagerForInquiry(prisma: PrismaClient, tenantId: s
     [inquiry.contact?.firstName, inquiry.contact?.lastName].filter(Boolean).join(" ") ||
     "Клиент";
 
-  async function markBlocked(code: string, message: string) {
+  const markBlocked = async (code: string, message: string) => {
     await prisma.$transaction(async (tx) => {
       if (task) {
         await tx.task.update({
@@ -493,15 +494,12 @@ export async function startAiManagerForInquiry(prisma: PrismaClient, tenantId: s
           data: {
             executionStatus: code === "AI_OUTBOUND_FAILED" ? "failed" : "needs_human",
             resultText: message,
-            contextSnapshotJson: {
-              ...(typeof task.contextSnapshotJson === "object" && task.contextSnapshotJson
-                ? (task.contextSnapshotJson as object)
-                : {}),
+            contextSnapshotJson: mergeTaskContextSnapshot(task.contextSnapshotJson, {
               executorType: "AI",
               executorId: "AI_MANAGER",
               aiStatus: code === "AI_OUTBOUND_FAILED" ? "failed" : "needs_human",
               handoffReason: code,
-            } as Prisma.InputJsonValue,
+            }) as Prisma.InputJsonValue,
           },
         });
       }
@@ -538,7 +536,7 @@ export async function startAiManagerForInquiry(prisma: PrismaClient, tenantId: s
       status: (code === "AI_OUTBOUND_FAILED" ? "failed" : "needs_human") as AiProcessStatus,
       reason: code,
     };
-  }
+  };
 
   const opened = await openWhatsAppChannelForContact(prisma, {
     tenantId,
@@ -620,7 +618,7 @@ export async function startAiManagerForInquiry(prisma: PrismaClient, tenantId: s
         data: {
           executionStatus: "in_progress",
           conversationId: conversation.id,
-          contextSnapshotJson: {
+          contextSnapshotJson: mergeTaskContextSnapshot(task.contextSnapshotJson, {
             executorType: "AI",
             executorId: "AI_MANAGER",
             knownFields: analysis.knownFields,
@@ -628,7 +626,7 @@ export async function startAiManagerForInquiry(prisma: PrismaClient, tenantId: s
             expectedOutcome: analysis.expectedOutcome,
             aiStatus: "in_progress",
             skipGreeting: Boolean(skipGreetingNote),
-          } as Prisma.InputJsonValue,
+          }) as Prisma.InputJsonValue,
         },
       });
     }
@@ -713,11 +711,11 @@ export async function handoffInquiryToHuman(
         data: {
           executionStatus: "paused",
           ownerMembershipId: opts.membershipId || inquiry.assigneeMembershipId,
-          contextSnapshotJson: {
+          contextSnapshotJson: mergeTaskContextSnapshot(inquiry.tasks[0].contextSnapshotJson, {
             executorType: "USER",
             aiStatus: "paused",
             handoffReason: opts.reason || "HUMAN_TAKEOVER",
-          } as Prisma.InputJsonValue,
+          }) as Prisma.InputJsonValue,
         },
       });
     }

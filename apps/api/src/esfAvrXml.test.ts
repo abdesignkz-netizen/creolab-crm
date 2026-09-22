@@ -259,4 +259,14 @@ describe("ESF AVR XML / official AwpV1", () => {
     assert.equal(resolveEsfProvider({ provider: "mock", nodeEnv: "test" }), "mock");
     assert.equal(resolveEsfProvider({ provider: "mock", nodeEnv: "production" }), "live");
   });
+
+  it("mock uploadAwp decline returns an errors array", () => {
+    resetEsfMock();
+    const uploaded = mockUploadAwp({ xml: "<not-awp/>", number: "AVR-BAD" });
+    assert.equal(uploaded.ok, false);
+    if (uploaded.ok) return;
+    assert.ok(uploaded.errors.length > 0);
+    assert.equal(typeof uploaded.errors[0]?.text, "string");
+    assert.doesNotThrow(() => uploaded.errors.map((row) => `${row.errorCode || ""} ${row.text || ""}`));
+  });
 });

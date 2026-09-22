@@ -199,6 +199,8 @@ export const createTaskSchema = z.object({
   dueAt: dateTimeInput.optional(),
   priority: z.enum(["low", "normal", "high"]).default("normal"),
   ownerMembershipId: z.string().uuid().optional(),
+  companyId: z.string().uuid().optional(),
+  executorKind: z.enum(["user", "ai"]).optional(),
   targetType: z.enum(["client", "group", "none"]).default("none"),
   clientIds: z.array(z.string().uuid()).max(200).optional(),
   segmentSnapshot: z.record(z.string(), z.unknown()).optional(),
@@ -380,6 +382,7 @@ export const parseContactImportSchema = z.object({
 
 export const assignTaskSchema = z.object({
   membershipId: z.string().uuid().optional(),
+  executorKind: z.enum(["user", "ai"]).optional(),
 });
 
 export const setTaskStatusSchema = z.object({

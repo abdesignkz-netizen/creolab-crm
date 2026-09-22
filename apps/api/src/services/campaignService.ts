@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { validateClientPhone } from "@creolab/contracts";
+import { validateClientPhone, taskCreatorSnapshot } from "@creolab/contracts";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import { fileStorageStatus, resolveUploadPath } from "../lib/storage.ts";
@@ -602,6 +602,11 @@ async function ensureCampaignScheduleTask(
     rawCommandText: input.campaign.rawCommandText || null,
     parsedCommandJson: payload as Prisma.InputJsonValue,
     segmentSnapshotJson: { label: "Массовая рассылка", campaignId: input.campaign.id } as Prisma.InputJsonValue,
+    contextSnapshotJson: taskCreatorSnapshot({
+      createdByKind: input.campaign.source === "ai_command" ? "ai" : "user",
+      createdByMembershipId: input.ownerMembershipId || null,
+      executorType: "USER",
+    }) as Prisma.InputJsonValue,
     completedAt: null,
     resultCode: null,
     resultText: null,
@@ -640,6 +645,7 @@ async function ensureCampaignScheduleTask(
       ownerMembershipId: shared.ownerMembershipId,
       messageDraft: recipient.messageDraft || shared.messageDraft,
       parsedCommandJson: { ...payload, recipientId: recipient.id } as Prisma.InputJsonValue,
+      contextSnapshotJson: shared.contextSnapshotJson,
     };
     const child = await prisma.task.findFirst({
       where: { tenantId: input.campaign.tenantId, dedupeKey: childKey },

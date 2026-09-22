@@ -479,7 +479,7 @@ function withBoxTableBorders(stylesXml: string, sheetXml: string, lastTableRow: 
 }
 
 function sortCellsInRows(xml: string) {
-  return xml.replace(/<row ([^>/]*)>([\s\S]*?)<\/row>/g, (all, attrs, inner) => {
+  return xml.replace(/<row ([^>/]*)>([\s\S]*?)<\/row>/g, (all: string, attrs: string, inner: string) => {
     const cells = inner.match(/<c [^>]+\/>|<c [^>]*>[\s\S]*?<\/c>/g);
     if (!cells || cells.length <= 1) return all;
     cells.sort((left, right) => {
@@ -586,7 +586,7 @@ export async function renderAvrExcel(input: { number: string; source: AvrSourceS
   const localNumber = avrLocalNumber(input.number, input.source.documentDate);
   const filename = avrExcelFileName({ number: input.number, source: input.source });
   const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load(readFileSync(avrTemplatePath()));
+  await wb.xlsx.load(Uint8Array.from(readFileSync(avrTemplatePath())).buffer);
   wb.calcProperties.fullCalcOnLoad = true;
   const ws = wb.worksheets[0];
   if (!ws) throw new ApiError(500, "avr_template_missing", "В шаблоне АВР нет листа");

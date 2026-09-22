@@ -1,4 +1,12 @@
-import { taskBoardLane, type TaskBoardLane } from "@creolab/contracts";
+import {
+  displayTaskStatus,
+  isAiAssignableTaskType,
+  taskAssigneeKind,
+  taskBoardLane,
+  taskCreatedByKind,
+  taskCreatedByLabel,
+  type TaskBoardLane,
+} from "@creolab/contracts";
 import { notifySaved } from "../components/SaveNotice";
 import { useUrlState, useRequestVersion } from "../lib/useUrlState";
 import { useEffect, useMemo, useState, type DragEvent, type FormEvent } from "react";
@@ -11,9 +19,8 @@ import { CALLS_ENABLED } from "../lib/featureFlags";
 import { CampaignMassPanel } from "./CampaignMassPanel";
 import { formatDateTimeLocalInput, formatDateTimeRu, parseDateTimeLocalInput, toDateTimeLocalValue } from "../lib/period";
 
-type Filter = "open" | "waiting" | "scheduled" | "overdue" | "mine" | "done" | "all";
-type Board = TaskBoardLane;
-type NoteFilter = "active" | "todo" | "in_progress" | "done" | "all";
+type Filter = "open" | "waiting" | "scheduled" | "overdue" | "mine" | "done" | "all" | "today";
+const AI_ASSIGNEE = "__ai__";
 type TargetMode = "client" | "group" | "none";
 type TaskStatusMark = "open" | "in_progress" | "waiting" | "done";
 
@@ -206,36 +213,41 @@ function isClosedTask(item: { status?: string }) {
   return item.status === "done" || item.status === "canceled";
 }
 
-function itemBoardLane(item: any): Board {
+function itemBoardLane(item: any): TaskBoardLane {
   if (item?.boardLane === "ai" || item?.boardLane === "managers" || item?.boardLane === "notes") {
     return item.boardLane;
   }
   return taskBoardLane(item || {});
 }
 
-const NOTE_STATUS_LABEL: Record<string, string> = {
-  open: "К выполнению",
-  in_progress: "В работе",
-  waiting: "Жду",
-  done: "Сделано",
-  canceled: "Отменена",
-};
+function createdByText(item: any) {
+  if (item?.createdByLabel) return item.createdByLabel;
+  const kind = item?.createdByKind || taskCreatedByKind(item || {});
+  return kind === "user" ? "Не указан" : taskCreatedByLabel(kind);
+}
+
+function assigneeText(item: any) {
+  if (item?.assigneeLabel) return item.assigneeLabel;
+  const kind = item?.assigneeKind || taskAssigneeKind(item || {});
+  if (kind === "ai") return "AI Manager";
+  return item.assigneeName || item.owner?.user?.name || "Не назначен";
+}
+
+function statusText(item: any) {
+  return displayTaskStatus(item?.status) || item?.statusLabel || item?.status || "";
+}
+
+function isDueToday(item: any, now: Date) {
+  if (!item?.dueAt || isClosedTask(item)) return false;
+  return new Date(item.dueAt).toDateString() === now.toDateString();
+}
 
 const NOTE_STATUS_MARKS: Array<[TaskStatusMark, string]> = [
   ["open", "К выполнению"],
   ["in_progress", "В работе"],
   ["waiting", "Жду"],
-  ["done", "Сделано"],
+  ["done", "Завершено"],
 ];
-
-function noteStatusRank(status?: string) {
-  if (status === "in_progress") return 0;
-  if (status === "open") return 1;
-  if (status === "waiting") return 2;
-  if (status === "done") return 3;
-  if (status === "canceled") return 4;
-  return 9;
-}
 
 function startOfDay(value: Date) {
   return new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime();
@@ -304,17 +316,14 @@ export function TasksPage() {
   const caps = useCapabilities();
   const [items, setItems] = useState<any[]>([]);
   const [error, setError] = useState("");
-  const [filter, setFilter] = useUrlState<Filter>("filter", "open", ["open", "waiting", "scheduled", "overdue", "mine", "done", "all"]);
-  const [board, setBoard] = useUrlState<Board>("board", "managers", ["ai", "managers", "notes"]);
-  const [noteFilter, setNoteFilter] = useUrlState<NoteFilter>("notes", "active", ["active", "todo", "in_progress", "done", "all"]);
-  const [noteTitle, setNoteTitle] = useState("");
-  const [noteDescription, setNoteDescription] = useState("");
+  const [filter, setFilter] = useUrlState<Filter>("filter", "all", ["open", "waiting", "scheduled", "overdue", "mine", "done", "all", "today"]);
   const [me, setMe] = useState<any>(null);
   const [members, setMembers] = useState<any[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [messageDraft, setMessageDraft] = useState("");
   const [editDueAt, setEditDueAt] = useState("");
+  const [editOwnerId, setEditOwnerId] = useState("");
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [taskDetail, setTaskDetail] = useState<any>(null);
   const [preview, setPreview] = useState<any>(null);
@@ -330,8 +339,8 @@ export function TasksPage() {
   const SENDABLE = new Set(["proposal", "message", "send_documents", "prepare_estimate", "follow_up", "process_inquiry"]);
   const MANUAL_COMPLETE = new Set(["call", "meeting", "payment", "wait_client", "process_inquiry", "other"]);
 
-  const [targetMode, setTargetMode] = useState<TargetMode>("client");
-  const [type, setType] = useState(CALLS_ENABLED ? "call" : "message");
+  const [targetMode, setTargetMode] = useState<TargetMode>("none");
+  const [type, setType] = useState("other");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [dueAt, setDueAt] = useState("");
@@ -355,7 +364,7 @@ export function TasksPage() {
   const [segmentTotal, setSegmentTotal] = useState(0);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [previewBusy, setPreviewBusy] = useState(false);
-  const [composeMode, setComposeMode] = useState<"command" | "manual" | "campaign">("command");
+  const [composeMode, setComposeMode] = useState<"command" | "manual" | "campaign">("manual");
   const [commandText, setCommandText] = useState("");
   const [commandDueMode, setCommandDueMode] = useState<"now" | "scheduled">("now");
   const [commandDueAt, setCommandDueAt] = useState("");
@@ -383,6 +392,14 @@ export function TasksPage() {
     pendingAttachments?: PendingAttachment[];
   }>({});
   const [cmdPendingFiles, setCmdPendingFiles] = useState<PendingAttachment[]>([]);
+  const [showExtraFilters, setShowExtraFilters] = useState(false);
+  const [extraAssignee, setExtraAssignee] = useState("");
+  const [extraCreatedBy, setExtraCreatedBy] = useState("");
+  const [extraStatus, setExtraStatus] = useState("");
+  const [extraSource, setExtraSource] = useState("");
+  const [extraLink, setExtraLink] = useState("");
+  const [extraPeriodFrom, setExtraPeriodFrom] = useState("");
+  const [extraPeriodTo, setExtraPeriodTo] = useState("");
 
   const [whatsappReady, setWhatsappReady] = useState<boolean | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
@@ -645,18 +662,31 @@ export function TasksPage() {
 
   const membershipId = me?.activeTenant?.membershipId;
   const now = new Date();
-  const boardItems = items.filter((item) => itemBoardLane(item) === board);
-  const visible = boardItems.filter((item) => {
-    if (board === "notes") {
-      if (noteFilter === "all") return true;
-      if (noteFilter === "done") return isClosedTask(item);
-      if (noteFilter === "in_progress") return item.status === "in_progress";
-      if (noteFilter === "todo") return item.status === "open";
-      return !isClosedTask(item);
-    }
+  const boardItems = items;
+  const extraFiltered = boardItems.filter((item) => {
+    if (extraAssignee === AI_ASSIGNEE && (item.assigneeKind || taskAssigneeKind(item)) !== "ai") return false;
+    if (extraAssignee && extraAssignee !== AI_ASSIGNEE && item.ownerMembershipId !== extraAssignee) return false;
+    if (extraCreatedBy && (item.createdByKind || taskCreatedByKind(item)) !== extraCreatedBy) return false;
+    if (extraStatus && item.status !== extraStatus) return false;
+    if (extraSource === "ai" || extraSource === "managers" || extraSource === "notes") {
+      if (itemBoardLane(item) !== extraSource) return false;
+    } else if (extraSource && String(item.source || "manual") !== extraSource) return false;
+    if (extraLink === "none" && (item.contactId || item.inquiryId || item.dealId || item.conversationId || item.companyId)) return false;
+    if (extraLink === "client" && !item.contactId && !item.contact?.id) return false;
+    if (extraLink === "company" && !item.companyId && !item.company?.id) return false;
+    if (extraLink === "inquiry" && !item.inquiryId) return false;
+    if (extraLink === "deal" && !item.dealId) return false;
+    if (extraLink === "conversation" && !item.conversationId) return false;
+    if (extraPeriodFrom && item.dueAt && new Date(item.dueAt).getTime() < new Date(extraPeriodFrom).getTime()) return false;
+    if (extraPeriodTo && item.dueAt && new Date(item.dueAt).getTime() > new Date(`${extraPeriodTo}T23:59:59`).getTime()) return false;
+    if ((extraPeriodFrom || extraPeriodTo) && !item.dueAt) return false;
+    return true;
+  });
+  const visible = extraFiltered.filter((item) => {
     if (filter === "all") return true;
     if (filter === "done") return isClosedTask(item);
     if (filter === "waiting") return item.status === "waiting";
+    if (filter === "today") return isDueToday(item, now);
     if (filter === "scheduled") {
       return (
         !isClosedTask(item) &&
@@ -673,16 +703,14 @@ export function TasksPage() {
       );
     }
     if (filter === "mine") {
-      return item.ownerMembershipId === membershipId && ["open", "in_progress", "waiting"].includes(item.status);
+      return (
+        item.ownerMembershipId === membershipId &&
+        (item.assigneeKind || taskAssigneeKind(item)) !== "ai" &&
+        ["open", "in_progress", "waiting"].includes(item.status)
+      );
     }
     return item.status === "open" || item.status === "in_progress";
   });
-  const noteItems = [...visible].sort((a, b) => {
-    const rank = noteStatusRank(a.status) - noteStatusRank(b.status);
-    if (rank !== 0) return rank;
-    return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
-  });
-
   const activeItems = visible.filter((item) => !isClosedTask(item));
   const doneItems = visible.filter((item) => isClosedTask(item));
   const groups = ["overdue", "today", "later", "none"].map((key) => ({
@@ -690,14 +718,22 @@ export function TasksPage() {
     items: activeItems.filter((item) => dueGroup(item, now) === key),
   }));
   const doneGroups = groupDoneByDate(doneItems, now);
-  const showActiveGroups = board !== "notes" && filter !== "done";
-  const showDoneGroups = board !== "notes" && (filter === "done" || filter === "all");
+  const showActiveGroups = filter !== "done";
+  const showDoneGroups = filter === "done" || filter === "all";
 
   async function submitTask(event: FormEvent) {
     event.preventDefault();
     try {
       if (targetMode === "client" && !selectedClient) {
         setError("Выберите клиента");
+        return;
+      }
+      if (ownerId === AI_ASSIGNEE && !isAiAssignableTaskType(type)) {
+        setError("AI Manager не выполняет этот тип задачи. Выберите «Написать», «Напомнить» или отправку документов.");
+        return;
+      }
+      if (ownerId === AI_ASSIGNEE && targetMode !== "client") {
+        setError("Для AI Manager нужна привязка к клиенту");
         return;
       }
       if (targetMode === "group" && selectedIds.length === 0) {
@@ -714,12 +750,13 @@ export function TasksPage() {
         suggestedTitle(type, targetMode, selectedClient, selectedIds.length, segmentLabel);
 
       await api.createTask({
-        type,
+        type: targetMode === "none" && !SENDABLE.has(type) ? (type === "other" ? "note" : type) : type,
         title: finalTitle,
         description: description || undefined,
         dueAt: dueAt || undefined,
         priority,
-        ownerMembershipId: ownerId || undefined,
+        ownerMembershipId: ownerId && ownerId !== AI_ASSIGNEE ? ownerId : undefined,
+        executorKind: ownerId === AI_ASSIGNEE ? "ai" : undefined,
         targetType: targetMode,
         contactId: targetMode === "client" ? selectedClient?.id : undefined,
         inquiryId: targetMode === "client" && inquiryId ? inquiryId : undefined,
@@ -759,35 +796,9 @@ export function TasksPage() {
       setSegmentTotal(0);
       setShowCreate(false);
       notifySaved("Задача создана");
-      setBoard(targetMode === "none" || type === "note" ? "notes" : "managers");
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось создать");
-    }
-  }
-
-  async function submitNote(event: FormEvent) {
-    event.preventDefault();
-    const titleText = noteTitle.trim();
-    if (!titleText) {
-      setError("Напишите, что нужно сделать");
-      return;
-    }
-    try {
-      await api.createTask({
-        type: "note",
-        title: titleText,
-        description: noteDescription.trim() || undefined,
-        targetType: "none",
-      });
-      setNoteTitle("");
-      setNoteDescription("");
-      setNoteFilter("active");
-      notifySaved("Заметка добавлена");
-      setError("");
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось добавить заметку");
     }
   }
 
@@ -813,6 +824,11 @@ export function TasksPage() {
       setTaskDetail(detail);
       setMessageDraft(resolveOutboundDraft(detail));
       setEditDueAt(detail.dueAt ? toDateTimeLocal(new Date(detail.dueAt)) : "");
+      setEditOwnerId(
+        (detail.assigneeKind || taskAssigneeKind(detail as { ownerMembershipId?: string | null; contextSnapshotJson?: unknown })) === "ai"
+          ? AI_ASSIGNEE
+          : detail.ownerMembershipId || membershipId || "",
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось открыть задачу");
     } finally {
@@ -856,9 +872,18 @@ export function TasksPage() {
     setBusy(true);
     try {
       await api.updateTask(activeTaskId, await taskEditPayload());
+      if (caps.manageTasks && editOwnerId) {
+        const assignedToAi = (taskDetail?.assigneeKind || taskAssigneeKind(taskDetail || {})) === "ai";
+        if (editOwnerId === AI_ASSIGNEE) {
+          if (!assignedToAi) await api.assignTask(activeTaskId, undefined, { executorKind: "ai" });
+        } else if (editOwnerId !== taskDetail?.ownerMembershipId) {
+          await api.assignTask(activeTaskId, editOwnerId);
+        }
+      }
       setActiveTaskId(null);
       setTaskDetail(null);
       setEditDueAt("");
+      setEditOwnerId("");
       setPreview(null);
       notifySaved("Правки задачи сохранены");
       setError("");
@@ -1162,7 +1187,6 @@ export function TasksPage() {
         setCmdPhonesUnresolved([]);
       }
       setError("");
-      setBoard("ai");
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось создать из команды");
@@ -1266,13 +1290,20 @@ export function TasksPage() {
   }
 
   const filterCounts = {
-    open: boardItems.filter((item) => item.status === "open" || item.status === "in_progress").length,
-    waiting: boardItems.filter((item) => item.status === "waiting").length,
+    all: boardItems.length,
+    mine: boardItems.filter(
+      (item) =>
+        item.ownerMembershipId === membershipId &&
+        (item.assigneeKind || taskAssigneeKind(item)) !== "ai" &&
+        ["open", "in_progress", "waiting"].includes(item.status),
+    ).length,
+    today: boardItems.filter((item) => isDueToday(item, now)).length,
     scheduled: boardItems.filter(
       (item) =>
         !isClosedTask(item) &&
         (isScheduledSend(item) || Boolean(item.dueAt && new Date(item.dueAt).getTime() > now.getTime())),
     ).length,
+    waiting: boardItems.filter((item) => item.status === "waiting").length,
     overdue: boardItems.filter(
       (item) =>
         item.dueAt &&
@@ -1281,24 +1312,12 @@ export function TasksPage() {
         item.status !== "canceled" &&
         !isScheduledSend(item),
     ).length,
-    mine: boardItems.filter(
-      (item) => item.ownerMembershipId === membershipId && ["open", "in_progress", "waiting"].includes(item.status),
-    ).length,
     done: boardItems.filter((item) => isClosedTask(item)).length,
-    all: boardItems.length,
+    open: boardItems.filter((item) => item.status === "open" || item.status === "in_progress").length,
   };
-  const boardCounts = {
-    ai: items.filter((item) => itemBoardLane(item) === "ai" && !isClosedTask(item)).length,
-    managers: items.filter((item) => itemBoardLane(item) === "managers" && !isClosedTask(item)).length,
-    notes: items.filter((item) => itemBoardLane(item) === "notes" && !isClosedTask(item)).length,
-  };
-  const noteFilterCounts = {
-    active: boardItems.filter((item) => !isClosedTask(item)).length,
-    todo: boardItems.filter((item) => item.status === "open").length,
-    in_progress: boardItems.filter((item) => item.status === "in_progress").length,
-    done: boardItems.filter((item) => isClosedTask(item)).length,
-    all: boardItems.length,
-  };
+  const extraFilterActive = Boolean(
+    extraAssignee || extraCreatedBy || extraStatus || extraSource || extraLink || extraPeriodFrom || extraPeriodTo,
+  );
   const commandWillSchedule = commandDueMode === "scheduled" && Boolean(commandDueAt);
 
   return (
@@ -1306,159 +1325,164 @@ export function TasksPage() {
       <div className="page-head">
         <div>
           <h2>Задачи</h2>
-          <p className="muted page-head-sub">
-            {board === "ai"
-              ? "Что поставил AI: обработка заявок, договорённости из WhatsApp, команды"
-              : board === "notes"
-                ? "Личные дела без клиента — отмечайте «в работе» или «сделано»"
-                : "Что нужно сделать менеджерам: звонки, сообщения, встречи, рассылки"}
-          </p>
+          <p className="muted page-head-sub">Все действия команды и AI в одном месте.</p>
         </div>
         <div className="actions">
-          {caps.manageTasks && board === "ai" ? (
+          {caps.manageTasks ? (
             <button
               type="button"
-              className={showCreate && composeMode === "command" ? "btn" : "btn secondary"}
-              {...tip("Опишите задачу своими словами — система разберёт, кому и что сделать")}
+              className={showCreate && composeMode === "manual" ? "btn" : "btn"}
+              {...tip("Создать задачу: что сделать, к чему относится, кто выполнит, срок")}
               onClick={() => {
-                setComposeMode("command");
+                setComposeMode("manual");
                 setShowCampaignPanel(false);
                 setShowCreate(true);
               }}
             >
-              Описать задачу
+              + Новая задача
             </button>
-          ) : null}
-          {caps.manageTasks && board === "managers" ? (
-            <>
-              <button
-                type="button"
-                className={showCreate && (composeMode === "campaign" || showCampaignPanel) ? "btn" : "btn secondary"}
-                {...tip("Рассылка одного сообщения или файла списку номеров / сегменту CRM")}
-                onClick={() => {
-                  setComposeMode("campaign");
-                  setShowCampaignPanel(true);
-                  setCampaignSeed({ whoMode: "phones" });
-                  setShowCreate(true);
-                }}
-              >
-                Массовая отправка
-              </button>
-              <button
-                type="button"
-                className={showCreate && composeMode === "manual" ? "btn" : "btn secondary"}
-                {...tip("Создать задачу вручную: тип, клиент, срок, текст")}
-                onClick={() => {
-                  setComposeMode("manual");
-                  setShowCampaignPanel(false);
-                  setShowCreate(true);
-                }}
-              >
-                Заполнить форму
-              </button>
-            </>
           ) : null}
         </div>
       </div>
-      <div className="actions task-board-tabs">
+      <div className="actions task-quick-filters">
         {(
           [
-            ["ai", "От AI"],
-            ["managers", "Менеджерам"],
-            ["notes", "Заметки"],
-          ] as const
-        ).map(([value, label]) => (
-          <button
-            key={value}
-            className={board === value ? "btn" : "btn secondary"}
-            {...tip(
-              value === "ai"
-                ? "Задачи, которые поставил AI"
-                : value === "managers"
-                  ? "Задачи, назначенные менеджерам"
-                  : "Что нужно сделать: как записи в заметках",
-            )}
-            onClick={() => {
-              setBoard(value);
-              setShowCreate(false);
-              setShowCampaignPanel(false);
-            }}
-          >
-            {label} · {boardCounts[value]}
-          </button>
-        ))}
-      </div>
-      {board === "notes" ? (
-        <div className="actions">
-          {(
-            [
-              ["active", "Активные"],
-              ["todo", "К выполнению"],
-              ["in_progress", "В работе"],
-              ["done", "Сделано"],
-              ["all", "Все"],
-            ] as const
-          ).map(([value, label]) => (
-            <button
-              key={value}
-              className={noteFilter === value ? "btn" : "btn secondary"}
-              {...tip(
-                value === "active"
-                  ? "Ещё не сделанные заметки"
-                  : value === "todo"
-                    ? "Пока не начаты"
-                    : value === "in_progress"
-                      ? "Сейчас в работе"
-                      : value === "done"
-                        ? "Уже сделано"
-                        : "Все заметки",
-              )}
-              onClick={() => setNoteFilter(value)}
-            >
-              {label} · {noteFilterCounts[value]}
-            </button>
-          ))}
-        </div>
-      ) : (
-      <div className="actions">
-        {(
-          [
-            ["open", "Открытые"],
-            ["waiting", "Жду"],
-            ["scheduled", "Запланировано"],
-            ["overdue", "Просроченные"],
-            ["mine", "Мои"],
-            ["done", "Сделанные"],
             ["all", "Все"],
+            ["mine", "Мои"],
+            ["today", "Сегодня"],
+            ["scheduled", "Запланированные"],
+            ["waiting", "Жду"],
+            ["overdue", "Просроченные"],
+            ["done", "Завершённые"],
           ] as const
         ).map(([value, label]) => (
           <button
             key={value}
             className={filter === value ? "btn" : "btn secondary"}
             {...tip(
-              value === "open"
-                ? "Задачи в работе прямо сейчас"
-                : value === "waiting"
-                  ? "Ждёте ответа клиента или внешней реакции"
-                  : value === "scheduled"
-                    ? "Отправка в выбранное время, не сразу"
-                    : value === "overdue"
-                    ? "Срок уже прошёл — нужно действие"
-                    : value === "mine"
-                      ? "Назначены на вас"
-                      : value === "done"
-                        ? "Что уже сделано, по датам"
-                        : "Все задачи: сначала работа, затем сделанное по датам",
+              value === "all"
+                ? "Все доступные задачи"
+                : value === "mine"
+                  ? "Назначены на вас — не те, что вы поставили другим"
+                  : value === "today"
+                    ? "Срок сегодня"
+                    : value === "scheduled"
+                      ? "Срок в будущем или запланированная отправка"
+                      : value === "waiting"
+                        ? "Ждёте ответа клиента или внешней реакции"
+                        : value === "overdue"
+                          ? "Срок уже прошёл, задача ещё не завершена"
+                          : "Что уже сделано или отменено",
             )}
             onClick={() => setFilter(value)}
           >
             {label} · {filterCounts[value]}
           </button>
         ))}
+        <button
+          type="button"
+          className={showExtraFilters || extraFilterActive ? "btn" : "btn secondary"}
+          {...tip("Исполнитель, кто поставил, статус, привязка, период, источник")}
+          onClick={() => setShowExtraFilters((open) => !open)}
+        >
+          Фильтры
+        </button>
       </div>
-      )}
+      {showExtraFilters ? (
+        <div className="panel task-extra-filters">
+          <div className="task-extra-grid">
+            <label>
+              Исполнитель
+              <select value={extraAssignee} onChange={(event) => setExtraAssignee(event.target.value)}>
+                <option value="">Все</option>
+                <option value={AI_ASSIGNEE}>AI Manager</option>
+                {members.map((member) => (
+                  <option key={member.id} value={member.id}>
+                    {member.name}
+                    {member.isMe ? " (я)" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Кто поставил
+              <select value={extraCreatedBy} onChange={(event) => setExtraCreatedBy(event.target.value)}>
+                <option value="">Все</option>
+                <option value="user">Сотрудник</option>
+                <option value="ai">AI Manager</option>
+                <option value="system">Автоматизация</option>
+              </select>
+            </label>
+            <label>
+              Статус
+              <select value={extraStatus} onChange={(event) => setExtraStatus(event.target.value)}>
+                <option value="">Все</option>
+                <option value="open">К выполнению</option>
+                <option value="in_progress">В работе</option>
+                <option value="waiting">Жду</option>
+                <option value="done">Завершено</option>
+                <option value="canceled">Отменено</option>
+              </select>
+            </label>
+            <label>
+              Связано с
+              <select value={extraLink} onChange={(event) => setExtraLink(event.target.value)}>
+                <option value="">Все</option>
+                <option value="none">Без привязки</option>
+                <option value="client">Клиент</option>
+                <option value="company">Компания</option>
+                <option value="inquiry">Заявка</option>
+                <option value="deal">Сделка</option>
+                <option value="conversation">Диалог</option>
+              </select>
+            </label>
+            <label>
+              Источник
+              <select value={extraSource} onChange={(event) => setExtraSource(event.target.value)}>
+                <option value="">Все</option>
+                <option value="ai">От AI</option>
+                <option value="managers">Команда</option>
+                <option value="notes">Без клиента</option>
+                <option value="manual">Вручную</option>
+                <option value="ai_command">Команда AI</option>
+                <option value="ai_automation">Автоматизация AI</option>
+                <option value="context_engine">Из WhatsApp</option>
+                <option value="campaign">Рассылка</option>
+                <option value="rule">Правило</option>
+              </select>
+            </label>
+            <label>
+              Срок с
+              <input type="date" value={extraPeriodFrom} onChange={(event) => setExtraPeriodFrom(event.target.value)} />
+            </label>
+            <label>
+              Срок по
+              <input type="date" value={extraPeriodTo} onChange={(event) => setExtraPeriodTo(event.target.value)} />
+            </label>
+          </div>
+          {extraFilterActive ? (
+            <div className="actions">
+              <button
+                type="button"
+                className="btn secondary"
+                onClick={() => {
+                  setExtraAssignee("");
+                  setExtraCreatedBy("");
+                  setExtraStatus("");
+                  setExtraSource("");
+                  setExtraLink("");
+                  setExtraPeriodFrom("");
+                  setExtraPeriodTo("");
+                }}
+              >
+                Сбросить фильтры
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
-      {whatsappReady === false && board !== "notes" ? (
+      {whatsappReady === false ? (
         <div className="banner warn">
           <span>
             WhatsApp-бот не подключён или недоступен. Создавать и закрывать задачи можно, а отправка сообщений/КП из задачи —
@@ -1468,37 +1492,7 @@ export function TasksPage() {
         </div>
       ) : null}
 
-      {board === "notes" && caps.manageTasks ? (
-        <form className="panel task-form task-note-compose" onSubmit={submitNote}>
-          <b>Новая заметка</b>
-          <label>
-            Что нужно сделать
-            <input
-              value={noteTitle}
-              onChange={(event) => setNoteTitle(event.target.value)}
-              placeholder="Например: подготовить смету к понедельнику"
-              maxLength={200}
-            />
-          </label>
-          <label>
-            Подробности
-            <textarea
-              value={noteDescription}
-              onChange={(event) => setNoteDescription(event.target.value)}
-              rows={2}
-              placeholder="Необязательно"
-              maxLength={2000}
-            />
-          </label>
-          <div className="actions">
-            <button className="btn" type="submit" {...tip("Сохранить как заметку со статусом «к выполнению»")}>
-              Добавить заметку
-            </button>
-          </div>
-        </form>
-      ) : null}
-
-      {board === "managers" && showCreate && (composeMode === "campaign" || showCampaignPanel) ? (
+      {showCreate && (composeMode === "campaign" || showCampaignPanel) ? (
         <CampaignMassPanel
           key={`${campaignSeed.whoMode || "phones"}-${(campaignSeed.contactIds || []).join(",")}-${(campaignSeed.phones || "").slice(0, 40)}`}
           initialPhoneText={campaignSeed.phones || ""}
@@ -1510,20 +1504,20 @@ export function TasksPage() {
           initialPendingAttachments={campaignSeed.pendingAttachments || []}
           onClose={() => {
             setShowCampaignPanel(false);
-            setComposeMode("command");
+            setComposeMode("manual");
             setCampaignSeed({});
           }}
           onScheduled={() => {
             setFilter("scheduled");
             setShowCampaignPanel(false);
-            setComposeMode("command");
+            setComposeMode("manual");
             setCampaignSeed({});
             void load();
           }}
         />
       ) : null}
 
-      {board === "ai" && showCreate && composeMode === "command" && !showCampaignPanel ? (
+      {showCreate && composeMode === "command" && !showCampaignPanel ? (
         <div className="panel task-form command-compose">
           <div className="command-compose-head">
             <div>
@@ -2132,18 +2126,65 @@ export function TasksPage() {
         </div>
       ) : null}
 
-      {board === "managers" && showCreate && composeMode === "manual" ? (
+      {showCreate && composeMode === "manual" && !showCampaignPanel ? (
       <form className="panel task-form" onSubmit={submitTask}>
         <b>Новая задача</b>
+        <p className="muted">Что нужно сделать, к чему относится, кто выполнит и когда.</p>
+        <div className="actions" style={{ marginBottom: 12 }}>
+          <button
+            type="button"
+            className="btn secondary"
+            {...tip("Опишите задачу своими словами — система разберёт, кому и что сделать")}
+            onClick={() => {
+              setComposeMode("command");
+              setShowCampaignPanel(false);
+            }}
+          >
+            Описать своими словами
+          </button>
+          <button
+            type="button"
+            className="btn secondary"
+            {...tip("Рассылка одного сообщения или файла списку номеров / сегменту CRM")}
+            onClick={() => {
+              setComposeMode("campaign");
+              setShowCampaignPanel(true);
+              setCampaignSeed({ whoMode: "phones" });
+            }}
+          >
+            Массовая отправка
+          </button>
+        </div>
 
         <label>
-          Тип
+          Что нужно сделать
+          <input
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            placeholder="Например: подготовить коммерческое предложение"
+            required
+            maxLength={200}
+          />
+        </label>
+        <label>
+          Описание / подробности
+          <textarea
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
+            rows={2}
+            placeholder="Необязательно"
+            maxLength={2000}
+          />
+        </label>
+        <label>
+          Тип действия
           <select
             value={type}
             onChange={(event) => {
-              setType(event.target.value);
-              if (!title.trim()) {
-                setTitle(suggestedTitle(event.target.value, targetMode, selectedClient, selectedIds.length, segmentLabel));
+              const next = event.target.value;
+              setType(next);
+              if (ownerId === AI_ASSIGNEE && !isAiAssignableTaskType(next)) {
+                setOwnerId(membershipId || "");
               }
             }}
           >
@@ -2157,7 +2198,7 @@ export function TasksPage() {
 
         <div className="field-block">
           <div className="muted" style={{ marginBottom: 8 }}>
-            Кому относится задача
+            Связать с
           </div>
           <div className="chip-row">
             {(
@@ -2192,7 +2233,7 @@ export function TasksPage() {
           </div>
           {targetMode === "none" ? (
             <p className="muted" style={{ marginTop: 8 }}>
-              Появится в разделе «Заметки» — как запись, что нужно сделать.
+              Внутренняя задача команды — без клиента, заявки или сделки.
             </p>
           ) : null}
         </div>
@@ -2437,19 +2478,6 @@ export function TasksPage() {
           </div>
         ) : null}
 
-        <label>
-          Название
-          <input
-            value={title}
-            onChange={(event) => setTitle(event.target.value)}
-            placeholder={suggestedTitle(type, targetMode, selectedClient, selectedIds.length, segmentLabel)}
-            required={false}
-          />
-        </label>
-        <label>
-          Описание
-          <textarea value={description} onChange={(event) => setDescription(event.target.value)} />
-        </label>
         {SENDABLE.has(type) ? (
           <label>
             Текст сообщения клиенту
@@ -2461,9 +2489,23 @@ export function TasksPage() {
           </label>
         ) : null}
         <label>
-          Ответственный
-          <select value={ownerId} onChange={(event) => setOwnerId(event.target.value)} required>
+          Исполнитель
+          <select
+            value={ownerId}
+            onChange={(event) => {
+              const next = event.target.value;
+              if (next === AI_ASSIGNEE && !isAiAssignableTaskType(type)) {
+                setType("message");
+                if (targetMode === "none") setTargetMode("client");
+              }
+              setOwnerId(next);
+            }}
+            required
+          >
             <option value="">Выберите</option>
+            {isAiAssignableTaskType(type) || ownerId === AI_ASSIGNEE ? (
+              <option value={AI_ASSIGNEE}>AI Manager</option>
+            ) : null}
             {members.map((member) => (
               <option key={member.id} value={member.id}>
                 {member.name}
@@ -2472,6 +2514,9 @@ export function TasksPage() {
             ))}
           </select>
         </label>
+        {ownerId === AI_ASSIGNEE ? (
+          <p className="muted">AI выполнит только действие, которое система уже умеет отправлять в WhatsApp.</p>
+        ) : null}
         <label>
           Срок
           <input type="datetime-local" value={dueAt} onChange={(event) => setDueAt(event.target.value)} />
@@ -2564,6 +2609,38 @@ export function TasksPage() {
             Когда выполнить
             <input type="datetime-local" value={editDueAt} onChange={(event) => setEditDueAt(event.target.value)} disabled={!caps.manageTasks} />
           </label>
+          {caps.manageTasks ? (
+            <>
+              <div>
+                <span className="muted">Поставил</span>
+                <div>{createdByText(taskDetail)}</div>
+              </div>
+            <label>
+              Исполнитель
+              <select value={editOwnerId} onChange={(event) => setEditOwnerId(event.target.value)}>
+                {isAiAssignableTaskType(taskDetail.type) || editOwnerId === AI_ASSIGNEE ? (
+                  <option value={AI_ASSIGNEE}>AI Manager</option>
+                ) : null}
+                {members.map((member) => (
+                  <option key={member.id} value={member.id}>
+                    {member.name}
+                    {member.isMe ? " (я)" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {editOwnerId === AI_ASSIGNEE ? (
+              <p className="muted">AI выполнит только действие, которое система уже умеет отправлять в WhatsApp.</p>
+            ) : null}
+            </>
+          ) : (
+            <div>
+              <span className="muted">Поставил / исполнитель</span>
+              <div>
+                {createdByText(taskDetail)} → {assigneeText(taskDetail)}
+              </div>
+            </div>
+          )}
           <label>
             Тип файла
             <select value={docType} onChange={(event) => setDocType(event.target.value)}>
@@ -2825,77 +2902,21 @@ export function TasksPage() {
 
       {visible.length === 0 ? (
         <p className="empty">
-          {board === "notes"
-            ? noteFilter === "done"
-              ? "Сделанных заметок пока нет."
-              : noteFilter === "in_progress"
-                ? "Нет заметок в работе."
-                : noteFilter === "todo"
-                  ? "Нет заметок к выполнению."
-                  : "Заметок пока нет. Добавьте, что нужно сделать."
-            : filter === "open"
-            ? "Открытых задач нет."
-            : filter === "waiting"
-              ? "Задач в ожидании нет."
-              : filter === "scheduled"
-                ? "Запланированных задач нет. Выберите «По дате и времени», чтобы отправка ушла не сразу."
-                : filter === "overdue"
+          {filter === "waiting"
+            ? "Задач в ожидании нет."
+            : filter === "scheduled"
+              ? "Запланированных задач нет."
+              : filter === "overdue"
                 ? "Просроченных задач нет."
                 : filter === "mine"
                   ? "У вас нет активных задач."
-                  : filter === "done"
-                    ? "Сделанных задач пока нет."
-                    : "Задач пока нет."}
+                  : filter === "today"
+                    ? "На сегодня задач нет."
+                    : filter === "done"
+                      ? "Завершённых задач пока нет."
+                      : "Задач пока нет."}
         </p>
       ) : null}
-
-      {board === "notes"
-        ? noteItems.map((item) => (
-            <div
-              className={`row task-row task-note-row${item.status === "in_progress" ? " task-row-progress" : ""}${
-                item.status === "done" ? " task-row-done" : ""
-              }${item.status === "canceled" ? " task-row-canceled" : ""}${item.status === "waiting" ? " task-row-waiting" : ""}`}
-              key={item.id}
-            >
-              <div className="task-row-main">
-                <div className="task-row-title">
-                  <b>{item.title}</b>
-                  <span
-                    className={`deal-flag${item.status === "done" ? " deal-flag-done" : ""}${
-                      item.status === "in_progress" ? " deal-flag-progress" : ""
-                    }`}
-                  >
-                    {NOTE_STATUS_LABEL[item.status] || item.statusLabel || item.status}
-                  </span>
-                </div>
-                {item.descriptionPreview ? <div className="task-desc muted">{item.descriptionPreview}</div> : null}
-                {caps.manageTasks ? (
-                  <div className="chip-row task-note-marks">
-                    {NOTE_STATUS_MARKS.map(([value, label]) => (
-                      <button
-                        key={value}
-                        type="button"
-                        className={item.status === value ? "chip active" : "chip"}
-                        {...tip(
-                          value === "open"
-                            ? "Ещё не начато"
-                            : value === "in_progress"
-                              ? "Сейчас делаете"
-                              : value === "waiting"
-                                ? "Ждёте кого-то или чего-то"
-                                : "Отметить сделанным",
-                        )}
-                        onClick={() => setNoteStatus(item.id, value)}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          ))
-        : null}
 
       {showActiveGroups
         ? groups.map((group) =>
@@ -2903,10 +2924,17 @@ export function TasksPage() {
           <div key={group.key}>
             <h3>{GROUP_TITLE[group.key]}</h3>
             {group.items.map((item) => (
-              <div className={`row task-row${item.overdue ? " task-row-overdue" : ""}`} key={item.id}>
+              <div className={`row task-row${item.overdue ? " task-row-overdue" : ""}${item.status === "in_progress" ? " task-row-progress" : ""}${item.status === "waiting" ? " task-row-waiting" : ""}`} key={item.id}>
                 <div className="task-row-main">
                   <div className="task-row-title">
                     <b>{item.title}</b>
+                    <span
+                      className={`deal-flag${item.status === "done" ? " deal-flag-done" : ""}${
+                        item.status === "in_progress" ? " deal-flag-progress" : ""
+                      }`}
+                    >
+                      {statusText(item)}
+                    </span>
                     {item.overdue && !isScheduledSend(item) ? <span className="deal-flag">Просрочено</span> : null}
                     {isScheduledSend(item) ? <span className="deal-flag">Отправка запланирована</span> : null}
                     {item.executionStatus === "failed" && !isScheduledSend(item) ? (
@@ -2916,22 +2944,45 @@ export function TasksPage() {
                   </div>
                   <div className="task-meta-grid">
                     <div>
-                      <span className="muted">Тип</span>
-                      <div>{item.typeLabel || TASK_TYPES.find(([id]) => id === item.type)?.[1] || item.type}</div>
-                    </div>
-                    <div>
-                      <span className="muted">Статус</span>
-                      <div>{item.statusLabel || item.status}</div>
-                    </div>
-                    <div>
                       <span className="muted">Срок</span>
                       <div>{item.dueAt ? formatDateTimeRu(item.dueAt) : "Без срока"}</div>
                     </div>
                     <div>
-                      <span className="muted">Ответственный</span>
-                      <div>{item.assigneeName || item.owner?.user?.name || "Не назначен"}</div>
+                      <span className="muted">Поставил</span>
+                      <div>{createdByText(item)}</div>
+                    </div>
+                    <div>
+                      <span className="muted">Исполнитель</span>
+                      <div>{assigneeText(item)}</div>
+                    </div>
+                    <div>
+                      <span className="muted">Статус</span>
+                      <div>{statusText(item)}</div>
                     </div>
                   </div>
+                  {caps.manageTasks && !String(item.id).startsWith("campaign:") ? (
+                    <div className="chip-row task-note-marks">
+                      {NOTE_STATUS_MARKS.map(([value, label]) => (
+                        <button
+                          key={value}
+                          type="button"
+                          className={item.status === value ? "chip active" : "chip"}
+                          {...tip(
+                            value === "open"
+                              ? "Вернуть к выполнению"
+                              : value === "in_progress"
+                                ? "Взять в работу"
+                                : value === "waiting"
+                                  ? "Жду ответа"
+                                  : "Завершить",
+                          )}
+                          onClick={() => setNoteStatus(item.id, value)}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
                   <div className="task-who">
                     <span className="muted">Кому</span>
                     <div>
@@ -2984,10 +3035,7 @@ export function TasksPage() {
                       </div>
                     </div>
                   ) : null}
-                  {item.descriptionPreview ? (
-                    <div className="task-desc muted">Описание: {item.descriptionPreview}</div>
-                  ) : null}
-                  {item.messagePreview ? (
+                  {item.messagePreview && SENDABLE.has(item.type) ? (
                     <div className="task-desc muted">Сообщение: {item.messagePreview}</div>
                   ) : null}
                   {item.briefingText || item.purpose || item.source === "context_engine" ? (
@@ -3157,13 +3205,13 @@ export function TasksPage() {
                           С результатом
                         </button>
                       ) : null}
-                      {item.status === "open" ? (
+                      {item.status === "open" || item.status === "in_progress" ? (
                         <button
                           className="btn secondary"
-                          {...tip("Отложить: ждёте ответа клиента. Задача уйдёт во вкладку «Жду»")}
+                          {...tip("Отложить: ждёте ответа клиента. Задача уйдёт в «Жду»")}
                           onClick={() => api.waitTask(item.id).then(load).catch((err) => setError(err.message))}
                         >
-                          Жду ответа
+                          Жду
                         </button>
                       ) : null}
                       {item.status === "waiting" ? (
@@ -3186,7 +3234,7 @@ export function TasksPage() {
                             .catch((err) => setError(err instanceof Error ? err.message : "Нельзя закрыть"))
                         }
                       >
-                        Готово
+                        Завершить
                       </button>
                       <button
                         className="btn danger"
@@ -3197,7 +3245,7 @@ export function TasksPage() {
                       </button>
                     </>
                   ) : (
-                    <span className="muted">{item.statusLabel || item.status}</span>
+                    <span className="muted">{statusText(item)}</span>
                   )}
                 </div>
               </div>
@@ -3227,12 +3275,8 @@ export function TasksPage() {
                       </div>
                       <div className="task-meta-grid">
                         <div>
-                          <span className="muted">Тип</span>
-                          <div>{item.typeLabel || TASK_TYPES.find(([id]) => id === item.type)?.[1] || item.type}</div>
-                        </div>
-                        <div>
                           <span className="muted">Результат</span>
-                          <div>{result || item.statusLabel || "Сделано"}</div>
+                          <div>{result || statusText(item) || "Завершено"}</div>
                         </div>
                         <div>
                           <span className="muted">Когда</span>
@@ -3243,8 +3287,12 @@ export function TasksPage() {
                           </div>
                         </div>
                         <div>
-                          <span className="muted">Ответственный</span>
-                          <div>{item.assigneeName || item.owner?.user?.name || "Не назначен"}</div>
+                          <span className="muted">Поставил</span>
+                          <div>{createdByText(item)}</div>
+                        </div>
+                        <div>
+                          <span className="muted">Исполнитель</span>
+                          <div>{assigneeText(item)}</div>
                         </div>
                       </div>
                       <div className="task-who">

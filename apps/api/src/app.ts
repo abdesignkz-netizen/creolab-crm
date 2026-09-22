@@ -1811,7 +1811,7 @@ export function createApp(prisma: PrismaClient) {
 
   app.post("/api/v1/tasks/:id/assign", json, async (req, res) => {
     const input = assignTaskSchema.parse(req.body || {});
-    res.json(await assignTask(prisma, await requireAuth(req), req.params.id, input.membershipId));
+    res.json(await assignTask(prisma, await requireAuth(req), req.params.id, input));
   });
 
   app.post("/api/v1/tasks/:id/status", json, async (req, res) => {

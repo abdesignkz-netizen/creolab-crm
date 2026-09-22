@@ -744,57 +744,59 @@ export async function updateDeal(
     }
   }
 
-  await prisma.deal.update({
-    where: { id: dealId },
-    data: {
-      ...(input.title != null ? { title: String(input.title) } : {}),
-      ...(input.description !== undefined ? { description: input.description as string | null } : {}),
-      ...(input.offerAmountMinor !== undefined
-        ? {
-            offerAmountMinor:
-              input.offerAmountMinor == null ? null : Number(input.offerAmountMinor),
-          }
-        : {}),
-      ...(input.currency ? { currency: String(input.currency) } : {}),
-      ...(probability != null ? { probability } : {}),
-      ...(paymentStatus ? { paymentStatus } : {}),
-      ...(input.fulfillmentStatus ? { fulfillmentStatus: String(input.fulfillmentStatus) } : {}),
-      ...(input.nextAction !== undefined ? { nextAction: input.nextAction as string | null } : {}),
-      ...(input.nextActionAt !== undefined
-        ? { nextActionAt: input.nextActionAt ? new Date(String(input.nextActionAt)) : null }
-        : {}),
-      ...(input.expectedCloseAt !== undefined
-        ? { expectedCloseAt: input.expectedCloseAt ? new Date(String(input.expectedCloseAt)) : null }
-        : {}),
-      ...(input.assigneeMembershipId !== undefined
-        ? { assigneeMembershipId: input.assigneeMembershipId as string | null }
-        : {}),
-      ...(input.companyId !== undefined ? { companyId } : {}),
-      version: { increment: 1 },
-    },
-  });
-  await writeAudit(prisma, {
-    tenantId: tid,
-    actorUserId: auth.user.id,
-    action: "deal.update",
-    entityType: "deal",
-    entityId: dealId,
-    changes: {
-      before: {
-        offerAmountMinor: deal.offerAmountMinor,
-        probability: deal.probability,
-        nextAction: deal.nextAction,
-        nextActionAt: deal.nextActionAt,
-        paymentStatus: deal.paymentStatus,
+  await prisma.$transaction(async (tx) => {
+    await tx.deal.update({
+      where: { id: dealId },
+      data: {
+        ...(input.title != null ? { title: String(input.title) } : {}),
+        ...(input.description !== undefined ? { description: input.description as string | null } : {}),
+        ...(input.offerAmountMinor !== undefined
+          ? {
+              offerAmountMinor:
+                input.offerAmountMinor == null ? null : Number(input.offerAmountMinor),
+            }
+          : {}),
+        ...(input.currency ? { currency: String(input.currency) } : {}),
+        ...(probability != null ? { probability } : {}),
+        ...(paymentStatus ? { paymentStatus } : {}),
+        ...(input.fulfillmentStatus ? { fulfillmentStatus: String(input.fulfillmentStatus) } : {}),
+        ...(input.nextAction !== undefined ? { nextAction: input.nextAction as string | null } : {}),
+        ...(input.nextActionAt !== undefined
+          ? { nextActionAt: input.nextActionAt ? new Date(String(input.nextActionAt)) : null }
+          : {}),
+        ...(input.expectedCloseAt !== undefined
+          ? { expectedCloseAt: input.expectedCloseAt ? new Date(String(input.expectedCloseAt)) : null }
+          : {}),
+        ...(input.assigneeMembershipId !== undefined
+          ? { assigneeMembershipId: input.assigneeMembershipId as string | null }
+          : {}),
+        ...(input.companyId !== undefined ? { companyId } : {}),
+        version: { increment: 1 },
       },
-      after: {
-        offerAmountMinor: input.offerAmountMinor !== undefined ? input.offerAmountMinor : deal.offerAmountMinor,
-        probability: probability ?? deal.probability,
-        nextAction: input.nextAction !== undefined ? input.nextAction : deal.nextAction,
-        nextActionAt: input.nextActionAt !== undefined ? input.nextActionAt : deal.nextActionAt,
-        paymentStatus: paymentStatus || deal.paymentStatus,
+    });
+    await writeAudit(tx, {
+      tenantId: tid,
+      actorUserId: auth.user.id,
+      action: "deal.update",
+      entityType: "deal",
+      entityId: dealId,
+      changes: {
+        before: {
+          offerAmountMinor: deal.offerAmountMinor,
+          probability: deal.probability,
+          nextAction: deal.nextAction,
+          nextActionAt: deal.nextActionAt,
+          paymentStatus: deal.paymentStatus,
+        },
+        after: {
+          offerAmountMinor: input.offerAmountMinor !== undefined ? input.offerAmountMinor : deal.offerAmountMinor,
+          probability: probability ?? deal.probability,
+          nextAction: input.nextAction !== undefined ? input.nextAction : deal.nextAction,
+          nextActionAt: input.nextActionAt !== undefined ? input.nextActionAt : deal.nextActionAt,
+          paymentStatus: paymentStatus || deal.paymentStatus,
+        },
       },
-    },
+    });
   });
 
   return getDeal(prisma, auth, dealId);
