@@ -475,36 +475,27 @@ export function SituationPage() {
         </div>
       ) : null}
 
-      <div className="dash-controls">
-        <div className="sit-toolbar">
-          <div className="sit-toolbar-side">
-            <div className="segmented sit-scope">
-              {(
-                [
-                  ["all", "Все"],
-                  ["mine", "Мои"],
-                  ["unassigned", "Без ответственного"],
-                ] as const
-              ).map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  className={scope === value ? "btn" : "btn secondary"}
-                  onClick={() => setScope(value)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <button
-              type="button"
-              className={onlyImportant ? "btn" : "btn secondary"}
-              onClick={() => setOnlyImportant((v) => !v)}
-            >
-              Только важное
+      <div className="dash-controls" role="group" aria-labelledby="dashboard-owner-label" aria-describedby="dashboard-owner-help">
+        <b id="dashboard-owner-label">Чьи записи показывать</b>
+        <div className="segmented sit-scope dashboard-owner-filter">
+          {([
+            ["all", "Вся команда", "Показать доступные записи компании, включая записи без ответственного"],
+            ["mine", "Назначены мне", "Показать записи, за которые отвечаете вы, независимо от того, кто их создал"],
+            ["unassigned", "Без ответственного", "Показать записи, которым ещё не назначен ответственный сотрудник"],
+          ] as const).map(([value, label, hint]) => (
+            <button key={value} type="button" className={scope === value ? "btn" : "btn secondary"}
+              aria-pressed={scope === value} data-tip={hint} onClick={() => setScope(value)}>
+              {label}
             </button>
-          </div>
+          ))}
         </div>
+        <p className="muted dashboard-filter-help" id="dashboard-owner-help">
+          {scope === "mine"
+            ? "Показаны записи, за которые отвечаете вы. Автор записи может быть другим сотрудником."
+            : scope === "unassigned"
+              ? "Показаны записи, которым ещё не назначен ответственный сотрудник."
+              : "Показаны доступные записи всей команды, включая записи без ответственного."}
+        </p>
       </div>
 
       {error ? <p className="error">{error}</p> : null}
@@ -559,7 +550,22 @@ export function SituationPage() {
           </div>
         </div>
 
-        {attentionFilter ? <button className="btn secondary" onClick={() => setAttentionFilter("")}>Показать все действия</button> : null}
+        <div className="dashboard-attention-filter" role="group" aria-label="Какие действия показывать" aria-describedby="dashboard-attention-help">
+          <span className="muted">Какие действия показывать</span>
+          <div className="segmented sit-scope">
+            <button type="button" className={!onlyImportant ? "btn" : "btn secondary"} aria-pressed={!onlyImportant}
+              data-tip="Показать весь список действий, требующих внимания" onClick={() => setOnlyImportant(false)}>Все действия</button>
+            <button type="button" className={onlyImportant ? "btn" : "btn secondary"} aria-pressed={onlyImportant}
+              data-tip="Оставить ответы клиентам, просрочки, помощь AI и записи без контакта или следующего шага" onClick={() => setOnlyImportant(true)}>Приоритетные действия</button>
+          </div>
+          <p className="muted dashboard-filter-help" id="dashboard-attention-help">
+            {onlyImportant
+              ? "Ответы клиентам, просроченные задачи, сроки и оплаты, помощь AI, записи без контакта или следующего шага."
+              : "Все действия из списка «Требует внимания»."}
+            {" "}Этот переключатель меняет только список ниже; показатели обзора остаются прежними.
+          </p>
+        </div>
+        {attentionFilter ? <button className="btn secondary" onClick={() => setAttentionFilter("")}>Снять отбор по типу действия</button> : null}
         {visibleAttention.length === 0 ? (
           <p className="empty sit-empty-ok">{attention.emptyLabel}</p>
         ) : (

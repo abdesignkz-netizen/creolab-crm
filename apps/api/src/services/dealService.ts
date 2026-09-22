@@ -3,7 +3,9 @@ import { resolveEsfMeasureUnitCode } from "@creolab/contracts";
 import type { PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
-import { assertDealVisible, isManager, managerDealWriteFields, requireCompanyAdmin, seesAllCompanyRecords } from "../lib/access.ts";
+import { assertDealVisible, capabilities, isManager, managerDealWriteFields, requireCompanyAdmin, seesAllCompanyRecords } from "../lib/access.ts";
+import { loadDealDocumentSummaries } from "./dealDocumentSummary.ts";
+import { canUseFeature } from "./entitlementService.ts";
 import {
   LEGACY_STAGE_MAP,
   PAYMENT_STATUSES,
@@ -20,7 +22,7 @@ import { displayName, phoneFromContact } from "./contactLabels.ts";
 import { writeActivity } from "./contactService.ts";
 import { serializeDealItem, totalsFromItems } from "./dealItemService.ts";
 import { lineAmounts, sumLines, toMinorTenge } from "./documentMoney.ts";
-import { getTenantDocumentFlags, resolveVatRate } from "./legalProfileService.ts";
+import { getTenantDocumentFlags, isDocumentsEnabled, resolveVatRate } from "./legalProfileService.ts";
 import { resolvePeriodRange, periodLabel, type PeriodPreset } from "./periodRange.ts";
 
 type DealTimeMode = "now" | "period";
@@ -261,6 +263,7 @@ function serializeDeal(deal: any, ops: ReturnType<typeof parseOpsSettings>, curr
   const probability = deal.probability ?? deal.stage?.defaultProbability ?? 10;
   return {
     id: deal.id,
+    number: deal.number != null ? `СД-${String(deal.number).padStart(6, "0")}` : null,
     title: deal.title,
     description: deal.description,
     outcome: deal.outcome,
@@ -472,6 +475,10 @@ export async function getDealBoard(
   const serializedAll = deals.map((d) =>
     serializeDeal({ ...d, offerAmountMinor: d.outcome === "won" ? d.wonAmountMinor ?? d.offerAmountMinor : d.offerAmountMinor, contact: { ...d.contact, ...contactById.get(d.contactId) } }, ops, currency, now),
   );
+  const documentsAllowed = capabilities(auth).documents && await isDocumentsEnabled(prisma, tid) && await canUseFeature(prisma, tid, "DOCUMENTS");
+  const documentSummaries = documentsAllowed
+    ? await loadDealDocumentSummaries(prisma, tid, deals.map((deal) => deal.id))
+    : null;
 
   const focusFilter = (d: (typeof serializedAll)[number]) => {
     if (focus === "proposal_no_reply") return Boolean(d.flags.proposalWithoutReply);
@@ -615,6 +622,10 @@ export async function getDealBoard(
 
   return {
     asOf: now.toISOString(),
+    documentsAllowed,
+    items: serializedAll.filter(focusFilter).map((deal) => ({ ...deal, documents: documentSummaries?.get(deal.id) ?? null })),
+    limit: 500,
+    limitReached: deals.length === 500,
     currency,
     timeMode,
     basis: timeMode === "period" ? basis : null,

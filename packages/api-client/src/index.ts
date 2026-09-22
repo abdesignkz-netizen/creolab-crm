@@ -438,6 +438,10 @@ export function createApiClient(options: ClientOptions) {
         method: "POST",
         body: JSON.stringify(body),
       }),
+    prepareContractSellerSign: (contractId: string) =>
+      request(`/api/v1/contracts/${contractId}/prepare-seller-sign`, { method: "POST" }),
+    sendContractToBuyer: (contractId: string) =>
+      request(`/api/v1/contracts/${contractId}/send-to-buyer`, { method: "POST" }),
     sendContractForSign: (contractId: string) =>
       request(`/api/v1/contracts/${contractId}/send-for-sign`, { method: "POST", body: JSON.stringify({}) }),
     contractSigning: (contractId: string) => request(`/api/v1/contracts/${contractId}/signing`),

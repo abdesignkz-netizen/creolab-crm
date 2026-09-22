@@ -1404,6 +1404,16 @@ export function createApp(prisma: PrismaClient) {
     await sendContractPdf(prisma, await requireAuth(req), req.params.id, res);
   });
 
+  app.post("/api/v1/contracts/:id/prepare-seller-sign", async (req, res) => {
+    const { sendContractForSign } = await import("./services/contractSigningService.ts");
+    res.json(await sendContractForSign(prisma, await requireAuth(req), req.params.id, { publicBaseUrl: config.appBaseUrl, sellerOnly: true }));
+  });
+
+  app.post("/api/v1/contracts/:id/send-to-buyer", async (req, res) => {
+    const { sendContractForSign } = await import("./services/contractSigningService.ts");
+    res.json(await sendContractForSign(prisma, await requireAuth(req), req.params.id, { publicBaseUrl: config.appBaseUrl, requireSellerSignature: true }));
+  });
+
   app.post("/api/v1/contracts/:id/send-for-sign", json, async (req, res) => {
     const { sendContractForSign } = await import("./services/contractSigningService.ts");
     const origin = String(req.get("origin") || "").replace(/\/$/, "");

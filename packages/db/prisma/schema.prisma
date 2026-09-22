@@ -804,6 +804,7 @@ model DealStage {
 
 model Deal {
   id                   String    @id @default(uuid())
+  number               Int       @unique @default(autoincrement())
   tenantId             String
   contactId            String
   companyId            String?

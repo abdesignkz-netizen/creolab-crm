@@ -23,6 +23,7 @@ function isLivePostgresUrl(url: string | undefined): boolean {
 
 async function applyLivePostgresPatches(prisma: PrismaClient) {
   const statements = [
+    ...DEAL_NUMBER_SQL.split(";").map((s) => s.trim()).filter(Boolean),
     `ALTER TABLE "Campaign" ADD COLUMN IF NOT EXISTS "personalizeEach" BOOLEAN DEFAULT false`,
     `ALTER TABLE "CampaignRecipient" ADD COLUMN IF NOT EXISTS "messageDraft" TEXT`,
     ...DOCUMENT_DOMAIN_SQL.split(";")
@@ -71,6 +72,7 @@ async function applyInitSql(pglite: PGlite) {
 
 async function applyAdditiveSchema(pglite: PGlite) {
   await pglite.exec(`
+    ${DEAL_NUMBER_SQL}
     CREATE TABLE IF NOT EXISTS "SituationSnooze" (
       "id" TEXT NOT NULL,
       "tenantId" TEXT NOT NULL,
@@ -1153,6 +1155,11 @@ const CONTROL_DOMAIN_SQL = `
       ON "ControlConfirmation"("tenantId", "requestId");
     CREATE INDEX IF NOT EXISTS "ControlConfirmation_tenantId_status_expiresAt_idx"
       ON "ControlConfirmation"("tenantId", "status", "expiresAt");
+`;
+
+const DEAL_NUMBER_SQL = `
+ALTER TABLE "Deal" ADD COLUMN IF NOT EXISTS "number" SERIAL;
+CREATE UNIQUE INDEX IF NOT EXISTS "Deal_number_key" ON "Deal"("number");
 `;
 
 const BILLING_DOMAIN_SQL = `

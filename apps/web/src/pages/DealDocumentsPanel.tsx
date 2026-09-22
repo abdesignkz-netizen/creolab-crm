@@ -2,7 +2,8 @@ import { EsfSubmissionStatus, ESF_SEND_PHASES, type EsfSubmission } from "../com
 import { notifySaved } from "../components/SaveNotice";
 import { esfMeasureUnitShortLabel, INVOICE_PAYMENT_KIND_LABEL, type PdfImportDraft } from "@creolab/contracts";
 import { DeleteContractButton } from "../components/DeleteContractButton";
-import { ContractPreviewModal } from "../components/ContractPreviewModal";
+import { ContractWorkspaceModal } from "../components/ContractWorkspaceModal";
+import { readContractReview, writeContractReview, type ContractReviewState } from "../lib/contractReview";
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { api, downloadAvrExcel, downloadAvrPdf } from "../lib/api";
@@ -12,27 +13,6 @@ import { createSigningClient, ncalayerUserMessage } from "../lib/signing/ncalaye
 import { CONTRACT_SIGNING_ENABLED } from "../lib/featureFlags";
 import { signatureCheckLabel } from "../lib/signing/verificationLabels";
 import { tip } from "../lib/tip";
-
-type ContractReviewState = { viewed: boolean; confirmed: boolean };
-
-function contractReviewKey(fileKey: string) {
-  return `basqar-contract-review:${fileKey}`;
-}
-
-function readContractReview(fileKey: string): ContractReviewState {
-  if (!fileKey) return { viewed: false, confirmed: false };
-  try {
-    const parsed = JSON.parse(sessionStorage.getItem(contractReviewKey(fileKey)) || "null");
-    return { viewed: Boolean(parsed?.viewed), confirmed: Boolean(parsed?.confirmed) };
-  } catch {
-    return { viewed: false, confirmed: false };
-  }
-}
-
-function writeContractReview(fileKey: string, state: ContractReviewState) {
-  if (!fileKey) return;
-  sessionStorage.setItem(contractReviewKey(fileKey), JSON.stringify(state));
-}
 
 const CONTRACT_STATUS_LABEL: Record<string, string> = {
   DRAFT: "Черновик",
@@ -328,15 +308,6 @@ export function DealDocumentsPanel(props: {
     setPreviewContract({ id: contract.id, number: contract.number });
   }
 
-  function markContractViewed() {
-    if (!fileKey) return;
-    setReview((current) => {
-      const next = { viewed: true, confirmed: current.confirmed };
-      writeContractReview(fileKey, next);
-      return next;
-    });
-  }
-
   function confirmContract(fromPreview = false) {
     if (!fileKey || !contract?.id) return;
     if (!fromPreview && !review.viewed) {
@@ -481,7 +452,7 @@ export function DealDocumentsPanel(props: {
           {contracts.map((doc: any) => (
             <div className="row" key={doc.id}>
               <div>
-                <b>Договор {doc.number}</b>
+                <button type="button" className="contract-number-link" onClick={() => setPreviewContract({ id: doc.id, number: doc.number })}>Договор {doc.number}</button>
                 {doc.originalFileName && /\.docx?$/i.test(doc.originalFileName) ? <a className="btn secondary" href={`/api/v1/contracts/${doc.id}/original`}>Скачать оригинал Word</a> : null}{doc.importedPdf ? <div className="muted">Загружен вручную</div> : null}
                 <div className="muted">
                   {CONTRACT_STATUS_LABEL[doc.status] || doc.status} · {Number(doc.totalAmount).toLocaleString("ru-RU")} ₸
@@ -1263,12 +1234,11 @@ export function DealDocumentsPanel(props: {
         </div>
       </div>
     {previewContract ? (
-      <ContractPreviewModal
-        contract={previewContract}
-        onClose={() => setPreviewContract(null)}
-        onViewed={markContractViewed}
-        onConfirm={needsReview && !review.confirmed ? () => confirmContract(true) : undefined}
-        confirmed={review.confirmed}
+      <ContractWorkspaceModal
+        key={previewContract.id}
+        contractId={previewContract.id}
+        onClose={() => { setPreviewContract(null); setReview(readContractReview(fileKey)); }}
+        onChanged={load}
       />
     ) : null}
     </>

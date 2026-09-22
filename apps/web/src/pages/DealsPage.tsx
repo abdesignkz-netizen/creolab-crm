@@ -12,6 +12,8 @@ import { tip } from "../lib/tip";
 import { DealDocumentsPanel } from "./DealDocumentsPanel";
 import { CONTRACT_SIGNING_ENABLED } from "../lib/featureFlags";
 import { dealOutcomeLabel } from "../lib/labels";
+import { DealList } from "../components/DealList";
+import { ContractWorkspaceModal } from "../components/ContractWorkspaceModal";
 
 type Scope = "all" | "mine" | "unassigned";
 type TimeMode = "now" | "period";
@@ -166,6 +168,9 @@ function DealBoardCard({
 }
 
 export function DealsPage() {
+  const caps = useCapabilities();
+  const [view, setView] = useUrlState("view", "list", ["list", "board"]);
+  const [selectedContractId, setSelectedContractId] = useState<string | null>(null);
   const requestVersion = useRequestVersion();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -320,6 +325,7 @@ export function DealsPage() {
       <div className="page-head">
         <div>
           <h2>Сделки</h2>
+          <p className="muted">Заказы, суммы и состояние документов по каждой сделке.</p>
         </div>
         <div className="sit-toolbar-side">
           {data.period?.label ? <span className="muted">{data.period.label}</span> : null}
@@ -475,7 +481,17 @@ export function DealsPage() {
         ) : null}
       </div>
 
-      <div className="deal-kanban">
+      <div className="deal-view-toolbar">
+        <div className="segmented" aria-label="Вид сделок">
+          <button type="button" className={view === "list" ? "btn" : "btn secondary"} aria-pressed={view === "list"} onClick={() => setView("list")}>Список</button>
+          <button type="button" className={view === "board" ? "btn" : "btn secondary"} aria-pressed={view === "board"} onClick={() => setView("board")}>Доска по этапам</button>
+        </div>
+        <label>Этап<select aria-label="Этап" value={stage} onChange={(event) => setStage(event.target.value)}><option value="">Все этапы</option>{(data.columns || []).map((column: any) => <option key={column.stageId} value={column.systemKey}>{column.name}</option>)}</select></label>
+        <label>Статус сделки<select aria-label="Статус сделки" value={outcome} onChange={(event) => setOutcome(event.target.value)}><option value="">{timeMode === "now" ? "Активные и на паузе" : "Все статусы"}</option><option value="open">В работе</option><option value="on_hold">На паузе</option><option value="won">Успешно завершена</option><option value="lost">Потеряна</option></select></label>
+        <button type="button" className="btn secondary" onClick={() => void load()}>Обновить</button>
+      </div>
+      {data.limitReached ? <p className="warn">Показаны первые {data.limit} сделок. Уточните период, этап или ответственного, чтобы сузить список.</p> : null}
+      {view === "list" ? <DealList items={data.items || [...(data.columns || []).flatMap((column: any) => column.deals), ...(data.onHold || [])]} documentsAllowed={caps.documents && data.documentsAllowed !== false} onOpenContract={setSelectedContractId} /> : <div className="deal-kanban">
         {(data.columns || []).map((col: any) => (
           <div
             key={col.stageId}
@@ -509,9 +525,9 @@ export function DealsPage() {
             </div>
           </div>
         ))}
-      </div>
+      </div>}
 
-      {data.onHold?.length ? (
+      {view === "board" && data.onHold?.length ? (
         <div className="sit-section">
           <h3>На паузе</h3>
           {data.onHold.map((deal: any) => (
@@ -526,6 +542,7 @@ export function DealsPage() {
         </div>
       ) : null}
 
+      {selectedContractId ? <ContractWorkspaceModal key={selectedContractId} contractId={selectedContractId} onClose={() => setSelectedContractId(null)} onChanged={load} /> : null}
       {createOpen ? (
         <div className="stats-modal-backdrop" onClick={() => setCreateOpen(false)}>
           <div className="stats-modal" onClick={(e) => e.stopPropagation()}>
@@ -801,6 +818,7 @@ export function DealDetailPage() {
             ) : null}
           </p>
           <h2>{d.title}</h2>
+          {d.number ? <p className="muted">Сделка {d.number}</p> : null}
           <p className="muted">
             {nameWithPhone(d.contact?.name, d.contact?.phone)}
             {d.stage?.name ? ` · ${d.stage.name}` : ""}

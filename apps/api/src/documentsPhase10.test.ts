@@ -124,6 +124,7 @@ describe("Documents phase 10 общий список", () => {
     assert.ok(list.body.items.some((row: { kind: string; dealId: string }) => row.kind === "INVOICE" && row.dealId === dealId));
     assert.equal(
       list.body.items.every((row: { href: string; kind: string }) => {
+        if (row.kind === "CONTRACT") return String(row.href).startsWith("/documents?kind=CONTRACT&contract=");
         if (row.kind === "INVOICE") return String(row.href).startsWith("/documents/invoices/");
         if (row.kind === "AVR") return String(row.href).startsWith("/documents/avr/");
         return String(row.href).startsWith("/deals/");
@@ -218,6 +219,7 @@ describe("Documents phase 10 общий список", () => {
     assert.equal(invoiceRow?.esfStatus, "Отправлен");
     const contracts = await json("/api/v1/documents?kind=CONTRACT");
     const contractRow = contracts.body.items.find((row: { id: string }) => row.id === contractId);
+    assert.equal(contractRow?.href, `/documents?kind=CONTRACT&contract=${contractId}`);
     assert.equal(contractRow?.avrStatus, "Готов");
     assert.equal(contractRow?.esfStatus, "Отправлен");
   });

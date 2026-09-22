@@ -147,7 +147,7 @@ export async function sendContractForSign(
   prisma: PrismaClient,
   auth: AuthContext,
   contractId: string,
-  options: { publicBaseUrl: string },
+  options: { publicBaseUrl: string; sellerOnly?: boolean; requireSellerSignature?: boolean },
 ) {
   const membership = requireTenant(auth);
   if (!can(auth, "manage_documents")) throw new ApiError(403, "forbidden", "Недостаточно прав для документов");
@@ -176,6 +176,10 @@ export async function sendContractForSign(
     throw new ApiError(422, "already_signed", "Обе стороны уже подписали");
   }
 
+  if (options.requireSellerSignature && !sellerSigned) {
+    throw new ApiError(422, "seller_must_sign_first", "Сначала подпишите договор со стороны компании");
+  }
+
   const expiresAt = new Date(Date.now() + SIGN_TTL_MS);
   let buyerToken: string | null = null;
   const saved = await prisma.$transaction(async (tx) => {
@@ -186,7 +190,7 @@ export async function sendContractForSign(
       });
     }
 
-    let seller = existing.find((row) => row.signerType === "SELLER" && ["PENDING", "OPENED", "SIGNED"].includes(row.status));
+    let seller = existing.find((row) => row.signerType === "SELLER" && ["PENDING", "OPENED", "SIGNED"].includes(expireIfNeeded(row).status));
     if (!seller) {
       seller = await tx.signatureRequest.create({
         data: {
@@ -205,7 +209,7 @@ export async function sendContractForSign(
     }
 
     let buyer = existing.find((row) => row.signerType === "BUYER" && ["PENDING", "OPENED", "SIGNED"].includes(row.status));
-    if (!buyer || (buyer.status !== "SIGNED" && !buyerSigned)) {
+    if (!options.sellerOnly && (!buyer || (buyer.status !== "SIGNED" && !buyerSigned))) {
       buyerToken = newToken();
       if (buyer && buyer.status !== "SIGNED") {
         buyer = await tx.signatureRequest.update({
@@ -251,10 +255,10 @@ export async function sendContractForSign(
       data: {
         tenantId: tid,
         actorUserId: auth.user.id,
-        action: "contract.send_for_sign",
+        action: options.sellerOnly ? "contract.prepare_seller_sign" : "contract.send_for_sign",
         entityType: "contract",
         entityId: contract.id,
-        changesJson: { versionId: version.id, sellerRequestId: seller.id, buyerRequestId: buyer.id },
+        changesJson: { versionId: version.id, sellerRequestId: seller.id, buyerRequestId: options.sellerOnly ? null : buyer?.id || null },
       },
     });
     return { updated, seller, buyer };
@@ -264,9 +268,9 @@ export async function sendContractForSign(
     contract: serializeContract(saved.updated),
     requests: [
       serializeRequest(saved.seller),
-      serializeRequest(saved.buyer, {
+      ...(!options.sellerOnly && saved.buyer ? [serializeRequest(saved.buyer, {
         signUrl: buyerToken ? `${options.publicBaseUrl.replace(/\/$/, "")}/sign/${buyerToken}` : null,
-      }),
+      })] : []),
     ],
   };
 }

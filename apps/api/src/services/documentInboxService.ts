@@ -357,7 +357,7 @@ function serializeInboxItem(row: {
         : row.kind === "INVOICE"
           ? `/documents/invoices/${row.id}`
           : row.kind === "CONTRACT"
-            ? `/deals/${row.dealId}#contract`
+            ? `/documents?kind=CONTRACT&contract=${encodeURIComponent(row.id)}`
             : `/deals/${row.dealId}`,
   };
 }

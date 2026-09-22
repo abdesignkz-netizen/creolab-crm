@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api, downloadContractFile, downloadContractPreview } from "../lib/api";
 
 function isPdfFile(blob: Blob, filename: string) {
@@ -11,26 +11,35 @@ export function ContractPreviewModal({
   onViewed,
   onConfirm,
   confirmed,
+  fileRevision,
+  busy = false,
+  children,
+  actions,
 }: {
   contract: { id: string; number?: string; preview?: boolean };
   onClose: () => void;
   onViewed?: () => void;
   onConfirm?: () => void;
   confirmed?: boolean;
+  fileRevision?: string | null;
+  busy?: boolean;
+  children?: ReactNode;
+  actions?: (ready: boolean) => ReactNode;
 }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [pdfUrl, setPdfUrl] = useState("");
+  const [retry, setRetry] = useState(0);
   const onViewedRef = useRef(onViewed);
   onViewedRef.current = onViewed;
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape" && !busy) onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, busy]);
 
   useEffect(() => {
     let cancelled = false;
@@ -64,10 +73,10 @@ export function ContractPreviewModal({
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [contract.id, contract.preview]);
+  }, [contract.id, contract.preview, fileRevision, retry]);
 
   return (
-    <div className="stats-modal-backdrop" onClick={onClose}>
+    <div className="stats-modal-backdrop" onClick={() => { if (!busy) onClose(); }}>
       <div
         className="stats-modal invoice-preview-modal contract-preview-modal"
         role="dialog"
@@ -77,18 +86,20 @@ export function ContractPreviewModal({
       >
         <div className="row sit-head">
           <h3>Договор {contract.number || ""}</h3>
-          <button type="button" className="btn secondary" onClick={onClose}>
+          <button type="button" className="btn secondary" disabled={busy} onClick={onClose}>
             Закрыть
           </button>
         </div>
-        {error ? <p className="error">{error}</p> : null}
+        {children}
+        {error ? <div role="alert"><p className="error">{error}</p><button type="button" className="btn secondary" disabled={busy} onClick={() => setRetry(value => value + 1)}>Повторить открытие PDF</button></div> : null}
         {loading ? <p className="muted">Открываем PDF…</p> : null}
         {pdfUrl ? <iframe title="Просмотр договора" src={pdfUrl} /> : null}
         <div className="actions">
+          {actions?.(!loading && !error && Boolean(pdfUrl))}
           <button
             type="button"
             className="btn"
-            disabled={loading && !error}
+            disabled={busy || (loading && !error)}
             onClick={() =>
               void (contract.preview ? downloadContractPreview(contract.id) : downloadContractFile(contract.id))
             }
@@ -108,7 +119,7 @@ export function ContractPreviewModal({
               {confirmed ? "Подтверждён" : "Подтвердить"}
             </button>
           ) : null}
-          <button type="button" className="btn secondary" onClick={onClose}>
+          <button type="button" className="btn secondary" disabled={busy} onClick={onClose}>
             Закрыть
           </button>
         </div>

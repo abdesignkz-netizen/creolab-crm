@@ -3503,3 +3503,115 @@ html[data-theme="dark"] {
 }
 
 
+
+.contract-number-link { border: 0; padding: 0; background: none; color: inherit; font: inherit; font-weight: 600; text-decoration: underline; cursor: pointer; text-align: left; }
+.contract-edit-form { display: grid; gap: 12px; }
+.contract-edit-form label { display: grid; gap: 6px; }
+.contract-preview-modal > .actions { position: sticky; bottom: -1px; background: var(--card, #fff); padding: 12px 0; border-top: 1px solid var(--line); }
+
+/* Pricing groups keep product choices separate from optional modules. */
+.billing-page { min-width: 0; }
+.billing-catalog { gap: 28px; }
+.billing-section-links { display: flex; flex-wrap: wrap; gap: 10px 22px; font-size: 14px; }
+.billing-section-links a { color: var(--accent, #2563eb); text-underline-offset: 4px; }
+.billing-plan-group, .billing-selection, .billing-comparison { scroll-margin-top: 24px; min-width: 0; }
+.billing-plan-group > .muted { margin: 6px 0 18px; max-width: 900px; }
+.billing-plan-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.billing-plan-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.billing-plan-card { display: flex; flex-direction: column; gap: 12px; padding: 24px; border: 1px solid var(--line, #e3e5ec); min-width: 0; }
+.billing-plan-card.is-selected { border-color: var(--accent, #2563eb); }
+.billing-plan-card.is-recommended { box-shadow: 0 0 0 1px var(--accent, #2563eb); }
+.billing-card-badges { min-height: 18px; display: flex; gap: 12px; }
+.billing-plan-card h4 { font-size: 22px; margin: 0; }
+.billing-plan-card p { margin: 0; }
+.billing-audience { min-height: 66px; font-size: 14px; }
+.billing-price strong { font-size: clamp(23px, 2vw, 30px); letter-spacing: -0.6px; white-space: nowrap; }
+.billing-price span { font-size: 14px; }
+.billing-price-note { font-size: 12px; min-height: 36px; }
+.billing-plan-limits { display: grid; gap: 8px; margin: 4px 0; font-size: 13px; padding: 14px 0; border-top: 1px solid var(--line, #e3e5ec); border-bottom: 1px solid var(--line, #e3e5ec); }
+.billing-plan-limits > div, .billing-quote dl > div { display: flex; justify-content: space-between; gap: 12px; }
+.billing-plan-limits dd, .billing-quote dd { margin: 0; text-align: right; font-weight: 600; }
+.billing-feature-list { padding-left: 18px; margin: 0 0 8px; display: grid; gap: 9px; font-size: 14px; }
+.billing-feature-list li::marker { color: var(--accent, #2563eb); }
+.billing-plan-card > .btn { margin-top: auto; width: 100%; }
+.billing-enterprise { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.billing-enterprise .btn { flex-shrink: 0; }
+.billing-comparison summary { cursor: pointer; font-weight: 600; font-size: 17px; }
+.billing-comparison > p { margin-top: 14px; }
+.billing-table-scroll { overflow-x: auto; max-width: 100%; margin-top: 16px; }
+.billing-table-scroll table { min-width: 1150px; font-size: 13px; border-collapse: collapse; width: 100%; }
+.billing-table-scroll caption { text-align: left; padding: 0 0 12px; }
+.billing-table-scroll th, .billing-table-scroll td { text-align: left; padding: 12px; border-bottom: 1px solid var(--line, #e3e5ec); }
+.billing-table-scroll th:first-child { min-width: 190px; }
+.billing-included { color: var(--accent, #2563eb); font-weight: 500; }
+.billing-page .billing-addon { padding: 16px 0; border-bottom: 1px solid var(--line, #e3e5ec); }
+.billing-addon p { margin: 5px 0; font-size: 14px; }
+.billing-addon input[type="checkbox"] { width: 20px; height: 20px; flex-shrink: 0; }
+.billing-stepper { flex-shrink: 0; }
+.billing-stepper output { min-width: 22px; text-align: center; }
+.billing-page .billing-stepper button { width: 34px; height: 34px; }
+.billing-quote { padding: 20px; background: rgba(37, 99, 235, 0.04); border-radius: 12px; }
+.billing-quote dl { display: grid; gap: 12px; padding-bottom: 16px; border-bottom: 1px solid var(--line, #e3e5ec); }
+.billing-total { font-size: 20px; }
+.billing-steps { display: grid; gap: 10px; padding-left: 22px; margin: 0; }
+.billing-notice { padding: 14px 18px; border-radius: 12px; background: rgba(37, 99, 235, 0.08); }
+.billing-period-toggle .active { color: var(--accent, #2563eb); border-color: var(--accent, #2563eb); }
+@media (max-width: 1150px) {
+  .billing-plan-grid.three { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 700px) {
+  .billing-plan-grid, .billing-plan-grid.three { grid-template-columns: minmax(0, 1fr); }
+  .billing-plan-card { padding: 20px; }
+  .billing-audience, .billing-price-note, .billing-card-badges { min-height: 0; }
+  .billing-enterprise { flex-direction: column; align-items: stretch; }
+  .billing-page .page-head { flex-wrap: wrap; }
+  .billing-page .actions .btn { white-space: normal; }
+  .billing-price strong { font-size: 28px; }
+  .billing-quote { padding: 14px; }
+}
+
+.deal-view-toolbar, .deal-list-tools { display: flex; gap: 14px; align-items: end; flex-wrap: wrap; margin: 16px 0; }
+.deal-view-toolbar label, .deal-list-tools label { display: grid; gap: 6px; font-size: 13px; }
+.deal-view-toolbar select, .deal-list-tools select { padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--ink); max-width: 100%; }
+.deal-list-search { flex: 1; min-width: 240px; }
+.deal-list-hint { font-size: 13px; margin: 0; }
+.deal-list { min-width: 0; }
+.deal-list-scroll { overflow-x: auto; padding: 0; }
+.deal-list-table { width: 100%; min-width: 1400px; border-collapse: collapse; font-size: 13px; }
+.deal-list-table th { text-align: left; background: var(--bg-elevated); padding: 14px; white-space: nowrap; }
+.deal-list-table td { padding: 16px 14px; vertical-align: top; border-top: 1px solid var(--line); }
+.deal-list-table td:nth-child(2), .deal-list-table td:nth-child(4) { min-width: 170px; max-width: 260px; overflow-wrap: anywhere; }
+.deal-list-table td:nth-child(n+7) { min-width: 135px; max-width: 180px; }
+.deal-list-table td > small { display: block; margin-top: 6px; }
+.deal-list-table a { text-underline-offset: 3px; }
+.deal-number-link, .deal-list-amount, .deal-phone { white-space: nowrap; }
+.deal-number-link { font-weight: 600; }
+.deal-doc-summary { display: grid; gap: 6px; justify-items: start; }
+.deal-doc-link { font: inherit; text-decoration: underline; text-underline-offset: 3px; color: var(--ink); background: transparent; border: 0; padding: 0; cursor: pointer; text-align: left; }
+.deal-doc-state, .deal-outcome { display: inline-block; padding: 3px 7px; border-radius: 6px; font-size: 12px; background: var(--bg-elevated); }
+.deal-doc-state.sent, .deal-outcome.won { color: var(--ok); background: var(--ok-soft); }
+.deal-doc-state.error { color: var(--danger); background: var(--danger-soft); }
+.deal-outcome.on_hold { color: var(--warn); background: var(--warn-soft); }
+.deal-doc-delivery, .deal-doc-empty { font-size: 12px; color: var(--muted); }
+@media (max-width: 700px) {
+  .deal-list-tools, .deal-view-toolbar { align-items: stretch; }
+  .deal-list-tools label, .deal-view-toolbar label { width: 100%; min-width: 0; }
+  .deal-list-table { min-width: 0; display: block; }
+  .deal-list-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .deal-list-table tbody { display: block; }
+  .deal-list-table tr { display: block; padding: 14px; border-bottom: 3px solid var(--line); }
+  .deal-list-table td { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 6px 12px; padding: 9px 0; min-width: 0 !important; max-width: none !important; border-top: 0; }
+  .deal-list-table td::before { content: attr(data-label); color: var(--muted); font-size: 12px; grid-column: 1; grid-row: 1 / span 4; }
+  .deal-list-table td > * { grid-column: 2; }
+  .deal-list-table td > small { margin-top: 0; }
+  .deal-list-table .deal-phone { white-space: normal; }
+}
+
+.dashboard-owner-filter { width: fit-content; max-width: 100%; }
+.dashboard-filter-help { margin: 0; font-size: 13px; line-height: 1.5; }
+.dashboard-attention-filter { display: grid; gap: 10px; padding: 14px 0; margin-bottom: 12px; border-bottom: 1px solid var(--line); }
+.dashboard-attention-filter > .segmented { width: fit-content; max-width: 100%; }
+@media (max-width: 700px) {
+  .dashboard-owner-filter, .dashboard-attention-filter > .segmented { flex-wrap: wrap; width: 100%; }
+  .dashboard-owner-filter .btn, .dashboard-attention-filter .btn { white-space: normal; }
+}

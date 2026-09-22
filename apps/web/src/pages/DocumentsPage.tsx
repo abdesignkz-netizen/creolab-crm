@@ -1,3 +1,4 @@
+import { ContractWorkspaceModal } from "../components/ContractWorkspaceModal";
 import { ManualPdfImportPanel } from "./ManualPdfImportPanel";
 import { ContractTemplatePanel } from "./ContractTemplatePanel";
 import { DeleteContractButton } from "../components/DeleteContractButton";
@@ -76,6 +77,15 @@ export function DocumentsPage() {
   const [esfError, setEsfError] = useState("");
   const [createdEsf, setCreatedEsf] = useState<any>(null);
   const esfFlight = useRef(false);
+  const selectedContractId = searchParams.get("contract");
+  const dealFilter = searchParams.get("dealId") || "";
+  function contractHref(id: string) {
+    const params = new URLSearchParams(searchParams); params.set("contract", id);
+    return `/documents?${params}`;
+  }
+  function closeContract() {
+    setSearchParams(previous => { const params = new URLSearchParams(previous); params.delete("contract"); return params; }, { replace: true });
+  }
   const limit = 50;
 
   async function openEsfCreate() {
@@ -115,6 +125,7 @@ export function DocumentsPage() {
       setLoading(true);
       const data: any = await api.documents({
         kind: kind || undefined,
+        dealId: dealFilter || undefined,
         attention: attention === "1" ? "1" : undefined,
         status: status || undefined,
         q: q.trim() || undefined,
@@ -144,7 +155,7 @@ export function DocumentsPage() {
 
   useEffect(() => {
     void load(Number(offset) || 0);
-  }, [kind, attention, status, offset]);
+  }, [kind, attention, status, offset, dealFilter]);
 
   async function onSearch(e: FormEvent) {
     e.preventDefault();
@@ -219,6 +230,7 @@ export function DocumentsPage() {
 
   return (
     <section className="documents-page">
+      {dealFilter ? <div className="active-filter-note"><span>Документы выбранной сделки</span><Link to={`/deals/${dealFilter}`}>Открыть сделку</Link><button type="button" className="btn secondary" onClick={() => setSearchParams(previous => { const next = new URLSearchParams(previous); next.delete("dealId"); next.delete("offset"); return next; })}>Показать все документы</button></div> : null}
       <div className="row sit-head">
         <div>
           <h2>Документы</h2>
@@ -306,6 +318,8 @@ export function DocumentsPage() {
             {commandResult.prepareOnly ? "Черновик готов. " : "Готово. "}
             {commandResult.result?.invoice?.id ? (
               <Link to={`/documents/invoices/${commandResult.result.invoice.id}`}>Открыть счёт</Link>
+            ) : commandResult.result?.contract?.id ? (
+              <Link to={contractHref(commandResult.result.contract.id)}>Открыть договор</Link>
             ) : (
               <Link to={`/deals/${commandResult.deal.id}`}>Открыть сделку</Link>
             )}
@@ -439,7 +453,7 @@ export function DocumentsPage() {
                 {items.map((item) => (
                   <tr key={`${item.kind}-${item.id}`}>
                     <td className="documents-cell-number">
-                      <Link to={item.href}>{item.number}</Link>
+                      <Link to={item.kind === "CONTRACT" ? contractHref(item.id) : item.href}>{item.number}</Link>
                     </td>
                     <td className="documents-cell-client">{item.companyName || "Не указан"}</td>
                     <td className="documents-cell-deal">
@@ -455,7 +469,7 @@ export function DocumentsPage() {
                     {kind === "ESF" ? null : <td className="documents-cell-esf">{item.esfStatus}</td>}
                     <td className="documents-cell-owner">{item.responsible || "Не назначен"}</td>
                     <td className="documents-cell-actions">
-                      <Link to={item.href}>Открыть</Link>
+                      <Link to={item.kind === "CONTRACT" ? contractHref(item.id) : item.href}>Открыть</Link>
                       {item.kind === "CONTRACT" ? (
                         <DeleteContractButton
                           id={item.id}
@@ -484,6 +498,7 @@ export function DocumentsPage() {
           onChange={(next) => setOffset(String(next))}
         />
       ) : null}
+      {selectedContractId ? <ContractWorkspaceModal key={selectedContractId} contractId={selectedContractId} onClose={closeContract} onChanged={() => load()} /> : null}
     </section>
   );
 }

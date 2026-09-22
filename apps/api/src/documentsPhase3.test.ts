@@ -125,6 +125,25 @@ describe("Documents phase 3", () => {
     server?.close();
   });
 
+  it("готовит только подпись исполнителя и не создаёт ссылку заказчику до неё", async () => {
+    const early = await json(`/api/v1/contracts/${contractId}/send-to-buyer`, { method: "POST" });
+    assert.equal(early.response.status, 422);
+    assert.equal(early.body.code, "seller_must_sign_first");
+    assert.equal(await prisma.signatureRequest.count({ where: { contractId } }), 0);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const prepared = await json(`/api/v1/contracts/${contractId}/prepare-seller-sign`, { method: "POST" });
+      assert.equal(prepared.response.status, 200, JSON.stringify(prepared.body));
+      assert.equal(prepared.body.requests.length, 1);
+      assert.equal(prepared.body.requests[0].signerType, "SELLER");
+      assert.equal(prepared.body.requests[0].signUrl, null);
+    }
+    assert.equal(await prisma.signatureRequest.count({ where: { contractId } }), 1);
+    assert.equal(await prisma.signatureRequest.count({ where: { contractId, signerType: "BUYER" } }), 0);
+    const foreign = await json(`/api/v1/contracts/${contractId}/prepare-seller-sign`, { method: "POST" }, otherCookie);
+    assert.equal(foreign.response.status, 403); // The other tenant has contract signing disabled.
+    assert.equal(await prisma.signatureRequest.count({ where: { contractId } }), 1);
+  });
+
   it("не раскрывает raw token в базе и не пускает заказчика раньше исполнителя", async () => {
     const sent = await json(`/api/v1/contracts/${contractId}/send-for-sign`, {
       method: "POST",
@@ -166,6 +185,12 @@ describe("Documents phase 3", () => {
     });
     assert.equal(seller.response.status, 200, JSON.stringify(seller.body));
     assert.equal(seller.body.contract.status, "PARTIALLY_SIGNED");
+
+    const sentToBuyer = await json(`/api/v1/contracts/${contractId}/send-to-buyer`, { method: "POST" });
+    assert.equal(sentToBuyer.response.status, 200, JSON.stringify(sentToBuyer.body));
+    buyerToken = sentToBuyer.body.requests.find((row: { signerType: string }) => row.signerType === "BUYER").signUrl.split("/sign/")[1];
+    assert.ok(buyerToken);
+    assert.equal(await prisma.signatureRequest.count({ where: { contractId } }), 2);
 
     const publicView = await json(`/public/sign/${buyerToken}`, {}, "");
     assert.equal(publicView.body.canSign, true);
