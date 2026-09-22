@@ -1,3 +1,8 @@
+import { connectTikTok, checkTikTok, disconnectTikTok, listTikTokConnections, receiveTikTok, tiktokConnectSchema } from "./services/tiktokConnectionService.ts";
+import { connectMeta, activateMeta, disconnectMeta, listMetaConnections, receiveMetaWebhook, verifyMetaWebhook, metaConnectSchema } from "./services/metaConnectionService.ts";
+import { beginGoogleConnection, finishGoogleConnection, listGoogleConnections, disconnectGoogleConnection, googleConnectSchema } from "./services/googleConnectionService.ts";
+import { syncGoogleConnection } from "./services/googleSyncService.ts";
+import { connectCompanyTelegram, disconnectCompanyTelegram, checkCompanyTelegram, receiveCompanyTelegram, telegramConnectSchema } from "./services/telegramCompanyService.ts";
 import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
@@ -2078,6 +2083,92 @@ export function createApp(prisma: PrismaClient) {
 
   app.post("/api/v1/management/claim-all-ai", json, async (req, res) => {
     res.json(await claimAllAiConversations(prisma, await requireAuth(req)));
+  });
+
+  app.get("/api/v1/integrations/tiktok", async (req, res) => { res.json(await listTikTokConnections(prisma, await requireAuth(req))); });
+  app.post("/api/v1/integrations/tiktok/connect", json, async (req, res) => {
+    const auth = await requireAuth(req); await requireFeature(prisma, auth, FEATURES.CHANNELS);
+    res.json(await connectTikTok(prisma, auth, tiktokConnectSchema.parse(req.body)));
+  });
+  app.post("/api/v1/integrations/tiktok/:id/check", async (req, res) => { res.json(await checkTikTok(prisma, await requireAuth(req), req.params.id)); });
+  app.post("/api/v1/integrations/tiktok/:id/disconnect", async (req, res) => { res.json(await disconnectTikTok(prisma, await requireAuth(req), req.params.id)); });
+  app.post("/public/integrations/tiktok/:id/:key", rawJson, async (req, res) => {
+    res.json(await receiveTikTok(prisma, req.params.id, req.params.key, Buffer.isBuffer(req.body) ? req.body : Buffer.from("{}")));
+  });
+
+  app.get("/api/v1/integrations/meta", async (req, res) => { res.json(await listMetaConnections(prisma, await requireAuth(req))); });
+  app.post("/api/v1/integrations/meta/connect", json, async (req, res) => {
+    const auth = await requireAuth(req); await requireFeature(prisma, auth, FEATURES.CHANNELS);
+    res.json(await connectMeta(prisma, auth, metaConnectSchema.parse(req.body)));
+  });
+  app.post("/api/v1/integrations/meta/:id/activate", async (req, res) => { res.json(await activateMeta(prisma, await requireAuth(req), req.params.id)); });
+  app.post("/api/v1/integrations/meta/:id/disconnect", async (req, res) => { res.json(await disconnectMeta(prisma, await requireAuth(req), req.params.id)); });
+  app.get("/public/integrations/meta/:id", async (req, res) => {
+    res.type("text/plain").send(await verifyMetaWebhook(prisma, req.params.id, String(req.query["hub.mode"] || ""), String(req.query["hub.verify_token"] || ""), String(req.query["hub.challenge"] || "")));
+  });
+  app.post("/public/integrations/meta/:id", rawJson, async (req, res) => {
+    const raw = Buffer.isBuffer(req.body) ? req.body : Buffer.from(JSON.stringify(req.body || {}));
+    res.json(await receiveMetaWebhook(prisma, req.params.id, raw, req.header("x-hub-signature-256") || ""));
+  });
+
+  app.get("/api/v1/integrations/google", async (req, res) => {
+    res.json(await listGoogleConnections(prisma, await requireAuth(req)));
+  });
+  app.post("/api/v1/integrations/google/connect", json, async (req, res) => {
+    const auth = await requireAuth(req);
+    await requireFeature(prisma, auth, FEATURES.CHANNELS);
+    res.json(await beginGoogleConnection(prisma, auth, googleConnectSchema.parse(req.body)));
+  });
+  app.get("/api/v1/integrations/google/callback", async (req, res) => {
+    await finishGoogleConnection(prisma, await requireAuth(req), { state: String(req.query.state || ""), code: String(req.query.code || ""), error: String(req.query.error || "") });
+    res.redirect(`${config.appBaseUrl.replace(/\/$/, "")}/integrations?google=connected`);
+  });
+  app.post("/api/v1/integrations/google/:id/disconnect", async (req, res) => {
+    res.json(await disconnectGoogleConnection(prisma, await requireAuth(req), req.params.id));
+  });
+  app.post("/api/v1/integrations/google/:id/sync", async (req, res) => {
+    res.json(await syncGoogleConnection(prisma, await requireAuth(req), req.params.id));
+  });
+  app.get("/api/v1/integrations/google/:id/questions", async (req, res) => {
+    const auth = await requireAuth(req);
+    const { requireIntegrationsAccess, requireTenant } = await import("./lib/access.ts");
+    requireIntegrationsAccess(auth); const { tenantId } = requireTenant(auth);
+    const row = await prisma.integration.findFirst({ where: { id: req.params.id, tenantId, type: "google_forms", status: "active" } });
+    if (!row) throw new ApiError(404, "not_found", "Форма не найдена");
+    const { googleFormQuestions } = await import("./services/googleIntakeService.ts");
+    res.json({ items: await googleFormQuestions(prisma, row), mapping: row.mappingJson });
+  });
+  app.patch("/api/v1/integrations/google/:id/mapping", json, async (req, res) => {
+    const auth = await requireAuth(req);
+    const { requireIntegrationsAccess, requireTenant } = await import("./lib/access.ts");
+    requireIntegrationsAccess(auth); const { tenantId } = requireTenant(auth);
+    const row = await prisma.integration.findFirst({ where: { id: req.params.id, tenantId, type: "google_forms", status: "active" } });
+    if (!row) throw new ApiError(404, "not_found", "Форма не найдена");
+    const { googleFormQuestions } = await import("./services/googleIntakeService.ts");
+    const questions = await googleFormQuestions(prisma, row);
+    const mapping: Record<string, string> = {};
+    for (const key of ["phone", "name", "email", "message"]) {
+      const value = req.body?.[key];
+      if (value && (typeof value !== "string" || !questions.some(q => q.id === value))) throw new ApiError(422, "invalid_field", "Выберите поле из подключённой формы");
+      if (value) mapping[key] = value;
+    }
+    await prisma.integration.update({ where: { id: row.id }, data: { mappingJson: mapping } });
+    res.json({ saved: true });
+  });
+
+  app.post("/api/v1/integrations/telegram/connect", json, async (req, res) => {
+    const auth = await requireAuth(req);
+    await requireFeature(prisma, auth, FEATURES.CHANNELS);
+    res.json(await connectCompanyTelegram(prisma, auth, telegramConnectSchema.parse(req.body)));
+  });
+  app.post("/api/v1/integrations/telegram/:id/disconnect", async (req, res) => {
+    res.json(await disconnectCompanyTelegram(prisma, await requireAuth(req), req.params.id));
+  });
+  app.post("/api/v1/integrations/telegram/:id/check", async (req, res) => {
+    res.json(await checkCompanyTelegram(prisma, await requireAuth(req), req.params.id));
+  });
+  app.post("/public/integrations/telegram/:id", json, async (req, res) => {
+    res.json(await receiveCompanyTelegram(prisma, req.params.id, req.header("x-telegram-bot-api-secret-token") || "", req.body));
   });
 
   app.get("/api/v1/integrations/setup", async (req, res) => {

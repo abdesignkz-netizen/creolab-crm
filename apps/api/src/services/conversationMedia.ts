@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { PrismaClient } from "@creolab/db";
+import type { Prisma, PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import { assertExternalCallbackUrl } from "../lib/externalUrl.ts";
 import { resolveUploadPath } from "../lib/storage.ts";
@@ -176,7 +176,7 @@ export function messagePreviewText(
 }
 
 export async function storeMessageAttachment(
-  prisma: PrismaClient,
+  prisma: PrismaClient | Prisma.TransactionClient,
   input: {
     tenantId: string;
     messageId: string;

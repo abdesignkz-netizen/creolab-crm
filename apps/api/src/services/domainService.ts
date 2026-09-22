@@ -1042,6 +1042,11 @@ export async function setConversationMode(
     });
     if (!current) throw new ApiError(404, "not_found", "Диалог не найден");
 
+    if (mode === "ai" && current.connectionId) {
+      const channel = await tx.channelConnection.findFirst({ where: { id: current.connectionId, tenantId: tid } });
+      if (["telegram", "email", "instagram"].includes(channel?.channelType || "")) throw new ApiError(409, "channel_ai_unavailable", "Для этого канала сейчас доступны ответы сотрудников. Автоматические ответы AI не подключены.");
+    }
+
     const selfId = auth.activeMembership?.id;
     let nextAssignee = current.assigneeMembershipId;
     if (mode === "human") {
@@ -1204,6 +1209,20 @@ export async function addConversationMessage(
         internal: true,
       },
     });
+  }
+  if (conversation.connectionId) {
+    const connection = await prisma.channelConnection.findFirst({ where: { id: conversation.connectionId, tenantId: tid } });
+    if (connection?.channelType === "instagram") {
+      const { sendInstagramReply } = await import("./metaConnectionService.ts");
+      return sendInstagramReply(prisma, auth, id, input);
+    }
+    if (connection?.channelType === "email") {
+      throw new ApiError(409, "email_receive_only", "Подключён приём почты. Для ответа откройте письмо в почтовом ящике.");
+    }
+    if (connection?.channelType === "telegram") {
+      const { sendCompanyTelegram } = await import("./telegramCompanyService.ts");
+      return sendCompanyTelegram(prisma, auth, id, input);
+    }
   }
   if (conversation.mode !== "human") {
     throw new ApiError(409, "mode_locked", "Сначала возьмите диалог, затем отвечайте");

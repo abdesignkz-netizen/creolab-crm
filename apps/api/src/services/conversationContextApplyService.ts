@@ -225,7 +225,10 @@ async function upsertAgreementAndTask(
   }
 
   await scheduleReminders(prisma, tid, "agreement", agreement.id, scheduledAt, suggestion.type);
-  await syncAgreementToCalendar(agreement).catch(() => null);
+  // OAuth calendars are polled per tenant; retain the existing optional legacy adapter otherwise.
+  if (!await prisma.integration.findFirst({ where: { tenantId: tid, type: "calendar", status: "active", publicKey: { startsWith: "google:" }, credentialId: { not: null } } })) {
+    await syncAgreementToCalendar(agreement).catch(() => null);
+  }
 
   const hitlTypes = new Set(["SEND_CONTRACT", "SEND_INVOICE", "SEND_PROPOSAL", "SEND_DOCUMENTS"]);
   const requiresHitl = hitlTypes.has(suggestion.type);

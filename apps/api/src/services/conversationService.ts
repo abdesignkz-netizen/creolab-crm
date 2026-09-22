@@ -46,7 +46,9 @@ function primaryPhone(
   return phones.find((item) => item.primary) || phones[0] || null;
 }
 
-function channelLabel(conversation: { sellerLeadId?: string | null; connectionId?: string | null }) {
+function channelLabel(conversation: { sellerLeadId?: string | null; connectionId?: string | null; connection?: { channelType: string } | null }) {
+  const labels: Record<string, string> = { telegram: "Telegram", instagram: "Instagram", email: "Gmail" };
+  if (conversation.connection?.channelType && labels[conversation.connection.channelType]) return labels[conversation.connection.channelType];
   if (conversation.sellerLeadId) return "WhatsApp";
   return "Диалог";
 }
@@ -190,6 +192,7 @@ export async function listConversationsBoard(
   const conversations = await prisma.conversation.findMany({
     where,
     include: {
+      connection: { select: { channelType: true, status: true } },
       contact: {
         include: {
           methods: true,
@@ -388,6 +391,7 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
   const conversation = await prisma.conversation.findFirst({
     where: { id, tenantId: tid },
     include: {
+      connection: { select: { channelType: true, status: true } },
       contact: {
         include: {
           methods: true,
@@ -505,6 +509,8 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
       modeLabel: conversation.mode === "human" ? "Менеджер отвечает" : conversation.mode === "paused" ? "AI отключён" : "AI отвечает",
       status: conversation.status,
       channel,
+      channelType: conversation.connection?.channelType || (conversation.sellerLeadId ? "whatsapp" : null),
+      channelConnected: !conversation.connection || conversation.connection.status === "active",
       acquisition,
       sourceLine: sourceArrow(acquisition, channel),
       sellerLeadId: conversation.sellerLeadId,

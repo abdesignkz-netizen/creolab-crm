@@ -249,6 +249,9 @@ export function startBackgroundJobs(prisma: PrismaClient) {
     import("./esfStatusSyncService.ts")
       .then(({ ensureEsfStatusPolls }) => ensureEsfStatusPolls(prisma))
       .catch((error) => console.error("esf polls", error));
+    import("./googleSyncService.ts")
+      .then(({ pollGoogleConnections }) => pollGoogleConnections(prisma))
+      .catch(() => undefined);
     processDueScheduledActions(prisma).catch((error) => console.error("scheduled", error));
     resumeRunningCampaigns(prisma).catch((error) => console.error("campaign resume", error));
     import("./subscriptionActivationService.ts")

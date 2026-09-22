@@ -228,6 +228,7 @@ export function ConversationsPage() {
   }
 
   async function addPendingFiles(list: FileList | File[]) {
+    if (["email", "instagram"].includes(workspace?.conversation?.channelType)) return;
     try {
       const next = await filesToPending(list);
       setPendingFiles((previous) => {
@@ -314,6 +315,11 @@ export function ConversationsPage() {
     </div>
   );
 
+  const incomingMail = workspace?.conversation?.channelType === "email";
+  const staffOnly = ["telegram", "instagram", "email"].includes(workspace?.conversation?.channelType);
+  const canSend = !incomingMail && workspace?.conversation?.channelConnected !== false;
+  const canAttach = canSend && workspace?.conversation?.channelType !== "instagram";
+
   const chatPane = workspace ? (
     <div className="conv-chat-pane">
       <div className="conv-header">
@@ -366,7 +372,7 @@ export function ConversationsPage() {
               >
                 Передать менеджеру
               </button>
-            ) : (
+            ) : !staffOnly ? (
               <button
                 className="btn secondary"
                 type="button"
@@ -376,7 +382,7 @@ export function ConversationsPage() {
               >
                 Вернуть AI
               </button>
-            )}
+            ) : null}
           </div>
         </div>
       </div>
@@ -518,7 +524,7 @@ export function ConversationsPage() {
         <button
           type="button"
           className="btn secondary conv-attach-btn"
-          disabled={workspace.conversation.mode !== "human" || busy}
+          disabled={!canAttach || workspace.conversation.mode !== "human" || busy}
           aria-label="Прикрепить файл"
           {...tip("Прикрепить фото, видео, документ или другой файл")}
           onClick={() => fileInputRef.current?.click()}
@@ -540,21 +546,21 @@ export function ConversationsPage() {
           onChange={(event) => setText(event.target.value)}
           autoFocus={focusReply}
           placeholder={
-            workspace.conversation.mode === "human"
+            incomingMail ? "Входящая почта. Отправляйте ответы из Gmail." : !canSend ? "Канал отключён. Подключите его в настройках интеграций." : workspace.conversation.mode === "human"
               ? "Написать сообщение..."
               : "Сначала передайте диалог менеджеру, затем отвечайте"
           }
-          disabled={workspace.conversation.mode !== "human" || busy}
+          disabled={!canSend || workspace.conversation.mode !== "human" || busy}
         />
         <button
           className="btn"
-          disabled={workspace.conversation.mode !== "human" || busy || (!text.trim() && !pendingFiles.length)}
+          disabled={!canSend || workspace.conversation.mode !== "human" || busy || (!text.trim() && !pendingFiles.length)}
           {...tip(
             workspace.conversation.mode !== "human"
               ? "Сначала нажмите «Передать менеджеру» — иначе сообщение не уйдёт"
               : pendingFiles.length
-                ? "Отправить сообщение и вложения клиенту в WhatsApp"
-                : "Отправить сообщение клиенту в WhatsApp",
+                ? "Отправить сообщение и вложения клиенту"
+                : "Отправить сообщение клиенту",
           )}
         >
           Отправить

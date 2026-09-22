@@ -774,6 +774,19 @@ export async function ingestIntegrationEvent(
     throw new ApiError(422, "invalid_body", "Некорректное тело");
   }
   const parsed = integrationEventSchema.parse(json);
+  return processTrustedIntegrationLead(prisma, integration, parsed);
+}
+
+/** Internal adapter entrypoint. Caller must authenticate the provider; never expose this directly as an HTTP handler. */
+export async function processTrustedIntegrationLead(
+  prisma: PrismaClient,
+  integration: Awaited<ReturnType<PrismaClient["integration"]["findUniqueOrThrow"]>>,
+  payload: unknown,
+) {
+  const parsed = integrationEventSchema.parse(payload);
+  const integrationId = integration.id;
+  const tenant = await prisma.tenant.findUnique({ where: { id: integration.tenantId }, select: { status: true } });
+  if (integration.status !== "active" || tenant?.status !== "active") throw new ApiError(403, "integration_disabled", "Подключение недоступно");
   const payloadHash = hashPayload(parsed);
   const phoneMethod = parsed.contact.methods.find((item) => item.type === "phone");
   const phone = validateClientPhone(phoneMethod?.value, "KZ");
@@ -784,6 +797,10 @@ export async function ingestIntegrationEvent(
   );
 
   const result = await prisma.$transaction(async (tx) => {
+    if (integration.type !== "webhook") {
+      const current = await tx.integration.update({ where: { id: integrationId }, data: { lastEventAt: new Date() } });
+      if (current.status !== "active") throw new ApiError(403, "integration_disabled", "Подключение отключено");
+    }
     const existing = await tx.inboundEvent.findUnique({
       where: {
         integrationId_externalEventKey: {
@@ -793,7 +810,7 @@ export async function ingestIntegrationEvent(
       },
     });
     if (existing) {
-      if (existing.payloadHash !== payloadHash) {
+      if (integration.type === "webhook" && existing.payloadHash !== payloadHash) {
         throw new ApiError(409, "conflict", "Тот же event_id с другим содержимым");
       }
       return { disposition: "duplicate" as const, event_id: existing.id };
@@ -805,7 +822,7 @@ export async function ingestIntegrationEvent(
         externalEventKey: parsed.event_id,
         payloadHash,
         rawJson: parsed as Prisma.InputJsonValue,
-        provider: "webhook_api",
+        provider: integration.type === "webhook" ? "webhook_api" : integration.type,
         eventType: "LEAD_SUBMISSION",
         status: "PROCESSING",
         test: integration.testMode,
@@ -873,15 +890,20 @@ export async function ingestIntegrationEvent(
       isTest: integration.testMode,
     });
 
+    if (integration.type !== "webhook") {
+      lead.entryChannel = integration.type;
+      lead.acquisitionSource = integration.type;
+    }
+
     const inquiry = await createInquiryTx(tx, {
       tenantId: integration.tenantId,
       integrationId,
-      source: "webhook",
+      source: integration.type,
       inboundEventId: inbound.id,
       name: lead.name || parsed.contact.name,
       phoneRaw: phone.raw,
       phoneNormalized: phone.normalized,
-      phoneSource: "webhook",
+      phoneSource: integration.type,
       subject: lead.service || parsed.inquiry.subject,
       description: lead.message || parsed.inquiry.message,
       companyName: lead.company,
@@ -896,8 +918,8 @@ export async function ingestIntegrationEvent(
       fieldMeta: { mappingVersion: lead.mappingVersion, normalizedLead: true },
       assigneeMembershipId: assignee,
       test: integration.testMode,
-      sourceChannel: "webhook",
-      sourceType: lead.acquisitionSource || "webhook",
+      sourceChannel: integration.type,
+      sourceType: lead.acquisitionSource || integration.type,
     });
     await tx.inboundEvent.update({
       where: { id: inbound.id },

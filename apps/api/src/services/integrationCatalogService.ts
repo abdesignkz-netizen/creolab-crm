@@ -133,7 +133,8 @@ export async function listIntegrationCatalog(prisma: PrismaClient, auth: AuthCon
   const leadCards = [];
   for (const meta of Object.values(INTEGRATION_TYPE_META).filter((m) => m.group === "leads")) {
     const typeKey = Object.entries(INTEGRATION_TYPE_META).find(([, v]) => v.catalogType === meta.catalogType)?.[0];
-    const row = rows.find((r) => r.type === typeKey);
+    const matches = rows.filter(r => r.type === typeKey);
+    const row = matches.find(r => r.status === "active") || matches[0];
     if (meta.catalogType === "WEBSITE_FORM") {
       const health = row ? deriveHealthStatus(row) : "UNKNOWN";
       leadCards.push({
@@ -193,45 +194,38 @@ export async function listIntegrationCatalog(prisma: PrismaClient, auth: AuthCon
       continue;
     }
     leadCards.push({
-      catalogType: meta.catalogType,
-      title: meta.title,
-      stage: meta.stage,
-      connected: false,
-      connectionStatus: "DISCONNECTED",
-      healthStatus: "UNKNOWN",
-      healthLabel: "Не подключено",
-      inquiryCount: 0,
-      eventCount: 0,
-      automationMode: null,
-      automationLabel: null,
-      integrationId: null,
-      available: false,
-      comingSoon: true,
-      note:
-        meta.catalogType === "TIKTOK_LEADS"
-          ? "Подключение после проверки capability аккаунта"
-          : "Следующий этап развития интеграций",
+      catalogType: meta.catalogType, title: meta.title, stage: meta.stage,
+      connected: row?.status === "active",
+      connectionStatus: row?.connectionStatus || "DISCONNECTED",
+      healthStatus: row ? deriveHealthStatus(row) : "UNKNOWN",
+      healthLabel: row?.status === "active" ? healthLabel(deriveHealthStatus(row)) : row?.status === "pending" ? "Ожидает настройки" : "Не подключено",
+      inquiryCount: matches.reduce((sum, item) => sum + item._count.inquiries, 0),
+      eventCount: matches.reduce((sum, item) => sum + item._count.inboundEvents, 0),
+      automationMode: row?.automationMode || "inherit",
+      automationLabel: "Настройки обработки заявок",
+      integrationId: row?.id || null, available: true, comingSoon: false,
+      note: "Настройте подключение в соответствующем разделе ниже.",
     });
   }
 
-  const messagingCards = [
-    {
-      catalogType: "TELEGRAM",
-      title: "Telegram",
-      connected: false,
-      healthLabel: "Не подключено",
-      comingSoon: true,
-      note: "Этап 3: BotFather → token → webhook. Сообщения ≠ заявки.",
-    },
-    {
-      catalogType: "INSTAGRAM_DIRECT",
-      title: "Instagram Direct",
-      connected: false,
-      healthLabel: "Не подключено",
-      comingSoon: true,
-      note: "Этап 4: OAuth Professional Account. Отдельно от Meta Lead Forms.",
-    },
-  ];
+  const messagingCards = ["telegram_bot", "instagram_direct"].map(type => {
+    const meta = INTEGRATION_TYPE_META[type];
+    const row = rows.find(item => item.type === type && item.status === "active") || rows.find(item => item.type === type);
+    const available = true;
+    return {
+      catalogType: meta.catalogType, title: meta.title, integrationId: row?.id || null,
+      connections: rows.filter(item => item.type === type).map(item => ({
+        integrationId: item.id, connected: item.status === "active", status: item.status,
+        username: (item.schemaJson as { username?: string }).username || null,
+        healthLabel: item.status === "active" ? healthLabel(deriveHealthStatus(item)) : item.status === "pending" ? "Ожидает настройки" : "Отключено",
+      })),
+      connected: Boolean(row?.status === "active" && row.connectionStatus === "CONNECTED"),
+      healthLabel: row?.status === "active" ? healthLabel(deriveHealthStatus(row)) : "Не подключено",
+      available, comingSoon: !available,
+      note: type === "telegram_bot" ? "Личные сообщения клиентов боту и ответы сотрудников из CRM." : "Сообщения Instagram и текстовые ответы сотрудников в пределах 24 часов.",
+      username: type === "telegram_bot" ? (row?.schemaJson as { username?: string } | undefined)?.username || null : null,
+    };
+  });
 
   const eventLog = recentEvents.map((e) => ({
     id: e.id,

@@ -1,3 +1,6 @@
+import { TikTokConnectionsPanel } from "./TikTokConnectionsPanel";
+import { MetaConnectionsPanel } from "./MetaConnectionsPanel";
+import { GoogleConnectionsPanel } from "./GoogleConnectionsPanel";
 import { notifySaved } from "../components/SaveNotice";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
@@ -25,6 +28,8 @@ export function IntegrationsPage() {
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
   const [formMethod, setFormMethod] = useState<ConnectMethod>("html");
+  const [botToken, setBotToken] = useState("");
+  const [savingBot, setSavingBot] = useState(false);
   const [telegram, setTelegram] = useState<any>(null);
 
   async function load() {
@@ -59,6 +64,7 @@ export function IntegrationsPage() {
   const leadCards = (catalog?.leads || []).filter(
     (card: any) => card.catalogType === "WEBSITE_FORM" || (card.connected && card.catalogType !== "WEBHOOK_API"),
   );
+  const companyTelegram = catalog?.messaging?.find((card: any) => card.catalogType === "TELEGRAM");
   const telegramReady = Boolean(setup?.telegram?.employee?.botConfigured);
   const whatsappSender =
     setup?.whatsapp?.sender && !/\.js$/i.test(String(setup.whatsapp.sender)) ? setup.whatsapp.sender : null;
@@ -68,7 +74,7 @@ export function IntegrationsPage() {
       <div className="page-head">
         <div>
           <h2>Интеграции</h2>
-          <p className="muted">Форма сайта, WhatsApp и кабинет ИС ЭСФ.</p>
+          <p className="muted">Каналы общения, источники заявок, календарь и кабинет ИС ЭСФ.</p>
           <p className="muted">Подключение каналов доступно после активации тарифа. Сейчас можно изучить интерфейс.</p>
         </div>
       </div>
@@ -226,6 +232,39 @@ export function IntegrationsPage() {
           ) : null}
         </div>
       ) : null}
+
+      <GoogleConnectionsPanel onChange={() => void load()} />
+      <MetaConnectionsPanel onChange={() => void load()} />
+      <TikTokConnectionsPanel onChange={() => void load()} />
+      <div className="panel">
+        <h3>Telegram-бот компании</h3>
+        <p className="muted">Клиенты пишут вашему боту, сотрудники отвечают в разделе «Диалоги». Сообщения не создают заявки автоматически.</p>
+        <p><span className="badge">{companyTelegram?.healthLabel || "Не подключено"}</span> {companyTelegram?.username ? `@${companyTelegram.username}` : ""}</p>
+        <form onSubmit={async event => {
+          event.preventDefault(); setSavingBot(true); setError(""); setNote("");
+          try { await api.connectCompanyTelegram(botToken); setBotToken(""); setNote("Telegram-бот подключён. Напишите ему из другого аккаунта для проверки."); await load(); }
+          catch (err) { setError(err instanceof Error ? err.message : "Не удалось подключить бота"); }
+          finally { setSavingBot(false); }
+        }}>
+          <label>Токен бота из BotFather<input type="password" autoComplete="new-password" value={botToken} onChange={event => setBotToken(event.target.value)} placeholder="Токен Telegram-бота" required disabled={savingBot} /></label>
+          <p className="muted">Создайте бота командой /newbot в @BotFather. Используйте отдельного бота, который не подключён к другой системе. Токен хранится зашифрованным.</p>
+          <button className="btn" type="submit" disabled={savingBot || !botToken.trim()}>{savingBot ? "Подключение…" : "Подключить или обновить бота"}</button>
+        </form>
+        {(companyTelegram?.connections || []).map((bot: any) => <div className="panel" key={bot.integrationId}><p><b>{bot.username ? `@${bot.username}` : "Telegram"}</b> · {bot.healthLabel}</p><div className="actions">
+          <button type="button" className="btn secondary" disabled={savingBot} onClick={async () => {
+            setSavingBot(true); setError("");
+            try { const result = await api.checkCompanyTelegram(bot.integrationId) as { healthLabel: string }; setNote(result.healthLabel); await load(); }
+            catch (err) { setError(err instanceof Error ? err.message : "Проверка не выполнена"); }
+            finally { setSavingBot(false); }
+          }}>Проверить подключение</button>
+          {bot.status !== "disabled" ? <button type="button" className="btn secondary" disabled={savingBot} onClick={async () => {
+            setSavingBot(true); setError("");
+            try { await api.disconnectCompanyTelegram(bot.integrationId); setNote("Telegram-бот отключён. История диалогов сохранена."); await load(); }
+            catch (err) { setError(err instanceof Error ? err.message : "Не удалось отключить бота"); }
+            finally { setSavingBot(false); }
+          }}>Отключить бота</button> : null}
+        </div></div>)}
+      </div>
 
       <div className="panel">
         <h3>WhatsApp</h3>
