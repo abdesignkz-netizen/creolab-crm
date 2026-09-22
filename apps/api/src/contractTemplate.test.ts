@@ -581,6 +581,11 @@ KZ111111111111111111
     assert.ok(formed.body.previewId);
     assert.equal(formed.body.generated, true, JSON.stringify(formed.body));
 
+    const previewWord = await fetch(`${base}/api/v1/documents/contract-previews/${formed.body.previewId}/docx`, { headers: { cookie } });
+    assert.equal(previewWord.status, 200);
+    const wordBytes = Buffer.from(await previewWord.arrayBuffer());
+    assert.match(await docxToText(wordBytes), /Разработать презентацию компании/);
+
     const previewFile = await fetch(`${base}/api/v1/documents/contract-previews/${formed.body.previewId}`, { headers: { cookie } });
     assert.equal(previewFile.status, 200, await previewFile.clone().text());
     assert.match(previewFile.headers.get("content-type") || "", /pdf/);
@@ -599,6 +604,10 @@ KZ111111111111111111
     assert.equal(saved.body.contract.templateId, templateId);
     assert.ok(saved.body.dealId);
     assert.equal(saved.body.contract.status, "READY_TO_SIGN");
+
+    const savedWord = await fetch(`${base}/api/v1/contracts/${saved.body.contract.id}/docx`, { headers: { cookie } });
+    assert.equal(savedWord.status, 200);
+    assert.deepEqual(Buffer.from(await savedWord.arrayBuffer()), wordBytes);
 
     const file = await fetch(`${base}/api/v1/contracts/${saved.body.contract.id}/pdf`, { headers: { cookie } });
     assert.equal(file.status, 200);

@@ -3615,3 +3615,10 @@ html[data-theme="dark"] {
   .dashboard-owner-filter, .dashboard-attention-filter > .segmented { flex-wrap: wrap; width: 100%; }
   .dashboard-owner-filter .btn, .dashboard-attention-filter .btn { white-space: normal; }
 }
+
+.service-catalog-form { padding: 18px; border: 1px solid var(--line); border-radius: 12px; }
+.service-catalog-form label { display: grid; gap: 6px; }
+.service-catalog-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 16px 0; border-bottom: 1px solid var(--line); }
+.service-catalog-row > div:first-child { min-width: 0; overflow-wrap: anywhere; }
+.service-catalog-row .actions { flex-shrink: 0; }
+@media (max-width: 700px) { .service-catalog-row { align-items: stretch; flex-direction: column; } }

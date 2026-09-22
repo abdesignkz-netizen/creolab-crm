@@ -30,6 +30,9 @@ export function ContractPreviewModal({
   const [error, setError] = useState("");
   const [pdfUrl, setPdfUrl] = useState("");
   const [retry, setRetry] = useState(0);
+  const [format, setFormat] = useState<"pdf" | "docx">("pdf");
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState("");
   const onViewedRef = useRef(onViewed);
   onViewedRef.current = onViewed;
 
@@ -47,6 +50,7 @@ export function ContractPreviewModal({
     setLoading(true);
     setError("");
     setPdfUrl("");
+    setDownloadError("");
     void (async () => {
       try {
         const file = contract.preview
@@ -64,7 +68,10 @@ export function ContractPreviewModal({
         onViewedRef.current?.();
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Не удалось открыть договор");
+          const code = (err as { code?: string })?.code;
+          setError(code === "word_conversion_failed" || code === "word_conversion_unavailable"
+            ? "Не удалось подготовить PDF для просмотра. Повторите открытие или скачайте исходный договор в Word."
+            : err instanceof Error ? err.message : "Не удалось открыть договор");
           setLoading(false);
         }
       }
@@ -74,6 +81,16 @@ export function ContractPreviewModal({
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [contract.id, contract.preview, fileRevision, retry]);
+
+  async function download() {
+    if (downloading) return;
+    setDownloading(true); setDownloadError("");
+    try {
+      await (contract.preview ? downloadContractPreview(contract.id, format) : downloadContractFile(contract.id, format));
+    } catch (err) {
+      setDownloadError(err instanceof Error ? err.message : "Не удалось скачать договор. Повторите попытку.");
+    } finally { setDownloading(false); }
+  }
 
   return (
     <div className="stats-modal-backdrop" onClick={() => { if (!busy) onClose(); }}>
@@ -94,18 +111,17 @@ export function ContractPreviewModal({
         {error ? <div role="alert"><p className="error">{error}</p><button type="button" className="btn secondary" disabled={busy} onClick={() => setRetry(value => value + 1)}>Повторить открытие PDF</button></div> : null}
         {loading ? <p className="muted">Открываем PDF…</p> : null}
         {pdfUrl ? <iframe title="Просмотр договора" src={pdfUrl} /> : null}
+        {downloadError ? <p className="error" role="alert">{downloadError}</p> : null}
         <div className="actions">
           {actions?.(!loading && !error && Boolean(pdfUrl))}
-          <button
-            type="button"
-            className="btn"
-            disabled={busy || (loading && !error)}
-            onClick={() =>
-              void (contract.preview ? downloadContractPreview(contract.id) : downloadContractFile(contract.id))
-            }
-          >
-            Скачать PDF
-          </button>
+          <div className="actions contract-download-actions">
+            <select aria-label="Формат скачивания договора" value={format} disabled={busy || downloading} onChange={(event) => setFormat(event.target.value as "pdf" | "docx")}>
+              <option value="pdf">PDF</option><option value="docx">Word (.docx)</option>
+            </select>
+            <button type="button" className="btn" disabled={busy || downloading || (format === "pdf" && loading)} onClick={() => void download()}>
+              {downloading ? "Скачиваем…" : `Скачать в ${format === "pdf" ? "PDF" : "Word"}`}
+            </button>
+          </div>
           {onConfirm && !contract.preview ? (
             <button
               type="button"

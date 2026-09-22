@@ -1,3 +1,4 @@
+import { loadTenantServices } from "./tenantServiceCatalog.ts";
 import type { PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
@@ -702,6 +703,7 @@ export async function getAnalyticsDashboard(prisma: PrismaClient, auth: AuthCont
     }))
     .sort((a, b) => b.inquiries - a.inquiries);
 
+  const serviceNames = new Map((await loadTenantServices(prisma, tid)).map((row) => [row.code, row.name]));
   const serviceMap = new Map<string, { inquiries: number; won: number; revenue: number; sub: Map<string, number> }>();
   for (const inq of current.inquiries) {
     const cat = inq.serviceCategory || inq.service || "Не указано";
@@ -722,6 +724,7 @@ export async function getAnalyticsDashboard(prisma: PrismaClient, auth: AuthCont
   const services = [...serviceMap.entries()]
     .map(([name, v]) => ({
       name,
+      label: serviceNames.get(name) || name,
       inquiries: v.inquiries,
       won: v.won,
       conversion: pct(v.won, v.inquiries),

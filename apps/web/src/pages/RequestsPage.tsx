@@ -1,3 +1,4 @@
+import { catalogItemLabel, type TenantService } from "../lib/tenantServices";
 import { notifySaved } from "../components/SaveNotice";
 import { useRequestVersion } from "../lib/useUrlState";
 import { FormEvent, useEffect, useMemo, useState } from "react";
@@ -16,6 +17,7 @@ type ListResponse = {
   counts: Record<string, number>;
   sourceCounts?: Record<string, number>;
   categoryCounts?: Record<string, number>;
+  serviceOptions?: TenantService[];
   clarification: any[];
   period?: { preset: string; label: string; from: string | null; to: string | null };
 };
@@ -51,14 +53,7 @@ const ATTENTION_FILTERS: Array<{ key: string; label: string }> = [
   { key: "today", label: "Сегодня" },
 ];
 
-const SERVICE_OPTIONS = [
-  { value: "web", label: "Сайты" },
-  { value: "presentation", label: "Презентации" },
-  { value: "branding", label: "Брендинг" },
-  { value: "advertising", label: "Реклама" },
-  { value: "ai", label: "AI" },
-  { value: "other", label: "Другое" },
-];
+
 
 const SOURCE_OPTIONS = [
   { value: "manual", label: "Ручное добавление" },
@@ -202,6 +197,8 @@ export function RequestsPage() {
   const counts = data?.counts || {};
   const sourceCounts = data?.sourceCounts || {};
   const categoryCounts = data?.categoryCounts || {};
+  const services = data?.serviceOptions || [];
+  const serviceOptions = services.map((item) => ({ value: item.code, label: `${catalogItemLabel(item)}${item.active ? "" : " (архив)"}` }));
 
   function patchParams(patch: Record<string, string | null>) {
     const nextParams = new URLSearchParams(params);
@@ -262,7 +259,7 @@ export function RequestsPage() {
     serviceCategory
       ? {
           key: "category",
-          label: `Услуга: ${SERVICE_OPTIONS.find((o) => o.value === serviceCategory)?.label || serviceCategory}`,
+          label: `Услуга / товар: ${serviceOptions.find((o) => o.value === serviceCategory)?.label || (serviceCategory === "__undefined" ? "Не определено" : serviceCategory)}`,
         }
       : null,
     q ? { key: "q", label: `Поиск: ${q}` } : null,
@@ -467,14 +464,15 @@ export function RequestsPage() {
           </label>
 
           <label className="request-filter-label" style={{ display: "grid", gap: 4 }}>
-            Услуга
+            Услуга / товар
             <select
               className="filter-select"
               value={serviceCategory}
               onChange={(e) => setCategory(e.target.value)}
             >
-              <option value="">Все услуги</option>
-              {SERVICE_OPTIONS.map((opt) => (
+              <option value="">Все услуги и товары</option>
+              <option value="__undefined">Не определено{categoryCounts.__undefined != null ? ` (${categoryCounts.__undefined})` : ""}</option>
+              {serviceOptions.map((opt) => (
                 <option key={opt.value} value={opt.value}>
                   {opt.label}
                   {categoryCounts[opt.value] != null ? ` (${categoryCounts[opt.value]})` : ""}
@@ -585,9 +583,10 @@ export function RequestsPage() {
             />
           </label>
           <label>
-            Что интересует
-            <select name="serviceCategory" defaultValue="presentation">
-              {SERVICE_OPTIONS.map((opt) => (
+            Услуга / товар компании
+            <select name="serviceCategory" defaultValue="">
+              <option value="">Не определено</option>
+              {services.filter((item) => item.active).map((item) => ({ value: item.code, label: catalogItemLabel(item) })).map((opt) => (
                 <option key={opt.value} value={opt.value}>
                   {opt.label}
                 </option>
@@ -596,7 +595,7 @@ export function RequestsPage() {
           </label>
           <label>
             Краткая тема
-            <input name="subject" placeholder="Например: расчёт презентации" />
+            <input name="subject" placeholder="Кратко опишите запрос клиента" />
           </label>
           <label>
             Задача
@@ -652,7 +651,7 @@ export function RequestsPage() {
         {data?.items?.length ? (
           <div className="request-list-head" aria-hidden>
             <span>Клиент</span>
-            <span>Тема / услуга</span>
+            <span>Тема / услуга / товар</span>
             <span>Источник</span>
             <span>Статус</span>
             <span>Следующий шаг</span>

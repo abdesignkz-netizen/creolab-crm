@@ -5,6 +5,8 @@ import { createApp } from "./app.ts";
 import { readFile, unlink } from "node:fs/promises";
 import { resolveUploadPath } from "./lib/storage.ts";
 import { DEFAULT_CONTRACT_BODY } from "./services/contractTemplate.ts";
+import { buildPlainDocx, DOCX_MIME } from "./services/contractDocx.ts";
+import { storeContractBytes } from "./services/contractPdfCopy.ts";
 
 describe("Documents phase 2", () => {
   let prisma: Awaited<ReturnType<typeof createPrismaClient>>;
@@ -190,6 +192,13 @@ describe("Documents phase 2", () => {
     assert.match(file.headers.get("content-type") || "", /pdf/);
     const bytes = Buffer.from(await file.arrayBuffer());
     assert.equal(bytes.subarray(0, 4).toString("utf8"), "%PDF");
+    const word = await fetch(`${base}/api/v1/contracts/${contractId}/docx`, { headers: { cookie } });
+    assert.equal(word.status, 200);
+    assert.match(word.headers.get("content-type") || "", /wordprocessingml/);
+    assert.match(word.headers.get("content-disposition") || "", /\.docx/);
+    const source = await prisma.attachment.findFirstOrThrow({ where: { parentId: contractId, documentType: "contract_source" } });
+    assert.deepEqual(Buffer.from(await word.arrayBuffer()), await readFile(resolveUploadPath(source.storageKey)));
+    assert.equal((await prisma.contract.findUniqueOrThrow({ where: { id: contractId } })).generatedFileId, generatedFileId);
   });
 
   it("не отдаёт PDF другому тенанту и блокирует пересборку после ухода в подпись", async () => {
@@ -197,6 +206,7 @@ describe("Documents phase 2", () => {
       headers: { cookie: otherCookie },
     });
     assert.equal(foreign.status, 404);
+    assert.equal((await fetch(`${base}/api/v1/contracts/${contractId}/docx`, { headers: { cookie: otherCookie } })).status, 404);
 
     const changed = await json(`/api/v1/contracts/${contractId}/generate`, {
       method: "POST",
@@ -249,5 +259,38 @@ describe("Documents phase 2", () => {
     const restored = await prisma.attachment.findUniqueOrThrow({ where: { id: repaired.body.version.fileId } });
     assert.equal((await readFile(resolveUploadPath(restored.storageKey))).subarray(0, 4).toString("utf8"), "%PDF");
     assert.equal((await generate()).body.reused, true);
+  });
+  it("opens a legacy Word contract despite a converter failure and retains its original Word download", async () => {
+    const original = await prisma.contract.findUniqueOrThrow({ where: { id: contractId } });
+    const contract = await prisma.contract.create({ data: {
+      tenantId: original.tenantId, dealId, companyId: original.companyId, number: `${original.number}-LEGACY`,
+      date: original.date, amountWithoutVat: original.amountWithoutVat, vatAmount: original.vatAmount,
+      totalAmount: original.totalAmount, status: "READY_TO_SIGN",
+    } });
+    const docx = await buildPlainDocx("Договор DOG-2026-0009\nОплата после приёмки. Стоимость 200 000 тенге.\nПодписи сторон");
+    const source = await storeContractBytes(prisma, { tenantId: original.tenantId, parentId: contract.id,
+      parentType: "contract", fileName: `${contract.number}.docx`, mimeType: DOCX_MIME, bytes: docx });
+    await prisma.contract.update({ where: { id: contract.id }, data: { generatedFileId: source.id } });
+    await prisma.contractVersion.create({ data: { tenantId: original.tenantId, contractId: contract.id, version: 1, fileId: source.id, sha256: source.checksum } });
+    const converter = process.env.CRM_SOFFICE_PATH;
+    process.env.CRM_SOFFICE_PATH = "/usr/bin/true"; // Successful process, but no PDF output.
+    try {
+      const before = await fetch(`${base}/api/v1/contracts/${contract.id}/docx`, { headers: { cookie } });
+      assert.equal(before.status, 200);
+      assert.deepEqual(Buffer.from(await before.arrayBuffer()), docx);
+      const pdf = await fetch(`${base}/api/v1/contracts/${contract.id}/pdf`, { headers: { cookie } });
+      assert.equal(pdf.status, 200, await pdf.clone().text());
+      assert.equal(Buffer.from(await pdf.arrayBuffer()).subarray(0, 5).toString(), "%PDF-");
+      const after = await fetch(`${base}/api/v1/contracts/${contract.id}/docx`, { headers: { cookie } });
+      assert.deepEqual(Buffer.from(await after.arrayBuffer()), docx);
+      const current = await prisma.contract.findUniqueOrThrow({ where: { id: contract.id } });
+      assert.notEqual(current.generatedFileId, source.id);
+      const version = await prisma.contractVersion.findFirstOrThrow({ where: { contractId: contract.id } });
+      assert.equal(version.fileId, current.generatedFileId);
+      await fetch(`${base}/api/v1/contracts/${contract.id}/pdf`, { headers: { cookie } });
+      assert.equal(await prisma.attachment.count({ where: { parentId: contract.id, mimeType: "application/pdf" } }), 1);
+    } finally {
+      if (converter === undefined) delete process.env.CRM_SOFFICE_PATH; else process.env.CRM_SOFFICE_PATH = converter;
+    }
   });
 });

@@ -14,6 +14,11 @@ describe("inquiries overhaul", () => {
     prisma = await createPrismaClient();
     const { seedDatabase } = await import("../../../packages/db/src/seed.ts");
     await seedDatabase();
+    const tenant = await prisma.tenant.findUniqueOrThrow({ where: { slug: "creolab" } });
+    await prisma.tenantServiceCategory.createMany({ data: [
+      { tenantId: tenant.id, code: "presentation", name: "Презентации" },
+      { tenantId: tenant.id, code: "web", name: "Сайты" },
+    ] });
     const app = createApp(prisma);
     await new Promise<void>((resolve) => {
       server = app.listen(0, "127.0.0.1", () => resolve()) as typeof server;

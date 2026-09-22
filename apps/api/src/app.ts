@@ -1,3 +1,4 @@
+import { listTenantServices, saveTenantService } from "./services/tenantServiceCatalog.ts";
 import { connectTikTok, checkTikTok, disconnectTikTok, listTikTokConnections, receiveTikTok, tiktokConnectSchema } from "./services/tiktokConnectionService.ts";
 import { connectMeta, activateMeta, disconnectMeta, listMetaConnections, receiveMetaWebhook, verifyMetaWebhook, metaConnectSchema } from "./services/metaConnectionService.ts";
 import { beginGoogleConnection, finishGoogleConnection, listGoogleConnections, disconnectGoogleConnection, googleConnectSchema } from "./services/googleConnectionService.ts";
@@ -1247,6 +1248,16 @@ export function createApp(prisma: PrismaClient) {
     res.status(201).json(result);
   });
 
+  app.get("/api/v1/service-categories", async (req, res) => {
+    res.json(await listTenantServices(prisma, await requireAuth(req)));
+  });
+  app.post("/api/v1/service-categories", json, async (req, res) => {
+    res.status(201).json(await saveTenantService(prisma, await requireAuth(req), req.body));
+  });
+  app.patch("/api/v1/service-categories/:code", json, async (req, res) => {
+    res.json(await saveTenantService(prisma, await requireAuth(req), req.body, req.params.code));
+  });
+
   app.get("/api/v1/deals", async (req, res) => {
     const q = req.query as Record<string, string>;
     if (q.view === "list") {
@@ -1402,6 +1413,16 @@ export function createApp(prisma: PrismaClient) {
   app.get("/api/v1/contracts/:id/pdf", async (req, res) => {
     const { sendContractPdf } = await import("./services/contractGenerationService.ts");
     await sendContractPdf(prisma, await requireAuth(req), req.params.id, res);
+  });
+
+  app.get("/api/v1/contracts/:id/docx", async (req, res) => {
+    const { sendContractWord } = await import("./services/contractWordDownload.ts");
+    await sendContractWord(prisma, await requireAuth(req), req.params.id, res);
+  });
+
+  app.get("/api/v1/documents/contract-previews/:id/docx", async (req, res) => {
+    const { sendContractWord } = await import("./services/contractWordDownload.ts");
+    await sendContractWord(prisma, await requireAuth(req), req.params.id, res, true);
   });
 
   app.post("/api/v1/contracts/:id/prepare-seller-sign", async (req, res) => {

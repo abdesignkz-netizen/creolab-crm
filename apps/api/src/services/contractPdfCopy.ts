@@ -6,10 +6,10 @@ import type { PrismaClient } from "@creolab/db";
 import type { Response } from "express";
 import { ApiError } from "../errors.ts";
 import { resolveUploadPath } from "../lib/storage.ts";
-import { renderContractPdf, type ContractPdfInput } from "./contractPdf.ts";
+import { type ContractPdfInput } from "./contractPdf.ts";
 import { isWordAttachment } from "./contractDocx.ts";
 import { wordToPdf } from "./wordDocumentConversion.ts";
-import { ensureDefaultTemplate } from "./contractTemplate.ts";
+import { renderSimpleWordPdf } from "./contractWordPdfFallback.ts";
 
 export const PDF_MIME = "application/pdf";
 
@@ -44,14 +44,15 @@ export async function sendStoredFile(
   });
 }
 
-export async function wordFileToContractPdf(bytes: Buffer, fileName: string, input?: ContractPdfInput) {
+export async function wordFileToContractPdf(bytes: Buffer, fileName: string, _input?: ContractPdfInput) {
   if (isPdfBytes(bytes)) return bytes;
   const extension = /\.doc$/i.test(fileName) ? "doc" : "docx";
   try {
     return await wordToPdf(bytes, extension);
   } catch (error) {
-    if (error instanceof ApiError && error.code === "word_conversion_unavailable" && input) {
-      return renderContractPdf(input);
+    if (error instanceof ApiError && ["word_conversion_unavailable", "word_conversion_failed"].includes(error.code) && extension === "docx") {
+      const pdf = await renderSimpleWordPdf(bytes);
+      if (pdf) return pdf;
     }
     throw error;
   }
@@ -96,79 +97,6 @@ export async function storeContractBytes(
   });
 }
 
-async function pdfInputFromContract(
-  prisma: PrismaClient,
-  contract: {
-    id: string;
-    tenantId: string;
-    dealId: string;
-    number: string;
-    date: Date;
-    subject: string | null;
-    paymentTerms: string | null;
-    completionTerms: string | null;
-    amountWithoutVat: { toString(): string } | number;
-    vatRate: { toString(): string } | number | null;
-    vatAmount: { toString(): string } | number;
-    totalAmount: { toString(): string } | number;
-    templateId: string | null;
-  },
-): Promise<ContractPdfInput | undefined> {
-  const [deal, profile, tenant, storedTemplate] = await Promise.all([
-    prisma.deal.findFirst({
-      where: { id: contract.dealId, tenantId: contract.tenantId },
-      include: { items: { orderBy: { sortOrder: "asc" } }, company: true },
-    }),
-    prisma.tenantLegalProfile.findUnique({ where: { tenantId: contract.tenantId } }),
-    prisma.tenant.findUnique({ where: { id: contract.tenantId }, select: { name: true } }),
-    contract.templateId
-      ? prisma.contractTemplate.findFirst({ where: { id: contract.templateId, tenantId: contract.tenantId } })
-      : Promise.resolve(null),
-  ]);
-  if (!deal) return undefined;
-  const template = storedTemplate || (await ensureDefaultTemplate(prisma, contract.tenantId));
-  const filled = (value: string | null | undefined) => Boolean(value && String(value).trim());
-  const company = deal.company;
-  return {
-    number: contract.number,
-    date: contract.date || new Date(),
-    subject: contract.subject || deal.title,
-    dealName: deal.title,
-    paymentTerms: contract.paymentTerms || "По согласованию сторон.",
-    completionTerms: contract.completionTerms || "По согласованию сторон.",
-    amountWithoutVat: Number(contract.amountWithoutVat),
-    vatRate: contract.vatRate == null ? null : Number(contract.vatRate),
-    vatAmount: Number(contract.vatAmount),
-    totalAmount: Number(contract.totalAmount),
-    sellerName: profile?.legalName || profile?.shortName || tenant?.name || "",
-    sellerBin: profile?.bin || profile?.iin || "",
-    sellerAddress: profile?.legalAddress || "",
-    sellerDirector: profile?.directorName || "",
-    sellerDirectorPosition: filled(profile?.directorPosition) ? profile!.directorPosition! : "Директор",
-    sellerIban: profile?.iban || "",
-    sellerBank: profile?.bankName || "",
-    sellerBik: profile?.bik || "",
-    sellerPhone: profile?.phone || "",
-    sellerEmail: profile?.email || "",
-    buyerName: company?.legalName || company?.name || "",
-    buyerBin: company?.bin || company?.iin || "",
-    buyerAddress: company?.legalAddress || company?.address || "",
-    buyerDirector: filled(company?.directorName) ? company!.directorName! : "________________",
-    buyerIban: company?.iban || "",
-    buyerBank: company?.bankName || "",
-    buyerBik: company?.bik || "",
-    items: deal.items.map((item) => ({
-      name: item.name,
-      quantity: Number(item.quantity),
-      unit: item.unit,
-      unitPrice: Number(item.unitPrice),
-      amountWithoutVat: Number(item.amountWithoutVat),
-      totalAmount: Number(item.totalAmount),
-    })),
-    templateBody: template.body,
-  };
-}
-
 export async function ensureContractPdfAttachment(
   prisma: PrismaClient,
   args: { tenantId: string; contractId: string },
@@ -205,11 +133,9 @@ export async function ensureContractPdfAttachment(
   if (signatures > 0) {
     return { contract, attachment };
   }
-  const input = await pdfInputFromContract(prisma, contract);
   const pdf = await wordFileToContractPdf(
     bytes,
     attachment.fileName || attachment.originalFileName || "contract.docx",
-    input,
   );
   const pdfAttachment = await storeContractBytes(prisma, {
     tenantId: args.tenantId,

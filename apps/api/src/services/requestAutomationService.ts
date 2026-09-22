@@ -238,6 +238,8 @@ export async function processNewRequestAutomation(
     }
   }
 
+  const analyzedService = analysis?.serviceCategory
+    ? await prisma.tenantServiceCategory.findFirst({ where: { tenantId, code: analysis.serviceCategory }, select: { name: true } }) : null;
   const processTask = inquiry.tasks[0] || null;
   const dueAt = new Date(Date.now() + settings.firstContactSlaMinutes * 60_000);
 
@@ -267,7 +269,8 @@ export async function processNewRequestAutomation(
 
     if (analysis && !analysisError) {
       if (analysis.serviceCategory && !inquiry.serviceCategory) {
-        updates.serviceCategory = analysis.serviceCategory;
+        const activeService = await tx.tenantServiceCategory.findFirst({ where: { tenantId, code: analysis.serviceCategory, active: true }, select: { code: true } });
+        if (activeService) updates.serviceCategory = activeService.code;
       }
       if (analysis.serviceSubcategory && !inquiry.serviceSubcategory) {
         updates.serviceSubcategory = analysis.serviceSubcategory;
@@ -388,7 +391,7 @@ export async function processNewRequestAutomation(
         contactId: inquiry.contactId,
         inquiryId: inquiry.id,
         type: "inquiry.ai_analyzed",
-        title: `AI определил: ${analysis.serviceCategory || "потребность"}`,
+        title: `AI определил: ${analyzedService?.name || "потребность"}`,
         description: analysis.taskObjective,
         actorType: "system",
         metadata: {

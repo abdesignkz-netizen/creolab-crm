@@ -20,7 +20,18 @@ export async function wordToPdf(bytes: Buffer, extension: "doc" | "docx") {
     const input = path.join(dir, `contract.${extension}`);
     await writeFile(input, bytes);
     try {
-      await run(process.env.CRM_SOFFICE_PATH || "soffice", [`-env:UserInstallation=${pathToFileURL(profile).href}`, "--headless", "--nologo", "--nodefault", "--norestore", "--convert-to", "pdf:writer_pdf_Export", "--outdir", dir, input], { timeout: 60_000, maxBuffer: 512_000 });
+      const args = [`-env:UserInstallation=${pathToFileURL(profile).href}`, "--headless", "--nologo", "--nodefault", "--norestore", "--convert-to", "pdf:writer_pdf_Export", "--outdir", dir, input];
+      try {
+        await run(process.env.CRM_SOFFICE_PATH || "soffice", args, { timeout: 30_000, maxBuffer: 512_000 });
+        await readFile(path.join(dir, "contract.pdf"));
+      } catch (error) {
+        // Some older packages are not recognized by automatic format detection.
+        // Retry with the Word import filter; the source document is never rewritten.
+        if ((error as NodeJS.ErrnoException).code === "ENOENT" && (error as { syscall?: string }).syscall?.startsWith("spawn")) throw error;
+        await run(process.env.CRM_SOFFICE_PATH || "soffice", [
+          ...args.slice(0, 5), `--infilter=${extension === "docx" ? "Office Open XML Text" : "MS Word 97"}`, ...args.slice(5),
+        ], { timeout: 30_000, maxBuffer: 512_000 });
+      }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new ApiError(422, "word_conversion_unavailable", "Преобразование Word временно недоступно. Пока загрузите PDF-копию договора.");
       throw error;

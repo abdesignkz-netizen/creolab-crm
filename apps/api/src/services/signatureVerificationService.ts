@@ -2,7 +2,7 @@ import { inspectCms, type CmsInspection } from "./cmsInspect.ts";
 import { verifyCmsWithKalkan, type KalkanAuthorityStatus, type KalkanCryptoStatus } from "./kalkanCmsVerifyClient.ts";
 
 export type SignatureVerification = {
-  status: "PARSED" | "VERIFIED" | "FAILED";
+  status: "VERIFIED" | "FAILED";
   cryptoStatus: KalkanCryptoStatus;
   authorityStatus: KalkanAuthorityStatus;
   inspection: CmsInspection | null;
@@ -12,7 +12,7 @@ export type SignatureVerification = {
 function failed(
   details: Record<string, unknown>,
   inspection: CmsInspection | null = null,
-  cryptoStatus: KalkanCryptoStatus = "UNAVAILABLE",
+  cryptoStatus: KalkanCryptoStatus = "FAILED",
   authorityStatus: KalkanAuthorityStatus = "UNCHECKED",
 ): SignatureVerification {
   return { status: "FAILED", cryptoStatus, authorityStatus, inspection, details };
@@ -24,6 +24,7 @@ export async function verifyDocumentSignature(input: {
   documentHash: string;
   documentBytes?: Buffer;
   expectedBin?: string | null;
+  expectedIin?: string | null;
 }): Promise<SignatureVerification> {
   let inspection: CmsInspection;
   try {
@@ -31,6 +32,7 @@ export async function verifyDocumentSignature(input: {
   } catch {
     return failed({ error: "cms_parse_failed" });
   }
+  if (!inspection.detached) return failed({ error: "detached_signature_required" }, inspection);
   const cert = inspection.primary;
   if (!cert) return failed({ error: "certificate_missing" }, inspection);
   const now = new Date();
@@ -42,13 +44,15 @@ export async function verifyDocumentSignature(input: {
   }
   if (!cert.iin) return failed({ error: "signer_iin_missing" }, inspection);
   const warnings: string[] = [];
-  if (input.expectedBin && cert.bin && cert.bin !== input.expectedBin) {
+  if (input.expectedBin && cert.bin !== input.expectedBin) {
     return failed(
       { error: "bin_mismatch", expectedBin: input.expectedBin, certificateBin: cert.bin },
       inspection,
     );
   }
-  if (input.expectedBin && !cert.bin) warnings.push("certificate_bin_absent");
+  if (input.expectedIin && cert.iin !== input.expectedIin) {
+    return failed({ error: "iin_mismatch" }, inspection);
+  }
 
   const kalkan = input.documentBytes
     ? await verifyCmsWithKalkan({ cmsBase64: input.cmsBase64, documentBytes: input.documentBytes })
@@ -57,7 +61,7 @@ export async function verifyDocumentSignature(input: {
   const authorityDetail =
     kalkan.authorityStatus === "UNCHECKED" ? "nca_authority_adapter_missing" : kalkan.authorityStatus;
 
-  if (!kalkan.skipped && kalkan.cryptoStatus !== "VERIFIED") {
+  if (kalkan.skipped || kalkan.cryptoStatus !== "VERIFIED") {
     return failed(
       {
         error: kalkan.error || "cms_verify_failed",
@@ -72,30 +76,29 @@ export async function verifyDocumentSignature(input: {
     );
   }
 
-  if (!kalkan.skipped && kalkan.authorityStatus === "REVOKED") {
+  if (kalkan.authorityStatus !== "VALID") {
     return failed(
       {
-        error: "certificate_revoked",
+        error: kalkan.authorityStatus === "REVOKED" ? "certificate_revoked" : "certificate_authority_unchecked",
         documentHash: input.documentHash,
         crypto: "kalkan_cms_verified",
-        authority: "REVOKED",
+        authority: kalkan.authorityStatus,
         warnings,
       },
       inspection,
       "VERIFIED",
-      "REVOKED",
+      kalkan.authorityStatus,
     );
   }
 
-  const verified = kalkan.cryptoStatus === "VERIFIED";
   return {
-    status: verified ? "VERIFIED" : "PARSED",
+    status: "VERIFIED",
     cryptoStatus: kalkan.cryptoStatus,
     authorityStatus: kalkan.authorityStatus,
     inspection,
     details: {
       documentHash: input.documentHash,
-      crypto: verified ? "kalkan_cms_verified" : kalkan.error || "gost_kalkan_adapter_missing",
+      crypto: "kalkan_cms_verified",
       authority: authorityDetail,
       warnings,
       signerIin: cert.iin,

@@ -3,6 +3,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { after, before, describe, it } from "node:test";
 import { createPrismaClient } from "@creolab/db";
 import { createApp } from "./app.ts";
+import { startTestKalkan } from "./testKalkan.ts";
 import { makeTestCms } from "./testCms.ts";
 
 describe("Documents phase 3", () => {
@@ -16,7 +17,7 @@ describe("Documents phase 3", () => {
   let sellerRequestId = "";
   let buyerToken = "";
   let verificationId = "";
-  let previousKalkanUrl: string | undefined;
+  let verifier: Awaited<ReturnType<typeof startTestKalkan>>;
 
   async function json(path: string, init: RequestInit = {}, useCookie = cookie) {
     const response = await fetch(`${base}${path}`, {
@@ -32,8 +33,7 @@ describe("Documents phase 3", () => {
   }
 
   before(async () => {
-    previousKalkanUrl = process.env.KALKAN_VERIFY_URL;
-    delete process.env.KALKAN_VERIFY_URL;
+    verifier = await startTestKalkan();
     process.env.SEED_PASSWORD ||= "ChangeMeLocal1!";
     prisma = await createPrismaClient();
     const { seedDatabase } = await import("../../../packages/db/src/seed.ts");
@@ -119,9 +119,8 @@ describe("Documents phase 3", () => {
     contractId = generated.body.contract.id;
   });
 
-  after(() => {
-    if (previousKalkanUrl === undefined) delete process.env.KALKAN_VERIFY_URL;
-    else process.env.KALKAN_VERIFY_URL = previousKalkanUrl;
+  after(async () => {
+    await verifier?.close();
     server?.close();
   });
 
@@ -130,8 +129,8 @@ describe("Documents phase 3", () => {
     assert.equal(early.response.status, 422);
     assert.equal(early.body.code, "seller_must_sign_first");
     assert.equal(await prisma.signatureRequest.count({ where: { contractId } }), 0);
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const prepared = await json(`/api/v1/contracts/${contractId}/prepare-seller-sign`, { method: "POST" });
+    const preparedRequests = await Promise.all([1, 2].map(() => json(`/api/v1/contracts/${contractId}/prepare-seller-sign`, { method: "POST" })));
+    for (const prepared of preparedRequests) {
       assert.equal(prepared.response.status, 200, JSON.stringify(prepared.body));
       assert.equal(prepared.body.requests.length, 1);
       assert.equal(prepared.body.requests[0].signerType, "SELLER");
@@ -175,22 +174,91 @@ describe("Documents phase 3", () => {
     assert.equal(foreign.response.status, 404);
   });
 
+  it("запрещает выключенное подписание, истёкший запрос и переход к покупателю без проверенной подписи", async () => {
+    const cmsBase64 = makeTestCms(Buffer.from("guard checks"));
+    const post = { method: "POST", body: JSON.stringify({ cmsBase64 }) };
+    const stored = await prisma.signatureRequest.findUniqueOrThrow({ where: { id: sellerRequestId } });
+    await prisma.tenantLegalProfile.update({ where: { tenantId: stored.tenantId }, data: { contractSigningEnabled: false } });
+    try {
+      const disabled = await json(`/api/v1/signature-requests/${sellerRequestId}/sign`, post);
+      assert.equal(disabled.response.status, 403);
+      assert.equal(disabled.body.code, "signing_disabled");
+    } finally {
+      await prisma.tenantLegalProfile.update({ where: { tenantId: stored.tenantId }, data: { contractSigningEnabled: true } });
+    }
+    await prisma.signatureRequest.update({ where: { id: sellerRequestId }, data: { expiresAt: new Date(Date.now() - 1000) } });
+    const expired = await json(`/api/v1/signature-requests/${sellerRequestId}/sign`, post);
+    assert.equal(expired.response.status, 422);
+    assert.equal(expired.body.code, "signature_expired");
+    await prisma.signatureRequest.update({ where: { id: sellerRequestId }, data: { status: "SIGNED", expiresAt: stored.expiresAt } });
+    try {
+      const unverified = await json(`/api/v1/contracts/${contractId}/send-to-buyer`, { method: "POST" });
+      assert.equal(unverified.response.status, 409);
+      assert.equal(unverified.body.code, "signature_not_verified");
+      const publicView = await json(`/public/sign/${buyerToken}`, {}, "");
+      assert.equal(publicView.body.canSign, false);
+    } finally {
+      await prisma.signatureRequest.update({ where: { id: sellerRequestId }, data: { status: "PENDING" } });
+    }
+    assert.equal(await prisma.documentSignature.count({ where: { contractId } }), 0);
+  });
+
+  it("отклоняет подпись другого файла и недоступную проверку без изменения договора", async () => {
+    const before = await prisma.contract.findUniqueOrThrow({ where: { id: contractId } });
+    const wrong = await json(`/api/v1/signature-requests/${sellerRequestId}/sign`, {
+      method: "POST", body: JSON.stringify({ cmsBase64: makeTestCms(Buffer.from("Другой договор")) }),
+    });
+    assert.equal(wrong.response.status, 422, JSON.stringify(wrong.body));
+    assert.equal(wrong.body.code, "signature_invalid");
+    const url = process.env.KALKAN_VERIFY_URL;
+    delete process.env.KALKAN_VERIFY_URL;
+    try {
+      const unavailable = await json(`/api/v1/signature-requests/${sellerRequestId}/sign`, {
+        method: "POST", body: JSON.stringify({ cmsBase64: makeTestCms(Buffer.from("Любой файл")) }),
+      });
+      assert.equal(unavailable.response.status, 503, JSON.stringify(unavailable.body));
+      assert.equal(unavailable.body.code, "signature_verification_unavailable");
+    } finally { process.env.KALKAN_VERIFY_URL = url; }
+    assert.equal(await prisma.documentSignature.count({ where: { contractId } }), 0);
+    assert.equal((await prisma.contract.findUniqueOrThrow({ where: { id: contractId } })).status, before.status);
+    assert.equal((await prisma.signatureRequest.findUniqueOrThrow({ where: { id: sellerRequestId } })).status, "PENDING");
+  });
+
   it("принимает подписи по очереди и закрывает договор", async () => {
     const pdf = await fetch(`${base}/api/v1/contracts/${contractId}/pdf`, { headers: { cookie } });
     const bytes = Buffer.from(await pdf.arrayBuffer());
     const sellerCms = makeTestCms(bytes, { iin: "123456789013", bin: "123456789013" });
-    const seller = await json(`/api/v1/signature-requests/${sellerRequestId}/sign`, {
-      method: "POST",
-      body: JSON.stringify({ cmsBase64: sellerCms }),
-    });
+    const attempts = await Promise.all([1, 2].map(() => json(`/api/v1/signature-requests/${sellerRequestId}/sign`, {
+      method: "POST", body: JSON.stringify({ cmsBase64: sellerCms }),
+    })));
+    const seller = attempts.find((row) => row.response.status === 200)!;
+    assert.ok(seller, JSON.stringify(attempts.map((row) => row.body)));
+    assert.equal(attempts.filter((row) => row.response.ok).length, 1);
+    assert.ok([409, 422].includes(attempts.find((row) => row !== seller)!.response.status));
+    assert.equal(await prisma.documentSignature.count({ where: { signatureRequestId: sellerRequestId } }), 1);
     assert.equal(seller.response.status, 200, JSON.stringify(seller.body));
     assert.equal(seller.body.contract.status, "PARTIALLY_SIGNED");
+
+    // Reproduce historical duplicate SELLER requests; they must never count as BUYER.
+    const originalRequest = await prisma.signatureRequest.findUniqueOrThrow({ where: { id: sellerRequestId } });
+    const duplicate = await prisma.signatureRequest.create({ data: {
+      tenantId: originalRequest.tenantId, contractId, contractVersionId: originalRequest.contractVersionId,
+      signerType: "SELLER", signerBin: originalRequest.signerBin, order: 1, status: "PENDING",
+    } });
+    const duplicateSigned = await json(`/api/v1/signature-requests/${duplicate.id}/sign`, {
+      method: "POST", body: JSON.stringify({ cmsBase64: sellerCms }),
+    });
+    assert.equal(duplicateSigned.response.status, 200, JSON.stringify(duplicateSigned.body));
+    assert.equal(duplicateSigned.body.contract.status, "PARTIALLY_SIGNED");
+    assert.equal(duplicateSigned.body.bothSigned, false);
+    assert.equal(await prisma.outboxEvent.count({ where: { entityId: contractId, type: "contract.signed" } }), 0);
+    // Leave the old duplicate for all subsequent checks instead of deleting history.
 
     const sentToBuyer = await json(`/api/v1/contracts/${contractId}/send-to-buyer`, { method: "POST" });
     assert.equal(sentToBuyer.response.status, 200, JSON.stringify(sentToBuyer.body));
     buyerToken = sentToBuyer.body.requests.find((row: { signerType: string }) => row.signerType === "BUYER").signUrl.split("/sign/")[1];
     assert.ok(buyerToken);
-    assert.equal(await prisma.signatureRequest.count({ where: { contractId } }), 2);
+    assert.equal(await prisma.signatureRequest.count({ where: { contractId } }), 3);
 
     const publicView = await json(`/public/sign/${buyerToken}`, {}, "");
     assert.equal(publicView.body.canSign, true);
@@ -227,7 +295,9 @@ describe("Documents phase 3", () => {
     assert.ok(verificationId);
     const verify = await json(`/public/verify/${verificationId}`, {}, "");
     assert.equal(verify.body.status, "SIGNED");
-    assert.equal(verify.body.signers.length, 2);
+    assert.equal(verify.body.signers.length, 3);
+    assert.ok(verify.body.signers.every((row: { verificationStatus: string; authorityStatus: string }) => row.verificationStatus === "VERIFIED" && row.authorityStatus === "VALID"));
+    assert.equal(await prisma.outboxEvent.count({ where: { entityId: contractId, type: "contract.signed" } }), 1);
     assert.ok(verify.body.documentHash);
     assert.equal(verify.body.hashAlgorithm, "SHA-256");
     assert.equal("tenantId" in verify.body, false);

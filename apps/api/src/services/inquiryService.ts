@@ -1,3 +1,4 @@
+import { loadTenantServices, matchTenantService, detectTenantService, validateTenantService } from "./tenantServiceCatalog.ts";
 import { createHash } from "node:crypto";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { integrationEventSchema, taskCreatorSnapshot, validateClientPhone } from "@creolab/contracts";
@@ -285,6 +286,11 @@ async function createInquiryTx(
     needsReply?: boolean;
   },
 ) {
+  const services = await loadTenantServices(tx, args.tenantId);
+  const category = args.source === "manual"
+    ? await validateTenantService(tx, args.tenantId, args.serviceCategory)
+    : matchTenantService(services, args.serviceCategory) || matchTenantService(services, args.service)
+      || detectTenantService(services, [args.subject, args.description, args.service].filter(Boolean).join(" "));
   const phoneRaw = args.phoneRaw || "";
   const phoneNormalized = args.phoneNormalized || "";
   const contactId = await findOrCreateContactOptionalPhone(tx, args.tenantId, {
@@ -320,7 +326,7 @@ async function createInquiryTx(
       subject: args.subject || null,
       description: args.description || null,
       service: args.service || args.subject || null,
-      serviceCategory: args.serviceCategory || null,
+      serviceCategory: category,
       companyName: args.companyName || null,
       city: args.city || null,
       desiredDeadline: args.desiredDeadline || null,
@@ -1265,12 +1271,9 @@ function buildInquiryWhere(
   }
 
   if (query.serviceCategory) {
-    andParts.push({
-      OR: [
-        { serviceCategory: query.serviceCategory },
-        { service: { contains: query.serviceCategory, mode: "insensitive" } },
-      ],
-    });
+    andParts.push(query.serviceCategory === "__undefined"
+      ? { OR: [{ serviceCategory: null }, { serviceCategory: "" }] }
+      : { serviceCategory: query.serviceCategory });
   }
 
   if (q) {
@@ -1398,7 +1401,7 @@ export async function listInquiries(prisma: PrismaClient, auth: AuthContext, que
 
   const categoryCounts: Record<string, number> = {};
   for (const row of categoryRaw) {
-    const key = row.serviceCategory || "other";
+    const key = row.serviceCategory || "__undefined";
     categoryCounts[key] = (categoryCounts[key] || 0) + row._count._all;
   }
 
@@ -1432,8 +1435,11 @@ export async function listInquiries(prisma: PrismaClient, auth: AuthContext, que
 
   const { mapInquiryListItem, intakeReasonLabel, relativeDayLabel } = await import("./inquiryPresentation.ts");
 
+  const services = await loadTenantServices(prisma, membership.tenantId);
+  const names = new Map(services.map((service) => [service.code, service.name]));
   return {
-    items: items.map((item) => mapInquiryListItem(item, membership.tenant.timezone)),
+    serviceOptions: services,
+    items: items.map((item) => ({ ...mapInquiryListItem(item, membership.tenant.timezone), serviceLabel: names.get(item.serviceCategory || "") || "Не определено" })),
     total,
     offset: skip,
     limit: take,
@@ -1522,7 +1528,10 @@ export async function getInquiry(prisma: PrismaClient, auth: AuthContext, inquir
     take: 40,
   });
   const { mapInquiryDetail } = await import("./inquiryPresentation.ts");
-  return mapInquiryDetail({ ...inquiry, tasks: visibleTasks, activities }, membership.tenant.timezone);
+  const services = await loadTenantServices(prisma, membership.tenantId);
+  return { ...mapInquiryDetail({ ...inquiry, tasks: visibleTasks, activities }, membership.tenant.timezone),
+    serviceOptions: services, serviceLabel: services.find((row) => row.code === inquiry.serviceCategory)?.name || "Не определено" };
+
 }
 
 export async function takeInquiry(prisma: PrismaClient, auth: AuthContext, inquiryId: string) {
@@ -1601,7 +1610,7 @@ export async function updateInquiry(
     if ("subject" in input) data.subject = input.subject as string | null;
     if ("description" in input) data.description = input.description as string | null;
     if ("service" in input) data.service = input.service as string | null;
-    if ("serviceCategory" in input) data.serviceCategory = input.serviceCategory as string | null;
+    if ("serviceCategory" in input) data.serviceCategory = await validateTenantService(tx, membership.tenantId, input.serviceCategory, inquiry.serviceCategory);
     if ("serviceSubcategory" in input) data.serviceSubcategory = input.serviceSubcategory as string | null;
     if ("companyName" in input) data.companyName = input.companyName as string | null;
     if ("city" in input) data.city = input.city as string | null;

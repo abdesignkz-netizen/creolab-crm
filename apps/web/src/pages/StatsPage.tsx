@@ -27,7 +27,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "funnel", label: "Этапы" },
   { id: "sales", label: "Продажи" },
   { id: "sources", label: "Источники" },
-  { id: "services", label: "Услуги" },
+  { id: "services", label: "Услуги и товары" },
   { id: "managers", label: "Менеджеры" },
   { id: "communications", label: "Коммуникации" },
   { id: "tasks", label: "Задачи" },
@@ -475,7 +475,7 @@ export function StatsPage() {
             </select>
           </label>
           <label>
-            Услуга
+            Услуга / товар
             <input value={serviceCategory} onChange={(e) => setServiceCategory(e.target.value)} placeholder="Сайты" />
           </label>
           <label>
@@ -611,7 +611,7 @@ export function StatsPage() {
             </div>
             <div className="sit-section">
               <div className="sit-section-head">
-                <h3>Услуги</h3>
+                <h3>Услуги и товары</h3>
               </div>
               <BarChart items={data.services || []} valueKey="revenue" />
               <button type="button" className="btn secondary" onClick={() => setTab("services")}>
@@ -829,7 +829,7 @@ export function StatsPage() {
       {tab === "services" && data ? (
         <div className="sit-section">
           <div className="sit-section-head">
-            <h3>Услуги</h3>
+            <h3>Услуги и товары</h3>
             <div className="stats-metric-switch">
               {(
                 [
@@ -856,7 +856,7 @@ export function StatsPage() {
             <table className="stats-table">
               <thead>
                 <tr>
-                  <th>Услуга</th>
+                  <th>Услуга / товар</th>
                   <th>Обращения</th>
                   <th>Продажи</th>
                   <th>Конверсия</th>
@@ -869,7 +869,7 @@ export function StatsPage() {
                   <Fragment key={r.name}>
                     <tr>
                       <td>
-                        <b>{r.name}</b>
+                        <b>{r.label || r.name}</b>
                       </td>
                       <td>{r.inquiries}</td>
                       <td>
@@ -1241,7 +1241,7 @@ export function StatsPage() {
                   ["overview", "Общий результат"],
                   ["funnel", "Этапы"],
                   ["sources", "Источники"],
-                  ["services", "Услуги"],
+                  ["services", "Услуги и товары"],
                   ["sales", "Продажи"],
                   ["losses", "Потери"],
                 ] as const

@@ -32,13 +32,13 @@ export async function downloadInvoicePdf(invoiceId: string, stamped = false) {
   triggerDownload(blob, filename);
 }
 
-export async function downloadContractFile(contractId: string) {
-  const { blob, filename } = await api.downloadContractFile(contractId);
+export async function downloadContractFile(contractId: string, format: "pdf" | "docx" = "pdf") {
+  const { blob, filename } = await api.downloadContractFile(contractId, format);
   triggerDownload(blob, filename);
 }
 
-export async function downloadContractPreview(previewId: string) {
-  const { blob, filename } = await api.downloadContractPreview(previewId);
+export async function downloadContractPreview(previewId: string, format: "pdf" | "docx" = "pdf") {
+  const { blob, filename } = await api.downloadContractPreview(previewId, format);
   triggerDownload(blob, filename);
 }
 

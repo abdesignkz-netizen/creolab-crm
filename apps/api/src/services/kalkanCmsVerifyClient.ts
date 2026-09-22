@@ -59,10 +59,10 @@ export async function verifyCmsWithKalkan(input: {
         error: String(body.error || `kalkan_http_${response.status}`),
       };
     }
-    const cryptoStatus = asCryptoStatus(body.cryptoStatus) || (body.ok ? "VERIFIED" : "FAILED");
+    const cryptoStatus = asCryptoStatus(body.cryptoStatus) || "FAILED";
     return {
       skipped: false,
-      cryptoStatus,
+      cryptoStatus: body.ok === false && body.authorityStatus !== "REVOKED" && body.authorityStatus !== "UNCHECKED" ? "FAILED" : cryptoStatus,
       authorityStatus: asAuthorityStatus(body.authorityStatus),
       error: body.ok ? undefined : String(body.error || "cms_verify_failed"),
     };
@@ -70,7 +70,7 @@ export async function verifyCmsWithKalkan(input: {
     const aborted = error instanceof Error && error.name === "AbortError";
     return {
       skipped: false,
-      cryptoStatus: "FAILED",
+      cryptoStatus: "UNAVAILABLE",
       authorityStatus: "UNCHECKED",
       error: aborted ? "kalkan_timeout" : "kalkan_unreachable",
     };

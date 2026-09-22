@@ -272,6 +272,7 @@ export function managerInquiryWriteFields(input: Record<string, unknown>) {
     "description",
     "subject",
     "service",
+    "serviceCategory",
     "city",
     "desiredDeadline",
     "budgetMin",

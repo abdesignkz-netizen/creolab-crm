@@ -90,7 +90,7 @@ public final class VerifyServer {
         return;
       }
       Authority authority = checkAuthority(loader, crypto);
-      boolean ok = !"REVOKED".equals(authority.status);
+      boolean ok = "VALID".equals(authority.status);
       send(exchange, 200, jsonResult(ok, "VERIFIED", authority.status, authority.error));
     } catch (ClassNotFoundException e) {
       send(exchange, 503, jsonResult(false, "UNAVAILABLE", "UNCHECKED", "kalkan_jars_missing"));
@@ -132,13 +132,14 @@ public final class VerifyServer {
     Object encoded = getEncoded.invoke(parsed);
     Object cms;
     if (getSignedContent.invoke(parsed) != null) {
-      cms = cmsCl.getConstructor(byte[].class).newInstance(encoded);
+      // Only detached signatures bind the signature to the supplied contract bytes.
+      return result;
     } else {
       Object processable = procCl.getConstructor(byte[].class).newInstance((Object) document);
       Constructor<?> detached = null;
       for (Constructor<?> ctor : cmsCl.getConstructors()) {
         Class<?>[] params = ctor.getParameterTypes();
-        if (params.length == 2 && params[1] == byte[].class) {
+        if (params.length == 2 && params[0].isInstance(processable) && params[1] == byte[].class) {
           detached = ctor;
           break;
         }
@@ -150,7 +151,7 @@ public final class VerifyServer {
     Object signers = cmsCl.getMethod("getSignerInfos").invoke(cms);
     Method getSigners = signers.getClass().getMethod("getSigners");
     Collection<?> signerInfos = (Collection<?>) getSigners.invoke(signers);
-    if (signerInfos == null || signerInfos.isEmpty()) return result;
+    if (signerInfos == null || signerInfos.size() != 1) return result;
 
     Method getCerts = cmsCl.getMethod("getCertificatesAndCRLs", String.class, String.class);
     Object certStore = getCerts.invoke(cms, "Collection", provider.getName());
@@ -160,7 +161,7 @@ public final class VerifyServer {
     for (Object signer : signerInfos) {
       Object sid = signer.getClass().getMethod("getSID").invoke(signer);
       sidClass = sid.getClass();
-      Collection<?> certs = (Collection<?>) certStore.getClass().getMethod("getCertificates", sid.getClass()).invoke(certStore, sid);
+      Collection<?> certs = (Collection<?>) certStore.getClass().getMethod("getCertificates", java.security.cert.CertSelector.class).invoke(certStore, sid);
       if (certs == null || certs.isEmpty()) return result;
       Iterator<?> certIt = certs.iterator();
       while (certIt.hasNext()) {
@@ -273,9 +274,8 @@ public final class VerifyServer {
         }
       }
     }
-    for (X509Certificate extra : crypto.allCerts) {
-      if (!crypto.signerCerts.contains(extra)) caCerts.add(extra);
-    }
+    // CA trust comes only from the installed NCA roots and administrator configuration.
+    // Certificates supplied in an untrusted CMS must never become trust anchors.
     return caCerts;
   }
 

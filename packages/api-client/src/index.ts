@@ -420,10 +420,10 @@ export function createApiClient(options: ClientOptions) {
     generateContract: (contractId: string, body: unknown = {}) =>
       request(`/api/v1/contracts/${contractId}/generate`, { method: "POST", body: JSON.stringify(body) }),
     contractPdfUrl: (contractId: string) => `/api/v1/contracts/${contractId}/pdf`,
-    downloadContractFile: (contractId: string) =>
-      downloadBlob(`/api/v1/contracts/${contractId}/pdf`, "contract.pdf"),
-    downloadContractPreview: (previewId: string) =>
-      downloadBlob(`/api/v1/documents/contract-previews/${previewId}`, "contract.pdf"),
+    downloadContractFile: (contractId: string, format: "pdf" | "docx" = "pdf") =>
+      downloadBlob(`/api/v1/contracts/${contractId}/${format}`, `contract.${format}`),
+    downloadContractPreview: (previewId: string, format: "pdf" | "docx" = "pdf") =>
+      downloadBlob(`/api/v1/documents/contract-previews/${previewId}${format === "docx" ? "/docx" : ""}`, `contract.${format}`),
     contractTemplates: () => request("/api/v1/documents/contract-templates"),
     previewContractTemplate: (body: unknown) =>
       request("/api/v1/documents/contract-templates/preview", { method: "POST", body: JSON.stringify(body) }),

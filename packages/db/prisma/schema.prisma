@@ -72,6 +72,7 @@ model Tenant {
   supportTickets       SupportTicket[]
   supportArticleFeedbacks SupportArticleFeedback[]
   situationSnoozes     SituationSnooze[]
+  serviceCategories   TenantServiceCategory[]
   tags                 Tag[]
   contactTags          ContactTag[]
   activities           Activity[]
@@ -2138,4 +2139,21 @@ model PendingRegistration {
 
   @@index([email, consumedAt])
   @@index([expiresAt])
+}
+
+model TenantServiceCategory {
+  id          String   @id @default(uuid())
+  tenantId    String
+  code        String
+  name        String
+  kind        String   @default("SERVICE")
+  description String   @default("")
+  aliases     Json     @default("[]")
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, code])
+  @@index([tenantId, active])
 }

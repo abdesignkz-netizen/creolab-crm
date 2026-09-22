@@ -23,6 +23,7 @@ function isLivePostgresUrl(url: string | undefined): boolean {
 
 async function applyLivePostgresPatches(prisma: PrismaClient) {
   const statements = [
+    ...TENANT_SERVICES_SQL.split(";").map((s) => s.trim()).filter(Boolean),
     ...DEAL_NUMBER_SQL.split(";").map((s) => s.trim()).filter(Boolean),
     `ALTER TABLE "Campaign" ADD COLUMN IF NOT EXISTS "personalizeEach" BOOLEAN DEFAULT false`,
     `ALTER TABLE "CampaignRecipient" ADD COLUMN IF NOT EXISTS "messageDraft" TEXT`,
@@ -72,6 +73,7 @@ async function applyInitSql(pglite: PGlite) {
 
 async function applyAdditiveSchema(pglite: PGlite) {
   await pglite.exec(`
+    ${TENANT_SERVICES_SQL}
     ${DEAL_NUMBER_SQL}
     CREATE TABLE IF NOT EXISTS "SituationSnooze" (
       "id" TEXT NOT NULL,
@@ -1331,3 +1333,20 @@ export async function createPrismaClient(): Promise<PrismaClient> {
 }
 
 export type { PrismaClient };
+
+const TENANT_SERVICES_SQL = `
+CREATE TABLE IF NOT EXISTS "TenantServiceCategory" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "tenantId" TEXT NOT NULL REFERENCES "Tenant"("id") ON DELETE CASCADE,
+  "code" TEXT NOT NULL,
+  "name" TEXT NOT NULL,
+  "description" TEXT NOT NULL DEFAULT '',
+  "aliases" JSONB NOT NULL DEFAULT '[]',
+  "active" BOOLEAN NOT NULL DEFAULT true,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "TenantServiceCategory_tenantId_code_key" ON "TenantServiceCategory"("tenantId", "code");
+ALTER TABLE "TenantServiceCategory" ADD COLUMN IF NOT EXISTS "kind" TEXT NOT NULL DEFAULT 'SERVICE';
+CREATE INDEX IF NOT EXISTS "TenantServiceCategory_tenantId_active_idx" ON "TenantServiceCategory"("tenantId", "active");
+`;

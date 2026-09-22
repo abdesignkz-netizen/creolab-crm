@@ -4,6 +4,7 @@ import { after, before, mock, test } from "node:test";
 import type { Server } from "node:http";
 import { createPrismaClient } from "@creolab/db";
 import { createApp } from "./app.ts";
+import { startTestKalkan } from "./testKalkan.ts";
 import { makeTestCms } from "./testCms.ts";
 import { mockSetAwpStatus, mockSetInvoiceStatus, resetEsfMock } from "./integrations/esf/EsfMock.ts";
 import { processOutbox } from "./services/backgroundJobs.ts";
@@ -11,6 +12,7 @@ import { processOutbox } from "./services/backgroundJobs.ts";
 // Run with scripts/test-api.mjs: it supplies a separate temporary database and storage.
 // Only the external ESF service and signing certificates are synthetic. Business state
 // is changed through HTTP, including both contract signatures (no forced SIGNED rows).
+let verifier: Awaited<ReturnType<typeof startTestKalkan>>;
 let prisma: Awaited<ReturnType<typeof createPrismaClient>>;
 let server: Server;
 let base = "";
@@ -44,7 +46,7 @@ before(async () => {
   assert.equal(process.env.CRM_USE_PGLITE, "1", "Use the isolated test runner");
   assert.ok(process.env.CRM_PGLITE_DIR);
   assert.ok(process.env.STORAGE_DIR);
-  delete process.env.KALKAN_VERIFY_URL;
+  verifier = await startTestKalkan();
   process.env.ESF_PROVIDER = "mock";
   process.env.ESF_ENV = "off";
   process.env.ESF_ALLOW_LIVE_SEND = "0";
@@ -61,7 +63,7 @@ before(async () => {
   const realFetch = globalThis.fetch;
   mock.method(globalThis, "fetch", (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const url = new URL(input instanceof Request ? input.url : String(input));
-    assert.equal(url.origin, base, "The full-cycle test must never send external requests");
+    assert.ok([base, verifier.url].includes(url.origin), "The full-cycle test must never send external requests");
     return realFetch(input, init);
   });
   for (const email of ["owner@creolab.example", "owner@demo-agency.example"]) {
@@ -83,6 +85,7 @@ before(async () => {
 });
 after(async () => {
   mock.restoreAll();
+  await verifier?.close();
   if (server) await new Promise<void>((resolve, reject) => server.close((err) => err ? reject(err) : resolve()));
   await prisma?.$disconnect();
 });

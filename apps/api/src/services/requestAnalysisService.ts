@@ -1,3 +1,4 @@
+import { loadTenantServices, detectTenantService, type ServiceChoice } from "./tenantServiceCatalog.ts";
 import { looksLikeLeadFormDump } from "./contactInterestService.ts";
 import { schemaForCategory } from "./qualificationSchemas.ts";
 
@@ -26,6 +27,8 @@ export type RequestAnalysis = {
 };
 
 type AnalyzeInput = {
+  serviceCatalog?: ServiceChoice[];
+  senderCompany?: string;
   name?: string | null;
   companyName?: string | null;
   subject?: string | null;
@@ -157,22 +160,31 @@ export function analyzeRequestHeuristic(input: AnalyzeInput): RequestAnalysis {
     .join(" ");
   const evidence: string[] = [];
 
+  const allowed = input.serviceCatalog?.filter((row) => row.active);
   let category = input.serviceCategory || null;
+  if (allowed && !allowed.some((row) => row.code === category)) category = null;
+  function detect(text: string) {
+    const legacy = detectServiceFromText(text);
+    if (!allowed) return legacy;
+    const matched = detectTenantService(allowed, text);
+    if (matched) return { category: matched, subcategory: null };
+    return null;
+  }
   let subcategory = input.serviceSubcategory || null;
 
-  const fromClient = detectServiceFromText(clientText);
+  const fromClient = allowed && category ? null : detect(clientText);
   if (fromClient) {
     category = fromClient.category;
     subcategory = fromClient.subcategory || subcategory;
-    evidence.push("услуга из текста клиента");
+    evidence.push("товар или услуга из текста клиента");
   } else if (category) {
-    evidence.push("услуга из поля формы");
+    evidence.push("товар или услуга из поля формы");
   } else {
-    const fromLanding = detectServiceFromText(structuredHint);
+    const fromLanding = detect(structuredHint);
     if (fromLanding) {
       category = fromLanding.category;
       subcategory = fromLanding.subcategory;
-      evidence.push("услуга из landing/кампании");
+      evidence.push("товар или услуга из landing/кампании");
     }
   }
 
@@ -190,13 +202,14 @@ export function analyzeRequestHeuristic(input: AnalyzeInput): RequestAnalysis {
   const company = input.companyName || null;
   if (company) evidence.push("компания");
 
-  const pages = extractPages(clientText);
+  const selectedItem = allowed?.find((row) => row.code === category);
+  const pages = selectedItem?.kind === "PRODUCT" ? null : extractPages(clientText);
   const detectedNeed =
     clientText.trim() ||
     input.service?.trim() ||
-    (category ? `Заявка по услуге ${category}` : null);
+    (category ? `Заявка: ${selectedItem?.name || category}` : null);
 
-  const schema = schemaForCategory(category);
+  const schema = schemaForCategory(selectedItem?.kind === "PRODUCT" ? null : category);
   const knownFields: RequestAnalysis["knownFields"] = [];
   const knownKeys = new Set<string>();
 
@@ -207,8 +220,8 @@ export function analyzeRequestHeuristic(input: AnalyzeInput): RequestAnalysis {
     knownFields.push({ key, label, value: value || null });
   };
 
-  if (category) mark("service", "Услуга", category);
-  if (subcategory === "corporate" || /корпоратив/i.test(clientText)) {
+  if (category) mark("service", selectedItem?.kind === "PRODUCT" ? "Товар" : "Услуга", allowed?.find((row) => row.code === category)?.name || category);
+  if (selectedItem?.kind !== "PRODUCT" && (subcategory === "corporate" || /корпоратив/i.test(clientText))) {
     mark("site_type", "Тип сайта", "корпоративный");
   }
   if (pages) mark("structure", "Примерный объём", pages);
@@ -231,7 +244,7 @@ export function analyzeRequestHeuristic(input: AnalyzeInput): RequestAnalysis {
     .map((f) => ({ key: f.key, label: f.label }));
 
   const companyPart = company ? ` ${company}` : "";
-  const serviceLabel = serviceLabelForCategory(category);
+  const serviceLabel = analysisServiceLabel(input, category);
 
   const knownSummary = knownFields
     .filter((f) => f.key !== "phone")
@@ -272,6 +285,7 @@ export function analyzeRequestHeuristic(input: AnalyzeInput): RequestAnalysis {
 
   const clientMessageDraft = buildClientMessageDraft({
     contactName: input.name,
+    senderCompany: input.senderCompany,
     serviceLabel,
     service: input.service || input.subject,
     company,
@@ -301,6 +315,11 @@ export function analyzeRequestHeuristic(input: AnalyzeInput): RequestAnalysis {
     confidence: fromClient || category ? "MEDIUM" : "LOW",
     evidence,
   };
+}
+
+function analysisServiceLabel(input: AnalyzeInput, category?: string | null) {
+  const service = input.serviceCatalog?.find((row) => row.code === category);
+  return service ? `${service.kind === "PRODUCT" ? "товар" : "услугу"} «${service.name}»` : serviceLabelForCategory(category);
 }
 
 function serviceLabelForCategory(category?: string | null) {
@@ -376,7 +395,7 @@ function requestTopic(requestText: string | null | undefined, servicePhrase: str
   if (
     stripped.length >= 4 &&
     stripped.length <= 90 &&
-    !/заявка по услуге/i.test(stripped) &&
+    !/заявка по услуге|^заявка:/i.test(stripped) &&
     !isUnsuitableTopic(stripped)
   ) {
     const topic = stripped.charAt(0).toLowerCase() + stripped.slice(1);
@@ -419,6 +438,7 @@ function defaultWelcomeQuestions(questions: string[]) {
 
 export function formatInquiryWelcomeMessage(args: {
   contactName?: string | null;
+  senderCompany?: string;
   serviceLabel: string;
   service?: string | null;
   requestText?: string | null;
@@ -428,13 +448,14 @@ export function formatInquiryWelcomeMessage(args: {
   const firstName = greetingFirstName(args.contactName);
   const greeting = firstName ? `${firstName}, добрый день!` : "Добрый день!";
   const topic = requestTopic(args.requestText, welcomeServicePhrase(args.service, args.serviceLabel));
-  const opening = `${greeting} ${AGENCY_INTRO}, пишу по поводу вашей заявки на ${topic}.`;
+  const opening = `${greeting} ${args.senderCompany ? `Вас приветствует ${args.senderCompany}` : AGENCY_INTRO}, пишу по поводу вашей заявки на ${topic}.`;
   const continuation = stripWelcomeNoise(args.body) || defaultWelcomeQuestions(args.qualificationQuestions);
   return `${opening} ${continuation}`.replace(/\s+/g, " ").trim();
 }
 
 function buildClientMessageDraft(args: {
   contactName?: string | null;
+  senderCompany?: string;
   serviceLabel: string;
   service?: string | null;
   company: string | null;
@@ -445,6 +466,7 @@ function buildClientMessageDraft(args: {
 }) {
   return formatInquiryWelcomeMessage({
     contactName: args.contactName,
+    senderCompany: args.senderCompany,
     serviceLabel: args.serviceLabel,
     service: args.service,
     requestText: args.requestText,
@@ -468,8 +490,10 @@ export function applyRefinedRequestAnalysis(
   const qualificationQuestions = Array.isArray(refined.qualificationQuestions)
     ? (refined.qualificationQuestions as string[])
     : draft.qualificationQuestions;
-  const serviceCategory =
-    typeof refined.serviceCategory === "string" ? refined.serviceCategory : draft.serviceCategory;
+  const candidate = typeof refined.serviceCategory === "string" ? refined.serviceCategory : draft.serviceCategory;
+  const serviceCategory = input.serviceCatalog
+    ? input.serviceCatalog.some((row) => row.active && row.code === candidate) ? candidate : draft.serviceCategory
+    : candidate;
   const company = draft.company;
   const detectedNeed = typeof refined.detectedNeed === "string" ? refined.detectedNeed : draft.detectedNeed;
   const merged: RequestAnalysis = {
@@ -503,7 +527,8 @@ export function applyRefinedRequestAnalysis(
   };
   merged.clientMessageDraft = formatInquiryWelcomeMessage({
     contactName: input.name,
-    serviceLabel: serviceLabelForCategory(merged.serviceCategory),
+    senderCompany: input.senderCompany,
+    serviceLabel: analysisServiceLabel(input, merged.serviceCategory),
     service: input.service || input.subject,
     requestText: looksLikeLeadFormDump(input.description) ? null : input.description || input.subject || detectedNeed,
     body: sanitizeClientMessageDraft(refined.clientMessageDraft) || undefined,
@@ -513,19 +538,27 @@ export function applyRefinedRequestAnalysis(
 }
 
 export async function analyzeRequestWithOptionalLlm(input: AnalyzeInput): Promise<RequestAnalysis> {
+  if (input.prisma && input.tenantId) {
+    const [services, tenant] = await Promise.all([
+      loadTenantServices(input.prisma, input.tenantId),
+      input.prisma.tenant.findUnique({ where: { id: input.tenantId }, select: { name: true } }),
+    ]);
+    input = { ...input, serviceCatalog: services.filter((row) => row.active), senderCompany: tenant?.name || "наша компания" };
+  }
   const draft = analyzeRequestHeuristic(input);
   let analysis = draft;
   try {
     const { refineRequestAnalysisWithLlm, composeClientMessageWithLlm } = await import("./llmClient.ts");
-    const refined = await refineRequestAnalysisWithLlm(input, draft, {
+    const { prisma: _db, ...analysisInput } = input;
+    const refined = await refineRequestAnalysisWithLlm(analysisInput, draft, {
       prisma: input.prisma,
       tenantId: input.tenantId,
     });
     analysis = applyRefinedRequestAnalysis(draft, refined, input);
     const composed = await composeClientMessageWithLlm({
       instruction: [
-        "Это первое WhatsApp-сообщение по новой заявке CREOLAB.",
-        "Система сама поставит начало: «Имя, добрый день! Вас приветствует CreoLab Digital Agency, пишу по поводу вашей заявки на …».",
+        `Это первое WhatsApp-сообщение по новой заявке компании ${input.senderCompany || "CREOLAB"}.`,
+        "Система сама добавит приветствие и название компании. Пиши только продолжение сообщения.",
         "Напиши только продолжение: 1–3 уточняющих вопроса по заявке, на «Вы», коротко.",
         "Не пиши «Понял, что нужна…», «получили заявку», не повторяй приветствие и название агентства.",
         "Не цитируй служебные поля заявки: каналы, CTA, контакт, страница, телефон, UTM.",
@@ -548,7 +581,8 @@ export async function analyzeRequestWithOptionalLlm(input: AnalyzeInput): Promis
       ...analysis,
       clientMessageDraft: formatInquiryWelcomeMessage({
         contactName: input.name,
-        serviceLabel: serviceLabelForCategory(analysis.serviceCategory),
+        senderCompany: input.senderCompany,
+        serviceLabel: analysisServiceLabel(input, analysis.serviceCategory),
         service: input.service || input.subject,
         requestText: looksLikeLeadFormDump(input.description) ? null : input.description || input.subject || analysis.detectedNeed,
         body: composed,

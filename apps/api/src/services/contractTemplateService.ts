@@ -22,6 +22,7 @@ import { createContractDraft, serializeContract } from "./documentDraftService.t
 import { generateContractPdfFile, renderContractFromTemplate } from "./contractGenerationService.ts";
 import { addDealItem } from "./dealItemService.ts";
 import { resolveUploadPath } from "../lib/storage.ts";
+import { DOCX_MIME } from "./contractDocx.ts";
 import { lineAmounts, sumLines } from "./documentMoney.ts";
 import { assessContractReadiness, missingFieldsError } from "./contractReadiness.ts";
 import {
@@ -30,6 +31,7 @@ import {
   pdfDownloadHeaders,
   sendStoredFile,
   wordFileToContractPdf,
+  storeContractBytes,
 } from "./contractPdfCopy.ts";
 
 function requireManageDocuments(auth: AuthContext) {
@@ -465,6 +467,11 @@ async function previewContractFromTemplate(
       status: "preview",
     },
   });
+  await storeContractBytes(prisma, {
+    tenantId: tid, parentType: "contract_preview", parentId: previewId,
+    fileName: `${number}.docx`, mimeType: DOCX_MIME, bytes: docx,
+    documentType: "contract_source", uploadedById: auth.user.id, status: "preview",
+  });
   return {
     previewId,
     number,
@@ -512,6 +519,11 @@ async function saveContractPreview(
   if (!isPdfAttachment(previewFile)) {
     const source = await readFile(resolveUploadPath(previewFile.storageKey));
     const pdf = await wordFileToContractPdf(source, previewFile.fileName || "contract.docx");
+    await storeContractBytes(prisma, {
+      tenantId: tid, parentType: "contract_preview", parentId: previewId,
+      fileName: previewFile.fileName, mimeType: previewFile.mimeType, bytes: source,
+      documentType: "contract_source", uploadedById: auth.user.id, status: "preview",
+    });
     await writeFile(resolveUploadPath(previewFile.storageKey), pdf);
     previewFile = await prisma.attachment.update({
       where: { id: previewFile.id },
@@ -562,6 +574,10 @@ async function saveContractPreview(
       where: { id: previewFile.id },
       data: { parentType: "contract", parentId: contract.id, status: "stored" },
     });
+    await tx.attachment.updateMany({
+      where: { tenantId: tid, parentType: "contract_preview", parentId: previewId, documentType: "contract_source" },
+      data: { parentType: "contract", parentId: contract.id, status: "stored" },
+    });
     await tx.auditEvent.create({
       data: {
         tenantId: tid,
@@ -598,6 +614,11 @@ export async function sendContractPreviewFile(
   if (!isPdfAttachment(attachment)) {
     const source = await readFile(resolveUploadPath(attachment.storageKey));
     const pdf = await wordFileToContractPdf(source, attachment.fileName || "contract.docx");
+    await storeContractBytes(prisma, {
+      tenantId: tid, parentType: attachment.parentType, parentId: attachment.parentId,
+      fileName: attachment.fileName, mimeType: attachment.mimeType, bytes: source,
+      documentType: "contract_source", uploadedById: auth.user.id, status: attachment.status,
+    });
     const pdfName = (attachment.fileName || "contract").replace(/\.docx?$/i, "") + ".pdf";
     await writeFile(resolveUploadPath(attachment.storageKey), pdf);
     await prisma.attachment.update({

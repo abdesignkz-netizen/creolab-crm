@@ -6,6 +6,11 @@ import { contractItemTableRows, paymentHalves, renderContractPdf } from "./servi
 import { buildPlainDocx, contractDocxContentHash } from "./services/contractDocx.ts";
 import JSZip from "jszip";
 import { wordFileToContractPdf } from "./services/contractPdfCopy.ts";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { extractPdfPages } from "./services/pdfTextExtraction.ts";
+import { renderSimpleWordPdf } from "./services/contractWordPdfFallback.ts";
 
 const SAMPLE_INPUT = {
   number: "DOG-2026-0001",
@@ -76,6 +81,29 @@ describe("contract pdf", () => {
     } finally {
       if (original === undefined) delete process.env.CRM_SOFFICE_PATH;
       else process.env.CRM_SOFFICE_PATH = original;
+    }
+  });
+  it("recovers a converter failure from the saved Word text, never from changed deal or template data", async () => {
+    const original = process.env.CRM_SOFFICE_PATH;
+    const scratch = await mkdtemp(path.join(tmpdir(), "contract-pdf-fallback-"));
+    const converter = path.join(scratch, "soffice");
+    await writeFile(converter, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
+    process.env.CRM_SOFFICE_PATH = converter;
+    try {
+      const docx = await buildPlainDocx("Договор DOG-2026-0009\nУникальное условие: оплата после приёмки.\n{{items_table}}\nПодписи сторон", [["Заказ", "Сумма"], ["Презентация", "200 000 тенге"]]);
+      const pdf = await wordFileToContractPdf(docx, "DOG-2026-0009.docx", SAMPLE_INPUT);
+      const text = (await extractPdfPages(pdf)).map((page) => page.text).join(" ");
+      assert.match(text, /DOG-2026-0009/);
+      assert.match(text, /оплата после приёмки/);
+      assert.match(text, /200 000/);
+      assert.doesNotMatch(text, /952.?000|Разработка сайта|50% аванс/);
+      await assert.rejects(wordFileToContractPdf(Buffer.from("PK\u0003\u0004broken"), "broken.docx", SAMPLE_INPUT));
+      const imageDoc = await JSZip.loadAsync(docx);
+      imageDoc.file("word/media/logo.png", Buffer.from("logo"));
+      assert.equal(await renderSimpleWordPdf(await imageDoc.generateAsync({ type: "nodebuffer" })), null);
+    } finally {
+      if (original === undefined) delete process.env.CRM_SOFFICE_PATH; else process.env.CRM_SOFFICE_PATH = original;
+      await rm(scratch, { recursive: true, force: true });
     }
   });
 });

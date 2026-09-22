@@ -1,3 +1,4 @@
+import { catalogItemLabel, type TenantService } from "../lib/tenantServices";
 import { FormEvent, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { nameWithPhone, phoneText } from "../lib/contactDisplay";
@@ -16,7 +17,7 @@ const LOST_REASONS = [
   { value: "changed_mind", label: "Передумал" },
   { value: "wrong_inquiry", label: "Ошибочное обращение" },
   { value: "spam", label: "Спам" },
-  { value: "not_our_service", label: "Не наша услуга" },
+  { value: "not_our_service", label: "Нет в нашем ассортименте" },
   { value: "other", label: "Другое" },
 ];
 
@@ -219,7 +220,7 @@ export function RequestDetailPage() {
               <dd>{nameWithPhone(data.contactName, data.phone)}</dd>
             </div>
             <div>
-              <dt>Услуга</dt>
+              <dt>Услуга / товар</dt>
               <dd>{data.serviceLabel || "—"}</dd>
             </div>
             <div>
@@ -475,6 +476,13 @@ export function RequestDetailPage() {
                     data.statusLabel
                   )}
                 </dd>
+              </div>
+              <div>
+                <dt>Услуга / товар</dt>
+                <dd>{!closed ? <select aria-label="Услуга / товар заявки" value={data.serviceCategory || ""} disabled={busy} onChange={(event) => run(() => api.updateInquiry(data.id, { serviceCategory: event.target.value || null }))}>
+                  <option value="">Не определено</option>
+                  {(data.serviceOptions || []).filter((item: { code: string; active: boolean }) => item.active || item.code === data.serviceCategory).map((item: TenantService) => <option key={item.code} value={item.code}>{catalogItemLabel(item)}{item.active ? "" : " (архив)"}</option>)}
+                </select> : data.serviceLabel}</dd>
               </div>
               <div>
                 <dt>Ответственный</dt>

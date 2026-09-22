@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@creolab/db";
+import type { Prisma, PrismaClient } from "@creolab/db";
 import { z } from "zod";
 
 const sellerSchema = z.object({
@@ -10,7 +10,7 @@ const sellerSchema = z.object({
 /** Resolve missing document fields from the user-reviewed import of this deal.
  * Read-only: does not edit organisation settings or infer a signature from a scan.
  */
-export async function documentOrganization(prisma: PrismaClient, tenantId: string, dealId: string, contractId?: string | null) {
+export async function documentOrganization(prisma: PrismaClient | Prisma.TransactionClient, tenantId: string, dealId: string, contractId?: string | null) {
   const profile = await prisma.tenantLegalProfile.findUnique({ where: { tenantId } });
   const where = { tenantId, dealId, status: { notIn: ["CANCELLED", "VOID"] } };
   const contract = contractId

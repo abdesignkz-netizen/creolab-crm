@@ -1,3 +1,4 @@
+import { ServiceCatalogPanel } from "./ServiceCatalogPanel";
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { LegalSettingsPanel } from "./LegalSettingsPanel";
@@ -18,6 +19,7 @@ type Section =
   | "security"
   | "notifications"
   | "interface"
+  | "services"
   | "company"
   | "members"
   | "ops"
@@ -53,7 +55,7 @@ export function SettingsPage() {
   const allowedCompany: Section[] = [
     ...(caps.documents || caps.companyAdmin ? (["company"] as const) : []),
     ...(caps.members ? (["members"] as const) : []),
-    ...(caps.companyAdmin ? (["ops", "audit", "control"] as const) : []),
+    ...(caps.companyAdmin ? (["services", "ops", "audit", "control"] as const) : []),
     ...(caps.aiSettings ? (["ai"] as const) : []),
     ...(!caps.manager ? (["tasks"] as const) : []),
     ...(caps.integrations || caps.companyAdmin ? (["integrations"] as const) : []),
@@ -73,6 +75,7 @@ export function SettingsPage() {
     ...(caps.members ? [{ id: "members" as const, group: "company" as const, label: t(locale, "settings.members") }] : []),
     ...(caps.companyAdmin
       ? [
+          { id: "services" as const, group: "company" as const, label: "Услуги и товары" },
           { id: "ops" as const, group: "company" as const, label: t(locale, "settings.ops") },
           { id: "audit" as const, group: "company" as const, label: t(locale, "settings.audit") },
           { id: "control" as const, group: "company" as const, label: t(locale, "settings.control") },
@@ -131,6 +134,7 @@ export function SettingsPage() {
           {section === "interface" ? <InterfaceSection locale={locale} /> : null}
           {section === "company" && (caps.documents || caps.companyAdmin) ? <LegalSettingsPanel /> : null}
           {section === "members" && caps.members ? <MembersSection locale={locale} /> : null}
+          {section === "services" && caps.companyAdmin ? <ServiceCatalogPanel /> : null}
           {section === "ops" && caps.companyAdmin ? <OpsSection locale={locale} /> : null}
           {section === "audit" && caps.companyAdmin ? <AuditSection locale={locale} /> : null}
           {section === "control" && caps.companyAdmin ? <ControlSection locale={locale} /> : null}

@@ -1,8 +1,8 @@
 import { documentOrganization } from "./documentOrganization.ts";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
-import type { PrismaClient } from "@creolab/db";
+import type { Prisma, PrismaClient } from "@creolab/db";
 import type { Response } from "express";
 import { ApiError } from "../errors.ts";
 import { can, type AuthContext } from "../lib/types.ts";
@@ -12,6 +12,8 @@ import { getTenantDocumentFlags, requireDocumentsEnabled } from "./legalProfileS
 import { serializeContract } from "./documentDraftService.ts";
 import { verifyDocumentSignature } from "./signatureVerificationService.ts";
 import { ensureContractPdfAttachment, isPdfAttachment, pdfDownloadHeaders, sendStoredFile } from "./contractPdfCopy.ts";
+
+type SigningDb = PrismaClient | Prisma.TransactionClient;
 
 const SIGN_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 const OPEN_REQUESTS = ["PENDING", "OPENED"];
@@ -38,7 +40,7 @@ function newToken() {
 async function requireSigningEnabled(prisma: PrismaClient, tenantId: string) {
   const flags = await requireDocumentsEnabled(prisma, tenantId);
   if (!flags.contractSigningEnabled) {
-    throw new ApiError(403, "signing_disabled", "Подписание договоров выключено в настройках");
+    throw new ApiError(403, "signing_disabled", "Включите подписание: Настройки → Реквизиты компании → Изменить реквизиты → Подписание договора ЭЦП (NCALayer)");
   }
   return flags;
 }
@@ -96,7 +98,7 @@ function serializeRequest(
   };
 }
 
-async function loadContractBundle(prisma: PrismaClient, tenantId: string, contractId: string) {
+async function loadContractBundle(prisma: SigningDb, tenantId: string, contractId: string) {
   const contract = await prisma.contract.findFirst({
     where: { id: contractId, tenantId },
     include: {
@@ -117,7 +119,7 @@ function currentVersion(contract: { versions: Array<{ id: string; version: numbe
 }
 
 async function assertVersionFileHash(
-  prisma: PrismaClient,
+  prisma: SigningDb,
   tenantId: string,
   version: { fileId: string | null; sha256: string | null },
 ) {
@@ -143,6 +145,29 @@ function expireIfNeeded<T extends { status: string; expiresAt: Date | null }>(ro
   return row;
 }
 
+// Serialize transitions for one contract, including concurrent browser tabs.
+async function lockContract(tx: Prisma.TransactionClient, tenantId: string, contractId: string) {
+  await tx.$queryRaw`SELECT "id" FROM "Contract" WHERE "id" = ${contractId} AND "tenantId" = ${tenantId} FOR UPDATE`;
+}
+
+async function signedRoles(db: SigningDb, tenantId: string, contractId: string, versionId: string) {
+  const rows = await db.signatureRequest.findMany({
+    where: { tenantId, contractId, contractVersionId: versionId, status: "SIGNED",
+      signatures: { some: { contractVersionId: versionId, verificationStatus: "VERIFIED",
+        verificationDetails: { path: ["authority"], equals: "VALID" } } } },
+    select: { signerType: true },
+  });
+  return new Set(rows.map((row) => row.signerType));
+}
+
+async function assertOpenRequest(tx: SigningDb, request: { id: string; tokenHash: string | null; contractVersionId: string | null }) {
+  const current = await tx.signatureRequest.findUnique({ where: { id: request.id } });
+  if (!current || !OPEN_REQUESTS.includes(expireIfNeeded(current).status)
+      || current.tokenHash !== request.tokenHash || current.contractVersionId !== request.contractVersionId) {
+    throw new ApiError(409, "already_processed", "Запрос на подпись уже обработан, истёк или был заменён. Обновите документ.");
+  }
+}
+
 export async function sendContractForSign(
   prisma: PrismaClient,
   auth: AuthContext,
@@ -154,35 +179,42 @@ export async function sendContractForSign(
   const tid = membership.tenantId;
   await requireSigningEnabled(prisma, tid);
   await ensureContractPdfAttachment(prisma, { tenantId: tid, contractId });
-  const contract = await loadContractBundle(prisma, tid, contractId);
-  if (contract.status === "SIGNED" || contract.signedAt) {
-    throw new ApiError(422, "contract_immutable", "Договор уже подписан");
-  }
-  if (!["READY_TO_SIGN", "PENDING_SIGNATURE", "PARTIALLY_SIGNED"].includes(contract.status)) {
-    throw new ApiError(422, "not_ready_to_sign", "Договор ещё не готов к подписи");
-  }
-  const version = currentVersion(contract);
-  const profile = await documentOrganization(prisma, tid, contract.dealId, contract.id);
-  const company = contract.deal.company;
-  if (!company) throw new ApiError(422, "missing_fields", "У сделки нет компании покупателя");
-
-  const existing = await prisma.signatureRequest.findMany({
-    where: { tenantId: tid, contractId },
-    orderBy: { order: "asc" },
-  });
-  const sellerSigned = existing.some((row) => row.signerType === "SELLER" && row.status === "SIGNED");
-  const buyerSigned = existing.some((row) => row.signerType === "BUYER" && row.status === "SIGNED");
-  if (sellerSigned && buyerSigned) {
-    throw new ApiError(422, "already_signed", "Обе стороны уже подписали");
-  }
-
-  if (options.requireSellerSignature && !sellerSigned) {
-    throw new ApiError(422, "seller_must_sign_first", "Сначала подпишите договор со стороны компании");
-  }
-
   const expiresAt = new Date(Date.now() + SIGN_TTL_MS);
   let buyerToken: string | null = null;
   const saved = await prisma.$transaction(async (tx) => {
+    await lockContract(tx, tid, contractId);
+    const contract = await loadContractBundle(tx, tid, contractId);
+    if (contract.status === "SIGNED" || contract.signedAt) {
+      throw new ApiError(422, "contract_immutable", "Договор уже подписан");
+    }
+    if (!["READY_TO_SIGN", "PENDING_SIGNATURE", "PARTIALLY_SIGNED"].includes(contract.status)) {
+      throw new ApiError(422, "not_ready_to_sign", "Договор ещё не готов к подписи");
+    }
+    const version = currentVersion(contract);
+    const profile = await documentOrganization(tx, tid, contract.dealId, contract.id);
+    const company = contract.deal.company;
+    if (!profile?.bin && !profile?.iin) throw new ApiError(422, "missing_fields", "Укажите БИН или ИИН исполнителя в реквизитах компании");
+    if (!company?.bin && !company?.iin) throw new ApiError(422, "missing_fields", "Укажите БИН или ИИН покупателя");
+    if (!company) throw new ApiError(422, "missing_fields", "У сделки нет компании покупателя");
+
+    const existing = await tx.signatureRequest.findMany({
+      where: { tenantId: tid, contractId, contractVersionId: version.id },
+      orderBy: { order: "asc" },
+    });
+    const roles = await signedRoles(tx, tid, contractId, version.id);
+    const sellerSigned = roles.has("SELLER");
+    const buyerSigned = roles.has("BUYER");
+    if (existing.some((row) => row.status === "SIGNED" && !roles.has(row.signerType))) {
+      throw new ApiError(409, "signature_not_verified", "В договоре есть подпись без полной проверки ЭЦП. Требуется проверка ранее сохранённой подписи.");
+    }
+    if (sellerSigned && buyerSigned) {
+      throw new ApiError(422, "already_signed", "Обе стороны уже подписали");
+    }
+
+    if (options.requireSellerSignature && !sellerSigned) {
+      throw new ApiError(422, "seller_must_sign_first", "Сначала подпишите договор со стороны компании");
+    }
+
     if (!contract.verificationPublicId) {
       await tx.contract.update({
         where: { id: contract.id },
@@ -201,6 +233,7 @@ export async function sendContractForSign(
           signerUserId: auth.user.id,
           signerName: profile?.directorName || membership.tenant.name,
           signerBin: profile?.bin || null,
+          signerIin: profile?.bin ? null : profile?.iin || null,
           order: 1,
           status: "PENDING",
           expiresAt,
@@ -218,7 +251,8 @@ export async function sendContractForSign(
             contractVersionId: version.id,
             signerCompanyId: company.id,
             signerName: company.legalName || company.name,
-            signerBin: company.bin || company.iin,
+            signerBin: company.bin || null,
+            signerIin: company.bin ? null : company.iin,
             tokenHash: hashToken(buyerToken),
             status: "PENDING",
             expiresAt,
@@ -236,7 +270,8 @@ export async function sendContractForSign(
             signerType: "BUYER",
             signerCompanyId: company.id,
             signerName: company.legalName || company.name,
-            signerBin: company.bin || company.iin,
+            signerBin: company.bin || null,
+            signerIin: company.bin ? null : company.iin,
             order: 2,
             status: "PENDING",
             tokenHash: hashToken(buyerToken),
@@ -314,6 +349,8 @@ async function applySignature(
       signerType: string;
       signerName: string | null;
       signerBin: string | null;
+      signerIin: string | null;
+      tokenHash: string | null;
       status: string;
       expiresAt: Date | null;
       order: number;
@@ -324,18 +361,15 @@ async function applySignature(
 ) {
   const request = expireIfNeeded(input.request);
   if (request.status === "EXPIRED") {
-    await prisma.signatureRequest.update({ where: { id: request.id }, data: { status: "EXPIRED" } });
+    await prisma.signatureRequest.updateMany({ where: { id: request.id, status: { in: OPEN_REQUESTS }, expiresAt: { lt: new Date() } }, data: { status: "EXPIRED" } });
     throw new ApiError(422, "signature_expired", "Срок ссылки на подпись истёк");
   }
   if (!OPEN_REQUESTS.includes(request.status)) {
     throw new ApiError(422, "already_processed", "Эта сторона уже подписала или отклонила договор");
   }
   if (request.signerType === "BUYER") {
-    const seller = await prisma.signatureRequest.findFirst({
-      where: { tenantId: input.tenantId, contractId: request.contractId, signerType: "SELLER" },
-      orderBy: { createdAt: "desc" },
-    });
-    if (!seller || seller.status !== "SIGNED") {
+    const roles = request.contractVersionId ? await signedRoles(prisma, input.tenantId, request.contractId, request.contractVersionId) : new Set<string>();
+    if (!roles.has("SELLER")) {
       throw new ApiError(422, "seller_must_sign_first", "Сначала подписывает исполнитель");
     }
   }
@@ -346,7 +380,7 @@ async function applySignature(
   });
   if (!contract) throw new ApiError(404, "not_found", "Договор не найден");
   const version = currentVersion(contract);
-  if (request.contractVersionId && request.contractVersionId !== version.id) {
+  if (request.contractVersionId !== version.id) {
     throw new ApiError(422, "version_mismatch", "Подпись относится к другой версии договора");
   }
   const documentBytes = await assertVersionFileHash(prisma, input.tenantId, version);
@@ -356,8 +390,12 @@ async function applySignature(
     documentHash: version.sha256!,
     documentBytes,
     expectedBin: request.signerBin,
+    expectedIin: request.signerIin,
   });
-  if (verification.status === "FAILED") {
+  if (verification.status !== "VERIFIED") {
+    if (verification.cryptoStatus === "UNAVAILABLE" || verification.details.error === "certificate_authority_unchecked") {
+      throw new ApiError(503, "signature_verification_unavailable", "Проверка ЭЦП недоступна или не завершена. Договор не подписан. Повторите позже.");
+    }
     throw new ApiError(422, "signature_invalid", "Подпись не прошла проверку", undefined, verification.details);
   }
 
@@ -373,6 +411,19 @@ async function applySignature(
 
   const cert = verification.inspection?.primary;
   const result = await prisma.$transaction(async (tx) => {
+    await lockContract(tx, input.tenantId, request.contractId);
+    await assertOpenRequest(tx, request);
+    const current = await loadContractBundle(tx, input.tenantId, request.contractId);
+    const liveVersion = currentVersion(current);
+    if (current.status === "SIGNED" || current.signedAt || liveVersion.id !== version.id
+        || liveVersion.fileId !== version.fileId || liveVersion.sha256 !== version.sha256) {
+      throw new ApiError(409, "DOCUMENT_CHANGED", "Договор уже подписан или изменён. Обновите документ.");
+    }
+    await assertVersionFileHash(tx, input.tenantId, version);
+    const roles = await signedRoles(tx, input.tenantId, request.contractId, version.id);
+    if (request.signerType === "BUYER" && !roles.has("SELLER")) {
+      throw new ApiError(422, "seller_must_sign_first", "Сначала подписывает исполнитель");
+    }
     await tx.attachment.create({
       data: {
         id: attachmentId,
@@ -406,7 +457,7 @@ async function applySignature(
         signatureFormat: "CMS_DETACHED",
         signatureFileId: attachmentId,
         documentHash: version.sha256!,
-        verificationStatus: verification.status === "VERIFIED" ? "VERIFIED" : verification.status,
+        verificationStatus: verification.status,
         verificationDetails: verification.details as object,
       },
     });
@@ -415,18 +466,8 @@ async function applySignature(
       data: { status: "SIGNED", signedAt: new Date() },
     });
 
-    const signedCount = await tx.signatureRequest.count({
-      where: { tenantId: input.tenantId, contractId: request.contractId, status: "SIGNED" },
-    });
-    const allRequired = await tx.signatureRequest.count({
-      where: {
-        tenantId: input.tenantId,
-        contractId: request.contractId,
-        signerType: { in: ["SELLER", "BUYER"] },
-        status: { notIn: ["CANCELLED", "EXPIRED", "DECLINED"] },
-      },
-    });
-    const bothSigned = signedCount >= 2;
+    roles.add(request.signerType);
+    const bothSigned = roles.has("SELLER") && roles.has("BUYER");
     const updated = await tx.contract.update({
       where: { id: request.contractId },
       data: bothSigned
@@ -441,7 +482,7 @@ async function applySignature(
           type: "contract.signed",
           entityType: "contract",
           entityId: updated.id,
-          payloadJson: { contractId: updated.id, dealId: updated.dealId, signedCount, allRequired },
+          payloadJson: { contractId: updated.id, dealId: updated.dealId, signedCount: roles.size, allRequired: 2 },
         },
       });
     }
@@ -456,6 +497,9 @@ async function applySignature(
       },
     });
     return { signature, contract: updated, bothSigned };
+  }).catch(async (error) => {
+    await rm(abs, { force: true }).catch(() => {});
+    throw error;
   });
 
   if (result.bothSigned) {
@@ -523,6 +567,8 @@ export async function declineContractAsSeller(
     throw new ApiError(422, "already_processed", "Запрос уже обработан");
   }
   await prisma.$transaction(async (tx) => {
+    await lockContract(tx, membership.tenantId, request.contractId);
+    await assertOpenRequest(tx, request);
     await tx.signatureRequest.update({
       where: { id: request.id },
       data: { status: "DECLINED", declinedAt: new Date(), declineReason: reason?.trim() || null },
@@ -554,7 +600,7 @@ async function loadPublicRequest(prisma: PrismaClient, token: string) {
   if (!request) throw new ApiError(404, "not_found", "Ссылка недействительна");
   const current = expireIfNeeded(request);
   if (current.status === "EXPIRED" && request.status !== "EXPIRED") {
-    await prisma.signatureRequest.update({ where: { id: request.id }, data: { status: "EXPIRED" } });
+    await prisma.signatureRequest.updateMany({ where: { id: request.id, status: { in: OPEN_REQUESTS }, expiresAt: { lt: new Date() } }, data: { status: "EXPIRED" } });
   }
   return { ...request, status: current.status };
 }
@@ -565,7 +611,7 @@ function publicContractView(
 ) {
   const contract = request.contract;
   const company = contract.deal.company;
-  const open = request.status === "PENDING" || request.status === "OPENED";
+  const open = OPEN_REQUESTS.includes(request.status) && request.contractVersionId === contract.versions.at(-1)?.id;
   return {
     number: contract.number,
     date: contract.date.toISOString(),
@@ -585,19 +631,16 @@ function publicContractView(
 
 export async function getPublicSign(prisma: PrismaClient, token: string) {
   const request = await loadPublicRequest(prisma, token);
-  const [profile, seller] = await Promise.all([
+  const [profile, roles] = await Promise.all([
     documentOrganization(prisma, request.tenantId, request.contract.dealId, request.contractId),
-    prisma.signatureRequest.findFirst({
-      where: { tenantId: request.tenantId, contractId: request.contractId, signerType: "SELLER" },
-      orderBy: { createdAt: "desc" },
-    }),
+    signedRoles(prisma, request.tenantId, request.contractId, request.contractVersionId || ""),
   ]);
-  const view = publicContractView(request, seller?.status === "SIGNED");
+  const view = publicContractView(request, roles.has("SELLER"));
   view.sellerName = profile?.legalName || profile?.shortName || null;
   if ((request.status === "PENDING" || request.status === "OPENED") && !request.openedAt) {
-    await prisma.signatureRequest.update({
-      where: { id: request.id },
-      data: { status: request.status === "PENDING" ? "OPENED" : request.status, openedAt: new Date() },
+    await prisma.signatureRequest.updateMany({
+      where: { id: request.id, status: { in: OPEN_REQUESTS }, tokenHash: request.tokenHash },
+      data: { status: "OPENED", openedAt: new Date() },
     });
     view.status = request.status === "PENDING" ? "OPENED" : request.status;
   }
@@ -640,9 +683,13 @@ export async function declinePublicContract(prisma: PrismaClient, token: string,
   if (!OPEN_REQUESTS.includes(request.status)) {
     throw new ApiError(422, "already_processed", "Запрос уже обработан");
   }
-  await prisma.signatureRequest.update({
-    where: { id: request.id },
-    data: { status: "DECLINED", declinedAt: new Date(), declineReason: reason?.trim() || null },
+  await prisma.$transaction(async (tx) => {
+    await lockContract(tx, request.tenantId, request.contractId);
+    await assertOpenRequest(tx, request);
+    await tx.signatureRequest.update({
+      where: { id: request.id },
+      data: { status: "DECLINED", declinedAt: new Date(), declineReason: reason?.trim() || null },
+    });
   });
   return { ok: true };
 }
