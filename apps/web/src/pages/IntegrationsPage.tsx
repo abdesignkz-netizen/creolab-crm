@@ -121,7 +121,7 @@ export function IntegrationsPage() {
       {setup?.form?.connected && submitUrl ? (
         <div className="panel">
           <h3>Форма сайта — подключение</h3>
-          <p className="muted">Адрес для заявок: {submitUrl}</p>
+          <p className="muted integration-endpoint">Адрес для заявок: {submitUrl}</p>
           <div className="actions" style={{ marginBottom: 12 }}>
             {(
               [
