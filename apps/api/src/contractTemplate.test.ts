@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import JSZip from "jszip";
+import { readFile } from "node:fs/promises";
 import { createPrismaClient } from "@creolab/db";
 import { createApp } from "./app.ts";
 import { scanContractTemplateText, rewriteScannedFragment } from "./services/contractTemplateScan.ts";
@@ -658,6 +659,26 @@ KZ111111111111111111
     assert.equal(items[0].name, "Разработка презентации");
     assert.equal(items[0].vatRate, 12);
     assert.equal(items[1].vatRate, 0);
+  });
+
+  it("сохраняет вложенную таблицу и открывает сформированный договор в PDF", async () => {
+    const bytes = await readFile(new URL("./fixtures/nested-table-contract.docx", import.meta.url));
+    const created = await json("/api/v1/documents/contract-templates", { method: "POST", body: JSON.stringify({
+      name: "Договор с вложенной таблицей", fileName: "nested-table-contract.docx", fileBase64: bytes.toString("base64"),
+      body: "Договор № {{contract_number}}. Исполнитель {{seller_name}}. Заказчик {{buyer_name}}.",
+    }) });
+    assert.equal(created.response.status, 201, JSON.stringify(created.body));
+    const companies = await json("/api/v1/companies");
+    const company = companies.body.items[0];
+    const formed = await json(`/api/v1/companies/${company.id}/contract-from-template`, { method: "POST", body: JSON.stringify({
+      templateId: created.body.template.id, items: [{ name: "Обновлённая презентация", quantity: 1, unit: "шт", unitPrice: 200000, vatRate: 0 }],
+    }) });
+    assert.equal(formed.response.status, 201, JSON.stringify(formed.body));
+    const file = await fetch(`${base}/api/v1/documents/contract-previews/${formed.body.previewId}`, { headers: { cookie } });
+    assert.equal(file.status, 200); assert.match(file.headers.get("content-type") || "", /pdf/);
+    const text = await pdfText(Buffer.from(await file.arrayBuffer()));
+    for (const content of ["Условия договора остаются без изменений", "Подпись заказчика", "Подпись исполнителя", "Обновлённая презентация", "Приложение к договору"]) assert.ok(text.includes(content), content);
+    assert.doesNotMatch(text, /Старая услуга|120\s*000/);
   });
 
   it("не отдаёт шаблон другой компании", async () => {

@@ -226,6 +226,27 @@ function formatItemAmount(item: ServiceItem) {
   return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(Math.round(Number(amount) || 0));
 }
 
+/** Visit nested Word tables from the inside out. A non-greedy regex ends an outer
+ * table at its first child's closing tag and leaves orphan rows/cells behind. */
+function mapWordTables(xml: string, rewrite: (table: string, nested: boolean, depth: number) => string, depth = 0): string {
+  const stack: Array<{ start: number; openEnd: number }> = [];
+  let cursor = 0;
+  const parts: string[] = [];
+  for (const match of xml.matchAll(/<w:tbl\b[^>]*>|<\/w:tbl\s*>/g)) {
+    const tag = match[0];
+    if (/\/\s*>$/.test(tag)) continue;
+    if (!tag.startsWith("</")) { stack.push({ start: match.index!, openEnd: match.index! + tag.length }); continue; }
+    const open = stack.pop();
+    if (!open || stack.length) continue;
+    const inner = xml.slice(open.openEnd, match.index!);
+    const table = xml.slice(open.start, open.openEnd) + mapWordTables(inner, rewrite, depth + 1) + tag;
+    parts.push(xml.slice(cursor, open.start), rewrite(table, /<w:tbl\b/.test(inner), depth));
+    cursor = match.index! + tag.length;
+  }
+  parts.push(xml.slice(cursor));
+  return parts.join("");
+}
+
 export function replaceServiceTables(
   xml: string,
   items: ServiceItem[],
@@ -234,31 +255,43 @@ export function replaceServiceTables(
 ) {
   if (!items.length) return xml;
   const total = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(Math.round(Number(totalAmount) || 0));
-  return xml.replace(/<w:tbl\b[\s\S]*?<\/w:tbl>/g, (tbl) => {
+  return mapWordTables(xml, (tbl, nested, depth) => {
+    // Layout tables wrap legal text/signatures and must never be replaced as items.
+    if (nested) return tbl;
     const rows = tableCellTexts(tbl);
     const kind = classifyServiceTable(rows);
     if (!kind) return tbl;
-    if (kind === "assignment") {
-      return wordSimpleTableXml(
+    const replacement = kind === "assignment"
+      ? wordSimpleTableXml(
         [
           ["№", "Вид Услуг, требования к результату", "Сроки выполнения", "Стоимость в тенге"],
           ...items.map((item, index) => [String(index + 1), item.name, completionTerms, formatItemAmount(item)]),
           [`Итого: ${total}`],
-        ],
-        ASSIGNMENT_COL_WIDTHS,
-        true,
-        true,
+        ], ASSIGNMENT_COL_WIDTHS, true, true,
+      )
+      : wordSimpleTableXml(
+        items.map((item, index) => [String(index + 1), item.name, `${formatItemAmount(item)} тенге`]), PRICE_COL_WIDTHS,
       );
-    }
-    return wordSimpleTableXml(
-      items.map((item, index) => [String(index + 1), item.name, `${formatItemAmount(item)} тенге`]),
-      PRICE_COL_WIDTHS,
-    );
+    if (depth === 0) return replacement;
+    // Nested tables occupy their parent cell, not the full page width.
+    const widths = kind === "assignment" ? ASSIGNMENT_COL_WIDTHS : PRICE_COL_WIDTHS;
+    const width = widths.reduce((sum, value) => sum + value, 0);
+    return replacement
+      .replace(/<w:tblW\b[^>]*\/>/, '<w:tblW w:w="5000" w:type="pct"/>')
+      .replace('<w:tblLayout w:type="fixed"/>', '<w:tblLayout w:type="autofit"/>')
+      .replace(/<w:tblGrid>[\s\S]*?<\/w:tblGrid>/, '<w:tblGrid/>')
+      .replace(/<w:tcW w:w="(\d+)" w:type="dxa"\/>/g, (_, cellWidth: string) => `<w:tcW w:w="${Math.round(Number(cellWidth) / width * 5000)}" w:type="pct"/>`);
+
   });
 }
 
 export function documentHasServiceTables(xml: string) {
-  return [...xml.matchAll(/<w:tbl\b[\s\S]*?<\/w:tbl>/g)].some((match) => classifyServiceTable(tableCellTexts(match[0])));
+  let found = false;
+  mapWordTables(xml, (table, nested) => {
+    if (!nested && classifyServiceTable(tableCellTexts(table))) found = true;
+    return table;
+  });
+  return found;
 }
 
 export function wordItemsTableXml(rows: string[][]) {
