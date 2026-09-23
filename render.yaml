@@ -20,6 +20,13 @@ services:
         value: /var/data/files
       - key: STORAGE_PERSISTENT
         value: "1"
+      # Official SDK jars must be uploaded once to the existing persistent disk.
+      # The entrypoint starts a loopback-only verifier when this directory contains jars.
+      # Do not upload user keys (.p12/.pfx) or put PINs in environment variables.
+      - key: KALKAN_LIB_DIR
+        value: /var/data/kalkan/lib
+      - key: KALKAN_OCSP
+        value: "1"
       # CreoLab uses the working IS ESF portal. These settings enable the
       # connection; each document still requires the user's NCALayer signature.
       # For services managed in the Dashboard, apply the same values there.

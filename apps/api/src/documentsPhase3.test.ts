@@ -218,6 +218,8 @@ describe("Documents phase 3", () => {
       });
       assert.equal(unavailable.response.status, 503, JSON.stringify(unavailable.body));
       assert.equal(unavailable.body.code, "signature_verification_unavailable");
+      assert.equal(unavailable.body.details.reason, "gost_kalkan_adapter_missing");
+      assert.match(unavailable.body.message, /На сервере CRM не подключён/);
     } finally { process.env.KALKAN_VERIFY_URL = url; }
     assert.equal(await prisma.documentSignature.count({ where: { contractId } }), 0);
     assert.equal((await prisma.contract.findUniqueOrThrow({ where: { id: contractId } })).status, before.status);

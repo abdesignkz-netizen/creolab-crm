@@ -206,6 +206,23 @@ describe("kalkan cms verify sidecar", { concurrency: false }, () => {
     );
   });
 
+  it("сохраняет причину отказа OCSP и отличает сбой сервиса от неверной подписи", async () => {
+    const document = Buffer.from("diagnostic-check");
+    const cmsBase64 = makeTestCms(document);
+    await withSidecar(() => ({ status: 200, json: { ok: false, cryptoStatus: "VERIFIED", authorityStatus: "UNCHECKED", error: "issuer_cert_not_found" } }), async () => {
+      const result = await verifyDocumentSignature({ cmsBase64, documentHash: "x", documentBytes: document });
+      assert.equal(result.status, "FAILED");
+      assert.equal(result.details.authorityError, "issuer_cert_not_found");
+    });
+    for (const status of [401, 403, 429, 500, 502, 503]) {
+      await withSidecar(() => ({ status, json: { error: status === 401 ? "unauthorized" : `kalkan_http_${status}` } }), async () => {
+        const result = await verifyDocumentSignature({ cmsBase64, documentHash: "x", documentBytes: document });
+        assert.equal(result.status, "FAILED");
+        assert.equal(result.cryptoStatus, "UNAVAILABLE");
+      });
+    }
+  });
+
   it("отклоняет непроверенную цепочку и неполные ответы проверяющего сервиса", async () => {
     const document = Buffer.from("strict-verification");
     const cmsBase64 = makeTestCms(document);

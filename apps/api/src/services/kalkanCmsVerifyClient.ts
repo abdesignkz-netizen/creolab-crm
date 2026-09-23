@@ -54,12 +54,15 @@ export async function verifyCmsWithKalkan(input: {
     if (!response.ok) {
       return {
         skipped: false,
-        cryptoStatus: response.status === 503 ? "UNAVAILABLE" : "FAILED",
+        cryptoStatus: "UNAVAILABLE",
         authorityStatus: "UNCHECKED",
         error: String(body.error || `kalkan_http_${response.status}`),
       };
     }
-    const cryptoStatus = asCryptoStatus(body.cryptoStatus) || "FAILED";
+    const cryptoStatus = asCryptoStatus(body.cryptoStatus);
+    if (!cryptoStatus) {
+      return { skipped: false, cryptoStatus: "UNAVAILABLE", authorityStatus: "UNCHECKED", error: "kalkan_invalid_response" };
+    }
     return {
       skipped: false,
       cryptoStatus: body.ok === false && body.authorityStatus !== "REVOKED" && body.authorityStatus !== "UNCHECKED" ? "FAILED" : cryptoStatus,

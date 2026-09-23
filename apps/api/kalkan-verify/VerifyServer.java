@@ -53,10 +53,20 @@ public final class VerifyServer {
     if (!ocspUrl.isEmpty()) System.setProperty("knca.ocspresponderURL", ocspUrl);
 
     URLClassLoader loader = jarsLoader(libDir);
+    // Fail at startup if the installed SDK cannot serve real verification requests.
+    Class<?> providerCl = Class.forName("kz.gov.pki.kalkan.jce.provider.KalkanProvider", true, loader);
+    Provider provider = (Provider) providerCl.getDeclaredConstructor().newInstance();
+    if (Security.getProvider(provider.getName()) == null) Security.addProvider(provider);
+    Class.forName("kz.gov.pki.kalkan.jce.provider.cms.CMSSignedData", true, loader);
+    Class.forName("kz.gov.pki.provider.utils.PKIXUtil", true, loader);
+    if (loadCaCerts(loader, new CmsCrypto()).isEmpty()) throw new IllegalStateException("No installed CA certificates");
     int port = Integer.parseInt(env("KALKAN_VERIFY_PORT", "4170"));
     String secret = env("KALKAN_VERIFY_SECRET", "");
     HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 0);
     server.createContext("/verify", exchange -> handle(exchange, loader, secret));
+    // Loopback-only readiness: confirms SDK and CA loading, not external OCSP availability.
+    server.createContext("/health", exchange -> send(exchange, ocspEnabled() ? 200 : 503,
+        "{\"status\":\"ready\",\"authorityCheckEnabled\":" + ocspEnabled() + "}"));
     server.start();
     System.out.println("Kalkan CMS verify http://127.0.0.1:" + port + "/verify ocsp=" + (ocspEnabled() ? "on" : "off"));
   }

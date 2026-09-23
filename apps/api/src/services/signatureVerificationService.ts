@@ -83,6 +83,7 @@ export async function verifyDocumentSignature(input: {
         documentHash: input.documentHash,
         crypto: "kalkan_cms_verified",
         authority: kalkan.authorityStatus,
+        authorityError: kalkan.error || "ocsp_unchecked",
         warnings,
       },
       inspection,

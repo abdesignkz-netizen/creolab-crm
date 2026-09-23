@@ -11,6 +11,7 @@ import { asMoney } from "./documentMoney.ts";
 import { getTenantDocumentFlags, requireDocumentsEnabled } from "./legalProfileService.ts";
 import { serializeContract } from "./documentDraftService.ts";
 import { verifyDocumentSignature } from "./signatureVerificationService.ts";
+import { signatureVerificationUnavailableMessage } from "./signatureVerificationError.ts";
 import { ensureContractPdfAttachment, isPdfAttachment, pdfDownloadHeaders, sendStoredFile } from "./contractPdfCopy.ts";
 
 type SigningDb = PrismaClient | Prisma.TransactionClient;
@@ -394,7 +395,13 @@ async function applySignature(
   });
   if (verification.status !== "VERIFIED") {
     if (verification.cryptoStatus === "UNAVAILABLE" || verification.details.error === "certificate_authority_unchecked") {
-      throw new ApiError(503, "signature_verification_unavailable", "Проверка ЭЦП недоступна или не завершена. Договор не подписан. Повторите позже.");
+      const reason = String(verification.details.authorityError || verification.details.error || "verification_unavailable");
+      // Do not log the CMS, certificate, tax IDs, or document contents.
+      const diagnosticCode = /^[a-zA-Z0-9_]{1,80}$/.test(reason) ? reason : "verification_unavailable";
+      console.warn("[contract-signing] verification unavailable", {
+        reason: diagnosticCode, cryptoStatus: verification.cryptoStatus, authorityStatus: verification.authorityStatus,
+      });
+      throw new ApiError(503, "signature_verification_unavailable", signatureVerificationUnavailableMessage(reason), undefined, { reason: diagnosticCode });
     }
     throw new ApiError(422, "signature_invalid", "Подпись не прошла проверку", undefined, verification.details);
   }
