@@ -330,9 +330,9 @@ export function AiAutomationSettingsPage() {
       <p className="muted">Как обрабатывать новые заявки. Уже запущенные задачи не меняются.</p>
       <div className="panel">
         <b>Режим по умолчанию</b>
-        <div className="stack" style={{ marginTop: 12, gap: 10 }}>
+        <div className="ai-mode-grid" role="group" aria-label="Режим обработки новых заявок">
           {(data?.modes || []).map((item: { mode: string; label: string }) => (
-            <label key={item.mode} className="radio-row">
+            <label key={item.mode} className={`ai-mode-card${mode === item.mode ? " is-selected" : ""}`}>
               <input
                 type="radio"
                 name="aiMode"
@@ -341,7 +341,7 @@ export function AiAutomationSettingsPage() {
               />
               <span>
                 <b>{item.label}</b>
-                <div className="muted">{MODE_HELP[item.mode]}</div>
+                <span className="ai-mode-help">{MODE_HELP[item.mode]}</span>
               </span>
             </label>
           ))}

@@ -1,7 +1,8 @@
+import { assertFileCapacity } from "./billingResourceService.ts";
 import { documentOrganization } from "./documentOrganization.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile, unlink } from "node:fs/promises";
 import path from "node:path";
 import type { PrismaClient } from "@creolab/db";
 import type { Response } from "express";
@@ -266,6 +267,7 @@ export async function generateInvoicePdfFile(
   const storageKey = path.posix.join(tid, "invoices", invoice.id, `${attachmentId}-${fileName}`);
   const abs = resolveUploadPath(storageKey);
   await mkdir(path.dirname(abs), { recursive: true });
+  await assertFileCapacity(prisma, tid, pdf.length);
   await writeFile(abs, pdf);
 
   const saved = await prisma.$transaction(async (tx) => {
@@ -328,7 +330,7 @@ export async function generateInvoicePdfFile(
       },
     });
     return updated;
-  });
+  }).catch(async error => { await unlink(abs).catch(() => {}); throw error; });
 
   return {
     invoice: serializeInvoice(saved),

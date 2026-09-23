@@ -1,6 +1,8 @@
+import { assertFreeCapacity, initializeTenantUsage } from "./billingResourceService.ts";
+import { writeAudit } from "../lib/audit.ts";
 import { randomBytes } from "node:crypto";
 import type { Prisma, PrismaClient } from "@creolab/db";
-import { SUBSCRIPTION_STATUSES } from "@creolab/contracts";
+import { SUBSCRIPTION_STATUSES, CATALOG_BY_CODE, CATALOG_VERSION } from "@creolab/contracts";
 import { PIPELINE_STAGES } from "./dealPipeline.ts";
 
 export type DbClient = PrismaClient | Prisma.TransactionClient;
@@ -73,6 +75,8 @@ async function ensureStarterPlan(tx: DbClient, code = "starter") {
  * Does not create User or Membership — callers attach owner/invite in the same transaction.
  */
 export async function provisionOrganization(tx: DbClient, input: ProvisionOrganizationInput) {
+  const free = input.source === "self_registration";
+  if (free) await assertFreeCapacity(tx);
   const name = input.name.trim();
   const slug = await uniqueSlug(tx, name);
   const contactEmail = asTrimmed(input.contactEmail);
@@ -107,12 +111,19 @@ export async function provisionOrganization(tx: DbClient, input: ProvisionOrgani
       phone: contactPhone,
     },
   });
-  const plan = await ensureStarterPlan(tx, input.planCode || "starter");
+  const spec = CATALOG_BY_CODE.BASQAR_FREE;
+  const plan = free ? await tx.plan.upsert({ where: { code: spec.code }, update: {}, create: {
+    code: spec.code, name: spec.name, kind: spec.kind, product: spec.product, public: true,
+    catalogStatus: spec.catalogStatus, description: spec.description, version: CATALOG_VERSION,
+    featuresJson: spec.features, limitsJson: spec.limits,
+  } }) : await ensureStarterPlan(tx, input.planCode || "starter");
   await tx.tenantPlan.create({
     data: {
       tenantId: tenant.id,
       planId: plan.id,
-      status: input.subscriptionStatus,
+      status: free ? SUBSCRIPTION_STATUSES.ACTIVE : input.subscriptionStatus,
+      ...(free ? { featuresSnapshotJson: spec.features, limitsSnapshotJson: spec.limits,
+        priceSnapshotJson: { planVersion: CATALOG_VERSION, planCode: spec.code, basePriceAtActivation: 0, finalAmountMinor: 0 }, paymentMethod: "FREE" } : {}),
     },
   });
   for (const def of PIPELINE_STAGES) {
@@ -142,5 +153,9 @@ export async function provisionOrganization(tx: DbClient, input: ProvisionOrgani
       provider: null,
     },
   });
+  if (free) {
+    await initializeTenantUsage(tx, tenant.id, spec.limits as Record<string, number>);
+    await writeAudit(tx, { tenantId: tenant.id, action: "subscription.free_activated", entityType: "tenant", entityId: tenant.id });
+  }
   return tenant;
 }

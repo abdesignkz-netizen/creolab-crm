@@ -91,8 +91,8 @@ describe("self-service registration and preview entitlements", () => {
     const tenantId = verified.data.user?.activeTenant?.tenant?.id;
     assert.ok(tenantId);
     assert.equal(verified.data.user.activeTenant.role, "owner");
-    assert.equal(verified.data.user.billing.previewMode, true);
-    assert.equal(verified.data.user.billing.subscriptionStatus, "none");
+    assert.equal(verified.data.user.billing.previewMode, false);
+    assert.equal(verified.data.user.billing.subscriptionStatus, "active");
     assert.equal(verified.data.user.billing.organizationStatus, "active");
     assert.equal(verified.data.user.billing.entitlements.WHATSAPP, false);
 
@@ -108,7 +108,7 @@ describe("self-service registration and preview entitlements", () => {
 
     const me = await req(cookie, "/api/v1/me", { tenantId });
     assert.equal(me.status, 200);
-    assert.equal(me.data.billing.previewMode, true);
+    assert.equal(me.data.billing.previewMode, false);
 
     const situation = await req(cookie, "/api/v1/situation/overview", { tenantId });
     assert.equal(situation.status, 200);
@@ -134,12 +134,12 @@ describe("self-service registration and preview entitlements", () => {
 
     const billing = await req(cookie, "/api/v1/billing", { tenantId });
     assert.equal(billing.status, 200);
-    assert.equal(billing.data.previewMode, true);
-    assert.ok(billing.data.preview);
+    assert.equal(billing.data.previewMode, false);
+    assert.equal(billing.data.preview, null);
 
     const activated = await req(platformCookie, `/api/v1/admin/tenants/${tenantId}/subscription/activate`, {
       method: "POST",
-      body: {},
+      body: { planCode: "BUNDLE_CRM_AI" },
     });
     assert.equal(activated.status, 200, JSON.stringify(activated.data));
     assert.equal(activated.data.subscriptionStatus, "active");
@@ -212,12 +212,12 @@ describe("self-service registration and preview entitlements", () => {
 
     await req(platformCookie, `/api/v1/admin/tenants/${b.tenantId}/subscription/activate`, {
       method: "POST",
-      body: {},
+      body: { planCode: "CRM_START" },
     });
 
     const aBilling = await req(a.cookie, "/api/v1/billing", { tenantId: a.tenantId });
     const bBilling = await req(b.cookie, "/api/v1/billing", { tenantId: b.tenantId });
-    assert.equal(aBilling.data.subscriptionStatus, "none");
+    assert.equal(aBilling.data.subscriptionStatus, "active");
     assert.equal(bBilling.data.subscriptionStatus, "active");
 
     const cross = await req(a.cookie, "/api/v1/contacts", { tenantId: b.tenantId });

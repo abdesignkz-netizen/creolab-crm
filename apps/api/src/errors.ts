@@ -51,6 +51,8 @@ export function withControlClientFields(
 }
 
 export function errorBody(error: unknown, requestId: string) {
+  const quota = error instanceof Error ? error.message.match(/BASQAR_LIMIT:([A-Z_]+)/)?.[1] : null;
+  if (quota) return { status: 403, body: { code: "limit_exceeded", message: "Достигнут лимит тарифа. Перейдите на Start или увеличьте ресурсы в разделе «Тарифы».", details: { limit: quota, billingPath: "/billing" }, request_id: requestId } };
   if (error instanceof ApiError) {
     return {
       status: error.status,

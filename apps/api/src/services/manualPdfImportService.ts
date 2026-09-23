@@ -1,3 +1,4 @@
+import { assertFileCapacity } from "./billingResourceService.ts";
 import { wordToPdf } from "./wordDocumentConversion.ts";
 import { fillImportedSeller } from "./importedRequisites.ts";
 import { beginDocumentExtraction } from "./documentExtractionGate.ts";
@@ -73,12 +74,14 @@ export async function previewManualPdf(prisma: PrismaClient, auth: AuthContext, 
     const storageKey = path.posix.join(membership.tenantId, "manual-pdf", `${importId}.${extension}`);
     const absolute = resolveUploadPath(storageKey);
     await mkdir(path.dirname(absolute), { recursive: true });
+    await assertFileCapacity(prisma, membership.tenantId, bytes.length);
     await writeFile(absolute, bytes, { flag: "wx" });
     try {
       await prisma.attachment.create({ data: { id: importId, tenantId: membership.tenantId, parentType: "document_import", parentId: importId, documentType: input.kind.toLowerCase(), storageKey, fileName: `${importId}.${extension}`, originalFileName: path.basename(input.fileName), mimeType: word ? (extension === "docx" ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document" : "application/msword") : "application/pdf", sizeBytes: bytes.length, checksum: sha256, status: "preview", uploadedById: auth.user.id } });
       if (word) {
         const pdfId = randomUUID();
         const pdfKey = path.posix.join(membership.tenantId, "manual-pdf", `${pdfId}.pdf`);
+        await assertFileCapacity(prisma, membership.tenantId, pdfBytes.length);
         await writeFile(resolveUploadPath(pdfKey), pdfBytes, { flag:"wx" });
         try {
           await prisma.attachment.create({data:{id:pdfId,tenantId:membership.tenantId,parentType:"document_import_pdf",parentId:importId,documentType:input.kind.toLowerCase(),storageKey:pdfKey,fileName:`${pdfId}.pdf`,originalFileName:input.fileName.replace(/\.(docx|doc)$/i,".pdf"),mimeType:"application/pdf",sizeBytes:pdfBytes.length,checksum:createHash("sha256").update(pdfBytes).digest("hex"),status:"preview",uploadedById:auth.user.id}});

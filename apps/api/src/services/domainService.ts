@@ -742,6 +742,8 @@ export async function createTask(
   const targetType = isNote ? "none" : input.targetType || (input.contactId || input.clientIds?.length ? "client" : "none");
   const assignToAi = input.executorKind === "ai";
   if (assignToAi) {
+    const { requireAnyFeature } = await import("./entitlementService.ts");
+    await requireAnyFeature(prisma, auth, ["AI_MANAGER", "AI_CONTROL"]);
     if (!isAiAssignableTaskType(input.type)) {
       throw new ApiError(422, "ai_capability", "AI Manager не выполняет этот тип задачи. Назначьте сотрудника.");
     }
@@ -985,6 +987,10 @@ export async function assignTask(
   requireManageTasks(auth);
   const { tid, task } = await taskInTenant(prisma, auth, id);
   const assignToAi = input.executorKind === "ai";
+  if (assignToAi) {
+    const { requireAnyFeature } = await import("./entitlementService.ts");
+    await requireAnyFeature(prisma, auth, ["AI_MANAGER", "AI_CONTROL"]);
+  }
   const snap = jsonObject(task.contextSnapshotJson);
   if (assignToAi) {
     if (!isAiAssignableTaskType(task.type)) {

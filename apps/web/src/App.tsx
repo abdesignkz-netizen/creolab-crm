@@ -256,7 +256,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
   const moreActive = moreLinks.some(([path]) => location.pathname === path || location.pathname.startsWith(`${path}/`));
 
   useEffect(() => {
-    if (!tenantId || me?.billing?.previewMode) return;
+    if (!tenantId || me?.billing?.previewMode || !me?.billing?.entitlements?.WHATSAPP) return;
     let cancelled = false;
     async function syncQuietly() {
       try {
@@ -273,7 +273,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [tenantId, me?.billing?.previewMode]);
+  }, [tenantId, me?.billing?.previewMode, me?.billing?.entitlements?.WHATSAPP]);
 
   useEffect(() => {
     if (!tenantId) return;

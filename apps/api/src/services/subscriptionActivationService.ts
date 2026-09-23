@@ -1,3 +1,4 @@
+import { initializeTenantUsage } from "./billingResourceService.ts";
 import { randomUUID } from "node:crypto";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { SUBSCRIPTION_STATUSES } from "@creolab/contracts";
@@ -5,10 +6,11 @@ import { ApiError } from "../errors.ts";
 import { writeAudit } from "../lib/audit.ts";
 import { createStaffNotification } from "./notificationService.ts";
 import { loadCurrentTenantPlan } from "./entitlementService.ts";
-import { loadCatalogItem, quoteSubscription, type QuoteAddonInput } from "./pricingEngine.ts";
+import { ensurePricingCatalog, loadCatalogItem, quoteSubscription, type QuoteAddonInput, type PricingQuote } from "./pricingEngine.ts";
 
 export type ActivationInput = {
   tenantId: string;
+  approvedSnapshot?: PricingQuote["snapshot"];
   planCode?: string | null;
   addOns?: QuoteAddonInput[];
   billingPeriod?: string;
@@ -27,13 +29,18 @@ export type ActivationInput = {
 function asDate(value: Date | string | null | undefined, fallback: Date) {
   if (!value) return fallback;
   const date = value instanceof Date ? value : new Date(value);
-  return Number.isNaN(date.getTime()) ? fallback : date;
+  if (Number.isNaN(date.getTime())) throw new ApiError(422, "invalid_date", "Некорректная дата подписки");
+  return date;
 }
 
 export function periodEnd(start: Date, period: string) {
   const end = new Date(start.getTime());
-  if (period === "YEARLY") end.setFullYear(end.getFullYear() + 1);
-  else end.setMonth(end.getMonth() + 1);
+  const day = end.getUTCDate();
+  end.setUTCDate(1);
+  if (period === "YEARLY") end.setUTCFullYear(end.getUTCFullYear() + 1);
+  else end.setUTCMonth(end.getUTCMonth() + 1);
+  const lastDay = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() + 1, 0)).getUTCDate();
+  end.setUTCDate(Math.min(day, lastDay));
   return end;
 }
 
@@ -60,25 +67,46 @@ async function notifyOwners(
       body,
       priority: "high",
       episodeKey: `billing:${entityId}:${title}`,
-    }).catch(() => undefined);
+    });
   }
 }
 
-export async function activateSubscription(prisma: PrismaClient, input: ActivationInput) {
+export async function activateSubscription(prisma: PrismaClient, input: ActivationInput): Promise<import("./billingService.ts").BillingState> {
+  if (typeof prisma.$transaction === "function") {
+    await ensurePricingCatalog(prisma);
+    return prisma.$transaction(tx => activateSubscription(tx as PrismaClient, input), { timeout: 30000 });
+  }
+  await prisma.$queryRaw`SELECT id FROM "Tenant" WHERE id = ${input.tenantId} FOR UPDATE`;
   const tenant = await prisma.tenant.findUnique({ where: { id: input.tenantId } });
   if (!tenant) throw new ApiError(404, "not_found", "Компания не найдена");
   const planCode = String(input.planCode || "starter").trim();
-  const catalog = await loadCatalogItem(prisma, planCode);
+  const catalog = input.approvedSnapshot ? { code: planCode } : await loadCatalogItem(prisma, planCode);
   if (!catalog && planCode !== "starter") throw new ApiError(404, "not_found", "Тариф не найден");
   const period = input.billingPeriod === "YEARLY" ? "YEARLY" : "MONTHLY";
   const quote =
     planCode === "starter"
       ? null
-      : await quoteSubscription(prisma, { planCode, addOns: input.addOns, billingPeriod: period });
+      : input.approvedSnapshot
+        ? { snapshot: input.approvedSnapshot, features: input.approvedSnapshot.features, limits: input.approvedSnapshot.limits, finalAmountMinor: input.approvedSnapshot.finalAmountMinor }
+        : await quoteSubscription(prisma, { planCode, addOns: input.addOns, billingPeriod: period });
 
   const plan = await prisma.plan.findUnique({ where: { code: planCode } });
   if (!plan) throw new ApiError(404, "not_found", "Тариф не найден");
 
+  if (quote && !(await prisma.tenantUsage.findUnique({ where: { tenantId: input.tenantId } }))) {
+    // Measure historical data before a downgrade check. Any failure rolls back
+    // this initialization together with payment and activation.
+    await initializeTenantUsage(prisma, input.tenantId, {});
+  }
+  // Hold the same row lock used by resource writers until the new limits commit.
+  await prisma.$queryRaw`SELECT "tenantId" FROM "TenantUsage" WHERE "tenantId" = ${input.tenantId} FOR UPDATE`;
+  if (quote) {
+    const override = await prisma.tenantBillingOverride.findUnique({ where: { tenantId: input.tenantId } });
+    const effectiveLimits = { ...quote.limits, ...(override?.limitsJson as Record<string, number> || {}) };
+    const { downgradeBlockers } = await import("./subscriptionRequestService.ts");
+    const issues = await downgradeBlockers(prisma, input.tenantId, effectiveLimits);
+    if (issues.length) throw new ApiError(422, "LIMIT_EXCEEDED_AFTER_DOWNGRADE", "Использование превышает лимиты выбранной конфигурации", undefined, { issues });
+  }
   const now = new Date();
   const current = await loadCurrentTenantPlan(prisma, input.tenantId);
   const startBase =
@@ -87,17 +115,18 @@ export async function activateSubscription(prisma: PrismaClient, input: Activati
       : now;
   const startsAt = asDate(input.startDate, input.extendFromCurrentEnd ? current?.startsAt || now : now);
   const endsAt =
-    planCode === "starter" && !input.endDate
+    ["starter", "BASQAR_FREE"].includes(planCode) && !input.endDate
       ? null
       : input.endDate
         ? asDate(input.endDate, periodEnd(startBase, period))
         : periodEnd(startBase, period);
+  if (endsAt && (endsAt <= startsAt || startsAt > now)) throw new ApiError(422, "invalid_dates", "Начало не может быть в будущем, окончание должно быть позже начала");
   const amountMinor = input.amountMinor ?? quote?.finalAmountMinor ?? 0;
   const itemsJson = quote?.snapshot.addOns || [];
   const featuresJson = quote?.features || plan.featuresJson;
   const limitsJson = quote?.limits || plan.limitsJson;
 
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await (async (tx: PrismaClient) => {
     let row;
     if (current) {
       row = await tx.tenantPlan.update({
@@ -167,6 +196,7 @@ export async function activateSubscription(prisma: PrismaClient, input: Activati
       entityId: row.id,
       changes: {
         planCode,
+        fromPlanCode: current?.plan.code || null,
         source: input.source || "trusted",
         billingPeriod: period,
         amountMinor,
@@ -176,8 +206,11 @@ export async function activateSubscription(prisma: PrismaClient, input: Activati
         paymentId: input.paymentId || null,
       },
     });
+    const { getEntitlements } = await import("./entitlementService.ts");
+    const effective = await getEntitlements(tx, input.tenantId);
+    if (quote) await initializeTenantUsage(tx, input.tenantId, effective.limits);
     return row;
-  });
+  })(prisma);
 
   await notifyOwners(
     prisma,

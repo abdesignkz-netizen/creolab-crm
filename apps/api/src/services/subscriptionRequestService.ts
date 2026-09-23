@@ -22,7 +22,7 @@ function asAddOns(value: unknown): QuoteAddonInput[] {
     const rec = row as Record<string, unknown>;
     const code = String(rec.code || "").trim();
     if (!code) continue;
-    items.push({ code, qty: Number(rec.qty) || 1 });
+    items.push({ code, qty: rec.qty == null ? 1 : Number(rec.qty) });
   }
   return items;
 }
@@ -42,7 +42,7 @@ function inferRequestType(
 ): SubscriptionRequestType {
   if (raw) return requestType(raw);
   if (planCode === "CRM_ENTERPRISE") return "ENTERPRISE_REQUEST";
-  if (!current.snapshot.entitled || current.snapshot.previewMode) return "NEW_SUBSCRIPTION";
+  if (!current.snapshot.entitled || current.snapshot.previewMode || current.snapshot.planCode === "BASQAR_FREE") return "NEW_SUBSCRIPTION";
   if (current.snapshot.planCode === planCode) return "RENEWAL";
   if (amountMinor < Number(current.snapshot.amountMinor || 0)) return "DOWNGRADE";
   return "UPGRADE";
@@ -50,8 +50,8 @@ function inferRequestType(
 
 function limitsLower(next: Record<string, number>, current: Record<string, number>, entitled: boolean) {
   if (!entitled) return false;
-  return ["USERS", "WHATSAPP_CONNECTIONS", "PIPELINES", "STORAGE_GB"].some(
-    (key) => Number(next[key] ?? Infinity) < Number(current[key] ?? 0),
+  return ["USERS", "CLIENTS", "ACTIVE_DEALS", "MONTHLY_LEADS", "DATABASE_MB", "FILE_STORAGE_MB", "WHATSAPP_CONNECTIONS", "PIPELINES", "STORAGE_GB"].some(
+    (key) => (next[key] === -1 ? Infinity : Number(next[key] ?? Infinity)) < (current[key] === -1 ? Infinity : Number(current[key] ?? 0)),
   );
 }
 
@@ -125,7 +125,7 @@ export async function createSubscriptionRequest(
   prisma: PrismaClient,
   auth: AuthContext,
   input: unknown,
-) {
+): Promise<ReturnType<typeof serializeRequest>> {
   requireCompanyAdmin(auth, "Запрос тарифа доступен администратору компании");
   const membership = requireTenant(auth);
   const body = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
@@ -134,6 +134,8 @@ export async function createSubscriptionRequest(
   const billingPeriod = body.billingPeriod === "YEARLY" ? "YEARLY" : "MONTHLY";
   const addOns = asAddOns(body.addOns || body.requestedAddOns);
   const quote = await quoteSubscription(prisma, { planCode, addOns, billingPeriod });
+  if (typeof prisma.$transaction === "function") return prisma.$transaction(tx => createSubscriptionRequest(tx as PrismaClient, auth, input), { timeout: 30000 });
+  await prisma.$queryRaw`SELECT id FROM "Tenant" WHERE id = ${membership.tenantId} FOR UPDATE`;
   const current = await getEntitlements(prisma, membership.tenantId);
   const type = inferRequestType(body.requestType || body.type, planCode, quote.finalAmountMinor, current);
 
@@ -196,10 +198,9 @@ export async function cancelSubscriptionRequest(prisma: PrismaClient, auth: Auth
   if (!OPEN_REQUEST_STATUSES.includes(row.status as (typeof OPEN_REQUEST_STATUSES)[number])) {
     throw new ApiError(409, "invalid_state", "Этот запрос нельзя отменить");
   }
-  const updated = await prisma.subscriptionRequest.update({
-    where: { id: row.id },
-    data: { status: "CANCELLED" },
-  });
+  const changed = await prisma.subscriptionRequest.updateMany({ where: { id: row.id, status: { in: [...OPEN_REQUEST_STATUSES] } }, data: { status: "CANCELLED" } });
+  if (!changed.count) throw new ApiError(409, "invalid_state", "Запрос уже обработан");
+  const updated = await prisma.subscriptionRequest.findUniqueOrThrow({ where: { id: row.id } });
   await writeAudit(prisma, {
     tenantId: membership.tenantId,
     actorUserId: auth.user.id,
@@ -221,10 +222,15 @@ export async function listTenantBillingRequests(prisma: PrismaClient, auth: Auth
   return { items: items.map(serializeRequest), current: items.find((row) => OPEN_REQUEST_STATUSES.includes(row.status as never)) || null };
 }
 
-async function downgradeBlockers(prisma: PrismaClient, tenantId: string, limits: Record<string, number>) {
+export async function downgradeBlockers(prisma: PrismaClient, tenantId: string, limits: Record<string, number>) {
   const usage = await collectTenantUsage(prisma, tenantId);
   const issues: Array<{ limit: string; used: number; cap: number; message: string }> = [];
   const checks: Array<[string, number, string]> = [
+    ["CLIENTS", usage.clients, "клиентов"],
+    ["ACTIVE_DEALS", usage.activeDeals, "активных сделок"],
+    ["MONTHLY_LEADS", usage.monthlyLeads, "заявок за месяц"],
+    ["DATABASE_MB", usage.databaseMb, "МБ данных"],
+    ["FILE_STORAGE_MB", usage.fileMb, "МБ файлов"],
     ["USERS", usage.users, "пользователей"],
     ["WHATSAPP_CONNECTIONS", usage.whatsapp, "подключений WhatsApp"],
     ["PIPELINES", usage.pipelines, "воронок"],
@@ -232,7 +238,7 @@ async function downgradeBlockers(prisma: PrismaClient, tenantId: string, limits:
   ];
   for (const [key, used, label] of checks) {
     const cap = Number(limits[key] ?? Infinity);
-    if (Number.isFinite(cap) && used > cap) {
+    if (Number.isFinite(cap) && cap >= 0 && used > cap) {
       issues.push({
         limit: key,
         used,
@@ -324,8 +330,8 @@ export async function rejectBillingRequest(
   const row = await prisma.subscriptionRequest.findUnique({ where: { id } });
   if (!row) throw new ApiError(404, "not_found", "Запрос не найден");
   if (row.status === "ACTIVATED") throw new ApiError(409, "invalid_state", "Запрос уже активирован");
-  const updated = await prisma.subscriptionRequest.update({
-    where: { id },
+  const changed = await prisma.subscriptionRequest.updateMany({
+    where: { id, status: { in: [...OPEN_REQUEST_STATUSES] } },
     data: {
       status: "REJECTED",
       reviewedAt: new Date(),
@@ -333,6 +339,8 @@ export async function rejectBillingRequest(
       rejectionReason: String(body.reason || body.rejectionReason || "").trim() || "Отклонено администратором",
     },
   });
+  if (!changed.count) throw new ApiError(409, "invalid_state", "Запрос уже обработан");
+  const updated = await prisma.subscriptionRequest.findUniqueOrThrow({ where: { id } });
   await writeAudit(prisma, {
     tenantId: row.tenantId,
     actorUserId: auth.user.id,
@@ -349,9 +357,14 @@ export async function confirmBillingPaymentAndActivate(
   auth: AuthContext,
   id: string,
   input: unknown,
-) {
+): Promise<Awaited<ReturnType<typeof getBillingState>>> {
   requirePlatformAdmin(auth);
   const body = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+  if (typeof prisma.$transaction === "function") return prisma.$transaction(tx => confirmBillingPaymentAndActivate(tx as PrismaClient, auth, id, input), { timeout: 30000 });
+  const target = await prisma.subscriptionRequest.findUnique({ where: { id }, select: { tenantId: true } });
+  if (!target) throw new ApiError(404, "not_found", "Запрос не найден");
+  await prisma.$queryRaw`SELECT id FROM "Tenant" WHERE id = ${target.tenantId} FOR UPDATE`;
+  await prisma.$queryRaw`SELECT id FROM "SubscriptionRequest" WHERE id = ${id} FOR UPDATE`;
   const existing = await prisma.subscriptionRequest.findUnique({ where: { id }, include: { payments: true } });
   if (!existing) throw new ApiError(404, "not_found", "Запрос не найден");
   if (existing.status === "ACTIVATED") {
@@ -361,6 +374,33 @@ export async function confirmBillingPaymentAndActivate(
     throw new ApiError(409, "invalid_state", "Этот запрос нельзя активировать");
   }
 
+  const snapshot = existing.snapshotJson as unknown as import("./pricingEngine.ts").PricingQuote["snapshot"];
+  if (!snapshot.features || !snapshot.limits || !Array.isArray(snapshot.lines)) throw new ApiError(409, "requote_required", "Обновите запрос: в нём нет сохранённых условий тарифа");
+  if (existing.requestedPlanCode === "CRM_ENTERPRISE") {
+    const override = await prisma.tenantBillingOverride.findUnique({ where: { tenantId: existing.tenantId } });
+    const terms = body.enterpriseTerms && typeof body.enterpriseTerms === "object" ? body.enterpriseTerms as Record<string, unknown> : null;
+    const price = terms?.customPriceMinor ?? override?.customPriceMinor;
+    const limits = (terms?.limits ?? override?.limitsJson ?? {}) as Record<string, number>;
+    const features = (terms?.features ?? override?.featuresJson ?? {}) as Record<string, boolean>;
+    if (!Number.isSafeInteger(price) || Number(price) <= 0) throw new ApiError(422, "enterprise_terms_required", "Укажите согласованную стоимость Enterprise");
+    if (Object.values(limits).some(value => !Number.isFinite(value) || value < -1) || Object.values(features).some(value => typeof value !== "boolean")) throw new ApiError(422, "invalid_terms", "Некорректные индивидуальные условия");
+    if (terms && override) {
+      // Explicitly agreed Enterprise terms replace conflicting old admin overrides.
+      await prisma.tenantBillingOverride.update({ where: { tenantId: existing.tenantId }, data: {
+        featuresJson: features, limitsJson: limits, customPriceMinor: Number(price), updatedByUserId: auth.user.id,
+      } });
+    }
+    existing.finalAmountMinor = Number(price);
+    snapshot.enterpriseTerms = { sla: String(terms?.sla || "").trim().slice(0,4000), integrations: String(terms?.integrations || "").trim().slice(0,4000) };
+    snapshot.finalAmountMinor = Number(price);
+    snapshot.finalPriceAtActivation = Number(price);
+    snapshot.basePriceAtActivation = Number(price);
+    snapshot.lines = [{ code: 'CRM_ENTERPRISE', name: 'Enterprise', kind: 'plan', qty: 1, unitAmountMinor: Number(price), amountMinor: Number(price), chargeType: 'RECURRING', catalogStatus: 'AVAILABLE' }];
+    snapshot.features = { ...snapshot.features, ...features };
+    snapshot.limits = { ...snapshot.limits, ...limits };
+    if (limits.FILE_STORAGE_MB != null) snapshot.limits.STORAGE_GB = limits.FILE_STORAGE_MB < 0 ? -1 : limits.FILE_STORAGE_MB / 1024;
+    await prisma.subscriptionRequest.update({ where: { id }, data: { baseAmountMinor: Number(price), finalAmountMinor: Number(price), snapshotJson: snapshot as unknown as Prisma.InputJsonValue } });
+  }
   const addOns = asAddOns(existing.requestedAddOnsJson);
   const billingPeriod = existing.billingPeriod === "YEARLY" ? "YEARLY" : "MONTHLY";
   const confirmed = existing.payments.find((item) => item.status === "CONFIRMED");
@@ -394,6 +434,7 @@ export async function confirmBillingPaymentAndActivate(
 
   const billing = await activateSubscription(prisma, {
     tenantId: existing.tenantId,
+    approvedSnapshot: snapshot,
     planCode: existing.requestedPlanCode,
     addOns,
     billingPeriod,
@@ -424,5 +465,5 @@ export async function confirmBillingPaymentAndActivate(
     entityId: payment.id,
     changes: { requestId: existing.id, amountMinor: existing.finalAmountMinor },
   });
-  return billing;
+  return getBillingState(prisma, existing.tenantId);
 }

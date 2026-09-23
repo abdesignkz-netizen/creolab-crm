@@ -1,3 +1,4 @@
+import { canUseFeature } from "./entitlementService.ts";
 import { loadTenantServices, matchTenantService, detectTenantService, validateTenantService } from "./tenantServiceCatalog.ts";
 import { createHash } from "node:crypto";
 import type { Prisma, PrismaClient } from "@creolab/db";
@@ -608,6 +609,7 @@ export async function submitPublicForm(
   if (form.integration.status !== "active") {
     throw new ApiError(404, "not_found", "Форма недоступна");
   }
+  if (!(await canUseFeature(prisma, form.tenantId, "CHANNELS"))) throw new ApiError(403, "feature_required", "Приём заявок из подключённых каналов недоступен по тарифу");
   if (!originAllowed(form.allowedDomains, meta.origin)) {
     throw new ApiError(403, "origin_not_allowed", "Домен не разрешён для этой формы");
   }
@@ -793,6 +795,7 @@ export async function processTrustedIntegrationLead(
   const integrationId = integration.id;
   const tenant = await prisma.tenant.findUnique({ where: { id: integration.tenantId }, select: { status: true } });
   if (integration.status !== "active" || tenant?.status !== "active") throw new ApiError(403, "integration_disabled", "Подключение недоступно");
+  if (!(await canUseFeature(prisma, integration.tenantId, integration.type === "webhook" ? "API_ACCESS" : "CHANNELS"))) throw new ApiError(403, "feature_required", "Приём заявок через интеграцию недоступен по тарифу");
   const payloadHash = hashPayload(parsed);
   const phoneMethod = parsed.contact.methods.find((item) => item.type === "phone");
   const phone = validateClientPhone(phoneMethod?.value, "KZ");

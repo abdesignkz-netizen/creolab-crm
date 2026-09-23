@@ -1,3 +1,4 @@
+import { requirePlatformAdmin } from "./lib/access.ts";
 import { listTenantServices, saveTenantService } from "./services/tenantServiceCatalog.ts";
 import { connectTikTok, checkTikTok, disconnectTikTok, listTikTokConnections, receiveTikTok, tiktokConnectSchema } from "./services/tiktokConnectionService.ts";
 import { connectMeta, activateMeta, disconnectMeta, listMetaConnections, receiveMetaWebhook, verifyMetaWebhook, metaConnectSchema } from "./services/metaConnectionService.ts";
@@ -306,7 +307,7 @@ import {
   startSelfRegistration,
   verifySelfRegistration,
 } from "./services/selfRegistrationService.ts";
-import { matchPaidFeature, requireFeature, FEATURES } from "./services/entitlementService.ts";
+import { matchPaidFeatures, matchAlternativeFeatures, requireAnyFeature, requireFeature, FEATURES } from "./services/entitlementService.ts";
 import {
   activateSubscriptionAsPlatformAdmin,
   activateTenantSubscription,
@@ -401,6 +402,20 @@ export function createApp(prisma: PrismaClient) {
 
   const json = express.json({ limit: "200kb" });
   const jsonLarge = express.json({ limit: "30mb" });
+
+  app.use(async (req, res, next) => {
+    try {
+      const features = matchPaidFeatures(req.method, req.path);
+      const alternatives = matchAlternativeFeatures(req.method, req.path);
+      if (!features.length && !alternatives.length) return next();
+      const auth = await requireAuth(req);
+      for (const feature of features) await requireFeature(prisma, auth, feature);
+      if (alternatives.length) await requireAnyFeature(prisma, auth, alternatives);
+      next();
+    } catch (error) {
+      next(error);
+    }
+  });
 
   app.get("/api/v1/documents/import-pdf/matches", async (req, res) => {
     const { matchInvoiceImport } = await import("./services/manualPdfImportService.ts");
@@ -520,17 +535,7 @@ export function createApp(prisma: PrismaClient) {
     return auth;
   }
 
-  app.use(async (req, res, next) => {
-    try {
-      const feature = matchPaidFeature(req.method, req.path);
-      if (!feature) return next();
-      const auth = await requireAuth(req);
-      await requireFeature(prisma, auth, feature);
-      next();
-    } catch (error) {
-      next(error);
-    }
-  });
+
 
   app.post("/api/v1/auth/login", json, async (req, res) => {
     const ip = clientIp(req);
@@ -2341,6 +2346,15 @@ export function createApp(prisma: PrismaClient) {
     res.json(await upsertBillingOverride(prisma, await requireAuth(req), req.params.id, req.body || {}));
   });
 
+  app.get("/api/v1/admin/billing/free", async (req, res) => {
+    const auth = await requireAuth(req); requirePlatformAdmin(auth);
+    const { freeMetrics } = await import("./services/billingResourceService.ts");
+    res.json(await freeMetrics(prisma));
+  });
+  app.patch("/api/v1/admin/billing/free", json, async (req, res) => {
+    const { updateFreePolicy } = await import("./services/billingResourceService.ts");
+    res.json(await updateFreePolicy(prisma, await requireAuth(req), req.body));
+  });
   app.get("/api/v1/admin/billing/requests", async (req, res) => {
     const { listAdminBillingRequests } = await import("./services/subscriptionRequestService.ts");
     res.json(await listAdminBillingRequests(prisma, await requireAuth(req), req.query as Record<string, string>));

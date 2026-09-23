@@ -1,4 +1,5 @@
-import { mkdir, writeFile, readFile } from "node:fs/promises";
+import { assertFileCapacity } from "./billingResourceService.ts";
+import { mkdir, writeFile, readFile, unlink } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import type { PrismaClient } from "@creolab/db";
@@ -66,6 +67,7 @@ function serializeTemplate(row: {
 }
 
 async function storeTemplateWord(
+  prisma: PrismaClient,
   tenantId: string,
   templateId: string,
   fileName: string,
@@ -90,7 +92,10 @@ async function storeTemplateWord(
   const storageKey = path.posix.join(tenantId, "contract-templates", templateId, safe);
   const abs = resolveUploadPath(storageKey);
   await mkdir(path.dirname(abs), { recursive: true });
+  await assertFileCapacity(prisma, tenantId, stored.length);
   await writeFile(abs, stored);
+  await prisma.attachment.create({ data: { tenantId, parentType: "contract_template_source", parentId: templateId,
+    storageKey, fileName, mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", sizeBytes: stored.length } }).catch(async error => { await unlink(abs).catch(() => {}); throw error; });
   return { sourceFileName: fileName, sourceStorageKey: storageKey };
 }
 
@@ -220,7 +225,7 @@ export async function createContractTemplate(prisma: PrismaClient, auth: AuthCon
     });
   });
   if (sourceBytes && scannedForFile) {
-    const stored = await storeTemplateWord(membership.tenantId, created.id, sourceName, sourceBytes, scannedForFile);
+    const stored = await storeTemplateWord(prisma, membership.tenantId, created.id, sourceName, sourceBytes, scannedForFile);
     await prisma.contractTemplate.update({
       where: { id: created.id },
       data: stored,
@@ -441,6 +446,7 @@ async function previewContractFromTemplate(
   const storageKey = path.posix.join(tid, "contract-previews", previewId, fileName);
   const abs = resolveUploadPath(storageKey);
   await mkdir(path.dirname(abs), { recursive: true });
+  await assertFileCapacity(prisma, tid, pdf.length);
   await writeFile(abs, pdf);
   const meta: PreviewMeta = {
     companyId,

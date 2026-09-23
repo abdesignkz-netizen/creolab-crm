@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@creolab/db";
 import {
   CATALOG_BY_CODE,
+  CATALOG_VERSION,
   FEATURE_LIST,
   LIMIT_LIST,
   PRICING_CATALOG,
@@ -41,6 +42,9 @@ export type PricingQuote = {
   recommendation: { code: string; name: string; saveMinor: number; message: string } | null;
   snapshot: {
     planVersion: number;
+    enterpriseTerms?: { sla: string; integrations: string };
+    basePriceAtActivation?: number;
+    finalPriceAtActivation?: number;
     planCode: string | null;
     billingPeriod: BillingPeriod;
     addOns: Array<{ code: string; qty: number }>;
@@ -71,13 +75,17 @@ type DbPlan = {
   version: number;
 };
 
-let catalogReady = false;
+const catalogReady = new WeakMap<PrismaClient, Promise<void>>();
 
 export async function ensurePricingCatalog(prisma: PrismaClient) {
-  if (catalogReady) return;
-  const count = await prisma.plan.count({ where: { kind: { in: ["plan", "bundle", "addon"] } } });
-  if (count < 8) await syncPricingCatalog(prisma);
-  catalogReady = true;
+  let ready = catalogReady.get(prisma);
+  if (!ready) {
+    ready = (typeof prisma.$transaction === "function" ? prisma.$transaction(tx => syncPricingCatalog(tx), { timeout: 30000 }) : syncPricingCatalog(prisma)).catch(error => {
+      catalogReady.delete(prisma); throw error;
+    });
+    catalogReady.set(prisma, ready);
+  }
+  await ready;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -91,6 +99,7 @@ function catalogFallback(code: string): CatalogItem | null {
 function fromDb(row: DbPlan): CatalogItem {
   const fallback = catalogFallback(row.code);
   return {
+    version: row.version,
     code: row.code,
     name: row.name,
     product: (row.product || fallback?.product || "CRM") as CatalogItem["product"],
@@ -165,7 +174,7 @@ export function mergeEntitlementState(
     for (const [key, value] of Object.entries(item.limits || {})) {
       const n = Number(value);
       if (!Number.isFinite(n)) continue;
-      limits[key] = (limits[key] || 0) + n * qty;
+      limits[key] = limits[key] === -1 || n === -1 ? -1 : (limits[key] || 0) + n * qty;
     }
   };
   if (base) applyAbs(base);
@@ -199,6 +208,7 @@ export async function quoteSubscription(
   const planCode = String(input.planCode || "").trim() || null;
   const plan = planCode ? await loadCatalogItem(prisma, planCode) : null;
   if (planCode && !plan) throw new ApiError(404, "not_found", "Тариф не найден");
+  if (plan && !["plan", "bundle"].includes(plan.kind)) throw new ApiError(422, "invalid_plan", "Выберите базовый тариф, а не дополнение");
   if (plan && (!plan.active || plan.catalogStatus === "HIDDEN")) {
     throw new ApiError(422, "unavailable", "Этот тариф недоступен");
   }
@@ -206,6 +216,9 @@ export async function quoteSubscription(
     throw new ApiError(422, "coming_soon", `${plan.name} пока в подготовке`);
   }
 
+  if (planCode === "BASQAR_FREE" && input.addOns?.length) throw new ApiError(422, "upgrade_required", "Для дополнений перейдите на CRM Start.");
+  if (input.addOns?.some(row => !Number.isSafeInteger(row.qty ?? 1) || (row.qty ?? 1) < 1 || (row.qty ?? 1) > 99)) throw new ApiError(422, "invalid_quantity", "Количество должно быть целым от 1 до 99");
+  if (new Set((input.addOns || []).map(row => row.code)).size !== (input.addOns || []).length) throw new ApiError(422, "duplicate_addon", "Дополнение указано дважды");
   const included = includedSet(plan);
   const addOnInputs = (input.addOns || [])
     .map((row) => ({ code: String(row.code || "").trim(), qty: Math.max(1, Math.min(99, Number(row.qty) || 1)) }))
@@ -220,6 +233,9 @@ export async function quoteSubscription(
     addonRows.push({ item, qty: item.chargeType === "ONE_TIME" ? 1 : row.qty });
   }
 
+  const aiTiers = addonRows.filter(row => /^ADDON_AI_(START|BUSINESS|PRO)$/.test(row.item.code));
+  if (aiTiers.length > 1 || aiTiers.some(row => row.qty !== 1) || (plan?.features.AI_MANAGER && aiTiers.length)) throw new ApiError(422, "invalid_ai_tier", "Выберите один уровень AI Manager");
+  if (addonRows.some(row => row.item.code === "ADDON_AI_PACK") && !plan?.features.AI_MANAGER && !aiTiers.length) throw new ApiError(422, "ai_required", "Сначала подключите AI Manager");
   const lines: QuotedLine[] = [];
   if (plan) {
     const amount = unitPrice(plan, billingPeriod);
@@ -249,17 +265,20 @@ export async function quoteSubscription(
   }
 
   const merged = mergeEntitlementState(plan, addonRows);
-  const baseAmountMinor = lines.reduce((sum, line) => sum + line.amountMinor, 0);
+  const finalAmountMinor = lines.reduce((sum, line) => sum + line.amountMinor, 0);
+  const baseAmountMinor = plan ? unitPrice(plan, billingPeriod) : 0;
   const full = await loadCatalogItem(prisma, "BUNDLE_FULL");
   let recommendation: PricingQuote["recommendation"] = null;
-  if (full && plan?.code !== "BUNDLE_FULL" && plan?.code !== "CRM_ENTERPRISE") {
+  if (full && !lines.some(line => line.chargeType === "ONE_TIME") && plan?.code !== "BUNDLE_FULL" && plan?.code !== "CRM_ENTERPRISE") {
     const fullPrice = unitPrice(full, billingPeriod);
-    if (baseAmountMinor > fullPrice) {
+    if (finalAmountMinor > fullPrice &&
+        Object.entries(merged.features).every(([key, value]) => !value || full.features[key as Feature]) &&
+        Object.entries(merged.limits).every(([key, value]) => Number(full.limits[key as LimitKey] ?? 0) === -1 || (value >= 0 && Number(full.limits[key as LimitKey] ?? 0) >= value))) {
       recommendation = {
         code: full.code,
         name: full.name,
-        saveMinor: baseAmountMinor - fullPrice,
-        message: `${full.name} — ${fullPrice.toLocaleString("ru-RU")} ₸. Экономия ${ (baseAmountMinor - fullPrice).toLocaleString("ru-RU") } ₸ / ${billingPeriod === "YEARLY" ? "год" : "месяц"}.`,
+        saveMinor: finalAmountMinor - fullPrice,
+        message: `${full.name} — ${fullPrice.toLocaleString("ru-RU")} ₸. Экономия ${ (finalAmountMinor - fullPrice).toLocaleString("ru-RU") } ₸ / ${billingPeriod === "YEARLY" ? "год" : "месяц"}.`,
       };
     }
   }
@@ -272,20 +291,22 @@ export async function quoteSubscription(
     includedCodes: [...included],
     baseAmountMinor,
     discountAmountMinor: 0,
-    finalAmountMinor: baseAmountMinor,
+    finalAmountMinor,
     currency: "KZT",
     features: merged.features,
     limits: merged.limits,
     recommendation,
     snapshot: {
-      planVersion: 1,
+      planVersion: plan?.version || CATALOG_VERSION,
+      basePriceAtActivation: baseAmountMinor,
+      finalPriceAtActivation: finalAmountMinor,
       planCode: plan?.code || null,
       billingPeriod,
       addOns: addonRows.map((row) => ({ code: row.item.code, qty: row.qty })),
       features: merged.features,
       limits: merged.limits,
       lines,
-      finalAmountMinor: baseAmountMinor,
+      finalAmountMinor,
     },
   };
 }
@@ -301,7 +322,7 @@ export function serializeCatalogItem(item: CatalogItem, period: BillingPeriod) {
     features: item.features,
     limits: item.limits,
     billingPeriod: period === "YEARLY" ? "year" : "month",
-    price: unitPrice(item, period) || null,
+    price: item.code === "CRM_ENTERPRISE" ? null : unitPrice(item, period),
     monthlyPriceMinor: item.monthlyPriceMinor,
     yearlyPriceMinor: item.yearlyPriceMinor,
     chargeType: item.chargeType,

@@ -1,3 +1,4 @@
+import { useSession } from "../lib/session";
 import { useUrlState, useRequestVersion } from "../lib/useUrlState";
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
@@ -126,7 +127,7 @@ function LineChart({
           .map((p, i) => p.value == null ? "" : `${i === 0 || comparePoints[i - 1].value == null ? "M" : "L"} ${toX(i)} ${toY(p.value)}`)
           .join(" ")
       : null;
-  const labelEvery = Math.max(1, Math.ceil(points.length / 8));
+  const labelEvery = Math.max(1, Math.ceil((points.length - 1) / 6));
 
   return (
     <div className="stats-chart-wrap">
@@ -145,7 +146,8 @@ function LineChart({
         {comparePath ? <path d={comparePath} className="stats-line-compare" fill="none" /> : null}
         <path d={path} className="stats-line" fill="none" />
         {points.map((p, i) => {
-          const showLabel = i === 0 || i === points.length - 1 || i % labelEvery === 0;
+          // Keep the final date without squeezing a neighbouring label against it.
+          const showLabel = i === 0 || i === points.length - 1 || (i % labelEvery === 0 && points.length - 1 - i >= labelEvery);
           return (
             <g key={p.label + i}>
               {p.value != null ? <circle
@@ -166,7 +168,7 @@ function LineChart({
                 </text>
               ) : null}
               {showLabel ? (
-                <text x={toX(i)} y={h - padB + 16} textAnchor="middle" className="stats-tick">
+                <text x={toX(i)} y={h - padB + 16} textAnchor={i === 0 ? "start" : i === points.length - 1 ? "end" : "middle"} className="stats-tick">
                   {p.label}
                 </text>
               ) : null}
@@ -283,6 +285,8 @@ function KpiCard({
 }
 
 export function StatsPage() {
+  const { me } = useSession();
+  const exportAllowed = Boolean(me?.billing?.entitlements?.EXPORT);
   const requestVersion = useRequestVersion();
   const [tab, setTab] = useUrlState<TabId>("tab", "overview", TABS.map(t => t.id));
   const [period, setPeriod] = useUrlState<PeriodPreset>("period", "this_month");
@@ -434,7 +438,7 @@ export function StatsPage() {
           <button type="button" className="btn secondary" onClick={() => setFiltersOpen((v) => !v)}>
             Фильтры
           </button>
-          <button type="button" className="btn" onClick={() => setExportOpen(true)}>
+          <button type="button" className="btn" disabled={!exportAllowed} title={exportAllowed ? undefined : "Экспорт доступен начиная с CRM Start"} onClick={() => setExportOpen(true)}>
             Скачать отчёт
           </button>
         </div>
@@ -820,7 +824,7 @@ export function StatsPage() {
               </tbody>
             </table>
           </div>
-          <button type="button" className="btn secondary" onClick={() => exportAnalyticsCsv(data, "sources")}>
+          <button type="button" className="btn secondary" disabled={!exportAllowed} onClick={() => exportAnalyticsCsv(data, "sources")}>
             CSV источников
           </button>
         </div>

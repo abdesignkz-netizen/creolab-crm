@@ -42,6 +42,8 @@ export async function sendViaProvider(
     idempotencyKey: string;
   },
 ) {
+  const { canUseFeature } = await import("./entitlementService.ts");
+  if (!(await canUseFeature(prisma, tenantId, "WHATSAPP"))) throw new ApiError(403, "feature_required", "WhatsApp не подключён к тарифу", undefined, { feature: "WHATSAPP", billingPath: "/billing" });
   const resolved = await resolveSellerBridge(prisma, tenantId);
   if (!resolved.bridge) {
     throw new ApiError(503, "bridge_unavailable", "WhatsApp seller-bot не подключён. Отправка невозможна.");

@@ -12,9 +12,10 @@ export function catalogPrice(item: BillingCatalogItem, period: BillingPeriod) {
 }
 
 const AUDIENCE: Record<string, string> = {
+  BASQAR_FREE: "Для знакомства с BasQar и первых продаж",
   CRM_START: "Для небольшой команды, которой нужно вести клиентов и продажи.",
-  CRM_BUSINESS: "Для отдела продаж, которому нужны документы, аналитика и несколько воронок.",
-  CRM_PRO: "Для большой команды с несколькими отделами и доступом через API.",
+  CRM_BUSINESS: "Для отдела продаж, которому нужны документы, аналитика и управление командой.",
+  CRM_PRO: "Для команды до 25 пользователей с доступом через API.",
   BUNDLE_CRM_AI: "Для команды, которая ведёт продажи в CRM и поручает переписку AI-менеджеру.",
   BUNDLE_FULL: "Для продаж с AI и управления CRM командами через BasQar Control.",
   AI_SALES: "Для продаж в WhatsApp с AI-менеджером и базового учёта клиентов.",
@@ -22,8 +23,8 @@ const AUDIENCE: Record<string, string> = {
 };
 
 const GROUPS = [
-  { id: "crm", title: "CRM для команды", text: "Три уровня: от учёта продаж до работы нескольких отделов. AI-менеджер и номера WhatsApp подключаются дополнительно.", codes: ["CRM_START", "CRM_BUSINESS", "CRM_PRO"] },
-  { id: "bundles", title: "CRM вместе с AI", text: "Готовые комплекты на базе CRM Business. Отличаются от CRM Pro составом модулей и лимитами команды.", codes: ["BUNDLE_CRM_AI", "BUNDLE_FULL"] },
+  { id: "main", title: "Тарифы BasQar", text: "Free для первых продаж. Платные тарифы включают базовую конфигурацию; ресурсы можно увеличить дополнениями.", codes: ["BASQAR_FREE", "CRM_START", "CRM_BUSINESS", "BUNDLE_CRM_AI", "BUNDLE_FULL"] },
+  { id: "crm", title: "CRM для команды", text: "CRM Pro рассчитан на более крупную команду. AI-менеджер и номера WhatsApp подключаются дополнительно.", codes: ["CRM_PRO"] },
   { id: "standalone", title: "Отдельные продукты с CRM Lite", text: "CRM Lite включает клиентов, заявки, сделки и задачи. Работа с компаниями и документами доступна в соответствующих тарифах полной CRM.", codes: ["AI_SALES", "CONTROL_STANDALONE"] },
 ];
 
@@ -65,6 +66,7 @@ export function BillingCatalog({ items, period, selected, current, disabled, onS
   const comparison = available.filter((item) => item.code !== "CRM_ENTERPRISE");
   const periodLabel = period === "YEARLY" ? "год" : "месяц";
   function card(item: BillingCatalogItem) {
+    const free = item.code === "BASQAR_FREE";
     const selectedItem = selected === item.code;
     const savings = item.monthlyPriceMinor * 12 - item.yearlyPriceMinor;
     return <article key={item.code} className={`panel billing-plan-card ${selectedItem ? "is-selected" : ""} ${item.recommended ? "is-recommended" : ""}`}>
@@ -75,19 +77,20 @@ export function BillingCatalog({ items, period, selected, current, disabled, onS
       <h4>{item.name}</h4>
       <p className="muted billing-audience">{AUDIENCE[item.code] || item.description}</p>
       {item.included?.length ? <p className="billing-composition">В составе: {item.included.map((row) => items.find((entry) => entry.code === row.code)?.name || row.code).join(" + ")}.</p> : null}
-      <p className="billing-price"><strong>{formatKzt(catalogPrice(item, period))}</strong><span> / {periodLabel}</span></p>
-      <p className="muted billing-price-note">{period === "YEARLY" ? `Оплата за год целиком${savings > 0 ? `. Экономия ${formatKzt(savings)}` : ""}.` : "Стоимость за компанию, с указанным числом пользователей."}</p>
+      <p className="billing-price"><strong>{free ? "0 ₸" : `от ${formatKzt(catalogPrice(item, period))}`}</strong>{!free ? <span> / {periodLabel}</span> : null}</p>
+      <p className="muted billing-price-note">{free ? "Ручная работа с клиентами, сделками и задачами. Без оплаты и подтверждения администратора." : "Указана стоимость базовой конфигурации. Дополнительные подключения и ресурсы оплачиваются отдельно."}</p>
       <dl className="billing-plan-limits">
-        {LIMIT_LIST.map((key) => <div key={key}><dt>{LIMIT_LABEL[key]}</dt><dd>{item.limits[key] ? Number(item.limits[key]).toLocaleString("ru-RU") : "Не включено"}</dd></div>)}
+        {LIMIT_LIST.filter(key => key !== "STORAGE_GB").map((key) => <div key={key}><dt>{LIMIT_LABEL[key]}</dt><dd>{item.limits[key] === -1 ? "Без квоты" : item.limits[key] == null ? "По условиям тарифа" : Number(item.limits[key]).toLocaleString("ru-RU")}</dd></div>)}
       </dl>
+      {item.features.MULTIPLE_PIPELINES || item.features.MULTI_DEPARTMENT ? <p className="muted">Сейчас доступна одна воронка. Несколько воронок и отделы находятся в подготовке.</p> : null}
       <ul className="billing-feature-list">{highlights(item).map((text) => <li key={text}>{text}</li>)}</ul>
-      <button type="button" className={`btn ${selectedItem ? "" : "secondary"}`} aria-pressed={selectedItem} disabled={disabled} data-tip={`Выбрать ${item.name} и посмотреть расчёт`} onClick={() => onSelect(item.code)}>
-        {selectedItem ? `Выбран ${item.name}` : `Выбрать ${item.name}`}
+      <button type="button" className={`btn ${selectedItem ? "" : "secondary"}`} aria-pressed={selectedItem} disabled={disabled || current === item.code} data-tip={`Выбрать ${item.name} и посмотреть расчёт`} onClick={() => onSelect(item.code)}>
+        {current === item.code ? "Ваш тариф" : free ? "Начать бесплатно" : selectedItem ? `Выбран ${item.name}` : `Выбрать ${item.name}`}
       </button>
     </article>;
   }
   return <div id="billing-catalog" className="billing-catalog stack">
-    <div><h3>Выберите тариф под свою задачу</h3><p className="muted">Все цены в тенге. Лимиты ниже включены в стоимость. AI-взаимодействия указаны на период подписки.</p></div>
+    <div><h3>Выберите тариф под свою задачу</h3><p className="muted">Все цены в тенге. Лимиты ниже включены в стоимость. AI-взаимодействия учитываются за календарный месяц.</p></div>
     <nav className="billing-section-links" aria-label="Группы тарифов">
       {GROUPS.map((group) => <a key={group.id} href={`#billing-${group.id}`}>{group.title}</a>)}
       <a href="#billing-comparison">Сравнить возможности</a>
@@ -101,7 +104,7 @@ export function BillingCatalog({ items, period, selected, current, disabled, onS
       </section>;
     })}
     {enterprise ? <section className="panel billing-enterprise">
-      <div><h3>Enterprise — индивидуальные условия</h3><p>Для компаний, которым нужны особые лимиты, условия поддержки и стоимость.</p><p className="muted">Состав модулей, число пользователей и условия обслуживания согласуем перед подключением.</p></div>
+      <div><h3>Enterprise</h3><p className="billing-plan-price">Индивидуально</p><p>Для компаний, которым нужны особые лимиты, условия поддержки и стоимость.</p><p className="muted">Состав модулей, число пользователей и условия обслуживания согласуем перед подключением.</p></div>
       <button className="btn secondary" type="button" disabled={disabled} onClick={() => onSelect(enterprise.code)}>Обсудить Enterprise</button>
     </section> : null}
     <details id="billing-comparison" className="panel billing-comparison">
@@ -110,8 +113,8 @@ export function BillingCatalog({ items, period, selected, current, disabled, onS
       <div className="billing-table-scroll" tabIndex={0} role="region" aria-label="Сравнение тарифов">
         <table><caption className="muted">Возможности базовых тарифов без дополнительных модулей</caption><thead><tr><th scope="col">Возможность</th>{comparison.map((item) => <th scope="col" key={item.code}>{item.name}</th>)}</tr></thead>
           <tbody>
-            <tr><th scope="row">Цена / {periodLabel}</th>{comparison.map((item) => <td key={item.code}>{formatKzt(catalogPrice(item, period))}</td>)}</tr>
-            {LIMIT_LIST.map((key) => <tr key={key}><th scope="row">{LIMIT_LABEL[key]}</th>{comparison.map((item) => <td key={item.code}>{item.limits[key] ? Number(item.limits[key]).toLocaleString("ru-RU") : "Не включено"}</td>)}</tr>)}
+            <tr><th scope="row">Цена / {periodLabel}</th>{comparison.map((item) => <td key={item.code}>{item.code === "BASQAR_FREE" ? "0 ₸" : `от ${formatKzt(catalogPrice(item, period))}`}</td>)}</tr>
+            {LIMIT_LIST.filter(key => key !== "STORAGE_GB").map((key) => <tr key={key}><th scope="row">{LIMIT_LABEL[key]}</th>{comparison.map((item) => <td key={item.code}>{item.limits[key] === -1 ? "Без квоты" : item.limits[key] == null ? "По условиям тарифа" : Number(item.limits[key]).toLocaleString("ru-RU")}</td>)}</tr>)}
             {FEATURE_ROWS.map(({ key, label }) => <tr key={key}><th scope="row">{label || FEATURE_LABEL[key]}</th>{comparison.map((item) => <td key={item.code} className={item.features[key] ? "billing-included" : "muted"}>{item.features[key] ? "Включено" : "Не включено"}</td>)}</tr>)}
           </tbody>
         </table>

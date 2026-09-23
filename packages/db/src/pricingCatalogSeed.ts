@@ -1,9 +1,22 @@
-import type { PrismaClient } from "@prisma/client";
-import { PRICING_CATALOG } from "@creolab/contracts";
+import type { Prisma, PrismaClient } from "@prisma/client";
+import { PRICING_CATALOG, CATALOG_VERSION } from "@creolab/contracts";
 
-export async function syncPricingCatalog(prisma: PrismaClient) {
+export async function syncPricingCatalog(prisma: PrismaClient | Prisma.TransactionClient) {
   for (const item of PRICING_CATALOG) {
+    const existing = await prisma.plan.findUnique({ where: { code: item.code } });
+    if (existing && existing.version >= CATALOG_VERSION) continue;
+    // Freeze old assignments before changing their public catalog row.
+    if (existing) {
+      const assigned = await prisma.tenantPlan.findMany({ where: { planId: existing.id } });
+      for (const row of assigned) {
+        await prisma.tenantPlan.update({ where: { id: row.id }, data: {
+          featuresSnapshotJson: Object.keys((row.featuresSnapshotJson || {}) as object).length ? row.featuresSnapshotJson : existing.featuresJson,
+          limitsSnapshotJson: Object.keys((row.limitsSnapshotJson || {}) as object).length ? row.limitsSnapshotJson : existing.limitsJson,
+        } as Prisma.TenantPlanUpdateInput });
+      }
+    }
     const data = {
+      version: CATALOG_VERSION,
       name: item.name,
       kind: item.kind,
       product: item.product,

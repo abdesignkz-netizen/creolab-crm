@@ -3224,7 +3224,7 @@ export function TasksPage() {
                         </button>
                       ) : null}
                       <button
-                        className="btn secondary"
+                        className="btn"
                         type="button"
                         {...tip("Сразу отметить задачу выполненной без заполнения результата")}
                         onClick={() =>
@@ -3237,7 +3237,7 @@ export function TasksPage() {
                         Завершить
                       </button>
                       <button
-                        className="btn danger"
+                        className="btn secondary task-cancel"
                         {...tip("Отменить задачу — она больше не будет в работе")}
                         onClick={() => api.cancelTask(item.id).then(load).catch((err) => setError(err.message))}
                       >

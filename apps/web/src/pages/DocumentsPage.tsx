@@ -1,3 +1,4 @@
+import { NavIcon } from "../components/NavIcon";
 import { ContractWorkspaceModal } from "../components/ContractWorkspaceModal";
 import { ManualPdfImportPanel } from "./ManualPdfImportPanel";
 import { ContractTemplatePanel } from "./ContractTemplatePanel";
@@ -327,25 +328,26 @@ export function DocumentsPage() {
         ) : null}
       </form>
 
-      <div className="sit-toolbar">
-        <div className="sit-periods">
+      <div className="sit-toolbar documents-toolbar">
+        <div className="sit-periods document-kind-filters" role="group" aria-label="Тип документа">
           {KINDS.map(([id, label]) => (
             <button
               key={id || "all"}
               type="button"
+              data-kind={id || "ALL"}
+              aria-pressed={kind === id && attention !== "1"}
               className={kind === id && attention !== "1" ? "btn sit-chip" : "btn secondary sit-chip"}
               onClick={() => showKind(id)}
             >
-              {label}
-              {id === "CONTRACT" && counts.contract ? ` · ${counts.contract}` : ""}
-              {id === "INVOICE" && counts.invoice ? ` · ${counts.invoice}` : ""}
-              {id === "AVR" && counts.avr ? ` · ${counts.avr}` : ""}
-              {id === "ESF" && counts.esf ? ` · ${counts.esf}` : ""}
+              {id ? <span className="document-kind-icon"><NavIcon to="/documents" /></span> : null}
+              <span>{label}</span>
+              {id ? <span className="document-kind-count">{({ CONTRACT: counts.contract, INVOICE: counts.invoice, AVR: counts.avr, ESF: counts.esf })[id] ?? 0}</span> : null}
             </button>
           ))}
           <button
             type="button"
             className={attention === "1" ? "btn sit-chip" : "btn secondary sit-chip"}
+            aria-pressed={attention === "1"}
             onClick={() => {
               setSearchParams((previous) => {
                 const result = new URLSearchParams(previous);

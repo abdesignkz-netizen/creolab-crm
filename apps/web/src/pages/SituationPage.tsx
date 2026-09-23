@@ -571,21 +571,21 @@ export function SituationPage() {
         ) : (
           visibleAttention.map((item: any) => (
             <div className={`dash-attn-item severity-${item.severity}`} key={item.id}>
-              <div>
+              <span className="attention-icon" aria-hidden="true"><DashIcon d={item.nextAction === "complete_phone" ? ICONS.phone : item.nextAction === "complete_task" ? ICONS.tasks : ICONS.warning} /></span>
+              <div className="attention-content">
+                <div className="sit-attn-why">
+                  {item.whyLabel ? <b>{item.whyLabel}</b> : null}
+                  {item.reason && item.reason !== item.whyLabel ? <span>{item.reason}</span> : null}
+                </div>
                 <b>{nameWithPhone(item.contactName || item.title, item.phone)}</b>
                 {item.interest && item.interest !== item.reason ? <div className="muted">{item.interest}</div> : null}
                 {item.contactName && item.title && item.title !== item.contactName && item.title !== item.interest ? (
                   <div className="muted">{item.title}</div>
                 ) : null}
-                <div className="sit-attn-why">
-                  {item.whyLabel ? <span className="badge warn">{item.whyLabel}</span> : null}
-                  {item.reason && item.reason !== item.whyLabel ? <span>{item.reason}</span> : null}
-                </div>
-                <div className="muted">
-                  {ACTION_LABEL[item.nextAction] || item.nextAction}
-                  {" · "}
-                  {ageLabel(item.ageMinutes)}
-                  {item.ownerMembershipId ? "" : " · без ответственного"}
+                <div className="attention-next muted">
+                  <span>{ACTION_LABEL[item.nextAction] || item.nextAction}</span>
+                  <span>{ageLabel(item.ageMinutes)}</span>
+                  {item.ownerMembershipId ? null : <span>Без ответственного</span>}
                 </div>
                 {item.nextAction === "complete_phone" ? (
                   <form

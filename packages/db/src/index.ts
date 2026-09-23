@@ -3,3 +3,5 @@ export type { PrismaClient } from "@prisma/client";
 export { Prisma } from "@prisma/client";
 export { upsertSupportCatalog, SUPPORT_ARTICLES, SUPPORT_CATEGORIES } from "./supportCatalog.ts";
 export { syncPricingCatalog } from "./pricingCatalogSeed.ts";
+
+export { BILLING_DATA_TABLES } from "./billingQuotaSchema.ts";

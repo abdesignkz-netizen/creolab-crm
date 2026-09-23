@@ -21,6 +21,9 @@ const PREVIEW_STATUSES = new Set([
 ]);
 
 const PLAN_FEATURE_ALIASES: Record<Feature, string[]> = {
+  IMPORT: ["IMPORT"],
+  EXPORT: ["EXPORT"],
+  FILE_STORAGE: ["FILE_STORAGE"],
   WHATSAPP: ["whatsapp", "WHATSAPP"],
   AI_MANAGER: ["ai", "aiManager", "AI_MANAGER"],
   TEAM: ["team", "members", "TEAM"],
@@ -190,6 +193,11 @@ function planAllowsFeature(row: TenantPlanRow | null, feature: Feature, entitled
   if (!row || isLegacyPlan(row.plan)) return true;
   const snap = asRecord(row.featuresSnapshotJson);
   const json = Object.keys(snap).length ? snap : asRecord(row.plan.featuresJson);
+  const version = Number(asRecord(row.priceSnapshotJson).planVersion || 1);
+  if (version < 2 && !(feature in json)) {
+    if (feature === FEATURES.IMPORT || feature === FEATURES.EXPORT) return Boolean(json.CRM_CORE);
+    if (feature === FEATURES.FILE_STORAGE) return Number(asRecord(row.limitsSnapshotJson).STORAGE_GB ?? asRecord(row.plan.limitsJson).STORAGE_GB ?? 0) > 0;
+  }
   for (const key of PLAN_FEATURE_ALIASES[feature] || [feature]) {
     if (key in json) return Boolean(json[key]);
   }
@@ -204,7 +212,7 @@ export function entitlementsFromSnapshot(snap: SubscriptionSnapshot, row: Tenant
   const map = {} as Record<Feature, boolean>;
   const extra = asRecord(override?.featuresJson);
   for (const feature of FEATURE_LIST) {
-    map[feature] = planAllowsFeature(row, feature, snap.entitled) || Boolean(extra[feature]);
+    map[feature] = snap.entitled && (typeof extra[feature] === "boolean" ? Boolean(extra[feature]) : planAllowsFeature(row, feature, snap.entitled));
   }
   return map;
 }
@@ -220,7 +228,7 @@ export function limitsFromPlan(row: TenantPlanRow | null, override?: { limitsJso
     base[LIMITS.PIPELINES] = 99;
     base[LIMITS.DEPARTMENTS] = 99;
     base[LIMITS.STORAGE_GB] = 999;
-    return base;
+    return applyLimitOverride(base, override);
   }
   if (isLegacyPlan(row.plan)) {
     const json = asRecord(row.plan.limitsJson);
@@ -234,7 +242,8 @@ export function limitsFromPlan(row: TenantPlanRow | null, override?: { limitsJso
     base[LIMITS.STORAGE_GB] = Number(json.STORAGE_GB || 999);
     return applyLimitOverride(base, override);
   }
-  const json = { ...asRecord(row.plan.limitsJson), ...asRecord(row.limitsSnapshotJson) };
+  const snapshot = asRecord(row.limitsSnapshotJson);
+  const json = Object.keys(snapshot).length ? snapshot : asRecord(row.plan.limitsJson);
   for (const [key, value] of Object.entries(json)) {
     const n = Number(value);
     if (Number.isFinite(n)) base[key] = n;
@@ -263,6 +272,9 @@ function applyLimitOverride(base: Record<string, number>, override?: { limitsJso
     const n = Number(value);
     if (Number.isFinite(n)) base[key] = n;
   }
+  if (extra.USERS != null) base.members = base.USERS;
+  if (extra.WHATSAPP_CONNECTIONS != null) base.whatsappActive = base.WHATSAPP_CONNECTIONS;
+  if (extra.FILE_STORAGE_MB != null) base.STORAGE_GB = base.FILE_STORAGE_MB < 0 ? -1 : base.FILE_STORAGE_MB / 1024;
   return base;
 }
 
@@ -310,6 +322,18 @@ export async function requireFeature(prisma: PrismaClient, auth: AuthContext, fe
   );
 }
 
+export async function requireAnyFeature(prisma: PrismaClient, auth: AuthContext, features: Feature[]) {
+  const membership = requireTenant(auth);
+  const access = await getEntitlements(prisma, membership.tenantId);
+  if (features.some(feature => access.entitlements[feature])) return membership;
+  throw new ApiError(403, "feature_required", "Для AI-команд подключите AI Manager или BasQar Control.", undefined, { feature: features[0], billingPath: "/billing" });
+}
+
+export function matchAlternativeFeatures(method: string, path: string): Feature[] {
+  return method.toUpperCase() === "POST" && /^\/api\/v1\/(tasks|campaigns)\/(parse|from-command|parse-command)/.test(path)
+    ? [FEATURES.AI_MANAGER, FEATURES.AI_CONTROL] : [];
+}
+
 export async function requireLimitAvailable(
   prisma: PrismaClient,
   tenantId: string,
@@ -320,7 +344,7 @@ export async function requireLimitAvailable(
   const resolved = await getEntitlements(prisma, tenantId);
   if (resolved.snapshot.grandfathered) return resolved;
   const cap = Number(resolved.limits[limit] || 0);
-  if (used >= cap) {
+  if (cap >= 0 && used >= cap) {
     throw new ApiError(403, "limit_exceeded", message, undefined, {
       limit,
       used,
@@ -334,6 +358,17 @@ export async function requireLimitAvailable(
 type FeatureRule = { methods?: string[]; pattern: RegExp; feature: Feature };
 
 const PAID_RULES: FeatureRule[] = [
+  { methods: ["POST", "PATCH"], pattern: /^\/api\/v1\/contacts(?:\/[^/]+)?$/, feature: FEATURES.CLIENTS },
+  { methods: ["POST", "PATCH"], pattern: /^\/api\/v1\/companies(?:\/[^/]+)?$/, feature: FEATURES.COMPANIES },
+  { methods: ["POST", "PATCH"], pattern: /^\/api\/v1\/inquiries(?:\/[^/]+)?$/, feature: FEATURES.LEADS },
+  { methods: ["POST", "PATCH"], pattern: /^\/api\/v1\/deals(?:\/[^/]+)?$/, feature: FEATURES.DEALS },
+
+  { pattern: /^\/api\/v1\/contacts\/import$/, feature: FEATURES.IMPORT },
+  { pattern: /^\/api\/v1\/settings\/legal-profile\/marks\//, feature: FEATURES.FILE_STORAGE },
+  { pattern: /^\/api\/v1\/(documents|contracts|invoices|electronic-documents)(\/|$)/, feature: FEATURES.DOCUMENTS },
+  { pattern: /^\/api\/v1\/deals\/[^/]+\/(contract|invoice|avr)/, feature: FEATURES.DOCUMENTS },
+  { pattern: /^\/api\/v1\/(tasks|campaigns)\/[^/]+\/attachments$/, feature: FEATURES.FILE_STORAGE },
+  { pattern: /^\/api\/v1\/ai-manager\//, feature: FEATURES.AI_MANAGER },
   { pattern: /^\/api\/v1\/integrations\/whatsapp-seller\/(connect|rotate-secret|disconnect|sync)$/, feature: FEATURES.WHATSAPP },
   { pattern: /^\/api\/v1\/integrations\/esf\//, feature: FEATURES.ESF },
   { pattern: /^\/api\/v1\/electronic-documents\/[^/]+\/esf-/, feature: FEATURES.ESF },
@@ -358,9 +393,11 @@ const PAID_RULES: FeatureRule[] = [
   { pattern: /^\/api\/v1\/workspace\/control\/identities/, feature: FEATURES.AI_CONTROL },
 ];
 
-export function matchPaidFeature(method: string, path: string): Feature | null {
+export function matchPaidFeatures(method: string, path: string): Feature[] {
   const m = method.toUpperCase();
-  if (m === "GET" || m === "HEAD" || m === "OPTIONS") return null;
+  if ((m === "GET" || m === "HEAD") && /^\/api\/v1\/contacts\/export(?:\?|$)/.test(path)) return [FEATURES.EXPORT];
+  if ((m === "GET" || m === "HEAD") && /^\/api\/v1\/analytics\/(trend|drilldown)(?:\?|$)/.test(path)) return [FEATURES.ADVANCED_ANALYTICS];
+  if (m === "GET" || m === "HEAD" || m === "OPTIONS" || m === "DELETE") return [];
   const pathOnly = String(path || "").split("?")[0];
   if (
     pathOnly.startsWith("/api/v1/auth") ||
@@ -371,13 +408,17 @@ export function matchPaidFeature(method: string, path: string): Feature | null {
     pathOnly.startsWith("/api/v1/internal") ||
     pathOnly.startsWith("/api/v1/invitations")
   ) {
-    return null;
+    return [];
   }
-  for (const rule of PAID_RULES) {
-    if (rule.methods && !rule.methods.includes(m)) continue;
-    if (rule.pattern.test(pathOnly)) return rule.feature;
-  }
-  return null;
+  return [...new Set(PAID_RULES.filter(rule => (!rule.methods || rule.methods.includes(m)) && rule.pattern.test(pathOnly)).map(rule => rule.feature))];
+}
+
+export function matchPaidFeature(method: string, path: string): Feature | null {
+  return matchPaidFeatures(method, path)[0] || null;
 }
 
 export { FEATURES };
+
+export const resolveEffectiveEntitlements = getEntitlements;
+
+export { getUsage, canConsume } from "./billingResourceService.ts";

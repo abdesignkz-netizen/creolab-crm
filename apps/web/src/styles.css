@@ -3638,3 +3638,9 @@ html[data-theme="dark"] {
 .service-catalog-row > div:first-child { min-width: 0; overflow-wrap: anywhere; }
 .service-catalog-row .actions { flex-shrink: 0; }
 @media (max-width: 700px) { .service-catalog-row { align-items: stretch; flex-direction: column; } }
+
+/* The administrator can review long Enterprise configurations on small screens. */
+#billing-confirm-form { max-width: 760px; max-height: calc(100dvh - 32px); overflow-y: auto; min-width: 0; }
+#billing-confirm-form fieldset { min-width: 0; }
+#billing-confirm-form label { min-width: 0; }
+#billing-confirm-form input[type="checkbox"] { width: auto; margin-right: 8px; }

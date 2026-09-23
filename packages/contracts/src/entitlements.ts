@@ -10,6 +10,9 @@ export const FEATURES = {
   MESSAGING: "MESSAGING",
   AUTOMATION: "AUTOMATION",
   CHANNELS: "CHANNELS",
+  IMPORT: "IMPORT",
+  EXPORT: "EXPORT",
+  FILE_STORAGE: "FILE_STORAGE",
   CRM_CORE: "CRM_CORE",
   CRM_LITE: "CRM_LITE",
   CLIENTS: "CLIENTS",
@@ -46,6 +49,9 @@ export const FEATURE_LABEL: Record<Feature, string> = {
   MESSAGING: "Сообщения",
   AUTOMATION: "Автоматизации",
   CHANNELS: "Каналы",
+  IMPORT: "Импорт",
+  EXPORT: "Экспорт",
+  FILE_STORAGE: "Файлы",
   CRM_CORE: "CRM",
   CRM_LITE: "CRM Lite",
   CLIENTS: "Клиенты",
@@ -67,6 +73,11 @@ export const FEATURE_LABEL: Record<Feature, string> = {
 };
 
 export const LIMITS = {
+  CLIENTS: "CLIENTS",
+  ACTIVE_DEALS: "ACTIVE_DEALS",
+  MONTHLY_LEADS: "MONTHLY_LEADS",
+  DATABASE_MB: "DATABASE_MB",
+  FILE_STORAGE_MB: "FILE_STORAGE_MB",
   USERS: "USERS",
   PIPELINES: "PIPELINES",
   DEPARTMENTS: "DEPARTMENTS",
@@ -80,6 +91,11 @@ export type LimitKey = (typeof LIMITS)[keyof typeof LIMITS];
 export const LIMIT_LIST = Object.values(LIMITS);
 
 export const LIMIT_LABEL: Record<LimitKey, string> = {
+  CLIENTS: "Клиенты",
+  ACTIVE_DEALS: "Активные сделки",
+  MONTHLY_LEADS: "Заявки за месяц",
+  DATABASE_MB: "База данных, МБ",
+  FILE_STORAGE_MB: "Файлы, МБ",
   USERS: "Пользователи",
   PIPELINES: "Воронки",
   DEPARTMENTS: "Отделы",

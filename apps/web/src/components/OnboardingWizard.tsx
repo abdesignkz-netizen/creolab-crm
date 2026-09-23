@@ -30,6 +30,7 @@ export function OnboardingWizard() {
   if (billing.subscriptionStatus !== "active") return null;
   if (!billing.onboarding?.needed) return null;
   const done = billing.onboarding.steps || {};
+  const steps = STEPS.filter(step => step.id === "company" || (step.id === "ai" && billing.entitlements?.AI_MANAGER) || (step.id === "whatsapp" && billing.entitlements?.WHATSAPP) || (step.id === "team" && billing.entitlements?.TEAM));
 
   async function skip() {
     await api.skipOnboarding();
@@ -47,7 +48,7 @@ export function OnboardingWizard() {
       <h3>Настройте рабочий кабинет</h3>
       <p className="muted">Тариф активен. Пройдите шаги, когда будет удобно — ничего не блокируется.</p>
       <ol className="onboarding-steps">
-        {STEPS.map((step, index) => (
+        {steps.map((step, index) => (
           <li key={step.id} className={done[step.id] ? "is-done" : ""}>
             <div>
               <b>

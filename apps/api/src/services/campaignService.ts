@@ -1,3 +1,4 @@
+import { assertFileCapacity } from "./billingResourceService.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -435,6 +436,7 @@ export async function addCampaignAttachment(
   const storageKey = path.posix.join(membership.tenantId, "campaigns", campaignId, `${attachmentId}-${safeName}`);
   const abs = resolveUploadPath(storageKey);
   await mkdir(path.dirname(abs), { recursive: true });
+  await assertFileCapacity(prisma, membership.tenantId, buf.length);
   await writeFile(abs, buf);
   const checksum = createHash("sha256").update(buf).digest("hex");
   const row = await prisma.attachment.create({
@@ -453,7 +455,7 @@ export async function addCampaignAttachment(
       uploadedById: auth.user.id,
       status: "stored",
     },
-  });
+  }).catch(async error => { await unlink(abs).catch(() => {}); throw error; });
   await prisma.campaign.update({
     where: { id: campaignId },
     data: { confirmedAt: null, confirmedById: null, contentHash: null, status: "draft" },

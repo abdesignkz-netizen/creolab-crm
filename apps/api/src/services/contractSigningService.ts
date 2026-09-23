@@ -1,3 +1,4 @@
+import { assertFileCapacity } from "./billingResourceService.ts";
 import { documentOrganization } from "./documentOrganization.ts";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile, rm } from "node:fs/promises";
@@ -414,6 +415,7 @@ async function applySignature(
   const storageKey = path.posix.join(input.tenantId, "signatures", request.contractId, `${attachmentId}.p7s`);
   const abs = resolveUploadPath(storageKey);
   await mkdir(path.dirname(abs), { recursive: true });
+  await assertFileCapacity(prisma, input.tenantId, cms.length);
   await writeFile(abs, cms);
 
   const cert = verification.inspection?.primary;

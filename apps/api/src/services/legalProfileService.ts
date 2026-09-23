@@ -1,6 +1,7 @@
+import { assertFileCapacity } from "./billingResourceService.ts";
 import type { PrismaClient } from "@creolab/db";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { unlink, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { normalizeKzTaxId } from "@creolab/contracts";
 import { ApiError } from "../errors.ts";
@@ -307,6 +308,7 @@ export async function saveInvoiceMarkImage(
   const storageKey = path.posix.join(membership.tenantId, "legal-marks", `${kind}-${id}.${ext}`);
   const absolute = resolveUploadPath(storageKey);
   await mkdir(path.dirname(absolute), { recursive: true });
+  await assertFileCapacity(prisma, membership.tenantId, buffer.length);
   await writeFile(absolute, buffer, { flag: "wx" });
   await prisma.attachment.create({
     data: {
@@ -324,7 +326,7 @@ export async function saveInvoiceMarkImage(
       status: "stored",
       uploadedById: auth.user.id,
     },
-  });
+  }).catch(async error => { await unlink(absolute).catch(() => {}); throw error; });
   for (const old of previous) {
     await prisma.attachment.delete({ where: { id: old.id } }).catch(() => undefined);
     await rm(resolveUploadPath(old.storageKey), { force: true }).catch(() => undefined);

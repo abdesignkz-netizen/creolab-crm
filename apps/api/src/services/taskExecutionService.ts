@@ -1,3 +1,4 @@
+import { assertFileCapacity } from "./billingResourceService.ts";
 import { taskCreatorSnapshot } from "@creolab/contracts";
 import { CALLS_ENABLED } from "../lib/featureFlags.ts";
 import type { Prisma, PrismaClient } from "@creolab/db";
@@ -404,6 +405,7 @@ export async function addTaskAttachment(
   const storageKey = path.posix.join(tid, id, `${attachmentId}-${safeName}`);
   const abs = resolveUploadPath(storageKey);
   await mkdir(path.dirname(abs), { recursive: true });
+  await assertFileCapacity(prisma, tid, buffer.length);
   await writeFile(abs, buffer);
   const checksum = createHash("sha256").update(buffer).digest("hex");
 
@@ -424,7 +426,7 @@ export async function addTaskAttachment(
       status: "stored",
       sendState: "pending",
     },
-  });
+  }).catch(async error => { await unlink(abs).catch(() => {}); throw error; });
   await invalidateExecution(prisma, tid, id);
   if (task.contactId) {
     await writeActivity(prisma, {
@@ -490,7 +492,8 @@ async function copyParentAttachmentToChild(
   const abs = resolveUploadPath(storageKey);
   await mkdir(path.dirname(abs), { recursive: true });
   try {
-    await copyFile(src, abs);
+    await assertFileCapacity(prisma, tid, parentAtt.sizeBytes);
+  await copyFile(src, abs);
   } catch {
     return { created: false };
   }
@@ -512,7 +515,7 @@ async function copyParentAttachmentToChild(
       status: "stored",
       sendState: "pending",
     },
-  });
+  }).catch(async error => { await unlink(abs).catch(() => {}); throw error; });
   return { created: true };
 }
 

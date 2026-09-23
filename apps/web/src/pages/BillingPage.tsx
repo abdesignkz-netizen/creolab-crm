@@ -12,6 +12,7 @@ type Quote = {
   lines: Array<{ code: string; name: string; qty: number; amountMinor: number; chargeType: string }>;
   finalAmountMinor: number;
   limits: Record<string, number>;
+  recommendation?: { code: string; name: string; saveMinor: number; message: string } | null;
 };
 
 const STATUS_LABEL: Record<string, string> = {
@@ -19,7 +20,7 @@ const STATUS_LABEL: Record<string, string> = {
   canceled: "Отменён", cancel_at_period_end: "Отмена в конце периода", expired: "Истёк", suspended: "Приостановлен",
 };
 const AI_TIERS = ["ADDON_AI_START", "ADDON_AI_BUSINESS", "ADDON_AI_PRO"];
-const STEPPERS = ["ADDON_USER", "ADDON_WHATSAPP", "ADDON_AI_PACK", "ADDON_STORAGE_10GB"];
+const STEPPERS = ["ADDON_USER", "ADDON_WHATSAPP", "ADDON_AI_PACK", "ADDON_STORAGE_10GB", "ADDON_DEPARTMENT"];
 const FALLBACK_CATALOG = Object.values(CATALOG_BY_CODE).filter((item) => item.public && item.active && item.catalogStatus !== "HIDDEN");
 
 function formatDate(value: string) {
@@ -74,6 +75,8 @@ export function BillingPage() {
 
   const preview = Boolean(data?.previewMode);
   const currentRequest = data?.currentRequest;
+  const free = planCode === "BASQAR_FREE";
+  const currentFree = data?.planCode === "BASQAR_FREE";
   const enterprise = planCode === "CRM_ENTERPRISE";
   const periodLabel = period === "YEARLY" ? "год" : "месяц";
   const extras = items.filter((item) => item.kind === "addon" && item.catalogStatus === "AVAILABLE");
@@ -140,13 +143,17 @@ export function BillingPage() {
     {(data?.warnings || []).map((item: { code: string; message: string }) => <p key={item.code} className="warn">{item.message}</p>)}
     <div className="panel stack">
       <h3>Ваш тариф</h3>
-      <p><b>{preview ? "Ознакомительный режим" : data?.planName || "Не подключён"}</b>{data?.amountMinor ? ` · ${formatKzt(data.amountMinor)} / ${data.billingPeriod === "YEARLY" ? "год" : "месяц"}` : ""}</p>
+      <p><b>{preview ? "Ознакомительный режим" : data?.planName || "Не подключён"}</b>{data?.amountMinor ? ` · ${formatKzt(data.priceBreakdown?.recurring ?? data.amountMinor)} / ${data.billingPeriod === "YEARLY" ? "год" : "месяц"}` : ""}</p>
       <p className="muted">Статус: {STATUS_LABEL[data?.subscriptionStatus] || data?.subscriptionStatus || "—"}.{data?.expiresAt ? ` Активен до ${formatDate(data.expiresAt)}` : preview ? " Платная подписка не подключена." : ""}</p>
-      <div className="billing-usage-grid">{(data?.usage || []).map((row: { key: string; label: string; used: number; cap: number; unit?: string }) => <div key={row.key} className="billing-usage"><div className="billing-usage-label"><span>{row.label}</span><span>{row.used} / {row.cap || "—"}{row.unit ? ` ${row.unit}` : ""}</span></div><div className="usage-bar"><span style={{ width: `${row.cap ? Math.min(100, row.used / row.cap * 100) : 0}%` }} /></div></div>)}</div>
+      {data?.priceBreakdown && !currentFree ? <dl className="billing-quote"><div>Базовая стоимость: {formatKzt(data.priceBreakdown.base)}</div><div>Дополнения: {formatKzt(data.priceBreakdown.addOns)}</div><div>Итого: {formatKzt(data.priceBreakdown.recurring)} / {data.billingPeriod === "YEARLY" ? "год" : "месяц"}</div>{data.priceBreakdown.oneTime > 0 ? <div>Разовые услуги: {formatKzt(data.priceBreakdown.oneTime)}</div> : null}</dl> : null}
+      {data?.enterpriseTerms?.sla ? <p>Поддержка / SLA: {data.enterpriseTerms.sla}</p> : null}
+      {data?.enterpriseTerms?.integrations ? <p>Согласованные интеграции: {data.enterpriseTerms.integrations}</p> : null}
+      {currentFree ? <p>0 ₸ · Для знакомства с BasQar и первых продаж</p> : null}
+      <div className="billing-usage-grid">{(data?.usage || []).map((row: { key: string; label: string; used: number; cap: number; unit?: string; measured?: boolean }) => <div key={row.key} className="billing-usage"><div className="billing-usage-label"><span>{row.label}</span><span>{row.measured === false ? "Ещё не рассчитано" : `${row.used} / ${row.cap < 0 ? "без квоты" : row.cap}${row.unit ? ` ${row.unit}` : ""}`}</span></div><div className="usage-bar"><span style={{ width: `${row.cap > 0 ? Math.min(100, row.used / row.cap * 100) : 0}%` }} /></div></div>)}</div>
       {!preview ? <div className="actions">
         <button className="btn secondary" type="button" disabled={busy} onClick={() => document.getElementById("billing-catalog")?.scrollIntoView({ behavior: "smooth" })}>Изменить тариф</button>
-        <button className="btn secondary" type="button" disabled={busy || !data?.planCode} onClick={() => configureCurrent("ADD_ADDON")}>Подключить модуль</button>
-        <button className="btn" type="button" disabled={busy || !data?.planCode} onClick={() => configureCurrent("RENEWAL")}>Продлить</button>
+        <button className="btn secondary" type="button" disabled={busy || !data?.planCode || currentFree} onClick={() => configureCurrent("ADD_ADDON")}>Подключить модуль</button>
+        <button className="btn" type="button" disabled={busy || !data?.planCode || currentFree} onClick={() => configureCurrent("RENEWAL")}>Продлить</button>
       </div> : null}
     </div>
     {currentRequest ? <div className="panel stack">
@@ -160,9 +167,9 @@ export function BillingPage() {
     <div ref={selection} className="billing-selection" tabIndex={-1}>
       {planCode ? <div className="panel stack">
         <div className="page-head"><div><h3>{requestType === "RENEWAL" ? "Продление: " : "Ваш выбор: "}{plan?.name || planCode}</h3><p className="muted">{enterprise ? "Стоимость и состав согласуем индивидуально." : `Период оплаты: ${period === "YEARLY" ? "12 месяцев" : "1 месяц"}.`}</p></div>
-          {!enterprise ? <button className="btn secondary" disabled={busy} type="button" aria-expanded={constructorOpen} onClick={() => setConstructorOpen((open) => !open)}>{constructorOpen ? "Скрыть дополнения" : "Добавить модули и лимиты"}</button> : null}
+          {!enterprise && !free ? <button className="btn secondary" disabled={busy} type="button" aria-expanded={constructorOpen} onClick={() => setConstructorOpen((open) => !open)}>{constructorOpen ? "Скрыть дополнения" : "Настроить под себя"}</button> : null}
         </div>
-        {constructorOpen && !enterprise ? <div className="stack">
+        {constructorOpen && !enterprise && !free ? <div className="stack">
           <h4>Дополнения к выбранному тарифу</h4><p className="muted">Модули и дополнительные лимиты оплачиваются сверх тарифа. Выберите один уровень AI Manager; если AI уже включён, объём можно увеличить пакетом взаимодействий.</p>
           <div className="billing-addons">{extras.map((item) => {
             const isIncluded = included.has(item.code) || (item.code === "ADDON_CONTROL" && plan?.features.AI_CONTROL);
@@ -172,12 +179,13 @@ export function BillingPage() {
             const qty = addons[item.code] || 0;
             const explanation = isIncluded ? "Уже включено в тариф" : aiAlreadyIncluded ? "AI уже включён — используйте дополнительный пакет" : needsAi ? "Сначала подключите AI Manager" : "";
             return <div key={item.code} className="billing-addon">
-              <div><b>{item.name}</b><p className="muted">{item.description}</p>{AI_TIERS.includes(item.code) ? <p className="muted">AI-взаимодействия: {item.limits.AI_USAGE?.toLocaleString("ru-RU")} · WhatsApp: {item.limits.WHATSAPP_CONNECTIONS}</p> : null}<p>{isIncluded ? "Без доплаты" : `${item.code === "ADDON_INTEGRATION" ? "от " : ""}${formatKzt(catalogPrice(item, period))} / ${item.chargeType === "ONE_TIME" ? "разово" : periodLabel}`}</p>{explanation ? <small className="muted">{explanation}</small> : null}</div>
+              <div><b>{item.name}</b><p className="muted">{item.description}</p>{AI_TIERS.includes(item.code) ? <p className="muted">AI-взаимодействия: {item.limits.AI_USAGE?.toLocaleString("ru-RU")} · WhatsApp: {item.limits.WHATSAPP_CONNECTIONS}</p> : null}<p>{isIncluded ? "Без доплаты" : `${item.code === "ADDON_INTEGRATION" || AI_TIERS.includes(item.code) || item.code === "ADDON_AI_PACK" || item.code === "ADDON_CONTROL" ? "от +" : "+"}${formatKzt(catalogPrice(item, period))} / ${item.chargeType === "ONE_TIME" ? "разово" : periodLabel}`}</p>{explanation ? <small className="muted">{explanation}</small> : null}</div>
               {STEPPERS.includes(item.code) ? <div className="billing-stepper"><button type="button" aria-label={`Уменьшить: ${item.name}`} disabled={disabled || qty === 0} onClick={() => setAddonQty(item.code, qty - 1)}>−</button><output aria-label={`Количество: ${item.name}`}>{qty}</output><button type="button" aria-label={`Добавить: ${item.name}`} disabled={disabled || qty >= 99} onClick={() => setAddonQty(item.code, qty + 1)}>+</button></div> : <input type="checkbox" aria-label={item.name} disabled={disabled} checked={Boolean(isIncluded || qty > 0)} onChange={(event) => setAddonQty(item.code, event.target.checked ? 1 : 0)} />}
             </div>;
           })}</div>
         </div> : null}
         {quoteError ? <p className="error" role="alert">{quoteError} <button className="btn secondary" onClick={() => setRetry((value) => value + 1)}>Повторить расчёт</button></p> : !quote ? <p className="muted" role="status">Рассчитываем стоимость…</p> : !enterprise ? <div className="billing-quote" aria-live="polite">
+          {quote.recommendation ? <div className="billing-notice"><p>{quote.recommendation.message}</p><button className="btn secondary" onClick={() => pickOffer(quote.recommendation!.code)}>Посмотреть {quote.recommendation.name}</button></div> : null}
           <h4>Что входит в оплату</h4><dl>{quote.lines.map((line, index) => <div key={`${line.code}-${index}`}><dt>{line.name}{line.qty > 1 ? ` × ${line.qty}` : ""}{line.chargeType === "ONE_TIME" ? " · разово" : ""}</dt><dd>{formatKzt(line.amountMinor)}</dd></div>)}</dl>
           <p>Подписка: <b>{formatKzt(recurring)} / {periodLabel}</b>{oneTime > 0 ? ` · Разовые услуги: ${formatKzt(oneTime)}` : ""}</p><p className="billing-total">Итого к оплате: <strong>{formatKzt(quote.finalAmountMinor)}</strong></p>
           {selectedAddOns.some((item) => item.code === "ADDON_INTEGRATION") ? <p className="muted">Интеграция рассчитана по начальной стоимости. Окончательную цену согласуем по задаче.</p> : null}

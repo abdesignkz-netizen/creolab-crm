@@ -26,6 +26,7 @@ model Tenant {
   subscriptionRequests SubscriptionRequest[]
   billingPayments      BillingPayment[]
   billingOverride      TenantBillingOverride?
+  usage                TenantUsage?
   credentials          Credential[]
   integrations         Integration[]
   channelConnections   ChannelConnection[]
@@ -2156,4 +2157,16 @@ model TenantServiceCategory {
 
   @@unique([tenantId, code])
   @@index([tenantId, active])
+}
+
+model TenantUsage {
+  tenantId String @id
+  limitsJson Json @default("{}")
+  countersJson Json @default("{}")
+  period String
+  databaseBytes BigInt @default(0)
+  fileBytes BigInt @default(0)
+  lastActivityAt DateTime?
+  reconciledAt DateTime @default(now())
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 }

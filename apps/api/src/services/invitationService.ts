@@ -63,10 +63,11 @@ export async function createTenantInvitation(
         );
       }
       if (!resolved.snapshot.grandfathered && !isLegacyPlan(resolved.plan?.plan)) {
-        memberLimit = Math.min(memberLimit, Number(resolved.limits.USERS || resolved.limits.members || memberLimit));
+        memberLimit = Number(resolved.limits.USERS ?? resolved.limits.members ?? memberLimit);
+        if (memberLimit < 0) memberLimit = Number.MAX_SAFE_INTEGER;
       }
     } catch (error) {
-      if (error instanceof ApiError) throw error;
+      throw error;
     }
   }
   const [activeCount, pendingCount] = await Promise.all([

@@ -40,7 +40,7 @@ export function createApiClient(options: ClientOptions) {
       error.status = response.status;
       error.code = (data as { code?: string }).code;
       error.body = data;
-      if (error.code === "feature_required") {
+      if (error.code === "feature_required" || error.code === "limit_exceeded") {
         options.onFeatureRequired?.({
           message: String((data as { message?: string }).message || "Эта функция доступна после активации тарифа BasQar."),
           feature: (data as { details?: { feature?: string } }).details?.feature,
@@ -159,6 +159,8 @@ export function createApiClient(options: ClientOptions) {
         method: "POST",
         body: JSON.stringify(body),
       }),
+    adminFreeMetrics: () => request("/api/v1/admin/billing/free"),
+    adminUpdateFreePolicy: (body: { maxActiveFreeTenants: number }) => request("/api/v1/admin/billing/free", { method: "PATCH", body: JSON.stringify(body) }),
     adminBillingRequests: (query: { status?: string } = {}) => {
       const params = new URLSearchParams();
       if (query.status) params.set("status", query.status);

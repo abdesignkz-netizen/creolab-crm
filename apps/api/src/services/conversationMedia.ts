@@ -1,5 +1,6 @@
+import { assertFileCapacity } from "./billingResourceService.ts";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { unlink, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
@@ -203,6 +204,7 @@ export async function storeMessageAttachment(
   );
   const abs = resolveUploadPath(storageKey);
   await mkdir(path.dirname(abs), { recursive: true });
+  await assertFileCapacity(prisma, input.tenantId, input.buffer.length);
   await writeFile(abs, input.buffer);
   return prisma.attachment.create({
     data: {
@@ -223,7 +225,7 @@ export async function storeMessageAttachment(
       sendState: input.sendState || "stored",
       providerMessageId: input.providerMessageId || undefined,
     },
-  });
+  }).catch(async error => { await unlink(abs).catch(() => {}); throw error; });
 }
 
 export async function fetchRemoteMedia(fileUrl: string) {

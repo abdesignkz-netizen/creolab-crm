@@ -245,6 +245,7 @@ export function startBackgroundJobs(prisma: PrismaClient) {
   if (started || process.env.NODE_ENV === "test") return () => undefined;
   started = true;
   const tick = () => {
+    import("./billingResourceService.ts").then(({ reconcileBillingUsage }) => reconcileBillingUsage(prisma)).catch(error => console.error("billing usage", error));
     processOutbox(prisma).catch((error) => console.error("outbox", error));
     import("./esfStatusSyncService.ts")
       .then(({ ensureEsfStatusPolls }) => ensureEsfStatusPolls(prisma))

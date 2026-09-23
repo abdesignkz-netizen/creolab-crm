@@ -1,6 +1,7 @@
+import { assertFileCapacity } from "./billingResourceService.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { unlink, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { PrismaClient } from "@creolab/db";
 import type { Response } from "express";
@@ -77,6 +78,7 @@ export async function storeContractBytes(
   const storageKey = path.posix.join(opts.tenantId, folder, opts.parentId, `${id}-${opts.fileName}`);
   const abs = resolveUploadPath(storageKey);
   await mkdir(path.dirname(abs), { recursive: true });
+  await assertFileCapacity(prisma, opts.tenantId, opts.bytes.length);
   await writeFile(abs, opts.bytes);
   return prisma.attachment.create({
     data: {
@@ -94,7 +96,7 @@ export async function storeContractBytes(
       uploadedById: opts.uploadedById || null,
       status: opts.status || "stored",
     },
-  });
+  }).catch(async error => { await unlink(abs).catch(() => {}); throw error; });
 }
 
 export async function ensureContractPdfAttachment(

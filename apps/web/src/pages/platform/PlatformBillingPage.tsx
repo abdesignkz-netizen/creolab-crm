@@ -1,3 +1,4 @@
+import { FEATURE_LIST, FEATURE_LABEL, LIMIT_LIST, LIMIT_LABEL } from "@creolab/contracts";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../../lib/api";
@@ -26,6 +27,16 @@ function formatKzt(value: number) {
 }
 
 export function PlatformBillingPage() {
+  const [freeStats, setFreeStats] = useState<any>(null);
+  const [freeCap, setFreeCap] = useState(0);
+  async function loadFree() { const result: any = await api.adminFreeMetrics(); setFreeStats(result); setFreeCap(result.maxActiveFreeTenants); }
+  useEffect(() => { void loadFree().catch(err => setError(err.message)); }, []);
+  async function saveFreePolicy() {
+    setBusy(true); setError("");
+    try { await api.adminUpdateFreePolicy({ maxActiveFreeTenants: freeCap }); await loadFree(); notifySaved("Лимит Free сохранён"); }
+    catch (err) { setError(err instanceof Error ? err.message : "Ошибка сохранения"); }
+    finally { setBusy(false); }
+  }
   const [status, setStatus] = useState("");
   const [data, setData] = useState<{ items?: BillingRequest[]; pendingCount?: number } | null>(null);
   const [selected, setSelected] = useState<any>(null);
@@ -53,11 +64,19 @@ export function PlatformBillingPage() {
       const form = document.getElementById("billing-confirm-form") as HTMLFormElement | null;
       const startDate = form ? String(new FormData(form).get("startDate") || "") : "";
       const endDate = form ? String(new FormData(form).get("endDate") || "") : "";
-      await api.adminConfirmBillingRequest(selected.request.id, { startDate, endDate });
+      const values = form ? new FormData(form) : null;
+      const enterpriseTerms = selected.request.planCode === "CRM_ENTERPRISE" && values ? {
+        customPriceMinor: Number(values.get("customPriceMinor")),
+        sla: String(values.get("sla") || ""), integrations: String(values.get("integrations") || ""),
+        limits: Object.fromEntries(LIMIT_LIST.filter(key => key !== "STORAGE_GB").map(key => [key, Number(values.get(`limit:${key}`))])),
+        features: Object.fromEntries(FEATURE_LIST.map(key => [key, values.get(`feature:${key}`) === "on"])),
+      } : undefined;
+      await api.adminConfirmBillingRequest(selected.request.id, { startDate, endDate, ...(enterpriseTerms ? { enterpriseTerms } : {}) });
       notifySaved("Оплата подтверждена, тариф активирован");
       setConfirmOpen(false);
       setSelected(null);
       await load();
+      await loadFree();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось активировать");
     } finally {
@@ -99,6 +118,9 @@ export function PlatformBillingPage() {
           <option value="CANCELLED">Отменены</option>
         </select>
       </div>
+      {freeStats ? <section className="panel stack"><h3>BasQar Free</h3><div className="billing-usage-grid">
+        {[["Всего Free", freeStats.total], ["Активные за 30 дней", freeStats.active], ["Неактивные", freeStats.inactive], ["Новые за месяц", freeStats.newThisMonth], ["Перешли на платный", freeStats.converted], ["Free → Start", freeStats.freeToStart], ["Free → CRM + AI", freeStats.freeToCrmAi]].map(([label,value]) => <div key={label}><span>{label}</span><p><b>{value}</b></p></div>)}
+      </div><form className="actions" onSubmit={event => { event.preventDefault(); void saveFreePolicy(); }}><label>Максимум активных Free<input type="number" min="0" step="1" value={freeCap} onChange={event => setFreeCap(Number(event.target.value))} /></label><button className="btn secondary" disabled={busy}>Сохранить лимит</button></form><p className="muted">Активность — изменение рабочих данных за последние 30 дней. Изменение лимита не отключает существующие компании.</p></section> : null}
       {error ? <p className="error">{error}</p> : null}
       <div className="panel">
         {items.length === 0 ? (
@@ -111,7 +133,7 @@ export function PlatformBillingPage() {
                   <b>{item.company}</b>
                   <div className="muted">{item.ownerName || "—"} · {item.ownerEmail || "—"}</div>
                   <div className="muted">
-                    {item.planName || item.planCode} · {formatKzt(item.finalAmountMinor)} · {item.statusLabel} · {formatDateTime(item.createdAt)}
+                    {item.planName || item.planCode} · {item.planCode === "CRM_ENTERPRISE" && !item.finalAmountMinor ? "Индивидуально" : formatKzt(item.finalAmountMinor)} · {item.statusLabel} · {formatDateTime(item.createdAt)}
                   </div>
                 </div>
               </button>
@@ -133,11 +155,13 @@ export function PlatformBillingPage() {
               : "нет"}
           </p>
           <p>Период: {selected.request?.billingPeriod === "YEARLY" ? "1 год" : "1 месяц"}</p>
-          <p>Стоимость: {formatKzt(selected.request?.finalAmountMinor || 0)}</p>
+          <p>Базовая цена: {formatKzt(selected.request?.baseAmountMinor || 0)}</p>
+          <dl>{(selected.request?.snapshot?.lines || []).filter((row: any) => row.kind === "addon").map((row: any) => <div key={row.code}>{row.name} × {row.qty}: {formatKzt(row.amountMinor)}{row.chargeType === "ONE_TIME" ? " · разово" : ""}</div>)}</dl>
+          <p>Итого: {formatKzt(selected.request?.finalAmountMinor || 0)}</p>
           <p>Статус: {selected.request?.statusLabel}</p>
           <p className="muted"><Link to={`/admin/companies/${selected.company?.id}`}>Открыть компанию</Link></p>
           <div className="actions">
-            {selected.request?.status !== "ACTIVATED" && selected.request?.status !== "REJECTED" ? (
+            {["PENDING", "AWAITING_PAYMENT", "PAYMENT_REVIEW", "APPROVED"].includes(selected.request?.status) ? (
               <>
                 <button className="btn" type="button" onClick={() => setConfirmOpen(true)}>Подтвердить оплату и активировать</button>
                 <button className="btn secondary" type="button" disabled={busy} onClick={() => void reject()}>Отклонить</button>
@@ -154,8 +178,15 @@ export function PlatformBillingPage() {
             <h2>Подтвердить оплату?</h2>
             <p>Компания: {selected.company?.name}</p>
             <p>Тариф: {selected.request?.planName}</p>
-            <p>Сумма: {formatKzt(selected.request?.finalAmountMinor || 0)}</p>
+            <p>Сумма: {selected.request?.planCode === "CRM_ENTERPRISE" && !selected.request?.finalAmountMinor ? "Укажите согласованную цену ниже" : formatKzt(selected.request?.finalAmountMinor || 0)}</p>
             <p>Период: {selected.request?.billingPeriod === "YEARLY" ? "1 год" : "1 месяц"}</p>
+            {selected.request?.planCode === "CRM_ENTERPRISE" ? <fieldset className="stack"><legend>Индивидуальные условия</legend>
+              <label>Согласованная цена за период, ₸<input name="customPriceMinor" type="number" min="1" step="1" required /></label>
+              <label>Условия поддержки / SLA<textarea name="sla" maxLength={4000} /></label><label>Согласованные интеграции<textarea name="integrations" maxLength={4000} /></label>
+              <p className="muted">Лимиты: −1 означает без квоты. Возможности откроются только после подтверждения оплаты.</p>
+              <div className="billing-usage-grid">{LIMIT_LIST.filter(key => key !== "STORAGE_GB").map(key => <label key={key}>{LIMIT_LABEL[key]}<input name={`limit:${key}`} type="number" min="-1" step="1" defaultValue={selected.request?.snapshot?.limits?.[key] ?? 0} required /></label>)}</div>
+              <div className="billing-usage-grid">{FEATURE_LIST.map(key => <label key={key}><input name={`feature:${key}`} type="checkbox" defaultChecked={Boolean(selected.request?.snapshot?.features?.[key])} />{FEATURE_LABEL[key]}</label>)}</div>
+            </fieldset> : null}
             <label>Начало<input name="startDate" type="date" /></label>
             <label>Окончание<input name="endDate" type="date" /></label>
             <div className="actions">

@@ -5,6 +5,7 @@ export type CatalogProduct = "CRM" | "AI" | "CONTROL" | "BUNDLE" | "ADDON";
 export type CatalogChargeType = "RECURRING" | "ONE_TIME";
 
 export type CatalogItem = {
+  version?: number;
   code: string;
   name: string;
   product: CatalogProduct;
@@ -28,6 +29,7 @@ const F = FEATURES;
 const L = LIMITS;
 
 const CRM_BASE: Partial<Record<Feature, boolean>> = {
+  [F.IMPORT]: true, [F.EXPORT]: true, [F.FILE_STORAGE]: true,
   [F.CRM_CORE]: true,
   [F.CLIENTS]: true,
   [F.COMPANIES]: true,
@@ -39,6 +41,7 @@ const CRM_BASE: Partial<Record<Feature, boolean>> = {
 };
 
 const CRM_LITE: Partial<Record<Feature, boolean>> = {
+  [F.FILE_STORAGE]: true,
   [F.CRM_LITE]: true,
   [F.CLIENTS]: true,
   [F.LEADS]: true,
@@ -79,7 +82,22 @@ function yearly(monthly: number) {
   return monthly * 10;
 }
 
+export const CATALOG_VERSION = 2;
+// -1 means no commercial quota. It never means that an unimplemented module exists.
+const UNLIMITED_CRM = { [L.CLIENTS]: -1, [L.ACTIVE_DEALS]: -1, [L.MONTHLY_LEADS]: -1 };
 export const PRICING_CATALOG: CatalogItem[] = [
+  {
+    code: "BASQAR_FREE", name: "BasQar Free", product: "CRM", kind: "plan",
+    monthlyPriceMinor: 0, yearlyPriceMinor: 0, public: true, active: true,
+    catalogStatus: "AVAILABLE", chargeType: "RECURRING", sortOrder: 0,
+    description: "Для знакомства с BasQar и первых продаж",
+    features: { [F.CRM_CORE]: true, [F.CLIENTS]: true, [F.COMPANIES]: true,
+      [F.LEADS]: true, [F.DEALS]: true, [F.TASKS]: true },
+    limits: { [L.USERS]: 1, members: 1, [L.CLIENTS]: 15, [L.ACTIVE_DEALS]: 10,
+      [L.MONTHLY_LEADS]: 20, [L.PIPELINES]: 1, [L.DEPARTMENTS]: 0,
+      [L.DATABASE_MB]: 50, [L.FILE_STORAGE_MB]: 0, [L.STORAGE_GB]: 0,
+      [L.WHATSAPP_CONNECTIONS]: 0, [L.AI_USAGE]: 0 },
+  },
   {
     code: "CRM_START",
     name: "CRM Start",
@@ -92,9 +110,9 @@ export const PRICING_CATALOG: CatalogItem[] = [
     catalogStatus: "AVAILABLE",
     chargeType: "RECURRING",
     sortOrder: 10,
-    description: "Полноценная CRM для небольшого бизнеса: клиенты, заявки, сделки, задачи, одна воронка.",
+    description: "Для полноценной ежедневной работы с клиентами и продажами.",
     features: CRM_BASE,
-    limits: { [L.USERS]: 3, members: 3, [L.PIPELINES]: 1, [L.DEPARTMENTS]: 1, [L.WHATSAPP_CONNECTIONS]: 0, whatsappActive: 0, [L.AI_USAGE]: 0, [L.STORAGE_GB]: 5 },
+    limits: { ...UNLIMITED_CRM, [L.DATABASE_MB]: 500, [L.FILE_STORAGE_MB]: 1024, [L.USERS]: 3, members: 3, [L.PIPELINES]: 1, [L.DEPARTMENTS]: 1, [L.WHATSAPP_CONNECTIONS]: 0, whatsappActive: 0, [L.AI_USAGE]: 0, [L.STORAGE_GB]: 1 },
   },
   {
     code: "CRM_BUSINESS",
@@ -110,7 +128,7 @@ export const PRICING_CATALOG: CatalogItem[] = [
     sortOrder: 20,
     description: "Основной CRM-тариф: несколько воронок, документы, workflow, аналитика, до 10 пользователей.",
     features: BUSINESS_PLUS,
-    limits: { [L.USERS]: 10, members: 10, [L.PIPELINES]: 5, [L.DEPARTMENTS]: 1, [L.WHATSAPP_CONNECTIONS]: 0, whatsappActive: 0, [L.AI_USAGE]: 0, [L.STORAGE_GB]: 10 },
+    limits: { ...UNLIMITED_CRM, [L.DATABASE_MB]: 2048, [L.FILE_STORAGE_MB]: 5120, [L.USERS]: 10, members: 10, [L.PIPELINES]: 5, [L.DEPARTMENTS]: 1, [L.WHATSAPP_CONNECTIONS]: 0, whatsappActive: 0, [L.AI_USAGE]: 0, [L.STORAGE_GB]: 5 },
   },
   {
     code: "CRM_PRO",
@@ -126,7 +144,7 @@ export const PRICING_CATALOG: CatalogItem[] = [
     sortOrder: 30,
     description: "Корпоративная CRM: отделы, API, расширенные роли, до 25 пользователей.",
     features: PRO_PLUS,
-    limits: { [L.USERS]: 25, members: 25, [L.PIPELINES]: 20, [L.DEPARTMENTS]: 5, [L.WHATSAPP_CONNECTIONS]: 0, whatsappActive: 0, [L.AI_USAGE]: 0, [L.STORAGE_GB]: 25 },
+    limits: { ...UNLIMITED_CRM, [L.DATABASE_MB]: -1, [L.FILE_STORAGE_MB]: 25600, [L.USERS]: 25, members: 25, [L.PIPELINES]: 20, [L.DEPARTMENTS]: 5, [L.WHATSAPP_CONNECTIONS]: 0, whatsappActive: 0, [L.AI_USAGE]: 0, [L.STORAGE_GB]: 25 },
   },
   {
     code: "CRM_ENTERPRISE",
@@ -142,7 +160,7 @@ export const PRICING_CATALOG: CatalogItem[] = [
     sortOrder: 40,
     description: "Индивидуальные лимиты, SLA и цена. Запрос уходит администратору BasQar.",
     features: { ...PRO_PLUS, [F.PRIORITY_SUPPORT]: true },
-    limits: { [L.USERS]: 50, members: 50, [L.PIPELINES]: 50, [L.DEPARTMENTS]: 20, [L.WHATSAPP_CONNECTIONS]: 0, [L.AI_USAGE]: 0, [L.STORAGE_GB]: 100 },
+    limits: { ...UNLIMITED_CRM, [L.DATABASE_MB]: -1, [L.FILE_STORAGE_MB]: 102400, [L.USERS]: 50, members: 50, [L.PIPELINES]: 50, [L.DEPARTMENTS]: 20, [L.WHATSAPP_CONNECTIONS]: 0, [L.AI_USAGE]: 0, [L.STORAGE_GB]: 100 },
   },
   {
     code: "AI_SALES",
@@ -158,7 +176,7 @@ export const PRICING_CATALOG: CatalogItem[] = [
     sortOrder: 50,
     description: "AI Manager без полной CRM: WhatsApp-продажи и CRM Lite на тех же клиентах, заявках и сделках.",
     features: { ...CRM_LITE, ...AI_FEATURES },
-    limits: { [L.USERS]: 3, members: 3, [L.PIPELINES]: 1, [L.DEPARTMENTS]: 1, [L.WHATSAPP_CONNECTIONS]: 1, whatsappActive: 1, [L.AI_USAGE]: 3000, [L.STORAGE_GB]: 5 },
+    limits: { ...UNLIMITED_CRM, [L.DATABASE_MB]: -1, [L.FILE_STORAGE_MB]: 5120, [L.USERS]: 3, members: 3, [L.PIPELINES]: 1, [L.DEPARTMENTS]: 1, [L.WHATSAPP_CONNECTIONS]: 1, whatsappActive: 1, [L.AI_USAGE]: 3000, [L.STORAGE_GB]: 5 },
   },
   {
     code: "CONTROL_STANDALONE",
@@ -174,7 +192,7 @@ export const PRICING_CATALOG: CatalogItem[] = [
     sortOrder: 60,
     description: "Управление CRM командами из WhatsApp и других каналов плюс CRM Lite.",
     features: { ...CRM_LITE, [F.AI_CONTROL]: true },
-    limits: { [L.USERS]: 3, members: 3, [L.PIPELINES]: 1, [L.DEPARTMENTS]: 1, [L.WHATSAPP_CONNECTIONS]: 0, [L.AI_USAGE]: 0, [L.STORAGE_GB]: 5 },
+    limits: { ...UNLIMITED_CRM, [L.DATABASE_MB]: -1, [L.FILE_STORAGE_MB]: 5120, [L.USERS]: 3, members: 3, [L.PIPELINES]: 1, [L.DEPARTMENTS]: 1, [L.WHATSAPP_CONNECTIONS]: 0, [L.AI_USAGE]: 0, [L.STORAGE_GB]: 5 },
   },
   {
     code: "BUNDLE_CRM_AI",
@@ -191,7 +209,7 @@ export const PRICING_CATALOG: CatalogItem[] = [
     sortOrder: 5,
     description: "CRM Business и AI Manager Business вместе. Отдельно это 59 800 ₸.",
     features: { ...BUSINESS_PLUS, ...AI_FEATURES },
-    limits: { [L.USERS]: 10, members: 10, [L.PIPELINES]: 5, [L.DEPARTMENTS]: 1, [L.WHATSAPP_CONNECTIONS]: 1, whatsappActive: 1, [L.AI_USAGE]: 3000, [L.STORAGE_GB]: 10 },
+    limits: { ...UNLIMITED_CRM, [L.DATABASE_MB]: 3072, [L.FILE_STORAGE_MB]: 10240, [L.USERS]: 10, members: 10, [L.PIPELINES]: 5, [L.DEPARTMENTS]: 1, [L.WHATSAPP_CONNECTIONS]: 1, whatsappActive: 1, [L.AI_USAGE]: 3000, [L.STORAGE_GB]: 10 },
     included: [
       { code: "CRM_BUSINESS", qty: 1 },
       { code: "ADDON_AI_BUSINESS", qty: 1 },
@@ -211,7 +229,7 @@ export const PRICING_CATALOG: CatalogItem[] = [
     sortOrder: 8,
     description: "CRM Business, AI Manager, Control, 2 WhatsApp, документы и приоритетная поддержка.",
     features: { ...BUSINESS_PLUS, ...AI_FEATURES, [F.AI_CONTROL]: true, [F.API]: true, [F.API_ACCESS]: true, [F.PRIORITY_SUPPORT]: true },
-    limits: { [L.USERS]: 10, members: 10, [L.PIPELINES]: 5, [L.DEPARTMENTS]: 1, [L.WHATSAPP_CONNECTIONS]: 2, whatsappActive: 2, [L.AI_USAGE]: 5000, [L.STORAGE_GB]: 20 },
+    limits: { ...UNLIMITED_CRM, [L.DATABASE_MB]: 5120, [L.FILE_STORAGE_MB]: 20480, [L.USERS]: 10, members: 10, [L.PIPELINES]: 5, [L.DEPARTMENTS]: 1, [L.WHATSAPP_CONNECTIONS]: 2, whatsappActive: 2, [L.AI_USAGE]: 5000, [L.STORAGE_GB]: 20 },
     included: [
       { code: "CRM_BUSINESS", qty: 1 },
       { code: "ADDON_AI_BUSINESS", qty: 1 },
@@ -351,7 +369,7 @@ export const PRICING_CATALOG: CatalogItem[] = [
     sortOrder: 180,
     description: "Дополнительные 10 ГБ файлов.",
     features: {},
-    limits: { [L.STORAGE_GB]: 10 },
+    limits: { [L.STORAGE_GB]: 10, [L.FILE_STORAGE_MB]: 10240 },
     limitDelta: true,
   },
   {
@@ -447,9 +465,11 @@ export const CATALOG_BY_CODE = Object.fromEntries(PRICING_CATALOG.map((item) => 
 >;
 
 export const PUBLIC_OFFERS = [
-  { code: "CRM_START", group: "CRM", fromCode: "CRM_START", title: "CRM", subtitle: "от 14 900 ₸ / месяц" },
+  { code: "BASQAR_FREE", group: "CRM", fromCode: "BASQAR_FREE", title: "Free", subtitle: "0 ₸" },
+  { code: "CRM_BUSINESS", group: "CRM", fromCode: "CRM_BUSINESS", title: "CRM Business", subtitle: "от 29 900 ₸ / месяц" },
+  { code: "CRM_START", group: "CRM", fromCode: "CRM_START", title: "CRM Start", subtitle: "от 14 900 ₸ / месяц" },
   { code: "AI_SALES", group: "AI", fromCode: "AI_SALES", title: "AI Manager", subtitle: "от 29 900 ₸ / месяц" },
-  { code: "BUNDLE_CRM_AI", group: "BUNDLE", fromCode: "BUNDLE_CRM_AI", title: "CRM + AI", subtitle: "49 900 ₸ / месяц", recommended: true },
-  { code: "BUNDLE_FULL", group: "BUNDLE", fromCode: "BUNDLE_FULL", title: "BasQar Full", subtitle: "69 900 ₸ / месяц" },
+  { code: "BUNDLE_CRM_AI", group: "BUNDLE", fromCode: "BUNDLE_CRM_AI", title: "CRM + AI", subtitle: "от 49 900 ₸ / месяц", recommended: true },
+  { code: "BUNDLE_FULL", group: "BUNDLE", fromCode: "BUNDLE_FULL", title: "BasQar Full", subtitle: "от 69 900 ₸ / месяц" },
   { code: "CRM_ENTERPRISE", group: "CRM", fromCode: "CRM_ENTERPRISE", title: "Enterprise", subtitle: "Индивидуально" },
 ] as const;

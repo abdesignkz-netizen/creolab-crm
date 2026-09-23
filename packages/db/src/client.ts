@@ -1,3 +1,4 @@
+import { BILLING_QUOTA_SQL } from "./billingQuotaSchema.ts";
 import { existsSync, mkdirSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import { PrismaClient } from "@prisma/client";
@@ -56,6 +57,7 @@ async function applyLivePostgresPatches(prisma: PrismaClient) {
       console.error("[db] additive patch failed", sql, error);
     }
   }
+  for (const sql of BILLING_QUOTA_SQL) await prisma.$executeRawUnsafe(sql);
 }
 
 async function applyInitSql(pglite: PGlite) {
@@ -1303,6 +1305,7 @@ export async function createPrismaClient(): Promise<PrismaClient> {
   globalForPrisma.pglite = pglite;
   await applyInitSql(pglite);
   await applyAdditiveSchema(pglite);
+  for (const sql of BILLING_QUOTA_SQL) await pglite.exec(sql);
   const adapter = new PrismaPGlite(pglite);
   const prisma = new PrismaClient({ adapter } as never);
   globalForPrisma.prisma = prisma;

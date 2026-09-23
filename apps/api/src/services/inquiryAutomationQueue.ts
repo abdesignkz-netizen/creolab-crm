@@ -24,6 +24,9 @@ export async function processInquiryAutomationJob(
     select: { id: true, fieldMetaJson: true },
   });
   if (!inquiry) return { skipped: true as const };
+  const { canUseFeature } = await import("./entitlementService.ts");
+  if (!(await canUseFeature(prisma, payload.tenantId, "AI_MANAGER"))) return { skipped: true as const, reason: "feature_required" };
+
 
   const status = automationStatus(inquiry.fieldMetaJson);
   if (status && !REPROCESSABLE_STATUSES.has(status)) {

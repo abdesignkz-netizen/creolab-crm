@@ -1,12 +1,11 @@
+import { getUsage, billingMonthStart } from "./billingResourceService.ts";
 import type { PrismaClient } from "@creolab/db";
 import { LIMITS } from "@creolab/contracts";
 import { getEntitlements } from "./entitlementService.ts";
 
 export async function collectTenantUsage(prisma: PrismaClient, tenantId: string) {
   const now = new Date();
-  const start = new Date(now);
-  start.setDate(1);
-  start.setHours(0, 0, 0, 0);
+  const start = billingMonthStart(now);
   const [
     users,
     whatsapp,
@@ -30,9 +29,13 @@ export async function collectTenantUsage(prisma: PrismaClient, tenantId: string)
     getEntitlements(prisma, tenantId),
     uniquePipelineCount(prisma, tenantId),
   ]);
+  const [clients, activeDeals, monthlyLeads, databaseMb, fileMb] = await Promise.all(["CLIENTS", "ACTIVE_DEALS", "MONTHLY_LEADS", "DATABASE_MB", "FILE_STORAGE_MB"].map(code => getUsage(prisma, tenantId, code)));
+  const databaseTracked = Boolean(await prisma.tenantUsage.findUnique({ where: { tenantId }, select: { tenantId: true } }));
   const storageGb = Number(((storage._sum.sizeBytes || 0) / (1024 * 1024 * 1024)).toFixed(2));
   const limits = entitlements.limits;
   return {
+    planCode: entitlements.snapshot.planCode,
+    clients, activeDeals, monthlyLeads, databaseMb, fileMb,
     users,
     whatsapp,
     pipelines: pipelineBoards,
@@ -40,10 +43,10 @@ export async function collectTenantUsage(prisma: PrismaClient, tenantId: string)
     aiUsage: aiEvents,
     limits,
     rows: [
+      ...([['CLIENTS', 'Клиенты', clients], ['ACTIVE_DEALS', 'Активные сделки', activeDeals], ['MONTHLY_LEADS', 'Заявки за месяц', monthlyLeads], ['DATABASE_MB', 'База данных', databaseMb], ['FILE_STORAGE_MB', 'Файлы', fileMb]] as const).map(([key,label,used]) => ({ key, label, used: Math.ceil(used * 100) / 100, cap: limits[key] ?? -1, unit: key.endsWith('_MB') ? 'MB' : undefined, measured: key !== 'DATABASE_MB' || databaseTracked })),
       { key: LIMITS.USERS, label: "Пользователи", used: users, cap: Number(limits[LIMITS.USERS] || limits.members || 0) },
       { key: LIMITS.WHATSAPP_CONNECTIONS, label: "WhatsApp", used: whatsapp, cap: Number(limits[LIMITS.WHATSAPP_CONNECTIONS] || limits.whatsappActive || 0) },
       { key: LIMITS.AI_USAGE, label: "AI", used: aiEvents, cap: Number(limits[LIMITS.AI_USAGE] || 0), clientMetric: true },
-      { key: LIMITS.STORAGE_GB, label: "Хранилище", used: storageGb, cap: Number(limits[LIMITS.STORAGE_GB] || 0), unit: "GB" },
       { key: LIMITS.PIPELINES, label: "Воронки", used: pipelineBoards, cap: Number(limits[LIMITS.PIPELINES] || 0) },
     ],
   };
@@ -57,19 +60,23 @@ async function uniquePipelineCount(prisma: PrismaClient, tenantId: string) {
 export function usageWarnings(usage: Awaited<ReturnType<typeof collectTenantUsage>>, daysLeft: number | null) {
   const warnings: Array<{ code: string; message: string }> = [];
   for (const row of usage.rows) {
-    if (!row.cap) continue;
+    if (row.cap <= 0) continue;
     const ratio = row.used / row.cap;
     if (ratio >= 1) {
       warnings.push({
         code: `${row.key}_exhausted`,
-        message: row.key === LIMITS.AI_USAGE
+        message: usage.planCode === "BASQAR_FREE"
+          ? `Вы достигли лимита Free: «${row.label}». Перейдите на Start, чтобы продолжить работу.`
+          : row.key === LIMITS.AI_USAGE
           ? "AI-лимит исчерпан. Подключите дополнительный пакет."
           : `Лимит «${row.label}» исчерпан.`,
       });
     } else if (ratio >= 0.8) {
       warnings.push({
         code: `${row.key}_80`,
-        message: row.key === LIMITS.AI_USAGE
+        message: usage.planCode === "BASQAR_FREE"
+          ? `Вы приближаетесь к лимиту Free: «${row.label}» — использовано 80% или больше.`
+          : row.key === LIMITS.AI_USAGE
           ? "Вы использовали 80% AI-лимита."
           : `Использовано более 80% лимита «${row.label}».`,
       });

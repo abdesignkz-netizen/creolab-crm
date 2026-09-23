@@ -62,24 +62,27 @@ async function completeChat(input: {
   const runtime = input.runtime || {};
   const { apiKey, baseUrl, model, provider } = await resolveLlm(runtime);
   if (!apiKey) return { content: null as string | null };
+  let releaseReservation: (() => Promise<void>) | null = null;
   if (runtime.prisma && runtime.tenantId) {
     try {
       const { getEntitlements } = await import("./entitlementService.ts");
       const { LIMITS } = await import("@creolab/contracts");
       const resolved = await getEntitlements(runtime.prisma, runtime.tenantId);
       if (!resolved.snapshot.grandfathered) {
+        if (!resolved.entitlements.AI_MANAGER && !resolved.entitlements.AI_CONTROL) return { content: null as string | null };
         const cap = Number(resolved.limits[LIMITS.AI_USAGE] || 0);
-        if (cap <= 0) return { content: null as string | null };
-        const start = new Date();
-        start.setDate(1);
-        start.setHours(0, 0, 0, 0);
+        if (cap === 0) return { content: null as string | null };
+        const { billingMonthStart } = await import("./billingResourceService.ts");
+        const start = billingMonthStart();
         const used = await runtime.prisma.aIUsageEvent.count({
           where: { tenantId: runtime.tenantId, createdAt: { gte: start }, status: "ok" },
         });
-        if (used >= cap) return { content: null as string | null };
+        if (cap >= 0 && used >= cap) return { content: null as string | null };
+        const { reserveAiCall } = await import("./billingResourceService.ts");
+        releaseReservation = await reserveAiCall(runtime.prisma, runtime.tenantId, (input.timeoutMs ?? 15000) + 120000);
       }
     } catch {
-      /* limit check is best-effort */
+      return { content: null as string | null };
     }
   }
   const started = Date.now();
@@ -138,6 +141,7 @@ async function completeChat(input: {
     status,
     errorCode,
   });
+  await releaseReservation?.().catch(() => {});
   return { content: status === "ok" ? content : null };
 }
 

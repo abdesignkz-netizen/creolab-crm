@@ -142,14 +142,15 @@ describe("SaaS billing catalog, requests and manual activation", () => {
     assert.equal(yearly.finalAmountMinor, 149000);
   });
 
-  it("lets a new company enter preview, request a plan, and wait for admin payment confirmation", async () => {
+  it("lets a new company enter Free, request a plan, and wait for admin payment confirmation", async () => {
     const account = await signup("Олжас", "Студия Олжас", `billing-${Date.now()}@example.test`);
     const { cookie, tenantId } = account;
 
     const billing = await req(cookie, "/api/v1/billing", { tenantId });
     assert.equal(billing.status, 200);
-    assert.equal(billing.data.previewMode, true);
-    assert.ok(billing.data.preview);
+    assert.equal(billing.data.previewMode, false);
+    assert.equal(billing.data.planCode, "BASQAR_FREE");
+    assert.equal(billing.data.preview, null);
 
     const plans = await req(cookie, "/api/v1/billing/plans", { tenantId });
     assert.equal(plans.status, 200);
@@ -168,7 +169,7 @@ describe("SaaS billing catalog, requests and manual activation", () => {
     assert.equal(spoofed.data.status, "AWAITING_PAYMENT");
 
     const afterRequest = await req(cookie, "/api/v1/billing", { tenantId });
-    assert.equal(afterRequest.data.previewMode, true);
+    assert.equal(afterRequest.data.previewMode, false);
     assert.equal(afterRequest.data.entitlements.AI_MANAGER, false);
     assert.equal(afterRequest.data.currentRequest.finalAmountMinor, 49900);
 
@@ -299,4 +300,89 @@ describe("SaaS billing catalog, requests and manual activation", () => {
     assert.equal(expired.data.previewMode, true);
     assert.ok(await prisma.contact.findFirst({ where: { id: contact.id, tenantId } }));
   });
+  it("enforces Free on HTTP routes while manual tasks and company isolation keep working", async () => {
+    const { cookie, tenantId } = await signup("Free Owner", "Free HTTP", `free-http-${Date.now()}@example.test`);
+    for (const [path, method] of [["/contacts/import", "POST"], ["/contacts/export", "GET"], ["/documents/import-pdf/preview", "POST"], ["/tasks/parse-command", "POST"], ["/analytics/trend", "GET"]]) {
+      const result = await req(cookie, `/api/v1${path}`, { tenantId, method, ...(method === "POST" ? { body: {} } : {}) });
+      assert.equal(result.status, 403, `${path}: ${JSON.stringify(result.data)}`);
+    }
+    const created = await req(cookie, "/api/v1/tasks", { tenantId, method: "POST", body: { type: "note", title: "Ручная задача", targetType: "none", priority: "high" } });
+    assert.equal(created.status, 201, JSON.stringify(created.data));
+    const taskId = created.data.id || created.data.task?.id;
+    assert.ok(taskId);
+    for (const action of ["complete", "reopen"]) {
+      const response = await req(cookie, `/api/v1/tasks/${taskId}/${action}`, { tenantId, method: "POST", body: {} });
+      assert.equal(response.status, 200, JSON.stringify(response.data));
+    }
+    const admin = await req(cookie, "/api/v1/admin/billing/free", { tenantId });
+    assert.equal(admin.status, 403);
+  });
+
+  it("rolls back payment on activation failure, retains the quote and serializes duplicate approval", async () => {
+    const { cookie, tenantId } = await signup("Safe", "Atomic billing", `atomic-${Date.now()}@example.test`);
+    const requested = await req(cookie, "/api/v1/billing/requests", { tenantId, method: "POST", body: { planCode: "CRM_START", baseAmountMinor: 1, limits: { USERS: 999 } } });
+    assert.equal(requested.status, 201);
+    const id = requested.data.id;
+    const failed = await req(platformCookie, `/api/v1/admin/billing/requests/${id}/confirm`, { method: "POST", body: { endDate: "2000-01-01" } });
+    assert.equal(failed.status, 422, JSON.stringify(failed.data));
+    assert.equal(await prisma.billingPayment.count({ where: { tenantId } }), 0);
+    assert.equal((await prisma.subscriptionRequest.findUniqueOrThrow({ where: { id } })).status, "AWAITING_PAYMENT");
+    const plan = await prisma.plan.findUniqueOrThrow({ where: { code: "CRM_START" } });
+    await prisma.plan.update({ where: { id: plan.id }, data: { monthlyPriceMinor: 44444, limitsJson: { USERS: 1 } } });
+    try {
+      const approved = await Promise.all([1,2].map(() => req(platformCookie, `/api/v1/admin/billing/requests/${id}/confirm`, { method: "POST", body: {} })));
+      for (const result of approved) { assert.equal(result.status, 200, JSON.stringify(result.data)); assert.equal(result.data.amountMinor, 14900); assert.equal(result.data.limits.USERS, 3); }
+      assert.equal(await prisma.billingPayment.count({ where: { tenantId, status: "CONFIRMED" } }), 1);
+      assert.equal(await prisma.auditEvent.count({ where: { tenantId, action: "payment.confirmed" } }), 1);
+      assert.ok(await prisma.notification.findFirst({ where: { tenantId, type: "billing.subscription" } }));
+    } finally {
+      await prisma.plan.update({ where: { id: plan.id }, data: { monthlyPriceMinor: plan.monthlyPriceMinor, limitsJson: plan.limitsJson as never } });
+    }
+  });
+
+  it("edits Free capacity without deployment, rejects new signup atomically and preserves existing companies", async () => {
+    const existing = await signup("Existing", "Existing Free", `existing-free-${Date.now()}@example.test`);
+    const policy = await req(platformCookie, "/api/v1/admin/billing/free", { method: "PATCH", body: { maxActiveFreeTenants: 0 } });
+    assert.equal(policy.status, 200);
+    assert.ok(policy.data.active > 0);
+    try {
+      const email = `capacity-${Date.now()}@example.test`;
+      const begin = await req("", "/api/v1/auth/register", { method: "POST", body: { name: "Capacity", companyName: "Capacity test", email, password: "SignupPass1!", passwordConfirm: "SignupPass1!" } });
+      assert.equal(begin.status, 200);
+      const done = await req("", "/api/v1/auth/register/verify", { method: "POST", body: { email, code: begin.data.verificationCode } });
+      assert.equal(done.status, 503, JSON.stringify(done.data));
+      assert.equal(await prisma.user.findUnique({ where: { email } }), null);
+      assert.equal((await req(existing.cookie, "/api/v1/billing", { tenantId: existing.tenantId })).data.subscriptionStatus, "active");
+    } finally { await req(platformCookie, "/api/v1/admin/billing/free", { method: "PATCH", body: { maxActiveFreeTenants: 5000 } }); }
+  });
+
+  it("records administrator renewals as requests and payments with agreed prices", async () => {
+    const tenant = await signup("Renewal", "Renewal company", `renewal-admin-${Date.now()}@example.test`);
+    const request = await req(tenant.cookie, "/api/v1/billing/requests", { method: "POST", body: { planCode: "CRM_START" } });
+    await req(platformCookie, `/api/v1/admin/billing/requests/${request.data.id}/confirm`, { method: "POST", body: {} });
+    const current = await prisma.tenantPlan.findFirstOrThrow({ where: { tenantId: tenant.tenantId } });
+    const snapshot = current.priceSnapshotJson as { finalAmountMinor: number };
+    const response = await req(platformCookie, `/api/v1/admin/tenants/${tenant.tenantId}/subscription/extend`, { method: "POST", body: {} });
+    assert.equal(response.status,200,JSON.stringify(response.data));
+    assert.equal(response.data.amountMinor,snapshot.finalAmountMinor);
+    assert.ok(new Date(response.data.expiresAt).getTime() > current.endsAt!.getTime());
+    assert.equal(await prisma.billingPayment.count({where:{tenantId:tenant.tenantId}}),2);
+    assert.equal(await prisma.subscriptionRequest.count({where:{tenantId:tenant.tenantId,requestType:"RENEWAL",status:"ACTIVATED"}}),1);
+  });
+
+  it("requires administrator Enterprise terms and preserves the agreed SLA", async () => {
+    const tenant = await signup("Enterprise", "Custom company", `enterprise-${Date.now()}@example.test`);
+    const request = await req(tenant.cookie, "/api/v1/billing/requests", { method:"POST", body:{planCode:"CRM_ENTERPRISE", enterpriseTerms:{customPriceMinor:1,limits:{USERS:999}}} });
+    assert.equal(request.status,201);
+    const path = `/api/v1/admin/billing/requests/${request.data.id}/confirm`;
+    assert.equal((await req(tenant.cookie,path,{method:"POST",body:{}})).status,403);
+    assert.equal((await req(platformCookie,path,{method:"POST",body:{}})).status,422);
+    assert.equal(await prisma.billingPayment.count({where:{tenantId:tenant.tenantId}}),0);
+    const activated = await req(platformCookie,path,{method:"POST",body:{enterpriseTerms:{customPriceMinor:123000,limits:{USERS:15,DATABASE_MB:100,FILE_STORAGE_MB:2048},features:{DOCUMENTS:true},sla:"Ответ в рабочее время",integrations:"Существующий API"}}});
+    assert.equal(activated.status,200,JSON.stringify(activated.data));
+    assert.equal(activated.data.amountMinor,123000); assert.equal(activated.data.limits.USERS,15);
+    assert.equal(activated.data.limits.STORAGE_GB,2);
+    assert.equal(activated.data.enterpriseTerms.sla,"Ответ в рабочее время");
+  });
+
 });
