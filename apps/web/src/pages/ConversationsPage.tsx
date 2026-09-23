@@ -1,6 +1,6 @@
 import { ChannelIcon, ConversationAvatar, CONVERSATION_CHANNELS } from "../components/ConversationIdentity";
 import { useUrlState, useRequestVersion } from "../lib/useUrlState";
-import { useEffect, useRef, useState, type DragEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type DragEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { nameWithPhone, phoneText } from "../lib/contactDisplay";
 import { api } from "../lib/api";
@@ -119,6 +119,12 @@ export function ConversationsPage() {
   const [members, setMembers] = useState<Array<{ id: string; name: string; isMe?: boolean }>>([]);
   const [assigneePick, setAssigneePick] = useState("");
   const focusReply = searchParams.get("focus") === "reply";
+  const messagesRef = useRef<HTMLDivElement | null>(null);
+  const lastVisibleMessageId = workspace?.messages?.at(-1)?.id;
+  useLayoutEffect(() => {
+    const list = messagesRef.current;
+    if (list) list.scrollTop = list.scrollHeight;
+  }, [workspace?.conversation?.id, lastVisibleMessageId]);
   const replyRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -176,13 +182,11 @@ export function ConversationsPage() {
   }
 
   useEffect(() => {
-    loadList();
-  }, [filter, channel]);
-
-  useEffect(() => {
-    const timer = setTimeout(() => loadList(), 250);
+    // Cancel a pending search when the user changes the channel or status.
+    // Otherwise its captured channel could replace the newly selected list.
+    const timer = setTimeout(() => loadList(), q ? 250 : 0);
     return () => clearTimeout(timer);
-  }, [q]);
+  }, [q, filter, channel]);
 
   useEffect(() => {
     workspaceVersion.current += 1;
@@ -445,7 +449,7 @@ export function ConversationsPage() {
         </div>
       ) : null}
 
-      <div className="conv-messages">
+      <div className="conv-messages" ref={messagesRef}>
         {workspace.hasEarlierMessages ? <button type="button" className="btn secondary history-button" disabled={historyLoading} onClick={async () => {
           const id = workspace.conversation.id;
           setHistoryLoading(true);

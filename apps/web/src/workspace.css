@@ -564,3 +564,45 @@ select:disabled { cursor: not-allowed; opacity: .65; }
 }
 
 .conversation-avatar > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
+
+@media (min-width: 768px) and (max-width: 1000px) {
+  .conversations-layout { grid-template-columns: 60px minmax(0, 1fr); }
+  .conversations-layout:not(.has-selection) .conv-chat-pane { display: none; }
+  .conversations-layout.has-selection { grid-template-columns: minmax(0, 1fr); }
+  .conversations-layout.has-selection .conversation-channels,
+  .conversations-layout.has-selection .conv-list-pane { display: none; }
+  .conversation-back { display: inline-flex; }
+}
+@media (max-width: 1000px) { .conv-person-copy .conversation-back { display: flex; width: fit-content; margin-bottom: 8px; } }
+@media (max-width: 767px) {
+  .main:has(.conversations-layout) { height: calc(100dvh - 64px); min-height: 0; overflow: hidden; padding-top: 12px; padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px)); }
+  .conversations-layout { flex: 1 1 0; height: auto; min-height: 0; }
+  .main:has(.conversations-layout) > :not(.conversations-layout) { flex-shrink: 0; }
+}
+
+/* Team settings keep invitation, capacity and member editing in one workspace. */
+.members-panel { display: grid; gap: 20px; min-width: 0; }
+.members-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.members-heading h2, .members-panel h3 { margin: 0; font-size: 19px; }
+.members-panel p { margin: 6px 0 0; }
+.members-capacity { display: flex; flex-wrap: wrap; gap: 16px 32px; padding: 18px; background: #f2f7ff; border: 1px solid #dbe7fa; border-radius: 14px; }
+.members-limit { flex-basis: 100%; border-top: 1px solid #dbe7fa; padding-top: 10px; }
+.members-limit a { display: inline-block; margin-top: 8px; }
+.member-card, .member-invite-form, .member-invite-link { padding: 18px; border: 1px solid var(--line, #dce5f2); border-radius: 14px; min-width: 0; }
+.member-card { display: flex; flex-wrap: wrap; align-items: end; gap: 16px; }
+.member-info { flex: 1 1 100%; overflow-wrap: anywhere; }
+.member-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; flex: 1 1 360px; }
+.member-fields label { display: grid; gap: 6px; color: var(--muted); font-size: 13px; min-width: 0; }
+.member-fields input, .member-fields select { width: 100%; min-width: 0; color: var(--text); font-size: 14px; }
+.member-invite-form { display: grid; gap: 16px; }
+.member-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.member-invite-link { background: #f0fbf6; border-color: #ccebdc; overflow-wrap: anywhere; }
+.member-link-controls { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+.member-link-controls input { flex: 1 1 220px; min-width: 0; }
+.member-invitations { display: grid; gap: 12px; min-width: 0; }
+.audit-details { margin: 10px 0 0; padding: 0; list-style: none; display: grid; gap: 5px; color: var(--muted); overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .member-fields { grid-template-columns: minmax(0, 1fr); flex-basis: 100%; }
+  .member-actions, .members-heading > .btn { width: 100%; }
+  .member-actions .btn { flex: 1 1 auto; }
+}

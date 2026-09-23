@@ -1,3 +1,4 @@
+import { getInvitationCapacity } from "./invitationService.ts";
 import { writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import type { PrismaClient } from "@creolab/db";
@@ -288,7 +289,13 @@ export async function listCompanyMembers(prisma: PrismaClient, auth: AuthContext
     include: { user: true },
     orderBy: { createdAt: "asc" },
   });
+  const [capacity, invitations] = await Promise.all([
+    getInvitationCapacity(prisma, membership.tenantId),
+    prisma.invitation.findMany({ where: { tenantId: membership.tenantId, acceptedAt: null, revokedAt: null }, orderBy: { expiresAt: "desc" },
+      select: { id: true, email: true, name: true, role: true, expiresAt: true } }),
+  ]);
   return {
+    capacity, invitations,
     items: items.map((item) => ({
       id: item.id,
       userId: item.userId,

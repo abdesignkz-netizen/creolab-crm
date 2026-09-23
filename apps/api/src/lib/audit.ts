@@ -1,3 +1,4 @@
+import { presentAudit, AUDIT_ACTION_LABELS, AUDIT_ENTITY_LABELS } from "./auditPresentation.ts";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { redactSensitive } from "./redact.ts";
 import { requireCompanyAdmin, requireTenant } from "./access.ts";
@@ -44,6 +45,8 @@ export async function listTenantAudit(
     where.OR = [
       { action: { contains: String(query.q), mode: "insensitive" } },
       { entityType: { contains: String(query.q), mode: "insensitive" } },
+      { action: { in: Object.entries(AUDIT_ACTION_LABELS).filter(([, label]) => label.toLocaleLowerCase("ru").includes(String(query.q).toLocaleLowerCase("ru"))).map(([code]) => code) } },
+      { entityType: { in: Object.entries(AUDIT_ENTITY_LABELS).filter(([, label]) => label.toLocaleLowerCase("ru").includes(String(query.q).toLocaleLowerCase("ru"))).map(([code]) => code) } },
     ];
   }
   const [total, items] = await Promise.all([
@@ -67,7 +70,7 @@ export async function listTenantAudit(
     items: items.map((item) => ({
       id: item.id,
       action: item.action,
-      actionLabel: AUDIT_ACTION_LABEL[item.action] || item.action,
+      ...presentAudit(item, membership.tenant.timezone || "Asia/Almaty"),
       entityType: item.entityType,
       entityId: item.entityId,
       createdAt: item.createdAt,
@@ -79,24 +82,3 @@ export async function listTenantAudit(
     })),
   };
 }
-
-const AUDIT_ACTION_LABEL: Record<string, string> = {
-  "deal.create": "Создана сделка",
-  "deal.update": "Изменена сделка",
-  "deal.stage_changed": "Изменён этап сделки",
-  "deal.lost": "Сделка потеряна",
-  "deal.won": "Сделка выиграна",
-  "conversation.take": "Диалог забрал человек",
-  "conversation.return_to_ai": "Диалог вернули AI",
-  "conversation.pause": "Диалог на паузе",
-  "conversation.assign": "Диалог назначен",
-  "contact.delete": "Удалён клиент",
-  "contact.merge": "Объединены клиенты",
-  "settings.ops_updated": "Обновлены операционные настройки",
-  "settings.ai_updated": "Обновлены настройки AI",
-  "control.settings_updated": "Обновлены настройки BasQar Control",
-  "control.access_updated": "Обновлён доступ BasQar Control",
-  "control.identity_linked": "Привязан внешний аккаунт Control",
-  "control.identity_disabled": "Отключена привязка Control",
-  "control.identity_verified": "Подтверждена привязка Control",
-};

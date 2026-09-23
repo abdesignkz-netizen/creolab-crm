@@ -739,6 +739,19 @@ export function createApp(prisma: PrismaClient) {
     res.json(await listCompanyMembers(prisma, await requireAuth(req)));
   });
 
+  app.post("/api/v1/settings/members/invitations", json, async (req, res) => {
+    const { inviteCompanyMember } = await import("./services/companyInvitationService.ts");
+    res.status(201).json(await inviteCompanyMember(prisma, await requireAuth(req), req.body || {}));
+  });
+  app.post("/api/v1/settings/members/invitations/:id/renew", async (req, res) => {
+    const { manageCompanyInvitation } = await import("./services/companyInvitationService.ts");
+    res.json(await manageCompanyInvitation(prisma, await requireAuth(req), req.params.id, "renew"));
+  });
+  app.delete("/api/v1/settings/members/invitations/:id", async (req, res) => {
+    const { manageCompanyInvitation } = await import("./services/companyInvitationService.ts");
+    res.json(await manageCompanyInvitation(prisma, await requireAuth(req), req.params.id, "revoke"));
+  });
+
   app.patch("/api/v1/workspace/members/:id", json, async (req, res) => {
     const { updateCompanyMember } = await import("./services/accountService.ts");
     res.json(await updateCompanyMember(prisma, await requireAuth(req), req.params.id, req.body || {}));

@@ -543,52 +543,91 @@ function InterfaceSection({ locale }: { locale: Locale }) {
   );
 }
 
+const memberRoles = [
+  ["owner", "Администратор компании"], ["director", "Директор"],
+  ["sales_lead", "Руководитель продаж"], ["manager", "Менеджер"],
+];
+type MemberCapacity = { active: number; pending: number; limit: number | null; remaining: number | null; canInvite: boolean; entitled: boolean; planName: string };
+
 function MembersSection({ locale }: { locale: Locale }) {
   const [items, setItems] = useState<any[]>([]);
+  const [invitations, setInvitations] = useState<any[]>([]);
+  const [capacity, setCapacity] = useState<MemberCapacity | null>(null);
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [link, setLink] = useState<{ email: string; inviteUrl: string; expiresAt: string } | null>(null);
+  const [copied, setCopied] = useState(false);
 
   async function load() {
-    const data = (await api.companyMembers()) as { items: any[] };
+    const data = (await api.companyMembers()) as { items: any[]; invitations: any[]; capacity: MemberCapacity };
     setItems(data.items || []);
+    setInvitations(data.invitations || []);
+    setCapacity(data.capacity);
   }
+  useEffect(() => { void load().catch((err) => setError(err instanceof Error ? err.message : "Не удалось загрузить сотрудников")); }, []);
 
-  useEffect(() => {
-    void load().catch((err) => setError(err instanceof Error ? err.message : "Ошибка"));
-  }, []);
+  async function run(action: () => Promise<void>) {
+    setBusy(true); setError("");
+    try { await action(); await load(); }
+    catch (err) { setError(err instanceof Error ? err.message : "Не удалось сохранить изменения"); }
+    finally { setBusy(false); }
+  }
+  function showLink(value: any) { setLink(value); setCopied(false); }
 
   return (
-    <div className="panel">
-      <b>{t(locale, "settings.members")}</b>
-      {error ? <p className="error">{error}</p> : null}
-      {items.map((item) => (
-        <form
-          key={item.id}
-          className="row"
-          onSubmit={async (event) => {
-            event.preventDefault();
-            const form = new FormData(event.currentTarget);
-            await api.updateCompanyMember(item.id, {
-              role: form.get("role"),
-              jobTitle: form.get("jobTitle"),
-            });
-            notifySaved("Сотрудник обновлён");
-            await load();
-          }}
-        >
-          <div>
-            <b>{item.name}</b>
-            <div className="muted">{item.email}</div>
-            <input name="jobTitle" defaultValue={item.jobTitle || ""} placeholder="Должность" />
-            <select name="role" defaultValue={item.role}>
-              <option value="owner">Администратор компании</option>
-              <option value="director">Директор</option>
-              <option value="sales_lead">Руководитель продаж</option>
-              <option value="manager">Менеджер</option>
-            </select>
-          </div>
-          <button className="btn secondary">{t(locale, "settings.save")}</button>
-        </form>
-      ))}
+    <div className="panel members-panel">
+      <div className="members-heading">
+        <div><h2>{t(locale, "settings.members")}</h2><p className="muted">Управляйте доступом команды к вашей компании.</p></div>
+        <button className="btn" disabled={busy || !capacity?.canInvite} onClick={() => setAdding(true)}>Добавить сотрудника</button>
+      </div>
+      {error ? <p className="error" role="alert">{error}</p> : null}
+      {capacity ? <div className="members-capacity">
+        <div><b>{capacity.planName}</b><p>Сотрудников: <strong>{capacity.active}{capacity.limit === null ? " · без ограничения" : ` / ${capacity.limit}`}</strong></p></div>
+        <div><b>{capacity.remaining === null ? "Места доступны" : `Свободных мест: ${capacity.remaining}`}</b><p className="muted">Ожидают приглашения: {capacity.pending}. Они также занимают места.</p></div>
+        {!capacity.canInvite ? <div className="members-limit"><p>{capacity.entitled ? "Все места заняты. Отмените ненужное приглашение или подключите дополнительные места." : "Для добавления сотрудников выберите тариф с командной работой."}</p><Link to="/billing">Тарифы и дополнительные места →</Link></div> : null}
+      </div> : !error ? <p className="muted" role="status">Загружаем сотрудников и доступные места…</p> : null}
+      {adding && capacity?.canInvite ? <form className="member-invite-form" onSubmit={event => {
+        event.preventDefault(); const form = new FormData(event.currentTarget);
+        void run(async () => {
+          const result = await api.inviteCompanyMember({ name: String(form.get("name")), email: String(form.get("email")), role: String(form.get("role")) });
+          showLink(result); setAdding(false);
+        });
+      }}>
+        <h3>Пригласить сотрудника</h3>
+        <p className="muted">Создайте ссылку и передайте её сотруднику. При первом входе он сам задаст пароль. Письмо автоматически не отправляется.</p>
+        <div className="member-fields">
+          <label>Имя сотрудника<input name="name" required maxLength={160} autoComplete="off" placeholder="Имя и фамилия" /></label>
+          <label>Электронная почта<input name="email" type="email" required maxLength={254} autoComplete="off" placeholder="name@company.kz" /></label>
+          <label>Роль<select name="role" defaultValue="manager">{memberRoles.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+        </div>
+        <div className="member-actions"><button className="btn" disabled={busy}>{busy ? "Создаём приглашение…" : "Создать приглашение"}</button><button type="button" className="btn secondary" disabled={busy} onClick={() => setAdding(false)}>Отмена</button></div>
+      </form> : null}
+      {link ? <div className="member-invite-link" role="status">
+        <b>Приглашение для {link.email} готово</b>
+        <p>Передайте ссылку лично сотруднику. Она действует до {formatDateTime(link.expiresAt, { locale })}.</p>
+        <div className="member-link-controls"><input aria-label="Ссылка приглашения" readOnly value={link.inviteUrl} onFocus={e => e.currentTarget.select()} /><button className="btn secondary" onClick={async () => {
+          try { await navigator.clipboard.writeText(link.inviteUrl); setCopied(true); }
+          catch { setError("Не удалось скопировать автоматически. Выделите ссылку и скопируйте её вручную."); }
+        }}>{copied ? "Скопировано" : "Скопировать ссылку"}</button></div>
+      </div> : null}
+      {items.map(item => <form key={item.id} className="member-card" onSubmit={event => {
+        event.preventDefault(); const form = new FormData(event.currentTarget);
+        void run(async () => { await api.updateCompanyMember(item.id, { role: form.get("role"), jobTitle: form.get("jobTitle") }); notifySaved("Сотрудник обновлён"); });
+      }}>
+        <div className="member-info"><b>{item.name}{item.isMe ? " (вы)" : ""}</b><div className="muted">{item.email}</div>{!item.active ? <span className="muted">Доступ приостановлен</span> : null}</div>
+        <div className="member-fields">
+          <label>Должность<input name="jobTitle" defaultValue={item.jobTitle || ""} placeholder="Укажите должность" /></label>
+          <label>Роль<select name="role" defaultValue={item.role}>{memberRoles.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+        </div>
+        <button className="btn secondary" disabled={busy}>{t(locale, "settings.save")}</button>
+      </form>)}
+      {invitations.length ? <section className="member-invitations"><h3>Приглашения</h3><p className="muted">После обновления ссылки прежняя перестанет действовать.</p>
+        {invitations.map(item => <div className="member-card" key={item.id}>
+          <div className="member-info"><b>{item.name || item.email}</b><div className="muted">{item.email} · {memberRoles.find(([role]) => role === item.role)?.[1] || "Сотрудник"}</div><div className="muted">{new Date(item.expiresAt).getTime() > Date.now() ? "Ожидает принятия · до " : "Срок истёк · "}{formatDateTime(item.expiresAt, { locale })}</div></div>
+          <div className="member-actions"><button className="btn secondary" disabled={busy || !capacity?.entitled || (new Date(item.expiresAt).getTime() <= Date.now() && !capacity?.canInvite)} onClick={() => void run(async () => showLink(await api.renewCompanyInvitation(item.id)))}>Обновить ссылку</button><button className="btn secondary" disabled={busy} onClick={() => void run(async () => { await api.revokeCompanyInvitation(item.id); if (link?.email === item.email) setLink(null); })}>Отменить приглашение</button></div>
+        </div>)}
+      </section> : null}
     </div>
   );
 }
@@ -747,22 +786,14 @@ function AuditSection({ locale }: { locale: Locale }) {
       {(data?.items || []).map((item: any) => (
         <div className="row" key={item.id} style={{ alignItems: "flex-start" }}>
           <div>
-            <b>{item.actionLabel || item.action}</b>
+            <b>{item.actionLabel || "Действие в системе"}</b>
             <div className="muted">
               {item.actorLabel}
-              {item.entityType ? ` · ${item.entityType}` : ""}
-              {item.entityId ? ` #${String(item.entityId).slice(0, 8)}` : ""}
+              {item.entityLabel ? ` · ${item.entityLabel}` : ""}
               {" · "}
               {formatDateTime(item.createdAt, { timeZone: me?.user?.timezone, locale })}
             </div>
-            {item.changes && typeof item.changes === "object" ? (
-              <div className="muted">
-                {Object.entries(item.changes)
-                  .slice(0, 4)
-                  .map(([key, value]) => `${key}: ${typeof value === "object" ? JSON.stringify(value) : String(value ?? "")}`)
-                  .join(" · ")}
-              </div>
-            ) : null}
+            {item.details?.length ? <ul className="audit-details">{item.details.map((detail: string, index: number) => <li key={index}>{detail}</li>)}</ul> : null}
           </div>
         </div>
       ))}

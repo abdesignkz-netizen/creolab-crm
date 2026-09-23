@@ -12,6 +12,7 @@ const pending = new Map<string, Promise<Photo | null>>();
 const MAX_BYTES = 256 * 1024;
 const MAX_ENTRIES = 128; // At most 32 MB, including negative results; no unbounded tenant cache.
 let active = 0;
+const waiting: Array<() => void> = [];
 
 async function json(url: string, body: object) {
   const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(8000), redirect: "error" });
@@ -89,13 +90,14 @@ export async function getConversationAvatar(prisma: PrismaClient, auth: AuthCont
   if (existing && existing.until > Date.now()) return existing.photo;
   if (pending.has(key)) return pending.get(key)!;
   // A busy image provider must not consume all API connections. The next view retries.
-  if (active >= 4) return null;
+  if (active >= 4 && waiting.length >= 32) return null;
   const promise = (async () => {
-    active++;
+    if (active >= 4) await new Promise<void>(resolve => waiting.push(resolve));
+    else active++;
     let photo: Photo | null = null; let ttl = 60 * 60 * 1000;
     try { photo = await load(); if (photo) ttl = 6 * 60 * 60 * 1000; }
     catch { ttl = 5 * 60 * 1000; } // Do not log provider exceptions: URLs contain credentials.
-    finally { active--; }
+    finally { const next = waiting.shift(); if (next) next(); else active--; }
     cache.delete(key);
     while (cache.size >= MAX_ENTRIES) cache.delete(cache.keys().next().value!);
     cache.set(key, { photo, until: Date.now() + ttl });

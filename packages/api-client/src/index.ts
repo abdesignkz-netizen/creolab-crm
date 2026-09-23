@@ -193,6 +193,9 @@ export function createApiClient(options: ClientOptions) {
     notificationPreferences: () => request("/api/v1/me/notification-preferences"),
     updateNotificationPreferences: (body: Record<string, unknown>) =>
       request("/api/v1/me/notification-preferences", { method: "PATCH", body: JSON.stringify(body) }),
+    inviteCompanyMember: (body: { name: string; email: string; role: string }) => request("/api/v1/settings/members/invitations", { method: "POST", body: JSON.stringify(body) }),
+    renewCompanyInvitation: (id: string) => request(`/api/v1/settings/members/invitations/${encodeURIComponent(id)}/renew`, { method: "POST" }),
+    revokeCompanyInvitation: (id: string) => request(`/api/v1/settings/members/invitations/${encodeURIComponent(id)}`, { method: "DELETE" }),
     companyMembers: () => request("/api/v1/settings/members"),
     updateCompanyMember: (id: string, body: Record<string, unknown>) =>
       request(`/api/v1/workspace/members/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
@@ -600,6 +603,7 @@ export function createApiClient(options: ClientOptions) {
       }),
     setTaskStatus: (id: string, status: "open" | "in_progress" | "waiting" | "done" | "canceled") =>
       request(`/api/v1/tasks/${id}/status`, { method: "POST", body: JSON.stringify({ status }) }),
+    conversationAvatar: (id: string) => downloadBlob(`/api/v1/conversations/${encodeURIComponent(id)}/avatar`, "avatar"),
     conversations: (query: Record<string, string> = {}) => {
       const params = new URLSearchParams(query);
       const suffix = params.toString() ? `?${params}` : "";

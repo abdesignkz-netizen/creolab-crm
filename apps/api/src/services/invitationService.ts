@@ -1,5 +1,5 @@
 import type { Prisma, PrismaClient } from "@creolab/db";
-import { ROLES, isCompanyAdminRole } from "@creolab/contracts";
+import { ROLES, isCompanyAdminRole, FEATURES } from "@creolab/contracts";
 import { config } from "../config.ts";
 import { ApiError } from "../errors.ts";
 import { writeAudit } from "../lib/audit.ts";
@@ -7,6 +7,7 @@ import { randomToken, sha256 } from "../lib/hash.ts";
 import { hashPassword } from "../lib/password.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { getEffectiveTenantSettings } from "./runtimeSettings.ts";
+import { getEntitlements, isLegacyPlan } from "./entitlementService.ts";
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const INVITE_ROLES = new Set([ROLES.owner, ROLES.director, ROLES.sales_lead, ROLES.manager]);
@@ -28,6 +29,28 @@ function normalizeEmail(value: string) {
   return String(value || "").trim().toLowerCase();
 }
 
+/** Active members and pending invitations share the same purchased seats. */
+export async function getInvitationCapacity(db: PrismaClient | Prisma.TransactionClient, tenantId: string, excludeInvitationId?: string, skipEntitlementLimit = false) {
+  const resolved = await getEntitlements(db as PrismaClient, tenantId);
+  const legacy = resolved.snapshot.grandfathered || isLegacyPlan(resolved.plan?.plan);
+  const settings = legacy || skipEntitlementLimit ? await getEffectiveTenantSettings(db as PrismaClient, tenantId) : null;
+  const limit = settings ? settings.limits.members.value : Number(resolved.limits.USERS ?? resolved.limits.members ?? 0);
+  const [active, pending] = await Promise.all([
+    db.membership.count({ where: { tenantId, active: true } }),
+    db.invitation.count({ where: { tenantId, id: excludeInvitationId ? { not: excludeInvitationId } : undefined, acceptedAt: null, revokedAt: null, expiresAt: { gt: new Date() } } }),
+  ]);
+  const entitled = skipEntitlementLimit || resolved.snapshot.grandfathered || (resolved.snapshot.entitled && Boolean(resolved.entitlements[FEATURES.TEAM]));
+  const remaining = limit < 0 ? null : Math.max(0, limit - active - pending);
+  return { active, pending, limit: limit < 0 ? null : limit, remaining, canInvite: entitled && (remaining === null || remaining > 0),
+    planName: resolved.plan?.plan.name || "Текущие условия", entitled };
+}
+
+function assertInvitationCapacity(capacity: Awaited<ReturnType<typeof getInvitationCapacity>>) {
+  if (!capacity.canInvite) throw new ApiError(422, "member_limit", capacity.entitled
+    ? `Все места для сотрудников заняты (${capacity.limit}). Ожидающие приглашения тоже занимают места. Подключите дополнительные места или измените тариф.`
+    : "Добавление сотрудников недоступно на текущем тарифе. Выберите тариф с командной работой.");
+}
+
 export async function createTenantInvitation(
   prisma: PrismaClient | Prisma.TransactionClient,
   input: {
@@ -40,45 +63,16 @@ export async function createTenantInvitation(
     actorUserId?: string | null;
     skipEntitlementLimit?: boolean;
   },
-) {
+): Promise<{ invitation: import("@creolab/db").Prisma.InvitationGetPayload<{}>; token: string; inviteUrl: string; delivery: "link_created"; existingUser: boolean }> {
+  // Shared by company settings and Platform Admin, including callers already in a transaction.
+  if ("$transaction" in prisma) return prisma.$transaction(tx => createTenantInvitation(tx, input));
+  await prisma.$queryRaw`SELECT id FROM "Tenant" WHERE id = ${input.tenantId} FOR UPDATE`;
   assertInviteRole(input.role);
   const email = normalizeEmail(input.email);
-  if (!email || !email.includes("@")) {
-    throw new ApiError(422, "invalid", "Укажите email", { email: "Обязательно" });
-  }
-  const settings = await getEffectiveTenantSettings(prisma as PrismaClient, input.tenantId);
-  let memberLimit = settings.limits.members.value;
-  if (!input.skipEntitlementLimit) {
-    try {
-      const { getEntitlements, isLegacyPlan } = await import("./entitlementService.ts");
-      const { FEATURES } = await import("@creolab/contracts");
-      const resolved = await getEntitlements(prisma as PrismaClient, input.tenantId);
-      if (!resolved.snapshot.entitled) {
-        throw new ApiError(
-          403,
-          "feature_required",
-          "Приглашение команды доступно после подключения тарифа.",
-          undefined,
-          { feature: FEATURES.TEAM, billingPath: "/billing", label: "Команда" },
-        );
-      }
-      if (!resolved.snapshot.grandfathered && !isLegacyPlan(resolved.plan?.plan)) {
-        memberLimit = Number(resolved.limits.USERS ?? resolved.limits.members ?? memberLimit);
-        if (memberLimit < 0) memberLimit = Number.MAX_SAFE_INTEGER;
-      }
-    } catch (error) {
-      throw error;
-    }
-  }
-  const [activeCount, pendingCount] = await Promise.all([
-    prisma.membership.count({ where: { tenantId: input.tenantId, active: true } }),
-    prisma.invitation.count({
-      where: { tenantId: input.tenantId, acceptedAt: null, revokedAt: null, expiresAt: { gt: new Date() } },
-    }),
-  ]);
-  if (activeCount + pendingCount >= memberLimit) {
-    throw new ApiError(422, "limit", `Достигнут лимит участников (${memberLimit})`);
-  }
+  if (!email || !email.includes("@")) throw new ApiError(422, "invalid", "Укажите email", { email: "Обязательно" });
+  const duplicate = await prisma.invitation.findFirst({ where: { tenantId: input.tenantId, email, acceptedAt: null, revokedAt: null, expiresAt: { gt: new Date() } } });
+  if (duplicate) throw new ApiError(409, "already_invited", "Сотрудник уже приглашён. Обновите ссылку в списке приглашений.");
+  assertInvitationCapacity(await getInvitationCapacity(prisma, input.tenantId, undefined, input.skipEntitlementLimit));
   const existingMembership = await prisma.membership.findFirst({
     where: { tenantId: input.tenantId, user: { email } },
   });
@@ -118,7 +112,7 @@ export async function createTenantInvitation(
 }
 
 export async function rotateInvitation(
-  prisma: PrismaClient,
+  prisma: PrismaClient | Prisma.TransactionClient,
   invitationId: string,
   actorUserId: string,
 ) {
@@ -150,7 +144,7 @@ export async function rotateInvitation(
   };
 }
 
-export async function revokeInvitation(prisma: PrismaClient, invitationId: string, actorUserId: string) {
+export async function revokeInvitation(prisma: PrismaClient | Prisma.TransactionClient, invitationId: string, actorUserId: string) {
   const invitation = await prisma.invitation.findUnique({ where: { id: invitationId } });
   if (!invitation) throw new ApiError(404, "not_found", "Приглашение не найдено");
   if (invitation.acceptedAt) throw new ApiError(422, "accepted", "Приглашение уже принято");
@@ -211,36 +205,42 @@ export async function acceptInvitation(
     throw new ApiError(403, "tenant_suspended", "Доступ компании приостановлен");
   }
 
-  const existing = await prisma.user.findUnique({ where: { email: invitation.email } });
-  let userId: string;
-  if (existing) {
-    if (!input.auth?.user.id) {
-      throw new ApiError(409, "login_required", "Войдите в существующий аккаунт, чтобы принять приглашение");
+  const accepted = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Tenant" WHERE id = ${invitation.tenantId} FOR UPDATE`;
+    const current = await tx.invitation.findUnique({ where: { id: invitation.id } });
+    if (!current || current.tokenHash !== sha256(token) || current.acceptedAt || current.revokedAt || current.expiresAt.getTime() < Date.now()) throw new ApiError(409, "accepted", "Приглашение уже использовано или недействительно");
+    assertInviteRole(current.role);
+    const currentMember = await tx.membership.findFirst({ where: { tenantId: invitation.tenantId, user: { email: invitation.email }, active: true } });
+    if (!currentMember) assertInvitationCapacity(await getInvitationCapacity(tx, invitation.tenantId, invitation.id));
+    const existing = await tx.user.findUnique({ where: { email: invitation.email } });
+    let userId: string;
+    if (existing) {
+      if (!input.auth?.user.id) {
+        throw new ApiError(409, "login_required", "Войдите в существующий аккаунт, чтобы принять приглашение");
+      }
+      if (input.auth.user.email.toLowerCase() !== invitation.email) {
+        throw new ApiError(403, "email_mismatch", "Войдите в аккаунт с email из приглашения");
+      }
+      userId = existing.id;
+    } else {
+      const password = String(input.password || "");
+      if (password.length < 8) {
+        throw new ApiError(422, "invalid", "Задайте пароль не короче 8 символов", { password: "Минимум 8 символов" });
+      }
+      const name =
+        String(input.name || invitation.name || "").trim() || invitation.email.split("@")[0] || "Сотрудник";
+      const created = await tx.user.create({
+        data: {
+          email: invitation.email,
+          passwordHash: await hashPassword(password),
+          name,
+          phone: invitation.phone,
+          platformAdmin: false,
+        },
+      });
+      userId = created.id;
     }
-    if (input.auth.user.email.toLowerCase() !== invitation.email) {
-      throw new ApiError(403, "email_mismatch", "Войдите в аккаунт с email из приглашения");
-    }
-    userId = existing.id;
-  } else {
-    const password = String(input.password || "");
-    if (password.length < 8) {
-      throw new ApiError(422, "invalid", "Задайте пароль не короче 8 символов", { password: "Минимум 8 символов" });
-    }
-    const name =
-      String(input.name || invitation.name || "").trim() || invitation.email.split("@")[0] || "Сотрудник";
-    const created = await prisma.user.create({
-      data: {
-        email: invitation.email,
-        passwordHash: await hashPassword(password),
-        name,
-        phone: invitation.phone,
-        platformAdmin: false,
-      },
-    });
-    userId = created.id;
-  }
 
-  const membership = await prisma.$transaction(async (tx) => {
     const locked = await tx.invitation.findUnique({ where: { id: invitation.id } });
     if (!locked || locked.acceptedAt || locked.revokedAt) {
       throw new ApiError(409, "accepted", "Приглашение уже использовано");
@@ -248,7 +248,7 @@ export async function acceptInvitation(
     const already = await tx.membership.findUnique({
       where: { tenantId_userId: { tenantId: invitation.tenantId, userId } },
     });
-    const row =
+    let row =
       already ||
       (await tx.membership.create({
         data: {
@@ -259,14 +259,16 @@ export async function acceptInvitation(
         },
       }));
     if (already && !already.active) {
-      await tx.membership.update({ where: { id: already.id }, data: { active: true, role: invitation.role } });
+      row = await tx.membership.update({ where: { id: already.id }, data: { active: true, role: invitation.role } });
     }
     await tx.invitation.update({
       where: { id: invitation.id },
       data: { acceptedAt: new Date() },
     });
-    return row;
+    return { membership: row, userId, existing: Boolean(existing) };
   });
+
+  const { membership, userId, existing } = accepted;
 
   await writeAudit(prisma, {
     tenantId: invitation.tenantId,
