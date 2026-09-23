@@ -26,6 +26,14 @@ const ACTION_LABEL: Record<string, string> = {
   open_deal: "Открыть сделку",
 };
 
+function opensWaitingDialogue(item: { kind?: string; nextAction: string }) {
+  return item.kind === "contact_needs_reply" && item.nextAction === "open_contact";
+}
+
+function actionLabel(item: { kind?: string; nextAction: string }) {
+  return opensWaitingDialogue(item) ? "Открыть диалог" : ACTION_LABEL[item.nextAction];
+}
+
 function deltaText(value: number | null | undefined, percent?: number | null) {
   const parts: string[] = [];
   if (percent != null && percent !== 0) parts.push(`${percent > 0 ? "+" : ""}${percent}%`);
@@ -269,6 +277,28 @@ export function SituationPage() {
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не выполнено");
+    } finally {
+      setBusyId("");
+    }
+  }
+
+  async function openWaitingDialogue(item: any) {
+    setBusyId(item.id);
+    setError("");
+    try {
+      let conversationId = item.links?.conversationId;
+      if (!conversationId) {
+        const overview = await api.contactOverview(item.links?.contactId || item.entityId) as {
+          conversations?: Array<{ id: string; sellerLeadId?: string | null }>;
+        };
+        // The existing overview returns accessible conversations, newest first.
+        const conversations = overview.conversations || [];
+        conversationId = (conversations.find((conversation) => conversation.sellerLeadId) || conversations[0])?.id;
+      }
+      if (!conversationId) throw new Error("У клиента пока нет доступного диалога. Подробности можно посмотреть в карточке клиента.");
+      navigate(`/conversations/${encodeURIComponent(conversationId)}?focus=reply`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось открыть диалог");
     } finally {
       setBusyId("");
     }
@@ -583,7 +613,7 @@ export function SituationPage() {
                   <div className="muted">{item.title}</div>
                 ) : null}
                 <div className="attention-next muted">
-                  <span>{ACTION_LABEL[item.nextAction] || item.nextAction}</span>
+                  <span>{actionLabel(item) || item.nextAction}</span>
                   <span>{ageLabel(item.ageMinutes)}</span>
                   {item.ownerMembershipId ? null : <span>Без ответственного</span>}
                 </div>
@@ -628,6 +658,7 @@ export function SituationPage() {
                       if (item.nextAction === "complete_task") return void run(item, () => api.completeTask(item.entityId));
                       if (item.nextAction === "assign_owner") return void run(item, () => api.assignTask(item.entityId));
                       if (item.nextAction === "instruct_ai") return navigate("/control");
+                      if (opensWaitingDialogue(item)) return void openWaitingDialogue(item);
                       if (item.nextAction === "open_contact") return navigate(`/contacts/${item.entityId}`);
                       if (item.nextAction === "create_next_action") {
                         return navigate(`/tasks?${new URLSearchParams({ ...(item.links?.contactId ? { contactId: item.links.contactId } : {}), ...(item.links?.dealId ? { dealId: item.links.dealId } : {}), ...(item.links?.inquiryId ? { inquiryId: item.links.inquiryId } : {}) })}`);
@@ -638,7 +669,7 @@ export function SituationPage() {
                       return navigate(item.href || "/today");
                     }}
                   >
-                    {ACTION_LABEL[item.nextAction] || "Открыть"}
+                    {actionLabel(item) || "Открыть"}
                   </button>
                 ) : null}
                 <Link className="btn secondary" to={item.href || "/today"}>

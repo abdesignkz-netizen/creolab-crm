@@ -131,6 +131,10 @@ export async function listConversationsBoard(
   const now = new Date();
   const filter = String(query.filter || "all");
   const q = String(query.q || "").trim();
+  const channelFilter = String(query.channel || "all");
+  if (!["all", "whatsapp", "telegram", "instagram", "email", "other"].includes(channelFilter)) {
+    throw new ApiError(400, "invalid_channel", "Неизвестный канал диалогов");
+  }
   const digits = digitsOnly(q);
   const phoneVariants = new Set<string>();
   if (digits) {
@@ -152,6 +156,29 @@ export async function listConversationsBoard(
       conversationAccessWhere(auth),
     ],
   };
+
+  // Apply channel selection before pagination; tenant and role restrictions stay in AND.
+  const channelWhere: Prisma.ConversationWhereInput | null = channelFilter === "all" ? null
+    : channelFilter === "whatsapp" ? { sellerLeadId: { not: null } }
+    : channelFilter === "other" ? { sellerLeadId: null, connectionId: null }
+    : { connection: { channelType: channelFilter } };
+  if (channelWhere) (where.AND as Prisma.ConversationWhereInput[]).push(channelWhere);
+
+  const accessible = { AND: [{ tenantId: tid, status: { not: "archived" } }, conversationAccessWhere(auth)] };
+  const [connections, whatsappIntegration, whatsappHistory, otherHistory] = await Promise.all([
+    prisma.channelConnection.findMany({
+      where: { tenantId: tid, OR: [{ status: "active" }, { conversations: { some: accessible } }] },
+      select: { channelType: true },
+    }),
+    prisma.integration.findFirst({ where: { tenantId: tid, type: "whatsapp_seller", OR: [{ status: "active" }, { connectionStatus: { in: ["CONNECTED", "connected"] } }] }, select: { id: true } }),
+    prisma.conversation.findFirst({ where: { AND: [accessible, { sellerLeadId: { not: null } }] }, select: { id: true } }),
+    prisma.conversation.findFirst({ where: { AND: [accessible, { sellerLeadId: null, connectionId: null }] }, select: { id: true } }),
+  ]);
+  const availableChannels = [...new Set([
+    ...(whatsappIntegration || whatsappHistory ? ["whatsapp"] : []),
+    ...connections.map((connection) => connection.channelType).filter((channel) => ["telegram", "instagram", "email"].includes(channel)),
+    ...(otherHistory ? ["other"] : []),
+  ])];
 
   if (filter === "ai") where.mode = "ai";
   if (filter === "human") where.mode = "human";
@@ -316,6 +343,7 @@ export async function listConversationsBoard(
         topic: topic || "Тема не определена",
         service: linkedInquiry?.service || null,
         channel,
+        channelType: conversation.connection?.channelType || (conversation.sellerLeadId ? "whatsapp" : "other"),
         acquisition,
         sourceLine: sourceArrow(acquisition, channel),
         lastMessagePreview: messagePreviewText(last),
@@ -373,6 +401,7 @@ export async function listConversationsBoard(
   return {
     asOf: now.toISOString(),
     items,
+    availableChannels,
     counts: {
       all: items.length,
       needsReply: items.filter((item) => item.needsReply).length,

@@ -642,4 +642,29 @@ describe("Conversations board", () => {
     const item = board.items.find((row: { id: string }) => row.id === conversation.id);
     assert.equal(item.lastMessagePreview, "Смотрите фото");
   });
+  it("каналы фильтруются совместно с поиском, сохраняя изоляцию компаний и историю отключённого канала", async () => {
+    const source = await prisma.conversation.findUniqueOrThrow({ where: { id: conversationId } });
+    const integration = await prisma.integration.create({ data: { tenantId: source.tenantId, type: "telegram", name: "Channel test" } });
+    const connection = await prisma.channelConnection.create({ data: { tenantId: source.tenantId, integrationId: integration.id, channelType: "telegram", status: "disabled" } });
+    const telegram = await prisma.conversation.create({ data: { tenantId: source.tenantId, contactId: source.contactId, connectionId: connection.id, mode: "human", status: "open" } });
+    await prisma.message.create({ data: { tenantId: source.tenantId, conversationId: telegram.id, text: "unique-channel-search", senderKind: "client", direction: "inbound" } });
+    const other = await prisma.tenant.create({ data: { name: "Other channel tenant", slug: "board-channel-isolation" } });
+    const foreignIntegration = await prisma.integration.create({ data: { tenantId: other.id, type: "instagram", name: "Private connection" } });
+    const foreignConnection = await prisma.channelConnection.create({ data: { tenantId: other.id, integrationId: foreignIntegration.id, channelType: "instagram", status: "active" } });
+    const foreign = await prisma.conversation.create({ data: { tenantId: other.id, connectionId: foreignConnection.id, status: "open" } });
+    const board = async (query: string) => (await fetch(`${base}/api/v1/conversations?${query}`, { headers: { cookie } })).json();
+    const all = await board("channel=all");
+    assert.ok(all.items.some((row: any) => row.id === telegram.id));
+    assert.ok(all.items.some((row: any) => row.id === conversationId));
+    assert.ok(!all.items.some((row: any) => row.id === foreign.id));
+    assert.ok(all.availableChannels.includes("telegram"));
+    assert.ok(!all.availableChannels.includes("instagram"));
+    const filtered = await board("channel=telegram&filter=human&q=unique-channel-search");
+    assert.deepEqual(filtered.items.map((row: any) => row.id), [telegram.id]);
+    assert.equal(filtered.items[0].channelType, "telegram");
+    assert.equal((await board("channel=whatsapp&q=unique-channel-search")).items.length, 0);
+    assert.equal((await board("channel=instagram")).items.length, 0);
+    assert.equal((await fetch(`${base}/api/v1/conversations?channel=unknown`, { headers: { cookie } })).status, 400);
+  });
+
 });

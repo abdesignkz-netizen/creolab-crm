@@ -1,3 +1,4 @@
+import { ChannelIcon, ConversationAvatar, CONVERSATION_CHANNELS } from "../components/ConversationIdentity";
 import { useUrlState, useRequestVersion } from "../lib/useUrlState";
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -103,6 +104,8 @@ export function ConversationsPage() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [searchParams] = useSearchParams();
   const [filter, setFilter] = useUrlState("filter", "all", FILTERS.map(([value]) => value));
+  const [channel] = useUrlState("channel", "all", CONVERSATION_CHANNELS.map(([value]) => value));
+  const [availableChannels, setAvailableChannels] = useState<string[]>([]);
   const [q, setQ] = useState("");
   const [items, setItems] = useState<any[]>([]);
   const [listLoading, setListLoading] = useState(true);
@@ -123,9 +126,10 @@ export function ConversationsPage() {
     const request = ++listVersion.current;
     setListLoading(true);
     try {
-      const data: any = await api.conversations({ filter, q });
+      const data: any = await api.conversations({ filter, q, channel });
       if (request !== listVersion.current) return;
       setItems(data.items || []);
+      setAvailableChannels(data.availableChannels || []);
       setError("");
     } catch (err) {
       if (request !== listVersion.current) return;
@@ -173,7 +177,7 @@ export function ConversationsPage() {
 
   useEffect(() => {
     loadList();
-  }, [filter]);
+  }, [filter, channel]);
 
   useEffect(() => {
     const timer = setTimeout(() => loadList(), 250);
@@ -260,29 +264,31 @@ export function ConversationsPage() {
   const listPane = (
     <div className="conv-list-pane">
       <div className="page-head">
-        <h2>Диалоги</h2>
+        <h2>Диалоги</h2><span className="badge" title="Диалогов по выбранным условиям">{items.length}</span>
       </div>
       <input
         className="conv-search"
         value={q}
         onChange={(event) => setQ(event.target.value)}
-        placeholder="Имя, телефон, компания, тема или сообщение"
+        placeholder="Поиск клиента или сообщения"
+        aria-label="Поиск по имени, телефону, компании, теме или сообщению"
       />
-      <div className="chip-row">
-        {FILTERS.map(([value, label]) => (
-          <button
-            key={value}
-            type="button"
-            className={filter === value ? "chip active" : "chip"}
-            onClick={() => setFilter(value)}
-          >
-            {label}
-          </button>
+      <div className="conv-primary-filters" role="group" aria-label="Статус диалогов">
+        {FILTERS.filter(([value]) => ["all", "unread", "needs_reply"].includes(value)).map(([value, label]) => (
+          <button key={value} type="button" className={filter === value ? "chip active" : "chip"} aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}</button>
         ))}
       </div>
+      <details className="conv-more-filters">
+        <summary>Ещё фильтры{!["all", "unread", "needs_reply"].includes(filter) ? ` · ${FILTERS.find(([value]) => value === filter)?.[1]}` : ""}</summary>
+        <div className="chip-row">
+          {FILTERS.filter(([value]) => !["all", "unread", "needs_reply"].includes(value)).map(([value, label]) => (
+            <button key={value} type="button" className={filter === value ? "chip active" : "chip"} aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}</button>
+          ))}
+        </div>
+      </details>
       {listLoading ? <p className="muted" role="status">Загрузка диалогов…</p> : null}
       {!listLoading && items.length === 0 ? (
-        <p className="empty">{q || filter !== "all" ? "По выбранным условиям диалоги не найдены." : "Диалоги появятся после подключения каналов. Сейчас можно посмотреть, как устроен этот раздел."}</p>
+        <p className="empty">{q || filter !== "all" || channel !== "all" ? "По выбранным условиям диалоги не найдены." : "Диалоги появятся после подключения каналов. Сейчас можно посмотреть, как устроен этот раздел."}</p>
       ) : null}
       <div className="conv-list">
         {items.map((item) => (
@@ -292,23 +298,22 @@ export function ConversationsPage() {
             className={`conv-row ${selectedId === item.id ? "active" : ""} ${item.unread ? "unread" : ""}`}
             onClick={() => navigate(`/conversations/${item.id}?${searchParams}`)}
           >
-            <div className="conv-row-top">
-              <b>{item.title}</b>
-              <span className="muted conv-row-when">{item.lastMessageLabel || ""}</span>
+            <ConversationAvatar conversationId={item.id} name={item.title} channel={item.channelType || (item.sellerLeadId ? "whatsapp" : "other")} />
+            <div className="conv-row-copy">
+              <div className="conv-row-top">
+                <b>{item.title}</b>
+                {item.unread ? <span className="conv-unread-dot" title="Непрочитанные сообщения" aria-label="Непрочитанные сообщения" /> : null}
+              </div>
+              <div className="conv-preview">{item.lastMessagePreview || "Пока нет сообщений"}</div>
+              <div className="conv-row-detail" title={[item.phone, item.topic, item.sourceLine].filter(Boolean).join(" · ")}>
+                {item.topic || phoneText(item.phone)}
+              </div>
+              <div className="conv-meta">
+                <span className={item.needsReply ? "conv-reply-badge" : ""}>{item.needsReply ? "Ждёт ответа" : item.businessStatus}</span>
+                <span className="badge">{item.modeLabel}</span>
+              </div>
+              <div className="conv-row-when muted">{item.lastMessageLabel}{item.waitLabel ? ` · ${item.waitLabel}` : ""}</div>
             </div>
-            <div className="muted">{phoneText(item.phone)}</div>
-            <div className="conv-topic">{item.topic}</div>
-            <div className="muted">{item.sourceLine}</div>
-            <div className="conv-preview">«{item.lastMessagePreview}»</div>
-            <div className="conv-meta">
-              <span>
-                {[item.unread ? "Новое" : null, item.businessStatus, item.needsReply ? "Нужен ответ" : null, item.waitLabel]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </span>
-              <span className="badge">{item.modeLabel}</span>
-            </div>
-            {item.urgent ? <span className="urgent-dot" title="Срочно" /> : null}
           </button>
         ))}
       </div>
@@ -323,11 +328,14 @@ export function ConversationsPage() {
   const chatPane = workspace ? (
     <div className="conv-chat-pane">
       <div className="conv-header">
-        <div>
+        <div className="conv-person">
+          <ConversationAvatar conversationId={workspace.conversation.id} name={workspace.client?.name || "Диалог"} channel={workspace.conversation.channelType || "other"} />
+          <div className="conv-person-copy">
           <Link className="btn secondary conversation-back" to={`/conversations?${searchParams}`}>← Диалоги</Link>
           <b>{nameWithPhone(workspace.client?.name || "Диалог", workspace.client?.phone)}</b>
           <div className="muted">
-            {workspace.conversation.sourceLine}
+            <span className={`conv-channel-label channel-${workspace.conversation.channelType || "other"}`}><ChannelIcon channel={workspace.conversation.channelType || "other"} />{workspace.conversation.channel}</span>
+            {workspace.conversation.channelConnected === false ? " · Канал отключён" : ""}
           </div>
           <div className="conv-topic">{workspace.conversation.topic}</div>
           {workspace.currentRequest ? (
@@ -340,6 +348,7 @@ export function ConversationsPage() {
           ) : (
             <div className="muted">Заявка не определена</div>
           )}
+          </div>
         </div>
         <div className="conv-header-actions">
           <span className="badge">{workspace.conversation.modeLabel}</span>
@@ -542,7 +551,7 @@ export function ConversationsPage() {
         <textarea
           ref={replyRef}
           value={text}
-          rows={4}
+          rows={2}
           onChange={(event) => setText(event.target.value)}
           autoFocus={focusReply}
           placeholder={
@@ -569,12 +578,20 @@ export function ConversationsPage() {
     </div>
   ) : (
     <div className="conv-chat-pane empty-pane">
-      <p className="muted">Выберите диалог слева</p>
+      <div className="conv-welcome">
+        <span className="conv-welcome-icon"><ChannelIcon channel="all" /></span>
+        <h3>Вся переписка — в одном месте</h3>
+        <p className="muted">Выберите диалог, чтобы прочитать сообщения и увидеть данные клиента, заявки и сделки.</p>
+      </div>
     </div>
   );
 
   const contextPane = workspace ? (
-    <aside className={`conv-context-pane ${showContext ? "open" : ""}`}>
+    <aside className={`conv-context-pane ${showContext ? "open" : ""}`} aria-label="Информация о клиенте и диалоге">
+      <div className="conv-context-identity">
+        <ConversationAvatar conversationId={workspace.conversation.id} name={workspace.client?.name || "Клиент"} channel={workspace.conversation.channelType || "other"} />
+        <div><b>{workspace.client?.name || "Клиент"}</b><div className="muted">{workspace.client?.companyName || phoneText(workspace.client?.phone)}</div></div>
+      </div>
       <div className="page-head mobile-only">
         <b>Контекст</b>
         <button type="button" className="btn secondary" onClick={() => setShowContext(false)}>
@@ -753,6 +770,18 @@ export function ConversationsPage() {
   return (
     <section className={`conversations-layout ${selectedId ? "has-selection" : ""}`}>
       {error ? <p className="error" style={{ gridColumn: "1 / -1" }} role="alert">{error}</p> : null}
+      <nav className="conversation-channels" aria-label="Каналы диалогов">
+        {CONVERSATION_CHANNELS.filter(([value]) => value === "all" || value === channel || availableChannels.includes(value)).map(([value, label]) => (
+          <button key={value} type="button" className={`conversation-channel channel-${value}${channel === value ? " active" : ""}`} aria-pressed={channel === value} aria-label={`${label}: диалоги`} onClick={() => {
+            const next = new URLSearchParams(searchParams);
+            if (value === "all") next.delete("channel"); else next.set("channel", value);
+            next.delete("focus");
+            navigate(`/conversations?${next}`);
+          }}>
+            <ChannelIcon channel={value} /><span>{label}</span>
+          </button>
+        ))}
+      </nav>
       {listPane}
       {chatPane}
       {contextPane}

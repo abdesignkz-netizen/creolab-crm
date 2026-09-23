@@ -1,3 +1,4 @@
+import { getConversationAvatar } from "./services/conversationAvatarService.ts";
 import { requirePlatformAdmin } from "./lib/access.ts";
 import { listTenantServices, saveTenantService } from "./services/tenantServiceCatalog.ts";
 import { connectTikTok, checkTikTok, disconnectTikTok, listTikTokConnections, receiveTikTok, tiktokConnectSchema } from "./services/tiktokConnectionService.ts";
@@ -1866,6 +1867,14 @@ export function createApp(prisma: PrismaClient) {
 
   app.get("/api/v1/conversations/:id", async (req, res) => {
     res.json(await getConversationWorkspace(prisma, await requireAuth(req), req.params.id));
+  });
+
+  app.get("/api/v1/conversations/:id/avatar", async (req, res) => {
+    const photo = await getConversationAvatar(prisma, await requireAuth(req), req.params.id);
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    if (!photo) { res.status(204).end(); return; }
+    res.type(photo.mime).send(photo.bytes);
   });
 
   app.get("/api/v1/conversations/:id/messages", async (req, res) => {
