@@ -333,7 +333,7 @@ function replaceMoneyByContext(text: string) {
 
 function replaceContractNumbers(text: string) {
   let next = text.replace(
-    new RegExp(`(договору?(?:\\s+[^\\n№]{0,80})?)\\s*(?:№|N|No\\.?)\\s*${CONTRACT_NO}`, "gi"),
+    new RegExp(`(договору?(?:\\s+(?:(?!приложени)[^\\n№]){0,80})?)\\s*(?:№|N|No\\.?)\\s*${CONTRACT_NO}`, "gi"),
     (_, title: string) => `${String(title).trimEnd()} № {{contract_number}}`,
   );
   next = next.replace(new RegExp(`(^|\\n)\\s*№\\s*${CONTRACT_NO}`, "g"), "$1№ {{contract_number}}");
@@ -413,7 +413,7 @@ export function fillContextualLeftovers(text: string, values: Record<string, str
   let next = text;
   if (values.contract_number) {
     next = next.replace(
-      new RegExp(`(договору?(?:\\s+[^\\n№]{0,80})?)\\s*(?:№|N|No\\.?)\\s*${CONTRACT_NO}`, "gi"),
+      new RegExp(`(договору?(?:\\s+(?:(?!приложени)[^\\n№]){0,80})?)\\s*(?:№|N|No\\.?)\\s*${CONTRACT_NO}`, "gi"),
       (_, title: string) => `${String(title).trimEnd()} № ${values.contract_number}`,
     );
     next = next.replace(/№\s*\d{6,}\/\d{1,4}/g, `№ ${values.contract_number}`);

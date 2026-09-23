@@ -172,7 +172,7 @@ const PRICE_COL_WIDTHS = [900, 6800, 2200];
 const ASSIGNMENT_COL_WIDTHS = [700, 4800, 2100, 2100];
 
 function looksLikeMoney(text: string) {
-  return /(?:\d{1,3}(?:\s\d{3})+|\d{4,7})\s*(?:тенге|₸)?/i.test(text) || /тенге|₸/.test(text);
+  return /^(?:\d+(?:[\s.,]\d+)*|\{\{\s*amount\s*\}\})\s*(?:(?:тенге|₸|тг)(?:\s+за\s+.+)?)?$/i.test(text.trim());
 }
 
 function tableCellTexts(tbl: string) {
@@ -186,14 +186,20 @@ function tableCellTexts(tbl: string) {
 export function classifyServiceTable(rows: string[][]) {
   if (!rows.length) return null;
   const blob = rows.flat().join(" \n ").toLowerCase();
-  if (/м\.п\.|основании устава/.test(blob) && !/стоимость|прайс|вид услуг/.test(blob)) return null;
-  const moneyRows = rows.filter((row) => looksLikeMoney(row[row.length - 1] || "") || row.some(looksLikeMoney)).length;
-  if (!moneyRows) return null;
+  // Bank accounts, BINs and addresses are numbers too. Require positive item-table
+  // evidence, and never treat party/signature tables as order lines.
+  if (/(?:^|[^а-яё])(?:б[иі]н|иин|бик|иик)(?=$|[^а-яё])|iban|\bkz\d|реквизит|директор|м\.п\.|\{\{\s*(?:buyer|seller)_/.test(blob)) return null;
   const header = (rows[0] || []).join(" ").toLowerCase();
   const cols = Math.max(...rows.map((row) => row.length), 0);
-  if (/срок|вид услуг/.test(header) || (cols >= 4 && /стоимость|тенге/.test(blob))) return "assignment";
-  if (cols >= 2 && cols <= 3) return "price";
-  if (/услуг|слайд|презентац|разработк|прайс/.test(blob)) return cols >= 4 ? "assignment" : "price";
+  const itemHeader = /вид\s+услуг|наименование|наименовани[ея]\s+(?:работ|товар)|описание\s+(?:работ|услуг)/.test(header);
+  const priceHeader = /стоимость|цена|сумма/.test(header);
+  if (cols >= 4 && itemHeader && priceHeader && /срок/.test(header)) return "assignment";
+  if (cols >= 2 && cols <= 3 && itemHeader && priceHeader) return "price";
+  if (rows.every(row => row.length === 2 && /[а-яёa-z]{3}/i.test(row[0])
+    && !/^(?:итого|всего)\s*:?/i.test(row[0]) && looksLikeMoney(row[1]) && /тенге|₸|тг/i.test(row[1]))) return "price";
+  const numberedItems = rows.filter((row, index) => row.length === 3 && /^\d+[.)]?$/.test(row[0]) && Number(row[0].replace(/[.)]$/, "")) === index + 1
+    && /[а-яёa-z]{3}/i.test(row[1]) && looksLikeMoney(row[2]));
+  if (numberedItems.length && numberedItems.length === rows.length) return "price";
   return null;
 }
 
@@ -228,7 +234,7 @@ function formatItemAmount(item: ServiceItem) {
 
 /** Visit nested Word tables from the inside out. A non-greedy regex ends an outer
  * table at its first child's closing tag and leaves orphan rows/cells behind. */
-function mapWordTables(xml: string, rewrite: (table: string, nested: boolean, depth: number) => string, depth = 0): string {
+function mapWordTables(xml: string, rewrite: (table: string, nested: boolean, depth: number, following: string) => string, depth = 0): string {
   const stack: Array<{ start: number; openEnd: number }> = [];
   let cursor = 0;
   const parts: string[] = [];
@@ -240,7 +246,7 @@ function mapWordTables(xml: string, rewrite: (table: string, nested: boolean, de
     if (!open || stack.length) continue;
     const inner = xml.slice(open.openEnd, match.index!);
     const table = xml.slice(open.start, open.openEnd) + mapWordTables(inner, rewrite, depth + 1) + tag;
-    parts.push(xml.slice(cursor, open.start), rewrite(table, /<w:tbl\b/.test(inner), depth));
+    parts.push(xml.slice(cursor, open.start), rewrite(table, /<w:tbl\b/.test(inner), depth, xml.slice(match.index! + tag.length)));
     cursor = match.index! + tag.length;
   }
   parts.push(xml.slice(cursor));
@@ -255,18 +261,22 @@ export function replaceServiceTables(
 ) {
   if (!items.length) return xml;
   const total = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(Math.round(Number(totalAmount) || 0));
-  return mapWordTables(xml, (tbl, nested, depth) => {
+  return mapWordTables(xml, (tbl, nested, depth, following) => {
     // Layout tables wrap legal text/signatures and must never be replaced as items.
     if (nested) return tbl;
     const rows = tableCellTexts(tbl);
     const kind = classifyServiceTable(rows);
     if (!kind) return tbl;
+    // A total may be the next paragraph/outer layout row, outside this leaf table.
+    // Only inspect the immediately following content, not totals of another appendix.
+    const followingText = paragraphPlainWithBreaks(following).trimStart();
+    const externalTotal = /^Итого\s*:/i.test(followingText);
     const replacement = kind === "assignment"
       ? wordSimpleTableXml(
         [
           ["№", "Вид Услуг, требования к результату", "Сроки выполнения", "Стоимость в тенге"],
           ...items.map((item, index) => [String(index + 1), item.name, completionTerms, formatItemAmount(item)]),
-          [`Итого: ${total}`],
+          ...(!externalTotal ? [[`Итого: ${total}`]] : []),
         ], ASSIGNMENT_COL_WIDTHS, true, true,
       )
       : wordSimpleTableXml(
@@ -527,6 +537,79 @@ export async function rewriteDocxText(bytes: Buffer, transform: (text: string) =
   return mapDocxXml(bytes, (paragraph) => rewriteParagraph(paragraph, transform));
 }
 
+/** Older uploads can have an address split across paragraphs, although the scan
+ * matched the whole address. Repair only address paragraphs immediately before
+ * an explicitly identified party's BIN; never infer a party from table position. */
+function markSplitPartyAddresses(xml: string) {
+  return xml.replace(/<w:tc\b[^>]*>(?:(?!<w:tc\b)[\s\S])*?<\/w:tc>/g, cell => {
+    const paragraphs = [...cell.matchAll(/<w:p\b[\s\S]*?<\/w:p>/g)];
+    for (let i = 0; i < paragraphs.length; i++) {
+      const role = paragraphPlainWithBreaks(paragraphs[i][0]).match(/БИН\s*:?\s*\{\{\s*(buyer|seller)_bin\s*\}\}/i)?.[1];
+      if (!role || cell.includes(`{{${role}_address}}`)) continue;
+      let start = i - 1;
+      while (start >= 0 && i - start <= 5) {
+        const text = paragraphPlainWithBreaks(paragraphs[start][0]).trim();
+        if (/^(?:РК(?:[,\s]|$)|Республика\s+Казахстан|Казахстан[,\s]|\d{6}\b|г\.|город\s|ул\.|улица\s)/i.test(text)) {
+          while (start > 0 && /^(?:РК(?:[,\s]|$)|Республика\s+Казахстан|Казахстан[,\s]|\d{6}\b|г\.|город\s|ул\.|улица\s)/i.test(paragraphPlainWithBreaks(paragraphs[start - 1][0]).trim())) start--;
+          const block = paragraphs.slice(start, i);
+          // Only consecutive paragraphs, no table boundaries or embedded content.
+          const from = block[0].index!;
+          const to = paragraphs[i].index!;
+          const between = cell.slice(from, to);
+          if (/<w:(?:drawing|pict|object|fldChar|sectPr)\b/.test(between)) break;
+          if (between.replace(/<w:p\b[\s\S]*?<\/w:p>/g, "").trim()) break;
+          if (/\{\{|БИК|ИИК|IBAN|БИН|директор/i.test(block.map(p => paragraphPlainWithBreaks(p[0])).join(" "))) break;
+          return cell.slice(0, from) + rebuildParagraphs(block[0][0], `{{${role}_address}}`) + cell.slice(to);
+        }
+        if (/\{\{|БИК|ИИК|директор/i.test(text)) break;
+        start--;
+      }
+    }
+    return cell;
+  });
+}
+
+/** Empty trailing paragraphs inherited from Word can spill onto a footer-only
+ * page. Keep one minimal paragraph after a final table (required by Word). */
+export function trimTrailingEmptyParagraphs(xml: string) {
+  const section = /<w:sectPr\b[^>]*>(?:(?!<w:sectPr\b)[\s\S])*?<\/w:sectPr>\s*<\/w:body>/.exec(xml);
+  if (!section) return xml;
+  const prefix = xml.slice(0, section.index);
+  const paragraphs = [...prefix.matchAll(/<w:p\b[\s\S]*?<\/w:p>/g)];
+  let cut = prefix.length;
+  for (let i = paragraphs.length - 1; i >= 0; i--) {
+    const p = paragraphs[i];
+    if (paragraphPlainWithBreaks(p[0]).trim() || /<w:(?:drawing|pict|object|fldChar|sectPr|sdt|bookmarkStart|footnoteReference|endnoteReference)\b/.test(p[0])) break;
+    // Never cross a table boundary captured between paragraphs.
+    if (prefix.slice(p.index! + p[0].length, cut).trim()) break;
+    cut = p.index!;
+  }
+  if (cut === prefix.length) return xml;
+  return prefix.slice(0, cut) + '<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="20" w:lineRule="exact"/><w:rPr><w:sz w:val="2"/></w:rPr></w:pPr></w:p>' + xml.slice(section.index);
+}
+
+function normalizeTemplatePagination(xml: string) {
+  const paragraphs = [...xml.matchAll(/<w:p\b[\s\S]*?<\/w:p>/g)];
+  const edits: Array<{ start: number; end: number; value: string }> = [];
+  let blanks: RegExpMatchArray[] = [];
+  for (const p of paragraphs) {
+    if (blanks.length && xml.slice(blanks.at(-1)!.index! + blanks.at(-1)![0].length, p.index!).trim()) blanks = [];
+    const empty = !paragraphPlainWithBreaks(p[0]).trim() && !/<w:(?:drawing|pict|object|fldChar|sectPr|sdt)\b/.test(p[0]);
+    if (empty) { blanks.push(p); continue; }
+    if (blanks.length >= 3 && /^Приложение\s*№\s*\d+\s*$/i.test(paragraphPlainWithBreaks(p[0]).trim())) {
+      // Old Word templates position appendices with dozens of empty lines. An
+      // actual page boundary remains stable when party details/items grow.
+      const heading = /<w:pageBreakBefore\b/.test(p[0]) ? p[0]
+        : /<w:pPr\b[^>]*>/.test(p[0]) ? p[0].replace(/<w:pPr\b[^>]*>/, '$&<w:pageBreakBefore/>')
+          : p[0].replace(/<w:p\b[^>]*>/, '$&<w:pPr><w:pageBreakBefore/></w:pPr>');
+      edits.push({ start: blanks[0].index!, end: p.index! + p[0].length, value: heading });
+    }
+    blanks = [];
+  }
+  for (const edit of edits.reverse()) xml = xml.slice(0, edit.start) + edit.value + xml.slice(edit.end);
+  return trimTrailingEmptyParagraphs(xml);
+}
+
 export async function fillDocxPlaceholders(
   bytes: Buffer,
   values: Record<string, string>,
@@ -535,10 +618,13 @@ export async function fillDocxPlaceholders(
 ) {
   const peek = await JSZip.loadAsync(bytes);
   const sourceXml = (await peek.file("word/document.xml")?.async("string")) || "";
-  const hasServiceTables = documentHasServiceTables(sourceXml);
+  const repairedXml = markSplitPartyAddresses(sourceXml);
+  peek.file("word/document.xml", repairedXml);
+  const prepared = Buffer.from(await peek.generateAsync({ type: "nodebuffer" }));
+  const hasServiceTables = documentHasServiceTables(repairedXml);
   const itemsTableXml = !hasServiceTables && itemRows.length ? wordItemsTableXml(itemRows) : "";
   return mapDocxXml(
-    bytes,
+    prepared,
     (paragraph, filePath) =>
       fillParagraph(
         paragraph,
@@ -546,10 +632,12 @@ export async function fillDocxPlaceholders(
         filePath.endsWith("document.xml") ? itemsTableXml : undefined,
         Boolean(itemsTableXml) || !hasServiceTables,
       ),
-    (xml, filePath) =>
-      filePath.endsWith("document.xml") && extras.items?.length && hasServiceTables
-        ? replaceServiceTables(xml, extras.items, extras.completionTerms || "", extras.totalAmount || 0)
-        : xml,
+    (xml, filePath) => {
+      if (!filePath.endsWith("document.xml")) return xml;
+      const filled = extras.items?.length && hasServiceTables
+        ? replaceServiceTables(xml, extras.items, extras.completionTerms || "", extras.totalAmount || 0) : xml;
+      return normalizeTemplatePagination(filled);
+    },
   );
 }
 
