@@ -206,10 +206,16 @@ describe("Documents phase 3", () => {
   it("отклоняет подпись другого файла и недоступную проверку без изменения договора", async () => {
     const before = await prisma.contract.findUniqueOrThrow({ where: { id: contractId } });
     const wrong = await json(`/api/v1/signature-requests/${sellerRequestId}/sign`, {
-      method: "POST", body: JSON.stringify({ cmsBase64: makeTestCms(Buffer.from("Другой договор")) }),
+      method: "POST", body: JSON.stringify({ cmsBase64: `-----BEGIN CMS-----\n${makeTestCms(Buffer.from("Другой договор"))}\n-----END CMS-----` }),
     });
     assert.equal(wrong.response.status, 422, JSON.stringify(wrong.body));
     assert.equal(wrong.body.code, "signature_invalid");
+    assert.match(wrong.body.message, /для этой версии договора/);
+    const foreignBin = await json(`/api/v1/signature-requests/${sellerRequestId}/sign`, {
+      method: "POST", body: JSON.stringify({ cmsBase64: makeTestCms(Buffer.from("Any file"), { bin: "999999999999" }) }),
+    });
+    assert.equal(foreignBin.response.status, 422);
+    assert.match(foreignBin.body.message, /БИН в выбранной ЭЦП не совпадает/);
     const url = process.env.KALKAN_VERIFY_URL;
     delete process.env.KALKAN_VERIFY_URL;
     try {
@@ -229,7 +235,7 @@ describe("Documents phase 3", () => {
   it("принимает подписи по очереди и закрывает договор", async () => {
     const pdf = await fetch(`${base}/api/v1/contracts/${contractId}/pdf`, { headers: { cookie } });
     const bytes = Buffer.from(await pdf.arrayBuffer());
-    const sellerCms = makeTestCms(bytes, { iin: "123456789013", bin: "123456789013" });
+    const sellerCms = `-----BEGIN CMS-----\r\n${makeTestCms(bytes, { iin: "123456789013", bin: "123456789013" }).match(/.{1,64}/g)!.join("\r\n")}\r\n-----END CMS-----`;
     const attempts = await Promise.all([1, 2].map(() => json(`/api/v1/signature-requests/${sellerRequestId}/sign`, {
       method: "POST", body: JSON.stringify({ cmsBase64: sellerCms }),
     })));
@@ -266,7 +272,7 @@ describe("Documents phase 3", () => {
     assert.equal(publicView.body.canSign, true);
     assert.equal(publicView.body.version, 1);
 
-    const buyerCms = makeTestCms(bytes, { iin: "222222222220", bin: "222222222220" });
+    const buyerCms = `-----BEGIN CMS-----\n${makeTestCms(bytes, { iin: "222222222220", bin: "222222222220" })}\n-----END CMS-----`;
     const stored = await prisma.contract.findFirst({ where: { id: contractId } });
     const attachment = await prisma.attachment.findFirst({ where: { id: stored?.generatedFileId || "" } });
     assert.ok(attachment);

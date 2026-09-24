@@ -7,6 +7,7 @@ import { inspectCms, pemFromCms } from "./services/cmsInspect.ts";
 import { verifyCmsWithKalkan } from "./services/kalkanCmsVerifyClient.ts";
 import { verifyDocumentSignature } from "./services/signatureVerificationService.ts";
 import { makeTestCms } from "./testCms.ts";
+import { startTestKalkan } from "./testKalkan.ts";
 
 describe("cms inspect", { concurrency: false }, () => {
   it("достаёт ИИН и БИН из сертификата", () => {
@@ -95,6 +96,22 @@ describe("cms inspect", { concurrency: false }, () => {
 });
 
 describe("kalkan cms verify sidecar", { concurrency: false }, () => {
+  it("проверяет PEM-ответ NCALayer по исходному файлу и отклоняет другой файл", async () => {
+    const verifier = await startTestKalkan();
+    try {
+      const documentBytes = Buffer.from("NCALayer contract bytes");
+      const raw = makeTestCms(documentBytes);
+      const pem = `-----BEGIN CMS-----\r\n${raw.match(/.{1,64}/g)!.join("\r\n")}\r\n-----END CMS-----\r\n`;
+      for (const cmsBase64 of [raw, pem]) {
+        const valid = await verifyDocumentSignature({ cmsBase64, documentBytes, documentHash: "test", expectedBin: "123456789013" });
+        assert.equal(valid.status, "VERIFIED", JSON.stringify(valid.details));
+        const wrong = await verifyDocumentSignature({ cmsBase64, documentBytes: Buffer.from("Another contract"), documentHash: "other" });
+        assert.equal(wrong.status, "FAILED");
+        assert.equal(wrong.details.error, "cms_verify_failed");
+      }
+    } finally { await verifier.close(); }
+  });
+
   async function withSidecar(
     handler: (body: { cmsBase64?: string; documentBase64?: string }, req: { headers: Record<string, string | string[] | undefined> }) => { status: number; json: Record<string, unknown> },
     run: (base: string) => Promise<void>,

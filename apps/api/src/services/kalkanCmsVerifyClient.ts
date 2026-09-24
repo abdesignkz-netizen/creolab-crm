@@ -1,4 +1,5 @@
 import { readKalkanVerifyConfig } from "../lib/kalkanVerifyConfig.ts";
+import { decodeCmsDer } from "./cmsInspect.ts";
 
 export type KalkanCryptoStatus = "VERIFIED" | "FAILED" | "UNAVAILABLE";
 export type KalkanAuthorityStatus = "VALID" | "REVOKED" | "UNCHECKED";
@@ -36,6 +37,15 @@ export async function verifyCmsWithKalkan(input: {
     return { skipped: true, cryptoStatus: "UNAVAILABLE", authorityStatus: "UNCHECKED", error: "gost_kalkan_adapter_missing" };
   }
 
+  // NCALayer basics returns PEM (BEGIN CMS); the verifier expects DER as Base64.
+  // Use the same bytes as certificate inspection and signature storage.
+  let cmsBase64: string;
+  try {
+    cmsBase64 = decodeCmsDer(input.cmsBase64).toString("base64");
+  } catch {
+    return { skipped: false, cryptoStatus: "FAILED", authorityStatus: "UNCHECKED", error: "cms_parse_failed" };
+  }
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.timeoutMs);
   try {
@@ -45,7 +55,7 @@ export async function verifyCmsWithKalkan(input: {
       method: "POST",
       headers,
       body: JSON.stringify({
-        cmsBase64: input.cmsBase64,
+        cmsBase64,
         documentBase64: input.documentBytes.toString("base64"),
       }),
       signal: controller.signal,

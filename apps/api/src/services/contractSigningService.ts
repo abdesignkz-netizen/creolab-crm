@@ -12,7 +12,8 @@ import { asMoney } from "./documentMoney.ts";
 import { getTenantDocumentFlags, requireDocumentsEnabled } from "./legalProfileService.ts";
 import { serializeContract } from "./documentDraftService.ts";
 import { verifyDocumentSignature } from "./signatureVerificationService.ts";
-import { signatureVerificationUnavailableMessage } from "./signatureVerificationError.ts";
+import { signatureVerificationFailureMessage, signatureVerificationUnavailableMessage } from "./signatureVerificationError.ts";
+import { decodeCmsDer } from "./cmsInspect.ts";
 import { ensureContractPdfAttachment, isPdfAttachment, pdfDownloadHeaders, sendStoredFile } from "./contractPdfCopy.ts";
 
 type SigningDb = PrismaClient | Prisma.TransactionClient;
@@ -404,13 +405,10 @@ async function applySignature(
       });
       throw new ApiError(503, "signature_verification_unavailable", signatureVerificationUnavailableMessage(reason), undefined, { reason: diagnosticCode });
     }
-    throw new ApiError(422, "signature_invalid", "Подпись не прошла проверку", undefined, verification.details);
+    throw new ApiError(422, "signature_invalid", signatureVerificationFailureMessage(verification.details.error), undefined, verification.details);
   }
 
-  const cms = Buffer.from(
-    input.cmsBase64.replace(/-----BEGIN CMS-----/g, "").replace(/-----END CMS-----/g, "").replace(/\s+/g, ""),
-    "base64",
-  );
+  const cms = decodeCmsDer(input.cmsBase64);
   const attachmentId = randomUUID();
   const storageKey = path.posix.join(input.tenantId, "signatures", request.contractId, `${attachmentId}.p7s`);
   const abs = resolveUploadPath(storageKey);

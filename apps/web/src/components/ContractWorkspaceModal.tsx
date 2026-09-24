@@ -153,7 +153,7 @@ export function ContractWorkspaceModal({ contractId, onClose, onChanged }: {
     {!contract && error ? <button type="button" className="btn secondary" disabled={busy} onClick={() => void action(async () => { await read(); })}>Повторить загрузку</button> : null}
     {note ? <p role="status">{note}</p> : null}
     {contract ? <p className="muted">{Number(contract.totalAmount).toLocaleString("ru-RU")} {contract.currency === "KZT" ? "₸" : contract.currency} · {fullySigned ? "Подписан" : seller ? "Подписан компанией, ожидается подпись заказчика" : review.confirmed ? "Подтверждён" : "Требует проверки"}</p> : null}
-    {contract?.importedPdf ? <p className="muted">Загруженный договор сохраняется в исходном виде. Для изменения загрузите новую редакцию.</p> : contract && !editable ? <p className="muted">Договор уже передан на подпись. Изменение этой версии недоступно.</p> : null}
+    {contract?.importedPdf ? <p className="muted">Загруженный договор сохраняется в исходном виде. Для изменения загрузите новую редакцию.</p> : contract && !editable ? <p className="muted">{seller || fullySigned ? "Договор уже подписан компанией. Изменение этой версии недоступно." : "Версия договора зафиксирована для подписания. Если попытка не удалась, нажмите «Подписать» повторно."}</p> : null}
     {editing ? <form className="panel contract-edit-form" onSubmit={event => { event.preventDefault(); void action(save); }}>
       <label>Предмет договора<textarea required value={form.subject} disabled={busy} onChange={event => setForm({ ...form, subject: event.target.value })}/></label>
       <label>Условия оплаты<textarea value={form.paymentTerms} disabled={busy} onChange={event => setForm({ ...form, paymentTerms: event.target.value })}/></label>
