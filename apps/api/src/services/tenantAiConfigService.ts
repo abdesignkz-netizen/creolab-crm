@@ -52,6 +52,7 @@ export type WhatsAppAiActivation = {
   knowledge: AiLivePiece;
   syncedAt: string | null;
   note: string;
+  delivery: { promptCharacters: number; knowledgeCharacters: number } | null;
 };
 
 function describePiece(
@@ -105,6 +106,8 @@ export function describeWhatsAppAiActivation(input: {
     knowledge,
     syncedAt: sync?.liveAt || sync?.lastAttemptAt || null,
     note: sync?.lastAttemptNote || "",
+    delivery: typeof sync?.sentPromptCharacters === "number" && typeof sync?.sentKnowledgeCharacters === "number"
+      ? { promptCharacters: sync.sentPromptCharacters, knowledgeCharacters: sync.sentKnowledgeCharacters } : null,
   };
 }
 
@@ -114,7 +117,6 @@ async function readActivation(prisma: PrismaClient, tenantId: string): Promise<W
     prisma.knowledgeDocument.findMany({
       where: { tenantId, status: "published" },
       orderBy: { updatedAt: "desc" },
-      take: 40,
       select: { title: true, content: true },
     }),
     prisma.integration.findFirst({ where: { tenantId, type: "whatsapp_seller" } }),
@@ -141,8 +143,6 @@ async function pushAiConfigToWhatsApp(prisma: PrismaClient, tenantId: string) {
     select: { id: true },
   });
   if (!integration) return readActivation(prisma, tenantId);
-  const context = await getPublishedTenantAiContext(prisma, tenantId);
-  const { promptFp, knowledgeFp } = publishedAiFingerprints(context);
   const attemptedAt = new Date().toISOString();
   try {
     const { syncWhatsAppAiManagerRegistration } = await import("./aiManagerRegistration.ts");
@@ -152,9 +152,6 @@ async function pushAiConfigToWhatsApp(prisma: PrismaClient, tenantId: string) {
       lastAttemptOk: Boolean(result.ok || result.registered),
       lastAttemptRegistered: Boolean(result.registered),
       lastAttemptNote: result.note,
-      ...(result.registered
-        ? { liveAt: attemptedAt, livePromptFp: promptFp, liveKnowledgeFp: knowledgeFp }
-        : {}),
     });
   } catch (error) {
     const note = error instanceof Error ? error.message : "Не удалось отправить в WhatsApp AI";
@@ -181,7 +178,6 @@ export async function getPublishedTenantAiContext(prisma: PrismaClient, tenantId
   const knowledge = await prisma.knowledgeDocument.findMany({
     where: { tenantId, status: "published" },
     orderBy: { updatedAt: "desc" },
-    take: 40,
     select: { id: true, title: true, content: true, sourceType: true, updatedAt: true },
   });
   const publishedPrompt = config?.promptStatus === "published" ? String(config.systemPrompt || "").trim() : "";
@@ -199,8 +195,7 @@ export function buildTenantAiSystemPreamble(context: Awaited<ReturnType<typeof g
   const knowledge = context.knowledge
     .map((item) => `### ${item.title}\n${item.content}`.trim())
     .filter(Boolean)
-    .join("\n\n")
-    .slice(0, 12000);
+    .join("\n\n");
   return [PLATFORM_BASE_PROMPT, context.tenantPrompt ? `Инструкции компании:\n${context.tenantPrompt}` : "", knowledge ? `База знаний компании:\n${knowledge}` : ""]
     .filter(Boolean)
     .join("\n\n");

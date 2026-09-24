@@ -19,6 +19,8 @@ export type WhatsAppSellerSchema = {
     liveAt?: string;
     livePromptFp?: string;
     liveKnowledgeFp?: string;
+    sentPromptCharacters?: number;
+    sentKnowledgeCharacters?: number;
   };
 };
 

@@ -34,11 +34,11 @@ export async function tenantAiManagerRegisterPayload(prisma: PrismaClient, tenan
   const knowledge = context.knowledge
     .map((item) => `### ${item.title}\n${item.content}`.trim())
     .filter(Boolean)
-    .join("\n\n")
-    .slice(0, 20000);
+    .join("\n\n");
   return {
     prompt: [context.platformBasePrompt, context.tenantPrompt].filter(Boolean).join("\n\n"),
     knowledge: knowledge || "База знаний компании не задана.",
+    fingerprints: publishedAiFingerprints(context),
     aiConfig: {
       model: context.model,
       temperature: context.temperature,
@@ -108,6 +108,10 @@ export async function syncWhatsAppAiManagerRegistration(
     };
   }
 
+  if (registered.ok !== true) {
+    return { ok: false as const, registered: false, note: "AI Manager не подтвердил сохранение настроек.", webhookToken: "", webhookUrl: "" };
+  }
+
   const registeredIntegration = "integration" in registered ? registered.integration : undefined;
   const webhookToken = String(registeredIntegration?.webhookToken || schema.webhookToken || "").trim();
   const webhookUrl = aiManagerWebhookUrl(sellerUrl, webhookToken);
@@ -129,7 +133,8 @@ export async function syncWhatsAppAiManagerRegistration(
     }
   }
 
-  const fps = publishedAiFingerprints(await getPublishedTenantAiContext(prisma, tenantId));
+  // Record the exact snapshot sent above, even if admin edited it during the request.
+  const fps = context.fingerprints;
   const attemptedAt = new Date().toISOString();
   const nextSchema: WhatsAppSellerSchema = {
     ...schema,
@@ -145,6 +150,8 @@ export async function syncWhatsAppAiManagerRegistration(
       liveAt: attemptedAt,
       livePromptFp: fps.promptFp,
       liveKnowledgeFp: fps.knowledgeFp,
+      sentPromptCharacters: context.prompt.length,
+      sentKnowledgeCharacters: context.knowledge.length,
     },
   };
   await prisma.integration.update({

@@ -10,8 +10,10 @@ import { setGreenApiFetchForTests } from "./services/greenApiWebhook.ts";
 import { recordAiUsage, listPlatformAiUsage } from "./services/aiUsageService.ts";
 import {
   getPublishedTenantAiContext,
+  buildTenantAiSystemPreamble,
   getTenantAiManagerAdmin,
   saveTenantAiPrompt,
+  syncTenantAiToWhatsApp,
   searchTenantKnowledge,
   upsertTenantKnowledgeDocument,
 } from "./services/tenantAiConfigService.ts";
@@ -346,6 +348,53 @@ describe("shared AI Manager SaaS", () => {
     assert.ok(kb);
     assert.match(kb.content, /экспресс-сайт/i);
     assert.equal(kb.status, "published");
+  });
+
+  it("sends the complete published knowledge beyond 20000 characters and 40 documents", async () => {
+    const tail = "FINAL_KNOWLEDGE_FACT_53";
+    const content = "Полная база знаний. ".repeat(1600) + tail;
+    const published = await upsertTenantKnowledgeDocument(prisma, platformAuth, tenantA, {
+      title: "Полная база", content, publish: true,
+    });
+    assert.ok(content.length > 20000);
+    const registration = registerCalls.at(-1)!;
+    assert.ok(String(registration.input.knowledge).includes(content));
+    assert.ok(String(registration.input.knowledge).includes(tail));
+    assert.ok(published.activation.knowledge.live);
+    assert.equal(published.activation.delivery?.knowledgeCharacters, String(registration.input.knowledge).length);
+    await prisma.knowledgeDocument.createMany({ data: Array.from({ length: 41 }, (_, index) => ({
+      tenantId: tenantA, title: `Fact ${index}`, content: `UNIQUE_FACT_${index}`, status: "published",
+    })) });
+    const context = await getPublishedTenantAiContext(prisma, tenantA);
+    assert.ok(context.knowledge.length > 40);
+    const { tenantAiManagerRegisterPayload } = await import("./services/aiManagerRegistration.ts");
+    const payload = await tenantAiManagerRegisterPayload(prisma, tenantA);
+    assert.ok(payload.knowledge.includes(content));
+    for (let index = 0; index < 41; index++) assert.ok(payload.knowledge.includes(`UNIQUE_FACT_${index}`));
+    assert.ok(buildTenantAiSystemPreamble(context).includes(content));
+    assert.ok(!payload.knowledge.includes("Секретная цена 999"));
+  });
+
+  it("records the sent version when the prompt changes during registration", async () => {
+    const before = await getPublishedTenantAiContext(prisma, tenantA);
+    const registration = mock.method(WhatsAppSellerBridge.prototype, "registerIntegration", async (input: { integrationId: string; prompt?: string }) => {
+      assert.ok(input.prompt?.includes(before.tenantPrompt));
+      await prisma.aIConfiguration.updateMany({ where: { tenantId: tenantA }, data: { systemPrompt: "Changed during registration", promptStatus: "published" } });
+      return { ok: true, integration: { webhookToken: `hook-${input.integrationId}`, integrationId: input.integrationId } };
+    });
+    try {
+      const result = await syncTenantAiToWhatsApp(prisma, platformAuth, tenantA);
+      assert.equal(result.activation.prompt.live, false);
+      assert.match(result.activation.prompt.reason, /более новая версия/);
+    } finally { registration.mock.restore(); }
+  });
+
+  it("does not mark a rejected registration as applied", async () => {
+    const registration = mock.method(WhatsAppSellerBridge.prototype, "registerIntegration", async () => ({ ok: false }));
+    try {
+      const result = await saveTenantAiPrompt(prisma, platformAuth, tenantA, { draftPrompt: "Rejected registration version", publish: true });
+      assert.equal(result.activation.prompt.live, false);
+    } finally { registration.mock.restore(); }
   });
 
   it("stores each client WhatsApp prompt and knowledge in service admin", async () => {
