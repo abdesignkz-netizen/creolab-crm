@@ -419,6 +419,18 @@ export function createApiClient(options: ClientOptions) {
       const qs = params.toString();
       return request(`/api/v1/documents${qs ? `?${qs}` : ""}`);
     },
+    avrSigning: (id: string) => request(`/api/v1/electronic-documents/${id}/signing`),
+    prepareAvrSellerSign: (id: string) => request(`/api/v1/electronic-documents/${id}/prepare-seller-sign`, { method: "POST" }),
+    sendAvrToBuyer: (id: string) => request(`/api/v1/electronic-documents/${id}/send-to-buyer`, { method: "POST" }),
+    downloadAvrSigningPdf: (id: string) => downloadBlob(`/api/v1/electronic-documents/${id}/signing-pdf`, "avr-original.pdf"),
+    signAvrAsSeller: (id: string, cmsBase64: string) => request(`/api/v1/electronic-documents/${id}/sign`, { method: "POST", body: JSON.stringify({ cmsBase64 }) }),
+    downloadSignedAvr: (id: string, format: "pdf" | "zip") => downloadBlob(`/api/v1/electronic-documents/${id}/signed-${format}`, `signed-avr.${format}`),
+    publicAvrSign: (token: string) => request(`/public/avr-sign/${encodeURIComponent(token)}`),
+    publicAvrSignPdfUrl: (token: string) => `/public/avr-sign/${encodeURIComponent(token)}/pdf`,
+    publicSubmitAvrSign: (token: string, cmsBase64: string) => request(`/public/avr-sign/${encodeURIComponent(token)}/sign`, { method: "POST", body: JSON.stringify({ cmsBase64 }) }),
+    publicDeclineAvrSign: (token: string) => request(`/public/avr-sign/${encodeURIComponent(token)}/decline`, { method: "POST", body: "{}" }),
+    publicAvrVerify: (id: string) => request(`/public/avr-verify/${encodeURIComponent(id)}`),
+    downloadPublicSignedAvr: (token: string, format: "pdf" | "zip") => downloadBlob(`/public/avr-sign/${encodeURIComponent(token)}/signed-${format}`, `signed-avr.${format}`),
     contractReadiness: (dealId: string) => request(`/api/v1/deals/${dealId}/contract-readiness`),
     createContractDraft: (dealId: string, body: unknown = {}) =>
       request(`/api/v1/deals/${dealId}/contracts`, { method: "POST", body: JSON.stringify(body) }),

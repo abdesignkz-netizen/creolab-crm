@@ -1623,6 +1623,68 @@ export function createApp(prisma: PrismaClient) {
     await sendAvrPdf(prisma, await requireAuth(req), req.params.id, res);
   });
 
+  app.get("/api/v1/electronic-documents/:id/signing", async (req, res) => {
+    const { getAvrSigning } = await import("./services/avrSigningService.ts");
+    res.json(await getAvrSigning(prisma, await requireAuth(req), req.params.id));
+  });
+  app.post("/api/v1/electronic-documents/:id/prepare-seller-sign", async (req, res) => {
+    const { prepareAvrSeller } = await import("./services/avrSigningService.ts");
+    res.json(await prepareAvrSeller(prisma, await requireAuth(req), req.params.id));
+  });
+  app.post("/api/v1/electronic-documents/:id/send-to-buyer", async (req, res) => {
+    const { sendAvrToBuyer } = await import("./services/avrSigningService.ts");
+    res.json(await sendAvrToBuyer(prisma, await requireAuth(req), req.params.id));
+  });
+  app.get("/api/v1/electronic-documents/:id/signing-pdf", async (req, res) => {
+    const { sendAvrSigningPdf } = await import("./services/avrSigningService.ts");
+    await sendAvrSigningPdf(prisma, res, { auth: await requireAuth(req), id: req.params.id });
+  });
+  app.post("/api/v1/electronic-documents/:id/sign", jsonLarge, async (req, res) => {
+    const { cmsBase64 } = submitSignatureSchema.parse(req.body || {});
+    const { submitAvrSignature } = await import("./services/avrSigningService.ts");
+    res.json(await submitAvrSignature(prisma, cmsBase64, { auth: await requireAuth(req), id: req.params.id }));
+  });
+  app.get("/public/avr-sign/:token", async (req, res) => {
+    rateLimit(`avr-sign:${req.ip}`, 60);
+    const { getPublicAvrSign } = await import("./services/avrSigningService.ts");
+    res.json(await getPublicAvrSign(prisma, req.params.token));
+  });
+  app.get("/public/avr-sign/:token/pdf", async (req, res) => {
+    rateLimit(`avr-pdf:${req.ip}`, 40);
+    const { sendAvrSigningPdf } = await import("./services/avrSigningService.ts");
+    await sendAvrSigningPdf(prisma, res, { token: req.params.token });
+  });
+  app.post("/public/avr-sign/:token/sign", jsonLarge, async (req, res) => {
+    rateLimit(`avr-submit:${req.ip}`, 20);
+    const { cmsBase64 } = submitSignatureSchema.parse(req.body || {});
+    const { submitAvrSignature } = await import("./services/avrSigningService.ts");
+    res.json(await submitAvrSignature(prisma, cmsBase64, { token: req.params.token }));
+  });
+  app.post("/public/avr-sign/:token/decline", json, async (req, res) => {
+    rateLimit(`avr-decline:${req.ip}`, 20);
+    const { reason } = declineSignatureSchema.parse(req.body || {});
+    const { declinePublicAvr } = await import("./services/avrSigningService.ts");
+    res.json(await declinePublicAvr(prisma, req.params.token, reason));
+  });
+  app.get("/public/avr-verify/:verificationId", async (req, res) => {
+    rateLimit(`avr-verify:${req.ip}`, 40);
+    const { getPublicAvrVerification } = await import("./services/avrSigningService.ts");
+    res.json(await getPublicAvrVerification(prisma, req.params.verificationId));
+  });
+  for (const format of ["pdf", "zip"] as const) {
+    app.get(`/api/v1/electronic-documents/:id/signed-${format}`, async (req, res) => {
+      const { downloadSignedAvr } = await import("./services/avrSigningService.ts");
+      const { sendSignedExport } = await import("./services/contractSignedExport.ts");
+      sendSignedExport(res, await downloadSignedAvr(prisma, format, { auth: await requireAuth(req), id: req.params.id }));
+    });
+    app.get(`/public/avr-sign/:token/signed-${format}`, async (req, res) => {
+      rateLimit(`avr-export:${req.ip}`, 20);
+      const { downloadSignedAvr } = await import("./services/avrSigningService.ts");
+      const { sendSignedExport } = await import("./services/contractSignedExport.ts");
+      sendSignedExport(res, await downloadSignedAvr(prisma, format, { token: req.params.token }));
+    });
+  }
+
   app.post("/api/v1/electronic-documents/:id/validate", json, async (req, res) => {
     const auth = await requireAuth(req);
     const membership = auth.activeMembership;

@@ -34,6 +34,8 @@ const STATUS_FILTERS: Record<string, Array<[string, string]>> = {
     ["CANCELLED", "Отменён"],
   ],
   AVR: [
+    ["PENDING_SIGNATURE", "На подписи в BasQar"],
+    ["PARTIALLY_SIGNED", "Ожидает подписи заказчика"],
     ["DRAFT", "Черновик"],
     ["VALIDATED", "Готов"],
     ["SIGNED", "Подписан"],

@@ -15,7 +15,7 @@ import { collectPdf, resolveFont } from "./contractPdf.ts";
 const hash = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 const mask = (value: string | null) => value ? `••••••••${value.slice(-4)}` : null;
 export type SigningReceipt = {
-  number: string; version: number; documentHash: string; verificationUrl: string;
+  documentLabel?: string; number: string; version: number; documentHash: string; verificationUrl: string;
   signers: Array<{ role: string; name: string; organization: string | null; bin: string | null; iin: string | null; signedAt: string; certificateSerial: string | null }>;
 };
 
@@ -26,7 +26,7 @@ export async function renderSigningReceipt(receipt: SigningReceipt) {
   doc.registerFont("regular", resolveFont("NotoSans-Regular.ttf"));
   doc.registerFont("bold", resolveFont("NotoSans-Bold.ttf"));
   doc.font("bold").fontSize(24).fillColor("#17243B").text("Лист подписания");
-  doc.moveDown(.4).font("regular").fontSize(11).fillColor("#52627B").text(`Договор ${receipt.number} · версия ${receipt.version}`);
+  doc.moveDown(.4).font("regular").fontSize(11).fillColor("#52627B").text(`${receipt.documentLabel || "Договор"} ${receipt.number} · версия ${receipt.version}`);
   doc.moveDown().font("bold").fontSize(15).fillColor("#13744B").text("Подписан обеими сторонами");
   for (const signer of receipt.signers) {
     if (doc.y > 600) doc.addPage();
@@ -38,7 +38,7 @@ export async function renderSigningReceipt(receipt: SigningReceipt) {
     doc.fontSize(9).fillColor("#52627B").text(`Сертификат: ${signer.certificateSerial || "не указан"}`);
     doc.text("Криптографическая проверка и проверка сертификата пройдены при приёме подписи.");
   }
-  doc.moveDown(1.5).font("bold").fontSize(10).fillColor("#17243B").text("SHA-256 исходного договора");
+  doc.moveDown(1.5).font("bold").fontSize(10).fillColor("#17243B").text("SHA-256 исходного документа");
   doc.font("regular").fontSize(8).text(receipt.documentHash);
   // Keep the QR and its caption together even with long party names.
   if (doc.y > 620) doc.addPage();
@@ -90,6 +90,11 @@ export async function buildSignedContractExport(prisma: PrismaClient, tenantId: 
     })(), role: row!.request!.signerType, name: row!.signerName || "Не указан", bin: row!.signerBin,
       iin: mask(row!.signerIin), signedAt: row!.signedAt.toISOString(), certificateSerial: row!.certificateSerial })),
   };
+  return buildSignedDocumentExport(original, files, receipt, format);
+}
+
+/** Shared archive format for contracts and AVR; original and signatures stay byte-identical. */
+export async function buildSignedDocumentExport(original: Buffer, files: Buffer[], receipt: SigningReceipt, format: "pdf" | "zip") {
   const sheet = await renderSigningReceipt(receipt);
   const pdf = await PDFDocument.create();
   const source = await PDFDocument.load(original);
@@ -100,16 +105,16 @@ export async function buildSignedContractExport(prisma: PrismaClient, tenantId: 
     ["original.pdf", original, "application/pdf"], ["seller.p7s", files[0], "application/pkcs7-signature"], ["buyer.p7s", files[1], "application/pkcs7-signature"],
   ];
   for (const [name, bytes, mimeType] of entries) await pdf.attach(bytes, name, { mimeType });
-  pdf.setTitle(`Договор ${contract.number} - подписан обеими сторонами`);
+  pdf.setTitle(`${receipt.documentLabel || "Договор"} ${receipt.number} - подписан обеими сторонами`);
   const annotated = Buffer.from(await pdf.save());
-  const safeNumber = contract.number.replace(/[^\p{L}\p{N}_.-]/gu, "_").slice(0, 100) || "contract";
+  const safeNumber = receipt.number.replace(/[^\p{L}\p{N}_.-]/gu, "_").slice(0, 100) || "contract";
   if (format === "pdf") return { bytes: annotated, name: `${safeNumber}-signed.pdf`, mime: "application/pdf" };
   const zip = new JSZip();
   for (const [name, bytes] of entries) zip.file(name, bytes);
   zip.file("signed-view.pdf", annotated);
   zip.file("signing-receipt.pdf", sheet);
   zip.file("verification.json", JSON.stringify({ ...receipt, verificationBasis: "stored checks at signature acceptance", files: entries.map(([name, bytes]) => ({ name, sha256: hash(bytes) })) }, null, 2));
-  zip.file("README.txt", "BasQar: договор подписан обеими сторонами.\n\noriginal.pdf - неизменённый подписанный оригинал.\nseller.p7s / buyer.p7s - отсоединённые CMS-подписи исполнителя и заказчика. Проверяйте каждую подпись совместно с original.pdf.\nsigned-view.pdf - копия для просмотра с листом подписания и вложенными оригиналом и ЭЦП.\nsigning-receipt.pdf - лист подписания.\nverification.json - сведения и контрольные суммы.\n\nPDF с отметками и протокол не заменяют криптографическую проверку. Даты - время приёма подписи в BasQar, не независимая метка времени НУЦ.\n");
+  zip.file("README.txt", "BasQar: документ подписан обеими сторонами.\n\noriginal.pdf - неизменённый подписанный оригинал.\nseller.p7s / buyer.p7s - отсоединённые CMS-подписи исполнителя и заказчика. Проверяйте каждую подпись совместно с original.pdf.\nsigned-view.pdf - копия для просмотра с листом подписания и вложенными оригиналом и ЭЦП.\nsigning-receipt.pdf - лист подписания.\nverification.json - сведения и контрольные суммы.\n\nPDF с отметками и протокол не заменяют криптографическую проверку. Даты - время приёма подписи в BasQar, не независимая метка времени НУЦ.\n");
   return { bytes: await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" }), name: `${safeNumber}-signatures.zip`, mime: "application/zip" };
 }
 

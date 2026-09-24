@@ -4,26 +4,26 @@ import { api } from "../lib/api";
 import { CONTRACT_SIGNING_ENABLED } from "../lib/featureFlags";
 import { signatureCheckLabel } from "../lib/signing/verificationLabels";
 
-export function VerifyPage() {
+export function VerifyPage({ avr = false }: { avr?: boolean }) {
+  const label = avr ? "АВР" : "договора";
   const { verificationId = "" } = useParams();
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
     if (!CONTRACT_SIGNING_ENABLED) return;
-    void api
-      .publicVerify(verificationId)
+    void (avr ? api.publicAvrVerify(verificationId) : api.publicVerify(verificationId))
       .then(setData)
       .catch((err) => setError(err instanceof Error ? err.message : "Проверка не найдена"));
-  }, [verificationId]);
+  }, [verificationId, avr]);
 
   if (!CONTRACT_SIGNING_ENABLED) {
     return (
       <div className="login">
         <div className="login-stage">
           <div className="panel" style={{ maxWidth: 560 }}>
-            <h2>Проверка договора</h2>
-            <p className="muted">Проверка подписи договора пока недоступна.</p>
+            <h2>Проверка {label}</h2>
+            <p className="muted">Проверка подписи {label} пока недоступна.</p>
           </div>
         </div>
       </div>
@@ -36,12 +36,12 @@ export function VerifyPage() {
     <div className="login">
       <div className="login-stage">
         <div className="panel" style={{ maxWidth: 560 }}>
-          <h2>Проверка договора</h2>
+          <h2>Проверка {label}</h2>
           {error ? <p className="error">{error}</p> : null}
           {data ? (
             <>
               <p>
-                <b>Договор {data.number}</b>
+                <b>{avr ? "АВР" : "Договор"} {data.number}</b>
               </p>
               <p className="muted">
                 {data.date ? new Date(data.date).toLocaleDateString("ru-RU") : ""} · версия {data.version || "—"} ·{" "}

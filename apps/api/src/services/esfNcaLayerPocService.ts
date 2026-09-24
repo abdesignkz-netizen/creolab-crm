@@ -508,6 +508,7 @@ export async function sendEsfWithNcaLayerSignature(prisma:PrismaClient,auth:Auth
   const m=requireTenant(auth);requireSendEsf(auth);
   const doc=await prisma.electronicDocument.findFirst({where:{id:documentId,tenantId:m.tenantId}});
   if(!doc)throw new ApiError(404,"not_found","Документ не найден");
+  if(doc.externalSystem==="BASQAR")throw new ApiError(409,"avr_signing_mode","Этот АВР подписывается в BasQar");
   if(doc.externalId)return sendEsfWithNcaLayerSignatureInternal(prisma,auth,documentId,raw);
   if(doc.status==="SENDING")throw new ApiError(409,"document_sending","Документ уже отправляется. Дождитесь результата.");
   if(!["VALIDATED","SIGNED"].includes(doc.status))throw new ApiError(422,"document_not_ready","Сначала проверьте документ");
@@ -520,7 +521,7 @@ export async function sendEsfWithNcaLayerSignature(prisma:PrismaClient,auth:Auth
     await tx.$queryRaw`SELECT id FROM "Deal" WHERE id = ${doc.dealId} AND "tenantId" = ${m.tenantId} FOR UPDATE`;
     const duplicate=await tx.electronicDocument.findFirst({where:{tenantId:m.tenantId,dealId:doc.dealId,type:doc.type,id:{not:doc.id},OR:[{externalId:{not:null}},{status:{in:["SENDING","SENT","ACCEPTED"]}}]}});
     if(duplicate)throw new ApiError(409,"document_duplicate","По сделке уже есть отправленный или отправляющийся документ");
-    const claimed=await tx.electronicDocument.updateMany({where:{id:doc.id,tenantId:m.tenantId,status:{in:["VALIDATED","SIGNED"]},externalId:null},data:{status:"SENDING"}});
+    const claimed=await tx.electronicDocument.updateMany({where:{id:doc.id,tenantId:m.tenantId,status:{in:["VALIDATED","SIGNED"]},externalId:null,OR:[{externalSystem:null},{externalSystem:{not:"BASQAR"}}]},data:{status:"SENDING"}});
     if(!claimed.count)throw new ApiError(409,"document_sending","Документ уже отправляется или изменён");
   });
   try {return await sendEsfWithNcaLayerSignatureInternal(prisma,auth,documentId,raw);}

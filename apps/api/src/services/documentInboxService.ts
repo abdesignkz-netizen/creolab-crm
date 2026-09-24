@@ -33,6 +33,8 @@ const INVOICE_STATUS_LABEL: Record<string, string> = {
 };
 
 const EDOC_STATUS_LABEL: Record<string, string> = {
+  PENDING_SIGNATURE: "На подписи в BasQar",
+  PARTIALLY_SIGNED: "Ожидает подписи заказчика",
   DRAFT: "Черновик",
   VALIDATED: "Готов",
   SIGNING: "Подписание",
@@ -67,7 +69,7 @@ export function documentStatusLabel(kind: DocumentKind, status: string) {
 export function isDocumentAttention(kind: DocumentKind, status: string, errorCode?: string | null) {
   if (kind === "CONTRACT") return CONTRACT_ATTENTION.has(status);
   if (kind === "INVOICE") return INVOICE_ATTENTION.has(status);
-  return status === "SENT" || Boolean(errorCode);
+  return ["SENT", "PENDING_SIGNATURE", "PARTIALLY_SIGNED"].includes(status) || Boolean(errorCode);
 }
 
 export async function countDocumentAttention(prisma: PrismaClient, tenantId: string) {
@@ -79,7 +81,7 @@ export async function countDocumentAttention(prisma: PrismaClient, tenantId: str
       where: {
         tenantId,
         type: { in: ["AVR", "ESF"] },
-        OR: [{ status: "SENT" }, { errorCode: { not: null } }],
+        OR: [{ status: { in: ["SENT", "PENDING_SIGNATURE", "PARTIALLY_SIGNED"] } }, { errorCode: { not: null } }],
       },
     }),
   ]);
@@ -146,7 +148,7 @@ export async function listTenantDocuments(
         : {}),
     ...(attentionOnly
       ? {
-          OR: [{ status: "SENT" }, { errorCode: { not: null } }],
+          OR: [{ status: { in: ["SENT", "PENDING_SIGNATURE", "PARTIALLY_SIGNED"] } }, { errorCode: { not: null } }],
         }
       : {}),
   });

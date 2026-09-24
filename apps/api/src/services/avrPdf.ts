@@ -415,6 +415,10 @@ export async function sendAvrPdf(prisma: PrismaClient, auth: AuthContext, docume
   if (document.type !== "AVR") {
     throw new ApiError(422, "not_avr", "PDF-форма доступна только для АВР");
   }
+  if (document.externalSystem === "BASQAR") {
+    const { sendAvrSigningPdf } = await import("./avrSigningService.ts");
+    return sendAvrSigningPdf(prisma, res, { auth, id: documentId });
+  }
   const source = await resolveAvrSource(prisma, membership.tenantId, document);
   const { buffer, filename } = await renderAvrPdf({ number: document.number, source });
   res.setHeader("Content-Type", "application/pdf");

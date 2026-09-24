@@ -1,0 +1,26 @@
+// Additive schema shared by PostgreSQL and PGlite startup.
+export const AVR_SIGNING_SQL = `
+CREATE TABLE IF NOT EXISTS "AvrSigning" (
+  "id" TEXT PRIMARY KEY,
+  "tenantId" TEXT NOT NULL,
+  "documentId" TEXT NOT NULL UNIQUE,
+  "status" TEXT NOT NULL DEFAULT 'PENDING_SIGNATURE',
+  "originalFileId" TEXT NOT NULL,
+  "documentHash" TEXT NOT NULL,
+  "snapshotJson" JSONB NOT NULL,
+  "sellerSignature" JSONB,
+  "buyerSignature" JSONB,
+  "buyerTokenHash" TEXT UNIQUE,
+  "expiresAt" TIMESTAMP(3),
+  "openedAt" TIMESTAMP(3),
+  "declinedAt" TIMESTAMP(3),
+  "declineReason" TEXT,
+  "signedAt" TIMESTAMP(3),
+  "verificationPublicId" TEXT NOT NULL UNIQUE,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" TIMESTAMP(3) NOT NULL,
+  UNIQUE ("tenantId", "id"),
+  UNIQUE ("tenantId", "documentId"),
+  FOREIGN KEY ("tenantId", "documentId") REFERENCES "ElectronicDocument"("tenantId", "id") ON DELETE CASCADE
+);
+`;

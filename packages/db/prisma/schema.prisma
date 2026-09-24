@@ -2009,10 +2009,38 @@ model ElectronicDocument {
   contract           Contract? @relation(fields: [tenantId, contractId], references: [tenantId, id])
   company            Company?  @relation(fields: [tenantId, companyId], references: [tenantId, id])
   invoice            Invoice?  @relation(fields: [tenantId, invoiceId], references: [tenantId, id])
+  basqarSigning      AvrSigning?
 
   @@unique([tenantId, id])
   @@unique([tenantId, type, number])
   @@index([tenantId, dealId, type, status])
+}
+
+// One immutable PDF and exactly two detached signatures per local AVR.
+// ESF XML signing remains a separate workflow.
+model AvrSigning {
+  id                   String   @id @default(uuid())
+  tenantId             String
+  documentId           String   @unique
+  status               String   @default("PENDING_SIGNATURE")
+  originalFileId       String
+  documentHash         String
+  snapshotJson         Json
+  sellerSignature      Json?
+  buyerSignature       Json?
+  buyerTokenHash       String?  @unique
+  expiresAt            DateTime?
+  openedAt             DateTime?
+  declinedAt           DateTime?
+  declineReason        String?
+  signedAt             DateTime?
+  verificationPublicId String   @unique @default(uuid())
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  document             ElectronicDocument @relation(fields: [tenantId, documentId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, documentId])
+  @@unique([tenantId, id])
 }
 
 model SupportArticle {

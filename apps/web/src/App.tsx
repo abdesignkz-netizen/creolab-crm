@@ -1037,7 +1037,7 @@ function SimpleList({ title, load, render }: { title: string; load: () => Promis
 
 export function App() {
   const location = useLocation();
-  const publicSigningPage = /^\/(sign|verify)\/[^/]+\/?$/.test(location.pathname);
+  const publicSigningPage = /^\/(sign|verify)\/(?:avr\/)?[^/]+\/?$/.test(location.pathname);
   const [me, setMe] = useState<any>(null);
   const [boot, setBoot] = useState<"loading" | "anon" | "ready" | "error" | "tenant-blocked">("loading");
   const [bootError, setBootError] = useState("");
@@ -1154,6 +1154,8 @@ export function App() {
           </Suspense>
         }
       />
+      <Route path="/sign/avr/:token" element={<Suspense fallback={<div className="state">Загрузка…</div>}><SignPage avr /></Suspense>} />
+      <Route path="/verify/avr/:verificationId" element={<Suspense fallback={<div className="state">Загрузка…</div>}><VerifyPage avr /></Suspense>} />
       <Route
         path="/sign/:token"
         element={

@@ -107,7 +107,7 @@ async function createAvrDraftLocked(
   const existing = await prisma.electronicDocument.findFirst({
     where:{tenantId:tid,dealId,type:"AVR",OR:[{externalId:{not:null}},{status:{in:["SENDING","SENT","ACCEPTED"]}}]},orderBy:{createdAt:"desc"},
   }) || await prisma.electronicDocument.findFirst({
-    where: { tenantId: tid, dealId, type: "AVR", status: { in: ["DRAFT", "VALIDATED", "SIGNED"] } },orderBy:{createdAt:"desc"},
+    where: { tenantId: tid, dealId, type: "AVR", status: { in: ["DRAFT", "VALIDATED", "SIGNED", "PENDING_SIGNATURE", "PARTIALLY_SIGNED"] } },orderBy:{createdAt:"desc"},
   });
   if (existing && existing.status !== "DRAFT") {
     return { document: serializeElectronicDocument(existing), reused: true };

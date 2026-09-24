@@ -7,7 +7,7 @@ export const BILLING_DATA_TABLES = [
   'DealStageHistory', 'DealContact', 'DealConversation', 'PaymentRecord', 'Task',
   'Note', 'Activity', 'Conversation', 'Message', 'MessageStatusEvent', 'Attachment',
   'Membership', 'Integration', 'Contract', 'ContractVersion', 'ContractTemplate', 'Invoice',
-  'InvoiceItem', 'ElectronicDocument', 'Agreement', 'KnowledgeVersion',
+  'InvoiceItem', 'ElectronicDocument', 'AvrSigning', 'Agreement', 'KnowledgeVersion',
   'KnowledgeDocument', 'CatalogItem', 'TenantServiceCategory',
 ] as const;
 

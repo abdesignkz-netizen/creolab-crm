@@ -1,3 +1,4 @@
+import { AVR_SIGNING_SQL } from "./avrSigningSchema.ts";
 import { BILLING_QUOTA_SQL } from "./billingQuotaSchema.ts";
 import { existsSync, mkdirSync, unlinkSync } from "node:fs";
 import path from "node:path";
@@ -57,6 +58,7 @@ async function applyLivePostgresPatches(prisma: PrismaClient) {
       console.error("[db] additive patch failed", sql, error);
     }
   }
+  for (const sql of AVR_SIGNING_SQL.split(";").map(s => s.trim()).filter(Boolean)) await prisma.$executeRawUnsafe(sql);
   for (const sql of BILLING_QUOTA_SQL) await prisma.$executeRawUnsafe(sql);
 }
 
@@ -525,6 +527,7 @@ async function applyAdditiveSchema(pglite: PGlite) {
     WHERE "healthStatus" IS NULL OR "healthStatus" = 'UNKNOWN';
 
     ${DOCUMENT_DOMAIN_SQL}
+    ${AVR_SIGNING_SQL}
     ${ACCOUNT_DOMAIN_SQL}
     ${PLATFORM_DOMAIN_SQL}
     ${AI_DOMAIN_SQL}

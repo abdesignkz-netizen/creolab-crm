@@ -40,6 +40,7 @@ async function loadDocument(prisma: PrismaClient, tenantId: string, documentId: 
     where: { id: documentId, tenantId },
   });
   if (!document) throw new ApiError(404, "not_found", "Документ не найден");
+  if (document.externalSystem === "BASQAR") throw new ApiError(409, "avr_signing_mode", "Этот АВР подписывается в BasQar");
   if (document.type !== "AVR" && document.type !== "ESF") {
     throw new ApiError(422, "unsupported_document", "ИС ЭСФ принимает только АВР и ЭСФ");
   }

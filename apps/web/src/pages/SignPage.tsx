@@ -5,7 +5,11 @@ import { createSigningClient, ncalayerUserMessage } from "../lib/signing/ncalaye
 import { ContractSignatureSummary } from "../components/ContractSignatureSummary";
 import { CONTRACT_SIGNING_ENABLED } from "../lib/featureFlags";
 
-export function SignPage() {
+export function SignPage({ avr = false }: { avr?: boolean }) {
+  const label = avr ? "АВР" : "договора";
+  const documentName = avr ? "АВР" : "Договор";
+  const signApi = avr ? { get: api.publicAvrSign, pdf: api.publicAvrSignPdfUrl, submit: api.publicSubmitAvrSign, decline: api.publicDeclineAvrSign, download: api.downloadPublicSignedAvr }
+    : { get: api.publicSign, pdf: api.publicSignPdfUrl, submit: api.publicSubmitSign, decline: api.publicDeclineSign, download: api.downloadPublicSignedContract };
   const { token = "" } = useParams();
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState("");
@@ -14,7 +18,7 @@ export function SignPage() {
 
   async function load() {
     try {
-      setData(await api.publicSign(token));
+      setData(await signApi.get(token));
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Ссылка недействительна");
@@ -23,16 +27,17 @@ export function SignPage() {
 
   useEffect(() => {
     if (!CONTRACT_SIGNING_ENABLED) return;
+    setData(null); setDone("");
     void load();
-  }, [token]);
+  }, [token, avr]);
 
   if (!CONTRACT_SIGNING_ENABLED) {
     return (
       <div className="login">
         <div className="login-stage">
           <div className="panel" style={{ maxWidth: 560 }}>
-            <h2>Подписание договора</h2>
-            <p className="muted">Подписание договора пока недоступно.</p>
+            <h2>Подписание {label}</h2>
+            <p className="muted">Подписание {label} пока недоступно.</p>
           </div>
         </div>
       </div>
@@ -44,8 +49,8 @@ export function SignPage() {
     setError("");
     const client = createSigningClient();
     try {
-      const pdf = await fetch(api.publicSignPdfUrl(token), { credentials: "include" });
-      if (!pdf.ok) throw new Error("Не удалось открыть договор");
+      const pdf = await fetch(signApi.pdf(token), { credentials: "include" });
+      if (!pdf.ok) throw new Error("Не удалось открыть документ");
       const bytes = new Uint8Array(await pdf.arrayBuffer());
       let binary = "";
       bytes.forEach((byte) => {
@@ -54,8 +59,8 @@ export function SignPage() {
       const base64 = btoa(binary);
       await client.connect();
       const cms = await client.signDocument(base64);
-      await api.publicSubmitSign(token, cms);
-      setDone("Договор подписан обеими сторонами");
+      await signApi.submit(token, cms);
+      setDone(`${documentName} подписан обеими сторонами`);
       await load();
     } catch (err: any) {
       setError(ncalayerUserMessage(err));
@@ -71,14 +76,14 @@ export function SignPage() {
     <div className="login">
       <div className="login-stage sign-doc-stage">
           <div className="panel" style={{ maxWidth: 920 }}>
-            <h2>Подписание договора</h2>
+            <h2>Подписание {label}</h2>
             <p className="muted">Нужен NCALayer с ключом подписи НУЦ. PIN на сервер не передаётся.</p>
             {error ? <p className="error">{error}</p> : null}
           {done ? <p className="muted">{done}</p> : null}
           {data ? (
             <>
               <p>
-                <b>{data.subject || `Договор ${data.number}`}</b>
+                <b>{data.subject || `${documentName} ${data.number}`}</b>
               </p>
               <p className="muted">
                 № {data.number}
@@ -91,12 +96,13 @@ export function SignPage() {
               <p>
                 Сумма: <b>{Number(data.amount || 0).toLocaleString("ru-RU")} {data.currency}</b>
               </p>
-              <iframe className="sign-doc-frame" title="Договор PDF" src={api.publicSignPdfUrl(token)} />
-              <ContractSignatureSummary signed={data.contractStatus === "SIGNED"} signers={data.signers || []}
-                verificationUrl={data.verificationUrl} sellerName={data.sellerName} buyerName={data.buyerName} download={format => api.downloadPublicSignedContract(token, format)} />
+              <iframe className="sign-doc-frame" title={`${documentName} PDF`} src={signApi.pdf(token)} />
+              <ContractSignatureSummary documentLabel={label} signed={data.contractStatus === "SIGNED"} signers={data.signers || []}
+                verificationUrl={data.verificationUrl} sellerName={data.sellerName} buyerName={data.buyerName} download={format => signApi.download(token, format)} />
+              {data.declinedAt ? <p className="error">Вы отклонили этот АВР. Обратитесь к исполнителю для согласования.</p> : null}
               {data.waitingForSeller ? <p className="muted">Сначала должен подписать исполнитель.</p> : null}
               <div className="actions">
-                <a className="btn secondary" href={api.publicSignPdfUrl(token)}>
+                <a className="btn secondary" href={signApi.pdf(token)}>
                   Скачать исходный PDF
                 </a>
                 <button type="button" className="btn" disabled={busy || !data.canSign} onClick={() => void sign()}>
@@ -108,10 +114,10 @@ export function SignPage() {
                   disabled={busy || !data.canDecline}
                   onClick={() => {
                     setBusy(true);
-                    void api
-                      .publicDeclineSign(token)
+                    void signApi
+                      .decline(token)
                       .then(() => {
-                        setDone("Договор отклонён");
+                        setDone(`${documentName} отклонён`);
                         return load();
                       })
                       .catch((err) => setError(err instanceof Error ? err.message : "Не удалось отклонить"))
