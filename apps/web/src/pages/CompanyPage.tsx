@@ -100,6 +100,7 @@ export function CompanyPage() {
   const [templateId, setTemplateId] = useState("");
   const [templateBusy, setTemplateBusy] = useState(false);
   const [contractLines, setContractLines] = useState<ContractDraftLine[]>([newContractDraftLine()]);
+  const [completionTerms, setCompletionTerms] = useState("");
   const [formed, setFormed] = useState<{ previewId: string; number: string } | null>(null);
   const [viewOpen, setViewOpen] = useState(false);
 
@@ -496,7 +497,8 @@ export function CompanyPage() {
                 ))}
               </select>
             </label>
-            <ContractGenerateItems lines={contractLines} onChange={setContractLines} disabled={templateBusy} />
+            <ContractGenerateItems lines={contractLines} onChange={(next) => { setContractLines(next); setFormed(null); }}
+              completionTerms={completionTerms} onCompletionTermsChange={(value) => { setCompletionTerms(value); setFormed(null); }} disabled={templateBusy} />
             <div className="actions">
               {formed ? (
                 <>
@@ -540,7 +542,7 @@ export function CompanyPage() {
                     }
                     setTemplateBusy(true);
                     setError("");
-                    void api.createCompanyContractFromTemplate(id, { templateId, items })
+                    void api.createCompanyContractFromTemplate(id, { templateId, items, completionTerms })
                       .then((result: any) => {
                         if (!result.previewId) throw new Error("Не удалось сформировать договор");
                         setFormed({ previewId: result.previewId, number: result.number });

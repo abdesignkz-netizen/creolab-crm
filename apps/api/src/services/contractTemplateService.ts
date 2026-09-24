@@ -291,6 +291,7 @@ type PreviewItem = {
 };
 
 type PreviewMeta = {
+  completionTerms?: string | null;
   companyId: string;
   templateId: string;
   number: string;
@@ -368,7 +369,7 @@ async function previewContractFromTemplate(
   prisma: PrismaClient,
   auth: AuthContext,
   companyId: string,
-  input: { templateId: string; items?: PreviewItem[] },
+  input: { templateId: string; items?: PreviewItem[]; completionTerms?: string },
 ) {
   const membership = requireTenant(auth);
   const tid = membership.tenantId;
@@ -414,7 +415,7 @@ async function previewContractFromTemplate(
     subject: template.name,
     dealName: template.name,
     paymentTerms: "По согласованию сторон.",
-    completionTerms: "По согласованию сторон.",
+    completionTerms: input.completionTerms?.trim() || "По согласованию сторон.",
     amountWithoutVat: totals.amountWithoutVat,
     vatRate: totals.vatRate,
     vatAmount: totals.vatAmount,
@@ -449,6 +450,7 @@ async function previewContractFromTemplate(
   await assertFileCapacity(prisma, tid, pdf.length);
   await writeFile(abs, pdf);
   const meta: PreviewMeta = {
+    completionTerms: input.completionTerms?.trim() || null,
     companyId,
     templateId: template.id,
     number,
@@ -557,6 +559,7 @@ async function saveContractPreview(
         companyId,
         number: meta.number,
         subject: meta.subject,
+        completionTerms: meta.completionTerms || null,
         amountWithoutVat: totals.amountWithoutVat,
         vatRate: totals.vatRate,
         vatAmount: totals.vatAmount,
@@ -677,15 +680,20 @@ export async function createContractFromTemplateForCompany(
     const draft = await createContractDraft(prisma, auth, dealId, {
       subject: template.name,
       templateId: template.id,
+      completionTerms: input.completionTerms,
     });
     if (input.generate === false) {
       return { ...draft, dealId, createdDeal, generated: false };
     }
-    const generated = await generateContractPdfFile(prisma, auth, draft.contract.id, { templateId: template.id });
+    const generated = await generateContractPdfFile(prisma, auth, draft.contract.id, {
+      templateId: template.id,
+      completionTerms: input.completionTerms,
+    });
     return { ...generated, dealId, createdDeal, generated: true };
   }
   return previewContractFromTemplate(prisma, auth, companyId, {
     templateId: input.templateId!,
+    completionTerms: input.completionTerms,
     items: input.items?.map((item) => ({ ...item, vatRate: item.vatRate ?? 0 })),
   });
 }

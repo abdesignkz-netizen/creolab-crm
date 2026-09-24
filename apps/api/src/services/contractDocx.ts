@@ -10,7 +10,9 @@ import {
   ensureModernWordPackage,
   fillDocxPlaceholders,
   wordItemsTableXml,
+  docxXml,
 } from "./docxTemplateFill.ts";
+import { docxToText } from "./wordDocumentText.ts";
 
 export const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
@@ -104,18 +106,39 @@ export async function buildPlainDocx(text: string, itemRows: string[][] = []) {
   );
 }
 
+async function ensureCompletionTerms(bytes: Buffer, terms: string) {
+  const value = terms.trim();
+  if (!value || value === "По согласованию сторон.") return bytes;
+  const normalize = (text: string) => text.replace(/\s+/g, " ").trim();
+  if (normalize(await docxToText(bytes)).includes(normalize(value))) return bytes;
+  // Imported templates may have neither a term placeholder nor an assignment table.
+  const zip = await JSZip.loadAsync(bytes);
+  let xml = await zip.file("word/document.xml")!.async("string");
+  const paragraph = `<w:p><w:r><w:t xml:space="preserve">${encodeXml(`Срок выполнения работ / оказания услуг: ${value}`)}</w:t></w:r></w:p>`;
+  let inserted = false;
+  xml = xml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (part) => {
+    if (inserted || !/РЕКВИЗИТЫ/i.test(docxXml.paragraphPlainWithBreaks(part))) return part;
+    inserted = true;
+    return paragraph + part;
+  });
+  if (!inserted) xml = xml.replace(/(<w:sectPr\b[^>]*(?:\/>|>[\s\S]*?<\/w:sectPr>)\s*)?<\/w:body>/, (ending) => paragraph + ending);
+  zip.file("word/document.xml", xml);
+  return Buffer.from(await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" }));
+}
+
 export async function renderContractDocx(input: ContractPdfInput, sourceDocx?: Buffer | null) {
   const values = buildContractPlaceholders(input);
   const itemRows = contractItemTableRows(input);
   if (sourceDocx && isDocxBytes(sourceDocx)) {
-    return fillDocxPlaceholders(sourceDocx, values, itemRows, {
+    const filled = await fillDocxPlaceholders(sourceDocx, values, itemRows, {
       items: input.items,
       completionTerms: input.completionTerms,
       totalAmount: input.totalAmount,
     });
+    return ensureCompletionTerms(filled, input.completionTerms);
   }
   const body = applyPlaceholders(input.templateBody || "", { ...values, items_table: "{{items_table}}" })
     .replace(/\n{3,}/g, "\n\n")
     .trim();
-  return buildPlainDocx(body, itemRows);
+  return ensureCompletionTerms(await buildPlainDocx(body, itemRows), input.completionTerms);
 }

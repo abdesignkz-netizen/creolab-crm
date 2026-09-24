@@ -56,10 +56,14 @@ export function ContractGenerateItems({
   lines,
   onChange,
   disabled,
+  completionTerms,
+  onCompletionTermsChange,
 }: {
   lines: ContractDraftLine[];
   onChange: (lines: ContractDraftLine[]) => void;
   disabled?: boolean;
+  completionTerms: string;
+  onCompletionTermsChange: (value: string) => void;
 }) {
   const total = lines.reduce((sum, line) => sum + lineSum(line), 0);
   function patch(key: string, next: Partial<ContractDraftLine>) {
@@ -141,6 +145,18 @@ export function ContractGenerateItems({
       <p className="contract-gen-total">
         Итого: <b>{total.toLocaleString("ru-RU")} ₸</b>
       </p>
+      <label>
+        Срок выполнения работ / оказания услуг
+        <textarea
+          value={completionTerms}
+          onChange={(event) => onCompletionTermsChange(event.target.value)}
+          disabled={disabled}
+          maxLength={2000}
+          rows={2}
+          placeholder="Например: 10 рабочих дней после предоплаты или до 15.10.2026"
+        />
+      </label>
+      <p className="muted">Срок для всех позиций договора. Если не заполнить — по согласованию сторон.</p>
     </div>
   );
 }

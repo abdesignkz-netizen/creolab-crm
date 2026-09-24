@@ -674,6 +674,7 @@ export const patchContractTemplateSchema = z.object({
 });
 
 export const companyContractFromTemplateSchema = z.object({
+  completionTerms: z.string().trim().max(2000).optional(),
   templateId: z.string().uuid().optional(),
   previewId: z.string().uuid().optional(),
   save: z.boolean().optional(),

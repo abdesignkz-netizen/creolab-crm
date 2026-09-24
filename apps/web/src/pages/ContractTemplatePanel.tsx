@@ -54,6 +54,7 @@ export function ContractTemplatePanel({ onSaved }: { onSaved?: () => void }) {
   const [formBusy, setFormBusy] = useState(false);
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [lines, setLines] = useState<ContractDraftLine[]>([newContractDraftLine()]);
+  const [completionTerms, setCompletionTerms] = useState("");
   const [savedNotice, setSavedNotice] = useState("");
   const [justSavedId, setJustSavedId] = useState("");
   const [renameId, setRenameId] = useState("");
@@ -235,7 +236,7 @@ export function ContractTemplatePanel({ onSaved }: { onSaved?: () => void }) {
     setFormBusy(true);
     setError("");
     try {
-      const result: any = await api.createCompanyContractFromTemplate(companyId, { templateId, items });
+      const result: any = await api.createCompanyContractFromTemplate(companyId, { templateId, items, completionTerms });
       if (!result.previewId) throw new Error("Не удалось сформировать договор");
       setFormed({ previewId: result.previewId, number: result.number, companyId });
       setViewOpen(true);
@@ -479,6 +480,7 @@ export function ContractTemplatePanel({ onSaved }: { onSaved?: () => void }) {
                     const id = e.target.value;
                     const previous = items.find((row) => row.id === templateId)?.name || "";
                     setTemplateId(id);
+                    setFormed(null);
                     const nextName = items.find((row) => row.id === id)?.name || "";
                     setLines((current) => {
                       if (current.length === 1 && (!current[0].name.trim() || current[0].name === previous)) {
@@ -493,7 +495,8 @@ export function ContractTemplatePanel({ onSaved }: { onSaved?: () => void }) {
                   ))}
                 </select>
               </label>
-              <ContractGenerateItems lines={lines} onChange={setLines} disabled={formBusy} />
+              <ContractGenerateItems lines={lines} onChange={(next) => { setLines(next); setFormed(null); }}
+                completionTerms={completionTerms} onCompletionTermsChange={(value) => { setCompletionTerms(value); setFormed(null); }} disabled={formBusy} />
               <div className="actions">
                 {formed ? (
                   <>

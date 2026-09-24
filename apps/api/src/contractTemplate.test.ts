@@ -575,7 +575,7 @@ KZ111111111111111111
 
     const formed = await json(`/api/v1/companies/${company.body.id}/contract-from-template`, {
       method: "POST",
-      body: JSON.stringify({ templateId }),
+      body: JSON.stringify({ templateId, completionTerms: "  10 рабочих дней после предоплаты  " }),
     });
     assert.equal(formed.response.status, 201, JSON.stringify(formed.body));
     assert.equal(formed.body.dealId, null);
@@ -586,6 +586,7 @@ KZ111111111111111111
     assert.equal(previewWord.status, 200);
     const wordBytes = Buffer.from(await previewWord.arrayBuffer());
     assert.match(await docxToText(wordBytes), /Разработать презентацию компании/);
+    assert.match(await docxToText(wordBytes), /10 рабочих дней после предоплаты/);
 
     const previewFile = await fetch(`${base}/api/v1/documents/contract-previews/${formed.body.previewId}`, { headers: { cookie } });
     assert.equal(previewFile.status, 200, await previewFile.clone().text());
@@ -594,6 +595,7 @@ KZ111111111111111111
     assert.equal(previewBytes.subarray(0, 4).toString("utf8"), "%PDF");
     const previewText = await pdfText(previewBytes);
     assert.match(previewText, /Разработать презентацию компании/);
+    assert.match(previewText, /10 рабочих дней после предоплаты/);
     assert.match(previewText, /реквизит/i);
     assert.doesNotMatch(previewText, /5\.\s*Заключительные положения/);
 
@@ -603,6 +605,8 @@ KZ111111111111111111
     });
     assert.equal(saved.response.status, 201, JSON.stringify(saved.body));
     assert.equal(saved.body.contract.templateId, templateId);
+    assert.equal(saved.body.contract.completionTerms, "10 рабочих дней после предоплаты");
+    assert.equal((await prisma.contract.findUniqueOrThrow({ where: { id: saved.body.contract.id } })).completionTerms, "10 рабочих дней после предоплаты");
     assert.ok(saved.body.dealId);
     assert.equal(saved.body.contract.status, "READY_TO_SIGN");
 
@@ -617,6 +621,7 @@ KZ111111111111111111
     assert.equal(fileBytes.subarray(0, 4).toString("utf8"), "%PDF");
     const pdfBody = await pdfText(fileBytes);
     assert.match(pdfBody, /Разработать презентацию компании/);
+    assert.match(pdfBody, /10 рабочих дней после предоплаты/);
     assert.match(pdfBody, /реквизит/i);
     assert.doesNotMatch(pdfBody, /5\.\s*Заключительные положения/);
 
@@ -659,6 +664,24 @@ KZ111111111111111111
     assert.equal(items[0].name, "Разработка презентации");
     assert.equal(items[0].vatRate, 12);
     assert.equal(items[1].vatRate, 0);
+    assert.equal(saved.body.contract.completionTerms, null);
+
+    const tooLong = await json(`/api/v1/companies/${companyId}/contract-from-template`, {
+      method: "POST",
+      body: JSON.stringify({ templateId, completionTerms: "x".repeat(2001) }),
+    });
+    assert.equal(tooLong.response.status, 422);
+
+    const regenerated = await json(`/api/v1/companies/${companyId}/contract-from-template`, {
+      method: "POST",
+      body: JSON.stringify({ templateId, dealId: saved.body.dealId, completionTerms: "До 15.10.2026 включительно" }),
+    });
+    assert.equal(regenerated.response.status, 201, JSON.stringify(regenerated.body));
+    assert.equal(regenerated.body.contract.completionTerms, "До 15.10.2026 включительно");
+    const updatedWord = await fetch(`${base}/api/v1/contracts/${regenerated.body.contract.id}/docx`, { headers: { cookie } });
+    assert.equal(updatedWord.status, 200);
+    const updatedText = await docxToText(Buffer.from(await updatedWord.arrayBuffer()));
+    assert.match(updatedText, /До 15\.10\.2026 включительно/);
   });
 
   it("сохраняет вложенную таблицу и открывает сформированный договор в PDF", async () => {
