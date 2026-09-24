@@ -323,7 +323,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
   }, [location.search]);
 
   useEffect(() => {
-    if (!hasCompany) return;
+    if (!hasCompany || !me?.billing?.entitlements?.SUPPORT) return;
     let cancelled = false;
     async function loadHelp() {
       try {
@@ -341,7 +341,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [hasCompany, tenantId]);
+  }, [hasCompany, tenantId, me?.billing?.entitlements?.SUPPORT]);
 
   useEffect(() => {
     if (!platformAdmin) return;
@@ -463,7 +463,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
           <b>{pageTitle}</b>
           <span className="muted">{me.activeTenant?.tenant?.name || "Нет компании"}</span>
         </div>
-        {inServiceAdmin ? null : (
+        {inServiceAdmin || !me?.billing?.entitlements?.SUPPORT ? null : (
         <SupportHelpButton unread={helpUnread} onClick={() => { setHelpTicketId(null); setHelpOpen(true); }} />
         )}
         {unreadNotices > 0 ? (
@@ -518,7 +518,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
             </div>
           ))}
         </nav>
-        {inServiceAdmin ? null : (
+        {inServiceAdmin || !me?.billing?.entitlements?.SUPPORT ? null : (
         <button
           type="button"
           className="nav-help"
@@ -545,7 +545,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
           <div className="workspace-breadcrumb"><span>{pageTitle}</span></div>
           {hasCompany && !inServiceAdmin ? <WorkspaceSearch /> : null}
           <div className="workspace-identity">
-            {inServiceAdmin ? null : (
+            {inServiceAdmin || !me?.billing?.entitlements?.SUPPORT ? null : (
             <SupportHelpButton unread={helpUnread} onClick={() => { setHelpTicketId(null); setHelpOpen(true); }} />
             )}
             <span>{me.user.name}</span>
@@ -647,7 +647,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
         </button>
       </div>
 
-      {inServiceAdmin ? null : (
+      {inServiceAdmin || !me?.billing?.entitlements?.SUPPORT ? null : (
       <SupportCenter
         open={helpOpen}
         onClose={() => setHelpOpen(false)}

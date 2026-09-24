@@ -42,6 +42,8 @@ export type PricingQuote = {
   recommendation: { code: string; name: string; saveMinor: number; message: string } | null;
   snapshot: {
     planVersion: number;
+    baseFeatures?: Record<string, boolean>;
+    baseLimits?: Record<string, number>;
     enterpriseTerms?: { sla: string; integrations: string };
     basePriceAtActivation?: number;
     finalPriceAtActivation?: number;
@@ -113,8 +115,8 @@ function fromDb(row: DbPlan): CatalogItem {
     recommended: row.recommended,
     sortOrder: row.sortOrder,
     description: row.description || fallback?.description || "",
-    features: { ...(fallback?.features || {}), ...asRecord(row.featuresJson) } as CatalogItem["features"],
-    limits: { ...(fallback?.limits || {}), ...asRecord(row.limitsJson) } as CatalogItem["limits"],
+    features: asRecord(row.featuresJson) as CatalogItem["features"],
+    limits: asRecord(row.limitsJson) as CatalogItem["limits"],
     included: Array.isArray(row.includedJson)
       ? (row.includedJson as Array<{ code: string; qty: number }>)
       : fallback?.included,
@@ -168,8 +170,12 @@ export function mergeEntitlementState(
     }
   };
   const applyDelta = (item: CatalogItem, qty: number) => {
-    for (const [key, on] of Object.entries(item.features || {})) {
-      if (on) features[key as Feature] = true;
+    // Resource add-ons must not unlock a higher product tier; legacy module add-ons retain their contract.
+    const resourceOnly = ["ADDON_USER", "ADDON_AI_PACK", "ADDON_STORAGE_10GB", "ADDON_WHATSAPP"].includes(item.code);
+    if (!resourceOnly) {
+      for (const [key, on] of Object.entries(item.features || {})) {
+        if (on) features[key as Feature] = true;
+      }
     }
     for (const [key, value] of Object.entries(item.limits || {})) {
       const n = Number(value);
@@ -207,6 +213,7 @@ export async function quoteSubscription(
   const billingPeriod: BillingPeriod = input.billingPeriod === "YEARLY" ? "YEARLY" : "MONTHLY";
   const planCode = String(input.planCode || "").trim() || null;
   const plan = planCode ? await loadCatalogItem(prisma, planCode) : null;
+  if (!planCode) throw new ApiError(422, "plan_required", "Выберите основной тариф");
   if (planCode && !plan) throw new ApiError(404, "not_found", "Тариф не найден");
   if (plan && !["plan", "bundle"].includes(plan.kind)) throw new ApiError(422, "invalid_plan", "Выберите базовый тариф, а не дополнение");
   if (plan && (!plan.active || plan.catalogStatus === "HIDDEN")) {
@@ -235,7 +242,8 @@ export async function quoteSubscription(
 
   const aiTiers = addonRows.filter(row => /^ADDON_AI_(START|BUSINESS|PRO)$/.test(row.item.code));
   if (aiTiers.length > 1 || aiTiers.some(row => row.qty !== 1) || (plan?.features.AI_MANAGER && aiTiers.length)) throw new ApiError(422, "invalid_ai_tier", "Выберите один уровень AI Manager");
-  if (addonRows.some(row => row.item.code === "ADDON_AI_PACK") && !plan?.features.AI_MANAGER && !aiTiers.length) throw new ApiError(422, "ai_required", "Сначала подключите AI Manager");
+  if (addonRows.some(row => row.item.code === "ADDON_AI_PACK") && !plan?.features.AI_MANAGER && !plan?.features.AI_CONTROL && !aiTiers.length) throw new ApiError(422, "ai_required", "Сначала подключите AI Manager");
+  if (addonRows.some(row => row.item.code === "ADDON_WHATSAPP") && !plan?.features.CHANNELS) throw new ApiError(422, "channels_required", "Коммуникационные каналы доступны начиная с Control.");
   const lines: QuotedLine[] = [];
   if (plan) {
     const amount = unitPrice(plan, billingPeriod);
@@ -267,9 +275,9 @@ export async function quoteSubscription(
   const merged = mergeEntitlementState(plan, addonRows);
   const finalAmountMinor = lines.reduce((sum, line) => sum + line.amountMinor, 0);
   const baseAmountMinor = plan ? unitPrice(plan, billingPeriod) : 0;
-  const full = await loadCatalogItem(prisma, "BUNDLE_FULL");
+  const full = await loadCatalogItem(prisma, "FULL");
   let recommendation: PricingQuote["recommendation"] = null;
-  if (full && !lines.some(line => line.chargeType === "ONE_TIME") && plan?.code !== "BUNDLE_FULL" && plan?.code !== "CRM_ENTERPRISE") {
+  if (full && !lines.some(line => line.chargeType === "ONE_TIME") && plan?.code !== "FULL" && plan?.code !== "BUNDLE_FULL" && plan?.code !== "CRM_ENTERPRISE") {
     const fullPrice = unitPrice(full, billingPeriod);
     if (finalAmountMinor > fullPrice &&
         Object.entries(merged.features).every(([key, value]) => !value || full.features[key as Feature]) &&
@@ -298,6 +306,8 @@ export async function quoteSubscription(
     recommendation,
     snapshot: {
       planVersion: plan?.version || CATALOG_VERSION,
+      baseFeatures: mergeEntitlementState(plan, []).features,
+      baseLimits: mergeEntitlementState(plan, []).limits,
       basePriceAtActivation: baseAmountMinor,
       finalPriceAtActivation: finalAmountMinor,
       planCode: plan?.code || null,
@@ -346,4 +356,25 @@ export function publicOfferCards(items: CatalogItem[], period: BillingPeriod) {
       recommended: Boolean(("recommended" in offer && offer.recommended) || item.recommended),
     };
   }).filter(Boolean);
+}
+
+// Renewal is based on the customer's agreement, including retired SKUs and module add-ons.
+export async function quoteRenewal(prisma: PrismaClient, tenantId: string, planCode: string, period: string): Promise<PricingQuote> {
+  const { loadCurrentTenantPlan, limitsFromPlan, entitlementsFromSnapshot, snapshotFromPlan } = await import("./entitlementService.ts");
+  const row = await loadCurrentTenantPlan(prisma, tenantId);
+  if (!row || row.plan.code !== planCode || planCode === "BASQAR_FREE") throw new ApiError(422, "invalid_renewal", "Продлить можно текущий платный тариф");
+  const billingPeriod = row.billingPeriod === "YEARLY" ? "YEARLY" : "MONTHLY";
+  if (period !== billingPeriod) throw new ApiError(422, "renewal_period", "Для изменения периода согласуйте новые условия");
+  const saved = asRecord(row.priceSnapshotJson);
+  const originalLines = Array.isArray(saved.lines) ? saved.lines as QuotedLine[] : [];
+  const lines: QuotedLine[] = originalLines.length ? originalLines.filter(line => line.chargeType !== "ONE_TIME") : [{ code: row.plan.code, name: row.plan.name, kind: "plan", qty: 1, unitAmountMinor: row.amountMinor || 0, amountMinor: row.amountMinor || 0, chargeType: "RECURRING", catalogStatus: "HIDDEN" }];
+  const originalAddOns = Array.isArray(saved.addOns) ? saved.addOns as Array<{code: string; qty: number}> : Array.isArray(row.itemsJson) ? row.itemsJson as Array<{code: string; qty: number}> : [];
+  const addOns = originalAddOns.filter(addon => !originalLines.length || lines.some(line => line.code === addon.code));
+  const finalAmountMinor = lines.reduce((sum, line) => sum + line.amountMinor, 0);
+  const baseAmountMinor = lines.filter(line => line.kind !== "addon").reduce((sum, line) => sum + line.amountMinor, 0);
+  const active = { ...row, status: "active", endsAt: null };
+  const features = entitlementsFromSnapshot(snapshotFromPlan("active", active), active);
+  const limits = limitsFromPlan(row);
+  const snapshot = { ...saved, planVersion: Number(saved.planVersion || 1), planCode, billingPeriod, addOns, features, limits, lines, finalAmountMinor, basePriceAtActivation: baseAmountMinor, finalPriceAtActivation: finalAmountMinor } as PricingQuote["snapshot"];
+  return { planCode, planName: row.plan.name, billingPeriod, lines, includedCodes: [], baseAmountMinor, discountAmountMinor: 0, finalAmountMinor, currency: "KZT", features, limits, recommendation: null, snapshot };
 }

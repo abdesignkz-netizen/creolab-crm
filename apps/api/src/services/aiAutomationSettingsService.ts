@@ -1,3 +1,4 @@
+import { requireFeature } from "./entitlementService.ts";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
@@ -55,6 +56,12 @@ export async function updateAIAutomationSettings(
   const tenant = await prisma.tenant.findUnique({ where: { id: membership.tenantId } });
   if (!tenant) throw new ApiError(404, "not_found", "Компания не найдена");
 
+  const previous = parseAIAutomationSettings(tenant.settingsJson);
+  const advancedKeys = ["sourceModes", "serviceModes", "integrationModes", "customSchedule"] as const;
+  const advancedChanged = advancedKeys.some(key => input[key] !== undefined && JSON.stringify(input[key]) !== JSON.stringify(previous[key]));
+  if (advancedChanged || (input.followUp && input.followUp.maxAttempts > 3 && input.followUp.maxAttempts !== previous.followUp.maxAttempts) || (input.scheduleMode === "custom" && previous.scheduleMode !== "custom")) {
+    await requireFeature(prisma, auth, "ADVANCED_AUTOMATION");
+  }
   let next = parseAIAutomationSettings(tenant.settingsJson);
   if (input.defaultMode) {
     next = applyModeToSettings(next, input.defaultMode);

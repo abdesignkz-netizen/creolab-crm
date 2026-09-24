@@ -865,6 +865,11 @@ export async function retryFailedCampaign(prisma: PrismaClient, auth: AuthContex
 }
 
 export async function processCampaignQueue(prisma: PrismaClient, campaignId: string) {
+  const seed = await prisma.campaign.findFirst({ where: { id: campaignId }, select: { tenantId: true } });
+  if (seed) {
+    const { canUseFeature } = await import("./entitlementService.ts");
+    if (!(await canUseFeature(prisma, seed.tenantId, "MASS_MESSAGING"))) return;
+  }
   for (;;) {
     const campaign = await prisma.campaign.findFirst({
       where: { id: campaignId },

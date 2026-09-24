@@ -249,6 +249,8 @@ async function companyCard(prisma: PrismaClient, tenantId: string) {
     subscriptionStatus: billing.subscriptionStatus,
     planCode: billing.planCode,
     planName: billing.planName,
+    accessBreakdown: billing.accessBreakdown,
+    enterpriseTerms: billing.enterpriseTerms,
     activatedAt: billing.startsAt,
     expiresAt: billing.expiresAt,
     amountMinor: billing.amountMinor,

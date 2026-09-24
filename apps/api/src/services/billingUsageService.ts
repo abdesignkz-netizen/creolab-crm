@@ -45,8 +45,8 @@ export async function collectTenantUsage(prisma: PrismaClient, tenantId: string)
     rows: [
       ...([['CLIENTS', 'Клиенты', clients], ['ACTIVE_DEALS', 'Активные сделки', activeDeals], ['MONTHLY_LEADS', 'Заявки за месяц', monthlyLeads], ['DATABASE_MB', 'База данных', databaseMb], ['FILE_STORAGE_MB', 'Файлы', fileMb]] as const).map(([key,label,used]) => ({ key, label, used: Math.ceil(used * 100) / 100, cap: limits[key] ?? -1, unit: key.endsWith('_MB') ? 'MB' : undefined, measured: key !== 'DATABASE_MB' || databaseTracked })),
       { key: LIMITS.USERS, label: "Пользователи", used: users, cap: Number(limits[LIMITS.USERS] || limits.members || 0) },
-      { key: LIMITS.WHATSAPP_CONNECTIONS, label: "WhatsApp", used: whatsapp, cap: Number(limits[LIMITS.WHATSAPP_CONNECTIONS] || limits.whatsappActive || 0) },
-      { key: LIMITS.AI_USAGE, label: "AI", used: aiEvents, cap: Number(limits[LIMITS.AI_USAGE] || 0), clientMetric: true },
+      { key: LIMITS.WHATSAPP_CONNECTIONS, label: "Подключения коммуникационных каналов", used: whatsapp, cap: Number(limits[LIMITS.WHATSAPP_CONNECTIONS] || limits.whatsappActive || 0) },
+      { key: LIMITS.AI_USAGE, label: "AI-взаимодействия", used: aiEvents, cap: Number(limits[LIMITS.AI_USAGE] || 0), clientMetric: true },
       { key: LIMITS.PIPELINES, label: "Воронки", used: pipelineBoards, cap: Number(limits[LIMITS.PIPELINES] || 0) },
     ],
   };

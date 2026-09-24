@@ -227,6 +227,11 @@ async function conversationGuards(
 }
 
 export async function refreshConversationFollowUp(prisma: PrismaClient, tenantId: string, conversationId: string) {
+  const { canUseFeature } = await import("./entitlementService.ts");
+  if (!(await canUseFeature(prisma, tenantId, "AI_MANAGER"))) {
+    await cancelConversationFollowUps(prisma, tenantId, conversationId, "feature_required");
+    return;
+  }
   const { settings, timeZone } = await loadTenantSettings(prisma, tenantId);
   if (!settings.followUp.enabled) {
     await cancelConversationFollowUps(prisma, tenantId, conversationId, "followup_disabled");
@@ -306,6 +311,11 @@ export async function processClientFollowUp(
   prisma: PrismaClient,
   item: { id: string; tenantId: string; parentId: string; payloadJson: unknown },
 ) {
+  const { canUseFeature } = await import("./entitlementService.ts");
+  if (!(await canUseFeature(prisma, item.tenantId, "AI_MANAGER"))) {
+    await prisma.scheduledAction.update({ where: { id: item.id }, data: { state: "canceled", cancelReason: "feature_required" } });
+    return { skipped: "feature_required" as const };
+  }
   const { settings, timeZone } = await loadTenantSettings(prisma, item.tenantId);
   if (!settings.followUp.enabled) {
     await prisma.scheduledAction.update({

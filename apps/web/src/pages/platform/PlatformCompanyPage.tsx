@@ -141,7 +141,7 @@ function CompanyInfo({ company, onSaved }: { company: any; onSaved: (row: any) =
 }
 
 function CompanySubscription({ company, onSaved }: { company: any; onSaved: (row: any) => void }) {
-  const [planCode, setPlanCode] = useState(company.planCode && company.planCode !== "starter" ? company.planCode : "CRM_BUSINESS");
+  const [planCode, setPlanCode] = useState(company.planCode && company.planCode !== "starter" ? company.planCode : "CRM_START");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
 
@@ -162,6 +162,10 @@ function CompanySubscription({ company, onSaved }: { company: any; onSaved: (row
   return (
     <div className="panel stack">
       <h3>Подписка</h3>
+      {company.accessBreakdown ? <details><summary>Источники доступа и лимитов</summary>
+        <p>Base plan: {company.accessBreakdown.basePlan || "Grandfathered"} · Legacy: {company.accessBreakdown.legacy ? "да" : "нет"} · Grandfathered: {company.accessBreakdown.grandfathered ? "да" : "нет"}</p>
+        {[["Base features", company.accessBreakdown.baseFeatures], ["Base limits", company.accessBreakdown.baseLimits], ["Addons", company.accessBreakdown.addOns], ["Overrides", company.accessBreakdown.overrides], ["Согласованные функции", company.accessBreakdown.subscriptionFeatures], ["Согласованные лимиты", company.accessBreakdown.subscriptionLimits], ["Effective features", company.accessBreakdown.effectiveFeatures], ["Effective limits", company.accessBreakdown.effectiveLimits], ["Enterprise custom settings", company.enterpriseTerms]].map(([label,value]) => <div key={String(label)}><b>{String(label)}</b><pre style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere"}}>{value == null ? "Отдельный снимок отсутствует в прежнем договоре" : JSON.stringify(value,null,2)}</pre></div>)}
+      </details> : null}
       <p>Тариф: <b>{company.planName || "Нет"}</b></p>
       <p>Статус: <b>{company.subscriptionStatus || "—"}</b></p>
       <p>Стоимость: {company.amountMinor != null ? `${Number(company.amountMinor).toLocaleString("ru-RU")} ₸` : "—"}</p>
@@ -181,13 +185,12 @@ function CompanySubscription({ company, onSaved }: { company: any; onSaved: (row
       <label>
         Тариф
         <select value={planCode} onChange={(event) => setPlanCode(event.target.value)}>
+          <option value="BASQAR_FREE">BasQar Free</option>
           <option value="CRM_START">CRM Start</option>
-          <option value="CRM_BUSINESS">CRM Business</option>
-          <option value="CRM_PRO">CRM Pro</option>
-          <option value="AI_SALES">BasQar AI Sales</option>
-          <option value="CONTROL_STANDALONE">BasQar Control</option>
-          <option value="BUNDLE_CRM_AI">CRM + AI</option>
-          <option value="BUNDLE_FULL">BasQar Full</option>
+          <option value="CONTROL">Control</option>
+          <option value="SALES">Sales</option>
+          <option value="FULL">Full</option>
+          {company.accessBreakdown?.legacy ? <option value={company.planCode}>{company.planName} (legacy, продление по договору)</option> : null}
           <option value="CRM_ENTERPRISE">Enterprise</option>
         </select>
       </label>
@@ -195,7 +198,6 @@ function CompanySubscription({ company, onSaved }: { company: any; onSaved: (row
       <div className="actions" style={{ flexWrap: "wrap" }}>
         <button className="btn" disabled={Boolean(busy)} onClick={() => void run("plan", () => api.adminActivateSubscription(company.id, { planCode, source: "platform_admin", reason: "Ручная активация" }))}>Изменить тариф</button>
         <button className="btn secondary" disabled={Boolean(busy)} onClick={() => void run("extend", () => api.adminExtendSubscription(company.id, { reason: "Продление администратором" }))}>Продлить</button>
-        <button className="btn secondary" disabled={Boolean(busy)} onClick={() => void run("addon", () => api.adminActivateSubscription(company.id, { planCode, addOns: [{ code: "ADDON_CONTROL", qty: 1 }], reason: "Добавлен Control" }))}>Добавить Control</button>
         <button className="btn secondary" disabled={Boolean(busy)} onClick={() => void run("suspend", () => api.adminSuspendSubscription(company.id, { reason: "Приостановлено администратором" }))}>Приостановить</button>
         <button className="btn secondary" disabled={Boolean(busy)} onClick={() => void run("reactivate", () => api.adminReactivateSubscription(company.id, { reason: "Восстановлено администратором" }))}>Активировать</button>
         <button className="btn secondary" disabled={Boolean(busy)} onClick={() => void run("free", () => api.adminActivateSubscription(company.id, { planCode, source: "complimentary", reason: "Бесплатный период" }))}>Дать бесплатный период</button>

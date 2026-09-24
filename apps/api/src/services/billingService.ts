@@ -1,3 +1,4 @@
+import { FEATURE_LIST, LIMIT_LIST, LEGACY_CATALOG_CODES } from "@creolab/contracts";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import { writeAudit } from "../lib/audit.ts";
@@ -11,7 +12,7 @@ import {
   snapshotFromPlan,
 } from "./entitlementService.ts";
 import { PREVIEW_DATASET } from "./previewDataset.ts";
-import { loadPublicCatalog, publicOfferCards, quoteSubscription, serializeCatalogItem } from "./pricingEngine.ts";
+import { loadPublicCatalog, publicOfferCards, quoteRenewal, quoteSubscription, serializeCatalogItem } from "./pricingEngine.ts";
 import { activateSubscription } from "./subscriptionActivationService.ts";
 import { collectTenantUsage, usageWarnings } from "./billingUsageService.ts";
 
@@ -50,7 +51,7 @@ export async function getBillingState(prisma: PrismaClient, tenantId: string) {
     where: { tenantId, status: { in: ["PENDING", "AWAITING_PAYMENT", "PAYMENT_REVIEW", "APPROVED"] } },
     orderBy: { createdAt: "desc" },
   }).catch(() => null);
-  const price = resolved.plan?.priceSnapshotJson as { enterpriseTerms?: { sla: string; integrations: string }; lines?: Array<{ kind: string; chargeType: string; amountMinor: number }> } | null;
+  const price = resolved.plan?.priceSnapshotJson as { baseFeatures?: Record<string, boolean>; baseLimits?: Record<string, number>; enterpriseTerms?: { sla: string; integrations: string }; lines?: Array<{ kind: string; chargeType: string; amountMinor: number }> } | null;
   const priceLines = price?.lines || [];
   const priceBreakdown = { base: priceLines.filter(row => row.kind !== 'addon').reduce((n,row) => n + row.amountMinor,0), addOns: priceLines.filter(row => row.kind === 'addon' && row.chargeType !== 'ONE_TIME').reduce((n,row) => n + row.amountMinor,0), recurring: priceLines.filter(row => row.chargeType !== 'ONE_TIME').reduce((n,row) => n + row.amountMinor,0), oneTime: priceLines.filter(row => row.chargeType === 'ONE_TIME').reduce((n,row) => n + row.amountMinor,0) };
   const addOns = Array.isArray(resolved.plan?.itemsJson) ? resolved.plan?.itemsJson : [];
@@ -66,6 +67,17 @@ export async function getBillingState(prisma: PrismaClient, tenantId: string) {
     createdAt: tenant.createdAt.toISOString(),
     ...snapshot,
     entitlements: resolved.entitlements,
+    accessBreakdown: {
+      basePlan: snapshot.planName, planCode: snapshot.planCode,
+      legacy: LEGACY_CATALOG_CODES.includes(snapshot.planCode as never) || snapshot.grandfathered,
+      grandfathered: snapshot.grandfathered,
+      baseFeatures: price?.baseFeatures || null,
+      baseLimits: price?.baseLimits || null,
+      subscriptionFeatures: resolved.plan?.featuresSnapshotJson || resolved.plan?.plan.featuresJson,
+      subscriptionLimits: resolved.plan?.limitsSnapshotJson || resolved.plan?.plan.limitsJson,
+      addOns, overrides: resolved.override,
+      effectiveFeatures: resolved.entitlements, effectiveLimits: resolved.limits,
+    },
     limits: resolved.limits,
     usage: usage.rows,
     warnings: usageWarnings(usage, remaining),
@@ -122,6 +134,7 @@ export async function listPublicPlans(prisma: PrismaClient, period: string = "MO
 export async function quotePublic(prisma: PrismaClient, auth: AuthContext, input: unknown) {
   requireTenant(auth);
   const body = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+  if (body.requestType === "RENEWAL") return quoteRenewal(prisma, requireTenant(auth).tenantId, String(body.planCode || ""), String(body.billingPeriod || "MONTHLY"));
   return quoteSubscription(prisma, {
     planCode: body.planCode ? String(body.planCode) : null,
     addOns: Array.isArray(body.addOns) ? (body.addOns as Array<{ code: string; qty?: number }>) : [],
@@ -285,7 +298,7 @@ export async function extendSubscriptionAsPlatformAdmin(
   const renewalSnapshot = { ...snapshot, lines, addOns, finalAmountMinor, finalPriceAtActivation: finalAmountMinor, basePriceAtActivation: baseAmountMinor };
   const request = await prisma.subscriptionRequest.create({ data: {
     tenantId, requestedByUserId: auth.user.id, requestType: "RENEWAL", requestedPlanCode: current.plan.code,
-    requestedAddOnsJson: addOns, billingPeriod: current.billingPeriod, baseAmountMinor, finalAmountMinor,
+    requestedAddOnsJson: addOns, billingPeriod: current.billingPeriod || "MONTHLY", baseAmountMinor, finalAmountMinor,
     snapshotJson: renewalSnapshot as unknown as Prisma.InputJsonValue,
   } });
   const { confirmBillingPaymentAndActivate } = await import("./subscriptionRequestService.ts");
@@ -300,6 +313,8 @@ export async function upsertBillingOverride(
 ): Promise<BillingState> {
   requirePlatformAdmin(auth);
   const body = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+  if (Object.entries((body.features || {}) as Record<string, unknown>).some(([key, value]) => !FEATURE_LIST.includes(key as never) || typeof value !== "boolean")) throw new ApiError(422, "invalid_feature", "Неизвестная функция или некорректное значение");
+  if (Object.keys((body.limits || {}) as object).some(key => !LIMIT_LIST.includes(key as never))) throw new ApiError(422, "invalid_limit", "Неизвестный лимит");
   for (const value of Object.values((body.limits || {}) as object)) {
     if (typeof value !== "number" || !Number.isFinite(value) || value < -1) throw new ApiError(422, "invalid_limit", "Некорректный лимит");
   }

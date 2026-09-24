@@ -1,5 +1,6 @@
 import { mergeTaskContextSnapshot } from "@creolab/contracts";
 import type { Prisma, PrismaClient } from "@creolab/db";
+import { ApiError } from "../errors.ts";
 import { parseAIAutomationSettings, isWithinAiSchedule, offHoursBlocksAnalysis } from "./aiAutomationSettings.ts";
 import { decideAutomationPolicy, type AutomationDecision } from "./aiAutomationPolicyService.ts";
 import { analyzeRequestWithOptionalLlm, type RequestAnalysis } from "./requestAnalysisService.ts";
@@ -141,6 +142,8 @@ export async function processNewRequestAutomation(
   inquiryId: string,
   options: { forceMode?: "MANUAL" | "ASSIST" | "CONFIRM" | "AUTO"; forceStart?: boolean } = {},
 ) {
+  const { canUseFeature } = await import("./entitlementService.ts");
+  if (!(await canUseFeature(prisma, tenantId, "AI_MANAGER"))) return null;
   const inquiry = await prisma.inquiry.findFirst({
     where: { id: inquiryId, tenantId },
     include: {
@@ -448,6 +451,8 @@ export async function startAiManagerForInquiry(prisma: PrismaClient, tenantId: s
   inquiryId: string; status: AiProcessStatus; decision?: AutomationDecision; analysis?: RequestAnalysis | null;
   reason?: string | null; conversationId?: string;
 } | null> {
+  const { canUseFeature } = await import("./entitlementService.ts");
+  if (!(await canUseFeature(prisma, tenantId, "AI_MANAGER"))) throw new ApiError(403, "feature_required", "AI-менеджер продаж доступен начиная с Sales.");
   const inquiry = await prisma.inquiry.findFirst({
     where: { id: inquiryId, tenantId },
     include: {

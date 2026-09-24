@@ -1,3 +1,4 @@
+import { requireFeature as requireBillingFeature } from "./entitlementService.ts";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import {
   CONTROL_ACTION_META,
@@ -1307,6 +1308,7 @@ async function executeResolved(input: {
 }) {
   const started = Date.now();
   const membership = requireTenant(input.auth);
+  if (input.action.startsWith("BULK_")) await requireBillingFeature(input.prisma, input.auth, "CONTROL_BULK");
   const period = mapControlPeriod(input.params, membership.tenant.timezone || "Asia/Almaty");
   try {
     if (input.confirm) {
@@ -1577,6 +1579,7 @@ export async function confirmAiControlCommand(
   const action = confirmation.action as ControlAction;
   assertControlPermission(access, action, parsed.source);
   const auth = await authForUserInTenant(prisma, identity.userId, integration.tenantId, `control:${confirmation.requestId}`);
+  if (action.startsWith("BULK_")) await requireBillingFeature(prisma, auth, "CONTROL_BULK");
   const claimed = await prisma.controlConfirmation.updateMany({
     where: { id: confirmation.id, status: "pending" },
     data: { status: "confirmed", confirmedAt: new Date() },

@@ -130,7 +130,8 @@ describe("self-service registration and preview entitlements", () => {
     assert.equal(ai.data.code, "feature_required");
 
     const support = await req(cookie, "/api/v1/support/articles", { tenantId });
-    assert.equal(support.status, 200);
+    assert.equal(support.status, 403);
+    assert.equal(support.data.code, "feature_required");
 
     const billing = await req(cookie, "/api/v1/billing", { tenantId });
     assert.equal(billing.status, 200);
@@ -139,7 +140,7 @@ describe("self-service registration and preview entitlements", () => {
 
     const activated = await req(platformCookie, `/api/v1/admin/tenants/${tenantId}/subscription/activate`, {
       method: "POST",
-      body: { planCode: "BUNDLE_CRM_AI" },
+      body: { planCode: "SALES" },
     });
     assert.equal(activated.status, 200, JSON.stringify(activated.data));
     assert.equal(activated.data.subscriptionStatus, "active");

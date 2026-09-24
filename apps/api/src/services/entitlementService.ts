@@ -53,18 +53,25 @@ const PLAN_FEATURE_ALIASES: Record<Feature, string[]> = {
   INSTAGRAM: ["INSTAGRAM"],
   TELEPHONY: ["TELEPHONY"],
   PRIORITY_SUPPORT: ["PRIORITY_SUPPORT"],
+  SUPPORT: ["SUPPORT"],
+  CONTROL_BULK: ["CONTROL_BULK"],
+  ADVANCED_AUTOMATION: ["ADVANCED_AUTOMATION"],
 };
 
 const FEATURE_HINT: Partial<Record<Feature, string>> = {
-  AI_MANAGER: "AI Manager подключается отдельным модулем или пакетом CRM + AI.",
-  AI_CONTROL: "BasQar Control не подключён.",
-  WHATSAPP: "WhatsApp входит в AI Manager или подключается как дополнение.",
-  DOCUMENTS: "Документы доступны в CRM Business и выше.",
-  ESF: "ИС ЭСФ доступна с документами в CRM Business и выше.",
-  ADVANCED_ANALYTICS: "Расширенная аналитика доступна в CRM Business и выше.",
-  API: "API доступен в CRM Pro и BasQar Full.",
-  MASS_MESSAGING: "Массовые рассылки доступны в CRM Business и выше.",
-  WORKFLOWS: "Workflow доступен в CRM Business и выше.",
+  AI_MANAGER: "AI-менеджер продаж доступен начиная с Sales.",
+  AI_CONTROL: "AI-контроль бизнеса доступен начиная с Control.",
+  WHATSAPP: "Коммуникационные каналы доступны начиная с Control.",
+  DOCUMENTS: "Документы доступны начиная с Control.",
+  ESF: "ИС ЭСФ доступна начиная с Control.",
+  ADVANCED_ANALYTICS: "Расширенная аналитика доступна начиная с Control.",
+  API: "API доступен в Full или по индивидуальным условиям.",
+  MASS_MESSAGING: "Массовые рассылки доступны начиная с Sales.",
+  WORKFLOWS: "Эта возможность доступна по условиям вашей подписки.",
+  SUPPORT: "Поддержка доступна начиная с CRM Start.",
+  IMPORT: "Импорт клиентов доступен начиная с CRM Start.",
+  CONTROL_BULK: "Расширенная автоматизация доступна в Full.",
+  ADVANCED_AUTOMATION: "Расширенная автоматизация доступна в Full.",
 };
 
 export type SubscriptionSnapshot = {
@@ -194,6 +201,11 @@ function planAllowsFeature(row: TenantPlanRow | null, feature: Feature, entitled
   const snap = asRecord(row.featuresSnapshotJson);
   const json = Object.keys(snap).length ? snap : asRecord(row.plan.featuresJson);
   const version = Number(asRecord(row.priceSnapshotJson).planVersion || 1);
+  if (version < 3 && !(feature in json)) {
+    if (feature === FEATURES.SUPPORT) return true;
+    if (feature === FEATURES.CONTROL_BULK) return Boolean(json.AI_CONTROL);
+    if (feature === FEATURES.ADVANCED_AUTOMATION) return Boolean(json.AI_MANAGER || json.ai || json.aiManager);
+  }
   if (version < 2 && !(feature in json)) {
     if (feature === FEATURES.IMPORT || feature === FEATURES.EXPORT) return Boolean(json.CRM_CORE);
     if (feature === FEATURES.FILE_STORAGE) return Number(asRecord(row.limitsSnapshotJson).STORAGE_GB ?? asRecord(row.plan.limitsJson).STORAGE_GB ?? 0) > 0;
@@ -212,7 +224,9 @@ export function entitlementsFromSnapshot(snap: SubscriptionSnapshot, row: Tenant
   const map = {} as Record<Feature, boolean>;
   const extra = asRecord(override?.featuresJson);
   for (const feature of FEATURE_LIST) {
-    map[feature] = snap.entitled && (typeof extra[feature] === "boolean" ? Boolean(extra[feature]) : planAllowsFeature(row, feature, snap.entitled));
+    const base = planAllowsFeature(row, feature, snap.entitled);
+    // Overrides may grant access, but an explicit false is an intentional deny.
+    map[feature] = snap.entitled && (typeof extra[feature] === "boolean" ? Boolean(extra[feature]) : base);
   }
   return map;
 }
@@ -330,6 +344,7 @@ export async function requireAnyFeature(prisma: PrismaClient, auth: AuthContext,
 }
 
 export function matchAlternativeFeatures(method: string, path: string): Feature[] {
+  if (method.toUpperCase() === "POST" && path === "/api/v1/situation/ask") return [FEATURES.AI_CONTROL, FEATURES.AI_MANAGER];
   return method.toUpperCase() === "POST" && /^\/api\/v1\/(tasks|campaigns)\/(parse|from-command|parse-command)/.test(path)
     ? [FEATURES.AI_MANAGER, FEATURES.AI_CONTROL] : [];
 }
@@ -380,7 +395,6 @@ const PAID_RULES: FeatureRule[] = [
   { pattern: /^\/api\/v1\/ai\/sandbox$/, feature: FEATURES.AI_MANAGER },
   { pattern: /^\/api\/v1\/settings\/ai-automation$/, feature: FEATURES.AI_MANAGER },
   { pattern: /^\/api\/v1\/management\/(ai-pause|claim-all-ai)$/, feature: FEATURES.AI_MANAGER },
-  { pattern: /^\/api\/v1\/situation\/ask$/, feature: FEATURES.AI_MANAGER },
   { pattern: /^\/api\/v1\/campaigns/, feature: FEATURES.MASS_MESSAGING },
   { pattern: /^\/api\/v1\/integrations\/[^/]+\/(test-mode|rotate-secret)$/, feature: FEATURES.CHANNELS },
   { pattern: /^\/api\/v1\/telegram\/begin-link$/, feature: FEATURES.CHANNELS },
@@ -395,22 +409,29 @@ const PAID_RULES: FeatureRule[] = [
 
 export function matchPaidFeatures(method: string, path: string): Feature[] {
   const m = method.toUpperCase();
-  if ((m === "GET" || m === "HEAD") && /^\/api\/v1\/contacts\/export(?:\?|$)/.test(path)) return [FEATURES.EXPORT];
-  if ((m === "GET" || m === "HEAD") && /^\/api\/v1\/analytics\/(trend|drilldown)(?:\?|$)/.test(path)) return [FEATURES.ADVANCED_ANALYTICS];
-  if (m === "GET" || m === "HEAD" || m === "OPTIONS" || m === "DELETE") return [];
   const pathOnly = String(path || "").split("?")[0];
-  if (
-    pathOnly.startsWith("/api/v1/auth") ||
-    pathOnly.startsWith("/api/v1/me") ||
-    pathOnly.startsWith("/api/v1/admin") ||
-    pathOnly.startsWith("/api/v1/support") ||
-    pathOnly.startsWith("/api/v1/billing") ||
-    pathOnly.startsWith("/api/v1/internal") ||
-    pathOnly.startsWith("/api/v1/invitations")
-  ) {
-    return [];
+  if (m === "OPTIONS" || /^\/api\/v1\/(auth|me|admin|billing|internal|invitations)(?:\/|$)/.test(pathOnly)) return [];
+  const required: Feature[] = [];
+  const readRules: FeatureRule[] = [
+    {pattern:/^\/api\/v1\/support(?:\/|$)/,feature:FEATURES.SUPPORT},
+    {pattern:/^\/api\/v1\/(documents|contracts|invoices|electronic-documents|signature-requests)(?:\/|$)/,feature:FEATURES.DOCUMENTS},
+    {pattern:/^\/api\/v1\/deals\/[^/]+\/(contract|invoice|avr)/,feature:FEATURES.DOCUMENTS},
+    {pattern:/^\/api\/v1\/integrations\/esf(?:\/|$)/,feature:FEATURES.ESF},
+    {pattern:/^\/api\/v1\/electronic-documents\/[^/]+\/esf-/,feature:FEATURES.ESF},
+    {pattern:/^\/api\/v1\/ai-manager(?:\/|$)/,feature:FEATURES.AI_MANAGER},
+    {pattern:/^\/api\/v1\/settings\/ai-automation$/,feature:FEATURES.AI_MANAGER},
+    {pattern:/^\/api\/v1\/campaigns(?:\/|$)/,feature:FEATURES.MASS_MESSAGING},
+    {pattern:/^\/api\/v1\/campaigns\/draft-message$/,feature:FEATURES.ADVANCED_AUTOMATION},
+    {pattern:/^\/api\/v1\/workspace\/control(?:\/|$)/,feature:FEATURES.AI_CONTROL},
+  ];
+  for (const rule of readRules) if (rule.pattern.test(pathOnly)) required.push(rule.feature);
+  if (m === "GET" || m === "HEAD") {
+    if (pathOnly === "/api/v1/contacts/export") required.push(FEATURES.EXPORT);
+    if (/^\/api\/v1\/analytics\/(trend|drilldown)$/.test(pathOnly)) required.push(FEATURES.ADVANCED_ANALYTICS);
+  } else if (m !== "DELETE") {
+    for (const rule of PAID_RULES) if ((!rule.methods || rule.methods.includes(m)) && rule.pattern.test(pathOnly)) required.push(rule.feature);
   }
-  return [...new Set(PAID_RULES.filter(rule => (!rule.methods || rule.methods.includes(m)) && rule.pattern.test(pathOnly)).map(rule => rule.feature))];
+  return [...new Set(required)];
 }
 
 export function matchPaidFeature(method: string, path: string): Feature | null {

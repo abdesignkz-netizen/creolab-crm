@@ -1,3 +1,4 @@
+import { FEATURE_LIST, LIMIT_LIST } from "@creolab/contracts";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import {
   OPEN_REQUEST_STATUSES,
@@ -8,7 +9,7 @@ import { ApiError } from "../errors.ts";
 import { writeAudit } from "../lib/audit.ts";
 import { requireCompanyAdmin, requirePlatformAdmin, requireTenant } from "../lib/access.ts";
 import type { AuthContext } from "../lib/types.ts";
-import { quoteSubscription, type QuoteAddonInput } from "./pricingEngine.ts";
+import { quoteRenewal, quoteSubscription, type QuoteAddonInput } from "./pricingEngine.ts";
 import { activateSubscription } from "./subscriptionActivationService.ts";
 import { collectTenantUsage } from "./billingUsageService.ts";
 import { getBillingState } from "./billingService.ts";
@@ -133,7 +134,9 @@ export async function createSubscriptionRequest(
   if (!planCode) throw new ApiError(422, "invalid", "Выберите тариф");
   const billingPeriod = body.billingPeriod === "YEARLY" ? "YEARLY" : "MONTHLY";
   const addOns = asAddOns(body.addOns || body.requestedAddOns);
-  const quote = await quoteSubscription(prisma, { planCode, addOns, billingPeriod });
+  const quote = body.requestType === "RENEWAL"
+    ? await quoteRenewal(prisma, membership.tenantId, planCode, billingPeriod)
+    : await quoteSubscription(prisma, { planCode, addOns, billingPeriod });
   if (typeof prisma.$transaction === "function") return prisma.$transaction(tx => createSubscriptionRequest(tx as PrismaClient, auth, input), { timeout: 30000 });
   await prisma.$queryRaw`SELECT id FROM "Tenant" WHERE id = ${membership.tenantId} FOR UPDATE`;
   const current = await getEntitlements(prisma, membership.tenantId);
@@ -152,6 +155,10 @@ export async function createSubscriptionRequest(
     }
   }
 
+  if (planCode === "BASQAR_FREE" && current.snapshot.planCode !== "BASQAR_FREE") {
+    const { assertFreeCapacity } = await import("./billingResourceService.ts");
+    await assertFreeCapacity(prisma);
+  }
   const open = await getOpenBillingRequest(prisma, membership.tenantId);
   const payload = {
     requestType: type,
@@ -187,6 +194,11 @@ export async function createSubscriptionRequest(
     entityId: row.id,
     changes: { planCode: quote.planCode, amount: quote.finalAmountMinor, type },
   });
+  if (planCode === "BASQAR_FREE") {
+    const billing = await activateSubscription(prisma, {tenantId:membership.tenantId,planCode,approvedSnapshot:quote.snapshot,actorUserId:auth.user.id,source:"free_activation",requestId:row.id});
+    const activated = await prisma.subscriptionRequest.update({where:{id:row.id},data:{status:"ACTIVATED",activatedSubscriptionId:billing.tenantPlanId}});
+    return serializeRequest(activated);
+  }
   return serializeRequest(row);
 }
 
@@ -376,13 +388,14 @@ export async function confirmBillingPaymentAndActivate(
 
   const snapshot = existing.snapshotJson as unknown as import("./pricingEngine.ts").PricingQuote["snapshot"];
   if (!snapshot.features || !snapshot.limits || !Array.isArray(snapshot.lines)) throw new ApiError(409, "requote_required", "Обновите запрос: в нём нет сохранённых условий тарифа");
-  if (existing.requestedPlanCode === "CRM_ENTERPRISE") {
+  if (existing.requestedPlanCode === "CRM_ENTERPRISE" && (existing.requestType !== "RENEWAL" || body.enterpriseTerms)) {
     const override = await prisma.tenantBillingOverride.findUnique({ where: { tenantId: existing.tenantId } });
     const terms = body.enterpriseTerms && typeof body.enterpriseTerms === "object" ? body.enterpriseTerms as Record<string, unknown> : null;
     const price = terms?.customPriceMinor ?? override?.customPriceMinor;
     const limits = (terms?.limits ?? override?.limitsJson ?? {}) as Record<string, number>;
     const features = (terms?.features ?? override?.featuresJson ?? {}) as Record<string, boolean>;
-    if (!Number.isSafeInteger(price) || Number(price) <= 0) throw new ApiError(422, "enterprise_terms_required", "Укажите согласованную стоимость Enterprise");
+    if (!Number.isSafeInteger(price) || Number(price) < 0) throw new ApiError(422, "enterprise_terms_required", "Укажите согласованную стоимость Enterprise");
+    if (Object.keys(limits).some(key => !LIMIT_LIST.includes(key as never)) || Object.keys(features).some(key => !FEATURE_LIST.includes(key as never))) throw new ApiError(422, "invalid_terms", "Неизвестная функция или лимит");
     if (Object.values(limits).some(value => !Number.isFinite(value) || value < -1) || Object.values(features).some(value => typeof value !== "boolean")) throw new ApiError(422, "invalid_terms", "Некорректные индивидуальные условия");
     if (terms && override) {
       // Explicitly agreed Enterprise terms replace conflicting old admin overrides.

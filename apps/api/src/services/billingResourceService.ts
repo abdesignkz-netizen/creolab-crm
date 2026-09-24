@@ -92,7 +92,7 @@ export async function freeMetrics(prisma: Db) {
     if (change.fromPlanCode !== 'BASQAR_FREE' || change.planCode === 'BASQAR_FREE') continue;
     converted.add(row.tenantId!);
     if (change.planCode === 'CRM_START') start.add(row.tenantId!);
-    if (change.planCode === 'BUNDLE_CRM_AI') bundle.add(row.tenantId!);
+    if (['BUNDLE_CRM_AI', 'SALES'].includes(String(change.planCode))) bundle.add(row.tenantId!);
   }
   const policy = await prisma.platformSetting.findUnique({ where: { key: FREE_POLICY_KEY } });
   return { total: rows.length, active, inactive: rows.length - active,

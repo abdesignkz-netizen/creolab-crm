@@ -6,9 +6,11 @@ import { spawnSync } from "node:child_process";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const scratch = mkdtempSync(join(tmpdir(), "creolab-tests-"));
+const requested = new Set(process.argv.slice(2).map(value => value.replace(/\.test\.ts$/, "")));
 const files = ["apps/api/src", "packages/contracts/src"].flatMap((dir) =>
   readdirSync(join(root, dir)).filter((name) => name.endsWith(".test.ts")).sort().map((name) => join(dir, name)),
-);
+).filter(file => !requested.size || requested.has(file.split("/").at(-1).replace(/\.test\.ts$/, "")));
+if (!files.length) throw new Error("No matching test files");
 let failures = 0;
 try {
   for (const [index, file] of files.entries()) {

@@ -70,6 +70,7 @@ async function completeChat(input: {
       const resolved = await getEntitlements(runtime.prisma, runtime.tenantId);
       if (!resolved.snapshot.grandfathered) {
         if (!resolved.entitlements.AI_MANAGER && !resolved.entitlements.AI_CONTROL) return { content: null as string | null };
+        if (["AI_MANAGER_REPLY", "AI_LEAD_ANALYSIS", "AI_FOLLOW_UP"].includes(runtime.feature || input.feature) && !resolved.entitlements.AI_MANAGER) return { content: null as string | null };
         const cap = Number(resolved.limits[LIMITS.AI_USAGE] || 0);
         if (cap === 0) return { content: null as string | null };
         const { billingMonthStart } = await import("./billingResourceService.ts");

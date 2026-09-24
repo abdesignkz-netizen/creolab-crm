@@ -9,7 +9,9 @@ export async function syncPricingCatalog(prisma: PrismaClient | Prisma.Transacti
     if (existing) {
       const assigned = await prisma.tenantPlan.findMany({ where: { planId: existing.id } });
       for (const row of assigned) {
+        const price = (row.priceSnapshotJson || {}) as Record<string, unknown>;
         await prisma.tenantPlan.update({ where: { id: row.id }, data: {
+          priceSnapshotJson: { ...price, planVersion: price.planVersion || existing.version },
           featuresSnapshotJson: Object.keys((row.featuresSnapshotJson || {}) as object).length ? row.featuresSnapshotJson : existing.featuresJson,
           limitsSnapshotJson: Object.keys((row.limitsSnapshotJson || {}) as object).length ? row.limitsSnapshotJson : existing.limitsJson,
         } as Prisma.TenantPlanUpdateInput });

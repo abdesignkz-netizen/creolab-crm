@@ -91,52 +91,21 @@ describe("SaaS billing catalog, requests and manual activation", () => {
     assert.equal(start.features.WORKFLOWS, false);
     assert.equal(start.features.AI_MANAGER, false);
 
-    const business = await quoteSubscription(prisma, { planCode: "CRM_BUSINESS" });
-    assert.equal(business.finalAmountMinor, 29900);
-    assert.equal(business.limits.USERS, 10);
-    assert.equal(business.features.WORKFLOWS, true);
-
-    const pro = await quoteSubscription(prisma, { planCode: "CRM_PRO" });
-    assert.equal(pro.finalAmountMinor, 49900);
-    assert.equal(pro.limits.USERS, 25);
-    assert.equal(pro.features.API, true);
-
-    const aiAddon = await quoteSubscription(prisma, {
-      planCode: "CRM_START",
-      addOns: [{ code: "ADDON_AI_START", qty: 1 }],
-    });
-    assert.equal(aiAddon.features.AI_MANAGER, true);
-    assert.equal(aiAddon.limits.WHATSAPP_CONNECTIONS, 1);
-
-    const aiStand = await quoteSubscription(prisma, { planCode: "AI_SALES" });
-    assert.equal(aiStand.finalAmountMinor, 29900);
-    assert.equal(aiStand.features.CRM_LITE, true);
-    assert.equal(aiStand.features.AI_MANAGER, true);
-
-    const controlAddon = await quoteSubscription(prisma, {
-      planCode: "CRM_BUSINESS",
-      addOns: [{ code: "ADDON_CONTROL", qty: 1 }],
-    });
-    assert.equal(controlAddon.features.AI_CONTROL, true);
-    assert.equal(controlAddon.finalAmountMinor, 39800);
-
-    const controlStand = await quoteSubscription(prisma, { planCode: "CONTROL_STANDALONE" });
-    assert.equal(controlStand.finalAmountMinor, 19900);
-    assert.equal(controlStand.features.CRM_LITE, true);
-    assert.equal(controlStand.features.AI_CONTROL, true);
-
-    const bundle = await quoteSubscription(prisma, { planCode: "BUNDLE_CRM_AI" });
-    assert.equal(bundle.finalAmountMinor, 49900);
-    assert.ok(bundle.lines.length === 1);
-
-    const bundlePlusIncluded = await quoteSubscription(prisma, {
-      planCode: "BUNDLE_CRM_AI",
-      addOns: [{ code: "ADDON_AI_BUSINESS", qty: 1 }],
-    });
-    assert.equal(bundlePlusIncluded.finalAmountMinor, 49900);
-
-    const full = await quoteSubscription(prisma, { planCode: "BUNDLE_FULL" });
-    assert.equal(full.finalAmountMinor, 69900);
+    for (const [code, price, users, ai, control] of [
+      ["CONTROL", 29900, 5, false, true], ["SALES", 49900, 10, true, true], ["FULL", 69900, 20, true, true],
+    ] as const) {
+      const quote = await quoteSubscription(prisma, { planCode: code });
+      assert.equal(quote.finalAmountMinor, price);
+      assert.equal(quote.limits.USERS, users);
+      assert.equal(quote.features.AI_MANAGER, ai);
+      assert.equal(quote.features.AI_CONTROL, control);
+    }
+    for (const code of ["CRM_BUSINESS", "CRM_PRO", "AI_SALES", "CONTROL_STANDALONE", "BUNDLE_CRM_AI", "BUNDLE_FULL"]) {
+      await assert.rejects(quoteSubscription(prisma, { planCode: code }), /недоступен/);
+    }
+    for (const code of ["ADDON_AI_START", "ADDON_AI_BUSINESS", "ADDON_AI_PRO", "ADDON_CONTROL"]) {
+      await assert.rejects(quoteSubscription(prisma, { planCode: "SALES", addOns: [{ code }] }), /недоступно/);
+    }
 
     const yearly = await quoteSubscription(prisma, { planCode: "CRM_START", billingPeriod: "YEARLY" });
     assert.equal(yearly.finalAmountMinor, 149000);
@@ -154,7 +123,7 @@ describe("SaaS billing catalog, requests and manual activation", () => {
 
     const plans = await req(cookie, "/api/v1/billing/plans", { tenantId });
     assert.equal(plans.status, 200);
-    assert.ok((plans.data.offers || []).some((item: { code: string }) => item.code === "BUNDLE_CRM_AI"));
+    assert.ok((plans.data.offers || []).some((item: { code: string }) => item.code === "SALES"));
 
     const blocked = await req(cookie, "/api/v1/ai/sandbox", { method: "POST", tenantId, body: { message: "hi" } });
     assert.equal(blocked.status, 403);
@@ -162,7 +131,7 @@ describe("SaaS billing catalog, requests and manual activation", () => {
     const spoofed = await req(cookie, "/api/v1/billing/requests", {
       method: "POST",
       tenantId,
-      body: { planCode: "BUNDLE_CRM_AI", finalAmountMinor: 1, amount: 1, addOns: [] },
+      body: { planCode: "SALES", finalAmountMinor: 1, amount: 1, addOns: [] },
     });
     assert.equal(spoofed.status, 201, JSON.stringify(spoofed.data));
     assert.equal(spoofed.data.finalAmountMinor, 49900);
@@ -176,7 +145,7 @@ describe("SaaS billing catalog, requests and manual activation", () => {
     const duplicate = await req(cookie, "/api/v1/billing/requests", {
       method: "POST",
       tenantId,
-      body: { planCode: "BUNDLE_CRM_AI" },
+      body: { planCode: "SALES" },
     });
     assert.equal(duplicate.status, 201);
     assert.equal(duplicate.data.id, spoofed.data.id);
@@ -202,7 +171,7 @@ describe("SaaS billing catalog, requests and manual activation", () => {
     });
     assert.equal(confirmed.status, 200, JSON.stringify(confirmed.data));
     assert.equal(confirmed.data.subscriptionStatus, "active");
-    assert.equal(confirmed.data.planCode, "BUNDLE_CRM_AI");
+    assert.equal(confirmed.data.planCode, "SALES");
     assert.equal(confirmed.data.entitlements.AI_MANAGER, true);
     assert.equal(confirmed.data.previewMode, false);
 
@@ -245,15 +214,15 @@ describe("SaaS billing catalog, requests and manual activation", () => {
     const upgrade = await req(cookie, "/api/v1/billing/requests", {
       method: "POST",
       tenantId,
-      body: { planCode: "CRM_BUSINESS", requestType: "UPGRADE" },
+      body: { planCode: "CONTROL", requestType: "UPGRADE" },
     });
     assert.equal(upgrade.status, 201);
     const upgraded = await req(platformCookie, `/api/v1/admin/billing/requests/${upgrade.data.id}/confirm`, {
       method: "POST",
       body: {},
     });
-    assert.equal(upgraded.data.planCode, "CRM_BUSINESS");
-    assert.equal(upgraded.data.entitlements.WORKFLOWS, true);
+    assert.equal(upgraded.data.planCode, "CONTROL");
+    assert.equal(upgraded.data.entitlements.DOCUMENTS, true);
     assert.ok(await prisma.contact.findFirst({ where: { id: contact.id, tenantId } }));
 
     const hash = (await prisma.user.findFirstOrThrow({ where: { email: { contains: "billing-c-" } } })).passwordHash;
@@ -276,7 +245,7 @@ describe("SaaS billing catalog, requests and manual activation", () => {
     const renew = await req(cookie, "/api/v1/billing/requests", {
       method: "POST",
       tenantId,
-      body: { planCode: "CRM_BUSINESS", requestType: "RENEWAL" },
+      body: { planCode: "CONTROL", requestType: "RENEWAL" },
     });
     const renewed = await req(platformCookie, `/api/v1/admin/billing/requests/${renew.data.id}/confirm`, {
       method: "POST",
@@ -368,6 +337,38 @@ describe("SaaS billing catalog, requests and manual activation", () => {
     assert.ok(new Date(response.data.expiresAt).getTime() > current.endsAt!.getTime());
     assert.equal(await prisma.billingPayment.count({where:{tenantId:tenant.tenantId}}),2);
     assert.equal(await prisma.subscriptionRequest.count({where:{tenantId:tenant.tenantId,requestType:"RENEWAL",status:"ACTIVATED"}}),1);
+  });
+
+  it("activates Free without a payment and rejects excessive downgrade usage", async () => {
+    const account = await signup("Free switch", "Free switch company", `free-switch-${Date.now()}@example.test`);
+    const paid = await req(platformCookie, `/api/v1/admin/tenants/${account.tenantId}/subscription/activate`, {method:"POST",body:{planCode:"CRM_START"}});
+    assert.equal(paid.status,200,JSON.stringify(paid.data));
+    const payments=await prisma.billingPayment.count({where:{tenantId:account.tenantId}});
+    const free=await req(account.cookie,"/api/v1/billing/requests",{method:"POST",body:{planCode:"BASQAR_FREE"}});
+    assert.equal(free.status,201,JSON.stringify(free.data));assert.equal(free.data.status,"ACTIVATED");
+    const state=await req(account.cookie,"/api/v1/billing");
+    assert.equal(state.data.planCode,"BASQAR_FREE");assert.equal(state.data.expiresAt,null);assert.equal(state.data.paymentMethod,"FREE");
+    assert.equal(await prisma.billingPayment.count({where:{tenantId:account.tenantId}}),payments);
+  });
+
+  it("enforces the five-tier HTTP matrix, including reads and advanced settings", async () => {
+    const account = await signup("Matrix", "Matrix company", `matrix-${Date.now()}@example.test`);
+    for (const [index, planCode] of ["BASQAR_FREE", "CRM_START", "CONTROL", "SALES", "FULL"].entries()) {
+      if (index > 0) {
+        const activated = await req(platformCookie, `/api/v1/admin/tenants/${account.tenantId}/subscription/activate`, {method:"POST",body:{planCode}});
+        assert.equal(activated.status,200,JSON.stringify(activated.data));
+      }
+      for (const [path,minimum] of [["support/articles",1],["documents",2],["workspace/control",2],["settings/ai-automation",3],["campaigns/missing",3]] as const) {
+        const response = await req(account.cookie, `/api/v1/${path}`, {tenantId:account.tenantId});
+        assert.equal(response.status,index >= minimum ? (path === "campaigns/missing" ? 404 : 200) : 403,`${planCode} ${path}: ${JSON.stringify(response.data)}`);
+      }
+      if(index >= 3) {
+        const advanced = await req(account.cookie,"/api/v1/settings/ai-automation",{method:"PATCH",body:{serviceModes:{WEB:"AUTO"}}});
+        assert.equal(advanced.status,index === 4 ? 200 : 403,JSON.stringify(advanced.data));
+        const mode = await req(account.cookie,"/api/v1/settings/ai-automation",{method:"PATCH",body:{defaultMode:"ASSIST"}});
+        assert.equal(mode.status,200,JSON.stringify(mode.data));
+      }
+    }
   });
 
   it("requires administrator Enterprise terms and preserves the agreed SLA", async () => {

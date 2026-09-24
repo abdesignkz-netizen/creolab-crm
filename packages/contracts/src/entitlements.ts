@@ -31,6 +31,9 @@ export const FEATURES = {
   INSTAGRAM: "INSTAGRAM",
   TELEPHONY: "TELEPHONY",
   PRIORITY_SUPPORT: "PRIORITY_SUPPORT",
+  SUPPORT: "SUPPORT",
+  CONTROL_BULK: "CONTROL_BULK",
+  ADVANCED_AUTOMATION: "ADVANCED_AUTOMATION",
 } as const;
 
 export type Feature = (typeof FEATURES)[keyof typeof FEATURES];
@@ -70,6 +73,9 @@ export const FEATURE_LABEL: Record<Feature, string> = {
   INSTAGRAM: "Instagram",
   TELEPHONY: "Телефония",
   PRIORITY_SUPPORT: "Приоритетная поддержка",
+  SUPPORT: "База знаний и поддержка",
+  CONTROL_BULK: "Массовые действия Control",
+  ADVANCED_AUTOMATION: "Расширенная автоматизация",
 };
 
 export const LIMITS = {
@@ -99,7 +105,7 @@ export const LIMIT_LABEL: Record<LimitKey, string> = {
   USERS: "Пользователи",
   PIPELINES: "Воронки",
   DEPARTMENTS: "Отделы",
-  WHATSAPP_CONNECTIONS: "WhatsApp",
+  WHATSAPP_CONNECTIONS: "Подключения коммуникационных каналов",
   AI_USAGE: "AI-взаимодействия",
   STORAGE_GB: "Хранилище, ГБ",
 };

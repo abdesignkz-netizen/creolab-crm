@@ -22,16 +22,15 @@ export function PaywallDialog() {
 
   if (!open) return null;
   const label = open.feature ? FEATURE_LABEL[open.feature as Feature] : "";
-  const isAddon = open.feature === "AI_CONTROL" || open.feature === "AI_MANAGER" || open.feature === "WHATSAPP";
 
   return (
     <div className="paywall-backdrop" role="dialog" aria-modal="true" aria-labelledby="paywall-title">
       <div className="panel paywall-card">
-        <h2 id="paywall-title">{isAddon && label ? `${label} не подключён` : "Подключите тариф"}</h2>
+        <h2 id="paywall-title">Подключите подходящий тариф</h2>
         <p>
           {open.message ||
             (label
-              ? `Эта функция доступна в тарифе с модулем «${label}».`
+              ? `Эта функция доступна в тарифе с функцией «${label}».`
               : "Эта функция доступна после подключения тарифа.")}
         </p>
         <div className="actions">
@@ -53,7 +52,7 @@ export function PaywallDialog() {
               navigate("/billing");
             }}
           >
-            {isAddon ? "Подключить модуль" : "Отправить запрос на подключение"}
+            Отправить запрос на подключение
           </button>
           <button className="btn secondary" type="button" onClick={() => setOpen(null)}>
             Отмена

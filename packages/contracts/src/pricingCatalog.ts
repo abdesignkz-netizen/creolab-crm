@@ -38,6 +38,31 @@ const CRM_BASE: Partial<Record<Feature, boolean>> = {
   [F.TASKS]: true,
   [F.TEAM]: true,
   [F.AUTOMATION]: true,
+  [F.SUPPORT]: true,
+};
+
+const AI_FEATURES: Partial<Record<Feature, boolean>> = {
+  [F.AI_MANAGER]: true,
+  [F.WHATSAPP]: true,
+  [F.MESSAGING]: true,
+  [F.CHANNELS]: true,
+};
+
+const CONTROL_FEATURES: Partial<Record<Feature, boolean>> = {
+  ...CRM_BASE,
+  [F.DOCUMENTS]: true, [F.AVR_ESF]: true, [F.ESF]: true,
+  [F.ADVANCED_ANALYTICS]: true, [F.AI_CONTROL]: true,
+  [F.CHANNELS]: true, [F.WHATSAPP]: true, [F.MESSAGING]: true,
+};
+
+const SALES_FEATURES: Partial<Record<Feature, boolean>> = {
+  ...CONTROL_FEATURES, ...AI_FEATURES,
+  [F.MASS_MESSAGING]: true, [F.CHANNELS]: true,
+};
+
+const FULL_FEATURES: Partial<Record<Feature, boolean>> = {
+  ...SALES_FEATURES, [F.API]: true, [F.API_ACCESS]: true,
+  [F.ADVANCED_ROLES]: true, [F.CONTROL_BULK]: true, [F.ADVANCED_AUTOMATION]: true,
 };
 
 const CRM_LITE: Partial<Record<Feature, boolean>> = {
@@ -71,18 +96,11 @@ const PRO_PLUS: Partial<Record<Feature, boolean>> = {
   [F.MULTI_DEPARTMENT]: true,
 };
 
-const AI_FEATURES: Partial<Record<Feature, boolean>> = {
-  [F.AI_MANAGER]: true,
-  [F.WHATSAPP]: true,
-  [F.MESSAGING]: true,
-  [F.CHANNELS]: true,
-};
-
 function yearly(monthly: number) {
   return monthly * 10;
 }
 
-export const CATALOG_VERSION = 2;
+export const CATALOG_VERSION = 3;
 // -1 means no commercial quota. It never means that an unimplemented module exists.
 const UNLIMITED_CRM = { [L.CLIENTS]: -1, [L.ACTIVE_DEALS]: -1, [L.MONTHLY_LEADS]: -1 };
 export const PRICING_CATALOG: CatalogItem[] = [
@@ -90,12 +108,12 @@ export const PRICING_CATALOG: CatalogItem[] = [
     code: "BASQAR_FREE", name: "BasQar Free", product: "CRM", kind: "plan",
     monthlyPriceMinor: 0, yearlyPriceMinor: 0, public: true, active: true,
     catalogStatus: "AVAILABLE", chargeType: "RECURRING", sortOrder: 0,
-    description: "Для знакомства с BasQar и первых продаж",
+    description: "Для самостоятельной работы и знакомства с BasQar.",
     features: { [F.CRM_CORE]: true, [F.CLIENTS]: true, [F.COMPANIES]: true,
-      [F.LEADS]: true, [F.DEALS]: true, [F.TASKS]: true },
-    limits: { [L.USERS]: 1, members: 1, [L.CLIENTS]: 15, [L.ACTIVE_DEALS]: 10,
-      [L.MONTHLY_LEADS]: 20, [L.PIPELINES]: 1, [L.DEPARTMENTS]: 0,
-      [L.DATABASE_MB]: 50, [L.FILE_STORAGE_MB]: 0, [L.STORAGE_GB]: 0,
+      [F.LEADS]: true, [F.DEALS]: true, [F.TASKS]: true, [F.FILE_STORAGE]: true },
+    limits: { [L.USERS]: 1, members: 1, [L.CLIENTS]: 50, [L.ACTIVE_DEALS]: 20,
+      [L.MONTHLY_LEADS]: 50, [L.PIPELINES]: 1, [L.DEPARTMENTS]: 0,
+      [L.DATABASE_MB]: 100, [L.FILE_STORAGE_MB]: 250, [L.STORAGE_GB]: 250 / 1024,
       [L.WHATSAPP_CONNECTIONS]: 0, [L.AI_USAGE]: 0 },
   },
   {
@@ -110,9 +128,30 @@ export const PRICING_CATALOG: CatalogItem[] = [
     catalogStatus: "AVAILABLE",
     chargeType: "RECURRING",
     sortOrder: 10,
-    description: "Для полноценной ежедневной работы с клиентами и продажами.",
+    description: "Для небольшой команды, которой нужна CRM без AI.",
     features: CRM_BASE,
-    limits: { ...UNLIMITED_CRM, [L.DATABASE_MB]: 500, [L.FILE_STORAGE_MB]: 1024, [L.USERS]: 3, members: 3, [L.PIPELINES]: 1, [L.DEPARTMENTS]: 1, [L.WHATSAPP_CONNECTIONS]: 0, whatsappActive: 0, [L.AI_USAGE]: 0, [L.STORAGE_GB]: 1 },
+    limits: { [L.CLIENTS]: 1000, [L.ACTIVE_DEALS]: 300, [L.MONTHLY_LEADS]: 1000, [L.DATABASE_MB]: 500, [L.FILE_STORAGE_MB]: 5120, [L.USERS]: 3, members: 3, [L.PIPELINES]: 1, [L.DEPARTMENTS]: 0, [L.WHATSAPP_CONNECTIONS]: 0, whatsappActive: 0, [L.AI_USAGE]: 0, [L.STORAGE_GB]: 5 },
+  },
+  {
+    code: "CONTROL", name: "Control", product: "CONTROL", kind: "plan",
+    monthlyPriceMinor: 29900, yearlyPriceMinor: yearly(29900), public: true, active: true,
+    catalogStatus: "AVAILABLE", chargeType: "RECURRING", sortOrder: 20,
+    description: "CRM, документы и AI-контроль бизнеса.", features: CONTROL_FEATURES,
+    limits: { [L.CLIENTS]: 5000, [L.ACTIVE_DEALS]: 1000, [L.MONTHLY_LEADS]: 3000, [L.DATABASE_MB]: 1024, [L.FILE_STORAGE_MB]: 10240, [L.USERS]: 5, members: 5, [L.PIPELINES]: 1, [L.DEPARTMENTS]: 0, [L.WHATSAPP_CONNECTIONS]: 1, whatsappActive: 1, [L.AI_USAGE]: 1000, [L.STORAGE_GB]: 10 },
+  },
+  {
+    code: "SALES", name: "Sales", product: "AI", kind: "plan",
+    monthlyPriceMinor: 49900, yearlyPriceMinor: yearly(49900), public: true, active: true,
+    catalogStatus: "AVAILABLE", chargeType: "RECURRING", sortOrder: 30,
+    description: "AI работает с клиентами вместе с вашей командой.", features: SALES_FEATURES,
+    limits: { [L.CLIENTS]: 15000, [L.ACTIVE_DEALS]: 3000, [L.MONTHLY_LEADS]: 10000, [L.DATABASE_MB]: 3072, [L.FILE_STORAGE_MB]: 15360, [L.USERS]: 10, members: 10, [L.PIPELINES]: 1, [L.DEPARTMENTS]: 0, [L.WHATSAPP_CONNECTIONS]: 2, whatsappActive: 2, [L.AI_USAGE]: 3000, [L.STORAGE_GB]: 15 },
+  },
+  {
+    code: "FULL", name: "Full", product: "BUNDLE", kind: "plan",
+    monthlyPriceMinor: 69900, yearlyPriceMinor: yearly(69900), public: true, active: true,
+    catalogStatus: "AVAILABLE", chargeType: "RECURRING", sortOrder: 40, recommended: true,
+    description: "Продажи и расширенная автоматизация бизнеса.", features: FULL_FEATURES,
+    limits: { [L.CLIENTS]: 50000, [L.ACTIVE_DEALS]: 10000, [L.MONTHLY_LEADS]: 30000, [L.DATABASE_MB]: 10240, [L.FILE_STORAGE_MB]: 30720, [L.USERS]: 20, members: 20, [L.PIPELINES]: 1, [L.DEPARTMENTS]: 0, [L.WHATSAPP_CONNECTIONS]: 4, whatsappActive: 4, [L.AI_USAGE]: 8000, [L.STORAGE_GB]: 30 },
   },
   {
     code: "CRM_BUSINESS",
@@ -121,9 +160,9 @@ export const PRICING_CATALOG: CatalogItem[] = [
     kind: "plan",
     monthlyPriceMinor: 29900,
     yearlyPriceMinor: yearly(29900),
-    public: true,
+    public: false,
     active: true,
-    catalogStatus: "AVAILABLE",
+    catalogStatus: "HIDDEN",
     chargeType: "RECURRING",
     sortOrder: 20,
     description: "Основной CRM-тариф: несколько воронок, документы, workflow, аналитика, до 10 пользователей.",
@@ -137,9 +176,9 @@ export const PRICING_CATALOG: CatalogItem[] = [
     kind: "plan",
     monthlyPriceMinor: 49900,
     yearlyPriceMinor: yearly(49900),
-    public: true,
+    public: false,
     active: true,
-    catalogStatus: "AVAILABLE",
+    catalogStatus: "HIDDEN",
     chargeType: "RECURRING",
     sortOrder: 30,
     description: "Корпоративная CRM: отделы, API, расширенные роли, до 25 пользователей.",
@@ -169,9 +208,9 @@ export const PRICING_CATALOG: CatalogItem[] = [
     kind: "plan",
     monthlyPriceMinor: 29900,
     yearlyPriceMinor: yearly(29900),
-    public: true,
+    public: false,
     active: true,
-    catalogStatus: "AVAILABLE",
+    catalogStatus: "HIDDEN",
     chargeType: "RECURRING",
     sortOrder: 50,
     description: "AI Manager без полной CRM: WhatsApp-продажи и CRM Lite на тех же клиентах, заявках и сделках.",
@@ -185,9 +224,9 @@ export const PRICING_CATALOG: CatalogItem[] = [
     kind: "plan",
     monthlyPriceMinor: 19900,
     yearlyPriceMinor: yearly(19900),
-    public: true,
+    public: false,
     active: true,
-    catalogStatus: "AVAILABLE",
+    catalogStatus: "HIDDEN",
     chargeType: "RECURRING",
     sortOrder: 60,
     description: "Управление CRM командами из WhatsApp и других каналов плюс CRM Lite.",
@@ -201,9 +240,9 @@ export const PRICING_CATALOG: CatalogItem[] = [
     kind: "bundle",
     monthlyPriceMinor: 49900,
     yearlyPriceMinor: yearly(49900),
-    public: true,
+    public: false,
     active: true,
-    catalogStatus: "AVAILABLE",
+    catalogStatus: "HIDDEN",
     chargeType: "RECURRING",
     recommended: true,
     sortOrder: 5,
@@ -222,9 +261,9 @@ export const PRICING_CATALOG: CatalogItem[] = [
     kind: "bundle",
     monthlyPriceMinor: 69900,
     yearlyPriceMinor: yearly(69900),
-    public: true,
+    public: false,
     active: true,
-    catalogStatus: "AVAILABLE",
+    catalogStatus: "HIDDEN",
     chargeType: "RECURRING",
     sortOrder: 8,
     description: "CRM Business, AI Manager, Control, 2 WhatsApp, документы и приоритетная поддержка.",
@@ -243,9 +282,9 @@ export const PRICING_CATALOG: CatalogItem[] = [
     kind: "addon",
     monthlyPriceMinor: 19900,
     yearlyPriceMinor: yearly(19900),
-    public: true,
+    public: false,
     active: true,
-    catalogStatus: "AVAILABLE",
+    catalogStatus: "HIDDEN",
     chargeType: "RECURRING",
     sortOrder: 110,
     description: "Полноценный AI-продажи: консультации, возражения, заявки и сделки. 1 WhatsApp.",
@@ -260,9 +299,9 @@ export const PRICING_CATALOG: CatalogItem[] = [
     kind: "addon",
     monthlyPriceMinor: 29900,
     yearlyPriceMinor: yearly(29900),
-    public: true,
+    public: false,
     active: true,
-    catalogStatus: "AVAILABLE",
+    catalogStatus: "HIDDEN",
     chargeType: "RECURRING",
     sortOrder: 120,
     description: "Основной AI-пакет: тот же интеллект, больше объёма. 1 WhatsApp.",
@@ -277,9 +316,9 @@ export const PRICING_CATALOG: CatalogItem[] = [
     kind: "addon",
     monthlyPriceMinor: 49900,
     yearlyPriceMinor: yearly(49900),
-    public: true,
+    public: false,
     active: true,
-    catalogStatus: "AVAILABLE",
+    catalogStatus: "HIDDEN",
     chargeType: "RECURRING",
     sortOrder: 130,
     description: "Масштаб: до 2 WhatsApp и высокий лимит AI.",
@@ -294,9 +333,9 @@ export const PRICING_CATALOG: CatalogItem[] = [
     kind: "addon",
     monthlyPriceMinor: 9900,
     yearlyPriceMinor: yearly(9900),
-    public: true,
+    public: false,
     active: true,
-    catalogStatus: "AVAILABLE",
+    catalogStatus: "HIDDEN",
     chargeType: "RECURRING",
     sortOrder: 140,
     description: "Команды к CRM из WhatsApp: статистика, задачи, сделки.",
@@ -323,7 +362,7 @@ export const PRICING_CATALOG: CatalogItem[] = [
   },
   {
     code: "ADDON_WHATSAPP",
-    name: "Дополнительный WhatsApp",
+    name: "Подключение коммуникационного канала",
     product: "ADDON",
     kind: "addon",
     monthlyPriceMinor: 9900,
@@ -333,8 +372,8 @@ export const PRICING_CATALOG: CatalogItem[] = [
     catalogStatus: "AVAILABLE",
     chargeType: "RECURRING",
     sortOrder: 160,
-    description: "Ещё один номер WhatsApp.",
-    features: { [F.WHATSAPP]: true, [F.MESSAGING]: true },
+    description: "Ещё одно подключение коммуникационного канала.",
+    features: {},
     limits: { [L.WHATSAPP_CONNECTIONS]: 1, whatsappActive: 1 },
     limitDelta: true,
   },
@@ -351,7 +390,7 @@ export const PRICING_CATALOG: CatalogItem[] = [
     chargeType: "RECURRING",
     sortOrder: 170,
     description: "+1000 AI-взаимодействий в период подписки.",
-    features: { [F.AI_MANAGER]: true },
+    features: {},
     limits: { [L.AI_USAGE]: 1000 },
     limitDelta: true,
   },
@@ -453,7 +492,7 @@ export const PRICING_CATALOG: CatalogItem[] = [
     chargeType: "ONE_TIME",
     sortOrder: 250,
     description: "Разовая индивидуальная интеграция от 50 000 ₸.",
-    features: { [F.CHANNELS]: true },
+    features: {},
     limits: {},
     limitDelta: true,
   },
@@ -465,11 +504,13 @@ export const CATALOG_BY_CODE = Object.fromEntries(PRICING_CATALOG.map((item) => 
 >;
 
 export const PUBLIC_OFFERS = [
-  { code: "BASQAR_FREE", group: "CRM", fromCode: "BASQAR_FREE", title: "Free", subtitle: "0 ₸" },
-  { code: "CRM_BUSINESS", group: "CRM", fromCode: "CRM_BUSINESS", title: "CRM Business", subtitle: "от 29 900 ₸ / месяц" },
-  { code: "CRM_START", group: "CRM", fromCode: "CRM_START", title: "CRM Start", subtitle: "от 14 900 ₸ / месяц" },
-  { code: "AI_SALES", group: "AI", fromCode: "AI_SALES", title: "AI Manager", subtitle: "от 29 900 ₸ / месяц" },
-  { code: "BUNDLE_CRM_AI", group: "BUNDLE", fromCode: "BUNDLE_CRM_AI", title: "CRM + AI", subtitle: "от 49 900 ₸ / месяц", recommended: true },
-  { code: "BUNDLE_FULL", group: "BUNDLE", fromCode: "BUNDLE_FULL", title: "BasQar Full", subtitle: "от 69 900 ₸ / месяц" },
+  { code: "BASQAR_FREE", group: "CRM", fromCode: "BASQAR_FREE", title: "BasQar Free", subtitle: "0 ₸" },
+  { code: "CRM_START", group: "CRM", fromCode: "CRM_START", title: "CRM Start", subtitle: "14 900 ₸ / месяц" },
+  { code: "CONTROL", group: "CRM", fromCode: "CONTROL", title: "Control", subtitle: "29 900 ₸ / месяц" },
+  { code: "SALES", group: "CRM", fromCode: "SALES", title: "Sales", subtitle: "49 900 ₸ / месяц" },
+  { code: "FULL", group: "CRM", fromCode: "FULL", title: "Full", subtitle: "69 900 ₸ / месяц", recommended: true },
   { code: "CRM_ENTERPRISE", group: "CRM", fromCode: "CRM_ENTERPRISE", title: "Enterprise", subtitle: "Индивидуально" },
 ] as const;
+
+// Commercial retirement is distinct from the grandfathered legacy access mode.
+export const LEGACY_CATALOG_CODES = ["CRM_BUSINESS", "CRM_PRO", "AI_SALES", "CONTROL_STANDALONE", "BUNDLE_CRM_AI", "BUNDLE_FULL", "ADDON_AI_START", "ADDON_AI_BUSINESS", "ADDON_AI_PRO", "ADDON_CONTROL"] as const;
