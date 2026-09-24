@@ -54,6 +54,8 @@ export const config = {
   port: Number(process.env.API_PORT || process.env.PORT || 4100),
   appBaseUrl: process.env.APP_BASE_URL || "http://localhost:5173",
   apiBaseUrl: process.env.API_BASE_URL || "http://localhost:4100",
+  legacyAppOrigin: process.env.LEGACY_APP_ORIGIN || "",
+  legacyRedirectMode: process.env.LEGACY_REDIRECT_MODE || "off",
   allowedOrigins: readAllowedOrigins(),
   sessionSecret: envSecret("SESSION_SECRET", "dev-session-secret-change"),
   jwtAccessSecret: envSecret("JWT_ACCESS_SECRET", "dev-access-secret-change"),

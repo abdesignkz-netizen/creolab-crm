@@ -8,6 +8,7 @@ import JSZip from "jszip";
 import { PDFDocument } from "pdf-lib";
 import { createHash } from "node:crypto";
 import { makeTestCms } from "./testCms.ts";
+import { config } from "./config.ts";
 
 describe("Documents phase 3", () => {
   let prisma: Awaited<ReturnType<typeof createPrismaClient>>;
@@ -17,6 +18,8 @@ describe("Documents phase 3", () => {
   let cookie = "";
   let otherCookie = "";
   let contractId = "";
+  let dealId = "";
+  const originalAppBaseUrl = config.appBaseUrl;
   let sellerRequestId = "";
   let buyerToken = "";
   let verificationId = "";
@@ -36,6 +39,7 @@ describe("Documents phase 3", () => {
   }
 
   before(async () => {
+    config.appBaseUrl = "https://bsqr.kz";
     verifier = await startTestKalkan();
     process.env.SEED_PASSWORD ||= "ChangeMeLocal1!";
     prisma = await createPrismaClient();
@@ -110,7 +114,8 @@ describe("Documents phase 3", () => {
         items: [{ name: "Аудит", quantity: 1, unitPrice: 100000 }],
       }),
     });
-    const draft = await json(`/api/v1/deals/${deal.body.deal.id}/contracts`, {
+    dealId = deal.body.deal.id;
+    const draft = await json(`/api/v1/deals/${dealId}/contracts`, {
       method: "POST",
       body: JSON.stringify({}),
     });
@@ -123,6 +128,7 @@ describe("Documents phase 3", () => {
   });
 
   after(async () => {
+    config.appBaseUrl = originalAppBaseUrl;
     await verifier?.close();
     server?.close();
   });
@@ -150,15 +156,23 @@ describe("Documents phase 3", () => {
   });
 
   it("не раскрывает raw token в базе и не пускает заказчика раньше исполнителя", async () => {
+    const command = await json("/api/v1/documents/from-command", {
+      method: "POST",
+      headers: { Origin: "https://untrusted.example" },
+      body: JSON.stringify({ text: "Отправь договор на подпись", dealId }),
+    });
+    assert.equal(command.response.status, 200, JSON.stringify(command.body));
+    assert.match(command.body.result.requests.find((row: { signerType: string }) => row.signerType === "BUYER").signUrl, /^https:\/\/bsqr\.kz\/sign\//);
     const sent = await json(`/api/v1/contracts/${contractId}/send-for-sign`, {
       method: "POST",
+      headers: { Origin: "https://crm.creolab.kz" },
       body: JSON.stringify({}),
     });
     assert.equal(sent.response.status, 200, JSON.stringify(sent.body));
     assert.equal(sent.body.contract.status, "PENDING_SIGNATURE");
     sellerRequestId = sent.body.requests.find((row: { signerType: string }) => row.signerType === "SELLER").id;
     const buyer = sent.body.requests.find((row: { signerType: string }) => row.signerType === "BUYER");
-    assert.ok(buyer.signUrl);
+    assert.match(buyer.signUrl, /^https:\/\/bsqr\.kz\/sign\//);
     buyerToken = String(buyer.signUrl).split("/sign/")[1];
     assert.ok(buyerToken);
     const stored = await prisma.signatureRequest.findMany({ where: { contractId } });

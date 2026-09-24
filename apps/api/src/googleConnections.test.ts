@@ -10,16 +10,16 @@ import { mapFormAnswers, gmailPlainText } from "./services/googleIntakeService.t
 describe("Google company connections", () => {
   let prisma: Awaited<ReturnType<typeof createPrismaClient>>; let server: ReturnType<ReturnType<typeof createApp>["listen"]>;
   let base="",cookie="",calendarId="",formsId="",emailId="",agreementId="";
-  const nativeFetch=globalThis.fetch; const originalBase=config.apiBaseUrl;
+  const nativeFetch=globalThis.fetch; const originalBase=config.apiBaseUrl; const originalAppBase=config.appBaseUrl;
   const oldClient=process.env.GOOGLE_CLIENT_ID,oldSecret=process.env.GOOGLE_CLIENT_SECRET;
   const events=new Map<string,unknown>();const cancelled=new Set<string>(); let inserts=0,refreshes=0; let mailbox="inbox@example.test"; const leadDate=new Date(Date.now()+1000).toISOString();
   before(async()=>{
-    process.env.GOOGLE_CLIENT_ID="test-client";process.env.GOOGLE_CLIENT_SECRET="test-secret";config.apiBaseUrl="https://crm.example.test";
+    process.env.GOOGLE_CLIENT_ID="test-client";process.env.GOOGLE_CLIENT_SECRET="test-secret";config.apiBaseUrl="https://crm.creolab.kz";config.appBaseUrl="https://bsqr.kz";
     globalThis.fetch=async(url,init)=>{
       const u=new URL(String(url));
       if(!["oauth2.googleapis.com","www.googleapis.com","forms.googleapis.com"].includes(u.hostname))return nativeFetch(url,init);
       const reply=(body:unknown,status=200)=>new Response(JSON.stringify(body),{status,headers:{"content-type":"application/json"}});
-      if(u.pathname==="/token") { const form=new URLSearchParams(String(init?.body));if(form.get("grant_type")==="refresh_token")refreshes++;return reply({access_token:"google-access",refresh_token:"google-refresh",expires_in:3600}); }
+      if(u.pathname==="/token") { const form=new URLSearchParams(String(init?.body));if(form.get("grant_type")==="refresh_token")refreshes++;else assert.equal(form.get("redirect_uri"), "https://bsqr.kz/api/v1/integrations/google/callback");return reply({access_token:"google-access",refresh_token:"google-refresh",expires_in:3600}); }
       if(u.pathname.includes("calendarList/"))return reply({id:"calendar-owner",summary:"Календарь компании",accessRole:"owner"});
       if(u.pathname.includes("/events")){
         const id=u.pathname.split("/").at(-1)!;const method=init?.method;
@@ -38,11 +38,13 @@ describe("Google company connections", () => {
     await new Promise<void>(resolve=>{server=createApp(prisma).listen(0,"127.0.0.1",resolve);});const addr=server.address();if(!addr||typeof addr==="string")throw new Error("port");base=`http://127.0.0.1:${addr.port}`;
     const login=await nativeFetch(`${base}/api/v1/auth/login`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({email:"owner@creolab.example",password:process.env.SEED_PASSWORD})});assert.equal(login.status,200);cookie=(login.headers.get("set-cookie")||"").split(";")[0];
   });
-  after(async()=>{globalThis.fetch=nativeFetch;config.apiBaseUrl=originalBase;if(oldClient===undefined)delete process.env.GOOGLE_CLIENT_ID;else process.env.GOOGLE_CLIENT_ID=oldClient;if(oldSecret===undefined)delete process.env.GOOGLE_CLIENT_SECRET;else process.env.GOOGLE_CLIENT_SECRET=oldSecret;if(server)await new Promise<void>(resolve=>server.close(()=>resolve()));if(prisma)await prisma.$disconnect();});
+  after(async()=>{globalThis.fetch=nativeFetch;config.apiBaseUrl=originalBase;config.appBaseUrl=originalAppBase;if(oldClient===undefined)delete process.env.GOOGLE_CLIENT_ID;else process.env.GOOGLE_CLIENT_ID=oldClient;if(oldSecret===undefined)delete process.env.GOOGLE_CLIENT_SECRET;else process.env.GOOGLE_CLIENT_SECRET=oldSecret;if(server)await new Promise<void>(resolve=>server.close(()=>resolve()));if(prisma)await prisma.$disconnect();});
   const post=(path:string,body:unknown={})=>nativeFetch(`${base}${path}`,{method:"POST",headers:{cookie,"content-type":"application/json"},body:JSON.stringify(body)});
   async function connect(kind:string,resourceId?:string){
     const begin=await post("/api/v1/integrations/google/connect",{kind,resourceId});const body=await begin.json();assert.equal(begin.status,200,JSON.stringify(body));const state=new URL(body.url).searchParams.get("state")!;
+    assert.equal(new URL(body.url).searchParams.get("redirect_uri"), "https://bsqr.kz/api/v1/integrations/google/callback");
     const callback=await nativeFetch(`${base}/api/v1/integrations/google/callback?state=${state}&code=test-code`,{headers:{cookie},redirect:"manual"});assert.equal(callback.status,302,await callback.text());
+    assert.equal(callback.headers.get("location"), "https://bsqr.kz/integrations?google=connected");
     const reused=await nativeFetch(`${base}/api/v1/integrations/google/callback?state=${state}&code=test-code`,{headers:{cookie},redirect:"manual"});assert.equal(reused.status,400);
     const list=await(await nativeFetch(`${base}/api/v1/integrations/google`,{headers:{cookie}})).json();assert.ok(!JSON.stringify(list).includes("google-access"));return list.items.find((r:{kind:string})=>r.kind===kind).id;
   }
@@ -106,5 +108,16 @@ describe("Google company connections", () => {
     assert.equal(await prisma.conversation.count({where:{connectionId:{in:[oldConnection.id,newConnection.id]}}}),2);
   });
   it("disconnect retains imported data and prevents further sync",async()=>{assert.equal((await post(`/api/v1/integrations/google/${emailId}/disconnect`)).status,200);assert.equal((await post(`/api/v1/integrations/google/${emailId}/sync`)).status,404);assert.equal(await prisma.channelConnection.count({where:{integrationId:emailId}}),1);});
+  it("uses the original OAuth redirect URI if the primary URL changes during authorization", async () => {
+    const begin = await post("/api/v1/integrations/google/connect", { kind: "email" });
+    assert.equal(begin.status, 200);
+    const state = new URL((await begin.json()).url).searchParams.get("state")!;
+    config.appBaseUrl = "https://next.example.test";
+    try {
+      const callback = await nativeFetch(`${base}/api/v1/integrations/google/callback?state=${state}&code=test-code`, { headers: { cookie }, redirect: "manual" });
+      assert.equal(callback.status, 302, await callback.text());
+      assert.equal(callback.headers.get("location"), "https://next.example.test/integrations?google=connected");
+    } finally { config.appBaseUrl = "https://bsqr.kz"; }
+  });
   it("mapping is explicit when labels differ and email HTML is not executed",()=>{assert.equal(mapFormAnswers([{id:"custom",title:"Номер для связи"}],{custom:{textAnswers:{answers:[{value:"+77001234567"}]}}},{phone:"custom"}).phone,"+77001234567");assert.equal(gmailPlainText({mimeType:"text/html",body:{data:Buffer.from("<script>bad()</script>").toString("base64url")}},"Безопасное превью"),"Безопасное превью");});
 });

@@ -14,6 +14,9 @@ services:
       mountPath: /var/data
       sizeGB: 5
     envVars:
+      # Domain migration is staged in Dashboard after DNS/TLS verification.
+      # Apply only the variables from deploy/bsqr-domain.env.example; keep existing secrets.
+      # Do not enable the legacy redirect before bsqr.kz is reachable.
       - key: NODE_ENV
         value: production
       - key: STORAGE_DIR

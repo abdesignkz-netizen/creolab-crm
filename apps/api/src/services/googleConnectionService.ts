@@ -19,7 +19,8 @@ const names = { calendar: "Google Calendar", google_forms: "Google Forms", email
 export const googleConnectSchema = z.object({ kind: z.enum(googleKinds), resourceId: z.string().trim().max(250).optional() });
 type Tokens = { access_token: string; refresh_token?: string; expiresAt: number; scope?: string };
 export function googleOAuthConfigured() { return Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET); }
-function callbackUrl() { return `${config.apiBaseUrl.replace(/\/$/, "")}/api/v1/integrations/google/callback`; }
+// OAuth returns a browser carrying a host-only session cookie, unlike server webhooks.
+function callbackUrl() { return `${config.appBaseUrl.replace(/\/$/, "")}/api/v1/integrations/google/callback`; }
 function assertConfigured() { if (!googleOAuthConfigured()) throw new ApiError(503, "google_not_configured", "Администратору сервиса нужно настроить Google OAuth (GOOGLE_CLIENT_ID и GOOGLE_CLIENT_SECRET)"); }
 async function tokenRequest(body: Record<string, string>) {
   assertConfigured();
@@ -34,9 +35,10 @@ export async function beginGoogleConnection(prisma: PrismaClient, auth: AuthCont
   requireIntegrationsAccess(auth); const { tenantId } = requireTenant(auth); assertConfigured();
   if (input.kind === "google_forms" && !/^[A-Za-z0-9_-]{10,250}$/.test(input.resourceId || "")) throw new ApiError(422, "form_id_required", "Укажите ID формы Google из адреса редактора формы");
   const state = randomBytes(32).toString("hex");
-  await prisma.idempotencyRecord.create({ data: { scope: "google.oauth", actorKey: auth.sessionId, key: createHash("sha256").update(state).digest("hex"), requestHash: auth.user.id, resultJson: { tenantId, kind: input.kind, resourceId: input.resourceId || "primary" }, expiresAt: new Date(Date.now() + 600000) } });
+  const redirectUri = callbackUrl();
+  await prisma.idempotencyRecord.create({ data: { scope: "google.oauth", actorKey: auth.sessionId, key: createHash("sha256").update(state).digest("hex"), requestHash: auth.user.id, resultJson: { tenantId, kind: input.kind, resourceId: input.resourceId || "primary", redirectUri }, expiresAt: new Date(Date.now() + 600000) } });
   const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
-  url.search = new URLSearchParams({ client_id: process.env.GOOGLE_CLIENT_ID!, redirect_uri: callbackUrl(), response_type: "code", scope: scopes[input.kind].join(" "), access_type: "offline", prompt: "consent", state }).toString();
+  url.search = new URLSearchParams({ client_id: process.env.GOOGLE_CLIENT_ID!, redirect_uri: redirectUri, response_type: "code", scope: scopes[input.kind].join(" "), access_type: "offline", prompt: "consent", state }).toString();
   return { url: url.toString() };
 }
 export async function finishGoogleConnection(prisma: PrismaClient, auth: AuthContext, input: { state: string; code: string; error?: string }) {
@@ -44,12 +46,15 @@ export async function finishGoogleConnection(prisma: PrismaClient, auth: AuthCon
   if (!/^[a-f0-9]{64}$/.test(input.state)) throw new ApiError(400, "oauth_state", "Недействительное подтверждение Google");
   const key = createHash("sha256").update(input.state).digest("hex");
   const record = await prisma.idempotencyRecord.findUnique({ where: { scope_actorKey_key: { scope: "google.oauth", actorKey: auth.sessionId, key } } });
-  const saved = record?.resultJson as { tenantId: string; kind: GoogleKind; resourceId: string } | undefined;
+  const saved = record?.resultJson as { tenantId: string; kind: GoogleKind; resourceId: string; redirectUri?: string } | undefined;
   if (!record || record.expiresAt < new Date() || record.requestHash !== auth.user.id || saved?.tenantId !== tenantId) throw new ApiError(400, "oauth_state", "Подтверждение истекло или принадлежит другой сессии. Начните подключение заново.");
   const consumed = await prisma.idempotencyRecord.deleteMany({ where: { id: record.id } });
   if (!consumed.count) throw new ApiError(409, "oauth_replayed", "Подтверждение уже использовано");
   if (input.error || !input.code) throw new ApiError(400, "oauth_declined", "Доступ Google не предоставлен");
-  const tokens = await tokenRequest({ grant_type: "authorization_code", code: input.code, redirect_uri: callbackUrl() });
+  // Retain the URI used at authorization even if a deployment changes the primary domain.
+  // Older in-flight records used API_BASE_URL (keep it unchanged during the transition).
+  const redirectUri = saved.redirectUri || `${config.apiBaseUrl.replace(/\/$/, "")}/api/v1/integrations/google/callback`;
+  const tokens = await tokenRequest({ grant_type: "authorization_code", code: input.code, redirect_uri: redirectUri });
   if (tokens.scope && scopes[saved.kind].some(scope => !tokens.scope!.split(" ").includes(scope))) throw new ApiError(403, "google_scope_missing", "Предоставьте все запрошенные разрешения для подключения");
   if (!tokens.refresh_token) throw new ApiError(422, "google_offline_missing", "Google не предоставил постоянный доступ. Отзовите прежний доступ приложения в Google и подключите снова.");
   // Validate resource access before publishing the connection.

@@ -7,12 +7,14 @@ import { redactSensitive } from "./lib/redact.ts";
 import { encryptSecret, decryptSecret } from "./lib/secretBox.ts";
 import { persistEsfSessionId, revealEsfSessionId } from "./lib/esfSessionSecret.ts";
 import { resetRateLimits } from "./lib/rateLimit.ts";
+import { config } from "./config.ts";
 
 describe("auth security", () => {
   let prisma: Awaited<ReturnType<typeof createPrismaClient>>;
   let server: { close: (cb?: (err?: Error) => void) => void; address: () => { port: number } | string | null };
   let url = "";
   const password = process.env.SEED_PASSWORD || "ChangeMeLocal1!";
+  const originalOrigins = config.allowedOrigins;
 
   async function login(email: string, pass = password) {
     const response = await fetch(`${url}/api/v1/auth/login`, {
@@ -26,6 +28,7 @@ describe("auth security", () => {
   }
 
   before(async () => {
+    config.allowedOrigins = ["https://bsqr.kz", "https://crm.creolab.kz"];
     process.env.SEED_PASSWORD ||= password;
     process.env.TRUST_PROXY_DEBUG = "1";
     prisma = await createPrismaClient();
@@ -41,8 +44,30 @@ describe("auth security", () => {
   });
 
   after(async () => {
+    config.allowedOrigins = originalOrigins;
     await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
     await prisma.$disconnect();
+  });
+
+  it("allows both CRM origins during migration, but not marketing or unrelated origins", async () => {
+    for (const origin of ["https://bsqr.kz", "https://crm.creolab.kz", "https://lead.bsqr.kz", "https://bsqr.kz.evil.example", "https://untrusted.example"]) {
+      const response = await fetch(`${url}/api/v1/tasks`, {
+        method: "OPTIONS",
+        headers: { Origin: origin, "Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": "content-type,x-tenant-id" },
+      });
+      assert.equal(response.headers.get("access-control-allow-origin"), config.allowedOrigins.includes(origin) ? origin : null);
+      assert.notEqual(response.headers.get("access-control-allow-origin"), "*");
+    }
+    const session = await login("owner@creolab.example");
+    assert.match(session.setCookie, /HttpOnly/i);
+    assert.match(session.setCookie, /SameSite=Lax/i);
+    assert.doesNotMatch(session.setCookie, /(?:^|;)\s*Domain=/i);
+    for (let refresh = 0; refresh < 2; refresh++) {
+      const me = await fetch(`${url}/api/v1/me`, { headers: { Origin: "https://bsqr.kz", cookie: session.setCookie.split(";")[0] } });
+      assert.equal(me.status, 200);
+      assert.equal(me.headers.get("access-control-allow-origin"), "https://bsqr.kz");
+      assert.equal(me.headers.get("access-control-allow-credentials"), "true");
+    }
   });
 
   it("redacts secrets in audit-like objects", () => {

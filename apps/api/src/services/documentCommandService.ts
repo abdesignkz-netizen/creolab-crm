@@ -1,4 +1,5 @@
 import type { PrismaClient } from "@creolab/db";
+import { config } from "../config.ts";
 import { ApiError } from "../errors.ts";
 import { can, type AuthContext } from "../lib/types.ts";
 import { createContractDraft, createElectronicDocumentDraft, createInvoiceDraft } from "./documentDraftService.ts";
@@ -202,7 +203,7 @@ export async function executeDocumentCommand(
       prepareOnly: false,
       deal,
       result: await sendContractForSign(prisma, auth, contract.id, {
-        publicBaseUrl: input.publicBaseUrl || "http://127.0.0.1:4191",
+        publicBaseUrl: input.publicBaseUrl || config.appBaseUrl,
       }),
     };
   }

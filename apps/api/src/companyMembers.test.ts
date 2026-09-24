@@ -4,17 +4,20 @@ import { createPrismaClient } from "@creolab/db";
 import { createApp } from "./app.ts";
 import { activateSubscription } from "./services/subscriptionActivationService.ts";
 import { presentAudit } from "./lib/auditPresentation.ts";
+import { config } from "./config.ts";
 
 describe("company employee invitations and readable audit", () => {
   let db: Awaited<ReturnType<typeof createPrismaClient>>;
   let server: any;
   let url: string, owner: string, manager: string, tenantId: string, otherTenantId: string;
   const base = "/api/v1/settings/members/invitations";
+  const originalAppBaseUrl = config.appBaseUrl;
   async function req(cookie: string, path: string, method = "GET", body?: unknown) {
     const r = await fetch(url + path, { method, headers: { cookie, "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
     return { status: r.status, data: await r.json(), cookie: (r.headers.get("set-cookie") || "").split(";")[0] };
   }
   before(async () => {
+    config.appBaseUrl = "https://bsqr.kz";
     db = await createPrismaClient();
     await (await import("../../../packages/db/src/seed.ts")).seedDatabase();
     server = createApp(db).listen(0, "127.0.0.1");
@@ -27,7 +30,7 @@ describe("company employee invitations and readable audit", () => {
     // Three seeded employees plus one purchased seat.
     await activateSubscription(db, { tenantId, planCode: "CRM_START", addOns: [{ code: "ADDON_USER", qty: 1 }] });
   });
-  after(async () => { await new Promise<void>(resolve => server.close(resolve)); });
+  after(async () => { config.appBaseUrl = originalAppBaseUrl; await new Promise<void>(resolve => server.close(resolve)); });
   let first: any;
   it("counts purchased seats and reserves the last seat atomically", async () => {
     const before = await req(owner, "/api/v1/settings/members");
@@ -35,6 +38,7 @@ describe("company employee invitations and readable audit", () => {
     const results = await Promise.all(["first", "second"].map(name => req(owner, base, "POST", { name, email: `${name}@invite.test`, role: "manager" })));
     assert.deepEqual(results.map(r => r.status).sort(), [201, 422]);
     first = results.find(r => r.status === 201)!.data;
+    assert.match(first.inviteUrl, /^https:\/\/bsqr\.kz\/invite\//);
     const list = await req(owner, "/api/v1/settings/members");
     assert.equal(list.data.capacity.pending, 1); assert.equal(list.data.capacity.canInvite, false);
     assert.equal(JSON.stringify(list.data).includes("tokenHash"), false);

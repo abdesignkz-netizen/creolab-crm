@@ -13,7 +13,7 @@
     "ios": {
       "bundleIdentifier": "kz.creolab.crm.dev",
       "supportsTablet": true,
-      "associatedDomains": ["applinks:crm.creolab.kz"]
+      "associatedDomains": ["applinks:bsqr.kz", "applinks:crm.creolab.kz"]
     },
     "android": {
       "package": "kz.creolab.crm.dev",
@@ -21,7 +21,10 @@
         {
           "action": "VIEW",
           "autoVerify": true,
-          "data": [{ "scheme": "https", "host": "crm.creolab.kz" }],
+          "data": [
+            { "scheme": "https", "host": "bsqr.kz" },
+            { "scheme": "https", "host": "crm.creolab.kz" }
+          ],
           "category": ["BROWSABLE", "DEFAULT"]
         }
       ]

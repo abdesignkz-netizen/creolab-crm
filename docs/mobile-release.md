@@ -7,7 +7,10 @@
 - iOS `kz.creolab.crm.dev`
 - Android `kz.creolab.crm.dev`
 - scheme `creolabcrm`
-- Deep links: `https://crm.creolab.kz/...` (домен пример из ТЗ, не настроен)
+- Deep links: `https://bsqr.kz/...`; `https://crm.creolab.kz/...` сохранён на переходный период.
+- Для Universal Links / App Links нужны AASA/assetlinks на обоих доменах с реальными
+  Apple Team ID / Android certificate fingerprints и новая native-сборка. Конфигурация Expo
+  сама по себе не подтверждает работоспособность ссылок. См. [перенос домена](domain-migration-bsqr-2026-09-25.md).
 
 Публичный конфиг содержит только `apiBaseUrl`. Refresh token — в SecureStore, не в AsyncStorage.
 

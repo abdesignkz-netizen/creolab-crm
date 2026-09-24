@@ -334,6 +334,7 @@ import {
 } from "./services/platformIntegrationService.ts";
 import { listPlatformCatalog, updatePlatformIntegrationType } from "./services/platformCatalog.ts";
 import type { AuthContext } from "./lib/types.ts";
+import { createLegacyDomainRedirect } from "./lib/legacyDomainRedirect.ts";
 
 const SESSION_COOKIE = {
   httpOnly: true as const,
@@ -359,6 +360,7 @@ export function createApp(prisma: PrismaClient) {
     }
     next();
   });
+  app.use(createLegacyDomainRedirect(config));
   app.use(
     cors({
       origin: config.allowedOrigins,
@@ -1320,11 +1322,10 @@ export function createApp(prisma: PrismaClient) {
   app.post("/api/v1/documents/from-command", json, async (req, res) => {
     const input = createDocumentFromCommandSchema.parse(req.body || {});
     const { executeDocumentCommand } = await import("./services/documentCommandService.ts");
-    const origin = String(req.get("origin") || "").replace(/\/$/, "");
     res.json(
       await executeDocumentCommand(prisma, await requireAuth(req), {
         ...input,
-        publicBaseUrl: origin || config.appBaseUrl,
+        publicBaseUrl: config.appBaseUrl,
       }),
     );
   });
@@ -1456,10 +1457,9 @@ export function createApp(prisma: PrismaClient) {
 
   app.post("/api/v1/contracts/:id/send-for-sign", json, async (req, res) => {
     const { sendContractForSign } = await import("./services/contractSigningService.ts");
-    const origin = String(req.get("origin") || "").replace(/\/$/, "");
     res.json(
       await sendContractForSign(prisma, await requireAuth(req), req.params.id, {
-        publicBaseUrl: origin || config.appBaseUrl,
+        publicBaseUrl: config.appBaseUrl,
       }),
     );
   });
@@ -2764,7 +2764,7 @@ export function createApp(prisma: PrismaClient) {
   app.post("/api/integrations/ai-control/confirm", json, confirmControl);
   app.post("/api/integrations/ai-control/verify", json, verifyControl);
 
-  // Кабинет (Vite build) с того же origin — для Render / одного домена crm.creolab.kz
+  // Кабинет (Vite build) и API с одного origin; публичные ссылки задаёт APP_BASE_URL.
   const webDistCandidates = [
     path.resolve(process.cwd(), "apps/web/dist"),
     path.resolve(process.cwd(), "../web/dist"),
