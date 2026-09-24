@@ -53,6 +53,7 @@ const EXT_MIME: Record<string, string> = {
 export type ConversationMediaKind = "image" | "video" | "audio" | "document" | "text";
 
 export type HistoryMediaItem = {
+  providerMessageId?: string;
   role: string;
   content: string;
   at?: string;
@@ -282,15 +283,20 @@ export function normalizeHistoryMediaItem(raw: unknown): HistoryMediaItem | null
   const content = pickString(
     file.caption,
     asRecord(nested.extendedTextMessageData)?.text,
+    asRecord(nested.textMessageData)?.textMessage,
     item.content,
     item.text,
     item.caption,
   );
-  const at = pickString(item.at, item.timestamp, item.occurred_at, item.occurredAt) || undefined;
+  const rawTime = item.at ?? item.timestamp ?? item.occurred_at ?? item.occurredAt;
+  const numericTime = typeof rawTime === "number" || (typeof rawTime === "string" && /^\d{10,13}$/.test(rawTime)) ? Number(rawTime) : null;
+  const parsedTime = numericTime != null ? new Date(numericTime < 1e12 ? numericTime * 1000 : numericTime) : null;
+  const at = parsedTime && Number.isFinite(parsedTime.getTime()) ? parsedTime.toISOString() : pickString(rawTime) || undefined;
   return {
     role,
     content,
     at,
+    providerMessageId: pickString(item.providerMessageId, item.idMessage, item.messageId) || undefined,
     type: mapProviderType(typeMessage) || pickString(item.type) || undefined,
     mimeType: pickString(file.mimeType, item.mimeType, item.mimetype) || undefined,
     fileName: pickString(file.fileName, item.fileName, item.filename) || undefined,

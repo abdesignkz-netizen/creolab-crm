@@ -1,7 +1,7 @@
-import type { PrismaClient } from "@creolab/db";
+import type { Prisma, PrismaClient } from "@creolab/db";
 
 export async function listThreadConversationIds(
-  prisma: PrismaClient,
+  prisma: PrismaClient | Prisma.TransactionClient,
   tenantId: string,
   conversation: { id: string; contactId?: string | null; sellerLeadId?: string | null; externalThreadId?: string | null },
   phoneNormalized?: string | null,

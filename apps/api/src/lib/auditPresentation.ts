@@ -1,6 +1,8 @@
 import { CATALOG_BY_CODE, CONTROL_ACTION_META } from "@creolab/contracts";
 
 export const AUDIT_ACTION_LABELS: Record<string, string> = {
+  "conversation.crm_updated": "AI обновил CRM по переписке",
+  "conversation.context_analyzed": "Проанализирован контекст диалога",
   "auth.login": "Вход в аккаунт", "auth.login_failed": "Неудачная попытка входа", "auth.logout": "Выход из аккаунта", "auth.logout_all": "Завершены все сеансы",
   "auth.password_reset_requested": "Запрошено восстановление пароля", "auth.password_reset_verified": "Подтверждено восстановление пароля", "auth.password_reset_completed": "Пароль восстановлен",
   "auth.register_started": "Начата регистрация", "auth.register_completed": "Регистрация завершена",

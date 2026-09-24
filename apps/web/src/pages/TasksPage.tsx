@@ -19,7 +19,7 @@ import { CALLS_ENABLED } from "../lib/featureFlags";
 import { CampaignMassPanel } from "./CampaignMassPanel";
 import { formatDateTimeLocalInput, formatDateTimeRu, parseDateTimeLocalInput, toDateTimeLocalValue } from "../lib/period";
 
-type Filter = "open" | "waiting" | "scheduled" | "overdue" | "mine" | "done" | "all" | "today";
+type Filter = "open" | "waiting" | "scheduled" | "overdue" | "mine" | "done" | "all" | "today" | "no_due";
 const AI_ASSIGNEE = "__ai__";
 type TargetMode = "client" | "group" | "none";
 type TaskStatusMark = "open" | "in_progress" | "waiting" | "done";
@@ -316,7 +316,7 @@ export function TasksPage() {
   const caps = useCapabilities();
   const [items, setItems] = useState<any[]>([]);
   const [error, setError] = useState("");
-  const [filter, setFilter] = useUrlState<Filter>("filter", "all", ["open", "waiting", "scheduled", "overdue", "mine", "done", "all", "today"]);
+  const [filter, setFilter] = useUrlState<Filter>("filter", "all", ["open", "waiting", "scheduled", "overdue", "mine", "done", "all", "today", "no_due"]);
   const [me, setMe] = useState<any>(null);
   const [members, setMembers] = useState<any[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -687,6 +687,7 @@ export function TasksPage() {
     if (filter === "done") return isClosedTask(item);
     if (filter === "waiting") return item.status === "waiting";
     if (filter === "today") return isDueToday(item, now);
+    if (filter === "no_due") return !isClosedTask(item) && !item.dueAt;
     if (filter === "scheduled") {
       return (
         !isClosedTask(item) &&
@@ -1298,6 +1299,7 @@ export function TasksPage() {
         ["open", "in_progress", "waiting"].includes(item.status),
     ).length,
     today: boardItems.filter((item) => isDueToday(item, now)).length,
+    no_due: boardItems.filter((item) => !isClosedTask(item) && !item.dueAt).length,
     scheduled: boardItems.filter(
       (item) =>
         !isClosedTask(item) &&
@@ -1351,6 +1353,7 @@ export function TasksPage() {
             ["mine", "Мои"],
             ["today", "Сегодня"],
             ["scheduled", "Запланированные"],
+            ["no_due", "Без срока"],
             ["waiting", "Жду"],
             ["overdue", "Просроченные"],
             ["done", "Завершённые"],
@@ -1368,11 +1371,13 @@ export function TasksPage() {
                     ? "Срок сегодня"
                     : value === "scheduled"
                       ? "Срок в будущем или запланированная отправка"
-                      : value === "waiting"
-                        ? "Ждёте ответа клиента или внешней реакции"
-                        : value === "overdue"
-                          ? "Срок уже прошёл, задача ещё не завершена"
-                          : "Что уже сделано или отменено",
+                      : value === "no_due"
+                        ? "Незавершённые задачи без даты выполнения"
+                        : value === "waiting"
+                          ? "Ждёте ответа клиента или внешней реакции"
+                          : value === "overdue"
+                            ? "Срок уже прошёл, задача ещё не завершена"
+                            : "Что уже сделано или отменено",
             )}
             onClick={() => setFilter(value)}
           >
@@ -2609,6 +2614,10 @@ export function TasksPage() {
             Когда выполнить
             <input type="datetime-local" value={editDueAt} onChange={(event) => setEditDueAt(event.target.value)} disabled={!caps.manageTasks} />
           </label>
+          <div>
+            <span className="muted">Создана</span>
+            <div>{formatDateTimeRu(taskDetail.createdAt) || "—"}</div>
+          </div>
           {caps.manageTasks ? (
             <>
               <div>
@@ -2904,17 +2913,19 @@ export function TasksPage() {
         <p className="empty">
           {filter === "waiting"
             ? "Задач в ожидании нет."
-            : filter === "scheduled"
-              ? "Запланированных задач нет."
-              : filter === "overdue"
-                ? "Просроченных задач нет."
-                : filter === "mine"
-                  ? "У вас нет активных задач."
-                  : filter === "today"
-                    ? "На сегодня задач нет."
-                    : filter === "done"
-                      ? "Завершённых задач пока нет."
-                      : "Задач пока нет."}
+            : filter === "no_due"
+              ? "Незавершённых задач без срока нет."
+              : filter === "scheduled"
+                ? "Запланированных задач нет."
+                : filter === "overdue"
+                  ? "Просроченных задач нет."
+                  : filter === "mine"
+                    ? "У вас нет активных задач."
+                    : filter === "today"
+                      ? "На сегодня задач нет."
+                      : filter === "done"
+                        ? "Завершённых задач пока нет."
+                        : "Задач пока нет."}
         </p>
       ) : null}
 
@@ -2946,6 +2957,10 @@ export function TasksPage() {
                     <div>
                       <span className="muted">Срок</span>
                       <div>{item.dueAt ? formatDateTimeRu(item.dueAt) : "Без срока"}</div>
+                    </div>
+                    <div>
+                      <span className="muted">Создана</span>
+                      <div>{formatDateTimeRu(item.createdAt) || "—"}</div>
                     </div>
                     <div>
                       <span className="muted">Поставил</span>
@@ -3274,6 +3289,10 @@ export function TasksPage() {
                         </span>
                       </div>
                       <div className="task-meta-grid">
+                        <div>
+                          <span className="muted">Создана</span>
+                          <div>{formatDateTimeRu(item.createdAt) || "—"}</div>
+                        </div>
                         <div>
                           <span className="muted">Результат</span>
                           <div>{result || statusText(item) || "Завершено"}</div>

@@ -2725,7 +2725,7 @@ a.dash-kpi-slate:hover { background: var(--bg-elevated); }
 .task-row-title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .task-meta-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 8px 12px;
   font-size: 13px;
 }

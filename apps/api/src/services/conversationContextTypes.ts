@@ -67,6 +67,7 @@ export type SuggestedTask = {
 };
 
 export type ConversationAnalysis = {
+  events?: BusinessEvent[];
   clientIntent: string | null;
   detectedNeed: string | null;
   suggestedRequestStatus: string | null;
@@ -159,3 +160,18 @@ export function agreementTypeToTaskType(type: AgreementType): string {
       return "other";
   }
 }
+
+/** Events extend the existing ConversationAnalysis contract; agreements remain the scheduling model. */
+export const BUSINESS_EVENT_TYPES = [
+  "CLIENT_INTEREST_CONFIRMED", "NEED_IDENTIFIED", "PRICE_DISCLOSED", "PRICE_ACCEPTED", "PRICE_REJECTED",
+  "COMMERCIAL_OFFER_REQUESTED", "COMMERCIAL_OFFER_SENT", "CALL_PROPOSED", "CALL_SCHEDULED",
+  "MEETING_PROPOSED", "MEETING_SCHEDULED", "FOLLOW_UP_REQUIRED", "PAYMENT_PROMISED", "PAYMENT_RECEIVED",
+  "CONTRACT_REQUESTED", "DEAL_WON", "DEAL_LOST", "CLIENT_REQUESTED_HUMAN", "OTHER_RELEVANT_BUSINESS_EVENT",
+] as const;
+export type BusinessEvent = {
+  type: (typeof BUSINESS_EVENT_TYPES)[number];
+  amount?: number | null;
+  currency?: string | null;
+  confidence: Confidence;
+  evidenceMessageIds: string[];
+};

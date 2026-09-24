@@ -10,16 +10,32 @@ const MODE_HELP: Record<string, string> = {
   AUTO: "AI разбирает заявку и сам пишет клиенту, если WhatsApp подключён.",
 };
 
-type SettingsSection = "requests" | "prompt" | "knowledge" | "handoff" | "followup" | "hours";
+type SettingsSection = "requests" | "crm" | "prompt" | "knowledge" | "handoff" | "followup" | "hours";
 
 const SECTION_ITEMS: Array<{ id: SettingsSection; label: string }> = [
   { id: "requests", label: "Новые заявки" },
+  { id: "crm", label: "CRM по переписке" },
   { id: "prompt", label: "Промпт" },
   { id: "knowledge", label: "База знаний" },
   { id: "handoff", label: "Передача менеджеру" },
   { id: "followup", label: "Повторный контакт" },
   { id: "hours", label: "Рабочее время" },
 ];
+
+const CRM_OPTIONS = [
+  ["enabled", "Автоматически обновлять CRM по переписке"],
+  ["inHumanMode", "Продолжать обновления, когда диалог ведёт менеджер"],
+  ["updateContact", "Обновлять сводку клиента"],
+  ["updateInquiry", "Обновлять заявку и следующий шаг"],
+  ["updateDealAmount", "Обновлять явно согласованную сумму сделки"],
+  ["updateDealStage", "Продвигать сделку по существующим этапам воронки"],
+  ["updateNextAction", "Обновлять следующий шаг сделки"],
+  ["detectAgreements", "Сохранять договорённости"],
+  ["createTasks", "Создавать задачи по согласованным звонкам и встречам"],
+] as const;
+type CrmState = Record<(typeof CRM_OPTIONS)[number][0], boolean>;
+const DEFAULT_CRM: CrmState = { enabled: false, inHumanMode: true, updateContact: true, updateInquiry: true,
+  updateDealAmount: true, updateDealStage: false, updateNextAction: true, detectAgreements: true, createTasks: true };
 
 const HANDOFF_OPTIONS: Array<{ key: string; label: string; hint: string }> = [
   { key: "CLIENT_REQUESTED_HUMAN", label: "Клиент просит связаться с человеком", hint: "Просит менеджера, оператора или «живого человека»." },
@@ -187,6 +203,7 @@ export function AiAutomationSettingsPage() {
   const [editing, setEditing] = useState(true);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [section, setSection] = useState<SettingsSection>("requests");
+  const [crm, setCrm] = useState<CrmState>(DEFAULT_CRM);
   const [mode, setMode] = useState("CONFIRM");
   const [processRepeat, setProcessRepeat] = useState(true);
   const [sla, setSla] = useState(15);
@@ -201,6 +218,7 @@ export function AiAutomationSettingsPage() {
   async function load() {
     try {
       const next = (await api.aiAutomationSettings()) as {
+        crm?: CrmState;
         defaultMode: string;
         processRepeatRequests: boolean;
         firstContactSlaMinutes: number;
@@ -216,6 +234,7 @@ export function AiAutomationSettingsPage() {
         followUp?: FollowUpState;
         conversationHours?: ConversationHoursState;
       };
+      setCrm({ ...DEFAULT_CRM, ...next.crm });
       setData(next);
       setMode(next.defaultMode);
       setProcessRepeat(Boolean(next.processRepeatRequests));
@@ -267,6 +286,7 @@ export function AiAutomationSettingsPage() {
     setHint("");
     try {
       const result = (await api.updateAiAutomationSettings({
+        crm,
         defaultMode: mode,
         processRepeatRequests: processRepeat,
         firstContactSlaMinutes: sla,
@@ -393,6 +413,19 @@ export function AiAutomationSettingsPage() {
       ) : null}
         </>
       ) : null}
+
+      {section === "crm" ? <div className="panel">
+        <b>CRM по переписке</b>
+        <p className="muted">При включённой настройке AI сохраняет подтверждённые факты в режимах AUTO и «После подтверждения». В HUMAN обновления могут продолжаться без ответов клиенту. ASSIST и пауза оставляют только предложения; ручной режим отключает автообновления.</p>
+        <div className="stack">
+          {CRM_OPTIONS.map(([key, label]) => <label className="check-row" key={key}>
+            <input type="checkbox" checked={crm[key]} disabled={key !== "enabled" && !crm.enabled}
+              onChange={event => setCrm(current => ({ ...current, [key]: event.target.checked }))} />
+            <span>{label}</span>
+          </label>)}
+        </div>
+        <p className="muted">AI не подтверждает оплату, не закрывает сделки и не отправляет документы по этим настройкам. Неоднозначные суммы и время требуют уточнения. Сумма по позициям сделки сохраняется.</p>
+      </div> : null}
 
       {section === "prompt" ? (
         <div className="panel">

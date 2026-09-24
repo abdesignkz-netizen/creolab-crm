@@ -151,6 +151,7 @@ export async function applyConfiguredHandoff(
   input: { text?: string; analysis?: { humanRequired?: boolean; humanReason?: string | null; confidence?: string | null } | null },
 ) {
   const { settings } = await loadTenantSettings(prisma, tenantId);
+  if (!settings.analyzeNewRequests) return null;
   const detected = detectHandoffReason(input.text || "", input.analysis);
   if (!detected || !settings.handoff.triggers[detected.trigger]) return null;
   const conversation = await prisma.conversation.findFirst({ where: { id: conversationId, tenantId } });
@@ -233,7 +234,7 @@ export async function refreshConversationFollowUp(prisma: PrismaClient, tenantId
     return;
   }
   const { settings, timeZone } = await loadTenantSettings(prisma, tenantId);
-  if (!settings.followUp.enabled) {
+  if (!settings.analyzeNewRequests || !settings.followUp.enabled) {
     await cancelConversationFollowUps(prisma, tenantId, conversationId, "followup_disabled");
     return;
   }
@@ -317,7 +318,7 @@ export async function processClientFollowUp(
     return { skipped: "feature_required" as const };
   }
   const { settings, timeZone } = await loadTenantSettings(prisma, item.tenantId);
-  if (!settings.followUp.enabled) {
+  if (!settings.analyzeNewRequests || !settings.followUp.enabled) {
     await prisma.scheduledAction.update({
       where: { id: item.id },
       data: { state: "canceled", cancelReason: "followup_disabled" },

@@ -9,6 +9,7 @@ import { decryptSecret, encryptSecret } from "../lib/secretBox.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { can } from "../lib/types.ts";
 import { requireIntegrationsAccess, requireNotManager, requireTenant } from "../lib/access.ts";
+import { enqueueConversationContext } from "./conversationContextQueue.ts";
 import { analyzeAndApplyConversation } from "./conversationContextApplyService.ts";
 import {
   assertAiManagerReachableUrl,
@@ -71,10 +72,11 @@ async function upsertLeadHistory(
     const item = normalizeHistoryMediaItem(raw);
     if (!item) continue;
     const oldPhoneScopedId = historyScopedIdByPhone(phone, item);
-    const phoneScopedId = `${tid}:${oldPhoneScopedId}`;
+    const legacyPhoneId = `${tid}:${oldPhoneScopedId}`;
+    const phoneScopedId = item.providerMessageId ? `seller-msg:${tid}:${phone}:${item.providerMessageId}` : legacyPhoneId;
     const legacyScopedId = historyScopedId(leadId, item);
     const existing = await prisma.message.findFirst({
-      where: { tenantId: tid, connectionScopedId: { in: [phoneScopedId, oldPhoneScopedId, legacyScopedId] } },
+      where: { tenantId: tid, connectionScopedId: { in: [phoneScopedId, legacyPhoneId, oldPhoneScopedId, legacyScopedId] } },
     });
     if (existing) {
       const patch: { conversationId?: string; connectionScopedId?: string; type?: string } = {};
@@ -90,7 +92,8 @@ async function upsertLeadHistory(
       if (!hasFile) await attachHistoryMedia(prisma, tid, existing.id, item);
       continue;
     }
-    const created = await prisma.message.upsert({
+    const created = await prisma.$transaction(async tx => {
+      const message = await tx.message.upsert({
       where: { connectionScopedId: phoneScopedId },
       update: {},
       create: {
@@ -102,8 +105,13 @@ async function upsertLeadHistory(
         text: historyMessageText(item),
         historical: true,
         connectionScopedId: phoneScopedId,
+        providerMessageId: item.providerMessageId,
         createdAt: validHistoryDate(item.at) || new Date(),
       },
+    });
+      await enqueueConversationContext(tx, tid, conversationId, message.id);
+      await tx.conversation.update({ where: { id: conversationId }, data: { messageRevision: { increment: 1 } } });
+      return message;
     });
     await attachHistoryMedia(prisma, tid, created.id, item);
     added += 1;
@@ -113,7 +121,7 @@ async function upsertLeadHistory(
     await prisma.conversation.update({
       where: { id: conversationId },
       data: {
-        messageRevision: { increment: added + moved },
+        messageRevision: { increment: moved },
         updatedAt: new Date(),
         ...(inboundAdded ? { needsAttention: true, attentionReason: "needs_reply" } : {}),
       },
@@ -259,7 +267,7 @@ export async function applySellerLeadSync(
     target = null;
   }
 
-  const mode = sellerModeToCrm(args.lead.aiMode);
+  const mode = args.lead.aiMode ? sellerModeToCrm(args.lead.aiMode) : target?.mode || "ai";
   if (!target) {
     target = await prisma.conversation.create({
       data: {
@@ -1343,7 +1351,7 @@ async function syncSellerLeadsOnce(prisma: PrismaClient, auth: AuthContext) {
   let contextApplied = 0;
   for (const conversationId of [...new Set(analyzeIds)].slice(0, 25)) {
     try {
-      await analyzeAndApplyConversation(prisma, auth, conversationId, { useLlm: true });
+      await analyzeAndApplyConversation(prisma, auth, conversationId, { useLlm: true, automatic: true });
       contextApplied += 1;
     } catch {
       /* analysis is best-effort during sync */

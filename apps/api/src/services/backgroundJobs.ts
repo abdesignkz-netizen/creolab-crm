@@ -25,6 +25,9 @@ export async function processOutbox(prisma: PrismaClient) {
       if (event.type === "campaign.run") {
         const payload = (event.payloadJson || {}) as { campaignId?: string };
         if (payload.campaignId) await processCampaignQueue(prisma, payload.campaignId);
+      } else if (event.type === "conversation.context") {
+        const { processConversationContextJob } = await import("./conversationContextQueue.ts");
+        await processConversationContextJob(prisma, event.tenantId, event.entityId, { sourceMessageId: (event.payloadJson as { messageId?: string }).messageId });
       } else if (event.type === "inquiry.automation") {
         const payload = (event.payloadJson || {}) as { inquiryId?: string; tenantId?: string };
         const { processInquiryAutomationJob } = await import("./inquiryAutomationQueue.ts");

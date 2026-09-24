@@ -204,6 +204,32 @@ export function ConversationsPage() {
   }, [selectedId]);
 
   useEffect(() => {
+    if (!selectedId || busy || historyLoading) return;
+    let live = true;
+    let inFlight = false;
+    const refresh = async () => {
+      if (!live || inFlight || document.visibilityState !== "visible") return;
+      inFlight = true;
+      const version = workspaceVersion.current;
+      try {
+        const data: any = await api.conversation(selectedId);
+        if (!live || selectedRef.current !== selectedId || version !== workspaceVersion.current) return;
+        setWorkspace((previous: any) => {
+          if (previous?.conversation?.id !== selectedId) return previous;
+          const firstAt = data.messages?.[0]?.createdAt;
+          const earlier = firstAt ? previous.messages.filter((message: any) => message.createdAt < firstAt) : [];
+          return { ...data, messages: [...earlier, ...(data.messages || [])],
+            hasEarlierMessages: earlier.length ? previous.hasEarlierMessages : data.hasEarlierMessages };
+        });
+      } catch {
+        // A transient background refresh must not erase the conversation or the reply draft.
+      } finally { inFlight = false; }
+    };
+    const timer = window.setInterval(refresh, 5000);
+    return () => { live = false; window.clearInterval(timer); };
+  }, [selectedId, busy, historyLoading]);
+
+  useEffect(() => {
     if (!focusReply || !workspace) return;
     const node = replyRef.current;
     if (!node) return;

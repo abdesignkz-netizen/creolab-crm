@@ -85,7 +85,7 @@ export type ConversationMode = (typeof CONVERSATION_MODES)[number];
 export function sellerModeToCrm(mode: string | null | undefined): ConversationMode {
   const value = String(mode || "AUTO").toUpperCase();
   if (value === "HUMAN") return "human";
-  if (value === "PAUSED") return "paused";
+  if (value === "PAUSED" || value === "ASSIST") return "paused";
   return "ai";
 }
 

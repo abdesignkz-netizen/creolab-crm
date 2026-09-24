@@ -1,5 +1,6 @@
-import type { PrismaClient } from "@creolab/db";
+import type { Prisma, PrismaClient } from "@creolab/db";
 import { inferClientInterest } from "./contactInterestService.ts";
+import { assertConversationReachable } from "../lib/access.ts";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { refineConversationContextWithLlm } from "./llmClient.ts";
@@ -13,7 +14,10 @@ import {
   type WaitingFor,
   agreementTypeToTaskType,
 } from "./conversationContextTypes.ts";
-import { adoptSameContactThreadMessages, listThreadConversationIds } from "./conversationThread.ts";
+import { listThreadConversationIds } from "./conversationThread.ts";
+
+import { normalizeCompanyTimezone } from "./aiAutomationSettings.ts";
+import { validateConversationRefinement } from "./conversationAnalysisValidation.ts";
 
 const ACTIVE_AGREEMENT = ["DETECTED", "NEEDS_CLARIFICATION", "CONFIRMED", "SCHEDULED", "RESCHEDULED"];
 
@@ -328,90 +332,63 @@ export function parseScheduleHint(
   timeZone: string,
 ): { datePart: boolean; timePart: boolean; at: Date | null; label: string | null } {
   const t = normalizeText(text);
-  const timeMatch = t.match(/(?:^|[^\d])(?:в|к)\s*(\d{1,2})(?:[:.](\d{2}))?(?:[^\d]|$)/) || t.match(/(\d{1,2})[:.](\d{2})/);
-  const hour = timeMatch ? Number(timeMatch[1]) : null;
-  const minute = timeMatch ? Number(timeMatch[2] || "0") : null;
-  const timePart = hour != null && hour >= 0 && hour <= 23;
-
-  let dayOffset: number | null = null;
-  if (hasWord(t, "сегодня")) dayOffset = 0;
-  else if (hasWord(t, "завтра")) dayOffset = 1;
-  else if (hasWord(t, "послезавтра")) dayOffset = 2;
-
-  const weekdays = ["воскресень", "понедельник", "вторник", "сред", "четверг", "пятниц", "суббот"];
-  if (dayOffset == null) {
-    for (let i = 0; i < weekdays.length; i += 1) {
-      if (hasWord(t, weekdays[i])) {
-        const parts = new Intl.DateTimeFormat("en-US", { timeZone, weekday: "short" }).formatToParts(now);
-        const map: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
-        const current = map[parts.find((p) => p.type === "weekday")?.value || ""] ?? now.getDay();
-        let delta = (i - current + 7) % 7;
-        if (delta === 0) delta = 7;
-        dayOffset = delta;
-        break;
-      }
+  timeZone = normalizeCompanyTimezone(timeZone);
+  const localParts = (date: Date) => {
+    const parts = new Intl.DateTimeFormat("en-GB", { timeZone, year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).formatToParts(date);
+    const get = (key: string) => Number(parts.find(p => p.type === key)?.value);
+    return { y: get("year"), m: get("month"), d: get("day"), h: get("hour"), min: get("minute"), sec: get("second") };
+  };
+  const base = localParts(now);
+  const time = t.match(/(?:^|[^\d])(\d{1,2}):(\d{2})(?!\d)/)
+    || t.match(/(?:^|\s)(?:в|к)\s+(\d{1,2})(?:[.]([0-5]\d))?(?![\d/]|\s*(?:сент|окт|нояб|дек|янв|фев|март|апрел|мая|июн|июл|авг))/);
+  const hour = time ? Number(time[1]) : -1;
+  const minute = time ? Number(time[2] || 0) : -1;
+  const approximate = /примерно|около|после обеда|утром|вечером/.test(t);
+  const timePart = Boolean(time && hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59 && !approximate);
+  let offset: number | null = null;
+  if (t.includes("послезавтра")) offset = 2;
+  else if (t.includes("завтра")) offset = 1;
+  else if (t.includes("сегодня")) offset = 0;
+  const relative = t.match(/через\s+(\d+|один|два|две|три|четыре|пять|неделю)\s*(?:дн|день|сут|$)/);
+  if (relative) offset = ({ один: 1, два: 2, две: 2, три: 3, четыре: 4, пять: 5, неделю: 7 } as Record<string, number>)[relative[1]] ?? Number(relative[1]);
+  const weekdays = ["воскресень", "понедельник", "вторник", "среду", "четверг", "пятниц", "суббот"];
+  if (offset == null) {
+    const weekday = weekdays.findIndex(day => t.includes(day));
+    if (weekday >= 0) {
+      const current = new Date(Date.UTC(base.y, base.m - 1, base.d)).getUTCDay();
+      offset = (weekday - current + 7) % 7;
+      if (offset === 0 && (!timePart || hour * 60 + minute <= base.h * 60 + base.min || /следующ/.test(t))) offset = 7;
     }
   }
-
-  const dm = t.match(/\b(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?\b/);
-  let ymd: { y: number; m: number; d: number } | null = null;
+  const months = ["январ", "феврал", "март", "апрел", "мая", "июн", "июл", "август", "сентябр", "октябр", "ноябр", "декабр"];
+  const named = t.match(/(?:^|[^\d])(\d{1,2})\s+(январ\S*|феврал\S*|март\S*|апрел\S*|мая|июн\S*|июл\S*|август\S*|сентябр\S*|октябр\S*|ноябр\S*|декабр\S*)(?:\s+(\d{4}))?/);
+  const numeric = t.match(/(?:^|[^\d:])(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?(?![\d:])/);
+  // A dotted time following «в» is not a calendar date.
+  const dm = named || (numeric && !new RegExp(`(?:в|к)\\s+${numeric[1]}[.]${numeric[2]}`).test(t) ? numeric : null);
+  let y = base.y, m = base.m, d = base.d;
   if (dm) {
-    const d = Number(dm[1]);
-    const m = Number(dm[2]);
-    let y = dm[3] ? Number(dm[3]) : Number(new Intl.DateTimeFormat("en", { timeZone, year: "numeric" }).format(now));
+    d = Number(dm[1]); m = named ? months.findIndex(month => dm[2].startsWith(month)) + 1 : Number(dm[2]);
+    y = dm[3] ? Number(dm[3]) : base.y;
     if (y < 100) y += 2000;
-    ymd = { y, m, d };
+  } else if (offset != null) {
+    const date = new Date(Date.UTC(y, m - 1, d + offset));
+    y = date.getUTCFullYear(); m = date.getUTCMonth() + 1; d = date.getUTCDate();
   }
-
-  const datePart = dayOffset != null || ymd != null;
-  if (!datePart && !timePart) return { datePart: false, timePart: false, at: null, label: null };
-
-  const baseParts = new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(now);
-  let y = Number(baseParts.find((p) => p.type === "year")?.value);
-  let m = Number(baseParts.find((p) => p.type === "month")?.value);
-  let d = Number(baseParts.find((p) => p.type === "day")?.value);
-  if (ymd) {
-    y = ymd.y;
-    m = ymd.m;
-    d = ymd.d;
-  } else if (dayOffset != null) {
-    const utc = new Date(Date.UTC(y, m - 1, d + dayOffset));
-    y = utc.getUTCFullYear();
-    m = utc.getUTCMonth() + 1;
-    d = utc.getUTCDate();
+  const validDate = new Date(Date.UTC(y, m - 1, d));
+  const datePart = Boolean((dm || offset != null) && validDate.getUTCFullYear() === y && validDate.getUTCMonth() === m - 1 && validDate.getUTCDate() === d);
+  const label = datePart ? `${String(d).padStart(2, "0")}.${String(m).padStart(2, "0")}.${y} · ${timePart ? `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}` : "время не указано"}` : null;
+  if (!datePart || !timePart) return { datePart, timePart, at: null, label };
+  const target = Date.UTC(y, m - 1, d, hour, minute);
+  let instant = target;
+  for (let i = 0; i < 3; i++) {
+    const local = localParts(new Date(instant));
+    instant += target - Date.UTC(local.y, local.m - 1, local.d, local.h, local.min, local.sec);
   }
+  const check = localParts(new Date(instant));
+  const valid = check.y === y && check.m === m && check.d === d && check.h === hour && check.min === minute;
+  return { datePart, timePart, at: valid ? new Date(instant) : null, label };
 
-  const hh = timePart ? hour! : 12;
-  const mm = timePart ? minute! : 0;
-  // Approximate local→UTC via offset probe
-  const guess = new Date(Date.UTC(y, m - 1, d, hh, mm, 0));
-  const asLocal = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(guess);
-  const get = (type: string) => Number(asLocal.find((p) => p.type === type)?.value);
-  const asUtc = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute"), get("second"));
-  const at = new Date(guess.getTime() - (asUtc - guess.getTime()));
-
-  const label = [
-    datePart ? `${String(d).padStart(2, "0")}.${String(m).padStart(2, "0")}.${y}` : null,
-    timePart ? `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}` : "время не указано",
-  ]
-    .filter(Boolean)
-    .join(" · ");
-
-  return { datePart, timePart, at: datePart ? at : null, label };
 }
 
 function windowMessages<T extends { text?: string | null; type?: string | null; attachments?: SituationAttachment[] }>(
@@ -423,7 +400,7 @@ function windowMessages<T extends { text?: string | null; type?: string | null; 
     .slice(-max);
 }
 
-function ruleAnalyze(input: {
+export function ruleAnalyze(input: {
   messages: Array<
     SituationMessage & {
       id: string;
@@ -443,7 +420,7 @@ function ruleAnalyze(input: {
   analysis.facts.pricesSent = situation.pricesSent;
   analysis.facts.waitingForManagement = situation.waitingForManagement;
   const msgs = windowMessages(input.messages);
-  if (msgs.length < 2) {
+  if (msgs.length === 0) {
     const interest = inferClientInterest(input.messages);
     analysis.detectedNeed = interest?.text || null;
     analysis.facts.service = interest?.text || null;
@@ -522,12 +499,14 @@ function ruleAnalyze(input: {
 
   // Never auto-suggest WON/LOST here — apply layer blocks them anyway.
 
-  const meetingKind = detectMeetingKind(recentCorpus) || detectMeetingKind(corpus);
-  const deliveryType = detectDeliveryType(recentCorpus);
-  const schedule = parseScheduleHint(recentCorpus, input.now, input.timeZone);
-  const confirm = isConfirm(lastText);
-  const cancel = isCancel(lastText) || isCancel(recentCorpus);
-  const reschedule = isReschedule(recentCorpus);
+  const meetingKind = detectMeetingKind(lastText) || ((isConfirm(lastText) || parseScheduleHint(lastText, last.createdAt, input.timeZone).datePart) ? detectMeetingKind(msgs.at(-2)?.text?.toLowerCase() || "") || (parseScheduleHint(lastText, last.createdAt, input.timeZone).datePart ? input.existingAgreements.find(a => ["CALL", "ONLINE_MEETING", "OFFLINE_MEETING"].includes(a.type))?.type as AgreementType || null : null) : null);
+  const deliveryType = detectDeliveryType(lastText);
+  const scheduleSource = parseScheduleHint(lastText, last.createdAt, input.timeZone).datePart
+    ? last : isConfirm(lastText) ? msgs.at(-2) || last : last;
+  const schedule = parseScheduleHint(scheduleSource.text || "", scheduleSource.createdAt, input.timeZone);
+  const confirm = isConfirm(lastText) || (isInboundClient(last) && /давайте|встречаемся|приезжайте/.test(lastText));
+  const cancel = isCancel(lastText);
+  const reschedule = /перенес|лучше|вместо|другой день/.test(lastText);
 
   const activeMeeting = input.existingAgreements.find(
     (a) =>
@@ -563,7 +542,7 @@ function ruleAnalyze(input: {
     const locationName =
       meetingKind === "OFFLINE_MEETING"
         ? /\b(к вам|ваш офис|у вас)\b/.test(recentCorpus)
-          ? "Офис CREOLAB"
+          ? "Офис компании"
           : /\b(к нам|наш офис|у нас)\b/.test(recentCorpus)
             ? "Офис клиента"
             : address
@@ -663,7 +642,7 @@ function ruleAnalyze(input: {
   }
 
   if (deliveryType && !meetingKind && !(deliveryType === "SEND_PROPOSAL" && situation.proposalSent)) {
-    const schedule = parseScheduleHint(recentCorpus, input.now, input.timeZone);
+    const schedule = parseScheduleHint(lastText, last.createdAt, input.timeZone);
     const confirmLike = confirm || /\b(отправьте|пришлите|нужно|надо)\b/.test(lastText);
     const confidence: Confidence = confirmLike && (schedule.datePart || /сегодня|завтра|до обеда/.test(recentCorpus)) ? "HIGH" : "MEDIUM";
     const status: AgreementStatus = confidence === "HIGH" ? "CONFIRMED" : schedule.datePart ? "DETECTED" : "NEEDS_CLARIFICATION";
@@ -708,6 +687,7 @@ function ruleAnalyze(input: {
   }
 
   fillFallbackSummary(analysis, input.messages);
+  if (analysis.suggestedDealStage === "proposal_sent" && !(isOutbound(last) && isCommercialOfferText(lastText))) analysis.suggestedDealStage = null;
   return analysis;
 }
 
@@ -715,11 +695,12 @@ export async function analyzeConversationContext(
   prisma: PrismaClient,
   auth: AuthContext,
   conversationId: string,
-  options: { useLlm?: boolean } = {},
-): Promise<{ analysis: ConversationAnalysis; conversationId: string; messageCount: number; llmUsed: boolean }> {
+  options: { useLlm?: boolean; sourceMessageId?: string } = {},
+): Promise<{ analysis: ConversationAnalysis; conversationId: string; messageCount: number; llmUsed: boolean; sourceMessageId: string | null; sourceMessageAt: Date | null; messageRevision: number; snapshot: { deal: { id: string; version: number; updatedAt: Date } | null; inquiry: { id: string; status: string; nextStep: string | null; aiSummary: string | null; needsReply: boolean } | null; contactSummary: string | null; agreements: Array<{ id: string; updatedAt: Date }> } }> {
   const tid = tenantId(auth);
-  const membership = auth.activeMembership!;
-  const timeZone = membership.tenant.timezone || "Asia/Almaty";
+  await assertConversationReachable(prisma, auth, conversationId);
+  const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: tid } });
+  const timeZone = normalizeCompanyTimezone(tenant.timezone);
 
   const conversation = await prisma.conversation.findFirst({
     where: { id: conversationId, tenantId: tid },
@@ -734,15 +715,17 @@ export async function analyzeConversationContext(
     conversation.contact?.methods.find((item) => item.primary)?.normalizedValue ||
     conversation.contact?.methods[0]?.normalizedValue ||
     conversation.externalThreadId;
-  await adoptSameContactThreadMessages(prisma, tid, conversation, phone);
   const threadIds = await listThreadConversationIds(prisma, tid, conversation, phone);
+  const source = options.sourceMessageId ? await prisma.message.findFirst({ where: { tenantId: tid, conversationId: { in: threadIds }, id: options.sourceMessageId, internal: false } }) : null;
+  if (options.sourceMessageId && !source) throw new ApiError(404, "not_found", "Сообщение не найдено");
   const messages = await prisma.message.findMany({
-    where: { tenantId: tid, conversationId: { in: threadIds }, internal: false },
+    where: { tenantId: tid, conversationId: { in: threadIds }, ...(source ? { OR: [{ createdAt: { lt: source.createdAt } }, { createdAt: source.createdAt, id: { lte: source.id } }] } : {}), internal: false, operationState: { notIn: ["queued", "failed", "unknown"] } },
     include: { attachments: { orderBy: { createdAt: "asc" } } },
-    orderBy: { createdAt: "asc" },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: 80,
   });
 
+  messages.reverse();
   const contactId = conversation.contactId;
   const inquiry =
     conversation.inquiries[0] ||
@@ -752,18 +735,12 @@ export async function analyzeConversationContext(
           orderBy: { receivedAt: "desc" },
         })
       : null);
-  const deal = contactId
-    ? await prisma.deal.findFirst({
-        where: { tenantId: tid, contactId, outcome: "open" },
-        include: { stage: true },
-        orderBy: { updatedAt: "desc" },
-      })
-    : null;
+  const deal = await resolveContextDeal(prisma, tid, conversationId, contactId, inquiry?.dealId);
 
   const existingAgreements = await prisma.agreement.findMany({
     where: {
       tenantId: tid,
-      OR: [{ conversationId }, ...(contactId ? [{ contactId }] : [])],
+      conversationId,
       status: { in: ACTIVE_AGREEMENT },
     },
     orderBy: { updatedAt: "desc" },
@@ -785,10 +762,11 @@ export async function analyzeConversationContext(
     inquiryStatus: inquiry?.status,
     dealStageKey: deal?.stage?.systemKey,
     contactName: conversation.contact?.name || conversation.contact?.firstName || null,
-    now: new Date(),
+    now: messages.at(-1)?.createdAt || new Date(),
     timeZone,
   });
 
+  analysis.events = extractPriceEvents(messages, deal?.currency || tenant.currency);
   let llmUsed = false;
   if (options.useLlm !== false) {
     const llm = await refineConversationContextWithLlm({
@@ -801,6 +779,9 @@ export async function analyzeConversationContext(
         id: m.id,
       })),
       draft: analysis,
+      timeZone,
+      referenceAt: messages.at(-1)?.createdAt.toISOString() || new Date().toISOString(),
+      currency: deal?.currency || tenant.currency,
       inquiryStatus: inquiry?.status || null,
       dealStage: deal?.stage?.systemKey || null,
       openTaskTitles: activeTasks.map((t) => t.title),
@@ -813,14 +794,30 @@ export async function analyzeConversationContext(
       prisma,
       tenantId: tid,
     });
-    if (llm) {
+    const validated = llm && validateConversationRefinement(llm, messages.map(m => m.id));
+    if (validated) {
       llmUsed = true;
-      analysis = mergeAnalysis(analysis, llm);
+      analysis = mergeAnalysis(analysis, validated);
     }
   }
+  analysis.events ??= extractPriceEvents(messages, deal?.currency || tenant.currency);
+  for (const agreement of analysis.agreements) {
+    const scheduled = ["CONFIRMED", "SCHEDULED", "RESCHEDULED"].includes(agreement.status) && Boolean(agreement.scheduledAt);
+    const type = agreement.type === "CALL" ? scheduled ? "CALL_SCHEDULED" : "CALL_PROPOSED"
+      : ["ONLINE_MEETING", "OFFLINE_MEETING"].includes(agreement.type) ? scheduled ? "MEETING_SCHEDULED" : "MEETING_PROPOSED"
+      : agreement.type === "PAYMENT_PROMISE" ? "PAYMENT_PROMISED" : agreement.type === "FOLLOW_UP" ? "FOLLOW_UP_REQUIRED" : null;
+    if (type && !analysis.events.some(event => event.type === type)) analysis.events.push({ type, confidence: agreement.confidence, evidenceMessageIds: agreement.evidenceMessageIds });
+  }
+  const suggestedStage = analysis.suggestedDealStage;
   fillFallbackSummary(analysis, messages);
+  analysis.suggestedDealStage = suggestedStage;
 
-  return { analysis, conversationId, messageCount: messages.length, llmUsed };
+  return { analysis, conversationId, messageCount: messages.length, llmUsed, sourceMessageId: messages.at(-1)?.id || null, sourceMessageAt: messages.at(-1)?.createdAt || null, messageRevision: conversation.messageRevision, snapshot: {
+    deal: deal ? { id: deal.id, version: deal.version, updatedAt: deal.updatedAt } : null,
+    inquiry: inquiry ? { id: inquiry.id, status: inquiry.status, nextStep: inquiry.nextStep, aiSummary: inquiry.aiSummary, needsReply: inquiry.needsReply } : null,
+    contactSummary: conversation.contact?.summary || null,
+    agreements: existingAgreements.map(a => ({ id: a.id, updatedAt: a.updatedAt })),
+  } };
 }
 
 function mergeAnalysis(base: ConversationAnalysis, llm: Partial<ConversationAnalysis>): ConversationAnalysis {
@@ -835,8 +832,8 @@ function mergeAnalysis(base: ConversationAnalysis, llm: Partial<ConversationAnal
       pricesSent: Boolean(base.facts.pricesSent || llmFacts.pricesSent),
       waitingForManagement: Boolean(base.facts.waitingForManagement || llmFacts.waitingForManagement),
     },
-    agreements: llm.agreements?.length ? llm.agreements : base.agreements,
-    suggestedTasks: llm.suggestedTasks?.length ? llm.suggestedTasks : base.suggestedTasks,
+    agreements: llm.agreements ?? base.agreements,
+    suggestedTasks: llm.suggestedTasks ?? base.suggestedTasks,
     evidenceMessageIds: llm.evidenceMessageIds?.length ? llm.evidenceMessageIds : base.evidenceMessageIds,
   };
 }
@@ -849,4 +846,40 @@ export async function listAgreementsForConversation(prisma: PrismaClient, auth: 
     orderBy: [{ scheduledAt: "asc" }, { updatedAt: "desc" }],
     take: 30,
   });
+}
+
+/** Prefer explicit links. Never guess which of several open deals a conversation concerns. */
+export async function resolveContextDeal(prisma: PrismaClient | Prisma.TransactionClient, tid: string, conversationId: string, contactId: string | null, inquiryDealId?: string | null) {
+  if (!contactId) return null;
+  const linked = await prisma.deal.findMany({ where: { tenantId: tid, contactId, outcome: "open",
+    OR: [{ conversations: { some: { tenantId: tid, conversationId } } }, ...(inquiryDealId ? [{ id: inquiryDealId }] : [])],
+  }, include: { stage: true }, take: 2 });
+  if (linked.length) return linked.length === 1 ? linked[0] : null;
+  const open = await prisma.deal.findMany({ where: { tenantId: tid, contactId, outcome: "open" }, include: { stage: true }, take: 2 });
+  return open.length === 1 ? open[0] : null;
+}
+
+/** Conservative offline fallback. Semantic understanding is supplied by the existing LLM analyst. */
+export function extractPriceEvents(messages: SituationMessage[], currency: string): NonNullable<ConversationAnalysis["events"]> {
+  const visible = messages.filter(m => !m.internal && m.text);
+  const last = visible.at(-1);
+  if (!last?.id || !isInboundClient(last)) return [];
+  const text = normalizeText(last.text || "");
+  const rejected = /дорог|неинтерес|не интерес|не устраива|не соглас|подума|отказ|не подходит/.test(text);
+  const accepted = !rejected && !/[?]|если|возможн|предполож|устраивало бы|согласился бы/.test(text) && !/бюджет|предоплат|аванс|ежемесяч|в месяц/.test(text) && /устраива|соглас(?:ен|на|ны)|фиксируем|бер[её]м|подходит/.test(text);
+  const amounts = (value: string) => [...value.matchAll(/(\d{1,3}(?:[ \u00a0]\d{3})+|\d+)(?:[,.](\d{1,2}))?\s*(тыс(?:яч[аиу]?)?\.?|[кk](?![a-zа-я])|млн\.?)?\s*(₸|тенге|тг|kzt|usd|eur|\$|€)?/gi)]
+    .filter(m => m[3] || m[4] || Number(m[1].replace(/\s/g, "")) >= 1000)
+    .map(m => ({ amount: Number(m[1].replace(/\s/g, "") + (m[2] ? "." + m[2] : "")) * (m[3] ? /млн/i.test(m[3]) ? 1e6 : 1000 : 1),
+      currency: /usd|\$/i.test(m[4] || "") ? "USD" : /eur|€/i.test(m[4] || "") ? "EUR" : m[4] ? "KZT" : currency }));
+  let found = amounts(text);
+  const evidence = [last.id];
+  if (!found.length && accepted && /^(да[,! ]*)?соглас(?:ен|на|ны)[.! ]*$/.test(text)) {
+    const previous = visible.at(-2);
+    if (previous?.id && isOutbound(previous) && !/бюджет|предоплат|аванс|ежемесяч|в месяц/i.test(previous.text || "") && /предлож|стоимост|пакет|цена|offer|price/i.test(previous.text || "")) {
+      found = amounts(previous.text || ""); evidence.unshift(previous.id);
+    }
+  }
+  if (found.length !== 1) return [];
+  return [{ type: rejected ? "PRICE_REJECTED" : accepted ? "PRICE_ACCEPTED" : "PRICE_DISCLOSED", ...found[0],
+    confidence: "HIGH", evidenceMessageIds: evidence }];
 }

@@ -1326,6 +1326,11 @@ export async function addConversationMessage(
       throw new ApiError(503, "sender_unknown", error instanceof Error ? error.message : "Неизвестный результат отправки");
     }
   }
+  const { enqueueConversationContext } = await import("./conversationContextQueue.ts");
+  await prisma.$transaction(async tx => {
+    await tx.conversation.update({ where: { id, tenantId: tid }, data: { messageRevision: { increment: 1 } } });
+    await enqueueConversationContext(tx, tid, id, message.id);
+  });
   return prisma.message.findFirst({
     where: { id: message.id, tenantId: tid },
     include: { attachments: true },

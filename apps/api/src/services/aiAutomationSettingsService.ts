@@ -8,6 +8,7 @@ import {
   mergeAIAutomationIntoSettingsJson,
   MODE_LABEL,
   parseAIAutomationSettings,
+  parseCrmAutomation,
   parseScheduleWindow,
   normalizeCompanyTimezone,
   DEFAULT_CUSTOM_SCHEDULE,
@@ -63,6 +64,7 @@ export async function updateAIAutomationSettings(
     await requireFeature(prisma, auth, "ADVANCED_AUTOMATION");
   }
   let next = parseAIAutomationSettings(tenant.settingsJson);
+  if (input.crm) next.crm = parseCrmAutomation({ ...next.crm, ...input.crm });
   if (input.defaultMode) {
     next = applyModeToSettings(next, input.defaultMode);
   }

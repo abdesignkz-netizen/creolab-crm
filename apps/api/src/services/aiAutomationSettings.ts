@@ -57,6 +57,8 @@ export type FollowUpSettings = {
 };
 
 export type AIAutomationSettings = {
+  /** Conversation intelligence permissions, independent of permission to send replies. */
+  crm: CrmAutomationSettings;
   defaultMode: AutomationMode;
   analyzeNewRequests: boolean;
   autoCreateAiTask: boolean;
@@ -78,6 +80,41 @@ export type AIAutomationSettings = {
   followUp: FollowUpSettings;
   conversationHours: ConversationHoursSettings;
 };
+
+export type CrmAutomationSettings = {
+  enabled: boolean;
+  inHumanMode: boolean;
+  updateContact: boolean;
+  updateInquiry: boolean;
+  updateDealAmount: boolean;
+  updateDealStage: boolean;
+  updateNextAction: boolean;
+  detectAgreements: boolean;
+  createTasks: boolean;
+};
+
+export const DEFAULT_CRM_AUTOMATION: CrmAutomationSettings = {
+  enabled: false,
+  inHumanMode: true,
+  updateContact: true,
+  updateInquiry: true,
+  updateDealAmount: true,
+  updateDealStage: false,
+  updateNextAction: true,
+  detectAgreements: true,
+  createTasks: true,
+};
+
+export function parseCrmAutomation(raw: unknown): CrmAutomationSettings {
+  const result = { ...DEFAULT_CRM_AUTOMATION };
+  if (raw && typeof raw === "object") {
+    for (const key of Object.keys(result) as Array<keyof CrmAutomationSettings>) {
+      const value = (raw as Record<string, unknown>)[key];
+      if (typeof value === "boolean") result[key] = value;
+    }
+  }
+  return result;
+}
 
 export const MODE_FLAGS: Record<
   AutomationMode,
@@ -159,6 +196,7 @@ export function cloneDayHours(source: Record<number, DayHours> = DEFAULT_DAY_HOU
 
 /** Safe default: analyze + prepare task, no proactive outbound */
 export const DEFAULT_AI_AUTOMATION: AIAutomationSettings = {
+  crm: { ...DEFAULT_CRM_AUTOMATION },
   defaultMode: "CONFIRM",
   ...MODE_FLAGS.CONFIRM,
   allowProactiveOutbound: true,
@@ -328,6 +366,7 @@ export function modeFromFlags(flags: {
 export function parseAIAutomationSettings(raw: unknown): AIAutomationSettings {
   const base: AIAutomationSettings = {
     ...DEFAULT_AI_AUTOMATION,
+    crm: { ...DEFAULT_CRM_AUTOMATION },
     workingHours: { ...DEFAULT_WORKING_HOURS, days: [...DEFAULT_WORKING_HOURS.days] },
     customSchedule: { ...DEFAULT_CUSTOM_SCHEDULE, days: [...DEFAULT_CUSTOM_SCHEDULE.days] },
     sourceModes: { ...DEFAULT_AI_AUTOMATION.sourceModes },
@@ -369,6 +408,7 @@ export function parseAIAutomationSettings(raw: unknown): AIAutomationSettings {
   base.serviceModes = { ...base.serviceModes, ...parseModeMap(block.serviceModes) };
   base.integrationModes = { ...base.integrationModes, ...parseModeMap(block.integrationModes) };
   base.handoff = parseHandoffSettings(block.handoff);
+  base.crm = parseCrmAutomation(block.crm);
   base.followUp = parseFollowUpSettings(block.followUp);
   base.conversationHours = parseConversationHours(block.conversationHours);
 
@@ -397,6 +437,7 @@ export function mergeAIAutomationIntoSettingsJson(
   const base =
     current && typeof current === "object" ? { ...(current as Record<string, unknown>) } : {};
   base.aiAutomation = {
+    crm: next.crm,
     defaultMode: next.defaultMode,
     analyzeNewRequests: next.analyzeNewRequests,
     autoCreateAiTask: next.autoCreateAiTask,

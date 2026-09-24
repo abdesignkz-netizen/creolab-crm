@@ -1,3 +1,4 @@
+import { enqueueConversationContext } from "./conversationContextQueue.ts";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { validateClientPhone } from "@creolab/contracts";
@@ -195,6 +196,7 @@ export async function receiveCompanyTelegram(prisma: PrismaClient, id: string, s
     const duplicateMessage = await tx.message.findUnique({ where: { connectionScopedId: scoped } });
     if (!duplicateMessage) {
       const message = await tx.message.create({ data: { tenantId, conversationId: conversation.id, senderKind: "client", direction: "inbound", type: downloaded ? "document" : "text", text: text || null, providerMessageId, connectionScopedId: scoped, createdAt: new Date(incoming.date * 1000) } });
+      await enqueueConversationContext(tx, tenantId, conversation.id, message.id);
       if (downloaded) await storeMessageAttachment(tx, { tenantId, messageId: message.id, ...downloaded, providerMessageId });
     }
     if (sharedContact && sharedContact.user_id === incoming.from!.id) {

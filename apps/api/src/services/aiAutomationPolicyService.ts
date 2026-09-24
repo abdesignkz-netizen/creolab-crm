@@ -40,6 +40,9 @@ function resolveMode(
   settings: AIAutomationSettings,
   input: PolicyInput,
 ): { mode: AutomationMode; reason: string; meta: Partial<AutomationDecision> } {
+  if (!settings.analyzeNewRequests) {
+    return { mode: "MANUAL", reason: "Глобальная AI-автоматизация выключена", meta: { hardBlocked: true } };
+  }
   if (input.doNotContact) {
     return {
       mode: "MANUAL",

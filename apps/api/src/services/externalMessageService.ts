@@ -1,3 +1,4 @@
+import { enqueueConversationContext } from "./conversationContextQueue.ts";
 import { createHash } from "node:crypto";
 import type { PrismaClient, Prisma } from "@creolab/db";
 import { ApiError } from "../errors.ts";
@@ -28,6 +29,7 @@ export async function recordExternalMessage(prisma: PrismaClient, integrationId:
     const previousMessage = await tx.message.findUnique({ where: { connectionScopedId: scopedId } });
     if (!previousMessage) {
       const message = await tx.message.create({ data: { tenantId, conversationId: conversation.id, direction: "inbound", senderKind: "client", text: input.text, createdAt: input.at, providerMessageId: input.messageId, connectionScopedId: scopedId } });
+      await enqueueConversationContext(tx, tenantId, conversation.id, message.id);
       for (const file of input.attachments || []) await storeMessageAttachment(tx, { tenantId, messageId: message.id, ...file });
       await tx.conversation.update({ where: { id: conversation.id }, data: { waitingFor: "MANAGER", needsAttention: true, attentionReason: "client_waiting", messageRevision: { increment: 1 } } });
       await tx.contact.update({ where: { id: contact.id }, data: { lastSeenAt: new Date(), lastInboundMessageAt: input.at } });
