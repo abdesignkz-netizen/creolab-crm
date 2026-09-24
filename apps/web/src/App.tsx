@@ -1037,6 +1037,7 @@ function SimpleList({ title, load, render }: { title: string; load: () => Promis
 
 export function App() {
   const location = useLocation();
+  const publicSigningPage = /^\/(sign|verify)\/[^/]+\/?$/.test(location.pathname);
   const [me, setMe] = useState<any>(null);
   const [boot, setBoot] = useState<"loading" | "anon" | "ready" | "error" | "tenant-blocked">("loading");
   const [bootError, setBootError] = useState("");
@@ -1048,6 +1049,7 @@ export function App() {
   } | null>(null);
   useEffect(() => {
     let cancelled = false;
+    if (publicSigningPage) { setBoot("anon"); return; }
     setBoot("loading");
     api.me().then((data) => {
       if (cancelled) return;
@@ -1078,7 +1080,7 @@ export function App() {
       }
     });
     return () => { cancelled = true; };
-  }, [bootRevision]);
+  }, [bootRevision, publicSigningPage]);
   if (boot === "loading") return <div className="state">{t(normalizeLocale(null), "common.loading")}</div>;
   if (boot === "error") return <div className="state"><p>{bootError}</p><button className="btn" onClick={() => setBootRevision(value => value + 1)}>Повторить</button></div>;
   if (boot === "tenant-blocked" && tenantBlock) {

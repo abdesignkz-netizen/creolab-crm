@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { api } from "../lib/api";
 import { createSigningClient, ncalayerUserMessage } from "../lib/signing/ncalayerClient";
+import { ContractSignatureSummary } from "../components/ContractSignatureSummary";
 import { CONTRACT_SIGNING_ENABLED } from "../lib/featureFlags";
 
 export function SignPage() {
@@ -54,7 +55,7 @@ export function SignPage() {
       await client.connect();
       const cms = await client.signDocument(base64);
       await api.publicSubmitSign(token, cms);
-      setDone("Договор подписан");
+      setDone("Договор подписан обеими сторонами");
       await load();
     } catch (err: any) {
       setError(ncalayerUserMessage(err));
@@ -91,10 +92,12 @@ export function SignPage() {
                 Сумма: <b>{Number(data.amount || 0).toLocaleString("ru-RU")} {data.currency}</b>
               </p>
               <iframe className="sign-doc-frame" title="Договор PDF" src={api.publicSignPdfUrl(token)} />
+              <ContractSignatureSummary signed={data.contractStatus === "SIGNED"} signers={data.signers || []}
+                verificationUrl={data.verificationUrl} sellerName={data.sellerName} buyerName={data.buyerName} download={format => api.downloadPublicSignedContract(token, format)} />
               {data.waitingForSeller ? <p className="muted">Сначала должен подписать исполнитель.</p> : null}
               <div className="actions">
                 <a className="btn secondary" href={api.publicSignPdfUrl(token)}>
-                  Скачать PDF
+                  Скачать исходный PDF
                 </a>
                 <button type="button" className="btn" disabled={busy || !data.canSign} onClick={() => void sign()}>
                   {busy ? "Подписываем…" : "Подписать ЭЦП"}

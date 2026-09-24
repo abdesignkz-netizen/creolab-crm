@@ -1469,6 +1469,20 @@ export function createApp(prisma: PrismaClient) {
     res.json(await getContractSigning(prisma, await requireAuth(req), req.params.id));
   });
 
+  for (const format of ["pdf", "zip"] as const) {
+    app.get(`/api/v1/contracts/:id/signed-${format}`, async (req, res) => {
+      const { downloadSignedContract } = await import("./services/contractSigningService.ts");
+      const { sendSignedExport } = await import("./services/contractSignedExport.ts");
+      sendSignedExport(res, await downloadSignedContract(prisma, await requireAuth(req), req.params.id, format));
+    });
+    app.get(`/public/sign/:token/signed-${format}`, async (req, res) => {
+      rateLimit(`sign-export:${req.ip}`, 20);
+      const { downloadPublicSignedContract } = await import("./services/contractSigningService.ts");
+      const { sendSignedExport } = await import("./services/contractSignedExport.ts");
+      sendSignedExport(res, await downloadPublicSignedContract(prisma, req.params.token, format));
+    });
+  }
+
   app.post("/api/v1/signature-requests/:id/sign", jsonLarge, async (req, res) => {
     const input = submitSignatureSchema.parse(req.body || {});
     const { signContractAsSeller } = await import("./services/contractSigningService.ts");

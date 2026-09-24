@@ -7,6 +7,7 @@ import type { Prisma, PrismaClient } from "@creolab/db";
 import type { Response } from "express";
 import { ApiError } from "../errors.ts";
 import { can, type AuthContext } from "../lib/types.ts";
+import { requireDocumentsAccess } from "../lib/access.ts";
 import { resolveUploadPath } from "../lib/storage.ts";
 import { asMoney } from "./documentMoney.ts";
 import { getTenantDocumentFlags, requireDocumentsEnabled } from "./legalProfileService.ts";
@@ -317,6 +318,7 @@ export async function getContractSigning(prisma: PrismaClient, auth: AuthContext
   const membership = requireTenant(auth);
   const tid = membership.tenantId;
   const contract = await loadContractBundle(prisma, tid, contractId);
+  const profile = await documentOrganization(prisma, tid, contract.dealId, contractId);
   const requests = await prisma.signatureRequest.findMany({
     where: { tenantId: tid, contractId },
     orderBy: { order: "asc" },
@@ -327,6 +329,8 @@ export async function getContractSigning(prisma: PrismaClient, auth: AuthContext
   });
   return {
     contract: serializeContract(contract),
+    sellerName: profile?.legalName || profile?.shortName || null,
+    buyerName: contract.deal.company?.legalName || contract.deal.company?.name || null,
     verificationUrl: contract.verificationPublicId ? `/verify/${contract.verificationPublicId}` : null,
     requests: requests.map((row) => serializeRequest(expireIfNeeded(row))),
     signatures: signatures.map((row) => ({
@@ -558,6 +562,23 @@ export async function signContractAsSeller(
   return { contract: serializeContract(result.contract), bothSigned: result.bothSigned };
 }
 
+export async function downloadSignedContract(prisma: PrismaClient, auth: AuthContext, contractId: string, format: "pdf" | "zip") {
+  requireDocumentsAccess(auth);
+  const membership = requireTenant(auth);
+  await loadContractBundle(prisma, membership.tenantId, contractId);
+  const { buildSignedContractExport } = await import("./contractSignedExport.ts");
+  return buildSignedContractExport(prisma, membership.tenantId, contractId, format);
+}
+
+export async function downloadPublicSignedContract(prisma: PrismaClient, token: string, format: "pdf" | "zip") {
+  const request = await loadPublicRequest(prisma, token);
+  if (request.status !== "SIGNED" || request.contractVersionId !== request.contract.versions.at(-1)?.id) {
+    throw new ApiError(409, "both_signatures_required", "Скачивание доступно после подписания договора обеими сторонами по этой ссылке.");
+  }
+  const { buildSignedContractExport } = await import("./contractSignedExport.ts");
+  return buildSignedContractExport(prisma, request.tenantId, request.contractId, format);
+}
+
 export async function declineContractAsSeller(
   prisma: PrismaClient,
   auth: AuthContext,
@@ -651,7 +672,14 @@ export async function getPublicSign(prisma: PrismaClient, token: string) {
     });
     view.status = request.status === "PENDING" ? "OPENED" : request.status;
   }
-  return view;
+  const signatures = await prisma.documentSignature.findMany({
+    where: { tenantId: request.tenantId, contractId: request.contractId, contractVersionId: request.contractVersionId },
+    include: { request: { select: { signerType: true } } }, orderBy: { signedAt: "asc" },
+  });
+  return { ...view,
+    verificationUrl: request.contract.verificationPublicId ? `/verify/${request.contract.verificationPublicId}` : null,
+    signers: signatures.map(row => ({ role: row.request?.signerType, name: row.signerName, signedAt: row.signedAt.toISOString(), ...signatureCheckView(row) })),
+  };
 }
 
 export async function sendPublicSignPdf(prisma: PrismaClient, token: string, res: Response) {

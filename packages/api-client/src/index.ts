@@ -427,6 +427,10 @@ export function createApiClient(options: ClientOptions) {
     contractPdfUrl: (contractId: string) => `/api/v1/contracts/${contractId}/pdf`,
     downloadContractFile: (contractId: string, format: "pdf" | "docx" = "pdf") =>
       downloadBlob(`/api/v1/contracts/${contractId}/${format}`, `contract.${format}`),
+    downloadSignedContract: (contractId: string, format: "pdf" | "zip") =>
+      downloadBlob(`/api/v1/contracts/${encodeURIComponent(contractId)}/signed-${format}`, `signed-contract.${format}`),
+    downloadPublicSignedContract: (token: string, format: "pdf" | "zip") =>
+      downloadBlob(`/public/sign/${encodeURIComponent(token)}/signed-${format}`, `signed-contract.${format}`),
     downloadContractPreview: (previewId: string, format: "pdf" | "docx" = "pdf") =>
       downloadBlob(`/api/v1/documents/contract-previews/${previewId}${format === "docx" ? "/docx" : ""}`, `contract.${format}`),
     contractTemplates: () => request("/api/v1/documents/contract-templates"),

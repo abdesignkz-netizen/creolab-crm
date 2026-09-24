@@ -4,6 +4,9 @@ import { after, before, describe, it } from "node:test";
 import { createPrismaClient } from "@creolab/db";
 import { createApp } from "./app.ts";
 import { startTestKalkan } from "./testKalkan.ts";
+import JSZip from "jszip";
+import { PDFDocument } from "pdf-lib";
+import { createHash } from "node:crypto";
 import { makeTestCms } from "./testCms.ts";
 
 describe("Documents phase 3", () => {
@@ -24,7 +27,7 @@ describe("Documents phase 3", () => {
       ...init,
       headers: {
         "Content-Type": "application/json",
-        cookie: useCookie,
+        ...(useCookie ? { cookie: useCookie } : {}),
         ...(init.headers || {}),
       },
     });
@@ -125,6 +128,9 @@ describe("Documents phase 3", () => {
   });
 
   it("готовит только подпись исполнителя и не создаёт ссылку заказчику до неё", async () => {
+    const unsignedExport = await json(`/api/v1/contracts/${contractId}/signed-zip`);
+    assert.equal(unsignedExport.response.status, 409);
+    assert.equal(unsignedExport.body.code, "both_signatures_required");
     const early = await json(`/api/v1/contracts/${contractId}/send-to-buyer`, { method: "POST" });
     assert.equal(early.response.status, 422);
     assert.equal(early.body.code, "seller_must_sign_first");
@@ -268,9 +274,23 @@ describe("Documents phase 3", () => {
     assert.ok(buyerToken);
     assert.equal(await prisma.signatureRequest.count({ where: { contractId } }), 3);
 
+    const prematureExport = await json(`/public/sign/${buyerToken}/signed-zip`, {}, "");
+    assert.equal(prematureExport.response.status, 409);
     const publicView = await json(`/public/sign/${buyerToken}`, {}, "");
+    assert.equal(publicView.response.status, 200);
     assert.equal(publicView.body.canSign, true);
     assert.equal(publicView.body.version, 1);
+
+    // External buyer: no CRM session, account, membership, or tenant header.
+    const anonymousMe = await json("/api/v1/me", {}, "");
+    assert.equal(anonymousMe.response.status, 401);
+    const accountsBefore = await prisma.user.count();
+    const membershipsBefore = await prisma.membership.count();
+    const publicPdf = await fetch(`${base}/public/sign/${buyerToken}/pdf`);
+    assert.equal(publicPdf.status, 200);
+    assert.equal(publicPdf.redirected, false);
+    assert.match(publicPdf.headers.get("content-type") || "", /application\/pdf/);
+    assert.deepEqual(Buffer.from(await publicPdf.arrayBuffer()), bytes);
 
     const buyerCms = `-----BEGIN CMS-----\n${makeTestCms(bytes, { iin: "222222222220", bin: "222222222220" })}\n-----END CMS-----`;
     const stored = await prisma.contract.findFirst({ where: { id: contractId } });
@@ -297,6 +317,12 @@ describe("Documents phase 3", () => {
     assert.equal(buyer.response.status, 200, JSON.stringify(buyer.body));
     assert.equal(buyer.body.bothSigned, true);
     assert.equal(buyer.body.contractStatus, "SIGNED");
+    assert.equal(await prisma.user.count(), accountsBefore, "Signing must not register a CRM user");
+    assert.equal(await prisma.membership.count(), membershipsBefore, "Signing must not create a CRM membership");
+    const signedPublicView = await json(`/public/sign/${buyerToken}`, {}, "");
+    assert.equal(signedPublicView.response.status, 200);
+    assert.equal(signedPublicView.body.contractStatus, "SIGNED");
+    assert.equal(signedPublicView.body.canSign, false);
 
     const signing = await json(`/api/v1/contracts/${contractId}/signing`);
     verificationId = String(signing.body.verificationUrl || "").split("/verify/")[1];
@@ -323,4 +349,72 @@ describe("Documents phase 3", () => {
     assert.equal(regen.response.status, 422);
     assert.equal(regen.body.code, "contract_immutable");
   });
+  it("выгружает оригинал и две ЭЦП владельцу и клиенту без аккаунта", async () => {
+    const originalResponse = await fetch(`${base}/api/v1/contracts/${contractId}/pdf`, { headers: { cookie } });
+    const original = Buffer.from(await originalResponse.arrayBuffer());
+    const saved = await prisma.contract.findUniqueOrThrow({ where: { id: contractId } });
+    const version = await prisma.contractVersion.findFirstOrThrow({ where: { contractId }, orderBy: { version: "desc" } });
+    for (const headers of [{ cookie }, {}]) {
+      const path = "cookie" in headers ? `/api/v1/contracts/${contractId}/signed-zip` : `/public/sign/${buyerToken}/signed-zip`;
+      const response = await fetch(base + path, { headers: headers as Record<string, string> });
+      assert.equal(response.status, 200);
+      assert.match(response.headers.get("content-type") || "", /application\/zip/);
+      assert.match(response.headers.get("cache-control") || "", /no-store/);
+      const zip = await JSZip.loadAsync(await response.arrayBuffer());
+      assert.deepEqual(await zip.file("original.pdf")!.async("nodebuffer"), original);
+      for (const role of ["SELLER", "BUYER"]) {
+        const signature = await prisma.documentSignature.findFirstOrThrow({ where: { contractId, request: { signerType: role } }, orderBy: { signedAt: "asc" } });
+        const attachment = await prisma.attachment.findUniqueOrThrow({ where: { id: signature.signatureFileId! } });
+        const { resolveUploadPath } = await import("./lib/storage.ts");
+        assert.deepEqual(await zip.file(`${role.toLowerCase()}.p7s`)!.async("nodebuffer"), await readFile(resolveUploadPath(attachment.storageKey)));
+      }
+      const manifest = JSON.parse(await zip.file("verification.json")!.async("string"));
+      assert.equal(manifest.documentHash, version.sha256);
+      assert.deepEqual(manifest.signers.map((row: { role: string }) => row.role), ["SELLER", "BUYER"]);
+      for (const file of manifest.files) assert.equal(createHash("sha256").update(await zip.file(file.name)!.async("nodebuffer")).digest("hex"), file.sha256);
+      const visual = await PDFDocument.load(await zip.file("signed-view.pdf")!.async("nodebuffer"));
+      const source = await PDFDocument.load(original);
+      assert.ok(visual.getPageCount() > source.getPageCount());
+      const originalAfter = await prisma.attachment.findUniqueOrThrow({ where: { id: saved.generatedFileId! } });
+      assert.equal(originalAfter.checksum, version.sha256);
+      if (process.env.SIGNED_EXPORT_QA_DIR) {
+        await writeFile(`${process.env.SIGNED_EXPORT_QA_DIR}/signed-view.pdf`, await zip.file("signed-view.pdf")!.async("nodebuffer"));
+        await writeFile(`${process.env.SIGNED_EXPORT_QA_DIR}/receipt.pdf`, await zip.file("signing-receipt.pdf")!.async("nodebuffer"));
+      }
+    }
+    const publicPdf = await fetch(`${base}/public/sign/${buyerToken}/signed-pdf`);
+    assert.equal(publicPdf.status, 200);
+    assert.match(publicPdf.headers.get("content-type") || "", /application\/pdf/);
+    assert.equal((await PDFDocument.load(await publicPdf.arrayBuffer())).getTitle(), `Договор ${saved.number} - подписан обеими сторонами`);
+    const anonymous = await json(`/api/v1/contracts/${contractId}/signed-zip`, {}, "");
+    assert.equal(anonymous.response.status, 401);
+    const foreign = await json(`/api/v1/contracts/${contractId}/signed-zip`, {}, otherCookie);
+    assert.equal(foreign.response.status, 404);
+    const invalid = await json("/public/sign/not-a-real-token/signed-zip", {}, "");
+    assert.equal(invalid.response.status, 404);
+  });
+
+  it("не выдаёт подписанный комплект с повреждённым файлом или непроверенной подписью", async () => {
+    const signature = await prisma.documentSignature.findFirstOrThrow({ where: { contractId, request: { signerType: "BUYER" } } });
+    const { resolveUploadPath } = await import("./lib/storage.ts");
+    const version = await prisma.contractVersion.findFirstOrThrow({ where: { contractId }, orderBy: { version: "desc" } });
+    for (const id of [signature.signatureFileId!, version.fileId!]) {
+      const attachment = await prisma.attachment.findUniqueOrThrow({ where: { id } });
+      const path = resolveUploadPath(attachment.storageKey);
+      const bytes = await readFile(path);
+      try {
+        await writeFile(path, Buffer.concat([bytes, Buffer.from("tampered")]));
+        const denied = await json(`/public/sign/${buyerToken}/signed-zip`, {}, "");
+        assert.equal(denied.response.status, 409);
+        assert.equal(denied.body.code, "signed_file_changed");
+      } finally { await writeFile(path, bytes); }
+    }
+    try {
+      await prisma.documentSignature.update({ where: { id: signature.id }, data: { verificationStatus: "PARSED" } });
+      const denied = await json(`/api/v1/contracts/${contractId}/signed-pdf`);
+      assert.equal(denied.response.status, 409);
+      assert.equal(denied.body.code, "both_signatures_required");
+    } finally { await prisma.documentSignature.update({ where: { id: signature.id }, data: { verificationStatus: signature.verificationStatus } }); }
+  });
+
 });

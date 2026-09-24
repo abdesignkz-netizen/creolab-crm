@@ -45,7 +45,7 @@ export function VerifyPage() {
               </p>
               <p className="muted">
                 {data.date ? new Date(data.date).toLocaleDateString("ru-RU") : ""} · версия {data.version || "—"} ·{" "}
-                {data.status}
+                {({ SIGNED: "Подписан обеими сторонами", PARTIALLY_SIGNED: "Подписан исполнителем, ожидается подпись заказчика", PENDING_SIGNATURE: "Ожидает подписания", READY_TO_SIGN: "Готов к подписанию", DRAFT: "Черновик" } as Record<string, string>)[data.status] || data.status}
               </p>
               <p className="muted">
                 {data.sellerName || "Исполнитель"} / {data.buyerName || "Заказчик"}

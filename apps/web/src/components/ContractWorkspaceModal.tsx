@@ -3,6 +3,7 @@ import { api } from "../lib/api";
 import { readContractReview, writeContractReview } from "../lib/contractReview";
 import { CONTRACT_SIGNING_ENABLED } from "../lib/featureFlags";
 import { createSigningClient, ncalayerUserMessage } from "../lib/signing/ncalayerClient";
+import { ContractSignatureSummary } from "./ContractSignatureSummary";
 import { ContractPreviewModal } from "./ContractPreviewModal";
 
 type Contract = {
@@ -12,7 +13,7 @@ type Contract = {
   totalAmount: number; currency: string;
 };
 type SigningRequest = { id: string; signerType: string; status: string; signUrl?: string | null };
-type Signing = { requests: SigningRequest[] };
+type Signing = { sellerName?: string | null; buyerName?: string | null; requests: SigningRequest[]; verificationUrl?: string | null; signatures?: Array<{ signatureRequestId: string; signerName: string | null; signedAt: string; verificationStatus: string; authorityStatus: string; cryptoStatus: string }> };
 type Bundle = { contract: Contract; versions: Array<{ id: string; fileId: string | null; sha256: string | null }> };
 type Template = { id: string; name: string };
 
@@ -152,7 +153,7 @@ export function ContractWorkspaceModal({ contractId, onClose, onChanged }: {
     {!contract && !error ? <p className="muted">Загружаем сведения о договоре…</p> : null}
     {!contract && error ? <button type="button" className="btn secondary" disabled={busy} onClick={() => void action(async () => { await read(); })}>Повторить загрузку</button> : null}
     {note ? <p role="status">{note}</p> : null}
-    {contract ? <p className="muted">{Number(contract.totalAmount).toLocaleString("ru-RU")} {contract.currency === "KZT" ? "₸" : contract.currency} · {fullySigned ? "Подписан" : seller ? "Подписан компанией, ожидается подпись заказчика" : review.confirmed ? "Подтверждён" : "Требует проверки"}</p> : null}
+    {contract ? <p className="muted">{Number(contract.totalAmount).toLocaleString("ru-RU")} {contract.currency === "KZT" ? "₸" : contract.currency} · {fullySigned ? "Подписан обеими сторонами" : seller ? "Подписан компанией, ожидается подпись заказчика" : review.confirmed ? "Подтверждён" : "Требует проверки"}</p> : null}
     {contract?.importedPdf ? <p className="muted">Загруженный договор сохраняется в исходном виде. Для изменения загрузите новую редакцию.</p> : contract && !editable ? <p className="muted">{seller || fullySigned ? "Договор уже подписан компанией. Изменение этой версии недоступно." : "Версия договора зафиксирована для подписания. Если попытка не удалась, нажмите «Подписать» повторно."}</p> : null}
     {editing ? <form className="panel contract-edit-form" onSubmit={event => { event.preventDefault(); void action(save); }}>
       <label>Предмет договора<textarea required value={form.subject} disabled={busy} onChange={event => setForm({ ...form, subject: event.target.value })}/></label>
@@ -162,6 +163,9 @@ export function ContractWorkspaceModal({ contractId, onClose, onChanged }: {
       <p className="muted">Сохранение сформирует новую PDF-копию договора. Её потребуется подтвердить заново.</p>
       <div className="actions"><button className="btn" disabled={busy}>Сохранить изменения</button><button type="button" className="btn secondary" disabled={busy} onClick={() => setEditing(false)}>Отмена</button></div>
     </form> : null}
+    <ContractSignatureSummary signed={fullySigned} verificationUrl={signing.verificationUrl} sellerName={signing.sellerName} buyerName={signing.buyerName}
+      signers={(signing.signatures || []).map(row => ({ ...row, name: row.signerName, role: signing.requests.find(request => request.id === row.signatureRequestId)?.signerType }))}
+      download={format => api.downloadSignedContract(contractId, format)} />
     {buyerLink ? <div className="panel"><label>Ссылка заказчику для подписи<input readOnly value={buyerLink} onFocus={event => event.target.select()}/></label><button type="button" className="btn secondary" onClick={() => void action(async () => { await navigator.clipboard.writeText(buyerLink); setNote("Ссылка скопирована. Отправьте её заказчику."); })}>Скопировать ссылку</button></div> : null}
   </ContractPreviewModal>;
 }
