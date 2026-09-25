@@ -160,6 +160,20 @@ function rebuildParagraphs(original: string, text: string) {
     .join("");
 }
 
+function normalizePartyAddressParagraph(paragraph: string) {
+  let next = paragraph.replace(/<w:ind\b[^>]*\/>/g, "");
+  const pPr = next.match(/<w:pPr\b[\s\S]*?<\/w:pPr>/)?.[0];
+  if (pPr) {
+    const normalized = pPr.includes("<w:jc")
+      ? pPr.replace(/<w:jc\b[^>]*\/>/g, '<w:jc w:val="left"/>')
+      : pPr.replace("</w:pPr>", '<w:jc w:val="left"/></w:pPr>');
+    next = next.replace(pPr, normalized);
+  } else {
+    next = next.replace(/^(<w:p\b[^>]*>)/, '$1<w:pPr><w:jc w:val="left"/></w:pPr>');
+  }
+  return next;
+}
+
 function cellXml(text: string, width: number, bold = false) {
   const rPr = bold
     ? `<w:rPr><w:b/><w:sz w:val="20"/><w:szCs w:val="20"/><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/></w:rPr>`
@@ -343,7 +357,9 @@ function rewriteParagraph(
   if (/<w:fldChar\b/.test(cleaned) && !/\{\{/.test(joined)) return cleaned;
   const next = transform(joined);
   if (next === joined) return cleaned;
-  return rebuildParagraphs(coalesced, next);
+  return rebuildParagraphs(/\{\{\s*(?:buyer|seller)_address\s*\}\}/i.test(joined)
+    ? normalizePartyAddressParagraph(coalesced)
+    : coalesced, next);
 }
 
 function fillParagraph(
@@ -361,7 +377,9 @@ function fillParagraph(
   if (/<w:fldChar\b/.test(cleaned) && !/\{\{/.test(joined) && !/№\s*\d{6,}\//.test(joined)) return cleaned;
   const next = transform(joined);
   if (next === joined) return cleaned;
-  return rebuildParagraphs(coalesced, next);
+  return rebuildParagraphs(/\{\{\s*(?:buyer|seller)_address\s*\}\}/i.test(joined)
+    ? normalizePartyAddressParagraph(coalesced)
+    : coalesced, next);
 }
 
 function mapParagraphs(

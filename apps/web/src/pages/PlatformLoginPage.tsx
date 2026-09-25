@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import { BrandLogo } from "../components/BrandLogo";
+import { PasswordInput } from "../components/PasswordInput";
 import { normalizeLocale, t } from "../i18n";
 
 export function PlatformLoginPage() {
@@ -40,7 +41,7 @@ export function PlatformLoginPage() {
           </label>
           <label>
             {t(locale, "login.password")}
-            <input name="password" type="password" required autoComplete="current-password" />
+            <PasswordInput name="password" required autoComplete="current-password" />
           </label>
           {error ? <p className="error">{error}</p> : null}
           <button className="btn">{t(locale, "login.submit")}</button>

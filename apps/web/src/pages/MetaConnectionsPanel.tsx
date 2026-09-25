@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
+import { IntegrationHelp } from "../components/IntegrationHelp";
 type Row = { id:string;kind:string;connected:boolean;status:string;lastError:string|null;settings:{label?:string;callbackUrl?:string} };
 export function MetaConnectionsPanel({ onChange }: { onChange: () => void }){
   const [rows,setRows]=useState<Row[]>([]),[busy,setBusy]=useState(false),[error,setError]=useState(""),[note,setNote]=useState("");
@@ -8,7 +9,7 @@ export function MetaConnectionsPanel({ onChange }: { onChange: () => void }){
   async function load(){setRows((await api.metaConnections()as{items:Row[]}).items);}
   useEffect(()=>{void load().catch(err=>setError(err.message));},[]);
   async function run(action:()=>Promise<void>){setBusy(true);setError("");setNote("");try{await action();await load();onChange();}catch(err){setError(err instanceof Error?err.message:"Ошибка подключения");}finally{setBusy(false);}}
-  return <div className="panel"><h3>Instagram Direct и Meta Lead Forms</h3>
+  return <div className="panel"><div className="row"><h3>Instagram Direct и Meta Lead Forms</h3><IntegrationHelp kind="meta_instagram" /></div>
     <p className="muted">Подключение через страницу Facebook и токен приложения Meta. Для Instagram нужен привязанный профессиональный аккаунт. Для внешних клиентов приложение должно иметь необходимые разрешения Meta.</p>
     {error?<p className="error">{error}</p>:null}{note?<p className="ok">{note}</p>:null}
     <form onSubmit={event=>{event.preventDefault();void run(async()=>{const result=await api.connectMeta(form)as{callbackUrl:string;verifyToken:string;note:string};if(result.verifyToken)setVerification(result);setForm({...form,accessToken:"",appSecret:""});setNote(result.note);});}}>
@@ -21,7 +22,7 @@ export function MetaConnectionsPanel({ onChange }: { onChange: () => void }){
       <button className="btn" disabled={busy}>{busy?"Подождите…":"Настроить подключение"}</button>
     </form>
     {verification?<div className="panel"><p>В разделе Webhooks приложения Meta укажите:</p><label>Callback URL<input readOnly value={verification.callbackUrl}/></label><label>Verify Token (показывается сейчас)<input readOnly value={verification.verifyToken}/></label><p className="muted">Для Instagram выберите объект Instagram и поле messages; для форм — объект Page и leadgen. Сохраните проверку в Meta, затем включите подключение ниже. Не заменяйте callback, который обслуживает другую компанию.</p></div>:null}
-    {rows.map(row=><div className="panel" key={row.id}><b>{row.kind==="instagram_direct"?"Instagram Direct":"Meta Lead Forms"} · {row.settings.label}</b><p>{row.connected?"Подключено":row.status==="DISCONNECTED"?"Отключено":"Ожидает настройки в Meta"}</p>{row.lastError?<p className="error">{row.lastError}</p>:null}<div className="actions">
+    {rows.map(row=><div className="panel" key={row.id}><b>{row.kind==="instagram_direct"?"Instagram Direct":"Meta Lead Forms"} · {row.settings.label}</b><p>{row.connected?"Подключено":row.status==="DISCONNECTED"?"Отключено":"Ожидает настройки в Meta"}</p><IntegrationHelp kind={row.kind === "instagram_direct" ? "meta_instagram" : "meta_leads"} />{row.lastError?<p className="error">{row.lastError}</p>:null}<div className="actions">
       <button className="btn secondary" disabled={busy||row.status==="DISCONNECTED"} onClick={()=>void run(async()=>{const result=await api.activateMeta(row.id)as{note:string};setNote(result.note);})}>Проверить и включить</button>
       <button className="btn secondary" disabled={busy||row.status==="DISCONNECTED"} onClick={()=>void run(async()=>{await api.disconnectMeta(row.id);setNote("Приём в CRM отключён. История сохранена. При необходимости удалите подписку и в приложении Meta.");})}>Отключить</button>
     </div></div>)}

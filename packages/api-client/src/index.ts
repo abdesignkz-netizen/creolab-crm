@@ -422,6 +422,8 @@ export function createApiClient(options: ClientOptions) {
     avrSigning: (id: string) => request(`/api/v1/electronic-documents/${id}/signing`),
     prepareAvrSellerSign: (id: string) => request(`/api/v1/electronic-documents/${id}/prepare-seller-sign`, { method: "POST" }),
     sendAvrToBuyer: (id: string) => request(`/api/v1/electronic-documents/${id}/send-to-buyer`, { method: "POST" }),
+    cancelAvrSigning: (id: string) => request(`/api/v1/electronic-documents/${id}/cancel-signing`, { method: "POST" }),
+    deleteAvr: (id: string) => request(`/api/v1/electronic-documents/${id}`, { method: "DELETE" }),
     downloadAvrSigningPdf: (id: string) => downloadBlob(`/api/v1/electronic-documents/${id}/signing-pdf`, "avr-original.pdf"),
     signAvrAsSeller: (id: string, cmsBase64: string) => request(`/api/v1/electronic-documents/${id}/sign`, { method: "POST", body: JSON.stringify({ cmsBase64 }) }),
     downloadSignedAvr: (id: string, format: "pdf" | "zip") => downloadBlob(`/api/v1/electronic-documents/${id}/signed-${format}`, `signed-avr.${format}`),
@@ -454,6 +456,8 @@ export function createApiClient(options: ClientOptions) {
       request(`/api/v1/documents/contract-templates/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
     deleteContractTemplate: (id: string) =>
       request(`/api/v1/documents/contract-templates/${id}`, { method: "DELETE" }),
+    deleteContract: (contractId: string) =>
+      request(`/api/v1/contracts/${contractId}`, { method: "DELETE" }),
     createCompanyContractFromTemplate: (companyId: string, body: unknown) =>
       request(`/api/v1/companies/${companyId}/contract-from-template`, {
         method: "POST",
@@ -463,6 +467,8 @@ export function createApiClient(options: ClientOptions) {
       request(`/api/v1/contracts/${contractId}/prepare-seller-sign`, { method: "POST" }),
     sendContractToBuyer: (contractId: string) =>
       request(`/api/v1/contracts/${contractId}/send-to-buyer`, { method: "POST" }),
+    cancelContractSigning: (contractId: string) =>
+      request(`/api/v1/contracts/${contractId}/cancel-signing`, { method: "POST" }),
     sendContractForSign: (contractId: string) =>
       request(`/api/v1/contracts/${contractId}/send-for-sign`, { method: "POST", body: JSON.stringify({}) }),
     contractSigning: (contractId: string) => request(`/api/v1/contracts/${contractId}/signing`),

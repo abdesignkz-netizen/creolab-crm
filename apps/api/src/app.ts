@@ -1454,6 +1454,10 @@ export function createApp(prisma: PrismaClient) {
     const { sendContractForSign } = await import("./services/contractSigningService.ts");
     res.json(await sendContractForSign(prisma, await requireAuth(req), req.params.id, { publicBaseUrl: config.appBaseUrl, requireSellerSignature: true }));
   });
+  app.post("/api/v1/contracts/:id/cancel-signing", async (req, res) => {
+    const { cancelContractSigning } = await import("./services/contractSigningService.ts");
+    res.json(await cancelContractSigning(prisma, await requireAuth(req), req.params.id));
+  });
 
   app.post("/api/v1/contracts/:id/send-for-sign", json, async (req, res) => {
     const { sendContractForSign } = await import("./services/contractSigningService.ts");
@@ -1634,6 +1638,14 @@ export function createApp(prisma: PrismaClient) {
   app.post("/api/v1/electronic-documents/:id/send-to-buyer", async (req, res) => {
     const { sendAvrToBuyer } = await import("./services/avrSigningService.ts");
     res.json(await sendAvrToBuyer(prisma, await requireAuth(req), req.params.id));
+  });
+  app.post("/api/v1/electronic-documents/:id/cancel-signing", async (req, res) => {
+    const { cancelAvrSigning } = await import("./services/avrSigningService.ts");
+    res.json(await cancelAvrSigning(prisma, await requireAuth(req), req.params.id));
+  });
+  app.delete("/api/v1/electronic-documents/:id", async (req, res) => {
+    const { deleteAvr } = await import("./services/avrDeletionService.ts");
+    res.json(await deleteAvr(prisma, await requireAuth(req), req.params.id));
   });
   app.get("/api/v1/electronic-documents/:id/signing-pdf", async (req, res) => {
     const { sendAvrSigningPdf } = await import("./services/avrSigningService.ts");

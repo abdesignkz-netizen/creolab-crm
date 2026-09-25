@@ -3,6 +3,7 @@ import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useSe
 import { api, clearTenant, setTenant } from "./lib/api";
 import { NavIcon } from "./components/NavIcon";
 import { BrandLogo } from "./components/BrandLogo";
+import { PasswordInput } from "./components/PasswordInput";
 import { SupportCenter, SupportHelpButton } from "./components/SupportCenter";
 import { PaywallDialog } from "./components/PaywallDialog";
 import { OnboardingWizard } from "./components/OnboardingWizard";
@@ -713,10 +714,14 @@ function Login() {
     if (params.get("reset") === "1") navigate("/forgot-password", { replace: true });
   }, [navigate, params]);
 
-  async function enterSession(result: any) {
+  async function enterSession(result: any, options: { openBilling?: boolean } = {}) {
     const tenantId = result.user?.activeTenant?.tenant?.id || result.user?.memberships?.[0]?.tenant?.id;
     if (tenantId) setTenant(tenantId);
-    const dest = result.user?.user?.platformAdmin && !tenantId ? "/admin" : "/today";
+    const dest = options.openBilling
+      ? "/billing"
+      : result.user?.user?.platformAdmin && !tenantId
+        ? "/admin"
+        : "/today";
     window.location.assign(dest);
   }
 
@@ -754,7 +759,7 @@ function Login() {
             </label>
             <label>
               {t(locale, "login.password")}
-              <input name="password" type="password" required autoComplete="current-password" />
+              <PasswordInput name="password" required autoComplete="current-password" />
             </label>
             {error ? <p className="error">{error}</p> : null}
             <button className="btn">{t(locale, "login.submit")}</button>
@@ -837,11 +842,11 @@ function Login() {
             </label>
             <label>
               {t(locale, "login.password")}
-              <input name="password" type="password" required minLength={8} autoComplete="new-password" />
+              <PasswordInput name="password" required minLength={8} autoComplete="new-password" />
             </label>
             <label>
               {t(locale, "login.passwordRepeat")}
-              <input name="passwordConfirm" type="password" required minLength={8} autoComplete="new-password" />
+              <PasswordInput name="passwordConfirm" required minLength={8} autoComplete="new-password" />
             </label>
             {error ? <p className="error">{error}</p> : null}
             <button className="btn" disabled={busy}>{t(locale, "login.sendRequest")}</button>
@@ -870,7 +875,7 @@ function Login() {
               setError("");
               try {
                 const result = (await api.verifyRegistration(email, String(form.get("code")))) as any;
-                await enterSession(result);
+                await enterSession(result, { openBilling: true });
               } catch (err) {
                 setError(err instanceof Error ? err.message : "Не удалось подтвердить код");
               } finally {

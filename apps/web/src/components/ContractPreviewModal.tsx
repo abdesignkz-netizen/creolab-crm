@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api, downloadContractFile, downloadContractPreview } from "../lib/api";
+import { PdfDocumentViewer } from "./PdfDocumentViewer";
 
 function isPdfFile(blob: Blob, filename: string) {
   return /pdf/i.test(blob.type) || /\.pdf$/i.test(filename);
@@ -110,7 +111,7 @@ export function ContractPreviewModal({
         {children}
         {error ? <div role="alert"><p className="error">{error}</p><button type="button" className="btn secondary" disabled={busy} onClick={() => setRetry(value => value + 1)}>Повторить открытие PDF</button></div> : null}
         {loading ? <p className="muted">Открываем PDF…</p> : null}
-        {pdfUrl ? <iframe title="Просмотр договора" src={pdfUrl} /> : null}
+        {pdfUrl ? <PdfDocumentViewer title={`Договор ${contract.number || ""}`} src={pdfUrl} /> : null}
         {downloadError ? <p className="error" role="alert">{downloadError}</p> : null}
         <div className="actions">
           {actions?.(!loading && !error && Boolean(pdfUrl))}

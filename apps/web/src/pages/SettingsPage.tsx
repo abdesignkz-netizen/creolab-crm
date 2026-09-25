@@ -3,6 +3,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { LegalSettingsPanel } from "./LegalSettingsPanel";
 import { api } from "../lib/api";
+import { PasswordInput } from "../components/PasswordInput";
 import { formatDateTime } from "../lib/datetime";
 import { useSession } from "../lib/session";
 import { normalizeLocale, t, type Locale } from "../i18n";
@@ -284,16 +285,16 @@ function SecuritySection({ locale }: { locale: Locale }) {
         <b>Смена пароля</b>
         <label>
           Текущий пароль
-          <input name="currentPassword" type="password" autoComplete="current-password" required />
+          <PasswordInput name="currentPassword" autoComplete="current-password" required />
           <FieldError message={errors.currentPassword} />
         </label>
         <label>
           Новый пароль
-          <input name="newPassword" type="password" autoComplete="new-password" required />
+          <PasswordInput name="newPassword" autoComplete="new-password" required />
         </label>
         <label>
           Повтор
-          <input name="confirmPassword" type="password" autoComplete="new-password" required />
+          <PasswordInput name="confirmPassword" autoComplete="new-password" required />
           <FieldError message={errors.confirmPassword} />
         </label>
         {status ? <p>{status}</p> : null}

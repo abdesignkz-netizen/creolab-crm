@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import { statusBadgeClass } from "../lib/statusBadge";
+import { IntegrationHelp } from "../components/IntegrationHelp";
 
 type ConnectMethod = "html" | "existing" | "js" | "tilda";
 
@@ -62,7 +63,7 @@ export function IntegrationsPage() {
   const formCard = catalog?.leads?.find((i: any) => i.catalogType === "WEBSITE_FORM");
   const submitUrl = formCard?.submitUrl || setup?.form?.submitUrl;
   const leadCards = (catalog?.leads || []).filter(
-    (card: any) => card.catalogType === "WEBSITE_FORM" || (card.connected && card.catalogType !== "WEBHOOK_API"),
+    (card: any) => card.catalogType === "WEBSITE_FORM" || card.catalogType === "WEBHOOK_API" || card.connected,
   );
   const companyTelegram = catalog?.messaging?.find((card: any) => card.catalogType === "TELEGRAM");
   const telegramReady = Boolean(setup?.telegram?.employee?.botConfigured);
@@ -114,6 +115,7 @@ export function IntegrationsPage() {
             ) : (
               <p className="muted">{card.note || "Не подключено"}</p>
             )}
+            <IntegrationHelp kind={card.catalogType === "WEBSITE_FORM" ? "website_form" : card.catalogType === "WEBHOOK_API" ? "webhook_api" : card.catalogType === "GOOGLE_FORMS" ? "google_forms" : card.catalogType === "META_LEAD_FORMS" ? "meta_leads" : card.catalogType === "TIKTOK_LEADS" ? "tiktok" : "website_form"} />
           </div>
         ))}
       </div>
@@ -121,6 +123,7 @@ export function IntegrationsPage() {
       {setup?.form?.connected && submitUrl ? (
         <div className="panel">
           <h3>Форма сайта — подключение</h3>
+          <IntegrationHelp kind="website_form" />
           <p className="muted integration-endpoint">Адрес для заявок: {submitUrl}</p>
           <div className="actions" style={{ marginBottom: 12 }}>
             {(
@@ -238,6 +241,7 @@ export function IntegrationsPage() {
       <TikTokConnectionsPanel onChange={() => void load()} />
       <div className="panel">
         <h3>Telegram-бот компании</h3>
+        <IntegrationHelp kind="telegram_bot" />
         <p className="muted">Клиенты пишут вашему боту, сотрудники отвечают в разделе «Диалоги». Сообщения не создают заявки автоматически.</p>
         <p><span className="badge">{companyTelegram?.healthLabel || "Не подключено"}</span> {companyTelegram?.username ? `@${companyTelegram.username}` : ""}</p>
         <form onSubmit={async event => {
@@ -268,13 +272,14 @@ export function IntegrationsPage() {
 
       <div className="panel">
         <h3>WhatsApp</h3>
+        <IntegrationHelp kind="whatsapp" />
         {setup?.whatsapp?.warning ? <div className="banner warn">{setup.whatsapp.warning}</div> : null}
         <p className="muted">{whatsappStatusNote(setup?.whatsapp)}</p>
         <p className="muted">Как бот отвечает клиентам, задаёт администратор сервиса: промт и база знаний компании.</p>
         <p className="integ-status-line">
           Статус подключения
           <span className={statusBadgeClass(setup?.whatsapp?.configured ? "Подключён" : "Не подключён")}>
-            {setup?.whatsapp?.configured ? "Подключён" : "Не подключён"}
+            {setup?.whatsapp?.reachable ? "Работает" : setup?.whatsapp?.configured ? "Ошибка проверки" : "Не подключён"}
           </span>
         </p>
         <p className="integ-status-line">
@@ -403,17 +408,21 @@ export function IntegrationsPage() {
           <Link className="btn" to="/integrations/esf">
             Открыть ИС ЭСФ
           </Link>
+          <IntegrationHelp kind="esf" />
         </div>
       </div>
 
-      {telegramReady ? (
+      {
         <>
           <h3 className="integ-section-title">Уведомления</h3>
           <div className="panel">
             <b>Telegram сотрудника</b>
+            <IntegrationHelp kind="employee_telegram" />
             <p className="muted">Личные уведомления. Это не заявки с сайта.</p>
+            {!telegramReady ? <p className="muted">Администратору сервиса нужно настроить Telegram-бота для уведомлений.</p> : null}
             <button
               className="btn"
+              disabled={!telegramReady}
               onClick={async () => {
                 const result = await api.beginTelegram();
                 setTelegram(result);
@@ -437,7 +446,7 @@ export function IntegrationsPage() {
             </p>
           </div>
         </>
-      ) : null}
+      }
     </section>
   );
 }

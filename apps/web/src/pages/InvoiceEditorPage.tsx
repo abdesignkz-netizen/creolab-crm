@@ -10,6 +10,7 @@ import {
 import { documentErrorFields, documentFieldLabel } from "../lib/documentErrors";
 import { api, downloadInvoicePdf } from "../lib/api";
 import { EsfMeasureUnitSelect } from "../components/EsfMeasureUnitSelect";
+import { PdfDocumentViewer } from "../components/PdfDocumentViewer";
 import { notifySaved } from "../components/SaveNotice";
 
 const money = (v: unknown) => Number(v || 0).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -646,7 +647,7 @@ export function InvoiceEditorPage() {
                 ) : null}
                 {previewError ? <p className="error">{previewError}</p> : null}
                 {previewUrl ? (
-                  <iframe title="Просмотр счёта" src={previewUrl} />
+                  <PdfDocumentViewer title="Просмотр счёта" src={previewUrl} />
                 ) : previewError ? null : (
                   <p className="muted">Готовим PDF…</p>
                 )}

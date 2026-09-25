@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
+import { IntegrationHelp } from "../components/IntegrationHelp";
 
 type Row = { id: string; connected: boolean; status: string; lastError: string | null; settings: { label?: string; advertiserId?: string } };
 export function TikTokConnectionsPanel({ onChange }: { onChange: () => void }) {
@@ -12,7 +13,7 @@ export function TikTokConnectionsPanel({ onChange }: { onChange: () => void }) {
     try { await action(); } catch (err) { setError(err instanceof Error ? err.message : "Ошибка подключения"); }
     finally { await load().catch(() => undefined); onChange(); setBusy(false); }
   }
-  return <div className="panel"><h3>TikTok Leads</h3>
+  return <div className="panel"><div className="row"><h3>TikTok Leads</h3><IntegrationHelp kind="tiktok" /></div>
     <p className="muted">Новые заявки из Instant Form автоматически поступают в CRM. Нужны приложение TikTok for Business с доступом к Lead Generation и права администратора рекламного аккаунта.</p>
     {error ? <p className="error">{error}</p> : null}
     <form onSubmit={event => { event.preventDefault(); void run(async () => { await api.connectTikTok(form); setForm({ ...form, accessToken: "", appSecret: "" }); }); }}>

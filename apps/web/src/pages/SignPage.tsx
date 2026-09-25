@@ -3,6 +3,7 @@ import { useParams } from "react-router-dom";
 import { api } from "../lib/api";
 import { createSigningClient, ncalayerUserMessage } from "../lib/signing/ncalayerClient";
 import { ContractSignatureSummary } from "../components/ContractSignatureSummary";
+import { PdfDocumentViewer } from "../components/PdfDocumentViewer";
 import { CONTRACT_SIGNING_ENABLED } from "../lib/featureFlags";
 
 export function SignPage({ avr = false }: { avr?: boolean }) {
@@ -15,6 +16,8 @@ export function SignPage({ avr = false }: { avr?: boolean }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState("");
+  const [pdfUrl, setPdfUrl] = useState("");
+  const [pdfError, setPdfError] = useState("");
 
   async function load() {
     try {
@@ -27,9 +30,32 @@ export function SignPage({ avr = false }: { avr?: boolean }) {
 
   useEffect(() => {
     if (!CONTRACT_SIGNING_ENABLED) return;
-    setData(null); setDone("");
+    setData(null); setDone(""); setPdfUrl(""); setPdfError("");
     void load();
   }, [token, avr]);
+
+  useEffect(() => {
+    if (!data) return;
+    let cancelled = false;
+    let objectUrl = "";
+    setPdfError("");
+    void fetch(signApi.pdf(token), { credentials: "include" })
+      .then(async response => {
+        if (!response.ok) throw new Error("Не удалось открыть документ");
+        const blob = await response.blob();
+        if (!/^application\/pdf(?:$|;)/i.test(blob.type)) throw new Error("Сервер вернул документ не в формате PDF");
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setPdfUrl(objectUrl);
+      })
+      .catch(error => {
+        if (!cancelled) setPdfError(error instanceof Error ? error.message : "Не удалось открыть PDF");
+      });
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [data, token, avr]);
 
   if (!CONTRACT_SIGNING_ENABLED) {
     return (
@@ -96,7 +122,9 @@ export function SignPage({ avr = false }: { avr?: boolean }) {
               <p>
                 Сумма: <b>{Number(data.amount || 0).toLocaleString("ru-RU")} {data.currency}</b>
               </p>
-              <iframe className="sign-doc-frame" title={`${documentName} PDF`} src={signApi.pdf(token)} />
+              {pdfUrl ? <PdfDocumentViewer className="sign-doc-frame" title={`${documentName} PDF`} src={pdfUrl} /> : null}
+              {!pdfUrl && !pdfError ? <p className="muted">Открываем PDF…</p> : null}
+              {pdfError ? <p className="error">{pdfError}. Используйте кнопку скачивания ниже.</p> : null}
               <ContractSignatureSummary documentLabel={label} signed={data.contractStatus === "SIGNED"} signers={data.signers || []}
                 verificationUrl={data.verificationUrl} sellerName={data.sellerName} buyerName={data.buyerName} download={format => signApi.download(token, format)} />
               {data.declinedAt ? <p className="error">Вы отклонили этот АВР. Обратитесь к исполнителю для согласования.</p> : null}

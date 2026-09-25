@@ -133,6 +133,20 @@ export function ContractWorkspaceModal({ contractId, onClose, onChanged }: {
     await refresh();
     setNote("Ссылка для подписи готова. Скопируйте её и отправьте заказчику.");
   }
+  async function cancelSigning() {
+    if (!window.confirm("Отменить подписание договора и вернуть его в исправление? Подпись исполнителя и ссылка заказчику будут аннулированы.")) return;
+    await api.cancelContractSigning(contractId);
+    setBuyerLink("");
+    await refresh();
+    setNote("Подписание отменено. Договор снова можно исправлять.");
+  }
+  async function deleteCurrentContract() {
+    if (!window.confirm("Удалить этот договор? Действие нельзя отменить.")) return;
+    await api.deleteContract(contractId);
+    setNote("Договор удалён");
+    await onChanged();
+    onClose();
+  }
 
   return <ContractPreviewModal
     contract={{ id: contractId, number: contract?.number }}
@@ -147,6 +161,8 @@ export function ContractWorkspaceModal({ contractId, onClose, onChanged }: {
       }}>Подтвердить</button> : null}
       {contract && !seller && !fullySigned ? <button type="button" className="btn" disabled={busy || editing || !ready || !review.confirmed || !CONTRACT_SIGNING_ENABLED} onClick={() => void action(sign)}>{busy ? "Подождите…" : "Подписать"}</button> : null}
       {seller && !buyerSigned && !fullySigned ? <button type="button" className="btn" disabled={busy || !CONTRACT_SIGNING_ENABLED} onClick={() => void action(sendToBuyer)}>Отправить на подпись заказчику</button> : null}
+      {signing.requests.length > 0 && !buyerSigned && !fullySigned ? <button type="button" className="btn secondary" disabled={busy || !CONTRACT_SIGNING_ENABLED} onClick={() => void action(cancelSigning)}>Отменить подпись и исправить договор</button> : null}
+      {contract && !seller && !buyerSigned && !fullySigned ? <button type="button" className="btn secondary" disabled={busy} onClick={() => void action(deleteCurrentContract)}>Удалить договор</button> : null}
     </>}
   >
     {error ? <p className="error" role="alert">{error}</p> : null}

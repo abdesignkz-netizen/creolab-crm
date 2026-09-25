@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
+import { IntegrationHelp } from "../components/IntegrationHelp";
 
 type Connection = { kind: string; title: string; id: string | null; connected: boolean; resource: string | null; lastError: string | null; healthStatus: string };
 const descriptions: Record<string,string> = {
@@ -16,11 +17,11 @@ export function GoogleConnectionsPanel({ onChange }: { onChange: () => void }) {
   async function load() { setData(await api.googleConnections() as typeof data); }
   useEffect(() => { void load().catch(err => setError(err.message)); },[]);
   async function run(key: string, action: () => Promise<void>) { setBusy(key);setError("");setNote("");try { await action();await load(); onChange(); } catch(err) { setError(err instanceof Error ? err.message : "Не удалось выполнить действие"); } finally { setBusy(""); } }
-  return <div className="panel"><h3>Google: календарь, формы и входящая почта</h3>
+  return <div className="panel"><div className="row"><h3>Google: календарь, формы и входящая почта</h3><IntegrationHelp kind="google_calendar" /></div>
     {error ? <p className="error">{error}</p> : null}{note ? <p className="ok">{note}</p> : null}
     {!data?.configured && data ? <p className="muted">Администратору сервиса нужно настроить подключение приложения к Google. После этого здесь станет доступен вход в аккаунт.</p> : null}
     {(data?.items || []).map(item => <div key={item.kind} className="panel">
-      <h4>{item.title} · {item.connected ? "Подключено" : "Не подключено"}</h4><p className="muted">{descriptions[item.kind]}</p>
+      <h4>{item.title} · {item.connected ? "Подключено" : "Не подключено"}</h4><p className="muted">{descriptions[item.kind]}</p><IntegrationHelp kind={item.kind === "calendar" ? "google_calendar" : item.kind === "google_forms" ? "google_forms" : "google_email"} />
       {item.resource ? <p>{item.resource}</p> : null}{item.lastError ? <p className="error">{item.lastError}</p> : null}
       {item.kind !== "email" ? <label>{item.kind === "calendar" ? "ID календаря (primary — основной)" : "ID Google Forms из адреса редактора"}<input value={resource[item.kind] || ""} onChange={event => setResource({...resource,[item.kind]:event.target.value})} /></label> : null}
       <div className="actions"><button className="btn" disabled={Boolean(busy) || !data?.configured} onClick={() => void run(item.kind, async () => {

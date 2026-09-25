@@ -7,8 +7,8 @@ export type MailMessage = {
   html?: string;
 };
 
-function fromAddress() {
-  return process.env.MAIL_FROM || process.env.SMTP_FROM || "BasQar <noreply@localhost>";
+export function fromAddress() {
+  return "BasQar <support@bsqr.kz>";
 }
 
 async function sendViaResend(message: MailMessage) {

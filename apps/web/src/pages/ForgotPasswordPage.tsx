@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ClipboardEvent, type FormEvent, type 
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../lib/api";
 import { BrandLogo } from "../components/BrandLogo";
+import { PasswordInput } from "../components/PasswordInput";
 import { normalizeLocale, t } from "../i18n";
 
 type Step = "email" | "code" | "password" | "done";
@@ -255,8 +256,7 @@ export function ForgotPasswordPage() {
             <h2>{t(locale, "login.resetNewTitle")}</h2>
             <label>
               {t(locale, "login.resetNewPassword")}
-              <input
-                type="password"
+              <PasswordInput
                 required
                 minLength={10}
                 autoComplete="new-password"
@@ -266,8 +266,7 @@ export function ForgotPasswordPage() {
             </label>
             <label>
               {t(locale, "login.resetRepeatPassword")}
-              <input
-                type="password"
+              <PasswordInput
                 required
                 minLength={10}
                 autoComplete="new-password"

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, setTenant } from "../lib/api";
+import { PasswordInput } from "../components/PasswordInput";
 
 export function InvitePage() {
   const { token = "" } = useParams();
@@ -79,7 +80,7 @@ export function InvitePage() {
               </label>
               <label>
                 Пароль
-                <input name="password" type="password" required minLength={8} autoComplete="new-password" />
+                <PasswordInput name="password" required minLength={8} autoComplete="new-password" />
               </label>
             </>
           ) : (

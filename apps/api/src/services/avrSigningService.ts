@@ -146,6 +146,36 @@ export async function sendAvrToBuyer(prisma: PrismaClient, auth: AuthContext, id
   });
   return { ...view(row), signUrl: `${config.appBaseUrl.replace(/\/$/, "")}/sign/avr/${token}` };
 }
+
+/** Cancel the BasQar signing cycle before the buyer signs.
+ * The seller signature belongs to the frozen PDF, so it is discarded together
+ * with the signing record and the AVR becomes an editable draft again.
+ */
+export async function cancelAvrSigning(prisma: PrismaClient, auth: AuthContext, id: string) {
+  const tid = tenant(auth, "manage_documents");
+  await enabled(prisma, tid);
+  const result = await prisma.$transaction(async tx => {
+    await lock(tx, tid, id);
+    const row = await load(tx, tid, id);
+    if (row.buyerSignature || row.status === "SIGNED") {
+      throw new ApiError(409, "already_signed", "АВР уже подписан заказчиком. Отмена недоступна.");
+    }
+    const files = await tx.attachment.findMany({ where: { tenantId: tid, parentType: "avr_signing", parentId: row.id } });
+    await tx.avrSigning.delete({ where: { id: row.id } });
+    const document = await tx.electronicDocument.update({
+      where: { id },
+      data: { status: "DRAFT", externalSystem: null, externalId: null, externalNumber: null,
+        externalStatus: null, signedByUserId: null, signedAt: null, sentAt: null, acceptedAt: null,
+        errorCode: null, errorMessage: null },
+    });
+    await tx.attachment.deleteMany({ where: { tenantId: tid, parentType: "avr_signing", parentId: row.id } });
+    await tx.auditEvent.create({ data: { tenantId: tid, actorUserId: auth.user.id, action: "avr.signing_cancelled",
+      entityType: "electronic_document", entityId: id, changesJson: { previousStatus: row.status, documentHash: row.documentHash } } });
+    return { document, files };
+  });
+  for (const file of result.files) await rm(resolveUploadPath(file.storageKey), { force: true }).catch(() => {});
+  return { ok: true, documentId: result.document.id };
+}
 function assertBuyerOpen(row: Signing) {
   if (row.buyerSignature || row.status === "SIGNED") throw new ApiError(409, "already_processed", "АВР уже подписан");
   if (row.declinedAt) throw new ApiError(409, "already_processed", "АВР отклонён заказчиком");

@@ -344,6 +344,40 @@ export async function getContractSigning(prisma: PrismaClient, auth: AuthContext
   };
 }
 
+/** Cancel an in-progress contract signing cycle before the buyer signs. */
+export async function cancelContractSigning(prisma: PrismaClient, auth: AuthContext, contractId: string) {
+  const membership = requireTenant(auth);
+  if (!can(auth, "manage_documents")) throw new ApiError(403, "forbidden", "Недостаточно прав для документов");
+  const tid = membership.tenantId;
+  await requireSigningEnabled(prisma, tid);
+  const result = await prisma.$transaction(async tx => {
+    await lockContract(tx, tid, contractId);
+    const contract = await loadContractBundle(tx, tid, contractId);
+    if (contract.signedAt || contract.status === "SIGNED") {
+      throw new ApiError(409, "already_signed", "Договор уже подписан заказчиком. Отмена недоступна.");
+    }
+    const requests = await tx.signatureRequest.findMany({ where: { tenantId: tid, contractId } });
+    if (!requests.length) throw new ApiError(409, "no_active_signing", "Активного подписания договора нет");
+    const buyerSigned = requests.some(row => row.signerType === "BUYER" && row.status === "SIGNED");
+    if (buyerSigned) throw new ApiError(409, "already_signed", "Договор уже подписан заказчиком. Отмена недоступна.");
+    const requestIds = requests.map(row => row.id);
+    const signatures = await tx.documentSignature.findMany({ where: { tenantId: tid, contractId }, select: { signatureFileId: true } });
+    const signatureFileIds = signatures.map(row => row.signatureFileId).filter((id): id is string => Boolean(id));
+    const signatureFiles = signatureFileIds.length
+      ? await tx.attachment.findMany({ where: { tenantId: tid, id: { in: signatureFileIds } }, select: { id: true, storageKey: true } })
+      : [];
+    await tx.documentSignature.deleteMany({ where: { tenantId: tid, contractId } });
+    await tx.signatureRequest.deleteMany({ where: { tenantId: tid, contractId } });
+    await tx.attachment.deleteMany({ where: { tenantId: tid, parentType: "document_signature", parentId: { in: requestIds } } });
+    const updated = await tx.contract.update({ where: { id: contractId }, data: { status: "READY_TO_SIGN", signedAt: null, finalSignedFileId: null } });
+    await tx.auditEvent.create({ data: { tenantId: tid, actorUserId: auth.user.id, action: "contract.signing_cancelled", entityType: "contract", entityId: contractId,
+      changesJson: { previousStatus: contract.status, requestCount: requests.length, signatureFileIds: signatures.map(row => row.signatureFileId).filter(Boolean) } } });
+    return { updated, signatureFiles };
+  });
+  for (const file of result.signatureFiles) await rm(resolveUploadPath(file.storageKey), { force: true }).catch(() => {});
+  return { ok: true, contract: serializeContract(result.updated) };
+}
+
 async function applySignature(
   prisma: PrismaClient,
   input: {

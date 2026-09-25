@@ -1469,6 +1469,30 @@ fieldset.field-block legend { padding: 0 6px; font-weight: 600; }
   cursor: pointer;
   font: inherit;
 }
+
+.password-field {
+  position: relative;
+  display: block;
+}
+.password-field > input {
+  width: 100%;
+  padding-right: 92px;
+}
+.password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 8px;
+  color: var(--accent, #1677d2);
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.password-toggle:hover { background: rgba(22, 119, 210, 0.1); }
+.password-toggle:focus-visible { outline: 2px solid var(--accent, #1677d2); outline-offset: 2px; }
 .login-dev-code {
   margin: 0;
   padding: 12px 14px;
@@ -1630,6 +1654,17 @@ fieldset.field-block legend { padding: 0 6px; font-weight: 600; }
   .confirm-panel .kv > div { grid-template-columns: 1fr; }
   .client-row, .contact-layout { grid-template-columns: 1fr; }
   .kv > div { grid-template-columns: 1fr; }
+  .contact-page .sticky-actions { width: 100%; min-width: 0; }
+  .contact-page .menu-wrap { flex: 0 0 100%; min-width: 0; }
+  .contact-page .menu-wrap .menu {
+    left: 0;
+    right: auto;
+    top: calc(100% + 6px);
+    width: min(240px, 100%);
+    min-width: 0;
+    max-width: 100%;
+  }
+  .contact-page .menu button { min-height: 44px; overflow-wrap: anywhere; }
   .sticky-actions {
     position: sticky;
     bottom: calc(84px + env(safe-area-inset-bottom, 0px));
@@ -3252,8 +3287,14 @@ button.linkish {
 .avr-editor label { display: grid; gap: 6px; }
 .stats-modal.invoice-preview-modal { width: min(920px, 100%); max-height: calc(100dvh - 24px); overflow: auto; display: grid; gap: 12px; }
 .stats-modal.invoice-preview-modal iframe { width: 100%; height: min(68dvh, 720px); border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.pdf-document-viewer { min-width: 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: #f3f4f6; }
+.pdf-viewer-toolbar { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 8px; background: var(--card); border-bottom: 1px solid var(--line); }
+.pdf-viewer-toolbar span { min-width: 64px; text-align: center; font-size: 13px; color: var(--muted); }
+.pdf-viewer-toolbar .btn { min-width: 36px; padding: 6px 10px; }
+.pdf-viewer-page { min-height: min(68dvh, 720px); max-height: min(68dvh, 720px); overflow: auto; padding: 8px; text-align: center; }
+.pdf-page-canvas { display: block; width: auto; max-width: none; height: auto; margin: 0 auto; background: #fff; box-shadow: 0 4px 16px rgba(16, 21, 28, 0.12); }
 .login-stage.sign-doc-stage { width: min(960px, 100%); }
-.sign-doc-frame { width: 100%; height: min(62dvh, 640px); border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.sign-doc-frame .pdf-viewer-page { min-height: min(62dvh, 640px); max-height: min(62dvh, 640px); }
 .contract-preview-host {
   min-height: min(68dvh, 720px);
   max-height: min(68dvh, 720px);
@@ -3272,6 +3313,9 @@ button.linkish {
 @media (max-width: 700px) {
   .invoice-marks-grid { grid-template-columns: 1fr; }
   .stats-modal.invoice-preview-modal iframe { height: 55dvh; }
+  .pdf-viewer-page { min-height: 58dvh; max-height: 58dvh; padding: 4px; }
+  .sign-doc-frame .pdf-viewer-page { min-height: 58dvh; max-height: 58dvh; }
+  .pdf-viewer-toolbar { position: sticky; top: 0; z-index: 1; }
 }
 .avr-line { display: grid; grid-template-columns: minmax(180px,3fr) minmax(72px,0.7fr) minmax(210px,1.6fr) minmax(90px,1fr) minmax(70px,0.7fr) auto auto; gap: 10px; border: 1px solid var(--border,#ddd); border-radius: 12px; padding: 16px; align-items: end; }
 .avr-line input, .avr-line select, .esf-measure-unit { min-width: 0; width: 100%; }
@@ -3524,6 +3568,13 @@ html[data-theme="dark"] {
 .contract-edit-form { display: grid; gap: 12px; }
 .contract-edit-form label { display: grid; gap: 6px; }
 .contract-preview-modal > .actions { position: sticky; bottom: -1px; background: var(--card, #fff); padding: 12px 0; border-top: 1px solid var(--line); }
+.integration-help-button { width: auto; margin: 4px 0 10px; }
+.integration-help-backdrop { position: fixed; inset: 0; z-index: 140; display: grid; place-items: center; padding: 16px; background: rgba(16, 21, 28, 0.45); }
+.integration-help-dialog { width: min(760px, 100%); max-height: calc(100dvh - 32px); overflow: auto; }
+.integration-help-dialog h3 { margin: 0; }
+.integration-help-dialog h4 { margin: 8px 0 0; }
+.integration-help-dialog p { line-height: 1.5; }
+.integration-help-dialog li { margin: 6px 0; line-height: 1.45; }
 
 /* Pricing groups keep product choices separate from optional modules. */
 .billing-page { min-width: 0; }
