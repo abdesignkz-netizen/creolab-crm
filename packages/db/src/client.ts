@@ -659,12 +659,16 @@ const DOCUMENT_DOMAIN_SQL = `
       "vatAmount" DECIMAL(18,2) NOT NULL,
       "totalAmount" DECIMAL(18,2) NOT NULL,
       "status" TEXT NOT NULL DEFAULT 'DRAFT',
+      "paymentPercent" DECIMAL(5,2) NOT NULL DEFAULT 100,
+      "paymentKind" TEXT NOT NULL DEFAULT 'FULL',
       "pdfFileId" TEXT,
       "createdByUserId" TEXT,
       "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
       "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
       CONSTRAINT "Invoice_pkey" PRIMARY KEY ("id")
     );
+    ALTER TABLE "Invoice" ADD COLUMN IF NOT EXISTS "paymentKind" TEXT NOT NULL DEFAULT 'FULL';
+    ALTER TABLE "Invoice" ADD COLUMN IF NOT EXISTS "paymentPercent" DECIMAL(5,2) NOT NULL DEFAULT 100;
     CREATE UNIQUE INDEX IF NOT EXISTS "Invoice_tenantId_id_key" ON "Invoice"("tenantId", "id");
     CREATE UNIQUE INDEX IF NOT EXISTS "Invoice_tenantId_number_key" ON "Invoice"("tenantId", "number");
     CREATE INDEX IF NOT EXISTS "Invoice_tenantId_dealId_status_idx" ON "Invoice"("tenantId", "dealId", "status");

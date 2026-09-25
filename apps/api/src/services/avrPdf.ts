@@ -20,7 +20,7 @@ import {
   paperAvrMeasureUnit,
   resolveAvrSource,
 } from "./avrExcel.ts";
-import type { AvrSourceSnapshot } from "./avrMapper.ts";
+import { expandLegalFormName, type AvrSourceSnapshot } from "./avrMapper.ts";
 
 const BLACK = rgb(0, 0, 0);
 const WHITE = rgb(1, 1, 1);
@@ -121,7 +121,7 @@ function taxId(party: { bin: string; iin: string }) {
 }
 
 function partyLine(name: string, address: string) {
-  return [name.trim(), address.trim()].filter(Boolean).join(", ");
+  return [expandLegalFormName(name), address.trim()].filter(Boolean).join(", ");
 }
 
 function money(value: number) {

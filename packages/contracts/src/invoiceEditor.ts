@@ -7,10 +7,12 @@ const paymentPercent = z.coerce
   .min(1, "Укажите процент оплаты")
   .max(100)
   .refine((n) => Math.abs(n * 100 - Math.round(n * 100)) < 0.00001, "Не более 2 знаков после запятой");
+export const invoicePaymentKind = z.enum(["PREPAYMENT", "BALANCE", "ADDITIONAL", "FULL"]);
 
 export const invoiceEditorSchema = avrEditorSchema.and(
   z.object({
     paymentPercent: paymentPercent.default(100),
+    paymentKind: invoicePaymentKind.default("FULL"),
     withoutContract: z.boolean().optional().default(false),
     contractNumber: z.string().trim().max(100).optional().default(""),
     contractDate: z
@@ -29,6 +31,7 @@ export const updateInvoiceDraftSchema = invoiceEditorSchema.and(
 
 export type InvoiceEditorInput = AvrEditorInput & {
   paymentPercent: number;
+  paymentKind: z.infer<typeof invoicePaymentKind>;
   withoutContract?: boolean;
   contractNumber?: string;
   contractDate?: string;

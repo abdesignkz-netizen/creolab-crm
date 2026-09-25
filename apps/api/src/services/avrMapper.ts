@@ -5,6 +5,19 @@ type DealItem = ReturnType<typeof serializeDealItem>;
 
 export const AVR_SOURCE_KIND = "avr_internal_v1";
 
+export function expandLegalFormName(value: string | null | undefined) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  return text.replace(/^(ТОО|АО|ИП)(?=$|\s|[«"„“])\s*/i, (_, form: string) => {
+    const names: Record<string, string> = {
+      ТОО: "Товарищество с ограниченной ответственностью",
+      АО: "Акционерное общество",
+      ИП: "Индивидуальный предприниматель",
+    };
+    return `${names[form.toUpperCase()]} `;
+  }).trim();
+}
+
 export type AvrSourceSnapshot = {
   kind: typeof AVR_SOURCE_KIND;
   seller: {
@@ -84,7 +97,7 @@ export function mapAvrSource(input: {
   return {
     kind: AVR_SOURCE_KIND,
     seller: {
-      legalName: input.profile?.legalName || input.profile?.shortName || input.tenantName || "",
+      legalName: expandLegalFormName(input.profile?.legalName || input.profile?.shortName || input.tenantName),
       bin: input.profile?.bin || "",
       iin: input.profile?.iin || "",
       legalAddress: input.profile?.legalAddress || "",
@@ -93,7 +106,7 @@ export function mapAvrSource(input: {
     },
     buyer: {
       name: input.company?.name || "",
-      legalName: input.company?.legalName || input.company?.name || "",
+      legalName: expandLegalFormName(input.company?.legalName || input.company?.name),
       bin: input.company?.bin || "",
       iin: input.company?.iin || "",
       legalAddress: input.company?.legalAddress || input.company?.address || "",

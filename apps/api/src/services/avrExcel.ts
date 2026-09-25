@@ -12,7 +12,7 @@ import JSZip from "jszip";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { requireDocumentsAccess } from "../lib/access.ts";
-import { AVR_SOURCE_KIND, mapAvrSource, type AvrSourceSnapshot } from "./avrMapper.ts";
+import { AVR_SOURCE_KIND, expandLegalFormName, mapAvrSource, type AvrSourceSnapshot } from "./avrMapper.ts";
 import { serializeDealItem } from "./dealItemService.ts";
 import { documentOrganization } from "./documentOrganization.ts";
 
@@ -186,7 +186,7 @@ export function avrExcelLayout(itemCount: number) {
 }
 
 function partyLine(name: string, address: string) {
-  return [name.trim(), address.trim()].filter(Boolean).join(", ");
+  return [expandLegalFormName(name), address.trim()].filter(Boolean).join(", ");
 }
 
 function taxId(party: { bin: string; iin: string }) {

@@ -38,6 +38,7 @@ function toEditor(invoice: ReturnType<typeof serializeInvoice>, contract?: { num
   return {
     documentDate: invoice.date.slice(0, 10),
     paymentPercent: invoice.paymentPercent || 100,
+    paymentKind: (invoice.paymentKind || (invoice.paymentPercent && invoice.paymentPercent < 100 ? "PREPAYMENT" : "FULL")) as InvoiceEditorInput["paymentKind"],
     withoutContract: Boolean(invoice.withoutContract),
     contractNumber: invoice.withoutContract ? "" : invoice.contractNumber || contract?.number || "",
     contractDate: invoice.withoutContract ? "" : invoice.contractDate || (contract?.date ? String(contract.date).slice(0, 10) : "") || "",

@@ -16,6 +16,7 @@ import {
 import { avrPdfFileName, renderAvrPdf } from "./services/avrPdf.ts";
 import { createPrismaClient } from "@creolab/db";
 import { createApp } from "./app.ts";
+import { expandLegalFormName } from "./services/avrMapper.ts";
 
 function cellValue(ws: ExcelJS.Worksheet, addr: string) {
   const value = ws.getCell(addr).value as
@@ -119,6 +120,12 @@ const gold: AvrSourceSnapshot = {
   totals: { amountWithoutVat: 325000, vatAmount: 0, totalAmount: 325000, currency: "KZT" },
   documentDate: "2026-09-10T00:00:00.000Z",
 };
+
+it("расшифровывает организационно-правовые формы в реквизитах АВР", () => {
+  assert.equal(expandLegalFormName("ТОО «Creolab»"), "Товарищество с ограниченной ответственностью «Creolab»");
+  assert.equal(expandLegalFormName("АО «ГОЛД ПРОДУКТ»"), "Акционерное общество «ГОЛД ПРОДУКТ»");
+  assert.equal(expandLegalFormName("ИП Иванов"), "Индивидуальный предприниматель Иванов");
+});
 
 describe("AVR Excel Form R-1", () => {
   it("переводит номер CRM в архивный YY-NNNN", () => {

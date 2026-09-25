@@ -125,7 +125,7 @@ async function invoicePdfSnapshot(
   }
 
   const itemTotals = sumLines(items);
-  const paymentPercent = inferInvoicePaymentPercent(asMoney(invoice.totalAmount), itemTotals.totalAmount);
+  const paymentPercent = Number(invoice.paymentPercent || inferInvoicePaymentPercent(asMoney(invoice.totalAmount), itemTotals.totalAmount));
   const computed = invoicePayableTotals(
     items.map((item) => ({
       name: item.name,
@@ -159,6 +159,7 @@ async function invoicePdfSnapshot(
     itemsVatAmount: itemTotals.vatAmount,
     itemsTotalAmount: itemTotals.totalAmount,
     paymentPercent,
+    paymentKind: invoice.paymentKind === "BALANCE" || invoice.paymentKind === "PREPAYMENT" || invoice.paymentKind === "ADDITIONAL" ? invoice.paymentKind : paymentPercent < 100 ? "PREPAYMENT" : "FULL",
     sellerName: profile?.legalName || profile?.shortName || tenant?.name || "",
     sellerBin: profile?.bin || profile?.iin || "",
     sellerAddress: profile?.legalAddress || "",
@@ -395,4 +396,3 @@ export async function sendInvoicePdf(
   res.setHeader("Cache-Control", "no-store");
   res.send(pdf);
 }
-

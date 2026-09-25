@@ -17,6 +17,7 @@ const money = (v: unknown) => Number(v || 0).toLocaleString("ru-RU", { minimumFr
 const empty: InvoiceEditorInput = {
   documentDate: new Date().toISOString().slice(0, 10),
   paymentPercent: 100,
+  paymentKind: "FULL",
   withoutContract: false,
   contractNumber: "",
   contractDate: "",
@@ -118,6 +119,7 @@ export function InvoiceEditorPage() {
           ? {
               documentDate: String(record.date || record.documentDate || ctx.editor?.documentDate || empty.documentDate).slice(0, 10),
               paymentPercent: record.paymentPercent || ctx.editor?.paymentPercent || 100,
+              paymentKind: record.paymentKind || ctx.editor?.paymentKind || (record.paymentPercent && record.paymentPercent < 100 ? "PREPAYMENT" : "FULL"),
               withoutContract: Boolean(record.withoutContract ?? ctx.editor?.withoutContract),
               contractNumber: record.withoutContract ? "" : record.contractNumber || ctx.editor?.contractNumber || ctx.contract?.number || "",
               contractDate: record.withoutContract ? "" : String(record.contractDate || ctx.editor?.contractDate || ctx.contract?.date || "").slice(0, 10),
@@ -437,12 +439,12 @@ export function InvoiceEditorPage() {
               {fieldError("documentDate")}
             </label>
             <label>
-              К оплате, %
+              Доля счёта, %
               <input
                 type="number"
-                min="1"
+                min="10"
                 max="100"
-                step="1"
+                step="10"
                 disabled={busy || immutable}
                 aria-invalid={Boolean(issues.paymentPercent)}
                 value={form.paymentPercent}
@@ -450,7 +452,15 @@ export function InvoiceEditorPage() {
               />
               {fieldError("paymentPercent")}
             </label>
-            <p className="muted">100% — полный счёт. 50% — предоплата, как в печатной форме 1С.</p>
+            <label>
+              Назначение платежа
+              <select disabled={busy || immutable} value={form.paymentKind} onChange={(e) => edit({ paymentKind: e.target.value as InvoiceEditorInput["paymentKind"] })}>
+                <option value="FULL">Полный счёт</option>
+                <option value="PREPAYMENT">Предоплата</option>
+                <option value="BALANCE">Остаток</option>
+              </select>
+            </label>
+            <p className="muted">Укажите долю от 10 до 100% с шагом 10. Например, 30% предоплата или 70% остаток.</p>
           </div>
           <div className="pdf-import-parties">
             <div className="panel">
@@ -566,7 +576,7 @@ export function InvoiceEditorPage() {
             </button>
             <p>
               Позиции: {money(totals?.items.totals.totalAmount)} ₸
-              {form.paymentPercent < 100 ? ` · предоплата ${form.paymentPercent}%: ${money(totals?.payable.totalAmount)} ₸` : null} ·{" "}
+              {form.paymentPercent < 100 ? ` · ${form.paymentKind === "BALANCE" ? "остаток" : "предоплата"} ${form.paymentPercent}%: ${money(totals?.payable.totalAmount)} ₸` : null} ·{" "}
               <b>К оплате: {money(totals?.payable.totalAmount)} ₸</b>
             </p>
             {fieldError("")}

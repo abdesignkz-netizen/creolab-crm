@@ -183,6 +183,8 @@ export function serializeInvoice(row: {
   contractNumber?: string | null;
   contractDate?: Date | null;
   withoutContract?: boolean | null;
+  paymentPercent?: { toString(): string } | number | null;
+  paymentKind?: string | null;
   updatedAt?: Date;
   items?: Array<{
     id: string;
@@ -212,10 +214,8 @@ export function serializeInvoice(row: {
     vatRate: row.vatRate == null ? null : asMoney(row.vatRate),
     vatAmount: asMoney(row.vatAmount),
     totalAmount: asMoney(row.totalAmount),
-    paymentPercent: inferInvoicePaymentPercent(
-      asMoney(row.totalAmount),
-      (row.items || []).reduce((sum, item) => sum + asMoney(item.totalAmount), 0),
-    ),
+    paymentPercent: row.paymentPercent == null ? inferInvoicePaymentPercent(asMoney(row.totalAmount), (row.items || []).reduce((sum, item) => sum + asMoney(item.totalAmount), 0)) : asMoney(row.paymentPercent),
+    paymentKind: row.paymentKind || "FULL",
     status: row.status,
     pdfFileId: row.pdfFileId ?? null,
     contractNumber: row.contractNumber || "",
@@ -547,6 +547,8 @@ export async function createOrReuseInvoiceDraft(
         status: "DRAFT",
         createdByUserId: input.actorUserId || null,
         ...invoiceContractBasis(editor),
+        paymentKind: editor?.paymentKind || "FULL",
+        paymentPercent: editor?.paymentPercent || 100,
       },
     });
     await tx.invoiceItem.createMany({
@@ -621,6 +623,8 @@ export async function applyInvoiceEditor(
         contractNumber: basis.contractNumber,
         contractDate: basis.contractDate,
         withoutContract: basis.withoutContract,
+        paymentKind: editor.paymentKind,
+        paymentPercent: editor.paymentPercent,
       },
       include: { items: { orderBy: { sortOrder: "asc" } } },
     });

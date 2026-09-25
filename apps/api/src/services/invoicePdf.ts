@@ -40,6 +40,7 @@ export type InvoicePdfInput = {
   itemsVatAmount?: number;
   itemsTotalAmount?: number;
   paymentPercent?: number;
+  paymentKind?: "PREPAYMENT" | "BALANCE" | "ADDITIONAL" | "FULL";
   sellerName: string;
   sellerBin: string;
   sellerAddress: string;
@@ -227,6 +228,7 @@ export async function renderInvoicePdf(input: InvoicePdfInput) {
   const payableTotal = input.totalAmount;
   const percent = input.paymentPercent && input.paymentPercent < 100 - 1e-6 ? input.paymentPercent : itemsTotal > 0 && payableTotal + 0.005 < itemsTotal ? Math.round((payableTotal / itemsTotal) * 10000) / 100 : 100;
   const showPrepayment = percent < 100 - 1e-6;
+  const paymentLabel = input.paymentKind === "BALANCE" ? "Остаток" : input.paymentKind === "ADDITIONAL" ? "Дополнительный платёж" : "Предоплата";
   const localNumber = invoiceLocalNumber(input.number, input.date);
 
   doc.fillColor(BLACK).font("NotoSans").fontSize(9).text(NOTICE, left, 34, { width, align: "left", lineGap: 1.2 });
@@ -386,7 +388,7 @@ export async function renderInvoicePdf(input: InvoicePdfInput) {
   doc.text(money(input.itemsTotalWithoutVat ?? input.amountWithoutVat), summaryX, y, { width: summaryW, align: "right" });
   y = doc.y + 4;
   if (showPrepayment) {
-    doc.text(`Предоплата ${String(percent).replace(".", ",")}%:`, summaryX, y, { width: summaryW * 0.7, align: "left" });
+    doc.text(`${paymentLabel} ${String(percent).replace(".", ",")}%:`, summaryX, y, { width: summaryW * 0.7, align: "left" });
     doc.text(money(payableTotal), summaryX, y, { width: summaryW, align: "right" });
     y = doc.y + 4;
   }
