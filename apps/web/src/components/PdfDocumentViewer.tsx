@@ -24,6 +24,11 @@ type PdfPage = {
 let pdfJsPromise: Promise<PdfJsModule> | null = null;
 function loadPdfJs() {
   if (!pdfJsPromise) {
+    // PDF.js 6 references the Iterator proposal during module evaluation;
+    // older Safari versions do not expose the global yet.
+    if (!("Iterator" in globalThis)) {
+      (globalThis as typeof globalThis & { Iterator?: new () => unknown }).Iterator = class Iterator {};
+    }
     pdfJsPromise = import("pdfjs-dist").then((module) => {
       const pdfJs = module as unknown as PdfJsModule;
       pdfJs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
