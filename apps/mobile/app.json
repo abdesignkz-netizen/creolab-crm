@@ -13,7 +13,7 @@
     "ios": {
       "bundleIdentifier": "kz.creolab.crm.dev",
       "supportsTablet": true,
-      "associatedDomains": ["applinks:bsqr.kz", "applinks:crm.creolab.kz"]
+      "associatedDomains": ["applinks:bsqr.kz"]
     },
     "android": {
       "package": "kz.creolab.crm.dev",
@@ -22,8 +22,7 @@
           "action": "VIEW",
           "autoVerify": true,
           "data": [
-            { "scheme": "https", "host": "bsqr.kz" },
-            { "scheme": "https", "host": "crm.creolab.kz" }
+            { "scheme": "https", "host": "bsqr.kz" }
           ],
           "category": ["BROWSABLE", "DEFAULT"]
         }
@@ -31,7 +30,7 @@
     },
     "plugins": ["expo-router", "expo-secure-store"],
     "extra": {
-      "apiBaseUrl": "http://127.0.0.1:4100"
+      "apiBaseUrl": "https://bsqr.kz"
     }
   }
 }

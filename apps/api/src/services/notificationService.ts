@@ -218,7 +218,7 @@ export async function deliverPendingPush(
         });
         return { attempted: 0, sent: 0 };
       }
-      webpush.setVapidDetails("mailto:crm@creolab.kz", vapidPublic, vapidPrivate);
+      webpush.setVapidDetails("mailto:support@bsqr.kz", vapidPublic, vapidPrivate);
       const keys = (sub.keysJson || {}) as { p256dh?: string; auth?: string };
       await webpush.sendNotification(
         {

@@ -20,10 +20,17 @@ function envSecret(name: string, fallback: string) {
   return fallback;
 }
 
+function publicUrl(name: string, fallback: string) {
+  const value = String(process.env[name] || fallback).replace(/\/$/, "");
+  // crm.creolab.kz is the retired public host. Keep old deployments from
+  // leaking it into newly generated forms, webhooks and OAuth links.
+  return value.replace(/^https:\/\/crm\.creolab\.kz$/i, "https://bsqr.kz");
+}
+
 function readAllowedOrigins() {
   const raw = process.env.ALLOWED_ORIGINS;
   if (raw && raw.trim()) {
-    const origins = raw.split(",").map((item) => item.trim()).filter(Boolean);
+    const origins = raw.split(",").map((item) => publicUrlValue(item.trim())).filter(Boolean);
     if (process.env.NODE_ENV === "production" && origins.some((item) => item === "*")) {
       throw new Error("ALLOWED_ORIGINS must not include * in production");
     }
@@ -40,6 +47,10 @@ function readAllowedOrigins() {
   ];
 }
 
+function publicUrlValue(value: string) {
+  return value.replace(/^https:\/\/crm\.creolab\.kz$/i, "https://bsqr.kz");
+}
+
 function readTrustProxy(): number | false {
   const raw = String(process.env.TRUST_PROXY || "").trim().toLowerCase();
   if (raw === "0" || raw === "false" || raw === "off") return false;
@@ -52,8 +63,8 @@ function readTrustProxy(): number | false {
 export const config = {
   nodeEnv: process.env.NODE_ENV || "development",
   port: Number(process.env.API_PORT || process.env.PORT || 4100),
-  appBaseUrl: process.env.APP_BASE_URL || "http://localhost:5173",
-  apiBaseUrl: process.env.API_BASE_URL || "http://localhost:4100",
+  appBaseUrl: publicUrl("APP_BASE_URL", process.env.NODE_ENV === "production" ? "https://bsqr.kz" : "http://localhost:5173"),
+  apiBaseUrl: publicUrl("API_BASE_URL", process.env.NODE_ENV === "production" ? "https://bsqr.kz" : "http://localhost:4100"),
   legacyAppOrigin: process.env.LEGACY_APP_ORIGIN || "",
   legacyRedirectMode: process.env.LEGACY_REDIRECT_MODE || "off",
   allowedOrigins: readAllowedOrigins(),
