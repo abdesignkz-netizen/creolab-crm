@@ -9,14 +9,14 @@
   "lang": "ru",
   "icons": [
     {
-      "src": "/favicon.svg",
+      "src": "/favicon-basqar.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any"
     },
     {
-      "src": "/favicon.png",
-      "sizes": "258x256",
+      "src": "/favicon-basqar.png",
+      "sizes": "343x343",
       "type": "image/png",
       "purpose": "any maskable"
     }

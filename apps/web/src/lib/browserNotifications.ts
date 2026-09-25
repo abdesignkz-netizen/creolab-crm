@@ -167,8 +167,8 @@ export async function showBrowserNotification(input: {
     tag: input.tag,
     url: input.url || "/today",
     requireInteraction: input.requireInteraction,
-    icon: "/favicon.svg",
-    badge: "/favicon.svg",
+    icon: "/favicon-basqar.png",
+    badge: "/favicon-basqar.png",
   };
 
   try {
@@ -185,7 +185,7 @@ export async function showBrowserNotification(input: {
     const n = new Notification(input.title, {
       body: input.body,
       tag: input.tag,
-      icon: "/favicon.svg",
+      icon: "/favicon-basqar.png",
       data: { url: input.url || "/today" },
     });
     n.onclick = () => {
