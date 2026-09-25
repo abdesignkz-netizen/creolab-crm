@@ -13,6 +13,12 @@
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any"
+    },
+    {
+      "src": "/favicon.png",
+      "sizes": "258x256",
+      "type": "image/png",
+      "purpose": "any maskable"
     }
   ]
 }

@@ -17,8 +17,8 @@ self.addEventListener("message", (event) => {
     renotify: true,
     requireInteraction: Boolean(data.requireInteraction),
     data: { url: data.url || "/today" },
-    icon: data.icon || "/favicon.svg",
-    badge: data.badge || "/favicon.svg",
+    icon: data.icon || "/favicon.png",
+    badge: data.badge || "/favicon.png",
   };
   event.waitUntil(self.registration.showNotification(title, options));
 });
