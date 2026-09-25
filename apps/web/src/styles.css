@@ -3293,6 +3293,7 @@ button.linkish {
 .pdf-viewer-toolbar .btn { min-width: 36px; padding: 6px 10px; }
 .pdf-viewer-page { min-height: min(68dvh, 720px); max-height: min(68dvh, 720px); overflow: auto; padding: 8px; text-align: center; }
 .pdf-page-canvas { display: block; width: auto; max-width: none; height: auto; margin: 0 auto; background: #fff; box-shadow: 0 4px 16px rgba(16, 21, 28, 0.12); }
+.avr-pdf-preview { display: grid; gap: 10px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
 .login-stage.sign-doc-stage { width: min(960px, 100%); }
 .sign-doc-frame .pdf-viewer-page { min-height: min(62dvh, 640px); max-height: min(62dvh, 640px); }
 .contract-preview-host {
