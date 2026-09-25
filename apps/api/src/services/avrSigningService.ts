@@ -102,7 +102,8 @@ export async function prepareAvrSeller(prisma: PrismaClient, auth: AuthContext, 
   const doc = await prisma.electronicDocument.findFirst({ where: { id, tenantId: tid, type: "AVR" } });
   if (!doc) throw new ApiError(404, "not_found", "АВР не найден");
   if (doc.status !== "VALIDATED" || doc.externalId || doc.externalSystem) throw new ApiError(409, "avr_not_ready", "Сначала проверьте АВР. Уже отправленный документ нельзя передать на другое подписание.");
-  const source = doc.sourceDataJson as unknown as AvrSourceSnapshot;
+  const { resolveAvrSource } = await import("./avrExcel.ts");
+  const source = await resolveAvrSource(prisma, tid, doc);
   const sellerId = source.seller?.bin || source.seller?.iin;
   const buyerId = source.buyer?.bin || source.buyer?.iin;
   if (!/^\d{12}$/.test(sellerId || "") || !/^\d{12}$/.test(buyerId || "")) throw new ApiError(422, "missing_fields", "Проверьте БИН / ИИН обеих сторон");
@@ -120,7 +121,7 @@ export async function prepareAvrSeller(prisma: PrismaClient, auth: AuthContext, 
       await tx.attachment.create({ data: file.data });
       const created = await tx.avrSigning.create({ data: { tenantId: tid, documentId: id, originalFileId: file.data.id,
         documentHash: file.data.checksum, snapshotJson: { ...source, number: doc.number } as unknown as Prisma.InputJsonValue } });
-      await tx.electronicDocument.update({ where: { id }, data: { status: "PENDING_SIGNATURE", externalSystem: "BASQAR", xmlStorageKey: null, errorCode: null, errorMessage: null } });
+      await tx.electronicDocument.update({ where: { id }, data: { sourceDataJson: source as unknown as Prisma.InputJsonValue, status: "PENDING_SIGNATURE", externalSystem: "BASQAR", xmlStorageKey: null, errorCode: null, errorMessage: null } });
       await tx.auditEvent.create({ data: { tenantId: tid, actorUserId: auth.user.id, action: "avr.prepare_seller_sign", entityType: "electronic_document", entityId: id, changesJson: { documentHash: created.documentHash } } });
       return created;
     });

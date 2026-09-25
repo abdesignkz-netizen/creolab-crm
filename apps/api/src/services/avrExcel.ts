@@ -16,6 +16,8 @@ import { AVR_SOURCE_KIND, mapAvrSource, type AvrSourceSnapshot } from "./avrMapp
 import { serializeDealItem } from "./dealItemService.ts";
 import { documentOrganization } from "./documentOrganization.ts";
 
+import { resolveAvrLinks } from "./avrContractBasis.ts";
+
 export const AVR_EXCEL_SHEET_NAME = "Акт выполненных работ";
 export const AVR_EXCEL_ITEM_START_ROW = 20;
 const TEMPLATE_ITEM_COUNT = 3;
@@ -610,22 +612,26 @@ export async function resolveAvrSource(
     documentDate: Date;
     currency: string;
     sourceDataJson: unknown;
+    status?: string;
+    externalId?: string | null;
+    externalSystem?: string | null;
   },
 ): Promise<AvrSourceSnapshot> {
   const stored = asAvrSource(document.sourceDataJson);
-  if (stored) return stored;
+  if (stored) {
+    if (stored.contract?.number?.trim() || !["DRAFT", "VALIDATED"].includes(document.status || "") || document.externalId || document.externalSystem === "BASQAR") return stored;
+    const { basis, invoice } = await resolveAvrLinks(prisma, tenantId, document.dealId, document);
+    return { ...stored, contract: basis, invoice: stored.invoice || (invoice ? { id: invoice.id, number: invoice.number, date: invoice.date.toISOString(), status: invoice.status } : null) };
+  }
   const deal = await prisma.deal.findFirst({
     where: { id: document.dealId, tenantId },
     include: { items: { orderBy: { sortOrder: "asc" } }, company: true },
   });
   if (!deal) throw new ApiError(404, "not_found", "Сделка не найдена");
-  const [profile, tenant, contract, invoice] = await Promise.all([
-    documentOrganization(prisma, tenantId, deal.id, document.contractId),
+  const { contract, invoice, basis } = await resolveAvrLinks(prisma, tenantId, deal.id, document);
+  const [profile, tenant] = await Promise.all([
+    documentOrganization(prisma, tenantId, deal.id, contract?.id),
     prisma.tenant.findUnique({ where: { id: tenantId }, select: { name: true } }),
-    document.contractId
-      ? prisma.contract.findFirst({ where: { id: document.contractId, tenantId } })
-      : prisma.contract.findFirst({ where: { tenantId, dealId: deal.id }, orderBy: { createdAt: "desc" } }),
-    document.invoiceId ? prisma.invoice.findFirst({ where: { id: document.invoiceId, tenantId } }) : null,
   ]);
   return mapAvrSource({
     documentDate: document.documentDate,
@@ -636,6 +642,7 @@ export async function resolveAvrSource(
     tenantName: tenant?.name,
     company: deal.company,
     contract,
+    contractBasis: basis,
     invoice,
   });
 }

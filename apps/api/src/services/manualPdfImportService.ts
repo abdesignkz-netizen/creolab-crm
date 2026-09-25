@@ -208,7 +208,7 @@ export async function commitManualPdf(prisma: PrismaClient, auth: AuthContext, r
         documentId = contract.id;
         await tx.contractVersion.create({ data: { tenantId: tid, contractId: documentId, version: 1, fileId: pdfAttachment.id, sha256: pdfAttachment.checksum } });
       } else {
-        const invoice = await tx.invoice.create({ data: { tenantId: tid, dealId, companyId, contractId, number: draft.number, date: new Date(draft.date), ...totals, status: "ISSUED", pdfFileId: importId, createdByUserId: auth.user.id } });
+        const invoice = await tx.invoice.create({ data: { tenantId: tid, dealId, companyId, contractId, contractNumber: draft.contractNumber || null, number: draft.number, date: new Date(draft.date), ...totals, status: "ISSUED", pdfFileId: importId, createdByUserId: auth.user.id } });
         documentId = invoice.id;
         await tx.invoiceItem.createMany({ data: items.map((item,sortOrder)=>({ ...item, tenantId: tid, invoiceId: documentId, sortOrder })) });
         await tx.deal.updateMany({ where: { id: dealId, tenantId: tid, paymentStatus: "NOT_INVOICED" }, data: { paymentStatus: "INVOICED" } });

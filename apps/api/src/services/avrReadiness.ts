@@ -1,3 +1,4 @@
+import { resolveAvrLinks } from "./avrContractBasis.ts";
 import { documentOrganization } from "./documentOrganization.ts";
 import type { PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
@@ -131,18 +132,17 @@ export async function getAvrReadiness(prisma: PrismaClient, auth: AuthContext, d
     },
   });
   if (!deal) throw new ApiError(404, "not_found", "Сделка не найдена");
-  const profile = await documentOrganization(prisma, tid, dealId, deal.electronicDocuments[0]?.contractId || deal.contracts[0]?.id);
-  const linkedId = deal.electronicDocuments[0]?.contractId;
-  const contract = linkedId ? await prisma.contract.findFirst({where:{id:linkedId,tenantId:tid,dealId}}) : deal.contracts[0] || null;
+  const { contract, invoice, basis } = await resolveAvrLinks(prisma, tid, dealId, deal.electronicDocuments[0] || {});
+  const profile = await documentOrganization(prisma, tid, dealId, contract?.id);
   const source=deal.electronicDocuments[0]?.sourceDataJson as {editorVersion?:number;items?:unknown[]}|undefined;
   return assessAvrReadiness({
     dealId,
     contractId: contract?.id || null,
     documentId: deal.electronicDocuments[0]?.id || null,
     signedContractId: contract?.status === "SIGNED" ? contract.id : null,
-    invoiceId: deal.electronicDocuments[0]?.invoiceId || null,
-    contractNumber: contract?.number || null,
-    contractDate: contract?.date || null,
+    invoiceId: invoice?.id || null,
+    contractNumber: basis?.number || null,
+    contractDate: basis?.date || null,
     itemCount: source?.editorVersion===1 ? source.items?.length||0 : deal.items.length,
     profile,
     company: deal.company,

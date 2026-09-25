@@ -7,6 +7,8 @@ import { assessAvrReadiness } from "./avrReadiness.ts";
 import { serializeDealItem } from "./dealItemService.ts";
 import { avrEditorAmounts, ESF_DEFAULT_MEASURE_UNIT_CODE } from "@creolab/contracts";
 
+import { resolveAvrLinks } from "./avrContractBasis.ts";
+
 export function documentWorkflowState(docs: Array<{type:string;status:string;externalStatus?:string|null;externalSystem?:string|null;externalId?:string|null;errorCode?:string|null}>) {
   const sent=(d:typeof docs[number]|undefined)=>Boolean(d&&(d.externalId||["SENT","ACCEPTED"].includes(d.status)));
   const pick=(type:string)=>docs.find(d=>d.type===type&&sent(d))||docs.find(d=>d.type===type);
@@ -45,11 +47,12 @@ export async function getAvrEditorContext(prisma:PrismaClient,auth:AuthContext,d
   const m=await workflowAccess(prisma,auth);
   const deal=await prisma.deal.findFirst({where:{id:dealId,tenantId:m.tenantId},include:{company:true,contact:true,assignee:{include:{user:{select:{name:true}}}},items:{orderBy:{sortOrder:"asc"}},contracts:{orderBy:{createdAt:"desc"},take:1},electronicDocuments:{orderBy:{createdAt:"desc"},select:{id:true,type:true,status:true,errorCode:true,externalId:true,externalSystem:true,externalStatus:true}}}});
   if(!deal)throw new ApiError(404,"not_found","Сделка не найдена");
-  const profile=await documentOrganization(prisma,m.tenantId,deal.id,deal.contracts[0]?.id);
+  const { contract, basis } = await resolveAvrLinks(prisma,m.tenantId,deal.id);
+  const profile=await documentOrganization(prisma,m.tenantId,deal.id,contract?.id);
   const legal=await (await import("./legalProfileService.ts")).getLegalProfile(prisma,auth);
   const items=deal.items.map(serializeDealItem);
   const fallback=!items.length&&Number(deal.offerAmountMinor)>0?[{name:deal.title,quantity:1,unit:ESF_DEFAULT_MEASURE_UNIT_CODE,unitPrice:Number(deal.offerAmountMinor),vatRate:0}]:[];
-  return {deal:{id:deal.id,title:deal.title,number:deal.id.slice(0,8).toUpperCase(),contactId:deal.contactId,contactName:deal.contact.name,companyId:deal.companyId,responsible:deal.assignee?.user.name||null},company:deal.company,organization:{...profile,directorBasis:legal.directorBasis},contract:deal.contracts[0]||null,items:items.length?items:fallback,documentState:documentWorkflowState(deal.electronicDocuments),existingDocumentId:deal.electronicDocuments.find(d=>d.type==="AVR")?.id||null};
+  return {deal:{id:deal.id,title:deal.title,number:deal.id.slice(0,8).toUpperCase(),contactId:deal.contactId,contactName:deal.contact.name,companyId:deal.companyId,responsible:deal.assignee?.user.name||null},company:deal.company,organization:{...profile,directorBasis:legal.directorBasis},contract:basis,items:items.length?items:fallback,documentState:documentWorkflowState(deal.electronicDocuments),existingDocumentId:deal.electronicDocuments.find(d=>d.type==="AVR")?.id||null};
 }
 
 export async function countDocumentClosing(prisma:PrismaClient,tenantId:string,scope:Prisma.DealWhereInput={}) {

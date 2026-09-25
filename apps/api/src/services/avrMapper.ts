@@ -75,6 +75,7 @@ export function mapAvrSource(input: {
     directorPosition?: string | null;
   } | null;
   contract: { id: string; number: string; date: Date; status: string } | null;
+  contractBasis?: AvrSourceSnapshot["contract"];
   invoice: { id: string; number: string; date: Date; status: string } | null;
 }): AvrSourceSnapshot {
   const totals = input.items.length
@@ -100,7 +101,7 @@ export function mapAvrSource(input: {
       directorPosition: input.company?.directorPosition || "",
     },
     deal: { id: input.deal.id, title: input.deal.title },
-    contract: input.contract
+    contract: input.contractBasis !== undefined ? input.contractBasis : input.contract
       ? {
           id: input.contract.id,
           number: input.contract.number,

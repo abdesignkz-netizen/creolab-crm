@@ -275,4 +275,82 @@ describe("AVR editor workflow", () => {
     assert.equal(documentWorkflowState([{type:"AVR",status:"ACCEPTED"},{type:"ESF",status:"ACCEPTED"}]).closed,true);
     assert.equal(documentWorkflowState([{type:"AVR",status:"VALIDATED",errorCode:"remote_error"}]).code,"ERROR");
   });
+  it("берёт основание из счёта без карточки договора и сохраняет его при проверке и редактировании", async () => {
+    const companyId = (await prisma.deal.findUniqueOrThrow({ where: { id: dealId } })).companyId!;
+    const created = await json("/api/v1/deals", post({ title: "АВР из счёта", contactId, companyId, items: [{ name: "Съёмка", quantity: 1, unitPrice: 400000 }] }));
+    const nextId = created.body.deal.id;
+    const tenantId = (await prisma.deal.findUniqueOrThrow({ where: { id: nextId } })).tenantId;
+    const invoice = await prisma.invoice.create({ data: { tenantId, dealId: nextId, companyId, amountWithoutVat: 400000, vatAmount: 0, totalAmount: 400000, number: "BASIS-INV", status: "ISSUED", contractNumber: "PHOTO-42", contractDate: new Date("2026-09-01T00:00:00Z") } });
+    const context = await json(`/api/v1/deals/${nextId}/avr-context`);
+    assert.equal(context.body.contract.number, "PHOTO-42");
+    const avr = await json(`/api/v1/deals/${nextId}/electronic-documents`, post({ type: "AVR", editor }));
+    assert.equal(avr.response.status, 201, JSON.stringify(avr.body));
+    const id = avr.body.document.id;
+    assert.equal(avr.body.document.invoiceId, invoice.id);
+    assert.equal(avr.body.document.contractId, null);
+    assert.equal(avr.body.document.source.contract.number, "PHOTO-42");
+    assert.equal(avr.body.document.source.contract.date, "2026-09-01T00:00:00.000Z");
+    const checked = await json(`/api/v1/electronic-documents/${id}/validate`, post({}));
+    assert.equal(checked.response.status, 200, JSON.stringify(checked.body));
+    assert.equal(checked.body.document.source.contract.number, "PHOTO-42");
+    const updated = await json(`/api/v1/electronic-documents/${id}`, patch(editor));
+    assert.equal(updated.response.status, 200);
+    assert.equal(updated.body.document.source.contract.number, "PHOTO-42");
+
+    const { renderAvrExcel, resolveAvrSource, formatAvrContractBasis } = await import("./services/avrExcel.ts");
+    const ExcelJS = (await import("exceljs")).default;
+    const bytes = await renderAvrExcel({ number: avr.body.document.number, source: updated.body.document.source });
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(bytes.buffer as any);
+    assert.match(String(workbook.worksheets[0].getCell("F13").value), /PHOTO-42/);
+    assert.match(formatAvrContractBasis(updated.body.document.source.contract), /2026/);
+    const { renderAvrPdf } = await import("./services/avrPdf.ts");
+    const { buffer: pdfBytes } = await renderAvrPdf({ number: avr.body.document.number, source: updated.body.document.source });
+    const { DOMMatrix, ImageData, Path2D } = await import("@napi-rs/canvas");
+    Object.assign(globalThis, { DOMMatrix, ImageData, Path2D });
+    const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    const pdf = await getDocument({ data: new Uint8Array(pdfBytes), useSystemFonts: true }).promise;
+    const page = await pdf.getPage(1);
+    const content = await page.getTextContent();
+    assert.match(content.items.map(row => "str" in row ? row.str : "").join(" "), /PHOTO-42/);
+    page.cleanup();
+
+    // Old snapshots can lack the basis; only mutable documents may be repaired.
+    const emptySource = { ...updated.body.document.source, contract: null, invoice: null };
+    await prisma.electronicDocument.update({ where: { id }, data: { sourceDataJson: emptySource, invoiceId: null } });
+    const old = await prisma.electronicDocument.findUniqueOrThrow({ where: { id } });
+    assert.equal((await resolveAvrSource(prisma, tenantId, old)).contract?.number, "PHOTO-42");
+    assert.equal((await json(`/api/v1/electronic-documents/${id}`)).body.document.source.contract.number, "PHOTO-42");
+    for (const status of ["SIGNED", "PENDING_SIGNATURE", "SENT", "ACCEPTED"]) {
+      assert.equal((await resolveAvrSource(prisma, tenantId, { ...old, status })).contract, null);
+    }
+    assert.equal((await resolveAvrSource(prisma, tenantId, { ...old, externalId: "sent-id" })).contract, null);
+  });
+
+  it("использует связанный договор счёта, явный договор и проверяет принадлежность документов", async () => {
+    const { resolveAvrLinks } = await import("./services/avrContractBasis.ts");
+    const tenantId = (await prisma.deal.findUniqueOrThrow({ where: { id: dealId } })).tenantId;
+    const first = await prisma.contract.findUniqueOrThrow({ where: { id: contractId } });
+    const newer = await prisma.contract.create({ data: { tenantId, dealId, amountWithoutVat: 1000, vatAmount: 0, totalAmount: 1000, number: "NEWER-UNRELATED", date: new Date("2026-09-20"), createdAt: new Date(Date.now() + 1000) } });
+    const invoice = await prisma.invoice.create({ data: { tenantId, dealId, amountWithoutVat: 1000, vatAmount: 0, totalAmount: 1000, number: "LINKED-INV", contractId: first.id, status: "ISSUED" } });
+    assert.equal((await resolveAvrLinks(prisma, tenantId, dealId, { invoiceId: invoice.id })).basis?.number, first.number);
+    assert.equal((await resolveAvrLinks(prisma, tenantId, dealId, { contractId: newer.id })).basis?.number, newer.number);
+    await prisma.invoice.update({ where: { id: invoice.id }, data: { withoutContract: true } });
+    assert.equal((await resolveAvrLinks(prisma, tenantId, dealId, { invoiceId: invoice.id })).basis, null);
+    const otherTenant = await prisma.tenant.findFirstOrThrow({ where: { id: { not: tenantId } } });
+    await assert.rejects(resolveAvrLinks(prisma, otherTenant.id, dealId, { invoiceId: invoice.id }), /Счёт не найден/);
+    await assert.rejects(resolveAvrLinks(prisma, tenantId, "other-deal", { contractId: newer.id }), /Договор не найден/);
+  });
+
+  it("восстанавливает номер из проверенного импорта счёта без выдуманной даты", async () => {
+    const { resolveAvrLinks } = await import("./services/avrContractBasis.ts");
+    const original = await prisma.deal.findUniqueOrThrow({ where: { id: dealId } });
+    const created = await json("/api/v1/deals", post({ title: "Импорт счёта", contactId, companyId: original.companyId, items: [{ name: "Работа", quantity: 1, unitPrice: 1000 }] }));
+    const imported = await prisma.invoice.create({ data: { tenantId: original.tenantId, dealId: created.body.deal.id, amountWithoutVat: 1000, vatAmount: 0, totalAmount: 1000, number: "IMPORTED-INV", pdfFileId: "legacy-file", status: "ISSUED" } });
+    await prisma.auditEvent.create({ data: { tenantId: original.tenantId, entityType: "invoice", entityId: imported.id, action: "document.import_pdf", changesJson: { reviewedImport: { subject: "Работа", paymentTerms: "Оплата", contractNumber: "EXT-45" } } } });
+    const result = await resolveAvrLinks(prisma, original.tenantId, created.body.deal.id);
+    assert.equal(result.contract, null);
+    assert.equal(result.basis?.number, "EXT-45");
+    assert.equal(result.basis?.date, "");
+  });
 });

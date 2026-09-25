@@ -759,5 +759,10 @@ export async function getElectronicDocument(prisma: PrismaClient, auth: AuthCont
     where: { id, tenantId: membership.tenantId },
   });
   if (!row) throw new ApiError(404, "not_found", "Документ не найден");
+  if (row.type === "AVR" && ["DRAFT", "VALIDATED"].includes(row.status) && !row.externalId && row.externalSystem !== "BASQAR") {
+    const { resolveAvrSource } = await import("./avrExcel.ts");
+    const source = await resolveAvrSource(prisma, membership.tenantId, row);
+    return { document: { ...serializeElectronicDocument(row), source } };
+  }
   return { document: serializeElectronicDocument(row) };
 }
