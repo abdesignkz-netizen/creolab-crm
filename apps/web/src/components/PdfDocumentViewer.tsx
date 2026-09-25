@@ -24,18 +24,41 @@ type PdfPage = {
 let pdfJsPromise: Promise<PdfJsModule> | null = null;
 function loadPdfJs() {
   if (!pdfJsPromise) {
-    // PDF.js 6 references the Iterator proposal during module evaluation;
-    // older Safari versions do not expose the global yet.
-    if (!("Iterator" in globalThis)) {
-      (globalThis as typeof globalThis & { Iterator?: new () => unknown }).Iterator = class Iterator {};
-    }
-    pdfJsPromise = import("pdfjs-dist").then((module) => {
+    installPdfCompatibility();
+    pdfJsPromise = import("pdfjs-dist/legacy/build/pdf.mjs").then((module) => {
       const pdfJs = module as unknown as PdfJsModule;
-      pdfJs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
+      pdfJs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/legacy/build/pdf.worker.min.mjs", import.meta.url).toString();
       return pdfJs;
     });
   }
   return pdfJsPromise;
+}
+
+function installPdfCompatibility() {
+  const runtime = globalThis as typeof globalThis & {
+    Iterator?: new () => unknown;
+    Promise: typeof Promise & { withResolvers?: <T>() => { promise: Promise<T>; resolve: (value: T | PromiseLike<T>) => void; reject: (reason?: unknown) => void } };
+  };
+  // PDF.js 6 uses the Iterator Helpers proposal and Promise.withResolvers.
+  // Older Safari versions need these tiny fallbacks before the module loads.
+  if (!runtime.Iterator) runtime.Iterator = class Iterator {};
+  if (!runtime.Promise.withResolvers) {
+    runtime.Promise.withResolvers = function withResolvers<T>() {
+      let resolve!: (value: T | PromiseLike<T>) => void;
+      let reject!: (reason?: unknown) => void;
+      const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
+      return { promise, resolve, reject };
+    };
+  }
+  const mapPrototype = Map.prototype as Map<unknown, unknown> & { getOrInsertComputed?: (key: unknown, factory: () => unknown) => unknown };
+  if (!mapPrototype.getOrInsertComputed) {
+    mapPrototype.getOrInsertComputed = function (key, factory) {
+      if (this.has(key)) return this.get(key);
+      const value = factory(); this.set(key, value); return value;
+    };
+  }
+  const iteratorPrototype = runtime.Iterator.prototype as { join?: (separator?: string) => string };
+  if (!iteratorPrototype.join) iteratorPrototype.join = function (separator = ",") { return Array.from(this as never).join(separator); };
 }
 
 export function PdfDocumentViewer({ src, title, className = "" }: PdfDocumentViewerProps) {
@@ -45,14 +68,18 @@ export function PdfDocumentViewer({ src, title, className = "" }: PdfDocumentVie
   const [scale, setScale] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [nativeFallback, setNativeFallback] = useState(false);
+
+  const isSafari = /Safari/i.test(navigator.userAgent) && !/(Chrome|Chromium|CriOS|Android)/i.test(navigator.userAgent);
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true); setError(""); setDocument(null); setPage(1);
+    setLoading(!isSafari); setError(""); setDocument(null); setPage(1); setNativeFallback(isSafari);
+    if (isSafari) return () => { cancelled = true; };
     void loadPdfJs().then((pdfJs) => pdfJs.getDocument({ url: src }).promise).then((pdf) => {
       if (!cancelled) setDocument(pdf);
     }).catch((reason) => {
-      if (!cancelled) setError(reason instanceof Error ? reason.message : "Не удалось открыть PDF");
+      if (!cancelled) { setError(""); setNativeFallback(true); }
     }).finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [src]);
@@ -87,8 +114,11 @@ export function PdfDocumentViewer({ src, title, className = "" }: PdfDocumentVie
       <button type="button" className="btn secondary" disabled={!document} onClick={() => setScale((value) => Math.min(1.8, value + 0.15))}>+</button>
     </div>
     <div ref={hostRef} className="pdf-viewer-page" role="document" aria-label={`${title}, страница ${page}`}>
+      {nativeFallback ? <object className="pdf-native-fallback" data={src} type="application/pdf" aria-label={title}>
+        <div className="pdf-fallback-message"><p className="muted">Встроенный просмотр недоступен в этом браузере.</p><a className="btn secondary" href={src} target="_blank" rel="noreferrer">Открыть PDF отдельно</a></div>
+      </object> : null}
       {loading ? <p className="muted">Открываем PDF…</p> : null}
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <p className="muted">Открываем PDF в режиме совместимости…</p> : null}
     </div>
   </div>;
 }
