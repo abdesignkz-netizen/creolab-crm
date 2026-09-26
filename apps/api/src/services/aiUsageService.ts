@@ -131,7 +131,7 @@ export async function recordAiUsage(prisma: PrismaClient | null | undefined, inp
       totalCost = money(num(inputCost) + num(outputCost) + num(cachedInputCost));
       pricingMissing = false;
     }
-    return await prisma.aIUsageEvent.create({
+    const event = await prisma.aIUsageEvent.create({
       data: {
         tenantId: input.tenantId || null,
         integrationId: input.integrationId || null,
@@ -161,6 +161,11 @@ export async function recordAiUsage(prisma: PrismaClient | null | undefined, inp
         errorCode: input.errorCode || null,
       },
     });
+    if (event.tenantId && event.status === 'ok') {
+      const { consumeResource, aiCreditCost } = await import('./billingResourceService.ts');
+      await consumeResource(prisma, event.tenantId, 'AI_CREDITS', aiCreditCost(event.feature), `ai:${event.id}`, false);
+    }
+    return event;
   } catch (error) {
     console.warn("[ai-usage] record failed", error instanceof Error ? error.message : error);
     return null;

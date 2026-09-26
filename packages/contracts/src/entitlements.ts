@@ -3,6 +3,7 @@ export const FEATURES = {
   AI_MANAGER: "AI_MANAGER",
   TEAM: "TEAM",
   MASS_MESSAGING: "MASS_MESSAGING",
+  MASS_CAMPAIGNS: "MASS_CAMPAIGNS",
   DOCUMENTS: "DOCUMENTS",
   ESF: "ESF",
   ADVANCED_ANALYTICS: "ADVANCED_ANALYTICS",
@@ -45,6 +46,7 @@ export const FEATURE_LABEL: Record<Feature, string> = {
   AI_MANAGER: "AI Manager",
   TEAM: "Команда",
   MASS_MESSAGING: "Массовые рассылки",
+  MASS_CAMPAIGNS: "Массовые рассылки",
   DOCUMENTS: "Документы",
   ESF: "ИС ЭСФ",
   ADVANCED_ANALYTICS: "Расширенная аналитика",
@@ -90,6 +92,13 @@ export const LIMITS = {
   WHATSAPP_CONNECTIONS: "WHATSAPP_CONNECTIONS",
   AI_USAGE: "AI_USAGE",
   STORAGE_GB: "STORAGE_GB",
+  /** Canonical resource names for the unified BasQar tariff line. */
+  AI_CREDITS: "AI_CREDITS",
+  AI_TRIAL: "AI_TRIAL",
+  AUTOMATION_RUNS: "AUTOMATION_RUNS",
+  DOCUMENTS: "DOCUMENTS_COUNT",
+  CAMPAIGN_RECIPIENTS: "CAMPAIGN_RECIPIENTS",
+  STORAGE_BYTES: "STORAGE_BYTES",
 } as const;
 
 export type LimitKey = (typeof LIMITS)[keyof typeof LIMITS];
@@ -106,8 +115,14 @@ export const LIMIT_LABEL: Record<LimitKey, string> = {
   PIPELINES: "Воронки",
   DEPARTMENTS: "Отделы",
   WHATSAPP_CONNECTIONS: "Подключения коммуникационных каналов",
-  AI_USAGE: "AI-взаимодействия",
+  AI_USAGE: "AI-кредиты (совместимость)",
   STORAGE_GB: "Хранилище, ГБ",
+  AI_CREDITS: "AI-кредиты",
+  AI_TRIAL: "Одноразовый AI-пакет",
+  AUTOMATION_RUNS: "Запуски автоматизаций",
+  DOCUMENTS_COUNT: "Документы за месяц",
+  CAMPAIGN_RECIPIENTS: "Получатели рассылок за месяц",
+  STORAGE_BYTES: "Хранилище",
 };
 
 export const SUBSCRIPTION_STATUSES = {

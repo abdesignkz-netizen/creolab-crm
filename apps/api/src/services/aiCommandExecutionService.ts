@@ -204,6 +204,9 @@ export async function executeTaskBatch(
     throw new ApiError(409, "scheduled", "Эту отправку выполнит рассылка в назначенное время. Не отправляйте задачу отдельно.");
   }
 
+  const { ensureMassCampaignAccess } = await import('./campaignService.ts');
+  await ensureMassCampaignAccess(prisma, tid);
+
   const children = parent.childTasks.filter((item) => item.status === "open" || item.status === "waiting");
   if (children.length > 30) {
     throw new ApiError(422, "too_many", "Слишком много получателей для batch. Создайте Campaign (следующая волна).");

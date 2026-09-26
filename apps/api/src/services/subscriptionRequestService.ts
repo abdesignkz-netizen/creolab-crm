@@ -134,12 +134,12 @@ export async function createSubscriptionRequest(
   if (!planCode) throw new ApiError(422, "invalid", "Выберите тариф");
   const billingPeriod = body.billingPeriod === "YEARLY" ? "YEARLY" : "MONTHLY";
   const addOns = asAddOns(body.addOns || body.requestedAddOns);
+  const current = await getEntitlements(prisma, membership.tenantId);
   const quote = body.requestType === "RENEWAL"
     ? await quoteRenewal(prisma, membership.tenantId, planCode, billingPeriod)
-    : await quoteSubscription(prisma, { planCode, addOns, billingPeriod });
+    : await quoteSubscription(prisma, { planCode, addOns, billingPeriod, launchEligible: !current.snapshot.entitled || current.snapshot.planCode === "BASQAR_FREE" });
   if (typeof prisma.$transaction === "function") return prisma.$transaction(tx => createSubscriptionRequest(tx as PrismaClient, auth, input), { timeout: 30000 });
   await prisma.$queryRaw`SELECT id FROM "Tenant" WHERE id = ${membership.tenantId} FOR UPDATE`;
-  const current = await getEntitlements(prisma, membership.tenantId);
   const type = inferRequestType(body.requestType || body.type, planCode, quote.finalAmountMinor, current);
 
   if (type === "DOWNGRADE" || limitsLower(quote.limits, current.limits, current.snapshot.entitled)) {

@@ -209,6 +209,8 @@ export async function activateSubscription(prisma: PrismaClient, input: Activati
     const { getEntitlements } = await import("./entitlementService.ts");
     const effective = await getEntitlements(tx, input.tenantId);
     if (quote) await initializeTenantUsage(tx, input.tenantId, effective.limits);
+    const {pauseUnavailableCampaigns} = await import('./campaignService.ts');
+    await pauseUnavailableCampaigns(tx, input.tenantId);
     return row;
   })(prisma);
 

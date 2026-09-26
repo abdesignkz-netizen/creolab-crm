@@ -1,4 +1,4 @@
-import { assertFileCapacity } from "./billingResourceService.ts";
+import { assertFileCapacity, consumeResource } from "./billingResourceService.ts";
 import { taskCreatorSnapshot } from "@creolab/contracts";
 import { CALLS_ENABLED } from "../lib/featureFlags.ts";
 import type { Prisma, PrismaClient } from "@creolab/db";
@@ -802,6 +802,15 @@ export async function executeTask(
   }
   if (!conversation?.sellerLeadId) {
     throw new ApiError(422, "invalid", "Диалог WhatsApp недоступен");
+  }
+
+  if (options.runScheduled || task.source === 'ai_command') {
+    await consumeResource(prisma, tid, 'AUTOMATION_RUNS', 1, `task:${task.parentTaskId || task.id}`);
+  }
+  if (task.parentTaskId) {
+    const { ensureMassCampaignAccess } = await import('./campaignService.ts');
+    await ensureMassCampaignAccess(prisma, tid);
+    await consumeResource(prisma, tid, 'CAMPAIGN_RECIPIENTS', 1, `batch-recipient:${task.id}`);
   }
 
   // Staff send must take the dialog from AI on both CRM and the seller bot.

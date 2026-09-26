@@ -1,3 +1,4 @@
+import { BILLING_RESOURCE_LEDGER_SQL } from "./billingResourceLedgerSchema.ts";
 // Quotas are materialized by the existing entitlement service. Tenants without a row
 // retain their old contract. Row locking protects all writers, including jobs/webhooks.
 export const BILLING_DATA_TABLES = [
@@ -90,5 +91,6 @@ BEGIN
     WHERE "tenantId" = tid;
   RETURN NULL;
 END $$`,
+...BILLING_RESOURCE_LEDGER_SQL,
 ...BILLING_DATA_TABLES.map(table => `CREATE OR REPLACE TRIGGER basqar_quota AFTER INSERT OR UPDATE OR DELETE ON "${table}" FOR EACH ROW EXECUTE FUNCTION basqar_quota_guard()`),
 ];

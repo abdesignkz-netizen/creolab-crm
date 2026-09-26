@@ -1,3 +1,4 @@
+import { consumeResource } from "./billingResourceService.ts";
 import { mergeTaskContextSnapshot } from "@creolab/contracts";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
@@ -203,7 +204,11 @@ export async function processNewRequestAutomation(
     decision.autoStart = false;
     decision.allowOutbound = false;
     decision.reason = `${decision.reason}; вне рабочего времени AI не отвечает`;
-  } else if (!withinSchedule && (decision.autoStart || decision.allowOutbound)) {
+  }
+  if (decision.analyze || decision.createTask || decision.autoStart) {
+    await consumeResource(prisma, tenantId, 'AUTOMATION_RUNS', 1, `inquiry:${inquiryId}`);
+  }
+ else if (!withinSchedule && (decision.autoStart || decision.allowOutbound)) {
     decision.autoStart = false;
     decision.allowOutbound = false;
     decision.reason = `${decision.reason}; вне окна автообработки`;

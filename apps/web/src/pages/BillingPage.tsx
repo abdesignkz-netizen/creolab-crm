@@ -185,7 +185,7 @@ export function BillingPage() {
             const qty = addons[item.code] || 0;
             const explanation = isIncluded ? "Уже включено в тариф" : aiAlreadyIncluded ? "AI уже включён — используйте дополнительный пакет" : needsAi ? "Доступно начиная с Control" : "";
             return <div key={item.code} className="billing-addon">
-              <div><b>{item.name}</b><p className="muted">{item.description}</p>{AI_TIERS.includes(item.code) ? <p className="muted">AI-взаимодействия: {item.limits.AI_USAGE?.toLocaleString("ru-RU")} · WhatsApp: {item.limits.WHATSAPP_CONNECTIONS}</p> : null}<p>{isIncluded ? "Без доплаты" : `${item.code === "ADDON_INTEGRATION" ? "от +" : "+"}${formatKzt(catalogPrice(item, period))} / ${item.chargeType === "ONE_TIME" ? "разово" : periodLabel}`}</p>{explanation ? <small className="muted">{explanation}</small> : null}</div>
+              <div><b>{item.name}</b><p className="muted">{item.description}</p>{AI_TIERS.includes(item.code) ? <p className="muted">AI-кредиты: {item.limits.AI_CREDITS || item.limits.AI_USAGE?.toLocaleString("ru-RU")} · WhatsApp: {item.limits.WHATSAPP_CONNECTIONS}</p> : null}<p>{isIncluded ? "Без доплаты" : `${item.code === "ADDON_INTEGRATION" ? "от +" : "+"}${formatKzt(catalogPrice(item, period))} / ${item.chargeType === "ONE_TIME" ? "разово" : periodLabel}`}</p>{explanation ? <small className="muted">{explanation}</small> : null}</div>
               {STEPPERS.includes(item.code) ? <div className="billing-stepper"><button type="button" aria-label={`Уменьшить: ${item.name}`} disabled={disabled || qty === 0} onClick={() => setAddonQty(item.code, qty - 1)}>−</button><output aria-label={`Количество: ${item.name}`}>{qty}</output><button type="button" aria-label={`Добавить: ${item.name}`} disabled={disabled || qty >= 99} onClick={() => setAddonQty(item.code, qty + 1)}>+</button></div> : <input type="checkbox" aria-label={item.name} disabled={disabled} checked={Boolean(isIncluded || qty > 0)} onChange={(event) => setAddonQty(item.code, event.target.checked ? 1 : 0)} />}
             </div>;
           })}</div>
@@ -195,7 +195,7 @@ export function BillingPage() {
           <h4>Что входит в оплату</h4><dl>{quote.lines.map((line, index) => <div key={`${line.code}-${index}`}><dt>{line.name}{line.qty > 1 ? ` × ${line.qty}` : ""}{line.chargeType === "ONE_TIME" ? " · разово" : ""}</dt><dd>{formatKzt(line.amountMinor)}</dd></div>)}</dl>
           <p>Подписка: <b>{formatKzt(recurring)} / {periodLabel}</b>{oneTime > 0 ? ` · Разовые услуги: ${formatKzt(oneTime)}` : ""}</p><p className="billing-total">Итого к оплате: <strong>{formatKzt(quote.finalAmountMinor)}</strong></p>
           {selectedAddOns.some((item) => item.code === "ADDON_INTEGRATION") ? <p className="muted">Интеграция рассчитана по начальной стоимости. Окончательную цену согласуем по задаче.</p> : null}
-          <p className="muted">С учётом дополнений: пользователей — {quote.limits.USERS}, воронок — {quote.limits.PIPELINES}, коммуникационные подключения — {quote.limits.WHATSAPP_CONNECTIONS}, AI-взаимодействий — {quote.limits.AI_USAGE?.toLocaleString("ru-RU")}, хранилище — {quote.limits.STORAGE_GB} ГБ.</p>
+          <p className="muted">С учётом дополнений: пользователей — {quote.limits.USERS}, воронок — {quote.limits.PIPELINES}, коммуникационные подключения — {quote.limits.WHATSAPP_CONNECTIONS}, AI-кредитов — {quote.limits.AI_USAGE?.toLocaleString("ru-RU")}, хранилище — {quote.limits.STORAGE_GB} ГБ.</p>
         </div> : null}
         <div className="actions"><button className="btn" type="button" disabled={busy || !quote || Boolean(currentRequest)} onClick={() => void submit()}>{enterprise ? "Отправить запрос на индивидуальные условия" : requestType === "RENEWAL" ? "Отправить запрос на продление" : "Отправить запрос на подключение"}</button></div>
         {currentRequest ? <p className="muted">У вас уже есть открытый запрос. Дождитесь его обработки или отмените его, чтобы отправить новый.</p> : null}
@@ -204,6 +204,6 @@ export function BillingPage() {
     <section className="panel stack"><h3>Как подключить</h3><ol className="billing-steps"><li>Выберите тариф и нужные дополнения.</li><li>Отправьте запрос. Оплата проходит вне системы.</li><li>Администратор BasQar подтвердит оплату и откроет доступ.</li></ol><p className="muted">Онлайн-оплата пока не подключена. Настройка внешних сервисов выполняется отдельно от выбора тарифа.</p>
       {upcoming.length ? <p className="muted">Дополнения в подготовке: {upcoming.map((item) => item.name).join(", ")}. Они недоступны для заказа в этом каталоге.</p> : null}
     </section>
-    <OnboardingWizard />{data?.entitlements?.SUPPORT ? <p className="muted">Вопросы по подключению можно задать в <Link to="/billing?support=1">поддержке</Link>.</p> : null}
+    <OnboardingWizard />{data?.entitlements?.SUPPORT ? <p className="muted">Вопросы по подключению можно задать в <Link to="/?support=1">поддержке</Link>.</p> : null}
   </section>;
 }

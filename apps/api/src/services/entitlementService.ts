@@ -28,6 +28,7 @@ const PLAN_FEATURE_ALIASES: Record<Feature, string[]> = {
   AI_MANAGER: ["ai", "aiManager", "AI_MANAGER"],
   TEAM: ["team", "members", "TEAM"],
   MASS_MESSAGING: ["campaigns", "massMessaging", "MASS_MESSAGING"],
+  MASS_CAMPAIGNS: ["campaigns", "massMessaging", "MASS_MESSAGING", "MASS_CAMPAIGNS"],
   DOCUMENTS: ["documents", "DOCUMENTS"],
   ESF: ["esf", "ESF", "AVR_ESF"],
   ADVANCED_ANALYTICS: ["analytics", "ADVANCED_ANALYTICS"],
@@ -59,17 +60,17 @@ const PLAN_FEATURE_ALIASES: Record<Feature, string[]> = {
 };
 
 const FEATURE_HINT: Partial<Record<Feature, string>> = {
-  AI_MANAGER: "AI-менеджер продаж доступен начиная с Sales.",
-  AI_CONTROL: "AI-контроль бизнеса доступен начиная с Control.",
-  WHATSAPP: "Коммуникационные каналы доступны начиная с Control.",
-  DOCUMENTS: "Документы доступны начиная с Control.",
-  ESF: "ИС ЭСФ доступна начиная с Control.",
-  ADVANCED_ANALYTICS: "Расширенная аналитика доступна начиная с Control.",
+  AI_MANAGER: "AI работает по лимиту AI-кредитов вашего тарифа.",
+  AI_CONTROL: "AI-контроль бизнеса доступен на всех тарифах.",
+  WHATSAPP: "WhatsApp доступен на всех тарифах в пределах лимита подключений.",
+  DOCUMENTS: "Документы доступны на всех тарифах в пределах месячного лимита.",
+  ESF: "ИС ЭСФ доступна на всех основных тарифах.",
+  ADVANCED_ANALYTICS: "Аналитика доступна на всех основных тарифах.",
   API: "API доступен в Full или по индивидуальным условиям.",
-  MASS_MESSAGING: "Массовые рассылки доступны начиная с Sales.",
+  MASS_MESSAGING: "Массовые рассылки доступны начиная с Start.",
   WORKFLOWS: "Эта возможность доступна по условиям вашей подписки.",
-  SUPPORT: "Поддержка доступна начиная с CRM Start.",
-  IMPORT: "Импорт клиентов доступен начиная с CRM Start.",
+  SUPPORT: "Поддержка доступна на всех тарифах.",
+  IMPORT: "Импорт клиентов доступен на всех тарифах.",
   CONTROL_BULK: "Расширенная автоматизация доступна в Full.",
   ADVANCED_AUTOMATION: "Расширенная автоматизация доступна в Full.",
 };
@@ -228,6 +229,8 @@ export function entitlementsFromSnapshot(snap: SubscriptionSnapshot, row: Tenant
     // Overrides may grant access, but an explicit false is an intentional deny.
     map[feature] = snap.entitled && (typeof extra[feature] === "boolean" ? Boolean(extra[feature]) : base);
   }
+  if (typeof extra.MASS_CAMPAIGNS === 'boolean') map.MASS_MESSAGING = map.MASS_CAMPAIGNS;
+  else map.MASS_CAMPAIGNS = map.MASS_MESSAGING;
   return map;
 }
 
@@ -239,6 +242,11 @@ export function limitsFromPlan(row: TenantPlanRow | null, override?: { limitsJso
     base[LIMITS.WHATSAPP_CONNECTIONS] = 99;
     base.whatsappActive = 99;
     base[LIMITS.AI_USAGE] = 999999;
+    base[LIMITS.AI_CREDITS] = 999999;
+    base[LIMITS.AUTOMATION_RUNS] = 999999;
+    base[LIMITS.DOCUMENTS] = 999999;
+    base[LIMITS.CAMPAIGN_RECIPIENTS] = 999999;
+    base[LIMITS.STORAGE_BYTES] = -1;
     base[LIMITS.PIPELINES] = 99;
     base[LIMITS.DEPARTMENTS] = 99;
     base[LIMITS.STORAGE_GB] = 999;
@@ -251,6 +259,7 @@ export function limitsFromPlan(row: TenantPlanRow | null, override?: { limitsJso
     base[LIMITS.WHATSAPP_CONNECTIONS] = Number(json.whatsappActive || json.WHATSAPP_CONNECTIONS || 20);
     base.whatsappActive = base[LIMITS.WHATSAPP_CONNECTIONS];
     base[LIMITS.AI_USAGE] = Number(json.AI_USAGE || 999999);
+    base[LIMITS.AI_CREDITS] = Number(json.AI_CREDITS ?? json.AI_USAGE ?? 999999);
     base[LIMITS.PIPELINES] = Number(json.PIPELINES || 99);
     base[LIMITS.DEPARTMENTS] = Number(json.DEPARTMENTS || 99);
     base[LIMITS.STORAGE_GB] = Number(json.STORAGE_GB || 999);
@@ -266,6 +275,8 @@ export function limitsFromPlan(row: TenantPlanRow | null, override?: { limitsJso
   if (base.whatsappActive == null && base[LIMITS.WHATSAPP_CONNECTIONS] != null) {
     base.whatsappActive = base[LIMITS.WHATSAPP_CONNECTIONS];
   }
+  if (!('AI_CREDITS' in json)) base.AI_CREDITS = base.AI_USAGE;
+  if (!('STORAGE_BYTES' in json)) base.STORAGE_BYTES = Number(json.FILE_STORAGE_MB ?? Number(json.STORAGE_GB || 0) * 1024) * 1048576;
   return applyLimitOverride(base, override);
 }
 
@@ -276,6 +287,11 @@ function emptyLimits(): Record<string, number> {
     [LIMITS.DEPARTMENTS]: 0,
     [LIMITS.WHATSAPP_CONNECTIONS]: 0,
     [LIMITS.AI_USAGE]: 0,
+    [LIMITS.AI_CREDITS]: 0,
+    [LIMITS.AUTOMATION_RUNS]: -1,
+    [LIMITS.DOCUMENTS]: -1,
+    [LIMITS.CAMPAIGN_RECIPIENTS]: -1,
+    [LIMITS.STORAGE_BYTES]: 0,
     [LIMITS.STORAGE_GB]: 0,
   };
 }
@@ -289,6 +305,10 @@ function applyLimitOverride(base: Record<string, number>, override?: { limitsJso
   if (extra.USERS != null) base.members = base.USERS;
   if (extra.WHATSAPP_CONNECTIONS != null) base.whatsappActive = base.WHATSAPP_CONNECTIONS;
   if (extra.FILE_STORAGE_MB != null) base.STORAGE_GB = base.FILE_STORAGE_MB < 0 ? -1 : base.FILE_STORAGE_MB / 1024;
+  if (extra.AI_CREDITS != null) base.AI_USAGE = base.AI_CREDITS;
+  else if (extra.AI_USAGE != null) base.AI_CREDITS = base.AI_USAGE;
+  if (extra.STORAGE_BYTES != null) { base.FILE_STORAGE_MB = base.STORAGE_BYTES < 0 ? -1 : base.STORAGE_BYTES / 1048576; base.STORAGE_GB = base.STORAGE_BYTES < 0 ? -1 : base.STORAGE_BYTES / 1073741824; }
+  else if (extra.FILE_STORAGE_MB != null) base.STORAGE_BYTES = base.FILE_STORAGE_MB < 0 ? -1 : base.FILE_STORAGE_MB * 1048576;
   return base;
 }
 
@@ -383,7 +403,7 @@ const PAID_RULES: FeatureRule[] = [
   { pattern: /^\/api\/v1\/(documents|contracts|invoices|electronic-documents)(\/|$)/, feature: FEATURES.DOCUMENTS },
   { pattern: /^\/api\/v1\/deals\/[^/]+\/(contract|invoice|avr)/, feature: FEATURES.DOCUMENTS },
   { pattern: /^\/api\/v1\/(tasks|campaigns)\/[^/]+\/attachments$/, feature: FEATURES.FILE_STORAGE },
-  { pattern: /^\/api\/v1\/ai-manager\//, feature: FEATURES.AI_MANAGER },
+  // AI operations are available on every tariff; the AI credit ledger enforces usage.
   { pattern: /^\/api\/v1\/integrations\/whatsapp-seller\/(connect|rotate-secret|disconnect|sync)$/, feature: FEATURES.WHATSAPP },
   { pattern: /^\/api\/v1\/integrations\/esf\//, feature: FEATURES.ESF },
   { pattern: /^\/api\/v1\/electronic-documents\/[^/]+\/esf-/, feature: FEATURES.ESF },
@@ -395,7 +415,7 @@ const PAID_RULES: FeatureRule[] = [
   { pattern: /^\/api\/v1\/ai\/sandbox$/, feature: FEATURES.AI_MANAGER },
   { pattern: /^\/api\/v1\/settings\/ai-automation$/, feature: FEATURES.AI_MANAGER },
   { pattern: /^\/api\/v1\/management\/(ai-pause|claim-all-ai)$/, feature: FEATURES.AI_MANAGER },
-  { pattern: /^\/api\/v1\/campaigns/, feature: FEATURES.MASS_MESSAGING },
+  // Campaign access is checked by campaignService after the draft is parsed.
   { pattern: /^\/api\/v1\/integrations\/[^/]+\/(test-mode|rotate-secret)$/, feature: FEATURES.CHANNELS },
   { pattern: /^\/api\/v1\/telegram\/begin-link$/, feature: FEATURES.CHANNELS },
   { pattern: /^\/api\/v1\/contracts\/[^/]+\/send-for-sign$/, feature: FEATURES.DOCUMENTS },
@@ -414,13 +434,9 @@ export function matchPaidFeatures(method: string, path: string): Feature[] {
   const required: Feature[] = [];
   const readRules: FeatureRule[] = [
     {pattern:/^\/api\/v1\/support(?:\/|$)/,feature:FEATURES.SUPPORT},
-    {pattern:/^\/api\/v1\/(documents|contracts|invoices|electronic-documents|signature-requests)(?:\/|$)/,feature:FEATURES.DOCUMENTS},
-    {pattern:/^\/api\/v1\/deals\/[^/]+\/(contract|invoice|avr)/,feature:FEATURES.DOCUMENTS},
     {pattern:/^\/api\/v1\/integrations\/esf(?:\/|$)/,feature:FEATURES.ESF},
     {pattern:/^\/api\/v1\/electronic-documents\/[^/]+\/esf-/,feature:FEATURES.ESF},
-    {pattern:/^\/api\/v1\/ai-manager(?:\/|$)/,feature:FEATURES.AI_MANAGER},
     {pattern:/^\/api\/v1\/settings\/ai-automation$/,feature:FEATURES.AI_MANAGER},
-    {pattern:/^\/api\/v1\/campaigns(?:\/|$)/,feature:FEATURES.MASS_MESSAGING},
     {pattern:/^\/api\/v1\/campaigns\/draft-message$/,feature:FEATURES.ADVANCED_AUTOMATION},
     {pattern:/^\/api\/v1\/workspace\/control(?:\/|$)/,feature:FEATURES.AI_CONTROL},
   ];

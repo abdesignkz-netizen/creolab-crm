@@ -1,6 +1,6 @@
 import { FEATURE_LABEL, LIMIT_LABEL, LIMIT_LIST, type CatalogItem, type Feature } from "@creolab/contracts";
 
-export type BillingCatalogItem = Pick<CatalogItem, "code" | "name" | "kind" | "product" | "description" | "monthlyPriceMinor" | "yearlyPriceMinor" | "chargeType" | "catalogStatus" | "features" | "limits" | "included" | "recommended">;
+export type BillingCatalogItem = Pick<CatalogItem, "code" | "name" | "kind" | "product" | "description" | "monthlyPriceMinor" | "yearlyPriceMinor" | "launchMonthlyPriceMinor" | "launchEndsAt" | "chargeType" | "catalogStatus" | "features" | "limits" | "included" | "recommended">;
 export type BillingPeriod = "MONTHLY" | "YEARLY";
 
 export function formatKzt(value: number) {
@@ -12,15 +12,15 @@ export function catalogPrice(item: BillingCatalogItem, period: BillingPeriod) {
 }
 
 const AUDIENCE: Record<string, string> = {
-  BASQAR_FREE: "Для самостоятельной работы и знакомства с BasQar.",
-  CRM_START: "Для небольшой команды, которой нужна CRM без AI.",
-  CONTROL: "CRM, документы и AI-контроль бизнеса.",
-  SALES: "AI работает с клиентами вместе с вашей командой.",
+  BASQAR_FREE: "Не демо. Работайте со своими клиентами и данными.",
+  CRM_START: "Для ежедневной работы малого бизнеса.",
+  CONTROL: "Для отдела продаж и растущей команды.",
+  SALES: "Для компаний с большим потоком клиентов и процессов.",
   FULL: "Продажи и расширенная автоматизация бизнеса.",
 };
 
 const GROUPS = [
-  { id: "main", title: "Тарифы BasQar", text: "Все цены фиксированы. Доступные ресурсы можно увеличить отдельными дополнениями.", codes: ["BASQAR_FREE", "CRM_START", "CONTROL", "SALES", "FULL"] },
+  { id: "main", title: "Тарифы BasQar", text: "Все цены фиксированы. Доступные ресурсы можно увеличить отдельными дополнениями.", codes: ["BASQAR_FREE", "CRM_START", "CONTROL", "SALES"] },
 ];
 
 // These rows describe the catalog flags; availability and limits always come from the server.
@@ -47,7 +47,7 @@ function highlights(item: BillingCatalogItem) {
   const rows = [f.CRM_CORE ? "Полная CRM: клиенты, компании, заявки, сделки и задачи" : "CRM Lite: клиенты, заявки, сделки и задачи"];
   if (f.DOCUMENTS) rows.push("Договоры, счета, АВР и работа с ИС ЭСФ");
   if (f.WORKFLOWS) rows.push("Сценарии работы со сделками и расширенная аналитика");
-  if (f.MASS_MESSAGING) rows.push("Массовые кампании с подтверждением запуска");
+  if (f.MASS_MESSAGING) rows.push("Массовые кампании с подтверждением запуска"); else rows.push("Массовые рассылки — с тарифа Start");
   if (f.CONTROL_BULK) rows.push("Массовые действия Control и расширенные правила AI");
   if (f.SUPPORT) rows.push("Импорт, экспорт и поддержка команды");
   if (f.AI_MANAGER) rows.push("AI Manager: консультации клиентов и обработка заявок");
@@ -65,6 +65,13 @@ export function BillingCatalog({ items, period, selected, current, disabled, onS
   const enterprise = available.find((item) => item.code === "CRM_ENTERPRISE");
   const comparison = GROUPS[0].codes.flatMap(code => available.find(item => item.code === code) || []);
   const periodLabel = period === "YEARLY" ? "год" : "месяц";
+  const priceText = (item: BillingCatalogItem) => {
+    if (period === 'MONTHLY' && item.launchMonthlyPriceMinor && item.launchEndsAt && new Date(item.launchEndsAt) >= new Date()) {
+      return <><strong>{formatKzt(item.launchMonthlyPriceMinor)}</strong> <span>/ месяц</span><br/><del className="muted">{formatKzt(item.monthlyPriceMinor)}</del> <small>до 31.12.2026</small></>;
+    }
+    if (period === 'YEARLY' && item.monthlyPriceMinor > 0) return <><strong>{formatKzt(Math.round(item.yearlyPriceMinor / 12))}</strong> <span>/ мес при оплате за год</span><br/><small>{formatKzt(item.yearlyPriceMinor)} за 12 месяцев · 2 месяца бесплатно</small></>;
+    return <><strong>{formatKzt(catalogPrice(item, period))}</strong>{item.code !== "BASQAR_FREE" ? <span> / {periodLabel}</span> : null}</>;
+  };
   function card(item: BillingCatalogItem) {
     const free = item.code === "BASQAR_FREE";
     const selectedItem = selected === item.code;
@@ -76,10 +83,10 @@ export function BillingCatalog({ items, period, selected, current, disabled, onS
       <h4>{item.name}</h4>
       <p className="muted billing-audience">{AUDIENCE[item.code] || item.description}</p>
       {item.included?.length ? <p className="billing-composition">В составе: {item.included.map((row) => items.find((entry) => entry.code === row.code)?.name || row.code).join(" + ")}.</p> : null}
-      <p className="billing-price"><strong>{formatKzt(catalogPrice(item, period))}</strong>{!free ? <span> / {periodLabel}</span> : null}</p>
+      <p className="billing-price">{priceText(item)}</p>
       <p className="muted billing-price-note">{free ? "Ручная работа с клиентами, сделками и задачами. Без оплаты и подтверждения администратора." : "Указана стоимость базовой конфигурации. Дополнительные подключения и ресурсы оплачиваются отдельно."}</p>
       <dl className="billing-plan-limits">
-        {LIMIT_LIST.filter(key => key !== "STORAGE_GB" && key !== "DEPARTMENTS").map((key) => <div key={key}><dt>{LIMIT_LABEL[key]}</dt><dd>{item.limits[key] === -1 ? "Без квоты" : item.limits[key] == null ? "По условиям тарифа" : Number(item.limits[key]).toLocaleString("ru-RU")}</dd></div>)}
+        {LIMIT_LIST.filter(key => key !== "STORAGE_GB" && key !== "DEPARTMENTS").map((key) => <div key={key}><dt>{key === "AI_USAGE" ? "AI-кредиты" : key === "AUTOMATION_RUNS" ? "Запуски автоматизации" : key === "DOCUMENTS_COUNT" ? "Документы" : key === "CAMPAIGN_RECIPIENTS" ? "Рассылки · получатели" : LIMIT_LABEL[key]}</dt><dd>{item.limits[key] === -1 ? "Без квоты" : item.limits[key] === 0 && key === "CAMPAIGN_RECIPIENTS" ? "С тарифа Start" : item.limits[key] == null ? "По условиям тарифа" : Number(item.limits[key]).toLocaleString("ru-RU")}</dd></div>)}
       </dl>
       {item.features.MULTIPLE_PIPELINES || item.features.MULTI_DEPARTMENT ? <p className="muted">Сейчас доступна одна воронка. Несколько воронок и отделы находятся в подготовке.</p> : null}
       <ul className="billing-feature-list">{highlights(item).map((text) => <li key={text}>{text}</li>)}</ul>
@@ -109,7 +116,7 @@ export function BillingCatalog({ items, period, selected, current, disabled, onS
         <table><caption className="muted">Возможности базовых тарифов без дополнительных модулей</caption><thead><tr><th scope="col">Возможность</th>{comparison.map((item) => <th scope="col" key={item.code}>{item.name}</th>)}</tr></thead>
           <tbody>
             <tr><th scope="row">Цена / {periodLabel}</th>{comparison.map((item) => <td key={item.code}>{formatKzt(catalogPrice(item, period))}</td>)}</tr>
-            {LIMIT_LIST.filter(key => key !== "STORAGE_GB" && key !== "DEPARTMENTS").map((key) => <tr key={key}><th scope="row">{LIMIT_LABEL[key]}</th>{comparison.map((item) => <td key={item.code}>{item.limits[key] === -1 ? "Без квоты" : item.limits[key] == null ? "По условиям тарифа" : Number(item.limits[key]).toLocaleString("ru-RU")}</td>)}</tr>)}
+            {LIMIT_LIST.filter(key => key !== "STORAGE_GB" && key !== "DEPARTMENTS").map((key) => <tr key={key}><th scope="row">{LIMIT_LABEL[key]}</th>{comparison.map((item) => <td key={item.code}>{item.limits[key] === -1 ? "Без квоты" : item.limits[key] === 0 && key === "CAMPAIGN_RECIPIENTS" ? "С тарифа Start" : item.limits[key] == null ? "По условиям тарифа" : Number(item.limits[key]).toLocaleString("ru-RU")}</td>)}</tr>)}
             {FEATURE_GROUPS.flatMap(group => [<tr key={group.title}><th colSpan={comparison.length + 1}>{group.title}</th></tr>, ...group.rows.map(({ key, label }) => <tr key={`${group.title}-${label}`}><th scope="row">{label || FEATURE_LABEL[key]}</th>{comparison.map((item) => <td key={item.code} className={item.features[key] ? "billing-included" : "muted"}>{item.features[key] ? "Включено" : "—"}</td>)}</tr>)])}
           </tbody>
         </table>

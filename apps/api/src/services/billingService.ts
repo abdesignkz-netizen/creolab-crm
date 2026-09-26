@@ -67,6 +67,8 @@ export async function getBillingState(prisma: PrismaClient, tenantId: string) {
     createdAt: tenant.createdAt.toISOString(),
     ...snapshot,
     entitlements: resolved.entitlements,
+    resourcePeriod: usage.period,
+    aiTrial: usage.aiTrial,
     accessBreakdown: {
       basePlan: snapshot.planName, planCode: snapshot.planCode,
       legacy: LEGACY_CATALOG_CODES.includes(snapshot.planCode as never) || snapshot.grandfathered,
@@ -290,12 +292,10 @@ export async function extendSubscriptionAsPlatformAdmin(
   if (current.plan.code === "BASQAR_FREE") throw new ApiError(422, "free_has_no_expiry", "Free не требует продления");
   const snapshot = current.priceSnapshotJson as unknown as import("./pricingEngine.ts").PricingQuote["snapshot"];
   if (!Array.isArray(snapshot.lines)) throw new ApiError(409, "requote_required", "Создайте заявку на продление с подтверждением условий тарифа");
-  // Renew the agreed recurring configuration; never charge installation services again.
-  const lines = snapshot.lines.filter(line => line.chargeType !== "ONE_TIME");
-  const addOns = snapshot.addOns.filter(addon => lines.some(line => line.code === addon.code));
-  const finalAmountMinor = lines.reduce((sum, line) => sum + line.amountMinor, 0);
-  const baseAmountMinor = lines.filter(line => line.kind !== "addon").reduce((sum, line) => sum + line.amountMinor, 0);
-  const renewalSnapshot = { ...snapshot, lines, addOns, finalAmountMinor, finalPriceAtActivation: finalAmountMinor, basePriceAtActivation: baseAmountMinor };
+  const renewal = await quoteRenewal(prisma, tenantId, current.plan.code, current.billingPeriod || 'MONTHLY');
+  const {lines, addOns} = renewal.snapshot;
+  const {finalAmountMinor, baseAmountMinor} = renewal;
+  const renewalSnapshot = renewal.snapshot;
   const request = await prisma.subscriptionRequest.create({ data: {
     tenantId, requestedByUserId: auth.user.id, requestType: "RENEWAL", requestedPlanCode: current.plan.code,
     requestedAddOnsJson: addOns, billingPeriod: current.billingPeriod || "MONTHLY", baseAmountMinor, finalAmountMinor,
@@ -344,6 +344,8 @@ export async function upsertBillingOverride(
   const { initializeTenantUsage } = await import("./billingResourceService.ts");
   const effective = await getEntitlements(prisma, tenantId);
   if (!effective.snapshot.grandfathered) await initializeTenantUsage(prisma, tenantId, effective.limits);
+  const {pauseUnavailableCampaigns} = await import('./campaignService.ts');
+  await pauseUnavailableCampaigns(prisma, tenantId);
   return getBillingState(prisma, tenantId);
 }
 

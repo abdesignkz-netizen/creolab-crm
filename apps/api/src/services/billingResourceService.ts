@@ -18,7 +18,9 @@ export function billingMonthStart(now = new Date()) { return new Date(`${billing
 export async function initializeTenantUsage(tx: Db, tenantId: string, limits: Record<string, number>) {
   const existing = await tx.tenantUsage.findUnique({ where: { tenantId } });
   if (existing) {
-    await tx.tenantUsage.update({ where: { tenantId }, data: { limitsJson: limits } });
+    const counters = existing.countersJson as Record<string, any>;
+    const issued = Number(counters.AI_TRIAL_ISSUED ?? 0);
+    await tx.tenantUsage.update({ where: { tenantId }, data: { limitsJson: limits, countersJson: { ...counters, AI_TRIAL_ISSUED: issued } } });
     return;
   }
   // Serialize activation against other activation/override requests for this tenant.
@@ -50,16 +52,22 @@ export async function initializeTenantUsage(tx: Db, tenantId: string, limits: Re
   const databaseBytes = await measureDatabaseBytes(tx, tenantId);
   await tx.tenantUsage.create({ data: { tenantId, limitsJson: limits, period: billingMonth(), databaseBytes,
     fileBytes: BigInt(files._sum.sizeBytes || 0), lastActivityAt: new Date(),
-    countersJson: { CLIENTS: clients, ACTIVE_DEALS: deals, USERS: users, MONTHLY_LEADS: leads, WHATSAPP_CONNECTIONS: whatsapp } } });
+    countersJson: { CLIENTS: clients, ACTIVE_DEALS: deals, USERS: users, MONTHLY_LEADS: leads, WHATSAPP_CONNECTIONS: whatsapp,
+      AI_TRIAL_ISSUED: Number(limits.AI_TRIAL || 0), resourceAnchor: new Date().toISOString() } } });
 }
 
 export async function getUsage(prisma: PrismaClient, tenantId: string, code: string): Promise<number> {
   const row = await prisma.tenantUsage.findUnique({ where: { tenantId } });
+  if (['AI_CREDITS', 'AI_USAGE', 'AUTOMATION_RUNS', 'DOCUMENTS_COUNT', 'CAMPAIGN_RECIPIENTS'].includes(code)) {
+    const resource = code === 'AI_USAGE' ? 'AI_CREDITS' : code;
+    return resourceUsed(prisma, tenantId, resource, await resourcePeriod(prisma, tenantId, resource));
+  }
   if (row) {
     if (code === 'DATABASE_MB') return Number(row.databaseBytes) / 1048576;
     if (code === 'FILE_STORAGE_MB') return Number(row.fileBytes) / 1048576;
     if (code === 'MONTHLY_LEADS' && row.period !== billingMonth()) return 0;
     if (code in (row.countersJson as object)) return Number((row.countersJson as Record<string, number>)[code]);
+
   }
   if (code === 'CLIENTS') return prisma.contact.count({ where: { tenantId } });
   if (code === 'ACTIVE_DEALS') return prisma.deal.count({ where: { tenantId, outcome: 'open', closedAt: null } });
@@ -67,9 +75,58 @@ export async function getUsage(prisma: PrismaClient, tenantId: string, code: str
   if (code === 'USERS') return prisma.membership.count({ where: { tenantId, active: true } });
   if (code === 'FILE_STORAGE_MB') return Number((await prisma.attachment.aggregate({ where: { tenantId, NOT: { parentType: { startsWith: 'support' } } }, _sum: { sizeBytes: true } }))._sum.sizeBytes || 0) / 1048576;
   if (code === 'PIPELINES') return (await prisma.dealStage.count({ where: { tenantId } })) ? 1 : 0;
-  if (code === 'AI_USAGE') return prisma.aIUsageEvent.count({ where: { tenantId, createdAt: { gte: billingMonthStart() }, status: 'ok' } });
+  if (code === 'AI_USAGE' || code === 'AI_CREDITS') return prisma.aIUsageEvent.count({ where: { tenantId, createdAt: { gte: billingMonthStart() }, status: 'ok' } });
   if (code === 'WHATSAPP_CONNECTIONS') return prisma.integration.count({ where: { tenantId, type: 'whatsapp_seller', NOT: { OR: [{ status: 'disabled' }, { connectionStatus: 'DISCONNECTED' }] } } });
   return 0;
+}
+
+export const AI_CREDIT_COSTS: Readonly<Record<string, number>> = Object.freeze({
+  AI_MANAGER_REPLY: 1, AI_CRM_COMMAND: 1, AI_SUMMARY: 1, AI_REPORT: 1,
+  AI_LEAD_ANALYSIS: 1, AI_FOLLOW_UP: 1, AI_DOCUMENT: 1, AI_CLASSIFICATION: 1,
+  AI_KNOWLEDGE: 1, AI_OTHER: 1,
+});
+export function aiCreditCost(feature: string) { return AI_CREDIT_COSTS[feature] ?? AI_CREDIT_COSTS.AI_OTHER; }
+
+export async function resourcePeriod(db: Db, tenantId: string, resource: string, now = new Date()) {
+  const row = await db.tenantUsage.findUnique({ where: { tenantId } });
+  // Paid resources reset with the billing calendar month. The Free AI grant is lifetime.
+  if (resource === 'AI_CREDITS' && Number((row?.limitsJson as Record<string, number>)?.AI_TRIAL || 0) > 0 && Number((row?.countersJson as Record<string, number>)?.AI_TRIAL_ISSUED || 0) > 0) return 'lifetime';
+  return billingMonth(now);
+}
+
+export async function resourceUsed(db: Db, tenantId: string, resource: string, period: string) {
+  const rows = await db.$queryRaw<Array<{used: bigint}>>`SELECT COALESCE(sum(amount),0)::bigint AS used FROM "BillingResourceUsage"
+    WHERE "tenantId" = ${tenantId} AND resource = ${resource} AND period = ${period}`;
+  let used = Number(rows[0]?.used || 0);
+  // Preserve AI already spent before this ledger was introduced, without double counting new events.
+  if (resource === 'AI_CREDITS' && period !== 'lifetime') {
+    const start = period.length === 7 ? new Date(period + '-01T00:00:00+05:00') : new Date(period);
+    const old = await db.$queryRaw<Array<{used: bigint}>>`SELECT count(*)::bigint AS used FROM "AIUsageEvent" e
+      WHERE e."tenantId" = ${tenantId} AND e.status = 'ok' AND e."createdAt" >= ${start}
+      AND NOT EXISTS (SELECT 1 FROM "BillingResourceUsage" u WHERE u."tenantId" = e."tenantId" AND u.resource = 'AI_CREDITS' AND u."operationId" = 'ai:' || e.id)`;
+    used += Number(old[0]?.used || 0);
+  }
+  return used;
+}
+
+/** Lock, check, and record once. Can share the caller's transaction with the operation. */
+export async function consumeResource(db: Db, tenantId: string, resource: string, amount = 1, operationId: string = randomUUID(), enforce = true): Promise<{idempotent: boolean}> {
+  if (!Number.isSafeInteger(amount) || amount < 0) throw new ApiError(422, 'invalid_amount', 'Некорректный объём');
+  if ('$transaction' in db) return db.$transaction(tx => consumeResource(tx, tenantId, resource, amount, operationId, enforce));
+  await db.$queryRaw`SELECT "tenantId" FROM "TenantUsage" WHERE "tenantId" = ${tenantId} FOR UPDATE`;
+  const row = await db.tenantUsage.findUnique({ where: { tenantId } });
+  const existing = await db.$queryRaw<Array<{amount: number}>>`SELECT amount FROM "BillingResourceUsage" WHERE "tenantId" = ${tenantId} AND resource = ${resource} AND "operationId" = ${operationId}`;
+  if (existing.length) return { idempotent: true };
+  const period = await resourcePeriod(db, tenantId, resource);
+  const access = await getEntitlements(db as PrismaClient, tenantId);
+  const cap = access.limits[resource] ?? -1;
+  if (enforce && !access.snapshot.entitled) throw new ApiError(403, 'subscription_required', 'Подписка не активна', undefined, {billingPath: '/billing'});
+  const used = await resourceUsed(db, tenantId, resource, period);
+  if (enforce && row && !access.snapshot.grandfathered && cap >= 0 && used + amount > cap) {
+    throw new ApiError(403, 'limit_exceeded', 'Лимит ресурса исчерпан. Остальные возможности BasQar продолжают работать.', undefined, { limit: resource, used, cap, billingPath: '/billing' });
+  }
+  await db.$executeRaw`INSERT INTO "BillingResourceUsage" ("tenantId", resource, "operationId", period, amount) VALUES (${tenantId}, ${resource}, ${operationId}, ${period}, ${amount}) ON CONFLICT DO NOTHING`;
+  return { idempotent: false };
 }
 
 // A preflight for friendly errors. Atomic resource enforcement is in the database trigger.
@@ -155,18 +212,24 @@ export async function assertFileCapacity(db: Db, tenantId: string, bytes: number
 
 // Reserve one in-flight AI call under the quota row lock, without holding a DB
 // transaction during an external HTTP request. Expired reservations recover crashes.
-export async function reserveAiCall(prisma: PrismaClient, tenantId: string, ttlMs = 120000) {
+export async function reserveAiCall(prisma: PrismaClient, tenantId: string, ttlMs = 120000, amount = 1) {
   const id = randomUUID();
   const reserved = await prisma.$transaction(async tx => {
     await tx.$queryRaw`SELECT "tenantId" FROM "TenantUsage" WHERE "tenantId" = ${tenantId} FOR UPDATE`;
     const row = await tx.tenantUsage.findUnique({ where: { tenantId } });
     if (!row) return null; // Legacy contracts retain their existing usage checks.
-    const cap = Number((row.limitsJson as Record<string, number>).AI_USAGE ?? 0);
+    const access = await getEntitlements(tx as PrismaClient, tenantId);
+    if (!access.snapshot.entitled) throw new ApiError(403, 'subscription_required', 'Подписка не активна');
+    const rowLimits = row.limitsJson as Record<string, number>;
+    const cap = Number(rowLimits.AI_USAGE ?? rowLimits.AI_CREDITS ?? access.limits.AI_CREDITS ?? access.limits.AI_USAGE ?? 0);
     const counters = row.countersJson as Record<string, any>;
-    const reservations = Object.fromEntries(Object.entries(counters.aiReservations || {}).filter(([, until]) => Number(until) > Date.now())) as Record<string, number>;
-    const used = await tx.aIUsageEvent.count({ where: { tenantId, createdAt: { gte: billingMonthStart() }, status: 'ok' } });
-    if (cap >= 0 && used + Object.keys(reservations).length >= cap) throw new ApiError(403, 'limit_exceeded', 'AI-лимит исчерпан. Подключите дополнительный пакет.');
-    reservations[id] = Date.now() + ttlMs;
+    const reservations = Object.fromEntries(Object.entries(counters.aiReservations || {}).filter(([, entry]) =>
+      (typeof entry === 'number' ? entry : Number((entry as {until: number}).until)) > Date.now())) as Record<string, any>;
+    const period = await resourcePeriod(tx, tenantId, 'AI_CREDITS');
+    const used = await resourceUsed(tx, tenantId, 'AI_CREDITS', period);
+    const reservedAmount = Object.values(reservations).reduce((sum: number, entry: any) => sum + (typeof entry === 'number' ? 1 : entry.amount), 0);
+    if (!access.snapshot.grandfathered && cap >= 0 && used + reservedAmount + amount > cap) throw new ApiError(403, 'limit_exceeded', 'AI-кредиты закончились. CRM, документы и ручные задачи продолжают работать.', undefined, {limit: 'AI_CREDITS', used, cap, billingPath: '/billing'});
+    reservations[id] = {until: Date.now() + ttlMs, amount};
     await tx.tenantUsage.update({ where: { tenantId }, data: { countersJson: { ...counters, aiReservations: reservations } } });
     return id;
   });

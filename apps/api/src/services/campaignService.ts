@@ -1,4 +1,4 @@
-import { assertFileCapacity } from "./billingResourceService.ts";
+import { assertFileCapacity, consumeResource } from "./billingResourceService.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -28,6 +28,7 @@ import { hashExecutionContent, sendViaProvider } from "./messagingProvider.ts";
 import { parseAndMatchPhoneList, type PhoneListItem } from "./phoneListService.ts";
 import { previewContactSegment } from "./segmentService.ts";
 import { resolveSellerBridge, resolveWhatsAppConversation } from "./sellerLink.ts";
+import { getEntitlements } from "./entitlementService.ts";
 
 const ALLOWED_MIME = new Set([
   "application/pdf",
@@ -75,7 +76,7 @@ function safeFileName(fileName: string) {
     .replace(/[^\w.\-а-яА-ЯёЁ ]+/g, "_")
     .slice(0, 180) || "file.bin";
 }
-const MAX_RECIPIENTS = 500;
+const MAX_RECIPIENTS = 5000;
 const SEND_CHUNK = 5;
 const SEND_DELAY_MS = 400;
 
@@ -85,6 +86,12 @@ function requireTenant(auth: AuthContext) {
   }
   requireNotManager(auth, "Постановка задач и автоматизация доступны администратору и директору");
   return auth.activeMembership;
+}
+
+export async function ensureMassCampaignAccess(prisma: PrismaClient, tenantId: string) {
+  const access = await getEntitlements(prisma, tenantId);
+  if (access.snapshot.grandfathered || access.entitlements.MASS_CAMPAIGNS) return access;
+  throw new ApiError(403, "feature_required", "Массовые рассылки доступны начиная с тарифа Start. Подключите тариф, чтобы продолжить.", undefined, { feature: "MASS_CAMPAIGNS", billingPath: "/billing" });
 }
 
 async function requireCampaignForTenant(prisma: PrismaClient, tenantId: string, id: string) {
@@ -174,6 +181,7 @@ export async function createCampaign(
 ) {
   const membership = requireTenant(auth);
   const tid = membership.tenantId;
+  await ensureMassCampaignAccess(prisma, tid);
   const recipients: Array<{
     contactId?: string | null;
     phoneRaw?: string | null;
@@ -727,6 +735,7 @@ export async function confirmCampaign(
   if (!campaign) throw new ApiError(404, "not_found", "Рассылка не найдена");
   const attachments = await campaignAttachments(prisma, membership.tenantId, id);
   const pending = campaign.recipients.filter((r) => r.status === "pending");
+  await ensureMassCampaignAccess(prisma, membership.tenantId);
   const attachmentSnapshots = attachments.map((a) => ({
     id: a.id,
     fileName: a.fileName,
@@ -745,6 +754,7 @@ export async function confirmCampaign(
     messageDraft: r.messageDraft || null,
   }));
   const hash = campaignHashInput(campaign, pending, attachmentSnapshots);
+
   const later = campaignSendLater(campaign.scheduledAt);
   const status = later ? "scheduled" : "awaiting_confirmation";
 
@@ -795,6 +805,7 @@ export async function confirmCampaign(
 
 export async function startCampaign(prisma: PrismaClient, auth: AuthContext, id: string) {
   const membership = requireTenant(auth);
+  await ensureMassCampaignAccess(prisma, membership.tenantId);
   const campaign = await prisma.campaign.findFirst({ where: { id, tenantId: membership.tenantId } });
   if (!campaign) throw new ApiError(404, "not_found", "Рассылка не найдена");
   if (!campaign.confirmedAt || !campaign.contentHash) {
@@ -855,6 +866,8 @@ export async function cancelCampaignRemainder(prisma: PrismaClient, auth: AuthCo
 export async function retryFailedCampaign(prisma: PrismaClient, auth: AuthContext, id: string) {
   const membership = requireTenant(auth);
   await requireCampaignForTenant(prisma, membership.tenantId, id);
+  await ensureMassCampaignAccess(prisma, membership.tenantId);
+
   await prisma.campaignRecipient.updateMany({
     where: { campaignId: id, tenantId: membership.tenantId, status: "failed" },
     data: { status: "queued", error: null },
@@ -864,11 +877,26 @@ export async function retryFailedCampaign(prisma: PrismaClient, auth: AuthContex
   return getCampaign(prisma, auth, id);
 }
 
+export async function pauseUnavailableCampaigns(prisma: PrismaClient, tenantId: string) {
+  const access = await getEntitlements(prisma, tenantId);
+  if (access.entitlements.MASS_CAMPAIGNS) return;
+  const reason = 'Отправка остановлена: текущая подписка не включает массовые рассылки. История сохранена.';
+  const rows = await prisma.campaign.findMany({where: {tenantId, status: {in: ['scheduled', 'running', 'awaiting_confirmation']}}});
+  for (const row of rows) {
+    await prisma.campaign.update({where: {id: row.id}, data: {status: 'paused', pausedAt: new Date(), statsJson: {...(row.statsJson as Record<string, any> || {}), billingPauseReason: reason}}});
+    await prisma.scheduledAction.updateMany({where: {tenantId, parentType: 'campaign', parentId: row.id, state: {in: ['scheduled', 'running']}}, data: {state: 'canceled', cancelReason: reason}});
+    await prisma.campaignRecipient.updateMany({where: {tenantId, campaignId: row.id, status: {in: ['pending', 'queued']}}, data: {error: reason}});
+  }
+}
+
 export async function processCampaignQueue(prisma: PrismaClient, campaignId: string) {
   const seed = await prisma.campaign.findFirst({ where: { id: campaignId }, select: { tenantId: true } });
   if (seed) {
-    const { canUseFeature } = await import("./entitlementService.ts");
-    if (!(await canUseFeature(prisma, seed.tenantId, "MASS_MESSAGING"))) return;
+    const access = await getEntitlements(prisma, seed.tenantId);
+    if (!access.snapshot.grandfathered && !access.entitlements.MASS_CAMPAIGNS) {
+      await pauseUnavailableCampaigns(prisma, seed.tenantId);
+      return;
+    }
   }
   for (;;) {
     const campaign = await prisma.campaign.findFirst({
@@ -907,6 +935,15 @@ export async function processCampaignQueue(prisma: PrismaClient, campaignId: str
     for (const recipient of batch) {
       const fresh = await prisma.campaign.findFirst({ where: { id: campaignId } });
       if (!fresh || fresh.status === "paused" || fresh.status === "cancelled") return;
+      try {
+        await ensureMassCampaignAccess(prisma, campaign.tenantId);
+        await consumeResource(prisma, campaign.tenantId, 'CAMPAIGN_RECIPIENTS', 1, `recipient:${recipient.id}`);
+      } catch (error) {
+        if (!(error instanceof ApiError)) throw error;
+        await prisma.campaign.update({where: {id: campaignId}, data: {status: 'paused', pausedAt: new Date()}});
+        await prisma.campaignRecipient.updateMany({where: {campaignId, status: 'queued'}, data: {error: error.message}});
+        return;
+      }
       await sendOneRecipient(prisma, campaign, recipient, attachments);
       await new Promise((r) => setTimeout(r, SEND_DELAY_MS));
     }

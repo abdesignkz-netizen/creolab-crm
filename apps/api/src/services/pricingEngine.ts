@@ -42,6 +42,7 @@ export type PricingQuote = {
   recommendation: { code: string; name: string; saveMinor: number; message: string } | null;
   snapshot: {
     planVersion: number;
+    launch?: { endsAt: string; standardMonthlyPrice: number };
     baseFeatures?: Record<string, boolean>;
     baseLimits?: Record<string, number>;
     enterpriseTerms?: { sla: string; integrations: string };
@@ -108,6 +109,8 @@ function fromDb(row: DbPlan): CatalogItem {
     kind: (row.kind || fallback?.kind || "plan") as CatalogItem["kind"],
     monthlyPriceMinor: row.monthlyPriceMinor ?? fallback?.monthlyPriceMinor ?? 0,
     yearlyPriceMinor: row.yearlyPriceMinor ?? fallback?.yearlyPriceMinor ?? 0,
+    launchMonthlyPriceMinor: fallback?.launchMonthlyPriceMinor,
+    launchEndsAt: fallback?.launchEndsAt,
     public: row.public,
     active: row.active,
     catalogStatus: (row.catalogStatus || "AVAILABLE") as CatalogItem["catalogStatus"],
@@ -136,7 +139,7 @@ export async function loadPublicCatalog(prisma: PrismaClient) {
   const rows = await prisma.plan.findMany({ orderBy: { sortOrder: "asc" } });
   const items = rows
     .map((row) => fromDb(row as unknown as DbPlan))
-    .filter((item) => item.active && item.public && item.catalogStatus !== "HIDDEN" && item.kind !== "legacy");
+    .filter((item) => item.active && item.public && item.catalogStatus === "AVAILABLE" && item.kind !== "legacy");
   if (items.length) return items;
   return PRICING_CATALOG.filter((item) => item.public && item.catalogStatus !== "HIDDEN");
 }
@@ -190,12 +193,24 @@ export function mergeEntitlementState(
   if (features.API_ACCESS) features.API = true;
   if (features.API) features.API_ACCESS = true;
   if (features.WHATSAPP) features.MESSAGING = true;
+  features.MASS_CAMPAIGNS = features.MASS_MESSAGING;
+  limits.AI_CREDITS = limits.AI_USAGE;
+  limits.STORAGE_BYTES = limits.FILE_STORAGE_MB < 0 ? -1 : limits.FILE_STORAGE_MB * 1048576;
+  // New monthly counters must not revoke old agreements that predate them.
+  for (const key of ['AUTOMATION_RUNS', 'DOCUMENTS_COUNT', 'CAMPAIGN_RECIPIENTS']) {
+    if (base && !(key in base.limits)) limits[key] = -1;
+  }
   return { features, limits };
 }
 
 function unitPrice(item: CatalogItem, period: BillingPeriod) {
   if (item.chargeType === "ONE_TIME") return item.monthlyPriceMinor;
   return period === "YEARLY" ? item.yearlyPriceMinor : item.monthlyPriceMinor;
+}
+
+export function newSubscriptionPrice(item: CatalogItem, period: BillingPeriod, at = new Date(), launchEligible = true) {
+  return launchEligible && period === 'MONTHLY' && item.launchMonthlyPriceMinor != null && item.launchEndsAt && at <= new Date(item.launchEndsAt)
+    ? item.launchMonthlyPriceMinor : unitPrice(item, period);
 }
 
 function includedSet(item: CatalogItem | null) {
@@ -208,6 +223,8 @@ export async function quoteSubscription(
     planCode?: string | null;
     addOns?: QuoteAddonInput[];
     billingPeriod?: string;
+    at?: Date;
+    launchEligible?: boolean;
   },
 ): Promise<PricingQuote> {
   const billingPeriod: BillingPeriod = input.billingPeriod === "YEARLY" ? "YEARLY" : "MONTHLY";
@@ -246,7 +263,7 @@ export async function quoteSubscription(
   if (addonRows.some(row => row.item.code === "ADDON_WHATSAPP") && !plan?.features.CHANNELS) throw new ApiError(422, "channels_required", "Коммуникационные каналы доступны начиная с Control.");
   const lines: QuotedLine[] = [];
   if (plan) {
-    const amount = unitPrice(plan, billingPeriod);
+    const amount = newSubscriptionPrice(plan, billingPeriod, input.at, input.launchEligible !== false);
     lines.push({
       code: plan.code,
       name: plan.name,
@@ -275,7 +292,7 @@ export async function quoteSubscription(
   const merged = mergeEntitlementState(plan, addonRows);
   const finalAmountMinor = lines.reduce((sum, line) => sum + line.amountMinor, 0);
   const baseAmountMinor = plan ? unitPrice(plan, billingPeriod) : 0;
-  const full = await loadCatalogItem(prisma, "FULL");
+  const full = await loadCatalogItem(prisma, "SALES");
   let recommendation: PricingQuote["recommendation"] = null;
   if (full && !lines.some(line => line.chargeType === "ONE_TIME") && plan?.code !== "FULL" && plan?.code !== "BUNDLE_FULL" && plan?.code !== "CRM_ENTERPRISE") {
     const fullPrice = unitPrice(full, billingPeriod);
@@ -298,7 +315,7 @@ export async function quoteSubscription(
     lines,
     includedCodes: [...included],
     baseAmountMinor,
-    discountAmountMinor: 0,
+    discountAmountMinor: Math.max(0, baseAmountMinor - (lines[0]?.amountMinor || 0)),
     finalAmountMinor,
     currency: "KZT",
     features: merged.features,
@@ -306,6 +323,7 @@ export async function quoteSubscription(
     recommendation,
     snapshot: {
       planVersion: plan?.version || CATALOG_VERSION,
+      ...(plan?.launchEndsAt && billingPeriod === 'MONTHLY' && baseAmountMinor === plan.launchMonthlyPriceMinor ? { launch: {endsAt: plan.launchEndsAt, standardMonthlyPrice: plan.monthlyPriceMinor} } : {}),
       baseFeatures: mergeEntitlementState(plan, []).features,
       baseLimits: mergeEntitlementState(plan, []).limits,
       basePriceAtActivation: baseAmountMinor,
@@ -332,7 +350,9 @@ export function serializeCatalogItem(item: CatalogItem, period: BillingPeriod) {
     features: item.features,
     limits: item.limits,
     billingPeriod: period === "YEARLY" ? "year" : "month",
-    price: item.code === "CRM_ENTERPRISE" ? null : unitPrice(item, period),
+    price: item.code === "CRM_ENTERPRISE" ? null : newSubscriptionPrice(item, period),
+    launchMonthlyPriceMinor: item.launchMonthlyPriceMinor,
+    launchEndsAt: item.launchEndsAt,
     monthlyPriceMinor: item.monthlyPriceMinor,
     yearlyPriceMinor: item.yearlyPriceMinor,
     chargeType: item.chargeType,
@@ -367,7 +387,12 @@ export async function quoteRenewal(prisma: PrismaClient, tenantId: string, planC
   if (period !== billingPeriod) throw new ApiError(422, "renewal_period", "Для изменения периода согласуйте новые условия");
   const saved = asRecord(row.priceSnapshotJson);
   const originalLines = Array.isArray(saved.lines) ? saved.lines as QuotedLine[] : [];
-  const lines: QuotedLine[] = originalLines.length ? originalLines.filter(line => line.chargeType !== "ONE_TIME") : [{ code: row.plan.code, name: row.plan.name, kind: "plan", qty: 1, unitAmountMinor: row.amountMinor || 0, amountMinor: row.amountMinor || 0, chargeType: "RECURRING", catalogStatus: "HIDDEN" }];
+  const lines: QuotedLine[] = originalLines.length ? originalLines.filter(line => line.chargeType !== "ONE_TIME").map(line => ({...line})) : [{ code: row.plan.code, name: row.plan.name, kind: "plan", qty: 1, unitAmountMinor: row.amountMinor || 0, amountMinor: row.amountMinor || 0, chargeType: "RECURRING", catalogStatus: "HIDDEN" }];
+  const launch = saved.launch as {endsAt: string; standardMonthlyPrice: number} | undefined;
+  const renewalAt = row.endsAt && row.endsAt > new Date() ? row.endsAt : new Date();
+  if (launch && billingPeriod === 'MONTHLY' && renewalAt > new Date(launch.endsAt)) {
+    for (const line of lines) if (line.code === planCode) { line.unitAmountMinor = launch.standardMonthlyPrice; line.amountMinor = launch.standardMonthlyPrice * line.qty; }
+  }
   const originalAddOns = Array.isArray(saved.addOns) ? saved.addOns as Array<{code: string; qty: number}> : Array.isArray(row.itemsJson) ? row.itemsJson as Array<{code: string; qty: number}> : [];
   const addOns = originalAddOns.filter(addon => !originalLines.length || lines.some(line => line.code === addon.code));
   const finalAmountMinor = lines.reduce((sum, line) => sum + line.amountMinor, 0);

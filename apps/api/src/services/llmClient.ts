@@ -71,16 +71,8 @@ async function completeChat(input: {
       if (!resolved.snapshot.grandfathered) {
         if (!resolved.entitlements.AI_MANAGER && !resolved.entitlements.AI_CONTROL) return { content: null as string | null };
         if (["AI_MANAGER_REPLY", "AI_LEAD_ANALYSIS", "AI_FOLLOW_UP"].includes(runtime.feature || input.feature) && !resolved.entitlements.AI_MANAGER) return { content: null as string | null };
-        const cap = Number(resolved.limits[LIMITS.AI_USAGE] || 0);
-        if (cap === 0) return { content: null as string | null };
-        const { billingMonthStart } = await import("./billingResourceService.ts");
-        const start = billingMonthStart();
-        const used = await runtime.prisma.aIUsageEvent.count({
-          where: { tenantId: runtime.tenantId, createdAt: { gte: start }, status: "ok" },
-        });
-        if (cap >= 0 && used >= cap) return { content: null as string | null };
-        const { reserveAiCall } = await import("./billingResourceService.ts");
-        releaseReservation = await reserveAiCall(runtime.prisma, runtime.tenantId, (input.timeoutMs ?? 15000) + 120000);
+        const { reserveAiCall, aiCreditCost } = await import("./billingResourceService.ts");
+        releaseReservation = await reserveAiCall(runtime.prisma, runtime.tenantId, (input.timeoutMs ?? 15000) + 120000, aiCreditCost(runtime.feature || input.feature));
       }
     } catch {
       return { content: null as string | null };
