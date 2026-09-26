@@ -1,3 +1,4 @@
+import { DocumentNumberingPanel } from "./DocumentNumberingPanel";
 import { ServiceCatalogPanel } from "./ServiceCatalogPanel";
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
@@ -133,7 +134,7 @@ export function SettingsPage() {
           {section === "security" ? <SecuritySection locale={locale} /> : null}
           {section === "notifications" ? <NotificationsSection locale={locale} /> : null}
           {section === "interface" ? <InterfaceSection locale={locale} /> : null}
-          {section === "company" && (caps.documents || caps.companyAdmin) ? <LegalSettingsPanel /> : null}
+          {section === "company" && (caps.documents || caps.companyAdmin) ? <><LegalSettingsPanel /><DocumentNumberingPanel /></> : null}
           {section === "members" && caps.members ? <MembersSection locale={locale} /> : null}
           {section === "services" && caps.companyAdmin ? <ServiceCatalogPanel /> : null}
           {section === "ops" && caps.companyAdmin ? <OpsSection locale={locale} /> : null}

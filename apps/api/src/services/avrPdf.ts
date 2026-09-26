@@ -371,7 +371,10 @@ export async function renderAvrPdf(input: { number: string; source: AvrSourceSna
   drawWrappedCenter(page, seller, 284.5, 426.72, 416.4, bold, PARTY, 368);
   drawCentered(page, sellerId, 575.5, 422.42, bold, PARTY);
   drawLeft(page, formatAvrContractBasis(source.contract), 116.1, 397.48, font, BODY);
-  drawCentered(page, localNumber, 545.5, 376.84, bold, BODY);
+  // Restore the lower edge erased by the value masks in the raster template.
+  page.drawLine({ start: { x: 522, y: 374.5 }, end: { x: 618.5, y: 374.5 }, thickness: 0.65, color: BLACK });
+  const numberSize = Math.min(BODY, 43 / Math.max(bold.widthOfTextAtSize(localNumber, 1), 1));
+  drawCentered(page, localNumber, 545.5, 376.84, bold, numberSize);
   drawCentered(page, formatDotDate(source.documentDate), 593.5, 376.84, bold, BODY);
 
   if (source.items.length > TEMPLATE_ITEMS) {

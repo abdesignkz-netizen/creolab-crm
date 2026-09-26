@@ -132,6 +132,18 @@ describe("AVR Excel Form R-1", () => {
     assert.equal(avrLocalNumber("AVR-2026-0035", "2026-09-10"), "26-0035");
     assert.equal(avrLocalNumber("AVR-2026-1", "2026-01-01"), "26-0001");
     assert.equal(avrLocalNumber("26-35", "2026-09-10"), "26-0035");
+    assert.equal(avrLocalNumber("Акт-125/А", "2026-09-10"), "Акт-125/А");
+    assert.equal(avrLocalNumber("123456", "2026-09-10"), "123456");
+  });
+
+  it("сохраняет ручной номер в Excel и PDF", async () => {
+    const number = "Акт-126/Б";
+    const excel = await renderAvrExcel({ number, source: gold });
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(excel.buffer as any);
+    assert.equal(cellValue(workbook.worksheets[0], "AP15"), number);
+    const pdf = await renderAvrPdf({ number, source: gold });
+    assert.ok((await pdfText(pdf.buffer)).includes(number));
   });
 
   it("собирает договор, ФИО и единицу как в бумажном архиве", () => {

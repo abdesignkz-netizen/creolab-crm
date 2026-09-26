@@ -910,6 +910,15 @@ export function createApp(prisma: PrismaClient) {
     res.json(await updateAIAutomationSettings(prisma, await requireAuth(req), req.body || {}));
   });
 
+  app.get("/api/v1/settings/document-numbering", async (req, res) => {
+    const { getDocumentNumbering } = await import("./services/documentNumberingService.ts");
+    res.json(await getDocumentNumbering(prisma, await requireAuth(req)));
+  });
+  app.patch("/api/v1/settings/document-numbering", json, async (req, res) => {
+    const { updateDocumentNumbering } = await import("./services/documentNumberingService.ts");
+    res.json(await updateDocumentNumbering(prisma, await requireAuth(req), req.body));
+  });
+
   app.get("/api/v1/settings/legal-profile", async (req, res) => {
     const { getLegalProfile } = await import("./services/legalProfileService.ts");
     res.json(await getLegalProfile(prisma, await requireAuth(req)));

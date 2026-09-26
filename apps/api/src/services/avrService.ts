@@ -1,3 +1,4 @@
+import { allocateDocumentNumber } from "./documentNumberingService.ts";
 import { avrEditorSchema, avrEditorAmounts, type AvrEditorInput } from "@creolab/contracts";
 import { documentOrganization } from "./documentOrganization.ts";
 import type { PrismaClient } from "@creolab/db";
@@ -24,10 +25,6 @@ function requireManageDocuments(auth: AuthContext) {
   }
 }
 
-async function nextAvrNumber(prisma: PrismaClient, tenantId: string) {
-  const count = await prisma.electronicDocument.count({ where: { tenantId, type: "AVR" } });
-  return `AVR-${new Date().getFullYear()}-${String(count + 1).padStart(4, "0")}`;
-}
 
 async function loadAvrBundle(prisma: PrismaClient, tenantId: string, dealId: string, contractId?: string | null) {
   const deal = await prisma.deal.findFirst({
@@ -109,6 +106,7 @@ async function createAvrDraftLocked(
     const updated = await prisma.electronicDocument.update({
       where: { id: existing.id },
       data: {
+        ...(editor?.number?.trim() ? { number: await allocateDocumentNumber(prisma, tid, "AVR", editor.number, existing.id) } : {}),
         contractId: contract?.id || null,
         invoiceId: invoice?.id || existing.invoiceId,
         companyId: deal.companyId,
@@ -133,7 +131,7 @@ async function createAvrDraftLocked(
       contractId: contract?.id || null,
       invoiceId: invoice?.id || null,
       companyId: deal.companyId,
-      number: await nextAvrNumber(prisma, tid),
+      number: await allocateDocumentNumber(prisma, tid, "AVR", editor?.number),
       amountWithoutVat: source.totals.amountWithoutVat,
       vatAmount: source.totals.vatAmount,
       totalAmount: source.totals.totalAmount,
@@ -258,6 +256,7 @@ export async function updateAvrDraft(prisma:PrismaClient,auth:AuthContext,id:str
   const editor=avrEditorSchema.parse(raw);
   const expected=(raw as {updatedAt?:string}).updatedAt;
   return prisma.$transaction(async tx=>{
+    await tx.$queryRaw`SELECT id FROM "Tenant" WHERE id = ${m.tenantId} FOR UPDATE`;
     await tx.$queryRaw`SELECT id FROM "ElectronicDocument" WHERE id = ${id} AND "tenantId" = ${m.tenantId} FOR UPDATE`;
     const doc=await tx.electronicDocument.findFirst({where:{id,tenantId:m.tenantId,type:"AVR"}});
     if(!doc)throw new ApiError(404,"not_found","АВР не найден");
@@ -265,7 +264,7 @@ export async function updateAvrDraft(prisma:PrismaClient,auth:AuthContext,id:str
     if(expected&&doc.updatedAt.toISOString()!==expected)throw new ApiError(409,"document_changed","Документ изменён. Откройте его заново.");
     const { resolveAvrSource } = await import("./avrExcel.ts");
     const source=applyEditor(await resolveAvrSource(tx as PrismaClient,m.tenantId,doc),editor);
-    const updated=await tx.electronicDocument.update({where:{id},data:{contractId:source.contract?.id||null,invoiceId:source.invoice?.id||doc.invoiceId,documentDate:new Date(editor.documentDate),sourceDataJson:source,...source.totals,status:"DRAFT",validatedAt:null,xmlStorageKey:null,errorCode:null,errorMessage:null}});
+    const updated=await tx.electronicDocument.update({where:{id},data:{...(editor.number?.trim()?{number:await allocateDocumentNumber(tx,m.tenantId,"AVR",editor.number,doc.id)}:{}),contractId:source.contract?.id||null,invoiceId:source.invoice?.id||doc.invoiceId,documentDate:new Date(editor.documentDate),sourceDataJson:source,...source.totals,status:"DRAFT",validatedAt:null,xmlStorageKey:null,errorCode:null,errorMessage:null}});
     await tx.auditEvent.create({data:{tenantId:m.tenantId,actorUserId:auth.user.id,action:"electronic_document.edit_draft",entityType:"electronic_document",entityId:id,changesJson:{dealId:doc.dealId,itemCount:editor.items.length}}});
     return {document:serializeElectronicDocument(updated)};
   });

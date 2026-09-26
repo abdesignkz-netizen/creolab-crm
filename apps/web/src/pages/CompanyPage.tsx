@@ -100,6 +100,8 @@ export function CompanyPage() {
   const [templateId, setTemplateId] = useState("");
   const [templateBusy, setTemplateBusy] = useState(false);
   const [contractLines, setContractLines] = useState<ContractDraftLine[]>([newContractDraftLine()]);
+  const [contractNumber, setContractNumber] = useState("");
+  const [contractDate, setContractDate] = useState(new Date().toISOString().slice(0, 10));
   const [completionTerms, setCompletionTerms] = useState("");
   const [formed, setFormed] = useState<{ previewId: string; number: string } | null>(null);
   const [viewOpen, setViewOpen] = useState(false);
@@ -123,6 +125,8 @@ export function CompanyPage() {
     void load();
     setFormed(null);
     setViewOpen(false);
+    setContractNumber("");
+    setContractDate(new Date().toISOString().slice(0, 10));
   }, [id, caps.documents]);
 
   useEffect(() => {
@@ -497,7 +501,9 @@ export function CompanyPage() {
                 ))}
               </select>
             </label>
-            <ContractGenerateItems lines={contractLines} onChange={(next) => { setContractLines(next); setFormed(null); }}
+            <label>Номер договора<input maxLength={40} value={contractNumber} disabled={templateBusy} placeholder="Автоматически по настройкам нумерации" onChange={event => { setContractNumber(event.target.value); setFormed(null); }} /></label>
+              <label>Дата договора<input type="date" value={contractDate} disabled={templateBusy} onChange={event => { setContractDate(event.target.value); setFormed(null); }} /></label>
+              <ContractGenerateItems lines={contractLines} onChange={(next) => { setContractLines(next); setFormed(null); }}
               completionTerms={completionTerms} onCompletionTermsChange={(value) => { setCompletionTerms(value); setFormed(null); }} disabled={templateBusy} />
             <div className="actions">
               {formed ? (
@@ -542,7 +548,7 @@ export function CompanyPage() {
                     }
                     setTemplateBusy(true);
                     setError("");
-                    void api.createCompanyContractFromTemplate(id, { templateId, items, completionTerms })
+                    void api.createCompanyContractFromTemplate(id, { templateId, items, completionTerms, number: contractNumber, documentDate: contractDate })
                       .then((result: any) => {
                         if (!result.previewId) throw new Error("Не удалось сформировать договор");
                         setFormed({ previewId: result.previewId, number: result.number });

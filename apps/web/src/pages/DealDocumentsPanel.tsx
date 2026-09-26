@@ -186,6 +186,8 @@ export function DealDocumentsPanel(props: {
   const [askCabinet, setAskCabinet] = useState(false);
   const [templates, setTemplates] = useState<Array<{ id: string; name: string; isDefault: boolean }>>([]);
   const [templateId, setTemplateId] = useState("");
+  const [contractNumber, setContractNumber] = useState("");
+  const [contractDate, setContractDate] = useState(new Date().toISOString().slice(0, 10));
   const [completionTerms, setCompletionTerms] = useState("5–7 рабочих дней");
   const [previewContract, setPreviewContract] = useState<{ id: string; number?: string } | null>(null);
   const [confirmSellerSign, setConfirmSellerSign] = useState(false);
@@ -209,6 +211,10 @@ export function DealDocumentsPanel(props: {
     if (contracts[0]?.templateId) setTemplateId(contracts[0].templateId);
     if (contracts[0]?.completionTerms) setCompletionTerms(contracts[0].completionTerms);
   }, [contracts[0]?.templateId, contracts[0]?.completionTerms]);
+  useEffect(() => {
+    setContractNumber(contracts[0]?.number || "");
+    setContractDate(contracts[0]?.date?.slice(0, 10) || new Date().toISOString().slice(0, 10));
+  }, [d.id, contracts[0]?.number, contracts[0]?.date]);
   function submission(type: string, value: EsfSubmission) {
     setSubmissions(previous => ({ ...previous, [type]: value }));
   }
@@ -342,6 +348,9 @@ export function DealDocumentsPanel(props: {
 
   function contractPayload() {
     return {
+      number: contractNumber,
+      documentDate: contractDate,
+      updatedAt: contracts[0]?.updatedAt || undefined,
       ...(templateId ? { templateId } : {}),
       completionTerms: completionTerms.trim() || null,
     };
@@ -383,7 +392,8 @@ export function DealDocumentsPanel(props: {
     setBusy(true);
     setError("");
     try {
-      await api.createContractDraft(d.id, contractPayload());
+      if (contracts[0]?.status === "READY_TO_SIGN") await api.generateContract(contracts[0].id, contractPayload());
+      else await api.createContractDraft(d.id, contractPayload());
       notifySaved("Договор сохранён");
       await load();
     } catch (err) {
@@ -529,6 +539,8 @@ export function DealDocumentsPanel(props: {
                 <p className="muted">После изменения позиций, шаблона или срока сформируйте договор заново — на подпись уйдёт новая PDF-копия.</p>
               ) : null}
               <div className="actions" style={{ marginTop: 8 }}>
+                <label>Номер договора<input maxLength={40} value={contractNumber} disabled={busy || importedContract} placeholder="Автоматически по настройкам нумерации" onChange={event => setContractNumber(event.target.value)} /></label>
+                <label>Дата договора<input type="date" value={contractDate} disabled={busy || importedContract} onChange={event => setContractDate(event.target.value)} /></label>
                 {templates.length ? (
                   <label>
                     Шаблон договора
@@ -732,24 +744,7 @@ export function DealDocumentsPanel(props: {
           ))}
           <div className="actions" style={{ marginTop: 8 }}>
             <Link className="btn" to={`/documents/invoices/new?dealId=${d.id}`}>Создать счёт</Link>
-            <button
-              type="button"
-              className="btn secondary"
-              disabled={busy}
-              onClick={() => {
-                setBusy(true);
-                void api
-                  .createInvoiceDraft(d.id)
-                  .then(() => {
-                    window.dispatchEvent(new Event("creolab:attention-changed"));
-                    return load();
-                  })
-                  .catch((err) => setError(err instanceof Error ? err.message : "Не удалось создать счёт"))
-                  .finally(() => setBusy(false));
-              }}
-            >
-              Черновик счёта
-            </button>
+
             <button
               type="button"
               className="btn"
@@ -820,16 +815,9 @@ export function DealDocumentsPanel(props: {
               type="button"
               className="btn secondary"
               disabled={busy}
-              onClick={() => {
-                setBusy(true);
-                void api
-                  .createElectronicDocumentDraft(d.id, { type: "AVR" })
-                  .then(() => load())
-                  .catch((err) => setError(err instanceof Error ? err.message : "Не удалось создать АВР"))
-                  .finally(() => setBusy(false));
-              }}
+              onClick={() => navigate(avr?.id ? `/documents/avr/${avr.id}` : `/documents/avr/new?dealId=${d.id}`)}
             >
-              Черновик АВР
+              {avr ? "Редактировать АВР" : "Создать АВР"}
             </button>
             <button
               type="button"

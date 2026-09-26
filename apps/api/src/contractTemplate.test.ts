@@ -450,6 +450,8 @@ KZ111111111111111111
     });
     assert.ok(isDocxBytes(bytes));
     const text = await docxToText(bytes);
+    assert.match(text, /ДОГОВОР № DOG-2026-0009/);
+    assert.match(text, /«19» сентября 2026/);
     assert.match(text, /Разработка презентации компании/);
     assert.match(text, /Minerals Supply Services Atyrau/);
     assert.match(text, /200\s*000/);
@@ -575,7 +577,7 @@ KZ111111111111111111
 
     const formed = await json(`/api/v1/companies/${company.body.id}/contract-from-template`, {
       method: "POST",
-      body: JSON.stringify({ templateId, completionTerms: "  10 рабочих дней после предоплаты  " }),
+      body: JSON.stringify({ templateId, number:"ДГ-шаблон/123", documentDate:"2026-08-17", completionTerms: "  10 рабочих дней после предоплаты  " }),
     });
     assert.equal(formed.response.status, 201, JSON.stringify(formed.body));
     assert.equal(formed.body.dealId, null);
@@ -585,6 +587,7 @@ KZ111111111111111111
     const previewWord = await fetch(`${base}/api/v1/documents/contract-previews/${formed.body.previewId}/docx`, { headers: { cookie } });
     assert.equal(previewWord.status, 200);
     const wordBytes = Buffer.from(await previewWord.arrayBuffer());
+    assert.ok((await docxToText(wordBytes)).includes("ДГ-шаблон/123"));
     assert.match(await docxToText(wordBytes), /Разработать презентацию компании/);
     assert.match(await docxToText(wordBytes), /10 рабочих дней после предоплаты/);
 
@@ -594,6 +597,7 @@ KZ111111111111111111
     const previewBytes = Buffer.from(await previewFile.arrayBuffer());
     assert.equal(previewBytes.subarray(0, 4).toString("utf8"), "%PDF");
     const previewText = await pdfText(previewBytes);
+    assert.ok(previewText.includes("ДГ-шаблон/123"));
     assert.match(previewText, /Разработать презентацию компании/);
     assert.match(previewText, /10 рабочих дней после предоплаты/);
     assert.match(previewText, /реквизит/i);
@@ -604,6 +608,8 @@ KZ111111111111111111
       body: JSON.stringify({ save: true, previewId: formed.body.previewId }),
     });
     assert.equal(saved.response.status, 201, JSON.stringify(saved.body));
+    assert.equal(saved.body.contract.number,"ДГ-шаблон/123");
+    assert.equal(saved.body.contract.date.slice(0,10),"2026-08-17");
     assert.equal(saved.body.contract.templateId, templateId);
     assert.equal(saved.body.contract.completionTerms, "10 рабочих дней после предоплаты");
     assert.equal((await prisma.contract.findUniqueOrThrow({ where: { id: saved.body.contract.id } })).completionTerms, "10 рабочих дней после предоплаты");

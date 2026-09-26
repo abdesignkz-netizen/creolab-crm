@@ -76,6 +76,13 @@ async function pdfText(buffer: Buffer) {
 }
 
 describe("invoice pdf", () => {
+  it("сохраняет ручной номер в PDF и не обрезает числовой номер", async () => {
+    assert.equal(invoiceLocalNumber("СЧ-125/А"), "СЧ-125/А");
+    assert.equal(invoiceLocalNumber("123456"), "123456");
+    const bytes = await renderInvoicePdf({...sample, number:"СЧ-125/А"});
+    assert.ok((await pdfText(bytes)).includes("СЧ-125/А"));
+  });
+
   it("собирает детерминированный PDF счёта по форме 1С", async () => {
     assert.equal(invoiceLocalNumber("INV-2026-0121"), "26-0121");
     assert.equal(invoiceDirectorShortName("Булан Асет Болатович"), "Булан А.Б.");

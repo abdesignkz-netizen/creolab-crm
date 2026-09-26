@@ -1,3 +1,4 @@
+import { allocateDocumentNumber } from "./documentNumberingService.ts";
 import { assertFileCapacity } from "./billingResourceService.ts";
 import { mkdir, writeFile, readFile, unlink } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
@@ -295,6 +296,7 @@ type PreviewMeta = {
   companyId: string;
   templateId: string;
   number: string;
+  documentDate?: string;
   subject: string;
   items: PreviewItem[];
 };
@@ -303,13 +305,6 @@ function previewMetaPath(storageKey: string) {
   return resolveUploadPath(`${storageKey}.meta.json`);
 }
 
-async function nextContractNumber(prisma: PrismaClient, tenantId: string) {
-  const year = new Date().getFullYear();
-  const count =
-    (await prisma.contract.count({ where: { tenantId } })) +
-    (await prisma.auditEvent.count({ where: { tenantId, entityType: "contract", action: "contract.delete" } }));
-  return `DOG-${year}-${String(count + 1).padStart(4, "0")}`;
-}
 
 async function ensureDealForCompany(
   prisma: PrismaClient,
@@ -369,7 +364,7 @@ async function previewContractFromTemplate(
   prisma: PrismaClient,
   auth: AuthContext,
   companyId: string,
-  input: { templateId: string; items?: PreviewItem[]; completionTerms?: string },
+  input: { templateId: string; items?: PreviewItem[]; completionTerms?: string; number?: string; documentDate?: string },
 ) {
   const membership = requireTenant(auth);
   const tid = membership.tenantId;
@@ -406,8 +401,8 @@ async function previewContractFromTemplate(
   });
   if (!readiness.ready) throw missingFieldsError(readiness);
   const totals = sumLines(pdfItems);
-  const number = await nextContractNumber(prisma, tid);
-  const contractDate = new Date();
+  const number = await prisma.$transaction(tx => allocateDocumentNumber(tx, tid, "DOG", input.number));
+  const contractDate = input.documentDate ? new Date(`${input.documentDate}T00:00:00.000Z`) : new Date();
   const filled = (value: string | null | undefined) => Boolean(value && String(value).trim());
   const pdfInput = {
     number,
@@ -443,7 +438,7 @@ async function previewContractFromTemplate(
   const docx = await renderContractFromTemplate(template, pdfInput);
   const pdf = await wordFileToContractPdf(docx, `${number}.docx`, pdfInput);
   const previewId = randomUUID();
-  const fileName = `${number}.pdf`;
+  const fileName = `${number.replace(/[\\/:*?"<>|\x00-\x1f]/g, "_")}.pdf`;
   const storageKey = path.posix.join(tid, "contract-previews", previewId, fileName);
   const abs = resolveUploadPath(storageKey);
   await mkdir(path.dirname(abs), { recursive: true });
@@ -454,6 +449,7 @@ async function previewContractFromTemplate(
     companyId,
     templateId: template.id,
     number,
+    documentDate: contractDate.toISOString(),
     subject: template.name,
     items: itemRows,
   };
@@ -557,7 +553,8 @@ async function saveContractPreview(
         tenantId: tid,
         dealId,
         companyId,
-        number: meta.number,
+        number: await allocateDocumentNumber(tx, tid, "DOG", meta.number),
+        date: meta.documentDate ? new Date(meta.documentDate) : attachment.createdAt,
         subject: meta.subject,
         completionTerms: meta.completionTerms || null,
         amountWithoutVat: totals.amountWithoutVat,
@@ -678,6 +675,8 @@ export async function createContractFromTemplateForCompany(
     ).map((item) => ({ ...item, vatRate: item.vatRate ?? 0 }));
     const { dealId, createdDeal } = await ensureDealForCompany(prisma, auth, company, template.name, itemRows, input.dealId);
     const draft = await createContractDraft(prisma, auth, dealId, {
+      number: input.number,
+      documentDate: input.documentDate,
       subject: template.name,
       templateId: template.id,
       completionTerms: input.completionTerms,
@@ -686,12 +685,16 @@ export async function createContractFromTemplateForCompany(
       return { ...draft, dealId, createdDeal, generated: false };
     }
     const generated = await generateContractPdfFile(prisma, auth, draft.contract.id, {
+      number: input.number,
+      documentDate: input.documentDate,
       templateId: template.id,
       completionTerms: input.completionTerms,
     });
     return { ...generated, dealId, createdDeal, generated: true };
   }
   return previewContractFromTemplate(prisma, auth, companyId, {
+    number: input.number,
+    documentDate: input.documentDate,
     templateId: input.templateId!,
     completionTerms: input.completionTerms,
     items: input.items?.map((item) => ({ ...item, vatRate: item.vatRate ?? 0 })),

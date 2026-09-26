@@ -100,10 +100,7 @@ export function invoiceLocalNumber(number: string, date?: Date | string | null) 
     const [yy, seq] = raw.split("-");
     return `${yy}-${seq.padStart(4, "0")}`;
   }
-  const iso = date instanceof Date ? date.toISOString() : String(date || new Date().toISOString());
-  const year = iso.match(/^(\d{4})/)?.[1] || String(new Date().getFullYear());
-  const digits = raw.replace(/\D/g, "");
-  return `${year.slice(-2)}-${(digits || "1").slice(-4).padStart(4, "0")}`;
+  return raw || "1";
 }
 
 export function invoiceDirectorShortName(fullName: string) {

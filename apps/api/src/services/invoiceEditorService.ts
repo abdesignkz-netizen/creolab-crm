@@ -7,14 +7,13 @@ import {
 import type { PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import { can, type AuthContext } from "../lib/types.ts";
-import { applyInvoiceEditor, serializeInvoice } from "./documentDraftService.ts";
+import { applyInvoiceEditor, isImportedInvoicePdf, serializeInvoice } from "./documentDraftService.ts";
 import { documentOrganization } from "./documentOrganization.ts";
 import { assessInvoiceReadiness } from "./invoiceReadiness.ts";
 import { getLegalProfile, requireDocumentsEnabled } from "./legalProfileService.ts";
 import { serializeDealItem } from "./dealItemService.ts";
 import { asMoney } from "./documentMoney.ts";
 
-const MUTABLE = new Set(["DRAFT", "ISSUED"]);
 
 function requireTenant(auth: AuthContext) {
   if (!auth.activeMembership) throw new ApiError(403, "no_tenant", "Нет активной компании");
@@ -36,6 +35,7 @@ function defaultKbe(bin?: string | null, iin?: string | null) {
 
 function toEditor(invoice: ReturnType<typeof serializeInvoice>, contract?: { number?: string | null; date?: Date | string | null } | null): InvoiceEditorInput {
   return {
+    number: invoice.number,
     documentDate: invoice.date.slice(0, 10),
     paymentPercent: invoice.paymentPercent || 100,
     paymentKind: (invoice.paymentKind || (invoice.paymentPercent && invoice.paymentPercent < 100 ? "PREPAYMENT" : "FULL")) as InvoiceEditorInput["paymentKind"],
@@ -257,7 +257,7 @@ export async function getInvoiceEditorContext(prisma: PrismaClient, auth: AuthCo
           },
         ]
       : [];
-  const invoice = deal.invoices[0] ? serializeInvoice(deal.invoices[0]) : null;
+  const invoice = deal.invoices[0] ? { ...serializeInvoice(deal.invoices[0]), importedPdf: await isImportedInvoicePdf(prisma, membership.tenantId, deal.invoices[0]) } : null;
   const settings = (await prisma.tenant.findUnique({
     where: { id: membership.tenantId },
     select: { settingsJson: true },
@@ -299,34 +299,9 @@ export async function updateInvoiceDraft(
 ) {
   const membership = await workflowAccess(prisma, auth);
   const parsed = updateInvoiceDraftSchema.parse(body);
-  const invoice = await prisma.invoice.findFirst({
-    where: { id: invoiceId, tenantId: membership.tenantId },
-    include: { items: { orderBy: { sortOrder: "asc" } } },
-  });
-  if (!invoice) throw new ApiError(404, "not_found", "Счёт не найден");
-  if (!MUTABLE.has(invoice.status)) {
-    throw new ApiError(422, "invoice_immutable", "Счёт уже оплачен, просрочен или отменён");
-  }
-  const imported = invoice.pdfFileId
-    ? await prisma.attachment.findFirst({
-        where: {
-          id: invoice.pdfFileId,
-          tenantId: membership.tenantId,
-          parentType: "invoice",
-          parentId: invoice.id,
-          status: "imported",
-        },
-        select: { id: true },
-      })
-    : null;
-  if (imported) {
-    throw new ApiError(422, "imported_pdf_immutable", "Загруженный PDF счёта сохраняется в исходном виде.");
-  }
-  if (parsed.updatedAt && invoice.updatedAt.toISOString() !== parsed.updatedAt) {
-    throw new ApiError(409, "version_conflict", "Счёт изменился, обновите страницу");
-  }
-  const result = await applyInvoiceEditor(prisma, membership.tenantId, invoice.id, parsed, {
+  const result = await applyInvoiceEditor(prisma, membership.tenantId, invoiceId, parsed, {
     actorUserId: auth.user.id,
+    updatedAt: parsed.updatedAt,
   });
   await prisma.auditEvent.create({
     data: {
@@ -334,8 +309,8 @@ export async function updateInvoiceDraft(
       actorUserId: auth.user.id,
       action: "invoice.update_draft",
       entityType: "invoice",
-      entityId: invoice.id,
-      changesJson: { paymentPercent: parsed.paymentPercent, itemCount: parsed.items.length },
+      entityId: invoiceId,
+      changesJson: { number: result.invoice.number, paymentPercent: parsed.paymentPercent, itemCount: parsed.items.length },
     },
   });
   return result;

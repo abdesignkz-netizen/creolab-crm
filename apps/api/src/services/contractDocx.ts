@@ -4,6 +4,7 @@ import {
   applyPlaceholders,
   buildContractPlaceholders,
   contractItemTableRows,
+  looksLikeFullContractTemplate,
   type ContractPdfInput,
 } from "./contractPdf.ts";
 import {
@@ -137,7 +138,12 @@ export async function renderContractDocx(input: ContractPdfInput, sourceDocx?: B
     });
     return ensureCompletionTerms(filled, input.completionTerms);
   }
-  const body = applyPlaceholders(input.templateBody || "", { ...values, items_table: "{{items_table}}" })
+  const templateBody = input.templateBody || "";
+  const hasOwnHeader = looksLikeFullContractTemplate(templateBody)
+    || /^\s*договор/i.test(templateBody)
+    || /\{\{\s*contract_number\s*\}\}/i.test(templateBody.slice(0, 400));
+  const header = hasOwnHeader ? "" : "ДОГОВОР № {{contract_number}}\nот {{contract_date}}\n\n";
+  const body = applyPlaceholders(header + templateBody, { ...values, items_table: "{{items_table}}" })
     .replace(/\n{3,}/g, "\n\n")
     .trim();
   return ensureCompletionTerms(await buildPlainDocx(body, itemRows), input.completionTerms);

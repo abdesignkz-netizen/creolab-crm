@@ -7,7 +7,7 @@ import { ContractSignatureSummary } from "./ContractSignatureSummary";
 import { ContractPreviewModal } from "./ContractPreviewModal";
 
 type Contract = {
-  id: string; number: string; status: string; generatedFileId: string | null;
+  id: string; number: string; date: string; updatedAt?: string | null; status: string; generatedFileId: string | null;
   importedPdf: boolean; signedAt: string | null; subject: string | null;
   paymentTerms: string | null; completionTerms: string | null; templateId: string | null;
   totalAmount: number; currency: string;
@@ -27,7 +27,7 @@ export function ContractWorkspaceModal({ contractId, onClose, onChanged }: {
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [templates, setTemplates] = useState<Template[]>([]);
-  const [form, setForm] = useState({ subject: "", paymentTerms: "", completionTerms: "", templateId: "" });
+  const [form, setForm] = useState({ number: "", documentDate: "", subject: "", paymentTerms: "", completionTerms: "", templateId: "" });
   const [review, setReview] = useState({ viewed: false, confirmed: false });
   const [buyerLink, setBuyerLink] = useState("");
   const inFlight = useRef(false);
@@ -80,13 +80,13 @@ export function ContractWorkspaceModal({ contractId, onClose, onChanged }: {
 
   async function edit() {
     if (!contract || !editable) return;
-    setForm({ subject: contract.subject || "", paymentTerms: contract.paymentTerms || "", completionTerms: contract.completionTerms || "", templateId: contract.templateId || "" });
+    setForm({ number: contract.number, documentDate: contract.date.slice(0, 10), subject: contract.subject || "", paymentTerms: contract.paymentTerms || "", completionTerms: contract.completionTerms || "", templateId: contract.templateId || "" });
     const result = await api.contractTemplates() as { items: Template[] };
     setTemplates(result.items || []); setEditing(true);
   }
 
   async function save() {
-    await api.generateContract(contractId, { ...form, templateId: form.templateId || undefined });
+    await api.generateContract(contractId, { ...form, updatedAt: contract?.updatedAt || undefined, templateId: form.templateId || undefined });
     setEditing(false); setBuyerLink("");
     setReview({ viewed: false, confirmed: false });
     writeContractReview(fileKey, { viewed: false, confirmed: false });
@@ -172,6 +172,8 @@ export function ContractWorkspaceModal({ contractId, onClose, onChanged }: {
     {contract ? <p className="muted">{Number(contract.totalAmount).toLocaleString("ru-RU")} {contract.currency === "KZT" ? "₸" : contract.currency} · {fullySigned ? "Подписан обеими сторонами" : seller ? "Подписан компанией, ожидается подпись заказчика" : review.confirmed ? "Подтверждён" : "Требует проверки"}</p> : null}
     {contract?.importedPdf ? <p className="muted">Загруженный договор сохраняется в исходном виде. Для изменения загрузите новую редакцию.</p> : contract && !editable ? <p className="muted">{seller || fullySigned ? "Договор уже подписан компанией. Изменение этой версии недоступно." : "Версия договора зафиксирована для подписания. Если попытка не удалась, нажмите «Подписать» повторно."}</p> : null}
     {editing ? <form className="panel contract-edit-form" onSubmit={event => { event.preventDefault(); void action(save); }}>
+      <label>Номер договора<input maxLength={40} value={form.number} disabled={busy} onChange={event => setForm({ ...form, number: event.target.value })}/></label>
+      <label>Дата договора<input type="date" required value={form.documentDate} disabled={busy} onChange={event => setForm({ ...form, documentDate: event.target.value })}/></label>
       <label>Предмет договора<textarea required value={form.subject} disabled={busy} onChange={event => setForm({ ...form, subject: event.target.value })}/></label>
       <label>Условия оплаты<textarea value={form.paymentTerms} disabled={busy} onChange={event => setForm({ ...form, paymentTerms: event.target.value })}/></label>
       <label>Срок исполнения<input value={form.completionTerms} disabled={busy} onChange={event => setForm({ ...form, completionTerms: event.target.value })}/></label>

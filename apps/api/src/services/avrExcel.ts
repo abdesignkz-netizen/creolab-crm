@@ -88,10 +88,7 @@ export function avrLocalNumber(number: string, documentDate?: string | Date | nu
     const [yy, seq] = raw.split("-");
     return `${yy}-${seq.padStart(4, "0")}`;
   }
-  const date = civilDateFromIso(documentDate) || civilDateFromIso(new Date().toISOString());
-  const yy = String(date?.year || new Date().getFullYear()).slice(-2);
-  const digits = raw.replace(/\D/g, "");
-  return `${yy}-${(digits || "1").slice(-4).padStart(4, "0")}`;
+  return raw || "1";
 }
 
 export function formatAvrContractBasis(contract: { number: string; date: string } | null | undefined) {

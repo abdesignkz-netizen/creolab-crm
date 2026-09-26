@@ -87,7 +87,7 @@ export function InvoiceEditorPage() {
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [preview]);
-  const immutable = Boolean(doc && !["DRAFT", "ISSUED"].includes(doc.status));
+  const immutable = Boolean(doc && (doc.importedPdf || !["DRAFT", "ISSUED"].includes(doc.status)));
   const parsed = invoiceEditorSchema.safeParse(form);
   const totals = parsed.success ? invoicePayableTotals(form.items, form.paymentPercent) : null;
 
@@ -117,6 +117,7 @@ export function InvoiceEditorPage() {
       setForm(
         record
           ? {
+              number: record.number,
               documentDate: String(record.date || record.documentDate || ctx.editor?.documentDate || empty.documentDate).slice(0, 10),
               paymentPercent: record.paymentPercent || ctx.editor?.paymentPercent || 100,
               paymentKind: record.paymentKind || ctx.editor?.paymentKind || (record.paymentPercent && record.paymentPercent < 100 ? "PREPAYMENT" : "FULL"),
@@ -207,6 +208,7 @@ export function InvoiceEditorPage() {
       ? await api.updateInvoiceDraft(doc.id, { ...form, updatedAt: doc.updatedAt })
       : await api.createInvoiceDraft(context.deal.id, { editor: form });
     setDoc(result.invoice);
+    setForm(current => ({ ...current, number: result.invoice.number }));
     setDirty(false);
     window.dispatchEvent(new Event("creolab:attention-changed"));
     if (!id) navigate(`/documents/invoices/${result.invoice.id}`, { replace: true });
@@ -433,6 +435,12 @@ export function InvoiceEditorPage() {
                 {context.contract && context.contract.status !== "SIGNED" ? <p className="muted">Договор ещё не подписан. Номер в счёте можно изменить.</p> : null}
               </>
             )}
+            {doc?.importedPdf ? <p className="muted">Загруженный PDF сохраняется в исходном виде. Для изменения данных создайте новый документ.</p> : null}
+            <label>
+              Номер счёта
+              <input disabled={busy || immutable} maxLength={40} aria-invalid={Boolean(issues.number)} value={form.number || ""} placeholder="Автоматически по настройкам нумерации" onChange={(e) => edit({ number: e.target.value })} />
+              {fieldError("number")}
+            </label>
             <label>
               Дата счёта
               <input type="date" disabled={busy || immutable} aria-invalid={Boolean(issues.documentDate)} value={form.documentDate} onChange={(e) => edit({ documentDate: e.target.value })} />

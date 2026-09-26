@@ -75,7 +75,8 @@ export async function storeContractBytes(
 ) {
   const id = randomUUID();
   const folder = opts.parentType === "contract_preview" ? "contract-previews" : "contracts";
-  const storageKey = path.posix.join(opts.tenantId, folder, opts.parentId, `${id}-${opts.fileName}`);
+  const storageFileName = opts.fileName.replace(/[\\/:*?"<>|\x00-\x1f]/g, "_");
+  const storageKey = path.posix.join(opts.tenantId, folder, opts.parentId, `${id}-${storageFileName}`);
   const abs = resolveUploadPath(storageKey);
   await mkdir(path.dirname(abs), { recursive: true });
   await assertFileCapacity(prisma, opts.tenantId, opts.bytes.length);

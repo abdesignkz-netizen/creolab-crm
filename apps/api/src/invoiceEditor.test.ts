@@ -12,6 +12,7 @@ describe("Invoice editor workflow", () => {
   let otherCookie = "";
   let dealId = "";
   let invoiceId = "";
+  let contactId = "";
 
   async function json(path: string, init: RequestInit = {}, useCookie = cookie) {
     const response = await fetch(`${base}${path}`, {
@@ -66,7 +67,7 @@ describe("Invoice editor workflow", () => {
       method: "POST",
       body: JSON.stringify({ name: "Invoice клиент", phone: "+77017770001" }),
     });
-    const contactId = created.body.client?.id || created.body.id;
+    contactId = created.body.client?.id || created.body.id;
     const deal = await json("/api/v1/deals", {
       method: "POST",
       body: JSON.stringify({
@@ -110,6 +111,7 @@ describe("Invoice editor workflow", () => {
     assert.equal((await json(`/api/v1/deals/${dealId}/invoice-context`, {}, otherCookie)).response.status, 404);
 
     const editor = {
+      number: "СЧ-125/А",
       documentDate: "2026-09-03",
       paymentPercent: 50,
       items: [{ name: "Разработка презентации компании до 15 слайдов/страниц", quantity: 1, unit: "услуга", unitPrice: 300000, vatRate: 0 }],
@@ -120,6 +122,8 @@ describe("Invoice editor workflow", () => {
     });
     assert.equal(created.response.status, 201, JSON.stringify(created.body));
     invoiceId = created.body.invoice.id;
+    assert.equal(created.body.invoice.number, "СЧ-125/А");
+    assert.equal((await json(`/api/v1/deals/${dealId}/invoice-context`)).body.editor.number, "СЧ-125/А");
     assert.equal(created.body.invoice.paymentPercent, 50);
     assert.equal(created.body.invoice.totalAmount, 150000);
     assert.equal(created.body.invoice.items[0].totalAmount, 300000);
@@ -141,6 +145,7 @@ describe("Invoice editor workflow", () => {
       .map((item) => ({ str: item.str, y: item.transform[5] }));
     const text = items.map((item) => item.str).join(" ");
     assert.match(text, /Счет на оплату/);
+    assert.ok(text.includes("СЧ-125/А"));
     assert.match(text, /Предоплата 50%/);
     assert.match(text, /ARASAKA/);
     assert.match(text, /Образец платежного поручения/);
@@ -160,9 +165,13 @@ describe("Invoice editor workflow", () => {
   });
 
   it("PATCH сохраняет правки и не зацикливает повторное создание", async () => {
+    const generated = await json(`/api/v1/invoices/${invoiceId}/generate`, {method:"POST", body:JSON.stringify({})});
+    assert.equal(generated.response.status,200,JSON.stringify(generated.body));
+    assert.ok(generated.body.invoice.pdfFileId);
     const patched = await json(`/api/v1/invoices/${invoiceId}`, {
       method: "PATCH",
       body: JSON.stringify({
+        number: "СЧ-126/Б",
         documentDate: "2026-09-03",
         paymentPercent: 50,
         items: [
@@ -172,6 +181,9 @@ describe("Invoice editor workflow", () => {
       }),
     });
     assert.equal(patched.response.status, 200, JSON.stringify(patched.body));
+    assert.equal(patched.body.invoice.number, "СЧ-126/Б");
+    assert.equal(patched.body.invoice.pdfFileId, null);
+    assert.equal(patched.body.invoice.status, "DRAFT");
     assert.equal(patched.body.invoice.items.length, 2);
     assert.equal(patched.body.invoice.totalAmount, 160000);
 
@@ -180,6 +192,9 @@ describe("Invoice editor workflow", () => {
     assert.equal(again.body.reused, true);
     const current = await json(`/api/v1/invoices/${invoiceId}`);
     assert.equal(current.body.invoice.id, invoiceId);
+    assert.equal(current.body.invoice.number, "СЧ-126/Б");
+    assert.equal(current.body.invoice.items.length, 2);
+    assert.equal(current.body.invoice.totalAmount, 160000);
   });
 
   it("сохраняет номер договора в счёте и печатает его в PDF", async () => {
@@ -314,4 +329,79 @@ describe("Invoice editor workflow", () => {
     const stampedBytes = Buffer.from(await stamped.arrayBuffer());
     assert.ok(stampedBytes.length > plainBytes.length);
   });
+  const post = (body: unknown) => ({method: "POST", body: JSON.stringify(body)});
+  const patch = (body: unknown) => ({method: "PATCH", body: JSON.stringify(body)});
+  const numberedEditor = {documentDate:"2026-09-26", paymentPercent:100, items:[{name:"Услуга",quantity:1,unit:"услуга",unitPrice:1000,vatRate:0}]};
+  async function newDeal() {
+    const result = await json("/api/v1/deals", post({title:"Проверка номера счёта",contactId,items:numberedEditor.items}));
+    assert.equal(result.response.status,201,JSON.stringify(result.body));
+    return result.body.deal.id as string;
+  }
+  it("защищает ручные номера и печатные варианты от дублей", async () => {
+    const id = await newDeal();
+    const clash = await json(`/api/v1/deals/${id}/invoices`,post({editor:{...numberedEditor,number:"СЧ-126/Б"}}));
+    assert.equal(clash.response.status,409,JSON.stringify(clash.body));
+    const automatic = await json(`/api/v1/deals/${id}/invoices`,post({editor:numberedEditor}));
+    assert.equal(automatic.response.status,201,JSON.stringify(automatic.body));
+    const [_,year,seq] = automatic.body.invoice.number.split("-");
+    const alias = `${year.slice(-2)}-${seq}`;
+    const another = await newDeal();
+    assert.equal((await json(`/api/v1/deals/${another}/invoices`,post({editor:{...numberedEditor,number:alias}}))).response.status,409);
+    assert.equal((await json(`/api/v1/invoices/${invoiceId}`,patch({...numberedEditor,number:alias}))).response.status,409);
+    const preserved = (await json(`/api/v1/invoices/${invoiceId}`)).body.invoice;
+    assert.equal(preserved.number,"СЧ-126/Б");
+    assert.equal(preserved.totalAmount,160000);
+    const tooLong = await json(`/api/v1/invoices/${invoiceId}`,patch({...numberedEditor,number:"X".repeat(41)}));
+    assert.equal(tooLong.response.status,422);
+  });
+  it("продолжает отсчёт после ручного номера и не стирает номер пустым полем", async () => {
+    const id = await newDeal();
+    const number = `${String(new Date().getFullYear()).slice(-2)}-0500`;
+    const created = await json(`/api/v1/deals/${id}/invoices`,post({editor:{...numberedEditor,number}}));
+    assert.equal(created.response.status,201,JSON.stringify(created.body));
+    const saved = await json(`/api/v1/invoices/${created.body.invoice.id}`,patch({...numberedEditor,number:""}));
+    assert.equal(saved.body.invoice.number,number);
+    assert.equal((await json("/api/v1/settings/document-numbering")).body.INV.next,501);
+    const nextDeal = await newDeal();
+    const next = await json(`/api/v1/deals/${nextDeal}/invoices`,post({editor:numberedEditor}));
+    assert.match(next.body.invoice.number,/-0501$/);
+  });
+  it("одновременное создание переиспользует один счёт, одинаковый ручной номер выдаётся один раз", async () => {
+    const id = await newDeal();
+    const results = await Promise.all([1,2].map(()=>json(`/api/v1/deals/${id}/invoices`,post({editor:numberedEditor}))));
+    for(const r of results) assert.equal(r.response.status,201,JSON.stringify(r.body));
+    assert.equal(results[0].body.invoice.id,results[1].body.invoice.id);
+    assert.equal(await prisma.invoice.count({where:{dealId:id}}),1);
+    const ids = [await newDeal(),await newDeal()];
+    const sameNumber = await Promise.all(ids.map(id=>json(`/api/v1/deals/${id}/invoices`,post({editor:{...numberedEditor,number:"СЧ-конкурентный"}}))));
+    assert.deepEqual(sameNumber.map(r=>r.response.status).sort(),[201,409]);
+  });
+  it("отклоняет устаревшие параллельные правки и не меняет оплаченный счёт", async () => {
+    const id = await newDeal();
+    const created = await json(`/api/v1/deals/${id}/invoices`,post({editor:numberedEditor}));
+    const invoice = created.body.invoice;
+    const edits = await Promise.all(["СЧ-версия-А","СЧ-версия-Б"].map(number=>json(`/api/v1/invoices/${invoice.id}`,patch({...numberedEditor,number,updatedAt:invoice.updatedAt}))));
+    assert.deepEqual(edits.map(r=>r.response.status).sort(),[200,409]);
+    await prisma.invoice.update({where:{id:invoice.id},data:{status:"PAID"}});
+    assert.equal((await json(`/api/v1/invoices/${invoice.id}`,patch({...numberedEditor,number:"СЧ-запрещено"}))).response.status,422);
+    assert.equal((await json(`/api/v1/invoices/${invoice.id}`,patch({...numberedEditor,number:"СЧ-чужой"}),otherCookie)).response.status,404);
+  });
+
+  it("показывает импортированный счёт без редактирования и защищает его на сервере", async () => {
+    const id = await newDeal();
+    const created = await json(`/api/v1/deals/${id}/invoices`,post({editor:numberedEditor}));
+    const row = await prisma.invoice.findUniqueOrThrow({where:{id:created.body.invoice.id}});
+    const file = await prisma.attachment.create({data:{tenantId:row.tenantId,parentType:"invoice",parentId:row.id,storageKey:"test-imported.pdf",fileName:"original.pdf",mimeType:"application/pdf",sizeBytes:1,status:"imported"}});
+    await prisma.invoice.update({where:{id:row.id},data:{pdfFileId:file.id}});
+    assert.equal((await json(`/api/v1/invoices/${row.id}`)).body.invoice.importedPdf,true);
+    assert.equal((await json(`/api/v1/deals/${id}/invoice-context`)).body.invoice.importedPdf,true);
+    const patchResult = await json(`/api/v1/invoices/${row.id}`,patch({...numberedEditor,number:"Новый номер"}));
+    assert.equal(patchResult.response.status,422);
+    assert.equal(patchResult.body.code,"imported_pdf_immutable");
+    const createResult = await json(`/api/v1/deals/${id}/invoices`,post({editor:{...numberedEditor,number:"Новый номер"}}));
+    assert.equal(createResult.response.status,422);
+    assert.equal(createResult.body.code,"imported_pdf_immutable");
+    assert.equal((await prisma.invoice.findUniqueOrThrow({where:{id:row.id}})).number,row.number);
+  });
+
 });

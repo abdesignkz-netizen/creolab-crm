@@ -646,6 +646,9 @@ export const legalProfileSchema = z.object({
 });
 
 export const createContractDraftSchema = z.object({
+  number: avrEditorSchema.shape.number,
+  documentDate: avrEditorSchema.shape.documentDate.optional(),
+  updatedAt: z.string().datetime().optional(),
   subject: z.string().trim().max(400).nullable().optional(),
   paymentTerms: z.string().trim().max(2000).nullable().optional(),
   completionTerms: z.string().trim().max(2000).nullable().optional(),
@@ -674,6 +677,8 @@ export const patchContractTemplateSchema = z.object({
 });
 
 export const companyContractFromTemplateSchema = z.object({
+  number: avrEditorSchema.shape.number,
+  documentDate: avrEditorSchema.shape.documentDate.optional(),
   completionTerms: z.string().trim().max(2000).optional(),
   templateId: z.string().uuid().optional(),
   previewId: z.string().uuid().optional(),

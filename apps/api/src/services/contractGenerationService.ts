@@ -1,7 +1,8 @@
+import { allocateDocumentNumber } from "./documentNumberingService.ts";
 import { documentOrganization } from "./documentOrganization.ts";
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
-import type { PrismaClient } from "@creolab/db";
+import { readFile, unlink } from "node:fs/promises";
+import type { PrismaClient, Prisma } from "@creolab/db";
 import type { Response } from "express";
 import { ApiError } from "../errors.ts";
 import { can, type AuthContext } from "../lib/types.ts";
@@ -108,6 +109,9 @@ export async function generateContractPdfFile(
   auth: AuthContext,
   contractId: string,
   input: {
+    number?: string;
+    documentDate?: string;
+    updatedAt?: string;
     subject?: string | null;
     paymentTerms?: string | null;
     completionTerms?: string | null;
@@ -127,6 +131,28 @@ export async function generateContractPdfFile(
   if (contract.originalFileId) throw new ApiError(422, "imported_pdf_immutable", "Загруженный PDF сохраняется в исходном виде. Для другого документа загрузите новый файл.");
   if (!MUTABLE_STATUSES.has(contract.status) || contract.signedAt) {
     throw new ApiError(422, "contract_immutable", "Договор уже на подписи или подписан — файл нельзя пересобрать");
+  }
+
+  if (input.updatedAt && contract.updatedAt.toISOString() !== input.updatedAt) {
+    throw new ApiError(409, "document_changed", "Договор изменился. Откройте его заново.");
+  }
+  const number = input.number?.trim() || contract.number;
+  // Conversion runs outside the transaction; recheck the snapshot before publishing a new version.
+  async function commitVersion<T>(save: (tx: Prisma.TransactionClient) => Promise<T>) {
+    return prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM "Tenant" WHERE id = ${tid} FOR UPDATE`;
+      await tx.$queryRaw`SELECT id FROM "Contract" WHERE id = ${contractId} AND "tenantId" = ${tid} FOR UPDATE`;
+      const current = await tx.contract.findFirst({ where: { id: contractId, tenantId: tid } });
+      if (!current) throw new ApiError(404, "not_found", "Договор не найден");
+      if (!MUTABLE_STATUSES.has(current.status) || current.signedAt || current.originalFileId) {
+        throw new ApiError(422, "contract_immutable", "Договор уже на подписи или подписан — файл нельзя пересобрать");
+      }
+      if (current.updatedAt.getTime() !== contract!.updatedAt.getTime()) {
+        throw new ApiError(409, "document_changed", "Договор изменился во время формирования. Откройте его заново.");
+      }
+      if (number !== current.number) await allocateDocumentNumber(tx, tid, "DOG", number, contractId);
+      return save(tx);
+    });
   }
 
   const deal = await prisma.deal.findFirst({
@@ -167,9 +193,9 @@ export async function generateContractPdfFile(
     : await ensureDefaultTemplate(prisma, tid);
 
   const company = deal.company!;
-  const contractDate = contract.date;
+  const contractDate = input.documentDate ? new Date(`${input.documentDate}T00:00:00.000Z`) : contract.date;
   const docxInput: ContractPdfInput = {
-    number: contract.number,
+    number,
     date: contractDate,
     subject,
     dealName: deal.title,
@@ -204,9 +230,10 @@ export async function generateContractPdfFile(
   const renderingInputHash = createHash("sha256").update(JSON.stringify(docxInput)).digest("hex");
   const reusable = await hasReusableContractSource(prisma, tid, contract.id, latest, docx, renderingInputHash);
   if (reusable && latest?.fileId) {
-    const reused = await prisma.contract.update({
+    const reused = await commitVersion(tx => tx.contract.update({
       where: { id: contract.id },
       data: {
+        number,
         subject,
         paymentTerms,
         completionTerms,
@@ -221,7 +248,7 @@ export async function generateContractPdfFile(
         generatedFileId: latest.fileId,
         templateId: template.id,
       },
-    });
+    }));
     return {
       contract: serializeContract({ ...reused, generatedMimeType: PDF_MIME }),
       version: {
@@ -237,30 +264,31 @@ export async function generateContractPdfFile(
     };
   }
 
-  const pdf = await wordFileToContractPdf(docx, `${contract.number}.docx`, docxInput);
+  const pdf = await wordFileToContractPdf(docx, `${number}.docx`, docxInput);
   const sha256 = createHash("sha256").update(pdf).digest("hex");
   const sourceAttachment = await storeContractBytes(prisma, {
     tenantId: tid,
     parentType: "contract",
     parentId: contract.id,
-    fileName: `${contract.number}.docx`,
+    fileName: `${number}.docx`,
     mimeType: DOCX_MIME,
     bytes: docx,
-    documentType: "contract_source",
+    documentType: "contract_source_pending",
     uploadedById: auth.user.id,
   });
   const pdfAttachment = await storeContractBytes(prisma, {
     tenantId: tid,
     parentType: "contract",
     parentId: contract.id,
-    fileName: `${contract.number}.pdf`,
+    fileName: `${number}.pdf`,
     mimeType: PDF_MIME,
     bytes: pdf,
     uploadedById: auth.user.id,
   });
 
   const nextVersion = latest?.fileId ? (latest.version || 0) + 1 : latest?.version || 1;
-  const saved = await prisma.$transaction(async (tx) => {
+  const saved = await commitVersion(async (tx) => {
+    await tx.attachment.update({ where: { id: sourceAttachment.id }, data: { documentType: "contract_source" } });
     const versionRow = latest && !latest.fileId
       ? await tx.contractVersion.update({
           where: { id: latest.id },
@@ -279,6 +307,7 @@ export async function generateContractPdfFile(
     const updated = await tx.contract.update({
       where: { id: contract.id },
       data: {
+        number,
         subject,
         paymentTerms,
         completionTerms,
@@ -303,7 +332,7 @@ export async function generateContractPdfFile(
         entityType: "contract",
         entityId: contract.id,
         changesJson: {
-          number: contract.number,
+          number,
           sha256,
           version: versionRow.version,
           reused: false,
@@ -314,6 +343,10 @@ export async function generateContractPdfFile(
     });
 
     return { updated, versionRow };
+  }).catch(async error => {
+    await prisma.attachment.deleteMany({ where: { id: { in: [sourceAttachment.id, pdfAttachment.id] }, tenantId: tid } });
+    await Promise.allSettled([sourceAttachment, pdfAttachment].map(file => unlink(resolveUploadPath(file.storageKey))));
+    throw error;
   });
 
   return {

@@ -1,3 +1,4 @@
+import { allocateDocumentNumber } from "./documentNumberingService.ts";
 import { documentOrganization } from "./documentOrganization.ts";
 import type { PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
@@ -21,10 +22,6 @@ function requireManageDocuments(auth: AuthContext) {
   }
 }
 
-async function nextEsfNumber(prisma: PrismaClient, tenantId: string) {
-  const count = await prisma.electronicDocument.count({ where: { tenantId, type: "ESF" } });
-  return `ESF-${new Date().getFullYear()}-${String(count + 1).padStart(4, "0")}`;
-}
 
 async function loadBundle(prisma: PrismaClient, tenantId: string, dealId: string, contractId?: string | null) {
   const deal = await prisma.deal.findFirst({
@@ -74,7 +71,15 @@ async function resolveLinks(
   return { contract, invoice };
 }
 
-export async function createEsfDraft(
+export async function createEsfDraft(prisma: PrismaClient, auth: AuthContext, dealId: string, input: { contractId?: string; invoiceId?: string } = {}) {
+  const membership = requireTenant(auth); requireManageDocuments(auth);
+  return prisma.$transaction(async tx => {
+    await tx.$queryRaw`SELECT id FROM "Tenant" WHERE id = ${membership.tenantId} FOR UPDATE`;
+    return createEsfDraftLocked(tx as PrismaClient, auth, dealId, input);
+  });
+}
+
+async function createEsfDraftLocked(
   prisma: PrismaClient,
   auth: AuthContext,
   dealId: string,
@@ -97,7 +102,7 @@ export async function createEsfDraft(
   if (!items.length) {
     throw new ApiError(422, "deal_items_required", "Сначала добавьте позиции в сделку");
   }
-  const number = existing?.number || (await nextEsfNumber(prisma, tid));
+  const number = existing?.number || (await allocateDocumentNumber(prisma, tid, "ESF"));
   const source = mapEsfInvoiceSource({
     documentDate: existing?.documentDate || new Date(),
     number,

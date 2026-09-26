@@ -54,6 +54,8 @@ export function ContractTemplatePanel({ onSaved }: { onSaved?: () => void }) {
   const [formBusy, setFormBusy] = useState(false);
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [lines, setLines] = useState<ContractDraftLine[]>([newContractDraftLine()]);
+  const [contractNumber, setContractNumber] = useState("");
+  const [contractDate, setContractDate] = useState(new Date().toISOString().slice(0, 10));
   const [completionTerms, setCompletionTerms] = useState("");
   const [savedNotice, setSavedNotice] = useState("");
   const [justSavedId, setJustSavedId] = useState("");
@@ -236,7 +238,7 @@ export function ContractTemplatePanel({ onSaved }: { onSaved?: () => void }) {
     setFormBusy(true);
     setError("");
     try {
-      const result: any = await api.createCompanyContractFromTemplate(companyId, { templateId, items, completionTerms });
+      const result: any = await api.createCompanyContractFromTemplate(companyId, { templateId, items, completionTerms, number: contractNumber, documentDate: contractDate });
       if (!result.previewId) throw new Error("Не удалось сформировать договор");
       setFormed({ previewId: result.previewId, number: result.number, companyId });
       setViewOpen(true);
@@ -495,6 +497,8 @@ export function ContractTemplatePanel({ onSaved }: { onSaved?: () => void }) {
                   ))}
                 </select>
               </label>
+              <label>Номер договора<input maxLength={40} value={contractNumber} disabled={formBusy} placeholder="Автоматически по настройкам нумерации" onChange={event => { setContractNumber(event.target.value); setFormed(null); }} /></label>
+              <label>Дата договора<input type="date" value={contractDate} disabled={formBusy} onChange={event => { setContractDate(event.target.value); setFormed(null); }} /></label>
               <ContractGenerateItems lines={lines} onChange={(next) => { setLines(next); setFormed(null); }}
                 completionTerms={completionTerms} onCompletionTermsChange={(value) => { setCompletionTerms(value); setFormed(null); }} disabled={formBusy} />
               <div className="actions">
