@@ -317,11 +317,24 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const help = params.get("help");
+    const support = params.get("support") === "1";
     if (help && !location.pathname.startsWith("/admin")) {
       setHelpTicketId(help);
       setHelpOpen(true);
+    } else if (support && !location.pathname.startsWith("/admin")) {
+      setHelpTicketId(null);
+      setHelpOpen(true);
     }
   }, [location.search]);
+
+  function closeHelp() {
+    setHelpOpen(false);
+    const params = new URLSearchParams(location.search);
+    if (!params.has("support")) return;
+    params.delete("support");
+    const search = params.toString();
+    navigate(`${location.pathname}${search ? `?${search}` : ""}`, { replace: true });
+  }
 
   useEffect(() => {
     if (!hasCompany || !me?.billing?.entitlements?.SUPPORT) return;
@@ -651,7 +664,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
       {inServiceAdmin || !me?.billing?.entitlements?.SUPPORT ? null : (
       <SupportCenter
         open={helpOpen}
-        onClose={() => setHelpOpen(false)}
+        onClose={closeHelp}
         initialTicketId={helpTicketId}
         onUnread={setHelpUnread}
         canCreateTicket={hasCompany}

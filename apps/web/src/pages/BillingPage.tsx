@@ -204,6 +204,6 @@ export function BillingPage() {
     <section className="panel stack"><h3>Как подключить</h3><ol className="billing-steps"><li>Выберите тариф и нужные дополнения.</li><li>Отправьте запрос. Оплата проходит вне системы.</li><li>Администратор BasQar подтвердит оплату и откроет доступ.</li></ol><p className="muted">Онлайн-оплата пока не подключена. Настройка внешних сервисов выполняется отдельно от выбора тарифа.</p>
       {upcoming.length ? <p className="muted">Дополнения в подготовке: {upcoming.map((item) => item.name).join(", ")}. Они недоступны для заказа в этом каталоге.</p> : null}
     </section>
-    <OnboardingWizard />{data?.entitlements?.SUPPORT ? <p className="muted">Вопросы по подключению можно задать в <Link to="/today">поддержке</Link>.</p> : null}
+    <OnboardingWizard />{data?.entitlements?.SUPPORT ? <p className="muted">Вопросы по подключению можно задать в <Link to="/billing?support=1">поддержке</Link>.</p> : null}
   </section>;
 }
