@@ -30,6 +30,8 @@ BEGIN
   IF NOT FOUND THEN RETURN NEW; END IF;
   cap := (u."limitsJson"->>'DOCUMENTS_COUNT')::numeric;
   IF cap IS NULL THEN RETURN NEW; END IF; -- Old contracts retain their agreed rights.
+  IF EXISTS (SELECT 1 FROM "BillingResourceUsage" WHERE "tenantId" = NEW."tenantId"
+    AND resource = 'DOCUMENTS_COUNT' AND "operationId" = TG_TABLE_NAME || ':' || NEW.id) THEN RETURN NEW; END IF;
   bucket := basqar_resource_period(u."countersJson"->>'resourceAnchor');
   SELECT COALESCE(sum(amount),0) INTO used FROM "BillingResourceUsage"
     WHERE "tenantId" = NEW."tenantId" AND resource = 'DOCUMENTS_COUNT' AND period = bucket;

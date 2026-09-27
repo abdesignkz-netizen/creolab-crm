@@ -144,6 +144,7 @@ function CompanySubscription({ company, onSaved }: { company: any; onSaved: (row
   const [planCode, setPlanCode] = useState(company.planCode && company.planCode !== "starter" ? company.planCode : "CRM_START");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
+  const [overrideError, setOverrideError] = useState("");
 
   async function run(label: string, fn: () => Promise<any>) {
     setBusy(label);
@@ -182,6 +183,30 @@ function CompanySubscription({ company, onSaved }: { company: any; onSaved: (row
       {(company.usage || []).map((row: { key: string; label: string; used: number; cap: number }) => (
         <p key={row.key} className="muted">{row.label}: {row.used} / {row.cap || "—"}</p>
       ))}
+      <form className="panel stack" onSubmit={async (event) => {
+        event.preventDefault();
+        const form = new FormData(event.currentTarget);
+        const limits: Record<string, number> = {};
+        for (const key of ["AI_CREDITS", "AUTOMATION_RUNS", "DOCUMENTS_COUNT", "CAMPAIGN_RECIPIENTS", "STORAGE_GB"]) {
+          const value = String(form.get(key) || "").trim();
+          if (value) limits[key] = Number(value);
+        }
+        try {
+          setOverrideError("");
+          const messaging = String(form.get("MASS_MESSAGING") || "keep");
+          const features = messaging === "keep" ? {} : { MASS_MESSAGING: messaging === "on" };
+          onSaved(await api.adminBillingOverride(company.id, { limits, features, reason: String(form.get("reason") || "") }));
+          notifySaved("Индивидуальные лимиты сохранены");
+        } catch (err) { setOverrideError(err instanceof Error ? err.message : "Ошибка"); }
+      }}>
+        <h4>Индивидуальные лимиты и функции</h4>
+        <p className="muted">Пустое поле сохраняет базовое значение тарифа. Значение −1 означает без квоты.</p>
+        {["AI_CREDITS", "AUTOMATION_RUNS", "DOCUMENTS_COUNT", "CAMPAIGN_RECIPIENTS", "STORAGE_GB"].map((key) => <label key={key}>{key}<input name={key} type="number" min="-1" placeholder="без изменения" /></label>)}
+        <label>Массовые рассылки<select name="MASS_MESSAGING" defaultValue="keep"><option value="keep">Без изменения</option><option value="on">Разрешить</option><option value="off">Запретить</option></select></label>
+        <label>Причина<input name="reason" placeholder="Причина изменения" /></label>
+        {overrideError ? <p className="error">{overrideError}</p> : null}
+        <button className="btn secondary" type="submit">Сохранить индивидуальные настройки</button>
+      </form>
       <label>
         Тариф
         <select value={planCode} onChange={(event) => setPlanCode(event.target.value)}>

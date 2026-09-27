@@ -135,11 +135,13 @@ export async function listPublicPlans(prisma: PrismaClient, period: string = "MO
 }
 
 export async function quotePublic(prisma: PrismaClient, auth: AuthContext, input: unknown) {
-  requireTenant(auth);
+  const membership = requireTenant(auth);
+  const current = await getEntitlements(prisma, membership.tenantId);
   const body = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
-  if (body.requestType === "RENEWAL") return quoteRenewal(prisma, requireTenant(auth).tenantId, String(body.planCode || ""), String(body.billingPeriod || "MONTHLY"));
+  if (body.requestType === "RENEWAL" || (!body.requestType && current.snapshot.planCode === body.planCode && body.planCode !== "BASQAR_FREE" && !current.snapshot.previewMode)) return quoteRenewal(prisma, requireTenant(auth).tenantId, String(body.planCode || ""), String(body.billingPeriod || "MONTHLY"));
   return quoteSubscription(prisma, {
     planCode: body.planCode ? String(body.planCode) : null,
+    launchEligible: !current.snapshot.entitled || current.snapshot.planCode === "BASQAR_FREE",
     addOns: Array.isArray(body.addOns) ? (body.addOns as Array<{ code: string; qty?: number }>) : [],
     billingPeriod: String(body.billingPeriod || "MONTHLY"),
   });

@@ -358,6 +358,8 @@ export async function processClientFollowUp(
     return { skipped: "no_channel" as const };
   }
 
+  const { consumeResource } = await import("./billingResourceService.ts");
+  await consumeResource(prisma, item.tenantId, "AUTOMATION_RUNS", 1, `follow-up:${item.id}`);
   const history = [...conversation.messages].reverse().map((row) => ({
     role: isInboundClient(row) ? "user" : "assistant",
     content: String(row.text || ""),

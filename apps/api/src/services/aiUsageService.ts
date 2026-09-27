@@ -103,12 +103,6 @@ export async function resolveModelPricing(
 export async function recordAiUsage(prisma: PrismaClient | null | undefined, input: RecordAiUsageInput) {
   if (!prisma) return null;
   try {
-    if (input.providerRequestId) {
-      const existing = await prisma.aIUsageEvent.findFirst({
-        where: { provider: input.provider, providerRequestId: input.providerRequestId },
-      });
-      if (existing) return existing;
-    }
     const pricing = input.status === "ok" ? await resolveModelPricing(prisma, input.provider, input.model, input.at || new Date()) : null;
     const inputTokens = input.inputTokens ?? null;
     const outputTokens = input.outputTokens ?? null;
@@ -131,7 +125,13 @@ export async function recordAiUsage(prisma: PrismaClient | null | undefined, inp
       totalCost = money(num(inputCost) + num(outputCost) + num(cachedInputCost));
       pricingMissing = false;
     }
-    const event = await prisma.aIUsageEvent.create({
+    return await prisma.$transaction(async tx => {
+    if (input.tenantId) await tx.$queryRaw`SELECT "tenantId" FROM "TenantUsage" WHERE "tenantId" = ${input.tenantId} FOR UPDATE`;
+    if (input.providerRequestId) {
+      const existing = await tx.aIUsageEvent.findFirst({ where: { tenantId: input.tenantId || null, provider: input.provider, providerRequestId: input.providerRequestId } });
+      if (existing) return existing;
+    }
+    const event = await tx.aIUsageEvent.create({
       data: {
         tenantId: input.tenantId || null,
         integrationId: input.integrationId || null,
@@ -163,9 +163,10 @@ export async function recordAiUsage(prisma: PrismaClient | null | undefined, inp
     });
     if (event.tenantId && event.status === 'ok') {
       const { consumeResource, aiCreditCost } = await import('./billingResourceService.ts');
-      await consumeResource(prisma, event.tenantId, 'AI_CREDITS', aiCreditCost(event.feature), `ai:${event.id}`, false);
+      await consumeResource(tx, event.tenantId, 'AI_CREDITS', aiCreditCost(event.feature), `ai:${event.id}`, false);
     }
     return event;
+    });
   } catch (error) {
     console.warn("[ai-usage] record failed", error instanceof Error ? error.message : error);
     return null;

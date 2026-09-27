@@ -323,7 +323,7 @@ export async function quoteSubscription(
     recommendation,
     snapshot: {
       planVersion: plan?.version || CATALOG_VERSION,
-      ...(plan?.launchEndsAt && billingPeriod === 'MONTHLY' && baseAmountMinor === plan.launchMonthlyPriceMinor ? { launch: {endsAt: plan.launchEndsAt, standardMonthlyPrice: plan.monthlyPriceMinor} } : {}),
+      ...(plan?.launchEndsAt && billingPeriod === 'MONTHLY' && lines[0]?.amountMinor === plan.launchMonthlyPriceMinor ? { launch: {endsAt: plan.launchEndsAt, standardMonthlyPrice: plan.monthlyPriceMinor} } : {}),
       baseFeatures: mergeEntitlementState(plan, []).features,
       baseLimits: mergeEntitlementState(plan, []).limits,
       basePriceAtActivation: baseAmountMinor,
@@ -379,7 +379,7 @@ export function publicOfferCards(items: CatalogItem[], period: BillingPeriod) {
 }
 
 // Renewal is based on the customer's agreement, including retired SKUs and module add-ons.
-export async function quoteRenewal(prisma: PrismaClient, tenantId: string, planCode: string, period: string): Promise<PricingQuote> {
+export async function quoteRenewal(prisma: PrismaClient, tenantId: string, planCode: string, period: string, now = new Date()): Promise<PricingQuote> {
   const { loadCurrentTenantPlan, limitsFromPlan, entitlementsFromSnapshot, snapshotFromPlan } = await import("./entitlementService.ts");
   const row = await loadCurrentTenantPlan(prisma, tenantId);
   if (!row || row.plan.code !== planCode || planCode === "BASQAR_FREE") throw new ApiError(422, "invalid_renewal", "Продлить можно текущий платный тариф");
@@ -389,7 +389,7 @@ export async function quoteRenewal(prisma: PrismaClient, tenantId: string, planC
   const originalLines = Array.isArray(saved.lines) ? saved.lines as QuotedLine[] : [];
   const lines: QuotedLine[] = originalLines.length ? originalLines.filter(line => line.chargeType !== "ONE_TIME").map(line => ({...line})) : [{ code: row.plan.code, name: row.plan.name, kind: "plan", qty: 1, unitAmountMinor: row.amountMinor || 0, amountMinor: row.amountMinor || 0, chargeType: "RECURRING", catalogStatus: "HIDDEN" }];
   const launch = saved.launch as {endsAt: string; standardMonthlyPrice: number} | undefined;
-  const renewalAt = row.endsAt && row.endsAt > new Date() ? row.endsAt : new Date();
+  const renewalAt = row.endsAt && row.endsAt > now ? row.endsAt : now;
   if (launch && billingPeriod === 'MONTHLY' && renewalAt > new Date(launch.endsAt)) {
     for (const line of lines) if (line.code === planCode) { line.unitAmountMinor = launch.standardMonthlyPrice; line.amountMinor = launch.standardMonthlyPrice * line.qty; }
   }

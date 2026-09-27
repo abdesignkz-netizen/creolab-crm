@@ -4,6 +4,13 @@ export type BillingCatalogItem = Pick<CatalogItem, "code" | "name" | "kind" | "p
 export type BillingPeriod = "MONTHLY" | "YEARLY";
 const DISPLAY_LIMITS = ["USERS", "AI_CREDITS", "AUTOMATION_RUNS", "DOCUMENTS_COUNT", "CAMPAIGN_RECIPIENTS", "WHATSAPP_CONNECTIONS", "STORAGE_GB"] as const;
 
+function resourceText(item: BillingCatalogItem, key: typeof DISPLAY_LIMITS[number]) {
+  const value = Number(item.limits[key]).toLocaleString("ru-RU");
+  if (key === "AI_CREDITS" && item.code === "BASQAR_FREE") return `🎁 ${value} один раз`;
+  if (["AI_CREDITS", "AUTOMATION_RUNS", "DOCUMENTS_COUNT", "CAMPAIGN_RECIPIENTS"].includes(key)) return `${value} / мес`;
+  return key === "STORAGE_GB" ? `${value} ГБ` : value;
+}
+
 
 export function formatKzt(value: number) {
   return `${value.toLocaleString("ru-RU")} ₸`;
@@ -69,17 +76,17 @@ export function BillingCatalog({ items, period, selected, current, disabled, onS
   const periodLabel = period === "YEARLY" ? "год" : "месяц";
   const priceText = (item: BillingCatalogItem) => {
     if (period === 'MONTHLY' && item.launchMonthlyPriceMinor && item.launchEndsAt && new Date(item.launchEndsAt) >= new Date()) {
-      return <><strong>{formatKzt(item.launchMonthlyPriceMinor)}</strong> <span>/ месяц</span><br/><del className="muted">{formatKzt(item.monthlyPriceMinor)}</del> <small>до 31.12.2026</small></>;
+      return <><strong>{formatKzt(item.launchMonthlyPriceMinor)}</strong> <span>/ месяц</span><br/><del className="muted">{formatKzt(item.monthlyPriceMinor)}</del> <small>Спеццена до 31.12.2026</small><br/><small>С 1 января 2027 года и при следующем продлении после акции — 14 990 ₸/мес.</small></>;
     }
-    if (period === 'YEARLY' && item.monthlyPriceMinor > 0) return <><strong>{formatKzt(Math.round(item.yearlyPriceMinor / 12))}</strong> <span>/ мес при оплате за год</span><br/><small>{formatKzt(item.yearlyPriceMinor)} за 12 месяцев · 2 месяца бесплатно</small></>;
-    return <><strong>{formatKzt(catalogPrice(item, period))}</strong>{item.code !== "BASQAR_FREE" ? <span> / {periodLabel}</span> : null}</>;
+    if (period === 'YEARLY' && item.monthlyPriceMinor > 0) return <><strong>{formatKzt(Math.round(item.yearlyPriceMinor / 12))}</strong> <span>/ мес при оплате за год</span><br/><small>{formatKzt(item.yearlyPriceMinor)} за 12 месяцев · 2 месяца бесплатно</small><br/><del className="muted">{formatKzt(item.monthlyPriceMinor)} / мес</del><br/><small>Экономия {formatKzt(item.monthlyPriceMinor * 12 - item.yearlyPriceMinor)} относительно стандартной цены {formatKzt(item.monthlyPriceMinor)} / мес.</small></>;
+    return <><strong>{formatKzt(catalogPrice(item, period))}</strong>{item.code !== "BASQAR_FREE" ? <span> / {periodLabel}</span> : <span> навсегда</span>}</>;
   };
   function card(item: BillingCatalogItem) {
     const free = item.code === "BASQAR_FREE";
     const selectedItem = selected === item.code;
     return <article key={item.code} className={`panel billing-plan-card ${selectedItem ? "is-selected" : ""} ${item.recommended ? "is-recommended" : ""}`}>
       <div className="billing-card-badges">
-        {item.recommended ? <span className="billing-recommend">Рекомендуем</span> : null}
+        {item.recommended ? <span className="billing-recommend">Популярный</span> : null}
         {current === item.code ? <span className="billing-recommend">Ваш тариф</span> : null}
       </div>
       <h4>{item.name}</h4>
@@ -88,9 +95,9 @@ export function BillingCatalog({ items, period, selected, current, disabled, onS
       <p className="billing-price">{priceText(item)}</p>
       <p className="muted billing-price-note">{free ? "Ручная работа с клиентами, сделками и задачами. Без оплаты и подтверждения администратора." : "Указана стоимость базовой конфигурации. Дополнительные подключения и ресурсы оплачиваются отдельно."}</p>
       <dl className="billing-plan-limits">
-        {DISPLAY_LIMITS.map((key) => <div key={key}><dt>{key === "AI_CREDITS" ? "AI-кредиты" : key === "AUTOMATION_RUNS" ? "Запуски автоматизации" : key === "DOCUMENTS_COUNT" ? "Документы" : key === "CAMPAIGN_RECIPIENTS" ? "Рассылки · получатели" : LIMIT_LABEL[key]}</dt><dd>{item.limits[key] === -1 ? "Без квоты" : item.limits[key] === 0 && key === "CAMPAIGN_RECIPIENTS" ? "С тарифа Start" : item.limits[key] == null ? "По условиям тарифа" : Number(item.limits[key]).toLocaleString("ru-RU")}</dd></div>)}
+        {DISPLAY_LIMITS.map((key) => <div key={key}><dt>{key === "AI_CREDITS" ? "AI-кредиты" : key === "AUTOMATION_RUNS" ? "Запуски автоматизации" : key === "DOCUMENTS_COUNT" ? "Документы" : key === "CAMPAIGN_RECIPIENTS" ? "Рассылки · получатели" : LIMIT_LABEL[key]}</dt><dd>{item.limits[key] === -1 ? "Без квоты" : item.limits[key] === 0 && key === "CAMPAIGN_RECIPIENTS" ? "С тарифа Start" : item.limits[key] == null ? "По условиям тарифа" : resourceText(item, key)}</dd></div>)}
       </dl>
-      {item.features.MULTIPLE_PIPELINES || item.features.MULTI_DEPARTMENT ? <p className="muted">Сейчас доступна одна воронка. Несколько воронок и отделы находятся в подготовке.</p> : null}
+      {item.code === "CRM_START" ? <p className="muted">По сравнению с Free: ×10 автоматизаций и документов, до 3 пользователей, 5 ГБ хранилища, ежемесячные AI-кредиты и рассылки до 300 получателей.</p> : null}
       <ul className="billing-feature-list">{highlights(item).map((text) => <li key={text}>{text}</li>)}</ul>
       <button type="button" className={`btn ${selectedItem ? "" : "secondary"}`} aria-pressed={selectedItem} disabled={disabled || current === item.code} data-tip={`Выбрать ${item.name} и посмотреть расчёт`} onClick={() => onSelect(item.code)}>
         {current === item.code ? "Ваш тариф" : free ? "Начать бесплатно" : selectedItem ? `Выбран ${item.name}` : `Выбрать ${item.name}`}
@@ -98,7 +105,8 @@ export function BillingCatalog({ items, period, selected, current, disabled, onS
     </article>;
   }
   return <div id="billing-catalog" className="billing-catalog stack">
-    <div><h3>Выберите тариф под свою задачу</h3><p className="muted">Все указанные лимиты включены в тариф. При необходимости доступные ресурсы можно увеличить отдельно без перехода на другой тариф. Дополнительные ресурсы не открывают функции другого тарифа.</p></div>
+    <div><h3>Выберите тариф под свою задачу</h3><p className="muted">Один продукт — четыре масштаба работы. Основные возможности включены во все тарифы. Массовые рассылки доступны со Start.</p></div>
+    <p className="muted">1 AI-кредит ≈ одно стандартное AI-действие. Ресурсы обновляются каждый расчётный месяц, в том числе при оплате за год, и не переносятся. 100 AI-кредитов Free выдаются один раз. Стоимость услуг внешнего WhatsApp-провайдера не входит в тариф BasQar.</p>
     <nav className="billing-section-links" aria-label="Группы тарифов">
       {GROUPS.map((group) => <a key={group.id} href={`#billing-${group.id}`}>{group.title}</a>)}
       <a href="#billing-comparison">Сравнить возможности</a>
@@ -118,7 +126,7 @@ export function BillingCatalog({ items, period, selected, current, disabled, onS
         <table><caption className="muted">Возможности базовых тарифов без дополнительных модулей</caption><thead><tr><th scope="col">Возможность</th>{comparison.map((item) => <th scope="col" key={item.code}>{item.name}</th>)}</tr></thead>
           <tbody>
             <tr><th scope="row">Цена / {periodLabel}</th>{comparison.map((item) => <td key={item.code}>{formatKzt(catalogPrice(item, period))}</td>)}</tr>
-            {DISPLAY_LIMITS.map((key) => <tr key={key}><th scope="row">{LIMIT_LABEL[key]}</th>{comparison.map((item) => <td key={item.code}>{item.limits[key] === -1 ? "Без квоты" : item.limits[key] === 0 && key === "CAMPAIGN_RECIPIENTS" ? "С тарифа Start" : item.limits[key] == null ? "По условиям тарифа" : Number(item.limits[key]).toLocaleString("ru-RU")}</td>)}</tr>)}
+            {DISPLAY_LIMITS.map((key) => <tr key={key}><th scope="row">{LIMIT_LABEL[key]}</th>{comparison.map((item) => <td key={item.code}>{item.limits[key] === -1 ? "Без квоты" : item.limits[key] === 0 && key === "CAMPAIGN_RECIPIENTS" ? "С тарифа Start" : item.limits[key] == null ? "По условиям тарифа" : resourceText(item, key)}</td>)}</tr>)}
             {FEATURE_GROUPS.flatMap(group => [<tr key={group.title}><th colSpan={comparison.length + 1}>{group.title}</th></tr>, ...group.rows.map(({ key, label }) => <tr key={`${group.title}-${label}`}><th scope="row">{label || FEATURE_LABEL[key]}</th>{comparison.map((item) => <td key={item.code} className={item.features[key] ? "billing-included" : "muted"}>{item.features[key] ? "Включено" : "—"}</td>)}</tr>)])}
           </tbody>
         </table>

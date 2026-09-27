@@ -19,7 +19,7 @@ export async function initializeTenantUsage(tx: Db, tenantId: string, limits: Re
   const existing = await tx.tenantUsage.findUnique({ where: { tenantId } });
   if (existing) {
     const counters = existing.countersJson as Record<string, any>;
-    const issued = Number(counters.AI_TRIAL_ISSUED ?? 0);
+    const issued = Number(counters.AI_TRIAL_ISSUED || limits.AI_TRIAL || 0);
     await tx.tenantUsage.update({ where: { tenantId }, data: { limitsJson: limits, countersJson: { ...counters, AI_TRIAL_ISSUED: issued } } });
     return;
   }
@@ -65,6 +65,7 @@ export async function getUsage(prisma: PrismaClient, tenantId: string, code: str
   if (row) {
     if (code === 'DATABASE_MB') return Number(row.databaseBytes) / 1048576;
     if (code === 'FILE_STORAGE_MB') return Number(row.fileBytes) / 1048576;
+    if (code === 'STORAGE_BYTES') return Number(row.fileBytes);
     if (code === 'MONTHLY_LEADS' && row.period !== billingMonth()) return 0;
     if (code in (row.countersJson as object)) return Number((row.countersJson as Record<string, number>)[code]);
 
@@ -89,9 +90,11 @@ export function aiCreditCost(feature: string) { return AI_CREDIT_COSTS[feature] 
 
 export async function resourcePeriod(db: Db, tenantId: string, resource: string, now = new Date()) {
   const row = await db.tenantUsage.findUnique({ where: { tenantId } });
-  // Paid resources reset with the billing calendar month. The Free AI grant is lifetime.
-  if (resource === 'AI_CREDITS' && Number((row?.limitsJson as Record<string, number>)?.AI_TRIAL || 0) > 0 && Number((row?.countersJson as Record<string, number>)?.AI_TRIAL_ISSUED || 0) > 0) return 'lifetime';
-  return billingMonth(now);
+  // Share the anniversary boundary with the database document trigger.
+  if (resource === 'AI_CREDITS' && Number((row?.limitsJson as Record<string, number>)?.AI_TRIAL || 0) > 0) return 'lifetime';
+  const anchor = (row?.countersJson as Record<string, string>)?.resourceAnchor || null;
+  const result = await db.$queryRaw<Array<{period: string}>>`SELECT basqar_resource_period(${anchor}::text, ${now}::timestamptz) AS period`;
+  return result[0].period;
 }
 
 export async function resourceUsed(db: Db, tenantId: string, resource: string, period: string) {
@@ -123,7 +126,7 @@ export async function consumeResource(db: Db, tenantId: string, resource: string
   const cap = access.limits[canonicalResource] ?? -1;
   if (enforce && !access.snapshot.entitled) throw new ApiError(403, 'subscription_required', 'Подписка не активна', undefined, {billingPath: '/billing'});
   const used = await resourceUsed(db, tenantId, canonicalResource, period);
-  if (enforce && row && !access.snapshot.grandfathered && cap >= 0 && used + amount > cap) {
+  if (enforce && !access.snapshot.grandfathered && cap >= 0 && used + amount > cap) {
     throw new ApiError(403, 'limit_exceeded', 'Лимит ресурса исчерпан. Остальные возможности BasQar продолжают работать.', undefined, { limit: resource, used, cap, billingPath: '/billing' });
   }
   await db.$executeRaw`INSERT INTO "BillingResourceUsage" ("tenantId", resource, "operationId", period, amount) VALUES (${tenantId}, ${canonicalResource}, ${operationId}, ${period}, ${amount}) ON CONFLICT DO NOTHING`;
@@ -218,8 +221,14 @@ export async function reserveAiCall(prisma: PrismaClient, tenantId: string, ttlM
   const reserved = await prisma.$transaction(async tx => {
     await tx.$queryRaw`SELECT "tenantId" FROM "TenantUsage" WHERE "tenantId" = ${tenantId} FOR UPDATE`;
     const row = await tx.tenantUsage.findUnique({ where: { tenantId } });
-    if (!row) return null; // Legacy contracts retain their existing usage checks.
     const access = await getEntitlements(tx as PrismaClient, tenantId);
+    if (!row) {
+      await initializeTenantUsage(tx, tenantId, access.limits);
+      return reserveAiCallInTransaction();
+    }
+    return reserveAiCallInTransaction();
+    async function reserveAiCallInTransaction() {
+    const row = (await tx.tenantUsage.findUnique({ where: { tenantId } }))!;
     if (!access.snapshot.entitled) throw new ApiError(403, 'subscription_required', 'Подписка не активна');
     const rowLimits = row.limitsJson as Record<string, number>;
     const cap = Number(rowLimits.AI_USAGE ?? rowLimits.AI_CREDITS ?? access.limits.AI_CREDITS ?? access.limits.AI_USAGE ?? 0);
@@ -233,6 +242,7 @@ export async function reserveAiCall(prisma: PrismaClient, tenantId: string, ttlM
     reservations[id] = {until: Date.now() + ttlMs, amount};
     await tx.tenantUsage.update({ where: { tenantId }, data: { countersJson: { ...counters, aiReservations: reservations } } });
     return id;
+    }
   });
   return async () => {
     if (!reserved) return;
