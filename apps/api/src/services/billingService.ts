@@ -69,6 +69,7 @@ export async function getBillingState(prisma: PrismaClient, tenantId: string) {
     entitlements: resolved.entitlements,
     resourcePeriod: usage.period,
     aiTrial: usage.aiTrial,
+    massCampaignsEnabled: usage.massCampaignsEnabled,
     accessBreakdown: {
       basePlan: snapshot.planName, planCode: snapshot.planCode,
       legacy: LEGACY_CATALOG_CODES.includes(snapshot.planCode as never) || snapshot.grandfathered,

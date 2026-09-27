@@ -1,7 +1,9 @@
-import { FEATURE_LABEL, LIMIT_LABEL, LIMIT_LIST, type CatalogItem, type Feature } from "@creolab/contracts";
+import { FEATURE_LABEL, LIMIT_LABEL, type CatalogItem, type Feature } from "@creolab/contracts";
 
 export type BillingCatalogItem = Pick<CatalogItem, "code" | "name" | "kind" | "product" | "description" | "monthlyPriceMinor" | "yearlyPriceMinor" | "launchMonthlyPriceMinor" | "launchEndsAt" | "chargeType" | "catalogStatus" | "features" | "limits" | "included" | "recommended">;
 export type BillingPeriod = "MONTHLY" | "YEARLY";
+const DISPLAY_LIMITS = ["USERS", "AI_CREDITS", "AUTOMATION_RUNS", "DOCUMENTS_COUNT", "CAMPAIGN_RECIPIENTS", "WHATSAPP_CONNECTIONS", "STORAGE_GB"] as const;
+
 
 export function formatKzt(value: number) {
   return `${value.toLocaleString("ru-RU")} ₸`;
@@ -86,7 +88,7 @@ export function BillingCatalog({ items, period, selected, current, disabled, onS
       <p className="billing-price">{priceText(item)}</p>
       <p className="muted billing-price-note">{free ? "Ручная работа с клиентами, сделками и задачами. Без оплаты и подтверждения администратора." : "Указана стоимость базовой конфигурации. Дополнительные подключения и ресурсы оплачиваются отдельно."}</p>
       <dl className="billing-plan-limits">
-        {LIMIT_LIST.filter(key => key !== "STORAGE_GB" && key !== "DEPARTMENTS").map((key) => <div key={key}><dt>{key === "AI_USAGE" ? "AI-кредиты" : key === "AUTOMATION_RUNS" ? "Запуски автоматизации" : key === "DOCUMENTS_COUNT" ? "Документы" : key === "CAMPAIGN_RECIPIENTS" ? "Рассылки · получатели" : LIMIT_LABEL[key]}</dt><dd>{item.limits[key] === -1 ? "Без квоты" : item.limits[key] === 0 && key === "CAMPAIGN_RECIPIENTS" ? "С тарифа Start" : item.limits[key] == null ? "По условиям тарифа" : Number(item.limits[key]).toLocaleString("ru-RU")}</dd></div>)}
+        {DISPLAY_LIMITS.map((key) => <div key={key}><dt>{key === "AI_CREDITS" ? "AI-кредиты" : key === "AUTOMATION_RUNS" ? "Запуски автоматизации" : key === "DOCUMENTS_COUNT" ? "Документы" : key === "CAMPAIGN_RECIPIENTS" ? "Рассылки · получатели" : LIMIT_LABEL[key]}</dt><dd>{item.limits[key] === -1 ? "Без квоты" : item.limits[key] === 0 && key === "CAMPAIGN_RECIPIENTS" ? "С тарифа Start" : item.limits[key] == null ? "По условиям тарифа" : Number(item.limits[key]).toLocaleString("ru-RU")}</dd></div>)}
       </dl>
       {item.features.MULTIPLE_PIPELINES || item.features.MULTI_DEPARTMENT ? <p className="muted">Сейчас доступна одна воронка. Несколько воронок и отделы находятся в подготовке.</p> : null}
       <ul className="billing-feature-list">{highlights(item).map((text) => <li key={text}>{text}</li>)}</ul>
@@ -116,7 +118,7 @@ export function BillingCatalog({ items, period, selected, current, disabled, onS
         <table><caption className="muted">Возможности базовых тарифов без дополнительных модулей</caption><thead><tr><th scope="col">Возможность</th>{comparison.map((item) => <th scope="col" key={item.code}>{item.name}</th>)}</tr></thead>
           <tbody>
             <tr><th scope="row">Цена / {periodLabel}</th>{comparison.map((item) => <td key={item.code}>{formatKzt(catalogPrice(item, period))}</td>)}</tr>
-            {LIMIT_LIST.filter(key => key !== "STORAGE_GB" && key !== "DEPARTMENTS").map((key) => <tr key={key}><th scope="row">{LIMIT_LABEL[key]}</th>{comparison.map((item) => <td key={item.code}>{item.limits[key] === -1 ? "Без квоты" : item.limits[key] === 0 && key === "CAMPAIGN_RECIPIENTS" ? "С тарифа Start" : item.limits[key] == null ? "По условиям тарифа" : Number(item.limits[key]).toLocaleString("ru-RU")}</td>)}</tr>)}
+            {DISPLAY_LIMITS.map((key) => <tr key={key}><th scope="row">{LIMIT_LABEL[key]}</th>{comparison.map((item) => <td key={item.code}>{item.limits[key] === -1 ? "Без квоты" : item.limits[key] === 0 && key === "CAMPAIGN_RECIPIENTS" ? "С тарифа Start" : item.limits[key] == null ? "По условиям тарифа" : Number(item.limits[key]).toLocaleString("ru-RU")}</td>)}</tr>)}
             {FEATURE_GROUPS.flatMap(group => [<tr key={group.title}><th colSpan={comparison.length + 1}>{group.title}</th></tr>, ...group.rows.map(({ key, label }) => <tr key={`${group.title}-${label}`}><th scope="row">{label || FEATURE_LABEL[key]}</th>{comparison.map((item) => <td key={item.code} className={item.features[key] ? "billing-included" : "muted"}>{item.features[key] ? "Включено" : "—"}</td>)}</tr>)])}
           </tbody>
         </table>

@@ -754,6 +754,7 @@ export async function confirmCampaign(
     messageDraft: r.messageDraft || null,
   }));
   const hash = campaignHashInput(campaign, pending, attachmentSnapshots);
+  await consumeResource(prisma, membership.tenantId, "CAMPAIGN_RECIPIENTS", pending.length, `campaign:${id}`);
 
   const later = campaignSendLater(campaign.scheduledAt);
   const status = later ? "scheduled" : "awaiting_confirmation";
@@ -935,15 +936,7 @@ export async function processCampaignQueue(prisma: PrismaClient, campaignId: str
     for (const recipient of batch) {
       const fresh = await prisma.campaign.findFirst({ where: { id: campaignId } });
       if (!fresh || fresh.status === "paused" || fresh.status === "cancelled") return;
-      try {
-        await ensureMassCampaignAccess(prisma, campaign.tenantId);
-        await consumeResource(prisma, campaign.tenantId, 'CAMPAIGN_RECIPIENTS', 1, `recipient:${recipient.id}`);
-      } catch (error) {
-        if (!(error instanceof ApiError)) throw error;
-        await prisma.campaign.update({where: {id: campaignId}, data: {status: 'paused', pausedAt: new Date()}});
-        await prisma.campaignRecipient.updateMany({where: {campaignId, status: 'queued'}, data: {error: error.message}});
-        return;
-      }
+      await ensureMassCampaignAccess(prisma, campaign.tenantId);
       await sendOneRecipient(prisma, campaign, recipient, attachments);
       await new Promise((r) => setTimeout(r, SEND_DELAY_MS));
     }

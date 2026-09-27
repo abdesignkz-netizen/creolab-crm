@@ -58,8 +58,8 @@ export async function initializeTenantUsage(tx: Db, tenantId: string, limits: Re
 
 export async function getUsage(prisma: PrismaClient, tenantId: string, code: string): Promise<number> {
   const row = await prisma.tenantUsage.findUnique({ where: { tenantId } });
-  if (['AI_CREDITS', 'AI_USAGE', 'AUTOMATION_RUNS', 'DOCUMENTS_COUNT', 'CAMPAIGN_RECIPIENTS'].includes(code)) {
-    const resource = code === 'AI_USAGE' ? 'AI_CREDITS' : code;
+  if (['AI_CREDITS', 'AI_USAGE', 'AUTOMATION_RUNS', 'DOCUMENTS', 'DOCUMENTS_COUNT', 'CAMPAIGN_RECIPIENTS'].includes(code)) {
+    const resource = code === 'AI_USAGE' ? 'AI_CREDITS' : code === 'DOCUMENTS' ? 'DOCUMENTS_COUNT' : code;
     return resourceUsed(prisma, tenantId, resource, await resourcePeriod(prisma, tenantId, resource));
   }
   if (row) {
@@ -112,20 +112,21 @@ export async function resourceUsed(db: Db, tenantId: string, resource: string, p
 /** Lock, check, and record once. Can share the caller's transaction with the operation. */
 export async function consumeResource(db: Db, tenantId: string, resource: string, amount = 1, operationId: string = randomUUID(), enforce = true): Promise<{idempotent: boolean}> {
   if (!Number.isSafeInteger(amount) || amount < 0) throw new ApiError(422, 'invalid_amount', 'Некорректный объём');
-  if ('$transaction' in db) return db.$transaction(tx => consumeResource(tx, tenantId, resource, amount, operationId, enforce));
+  const canonicalResource = resource === 'DOCUMENTS' ? 'DOCUMENTS_COUNT' : resource;
+  if ('$transaction' in db) return db.$transaction(tx => consumeResource(tx, tenantId, canonicalResource, amount, operationId, enforce));
   await db.$queryRaw`SELECT "tenantId" FROM "TenantUsage" WHERE "tenantId" = ${tenantId} FOR UPDATE`;
   const row = await db.tenantUsage.findUnique({ where: { tenantId } });
-  const existing = await db.$queryRaw<Array<{amount: number}>>`SELECT amount FROM "BillingResourceUsage" WHERE "tenantId" = ${tenantId} AND resource = ${resource} AND "operationId" = ${operationId}`;
+  const existing = await db.$queryRaw<Array<{amount: number}>>`SELECT amount FROM "BillingResourceUsage" WHERE "tenantId" = ${tenantId} AND resource = ${canonicalResource} AND "operationId" = ${operationId}`;
   if (existing.length) return { idempotent: true };
-  const period = await resourcePeriod(db, tenantId, resource);
+  const period = await resourcePeriod(db, tenantId, canonicalResource);
   const access = await getEntitlements(db as PrismaClient, tenantId);
-  const cap = access.limits[resource] ?? -1;
+  const cap = access.limits[canonicalResource] ?? -1;
   if (enforce && !access.snapshot.entitled) throw new ApiError(403, 'subscription_required', 'Подписка не активна', undefined, {billingPath: '/billing'});
-  const used = await resourceUsed(db, tenantId, resource, period);
+  const used = await resourceUsed(db, tenantId, canonicalResource, period);
   if (enforce && row && !access.snapshot.grandfathered && cap >= 0 && used + amount > cap) {
     throw new ApiError(403, 'limit_exceeded', 'Лимит ресурса исчерпан. Остальные возможности BasQar продолжают работать.', undefined, { limit: resource, used, cap, billingPath: '/billing' });
   }
-  await db.$executeRaw`INSERT INTO "BillingResourceUsage" ("tenantId", resource, "operationId", period, amount) VALUES (${tenantId}, ${resource}, ${operationId}, ${period}, ${amount}) ON CONFLICT DO NOTHING`;
+  await db.$executeRaw`INSERT INTO "BillingResourceUsage" ("tenantId", resource, "operationId", period, amount) VALUES (${tenantId}, ${canonicalResource}, ${operationId}, ${period}, ${amount}) ON CONFLICT DO NOTHING`;
   return { idempotent: false };
 }
 
