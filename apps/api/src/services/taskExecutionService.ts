@@ -804,7 +804,7 @@ export async function executeTask(
     throw new ApiError(422, "invalid", "Диалог WhatsApp недоступен");
   }
 
-  if (options.runScheduled || task.source === 'ai_command') {
+  if (options.runScheduled && task.source !== 'ai_automation') {
     await consumeResource(prisma, tid, 'AUTOMATION_RUNS', 1, `task:${task.parentTaskId || task.id}`);
   }
   if (task.parentTaskId) {

@@ -387,7 +387,7 @@ export async function quoteRenewal(prisma: PrismaClient, tenantId: string, planC
   if (period !== billingPeriod) throw new ApiError(422, "renewal_period", "Для изменения периода согласуйте новые условия");
   const saved = asRecord(row.priceSnapshotJson);
   const originalLines = Array.isArray(saved.lines) ? saved.lines as QuotedLine[] : [];
-  const lines: QuotedLine[] = originalLines.length ? originalLines.filter(line => line.chargeType !== "ONE_TIME").map(line => ({...line})) : [{ code: row.plan.code, name: row.plan.name, kind: "plan", qty: 1, unitAmountMinor: row.amountMinor || 0, amountMinor: row.amountMinor || 0, chargeType: "RECURRING", catalogStatus: "HIDDEN" }];
+  const lines: QuotedLine[] = originalLines.length ? originalLines.filter(line => line.chargeType !== "ONE_TIME" && line.code !== "INDIVIDUAL_PRICE").map(line => ({...line})) : [{ code: row.plan.code, name: row.plan.name, kind: "plan", qty: 1, unitAmountMinor: row.amountMinor || 0, amountMinor: row.amountMinor || 0, chargeType: "RECURRING", catalogStatus: "HIDDEN" }];
   const launch = saved.launch as {endsAt: string; standardMonthlyPrice: number} | undefined;
   const renewalAt = row.endsAt && row.endsAt > now ? row.endsAt : now;
   if (launch && billingPeriod === 'MONTHLY' && renewalAt > new Date(launch.endsAt)) {
@@ -395,6 +395,13 @@ export async function quoteRenewal(prisma: PrismaClient, tenantId: string, planC
   }
   const originalAddOns = Array.isArray(saved.addOns) ? saved.addOns as Array<{code: string; qty: number}> : Array.isArray(row.itemsJson) ? row.itemsJson as Array<{code: string; qty: number}> : [];
   const addOns = originalAddOns.filter(addon => !originalLines.length || lines.some(line => line.code === addon.code));
+  const override = await prisma.tenantBillingOverride.findUnique({ where: { tenantId } });
+  const recurringAmount = lines.reduce((sum, line) => sum + line.amountMinor, 0);
+  if (override?.customPriceMinor != null && recurringAmount !== override.customPriceMinor) {
+    lines.push({ code: 'INDIVIDUAL_PRICE', name: 'Индивидуальные условия', kind: 'addon', qty: 1,
+      unitAmountMinor: override.customPriceMinor - recurringAmount, amountMinor: override.customPriceMinor - recurringAmount,
+      chargeType: 'RECURRING', catalogStatus: 'HIDDEN' });
+  }
   const finalAmountMinor = lines.reduce((sum, line) => sum + line.amountMinor, 0);
   const baseAmountMinor = lines.filter(line => line.kind !== "addon").reduce((sum, line) => sum + line.amountMinor, 0);
   const active = { ...row, status: "active", endsAt: null };

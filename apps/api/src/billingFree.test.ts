@@ -9,30 +9,34 @@ import { activateSubscription, periodEnd } from './services/subscriptionActivati
 
 let db: PrismaClient;
 let sequence = 0;
-async function freeTenant() {
+async function freeTenant(overrides: Record<string, number> = {}) {
   return db.$transaction(async tx => {
     const tenant = await provisionOrganization(tx, { name: `Free ${Date.now()} ${sequence++}`, source: 'self_registration', subscriptionStatus: 'none', aiEnabled: false });
     const user = await tx.user.create({ data: { name: 'Owner', email: `${tenant.id}@example.test`, passwordHash: 'test' } });
     await tx.membership.create({ data: { tenantId: tenant.id, userId: user.id, role: 'owner' } });
+    if (Object.keys(overrides).length) {
+      await tx.tenantBillingOverride.create({data:{tenantId:tenant.id,limitsJson:overrides}});
+      await initializeTenantUsage(tx, tenant.id, (await getEntitlements(tx as PrismaClient, tenant.id)).limits);
+    }
     return tenant;
   });
 }
 describe('Free tenant quotas and preserved pricing', () => {
   before(async () => { db = await createPrismaClient(); });
-  it('automatically activates only new self registrations with exact limits and no paid features', async () => {
+  it('automatically activates only new self registrations with exact limits and shared core features', async () => {
     const tenant = await freeTenant();
     const access = await getEntitlements(db, tenant.id);
     assert.equal(access.snapshot.planCode, 'BASQAR_FREE');
     assert.equal(access.snapshot.subscriptionStatus, 'active');
     assert.equal(access.snapshot.expiresAt, null);
-    for (const [key,value] of Object.entries({ USERS:1, CLIENTS:50, ACTIVE_DEALS:20, MONTHLY_LEADS:50, PIPELINES:1, DATABASE_MB:100, FILE_STORAGE_MB:250 })) assert.equal(access.limits[key],value);
+    for (const [key,value] of Object.entries({ USERS:1, CLIENTS:-1, ACTIVE_DEALS:-1, MONTHLY_LEADS:-1, PIPELINES:1, DATABASE_MB:-1, FILE_STORAGE_MB:1024, AI_CREDITS:100, AUTOMATION_RUNS:30, DOCUMENTS_COUNT:3, WHATSAPP_CONNECTIONS:1 })) assert.equal(access.limits[key],value);
     for (const feature of ['TASKS','CLIENTS','COMPANIES','LEADS','DEALS'] as const) assert.equal(access.entitlements[feature],true);
-    for (const feature of ['AI_MANAGER','AI_CONTROL','WHATSAPP','IMPORT','EXPORT','SUPPORT','WORKFLOWS','DOCUMENTS','API_ACCESS'] as const) assert.equal(access.entitlements[feature],false);
+    for (const feature of ['AI_MANAGER','AI_CONTROL','WHATSAPP','IMPORT','EXPORT','SUPPORT','DOCUMENTS','CONTROL_BULK','ADVANCED_AUTOMATION'] as const) assert.equal(access.entitlements[feature],true);
     assert.equal(await db.billingPayment.count({ where: { tenantId: tenant.id } }),0);
     assert.equal(await db.subscriptionRequest.count({ where: { tenantId: tenant.id } }),0);
   });
   it('serializes concurrent creates: 50 clients, second user rejected, existing data readable', async () => {
-    const tenant = await freeTenant();
+    const tenant = await freeTenant({CLIENTS:50});
     const results = await Promise.allSettled(Array.from({length:51}, (_,i) => db.contact.create({data:{tenantId:tenant.id,name:`Client ${i}`}})));
     assert.equal(results.filter(row=>row.status==='fulfilled').length,50);
     assert.equal(await db.contact.count({where:{tenantId:tenant.id}}),50);
@@ -42,7 +46,7 @@ describe('Free tenant quotas and preserved pricing', () => {
     assert.equal(await getUsage(db,tenant.id,'USERS'),1);
   });
   it('counts active deals, keeps closed history, prevents reopening beyond quota', async () => {
-    const tenant = await freeTenant(); const contact = await db.contact.create({data:{tenantId:tenant.id,name:'Customer'}});
+    const tenant = await freeTenant({ACTIVE_DEALS:20}); const contact = await db.contact.create({data:{tenantId:tenant.id,name:'Customer'}});
     const stage = await db.dealStage.findFirstOrThrow({where:{tenantId:tenant.id}});
     const deals = [];
     for(let i=0;i<20;i++) deals.push(await db.deal.create({data:{tenantId:tenant.id,contactId:contact.id,stageId:stage.id,title:`Order ${i}`}}));
@@ -53,7 +57,7 @@ describe('Free tenant quotas and preserved pricing', () => {
     assert.equal(await db.deal.count({where:{tenantId:tenant.id}}),21);
   });
   it('counts monthly intake even after deletion and resets at month boundary', async () => {
-    const tenant = await freeTenant();
+    const tenant = await freeTenant({MONTHLY_LEADS:50});
     const contact = await db.contact.create({data:{tenantId:tenant.id,name:'Lead contact'}});
     const make = () => db.inquiry.create({data:{tenantId:tenant.id,source:'manual',contactId:contact.id,subject:'Lead'}});
     for(let i=0;i<50;i++) await make();
@@ -66,7 +70,7 @@ describe('Free tenant quotas and preserved pricing', () => {
     assert.equal((await db.tenantUsage.findUniqueOrThrow({where:{tenantId:tenant.id}})).period,billingMonth());
   });
   it('manual tasks work without AI and DB/files are independent with no data deletion', async () => {
-    const tenant = await freeTenant();
+    const tenant = await freeTenant({DATABASE_MB:100,FILE_STORAGE_MB:250});
     const task = await db.task.create({data:{tenantId:tenant.id,title:'Manual',type:'manual',status:'open'}});
     await db.task.update({where:{id:task.id},data:{title:'Changed',priority:'high',dueAt:new Date()}});
     await db.task.update({where:{id:task.id},data:{status:'completed'}});
@@ -82,7 +86,6 @@ describe('Free tenant quotas and preserved pricing', () => {
   it('enforces WhatsApp capacity including reconnection at the database boundary', async () => {
     const tenant = await freeTenant();
     const create = () => db.integration.create({data:{tenantId:tenant.id,type:'whatsapp_seller',name:'WhatsApp',status:'active',connectionStatus:'CONNECTED'}});
-    await assert.rejects(create(),/BASQAR_LIMIT:WHATSAPP_CONNECTIONS/);
     await db.tenantUsage.update({where:{tenantId:tenant.id},data:{limitsJson:{WHATSAPP_CONNECTIONS:1}}});
     const first = await create(); await assert.rejects(create(),/BASQAR_LIMIT:WHATSAPP_CONNECTIONS/);
     await db.integration.update({where:{id:first.id},data:{connectionStatus:'DISCONNECTED'}});
@@ -111,25 +114,25 @@ describe('Free tenant quotas and preserved pricing', () => {
     const access = await getEntitlements(db,tenant.id);
     assert.equal(access.limits.USERS,7); assert.equal(access.entitlements.IMPORT,true); assert.equal(access.entitlements.FILE_STORAGE,true);
     assert.equal(access.snapshot.amountMinor,12345); assert.equal(await db.tenantUsage.findUnique({where:{tenantId:tenant.id}}),null);
-    assert.equal((await db.plan.findUniqueOrThrow({where:{code:'CRM_START'}})).monthlyPriceMinor,14900);
+    assert.equal((await db.plan.findUniqueOrThrow({where:{code:'CRM_START'}})).monthlyPriceMinor,14990);
   });
   it('preserves legacy and uses backend price, compatible recommendations, immutable snapshots', async () => {
     const legacy = await db.tenant.create({data:{name:'Legacy',slug:`legacy-${Date.now()}`}});
     assert.equal((await getEntitlements(db,legacy.id)).snapshot.grandfathered,true);
     const quote = await quoteSubscription(db,{planCode:'SALES',addOns:[{code:'ADDON_USER',qty:2},{code:'ADDON_WHATSAPP',qty:1}]});
-    assert.equal(quote.baseAmountMinor,49900); assert.equal(quote.finalAmountMinor,67600); assert.equal(quote.limits.USERS,12);
+    assert.equal(quote.baseAmountMinor,69990); assert.equal(quote.finalAmountMinor,87690); assert.equal(quote.limits.USERS,27);
     assert.equal(quote.recommendation,null);
     const expensive = await quoteSubscription(db,{planCode:'SALES',addOns:[{code:'ADDON_AI_PACK',qty:3}]});
-    assert.equal(expensive.recommendation?.code,'FULL');
+    assert.equal(expensive.recommendation,null);
     await assert.rejects(quoteSubscription(db,{planCode:'ADDON_USER'}));
     await assert.rejects(quoteSubscription(db,{planCode:'BASQAR_FREE',addOns:[{code:'ADDON_USER'}]}));
-    await assert.rejects(quoteSubscription(db,{planCode:'CRM_START',addOns:[{code:'ADDON_AI_PACK'}]}));
+    assert.equal((await quoteSubscription(db,{planCode:'CRM_START',addOns:[{code:'ADDON_AI_PACK'}]})).limits.AI_CREDITS,2000);
     await assert.rejects(quoteSubscription(db,{planCode:'CRM_START',addOns:[{code:'ADDON_USER',qty:1.5}]}));
     const tenant = await freeTenant();
     await activateSubscription(db,{tenantId:tenant.id,planCode:'SALES',approvedSnapshot:quote.snapshot,amountMinor:quote.finalAmountMinor});
     await db.plan.update({where:{code:'SALES'},data:{monthlyPriceMinor:999999,limitsJson:{USERS:1}}});
-    assert.equal((await getEntitlements(db,tenant.id)).limits.USERS,12);
-    assert.equal((await getEntitlements(db,tenant.id)).snapshot.amountMinor,67600);
+    assert.equal((await getEntitlements(db,tenant.id)).limits.USERS,27);
+    assert.equal((await getEntitlements(db,tenant.id)).snapshot.amountMinor,87690);
     assert.ok((await freeMetrics(db)).freeToCrmAi > 0);
   });
 });

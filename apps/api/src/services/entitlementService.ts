@@ -309,6 +309,7 @@ function applyLimitOverride(base: Record<string, number>, override?: { limitsJso
   else if (extra.AI_USAGE != null) base.AI_CREDITS = base.AI_USAGE;
   if (extra.STORAGE_BYTES != null) { base.FILE_STORAGE_MB = base.STORAGE_BYTES < 0 ? -1 : base.STORAGE_BYTES / 1048576; base.STORAGE_GB = base.STORAGE_BYTES < 0 ? -1 : base.STORAGE_BYTES / 1073741824; }
   else if (extra.FILE_STORAGE_MB != null) base.STORAGE_BYTES = base.FILE_STORAGE_MB < 0 ? -1 : base.FILE_STORAGE_MB * 1048576;
+  else if (extra.STORAGE_GB != null) { base.FILE_STORAGE_MB = base.STORAGE_GB < 0 ? -1 : base.STORAGE_GB * 1024; base.STORAGE_BYTES = base.STORAGE_GB < 0 ? -1 : base.STORAGE_GB * 1073741824; }
   return base;
 }
 

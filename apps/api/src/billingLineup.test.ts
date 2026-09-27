@@ -13,42 +13,23 @@ async function tenant() {
   return db.tenant.create({ data: { name: "Lineup test", slug: `lineup-${Date.now()}-${sequence++}` } });
 }
 
-describe("BasQar v3 product access, resources and legacy agreements", () => {
+describe("BasQar v4 product access, resources and legacy agreements", () => {
   before(async () => { db = await createPrismaClient(); await syncPricingCatalog(db); });
 
-  it("publishes five fixed-price tiers and separate Enterprise, with exact quotas", async () => {
+  it("enables the core product on all four plans while preserving the campaign exception", async () => {
     const catalog = await loadPublicCatalog(db);
-    assert.deepEqual(catalog.filter(item => item.kind !== "addon").map(item => item.code).sort(), ["BASQAR_FREE", "CRM_START", "CONTROL", "SALES", "FULL", "CRM_ENTERPRISE"].sort());
-    const expectations = [
-      ["BASQAR_FREE",0,1,50,20,50,100,250,0,0],
-      ["CRM_START",14900,3,1000,300,1000,500,5120,0,0],
-      ["CONTROL",29900,5,5000,1000,3000,1024,10240,1000,1],
-      ["SALES",49900,10,15000,3000,10000,3072,15360,3000,2],
-      ["FULL",69900,20,50000,10000,30000,10240,30720,8000,4],
-    ] as const;
-    for (const [code,price,...values] of expectations) {
+    assert.deepEqual(catalog.filter(item => item.kind !== "addon").map(item => item.code).sort(), ["BASQAR_FREE","CRM_START","CONTROL","SALES"].sort());
+    for (const code of ["BASQAR_FREE","CRM_START","CONTROL","SALES"]) {
       const quote = await quoteSubscription(db,{planCode:code});
-      assert.equal(quote.finalAmountMinor,price);
-      assert.equal((await quoteSubscription(db,{planCode:code,billingPeriod:"YEARLY"})).finalAmountMinor,price*10);
-      ["USERS","CLIENTS","ACTIVE_DEALS","MONTHLY_LEADS","DATABASE_MB","FILE_STORAGE_MB","AI_USAGE","WHATSAPP_CONNECTIONS"].forEach((key,index) => assert.equal(quote.limits[key],values[index],`${code} ${key}`));
-      assert.equal(quote.limits.PIPELINES,1);
-      const index=expectations.findIndex(row=>row[0]===code);
-      for (const key of ["CLIENTS","COMPANIES","LEADS","DEALS","TASKS"] as const) assert.equal(quote.features[key],true);
-      assert.equal(quote.features.IMPORT,index>=1);
-      assert.equal(quote.features.SUPPORT,index>=1);
-      assert.equal(quote.features.DOCUMENTS,index>=2);
-      assert.equal(quote.features.AI_CONTROL,index>=2);
-      assert.equal(quote.features.AI_MANAGER,index>=3);
-      assert.equal(quote.features.MASS_MESSAGING,index>=3);
-      assert.equal(quote.features.CONTROL_BULK,index===4);
-      assert.equal(quote.features.ADVANCED_AUTOMATION,index===4);
+      for (const key of ["CLIENTS","COMPANIES","LEADS","DEALS","TASKS","DOCUMENTS","AI_CONTROL","AI_MANAGER","CONTROL_BULK","ADVANCED_AUTOMATION","IMPORT","SUPPORT"] as const) assert.equal(quote.features[key],true);
+      assert.equal(quote.features.MASS_CAMPAIGNS,code !== "BASQAR_FREE");
     }
   });
 
   it("adds resource capacity exactly once without enabling a product feature", async () => {
     for (const [code,addon,qty,key,cap] of [
-      ["CRM_START","ADDON_USER",2,"USERS",5], ["CONTROL","ADDON_AI_PACK",2,"AI_USAGE",3000],
-      ["SALES","ADDON_WHATSAPP",1,"WHATSAPP_CONNECTIONS",3], ["FULL","ADDON_STORAGE_10GB",1,"FILE_STORAGE_MB",40960],
+      ["CRM_START","ADDON_USER",2,"USERS",5], ["CONTROL","ADDON_AI_PACK",2,"AI_USAGE",5000],
+      ["SALES","ADDON_WHATSAPP",1,"WHATSAPP_CONNECTIONS",6], ["SALES","ADDON_STORAGE_10GB",1,"FILE_STORAGE_MB",61440],
     ] as const) {
       const base=await quoteSubscription(db,{planCode:code});
       const quote=await quoteSubscription(db,{planCode:code,addOns:[{code:addon,qty}]});
@@ -59,13 +40,13 @@ describe("BasQar v3 product access, resources and legacy agreements", () => {
       const access=await getEntitlements(db,company.id);
       assert.equal(access.limits[key],cap);
       assert.equal((await db.tenantUsage.findUniqueOrThrow({where:{tenantId:company.id}})).limitsJson[key],cap);
-      if (code==="CONTROL") assert.equal(access.entitlements.AI_MANAGER,false);
+      if (code==="CONTROL") assert.equal(access.entitlements.AI_MANAGER,true);
     }
     for (const addon of ["ADDON_USER","ADDON_AI_PACK","ADDON_WHATSAPP","ADDON_STORAGE_10GB"]) await assert.rejects(quoteSubscription(db,{planCode:"BASQAR_FREE",addOns:[{code:addon}]}));
     await assert.rejects(quoteSubscription(db,{addOns:[{code:"ADDON_USER"}]}));
-    await assert.rejects(quoteSubscription(db,{planCode:"CRM_START",addOns:[{code:"ADDON_WHATSAPP"}]}));
+    assert.equal((await quoteSubscription(db,{planCode:"CRM_START",addOns:[{code:"ADDON_WHATSAPP"}]})).limits.WHATSAPP_CONNECTIONS,2);
     const integration=await quoteSubscription(db,{planCode:"CRM_START",addOns:[{code:"ADDON_INTEGRATION"}]});
-    assert.equal(integration.features.CHANNELS,false);
+    assert.equal(integration.features.CHANNELS,true);
     assert.equal(integration.lines[1].chargeType,"ONE_TIME");
   });
 
@@ -99,8 +80,7 @@ describe("BasQar v3 product access, resources and legacy agreements", () => {
   it("guards read and write APIs and blocks background Sales work on Control", async () => {
     for(const method of ["GET","POST","PATCH","DELETE"]) {
       assert.ok(matchPaidFeatures(method,"/api/v1/support/tickets").includes("SUPPORT"));
-      assert.ok(matchPaidFeatures(method,"/api/v1/documents").includes("DOCUMENTS"));
-      assert.ok(matchPaidFeatures(method,"/api/v1/campaigns").includes("MASS_MESSAGING"));
+      assert.deepEqual(matchPaidFeatures(method,"/api/v1/campaigns"),[]);
     }
     assert.ok(matchAlternativeFeatures("POST","/api/v1/situation/ask").includes("AI_CONTROL"));
     assert.deepEqual(matchPaidFeatures("POST","/api/v1/tasks"),[]);

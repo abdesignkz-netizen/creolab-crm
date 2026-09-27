@@ -7,6 +7,9 @@ import { statusBadgeClass } from "../../lib/statusBadge";
 import { AssignIntegrationForm } from "./PlatformAssignIntegration";
 import { PlatformCompanyAiManager } from "./PlatformCompanyAiManager";
 import { PlatformAiUsagePage } from "./PlatformAiUsagePage";
+import { LIMIT_LABEL, type LimitKey } from "@creolab/contracts";
+
+const EDITABLE_LIMITS = ["USERS", "WHATSAPP_CONNECTIONS", "AI_CREDITS", "AUTOMATION_RUNS", "DOCUMENTS_COUNT", "CAMPAIGN_RECIPIENTS", "STORAGE_GB"] as const;
 
 const TABS = [
   ["info", "Основные данные"],
@@ -181,40 +184,49 @@ function CompanySubscription({ company, onSaved }: { company: any; onSaved: (row
         </p>
       ) : null}
       {(company.usage || []).map((row: { key: string; label: string; used: number; cap: number }) => (
-        <p key={row.key} className="muted">{row.label}: {row.used} / {row.cap || "—"}</p>
+        <p key={row.key} className="muted">{row.label}: {row.used} / {row.cap < 0 ? "Без квоты" : row.cap}</p>
       ))}
       <form className="panel stack" onSubmit={async (event) => {
         event.preventDefault();
         const form = new FormData(event.currentTarget);
         const limits: Record<string, number> = {};
-        for (const key of ["AI_CREDITS", "AUTOMATION_RUNS", "DOCUMENTS_COUNT", "CAMPAIGN_RECIPIENTS", "STORAGE_GB"]) {
+        for (const key of EDITABLE_LIMITS) {
           const value = String(form.get(key) || "").trim();
           if (value) limits[key] = Number(value);
         }
         try {
+          setBusy("override");
           setOverrideError("");
           const messaging = String(form.get("MASS_MESSAGING") || "keep");
-          const features = messaging === "keep" ? {} : { MASS_MESSAGING: messaging === "on" };
-          onSaved(await api.adminBillingOverride(company.id, { limits, features, reason: String(form.get("reason") || "") }));
+          const features = messaging === "keep" ? {} : { MASS_MESSAGING: messaging === "on", MASS_CAMPAIGNS: messaging === "on" };
+          const price = String(form.get("customPriceMinor") || "").trim();
+          await api.adminBillingOverride(company.id, { merge: true, limits, features,
+            ...(price ? { customPriceMinor: Number(price) } : {}),
+            grantAiCredits: Number(form.get("grantAiCredits") || 0), reason: String(form.get("reason") || "") });
+          onSaved(await api.adminCompany(company.id));
           notifySaved("Индивидуальные лимиты сохранены");
         } catch (err) { setOverrideError(err instanceof Error ? err.message : "Ошибка"); }
+        finally { setBusy(""); }
       }}>
         <h4>Индивидуальные лимиты и функции</h4>
-        <p className="muted">Пустое поле сохраняет базовое значение тарифа. Значение −1 означает без квоты.</p>
-        {["AI_CREDITS", "AUTOMATION_RUNS", "DOCUMENTS_COUNT", "CAMPAIGN_RECIPIENTS", "STORAGE_GB"].map((key) => <label key={key}>{key}<input name={key} type="number" min="-1" placeholder="без изменения" /></label>)}
+        <p className="muted">Пустое поле сохраняет текущие условия, включая ранее согласованные лимиты. −1 означает без квоты.</p>
+        {EDITABLE_LIMITS.map((key) => <label key={key}>{LIMIT_LABEL[key as LimitKey]}<input name={key} type="number" min="-1" step={key === "STORAGE_GB" ? "0.01" : "1"} placeholder={`Сейчас: ${company.accessBreakdown?.effectiveLimits?.[key] ?? "по тарифу"}`} /></label>)}
+        <label>Дополнительные AI-кредиты<input name="grantAiCredits" type="number" min="0" step="1" placeholder="0" /></label>
+        <p className="muted">Увеличивает согласованный лимит AI. На Free пакет остаётся разовым, на платном тарифе — ежемесячным.</p>
+        <label>Индивидуальная цена за период, ₸<input name="customPriceMinor" type="number" min="0" step="1" placeholder="Без изменения" /></label>
         <label>Массовые рассылки<select name="MASS_MESSAGING" defaultValue="keep"><option value="keep">Без изменения</option><option value="on">Разрешить</option><option value="off">Запретить</option></select></label>
         <label>Причина<input name="reason" placeholder="Причина изменения" /></label>
         {overrideError ? <p className="error">{overrideError}</p> : null}
-        <button className="btn secondary" type="submit">Сохранить индивидуальные настройки</button>
+        <button className="btn secondary" type="submit" disabled={Boolean(busy)}>Сохранить индивидуальные настройки</button>
       </form>
       <label>
         Тариф
         <select value={planCode} onChange={(event) => setPlanCode(event.target.value)}>
           <option value="BASQAR_FREE">BasQar Free</option>
-          <option value="CRM_START">CRM Start</option>
-          <option value="CONTROL">Control</option>
-          <option value="SALES">Sales</option>
-          <option value="FULL">Full</option>
+          <option value="CRM_START">BasQar Start</option>
+          <option value="CONTROL">BasQar Business</option>
+          <option value="SALES">BasQar Pro</option>
+          {company.planCode === 'FULL' ? <option value="FULL">Full (действующий договор)</option> : null}
           {company.accessBreakdown?.legacy ? <option value={company.planCode}>{company.planName} (legacy, продление по договору)</option> : null}
           <option value="CRM_ENTERPRISE">Enterprise</option>
         </select>

@@ -318,19 +318,37 @@ export async function upsertBillingOverride(
   const body = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
   if (Object.entries((body.features || {}) as Record<string, unknown>).some(([key, value]) => !FEATURE_LIST.includes(key as never) || typeof value !== "boolean")) throw new ApiError(422, "invalid_feature", "Неизвестная функция или некорректное значение");
   if (Object.keys((body.limits || {}) as object).some(key => !LIMIT_LIST.includes(key as never))) throw new ApiError(422, "invalid_limit", "Неизвестный лимит");
-  for (const value of Object.values((body.limits || {}) as object)) {
-    if (typeof value !== "number" || !Number.isFinite(value) || value < -1) throw new ApiError(422, "invalid_limit", "Некорректный лимит");
+  for (const [key, value] of Object.entries((body.limits || {}) as object)) {
+    if (typeof value !== "number" || !Number.isFinite(value) || value < -1 || (!['STORAGE_GB', 'FILE_STORAGE_MB', 'DATABASE_MB'].includes(key) && !Number.isSafeInteger(value))) throw new ApiError(422, "invalid_limit", "Некорректный лимит");
   }
   if (body.customPriceMinor != null && (!Number.isSafeInteger(body.customPriceMinor) || Number(body.customPriceMinor) < 0)) throw new ApiError(422, "invalid_price", "Некорректная цена");
+  if (body.grantAiCredits != null && (!Number.isSafeInteger(body.grantAiCredits) || Number(body.grantAiCredits) < 0)) throw new ApiError(422, "invalid_limit", "Укажите целое количество AI-кредитов");
+  if (typeof prisma.$transaction === "function") return prisma.$transaction(tx => upsertBillingOverride(tx as PrismaClient, auth, tenantId, input), { timeout: 30000 });
+  await prisma.$queryRaw`SELECT id FROM "Tenant" WHERE id = ${tenantId} FOR UPDATE`;
+  const previous = await prisma.tenantBillingOverride.findUnique({ where: { tenantId } });
+  const features = { ...(body.merge === true ? previous?.featuresJson as object : {}), ...(body.features as object || {}) };
+  const limits = { ...(body.merge === true ? previous?.limitsJson as object : {}), ...(body.limits as Record<string, number> || {}) };
+  const changedLimits = body.limits as Record<string, number> || {};
+  const changedFeatures = body.features as Record<string, boolean> || {};
+  if ('MASS_CAMPAIGNS' in changedFeatures || 'MASS_MESSAGING' in changedFeatures) {
+    Object.assign(features, { MASS_CAMPAIGNS: changedFeatures.MASS_CAMPAIGNS ?? changedFeatures.MASS_MESSAGING, MASS_MESSAGING: changedFeatures.MASS_CAMPAIGNS ?? changedFeatures.MASS_MESSAGING });
+  }
+  if ('AI_CREDITS' in changedLimits) delete limits.AI_USAGE;
+  else if ('AI_USAGE' in changedLimits) delete limits.AI_CREDITS;
+  if ('STORAGE_GB' in changedLimits) { delete limits.FILE_STORAGE_MB; delete limits.STORAGE_BYTES; }
+  else if ('FILE_STORAGE_MB' in changedLimits) { delete limits.STORAGE_GB; delete limits.STORAGE_BYTES; }
+  else if ('STORAGE_BYTES' in changedLimits) { delete limits.STORAGE_GB; delete limits.FILE_STORAGE_MB; }
+  if (body.grantAiCredits) {
+    const current = await getEntitlements(prisma, tenantId);
+    limits.AI_CREDITS = Number(limits.AI_CREDITS ?? current.limits.AI_CREDITS) + Number(body.grantAiCredits);
+  }
   const data = {
-    featuresJson: (body.features && typeof body.features === "object" ? body.features : {}) as Prisma.InputJsonValue,
-    limitsJson: (body.limits && typeof body.limits === "object" ? body.limits : {}) as Prisma.InputJsonValue,
-    customPriceMinor: body.customPriceMinor != null ? Number(body.customPriceMinor) : null,
+    featuresJson: features as Prisma.InputJsonValue,
+    limitsJson: limits as Prisma.InputJsonValue,
+    customPriceMinor: body.customPriceMinor != null ? Number(body.customPriceMinor) : body.merge === true && !('customPriceMinor' in body) ? previous?.customPriceMinor ?? null : null,
     reason: String(body.reason || "").trim() || null,
     updatedByUserId: auth.user.id,
   };
-  if (typeof prisma.$transaction === "function") return prisma.$transaction(tx => upsertBillingOverride(tx as PrismaClient, auth, tenantId, input), { timeout: 30000 });
-  await prisma.$queryRaw`SELECT id FROM "Tenant" WHERE id = ${tenantId} FOR UPDATE`;
   const row = await prisma.tenantBillingOverride.upsert({
     where: { tenantId },
     update: data,

@@ -126,46 +126,47 @@ export async function recordAiUsage(prisma: PrismaClient | null | undefined, inp
       pricingMissing = false;
     }
     return await prisma.$transaction(async tx => {
-    if (input.tenantId) await tx.$queryRaw`SELECT "tenantId" FROM "TenantUsage" WHERE "tenantId" = ${input.tenantId} FOR UPDATE`;
-    if (input.providerRequestId) {
-      const existing = await tx.aIUsageEvent.findFirst({ where: { tenantId: input.tenantId || null, provider: input.provider, providerRequestId: input.providerRequestId } });
-      if (existing) return existing;
-    }
-    const event = await tx.aIUsageEvent.create({
-      data: {
-        tenantId: input.tenantId || null,
-        integrationId: input.integrationId || null,
-        conversationId: input.conversationId || null,
-        userId: input.userId || null,
-        provider: input.provider,
-        model: input.model,
-        feature: input.feature || "AI_OTHER",
-        providerRequestId: input.providerRequestId || null,
-        inputTokens,
-        outputTokens,
-        cachedInputTokens,
-        reasoningTokens: input.reasoningTokens ?? null,
-        totalTokens,
-        inputUnitPrice: pricing ? pricing.inputPerMillion : null,
-        outputUnitPrice: pricing ? pricing.outputPerMillion : null,
-        cachedInputUnitPrice: pricing?.cachedInputPerMillion ?? null,
-        inputCost,
-        outputCost,
-        cachedInputCost,
-        totalCost,
-        currency: pricing?.currency || "USD",
-        pricingVersion: pricing?.pricingVersion || null,
-        pricingMissing,
-        latencyMs: input.latencyMs ?? null,
-        status: input.status,
-        errorCode: input.errorCode || null,
-      },
-    });
-    if (event.tenantId && event.status === 'ok') {
-      const { consumeResource, aiCreditCost } = await import('./billingResourceService.ts');
-      await consumeResource(tx, event.tenantId, 'AI_CREDITS', aiCreditCost(event.feature), `ai:${event.id}`, false);
-    }
-    return event;
+      if (input.tenantId) await tx.$queryRaw`SELECT id FROM "Tenant" WHERE id = ${input.tenantId} FOR UPDATE`;
+      if (input.tenantId) await tx.$queryRaw`SELECT "tenantId" FROM "TenantUsage" WHERE "tenantId" = ${input.tenantId} FOR UPDATE`;
+      if (input.providerRequestId) {
+        const existing = await tx.aIUsageEvent.findFirst({ where: { tenantId: input.tenantId || null, provider: input.provider, providerRequestId: input.providerRequestId } });
+        if (existing) return existing;
+      }
+      const event = await tx.aIUsageEvent.create({
+        data: {
+          tenantId: input.tenantId || null,
+          integrationId: input.integrationId || null,
+          conversationId: input.conversationId || null,
+          userId: input.userId || null,
+          provider: input.provider,
+          model: input.model,
+          feature: input.feature || "AI_OTHER",
+          providerRequestId: input.providerRequestId || null,
+          inputTokens,
+          outputTokens,
+          cachedInputTokens,
+          reasoningTokens: input.reasoningTokens ?? null,
+          totalTokens,
+          inputUnitPrice: pricing ? pricing.inputPerMillion : null,
+          outputUnitPrice: pricing ? pricing.outputPerMillion : null,
+          cachedInputUnitPrice: pricing?.cachedInputPerMillion ?? null,
+          inputCost,
+          outputCost,
+          cachedInputCost,
+          totalCost,
+          currency: pricing?.currency || "USD",
+          pricingVersion: pricing?.pricingVersion || null,
+          pricingMissing,
+          latencyMs: input.latencyMs ?? null,
+          status: input.status,
+          errorCode: input.errorCode || null,
+        },
+      });
+      if (event.tenantId && event.status === 'ok') {
+        const { consumeResource, aiCreditCost } = await import('./billingResourceService.ts');
+        await consumeResource(tx, event.tenantId, 'AI_CREDITS', aiCreditCost(event.feature), `ai:${event.id}`, false);
+      }
+      return event;
     });
   } catch (error) {
     console.warn("[ai-usage] record failed", error instanceof Error ? error.message : error);

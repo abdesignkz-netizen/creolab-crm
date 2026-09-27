@@ -15,7 +15,10 @@ export function billingMonth(now = new Date()) {
 }
 export function billingMonthStart(now = new Date()) { return new Date(`${billingMonth(now)}-01T00:00:00+05:00`); }
 
-export async function initializeTenantUsage(tx: Db, tenantId: string, limits: Record<string, number>) {
+export async function initializeTenantUsage(tx: Db, tenantId: string, limits: Record<string, number>): Promise<void> {
+  if ('$transaction' in tx) return tx.$transaction(db => initializeTenantUsage(db, tenantId, limits));
+  await tx.$queryRaw`SELECT id FROM "Tenant" WHERE id = ${tenantId} FOR UPDATE`;
+  await tx.$queryRaw`SELECT "tenantId" FROM "TenantUsage" WHERE "tenantId" = ${tenantId} FOR UPDATE`;
   const existing = await tx.tenantUsage.findUnique({ where: { tenantId } });
   if (existing) {
     const counters = existing.countersJson as Record<string, any>;
@@ -117,8 +120,8 @@ export async function consumeResource(db: Db, tenantId: string, resource: string
   if (!Number.isSafeInteger(amount) || amount < 0) throw new ApiError(422, 'invalid_amount', 'Некорректный объём');
   const canonicalResource = resource === 'DOCUMENTS' ? 'DOCUMENTS_COUNT' : resource;
   if ('$transaction' in db) return db.$transaction(tx => consumeResource(tx, tenantId, canonicalResource, amount, operationId, enforce));
+  await db.$queryRaw`SELECT id FROM "Tenant" WHERE id = ${tenantId} FOR UPDATE`;
   await db.$queryRaw`SELECT "tenantId" FROM "TenantUsage" WHERE "tenantId" = ${tenantId} FOR UPDATE`;
-  const row = await db.tenantUsage.findUnique({ where: { tenantId } });
   const existing = await db.$queryRaw<Array<{amount: number}>>`SELECT amount FROM "BillingResourceUsage" WHERE "tenantId" = ${tenantId} AND resource = ${canonicalResource} AND "operationId" = ${operationId}`;
   if (existing.length) return { idempotent: true };
   const period = await resourcePeriod(db, tenantId, canonicalResource);
@@ -219,15 +222,11 @@ export async function assertFileCapacity(db: Db, tenantId: string, bytes: number
 export async function reserveAiCall(prisma: PrismaClient, tenantId: string, ttlMs = 120000, amount = 1) {
   const id = randomUUID();
   const reserved = await prisma.$transaction(async tx => {
-    await tx.$queryRaw`SELECT "tenantId" FROM "TenantUsage" WHERE "tenantId" = ${tenantId} FOR UPDATE`;
-    const row = await tx.tenantUsage.findUnique({ where: { tenantId } });
+    await tx.$queryRaw`SELECT id FROM "Tenant" WHERE id = ${tenantId} FOR UPDATE`;
     const access = await getEntitlements(tx as PrismaClient, tenantId);
-    if (!row) {
-      await initializeTenantUsage(tx, tenantId, access.limits);
-      return reserveAiCallInTransaction();
-    }
-    return reserveAiCallInTransaction();
-    async function reserveAiCallInTransaction() {
+    if (access.snapshot.grandfathered) return null;
+    if (!await tx.tenantUsage.findUnique({ where: { tenantId } })) await initializeTenantUsage(tx, tenantId, access.limits);
+    await tx.$queryRaw`SELECT "tenantId" FROM "TenantUsage" WHERE "tenantId" = ${tenantId} FOR UPDATE`;
     const row = (await tx.tenantUsage.findUnique({ where: { tenantId } }))!;
     if (!access.snapshot.entitled) throw new ApiError(403, 'subscription_required', 'Подписка не активна');
     const rowLimits = row.limitsJson as Record<string, number>;
@@ -242,11 +241,11 @@ export async function reserveAiCall(prisma: PrismaClient, tenantId: string, ttlM
     reservations[id] = {until: Date.now() + ttlMs, amount};
     await tx.tenantUsage.update({ where: { tenantId }, data: { countersJson: { ...counters, aiReservations: reservations } } });
     return id;
-    }
   });
   return async () => {
     if (!reserved) return;
     await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM "Tenant" WHERE id = ${tenantId} FOR UPDATE`;
       await tx.$queryRaw`SELECT "tenantId" FROM "TenantUsage" WHERE "tenantId" = ${tenantId} FOR UPDATE`;
       const row = await tx.tenantUsage.findUnique({ where: { tenantId } });
       if (!row) return;
