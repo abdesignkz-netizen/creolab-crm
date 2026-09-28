@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
+import { useLocale } from "../lib/session";
+import { t } from "../i18n";
 
 type Article = {
   id: string;
@@ -427,9 +429,10 @@ export function SupportHelpButton({
   unread: number;
   onClick: () => void;
 }) {
+  const locale = useLocale();
   return (
     <button type="button" className="btn secondary support-help-btn" onClick={onClick}>
-      Помощь
+      {t(locale, "nav.help")}
       {unread > 0 ? <span className="nav-badge">{unread > 9 ? "9+" : unread}</span> : null}
     </button>
   );

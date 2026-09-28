@@ -1,13 +1,14 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import { BrandLogo } from "../components/BrandLogo";
 import { PasswordInput } from "../components/PasswordInput";
-import { normalizeLocale, t } from "../i18n";
+import { getPublicLocale, applyDocumentLocale, authErrorMessage, t } from "../i18n";
 
 export function PlatformLoginPage() {
   const [error, setError] = useState("");
-  const locale = normalizeLocale(null);
+  const locale = getPublicLocale();
+  useEffect(() => applyDocumentLocale(locale), [locale]);
   return (
     <div className="login">
       <div className="login-stage">
@@ -24,12 +25,7 @@ export function PlatformLoginPage() {
               await api.platformLogin(String(form.get("email")), String(form.get("password")));
               window.location.assign("/admin");
             } catch (err) {
-              const message = err instanceof Error ? err.message : "Ошибка входа";
-              setError(
-                message === "Failed to fetch" || message === "HTTP 500"
-                  ? "Сейчас не удаётся войти. Попробуйте ещё раз через минуту."
-                  : message,
-              );
+              setError(authErrorMessage(locale, err));
             }
           }}
         >

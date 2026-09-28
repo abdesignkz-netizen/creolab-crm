@@ -3,7 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../lib/api";
 import { BrandLogo } from "../components/BrandLogo";
 import { PasswordInput } from "../components/PasswordInput";
-import { normalizeLocale, t } from "../i18n";
+import { getPublicLocale, applyDocumentLocale, authErrorMessage, t } from "../i18n";
 
 type Step = "email" | "code" | "password" | "done";
 
@@ -11,20 +11,6 @@ function maskEmail(email: string) {
   const [local, domain] = email.split("@");
   if (!local || !domain) return email;
   return `${local.slice(0, 1)}***@${domain}`;
-}
-
-function publicError(err: unknown, fallback: string) {
-  const error = err as { message?: string; code?: string; status?: number };
-  if (error?.message === "Failed to fetch" || error?.message === "HTTP 500") {
-    return "Сейчас не удаётся выполнить запрос. Попробуйте ещё раз через минуту.";
-  }
-  if (error?.code === "rate_limited") return "Слишком много запросов. Подождите минуту.";
-  if (error?.code === "expired_code") return t(normalizeLocale(null), "login.resetExpired");
-  if (error?.code === "too_many_attempts") return t(normalizeLocale(null), "login.resetTooMany");
-  if (error?.code === "invalid_code") return t(normalizeLocale(null), "login.resetInvalidCode");
-  if (error?.code === "invalid_token") return t(normalizeLocale(null), "login.resetInvalidToken");
-  if (typeof error?.message === "string" && error.message && !/^HTTP \d+/.test(error.message)) return error.message;
-  return fallback;
 }
 
 function ResetCodeInputs({
@@ -65,7 +51,7 @@ function ResetCodeInputs({
   }
 
   return (
-    <div className="login-otp" role="group" aria-label="Код">
+    <div className="login-otp" role="group" aria-label={t(getPublicLocale(), "login.codeLabel")}>
       {value.map((digit, index) => (
         <input
           key={index}
@@ -87,7 +73,8 @@ function ResetCodeInputs({
 }
 
 export function ForgotPasswordPage() {
-  const locale = normalizeLocale(null);
+  const locale = getPublicLocale();
+  useEffect(() => applyDocumentLocale(locale), [locale]);
   const [searchParams] = useSearchParams();
   const [step, setStep] = useState<Step>("email");
   const [email, setEmail] = useState(searchParams.get("email") || "");
@@ -120,7 +107,7 @@ export function ForgotPasswordPage() {
       setStep("code");
       startCooldown();
     } catch (err) {
-      setError(publicError(err, "Не удалось отправить запрос"));
+      setError(authErrorMessage(locale, err, "login.resetRequestFailed"));
     } finally {
       setBusy(false);
     }
@@ -144,7 +131,7 @@ export function ForgotPasswordPage() {
       setResetToken(result.resetToken);
       setStep("password");
     } catch (err) {
-      setError(publicError(err, t(locale, "login.resetInvalidCode")));
+      setError(authErrorMessage(locale, err, "login.resetInvalidCode"));
     } finally {
       setBusy(false);
     }
@@ -159,7 +146,7 @@ export function ForgotPasswordPage() {
       setDigits(["", "", "", "", "", ""]);
       startCooldown();
     } catch (err) {
-      setError(publicError(err, "Не удалось отправить код"));
+      setError(authErrorMessage(locale, err, "login.resetResendFailed"));
     } finally {
       setBusy(false);
     }
@@ -168,7 +155,7 @@ export function ForgotPasswordPage() {
   async function submitPassword(event: FormEvent) {
     event.preventDefault();
     if (password !== passwordConfirm) {
-      setError("Пароли не совпадают");
+      setError(t(locale, "login.resetPasswordMismatch"));
       return;
     }
     setBusy(true);
@@ -180,7 +167,7 @@ export function ForgotPasswordPage() {
       setPasswordConfirm("");
       setStep("done");
     } catch (err) {
-      setError(publicError(err, "Не удалось сохранить пароль"));
+      setError(authErrorMessage(locale, err, "login.resetSaveFailed"));
     } finally {
       setBusy(false);
     }

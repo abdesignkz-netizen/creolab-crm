@@ -8,8 +8,8 @@ import { SupportCenter, SupportHelpButton } from "./components/SupportCenter";
 import { PaywallDialog } from "./components/PaywallDialog";
 import { OnboardingWizard } from "./components/OnboardingWizard";
 import { tip } from "./lib/tip";
-import { applyAppearance, emptyCaps, SessionContext, type Capabilities } from "./lib/session";
-import { normalizeLocale, t } from "./i18n";
+import { applyAppearance, useLocale, emptyCaps, SessionContext, type Capabilities } from "./lib/session";
+import { normalizeLocale, getPublicLocale, applyDocumentLocale, authErrorMessage, t } from "./i18n";
 import {
   currentBrowserPermission,
   dismissNotificationBanner,
@@ -77,12 +77,13 @@ function useQuery<T>(fn: () => Promise<T>, deps: unknown[] = []) {
 }
 
 function StateView({ state, onRetry, empty }: { state: LoadState<unknown>; onRetry: () => void; empty: string }) {
-  if (state.status === "loading") return <div className="state">Загрузка…</div>;
+  const locale = useLocale();
+  if (state.status === "loading") return <div className="state">{t(locale, "common.loading")}</div>;
   if (state.status === "error") {
     return (
       <div className="state">
         <p className="error">{state.error}</p>
-        <button className="btn" onClick={onRetry}>Повторить</button>
+        <button className="btn" onClick={onRetry}>{t(locale, "common.retry")}</button>
       </div>
     );
   }
@@ -188,8 +189,8 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
     return n > 0 ? n : 0;
   }
 
-  function badgeHint(path: string, fallback = "Требует внимания") {
-    return navHints[path] || fallback;
+  function badgeHint(path: string, fallback = t(locale, "nav.attention")) {
+    return locale === "kk" ? fallback : navHints[path] || fallback;
   }
 
   function navTo(path: string) {
@@ -475,13 +476,13 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
       <header className="mobile-topbar">
           <div className="mobile-topbar-title">
           <b>{pageTitle}</b>
-          <span className="muted">{me.activeTenant?.tenant?.name || "Нет компании"}</span>
+          <span className="muted">{me.activeTenant?.tenant?.name || t(locale, "nav.noCompany")}</span>
         </div>
         {inServiceAdmin || !me?.billing?.entitlements?.SUPPORT ? null : (
         <SupportHelpButton unread={helpUnread} onClick={() => { setHelpTicketId(null); setHelpOpen(true); }} />
         )}
         {unreadNotices > 0 ? (
-          <button type="button" className="nav-badge" onClick={() => navigate("/settings")} title="Уведомления">
+          <button type="button" className="nav-badge" onClick={() => navigate("/settings")} title={t(locale, "settings.notifications")}>
             {unreadNotices > 9 ? "9+" : unreadNotices}
           </button>
         ) : (
@@ -492,7 +493,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
       <aside className="nav desktop-nav">
         <div className="nav-brand">
           <BrandLogo />
-          <p>{me.activeTenant?.tenant?.name || "Нет компании"}</p>
+          <p>{me.activeTenant?.tenant?.name || t(locale, "nav.noCompany")}</p>
         </div>
         <nav className="nav-links">
           {(
@@ -509,7 +510,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
                 const count = badgeCount(to);
                 const hint = badgeHint(
                   to,
-                  to === "/settings" ? "Непрочитанные уведомления" : to === "/admin/support" ? "Непрочитанные обращения" : "Требует внимания",
+                  to === "/settings" ? t(locale, "nav.unreadNotices") : to === "/admin/support" ? t(locale, "nav.unreadTickets") : t(locale, "nav.attention"),
                 );
                 return (
                   <NavLink
@@ -540,7 +541,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
             setHelpTicketId(null);
             setHelpOpen(true);
           }}
-          aria-label={helpUnread > 0 ? `${t(locale, "nav.help")}. Есть непрочитанные ответы` : t(locale, "nav.help")}
+          aria-label={helpUnread > 0 ? `${t(locale, "nav.help")}. ${t(locale, "nav.unreadReplies")}` : t(locale, "nav.help")}
         >
           <span className="nav-link-label">
             <NavIcon to="/help" />
@@ -549,7 +550,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
           {helpUnread > 0 ? <span className="nav-badge">{formatBadge(helpUnread)}</span> : null}
         </button>
         )}
-        <button className="btn secondary nav-logout" onClick={logout} {...tip("Завершить сеанс в этом браузере")}>
+        <button className="btn secondary nav-logout" onClick={logout} {...tip(t(locale, "nav.logoutHint"))}>
           {t(locale, "nav.logout")}
         </button>
       </aside>
@@ -569,13 +570,13 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
         {notifyBanner ? (
           <div className="banner warn notify-banner">
             <div className="notify-banner-copy">
-              <b>Уведомления</b>
+              <b>{t(locale, "settings.notifications")}</b>
               <span>
                 {currentBrowserPermission() === "denied"
-                  ? "Разрешение запрещено в браузере. Откройте настройки сайта и разрешите уведомления, затем нажмите «Включить»."
+                  ? t(locale, "nav.notifyBlocked")
                   : isLikelyIosSafari() && !isStandaloneDisplayMode()
-                    ? "На iPhone уведомления работают только с иконки: Поделиться → На экран «Домой», откройте CRM с иконки, затем Настройки → Разрешить."
-                    : "Включите уведомления — новые заявки и важные события придут даже при свёрнутом окне."}
+                    ? t(locale, "nav.notifyIos")
+                    : t(locale, "nav.notifyHint")}
               </span>
             </div>
             <div className="actions">
@@ -589,7 +590,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
                     navigate("/settings");
                   }}
                 >
-                  Как включить
+                  {t(locale, "nav.enableHelp")}
                 </button>
               ) : (
                 <button
@@ -604,7 +605,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
                     })();
                   }}
                 >
-                  Включить
+                  {t(locale, "common.enable")}
                 </button>
               )}
               <button
@@ -615,7 +616,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
                   setNotifyBanner(false);
                 }}
               >
-                Позже
+                {t(locale, "common.later")}
               </button>
             </div>
           </div>
@@ -623,9 +624,9 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
         {children}
       </main>
 
-      {moreOpen ? <button type="button" className="nav-backdrop" aria-label="Закрыть" onClick={() => setMoreOpen(false)} /> : null}
+      {moreOpen ? <button type="button" className="nav-backdrop" aria-label={t(locale, "common.close")} onClick={() => setMoreOpen(false)} /> : null}
 
-      <div className={`more-sheet ${moreOpen ? "open" : ""}`} ref={moreSheetRef} role="dialog" aria-label="Ещё разделы" aria-modal={moreOpen || undefined} aria-hidden={!moreOpen} inert={!moreOpen} onKeyDown={(event) => {
+      <div className={`more-sheet ${moreOpen ? "open" : ""}`} ref={moreSheetRef} role="dialog" aria-label={t(locale, "nav.moreSections")} aria-modal={moreOpen || undefined} aria-hidden={!moreOpen} inert={!moreOpen} onKeyDown={(event) => {
         if (event.key !== "Tab") return;
         const controls = moreSheetRef.current?.querySelectorAll<HTMLElement>("a, button");
         if (!controls?.length) return;
@@ -656,7 +657,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
             );
           })}
         </nav>
-        <button type="button" className="btn secondary" onClick={logout} {...tip("Завершить сеанс в этом браузере")}>
+        <button type="button" className="btn secondary" onClick={logout} {...tip(t(locale, "nav.logoutHint"))}>
           {t(locale, "nav.logout")}
         </button>
       </div>
@@ -671,7 +672,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
       />
       )}
 
-      <nav className="mobile-tabbar" aria-label="Основная навигация">
+      <nav className="mobile-tabbar" aria-label={t(locale, "nav.primary")}>
         {primaryTabs.map((tab) => {
           const count = badgeCount(tab.to);
           const hint = badgeHint(tab.to);
@@ -713,7 +714,8 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
 }
 
 function Login() {
-  const locale = normalizeLocale(null);
+  const locale = getPublicLocale();
+  useEffect(() => applyDocumentLocale(locale), [locale]);
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const [mode, setMode] = useState<"login" | "signup" | "verify" | "exists">("login");
@@ -755,12 +757,7 @@ function Login() {
                 const result = (await api.login(String(form.get("email")), String(form.get("password")))) as any;
                 await enterSession(result);
               } catch (err) {
-                const message = err instanceof Error ? err.message : "Ошибка входа";
-                setError(
-                  message === "Failed to fetch" || message === "HTTP 500"
-                    ? "Сейчас не удаётся войти. Попробуйте ещё раз через минуту."
-                    : message,
-                );
+                setError(authErrorMessage(locale, err));
               }
             }}
           >
@@ -804,7 +801,7 @@ function Login() {
               const password = String(form.get("password") || "");
               const passwordConfirm = String(form.get("passwordConfirm") || "");
               if (password !== passwordConfirm) {
-                setError("Пароли не совпадают");
+                setError(t(locale, "login.passwordMismatch"));
                 return;
               }
               setBusy(true);
@@ -825,14 +822,9 @@ function Login() {
                 if (err?.code === "account_exists") {
                   setEmail(String(form.get("email")));
                   setMode("exists");
-                  setError(err.message);
+                  setError(authErrorMessage(locale, err));
                 } else {
-                  const message = err instanceof Error ? err.message : "Не удалось создать аккаунт";
-                  setError(
-                    message === "Failed to fetch" || message === "HTTP 500"
-                      ? "Сейчас не удаётся отправить запрос. Попробуйте ещё раз через минуту."
-                      : message,
-                  );
+                  setError(authErrorMessage(locale, err, "login.signupFailed"));
                 }
               } finally {
                 setBusy(false);
@@ -890,7 +882,7 @@ function Login() {
                 const result = (await api.verifyRegistration(email, String(form.get("code")))) as any;
                 await enterSession(result, { openBilling: true });
               } catch (err) {
-                setError(err instanceof Error ? err.message : "Не удалось подтвердить код");
+                setError(authErrorMessage(locale, err, "login.verifyFailed"));
               } finally {
                 setBusy(false);
               }
@@ -907,7 +899,7 @@ function Login() {
               </p>
             ) : null}
             <label>
-              Код
+              {t(locale, "login.codeLabel")}
               <input name="code" inputMode="numeric" pattern="\d{6}" maxLength={6} required autoComplete="one-time-code" />
             </label>
             {error ? <p className="error">{error}</p> : null}
@@ -922,9 +914,9 @@ function Login() {
                 try {
                   const resent = (await api.resendRegistration(email)) as { verificationCode?: string };
                   setDevCode(resent.verificationCode || "");
-                  setInfo(resent.verificationCode ? t(locale, "login.verifyCodeUpdated") : "Новый код отправлен");
+                  setInfo(resent.verificationCode ? t(locale, "login.verifyCodeUpdated") : t(locale, "login.resendFallback"));
                 } catch (err) {
-                  setError(err instanceof Error ? err.message : "Не удалось отправить код");
+                  setError(authErrorMessage(locale, err, "login.resendFailed"));
                 } finally {
                   setBusy(false);
                 }
@@ -956,6 +948,7 @@ function Login() {
 }
 
 function WorkspaceSearch() {
+  const locale = useLocale();
   const navigate = useNavigate();
   const [q, setQ] = useState("");
   const [items, setItems] = useState<Array<{ type: string; id: string; title: string; subtitle?: string; href: string }>>([]);
@@ -987,12 +980,12 @@ function WorkspaceSearch() {
   }, []);
 
   const typeLabel: Record<string, string> = {
-    contact: "Клиент",
-    company: "Компания",
-    deal: "Сделка",
-    inquiry: "Заявка",
-    task: "Задача",
-    conversation: "Диалог",
+    contact: t(locale, "search.contact"),
+    company: t(locale, "search.company"),
+    deal: t(locale, "search.deal"),
+    inquiry: t(locale, "search.inquiry"),
+    task: t(locale, "search.task"),
+    conversation: t(locale, "search.conversation"),
   };
 
   return (
@@ -1004,12 +997,12 @@ function WorkspaceSearch() {
           setOpen(true);
         }}
         onFocus={() => setOpen(true)}
-        placeholder="Поиск: клиент, телефон, сделка, заявка…"
-        aria-label="Поиск по компании"
+        placeholder={t(locale, "search.placeholder")}
+        aria-label={t(locale, "search.label")}
       />
       {open && q.trim().length >= 2 ? (
         <div className="workspace-search-results">
-          {items.length === 0 ? <div className="muted">Ничего не найдено</div> : null}
+          {items.length === 0 ? <div className="muted">{t(locale, "search.empty")}</div> : null}
           {items.map((item) => (
             <button
               type="button"
@@ -1099,7 +1092,7 @@ export function App() {
     });
     return () => { cancelled = true; };
   }, [bootRevision, publicSigningPage]);
-  if (boot === "loading") return <div className="state">{t(normalizeLocale(null), "common.loading")}</div>;
+  if (boot === "loading") return <div className="state">{t(getPublicLocale(), "common.loading")}</div>;
   if (boot === "error") return <div className="state"><p>{bootError}</p><button className="btn" onClick={() => setBootRevision(value => value + 1)}>Повторить</button></div>;
   if (boot === "tenant-blocked" && tenantBlock) {
     return (
@@ -1147,7 +1140,7 @@ export function App() {
       <Route
         path="/forgot-password"
         element={
-          <Suspense fallback={<div className="state">{t(normalizeLocale(null), "common.loading")}</div>}>
+          <Suspense fallback={<div className="state">{t(getPublicLocale(), "common.loading")}</div>}>
             <ForgotPasswordPage />
           </Suspense>
         }
@@ -1158,7 +1151,7 @@ export function App() {
           boot === "ready" && me?.user?.platformAdmin ? (
             <Navigate to="/admin" replace />
           ) : (
-            <Suspense fallback={<div className="state">{t(normalizeLocale(null), "common.loading")}</div>}>
+            <Suspense fallback={<div className="state">{t(getPublicLocale(), "common.loading")}</div>}>
               <PlatformLoginPage />
             </Suspense>
           )

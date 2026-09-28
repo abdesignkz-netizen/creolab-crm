@@ -1,4 +1,5 @@
 import { createContext, useContext } from "react";
+import { applyDocumentLocale, normalizeLocale, rememberLocale, getPublicLocale } from "../i18n";
 
 export type Capabilities = {
   role: string | null;
@@ -41,6 +42,11 @@ export function useSession() {
   return useContext(SessionContext);
 }
 
+export function useLocale() {
+  const { me } = useSession();
+  return me?.user ? normalizeLocale(me.user.locale) : getPublicLocale();
+}
+
 export function useCapabilities() {
   return useSession().caps;
 }
@@ -49,5 +55,7 @@ export function applyAppearance(user?: { locale?: string; theme?: string } | nul
   const theme = user?.theme || "system";
   document.documentElement.dataset.theme = theme;
   document.documentElement.style.colorScheme = theme === "system" ? "light dark" : theme;
-  document.documentElement.lang = user?.locale === "kk" ? "kk" : user?.locale === "en" ? "en" : "ru";
+  const locale = user ? normalizeLocale(user.locale) : getPublicLocale();
+  applyDocumentLocale(locale);
+  if (user) rememberLocale(locale);
 }

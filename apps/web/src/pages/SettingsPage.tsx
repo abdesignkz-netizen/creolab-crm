@@ -7,7 +7,7 @@ import { api } from "../lib/api";
 import { PasswordInput } from "../components/PasswordInput";
 import { formatDateTime } from "../lib/datetime";
 import { useSession } from "../lib/session";
-import { normalizeLocale, t, type Locale } from "../i18n";
+import { normalizeLocale, accountErrorMessage, t, type Locale } from "../i18n";
 import { notifySaved } from "../components/SaveNotice";
 import {
   currentBrowserPermission,
@@ -77,7 +77,7 @@ export function SettingsPage() {
     ...(caps.members ? [{ id: "members" as const, group: "company" as const, label: t(locale, "settings.members") }] : []),
     ...(caps.companyAdmin
       ? [
-          { id: "services" as const, group: "company" as const, label: "Услуги и товары" },
+          { id: "services" as const, group: "company" as const, label: t(locale, "settings.services") },
           { id: "ops" as const, group: "company" as const, label: t(locale, "settings.ops") },
           { id: "audit" as const, group: "company" as const, label: t(locale, "settings.audit") },
           { id: "control" as const, group: "company" as const, label: t(locale, "settings.control") },
@@ -149,6 +149,7 @@ export function SettingsPage() {
 function ProfileSection({ locale }: { locale: Locale }) {
   const { me } = useSession();
   const [status, setStatus] = useState("");
+  const [avatarError, setAvatarError] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [dirty, setDirty] = useState(false);
   useUnsaved(dirty);
@@ -167,12 +168,12 @@ function ProfileSection({ locale }: { locale: Locale }) {
       });
       setDirty(false);
       setStatus(t(locale, "settings.saved"));
-      notifySaved("Профиль сохранён");
+      notifySaved(t(locale, "settings.profileSaved"));
       window.location.reload();
     } catch (err: any) {
       const field = err?.body?.field_errors || {};
-      setErrors(field);
-      setStatus(err instanceof Error ? err.message : "Ошибка");
+      setErrors(Object.fromEntries(Object.entries(field).map(([key, value]) => [key, accountErrorMessage(locale, String(value))])));
+      setStatus(accountErrorMessage(locale, err instanceof Error ? err.message : undefined));
     }
   }
 
@@ -180,27 +181,33 @@ function ProfileSection({ locale }: { locale: Locale }) {
     event.preventDefault();
     const file = (event.currentTarget.elements.namedItem("avatar") as HTMLInputElement)?.files?.[0];
     if (!file) return;
-    const contentBase64 = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const result = String(reader.result || "");
-        resolve(result.includes(",") ? result.split(",")[1] : result);
-      };
-      reader.onerror = () => reject(new Error("Не удалось прочитать файл"));
-      reader.readAsDataURL(file);
-    });
-    await api.uploadAvatar({ contentBase64, mimeType: file.type });
-    notifySaved("Фото обновлено");
-    window.location.reload();
+    setAvatarError("");
+    try {
+      const contentBase64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = String(reader.result || "");
+          resolve(result.includes(",") ? result.split(",")[1] : result);
+        };
+        reader.onerror = () => reject(new Error(t(locale, "settings.fileReadError")));
+        reader.readAsDataURL(file);
+      });
+      await api.uploadAvatar({ contentBase64, mimeType: file.type });
+      notifySaved(t(locale, "settings.photoUpdated"));
+      window.location.reload();
+    } catch (err) {
+      setAvatarError(accountErrorMessage(locale, err instanceof Error ? err.message : undefined));
+    }
   }
 
   return (
     <>
       <form className="panel" onSubmit={onAvatar}>
-        <b>Фото</b>
-        {me?.user?.hasAvatar ? <img className="avatar-preview" src="/api/v1/me/avatar" alt="" /> : <p className="muted">Фото не загружено</p>}
+        <b>{t(locale, "settings.photo")}</b>
+        {me?.user?.hasAvatar ? <img className="avatar-preview" src="/api/v1/me/avatar" alt="" /> : <p className="muted">{t(locale, "settings.noPhoto")}</p>}
         <input name="avatar" type="file" accept="image/jpeg,image/png,image/webp" />
-        <button className="btn secondary" type="submit">Загрузить</button>
+        <button className="btn secondary" type="submit">{t(locale, "common.upload")}</button>
+        {avatarError ? <p className="error" role="alert">{avatarError}</p> : null}
       </form>
       <form
         className="panel"
@@ -230,15 +237,15 @@ function ProfileSection({ locale }: { locale: Locale }) {
           <input name="city" defaultValue={me?.user?.city || ""} />
         </label>
         <label>
-          Email
+          {t(locale, "login.email")}
           <input value={me?.user?.email || ""} readOnly />
         </label>
-        <p className="muted">Email используется для входа и меняется только через подтверждение нового адреса.</p>
+        <p className="muted">{t(locale, "settings.emailHint")}</p>
         <label>
-          Должность в компании
-          <input value={me?.activeTenant?.jobTitle || me?.activeTenant?.roleLabel || ""} readOnly />
+          {t(locale, "settings.jobTitle")}
+          <input value={me?.activeTenant?.jobTitle || (["owner", "director", "sales_lead", "manager"].includes(me?.activeTenant?.role) ? t(locale, `settings.currentRole.${me.activeTenant.role}`) : me?.activeTenant?.roleLabel || "")} readOnly />
         </label>
-        <p className="muted">Должность в компании меняет администратор или директор.</p>
+        <p className="muted">{t(locale, "settings.jobTitleHint")}</p>
         {status ? <p className="ok">{status}</p> : null}
         <button className="btn">{t(locale, "settings.save")}</button>
       </form>
@@ -271,45 +278,45 @@ function SecuritySection({ locale }: { locale: Locale }) {
         newPassword: form.get("newPassword"),
         confirmPassword: form.get("confirmPassword"),
       });
-      setStatus("Пароль изменён. Остальные сессии завершены.");
+      setStatus(t(locale, "settings.passwordChanged"));
       event.currentTarget.reset();
       await loadSessions();
     } catch (err: any) {
-      setErrors(err?.body?.field_errors || {});
-      setStatus(err instanceof Error ? err.message : "Ошибка");
+      setErrors(Object.fromEntries(Object.entries(err?.body?.field_errors || {}).map(([key, value]) => [key, accountErrorMessage(locale, String(value))])));
+      setStatus(accountErrorMessage(locale, err instanceof Error ? err.message : undefined));
     }
   }
 
   return (
     <>
       <form className="panel" onSubmit={onPassword}>
-        <b>Смена пароля</b>
+        <b>{t(locale, "settings.passwordChange")}</b>
         <label>
-          Текущий пароль
+          {t(locale, "settings.currentPassword")}
           <PasswordInput name="currentPassword" autoComplete="current-password" required />
           <FieldError message={errors.currentPassword} />
         </label>
         <label>
-          Новый пароль
+          {t(locale, "login.resetNewPassword")}
           <PasswordInput name="newPassword" autoComplete="new-password" required />
         </label>
         <label>
-          Повтор
+          {t(locale, "login.passwordRepeat")}
           <PasswordInput name="confirmPassword" autoComplete="new-password" required />
           <FieldError message={errors.confirmPassword} />
         </label>
         {status ? <p>{status}</p> : null}
-        <button className="btn" type="submit">Сменить пароль</button>
+        <button className="btn" type="submit">{t(locale, "settings.changePassword")}</button>
       </form>
       <div className="panel">
         <div className="page-head">
-          <b>Активные сессии</b>
+          <b>{t(locale, "settings.sessions")}</b>
           <button
             type="button"
             className="btn secondary"
             onClick={() => void api.revokeOtherSessions().then(loadSessions)}
           >
-            Выйти со всех устройств
+            {t(locale, "settings.revokeOthers")}
           </button>
         </div>
         {sessions.map((item) => (
@@ -317,18 +324,18 @@ function SecuritySection({ locale }: { locale: Locale }) {
             <div>
               <b>
                 {item.title}
-                {item.current ? " · текущая" : ""}
+                {item.current ? ` · ${t(locale, "settings.currentSession")}` : ""}
               </b>
               <div className="muted">
                 {item.lastSeenAt
-                  ? `Активность: ${formatDateTime(item.lastSeenAt, { timeZone: me?.user?.timezone, timeFormat: me?.user?.timeFormat, locale })}`
-                  : "Последняя активность неизвестна"}
+                  ? t(locale, "settings.lastActive").replace("{date}", formatDateTime(item.lastSeenAt, { timeZone: me?.user?.timezone, timeFormat: me?.user?.timeFormat, locale }))
+                  : t(locale, "settings.lastActiveUnknown")}
                 {item.ip ? ` · ${item.ip}` : ""}
               </div>
             </div>
             {!item.current ? (
               <button type="button" className="btn secondary" onClick={() => void api.revokeSession(item.id).then(loadSessions)}>
-                Завершить
+                {t(locale, "settings.endSession")}
               </button>
             ) : null}
           </div>
@@ -369,13 +376,13 @@ function NotificationsSection({ locale }: { locale: Locale }) {
   if (!prefs) return <div className="state">{t(locale, "common.loading")}</div>;
 
   const events: Array<[string, string]> = [
-    ["new_inquiries", "Новые доступные заявки"],
-    ["assignment", "Назначение заявки или сделки"],
-    ["dialogs", "Новые сообщения в доступных диалогах"],
-    ["tasks", "Назначенные задачи и напоминания"],
-    ["deals", "Изменения доступных сделок"],
-    ["ai_events", "События AI, требующие участия"],
-    ...(!caps.manager ? [["management", "Управленческие уведомления"] as [string, string]] : []),
+    ["new_inquiries", t(locale, "settings.notice.new_inquiries")],
+    ["assignment", t(locale, "settings.notice.assignment")],
+    ["dialogs", t(locale, "settings.notice.dialogs")],
+    ["tasks", t(locale, "settings.notice.tasks")],
+    ["deals", t(locale, "settings.notice.deals")],
+    ["ai_events", t(locale, "settings.notice.ai_events")],
+    ...(!caps.manager ? [["management", t(locale, "settings.notice.management")] as [string, string]] : []),
   ];
 
   return (
@@ -398,34 +405,34 @@ function NotificationsSection({ locale }: { locale: Locale }) {
           });
         }}
       >
-        <b>Категории</b>
+        <b>{t(locale, "settings.categories")}</b>
         {events.map(([key, label]) => (
           <label key={key} className="check-row">
             <input type="checkbox" name={`event_${key}`} defaultChecked={prefs.events?.[key] !== false} />
             {label}
           </label>
         ))}
-        <b>Каналы</b>
+        <b>{t(locale, "settings.channels")}</b>
         <label className="check-row">
           <input type="checkbox" name="ch_in_app" defaultChecked={prefs.channels?.in_app !== false} />
-          В кабинете
+          {t(locale, "settings.inApp")}
         </label>
         <label className="check-row">
           <input type="checkbox" name="ch_web_push" defaultChecked={prefs.channels?.web_push !== false} />
-          Браузерные уведомления
+          {t(locale, "settings.browserNotices")}
         </label>
-        <p className="muted">Сейчас уведомления приходят в кабинет и в браузер.</p>
-        <b>Время тишины (внешние уведомления)</b>
+        <p className="muted">{t(locale, "settings.noticeChannelsHint")}</p>
+        <b>{t(locale, "settings.quietHours")}</b>
         <label className="check-row">
           <input type="checkbox" name="quiet" defaultChecked={Boolean(prefs.quietHours?.enabled)} />
-          Включить
+          {t(locale, "common.enable")}
         </label>
         <label>
-          С
+          {t(locale, "settings.quietStart")}
           <input name="quietStart" type="time" defaultValue={prefs.quietHours?.start || "22:00"} />
         </label>
         <label>
-          До
+          {t(locale, "settings.quietEnd")}
           <input name="quietEnd" type="time" defaultValue={prefs.quietHours?.end || "08:00"} />
         </label>
         {status ? <p className="ok">{status}</p> : null}
@@ -433,10 +440,10 @@ function NotificationsSection({ locale }: { locale: Locale }) {
       </form>
 
       <div className="panel">
-        <b>Уведомления браузера</b>
+        <b>{t(locale, "settings.browserNotices")}</b>
         <p>
-          Статус: <b>{permission}</b>
-          {enabled ? " · включены в кабинете" : " · выключены в кабинете"}
+          {t(locale, "common.status")}: <b>{t(locale, `settings.permission.${permission}`)}</b>
+          {enabled ? ` · ${t(locale, "settings.noticeEnabled")}` : ` · ${t(locale, "settings.noticeDisabled")}`}
         </p>
         <div className="actions">
           <button
@@ -452,7 +459,7 @@ function NotificationsSection({ locale }: { locale: Locale }) {
               });
             }}
           >
-            Разрешить уведомления
+            {t(locale, "settings.allowNotices")}
           </button>
           <button
             type="button"
@@ -463,13 +470,13 @@ function NotificationsSection({ locale }: { locale: Locale }) {
               setEnabled(next);
             }}
           >
-            {enabled ? "Выключить в кабинете" : "Включить в кабинете"}
+            {enabled ? t(locale, "settings.disableNotices") : t(locale, "settings.enableNotices")}
           </button>
         </div>
       </div>
 
       <div className="panel">
-        <b>Последние уведомления</b>
+        <b>{t(locale, "settings.recentNotices")}</b>
         {notices.slice(0, 20).map((item) => (
           <div className="row" key={item.id}>
             <div>
@@ -477,7 +484,7 @@ function NotificationsSection({ locale }: { locale: Locale }) {
               <div className="muted">{item.body}</div>
             </div>
             <Link className="btn secondary" to={item.href || "/today"}>
-              Открыть
+              {t(locale, "common.open")}
             </Link>
           </div>
         ))}
@@ -523,20 +530,20 @@ function InterfaceSection({ locale }: { locale: Locale }) {
         {t(locale, "settings.timezone")}
         <input name="timezone" defaultValue={me?.user?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone} />
       </label>
-      <p className="muted">Личный часовой пояс меняет отображение времени. Автоматизация компании использует пояс организации.</p>
+      <p className="muted">{t(locale, "settings.timezoneHint")}</p>
       <label>
         {t(locale, "settings.timeFormat")}
         <select name="timeFormat" defaultValue={me?.user?.timeFormat || "24"}>
-          <option value="24">24 часа</option>
-          <option value="12">12 часов</option>
+          <option value="24">{t(locale, "settings.hours24")}</option>
+          <option value="12">{t(locale, "settings.hours12")}</option>
         </select>
       </label>
       <label>
         {t(locale, "settings.theme")}
         <select name="theme" defaultValue={me?.user?.theme || "system"}>
-          <option value="light">Светлая</option>
-          <option value="dark">Тёмная</option>
-          <option value="system">Системная</option>
+          <option value="light">{t(locale, "settings.themeLight")}</option>
+          <option value="dark">{t(locale, "settings.themeDark")}</option>
+          <option value="system">{t(locale, "settings.themeSystem")}</option>
         </select>
       </label>
       {status ? <p className="ok">{status}</p> : null}

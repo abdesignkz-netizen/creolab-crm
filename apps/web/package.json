@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "typecheck": "tsc -b"
+    "typecheck": "tsc -b",
+    "test": "node --test ../../scripts/i18n.test.mjs"
   },
   "dependencies": {
     "@creolab/api-client": "0.1.0",

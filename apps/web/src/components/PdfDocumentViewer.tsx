@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 
+import { useLocale } from "../lib/session";
+import { t } from "../i18n";
+
 type PdfDocumentViewerProps = {
   src: string;
   title: string;
@@ -62,6 +65,7 @@ function installPdfCompatibility() {
 }
 
 export function PdfDocumentViewer({ src, title, className = "" }: PdfDocumentViewerProps) {
+  const locale = useLocale();
   const hostRef = useRef<HTMLDivElement>(null);
   const [document, setDocument] = useState<PdfDocument | null>(null);
   const [page, setPage] = useState(1);
@@ -98,27 +102,27 @@ export function PdfDocumentViewer({ src, title, className = "" }: PdfDocumentVie
       canvas.width = Math.ceil(viewport.width); canvas.height = Math.ceil(viewport.height);
       canvas.className = "pdf-page-canvas";
       const context = canvas.getContext("2d");
-      if (!context) throw new Error("Не удалось подготовить просмотр PDF");
+      if (!context) throw new Error(t(locale, "pdf.prepareError"));
       host.replaceChildren(canvas);
       return pdfPage.render({ canvasContext: context, viewport }).promise;
-    }).catch((reason) => { if (!cancelled) setError(reason instanceof Error ? reason.message : "Не удалось отобразить страницу"); });
+    }).catch((reason) => { if (!cancelled) setError(reason instanceof Error ? reason.message : t(locale, "pdf.renderError")); });
     return () => { cancelled = true; };
-  }, [document, page, scale]);
+  }, [document, page, scale, locale]);
 
   return <div className={`pdf-document-viewer ${className}`}>
-    <div className="pdf-viewer-toolbar" aria-label={`Навигация по документу ${title}`}>
-      <button type="button" className="btn secondary" disabled={!document || page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>‹</button>
+    <div className="pdf-viewer-toolbar" aria-label={t(locale, "pdf.navigation", { title })}>
+      <button type="button" className="btn secondary" aria-label={t(locale, "common.previous")} disabled={!document || page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>‹</button>
       <span aria-live="polite">{document ? `${page} / ${document.numPages}` : "…"}</span>
-      <button type="button" className="btn secondary" disabled={!document || page >= document.numPages} onClick={() => setPage((value) => Math.min(document?.numPages || value, value + 1))}>›</button>
-      <button type="button" className="btn secondary" disabled={!document} onClick={() => setScale((value) => Math.max(0.75, value - 0.15))}>−</button>
-      <button type="button" className="btn secondary" disabled={!document} onClick={() => setScale((value) => Math.min(1.8, value + 0.15))}>+</button>
+      <button type="button" className="btn secondary" aria-label={t(locale, "common.next")} disabled={!document || page >= document.numPages} onClick={() => setPage((value) => Math.min(document?.numPages || value, value + 1))}>›</button>
+      <button type="button" className="btn secondary" aria-label={t(locale, "pdf.zoomOut")} disabled={!document} onClick={() => setScale((value) => Math.max(0.75, value - 0.15))}>−</button>
+      <button type="button" className="btn secondary" aria-label={t(locale, "pdf.zoomIn")} disabled={!document} onClick={() => setScale((value) => Math.min(1.8, value + 0.15))}>+</button>
     </div>
-    <div ref={hostRef} className="pdf-viewer-page" role="document" aria-label={`${title}, страница ${page}`}>
+    <div ref={hostRef} className="pdf-viewer-page" role="document" aria-label={t(locale, "pdf.page", { title, page })}>
       {nativeFallback ? <object className="pdf-native-fallback" data={src} type="application/pdf" aria-label={title}>
-        <div className="pdf-fallback-message"><p className="muted">Встроенный просмотр недоступен в этом браузере.</p><a className="btn secondary" href={src} target="_blank" rel="noreferrer">Открыть PDF отдельно</a></div>
+        <div className="pdf-fallback-message"><p className="muted">{t(locale, "pdf.unsupported")}</p><a className="btn secondary" href={src} target="_blank" rel="noreferrer">{t(locale, "pdf.openSeparately")}</a></div>
       </object> : null}
-      {loading ? <p className="muted">Открываем PDF…</p> : null}
-      {error ? <p className="muted">Открываем PDF в режиме совместимости…</p> : null}
+      {loading ? <p className="muted">{t(locale, "pdf.opening")}</p> : null}
+      {error ? <p className="muted">{t(locale, "pdf.compatibility")}</p> : null}
     </div>
   </div>;
 }
