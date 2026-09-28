@@ -1,0 +1,19 @@
+{
+  "companyName": "ТОО «CreoLab»",
+  "bin": "221140036408",
+  "address": "Республика Казахстан, г. Алматы, ул. Монгольская, 44",
+  "legalEmail": "info@creolab.kz",
+  "responsibleName": "Булан Асхат Болатұлы",
+  "responsibleRole": "директор",
+  "effectiveDate": "",
+  "hosting": "Сейчас используется Render; конфигурация репозитория указывает Frankfurt. Запланирован перенос на ps.kz. Регион основной базы, файлов, журналов и резервных копий после переноса ещё не подтверждён.",
+  "processors": "Перечень фактически используемых получателей, юридических лиц, стран, целей и категорий данных требуется подтвердить до публикации. В коде предусмотрены внешние AI-, почтовые и коммуникационные провайдеры; наличие интеграции в коде не подтверждает её использование.",
+  "release": {
+    "approved": false,
+    "emailVerified": true,
+    "storageKzVerified": false,
+    "processorsReviewed": false,
+    "retentionOperational": false,
+    "securityReviewed": false
+  }
+}

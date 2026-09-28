@@ -114,7 +114,7 @@ function yearly(monthly: number) {
   return monthly * 10;
 }
 
-export const CATALOG_VERSION = 4;
+export const CATALOG_VERSION = 5;
 // -1 means no commercial quota. It never means that an unimplemented module exists.
 const UNLIMITED_CRM = { [L.CLIENTS]: -1, [L.ACTIVE_DEALS]: -1, [L.MONTHLY_LEADS]: -1 };
 export const PRICING_CATALOG: CatalogItem[] = [
@@ -122,7 +122,7 @@ export const PRICING_CATALOG: CatalogItem[] = [
     code: "BASQAR_FREE", name: "BasQar Free", product: "CRM", kind: "plan",
     monthlyPriceMinor: 0, yearlyPriceMinor: 0, public: true, active: true,
     catalogStatus: "AVAILABLE", chargeType: "RECURRING", sortOrder: 0,
-    description: "Бесплатный тариф для работы в BasQar без ограничения по сроку.",
+    description: "Бесплатная CRM без ограничения по сроку. AI Manager — пробный режим для ознакомления с консультациями клиентов и обработкой заявок; 100 AI-кредитов один раз.",
     features: { ...CRM_BASE, ...AI_FEATURES, [F.MASS_MESSAGING]: false, [F.MASS_CAMPAIGNS]: false },
     limits: { [L.USERS]: 1, members: 1, [L.CLIENTS]: -1, [L.ACTIVE_DEALS]: -1,
       [L.MONTHLY_LEADS]: -1, [L.PIPELINES]: 1, [L.DEPARTMENTS]: 0,
@@ -145,8 +145,8 @@ export const PRICING_CATALOG: CatalogItem[] = [
     catalogStatus: "AVAILABLE",
     chargeType: "RECURRING",
     sortOrder: 10,
-    description: "Основной тариф для небольшой команды.",
-    features: { ...CRM_BASE, [F.AI_MANAGER]: true, [F.MASS_MESSAGING]: true },
+    description: "CRM и BasQar Control для небольшой команды. ИИ-менеджер не входит в тариф.",
+    features: { ...CRM_BASE, [F.AI_MANAGER]: false, [F.MASS_MESSAGING]: true },
     limits: { [L.CLIENTS]: -1, [L.ACTIVE_DEALS]: -1, [L.MONTHLY_LEADS]: -1, [L.DATABASE_MB]: -1, [L.FILE_STORAGE_MB]: 5120, [L.USERS]: 3, members: 3, [L.PIPELINES]: 1, [L.DEPARTMENTS]: 0, [L.WHATSAPP_CONNECTIONS]: 1, whatsappActive: 1, [L.AI_USAGE]: 1000, [L.AI_CREDITS]: 1000, [L.AUTOMATION_RUNS]: 300, [L.DOCUMENTS]: 30, [L.CAMPAIGN_RECIPIENTS]: 300, [L.STORAGE_BYTES]: 5 * 1024 * 1024 * 1024, [L.STORAGE_GB]: 5 },
   },
   {

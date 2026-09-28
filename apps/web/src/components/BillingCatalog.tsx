@@ -21,7 +21,7 @@ export function catalogPrice(item: BillingCatalogItem, period: BillingPeriod) {
 }
 
 const AUDIENCE: Record<string, string> = {
-  BASQAR_FREE: "Не демо. Работайте со своими клиентами и данными.",
+  BASQAR_FREE: "CRM для работы со своими клиентами. ИИ-менеджер — в пробном режиме.",
   CRM_START: "Для ежедневной работы малого бизнеса.",
   CONTROL: "Для отдела продаж и растущей команды.",
   SALES: "Для компаний с большим потоком клиентов и процессов.",
@@ -33,7 +33,7 @@ const GROUPS = [
 ];
 
 // These rows describe the catalog flags; availability and limits always come from the server.
-const FEATURE_GROUPS: Array<{ title: string; rows: Array<{ key: Feature; label: string }> }> = [
+const FEATURE_GROUPS: Array<{ title: string; requires?: Feature; rows: Array<{ key: Feature; label: string }> }> = [
   { title: "CRM", rows: [{key:"CRM_CORE",label:"Ситуация, история, теги и заметки"}] },
   { title: "Клиенты и компании", rows: [{key:"CLIENTS",label:"Клиенты"},{key:"COMPANIES",label:"Компании"},{key:"IMPORT",label:"Импорт клиентов"},{key:"EXPORT",label:"Экспорт и сегментация"}] },
   { title: "Заявки", rows: [{key:"LEADS",label:"Заявки, источники и UTM"}] },
@@ -42,7 +42,7 @@ const FEATURE_GROUPS: Array<{ title: string; rows: Array<{ key: Feature; label: 
   { title: "Аналитика", rows: [{key:"CRM_CORE",label:"Базовая CRM-аналитика"},{key:"AI_CONTROL",label:"AI-анализ данных компании"}] },
   { title: "Документы", rows: ["Единый раздел документов", "Договоры и договор из сделки", "Word-шаблоны, DOCX и PDF", "Счета, АВР и ЭСФ", "Импорт PDF/DOC/DOCX, OCR и распознавание", "NCALayer, подписание и проверка"].map(label => ({key:"DOCUMENTS" as Feature,label})).concat([{key:"ESF",label:"ИС ЭСФ при настроенном подключении"}]) },
   { title: "BasQar Control", rows: [{key:"AI_CONTROL",label:"Сводка, поиск, отчёты и безопасные команды CRM"},{key:"CONTROL_BULK",label:"Массовое назначение, изменение и создание"}] },
-  { title: "AI-менеджер продаж", rows: [{key:"AI_MANAGER",label:"AI-менеджер продаж"},{key:"AI_MANAGER",label:"MANUAL / ASSIST / CONFIRM / AUTO"},{key:"AI_MANAGER",label:"AI knowledge, Conversation Context, follow-up и передача человеку"},{key:"ADVANCED_AUTOMATION",label:"Расширенные правила AI и расписание"}] },
+  { title: "AI-менеджер продаж", requires: "AI_MANAGER", rows: [{key:"AI_MANAGER",label:"AI-менеджер продаж"},{key:"AI_MANAGER",label:"MANUAL / ASSIST / CONFIRM / AUTO"},{key:"AI_MANAGER",label:"AI knowledge, Conversation Context, follow-up и передача человеку"},{key:"ADVANCED_AUTOMATION",label:"Расширенные правила AI и расписание"}] },
   { title: "Коммуникации", rows: [{key:"MESSAGING",label:"Переписка через подключённый канал"}] },
   { title: "Рассылки", rows: [{key:"MASS_MESSAGING",label:"Кампании, CSV/Excel, сегменты, расписание, статусы и retry"}] },
   { title: "Интеграции", rows: [{key:"CHANNELS",label:"Подключение поддерживаемых коммуникационных каналов"}] },
@@ -59,7 +59,11 @@ function highlights(item: BillingCatalogItem) {
   if (f.MASS_MESSAGING) rows.push("Массовые кампании с подтверждением запуска"); else rows.push("Массовые рассылки — с тарифа Start");
   if (f.CONTROL_BULK) rows.push("Массовые действия Control и расширенные правила AI");
   if (f.SUPPORT) rows.push("Импорт, экспорт и поддержка команды");
-  if (f.AI_MANAGER) rows.push("AI Manager: консультации клиентов и обработка заявок");
+  if (f.AI_MANAGER) {
+    rows.push(item.code === "BASQAR_FREE"
+      ? "AI Manager: пробный режим для ознакомления с консультациями клиентов и обработкой заявок"
+      : "AI Manager: консультации клиентов и обработка заявок");
+  }
   if (f.AI_CONTROL) rows.push("BasQar Control: команды для задач, сделок и статистики");
   if (f.API) rows.push("Доступ через API");
   if (f.PRIORITY_SUPPORT) rows.push("Приоритетная поддержка");
@@ -105,8 +109,8 @@ export function BillingCatalog({ items, period, selected, current, disabled, onS
     </article>;
   }
   return <div id="billing-catalog" className="billing-catalog stack">
-    <div><h3>Выберите тариф под свою задачу</h3><p className="muted">Один продукт — четыре масштаба работы. Основные возможности включены во все тарифы. Массовые рассылки доступны со Start.</p></div>
-    <p className="muted">1 AI-кредит ≈ одно стандартное AI-действие. Ресурсы обновляются каждый расчётный месяц, в том числе при оплате за год, и не переносятся. 100 AI-кредитов Free выдаются один раз. Стоимость услуг внешнего WhatsApp-провайдера не входит в тариф BasQar.</p>
+    <div><h3>Выберите тариф под свою задачу</h3><p className="muted">Один продукт — четыре масштаба работы. CRM и BasQar Control доступны во всех тарифах. ИИ-менеджер: пробный режим в Free, включён в Business и Pro. Массовые рассылки доступны со Start.</p></div>
+    <p className="muted">1 AI-кредит ≈ одно стандартное AI-действие. Ресурсы обновляются каждый расчётный месяц, в том числе при оплате за год, и не переносятся. 100 AI-кредитов Free выдаются один раз, в том числе для ознакомления с ИИ-менеджером. AI-кредиты Start используются для BasQar Control и других доступных AI-действий; ИИ-менеджер в Start не входит. Стоимость услуг внешнего WhatsApp-провайдера не входит в тариф BasQar.</p>
     <nav className="billing-section-links" aria-label="Группы тарифов">
       {GROUPS.map((group) => <a key={group.id} href={`#billing-${group.id}`}>{group.title}</a>)}
       <a href="#billing-comparison">Сравнить возможности</a>
@@ -127,7 +131,7 @@ export function BillingCatalog({ items, period, selected, current, disabled, onS
           <tbody>
             <tr><th scope="row">Цена / {periodLabel}</th>{comparison.map((item) => <td key={item.code}>{formatKzt(catalogPrice(item, period))}</td>)}</tr>
             {DISPLAY_LIMITS.map((key) => <tr key={key}><th scope="row">{LIMIT_LABEL[key]}</th>{comparison.map((item) => <td key={item.code}>{item.limits[key] === -1 ? "Без квоты" : item.limits[key] === 0 && key === "CAMPAIGN_RECIPIENTS" ? "С тарифа Start" : item.limits[key] == null ? "По условиям тарифа" : resourceText(item, key)}</td>)}</tr>)}
-            {FEATURE_GROUPS.flatMap(group => [<tr key={group.title}><th colSpan={comparison.length + 1}>{group.title}</th></tr>, ...group.rows.map(({ key, label }) => <tr key={`${group.title}-${label}`}><th scope="row">{label || FEATURE_LABEL[key]}</th>{comparison.map((item) => <td key={item.code} className={item.features[key] ? "billing-included" : "muted"}>{item.features[key] ? "Включено" : "—"}</td>)}</tr>)])}
+            {FEATURE_GROUPS.flatMap(group => [<tr key={group.title}><th colSpan={comparison.length + 1}>{group.title}</th></tr>, ...group.rows.map(({ key, label }) => <tr key={`${group.title}-${label}`}><th scope="row">{label || FEATURE_LABEL[key]}</th>{comparison.map((item) => <td key={item.code} className={item.features[key] && (!group.requires || item.features[group.requires]) ? "billing-included" : "muted"}>{item.features[key] && (!group.requires || item.features[group.requires]) ? (key === "AI_MANAGER" && item.code === "BASQAR_FREE" ? "Пробный режим · 100 AI-кредитов один раз" : "Включено") : "—"}</td>)}</tr>)])}
           </tbody>
         </table>
       </div>

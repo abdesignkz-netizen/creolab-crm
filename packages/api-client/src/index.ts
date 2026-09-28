@@ -98,12 +98,14 @@ export function createApiClient(options: ClientOptions) {
       request("/api/v1/auth/platform-login", { method: "POST", body: JSON.stringify({ email, password, client }) }),
     requestSignup: (email: string, companyName: string) =>
       request("/api/v1/auth/signup-request", { method: "POST", body: JSON.stringify({ email, companyName }) }),
+    legalDocuments: () => request("/api/v1/legal/documents"),
     registerAccount: (body: {
       name: string;
       companyName: string;
       email: string;
       password: string;
       passwordConfirm?: string;
+      legalAcceptance?: { revision: string; offerAccepted: boolean; personalDataAccepted: boolean; authorizedRepresentative: boolean };
     }) => request("/api/v1/auth/register", { method: "POST", body: JSON.stringify(body) }),
     verifyRegistration: (email: string, code: string) =>
       request("/api/v1/auth/register/verify", { method: "POST", body: JSON.stringify({ email, code }) }),

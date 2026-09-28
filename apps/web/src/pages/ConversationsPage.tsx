@@ -1,3 +1,4 @@
+import { useSession } from "../lib/session";
 import { ChannelIcon, ConversationAvatar, CONVERSATION_CHANNELS } from "../components/ConversationIdentity";
 import { useUrlState, useRequestVersion } from "../lib/useUrlState";
 import { useEffect, useLayoutEffect, useRef, useState, type DragEvent } from "react";
@@ -95,6 +96,8 @@ function MessageBody({ message }: { message: any }) {
 }
 
 export function ConversationsPage() {
+  const { me } = useSession();
+  const aiManagerAllowed = Boolean(me?.billing?.entitlements?.AI_MANAGER);
   const listVersion = useRequestVersion();
   const workspaceVersion = useRequestVersion();
   const navigate = useNavigate();
@@ -411,7 +414,7 @@ export function ConversationsPage() {
               >
                 Передать менеджеру
               </button>
-            ) : !staffOnly ? (
+            ) : !staffOnly && aiManagerAllowed ? (
               <button
                 className="btn secondary"
                 type="button"
@@ -655,7 +658,7 @@ export function ConversationsPage() {
           type="button"
           className="btn secondary"
           style={{ marginTop: 8 }}
-          disabled={busy}
+          disabled={busy || !aiManagerAllowed}
           {...tip("Проанализировать переписку и выделить потребность и договорённости")}
           onClick={async () => {
             setBusy(true);

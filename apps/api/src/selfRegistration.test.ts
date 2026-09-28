@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import { createPrismaClient } from "@creolab/db";
 import { createApp } from "./app.ts";
+import { getLegalBundle, legalProfile } from "./services/legalDocuments.ts";
 import { resetRateLimits } from "./lib/rateLimit.ts";
 
 describe("self-service registration and preview entitlements", () => {
@@ -61,7 +62,7 @@ describe("self-service registration and preview entitlements", () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   });
 
-  it("registers a company after email verification and opens preview CRM", async () => {
+  it("registers a company after email verification with current Free entitlements", async () => {
     resetRateLimits();
     const email = `owner-a-${Date.now()}@example.test`;
     const started = await req("", "/api/v1/auth/register", {
@@ -94,7 +95,8 @@ describe("self-service registration and preview entitlements", () => {
     assert.equal(verified.data.user.billing.previewMode, false);
     assert.equal(verified.data.user.billing.subscriptionStatus, "active");
     assert.equal(verified.data.user.billing.organizationStatus, "active");
-    assert.equal(verified.data.user.billing.entitlements.WHATSAPP, false);
+    assert.equal(verified.data.user.billing.entitlements.WHATSAPP, true);
+    assert.equal(verified.data.user.billing.planCode, "BASQAR_FREE");
 
     const user = await prisma.user.findUniqueOrThrow({ where: { email } });
     assert.ok(user.passwordHash);
@@ -118,20 +120,19 @@ describe("self-service registration and preview entitlements", () => {
       tenantId,
       body: { instanceId: "1111111111", apiToken: "token-preview" },
     });
-    assert.equal(blocked.status, 403);
-    assert.equal(blocked.data.code, "feature_required");
+    assert.notEqual(blocked.data.code, "feature_required");
+    assert.ok(blocked.status === 200 || blocked.status === 422, JSON.stringify(blocked.data));
 
     const ai = await req(cookie, "/api/v1/ai/sandbox", {
       method: "POST",
       tenantId,
       body: { message: "тест" },
     });
-    assert.equal(ai.status, 403);
-    assert.equal(ai.data.code, "feature_required");
+    assert.equal(ai.status, 200);
+    assert.equal(ai.data.sandbox, true);
 
     const support = await req(cookie, "/api/v1/support/articles", { tenantId });
-    assert.equal(support.status, 403);
-    assert.equal(support.data.code, "feature_required");
+    assert.equal(support.status, 200);
 
     const billing = await req(cookie, "/api/v1/billing", { tenantId });
     assert.equal(billing.status, 200);
@@ -235,4 +236,62 @@ describe("self-service registration and preview entitlements", () => {
     assert.equal(leak.status, 403);
     void demoId;
   });
+  it("serves public legal HTML, rejects stale links and records verified acceptance", async () => {
+    resetRateLimits();
+    const draft = await req("", "/api/v1/legal/documents");
+    assert.equal(draft.status, 200);
+    assert.equal(draft.data.active, false);
+    const page = await fetch(`${url}${draft.data.documents[0].url}`);
+    assert.equal(page.status, 200);
+    assert.match(page.headers.get("content-type")!, /text\/html/);
+    assert.equal(page.headers.get("cache-control"), "no-store");
+    assert.match(page.headers.get("content-security-policy")!, /default-src 'none'/);
+    assert.match(await page.text(), /Проект для согласования/);
+    assert.equal((await fetch(`${url}/legal/offer?revision=stale`)).status, 409);
+    assert.equal((await fetch(`${url}/legal/missing`)).status, 404);
+    const legacyEmail = `legacy-legal-${Date.now()}@example.test`;
+    const legacy = await req("", "/api/v1/auth/register", { method: "POST", body: { name: "Legacy Applicant", companyName: "Legacy Test", email: legacyEmail, password: "SignupPass1!", passwordConfirm: "SignupPass1!" } });
+    assert.equal(legacy.status, 200);
+    const previous = structuredClone(legalProfile);
+    const previousEnv = process.env.BASQAR_LEGAL_PUBLISHED;
+    try {
+      legalProfile.effectiveDate = "2026-01-01";
+      for (const key of Object.keys(legalProfile.release) as Array<keyof typeof legalProfile.release>) legalProfile.release[key] = true;
+      process.env.BASQAR_LEGAL_PUBLISHED = "1";
+      const legacyVerify = await req("", "/api/v1/auth/register/verify", { method: "POST", body: { email: legacyEmail, code: legacy.data.verificationCode } });
+      assert.equal(legacyVerify.status, 409);
+      assert.equal(legacyVerify.data.code, "legal_consent_required");
+      assert.equal(await prisma.user.count({ where: { email: legacyEmail } }), 0);
+      const bundle = getLegalBundle();
+      const body = { name: "Test Legal Owner", companyName: "Legal Test Company", email: `legal-${Date.now()}@example.test`, password: "SignupPass1!", passwordConfirm: "SignupPass1!" };
+      const missing = await req("", "/api/v1/auth/register", { method: "POST", body });
+      assert.equal(missing.status, 422);
+      assert.equal(missing.data.code, "legal_consent_required");
+      assert.equal(await prisma.pendingRegistration.count({ where: { email: body.email } }), 0);
+      const legalAcceptance = { revision: bundle.revision, offerAccepted: true, personalDataAccepted: true, authorizedRepresentative: true };
+      const stale = await req("", "/api/v1/auth/register", { method: "POST", body: { ...body, legalAcceptance: { ...legalAcceptance, revision: "0".repeat(64) } } });
+      assert.equal(stale.status, 409);
+      assert.equal(stale.data.code, "legal_revision_changed");
+      const started = await req("", "/api/v1/auth/register", { method: "POST", body: { ...body, legalAcceptance } });
+      assert.equal(started.status, 200, JSON.stringify(started.data));
+      const pending = await prisma.pendingRegistration.findFirstOrThrow({ where: { email: body.email } });
+      const evidence = await prisma.auditEvent.findFirstOrThrow({ where: { action: "legal.registration_accepted", entityId: pending.id } });
+      const snapshot = evidence.changesJson as any;
+      assert.deepEqual(snapshot.documents, bundle.documents);
+      assert.equal(snapshot.subject.email, body.email);
+      assert.ok(!JSON.stringify(snapshot).includes(body.password));
+      assert.ok(!JSON.stringify(snapshot).includes(started.data.verificationCode));
+      const verified = await req("", "/api/v1/auth/register/verify", { method: "POST", body: { email: body.email, code: started.data.verificationCode } });
+      assert.equal(verified.status, 200, JSON.stringify(verified.data));
+      const user = await prisma.user.findUniqueOrThrow({ where: { email: body.email } });
+      const confirmation = await prisma.auditEvent.findFirstOrThrow({ where: { action: "legal.registration_confirmed", actorUserId: user.id } });
+      assert.equal((confirmation.changesJson as any).acceptanceEventId, evidence.id);
+      assert.ok(confirmation.tenantId);
+    } finally {
+      Object.assign(legalProfile, previous);
+      if (previousEnv === undefined) delete process.env.BASQAR_LEGAL_PUBLISHED;
+      else process.env.BASQAR_LEGAL_PUBLISHED = previousEnv;
+    }
+  });
+
 });

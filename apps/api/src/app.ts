@@ -1,3 +1,4 @@
+import { getLegalBundle, renderLegalDocument } from "./services/legalDocuments.ts";
 import { getConversationAvatar } from "./services/conversationAvatarService.ts";
 import { requirePlatformAdmin } from "./lib/access.ts";
 import { listTenantServices, saveTenantService } from "./services/tenantServiceCatalog.ts";
@@ -348,6 +349,7 @@ const SESSION_COOKIE = {
 
 export function createApp(prisma: PrismaClient) {
   const app = express();
+  getLegalBundle(); // Reject an attempted publication with unverified release prerequisites.
   app.disable("x-powered-by");
   if (config.trustProxy !== false) {
     app.set("trust proxy", config.trustProxy);
@@ -375,6 +377,24 @@ export function createApp(prisma: PrismaClient) {
     res.locals.requestId = requestId;
     res.setHeader("x-request-id", requestId);
     next();
+  });
+
+  app.get("/api/v1/legal/documents", (_req, res) => {
+    const bundle = getLegalBundle();
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ active: bundle.active, revision: bundle.revision, version: bundle.version,
+      documents: bundle.documents.map(({ slug, title, sha256 }) => ({ slug, title, sha256, url: `/legal/${slug}?revision=${bundle.revision}` })) });
+  });
+  app.get("/legal/:slug", (req, res) => {
+    const bundle = getLegalBundle();
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'");
+    if (req.query.revision && req.query.revision !== bundle.revision) {
+      res.status(409).type("text").send("Редакция документов изменилась. Обновите страницу регистрации. Копию ранее принятой редакции можно запросить у оператора."); return;
+    }
+    const html = renderLegalDocument(bundle, req.params.slug);
+    if (!html) { res.status(404).type("text").send("Документ не найден"); return; }
+    res.type("html").send(html);
   });
 
   app.get("/health", (_req, res) => {
@@ -2749,6 +2769,13 @@ export function createApp(prisma: PrismaClient) {
       integrationId: req.header("x-crm-integration-id") || null,
     });
     res.status(202).json(result);
+  });
+
+  app.get("/api/v1/integrations/seller-events/:integrationId/ai-access", async (req, res) => {
+    const { sellerAiAccess } = await import("./services/sellerLink.ts");
+    const secret = String(req.header("authorization") || "").replace(/^Bearer\s+/i, "");
+    res.setHeader("Cache-Control", "no-store");
+    res.json(await sellerAiAccess(prisma, { secret, integrationId: req.params.integrationId }));
   });
 
   app.post("/api/v1/integrations/seller-events/:integrationId", jsonLarge, async (req, res) => {

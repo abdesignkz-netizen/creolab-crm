@@ -1546,3 +1546,15 @@ export async function controlBoard(prisma: PrismaClient, auth: AuthContext) {
 }
 
 export { crmModeToSeller };
+
+/** The standalone seller must check this before each AI reply, not just on connection. */
+export async function sellerAiAccess(prisma: PrismaClient, input: { secret: string; integrationId: string }) {
+  const integration = await resolveSellerIntegrationForEvent(prisma, input);
+  const { getEntitlements } = await import("./entitlementService.ts");
+  const { canConsume } = await import("./billingResourceService.ts");
+  const access = await getEntitlements(prisma, integration.tenantId);
+  const enabled = integration.status !== "disabled" && integration.connectionStatus !== "DISCONNECTED";
+  if (!enabled || !access.entitlements.AI_MANAGER) return { allowed: false, reason: enabled ? "feature_required" : "integration_disabled", trial: false };
+  const credits = await canConsume(prisma, integration.tenantId, "AI_CREDITS", 1);
+  return { allowed: credits.allowed, reason: credits.allowed ? null : "ai_credits_exhausted", trial: access.snapshot.planCode === "BASQAR_FREE" };
+}

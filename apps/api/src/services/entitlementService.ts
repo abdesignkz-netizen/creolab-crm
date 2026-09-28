@@ -60,7 +60,7 @@ const PLAN_FEATURE_ALIASES: Record<Feature, string[]> = {
 };
 
 const FEATURE_HINT: Partial<Record<Feature, string>> = {
-  AI_MANAGER: "AI работает по лимиту AI-кредитов вашего тарифа.",
+  AI_MANAGER: "ИИ-менеджер не входит в Start. В Free доступен пробный режим, в Business и Pro — работа в пределах AI-кредитов.",
   AI_CONTROL: "AI-контроль бизнеса доступен на всех тарифах.",
   WHATSAPP: "WhatsApp доступен на всех тарифах в пределах лимита подключений.",
   DOCUMENTS: "Документы доступны на всех тарифах в пределах месячного лимита.",
@@ -198,7 +198,18 @@ export async function getSubscriptionSnapshot(prisma: PrismaClient, tenantId: st
 
 function planAllowsFeature(row: TenantPlanRow | null, feature: Feature, entitled: boolean) {
   if (!entitled) return false;
-  if (!row || isLegacyPlan(row.plan)) return true;
+  if (!row) return true;
+  // Start no longer includes AI Manager, including saved pre-v5 base features.
+  // Preserve explicitly purchased historical AI modules and tenant overrides.
+  if (row.plan.code === "CRM_START" && feature === FEATURES.AI_MANAGER) {
+    const saved = asRecord(row.priceSnapshotJson);
+    const addons = Array.isArray(row.itemsJson) ? row.itemsJson : Array.isArray(saved.addOns) ? saved.addOns : [];
+    return addons.some(value => {
+      const addon = asRecord(value);
+      return ["ADDON_AI_START", "ADDON_AI_BUSINESS", "ADDON_AI_PRO"].includes(String(addon.code)) && Number(addon.qty ?? 1) > 0;
+    });
+  }
+  if (isLegacyPlan(row.plan)) return true;
   const snap = asRecord(row.featuresSnapshotJson);
   const json = Object.keys(snap).length ? snap : asRecord(row.plan.featuresJson);
   const version = Number(asRecord(row.priceSnapshotJson).planVersion || 1);
@@ -404,7 +415,7 @@ const PAID_RULES: FeatureRule[] = [
   { pattern: /^\/api\/v1\/(documents|contracts|invoices|electronic-documents)(\/|$)/, feature: FEATURES.DOCUMENTS },
   { pattern: /^\/api\/v1\/deals\/[^/]+\/(contract|invoice|avr)/, feature: FEATURES.DOCUMENTS },
   { pattern: /^\/api\/v1\/(tasks|campaigns)\/[^/]+\/attachments$/, feature: FEATURES.FILE_STORAGE },
-  // AI operations are available on every tariff; the AI credit ledger enforces usage.
+  // AI Manager requires its own entitlement; shared Control actions use AI_CONTROL.
   { pattern: /^\/api\/v1\/integrations\/whatsapp-seller\/(connect|rotate-secret|disconnect|sync)$/, feature: FEATURES.WHATSAPP },
   { pattern: /^\/api\/v1\/integrations\/esf\//, feature: FEATURES.ESF },
   { pattern: /^\/api\/v1\/electronic-documents\/[^/]+\/esf-/, feature: FEATURES.ESF },

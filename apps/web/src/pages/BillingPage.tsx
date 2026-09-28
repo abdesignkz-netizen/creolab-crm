@@ -149,6 +149,7 @@ export function BillingPage() {
       {data?.enterpriseTerms?.sla ? <p>Поддержка / SLA: {data.enterpriseTerms.sla}</p> : null}
       {data?.enterpriseTerms?.integrations ? <p>Согласованные интеграции: {data.enterpriseTerms.integrations}</p> : null}
       {currentFree ? <p>0 ₸ · Для самостоятельной работы и знакомства с BasQar.</p> : null}
+      {data?.entitlements?.AI_MANAGER && currentFree ? <p className="muted">ИИ-менеджер доступен в пробном режиме для ознакомления с консультациями клиентов и обработкой заявок. 100 AI-кредитов выдаются один раз и используются всеми AI-функциями.</p> : data?.planCode === "CRM_START" && !data?.entitlements?.AI_MANAGER ? <p className="muted">ИИ-менеджер не входит в Start. AI-кредиты доступны для BasQar Control и других AI-действий тарифа.</p> : null}
       <div className="billing-usage-grid">{(data?.usage || []).map((row: { key: string; label: string; used: number; cap: number; unit?: string; measured?: boolean }) => <div key={row.key} className="billing-usage"><div className="billing-usage-label"><span>{row.label}</span><span>{row.measured === false ? "Ещё не рассчитано" : `${row.used} / ${row.cap < 0 ? "без квоты" : row.cap}${row.unit ? ` ${row.unit}` : ""}`}</span></div><div className="usage-bar"><span style={{ width: `${row.cap > 0 ? Math.min(100, row.used / row.cap * 100) : 0}%` }} /></div></div>)}</div>
       {data?.massCampaignsEnabled === false ? <p className="muted">Массовые рассылки — с тарифа Start. Индивидуальные сообщения клиентам доступны.</p> : null}
       {!preview ? <div className="actions">

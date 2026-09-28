@@ -1,3 +1,4 @@
+import { useSession } from "../lib/session";
 import { TikTokConnectionsPanel } from "./TikTokConnectionsPanel";
 import { MetaConnectionsPanel } from "./MetaConnectionsPanel";
 import { GoogleConnectionsPanel } from "./GoogleConnectionsPanel";
@@ -22,6 +23,9 @@ function whatsappStatusNote(wa: any) {
 }
 
 export function IntegrationsPage() {
+  const { me } = useSession();
+  const aiManagerAllowed = Boolean(me?.billing?.entitlements?.AI_MANAGER);
+  const aiManagerTrial = aiManagerAllowed && me?.billing?.planCode === "BASQAR_FREE";
   const [editingWhatsApp, setEditingWhatsApp] = useState(false);
   const [savingWhatsApp, setSavingWhatsApp] = useState(false);
   const [catalog, setCatalog] = useState<any>(null);
@@ -275,7 +279,7 @@ export function IntegrationsPage() {
         <IntegrationHelp kind="whatsapp" />
         {setup?.whatsapp?.warning ? <div className="banner warn">{setup.whatsapp.warning}</div> : null}
         <p className="muted">{whatsappStatusNote(setup?.whatsapp)}</p>
-        <p className="muted">Как бот отвечает клиентам, задаёт администратор сервиса: промт и база знаний компании.</p>
+        <p className="muted">{aiManagerAllowed ? "Как бот отвечает клиентам, задаёт администратор сервиса: промпт и база знаний компании." : "WhatsApp доступен для переписки с клиентами. ИИ-менеджер не включён в ваш тариф."}</p>
         <p className="integ-status-line">
           Статус подключения
           <span className={statusBadgeClass(setup?.whatsapp?.configured ? "Подключён" : "Не подключён")}>
@@ -284,7 +288,7 @@ export function IntegrationsPage() {
         </p>
         <p className="integ-status-line">
           AI-менеджер
-          {setup?.whatsapp?.reachable ? (
+          {!aiManagerAllowed ? <span className="badge">Не входит в тариф</span> : aiManagerTrial ? <span className="badge">Пробный режим · 100 AI-кредитов один раз</span> : setup?.whatsapp?.reachable ? (
             <span className="badge ok">Активен</span>
           ) : setup?.whatsapp?.configured ? (
             <span className="badge warn">Не отвечает</span>

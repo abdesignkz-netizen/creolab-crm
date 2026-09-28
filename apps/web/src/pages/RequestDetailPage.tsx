@@ -4,7 +4,7 @@ import { Link, useParams } from "react-router-dom";
 import { nameWithPhone, phoneText } from "../lib/contactDisplay";
 import { formatDurationMinutes, formatWaitSince } from "../lib/duration";
 import { api } from "../lib/api";
-import { useCapabilities } from "../lib/session";
+import { useCapabilities, useSession } from "../lib/session";
 import { CALLS_ENABLED } from "../lib/featureFlags";
 import { tip } from "../lib/tip";
 import { dealOutcomeLabel } from "../lib/labels";
@@ -32,6 +32,8 @@ const STATUS_OPTIONS = [
 
 export function RequestDetailPage() {
   const caps = useCapabilities();
+  const { me } = useSession();
+  const aiManagerAllowed = Boolean(me?.billing?.entitlements?.AI_MANAGER);
   const { requestId = "" } = useParams();
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState("");
@@ -119,7 +121,7 @@ export function RequestDetailPage() {
               Принять в обработку
             </button>
           ) : null}
-          {data.automation?.canStart && !closed && !caps.manager ? (
+          {aiManagerAllowed && data.automation?.canStart && !closed && !caps.manager ? (
             <button
               className="btn"
               disabled={busy}

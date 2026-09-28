@@ -1,3 +1,4 @@
+import { useSession } from "../lib/session";
 import { notifySaved } from "../components/SaveNotice";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
@@ -196,6 +197,9 @@ function ScheduleEditor({
 }
 
 export function AiAutomationSettingsPage() {
+  const { me } = useSession();
+  const aiManagerAllowed = Boolean(me?.billing?.entitlements?.AI_MANAGER);
+  const aiManagerTrial = aiManagerAllowed && me?.billing?.planCode === "BASQAR_FREE";
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState("");
   const [hint, setHint] = useState("");
@@ -276,8 +280,8 @@ export function AiAutomationSettingsPage() {
   }
 
   useEffect(() => {
-    void load();
-  }, []);
+    if (aiManagerAllowed) void load();
+  }, [aiManagerAllowed]);
 
   async function save() {
     if (busy) return;
@@ -309,10 +313,12 @@ export function AiAutomationSettingsPage() {
     }
   }
 
+  if (!aiManagerAllowed) return <section className="panel"><h2>ИИ-менеджер</h2><p>ИИ-менеджер не входит в ваш тариф. Пробный режим доступен в Free; работа с клиентами — в Business и Pro.</p><Link to="/billing">Посмотреть тарифы</Link></section>;
   if (!data && !error) return <div className="state">Загрузка настроек…</div>;
 
   return (
     <section>
+      {aiManagerTrial ? <p className="banner">Пробный режим ИИ-менеджера для ознакомления с консультациями клиентов и обработкой заявок. В Free доступно 100 AI-кредитов один раз, общих для всех AI-функций.</p> : null}
       <div className="page-head">
         <div>
           <p className="page-kicker">

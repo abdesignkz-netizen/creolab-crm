@@ -46,6 +46,12 @@ export const selfRegisterSchema = z
     email: z.string().trim().email().max(200),
     password: z.string().min(8, "Минимум 8 символов").max(200),
     passwordConfirm: z.string().min(8).max(200).optional(),
+    legalAcceptance: z.object({
+      revision: z.string().regex(/^[a-f0-9]{64}$/),
+      offerAccepted: z.boolean(),
+      personalDataAccepted: z.boolean(),
+      authorizedRepresentative: z.boolean(),
+    }).optional(),
   })
   .superRefine((value, ctx) => {
     if (value.passwordConfirm != null && value.passwordConfirm !== value.password) {

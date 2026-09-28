@@ -89,7 +89,7 @@ describe("SaaS billing catalog, requests and manual activation", () => {
     assert.equal(start.limits.USERS, 3);
     assert.equal(start.features.CLIENTS, true);
     assert.equal(start.features.WORKFLOWS, false);
-    assert.equal(start.features.AI_MANAGER, true);
+    assert.equal(start.features.AI_MANAGER, false);
 
     for (const [code, price, users, ai, control] of [
       ["CONTROL", 34990, 10, true, true], ["SALES", 69990, 25, true, true],
@@ -360,7 +360,7 @@ describe("SaaS billing catalog, requests and manual activation", () => {
       }
       for (const [path,minimum] of [["support/articles",1],["documents",2],["workspace/control",2],["settings/ai-automation",3],["campaigns/missing",3]] as const) {
         const response = await req(account.cookie, `/api/v1/${path}`, {tenantId:account.tenantId});
-        assert.equal(response.status,path === "campaigns/missing" ? 404 : 200,`${planCode} ${path}: ${JSON.stringify(response.data)}`);
+        assert.equal(response.status,path === "campaigns/missing" ? 404 : path === "settings/ai-automation" && planCode === "CRM_START" ? 403 : 200,`${planCode} ${path}: ${JSON.stringify(response.data)}`);
       }
       if(index >= 3) {
         const advanced = await req(account.cookie,"/api/v1/settings/ai-automation",{method:"PATCH",body:{serviceModes:{WEB:"AUTO"}}});

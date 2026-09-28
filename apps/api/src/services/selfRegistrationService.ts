@@ -1,3 +1,4 @@
+import { getLegalBundle, validateLegalAcceptance, recordRegistrationAcceptance } from "./legalDocuments.ts";
 import { randomInt } from "node:crypto";
 import type { PrismaClient } from "@creolab/db";
 import {
@@ -91,6 +92,8 @@ export async function startSelfRegistration(
   meta: { ip?: string; userAgent?: string } = {},
 ) {
   const parsed = selfRegisterSchema.parse(input);
+  const legalBundle = getLegalBundle();
+  validateLegalAcceptance(parsed.legalAcceptance, legalBundle);
   const email = normalizeEmail(parsed.email);
   const companyName = parsed.companyName.replace(/\s+/g, " ").trim();
   const names = splitName(parsed.name);
@@ -122,7 +125,7 @@ export async function startSelfRegistration(
       where: { email, consumedAt: null },
       data: { consumedAt: new Date() },
     });
-    await tx.pendingRegistration.create({
+    const pending = await tx.pendingRegistration.create({
       data: {
         email,
         name: names.name,
@@ -135,6 +138,7 @@ export async function startSelfRegistration(
         userAgent: (meta.userAgent || "").slice(0, 400) || null,
       },
     });
+    await recordRegistrationAcceptance(tx, pending.id, legalBundle, { name: names.name, email, companyName });
   });
   await upsertSignupLead(prisma, {
     email,
@@ -242,6 +246,10 @@ export async function verifySelfRegistration(
     if (!locked || locked.consumedAt) {
       throw new ApiError(409, "consumed", "Регистрация уже подтверждена. Войдите в аккаунт.");
     }
+    const acceptance = await tx.auditEvent.findFirst({ where: { action: "legal.registration_accepted", entityType: "PendingRegistration", entityId: pending.id }, orderBy: { createdAt: "desc" } });
+    if (getLegalBundle().active && !acceptance) {
+      throw new ApiError(409, "legal_consent_required", "Начните регистрацию заново и примите опубликованные документы.");
+    }
     const user = await tx.user.create({
       data: {
         email,
@@ -272,6 +280,11 @@ export async function verifySelfRegistration(
     await tx.pendingRegistration.update({
       where: { id: pending.id },
       data: { consumedAt: new Date() },
+    });
+    if (acceptance) await writeAudit(tx, {
+      tenantId: tenant.id, actorUserId: user.id, action: "legal.registration_confirmed",
+      entityType: "user", entityId: user.id,
+      changes: { acceptanceEventId: acceptance.id, emailVerifiedAt: user.emailVerifiedAt, confirmedAt: new Date().toISOString() },
     });
     await tx.serviceSignupRequest.updateMany({
       where: { email, status: "NEW" },

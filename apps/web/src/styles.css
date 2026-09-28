@@ -3723,3 +3723,10 @@ html[data-theme="dark"] {
   .public-sign-actions { flex-direction: column; }
   .public-sign-actions .btn { width: 100%; text-align: center; }
 }
+
+/* Registration consent must remain legible on narrow screens. */
+.legal-consents { border: 1px solid #d9e2ef; border-radius: 12px; padding: 16px; margin: 16px 0; min-width: 0; }
+.login .legal-consents label { display: flex; align-items: flex-start; gap: 10px; margin: 12px 0; font-size: 14px; line-height: 1.5; }
+.login .legal-consents input[type="checkbox"] { width: 18px; height: 18px; flex: 0 0 18px; margin: 2px 0 0; }
+.legal-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 20px; font-size: 13px; line-height: 1.5; padding: 16px; text-align: center; }
+.legal-links a { overflow-wrap: anywhere; }

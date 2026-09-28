@@ -457,7 +457,7 @@ export async function startAiManagerForInquiry(prisma: PrismaClient, tenantId: s
   reason?: string | null; conversationId?: string;
 } | null> {
   const { canUseFeature } = await import("./entitlementService.ts");
-  if (!(await canUseFeature(prisma, tenantId, "AI_MANAGER"))) throw new ApiError(403, "feature_required", "AI-менеджер продаж доступен начиная с Sales.");
+  if (!(await canUseFeature(prisma, tenantId, "AI_MANAGER"))) throw new ApiError(403, "feature_required", "ИИ-менеджер не входит в Start. В Free доступен пробный режим, в Business и Pro — работа в пределах AI-кредитов.");
   const inquiry = await prisma.inquiry.findFirst({
     where: { id: inquiryId, tenantId },
     include: {

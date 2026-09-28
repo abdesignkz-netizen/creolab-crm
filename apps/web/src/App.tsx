@@ -724,6 +724,18 @@ function Login() {
   const [email, setEmail] = useState("");
   const [info, setInfo] = useState("");
   const [devCode, setDevCode] = useState("");
+  const [legal, setLegal] = useState<{ active: boolean; revision: string } | null>(null);
+  const [legalFailed, setLegalFailed] = useState(false);
+  const loadLegal = () => {
+    setLegalFailed(false);
+    return api.legalDocuments().then((result: any) => {
+      if (typeof result?.active !== "boolean" || !/^[a-f0-9]{64}$/.test(result?.revision)) throw new Error("Invalid legal metadata");
+      setLegal({ active: result.active, revision: result.revision });
+    }).catch(() => { setLegal(null); setLegalFailed(true); });
+  };
+  useEffect(() => { void loadLegal(); }, []);
+  const legalUrl = (slug: string) => `/legal/${slug}${legal ? `?revision=${legal.revision}` : ""}`;
+
 
   useEffect(() => {
     if (params.get("reset") === "1") navigate("/forgot-password", { replace: true });
@@ -798,6 +810,7 @@ function Login() {
             onSubmit={async (event) => {
               event.preventDefault();
               const form = new FormData(event.currentTarget);
+              if (!legal) { setError(t(locale, "legal.unavailable")); return; }
               const password = String(form.get("password") || "");
               const passwordConfirm = String(form.get("passwordConfirm") || "");
               if (password !== passwordConfirm) {
@@ -814,6 +827,12 @@ function Login() {
                   email: nextEmail,
                   password,
                   passwordConfirm,
+                  ...(legal.active ? { legalAcceptance: {
+                    revision: legal.revision,
+                    offerAccepted: form.get("offerAccepted") === "on",
+                    personalDataAccepted: form.get("personalDataAccepted") === "on",
+                    authorizedRepresentative: form.get("authorizedRepresentative") === "on",
+                  } } : {}),
                 })) as { verificationCode?: string; delivered?: boolean };
                 setEmail(nextEmail);
                 setDevCode(started.verificationCode || "");
@@ -834,7 +853,7 @@ function Login() {
             <h2>{t(locale, "login.registerTitle")}</h2>
             <p className="muted">{t(locale, "login.registerHint")}</p>
             <label>
-              {t(locale, "login.name")}
+              {t(locale, legal?.active ? "legal.fullName" : "login.name")}
               <input name="name" required autoComplete="name" maxLength={120} />
             </label>
             <label>
@@ -854,7 +873,22 @@ function Login() {
               <PasswordInput name="passwordConfirm" required minLength={8} autoComplete="new-password" />
             </label>
             {error ? <p className="error">{error}</p> : null}
-            <button className="btn" disabled={busy}>{t(locale, "login.sendRequest")}</button>
+            {legal?.active ? (
+              <fieldset className="legal-consents" key={legal.revision}>
+                <legend>{t(locale, "legal.confirmations")}</legend>
+                <label><input type="checkbox" name="offerAccepted" required />
+                  <span>{t(locale, "legal.acceptOffer")} <a href={legalUrl("offer")} target="_blank" rel="noopener noreferrer">{t(locale, "legal.offer")}</a></span>
+                </label>
+                <label><input type="checkbox" name="personalDataAccepted" required />
+                  <span>{t(locale, "legal.acceptData")} <a href={legalUrl("consent")} target="_blank" rel="noopener noreferrer">{t(locale, "legal.consent")}</a> · <a href={legalUrl("privacy")} target="_blank" rel="noopener noreferrer">{t(locale, "legal.privacy")}</a></span>
+                </label>
+                <label><input type="checkbox" name="authorizedRepresentative" required /><span>{t(locale, "legal.authorized")}</span></label>
+                <p className="muted">{t(locale, "legal.language")}</p>
+              </fieldset>
+            ) : null}
+            {!legal ? <p role="status">{t(locale, legalFailed ? "legal.unavailable" : "legal.loading")}</p> : null}
+            {legalFailed ? <button className="btn secondary" type="button" onClick={() => void loadLegal()}>{t(locale, "legal.retry")}</button> : null}
+            <button className="btn" disabled={busy || !legal}>{t(locale, "login.sendRequest")}</button>
             <p className="muted login-alt">
               {t(locale, "login.hasAccount")}{" "}
               <button
@@ -942,6 +976,11 @@ function Login() {
             </p>
           </div>
         ) : null}
+        <nav className="legal-links" aria-label={t(locale, "legal.documents")}>
+          <a href={legalUrl("offer")} target="_blank" rel="noopener noreferrer">{t(locale, "legal.offer")}</a>
+          <a href={legalUrl("privacy")} target="_blank" rel="noopener noreferrer">{t(locale, "legal.privacy")}</a>
+          <a href={legalUrl("consent")} target="_blank" rel="noopener noreferrer">{t(locale, "legal.consent")}</a>
+        </nav>
       </div>
     </div>
   );

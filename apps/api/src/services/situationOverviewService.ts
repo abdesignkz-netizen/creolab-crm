@@ -1,3 +1,4 @@
+import { getEntitlements } from "./entitlementService.ts";
 import type { PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
@@ -412,6 +413,7 @@ export async function getSituationOverview(
   requireAnalyticsAccess(auth);
   const membership = requireTenant(auth);
   const tid = membership.tenantId;
+  const aiAccess = await getEntitlements(prisma, tid);
   const timeZone = membership.tenant.timezone || "Asia/Almaty";
   const currency = membership.tenant.currency || "KZT";
   const now = new Date();
@@ -1313,12 +1315,12 @@ export async function getSituationOverview(
         : null,
     freshness: board.freshness,
     aiManager: {
-      status: board.freshness.seller.configured
+      status: !aiAccess.entitlements.AI_MANAGER ? "unavailable" : board.freshness.seller.configured
         ? board.freshness.seller.reachable
           ? "active"
           : "error"
         : "offline",
-      label: board.freshness.seller.configured
+      label: !aiAccess.entitlements.AI_MANAGER ? "ИИ-менеджер · не входит в тариф" : aiAccess.snapshot.planCode === "BASQAR_FREE" ? "ИИ-менеджер · пробный режим" : board.freshness.seller.configured
         ? board.freshness.seller.reachable
           ? "AI · активен"
           : "AI · ошибка подключения"

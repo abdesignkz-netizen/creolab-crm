@@ -21,7 +21,8 @@ describe("BasQar v4 product access, resources and legacy agreements", () => {
     assert.deepEqual(catalog.filter(item => item.kind !== "addon").map(item => item.code).sort(), ["BASQAR_FREE","CRM_START","CONTROL","SALES"].sort());
     for (const code of ["BASQAR_FREE","CRM_START","CONTROL","SALES"]) {
       const quote = await quoteSubscription(db,{planCode:code});
-      for (const key of ["CLIENTS","COMPANIES","LEADS","DEALS","TASKS","DOCUMENTS","AI_CONTROL","AI_MANAGER","CONTROL_BULK","ADVANCED_AUTOMATION","IMPORT","SUPPORT"] as const) assert.equal(quote.features[key],true);
+      for (const key of ["CLIENTS","COMPANIES","LEADS","DEALS","TASKS","DOCUMENTS","AI_CONTROL","CONTROL_BULK","ADVANCED_AUTOMATION","IMPORT","SUPPORT"] as const) assert.equal(quote.features[key],true);
+      assert.equal(quote.features.AI_MANAGER, code !== "CRM_START");
       assert.equal(quote.features.MASS_CAMPAIGNS,code !== "BASQAR_FREE");
     }
   });

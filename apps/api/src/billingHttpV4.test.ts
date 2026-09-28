@@ -61,6 +61,13 @@ describe("BasQar billing HTTP contract", () => {
     assert.equal(confirmed.status, 200, JSON.stringify(confirmed.data));
     assert.equal(confirmed.data.planCode, "CRM_START");
     assert.equal(confirmed.data.limits.AI_CREDITS, 1000);
+    assert.equal(confirmed.data.entitlements.AI_MANAGER, false);
+    assert.equal(confirmed.data.entitlements.AI_CONTROL, true);
+    for (const [method, path] of [["GET", "/api/v1/settings/ai-automation"], ["POST", "/api/v1/ai/sandbox"], ["POST", "/api/v1/conversations/missing/return-to-ai"]]) {
+      const denied = await req(account.cookie, path, { method, tenantId: account.tenantId, ...(method === "POST" ? { body: {} } : {}) });
+      assert.equal(denied.status, 403);
+      assert.equal(denied.data.code, "feature_required");
+    }
   });
   it("keeps individual work available while Free rejects a campaign", async () => {
     const account = await signup(`free-${Date.now()}@example.test`);
