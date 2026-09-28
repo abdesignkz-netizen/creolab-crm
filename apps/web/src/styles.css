@@ -3699,3 +3699,27 @@ html[data-theme="dark"] {
 #billing-confirm-form fieldset { min-width: 0; }
 #billing-confirm-form label { min-width: 0; }
 #billing-confirm-form input[type="checkbox"] { width: auto; margin-right: 8px; }
+
+/* Public signing is independent of the CRM/login form layout and its full-width buttons. */
+.public-sign-page { min-height: 100dvh; background: #f3f6fb; padding: 40px 24px 24px; color: #19263d; }
+.public-sign-container { width: min(100%, 1040px); margin: 0 auto; }
+.public-sign-brand { margin: 0 0 28px; }
+.public-sign-brand img { display: block; width: 152px; height: 32px; object-fit: contain; object-position: left; }
+.public-sign-brand p { margin: 10px 0 0; font-size: 14px; color: #596b85; }
+.public-sign-card { padding: 32px; border-radius: 20px; box-shadow: 0 8px 30px #21395806; }
+.public-sign-eyebrow { display: inline-block; margin: 0 0 16px; padding: 8px 12px; background: #eaf2ff; color: #205bbc; border-radius: 8px; font-size: 14px; font-weight: 600; }
+.public-sign-card h1 { margin: 0 0 14px; font-size: clamp(23px, 3vw, 32px); line-height: 1.3; overflow-wrap: anywhere; }
+.public-sign-parties { color: #596b85; line-height: 1.6; overflow-wrap: anywhere; }
+.public-sign-card .sign-doc-frame { margin: 24px 0; }
+.public-sign-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.public-sign-actions .btn { min-height: 46px; white-space: normal; }
+.public-sign-actions .btn:not(.secondary) { order: -1; }
+.public-sign-instructions { font-size: 14px; line-height: 1.6; }
+.public-sign-footer { text-align: center; color: #6d7b91; font-size: 12px; margin-top: 22px; }
+@media (max-width: 600px) {
+  .public-sign-page { padding: 24px 12px; }
+  .public-sign-brand { padding: 0 8px; margin-bottom: 22px; }
+  .public-sign-card { padding: 20px 16px; border-radius: 16px; }
+  .public-sign-actions { flex-direction: column; }
+  .public-sign-actions .btn { width: 100%; text-align: center; }
+}

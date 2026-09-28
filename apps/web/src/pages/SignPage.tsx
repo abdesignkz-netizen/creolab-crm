@@ -5,6 +5,18 @@ import { createSigningClient, ncalayerUserMessage } from "../lib/signing/ncalaye
 import { ContractSignatureSummary } from "../components/ContractSignatureSummary";
 import { PdfDocumentViewer } from "../components/PdfDocumentViewer";
 import { CONTRACT_SIGNING_ENABLED } from "../lib/featureFlags";
+import { BASQAR_PAGE_TITLE, BASQAR_TAGLINE, getDocumentSignMeta, publicDocumentText } from "@creolab/contracts";
+import type { ReactNode } from "react";
+
+function SignShell({ children }: { children: ReactNode }) {
+  return <main className="public-sign-page"><div className="public-sign-container">
+    <header className="public-sign-brand"><img src="/basqar-logo.svg" alt="BasQar" width="152" height="32" /><p>{BASQAR_TAGLINE}</p></header>
+    <section className="panel public-sign-card" aria-labelledby="sign-document-title">
+      <p className="public-sign-eyebrow">Документ на подпись</p>{children}
+    </section>
+    <p className="public-sign-footer">BasQar · Документы и работа вашего бизнеса</p>
+  </div></main>;
+}
 
 export function SignPage({ avr = false }: { avr?: boolean }) {
   const label = avr ? "АВР" : "договора";
@@ -18,6 +30,10 @@ export function SignPage({ avr = false }: { avr?: boolean }) {
   const [done, setDone] = useState("");
   const [pdfUrl, setPdfUrl] = useState("");
   const [pdfError, setPdfError] = useState("");
+  const meta = getDocumentSignMeta(avr ? "AVR" : "CONTRACT", data);
+  const parties = [publicDocumentText(data?.sellerName), publicDocumentText(data?.buyerName)].filter(Boolean).join(" → ");
+
+  useEffect(() => { document.title = BASQAR_PAGE_TITLE; }, []);
 
   async function load() {
     try {
@@ -59,14 +75,10 @@ export function SignPage({ avr = false }: { avr?: boolean }) {
 
   if (!CONTRACT_SIGNING_ENABLED) {
     return (
-      <div className="login">
-        <div className="login-stage">
-          <div className="panel" style={{ maxWidth: 560 }}>
-            <h2>Подписание {label}</h2>
+      <SignShell>
+            <h1 id="sign-document-title">Подписание документа</h1>
             <p className="muted">Подписание {label} пока недоступно.</p>
-          </div>
-        </div>
-      </div>
+      </SignShell>
     );
   }
 
@@ -96,45 +108,33 @@ export function SignPage({ avr = false }: { avr?: boolean }) {
     }
   }
 
-  if (!data && !error) return <div className="state">Загрузка…</div>;
+  if (!data && !error) return <SignShell><h1 id="sign-document-title">Открываем документ</h1><p role="status" className="muted">Загрузка…</p></SignShell>;
 
   return (
-    <div className="login">
-      <div className="login-stage sign-doc-stage">
-          <div className="panel" style={{ maxWidth: 920 }}>
-            <h2>Подписание {label}</h2>
-            <p className="muted">Нужен NCALayer с ключом подписи НУЦ. PIN на сервер не передаётся.</p>
+    <SignShell>
+            <h1 id="sign-document-title">{data ? meta.heading : "Не удалось открыть документ"}</h1>
             {error ? <p className="error">{error}</p> : null}
           {done ? <p className="muted">{done}</p> : null}
           {data ? (
             <>
-              <p>
-                <b>{data.subject || `${documentName} ${data.number}`}</b>
-              </p>
-              <p className="muted">
-                № {data.number}
-                {data.version ? ` · версия ${data.version}` : ""}
-                {data.date ? ` · ${new Date(data.date).toLocaleDateString("ru-RU")}` : ""}
-              </p>
-              <p className="muted">
-                {data.sellerName || "Исполнитель"} → {data.buyerName || "Заказчик"}
-              </p>
-              <p>
+              {parties ? <p className="public-sign-parties">{parties}</p> : null}
+              {data.amount != null && Number.isFinite(Number(data.amount)) ? <p className="muted">
                 Сумма: <b>{Number(data.amount || 0).toLocaleString("ru-RU")} {data.currency}</b>
-              </p>
+              </p> : null}
               {pdfUrl ? <PdfDocumentViewer className="sign-doc-frame" title={`${documentName} PDF`} src={pdfUrl} /> : null}
               {!pdfUrl && !pdfError ? <p className="muted">Открываем PDF…</p> : null}
               {pdfError ? <p className="error">{pdfError}. Используйте кнопку скачивания ниже.</p> : null}
               <ContractSignatureSummary documentLabel={label} signed={data.contractStatus === "SIGNED"} signers={data.signers || []}
                 verificationUrl={data.verificationUrl} sellerName={data.sellerName} buyerName={data.buyerName} download={format => signApi.download(token, format)} />
-              {data.declinedAt ? <p className="error">Вы отклонили этот АВР. Обратитесь к исполнителю для согласования.</p> : null}
+              {data.declinedAt ? <p className="error">Вы отклонили документ. Обратитесь к исполнителю для согласования.</p> : null}
               {data.waitingForSeller ? <p className="muted">Сначала должен подписать исполнитель.</p> : null}
-              <div className="actions">
+              <p className="muted public-sign-instructions">Ознакомьтесь с документом и подпишите его ЭЦП через NCALayer. PIN остаётся на вашем устройстве.</p>
+              <div className="actions public-sign-actions">
                 <a className="btn secondary" href={signApi.pdf(token)}>
                   Скачать исходный PDF
                 </a>
                 <button type="button" className="btn" disabled={busy || !data.canSign} onClick={() => void sign()}>
-                  {busy ? "Подписываем…" : "Подписать ЭЦП"}
+                  {busy ? "Подписываем…" : "Подписать документ"}
                 </button>
                 <button
                   type="button"
@@ -157,8 +157,6 @@ export function SignPage({ avr = false }: { avr?: boolean }) {
               </div>
             </>
           ) : null}
-        </div>
-      </div>
-    </div>
+    </SignShell>
   );
 }

@@ -11,6 +11,8 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { loadPublicSignMeta, renderPublicSignHtml, type PublicSignRouteType } from "./services/publicSignPage.ts";
 import path from "node:path";
 import type { PrismaClient } from "@creolab/db";
 import {
@@ -2793,6 +2795,17 @@ export function createApp(prisma: PrismaClient) {
   ];
   const webDist = webDistCandidates.find((dir) => existsSync(path.join(dir, "index.html")));
   if (webDist) {
+    // Serve the same React application with token-safe metadata in the initial HTML,
+    // for humans and crawlers alike. Never count a link preview as a document open.
+    const signHtml = readFile(path.join(webDist, "index.html"), "utf8");
+    for (const [route, type] of [["/sign/avr/:token", "AVR"], ["/sign/:token", "CONTRACT"]] as const) {
+      app.get(route, async (req, res) => {
+        res.set({ 'Cache-Control': 'private, no-store', 'Referrer-Policy': 'no-referrer', 'X-Robots-Tag': 'noindex, nofollow, noarchive' });
+        rateLimit(`sign-meta:${req.ip}`, 120);
+        const meta = await loadPublicSignMeta(prisma, type, req.params.token);
+        res.type('html').send(renderPublicSignHtml(await signHtml, meta, config.appBaseUrl));
+      });
+    }
     app.use(express.static(webDist, { index: false, maxAge: "1h" }));
     app.get(/^(?!\/api\/|\/public\/|\/health$|\/ready$).*/, (_req, res) => {
       res.sendFile(path.join(webDist, "index.html"));

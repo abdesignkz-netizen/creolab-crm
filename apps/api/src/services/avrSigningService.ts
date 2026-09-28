@@ -196,6 +196,13 @@ export async function getPublicAvrSign(prisma: PrismaClient, token: string) {
   const canSign = flags.contractSigningEnabled && !row.declinedAt && !row.buyerSignature && verified(signature(row.sellerSignature), row.documentHash);
   return { ...view(row), canSign, canDecline: canSign, waitingForSeller: false };
 }
+// Crawlers must never set openedAt or read signature/party data into the HTML.
+export async function getPublicAvrSignMetaDocument(prisma: PrismaClient, token: string) {
+  const row = await publicRow(prisma, token);
+  if (row.declinedAt) return null;
+  const source = snapshot(row);
+  return { number: source.number, date: source.documentDate };
+}
 export async function sendAvrSigningPdf(prisma: PrismaClient, res: Response, input: { auth: AuthContext; id: string } | { token: string }) {
   let row: Signing;
   if ("auth" in input) { requireDocumentsAccess(input.auth); row = await load(prisma, tenant(input.auth), input.id); }

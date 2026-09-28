@@ -1,0 +1,20 @@
+// Reproducible typography/card asset. No document data or signing URLs are embedded.
+import { createCanvas, GlobalFonts, loadImage } from '@napi-rs/canvas';
+import { mkdir, writeFile } from 'node:fs/promises';
+GlobalFonts.registerFromPath('apps/api/assets/fonts/NotoSans-Regular.ttf', 'BasQar Sans');
+GlobalFonts.registerFromPath('apps/api/assets/fonts/NotoSans-Bold.ttf', 'BasQar Sans Bold');
+const canvas = createCanvas(1200, 630);
+const ctx = canvas.getContext('2d');
+ctx.fillStyle = '#f3f6fb'; ctx.fillRect(0, 0, 1200, 630);
+ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.roundRect(48, 48, 1104, 534, 28); ctx.fill();
+ctx.strokeStyle = '#e2eaf5'; ctx.lineWidth = 2; ctx.stroke();
+const logo = await loadImage('apps/web/public/basqar-logo.svg');
+ctx.drawImage(logo, 108, 112, 225, 47.47);
+ctx.font = '30px "BasQar Sans"'; ctx.fillStyle = '#556882';
+ctx.fillText('Умный контур ведения бизнеса', 108, 222);
+ctx.fillStyle = '#eaf2ff'; ctx.beginPath(); ctx.roundRect(108, 352, 426, 78, 14); ctx.fill();
+ctx.font = '30px "BasQar Sans Bold"'; ctx.fillStyle = '#205bbc';
+ctx.fillText('Документ на подпись', 136, 403);
+ctx.fillStyle = '#8491a5'; ctx.font = '22px "BasQar Sans"'; ctx.fillText('bsqr.kz', 108, 516);
+await mkdir('apps/web/public/og', { recursive: true });
+await writeFile('apps/web/public/og/document-sign-v1.png', canvas.toBuffer('image/png'));

@@ -30,3 +30,5 @@ export {
   type CompanyRequisitesDraft,
   type ParseCompanyRequisitesInput,
 } from "./companyRequisites.ts";
+
+export * from "./documentSignMeta.ts";

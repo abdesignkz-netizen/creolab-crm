@@ -647,7 +647,7 @@ export async function declineContractAsSeller(
   return { ok: true };
 }
 
-async function loadPublicRequest(prisma: PrismaClient, token: string) {
+async function loadPublicRequest(prisma: PrismaClient, token: string, readOnly = false) {
   const request = await prisma.signatureRequest.findFirst({
     where: { tokenHash: hashToken(token), signerType: "BUYER" },
     include: {
@@ -661,10 +661,16 @@ async function loadPublicRequest(prisma: PrismaClient, token: string) {
   });
   if (!request) throw new ApiError(404, "not_found", "Ссылка недействительна");
   const current = expireIfNeeded(request);
-  if (current.status === "EXPIRED" && request.status !== "EXPIRED") {
+  if (!readOnly && current.status === "EXPIRED" && request.status !== "EXPIRED") {
     await prisma.signatureRequest.updateMany({ where: { id: request.id, status: { in: OPEN_REQUESTS }, expiresAt: { lt: new Date() } }, data: { status: "EXPIRED" } });
   }
   return { ...request, status: current.status };
+}
+
+export async function getPublicContractSignMetaDocument(prisma: PrismaClient, token: string) {
+  const request = await loadPublicRequest(prisma, token, true);
+  if (!['PENDING', 'OPENED', 'SIGNED'].includes(request.status) || request.contractVersionId !== request.contract.versions.at(-1)?.id) return null;
+  return { number: request.contract.number, date: request.contract.date };
 }
 
 function publicContractView(
