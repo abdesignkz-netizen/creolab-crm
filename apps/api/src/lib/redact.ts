@@ -37,7 +37,13 @@ export function redactSensitive(value: unknown): unknown {
   return next;
 }
 
-export function logServerError(error: unknown) {
+export function logServerError(error: unknown, requestId?: string) {
+  if (process.env.NODE_ENV === "production") {
+    // Provider and database messages can contain credentials, URLs and customer records.
+    // Preserve a correlation ID without copying an untrusted exception into production logs.
+    console.error("server_error", { requestId });
+    return;
+  }
   if (error instanceof Error) {
     console.error(error.name, error.message);
     if (error.stack) console.error(error.stack.split("\n").slice(0, 12).join("\n"));

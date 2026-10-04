@@ -229,10 +229,11 @@ export async function issueSession(
   };
 }
 
-export async function login(
+async function loginWithRequirements(
   prisma: PrismaClient,
   input: unknown,
   meta: { userAgent?: string; ip?: string } = {},
+  platformAdminOnly = false,
 ) {
   const parsed = loginSchema.parse(input);
   const user = await prisma.user.findUnique({ where: { email: parsed.email.toLowerCase() } });
@@ -247,7 +248,23 @@ export async function login(
   if (user.status !== "active") {
     throw new ApiError(403, "account_disabled", "Учётная запись отключена");
   }
+  if (platformAdminOnly && !user.platformAdmin) {
+    throw new ApiError(403, "forbidden", "Эта страница только для администратора сервиса");
+  }
+  // Persist the language displayed on the sign-in form before loading session data.
+  // Older clients that omit it keep the user's existing preference.
+  if (parsed.locale && parsed.locale !== user.locale) {
+    await prisma.user.update({ where: { id: user.id }, data: { locale: parsed.locale } });
+  }
   return issueSession(prisma, user.id, parsed.client, meta);
+}
+
+export async function login(
+  prisma: PrismaClient,
+  input: unknown,
+  meta: { userAgent?: string; ip?: string } = {},
+) {
+  return loginWithRequirements(prisma, input, meta);
 }
 
 export async function loginPlatformAdmin(
@@ -255,12 +272,7 @@ export async function loginPlatformAdmin(
   input: unknown,
   meta: { userAgent?: string; ip?: string } = {},
 ) {
-  const result = await login(prisma, input, meta);
-  if (!result.auth.user.platformAdmin) {
-    await logout(prisma, result.auth.sessionId);
-    throw new ApiError(403, "forbidden", "Эта страница только для администратора сервиса");
-  }
-  return result;
+  return loginWithRequirements(prisma, input, meta, true);
 }
 
 export async function logout(prisma: PrismaClient, sessionId: string, all = false, userId?: string) {

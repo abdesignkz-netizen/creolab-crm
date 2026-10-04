@@ -4,7 +4,7 @@ import { unlink, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
-import { assertExternalCallbackUrl } from "../lib/externalUrl.ts";
+import { downloadPublicMedia, publicMediaUrl } from "../lib/publicMedia.ts";
 import { resolveUploadPath } from "../lib/storage.ts";
 
 export const CONVERSATION_MAX_FILE_BYTES = 16 * 1024 * 1024;
@@ -230,16 +230,12 @@ export async function storeMessageAttachment(
 }
 
 export async function fetchRemoteMedia(fileUrl: string) {
-  const parsed = assertExternalCallbackUrl(fileUrl, "fileUrl");
-  const response = await fetch(parsed.toString(), { signal: AbortSignal.timeout(20000) });
-  if (!response.ok) throw new Error(`media_http_${response.status}`);
+  const parsed = publicMediaUrl(fileUrl);
+  const { buffer, contentType } = await downloadPublicMedia(fileUrl, CONVERSATION_MAX_FILE_BYTES);
   const mimeType = resolveConversationMime(
     parsed.pathname,
-    response.headers.get("content-type") || "",
+    contentType,
   );
-  const buffer = Buffer.from(await response.arrayBuffer());
-  if (!buffer.length) throw new Error("empty_media");
-  if (buffer.length > CONVERSATION_MAX_FILE_BYTES) throw new Error("media_too_large");
   const fileName = path.basename(parsed.pathname) || "file.bin";
   return { buffer, mimeType, fileName };
 }

@@ -1,4 +1,6 @@
 import { mkdir } from "node:fs/promises";
+import { existsSync, realpathSync } from "node:fs";
+import { ApiError } from "../errors.ts";
 import path from "node:path";
 import { config } from "../config.ts";
 
@@ -58,12 +60,27 @@ export function missingFileMessage() {
 }
 
 export function resolveUploadPath(storageKey: string) {
-  if (!storageKey) return storageKey;
-  if (path.isAbsolute(storageKey)) return storageKey;
-  return path.join(uploadsRoot(), ...storageKey.split("/").filter(Boolean));
+  const invalid = () => new ApiError(422, "invalid_storage_path", "Недопустимый путь к файлу");
+  if (!storageKey || storageKey.includes("\0") || storageKey.includes("\\")) throw invalid();
+  const root = uploadsRoot();
+  const candidate = path.resolve(root, storageKey);
+  const inside = (base: string, target: string) => {
+    const relative = path.relative(base, target);
+    return relative !== "" && relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+  };
+  // Legacy absolute keys remain readable only when they are inside the configured store.
+  if (!inside(root, candidate)) throw invalid();
+  if (existsSync(root)) {
+    const realRoot = realpathSync(root);
+    let ancestor = candidate;
+    while (!existsSync(ancestor) && ancestor !== root) ancestor = path.dirname(ancestor);
+    const realAncestor = realpathSync(ancestor);
+    if (realAncestor !== realRoot && !inside(realRoot, realAncestor)) throw invalid();
+  }
+  return candidate;
 }
 
 export async function ensureUploadsRoot() {
-  await mkdir(uploadsRoot(), { recursive: true });
+  await mkdir(uploadsRoot(), { recursive: true, mode: 0o700 });
   return fileStorageStatus();
 }

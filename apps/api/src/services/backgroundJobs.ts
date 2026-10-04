@@ -1,3 +1,4 @@
+import { logServerError } from "../lib/redact.ts";
 import type { PrismaClient } from "@creolab/db";
 import { createStaffNotification, deliverPendingPush } from "./notificationService.ts";
 import { AGREEMENT_TYPE_LABEL, type AgreementType } from "./conversationContextTypes.ts";
@@ -47,7 +48,7 @@ export async function processOutbox(prisma: PrismaClient) {
         await processEsfSentOutbox(prisma, event);
       }
     } catch (error) {
-      console.error(`${event.type} outbox`, error);
+      logServerError(error, "background:outbox");
       await prisma.outboxEvent.update({
         where: { id: event.id },
         data: {
@@ -147,7 +148,7 @@ async function processAgreementReminder(
   });
 
   if (notification) {
-    await deliverPendingPush(prisma, notification.id).catch((error) => console.error("push", error));
+    await deliverPendingPush(prisma, notification.id).catch((error) => logServerError(error, "background:push"));
   }
 
   await prisma.scheduledAction.update({ where: { id: item.id }, data: { state: "done" } });
@@ -176,7 +177,7 @@ export async function processDueScheduledActions(prisma: PrismaClient) {
     if (item.type === "client_followup") {
       const { processClientFollowUp } = await import("./aiConversationPolicyService.ts");
       await processClientFollowUp(prisma, item).catch(async (error: unknown) => {
-        console.error("client followup", error);
+        logServerError(error, "background:client followup");
         await prisma.scheduledAction.update({
           where: { id: item.id },
           data: { state: "failed", cancelReason: error instanceof Error ? error.message : "error" },
@@ -186,7 +187,7 @@ export async function processDueScheduledActions(prisma: PrismaClient) {
     }
     if (item.type === "task_run" || item.type === "task_batch_run") {
       await processScheduledTask(prisma, item).catch(async (error: unknown) => {
-        console.error("scheduled task", error);
+        logServerError(error, "background:scheduled task");
         await prisma.scheduledAction.update({
           where: { id: item.id },
           data: { state: "failed", cancelReason: error instanceof Error ? error.message : "error" },
@@ -211,14 +212,14 @@ export async function processDueScheduledActions(prisma: PrismaClient) {
         where: { campaignId, status: "pending" },
         data: { status: "queued" },
       });
-      await processCampaignQueue(prisma, campaignId).catch((error: unknown) => console.error("campaign scheduled", error));
+      await processCampaignQueue(prisma, campaignId).catch((error: unknown) => logServerError(error, "background:campaign scheduled"));
       await prisma.scheduledAction.update({ where: { id: item.id }, data: { state: "done" } });
       continue;
     }
     if (item.type === "esf_status_poll") {
       const { processEsfStatusPollAction } = await import("./esfStatusSyncService.ts");
       await processEsfStatusPollAction(prisma, item).catch(async (error: unknown) => {
-        console.error("esf status poll", error);
+        logServerError(error, "background:esf status poll");
         await prisma.scheduledAction.update({
           where: { id: item.id },
           data: { state: "failed", cancelReason: error instanceof Error ? error.message : "error" },
@@ -228,7 +229,7 @@ export async function processDueScheduledActions(prisma: PrismaClient) {
     }
     if (item.type.startsWith("agreement_reminder")) {
       await processAgreementReminder(prisma, item).catch(async (error) => {
-        console.error("agreement reminder", error);
+        logServerError(error, "background:agreement reminder");
         await prisma.scheduledAction.update({
           where: { id: item.id },
           data: { state: "failed", cancelReason: error instanceof Error ? error.message : "error" },
@@ -247,7 +248,7 @@ export async function resumeRunningCampaigns(prisma: PrismaClient) {
   const { processCampaignQueue } = await import("./campaignService.ts");
   const running = await prisma.campaign.findMany({ where: { status: "running" }, take: 5 });
   for (const campaign of running) {
-    void processCampaignQueue(prisma, campaign.id).catch((error: unknown) => console.error("campaign resume", error));
+    void processCampaignQueue(prisma, campaign.id).catch((error: unknown) => logServerError(error, "background:campaign resume"));
   }
 }
 
@@ -255,19 +256,19 @@ export function startBackgroundJobs(prisma: PrismaClient) {
   if (started || process.env.NODE_ENV === "test") return () => undefined;
   started = true;
   const tick = () => {
-    import("./billingResourceService.ts").then(({ reconcileBillingUsage }) => reconcileBillingUsage(prisma)).catch(error => console.error("billing usage", error));
-    processOutbox(prisma).catch((error) => console.error("outbox", error));
+    import("./billingResourceService.ts").then(({ reconcileBillingUsage }) => reconcileBillingUsage(prisma)).catch(error => logServerError(error, "background:billing usage"));
+    processOutbox(prisma).catch((error) => logServerError(error, "background:outbox"));
     import("./esfStatusSyncService.ts")
       .then(({ ensureEsfStatusPolls }) => ensureEsfStatusPolls(prisma))
-      .catch((error) => console.error("esf polls", error));
+      .catch((error) => logServerError(error, "background:esf polls"));
     import("./googleSyncService.ts")
       .then(({ pollGoogleConnections }) => pollGoogleConnections(prisma))
       .catch(() => undefined);
-    processDueScheduledActions(prisma).catch((error) => console.error("scheduled", error));
-    resumeRunningCampaigns(prisma).catch((error) => console.error("campaign resume", error));
+    processDueScheduledActions(prisma).catch((error) => logServerError(error, "background:scheduled"));
+    resumeRunningCampaigns(prisma).catch((error) => logServerError(error, "background:campaign resume"));
     import("./subscriptionActivationService.ts")
       .then(({ expireDueSubscriptions }) => expireDueSubscriptions(prisma))
-      .catch((error) => console.error("billing expire", error));
+      .catch((error) => logServerError(error, "background:billing expire"));
   };
   tick();
   const timer = setInterval(tick, TICK_MS);

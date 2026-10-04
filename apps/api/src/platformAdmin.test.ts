@@ -337,18 +337,25 @@ describe("platform admin panel", () => {
   });
 
   it("platform login accepts service admin and rejects company admin", async () => {
+    const previousLocale = (await prisma.user.findUniqueOrThrow({ where: { email: "owner@creolab.example" } })).locale;
     const owner = await fetch(`${url}/api/v1/auth/platform-login`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ email: "owner@creolab.example", password: process.env.SEED_PASSWORD, client: "web" }),
+      body: JSON.stringify({ email: "owner@creolab.example", password: process.env.SEED_PASSWORD, client: "web", locale: "en" }),
     });
     assert.equal(owner.status, 403);
+    assert.equal((await prisma.user.findUniqueOrThrow({ where: { email: "owner@creolab.example" } })).locale, previousLocale);
     const platform = await fetch(`${url}/api/v1/auth/platform-login`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ email: "platform@creolab.example", password: process.env.SEED_PASSWORD, client: "web" }),
+      body: JSON.stringify({ email: "platform@creolab.example", password: process.env.SEED_PASSWORD, client: "web", locale: "en" }),
     });
-    assert.equal(platform.status, 200, await platform.text());
+    const data = await platform.json();
+    assert.equal(platform.status, 200, JSON.stringify(data));
+    assert.equal(data.user.user.locale, "en");
+    const cookie = (platform.headers.get("set-cookie") || "").split(";")[0];
+    const me = await req(cookie, "/api/v1/me");
+    assert.equal(me.data.user.locale, "en");
   });
 
   it("accepts a public signup request and shows it only to the service admin", async () => {

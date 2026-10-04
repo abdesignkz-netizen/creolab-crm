@@ -258,6 +258,7 @@ export async function verifySelfRegistration(
         firstName: names.firstName,
         lastName: names.lastName,
         emailVerifiedAt: new Date(),
+        locale: parsed.locale || "ru",
         platformAdmin: false,
         status: "active",
       },

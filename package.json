@@ -18,7 +18,8 @@
     "test": "npm run test --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "legal:check": "node --experimental-strip-types scripts/check-legal-readiness.mjs"
+    "legal:check": "node --experimental-strip-types scripts/check-legal-readiness.mjs",
+    "security:check": "node --experimental-strip-types scripts/check-security-readiness.mjs"
   },
   "engines": {
     "node": ">=22.18"

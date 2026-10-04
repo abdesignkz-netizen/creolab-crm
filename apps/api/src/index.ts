@@ -1,9 +1,12 @@
+import { assertProductionSecurity } from "./lib/productionSecurity.ts";
 import { createPrismaClient } from "@creolab/db";
 import { config } from "./config.ts";
 import { createApp } from "./app.ts";
 import { ensureUploadsRoot } from "./lib/storage.ts";
 import { promoteWebsiteFormsToLive } from "./services/integrationCatalogService.ts";
 
+assertProductionSecurity();
+process.umask(0o077);
 const prisma = await createPrismaClient();
 const { ensurePlatformAdmin } = await import("./services/platformAdminBootstrap.ts");
 const platformAdmin = await ensurePlatformAdmin(prisma);
@@ -34,8 +37,14 @@ if (process.env.WHATSAPP_QR_ENABLED !== "0") {
   });
 }
 
-app.listen(config.port, () => {
+const server = app.listen(config.port, () => {
   console.log(`CREOLAB AI CRM API http://127.0.0.1:${config.port}`);
   console.log("WhatsApp не требуется для заявок и кабинета.");
   void import("./services/backgroundJobs.ts").then(({ startBackgroundJobs }) => startBackgroundJobs(prisma));
 });
+
+// Bound slow clients and idle connections without shortening long document conversions.
+server.headersTimeout = 15_000;
+server.requestTimeout = 60_000;
+server.keepAliveTimeout = 5_000;
+server.maxRequestsPerSocket = 1000;

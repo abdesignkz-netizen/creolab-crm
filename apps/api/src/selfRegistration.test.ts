@@ -84,7 +84,7 @@ describe("self-service registration and preview entitlements", () => {
 
     const verified = await req("", "/api/v1/auth/register/verify", {
       method: "POST",
-      body: { email, code: started.data.verificationCode },
+      body: { email, code: started.data.verificationCode, locale: "kk" },
     });
     assert.equal(verified.status, 200, JSON.stringify(verified.data));
     assert.ok(verified.cookie.includes("crm_session"));
@@ -102,6 +102,8 @@ describe("self-service registration and preview entitlements", () => {
     assert.ok(user.passwordHash);
     assert.equal(user.passwordHash.includes("SignupPass1!"), false);
     assert.ok(user.emailVerifiedAt);
+    assert.equal(user.locale, "kk");
+    assert.equal(verified.data.user.user.locale, "kk");
 
     const membership = await prisma.membership.findFirstOrThrow({
       where: { userId: user.id, tenantId },
@@ -111,6 +113,7 @@ describe("self-service registration and preview entitlements", () => {
     const me = await req(cookie, "/api/v1/me", { tenantId });
     assert.equal(me.status, 200);
     assert.equal(me.data.billing.previewMode, false);
+    assert.equal(me.data.user.locale, "kk");
 
     const situation = await req(cookie, "/api/v1/situation/overview", { tenantId });
     assert.equal(situation.status, 200);

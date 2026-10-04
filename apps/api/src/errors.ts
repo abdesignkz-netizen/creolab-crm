@@ -51,6 +51,9 @@ export function withControlClientFields(
 }
 
 export function errorBody(error: unknown, requestId: string) {
+  const parserType = error && typeof error === "object" && "type" in error ? error.type : null;
+  if (parserType === "entity.too.large") return { status: 413, body: { code: "payload_too_large", message: "Превышен допустимый размер запроса", request_id: requestId } };
+  if (parserType === "entity.parse.failed") return { status: 400, body: { code: "invalid_json", message: "Некорректный формат запроса", request_id: requestId } };
   const quota = error instanceof Error ? error.message.match(/BASQAR_LIMIT:([A-Z_]+)/)?.[1] : null;
   if (quota) return { status: 403, body: { code: "limit_exceeded", message: "Достигнут лимит тарифа. Перейдите на Start или увеличьте ресурсы в разделе «Тарифы».", details: { limit: quota, billingPath: "/billing" }, request_id: requestId } };
   if (error instanceof ApiError) {

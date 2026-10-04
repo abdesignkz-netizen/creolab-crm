@@ -70,6 +70,45 @@ describe("auth security", () => {
     }
   });
 
+  it("uses the sign-in language for the profile, response and subsequent session reads", async () => {
+    resetRateLimits();
+    const email = "owner@creolab.example";
+    const original = await prisma.user.findUniqueOrThrow({ where: { email } });
+    const attempt = async (body: Record<string, unknown>) => {
+      const response = await fetch(`${url}/api/v1/auth/login`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email, password, client: "web", ...body }),
+      });
+      return { response, data: await response.json() };
+    };
+    try {
+      await prisma.user.update({ where: { email }, data: { locale: "kk" } });
+      for (const locale of ["ru", "en", "kk"]) {
+        const { response, data } = await attempt({ locale });
+        assert.equal(response.status, 200);
+        assert.equal(data.user.user.locale, locale);
+        assert.equal((await prisma.user.findUniqueOrThrow({ where: { email } })).locale, locale);
+        const cookie = (response.headers.get("set-cookie") || "").split(";")[0];
+        for (let refresh = 0; refresh < 2; refresh++) {
+          const me = await fetch(`${url}/api/v1/me`, { headers: { cookie } });
+          assert.equal(me.status, 200);
+          assert.equal((await me.json()).user.locale, locale);
+        }
+      }
+      // Mobile/older callers without a language must not reset the profile to Russian.
+      assert.equal((await attempt({})).data.user.user.locale, "kk");
+      assert.equal((await attempt({ locale: "ru", password: "IncorrectPassword1!" })).response.status, 401);
+      assert.equal((await attempt({ locale: "unsupported" })).response.status, 422);
+      assert.equal((await prisma.user.findUniqueOrThrow({ where: { email } })).locale, "kk");
+      await prisma.user.update({ where: { email }, data: { status: "disabled" } });
+      assert.equal((await attempt({ locale: "ru" })).response.status, 403);
+      assert.equal((await prisma.user.findUniqueOrThrow({ where: { email } })).locale, "kk");
+    } finally {
+      await prisma.user.update({ where: { email }, data: { locale: original.locale, status: original.status } });
+      resetRateLimits();
+    }
+  });
+
   it("redacts secrets in audit-like objects", () => {
     const scrubbed = redactSensitive({
       password: "plain",
@@ -302,7 +341,7 @@ describe("auth security", () => {
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("x-content-type-options"), "nosniff");
     assert.equal(response.headers.get("x-frame-options"), "DENY");
-    assert.equal(response.headers.get("referrer-policy"), "strict-origin-when-cross-origin");
+    assert.equal(response.headers.get("referrer-policy"), "no-referrer");
     assert.equal(response.headers.get("x-powered-by"), null);
     assert.equal(response.headers.get("strict-transport-security"), null);
   });

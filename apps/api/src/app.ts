@@ -1,3 +1,4 @@
+import { protectBrowserMutation, securityHeaders } from "./lib/httpSecurity.ts";
 import { getLegalBundle, renderLegalDocument } from "./services/legalDocuments.ts";
 import { setDirectWhatsAppAi } from "./services/whatsappAiService.ts";
 import { connectWhatsAppQr, listWhatsAppConnections, getWhatsAppQr, disconnectDirectWhatsApp } from "./services/whatsappConnectionService.ts";
@@ -357,16 +358,7 @@ export function createApp(prisma: PrismaClient) {
   if (config.trustProxy !== false) {
     app.set("trust proxy", config.trustProxy);
   }
-  app.use((_req, res, next) => {
-    res.setHeader("X-Content-Type-Options", "nosniff");
-    res.setHeader("X-Frame-Options", "DENY");
-    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
-    res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
-    if (config.nodeEnv === "production") {
-      res.setHeader("Strict-Transport-Security", "max-age=15552000; includeSubDomains");
-    }
-    next();
-  });
+  app.use(securityHeaders);
   app.use(createLegacyDomainRedirect(config));
   app.use(
     cors({
@@ -381,6 +373,7 @@ export function createApp(prisma: PrismaClient) {
     res.setHeader("x-request-id", requestId);
     next();
   });
+  app.use(protectBrowserMutation);
 
   app.get("/api/v1/legal/documents", (_req, res) => {
     const bundle = getLegalBundle();
@@ -429,7 +422,17 @@ export function createApp(prisma: PrismaClient) {
   }
 
   const json = express.json({ limit: "200kb" });
-  const jsonLarge = express.json({ limit: "30mb" });
+  const parseLargeJson = express.json({ limit: "30mb" });
+  const jsonLarge: express.RequestHandler<Record<string, string>> = async (req, res, next) => {
+    try {
+      // Reject anonymous CRM uploads before allocating/decoding a large JSON body.
+      // Public signing and signed provider callbacks authenticate using their own tokens.
+      if (req.path.startsWith("/api/") && !/^\/api\/v1\/integrations\/seller-events(?:\/|$)/.test(req.path)) {
+        await requireAuth(req);
+      }
+      parseLargeJson(req, res, next);
+    } catch (error) { next(error); }
+  };
 
   app.use(async (req, res, next) => {
     try {
@@ -490,6 +493,8 @@ export function createApp(prisma: PrismaClient) {
   const rawJson = express.raw({ type: "application/json", limit: "200kb" });
 
   function publicFormCors(req: express.Request, res: express.Response) {
+    res.removeHeader("Access-Control-Allow-Credentials");
+    res.vary("Origin");
     res.setHeader("Access-Control-Allow-Origin", req.get("origin") || "*");
     res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Submission-Id");
@@ -2019,7 +2024,7 @@ export function createApp(prisma: PrismaClient) {
   app.get("/api/v1/conversations/:id/attachments/:attachmentId", async (req, res) => {
     const file = await getConversationAttachment(prisma, await requireAuth(req), req.params.id, req.params.attachmentId);
     if (!existsSync(file.path)) throw new ApiError(404, "not_found", "Файл не найден");
-    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.setHeader("Cache-Control", "private, no-store");
     res.type(file.mimeType);
     const inline = file.kind === "image" || file.kind === "video" || file.kind === "audio";
     const ascii = file.fileName.replace(/[^\x20-\x7E]/g, "_").replace(/"/g, "");
@@ -2143,7 +2148,7 @@ export function createApp(prisma: PrismaClient) {
   app.get("/api/v1/support/tickets/:id/attachments/:attachmentId", async (req, res) => {
     const file = await getSupportAttachment(prisma, await requireAuth(req), req.params.id, req.params.attachmentId, false);
     if (!existsSync(file.path)) throw new ApiError(404, "not_found", "Файл не найден");
-    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.setHeader("Cache-Control", "private, no-store");
     res.type(file.mimeType);
     const ascii = file.fileName.replace(/[^\x20-\x7E]/g, "_").replace(/"/g, "");
     res.setHeader(
@@ -2736,7 +2741,7 @@ export function createApp(prisma: PrismaClient) {
   app.get("/api/v1/admin/support/tickets/:id/attachments/:attachmentId", async (req, res) => {
     const file = await getSupportAttachment(prisma, await requireAuth(req), req.params.id, req.params.attachmentId, true);
     if (!existsSync(file.path)) throw new ApiError(404, "not_found", "Файл не найден");
-    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.setHeader("Cache-Control", "private, no-store");
     res.type(file.mimeType);
     const ascii = file.fileName.replace(/[^\x20-\x7E]/g, "_").replace(/"/g, "");
     res.setHeader(
@@ -2905,7 +2910,7 @@ export function createApp(prisma: PrismaClient) {
     }
     const mapped = errorBody(error, res.locals.requestId);
     if (mapped.status >= 500) {
-      logServerError(error);
+      logServerError(error, res.locals.requestId);
     }
     res.status(mapped.status).json(withControlClientFields(pathHint, mapped.status, mapped.body));
   });

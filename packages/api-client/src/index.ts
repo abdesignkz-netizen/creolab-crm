@@ -103,10 +103,10 @@ export function createApiClient(options: ClientOptions) {
 
   return {
     request,
-    login: (email: string, password: string, client: "web" | "mobile" = "web") =>
-      request("/api/v1/auth/login", { method: "POST", body: JSON.stringify({ email, password, client }) }),
-    platformLogin: (email: string, password: string, client: "web" | "mobile" = "web") =>
-      request("/api/v1/auth/platform-login", { method: "POST", body: JSON.stringify({ email, password, client }) }),
+    login: (email: string, password: string, client: "web" | "mobile" = "web", locale?: "ru" | "kk" | "en") =>
+      request("/api/v1/auth/login", { method: "POST", body: JSON.stringify({ email, password, client, locale }) }),
+    platformLogin: (email: string, password: string, client: "web" | "mobile" = "web", locale?: "ru" | "kk" | "en") =>
+      request("/api/v1/auth/platform-login", { method: "POST", body: JSON.stringify({ email, password, client, locale }) }),
     requestSignup: (email: string, companyName: string) =>
       request("/api/v1/auth/signup-request", { method: "POST", body: JSON.stringify({ email, companyName }) }),
     legalDocuments: () => request("/api/v1/legal/documents"),
@@ -118,8 +118,8 @@ export function createApiClient(options: ClientOptions) {
       passwordConfirm?: string;
       legalAcceptance?: { revision: string; offerAccepted: boolean; personalDataAccepted: boolean; authorizedRepresentative: boolean };
     }) => request("/api/v1/auth/register", { method: "POST", body: JSON.stringify(body) }),
-    verifyRegistration: (email: string, code: string) =>
-      request("/api/v1/auth/register/verify", { method: "POST", body: JSON.stringify({ email, code }) }),
+    verifyRegistration: (email: string, code: string, locale?: "ru" | "kk" | "en") =>
+      request("/api/v1/auth/register/verify", { method: "POST", body: JSON.stringify({ email, code, locale }) }),
     resendRegistration: (email: string) =>
       request("/api/v1/auth/register/resend", { method: "POST", body: JSON.stringify({ email }) }),
     requestPasswordReset: (email: string) =>

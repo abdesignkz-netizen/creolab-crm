@@ -3,13 +3,20 @@ import { createHash } from "node:crypto";
 import type { PrismaClient, Prisma } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import { storeMessageAttachment } from "./conversationMedia.ts";
-import { automaticWhatsAppMode, enqueueWhatsAppAi } from "./whatsappAiService.ts";
+import { automaticWhatsAppMode, directAiReadiness, enqueueWhatsAppAi } from "./whatsappAiService.ts";
 
 export async function recordExternalMessage(prisma: PrismaClient, integrationId: string, input: {
   eventId: string; channel: "email" | "instagram" | "whatsapp"; externalUserId: string; threadId: string; messageId: string;
   name: string; email?: string; phone?: string; aliases?: string[]; text: string; at: Date; raw: Prisma.InputJsonValue;
   attachments?: Array<{ fileName: string; mimeType: string; buffer: Buffer }>;
 }) {
+  // Check outside the transaction: readiness uses the shared runtime settings reader.
+  // An opt-in awaiting administrator setup must not put new chats under an unavailable AI.
+  const aiIntegration = input.channel === "whatsapp"
+    ? await prisma.integration.findUnique({ where: { id: integrationId }, select: { tenantId: true, type: true } })
+    : null;
+  const aiReady = Boolean(aiIntegration && ["whatsapp_qr", "whatsapp_cloud"].includes(aiIntegration.type)
+    && !await directAiReadiness(prisma, aiIntegration.tenantId));
   return prisma.$transaction(async tx => {
     const integration = await tx.integration.update({ where: { id: integrationId }, data: { lastEventAt: new Date(), lastSuccessAt: new Date(), healthStatus: "HEALTHY", lastError: null, lastErrorCode: null }, include: { tenant: true } });
     if (integration.status !== "active" || integration.tenant.status !== "active") throw new ApiError(403, "integration_disabled", "Подключение недоступно");
@@ -32,7 +39,7 @@ export async function recordExternalMessage(prisma: PrismaClient, integrationId:
     }
     let conversation = await tx.conversation.findFirst({ where: { tenantId, connectionId: connection.id, ...(input.channel === "whatsapp" ? {} : { externalThreadId: input.threadId }), contactId: contact.id } });
     if (!conversation) conversation = await tx.conversation.create({ data: { tenantId, connectionId: connection.id, externalThreadId: input.threadId, contactId: contact.id,
-      mode: input.channel === "whatsapp" && connection.autoReply && automaticWhatsAppMode(integration.tenant.settingsJson, integration, contact) ? "ai" : "human" } });
+      mode: input.channel === "whatsapp" && aiReady && connection.autoReply && automaticWhatsAppMode(integration.tenant.settingsJson, integration, contact) ? "ai" : "human" } });
     else if (input.channel === "whatsapp" && conversation.externalThreadId !== input.threadId) await tx.conversation.update({ where: { id: conversation.id }, data: { externalThreadId: input.threadId } });
     const scopedId = `${input.channel}:${connection.id}:${input.messageId}`;
     const previousMessage = await tx.message.findUnique({ where: { connectionScopedId: scopedId } });

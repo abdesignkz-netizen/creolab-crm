@@ -23,6 +23,7 @@ export const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
   client: z.enum(["web", "mobile"]).default("web"),
+  locale: z.enum(["ru", "kk", "en"]).optional(),
 });
 
 export const passwordResetRequestSchema = z.object({
@@ -60,6 +61,7 @@ export const selfRegisterSchema = z
   });
 
 export const verifyRegistrationSchema = z.object({
+  locale: z.enum(["ru", "kk", "en"]).optional(),
   email: z.string().trim().email().max(200),
   code: z.string().trim().regex(/^\d{6}$/, "Введите 6-значный код"),
 });

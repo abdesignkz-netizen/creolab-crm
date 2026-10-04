@@ -153,7 +153,7 @@ describe("AVR signing in BasQar", () => {
     // Changing the customer's live card must not change the signed version or expected signer.
     const doc = await prisma.electronicDocument.findUniqueOrThrow({ where: { id } });
     await prisma.company.update({ where: { id: doc.companyId! }, data: { bin: "333333333330", legalName: "Changed live card" } });
-    assert.equal((await json(publicRoute(), "GET", undefined, "")).body.buyerName, "ТОО Заказчик");
+    assert.equal((await json(publicRoute(), "GET", undefined, "")).body.buyerName, publicView.body.buyerName);
     const results = await Promise.all([1,2].map(() => json(publicRoute("sign"), "POST", { cmsBase64 }, "")));
     assert.deepEqual(results.map(r => r.status).sort(), [200,409]);
     assert.equal((await json(publicRoute(), "GET", undefined, "")).body.canSign, false);

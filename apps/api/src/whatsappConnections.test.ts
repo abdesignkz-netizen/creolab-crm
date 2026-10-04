@@ -24,6 +24,7 @@ describe("WhatsApp provider connections", () => {
   let llmCalls = 0, llmInput: any;
   let onCloudSend: (() => Promise<void>) | undefined;
   const oldLlmKey = process.env.OPENAI_API_KEY, oldLlmUrl = process.env.OPENAI_BASE_URL;
+  const oldAnyModelKey = process.env.ANYMODEL_API_KEY;
   const authSnapshots: any[] = [];
   const sockets: Array<{ ev: EventEmitter; end: (error?: Error) => void }> = [];
   const fakeSocket = (options: any) => {
@@ -54,7 +55,7 @@ describe("WhatsApp provider connections", () => {
     assert.equal(login.status, 200); cookie = (login.headers.get("set-cookie") || "").split(";")[0];
     const member = await prisma.membership.findFirstOrThrow({ where: { user: { email: "owner@creolab.example" } } }); tenantId = member.tenantId;
   });
-  after(async () => { await runtime?.stop(); globalThis.fetch = nativeFetch; config.apiBaseUrl = oldBase; if (oldLlmKey === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = oldLlmKey; if (oldLlmUrl === undefined) delete process.env.OPENAI_BASE_URL; else process.env.OPENAI_BASE_URL = oldLlmUrl; invalidateRuntimeConfig(); if (server) await new Promise<void>(resolve => server.close(() => resolve())); await prisma?.$disconnect(); });
+  after(async () => { await runtime?.stop(); globalThis.fetch = nativeFetch; config.apiBaseUrl = oldBase; if (oldLlmKey === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = oldLlmKey; if (oldLlmUrl === undefined) delete process.env.OPENAI_BASE_URL; else process.env.OPENAI_BASE_URL = oldLlmUrl; if (oldAnyModelKey === undefined) delete process.env.ANYMODEL_API_KEY; else process.env.ANYMODEL_API_KEY = oldAnyModelKey; invalidateRuntimeConfig(); if (server) await new Promise<void>(resolve => server.close(() => resolve())); await prisma?.$disconnect(); });
   const post = (path: string, body: unknown = {}, headers: Record<string, string> = {}) => nativeFetch(`${base}${path}`, { method: "POST", headers: { cookie, "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
   const get = (path: string) => nativeFetch(`${base}${path}`, { headers: { cookie } });
   const connectInput = { appId: "50001", wabaId: "20001", phoneNumberId: "10001", accessToken, appSecret };
@@ -131,6 +132,51 @@ describe("WhatsApp provider connections", () => {
     assert.equal((await prisma.message.findUniqueOrThrow({ where: { id: message.id } })).operationState, "unknown");
     assert.equal((await post(path, { text: "Проверка отправки" }, headers)).status, 201);
     await runtime!.tick(); assert.equal(qrSends, 2); failQrSend = false;
+  });
+  it("keeps the AI opt-in while setup is pending and reuses saved admin configuration when ready", async () => {
+    const ai = await prisma.aIConfiguration.findFirstOrThrow({ where: { tenantId } });
+    const original = { enabled: ai.enabled, promptStatus: ai.promptStatus, systemPrompt: ai.systemPrompt, credentialId: ai.credentialId };
+    const knowledge = await prisma.knowledgeDocument.findMany({ where: { tenantId } });
+    try {
+      delete process.env.OPENAI_API_KEY;
+      delete process.env.ANYMODEL_API_KEY;
+      await prisma.aIConfiguration.update({ where: { id: ai.id }, data: { enabled: true, promptStatus: "published", systemPrompt: "EXISTING-ADMIN-PROMPT", credentialId: null } });
+      invalidateRuntimeConfig();
+      const read = async () => (await (await get("/api/v1/integrations/whatsapp")).json()).items;
+      assert.ok((await read()).every((item: any) => item.aiUnavailableReason === "ai_model_missing"));
+      for (const id of [cloudId, qrId]) assert.equal((await post(`/api/v1/integrations/whatsapp/${id}/ai`, { enabled: true })).status, 200);
+      assert.ok((await read()).every((item: any) => item.aiEnabled && !item.aiAvailable));
+      const saved = await prisma.aIConfiguration.findUniqueOrThrow({ where: { id: ai.id } });
+      assert.equal(saved.systemPrompt, "EXISTING-ADMIN-PROMPT");
+      assert.deepEqual(await prisma.knowledgeDocument.findMany({ where: { tenantId } }), knowledge);
+      // A new customer's opt-in must not produce a reply before setup is complete.
+      await prisma.tenant.update({ where: { id: tenantId }, data: { settingsJson: { aiAutomation: { defaultMode: "AUTO" } } } });
+      const event = inbound("pending-setup-inbound");
+      event.entry[0].changes[0].value.contacts[0].wa_id = "77018889900";
+      event.entry[0].changes[0].value.messages[0].from = "77018889900";
+      assert.equal((await webhook(event)).status, 200);
+      const message = await prisma.message.findFirstOrThrow({ where: { tenantId, providerMessageId: "pending-setup-inbound" }, include: { conversation: true } });
+      assert.equal(message.conversation.mode, "human");
+      assert.equal(await prisma.outboxEvent.count({ where: { entityId: message.conversationId, type: "whatsapp.ai_reply" } }), 0);
+      assert.equal(llmCalls, 0);
+      for (const [data, reason] of [
+        [{ promptStatus: "draft" }, "ai_not_configured"],
+        [{ promptStatus: "published", enabled: false }, "ai_disabled"],
+      ] as const) {
+        await prisma.aIConfiguration.update({ where: { id: ai.id }, data }); invalidateRuntimeConfig();
+        assert.ok((await read()).every((item: any) => item.aiUnavailableReason === reason));
+        assert.equal((await post(`/api/v1/integrations/whatsapp/${cloudId}/ai`, { enabled: true })).status, 200);
+      }
+      assert.equal((await prisma.aIConfiguration.findUniqueOrThrow({ where: { id: ai.id } })).enabled, false);
+      process.env.OPENAI_API_KEY = "mock-key-not-real";
+      await prisma.aIConfiguration.update({ where: { id: ai.id }, data: { enabled: true } }); invalidateRuntimeConfig();
+      assert.ok((await read()).every((item: any) => item.aiEnabled && item.aiAvailable && !item.aiUnavailableReason));
+      assert.equal((await prisma.aIConfiguration.findUniqueOrThrow({ where: { id: ai.id } })).systemPrompt, "EXISTING-ADMIN-PROMPT");
+    } finally {
+      await prisma.aIConfiguration.update({ where: { id: ai.id }, data: original });
+      for (const id of [cloudId, qrId]) await post(`/api/v1/integrations/whatsapp/${id}/ai`, { enabled: false });
+      invalidateRuntimeConfig();
+    }
   });
   it("enables AI for both providers and uses published tenant context and the existing usage ledger", async () => {
     process.env.OPENAI_API_KEY = "mock-key-not-real"; process.env.OPENAI_BASE_URL = "https://llm.example.test/v1";

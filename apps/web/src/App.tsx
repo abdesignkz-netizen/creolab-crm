@@ -768,7 +768,7 @@ function Login() {
               event.preventDefault();
               const form = new FormData(event.currentTarget);
               try {
-                const result = (await api.login(String(form.get("email")), String(form.get("password")))) as any;
+                const result = (await api.login(String(form.get("email")), String(form.get("password")), "web", locale)) as any;
                 await enterSession(result);
               } catch (err) {
                 setError(authErrorMessage(locale, err));
@@ -915,7 +915,7 @@ function Login() {
               setBusy(true);
               setError("");
               try {
-                const result = (await api.verifyRegistration(email, String(form.get("code")))) as any;
+                const result = (await api.verifyRegistration(email, String(form.get("code")), locale)) as any;
                 await enterSession(result, { openBilling: true });
               } catch (err) {
                 setError(authErrorMessage(locale, err, "login.verifyFailed"));

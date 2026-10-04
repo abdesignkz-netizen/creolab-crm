@@ -18,6 +18,19 @@ describe("WhatsApp AI activation labels", () => {
     }
   });
 
+  it("does not present a saved opt-in as live while the model is unconfigured", () => {
+    for (const type of ["whatsapp_qr", "whatsapp_cloud"]) {
+      const result = describeWhatsAppAiActivation({ prompt, knowledge, enabled: true,
+        integration: { type, status: "active", channelConnections: [{ status: "active", autoReply: true }] },
+        unavailableReason: "ai_model_missing" });
+      assert.equal(result.prompt.ready, true);
+      assert.equal(result.knowledge.ready, true);
+      assert.equal(result.prompt.live, false);
+      assert.equal(result.knowledge.live, false);
+      assert.match(result.prompt.reason, /модели ИИ/);
+    }
+  });
+
   it("marks prompt and knowledge inactive when WhatsApp is not connected", () => {
     const result = describeWhatsAppAiActivation({ prompt, knowledge, integration: null });
     assert.equal(result.prompt.live, false);

@@ -23,7 +23,7 @@ export function PlatformLoginPage() {
             event.preventDefault();
             const form = new FormData(event.currentTarget);
             try {
-              await api.platformLogin(String(form.get("email")), String(form.get("password")));
+              await api.platformLogin(String(form.get("email")), String(form.get("password")), "web", locale);
               window.location.assign("/admin");
             } catch (err) {
               setError(authErrorMessage(locale, err));

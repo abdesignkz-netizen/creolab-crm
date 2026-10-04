@@ -103,7 +103,7 @@ describe("BasQar support center", () => {
       assert.equal(search.status, 200);
       assert.ok(search.data.items.some((item: { slug: string; title: string }) => item.slug === "add-member" && item.title.includes("Қызметкерді")));
       const article = await req(ownerA, "/api/v1/support/articles/connect-whatsapp");
-      assert.equal(article.data.title, "WhatsApp қалай қосылады?");
+      assert.equal(article.data.title, "WhatsApp-ты қалай қосуға болады?");
       assert.match(article.data.content, /Интеграциялар/);
       const row = await prisma.supportArticle.findFirstOrThrow({ where: { slug: "connect-whatsapp" } });
       await prisma.supportArticle.update({ where: { id: row.id }, data: { title: "Авторский заголовок", content: "Текст администратора" } });

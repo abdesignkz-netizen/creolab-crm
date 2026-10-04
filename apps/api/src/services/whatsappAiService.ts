@@ -7,7 +7,7 @@ import { encryptSecret } from "../lib/secretBox.ts";
 import { directWhatsAppTypes, ownedWhatsApp } from "./whatsappConnectionService.ts";
 import { getEntitlements, requireFeature } from "./entitlementService.ts";
 import { canConsume } from "./billingResourceService.ts";
-import { getEffectiveLlmConfig } from "./runtimeSettings.ts";
+import { getEffectiveTenantSettings, getEffectiveLlmConfig } from "./runtimeSettings.ts";
 import { decideAutomationPolicy } from "./aiAutomationPolicyService.ts";
 import { parseAIAutomationSettings, isWithinAiSchedule } from "./aiAutomationSettings.ts";
 import { detectHandoffReason, isClientRefusalText } from "./aiConversationPolicyService.ts";
@@ -28,7 +28,8 @@ export async function directAiReadiness(prisma: PrismaClient, tenantId: string) 
   const access = await getEntitlements(prisma, tenantId);
   if (!access.entitlements.AI_MANAGER) return "feature_required";
   const ai = await prisma.aIConfiguration.findFirst({ where: { tenantId } });
-  if (!ai?.enabled || ai.promptStatus !== "published" || !ai.systemPrompt?.trim()) return "ai_not_configured";
+  if (!ai || ai.promptStatus !== "published" || !ai.systemPrompt?.trim()) return "ai_not_configured";
+  if (!ai.enabled || !(await getEffectiveTenantSettings(prisma, tenantId)).ai.enabled) return "ai_disabled";
   if (!(await getEffectiveLlmConfig(prisma, tenantId)).apiKey) return "ai_model_missing";
   return null;
 }
@@ -39,7 +40,11 @@ export async function setDirectWhatsAppAi(prisma: PrismaClient, auth: AuthContex
   if (enabled) {
     await requireFeature(prisma, auth, FEATURES.AI_MANAGER);
     const reason = await directAiReadiness(prisma, row.tenantId);
-    if (reason) throw new ApiError(409, reason, "Для ИИ-ответов опубликуйте промпт компании и настройте модель ИИ");
+    // Save the customer's opt-in while service administration finishes setup.
+    // Readiness is still enforced before generation and immediately before delivery.
+    if (reason && !["ai_not_configured", "ai_disabled", "ai_model_missing"].includes(reason)) {
+      throw new ApiError(409, reason, "Подключение WhatsApp недоступно");
+    }
   }
   await prisma.$transaction(async tx => {
     await tx.channelConnection.updateMany({ where: { tenantId: row.tenantId, integrationId: id }, data: { autoReply: enabled } });
