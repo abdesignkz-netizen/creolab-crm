@@ -3,7 +3,8 @@ import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../lib/api";
 import { BrandLogo } from "../components/BrandLogo";
 import { PasswordInput } from "../components/PasswordInput";
-import { getPublicLocale, applyDocumentLocale, authErrorMessage, t } from "../i18n";
+import { authErrorMessage, t, type Locale } from "../i18n";
+import { AuthLanguagePicker, useAuthLocale } from "../components/AuthLanguagePicker";
 
 type Step = "email" | "code" | "password" | "done";
 
@@ -14,10 +15,12 @@ function maskEmail(email: string) {
 }
 
 function ResetCodeInputs({
+  locale,
   value,
   onChange,
   disabled,
 }: {
+  locale: Locale;
   value: string[];
   onChange: (next: string[]) => void;
   disabled?: boolean;
@@ -51,7 +54,7 @@ function ResetCodeInputs({
   }
 
   return (
-    <div className="login-otp" role="group" aria-label={t(getPublicLocale(), "login.codeLabel")}>
+    <div className="login-otp" role="group" aria-label={t(locale, "login.codeLabel")}>
       {value.map((digit, index) => (
         <input
           key={index}
@@ -73,8 +76,7 @@ function ResetCodeInputs({
 }
 
 export function ForgotPasswordPage() {
-  const locale = getPublicLocale();
-  useEffect(() => applyDocumentLocale(locale), [locale]);
+  const [locale, chooseLocale] = useAuthLocale();
   const [searchParams] = useSearchParams();
   const [step, setStep] = useState<Step>("email");
   const [email, setEmail] = useState(searchParams.get("email") || "");
@@ -180,6 +182,7 @@ export function ForgotPasswordPage() {
           <BrandLogo variant="login" />
           <p>{t(locale, "login.brand")}</p>
         </div>
+        <AuthLanguagePicker locale={locale} onChange={next => { chooseLocale(next); setError(""); }} />
         {step === "email" ? (
           <form className="panel" onSubmit={submitEmail}>
             <h2>{t(locale, "login.resetTitle")}</h2>
@@ -207,7 +210,7 @@ export function ForgotPasswordPage() {
             <h2>{t(locale, "login.resetCheckTitle")}</h2>
             <p className="muted">{t(locale, "login.resetCheckHint")}</p>
             <p className="muted">{maskEmail(email)}</p>
-            <ResetCodeInputs value={digits} onChange={setDigits} disabled={busy} />
+            <ResetCodeInputs locale={locale} value={digits} onChange={setDigits} disabled={busy} />
             {error ? <p className="error">{error}</p> : null}
             <button className="btn" disabled={busy || digits.join("").length !== 6}>
               {t(locale, "login.resetConfirm")}
@@ -244,6 +247,7 @@ export function ForgotPasswordPage() {
             <label>
               {t(locale, "login.resetNewPassword")}
               <PasswordInput
+                locale={locale}
                 required
                 minLength={10}
                 autoComplete="new-password"
@@ -254,6 +258,7 @@ export function ForgotPasswordPage() {
             <label>
               {t(locale, "login.resetRepeatPassword")}
               <PasswordInput
+                locale={locale}
                 required
                 minLength={10}
                 autoComplete="new-password"

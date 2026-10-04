@@ -1422,6 +1422,31 @@ fieldset.field-block legend { padding: 0 6px; font-weight: 600; }
   justify-items: center;
   text-align: center;
 }
+.auth-language-picker {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+}
+.auth-language-picker button {
+  padding: 8px 14px;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+.auth-language-picker button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+.auth-language-picker button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 .login-brand .brand-mark {
   width: 52px;
   height: 52px;

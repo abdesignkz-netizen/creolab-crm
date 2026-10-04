@@ -5,12 +5,13 @@ import { api, clearTenant, setTenant } from "./lib/api";
 import { NavIcon } from "./components/NavIcon";
 import { BrandLogo } from "./components/BrandLogo";
 import { PasswordInput } from "./components/PasswordInput";
+import { AuthLanguagePicker, useAuthLocale } from "./components/AuthLanguagePicker";
 import { SupportCenter, SupportHelpButton } from "./components/SupportCenter";
 import { PaywallDialog } from "./components/PaywallDialog";
 import { OnboardingWizard } from "./components/OnboardingWizard";
 import { tip } from "./lib/tip";
 import { applyAppearance, useLocale, emptyCaps, SessionContext, type Capabilities } from "./lib/session";
-import { normalizeLocale, getPublicLocale, applyDocumentLocale, authErrorMessage, t } from "./i18n";
+import { normalizeLocale, getPublicLocale, authErrorMessage, t } from "./i18n";
 import {
   currentBrowserPermission,
   dismissNotificationBanner,
@@ -715,8 +716,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
 }
 
 function Login() {
-  const locale = getPublicLocale();
-  useEffect(() => applyDocumentLocale(locale), [locale]);
+  const [locale, chooseLocale] = useAuthLocale();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const [mode, setMode] = useState<"login" | "signup" | "verify" | "exists">("login");
@@ -760,6 +760,7 @@ function Login() {
           <BrandLogo variant="login" />
           <p>{t(locale, "login.brand")}</p>
         </div>
+        <AuthLanguagePicker locale={locale} onChange={next => { chooseLocale(next); setError(""); setInfo(""); }} />
         {mode === "login" ? (
           <form
             className="panel"
@@ -782,7 +783,7 @@ function Login() {
             </label>
             <label>
               {t(locale, "login.password")}
-              <PasswordInput name="password" required autoComplete="current-password" />
+              <PasswordInput locale={locale} name="password" required autoComplete="current-password" />
             </label>
             {error ? <p className="error">{error}</p> : null}
             <button className="btn">{t(locale, "login.submit")}</button>
@@ -867,11 +868,11 @@ function Login() {
             </label>
             <label>
               {t(locale, "login.password")}
-              <PasswordInput name="password" required minLength={8} autoComplete="new-password" />
+              <PasswordInput locale={locale} name="password" required minLength={8} autoComplete="new-password" />
             </label>
             <label>
               {t(locale, "login.passwordRepeat")}
-              <PasswordInput name="passwordConfirm" required minLength={8} autoComplete="new-password" />
+              <PasswordInput locale={locale} name="passwordConfirm" required minLength={8} autoComplete="new-password" />
             </label>
             {error ? <p className="error">{error}</p> : null}
             {legal?.active ? (

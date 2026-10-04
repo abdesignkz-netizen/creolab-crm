@@ -1,12 +1,13 @@
 import { useState, type InputHTMLAttributes } from "react";
 
 import { useLocale } from "../lib/session";
-import { t } from "../i18n";
+import { t, type Locale } from "../i18n";
 
-type PasswordInputProps = Omit<InputHTMLAttributes<HTMLInputElement>, "type">;
+type PasswordInputProps = Omit<InputHTMLAttributes<HTMLInputElement>, "type"> & { locale?: Locale };
 
-export function PasswordInput({ className = "", ...props }: PasswordInputProps) {
-  const locale = useLocale();
+export function PasswordInput({ className = "", locale: selectedLocale, ...props }: PasswordInputProps) {
+  const sessionLocale = useLocale();
+  const locale = selectedLocale ?? sessionLocale;
   const [visible, setVisible] = useState(false);
   return (
     <span className="password-field">
