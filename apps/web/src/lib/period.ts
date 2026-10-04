@@ -1,3 +1,5 @@
+import { systemText } from "@creolab/contracts";
+import { getPublicLocale } from "../i18n";
 export type PeriodPreset =
   | "today"
   | "yesterday"
@@ -31,7 +33,7 @@ export function formatDateTimeRu(value: string | Date | null | undefined, timeZo
       ? parseDateTimeLocalInput(raw, timeZone)
       : new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  return new Intl.DateTimeFormat("ru-RU", {
+  return new Intl.DateTimeFormat(getPublicLocale() === "kk" ? "kk-KZ" : "ru-RU", {
     timeZone,
     day: "2-digit",
     month: "2-digit",
@@ -88,14 +90,14 @@ export function formatDateTimeLocalInput(value: string) {
   return `${match[3]}.${match[2]}.${match[1]}, ${match[4]}:${match[5]}`;
 }
 
-export function formatCustomPeriodLabel(dateFrom: string, dateTo: string) {
-  if (!dateFrom || !dateTo) return "Период";
+export function formatCustomPeriodLabel(dateFrom: string, dateTo: string, locale: string = getPublicLocale()) {
+  if (!dateFrom || !dateTo) return systemText(locale, "Период");
   const a = new Date(`${dateFrom}T12:00:00`);
   const b = new Date(`${dateTo}T12:00:00`);
-  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return "Период";
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return systemText(locale, "Период");
   const opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short" };
   const sameYear = a.getFullYear() === b.getFullYear();
-  const left = a.toLocaleDateString("ru-RU", sameYear ? opts : { ...opts, year: "numeric" });
-  const right = b.toLocaleDateString("ru-RU", sameYear ? opts : { ...opts, year: "numeric" });
+  const left = a.toLocaleDateString(locale === "kk" ? "kk-KZ" : "ru-RU", sameYear ? opts : { ...opts, year: "numeric" });
+  const right = b.toLocaleDateString(locale === "kk" ? "kk-KZ" : "ru-RU", sameYear ? opts : { ...opts, year: "numeric" });
   return `${left} — ${right}`;
 }

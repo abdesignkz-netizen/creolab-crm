@@ -1,3 +1,4 @@
+import { uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale } from "../lib/uiText";
 import { catalogItemLabel, type TenantService } from "../lib/tenantServices";
 import { FormEvent, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
@@ -31,6 +32,7 @@ const STATUS_OPTIONS = [
 ];
 
 export function RequestDetailPage() {
+  const uiText = useUiText();
   const caps = useCapabilities();
   const { me } = useSession();
   const aiManagerAllowed = Boolean(me?.billing?.entitlements?.AI_MANAGER);
@@ -46,7 +48,7 @@ export function RequestDetailPage() {
       setData(await api.inquiry(requestId));
       setError("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не найдено");
+      setError(err instanceof Error ? err.message : uiText("Не найдено"));
     }
   }
 
@@ -60,20 +62,19 @@ export function RequestDetailPage() {
       await action();
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Ошибка");
+      setError(err instanceof Error ? err.message : uiText("Ошибка"));
     } finally {
       setBusy(false);
     }
   }
 
-  if (!data && !error) return <div className="state">Загрузка заявки…</div>;
+  if (!data && !error) return <div className="state">{uiText("Загрузка заявки…")}</div>;
   if (!data) {
     return (
       <section>
         <p className="error">{error}</p>
         <Link className="btn secondary" to="/inquiries">
-          К списку
-        </Link>
+          {uiText("К списку")}</Link>
       </section>
     );
   }
@@ -86,18 +87,18 @@ export function RequestDetailPage() {
       <div className="page-head">
         <div>
           <p className="page-kicker">
-            <Link to="/inquiries">Заявки</Link>
+            <Link to="/inquiries">{uiText("Заявки")}</Link>
           </p>
           <h2>{data.subject}</h2>
           <div className="client-meta" style={{ marginTop: 8 }}>
-            <span className="badge">{data.statusLabel}</span>
+            <span className="badge">{uiMessage(data.statusLabel)}</span>
             {data.needsReply ? (
               <span className="badge warn">
-                Нужен ответ{data.waitingMinutes != null ? ` · ${formatWaitSince(data.waitingMinutes)}` : ""}
+                {uiText("Нужен ответ")}{data.waitingMinutes != null ? ` · ${formatWaitSince(data.waitingMinutes)}` : ""}
               </span>
             ) : null}
-            {data.hasDeal ? <span className="badge">Сделка создана</span> : null}
-            {data.test ? <span className="badge warn">Тестовая заявка</span> : null}
+            {data.hasDeal ? <span className="badge">{uiText("Сделка создана")}</span> : null}
+            {data.test ? <span className="badge warn">{uiText("Тестовая заявка")}</span> : null}
           </div>
         </div>
       </div>
@@ -110,16 +111,15 @@ export function RequestDetailPage() {
           <div className="muted">{phoneText(data.phone)}</div>
           {data.companyName ? <div>{data.companyName}</div> : null}
           <div className="muted" style={{ marginTop: 8 }}>
-            Источник: {data.sourceLine}
+            {uiText("Источник:")}{" "}{data.sourceLine}
           </div>
-          <div className="muted">Создана: {data.receivedLabel}</div>
-          <div className="muted">Ответственный: {data.assigneeName || "Не назначен"}</div>
+          <div className="muted">{uiText("Создана:")}{" "}{data.receivedLabel}</div>
+          <div className="muted">{uiText("Ответственный:")}{" "}{data.assigneeName || uiText("Не назначен")}</div>
         </div>
         <div className="actions">
           {!closed && data.status !== "in_progress" ? (
             <button className="btn" disabled={busy} onClick={() => run(() => api.takeInquiry(data.id))}>
-              Принять в обработку
-            </button>
+              {uiText("Принять в обработку")}</button>
           ) : null}
           {aiManagerAllowed && data.automation?.canStart && !closed && !caps.manager ? (
             <button
@@ -127,111 +127,103 @@ export function RequestDetailPage() {
               disabled={busy}
               {...tip(
                 data.automation.status === "awaiting_confirm"
-                  ? "AI начнёт писать клиенту по этой заявке"
+                  ? uiText("AI начнёт писать клиенту по этой заявке")
                   : data.automation.status === "in_progress"
-                    ? "Если WhatsApp не ушёл, AI отправит приветствие по этой заявке"
-                    : "Передать заявку AI-менеджеру для первого контакта",
+                    ? uiText("Если WhatsApp не ушёл, AI отправит приветствие по этой заявке")
+                    : uiText("Передать заявку AI-менеджеру для первого контакта"),
               )}
               onClick={() => run(() => api.startInquiryAi(data.id))}
             >
               {data.automation.status === "awaiting_confirm"
-                ? "Начать обработку"
+                ? uiText("Начать обработку")
                 : data.automation.status === "in_progress"
-                  ? "Написать в WhatsApp"
-                  : "Передать AI-менеджеру"}
+                  ? uiText("Написать в WhatsApp")
+                  : uiText("Передать AI-менеджеру")}
             </button>
           ) : null}
           {data.automation?.canTakeover ? (
             <button
               className="btn secondary"
               disabled={busy}
-              {...tip("Остановить AI и вести заявку вручную")}
+              {...tip(uiText("Остановить AI и вести заявку вручную"))}
               onClick={() => run(() => api.takeoverInquiryAi(data.id))}
             >
-              Забрать себе
-            </button>
+              {uiText("Забрать себе")}</button>
           ) : null}
           {data.automation?.canReturnAi && !caps.manager ? (
             <button
               className="btn secondary"
               disabled={busy}
-              {...tip("Снова отдать заявку AI-менеджеру")}
+              {...tip(uiText("Снова отдать заявку AI-менеджеру"))}
               onClick={() => run(() => api.returnInquiryAi(data.id))}
             >
-              Передать обратно AI
-            </button>
+              {uiText("Передать обратно AI")}</button>
           ) : null}
           {data.conversationId ? (
             <Link
               className="btn secondary"
               to={`/conversations/${data.conversationId}`}
-              {...tip("Открыть WhatsApp-диалог по заявке")}
+              {...tip(uiText("Открыть WhatsApp-диалог по заявке"))}
             >
-              Написать
-            </Link>
+              {uiText("Написать")}</Link>
           ) : data.contactId ? (
-            <Link className="btn secondary" to={`/contacts/${data.contactId}`} {...tip("Открыть карточку клиента")}>
-              Написать
-            </Link>
+            <Link className="btn secondary" to={`/contacts/${data.contactId}`} {...tip(uiText("Открыть карточку клиента"))}>
+              {uiText("Написать")}</Link>
           ) : null}
           {CALLS_ENABLED && canCall ? (
             <a
               className="btn secondary"
               href={`tel:${String(data.phone).replace(/\s+/g, "")}`}
-              {...tip("Позвонить клиенту")}
+              {...tip(uiText("Позвонить клиенту"))}
             >
-              Позвонить
-            </a>
+              {uiText("Позвонить")}</a>
           ) : null}
           <Link
             className="btn secondary"
             to={`/tasks?inquiryId=${data.id}${data.contactId ? `&contactId=${data.contactId}` : ""}${data.conversationId ? `&conversationId=${data.conversationId}` : ""}${data.dealId ? `&dealId=${data.dealId}` : ""}`}
-            {...tip("Создать задачу с уже привязанной заявкой и клиентом")}
+            {...tip(uiText("Создать задачу с уже привязанной заявкой и клиентом"))}
           >
-            Создать задачу
-          </Link>
+            {uiText("Создать задачу")}</Link>
           {!data.hasDeal && !closed ? (
             <button
               className="btn"
               disabled={busy}
-              {...tip("Создать сделку по этой заявке")}
+              {...tip(uiText("Создать сделку по этой заявке"))}
               onClick={() => setShowDealConfirm(true)}
             >
-              Создать сделку
-            </button>
+              {uiText("Создать сделку")}</button>
           ) : null}
           {!closed ? (
             <button
               className="btn secondary"
               disabled={busy}
-              {...tip("Отметить заявку потерянной с указанием причины")}
+              {...tip(uiText("Отметить заявку потерянной с указанием причины"))}
               onClick={() => setShowLose(true)}
             >
-              Потеряна…
-            </button>
+              {uiText("Потеряна…")}</button>
           ) : null}
         </div>
       </div>
 
       {showDealConfirm ? (
         <div className="panel">
-          <b>Создать сделку по заявке «{data.subject}»?</b>
+          <b>{uiText("Создать сделку по заявке «")}{data.subject}»?</b>
           <div className="kv">
             <div>
-              <dt>Клиент</dt>
+              <dt>{uiText("Клиент")}</dt>
               <dd>{nameWithPhone(data.contactName, data.phone)}</dd>
             </div>
             <div>
-              <dt>Услуга / товар</dt>
+              <dt>{uiText("Услуга / товар")}</dt>
               <dd>{data.serviceLabel || "—"}</dd>
             </div>
             <div>
-              <dt>Сумма</dt>
-              <dd>{data.budgetLabel || "неизвестна"}</dd>
+              <dt>{uiText("Сумма")}</dt>
+              <dd>{data.budgetLabel || uiText("неизвестна")}</dd>
             </div>
             <div>
-              <dt>Ответственный</dt>
-              <dd>{data.assigneeName || "не назначен"}</dd>
+              <dt>{uiText("Ответственный")}</dt>
+              <dd>{data.assigneeName || uiText("не назначен")}</dd>
             </div>
           </div>
           <div className="actions">
@@ -245,11 +237,9 @@ export function RequestDetailPage() {
                 })
               }
             >
-              Создать сделку
-            </button>
+              {uiText("Создать сделку")}</button>
             <button className="btn secondary" type="button" onClick={() => setShowDealConfirm(false)}>
-              Отмена
-            </button>
+              {uiText("Отмена")}</button>
           </div>
         </div>
       ) : null}
@@ -270,20 +260,18 @@ export function RequestDetailPage() {
             });
           }}
         >
-          <b>Закрыть заявку</b>
+          <b>{uiText("Закрыть заявку")}</b>
           <label>
-            Тип
-            <select name="classification" defaultValue="lost">
-              <option value="lost">Потеряна</option>
-              <option value="invalid">Некорректная</option>
-              <option value="spam">Спам</option>
-              <option value="duplicate">Дубликат</option>
+            {uiText("Тип")}<select name="classification" defaultValue="lost">
+              <option value="lost">{uiText("Потеряна")}</option>
+              <option value="invalid">{uiText("Некорректная")}</option>
+              <option value="spam">{uiText("Спам")}</option>
+              <option value="duplicate">{uiText("Дубликат")}</option>
             </select>
           </label>
           <label>
-            Причина
-            <select name="reason" required defaultValue="no_reply">
-              {LOST_REASONS.map((item) => (
+            {uiText("Причина")}<select name="reason" required defaultValue="no_reply">
+              {localizeUiOptions(LOST_REASONS, uiText).map((item) => (
                 <option key={item.value} value={item.value}>
                   {item.label}
                 </option>
@@ -291,16 +279,13 @@ export function RequestDetailPage() {
             </select>
           </label>
           <label>
-            Комментарий
-            <textarea name="comment" rows={2} />
+            {uiText("Комментарий")}<textarea name="comment" rows={2} />
           </label>
           <div className="actions">
             <button className="btn danger" disabled={busy}>
-              Подтвердить
-            </button>
+              {uiText("Подтвердить")}</button>
             <button className="btn secondary" type="button" onClick={() => setShowLose(false)}>
-              Отмена
-            </button>
+              {uiText("Отмена")}</button>
           </div>
         </form>
       ) : null}
@@ -309,62 +294,61 @@ export function RequestDetailPage() {
         <div className="request-main-col">
           {data.automation ? (
             <div className="panel">
-              <h3>Обработка заявки</h3>
+              <h3>{uiText("Обработка заявки")}</h3>
               <div className="kv">
                 <div>
-                  <dt>Режим</dt>
-                  <dd>{data.automation.modeLabel || data.automation.mode || "—"}</dd>
+                  <dt>{uiText("Режим")}</dt>
+                  <dd>{uiMessage(data.automation.modeLabel) || data.automation.mode || "—"}</dd>
                 </div>
                 <div>
-                  <dt>Исполнитель</dt>
+                  <dt>{uiText("Исполнитель")}</dt>
                   <dd>
                     {data.automation.status === "none" || data.automation.status === "analyzed"
-                      ? "Менеджер"
-                      : "AI-менеджер"}
+                      ? uiText("Менеджер")
+                      : uiText("AI-менеджер")}
                   </dd>
                 </div>
                 <div>
-                  <dt>Статус</dt>
+                  <dt>{uiText("Статус")}</dt>
                   <dd>
-                    <span className="badge">{data.automation.statusLabel}</span>
+                    <span className="badge">{uiMessage(data.automation.statusLabel)}</span>
                   </dd>
                 </div>
                 <div>
-                  <dt>Задача</dt>
+                  <dt>{uiText("Задача")}</dt>
                   <dd>{data.automation.taskTitle || "—"}</dd>
                 </div>
                 <div>
-                  <dt>Следующее действие</dt>
+                  <dt>{uiText("Следующее действие")}</dt>
                   <dd>{data.automation.taskObjective || data.nextStep || "—"}</dd>
                 </div>
               </div>
-              {data.automation.reason ? <p className="muted">{data.automation.reason}</p> : null}
+              {data.automation.reason ? <p className="muted">{uiMessage(data.automation.reason)}</p> : null}
               {data.automation.analysisError ? (
                 <div className="actions">
-                  <p className="error">AI-анализ не выполнен: {data.automation.analysisError}</p>
+                  <p className="error">{uiText("AI-анализ не выполнен:")}{" "}{data.automation.analysisError}</p>
                   <button className="btn secondary" disabled={busy} onClick={() => run(() => api.retryInquiryAiAnalysis(data.id))}>
-                    Повторить анализ
-                  </button>
+                    {uiText("Повторить анализ")}</button>
                 </div>
               ) : null}
               {(data.automation.knownFields?.length || data.automation.missingFields?.length) ? (
                 <div className="request-gap" style={{ marginTop: 12 }}>
                   <div>
-                    <b>Уже известно</b>
+                    <b>{uiText("Уже известно")}</b>
                     <ul>
                       {(data.automation.knownFields || []).map((f: any) => (
                         <li key={f.key}>
-                          ✓ {f.label}
+                          ✓ {uiMessage(f.label)}
                           {f.value ? `: ${f.value}` : ""}
                         </li>
                       ))}
                     </ul>
                   </div>
                   <div>
-                    <b>Нужно выяснить</b>
+                    <b>{uiText("Нужно выяснить")}</b>
                     <ul>
                       {(data.automation.missingFields || []).map((f: any) => (
-                        <li key={f.key}>□ {f.label}</li>
+                        <li key={f.key}>□ {uiMessage(f.label)}</li>
                       ))}
                     </ul>
                   </div>
@@ -374,57 +358,57 @@ export function RequestDetailPage() {
           ) : null}
 
           <div className="panel">
-            <h3>Кратко</h3>
-            <p>{data.aiSummary || data.description || "Описание пока не заполнено."}</p>
+            <h3>{uiText("Кратко")}</h3>
+            <p>{data.aiSummary || data.description || uiText("Описание пока не заполнено.")}</p>
           </div>
 
           <div className="panel">
-            <h3>Потребность</h3>
+            <h3>{uiText("Потребность")}</h3>
             <div className="kv">
               <div>
-                <dt>Что интересует</dt>
+                <dt>{uiText("Что интересует")}</dt>
                 <dd>{data.serviceLabel || "—"}</dd>
               </div>
               <div>
-                <dt>Краткая тема</dt>
+                <dt>{uiText("Краткая тема")}</dt>
                 <dd>{data.subject || "—"}</dd>
               </div>
               <div>
-                <dt>Описание задачи</dt>
+                <dt>{uiText("Описание задачи")}</dt>
                 <dd>{data.description || "—"}</dd>
               </div>
               <div>
-                <dt>Подкатегория</dt>
+                <dt>{uiText("Подкатегория")}</dt>
                 <dd>{data.serviceSubcategory || "—"}</dd>
               </div>
               <div>
-                <dt>Бюджет</dt>
-                <dd>{data.budgetLabel || "Не определён"}</dd>
+                <dt>{uiText("Бюджет")}</dt>
+                <dd>{data.budgetLabel || uiText("Не определён")}</dd>
               </div>
               <div>
-                <dt>Срок</dt>
+                <dt>{uiText("Срок")}</dt>
                 <dd>{data.desiredDeadline || "—"}</dd>
               </div>
               <div>
-                <dt>Город</dt>
+                <dt>{uiText("Город")}</dt>
                 <dd>{data.city || "—"}</dd>
               </div>
             </div>
           </div>
 
           <div className="panel">
-            <h3>Источник</h3>
+            <h3>{uiText("Источник")}</h3>
             <div className="kv">
               <div>
-                <dt>Канал обращения</dt>
-                <dd>{data.channelLabel}</dd>
+                <dt>{uiText("Канал обращения")}</dt>
+                <dd>{uiMessage(data.channelLabel)}</dd>
               </div>
               <div>
-                <dt>Источник привлечения</dt>
+                <dt>{uiText("Источник привлечения")}</dt>
                 <dd>{data.attributionLabel || "—"}</dd>
               </div>
               <div>
-                <dt>Кампания</dt>
+                <dt>{uiText("Кампания")}</dt>
                 <dd>{data.utmCampaign || "—"}</dd>
               </div>
               <div>
@@ -434,19 +418,19 @@ export function RequestDetailPage() {
             </div>
             {data.utmSource || data.utmCampaign ? (
               <p className="muted" style={{ marginTop: 8 }}>
-                Метка кампании: {data.utmSource || "—"}
+                {uiText("Метка кампании:")}{" "}{data.utmSource || "—"}
                 {data.utmCampaign ? ` · ${data.utmCampaign}` : ""}
               </p>
             ) : null}
           </div>
 
           <div className="panel">
-            <h3>История</h3>
+            <h3>{uiText("История")}</h3>
             <div className="timeline">
-              {(data.timeline || []).length === 0 ? <p className="muted">Пока пусто</p> : null}
+              {(data.timeline || []).length === 0 ? <p className="muted">{uiText("Пока пусто")}</p> : null}
               {(data.timeline || []).map((item: any) => (
                 <div className="timeline-item" key={item.id}>
-                  <div className="muted">{new Date(item.at).toLocaleString("ru-RU")}</div>
+                  <div className="muted">{new Date(item.at).toLocaleString(uiFormatLocale())}</div>
                   <b>{item.title}</b>
                   {item.description ? <div className="muted">{item.description}</div> : null}
                 </div>
@@ -457,10 +441,10 @@ export function RequestDetailPage() {
 
         <div className="request-side-col">
           <div className="panel">
-            <h3>Сейчас</h3>
+            <h3>{uiText("Сейчас")}</h3>
             <div className="kv">
               <div>
-                <dt>Статус</dt>
+                <dt>{uiText("Статус")}</dt>
                 <dd>
                   {!closed ? (
                     <select
@@ -468,136 +452,132 @@ export function RequestDetailPage() {
                       disabled={busy}
                       onChange={(e) => run(() => api.updateInquiry(data.id, { status: e.target.value }))}
                     >
-                      {STATUS_OPTIONS.map((opt) => (
+                      {localizeUiOptions(STATUS_OPTIONS, uiText).map((opt) => (
                         <option key={opt.value} value={opt.value}>
                           {opt.label}
                         </option>
                       ))}
                     </select>
                   ) : (
-                    data.statusLabel
+                    uiMessage(data.statusLabel)
                   )}
                 </dd>
               </div>
               <div>
-                <dt>Услуга / товар</dt>
-                <dd>{!closed ? <select aria-label="Услуга / товар заявки" value={data.serviceCategory || ""} disabled={busy} onChange={(event) => run(() => api.updateInquiry(data.id, { serviceCategory: event.target.value || null }))}>
-                  <option value="">Не определено</option>
-                  {(data.serviceOptions || []).filter((item: { code: string; active: boolean }) => item.active || item.code === data.serviceCategory).map((item: TenantService) => <option key={item.code} value={item.code}>{catalogItemLabel(item)}{item.active ? "" : " (архив)"}</option>)}
+                <dt>{uiText("Услуга / товар")}</dt>
+                <dd>{!closed ? <select aria-label={uiText("Услуга / товар заявки")} value={data.serviceCategory || ""} disabled={busy} onChange={(event) => run(() => api.updateInquiry(data.id, { serviceCategory: event.target.value || null }))}>
+                  <option value="">{uiText("Не определено")}</option>
+                  {(data.serviceOptions || []).filter((item: { code: string; active: boolean }) => item.active || item.code === data.serviceCategory).map((item: TenantService) => <option key={item.code} value={item.code}>{catalogItemLabel(item)}{item.active ? "" : uiText(" (архив)")}</option>)}
                 </select> : data.serviceLabel}</dd>
               </div>
               <div>
-                <dt>Ответственный</dt>
-                <dd>{data.assigneeName || "Не назначен"}</dd>
+                <dt>{uiText("Ответственный")}</dt>
+                <dd>{data.assigneeName || uiText("Не назначен")}</dd>
               </div>
               <div>
-                <dt>Нужен ответ</dt>
+                <dt>{uiText("Нужен ответ")}</dt>
                 <dd>
                   {data.needsReply
-                    ? `Да${data.waitingMinutes != null ? ` · ${formatDurationMinutes(data.waitingMinutes)}` : ""}`
-                    : "Нет"}
+                    ? uiText("Да{p0}", {p0: data.waitingMinutes != null ? ` · ${formatDurationMinutes(data.waitingMinutes)}` : ""})
+                    : uiText("Нет")}
                 </dd>
               </div>
               <div>
-                <dt>Следующее действие</dt>
+                <dt>{uiText("Следующее действие")}</dt>
                 <dd>
                   {data.nextStep || (
                     <>
-                      Нет следующего действия{" "}
+                      {uiText("Нет следующего действия")}{" "}
                       <Link
                         className="linkish"
                         to={`/tasks?inquiryId=${data.id}${data.contactId ? `&contactId=${data.contactId}` : ""}`}
                       >
-                        Создать задачу
-                      </Link>
+                        {uiText("Создать задачу")}</Link>
                     </>
                   )}
                 </dd>
               </div>
               <div>
-                <dt>Сделка</dt>
-                <dd>{data.hasDeal ? data.dealTitle : "Не создана"}</dd>
+                <dt>{uiText("Сделка")}</dt>
+                <dd>{data.hasDeal ? data.dealTitle : uiText("Не создана")}</dd>
               </div>
             </div>
           </div>
 
           <div className="panel">
-            <h3>Квалификация</h3>
+            <h3>{uiText("Квалификация")}</h3>
             <div className="qualification-list">
               {(data.qualification || []).map((item: any) => (
                 <div key={item.key} className={`qualification-item ${item.ok ? "ok" : "missing"}`}>
                   <span>{item.ok ? "✓" : "—"}</span>
-                  <span>{item.label}</span>
+                  <span>{uiMessage(item.label)}</span>
                 </div>
               ))}
             </div>
           </div>
 
           <div className="panel">
-            <h3>Клиент</h3>
+            <h3>{uiText("Клиент")}</h3>
             {data.contact ? (
               <>
                 <b>{data.contact.name}</b>
-                <div className="muted">{data.contact.phone || "Нет телефона"}</div>
+                <div className="muted">{data.contact.phone || uiText("Нет телефона")}</div>
                 {data.contact.inquiryCount != null ? (
-                  <div className="muted">{data.contact.inquiryCount} обращений</div>
+                  <div className="muted">{data.contact.inquiryCount} {" "}{uiText("обращений")}</div>
                 ) : null}
                 <div className="actions" style={{ marginTop: 10 }}>
                   <Link className="btn secondary" to={`/contacts/${data.contact.id}`}>
-                    Открыть карточку
-                  </Link>
+                    {uiText("Открыть карточку")}</Link>
                 </div>
               </>
             ) : (
-              <p className="muted">Клиент пока не идентифицирован.</p>
+              <p className="muted">{uiText("Клиент пока не идентифицирован.")}</p>
             )}
           </div>
 
           <div className="panel">
-            <h3>Диалоги</h3>
+            <h3>{uiText("Диалоги")}</h3>
             {data.conversation ? (
               <Link className="row" to={`/conversations/${data.conversation.id}`} style={{ marginTop: 0 }}>
                 <div>
                   <b>{data.conversation.channel}</b>
                   <div className="muted">
-                    {data.conversation.messageCount != null ? `${data.conversation.messageCount} сообщений` : "Открыть переписку"}
+                    {data.conversation.messageCount != null ? uiText("{p0} сообщений", {p0: data.conversation.messageCount}) : uiText("Открыть переписку")}
                   </div>
                 </div>
               </Link>
             ) : (
-              <p className="muted">Связанных диалогов нет</p>
+              <p className="muted">{uiText("Связанных диалогов нет")}</p>
             )}
           </div>
 
           <div className="panel">
-            <h3>Сделка</h3>
+            <h3>{uiText("Сделка")}</h3>
             {data.deal ? (
               <>
                 <b>{data.deal.title}</b>
                 <div className="muted">{dealOutcomeLabel(data.deal.outcome, data.deal.stage)}</div>
                 <div className="actions" style={{ marginTop: 10 }}>
                   <Link className="btn secondary" to="/deals">
-                    Открыть сделку
-                  </Link>
+                    {uiText("Открыть сделку")}</Link>
                 </div>
               </>
             ) : (
               <button className="btn secondary" disabled={busy || closed} onClick={() => setShowDealConfirm(true)}>
-                + Создать сделку
-              </button>
+                {uiText("+ Создать сделку")}</button>
             )}
           </div>
 
           <div className="panel">
-            <h3>Задачи</h3>
-            {(data.tasks || []).length === 0 ? <p className="muted">Задач нет</p> : null}
+            <h3>{uiText("Задачи")}</h3>
+            {(data.tasks || []).length === 0 ? <p className="muted">{uiText("Задач нет")}</p> : null}
             {(data.tasks || []).map((task: any) => (
               <div className="row" key={task.id} style={{ marginTop: 8 }}>
                 <div>
                   <b>{task.title}</b>
                   <div className="muted">
                     {task.status}
-                    {task.dueAt ? ` · ${new Date(task.dueAt).toLocaleString("ru-RU")}` : ""}
+                    {task.dueAt ? ` · ${new Date(task.dueAt).toLocaleString(uiFormatLocale())}` : ""}
                   </div>
                 </div>
               </div>
@@ -607,8 +587,7 @@ export function RequestDetailPage() {
                 className="btn secondary"
                 to={`/tasks?inquiryId=${data.id}${data.contactId ? `&contactId=${data.contactId}` : ""}${data.conversationId ? `&conversationId=${data.conversationId}` : ""}${data.dealId ? `&dealId=${data.dealId}` : ""}`}
               >
-                + Задача
-              </Link>
+                {uiText("+ Задача")}</Link>
             </div>
           </div>
         </div>

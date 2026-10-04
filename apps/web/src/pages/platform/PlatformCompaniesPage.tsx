@@ -1,3 +1,4 @@
+import { uiText, useUiText, localizeUiOptions } from "../../lib/uiText";
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../../lib/api";
@@ -16,6 +17,7 @@ export function PlatformCompaniesPage({ mode }: { mode: "list" | "new" }) {
 }
 
 function CompanyList() {
+  const uiText = useUiText();
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("");
   const [page, setPage] = useState(1);
@@ -27,7 +29,7 @@ function CompanyList() {
     try {
       setData(await api.adminTenants({ q, status, page: nextPage, limit: 20 }));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Ошибка");
+      setError(err instanceof Error ? err.message : uiText("Ошибка"));
     }
   }
 
@@ -39,8 +41,8 @@ function CompanyList() {
   return (
     <div className="stack">
       <div className="page-head">
-        <h2>Компании</h2>
-        <Link className="btn" to="/admin/companies/new">Добавить компанию</Link>
+        <h2>{uiText("Компании")}</h2>
+        <Link className="btn" to="/admin/companies/new">{uiText("Добавить компанию")}</Link>
       </div>
       <form
         className="filters"
@@ -50,32 +52,32 @@ function CompanyList() {
           void load(1);
         }}
       >
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Поиск по названию" />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={uiText("Поиск по названию")} />
         <select value={status} onChange={(e) => setStatus(e.target.value)}>
-          <option value="">Все статусы</option>
-          <option value="active">Активные</option>
-          <option value="suspended">Приостановленные</option>
+          <option value="">{uiText("Все статусы")}</option>
+          <option value="active">{uiText("Активные")}</option>
+          <option value="suspended">{uiText("Приостановленные")}</option>
         </select>
-        <button className="btn secondary" type="submit">Найти</button>
+        <button className="btn secondary" type="submit">{uiText("Найти")}</button>
       </form>
       {error ? <p className="error">{error}</p> : null}
-      {!data ? <div className="state">Загрузка…</div> : (
+      {!data ? <div className="state">{uiText("Загрузка…")}</div> : (
         <>
           <div className="stats-table-wrap">
             <table className="stats-table">
               <thead>
                 <tr>
-                  <th>Название</th>
-                  <th>Владелец</th>
-                  <th>Тариф</th>
-                  <th>БИН/ИИН</th>
-                  <th>Администратор</th>
-                  <th>Контакт</th>
-                  <th>Участники</th>
-                  <th>Подключения</th>
+                  <th>{uiText("Название")}</th>
+                  <th>{uiText("Владелец")}</th>
+                  <th>{uiText("Тариф")}</th>
+                  <th>{uiText("БИН/ИИН")}</th>
+                  <th>{uiText("Администратор")}</th>
+                  <th>{uiText("Контакт")}</th>
+                  <th>{uiText("Участники")}</th>
+                  <th>{uiText("Подключения")}</th>
                   <th>WhatsApp AI</th>
-                  <th>Статус</th>
-                  <th>Создана</th>
+                  <th>{uiText("Статус")}</th>
+                  <th>{uiText("Создана")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -85,7 +87,7 @@ function CompanyList() {
                     <td>{item.owner?.email || item.admin?.email || "—"}</td>
                     <td>
                       {item.subscriptionStatus === "none" || item.previewMode
-                        ? "Просмотр"
+                        ? uiText("Просмотр")
                         : item.planName || item.subscriptionStatus || "—"}
                     </td>
                     <td>{item.bin || "—"}</td>
@@ -93,10 +95,10 @@ function CompanyList() {
                     <td>{[item.contactEmail, item.contactPhone].filter(Boolean).join(" · ") || "—"}</td>
                     <td>{item.memberCount}</td>
                     <td>{item.connectionsLabel}</td>
-                    <td><Link to={`/admin/ai-managers/${item.id}`}>Промт и база</Link></td>
+                    <td><Link to={`/admin/ai-managers/${item.id}`}>{uiText("Промт и база")}</Link></td>
                     <td>
                       <span className={statusBadgeClass(STATUS_LABEL[item.status] || item.status)}>
-                        {STATUS_LABEL[item.status] || item.status}
+                        {localizeUiOptions(STATUS_LABEL, uiText)[item.status] || item.status}
                       </span>
                     </td>
                     <td>{formatDateTime(item.createdAt)}</td>
@@ -106,9 +108,9 @@ function CompanyList() {
             </table>
           </div>
           <div className="actions">
-            <button className="btn secondary" disabled={page <= 1} onClick={() => { const next = page - 1; setPage(next); void load(next); }}>Назад</button>
-            <span className="muted">Стр. {data.page} · {data.total}</span>
-            <button className="btn secondary" disabled={page * data.pageSize >= data.total} onClick={() => { const next = page + 1; setPage(next); void load(next); }}>Дальше</button>
+            <button className="btn secondary" disabled={page <= 1} onClick={() => { const next = page - 1; setPage(next); void load(next); }}>{uiText("Назад")}</button>
+            <span className="muted">{uiText("Стр.")}{" "}{data.page} · {data.total}</span>
+            <button className="btn secondary" disabled={page * data.pageSize >= data.total} onClick={() => { const next = page + 1; setPage(next); void load(next); }}>{uiText("Дальше")}</button>
           </div>
         </>
       )}
@@ -117,6 +119,7 @@ function CompanyList() {
 }
 
 function CreateCompanyForm() {
+  const uiText = useUiText();
   const navigate = useNavigate();
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -142,13 +145,13 @@ function CreateCompanyForm() {
         adminPhone: String(form.get("adminPhone") || ""),
         adminRole: String(form.get("adminRole") || "owner"),
       })) as any;
-      notifySaved("Компания создана. Ссылка приглашения создана, письмо не отправлялось.");
+      notifySaved(uiText("Компания создана. Ссылка приглашения создана, письмо не отправлялось."));
       if (result.invitation?.inviteUrl) {
         await navigator.clipboard.writeText(result.invitation.inviteUrl).catch(() => undefined);
       }
       navigate(`/admin/companies/${result.company.id}`);
     } catch (err: any) {
-      setError(err instanceof Error ? err.message : "Не удалось создать");
+      setError(err instanceof Error ? err.message : uiText("Не удалось создать"));
       setFieldErrors(err?.body?.field_errors || {});
     } finally {
       setBusy(false);
@@ -157,30 +160,29 @@ function CreateCompanyForm() {
 
   return (
     <form className="panel stack" onSubmit={onSubmit}>
-      <h3>Новая компания</h3>
-      <label>Название *<input name="name" required />{fieldErrors.name ? <p className="field-error">{fieldErrors.name}</p> : null}</label>
-      <label>Юридическое название<input name="legalName" /></label>
-      <label>БИН/ИИН<input name="bin" />{fieldErrors.bin ? <p className="field-error">{fieldErrors.bin}</p> : null}</label>
-      <label>Контактный email<input name="contactEmail" type="email" /></label>
-      <label>Телефон<input name="contactPhone" /></label>
-      <label>Город<input name="city" /></label>
-      <label>Часовой пояс<input name="timezone" defaultValue="Asia/Almaty" /></label>
-      <h4>Первый администратор / директор</h4>
-      <label>Имя<input name="adminName" /></label>
+      <h3>{uiText("Новая компания")}</h3>
+      <label>{uiText("Название *")}<input name="name" required />{fieldErrors.name ? <p className="field-error">{fieldErrors.name}</p> : null}</label>
+      <label>{uiText("Юридическое название")}<input name="legalName" /></label>
+      <label>{uiText("БИН/ИИН")}<input name="bin" />{fieldErrors.bin ? <p className="field-error">{fieldErrors.bin}</p> : null}</label>
+      <label>{uiText("Контактный email")}<input name="contactEmail" type="email" /></label>
+      <label>{uiText("Телефон")}<input name="contactPhone" /></label>
+      <label>{uiText("Город")}<input name="city" /></label>
+      <label>{uiText("Часовой пояс")}<input name="timezone" defaultValue="Asia/Almaty" /></label>
+      <h4>{uiText("Первый администратор / директор")}</h4>
+      <label>{uiText("Имя")}<input name="adminName" /></label>
       <label>Email *<input name="adminEmail" type="email" required />{fieldErrors.adminEmail ? <p className="field-error">{fieldErrors.adminEmail}</p> : null}</label>
-      <label>Телефон<input name="adminPhone" /></label>
+      <label>{uiText("Телефон")}<input name="adminPhone" /></label>
       <label>
-        Роль
-        <select name="adminRole" defaultValue="owner">
-          <option value="owner">Администратор компании</option>
-          <option value="director">Директор</option>
+        {uiText("Роль")}<select name="adminRole" defaultValue="owner">
+          <option value="owner">{uiText("Администратор компании")}</option>
+          <option value="director">{uiText("Директор")}</option>
         </select>
       </label>
       {error ? <p className="error">{error}</p> : null}
-      <p className="muted">После сохранения будет создана ссылка приглашения. Статус: «Ссылка создана», без отправки email.</p>
+      <p className="muted">{uiText("После сохранения будет создана ссылка приглашения. Статус: «Ссылка создана», без отправки email.")}</p>
       <div className="actions">
-        <button className="btn" disabled={busy}>{busy ? "Сохранение…" : "Создать"}</button>
-        <Link className="btn secondary" to="/admin/companies">Отмена</Link>
+        <button className="btn" disabled={busy}>{busy ? uiText("Сохранение…") : uiText("Создать")}</button>
+        <Link className="btn secondary" to="/admin/companies">{uiText("Отмена")}</Link>
       </div>
     </form>
   );

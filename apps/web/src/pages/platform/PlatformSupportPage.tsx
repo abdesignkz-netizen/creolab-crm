@@ -1,3 +1,4 @@
+import { uiText, useUiText, localizeUiOptions, uiMessage } from "../../lib/uiText";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { api } from "../../lib/api";
@@ -88,7 +89,7 @@ const EMPTY_REPLY: Reply = { shortcut: "/", title: "", content: "", isActive: tr
 function fileToBase64(file: File) {
   return new Promise<{ fileName: string; mimeType: string; contentBase64: string }>((resolve, reject) => {
     const reader = new FileReader();
-    reader.onerror = () => reject(new Error("Не удалось прочитать файл"));
+    reader.onerror = () => reject(new Error(uiText("Не удалось прочитать файл")));
     reader.onload = () => {
       const result = String(reader.result || "");
       const comma = result.indexOf(",");
@@ -103,6 +104,7 @@ function fileToBase64(file: File) {
 }
 
 export function PlatformSupportPage() {
+  const uiText = useUiText();
   const { me } = useSession();
   const location = useLocation();
   const navigate = useNavigate();
@@ -146,19 +148,19 @@ export function PlatformSupportPage() {
   }
 
   useEffect(() => {
-    void loadTickets().catch((err) => setError(err instanceof Error ? err.message : "Ошибка"));
+    void loadTickets().catch((err) => setError(err instanceof Error ? err.message : uiText("Ошибка")));
     void loadReplies().catch(() => undefined);
   }, [status]);
 
   useEffect(() => {
-    if (tab === "articles") void loadArticles().catch((err) => setError(err instanceof Error ? err.message : "Ошибка"));
-    if (tab === "replies") void loadReplies().catch((err) => setError(err instanceof Error ? err.message : "Ошибка"));
+    if (tab === "articles") void loadArticles().catch((err) => setError(err instanceof Error ? err.message : uiText("Ошибка")));
+    if (tab === "replies") void loadReplies().catch((err) => setError(err instanceof Error ? err.message : uiText("Ошибка")));
   }, [tab]);
 
   useEffect(() => {
     if (ticketId) {
       setTab("tickets");
-      void loadTicket(ticketId).catch((err) => setError(err instanceof Error ? err.message : "Ошибка"));
+      void loadTicket(ticketId).catch((err) => setError(err instanceof Error ? err.message : uiText("Ошибка")));
     }
   }, [ticketId]);
 
@@ -188,7 +190,7 @@ export function PlatformSupportPage() {
       setDraft("");
       await loadTickets();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не отправлено");
+      setError(err instanceof Error ? err.message : uiText("Не отправлено"));
     } finally {
       setBusy(false);
     }
@@ -202,7 +204,7 @@ export function PlatformSupportPage() {
       const data = (await api.adminSupportAttachment(chat.ticket.id, payload)) as { ticket: Ticket; messages: Message[] };
       setChat(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Файл не отправлен");
+      setError(err instanceof Error ? err.message : uiText("Файл не отправлен"));
     } finally {
       setBusy(false);
     }
@@ -213,7 +215,7 @@ export function PlatformSupportPage() {
     const data = (await api.adminSupportTicketUpdate(chat.ticket.id, { status: next })) as { ticket: Ticket; messages: Message[] };
     setChat(data);
     await loadTickets();
-    notifySaved("Статус обновлён");
+    notifySaved(uiText("Статус обновлён"));
   }
 
   async function assignToMe() {
@@ -223,7 +225,7 @@ export function PlatformSupportPage() {
       messages: Message[];
     };
     setChat(data);
-    notifySaved("Назначено");
+    notifySaved(uiText("Назначено"));
   }
 
   async function saveArticle(event: FormEvent) {
@@ -241,9 +243,9 @@ export function PlatformSupportPage() {
       else await api.adminSupportArticleCreate(payload);
       await loadArticles();
       setArticle(EMPTY_ARTICLE);
-      notifySaved("Статья сохранена");
+      notifySaved(uiText("Статья сохранена"));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось сохранить");
+      setError(err instanceof Error ? err.message : uiText("Не удалось сохранить"));
     } finally {
       setBusy(false);
     }
@@ -258,9 +260,9 @@ export function PlatformSupportPage() {
       else await api.adminSupportReplyCreate(reply);
       await loadReplies();
       setReply(EMPTY_REPLY);
-      notifySaved("Шаблон сохранён");
+      notifySaved(uiText("Шаблон сохранён"));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось сохранить");
+      setError(err instanceof Error ? err.message : uiText("Не удалось сохранить"));
     } finally {
       setBusy(false);
     }
@@ -269,11 +271,11 @@ export function PlatformSupportPage() {
   return (
     <div className="stack">
       <div>
-        <h2>Поддержка</h2>
-        <p className="muted">Обращения пользователей сервиса. Это не CRM-диалоги компаний.</p>
+        <h2>{uiText("Поддержка")}</h2>
+        <p className="muted">{uiText("Обращения пользователей сервиса. Это не CRM-диалоги компаний.")}</p>
       </div>
       <div className="support-tabs">
-        {TABS.map(([id, label]) => (
+        {localizeUiOptions(TABS, uiText).map(([id, label]) => (
           <button key={id} type="button" className={`btn ${tab === id ? "" : "secondary"}`} onClick={() => setTab(id)}>
             {label}
           </button>
@@ -281,7 +283,7 @@ export function PlatformSupportPage() {
       </div>
       {error ? <p className="error">{error}</p> : null}
 
-      {tab === "signups" ? <PlatformSignupRequests title="Запросы с экрана входа" /> : null}
+      {tab === "signups" ? <PlatformSignupRequests title={uiText("Запросы с экрана входа")} /> : null}
 
       {tab === "tickets" ? (
         <div className="support-admin-layout">
@@ -293,11 +295,11 @@ export function PlatformSupportPage() {
                 void loadTickets();
               }}
             >
-              <input value={q} onChange={(event) => setQ(event.target.value)} placeholder="Номер или тема" />
-              <button className="btn secondary">Найти</button>
+              <input value={q} onChange={(event) => setQ(event.target.value)} placeholder={uiText("Номер или тема")} />
+              <button className="btn secondary">{uiText("Найти")}</button>
             </form>
             <div className="support-tabs">
-              {STATUS_FILTERS.map(([id, label]) => (
+              {localizeUiOptions(STATUS_FILTERS, uiText).map(([id, label]) => (
                 <button key={id || "all"} type="button" className={`btn ${status === id ? "" : "secondary"}`} onClick={() => setStatus(id)}>
                   {label}
                 </button>
@@ -312,39 +314,38 @@ export function PlatformSupportPage() {
                   onClick={() => navigate(`/admin/support/${item.id}`)}
                 >
                   <b>
-                    #{item.number} · {item.tenantName || "Компания"}
+                    #{item.number} · {item.tenantName || uiText("Компания")}
                   </b>
                   <span>{item.subject}</span>
                   <span className="muted">
-                    {item.statusLabel}
+                    {uiMessage(item.statusLabel)}
                     {item.adminUnread ? ` · ${item.adminUnread}` : ""}
                   </span>
                 </button>
               ))}
-              {!tickets.length ? <p className="muted">Обращений нет.</p> : null}
+              {!tickets.length ? <p className="muted">{uiText("Обращений нет.")}</p> : null}
             </div>
           </div>
           <div className="panel stack">
             {!chat ? (
-              <p className="muted">Выберите обращение.</p>
+              <p className="muted">{uiText("Выберите обращение.")}</p>
             ) : (
               <>
                 <div className="support-ticket-meta">
                   <b>
-                    #{chat.ticket.number} · {chat.ticket.tenantName || "Компания"}
+                    #{chat.ticket.number} · {chat.ticket.tenantName || uiText("Компания")}
                   </b>
-                  <span>Пользователь: {chat.ticket.createdBy?.name} · {chat.ticket.createdBy?.email}</span>
-                  <span>Создано: {formatDateTime(chat.ticket.createdAt)}</span>
+                  <span>{uiText("Пользователь:")}{" "}{chat.ticket.createdBy?.name} · {chat.ticket.createdBy?.email}</span>
+                  <span>{uiText("Создано:")}{" "}{formatDateTime(chat.ticket.createdAt)}</span>
                   <span>
-                    Раздел: {chat.ticket.sourceLabel || "—"}
+                    {uiText("Раздел:")}{" "}{chat.ticket.sourceLabel || "—"}
                     {chat.ticket.sourceRoute ? ` · ${chat.ticket.sourceRoute}` : ""}
                   </span>
-                  <span>Статус: {chat.ticket.statusLabel}</span>
-                  <span>Ответственный: {chat.ticket.assignedTo?.name || "не назначен"}</span>
+                  <span>{uiText("Статус:")}{" "}{uiMessage(chat.ticket.statusLabel)}</span>
+                  <span>{uiText("Ответственный:")}{" "}{chat.ticket.assignedTo?.name || uiText("не назначен")}</span>
                   {me?.user?.id && chat.ticket.assignedTo?.id !== me.user.id ? (
                     <button type="button" className="btn secondary" onClick={() => void assignToMe()}>
-                      Назначить себе
-                    </button>
+                      {uiText("Назначить себе")}</button>
                   ) : null}
                 </div>
                 <div className="support-messages" ref={messagesRef}>
@@ -362,7 +363,7 @@ export function PlatformSupportPage() {
                           target="_blank"
                           rel="noreferrer"
                         >
-                          {file.kind === "image" ? "Изображение" : file.fileName}
+                          {file.kind === "image" ? uiText("Изображение") : file.fileName}
                         </a>
                       ))}
                     </div>
@@ -389,22 +390,21 @@ export function PlatformSupportPage() {
                   <button type="button" className="btn secondary" onClick={() => fileRef.current?.click()} disabled={busy}>
                     +
                   </button>
-                  <input value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Ответить…" disabled={busy} />
+                  <input value={draft} onChange={(event) => setDraft(event.target.value)} placeholder={uiText("Ответить…")} disabled={busy} />
                   <button className="btn" disabled={busy || !draft.trim()}>
                     →
                   </button>
                 </form>
                 {activeReplies.length ? (
                   <label>
-                    Шаблон ответа
-                    <select
+                    {uiText("Шаблон ответа")}<select
                       value=""
                       onChange={(event) => {
                         const found = activeReplies.find((item) => item.id === event.target.value);
                         if (found) setDraft(found.content);
                       }}
                     >
-                      <option value="">Вставить шаблон…</option>
+                      <option value="">{uiText("Вставить шаблон…")}</option>
                       {activeReplies.map((item) => (
                         <option key={item.id} value={item.id}>
                           {item.shortcut} — {item.title}
@@ -415,11 +415,9 @@ export function PlatformSupportPage() {
                 ) : null}
                 <div className="actions">
                   <button type="button" className="btn secondary" onClick={() => void setTicketStatus("WAITING_FOR_CUSTOMER")}>
-                    Ожидаем клиента
-                  </button>
+                    {uiText("Ожидаем клиента")}</button>
                   <button type="button" className="btn secondary" onClick={() => void setTicketStatus("CLOSED")}>
-                    Закрыть
-                  </button>
+                    {uiText("Закрыть")}</button>
                 </div>
               </>
             )}
@@ -434,19 +432,17 @@ export function PlatformSupportPage() {
               <button key={item.id} type="button" className="support-item" onClick={() => setArticle(item)}>
                 <b>{item.title}</b>
                 <span className="muted">
-                  {item.category} · {item.isPublished === false ? "скрыта" : "опубликована"}
-                  {item.isPopular ? " · популярная" : ""}
+                  {item.category} · {item.isPublished === false ? uiText("скрыта") : uiText("опубликована")}
+                  {item.isPopular ? uiText(" · популярная") : ""}
                 </span>
               </button>
             ))}
             <button type="button" className="btn secondary" onClick={() => setArticle(EMPTY_ARTICLE)}>
-              Новая статья
-            </button>
+              {uiText("Новая статья")}</button>
           </div>
           <form className="panel stack" onSubmit={(event) => void saveArticle(event)}>
             <label>
-              Категория
-              <select value={article.category} onChange={(event) => setArticle({ ...article, category: event.target.value })}>
+              {uiText("Категория")}<select value={article.category} onChange={(event) => setArticle({ ...article, category: event.target.value })}>
                 {categories.map((item) => (
                   <option key={item.id} value={item.id}>
                     {item.title}
@@ -455,45 +451,35 @@ export function PlatformSupportPage() {
               </select>
             </label>
             <label>
-              Заголовок
-              <input value={article.title} onChange={(event) => setArticle({ ...article, title: event.target.value })} />
+              {uiText("Заголовок")}<input value={article.title} onChange={(event) => setArticle({ ...article, title: event.target.value })} />
             </label>
             <label>
-              Адрес статьи
-              <input value={article.slug} onChange={(event) => setArticle({ ...article, slug: event.target.value })} placeholder="connect-whatsapp" />
+              {uiText("Адрес статьи")}<input value={article.slug} onChange={(event) => setArticle({ ...article, slug: event.target.value })} placeholder="connect-whatsapp" />
             </label>
             <label>
-              Текст
-              <textarea rows={10} value={article.content} onChange={(event) => setArticle({ ...article, content: event.target.value })} />
+              {uiText("Текст")}<textarea rows={10} value={article.content} onChange={(event) => setArticle({ ...article, content: event.target.value })} />
             </label>
             <label>
-              Ключевые слова
-              <input value={article.keywords} onChange={(event) => setArticle({ ...article, keywords: event.target.value })} />
+              {uiText("Ключевые слова")}<input value={article.keywords} onChange={(event) => setArticle({ ...article, keywords: event.target.value })} />
             </label>
             <label>
-              Раздел CRM
-              <input value={article.relatedRoute || ""} onChange={(event) => setArticle({ ...article, relatedRoute: event.target.value })} placeholder="/integrations" />
+              {uiText("Раздел CRM")}<input value={article.relatedRoute || ""} onChange={(event) => setArticle({ ...article, relatedRoute: event.target.value })} placeholder="/integrations" />
             </label>
             <label>
-              Подпись кнопки
-              <input value={article.relatedLabel || ""} onChange={(event) => setArticle({ ...article, relatedLabel: event.target.value })} />
+              {uiText("Подпись кнопки")}<input value={article.relatedLabel || ""} onChange={(event) => setArticle({ ...article, relatedLabel: event.target.value })} />
             </label>
             <label>
-              Порядок
-              <input type="number" value={article.sortOrder} onChange={(event) => setArticle({ ...article, sortOrder: Number(event.target.value) })} />
+              {uiText("Порядок")}<input type="number" value={article.sortOrder} onChange={(event) => setArticle({ ...article, sortOrder: Number(event.target.value) })} />
             </label>
             <label className="check">
               <input type="checkbox" checked={Boolean(article.isPopular)} onChange={(event) => setArticle({ ...article, isPopular: event.target.checked })} />
-              Популярный вопрос
-            </label>
+              {uiText("Популярный вопрос")}</label>
             <label className="check">
               <input type="checkbox" checked={article.isPublished !== false} onChange={(event) => setArticle({ ...article, isPublished: event.target.checked })} />
-              Опубликована
-            </label>
+              {uiText("Опубликована")}</label>
             <div className="actions">
               <button className="btn" disabled={busy}>
-                Сохранить
-              </button>
+                {uiText("Сохранить")}</button>
               {article.id ? (
                 <button
                   type="button"
@@ -503,11 +489,10 @@ export function PlatformSupportPage() {
                     await api.adminSupportArticleDelete(article.id);
                     setArticle(EMPTY_ARTICLE);
                     await loadArticles();
-                    notifySaved("Статья удалена");
+                    notifySaved(uiText("Статья удалена"));
                   }}
                 >
-                  Удалить
-                </button>
+                  {uiText("Удалить")}</button>
               ) : null}
             </div>
           </form>
@@ -522,38 +507,31 @@ export function PlatformSupportPage() {
                 <b>
                   {item.shortcut} — {item.title}
                 </b>
-                <span className="muted">{item.isActive === false ? "выключен" : "активен"}</span>
+                <span className="muted">{item.isActive === false ? uiText("выключен") : uiText("активен")}</span>
               </button>
             ))}
             <button type="button" className="btn secondary" onClick={() => setReply(EMPTY_REPLY)}>
-              Новый шаблон
-            </button>
+              {uiText("Новый шаблон")}</button>
           </div>
           <form className="panel stack" onSubmit={(event) => void saveReply(event)}>
             <label>
-              Команда
-              <input value={reply.shortcut} onChange={(event) => setReply({ ...reply, shortcut: event.target.value })} placeholder="/whatsapp" />
+              {uiText("Команда")}<input value={reply.shortcut} onChange={(event) => setReply({ ...reply, shortcut: event.target.value })} placeholder="/whatsapp" />
             </label>
             <label>
-              Название
-              <input value={reply.title} onChange={(event) => setReply({ ...reply, title: event.target.value })} />
+              {uiText("Название")}<input value={reply.title} onChange={(event) => setReply({ ...reply, title: event.target.value })} />
             </label>
             <label>
-              Текст
-              <textarea rows={8} value={reply.content} onChange={(event) => setReply({ ...reply, content: event.target.value })} />
+              {uiText("Текст")}<textarea rows={8} value={reply.content} onChange={(event) => setReply({ ...reply, content: event.target.value })} />
             </label>
             <label>
-              Порядок
-              <input type="number" value={reply.sortOrder || 100} onChange={(event) => setReply({ ...reply, sortOrder: Number(event.target.value) })} />
+              {uiText("Порядок")}<input type="number" value={reply.sortOrder || 100} onChange={(event) => setReply({ ...reply, sortOrder: Number(event.target.value) })} />
             </label>
             <label className="check">
               <input type="checkbox" checked={reply.isActive !== false} onChange={(event) => setReply({ ...reply, isActive: event.target.checked })} />
-              Активен
-            </label>
+              {uiText("Активен")}</label>
             <div className="actions">
               <button className="btn" disabled={busy}>
-                Сохранить
-              </button>
+                {uiText("Сохранить")}</button>
               {reply.id ? (
                 <button
                   type="button"
@@ -563,11 +541,10 @@ export function PlatformSupportPage() {
                     await api.adminSupportReplyDelete(reply.id);
                     setReply(EMPTY_REPLY);
                     await loadReplies();
-                    notifySaved("Шаблон удалён");
+                    notifySaved(uiText("Шаблон удалён"));
                   }}
                 >
-                  Удалить
-                </button>
+                  {uiText("Удалить")}</button>
               ) : null}
             </div>
           </form>

@@ -11,7 +11,8 @@ function part(n: number, one: string, few: string, many: string) {
 }
 
 /** Human-readable wait/age from whole minutes: "5 часов 45 мин", "2 дня 3 часа", "1 месяц 12 дней". */
-export function formatDurationMinutes(minutes: number | null | undefined) {
+export function formatDurationMinutes(minutes: number | null | undefined, locale = "ru") {
+  if (locale.toLowerCase().split(/[-_]/)[0] === "kk") return formatKazakhDuration(minutes);
   if (minutes == null || !Number.isFinite(minutes)) return null;
   const mins = Math.max(0, Math.floor(minutes));
   if (mins < 1) return "меньше минуты";
@@ -44,12 +45,27 @@ export function formatDurationMinutes(minutes: number | null | undefined) {
   return remMonths ? `${yearPart} ${part(remMonths, "месяц", "месяца", "месяцев")}` : yearPart;
 }
 
-export function formatWaitSince(minutes: number | null | undefined) {
-  const duration = formatDurationMinutes(minutes);
-  return duration ? `Ждёт ${duration}` : null;
+export function formatWaitSince(minutes: number | null | undefined, locale = "ru") {
+  const duration = formatDurationMinutes(minutes, locale);
+  return duration ? locale.startsWith("kk") ? `${duration} күтуде` : `Ждёт ${duration}` : null;
 }
 
-export function formatWaitReply(minutes: number | null | undefined) {
-  const duration = formatDurationMinutes(minutes);
-  return duration ? `Ждёт ответа: ${duration}` : null;
+export function formatWaitReply(minutes: number | null | undefined, locale = "ru") {
+  const duration = formatDurationMinutes(minutes, locale);
+  return duration ? locale.startsWith("kk") ? `Жауап күткен уақыт: ${duration}` : `Ждёт ответа: ${duration}` : null;
+}
+
+function formatKazakhDuration(minutes: number | null | undefined) {
+  if (minutes == null || !Number.isFinite(minutes)) return null;
+  const mins = Math.max(0, Math.floor(minutes));
+  if (mins < 1) return "бір минуттан аз";
+  if (mins < 60) return `${mins} мин`;
+  const hours = Math.floor(mins / 60);
+  const days = Math.floor(hours / 24);
+  const months = Math.floor(days / 30);
+  const pair = (value: number, unit: string, rest: number, restUnit: string) => `${value} ${unit}${rest ? ` ${rest} ${restUnit}` : ""}`;
+  if (hours < 24) return pair(hours, "сағ", mins % 60, "мин");
+  if (days < 30) return pair(days, "күн", hours % 24, "сағ");
+  if (months < 12) return pair(months, "ай", days % 30, "күн");
+  return pair(Math.floor(months / 12), "жыл", months % 12, "ай");
 }

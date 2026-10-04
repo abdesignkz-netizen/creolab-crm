@@ -1,3 +1,4 @@
+import { getPublicLocale } from "../i18n";
 export function formatDateTime(
   value: string | Date | null | undefined,
   opts: { timeZone?: string | null; timeFormat?: string | null; locale?: string | null } = {},
@@ -5,7 +6,8 @@ export function formatDateTime(
   if (!value) return "";
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  const locale = opts.locale === "kk" ? "kk-KZ" : opts.locale === "en" ? "en-GB" : "ru-RU";
+  const selectedLocale = opts.locale || getPublicLocale();
+  const locale = selectedLocale === "kk" ? "kk-KZ" : selectedLocale === "en" ? "en-GB" : "ru-RU";
   return new Intl.DateTimeFormat(locale, {
     timeZone: opts.timeZone || undefined,
     day: "2-digit",

@@ -1,3 +1,4 @@
+import { uiText, useUiText, localizeUiOptions } from "../lib/uiText";
 import { esfMeasureUnitSymbol } from "@creolab/contracts";
 
 const UNITS = [
@@ -28,18 +29,19 @@ export function MeasureUnitSelect({
   id?: string;
   "aria-label"?: string;
 }) {
+  const uiText = useUiText();
   const selected = esfMeasureUnitSymbol(value);
-  const known = UNITS.some((unit) => unit.value === selected);
+  const known = localizeUiOptions(UNITS, uiText).some((unit) => unit.value === selected);
   return (
     <select
       id={id}
       disabled={disabled}
-      aria-label={ariaLabel || "Единица измерения"}
+      aria-label={ariaLabel || uiText("Единица измерения")}
       value={known ? selected : value || "шт"}
       onChange={(event) => onChange(event.target.value)}
     >
       {!known && value ? <option value={value}>{selected}</option> : null}
-      {UNITS.map((unit) => (
+      {localizeUiOptions(UNITS, uiText).map((unit) => (
         <option key={unit.value} value={unit.value}>
           {unit.label}
         </option>

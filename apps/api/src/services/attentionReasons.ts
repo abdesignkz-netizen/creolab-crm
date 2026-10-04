@@ -1,3 +1,4 @@
+import { systemText } from "@creolab/contracts";
 /** Staff-facing labels for conversation / inquiry attention codes. Never show the raw key. */
 const ATTENTION_REASON_LABEL: Record<string, string> = {
   CLIENT_REQUESTED_HUMAN: "Клиент попросил менеджера",
@@ -34,10 +35,10 @@ export const STATUS_ONLY_ATTENTION = new Set([
   "MANUAL_TAKEOVER",
 ]);
 
-export function attentionReasonLabel(code: string | null | undefined, fallback = "Нужно вмешательство человека") {
+export function attentionReasonLabel(code: string | null | undefined, fallback = "Нужно вмешательство человека", locale = "ru") {
   const key = String(code || "").trim();
-  if (!key) return fallback;
-  return ATTENTION_REASON_LABEL[key] || fallback;
+  if (!key) return systemText(locale, fallback);
+  return systemText(locale, ATTENTION_REASON_LABEL[key] || fallback);
 }
 
 export function looksLikeAttentionCode(value: string | null | undefined) {

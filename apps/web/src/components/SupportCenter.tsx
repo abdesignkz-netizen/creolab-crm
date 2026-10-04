@@ -1,3 +1,4 @@
+import { uiText, useUiText, localizeUiOptions, uiMessage } from "../lib/uiText";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
@@ -48,7 +49,7 @@ type View = "home" | "article" | "tickets" | "chat";
 function fileToBase64(file: File) {
   return new Promise<{ fileName: string; mimeType: string; contentBase64: string }>((resolve, reject) => {
     const reader = new FileReader();
-    reader.onerror = () => reject(new Error("Не удалось прочитать файл"));
+    reader.onerror = () => reject(new Error(uiText("Не удалось прочитать файл")));
     reader.onload = () => {
       const result = String(reader.result || "");
       const comma = result.indexOf(",");
@@ -75,6 +76,8 @@ export function SupportCenter({
   onUnread?: (count: number) => void;
   canCreateTicket: boolean;
 }) {
+  const uiText = useUiText();
+  const locale = useLocale();
   const location = useLocation();
   const navigate = useNavigate();
   const [view, setView] = useState<View>("home");
@@ -117,12 +120,16 @@ export function SupportCenter({
   }, [open, initialTicketId]);
 
   useEffect(() => {
+    if (open && article?.id) void api.supportArticle(article.id).then((next: any) => setArticle(next));
+  }, [locale]);
+
+  useEffect(() => {
     if (!open) return;
     const timer = window.setTimeout(() => {
       void loadCatalog(query);
     }, query.trim() ? 250 : 0);
     return () => window.clearTimeout(timer);
-  }, [open, query, location.pathname]);
+  }, [open, query, location.pathname, locale]);
 
   useEffect(() => {
     if (!open || view !== "chat" || !chat?.ticket.id) return;
@@ -156,13 +163,13 @@ export function SupportCenter({
 
   async function startChat(prefill = "") {
     if (!canCreateTicket) {
-      setError("Обращение создаётся из кабинета компании.");
+      setError(uiText("Обращение создаётся из кабинета компании."));
       return;
     }
     setBusy(true);
     setError("");
     try {
-      const text = prefill.trim() || "Нужна помощь по работе в BasQar.";
+      const text = prefill.trim() || uiText("Нужна помощь по работе в BasQar.");
       const data = (await api.createSupportTicket({
         message: text,
         route: location.pathname + location.search,
@@ -173,7 +180,7 @@ export function SupportCenter({
       setDraft("");
       await loadTickets();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось создать обращение");
+      setError(err instanceof Error ? err.message : uiText("Не удалось создать обращение"));
     } finally {
       setBusy(false);
     }
@@ -190,7 +197,7 @@ export function SupportCenter({
       setChat(data);
       setDraft("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не отправлено");
+      setError(err instanceof Error ? err.message : uiText("Не отправлено"));
     } finally {
       setBusy(false);
     }
@@ -205,7 +212,7 @@ export function SupportCenter({
       const data = (await api.supportAttachment(chat.ticket.id, payload)) as { ticket: Ticket; messages: Message[] };
       setChat(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Файл не отправлен");
+      setError(err instanceof Error ? err.message : uiText("Файл не отправлен"));
     } finally {
       setBusy(false);
     }
@@ -215,29 +222,27 @@ export function SupportCenter({
 
   return (
     <div className="support-root">
-      <button type="button" className="support-backdrop" aria-label="Закрыть поддержку" onClick={onClose} />
-      <aside className="support-drawer panel" role="dialog" aria-label="Поддержка BasQar">
+      <button type="button" className="support-backdrop" aria-label={uiText("Закрыть поддержку")} onClick={onClose} />
+      <aside className="support-drawer panel" role="dialog" aria-label={uiText("Поддержка BasQar")}>
         {view === "home" ? (
           <>
             <div className="support-head">
               <div>
-                <b>Поддержка BasQar</b>
-                <p className="muted">Чем можем помочь?</p>
+                <b>{uiText("Поддержка BasQar")}</b>
+                <p className="muted">{uiText("Чем можем помочь?")}</p>
               </div>
               <button type="button" className="btn secondary" onClick={onClose}>
-                Закрыть
-              </button>
+                {uiText("Закрыть")}</button>
             </div>
             <label className="support-search">
-              Найти ответ
-              <input
+              {uiText("Найти ответ")}<input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Например: как подключить WhatsApp"
+                placeholder={uiText("Например: как подключить WhatsApp")}
               />
             </label>
             {error ? <p className="error">{error}</p> : null}
-            <p className="muted">{query.trim() ? "Результаты" : catalog?.contextual?.length ? "По этому разделу и популярные вопросы" : "Популярные вопросы"}</p>
+            <p className="muted">{query.trim() ? uiText("Результаты") : catalog?.contextual?.length ? uiText("По этому разделу и популярные вопросы") : uiText("Популярные вопросы")}</p>
             <div className="support-list">
               {list.map((item) => (
                 <button key={item.id} type="button" className="support-item" onClick={() => void openArticle(item.id)}>
@@ -246,15 +251,13 @@ export function SupportCenter({
               ))}
             </div>
             <div className="support-footer">
-              <p className="muted">Не нашли ответ?</p>
+              <p className="muted">{uiText("Не нашли ответ?")}</p>
               <div className="actions">
                 <button type="button" className="btn" disabled={busy || !canCreateTicket} onClick={() => void startChat()}>
-                  Написать в поддержку
-                </button>
+                  {uiText("Написать в поддержку")}</button>
                 {canCreateTicket ? (
                   <button type="button" className="btn secondary" onClick={() => setView("tickets")}>
-                    Мои обращения
-                  </button>
+                    {uiText("Мои обращения")}</button>
                 ) : null}
               </div>
             </div>
@@ -265,11 +268,9 @@ export function SupportCenter({
           <>
             <div className="support-head">
               <button type="button" className="btn secondary" onClick={() => setView("home")}>
-                ← Назад
-              </button>
+                {uiText("← Назад")}</button>
               <button type="button" className="btn secondary" onClick={onClose}>
-                Закрыть
-              </button>
+                {uiText("Закрыть")}</button>
             </div>
             <h3>{article.title}</h3>
             <div className="support-article">{article.content}</div>
@@ -282,12 +283,12 @@ export function SupportCenter({
                   onClose();
                 }}
               >
-                {article.relatedLabel || "Открыть раздел"}
+                {article.relatedLabel || uiText("Открыть раздел")}
               </button>
             ) : null}
             {canCreateTicket ? (
               <div className="support-footer">
-                <p>Ответ помог?</p>
+                <p>{uiText("Ответ помог?")}</p>
                 <div className="actions">
                   <button
                     type="button"
@@ -296,8 +297,7 @@ export function SupportCenter({
                       void api.supportArticleFeedback(article.id, true).then(() => setArticle({ ...article, myFeedback: true }));
                     }}
                   >
-                    Да
-                  </button>
+                    {uiText("Да")}</button>
                   <button
                     type="button"
                     className={`btn ${article.myFeedback === false ? "" : "secondary"}`}
@@ -305,13 +305,11 @@ export function SupportCenter({
                       void api.supportArticleFeedback(article.id, false).then(() => setArticle({ ...article, myFeedback: false }));
                     }}
                   >
-                    Нет
-                  </button>
+                    {uiText("Нет")}</button>
                 </div>
-                <p className="muted">Не получилось?</p>
-                <button type="button" className="btn" disabled={busy} onClick={() => void startChat(`Вопрос: ${article.title}`)}>
-                  Написать в поддержку
-                </button>
+                <p className="muted">{uiText("Не получилось?")}</p>
+                <button type="button" className="btn" disabled={busy} onClick={() => void startChat(uiText("Вопрос: {p0}", {p0: article.title}))}>
+                  {uiText("Написать в поддержку")}</button>
               </div>
             ) : null}
           </>
@@ -321,13 +319,11 @@ export function SupportCenter({
           <>
             <div className="support-head">
               <button type="button" className="btn secondary" onClick={() => setView("home")}>
-                ← Назад
-              </button>
+                {uiText("← Назад")}</button>
               <button type="button" className="btn" disabled={busy} onClick={() => void startChat()}>
-                Новое обращение
-              </button>
+                {uiText("Новое обращение")}</button>
             </div>
-            <b>Мои обращения</b>
+            <b>{uiText("Мои обращения")}</b>
             <div className="support-list">
               {tickets.map((item) => (
                 <button key={item.id} type="button" className="support-item" onClick={() => void openTicket(item.id)}>
@@ -335,12 +331,12 @@ export function SupportCenter({
                     #{item.number} — {item.subject}
                   </span>
                   <span className="muted">
-                    {item.statusLabel}
+                    {uiMessage(item.statusLabel)}
                     {item.customerUnread ? ` · ${item.customerUnread}` : ""}
                   </span>
                 </button>
               ))}
-              {!tickets.length ? <p className="muted">Пока нет обращений.</p> : null}
+              {!tickets.length ? <p className="muted">{uiText("Пока нет обращений.")}</p> : null}
             </div>
           </>
         ) : null}
@@ -349,12 +345,11 @@ export function SupportCenter({
           <>
             <div className="support-head">
               <button type="button" className="btn secondary" onClick={() => setView("tickets")}>
-                ← Назад
-              </button>
+                {uiText("← Назад")}</button>
               <div>
-                <b>Поддержка BasQar</b>
+                <b>{uiText("Поддержка BasQar")}</b>
                 <p className="muted">
-                  #{chat.ticket.number} · {chat.ticket.statusLabel}
+                  #{chat.ticket.number} · {uiMessage(chat.ticket.statusLabel)}
                 </p>
               </div>
             </div>
@@ -365,7 +360,7 @@ export function SupportCenter({
                   key={item.id}
                   className={`support-bubble ${item.senderType === "USER" ? "mine" : item.senderType === "SYSTEM" ? "system" : ""}`}
                 >
-                  <div>{item.content}</div>
+                  <div>{item.senderType === "SYSTEM" ? uiMessage(item.content) : item.content}</div>
                   {(item.attachments || []).map((file) => (
                     <a
                       key={file.id}
@@ -374,14 +369,14 @@ export function SupportCenter({
                       target="_blank"
                       rel="noreferrer"
                     >
-                      {file.kind === "image" ? "Изображение" : file.fileName}
+                      {file.kind === "image" ? uiText("Изображение") : file.fileName}
                     </a>
                   ))}
                 </div>
               ))}
             </div>
             {chat.ticket.closed ? (
-              <p className="muted">Обращение закрыто. Можно создать новое.</p>
+              <p className="muted">{uiText("Обращение закрыто. Можно создать новое.")}</p>
             ) : (
               <form
                 className="support-composer"
@@ -407,7 +402,7 @@ export function SupportCenter({
                 <input
                   value={draft}
                   onChange={(event) => setDraft(event.target.value)}
-                  placeholder="Напишите сообщение…"
+                  placeholder={uiText("Напишите сообщение…")}
                   disabled={busy}
                 />
                 <button className="btn" disabled={busy || !draft.trim()}>

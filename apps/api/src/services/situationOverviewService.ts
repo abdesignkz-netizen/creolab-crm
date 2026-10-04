@@ -1,3 +1,4 @@
+import { systemText } from "@creolab/contracts";
 import { getEntitlements } from "./entitlementService.ts";
 import type { PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
@@ -45,9 +46,9 @@ function mapAgreementSit(a: {
     methods?: Array<{ type: string; rawValue?: string | null; normalizedValue?: string | null; primary?: boolean }>;
   } | null;
   inquiry: { id: string; subject: string | null; service: string | null } | null;
-  deal: { id: string; title: string; stage: { name: string } | null } | null;
+  deal: { id: string; title: string; stage: { name: string; systemKey?: string } | null } | null;
   task: { id: string; status: string } | null;
-}) {
+}, locale = "ru") {
   const contactName = a.contact ? displayName(a.contact) : null;
   return {
     id: a.id,
@@ -63,30 +64,30 @@ function mapAgreementSit(a: {
     phone: phoneFromContact(a.contact),
     inquiryTitle: a.inquiry?.subject || a.inquiry?.service || null,
     dealTitle: a.deal?.title || null,
-    dealStage: a.deal?.stage?.name || null,
+    dealStage: stageLabel(a.deal?.stage, locale),
     taskId: a.task?.id || null,
     href: a.task?.id ? "/tasks" : a.contact?.id ? `/contacts/${a.contact.id}` : "/today",
     attention:
       a.clarificationNeeded ||
       (a.type === "ONLINE_MEETING" && !a.meetingUrl
-        ? "Ссылка на встречу не добавлена"
+        ? systemText(locale, "Ссылка на встречу не добавлена")
         : a.type === "OFFLINE_MEETING" && !a.address && !a.locationName
-          ? "Не указано место"
+          ? systemText(locale, "Не указано место")
           : null),
   };
 }
 
 function summarizeAgreementTypes(
-  items: Array<{ type: string }>,
+  items: Array<{ type: string }>, locale = "ru",
 ): Array<{ type: string; label: string; count: number }> {
   const labels: Record<string, string> = {
-    CALL: "Телефонные созвоны",
-    ONLINE_MEETING: "Онлайн-встречи",
-    OFFLINE_MEETING: "Личные встречи",
+    CALL: systemText(locale, "Телефонные созвоны"),
+    ONLINE_MEETING: systemText(locale, "Онлайн-встречи"),
+    OFFLINE_MEETING: systemText(locale, "Личные встречи"),
     FOLLOW_UP: "Follow-up",
-    SEND_PROPOSAL: "Отправить КП",
-    SEND_CONTRACT: "Отправить договор",
-    PAYMENT_PROMISE: "Проверить оплату",
+    SEND_PROPOSAL: systemText(locale, "Отправить КП"),
+    SEND_CONTRACT: systemText(locale, "Отправить договор"),
+    PAYMENT_PROMISE: systemText(locale, "Проверить оплату"),
   };
   const map = new Map<string, number>();
   for (const item of items) {
@@ -115,8 +116,20 @@ const BUSINESS_ACTIVITY_TYPES = [
   "conversation.escalated",
 ];
 
+const SYSTEM_ACTIVITY_TITLES: Record<string, readonly string[]> = {
+  "inquiry.created": ["Получена тестовая заявка", "Получена новая заявка"],
+  "inquiry.converted": ["Заявка конвертирована в сделку"],
+  "inquiry.lost": ["Заявка потеряна"],
+  "deal.won": ["Сделка выиграна"], "deal.lost": ["Сделка потеряна"], "deal.created": ["Создана сделка"],
+  "payment.confirm": ["Оплата подтверждена"], "task.completed": ["Задача завершена"],
+  "task.auto_created": ["Задача создана автоматически"],
+  "agreement.upserted": ["Договорённость обновлена"], "agreement.rescheduled": ["Договорённость перенесена"],
+  "agreement.cancelled": ["Договорённость отменена"],
+};
+
 function requireTenant(auth: AuthContext) {
-  if (!auth.activeMembership) throw new ApiError(403, "no_tenant", "Нет активной компании");
+  const locale = auth.user.locale || "ru";
+  if (!auth.activeMembership) throw new ApiError(403, "no_tenant", systemText(locale, "Нет активной компании"));
   return auth.activeMembership;
 }
 
@@ -172,9 +185,9 @@ function normalizeSourceKey(raw: string | null | undefined) {
   return found?.[0] || value;
 }
 
-function sourceLabel(key: string) {
-  if (key === "unspecified") return "Не указан";
-  return SOURCE_LABELS[key] || key;
+function sourceLabel(key: string, locale = "ru") {
+  if (key === "unspecified") return systemText(locale, "Не указан");
+  return SOURCE_LABELS[key] ? systemText(locale, SOURCE_LABELS[key]) : key;
 }
 
 function ruCount(n: number, one: string, few: string, many: string) {
@@ -183,6 +196,13 @@ function ruCount(n: number, one: string, few: string, many: string) {
   if (mod10 === 1 && mod100 !== 11) return `${n} ${one}`;
   if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${n} ${few}`;
   return `${n} ${many}`;
+}
+
+/** Only built-in, unrenamed stages are translated. Tenant labels remain verbatim. */
+function stageLabel(stage: { systemKey?: string; name: string } | null | undefined, locale: string) {
+  if (!stage) return null;
+  const standard = PIPELINE_STAGES.find((value) => value.systemKey === stage.systemKey);
+  return standard?.name === stage.name ? systemText(locale, stage.name) : stage.name;
 }
 
 type PipelineStageRow = { systemKey: string; name: string; count: number; href: string };
@@ -240,47 +260,47 @@ function buildInsights(input: {
   biggestDrop: { fromName: string; toName: string; lost: number; fromCount: number; toCount: number } | null;
   topManager: { name: string; attention: number; average: number } | null;
   bestSource: { label: string; rate: number; inquiries: number } | null;
-}): SituationInsight[] {
+}, locale = "ru"): SituationInsight[] {
   const insights: SituationInsight[] = [];
   if (input.needsReply > 0) {
     insights.push({
       tone: "critical",
-      text: `${ruCount(input.needsReply, "клиент ждёт", "клиента ждут", "клиентов ждут")} ответа.`,
+      text: systemText(locale, "{p0} ответа.", { p0: ruCount(input.needsReply, systemText(locale, "клиент ждёт"), systemText(locale, "клиента ждут"), systemText(locale, "клиентов ждут")) }),
       href: "/contacts?filter=needs_reply",
     });
   }
   if (input.needsHuman > 0) {
     insights.push({
       tone: "critical",
-      text: `${ruCount(input.needsHuman, "диалог требует", "диалога требуют", "диалогов требуют")} вмешательства человека.`,
+      text: systemText(locale, "{p0} вмешательства человека.", { p0: ruCount(input.needsHuman, systemText(locale, "диалог требует"), systemText(locale, "диалога требуют"), systemText(locale, "диалогов требуют")) }),
       href: "/conversations?filter=attention",
     });
   }
   if (input.overdueTasks > 0) {
     insights.push({
       tone: "attention",
-      text: `${ruCount(input.overdueTasks, "просроченная задача", "просроченные задачи", "просроченных задач")}.`,
+      text: `${ruCount(input.overdueTasks, systemText(locale, "просроченная задача"), systemText(locale, "просроченные задачи"), systemText(locale, "просроченных задач"))}.`,
       href: "/tasks?filter=overdue",
     });
   }
   if (input.stalledDeals > 0) {
     insights.push({
       tone: "attention",
-      text: `${ruCount(input.stalledDeals, "сделка без активности", "сделки без активности", "сделок без активности")}.`,
+      text: `${ruCount(input.stalledDeals, systemText(locale, "сделка без активности"), systemText(locale, "сделки без активности"), systemText(locale, "сделок без активности"))}.`,
       href: "/deals?focus=stalled",
     });
   }
   if (input.newInquiries > 0) {
     insights.push({
       tone: "attention",
-      text: `${ruCount(input.newInquiries, "заявка ещё не обработана", "заявки ещё не обработаны", "заявок ещё не обработаны")}.`,
+      text: `${ruCount(input.newInquiries, systemText(locale, "заявка ещё не обработана"), systemText(locale, "заявки ещё не обработаны"), systemText(locale, "заявок ещё не обработаны"))}.`,
       href: "/inquiries?filter=new&test=false",
     });
   }
   if (input.biggestDrop) {
     insights.push({
       tone: "observe",
-      text: `Наибольшая потеря сейчас между «${input.biggestDrop.fromName}» и «${input.biggestDrop.toName}» (${input.biggestDrop.fromCount} → ${input.biggestDrop.toCount}).`,
+      text: systemText(locale, "Наибольшая потеря сейчас между «{p0}» и «{p1}» ({p2} → {p3}).", { p0: input.biggestDrop.fromName, p1: input.biggestDrop.toName, p2: input.biggestDrop.fromCount, p3: input.biggestDrop.toCount }),
       href: "#funnel",
     });
   }
@@ -288,13 +308,13 @@ function buildInsights(input: {
     const pct = Math.round((1 - input.inquiries / input.prevInquiries) * 100);
     insights.push({
       tone: "observe",
-      text: `Заявок на ${pct}% меньше, чем в прошлом периоде.`,
+      text: systemText(locale, "Заявок на {p0}% меньше, чем в прошлом периоде.", { p0: pct }),
     });
   } else if (input.prevInquiries != null && input.prevInquiries >= 3 && input.inquiries > input.prevInquiries * 1.2) {
     const pct = Math.round((input.inquiries / input.prevInquiries - 1) * 100);
     insights.push({
       tone: "observe",
-      text: `Заявок на ${pct}% больше, чем в прошлом периоде.`,
+      text: systemText(locale, "Заявок на {p0}% больше, чем в прошлом периоде.", { p0: pct }),
     });
   }
   if (
@@ -307,7 +327,7 @@ function buildInsights(input: {
   ) {
     insights.push({
       tone: "observe",
-      text: `Конверсия снизилась с ${input.prevConversionRate}% до ${input.conversionRate}%.`,
+      text: systemText(locale, "Конверсия снизилась с {p0}% до {p1}%.", { p0: input.prevConversionRate, p1: input.conversionRate }),
     });
   }
   if (
@@ -317,14 +337,14 @@ function buildInsights(input: {
   ) {
     insights.push({
       tone: "observe",
-      text: `У ${input.topManager.name} повышенная нагрузка: ${input.topManager.attention} пунктов внимания.`,
+      text: systemText(locale, "У {p0} повышенная нагрузка: {p1} пунктов внимания.", { p0: input.topManager.name, p1: input.topManager.attention }),
       href: "#team",
     });
   }
   if (input.bestSource && input.bestSource.inquiries >= 3 && input.bestSource.rate > 0) {
     insights.push({
       tone: "observe",
-      text: `Лучшая конверсия у источника «${input.bestSource.label}»: ${input.bestSource.rate}%.`,
+      text: systemText(locale, "Лучшая конверсия у источника «{p0}»: {p1}%.", { p0: input.bestSource.label, p1: input.bestSource.rate }),
       href: "#sources",
     });
   }
@@ -342,38 +362,38 @@ function buildBrief(facts: {
   overdueTasks: number;
   contractStage: number;
   noNextAction: number;
-}) {
+}, locale = "ru") {
   const bits: string[] = [];
   bits.push(
-    `${facts.periodLabel}: ${facts.inquiries} обращений, ${facts.dealsCreated} новых сделок, ${facts.wonDeals} продаж` +
-      (facts.wonAmountLabel ? ` на ${facts.wonAmountLabel}` : "") +
+    systemText(locale, "{p0}: {p1} обращений, {p2} новых сделок, {p3} продаж", { p0: facts.periodLabel, p1: facts.inquiries, p2: facts.dealsCreated, p3: facts.wonDeals }) +
+      (facts.wonAmountLabel ? systemText(locale, " на {p0}", { p0: facts.wonAmountLabel }) : "") +
       ".",
   );
   bits.push(
-    `Сейчас в работе ${facts.activeDeals} сделок` +
-      (facts.contractStage ? `, из них ${facts.contractStage} на согласовании` : "") +
+    systemText(locale, "Сейчас в работе {p0} сделок", { p0: facts.activeDeals }) +
+      (facts.contractStage ? systemText(locale, ", из них {p0} на согласовании", { p0: facts.contractStage }) : "") +
       ".",
   );
   if (facts.needsReply || facts.overdueTasks || facts.noNextAction) {
     const alerts: string[] = [];
-    if (facts.needsReply) alerts.push(`${facts.needsReply} ждут ответа`);
-    if (facts.overdueTasks) alerts.push(`${facts.overdueTasks} задач просрочено`);
-    if (facts.noNextAction) alerts.push(`${facts.noNextAction} без следующего шага`);
-    bits.push(`Требует внимания: ${alerts.join(", ")}.`);
+    if (facts.needsReply) alerts.push(systemText(locale, "{p0} ждут ответа", { p0: facts.needsReply }));
+    if (facts.overdueTasks) alerts.push(systemText(locale, "{p0} задач просрочено", { p0: facts.overdueTasks }));
+    if (facts.noNextAction) alerts.push(systemText(locale, "{p0} без следующего шага", { p0: facts.noNextAction }));
+    bits.push(systemText(locale, "Требует внимания: {p0}.", { p0: alerts.join(", ") }));
   } else {
-    bits.push("Критических действий сейчас нет.");
+    bits.push(systemText(locale, "Критических действий сейчас нет."));
   }
   return bits.join(" ");
 }
 
-function taskTypeBucket(type: string, title: string) {
+function taskTypeBucket(type: string, title: string, locale = "ru") {
   const t = `${type} ${title}`.toLowerCase();
-  if (/звон|call|phone/.test(t)) return "Позвонить";
-  if (/кп|proposal|коммерч|презентац/.test(t)) return "Отправить КП";
-  if (/оплат|payment/.test(t)) return "Проверить оплату";
-  if (/встреч|meeting/.test(t)) return "Встреча";
-  if (/писат|whatsapp|telegram|сообщ|message|reply/.test(t)) return "Написать";
-  return "Другое";
+  if (/звон|call|phone|қоңырау/.test(t)) return systemText(locale, "Позвонить");
+  if (/кп|proposal|коммерч|презентац|коммерциялық/.test(t)) return systemText(locale, "Отправить КП");
+  if (/оплат|payment|төлем/.test(t)) return systemText(locale, "Проверить оплату");
+  if (/встреч|meeting|кездесу/.test(t)) return systemText(locale, "Встреча");
+  if (/писат|whatsapp|telegram|сообщ|message|reply|жазу|хабарлама/.test(t)) return systemText(locale, "Написать");
+  return systemText(locale, "Другое");
 }
 
 function attentionGroup(item: { kind: string; waitingReply?: boolean }): string {
@@ -410,6 +430,7 @@ export async function getSituationOverview(
   auth: AuthContext,
   query: Record<string, string | undefined> = {},
 ) {
+  const locale = auth.user.locale || "ru";
   requireAnalyticsAccess(auth);
   const membership = requireTenant(auth);
   const tid = membership.tenantId;
@@ -738,7 +759,7 @@ export async function getSituationOverview(
 
   const lostReasonMap = new Map<string, number>();
   for (const deal of lostDeals) {
-    const key = (deal.lossReason || "Другое").trim() || "Другое";
+    const key = (deal.lossReason || systemText(locale, "Другое")).trim() || systemText(locale, "Другое");
     lostReasonMap.set(key, (lostReasonMap.get(key) || 0) + 1);
   }
 
@@ -748,7 +769,7 @@ export async function getSituationOverview(
     .filter((stage) => pipelineKeys.has(stage.systemKey))
     .map((stage) => ({
       systemKey: stage.systemKey,
-      name: stage.name,
+      name: stageLabel(stage, locale) || stage.name,
       count: openDeals.filter((d) => d.stageId === stage.id).length,
       href: "/deals",
     }));
@@ -811,22 +832,22 @@ export async function getSituationOverview(
       proposalStageIds.has(deal.stageId) && stageEntered < proposalCutoff && !flags.waitingClient;
 
     const reasons: string[] = [];
-    if (onContract) reasons.push("На договоре");
-    if (onProposalTooLong) reasons.push(`КП без ответа >${ops.proposalFollowUpThresholdDays} дн.`);
-    if (flags.stalled) reasons.push(`Нет активности ${ops.stalledDealDays}+ дн.`);
-    if (flags.overSla) reasons.push("Просрочен SLA этапа");
-    if (flags.noNextAction) reasons.push("Нет следующего действия");
-    if (flags.overdueNextAction) reasons.push("Просрочен follow-up");
-    if (flags.paymentOverdue) reasons.push("Просрочена оплата");
-    if (amount != null && amount >= ops.largeDealAmountMinor) reasons.push("Крупная сумма");
-    if (flags.waitingClient) reasons.push("Ждём клиента");
+    if (onContract) reasons.push(systemText(locale, "На договоре"));
+    if (onProposalTooLong) reasons.push(systemText(locale, "КП без ответа >{p0} дн.", { p0: ops.proposalFollowUpThresholdDays }));
+    if (flags.stalled) reasons.push(systemText(locale, "Нет активности {p0}+ дн.", { p0: ops.stalledDealDays }));
+    if (flags.overSla) reasons.push(systemText(locale, "Просрочен SLA этапа"));
+    if (flags.noNextAction) reasons.push(systemText(locale, "Нет следующего действия"));
+    if (flags.overdueNextAction) reasons.push(systemText(locale, "Просрочен follow-up"));
+    if (flags.paymentOverdue) reasons.push(systemText(locale, "Просрочена оплата"));
+    if (amount != null && amount >= ops.largeDealAmountMinor) reasons.push(systemText(locale, "Крупная сумма"));
+    if (flags.waitingClient) reasons.push(systemText(locale, "Ждём клиента"));
     if (reasons.length) {
       importantDeals.push({
         id: deal.id,
         title: deal.title,
         amount,
         amountLabel: formatMoneyKzt(amount, deal.currency || currency),
-        stageName: deal.stage?.name || "Сделка",
+        stageName: stageLabel(deal.stage, locale) || systemText(locale, "Сделка"),
         contactName: deal.contact ? displayName(deal.contact) : null,
         phone: phoneFromContact(deal.contact),
         reason: reasons.slice(0, 2).join(" · "),
@@ -852,7 +873,7 @@ export async function getSituationOverview(
 
   const typeCounts = new Map<string, number>();
   for (const task of remainingToday) {
-    const bucket = taskTypeBucket(task.type, task.title);
+    const bucket = taskTypeBucket(task.type, task.title, locale);
     typeCounts.set(bucket, (typeCounts.get(bucket) || 0) + 1);
   }
 
@@ -861,9 +882,9 @@ export async function getSituationOverview(
       ...item,
         group: attentionGroup(item),
         whyLabel:
-          item.kind === "inquiry_ai_blocked" && /не зарегистрирован в WhatsApp/i.test(item.reason || "")
-            ? "Нет WhatsApp"
-            : ATTENTION_WHY_LABEL[attentionGroup(item)] || ATTENTION_WHY_LABEL.other,
+          item.kind === "inquiry_ai_blocked" && item.attentionCode === "WHATSAPP_NOT_REGISTERED"
+            ? systemText(locale, "Нет WhatsApp")
+            : systemText(locale, ATTENTION_WHY_LABEL[attentionGroup(item)] || ATTENTION_WHY_LABEL.other),
       href:
         item.kind === "needs_phone"
           ? "/inquiries?filter=needs_clarification"
@@ -876,38 +897,38 @@ export async function getSituationOverview(
                 : item.links.taskId ? `/tasks?open=${item.links.taskId}` : "/tasks",
     })),
     ...noNextActionDeals.map(deal => ({
-      id: `deal-next:${deal.id}`, kind: "missing_next_action", group: "no_next_action", whyLabel: ATTENTION_WHY_LABEL.no_next_action, entityId: deal.id,
-      title: deal.title, reason: "В сделке нет следующего действия", nextAction: "create_next_action",
+      id: `deal-next:${deal.id}`, kind: "missing_next_action", group: "no_next_action", whyLabel: systemText(locale, ATTENTION_WHY_LABEL.no_next_action), entityId: deal.id,
+      title: deal.title, reason: systemText(locale, "В сделке нет следующего действия"), nextAction: "create_next_action",
       contactName: deal.contact ? displayName(deal.contact) : null,
       phone: phoneFromContact(deal.contact),
-      interest: deal.stage?.name || null,
+      interest: stageLabel(deal.stage, locale),
       severity: "normal", ownerMembershipId: deal.assigneeMembershipId, links: { dealId: deal.id, contactId: deal.contactId },
       href: `/deals/${deal.id}`, ageMinutes: Math.max(0, Math.floor((now.getTime() - deal.stageEnteredAt.getTime()) / 60000)),
     })),
     ...overSlaDeals.slice(0, 8).map((deal) => ({
-      id: `deal-sla:${deal.id}`, kind: "deal_over_sla", group: "over_sla", whyLabel: ATTENTION_WHY_LABEL.over_sla, entityId: deal.id,
-      title: deal.title, reason: "Сделка дольше SLA на текущем этапе", nextAction: "open_deal",
+      id: `deal-sla:${deal.id}`, kind: "deal_over_sla", group: "over_sla", whyLabel: systemText(locale, ATTENTION_WHY_LABEL.over_sla), entityId: deal.id,
+      title: deal.title, reason: systemText(locale, "Сделка дольше SLA на текущем этапе"), nextAction: "open_deal",
       contactName: deal.contact ? displayName(deal.contact) : null,
       phone: phoneFromContact(deal.contact),
-      interest: deal.stage?.name || null,
+      interest: stageLabel(deal.stage, locale),
       severity: "high", ownerMembershipId: deal.assigneeMembershipId, links: { dealId: deal.id, contactId: deal.contactId },
       href: `/deals/${deal.id}`,
     })),
     ...overdueNextDeals.slice(0, 8).map((deal) => ({
-      id: `deal-followup:${deal.id}`, kind: "overdue_next_action", group: "overdue", whyLabel: ATTENTION_WHY_LABEL.overdue, entityId: deal.id,
-      title: deal.title, reason: deal.nextAction ? `Просрочено: ${deal.nextAction}` : "Просрочено следующее действие", nextAction: "open_deal",
+      id: `deal-followup:${deal.id}`, kind: "overdue_next_action", group: "overdue", whyLabel: systemText(locale, ATTENTION_WHY_LABEL.overdue), entityId: deal.id,
+      title: deal.title, reason: deal.nextAction ? systemText(locale, "Просрочено: {p0}", { p0: deal.nextAction }) : systemText(locale, "Просрочено следующее действие"), nextAction: "open_deal",
       contactName: deal.contact ? displayName(deal.contact) : null,
       phone: phoneFromContact(deal.contact),
-      interest: deal.stage?.name || null,
+      interest: stageLabel(deal.stage, locale),
       severity: "high", ownerMembershipId: deal.assigneeMembershipId, links: { dealId: deal.id, contactId: deal.contactId },
       href: `/deals/${deal.id}`,
     })),
     ...paymentOverdueDeals.slice(0, 8).map((deal) => ({
-      id: `deal-pay:${deal.id}`, kind: "payment_overdue", group: "payment_overdue", whyLabel: ATTENTION_WHY_LABEL.payment_overdue, entityId: deal.id,
-      title: deal.title, reason: "Оплата по сделке просрочена", nextAction: "open_deal",
+      id: `deal-pay:${deal.id}`, kind: "payment_overdue", group: "payment_overdue", whyLabel: systemText(locale, ATTENTION_WHY_LABEL.payment_overdue), entityId: deal.id,
+      title: deal.title, reason: systemText(locale, "Оплата по сделке просрочена"), nextAction: "open_deal",
       contactName: deal.contact ? displayName(deal.contact) : null,
       phone: phoneFromContact(deal.contact),
-      interest: deal.stage?.name || null,
+      interest: stageLabel(deal.stage, locale),
       severity: "high", ownerMembershipId: deal.assigneeMembershipId, links: { dealId: deal.id, contactId: deal.contactId },
       href: `/deals/${deal.id}`,
     })),
@@ -915,13 +936,13 @@ export async function getSituationOverview(
       .filter((a) => a.status === "NEEDS_CLARIFICATION" || a.clarificationNeeded || (a.type === "ONLINE_MEETING" && !a.meetingUrl))
       .slice(0, 5)
       .map((a) => {
-        const mapped = mapAgreementSit(a);
+        const mapped = mapAgreementSit(a, locale);
         return {
           id: `agreement:${a.id}`,
           kind: "agreement_attention",
           title: mapped.attention || a.title,
           subtitle: a.title,
-          reason: mapped.attention || a.clarificationNeeded || "Нужно уточнение по договорённости",
+          reason: mapped.attention || a.clarificationNeeded || systemText(locale, "Нужно уточнение по договорённости"),
           nextAction: mapped.taskId ? "complete_task" : "open_contact",
           contactName: mapped.contactName,
           phone: mapped.phone,
@@ -929,7 +950,7 @@ export async function getSituationOverview(
           entityId: a.id,
           entityType: "agreement",
           group: "needs_clarification",
-          whyLabel: ATTENTION_WHY_LABEL.needs_clarification,
+          whyLabel: systemText(locale, ATTENTION_WHY_LABEL.needs_clarification),
           href: mapped.href,
           urgency: "high",
           ownerMembershipId: null,
@@ -939,12 +960,12 @@ export async function getSituationOverview(
       .filter((a) => a.scheduledAt && a.scheduledAt < now && ["CONFIRMED", "SCHEDULED", "RESCHEDULED"].includes(a.status))
       .slice(0, 5)
       .map((a) => {
-        const mapped = mapAgreementSit(a);
+        const mapped = mapAgreementSit(a, locale);
         return {
           id: `agreement-overdue:${a.id}`,
           kind: "agreement_overdue",
           title: a.title,
-          reason: "Договорённость просрочена",
+          reason: systemText(locale, "Договорённость просрочена"),
           nextAction: mapped.taskId ? "complete_task" : "open_contact",
           contactName: mapped.contactName,
           phone: mapped.phone,
@@ -952,7 +973,7 @@ export async function getSituationOverview(
           entityId: a.id,
           entityType: "agreement",
           group: "overdue",
-          whyLabel: ATTENTION_WHY_LABEL.overdue,
+          whyLabel: systemText(locale, ATTENTION_WHY_LABEL.overdue),
           href: mapped.href,
           urgency: "high",
           ownerMembershipId: null,
@@ -989,7 +1010,7 @@ export async function getSituationOverview(
   }
   const showPayments = paymentsPeriod.length > 0 || paymentsPrev.length > 0;
 
-  const label = periodLabel(preset, from, to, timeZone);
+  const label = periodLabel(preset, from, to, timeZone, locale);
   const wonAmountLabel = formatMoneyKzt(wonAmountKnown ? wonAmount : null, currency);
   const pipelineAmountLabel = formatMoneyKzt(pipelineAmountKnown ? pipelineAmount : null, currency);
 
@@ -1011,7 +1032,7 @@ export async function getSituationOverview(
   const sources = [...sourceMap.entries()]
     .map(([key, row]) => ({
       key,
-      label: sourceLabel(key),
+      label: sourceLabel(key, locale),
       inquiries: row.inquiries,
       deals: row.deals,
       conversionRate: row.inquiries > 0 ? Math.round((row.deals / row.inquiries) * 1000) / 10 : null,
@@ -1045,7 +1066,7 @@ export async function getSituationOverview(
 
   const teamRows = members.map((member) => ({
     membershipId: member.id,
-    name: member.user.name || "Менеджер",
+    name: member.user.name || systemText(locale, "Менеджер"),
     newInquiries: newByOwner.get(member.id) || 0,
     inWork: dealsByOwner.get(member.id) || 0,
     attention: attentionByOwner.get(member.id) || 0,
@@ -1053,7 +1074,7 @@ export async function getSituationOverview(
   }));
   const unassignedTeam = {
     membershipId: null as string | null,
-    name: "Без ответственного",
+    name: systemText(locale, "Без ответственного"),
     newInquiries: newByOwner.get(null) || 0,
     inWork: dealsByOwner.get(null) || 0,
     attention: attentionByOwner.get(null) || 0,
@@ -1100,7 +1121,7 @@ export async function getSituationOverview(
     bestSource: bestSource
       ? { label: bestSource.label, rate: bestSource.conversionRate || 0, inquiries: bestSource.inquiries }
       : null,
-  });
+  }, locale);
 
   const conversationAi = conversationModes.find((row) => row.mode === "ai")?._count._all || 0;
   const whatsappInquiries = periodInquiries.filter(
@@ -1193,7 +1214,7 @@ export async function getSituationOverview(
     overdueTasks: current.overdueTasks,
     contractStage: current.contractStage,
     noNextAction: current.noNextAction,
-  });
+  }, locale);
 
   const recentWins = wonDeals.slice(0, 5).map((d) => ({
     id: d.id,
@@ -1225,20 +1246,20 @@ export async function getSituationOverview(
     pipeline: {
       stages: pipelineView.stages,
       biggestDrop: pipelineView.biggestDrop,
-      note: "Стадии открытых сделок прямо сейчас",
+      note: systemText(locale, "Стадии открытых сделок прямо сейчас"),
     },
     sources,
     team,
     attention: {
       principle:
-        "Сюда попадает только то, где человек должен что-то сделать сейчас: ответить клиенту, забрать диалог у AI, закрыть просроченное, задать шаг или дописать телефон. Диалог уже у менеджера, если клиент не ждёт ответа, сюда не попадает.",
+        systemText(locale, "Сюда попадает только то, где человек должен что-то сделать сейчас: ответить клиенту, забрать диалог у AI, закрыть просроченное, задать шаг или дописать телефон. Диалог уже у менеджера, если клиент не ждёт ответа, сюда не попадает."),
       summary: {...attentionSummary,documentsToClose},
       items: onlyImportant
         ? attentionItems.filter((i) =>
             ["needs_reply", "overdue", "no_next_action", "needs_human", "no_contact", "over_sla", "payment_overdue"].includes(i.group),
           )
         : attentionItems,
-      emptyLabel: "Критических действий сейчас нет.",
+      emptyLabel: systemText(locale, "Критических действий сейчас нет."),
     },
     todayTasks: {
       totalDueToday: remainingToday.length,
@@ -1252,7 +1273,7 @@ export async function getSituationOverview(
           id: t.id,
           title: t.title,
           type: t.type,
-          typeLabel: taskTypeBucket(t.type, t.title),
+          typeLabel: taskTypeBucket(t.type, t.title, locale),
           dueAt: t.dueAt?.toISOString() || null,
           overdue: Boolean(t.dueAt && t.dueAt < now),
           contactName: t.contact ? displayName(t.contact) : null,
@@ -1261,22 +1282,22 @@ export async function getSituationOverview(
         })),
     },
     agreements: {
-      today: activeAgreements.filter((a) => a.scheduledAt && a.scheduledAt >= startToday && a.scheduledAt < startTomorrow).map(mapAgreementSit),
+      today: activeAgreements.filter((a) => a.scheduledAt && a.scheduledAt >= startToday && a.scheduledAt < startTomorrow).map((a) => mapAgreementSit(a, locale)),
       upcoming: activeAgreements
         .filter((a) => a.scheduledAt && a.scheduledAt >= startTomorrow)
         .slice(0, 8)
-        .map(mapAgreementSit),
-      needsClarification: activeAgreements.filter((a) => a.status === "NEEDS_CLARIFICATION" || a.clarificationNeeded).map(mapAgreementSit),
-      byType: summarizeAgreementTypes(activeAgreements.filter((a) => a.scheduledAt && a.scheduledAt >= startToday && a.scheduledAt < startTomorrow)),
+        .map((a) => mapAgreementSit(a, locale)),
+      needsClarification: activeAgreements.filter((a) => a.status === "NEEDS_CLARIFICATION" || a.clarificationNeeded).map((a) => mapAgreementSit(a, locale)),
+      byType: summarizeAgreementTypes(activeAgreements.filter((a) => a.scheduledAt && a.scheduledAt >= startToday && a.scheduledAt < startTomorrow), locale),
       overdue: activeAgreements
         .filter((a) => a.scheduledAt && a.scheduledAt < now && ["CONFIRMED", "SCHEDULED", "RESCHEDULED"].includes(a.status))
-        .map(mapAgreementSit),
+        .map((a) => mapAgreementSit(a, locale)),
     },
     importantDeals: importantDeals.slice(0, 8),
     recentInquiries: recentInquiries.map((inq) => ({
       id: inq.id,
-      title: inq.subject || inq.service || "Заявка",
-      contactName: inq.contact ? displayName(inq.contact) : "Клиент",
+      title: inq.subject || inq.service || systemText(locale, "Заявка"),
+      contactName: inq.contact ? displayName(inq.contact) : systemText(locale, "Клиент"),
       phone: phoneFromContact(inq.contact, inq),
       receivedAt: inq.receivedAt.toISOString(),
       source: inq.sourceChannel || inq.source,
@@ -1288,7 +1309,7 @@ export async function getSituationOverview(
     recentEvents: recentActivities.map((a) => ({
       id: a.id,
       type: a.type,
-      title: a.title,
+      title: SYSTEM_ACTIVITY_TITLES[a.type]?.includes(a.title) ? systemText(locale, a.title) : a.title,
       description: a.description,
       contactId: a.contactId,
       contactName: a.contact ? displayName(a.contact) : null,
@@ -1320,11 +1341,11 @@ export async function getSituationOverview(
           ? "active"
           : "error"
         : "offline",
-      label: !aiAccess.entitlements.AI_MANAGER ? "ИИ-менеджер · не входит в тариф" : aiAccess.snapshot.planCode === "BASQAR_FREE" ? "ИИ-менеджер · пробный режим" : board.freshness.seller.configured
+      label: !aiAccess.entitlements.AI_MANAGER ? systemText(locale, "ИИ-менеджер · не входит в тариф") : aiAccess.snapshot.planCode === "BASQAR_FREE" ? systemText(locale, "ИИ-менеджер · пробный режим") : board.freshness.seller.configured
         ? board.freshness.seller.reachable
-          ? "AI · активен"
-          : "AI · ошибка подключения"
-        : "AI · не подключён",
+          ? systemText(locale, "AI · активен")
+          : systemText(locale, "AI · ошибка подключения")
+        : systemText(locale, "AI · не подключён"),
       conversations: {
         ai: conversationAi,
         human: conversationsHumanVisible,
@@ -1376,7 +1397,7 @@ export async function getSituationOverview(
       })
     ).map((i) => ({
       id: i.id,
-      title: i.healthStatus === "TOKEN_EXPIRED" ? `${i.name}: требуется повторная авторизация` : `${i.name}: ошибка интеграции`,
+      title: i.healthStatus === "TOKEN_EXPIRED" ? systemText(locale, "{p0}: требуется повторная авторизация", { p0: i.name }) : systemText(locale, "{p0}: ошибка интеграции", { p0: i.name }),
       detail: i.lastError || i.lastErrorCode || i.healthStatus,
       href: "/integrations",
     })),

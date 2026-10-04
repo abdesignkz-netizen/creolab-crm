@@ -3,6 +3,7 @@ import type { AuthContext } from "../lib/types.ts";
 import { ApiError } from "../errors.ts";
 import { parseAIAutomationSettings } from "./aiAutomationSettings.ts";
 import { applyConversationAnalysis } from "./conversationContextApplyService.ts";
+import { deliveredConversationMessage, UNDELIVERED_MESSAGE_STATES } from "./conversationMessageState.ts";
 
 /** Reuse the durable outbox, written in the same transaction as the message. */
 export async function enqueueConversationContext(tx: Prisma.TransactionClient, tenantId: string, conversationId: string, messageId: string) {
@@ -18,7 +19,7 @@ export async function processConversationContextJob(prisma: PrismaClient, tenant
   const settings = parseAIAutomationSettings(tenant.settingsJson);
   if (!settings.analyzeNewRequests || !settings.crm.enabled) return { skipped: "automation_disabled" };
   const conversation = await prisma.conversation.findFirst({ where: { id: conversationId, tenantId },
-    include: { messages: { where: { internal: false, operationState: { notIn: ["queued", "failed", "unknown"] } }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 1 } } });
+    include: { messages: { where: deliveredConversationMessage, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 1 } } });
   if (!conversation) return { skipped: "missing" };
   if (conversation.sellerLeadId && !await prisma.inquiry.findFirst({ where: { tenantId, conversationId, archived: false }, select: { id: true } })) {
     // Seller ingestion derives the inquiry from persisted history; let that finish first.
@@ -26,6 +27,7 @@ export async function processConversationContextJob(prisma: PrismaClient, tenant
   }
   const last = options.sourceMessageId ? await prisma.message.findFirst({ where: { id: options.sourceMessageId, tenantId, conversationId } }) : conversation.messages[0];
   if (!last) return { skipped: "no_messages" };
+  if (last.internal || UNDELIVERED_MESSAGE_STATES.includes(last.operationState)) return { skipped: "message_not_delivered" };
   if (await prisma.idempotencyRecord.findUnique({ where: { scope_actorKey_key: {
     scope: "conversation.crm", actorKey: `${tenantId}:${conversationId}`, key: last.id,
   } } })) return { skipped: "already_applied" };
@@ -33,7 +35,7 @@ export async function processConversationContextJob(prisma: PrismaClient, tenant
   const pending = await prisma.outboxEvent.findMany({ where: { tenantId, type: "conversation.context", entityId: conversationId, processedAt: null },
     select: { payloadJson: true } });
   const pendingIds = pending.map(event => (event.payloadJson as { messageId?: unknown })?.messageId).filter((id): id is string => typeof id === "string");
-  const earlier = pendingIds.length ? await prisma.message.findMany({ where: { tenantId, conversationId, id: { in: pendingIds },
+  const earlier = pendingIds.length ? await prisma.message.findMany({ where: { tenantId, conversationId, id: { in: pendingIds }, ...deliveredConversationMessage,
     OR: [{ createdAt: { lt: last.createdAt } }, { createdAt: last.createdAt, id: { lt: last.id } }],
   }, select: { id: true } }) : [];
   if (earlier.length) {

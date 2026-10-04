@@ -1,3 +1,4 @@
+import { systemText } from "@creolab/contracts";
 import type { PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
@@ -11,7 +12,8 @@ import { inquiryNeedsActionWhere, openIntakeWhere } from "./inquiryAttention.ts"
 import { isManager, inquiryAccessWhere, conversationAccessWhere, dealAccessWhere } from "../lib/access.ts";
 
 function requireTenant(auth: AuthContext) {
-  if (!auth.activeMembership) throw new ApiError(403, "no_tenant", "Нет активной компании");
+  const locale = auth.user.locale || "ru";
+  if (!auth.activeMembership) throw new ApiError(403, "no_tenant", systemText(locale, "Нет активной компании"));
   return auth.activeMembership;
 }
 
@@ -22,16 +24,16 @@ function ruCount(n: number, one: string, few: string, many: string) {
   return `${n} ${word}`;
 }
 
-function joinRu(parts: string[]) {
+function joinRu(parts: string[], locale = "ru") {
   if (parts.length <= 1) return parts[0] || "";
-  if (parts.length === 2) return `${parts[0]} и ${parts[1]}`;
-  return `${parts.slice(0, -1).join(", ")} и ${parts[parts.length - 1]}`;
+  if (parts.length === 2) return systemText(locale, "{p0} и {p1}", { p0: parts[0], p1: parts[1] });
+  return systemText(locale, "{p0} и {p1}", { p0: parts.slice(0, -1).join(", "), p1: parts[parts.length - 1] });
 }
 
-export function badgeHint(total: number, parts: string[], empty = "") {
+export function badgeHint(total: number, parts: string[], empty = "", locale = "ru") {
   if (total <= 0) return empty;
-  if (!parts.length) return `${total} требуют внимания`;
-  return `${ruCount(total, "пункт требует внимания", "пункта требуют внимания", "пунктов требуют внимания")}: ${joinRu(parts)}`;
+  if (!parts.length) return systemText(locale, "{p0} требуют внимания", { p0: total });
+  return `${ruCount(total, systemText(locale, "пункт требует внимания"), systemText(locale, "пункта требуют внимания"), systemText(locale, "пунктов требуют внимания"))}: ${joinRu(parts, locale)}`;
 }
 
 /**
@@ -39,6 +41,7 @@ export function badgeHint(total: number, parts: string[], empty = "") {
  * Keys are route paths used in App shell navigation.
  */
 export async function getNavBadges(prisma: PrismaClient, auth: AuthContext) {
+  const locale = auth.user.locale || "ru";
   const membership = requireTenant(auth);
   const tid = membership.tenantId;
   const now = new Date();
@@ -137,46 +140,46 @@ export async function getNavBadges(prisma: PrismaClient, auth: AuthContext) {
 
   const situationParts = [
     conversationsAttention
-      ? ruCount(conversationsAttention, "диалог без ответа", "диалога без ответа", "диалогов без ответа")
+      ? ruCount(conversationsAttention, systemText(locale, "диалог без ответа"), systemText(locale, "диалога без ответа"), systemText(locale, "диалогов без ответа"))
       : "",
     tasksOverdue
-      ? ruCount(tasksOverdue, "просроченная задача", "просроченные задачи", "просроченных задач")
+      ? ruCount(tasksOverdue, systemText(locale, "просроченная задача"), systemText(locale, "просроченные задачи"), systemText(locale, "просроченных задач"))
       : "",
     inquiriesAttention
-      ? ruCount(inquiriesAttention, "новая или ждущая заявка", "новые или ждущие заявки", "новых или ждущих заявок")
+      ? ruCount(inquiriesAttention, systemText(locale, "новая или ждущая заявка"), systemText(locale, "новые или ждущие заявки"), systemText(locale, "новых или ждущих заявок"))
       : "",
     incompleteIntakes
-      ? ruCount(incompleteIntakes, "обращение без телефона", "обращения без телефона", "обращений без телефона")
+      ? ruCount(incompleteIntakes, systemText(locale, "обращение без телефона"), systemText(locale, "обращения без телефона"), systemText(locale, "обращений без телефона"))
       : "",
   ].filter(Boolean);
 
   const hints: Record<string, string> = {
-    "/today": badgeHint(situation, situationParts),
+    "/today": badgeHint(situation, situationParts, "", locale),
     "/conversations": conversations
-      ? ruCount(conversations, "диалог требует внимания", "диалога требуют внимания", "диалогов требуют внимания")
+      ? ruCount(conversations, systemText(locale, "диалог требует внимания"), systemText(locale, "диалога требуют внимания"), systemText(locale, "диалогов требуют внимания"))
       : "",
-    "/tasks": tasks ? ruCount(tasks, "просроченная задача", "просроченные задачи", "просроченных задач") : "",
+    "/tasks": tasks ? ruCount(tasks, systemText(locale, "просроченная задача"), systemText(locale, "просроченные задачи"), systemText(locale, "просроченных задач")) : "",
     "/contacts": contactsNew
-      ? ruCount(contactsNew, "новый клиент", "новых клиента", "новых клиентов")
+      ? ruCount(contactsNew, systemText(locale, "новый клиент"), systemText(locale, "новых клиента"), systemText(locale, "новых клиентов"))
       : "",
     "/companies": companiesAttention
-      ? `${ruCount(companiesAttention, "компания", "компании", "компаний")} с просроченной задачей или новой заявкой`
+      ? systemText(locale, "{p0} с просроченной задачей или новой заявкой", { p0: ruCount(companiesAttention, systemText(locale, "компания"), systemText(locale, "компании"), systemText(locale, "компаний")) })
       : "",
     "/inquiries": inquiries
-      ? `${ruCount(inquiries, "заявка требует внимания", "заявки требуют внимания", "заявок требуют внимания")}: новые, без ответа или без телефона. Не за сегодня — все открытые.`
+      ? systemText(locale, "{p0}: новые, без ответа или без телефона. Не за сегодня — все открытые.", { p0: ruCount(inquiries, systemText(locale, "заявка требует внимания"), systemText(locale, "заявки требуют внимания"), systemText(locale, "заявок требуют внимания")) })
       : "",
     "/deals": dealsAttention
-      ? `${ruCount(dealsAttention, "сделка", "сделки", "сделок")} с просроченной задачей`
+      ? systemText(locale, "{p0} с просроченной задачей", { p0: ruCount(dealsAttention, systemText(locale, "сделка"), systemText(locale, "сделки"), systemText(locale, "сделок")) })
       : "",
-    "/control": control ? `${ruCount(control, "диалог", "диалога", "диалогов")} у менеджера, не у AI` : "",
+    "/control": control ? systemText(locale, "{p0} у менеджера, не у AI", { p0: ruCount(control, systemText(locale, "диалог"), systemText(locale, "диалога"), systemText(locale, "диалогов")) }) : "",
     "/integrations": integrationsCount
-      ? `${ruCount(integrationsCount, "интеграция", "интеграции", "интеграций")} с ошибкой`
+      ? systemText(locale, "{p0} с ошибкой", { p0: ruCount(integrationsCount, systemText(locale, "интеграция"), systemText(locale, "интеграции"), systemText(locale, "интеграций")) })
       : "",
     "/settings": notificationsUnread
-      ? ruCount(notificationsUnread, "непрочитанное уведомление", "непрочитанных уведомления", "непрочитанных уведомлений")
+      ? ruCount(notificationsUnread, systemText(locale, "непрочитанное уведомление"), systemText(locale, "непрочитанных уведомления"), systemText(locale, "непрочитанных уведомлений"))
       : "",
     "/documents": documentsCount
-      ? ruCount(documentsCount, "документ требует внимания", "документа требуют внимания", "документов требуют внимания")
+      ? ruCount(documentsCount, systemText(locale, "документ требует внимания"), systemText(locale, "документа требуют внимания"), systemText(locale, "документов требуют внимания"))
       : "",
   };
 

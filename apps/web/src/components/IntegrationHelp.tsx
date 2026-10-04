@@ -1,3 +1,4 @@
+import { uiText, useUiText, localizeUiOptions } from "../lib/uiText";
 import { useState } from "react";
 
 export type IntegrationHelpKind =
@@ -20,14 +21,15 @@ const CONTENT: Record<IntegrationHelpKind, { title: string; intro: string; befor
 };
 
 export function IntegrationHelp({ kind }: { kind: IntegrationHelpKind }) {
+  const uiText = useUiText();
   const [open, setOpen] = useState(false);
-  const content = CONTENT[kind];
+  const content = localizeUiOptions(CONTENT, uiText)[kind];
   return <>
-    <button type="button" className="btn secondary integration-help-button" onClick={() => setOpen(true)}>Как подключить</button>
+    <button type="button" className="btn secondary integration-help-button" onClick={() => setOpen(true)}>{uiText("Как подключить")}</button>
     {open ? <div className="integration-help-backdrop" role="presentation" onClick={() => setOpen(false)}>
       <section className="panel integration-help-dialog" role="dialog" aria-modal="true" aria-labelledby={`integration-help-${kind}`} onClick={(event) => event.stopPropagation()}>
-        <div className="row"><h3 id={`integration-help-${kind}`}>{content.title}: как подключить</h3><button type="button" className="btn secondary" onClick={() => setOpen(false)}>Закрыть</button></div>
-        <p>{content.intro}</p><h4>Перед началом</h4><ul>{content.before.map(item => <li key={item}>{item}</li>)}</ul><h4>Порядок подключения</h4><ol>{content.steps.map(item => <li key={item}>{item}</li>)}</ol><h4>Как проверить</h4><p>{content.check}</p><h4>Если не работает</h4><ul>{content.trouble.map(item => <li key={item}>{item}</li>)}</ul>
+        <div className="row"><h3 id={`integration-help-${kind}`}>{content.title}{uiText(": как подключить")}</h3><button type="button" className="btn secondary" onClick={() => setOpen(false)}>{uiText("Закрыть")}</button></div>
+        <p>{content.intro}</p><h4>{uiText("Перед началом")}</h4><ul>{content.before.map(item => <li key={item}>{item}</li>)}</ul><h4>{uiText("Порядок подключения")}</h4><ol>{content.steps.map(item => <li key={item}>{item}</li>)}</ol><h4>{uiText("Как проверить")}</h4><p>{content.check}</p><h4>{uiText("Если не работает")}</h4><ul>{content.trouble.map(item => <li key={item}>{item}</li>)}</ul>
       </section>
     </div> : null}
   </>;

@@ -1,3 +1,4 @@
+import { deliveredConversationMessage } from "./conversationMessageState.ts";
 import { randomUUID } from "node:crypto";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { taskCreatorSnapshot } from "@creolab/contracts";
@@ -128,7 +129,7 @@ export async function applyConversationAnalysis(
     });
   }
   if (outcome.applied) {
-    const latest = await prisma.message.findFirst({ where: { tenantId: tenantId(auth), conversationId, internal: false }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] });
+    const latest = await prisma.message.findFirst({ where: { tenantId: tenantId(auth), conversationId, ...deliveredConversationMessage }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] });
     if (latest?.id === result.sourceMessageId) {
       const { applyConfiguredHandoff, refreshConversationFollowUp } = await import("./aiConversationPolicyService.ts");
       await applyConfiguredHandoff(prisma, tenantId(auth), conversationId, {
@@ -152,16 +153,16 @@ export async function applyAnalyzedConversation(prisma: PrismaClient, tid: strin
     const conversation = await tx.conversation.findFirst({ where: { id: conversationId, tenantId: tid },
       include: { contact: true, connection: { include: { integration: true } },
         inquiries: { where: { tenantId: tid, archived: false }, orderBy: { receivedAt: "desc" }, take: 1 },
-        messages: { where: { tenantId: tid, internal: false, operationState: { notIn: ["queued", "failed", "unknown"] } }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 80 } } });
+        messages: { where: { tenantId: tid, ...deliveredConversationMessage }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 80 } } });
     if (!conversation) throw new ApiError(404, "not_found", "Диалог не найден");
     const inquiry = conversation.inquiries[0];
     const integration = conversation.connection?.integration || (inquiry?.integrationId
       ? await tx.integration.findFirst({ where: { id: inquiry.integrationId, tenantId: tid } }) : null);
     if (integration && (integration.status === "disabled" || integration.connectionStatus === "DISCONNECTED")) return { applied: null, skipped: "integration_disabled" };
     const threadIds = await listThreadConversationIds(tx, tid, conversation);
-    const evidenceMessages = await tx.message.findMany({ where: { tenantId: tid, conversationId: { in: threadIds }, internal: false,
+    const evidenceMessages = await tx.message.findMany({ where: { tenantId: tid, conversationId: { in: threadIds },
       OR: [{ createdAt: { lt: sourceMessageAt } }, { createdAt: sourceMessageAt, id: { lte: sourceMessageId } }],
-      operationState: { notIn: ["queued", "failed", "unknown"] } }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 80 });
+      ...deliveredConversationMessage }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 80 });
     const attr = asObject(conversation.contact?.attributionJson);
     const fieldMeta = asObject(inquiry?.fieldMetaJson);
     const policy = decideAutomationPolicy({ settingsJson: tenant.settingsJson,

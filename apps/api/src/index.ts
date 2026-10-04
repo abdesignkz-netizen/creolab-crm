@@ -23,6 +23,16 @@ if (storage.warning) {
   console.log(`[storage] uploads at ${storage.uploadsRoot} (${storage.storePathKind})`);
 }
 const app = createApp(prisma);
+// Provider startup must never take down unrelated CRM routes.
+if (process.env.WHATSAPP_QR_ENABLED !== "0") {
+  void import("./services/whatsappQrRuntime.ts").then(({ startWhatsAppQrRuntime }) => {
+    const runtime = startWhatsAppQrRuntime(prisma);
+    for (const signal of ["SIGTERM", "SIGINT"] as const) process.once(signal, () => { void runtime.stop().finally(() => process.exit(0)); });
+  }).catch(() => {
+    process.env.WHATSAPP_QR_ENABLED = "0";
+    console.error("[whatsapp-qr] Runtime could not start. Check dependency/platform compatibility.");
+  });
+}
 
 app.listen(config.port, () => {
   console.log(`CREOLAB AI CRM API http://127.0.0.1:${config.port}`);

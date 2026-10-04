@@ -159,7 +159,7 @@ export async function listConversationsBoard(
 
   // Apply channel selection before pagination; tenant and role restrictions stay in AND.
   const channelWhere: Prisma.ConversationWhereInput | null = channelFilter === "all" ? null
-    : channelFilter === "whatsapp" ? { sellerLeadId: { not: null } }
+    : channelFilter === "whatsapp" ? { OR: [{ sellerLeadId: { not: null } }, { connection: { channelType: "whatsapp" } }] }
     : channelFilter === "other" ? { sellerLeadId: null, connectionId: null }
     : { connection: { channelType: channelFilter } };
   if (channelWhere) (where.AND as Prisma.ConversationWhereInput[]).push(channelWhere);
@@ -176,7 +176,7 @@ export async function listConversationsBoard(
   ]);
   const availableChannels = [...new Set([
     ...(whatsappIntegration || whatsappHistory ? ["whatsapp"] : []),
-    ...connections.map((connection) => connection.channelType).filter((channel) => ["telegram", "instagram", "email"].includes(channel)),
+    ...connections.map((connection) => connection.channelType).filter((channel) => ["whatsapp", "telegram", "instagram", "email"].includes(channel)),
     ...(otherHistory ? ["other"] : []),
   ])];
 
@@ -219,7 +219,7 @@ export async function listConversationsBoard(
   const conversations = await prisma.conversation.findMany({
     where,
     include: {
-      connection: { select: { channelType: true, status: true } },
+      connection: { select: { channelType: true, status: true, integration: { select: { type: true } } } },
       contact: {
         include: {
           methods: true,
@@ -420,7 +420,7 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
   const conversation = await prisma.conversation.findFirst({
     where: { id, tenantId: tid },
     include: {
-      connection: { select: { channelType: true, status: true } },
+      connection: { select: { channelType: true, status: true, integration: { select: { type: true } } } },
       contact: {
         include: {
           methods: true,
@@ -539,6 +539,7 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
       status: conversation.status,
       channel,
       channelType: conversation.connection?.channelType || (conversation.sellerLeadId ? "whatsapp" : null),
+      aiAvailable: !["telegram", "email", "instagram"].includes(conversation.connection?.channelType || ""),
       channelConnected: !conversation.connection || conversation.connection.status === "active",
       acquisition,
       sourceLine: sourceArrow(acquisition, channel),

@@ -1,3 +1,4 @@
+import { uiMessage, uiText, useUiText, localizeUiOptions } from "../../lib/uiText";
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { api } from "../../lib/api";
@@ -19,6 +20,7 @@ export function PlatformAiManagersPage() {
 }
 
 function AiManagerList() {
+  const uiText = useUiText();
   const [q, setQ] = useState("");
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState("");
@@ -28,7 +30,7 @@ function AiManagerList() {
     try {
       setData(await api.adminAiManagers({ q: search }));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось загрузить AI-менеджеров");
+      setError(err instanceof Error ? err.message : uiText("Не удалось загрузить AI-менеджеров"));
     }
   }
 
@@ -40,11 +42,9 @@ function AiManagerList() {
     <div className="stack">
       <div className="page-head">
         <div>
-          <h2>AI-менеджеры</h2>
+          <h2>{uiText("AI-менеджеры")}</h2>
           <p className="muted">
-            Для каждой компании видно, активны ли промт и база знаний в WhatsApp. Зелёный статус — бот уже отвечает по
-            этим текстам.
-          </p>
+            {uiText("Для каждой компании видно, активны ли промт и база знаний в WhatsApp. Зелёный статус — бот уже отвечает по этим текстам.")}</p>
         </div>
       </div>
       <form
@@ -54,26 +54,25 @@ function AiManagerList() {
           void load(q);
         }}
       >
-        <input value={q} onChange={(event) => setQ(event.target.value)} placeholder="Найти компанию" />
+        <input value={q} onChange={(event) => setQ(event.target.value)} placeholder={uiText("Найти компанию")} />
         <button className="btn secondary" type="submit">
-          Найти
-        </button>
+          {uiText("Найти")}</button>
       </form>
       {error ? <p className="error">{error}</p> : null}
       {!data ? (
-        <div className="state">Загрузка…</div>
+        <div className="state">{uiText("Загрузка…")}</div>
       ) : !(data.items || []).length ? (
-        <p className="muted">Компаний пока нет. Добавьте компанию — здесь появится её WhatsApp AI.</p>
+        <p className="muted">{uiText("Компаний пока нет. Добавьте компанию — здесь появится её WhatsApp AI.")}</p>
       ) : (
         <div className="stats-table-wrap">
           <table className="stats-table">
             <thead>
               <tr>
-                <th>Компания</th>
+                <th>{uiText("Компания")}</th>
                 <th>WhatsApp</th>
-                <th>Промт</th>
-                <th>База знаний</th>
-                <th>Обновлено</th>
+                <th>{uiText("Промт")}</th>
+                <th>{uiText("База знаний")}</th>
+                <th>{uiText("Обновлено")}</th>
               </tr>
             </thead>
             <tbody>
@@ -85,13 +84,13 @@ function AiManagerList() {
                   </td>
                   <td>
                     <span className={statusBadgeClass(WHATSAPP_LABEL[item.whatsapp] || item.whatsapp)}>
-                      {WHATSAPP_LABEL[item.whatsapp] || item.whatsapp}
+                      {localizeUiOptions(WHATSAPP_LABEL, uiText)[item.whatsapp] || item.whatsapp}
                     </span>
                   </td>
                   <td>
                     <div className="ai-live-cell">
                       <span className={statusBadgeClass(item.promptActivation?.label || (item.promptReady ? "задан" : "Не задан"))}>
-                        {item.promptActivation?.label || (item.promptReady ? "задан" : "Не задан")}
+                        {uiMessage(item.promptActivation?.label) || (item.promptReady ? uiText("задан") : uiText("Не задан"))}
                       </span>
                     </div>
                   </td>
@@ -102,7 +101,7 @@ function AiManagerList() {
                           item.knowledgeActivation?.label || (item.knowledgeCount ? "задана" : "Не задана"),
                         )}
                       >
-                        {item.knowledgeActivation?.label || (item.knowledgeCount ? "задана" : "Не задана")}
+                        {uiMessage(item.knowledgeActivation?.label) || (item.knowledgeCount ? uiText("задана") : uiText("Не задана"))}
                       </span>
                       <div className="muted">{item.knowledgeCount || 0}</div>
                     </div>
@@ -119,6 +118,7 @@ function AiManagerList() {
 }
 
 function AiManagerDetail({ tenantId }: { tenantId: string }) {
+  const uiText = useUiText();
   const [name, setName] = useState("");
   useEffect(() => {
     void api
@@ -132,9 +132,9 @@ function AiManagerDetail({ tenantId }: { tenantId: string }) {
       <div className="page-head">
         <div>
           <p className="muted">
-            <Link to="/admin/ai-managers">AI-менеджеры</Link>
+            <Link to="/admin/ai-managers">{uiText("AI-менеджеры")}</Link>
             {" · "}
-            <Link to={`/admin/companies/${tenantId}`}>Карточка компании</Link>
+            <Link to={`/admin/companies/${tenantId}`}>{uiText("Карточка компании")}</Link>
           </p>
           <h3>{name || "WhatsApp AI"}</h3>
         </div>

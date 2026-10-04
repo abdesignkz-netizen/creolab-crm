@@ -1,3 +1,4 @@
+import { uiText, useUiText, localizeUiOptions, uiFormatLocale , uiDurationLabel } from "../lib/uiText";
 import { esfMeasureUnitSymbol } from "@creolab/contracts";
 import { notifySaved } from "../components/SaveNotice";
 import { MeasureUnitSelect } from "../components/MeasureUnitSelect";
@@ -72,11 +73,11 @@ const EDOC_KPI_LABEL: Record<string, string> = {
 function electronicDocKpi(docs: any, type: "AVR" | "ESF") {
   if (!docs) return "—";
   const items = (docs.electronicDocuments || []).filter((row: { type?: string }) => row.type === type);
-  if (!items.length) return "Нет";
+  if (!items.length) return uiText("Нет");
   const best = items.reduce((current: { status?: string }, row: { status?: string }) =>
     (EDOC_KPI_RANK[row.status || ""] || 0) > (EDOC_KPI_RANK[current.status || ""] || 0) ? row : current,
   );
-  return EDOC_KPI_LABEL[best.status || ""] || "Черновик";
+  return localizeUiOptions(EDOC_KPI_LABEL, uiText)[best.status || ""] || uiText("Черновик");
 }
 
 function toDatetimeLocal(iso?: string | null) {
@@ -88,25 +89,25 @@ function toDatetimeLocal(iso?: string | null) {
 }
 
 function dealAttention(deal: any): { text: string; tone: "ok" | "warn" | "next" | "muted" } | null {
-  if (deal.outcome === "won") return { text: "Продажа", tone: "ok" };
-  if (deal.outcome === "lost") return { text: deal.lossReason ? `Потеря · ${deal.lossReason}` : "Потеря", tone: "muted" };
-  if (deal.flags?.overdueTask) return { text: "Просрочена задача", tone: "warn" };
-  if (deal.flags?.paymentOverdue) return { text: "Просрочена оплата", tone: "warn" };
-  if (deal.flags?.overdueNextAction) return { text: "Просрочен follow-up", tone: "warn" };
-  if (deal.flags?.overSla || deal.flags?.slaStatus === "OVERDUE") return { text: "Просрочен SLA", tone: "warn" };
-  if (deal.flags?.needsReply) return { text: "Нужен ответ", tone: "warn" };
-  if (deal.flags?.proposalWithoutReply) return { text: "КП без ответа", tone: "warn" };
-  if (deal.flags?.slaStatus === "WARNING") return { text: "SLA близко", tone: "warn" };
-  if (deal.flags?.stalled) return { text: "Зависла", tone: "warn" };
+  if (deal.outcome === "won") return { text: uiText("Продажа"), tone: "ok" };
+  if (deal.outcome === "lost") return { text: deal.lossReason ? uiText("Потеря · {p0}", {p0: deal.lossReason}) : uiText("Потеря"), tone: "muted" };
+  if (deal.flags?.overdueTask) return { text: uiText("Просрочена задача"), tone: "warn" };
+  if (deal.flags?.paymentOverdue) return { text: uiText("Просрочена оплата"), tone: "warn" };
+  if (deal.flags?.overdueNextAction) return { text: uiText("Просрочен follow-up"), tone: "warn" };
+  if (deal.flags?.overSla || deal.flags?.slaStatus === "OVERDUE") return { text: uiText("Просрочен SLA"), tone: "warn" };
+  if (deal.flags?.needsReply) return { text: uiText("Нужен ответ"), tone: "warn" };
+  if (deal.flags?.proposalWithoutReply) return { text: uiText("КП без ответа"), tone: "warn" };
+  if (deal.flags?.slaStatus === "WARNING") return { text: uiText("SLA близко"), tone: "warn" };
+  if (deal.flags?.stalled) return { text: uiText("Зависла"), tone: "warn" };
   if (deal.nextAction) {
     return {
       text: deal.nextActionAt
-        ? `${deal.nextAction} · ${new Date(deal.nextActionAt).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`
+        ? `${deal.nextAction} · ${new Date(deal.nextActionAt).toLocaleString(uiFormatLocale(), { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`
         : deal.nextAction,
       tone: "next",
     };
   }
-  if (deal.outcome === "open") return { text: "Нет следующего шага", tone: "warn" };
+  if (deal.outcome === "open") return { text: uiText("Нет следующего шага"), tone: "warn" };
   return null;
 }
 
@@ -125,9 +126,10 @@ function DealBoardCard({
   onDragStart: () => void;
   onDragEnd: () => void;
 }) {
+  const uiText = useUiText();
   const companyName = String(deal.company?.name || "").trim();
   const contactName = String(deal.contact?.name || "").trim();
-  const client = companyName || contactName || "Клиент не указан";
+  const client = companyName || contactName || uiText("Клиент не указан");
   const person = companyName && contactName && contactName !== companyName ? contactName : "";
   const phone = deal.contact ? phoneText(deal.contact.phone) : "";
   const attention = dealAttention(deal);
@@ -137,7 +139,7 @@ function DealBoardCard({
       className={`deal-card${dragging ? " dragging" : ""}`}
       role="button"
       tabIndex={0}
-      aria-label={`Открыть сделку: ${deal.title}`}
+      aria-label={uiText("Открыть сделку: {p0}", {p0: deal.title})}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
@@ -156,9 +158,9 @@ function DealBoardCard({
         {phone ? <span className="deal-card-phone">{phone}</span> : null}
       </div>
       <div className="deal-card-meta">
-        <span className="deal-card-amount">{deal.amountLabel || "Сумма не указана"}</span>
-        {deal.outcome === "open" && deal.stageDurationLabel ? (
-          <span className="deal-card-age">{deal.stageDurationLabel} на этапе</span>
+        <span className="deal-card-amount">{deal.amountLabel || uiText("Сумма не указана")}</span>
+        {deal.outcome === "open" && uiDurationLabel(deal.stageDurationLabel) ? (
+          <span className="deal-card-age">{uiDurationLabel(deal.stageDurationLabel)} {" "}{uiText("на этапе")}</span>
         ) : null}
       </div>
       {attention ? <div className={`deal-card-status ${attention.tone}`}>{attention.text}</div> : null}
@@ -168,6 +170,7 @@ function DealBoardCard({
 }
 
 export function DealsPage() {
+  const uiText = useUiText();
   const caps = useCapabilities();
   const [view, setView] = useUrlState("view", "list", ["list", "board"]);
   const [selectedContractId, setSelectedContractId] = useState<string | null>(null);
@@ -211,7 +214,7 @@ export function DealsPage() {
     const request = ++requestVersion.current;
     try {
       if (timeMode === "period" && period === "custom" && (!dateFrom || !dateTo)) {
-        setError("Укажите даты С и По");
+        setError(uiText("Укажите даты С и По"));
         return;
       }
       const result = await api.deals({
@@ -231,7 +234,7 @@ export function DealsPage() {
       setError("");
     } catch (err) {
       if (request !== requestVersion.current) return;
-      setError(err instanceof Error ? err.message : "Ошибка");
+      setError(err instanceof Error ? err.message : uiText("Ошибка"));
     }
   }
 
@@ -268,7 +271,7 @@ export function DealsPage() {
 
   async function createDeal() {
     if (!createTitle.trim() || !pickedContact?.id) {
-      setCreateError("Укажите название и клиента");
+      setCreateError(uiText("Укажите название и клиента"));
       return;
     }
     setCreateBusy(true);
@@ -283,10 +286,10 @@ export function DealsPage() {
       setCreateOpen(false);
       setCreateTitle("");
       setPickedContact(null);
-      notifySaved("Сделка создана");
+      notifySaved(uiText("Сделка создана"));
       navigate(`/deals/${id}`);
     } catch (err) {
-      setCreateError(err instanceof Error ? err.message : "Не удалось создать сделку");
+      setCreateError(err instanceof Error ? err.message : uiText("Не удалось создать сделку"));
     } finally {
       setCreateBusy(false);
     }
@@ -300,20 +303,19 @@ export function DealsPage() {
       setDragId(null);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось переместить");
+      setError(err instanceof Error ? err.message : uiText("Не удалось переместить"));
     } finally {
       setBusy(false);
     }
   }
 
-  if (!data && !error) return <div className="state">Загрузка…</div>;
+  if (!data && !error) return <div className="state">{uiText("Загрузка…")}</div>;
   if (!data) {
     return (
       <section>
         <p className="error">{error}</p>
         <button type="button" className="btn" onClick={() => void load()}>
-          Повторить
-        </button>
+          {uiText("Повторить")}</button>
       </section>
     );
   }
@@ -324,28 +326,27 @@ export function DealsPage() {
     <section className="deals-page">
       <div className="page-head">
         <div>
-          <h2>Сделки</h2>
-          <p className="muted">Заказы, суммы и состояние документов по каждой сделке.</p>
+          <h2>{uiText("Сделки")}</h2>
+          <p className="muted">{uiText("Заказы, суммы и состояние документов по каждой сделке.")}</p>
         </div>
         <div className="sit-toolbar-side">
           {data.period?.label ? <span className="muted">{data.period.label}</span> : null}
           <button type="button" className="btn" onClick={() => setCreateOpen(true)}>
-            Новая сделка
-          </button>
+            {uiText("Новая сделка")}</button>
         </div>
       </div>
 
       {error ? <p className="error">{error}</p> : null}
       {stage || outcome ? <div className="active-filter-note">
-        <span>Отбор: {stage ? data.columns?.find((column: any) => column.systemKey === stage)?.name || stage : ""}{stage && outcome ? " · " : ""}{({ won: "Продажи", lost: "Потери", open: "Активные", on_hold: "На паузе" } as Record<string, string>)[outcome]}</span>
-        <button className="btn secondary" onClick={() => navigate(`/deals?${new URLSearchParams({ timeMode, period, from: dateFrom, to: dateTo, basis, scope })}`)}>Снять отбор</button>
+        <span>{uiText("Отбор:")}{" "}{stage ? data.columns?.find((column: any) => column.systemKey === stage)?.name || stage : ""}{stage && outcome ? " · " : ""}{({ won: uiText("Продажи"), lost: uiText("Потери"), open: uiText("Активные"), on_hold: uiText("На паузе") } as Record<string, string>)[outcome]}</span>
+        <button className="btn secondary" onClick={() => navigate(`/deals?${new URLSearchParams({ timeMode, period, from: dateFrom, to: dateTo, basis, scope })}`)}>{uiText("Снять отбор")}</button>
       </div> : null}
 
       <div className="segmented sit-scope" style={{ width: "fit-content", marginBottom: 10 }}>
         {(
           [
-            ["now", "Сейчас"],
-            ["period", "За период"],
+            ["now", uiText("Сейчас")],
+            ["period", uiText("За период")],
           ] as const
         ).map(([value, label]) => (
           <button
@@ -375,9 +376,9 @@ export function DealsPage() {
           <div className="segmented sit-scope" style={{ width: "fit-content", marginTop: 8 }}>
             {(
               [
-                ["created", "Созданные"],
-                ["activity", "С активностью"],
-                ["closed", "Закрытые"],
+                ["created", uiText("Созданные")],
+                ["activity", uiText("С активностью")],
+                ["closed", uiText("Закрытые")],
               ] as const
             ).map(([value, label]) => (
               <button
@@ -397,39 +398,39 @@ export function DealsPage() {
         {s.mode === "period" ? (
           <>
             <div className="sit-kpi">
-              <span className="muted">Создано сделок</span>
+              <span className="muted">{uiText("Создано сделок")}</span>
               <strong>{s.createdDeals ?? "—"}</strong>
             </div>
             <div className="sit-kpi">
-              <span className="muted">Закрыто успешно</span>
+              <span className="muted">{uiText("Закрыто успешно")}</span>
               <strong>{s.wonDeals ?? "—"}</strong>
             </div>
             <div className="sit-kpi">
-              <span className="muted">Потеряно</span>
+              <span className="muted">{uiText("Потеряно")}</span>
               <strong>{s.lostDeals ?? "—"}</strong>
             </div>
             <div className="sit-kpi">
-              <span className="muted">Продано</span>
+              <span className="muted">{uiText("Продано")}</span>
               <strong>{s.soldAmountLabel || "—"}</strong>
             </div>
           </>
         ) : (
           <>
             <div className="sit-kpi">
-              <span className="muted">Активные</span>
+              <span className="muted">{uiText("Активные")}</span>
               <strong>{s.activeDeals}</strong>
             </div>
             <div className="sit-kpi">
-              <span className="muted">Сумма сделок</span>
+              <span className="muted">{uiText("Сумма сделок")}</span>
               <strong>{s.pipelineAmountLabel || "—"}</strong>
               {s.amountKnownOf ? (
                 <span className="kpi-hint">
-                  сумма у {s.amountKnownCount} из {s.amountKnownOf}
+                  {uiText("сумма у")}{" "}{s.amountKnownCount} {" "}{uiText("из")}{" "}{s.amountKnownOf}
                 </span>
               ) : null}
             </div>
             <div className="sit-kpi">
-              <span className="muted">Ожидаемые оплаты</span>
+              <span className="muted">{uiText("Ожидаемые оплаты")}</span>
               <strong>{s.expectedPaymentsLabel || "—"}</strong>
             </div>
           </>
@@ -440,9 +441,9 @@ export function DealsPage() {
         <div className="segmented sit-scope" style={{ width: "fit-content" }}>
           {(
             [
-              ["all", "Все"],
-              ["mine", "Мои"],
-              ["unassigned", "Без ответственного"],
+              ["all", uiText("Все")],
+              ["mine", uiText("Мои")],
+              ["unassigned", uiText("Без ответственного")],
             ] as const
           ).map(([value, label]) => (
             <button
@@ -459,13 +460,13 @@ export function DealsPage() {
           <div className="segmented sit-scope" style={{ width: "fit-content" }}>
             {(
               [
-                ["all", "Все"],
-                ["stalled", "Зависшие"],
-                ["needs_reply", "Нужен ответ"],
-                ["no_next_action", "Без следующего шага"],
-                ["over_sla", "Сверх SLA"],
-                ["overdue_next_action", "Просрочен шаг"],
-                ["payment_overdue", "Оплата"],
+                ["all", uiText("Все")],
+                ["stalled", uiText("Зависшие")],
+                ["needs_reply", uiText("Нужен ответ")],
+                ["no_next_action", uiText("Без следующего шага")],
+                ["over_sla", uiText("Сверх SLA")],
+                ["overdue_next_action", uiText("Просрочен шаг")],
+                ["payment_overdue", uiText("Оплата")],
               ] as const
             ).map(([value, label]) => (
               <button
@@ -482,15 +483,15 @@ export function DealsPage() {
       </div>
 
       <div className="deal-view-toolbar">
-        <div className="segmented" aria-label="Вид сделок">
-          <button type="button" className={view === "list" ? "btn" : "btn secondary"} aria-pressed={view === "list"} onClick={() => setView("list")}>Список</button>
-          <button type="button" className={view === "board" ? "btn" : "btn secondary"} aria-pressed={view === "board"} onClick={() => setView("board")}>Доска по этапам</button>
+        <div className="segmented" aria-label={uiText("Вид сделок")}>
+          <button type="button" className={view === "list" ? "btn" : "btn secondary"} aria-pressed={view === "list"} onClick={() => setView("list")}>{uiText("Список")}</button>
+          <button type="button" className={view === "board" ? "btn" : "btn secondary"} aria-pressed={view === "board"} onClick={() => setView("board")}>{uiText("Доска по этапам")}</button>
         </div>
-        <label>Этап<select aria-label="Этап" value={stage} onChange={(event) => setStage(event.target.value)}><option value="">Все этапы</option>{(data.columns || []).map((column: any) => <option key={column.stageId} value={column.systemKey}>{column.name}</option>)}</select></label>
-        <label>Статус сделки<select aria-label="Статус сделки" value={outcome} onChange={(event) => setOutcome(event.target.value)}><option value="">{timeMode === "now" ? "Активные и на паузе" : "Все статусы"}</option><option value="open">В работе</option><option value="on_hold">На паузе</option><option value="won">Успешно завершена</option><option value="lost">Потеряна</option></select></label>
-        <button type="button" className="btn secondary" onClick={() => void load()}>Обновить</button>
+        <label>{uiText("Этап")}<select aria-label={uiText("Этап")} value={stage} onChange={(event) => setStage(event.target.value)}><option value="">{uiText("Все этапы")}</option>{(data.columns || []).map((column: any) => <option key={column.stageId} value={column.systemKey}>{column.name}</option>)}</select></label>
+        <label>{uiText("Статус сделки")}<select aria-label={uiText("Статус сделки")} value={outcome} onChange={(event) => setOutcome(event.target.value)}><option value="">{timeMode === "now" ? uiText("Активные и на паузе") : uiText("Все статусы")}</option><option value="open">{uiText("В работе")}</option><option value="on_hold">{uiText("На паузе")}</option><option value="won">{uiText("Успешно завершена")}</option><option value="lost">{uiText("Потеряна")}</option></select></label>
+        <button type="button" className="btn secondary" onClick={() => void load()}>{uiText("Обновить")}</button>
       </div>
-      {data.limitReached ? <p className="warn">Показаны первые {data.limit} сделок. Уточните период, этап или ответственного, чтобы сузить список.</p> : null}
+      {data.limitReached ? <p className="warn">{uiText("Показаны первые")}{" "}{data.limit} {" "}{uiText("сделок. Уточните период, этап или ответственного, чтобы сузить список.")}</p> : null}
       {view === "list" ? <DealList items={data.items || [...(data.columns || []).flatMap((column: any) => column.deals), ...(data.onHold || [])]} documentsAllowed={caps.documents && data.documentsAllowed !== false} onOpenContract={setSelectedContractId} /> : <div className="deal-kanban">
         {(data.columns || []).map((col: any) => (
           <div
@@ -505,8 +506,8 @@ export function DealsPage() {
               <b>{col.name}</b>
               <span className="muted">
                 {col.count
-                  ? `${col.count} · ${col.amountLabel || "без сумм"}`
-                  : "Пусто"}
+                  ? `${col.count} · ${col.amountLabel || uiText("без сумм")}`
+                  : uiText("Пусто")}
               </span>
             </div>
             <div className="deal-column-body">
@@ -521,7 +522,7 @@ export function DealsPage() {
                   onDragEnd={() => setDragId(null)}
                 />
               ))}
-              {col.deals.length === 0 ? <p className="deal-column-empty">Нет сделок</p> : null}
+              {col.deals.length === 0 ? <p className="deal-column-empty">{uiText("Нет сделок")}</p> : null}
             </div>
           </div>
         ))}
@@ -529,7 +530,7 @@ export function DealsPage() {
 
       {view === "board" && data.onHold?.length ? (
         <div className="sit-section">
-          <h3>На паузе</h3>
+          <h3>{uiText("На паузе")}</h3>
           {data.onHold.map((deal: any) => (
             <Link key={deal.id} className="sit-list-row" to={`/deals/${deal.id}`}>
               <div>
@@ -546,22 +547,20 @@ export function DealsPage() {
       {createOpen ? (
         <div className="stats-modal-backdrop" onClick={() => setCreateOpen(false)}>
           <div className="stats-modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Новая сделка</h3>
-            <p className="muted">Без заявки. Клиент обязателен, компанию можно указать позже.</p>
+            <h3>{uiText("Новая сделка")}</h3>
+            <p className="muted">{uiText("Без заявки. Клиент обязателен, компанию можно указать позже.")}</p>
             {createError ? <p className="error">{createError}</p> : null}
             <label>
-              Название
-              <input value={createTitle} onChange={(e) => setCreateTitle(e.target.value)} placeholder="Сайт для…" />
+              {uiText("Название")}<input value={createTitle} onChange={(e) => setCreateTitle(e.target.value)} placeholder={uiText("Сайт для…")} />
             </label>
             <label>
-              Клиент
-              <input
+              {uiText("Клиент")}<input
                 value={pickedContact ? pickedContact.name || "" : contactQ}
                 onChange={(e) => {
                   setPickedContact(null);
                   setContactQ(e.target.value);
                 }}
-                placeholder="Имя или телефон"
+                placeholder={uiText("Имя или телефон")}
               />
             </label>
             {!pickedContact ? (
@@ -583,13 +582,12 @@ export function DealsPage() {
                 ))}
               </div>
             ) : (
-              <p className="muted">Клиент: {pickedContact.name}</p>
+              <p className="muted">{uiText("Клиент:")}{" "}{pickedContact.name}</p>
             )}
             {contactCompanies.length ? (
               <label>
-                Компания
-                <select value={pickedCompanyId} onChange={(e) => setPickedCompanyId(e.target.value)}>
-                  <option value="">Без компании</option>
+                {uiText("Компания")}<select value={pickedCompanyId} onChange={(e) => setPickedCompanyId(e.target.value)}>
+                  <option value="">{uiText("Без компании")}</option>
                   {contactCompanies.map((row: any) => {
                     const company = row.company || row;
                     return (
@@ -608,11 +606,10 @@ export function DealsPage() {
                 disabled={createBusy || !createTitle.trim() || !pickedContact}
                 onClick={() => void createDeal()}
               >
-                {createBusy ? "Создаём…" : "Создать"}
+                {createBusy ? uiText("Создаём…") : uiText("Создать")}
               </button>
               <button type="button" className="btn secondary" onClick={() => setCreateOpen(false)}>
-                Отмена
-              </button>
+                {uiText("Отмена")}</button>
             </div>
           </div>
         </div>
@@ -622,6 +619,7 @@ export function DealsPage() {
 }
 
 export function DealDetailPage() {
+  const uiText = useUiText();
   const caps = useCapabilities();
   const { dealId } = useParams();
   const navigate = useNavigate();
@@ -721,7 +719,7 @@ export function DealDetailPage() {
       if (d.lossReason) setLossReason(d.lossReason);
       setError("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Ошибка");
+      setError(err instanceof Error ? err.message : uiText("Ошибка"));
     }
   }
 
@@ -755,10 +753,10 @@ export function DealDetailPage() {
         ...(caps.confirmPayments ? { paymentStatus } : {}),
       });
       setEditing(false);
-      notifySaved("Изменения сделки сохранены");
+      notifySaved(uiText("Изменения сделки сохранены"));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не сохранено");
+      setError(err instanceof Error ? err.message : uiText("Не сохранено"));
     } finally {
       setBusy(false);
     }
@@ -768,7 +766,7 @@ export function DealDetailPage() {
     if (!dealId) return;
     const amountMinor = Math.round(Number(String(payAmount).replace(/\s+/g, "").replace(",", ".")));
     if (!Number.isFinite(amountMinor) || amountMinor <= 0) {
-      setError("Укажите сумму оплаты");
+      setError(uiText("Укажите сумму оплаты"));
       return;
     }
     setBusy(true);
@@ -781,18 +779,18 @@ export function DealDetailPage() {
       setPayComment("");
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось подтвердить оплату");
+      setError(err instanceof Error ? err.message : uiText("Не удалось подтвердить оплату"));
     } finally {
       setBusy(false);
     }
   }
 
-  if (!data && !error) return <div className="state">Загрузка…</div>;
+  if (!data && !error) return <div className="state">{uiText("Загрузка…")}</div>;
   if (!data) {
     return (
       <section>
         <p className="error">{error}</p>
-        <Link to="/deals">К списку сделок</Link>
+        <Link to="/deals">{uiText("К списку сделок")}</Link>
       </section>
     );
   }
@@ -809,16 +807,16 @@ export function DealDetailPage() {
       <div className="page-head">
         <div>
           <p className="page-kicker">
-            <Link to="/deals">Сделки</Link>
+            <Link to="/deals">{uiText("Сделки")}</Link>
             {caps.documents ? (
               <>
                 {" · "}
-                <Link to="/documents">Документы</Link>
+                <Link to="/documents">{uiText("Документы")}</Link>
               </>
             ) : null}
           </p>
           <h2>{d.title}</h2>
-          {d.number ? <p className="muted">Сделка {d.number}</p> : null}
+          {d.number ? <p className="muted">{uiText("Сделка")}{" "}{d.number}</p> : null}
           <p className="muted">
             {nameWithPhone(d.contact?.name, d.contact?.phone)}
             {d.stage?.name ? ` · ${d.stage.name}` : ""}
@@ -830,25 +828,25 @@ export function DealDetailPage() {
 
       <div className={`sit-kpi-grid${caps.documents ? " deal-kpi-5" : ""}`}>
         <div className="sit-kpi">
-          <span className="muted">Сумма</span>
+          <span className="muted">{uiText("Сумма")}</span>
           <strong>{d.amountLabel || "—"}</strong>
         </div>
         <div className="sit-kpi">
-          <span className="muted">На этапе</span>
-          <strong>{d.stageDurationLabel}</strong>
+          <span className="muted">{uiText("На этапе")}</span>
+          <strong>{uiDurationLabel(d.stageDurationLabel)}</strong>
         </div>
         <div className="sit-kpi">
-          <span className="muted">Оплата</span>
-          <strong>{PAYMENT_STATUS_LABEL[d.paymentStatus] || d.paymentStatus}</strong>
+          <span className="muted">{uiText("Оплата")}</span>
+          <strong>{localizeUiOptions(PAYMENT_STATUS_LABEL, uiText)[d.paymentStatus] || d.paymentStatus}</strong>
         </div>
         {caps.documents ? (
           <>
             <a className="sit-kpi" href="#avr">
-              <span className="muted">АВР</span>
+              <span className="muted">{uiText("АВР")}</span>
               <strong>{electronicDocKpi(docs, "AVR")}</strong>
             </a>
             <a className="sit-kpi" href="#esf">
-              <span className="muted">ЭСФ</span>
+              <span className="muted">{uiText("ЭСФ")}</span>
               <strong>{electronicDocKpi(docs, "ESF")}</strong>
             </a>
           </>
@@ -856,22 +854,22 @@ export function DealDetailPage() {
       </div>
 
       <div className="panel">
-        <div className="row"><b>Позиции</b><button type="button" className="btn secondary" disabled={busy} onClick={newItem}>Добавить новую позицию</button></div>
-        <p className="muted">Они же попадут в договор, счёт, АВР и ЭСФ.</p>
-        {(d.items || []).length === 0 ? <p className="empty">Позиций пока нет</p> : null}
+        <div className="row"><b>{uiText("Позиции")}</b><button type="button" className="btn secondary" disabled={busy} onClick={newItem}>{uiText("Добавить новую позицию")}</button></div>
+        <p className="muted">{uiText("Они же попадут в договор, счёт, АВР и ЭСФ.")}</p>
+        {(d.items || []).length === 0 ? <p className="empty">{uiText("Позиций пока нет")}</p> : null}
         {(d.items || []).map((item: any) => (
           <div className="row" key={item.id}>
             <div>
               <b>{item.name}</b>
               <div className="muted">
-                {item.quantity} {esfMeasureUnitSymbol(item.unit)} × {Number(item.unitPrice).toLocaleString("ru-RU")} ₸
-                {item.vatRate ? ` · НДС ${item.vatRate}%` : " · без НДС"}
+                {item.quantity} {esfMeasureUnitSymbol(item.unit)} × {Number(item.unitPrice).toLocaleString(uiFormatLocale())} ₸
+                {item.vatRate ? uiText(" · НДС {p0}%", {p0: item.vatRate}) : uiText(" · без НДС")}
               </div>
             </div>
             <div>
-              <b>{Number(item.totalAmount).toLocaleString("ru-RU")} ₸</b>
+              <b>{Number(item.totalAmount).toLocaleString(uiFormatLocale())} ₸</b>
               <div>
-                <button type="button" className="btn secondary" disabled={busy} onClick={() => editItem(item)}>Изменить</button>
+                <button type="button" className="btn secondary" disabled={busy} onClick={() => editItem(item)}>{uiText("Изменить")}</button>
                 <button
                   type="button"
                   className="btn secondary"
@@ -881,47 +879,41 @@ export function DealDetailPage() {
                     void api
                       .deleteDealItem(d.id, item.id)
                       .then(() => { if (editingItemId === item.id) closeItemForm(); return load(); })
-                      .catch((err) => setError(err instanceof Error ? err.message : "Не удалось удалить"))
+                      .catch((err) => setError(err instanceof Error ? err.message : uiText("Не удалось удалить")))
                       .finally(() => setBusy(false));
                   }}
                 >
-                  Удалить
-                </button>
+                  {uiText("Удалить")}</button>
               </div>
             </div>
           </div>
         ))}
         {d.itemTotals ? (
           <p>
-            Итого: <b>{Number(d.itemTotals.totalAmount).toLocaleString("ru-RU")} ₸</b>
-            {d.itemTotals.vatAmount ? ` · НДС ${Number(d.itemTotals.vatAmount).toLocaleString("ru-RU")} ₸` : ""}
+            {uiText("Итого:")}{" "}<b>{Number(d.itemTotals.totalAmount).toLocaleString(uiFormatLocale())} ₸</b>
+            {d.itemTotals.vatAmount ? uiText(" · НДС {p0} ₸", {p0: Number(d.itemTotals.vatAmount).toLocaleString(uiFormatLocale())}) : ""}
           </p>
         ) : null}
         {itemFormOpen ? (
         <div className="deal-edit" style={{ marginTop: 12 }}>
-          <b>{editingItemId ? "Редактирование позиции" : "Новая позиция"}</b>
+          <b>{editingItemId ? uiText("Редактирование позиции") : uiText("Новая позиция")}</b>
           <label>
-            Услуга
-            <input value={itemName} onChange={(e) => setItemName(e.target.value)} placeholder="Разработка сайта" />
+            {uiText("Услуга")}<input value={itemName} onChange={(e) => setItemName(e.target.value)} placeholder={uiText("Разработка сайта")} />
           </label>
           <label>
-            Кол-во
-            <input value={itemQty} onChange={(e) => setItemQty(e.target.value)} />
+            {uiText("Кол-во")}<input value={itemQty} onChange={(e) => setItemQty(e.target.value)} />
           </label>
           <label>
-            Ед. изм.
-            <MeasureUnitSelect value={itemUnit} onChange={setItemUnit} />
+            {uiText("Ед. изм.")}<MeasureUnitSelect value={itemUnit} onChange={setItemUnit} />
           </label>
           <label>
-            Цена без НДС (₸)
-            <input value={itemPrice} onChange={(e) => setItemPrice(e.target.value)} />
+            {uiText("Цена без НДС (₸)")}<input value={itemPrice} onChange={(e) => setItemPrice(e.target.value)} />
           </label>
           <label>
-            НДС
-            <select aria-label="НДС" value={itemVat} onChange={(e) => setItemVat(e.target.value)}>
-              <option value="0">Без НДС</option>
-              <option value="12">С НДС (12%)</option>
-              {!["0", "12"].includes(itemVat) ? <option value={itemVat}>С НДС ({itemVat}%) — из документа</option> : null}
+            {uiText("НДС")}<select aria-label={uiText("НДС")} value={itemVat} onChange={(e) => setItemVat(e.target.value)}>
+              <option value="0">{uiText("Без НДС")}</option>
+              <option value="12">{uiText("С НДС (12%)")}</option>
+              {!["0", "12"].includes(itemVat) ? <option value={itemVat}>{uiText("С НДС (")}{itemVat}{uiText("%) — из документа")}</option> : null}
             </select>
           </label>
           <div className="actions">
@@ -940,38 +932,36 @@ export function DealDetailPage() {
                 };
                 void (editingItemId ? api.updateDealItem(d.id, editingItemId, input) : api.addDealItem(d.id, input))
                   .then(() => {
-                    notifySaved(editingItemId ? "Позиция сохранена" : "Позиция добавлена");
+                    notifySaved(editingItemId ? uiText("Позиция сохранена") : uiText("Позиция добавлена"));
                     closeItemForm();
                     return load();
                   })
-                  .catch((err) => setError(err instanceof Error ? err.message : "Не удалось добавить позицию"))
+                  .catch((err) => setError(err instanceof Error ? err.message : uiText("Не удалось добавить позицию")))
                   .finally(() => setBusy(false));
               }}
             >
-              {editingItemId ? "Сохранить позицию" : "Добавить позицию"}
+              {editingItemId ? uiText("Сохранить позицию") : uiText("Добавить позицию")}
             </button>
             <button type="button" className="btn secondary" disabled={busy} onClick={closeItemForm}>
-              Отмена
-            </button>
+              {uiText("Отмена")}</button>
           </div>
         </div>
         ) : null}
       </div>
 
       <div className="panel">
-        <b>Покупатель для договора</b>
+        <b>{uiText("Покупатель для договора")}</b>
         <p className="muted">
           {d.company ? (
             <>
-              Компания: <Link to={`/companies/${d.company.id}`}>{d.company.name}</Link>
+              {uiText("Компания:")}{" "}<Link to={`/companies/${d.company.id}`}>{d.company.name}</Link>
             </>
           ) : (
-            "Компания не указана — без неё PDF не собрать."
+            uiText("Компания не указана — без неё PDF не собрать.")
           )}
         </p>
         <label>
-          Найти компанию
-          <input value={companyQ} onChange={(e) => setCompanyQ(e.target.value)} placeholder="Название или БИН" />
+          {uiText("Найти компанию")}<input value={companyQ} onChange={(e) => setCompanyQ(e.target.value)} placeholder={uiText("Название или БИН")} />
         </label>
         {companyHits.length ? (
           <div className="picker-list" style={{ marginTop: 8 }}>
@@ -989,7 +979,7 @@ export function DealDetailPage() {
                       setCompanyQ("");
                       return load();
                     })
-                    .catch((err) => setError(err instanceof Error ? err.message : "Не удалось привязать компанию"))
+                    .catch((err) => setError(err instanceof Error ? err.message : uiText("Не удалось привязать компанию")))
                     .finally(() => setBusy(false));
                 }}
               >
@@ -1010,12 +1000,11 @@ export function DealDetailPage() {
                 void api
                   .updateDeal(d.id, { companyId: null })
                   .then(() => load())
-                  .catch((err) => setError(err instanceof Error ? err.message : "Не удалось отвязать компанию"))
+                  .catch((err) => setError(err instanceof Error ? err.message : uiText("Не удалось отвязать компанию")))
                   .finally(() => setBusy(false));
               }}
             >
-              Отвязать компанию
-            </button>
+              {uiText("Отвязать компанию")}</button>
           </div>
         ) : null}
       </div>
@@ -1048,34 +1037,30 @@ export function DealDetailPage() {
       ) : null}
 
       {!editing ? <div className="panel saved-editor-summary">
-        <b>Данные сделки</b>
-        <button type="button" className="btn secondary" autoFocus onClick={() => setEditing(true)}>Редактировать сделку</button>
+        <b>{uiText("Данные сделки")}</b>
+        <button type="button" className="btn secondary" autoFocus onClick={() => setEditing(true)}>{uiText("Редактировать сделку")}</button>
       </div> : <div className="panel deal-edit">
-        <b>Редактирование</b>
+        <b>{uiText("Редактирование")}</b>
         <label>
-          Сумма (₸)
-          <input
+          {uiText("Сумма (₸)")}<input
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
-            placeholder="пусто = неизвестна"
+            placeholder={uiText("пусто = неизвестна")}
             disabled={Boolean(d.amountFromItems) || caps.manager}
           />
         </label>
         <label>
-          Следующий шаг
-          <input value={nextAction} onChange={(e) => setNextAction(e.target.value)} placeholder="Позвонить клиенту" />
+          {uiText("Следующий шаг")}<input value={nextAction} onChange={(e) => setNextAction(e.target.value)} placeholder={uiText("Позвонить клиенту")} />
         </label>
         <label>
-          Когда
-          <input type="datetime-local" value={nextActionAt} onChange={(e) => setNextActionAt(e.target.value)} />
+          {uiText("Когда")}<input type="datetime-local" value={nextActionAt} onChange={(e) => setNextActionAt(e.target.value)} />
         </label>
         {caps.confirmPayments ? (
         <label>
-          Статус оплаты
-          <select value={paymentStatus} onChange={(e) => setPaymentStatus(e.target.value)}>
+          {uiText("Статус оплаты")}<select value={paymentStatus} onChange={(e) => setPaymentStatus(e.target.value)}>
             {(board?.paymentStatuses || ["NOT_INVOICED", "INVOICED", "PAID"]).map((s: string) => (
               <option key={s} value={s}>
-                {PAYMENT_STATUS_LABEL[s] || s}
+                {localizeUiOptions(PAYMENT_STATUS_LABEL, uiText)[s] || s}
               </option>
             ))}
           </select>
@@ -1086,38 +1071,35 @@ export function DealDetailPage() {
             type="button"
             className="btn"
             disabled={busy}
-            {...tip("Сохранить сумму, следующий шаг и статус оплаты")}
+            {...tip(uiText("Сохранить сумму, следующий шаг и статус оплаты"))}
             onClick={() => void save()}
           >
-            Сохранить
-          </button>
+            {uiText("Сохранить")}</button>
           {d.contact?.id ? (
-            <Link className="btn secondary" to={`/contacts/${d.contact.id}`} {...tip("Открыть карточку клиента")}>
-              Клиент
-            </Link>
+            <Link className="btn secondary" to={`/contacts/${d.contact.id}`} {...tip(uiText("Открыть карточку клиента"))}>
+              {uiText("Клиент")}</Link>
           ) : null}
           {d.inquiryId ? (
-            <Link className="btn secondary" to={`/requests/${d.inquiryId}`} {...tip("Открыть исходную заявку")}>
-              Заявка
-            </Link>
+            <Link className="btn secondary" to={`/requests/${d.inquiryId}`} {...tip(uiText("Открыть исходную заявку"))}>
+              {uiText("Заявка")}</Link>
           ) : null}
         </div>
       </div>}
 
       {caps.confirmPayments ? (
       <div className="panel">
-        <b>Платежи</b>
+        <b>{uiText("Платежи")}</b>
         <div className="muted" style={{ marginBottom: 8 }}>
-          Оплачено: {paidTotal.toLocaleString("ru-RU")} ₸
-          {remaining != null ? ` · остаток: ${remaining.toLocaleString("ru-RU")} ₸` : ""}
+          {uiText("Оплачено:")}{" "}{paidTotal.toLocaleString(uiFormatLocale())} ₸
+          {remaining != null ? uiText(" · остаток: {p0} ₸", {p0: remaining.toLocaleString(uiFormatLocale())}) : ""}
         </div>
-        {payments.length === 0 ? <p className="empty">Платежей пока нет</p> : null}
+        {payments.length === 0 ? <p className="empty">{uiText("Платежей пока нет")}</p> : null}
         {payments.map((p: any) => (
           <div className="row" key={p.id}>
             <div>
-              <b>{Number(p.amountMinor || 0).toLocaleString("ru-RU")} {p.currency || "KZT"}</b>
+              <b>{Number(p.amountMinor || 0).toLocaleString(uiFormatLocale())} {p.currency || "KZT"}</b>
               <div className="muted">
-                {p.createdAt ? new Date(p.createdAt).toLocaleString("ru-RU") : ""}
+                {p.createdAt ? new Date(p.createdAt).toLocaleString(uiFormatLocale()) : ""}
                 {p.comment ? ` · ${p.comment}` : ""}
               </div>
             </div>
@@ -1125,34 +1107,31 @@ export function DealDetailPage() {
         ))}
         <div className="deal-edit" style={{ marginTop: 12 }}>
           <label>
-            Сумма платежа (₸)
-            <input
+            {uiText("Сумма платежа (₸)")}<input
               value={payAmount}
               onChange={(e) => setPayAmount(e.target.value)}
-              placeholder={remaining != null && remaining > 0 ? String(remaining) : "например 150000"}
+              placeholder={remaining != null && remaining > 0 ? String(remaining) : uiText("например 150000")}
             />
           </label>
           <label>
-            Комментарий
-            <input value={payComment} onChange={(e) => setPayComment(e.target.value)} placeholder="необязательно" />
+            {uiText("Комментарий")}<input value={payComment} onChange={(e) => setPayComment(e.target.value)} placeholder={uiText("необязательно")} />
           </label>
           <div className="actions">
             <button
               type="button"
               className="btn"
               disabled={busy}
-              {...tip("Зафиксировать платёж и обновить статус оплаты сделки")}
+              {...tip(uiText("Зафиксировать платёж и обновить статус оплаты сделки"))}
               onClick={() => void confirmPayment()}
             >
-              Подтвердить оплату
-            </button>
+              {uiText("Подтвердить оплату")}</button>
           </div>
         </div>
       </div>
       ) : null}
 
       <div className="panel">
-        <b>Перевести на стадию</b>
+        <b>{uiText("Перевести на стадию")}</b>
         <div className="deal-stage-actions">
           {(board?.columns || []).map((col: any) => (
             <button
@@ -1165,7 +1144,7 @@ export function DealDetailPage() {
                 void api
                   .changeDealStage(d.id, { stageId: col.stageId })
                   .then(() => load())
-                  .catch((err) => setError(err instanceof Error ? err.message : "Ошибка"))
+                  .catch((err) => setError(err instanceof Error ? err.message : uiText("Ошибка")))
                   .finally(() => setBusy(false));
               }}
             >
@@ -1180,91 +1159,88 @@ export function DealDetailPage() {
           type="button"
           className="btn"
           disabled={busy || d.outcome === "won"}
-          {...tip("Отметить, что сделка продана")}
+          {...tip(uiText("Отметить, что сделка продана"))}
           onClick={() => {
             setBusy(true);
             void api
               .markDealWon(d.id, { wonAmountMinor: d.amount })
               .then(() => load())
-              .catch((err) => setError(err instanceof Error ? err.message : "Ошибка"))
+              .catch((err) => setError(err instanceof Error ? err.message : uiText("Ошибка")))
               .finally(() => setBusy(false));
           }}
         >
-          Продажа
-        </button>
+          {uiText("Продажа")}</button>
         <button
           type="button"
           className="btn secondary"
           disabled={busy}
           {...tip(
             d.outcome === "on_hold"
-              ? "Вернуть сделку в работу"
-              : "Отложить сделку, не закрывая её",
+              ? uiText("Вернуть сделку в работу")
+              : uiText("Отложить сделку, не закрывая её"),
           )}
           onClick={() => {
             setBusy(true);
             void api
               .holdDeal(d.id, d.outcome !== "on_hold")
               .then(() => load())
-              .catch((err) => setError(err instanceof Error ? err.message : "Ошибка"))
+              .catch((err) => setError(err instanceof Error ? err.message : uiText("Ошибка")))
               .finally(() => setBusy(false));
           }}
         >
-          {d.outcome === "on_hold" ? "Снять с паузы" : "На паузу"}
+          {d.outcome === "on_hold" ? uiText("Снять с паузы") : uiText("На паузу")}
         </button>
-        <select value={lossReason} onChange={(e) => setLossReason(e.target.value)} title="Причина проигрыша">
+        <select value={lossReason} onChange={(e) => setLossReason(e.target.value)} title={uiText("Причина проигрыша")}>
           {(board?.lostReasons || ["Дорого", "Другое"]).map((r: string) => (
             <option key={r} value={r}>
-              {r}
+              {board?.lostReasons?.length ? r : uiText(r)}
             </option>
           ))}
         </select>
         <input
           value={lossNote}
           onChange={(e) => setLossNote(e.target.value)}
-          placeholder="Комментарий к потере"
+          placeholder={uiText("Комментарий к потере")}
           style={{ minWidth: 160 }}
         />
         <button
           type="button"
           className="btn danger"
           disabled={busy || d.outcome === "lost"}
-          {...tip("Отметить, что сделка не состоялась")}
+          {...tip(uiText("Отметить, что сделка не состоялась"))}
           onClick={() => {
             setBusy(true);
             void api
               .markDealLost(d.id, { lossReason, note: lossNote || undefined })
               .then(() => load())
-              .catch((err) => setError(err instanceof Error ? err.message : "Ошибка"))
+              .catch((err) => setError(err instanceof Error ? err.message : uiText("Ошибка")))
               .finally(() => setBusy(false));
           }}
         >
-          Потеря
-        </button>
+          {uiText("Потеря")}</button>
         <button
           type="button"
           className="btn secondary"
-          {...tip("Создать задачу, привязанную к этой сделке и клиенту")}
+          {...tip(uiText("Создать задачу, привязанную к этой сделке и клиенту"))}
           onClick={() =>
             navigate(
               `/tasks?dealId=${d.id}${d.contact?.id || d.contactId ? `&contactId=${d.contact?.id || d.contactId}` : ""}`,
             )
           }
         >
-          + Задача
-        </button>
+          {uiText("+ Задача")}</button>
       </div>
 
       <div className="panel">
-        <b>История стадий</b>
-        {(data.stageHistory || []).length === 0 ? <p className="empty">Пока нет</p> : null}
+        <b>{uiText("История стадий")}</b>
+        {(data.stageHistory || []).length === 0 ? <p className="empty">{uiText("Пока нет")}</p> : null}
         {(data.stageHistory || []).map((h: any) => (
           <div className="row" key={h.id}>
             <div>
               <b>
                 {h.fromSystemKey || "—"} → {h.toSystemKey}
               </b>
-              <div className="muted">{new Date(h.enteredAt).toLocaleString("ru-RU")}</div>
+              <div className="muted">{new Date(h.enteredAt).toLocaleString(uiFormatLocale())}</div>
             </div>
           </div>
         ))}
@@ -1272,12 +1248,12 @@ export function DealDetailPage() {
 
       {d.tasks?.length ? (
         <div className="panel">
-          <b>Открытые задачи</b>
+          <b>{uiText("Открытые задачи")}</b>
           {d.tasks.map((t: any) => (
             <div className="row" key={t.id}>
               <div>
                 <b>{t.title}</b>
-                <div className="muted">{t.dueAt ? new Date(t.dueAt).toLocaleString("ru-RU") : "без срока"}</div>
+                <div className="muted">{t.dueAt ? new Date(t.dueAt).toLocaleString(uiFormatLocale()) : uiText("без срока")}</div>
               </div>
             </div>
           ))}

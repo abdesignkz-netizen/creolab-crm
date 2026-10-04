@@ -1,4 +1,5 @@
-import { useSession } from "../lib/session";
+import { uiText, useUiText, localizeUiOptions, uiFormatLocale } from "../lib/uiText";
+import { useSession, useLocale } from "../lib/session";
 import { useUrlState, useRequestVersion } from "../lib/useUrlState";
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
@@ -58,7 +59,7 @@ const METRIC_HINTS: Record<TrendMetric, string> = {
 function formatChartValue(value: number | null, metric: TrendMetric) {
   if (value == null) return "—";
   if (metric === "conversion") return `${value}%`;
-  if (metric === "revenue") return value.toLocaleString("ru-RU");
+  if (metric === "revenue") return value.toLocaleString(uiFormatLocale());
   return String(value);
 }
 
@@ -78,14 +79,14 @@ function deltaLabel(value: number | null | undefined, unit: "%" | "pp" = "%") {
   if (value == null) return null;
   const arrow = value > 0 ? "↑" : value < 0 ? "↓" : "→";
   const abs = Math.abs(value);
-  return unit === "pp" ? `${arrow} ${abs} п.п.` : `${arrow} ${abs}%`;
+  return unit === "pp" ? uiText("{p0} {p1} п.п.", {p0: arrow, p1: abs}) : `${arrow} ${abs}%`;
 }
 
 function formatHours(hours: number | null | undefined) {
   if (hours == null) return "—";
-  if (hours < 1) return `${Math.round(hours * 60)} мин`;
-  if (hours < 48) return `${Math.round(hours * 10) / 10} ч`;
-  return `${Math.round((hours / 24) * 10) / 10} дн.`;
+  if (hours < 1) return uiText("{p0} мин", {p0: Math.round(hours * 60)});
+  if (hours < 48) return uiText("{p0} ч", {p0: Math.round(hours * 10) / 10});
+  return uiText("{p0} дн.", {p0: Math.round((hours / 24) * 10) / 10});
 }
 
 function LineChart({
@@ -99,9 +100,10 @@ function LineChart({
   label: string;
   metric: TrendMetric;
 }) {
+  const uiText = useUiText();
   const [hover, setHover] = useState<number | null>(null);
   if (!points.length) {
-    return <p className="empty">Пока недостаточно данных для графика.</p>;
+    return <p className="empty">{uiText("Пока недостаточно данных для графика.")}</p>;
   }
   const w = 720;
   const h = 260;
@@ -176,10 +178,10 @@ function LineChart({
           );
         })}
       </svg>
-      {metric === "conversion" && points.some(p => p.value == null) ? <p className="muted">«—» — нет обращений для расчёта. Продажи могут относиться к обращениям прошлых дат.</p> : null}
+      {metric === "conversion" && points.some(p => p.value == null) ? <p className="muted">{uiText("«—» — нет обращений для расчёта. Продажи могут относиться к обращениям прошлых дат.")}</p> : null}
       <div className="stats-chart-legend muted">
-        <span>● Текущий период</span>
-        {comparePath ? <span>○ Сравнение</span> : null}
+        <span>{uiText("● Текущий период")}</span>
+        {comparePath ? <span>{uiText("○ Сравнение")}</span> : null}
         {hover != null && points[hover] ? (
           <span>
             {points[hover].label}: {formatChartValue(points[hover].value, metric)}
@@ -217,6 +219,7 @@ function BarChart({
   items: { name: string; inquiries?: number; won?: number; revenue?: number; conversion?: number | null }[];
   valueKey: BarMetric;
 }) {
+  const uiText = useUiText();
   const rows = items
     .map((item) => ({
       name: item.name,
@@ -231,7 +234,7 @@ function BarChart({
     }))
     .filter((r) => r.value > 0)
     .slice(0, 12);
-  if (!rows.length) return <p className="empty">Нет данных для диаграммы.</p>;
+  if (!rows.length) return <p className="empty">{uiText("Нет данных для диаграммы.")}</p>;
   const max = Math.max(...rows.map((r) => r.value), 1);
   return (
     <div className="stats-bars">
@@ -244,7 +247,7 @@ function BarChart({
             <div className="stats-bar-fill" style={{ width: `${Math.max(4, (r.value / max) * 100)}%` }} />
           </div>
           <span className="stats-bar-value">
-            {valueKey === "conversion" ? `${r.value}%` : valueKey === "revenue" ? r.value.toLocaleString("ru-RU") : r.value}
+            {valueKey === "conversion" ? `${r.value}%` : valueKey === "revenue" ? r.value.toLocaleString(uiFormatLocale()) : r.value}
           </span>
         </div>
       ))}
@@ -265,18 +268,19 @@ function KpiCard({
   deltaUnit?: "%" | "pp";
   onClick?: () => void;
 }) {
+  const uiText = useUiText();
   const d = deltaLabel(delta, deltaUnit);
   const inner = (
     <>
       <span className="muted">{label}</span>
       <strong>{value}</strong>
       {d ? <span className={`kpi-delta ${delta && delta < 0 ? "down" : ""}`}>{d}</span> : null}
-      {onClick ? <span className="kpi-hint">Открыть список</span> : null}
+      {onClick ? <span className="kpi-hint">{uiText("Открыть список")}</span> : null}
     </>
   );
   if (onClick) {
     return (
-      <button type="button" className="sit-kpi stats-kpi-btn" {...tip(`Показать записи показателя «${label}»`)} onClick={onClick}>
+      <button type="button" className="sit-kpi stats-kpi-btn" {...tip(uiText("Показать записи показателя «{p0}»", {p0: label}))} onClick={onClick}>
         {inner}
       </button>
     );
@@ -285,10 +289,12 @@ function KpiCard({
 }
 
 export function StatsPage() {
+  const locale = useLocale();
+  const uiText = useUiText();
   const { me } = useSession();
   const exportAllowed = Boolean(me?.billing?.entitlements?.EXPORT);
   const requestVersion = useRequestVersion();
-  const [tab, setTab] = useUrlState<TabId>("tab", "overview", TABS.map(t => t.id));
+  const [tab, setTab] = useUrlState<TabId>("tab", "overview", localizeUiOptions(TABS, uiText).map(t => t.id));
   const [period, setPeriod] = useUrlState<PeriodPreset>("period", "this_month");
   const [dateFrom, setDateFrom] = useUrlState<string>("from", "");
   const [dateTo, setDateTo] = useUrlState<string>("to", "");
@@ -345,7 +351,7 @@ export function StatsPage() {
       const res = await api.analyticsDrilldown({ ...query, entity, key });
       setDrill(res);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось открыть детализацию");
+      setError(err instanceof Error ? err.message : uiText("Не удалось открыть детализацию"));
       setDrill(null);
     } finally {
       setDrillLoading(false);
@@ -356,7 +362,7 @@ export function StatsPage() {
     const request = ++requestVersion.current;
     try {
       if (period === "custom" && (!dateFrom || !dateTo)) {
-        setError("Укажите даты С и По");
+        setError(uiText("Укажите даты С и По"));
         setLoading(false);
         return;
       }
@@ -372,13 +378,13 @@ export function StatsPage() {
         setError("");
       } else if (trRes.status === "fulfilled") {
         setTrend(trRes.value);
-        setError(dashRes.reason instanceof Error ? dashRes.reason.message : "Ошибка загрузки");
+        setError(dashRes.reason instanceof Error ? dashRes.reason.message : uiText("Ошибка загрузки"));
       } else {
-        setError(dashRes.reason instanceof Error ? dashRes.reason.message : "Ошибка загрузки");
+        setError(dashRes.reason instanceof Error ? dashRes.reason.message : uiText("Ошибка загрузки"));
       }
     } catch (err) {
       if (request !== requestVersion.current) return;
-      setError(err instanceof Error ? err.message : "Ошибка загрузки");
+      setError(err instanceof Error ? err.message : uiText("Ошибка загрузки"));
     } finally {
       if (request === requestVersion.current) setLoading(false);
     }
@@ -396,7 +402,7 @@ export function StatsPage() {
 
   useEffect(() => {
     void load();
-  }, [query, trendMetric]);
+  }, [query, trendMetric, locale]);
 
   const trendPoints = (trend?.points || data?.trend?.points || []).map((p: any) => ({
     label: p.label,
@@ -422,7 +428,7 @@ export function StatsPage() {
         })
       : null;
 
-  if (loading && !data) return <div className="state">Загрузка статистики…</div>;
+  if (loading && !data) return <div className="state">{uiText("Загрузка статистики…")}</div>;
 
   const o = data?.overview || {};
   const sales = data?.sales || {};
@@ -431,16 +437,14 @@ export function StatsPage() {
     <section className="stats-page">
       <div className="row sit-head">
         <div>
-          <h2>Статистика</h2>
-          <p className="muted">Продажи, заявки и откуда приходят клиенты.</p>
+          <h2>{uiText("Статистика")}</h2>
+          <p className="muted">{uiText("Продажи, заявки и откуда приходят клиенты.")}</p>
         </div>
         <div className="sit-toolbar-side">
           <button type="button" className="btn secondary" onClick={() => setFiltersOpen((v) => !v)}>
-            Фильтры
-          </button>
-          <button type="button" className="btn" disabled={!exportAllowed} title={exportAllowed ? undefined : "Экспорт доступен начиная с CRM Start"} onClick={() => setExportOpen(true)}>
-            Скачать отчёт
-          </button>
+            {uiText("Фильтры")}</button>
+          <button type="button" className="btn" disabled={!exportAllowed} title={exportAllowed ? undefined : uiText("Экспорт доступен начиная с CRM Start")} onClick={() => setExportOpen(true)}>
+            {uiText("Скачать отчёт")}</button>
         </div>
       </div>
 
@@ -455,12 +459,11 @@ export function StatsPage() {
           activeLabel={data?.period?.label}
         />
         <label className="stats-compare">
-          Сравнить с
-          <select value={compare} onChange={(e) => setCompare(e.target.value as CompareMode)}>
-            <option value="previous">Предыдущим периодом</option>
-            <option value="last_month">Прошлым месяцем</option>
-            <option value="last_year">Прошлым годом</option>
-            <option value="none">Не сравнивать</option>
+          {uiText("Сравнить с")}<select value={compare} onChange={(e) => setCompare(e.target.value as CompareMode)}>
+            <option value="previous">{uiText("Предыдущим периодом")}</option>
+            <option value="last_month">{uiText("Прошлым месяцем")}</option>
+            <option value="last_year">{uiText("Прошлым годом")}</option>
+            <option value="none">{uiText("Не сравнивать")}</option>
           </select>
         </label>
       </div>
@@ -468,9 +471,8 @@ export function StatsPage() {
       {filtersOpen ? (
         <div className="stats-filters">
           <label>
-            Ответственный
-            <select value={assignee} onChange={(e) => setAssignee(e.target.value)}>
-              <option value="">Все</option>
+            {uiText("Ответственный")}<select value={assignee} onChange={(e) => setAssignee(e.target.value)}>
+              <option value="">{uiText("Все")}</option>
               {members.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.name}
@@ -479,24 +481,19 @@ export function StatsPage() {
             </select>
           </label>
           <label>
-            Услуга / товар
-            <input value={serviceCategory} onChange={(e) => setServiceCategory(e.target.value)} placeholder="Сайты" />
+            {uiText("Услуга / товар")}<input value={serviceCategory} onChange={(e) => setServiceCategory(e.target.value)} placeholder={uiText("Сайты")} />
           </label>
           <label>
-            Источник
-            <input value={source} onChange={(e) => setSource(e.target.value)} placeholder="Google Ads" />
+            {uiText("Источник")}<input value={source} onChange={(e) => setSource(e.target.value)} placeholder="Google Ads" />
           </label>
           <label>
-            Канал
-            <input value={channel} onChange={(e) => setChannel(e.target.value)} placeholder="WhatsApp" />
+            {uiText("Канал")}<input value={channel} onChange={(e) => setChannel(e.target.value)} placeholder="WhatsApp" />
           </label>
           <label>
-            Город
-            <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="Алматы" />
+            {uiText("Город")}<input value={city} onChange={(e) => setCity(e.target.value)} placeholder={uiText("Алматы")} />
           </label>
           <label>
-            Кампания
-            <input value={campaign} onChange={(e) => setCampaign(e.target.value)} placeholder="utm_campaign" />
+            {uiText("Кампания")}<input value={campaign} onChange={(e) => setCampaign(e.target.value)} placeholder="utm_campaign" />
           </label>
         </div>
       ) : null}
@@ -505,13 +502,12 @@ export function StatsPage() {
         <div className="row">
           <p className="error">{error}</p>
           <button type="button" className="btn secondary" onClick={() => void load()}>
-            Повторить
-          </button>
+            {uiText("Повторить")}</button>
         </div>
       ) : null}
 
       <div className="stats-tabs" role="tablist">
-        {TABS.map((t) => (
+        {localizeUiOptions(TABS, uiText).map((t) => (
           <button
             key={t.id}
             type="button"
@@ -527,10 +523,9 @@ export function StatsPage() {
 
       {data?.empty ? (
         <div className="sit-section">
-          <h3>Пока недостаточно данных для построения отчёта</h3>
+          <h3>{uiText("Пока недостаточно данных для построения отчёта")}</h3>
           <p className="muted">
-            После появления первых сделок здесь будет показана конверсия, динамика продаж и эффективность источников.
-          </p>
+            {uiText("После появления первых сделок здесь будет показана конверсия, динамика продаж и эффективность источников.")}</p>
         </div>
       ) : null}
 
@@ -538,40 +533,38 @@ export function StatsPage() {
         <>
           <div className="sit-section">
             <div className="sit-section-head">
-              <h3>Обзор · {data.period?.label}</h3>
+              <h3>{uiText("Обзор ·")}{" "}{data.period?.label}</h3>
               {data.compare?.label ? <span className="muted">vs {data.compare.label}</span> : null}
             </div>
             <div className="sit-kpi-grid stats-kpi-grid">
-              <KpiCard label="Обращения" value={o.inquiries} delta={o.deltas?.inquiries} onClick={() => void openDrill("inquiries")} />
-              <KpiCard label="Новые клиенты" value={o.clients} onClick={() => void openDrill("clients")} />
-              <KpiCard label="Заявки" value={o.requests} onClick={() => void openDrill("inquiries")} />
-              <KpiCard label="Создано сделок" value={o.dealsCreated} onClick={() => void openDrill("deals")} />
-              <KpiCard label="Договоры" value={o.contracts} />
-              <KpiCard label="Продажи" value={o.won} delta={o.deltas?.won} onClick={() => void openDrill("won")} />
-              <KpiCard label="Продано" value={o.revenueLabel || "—"} delta={o.deltas?.revenue} onClick={() => void openDrill("won")} />
-              <KpiCard label="Конверсия" value={o.conversion != null ? `${o.conversion}%` : "—"} delta={o.deltas?.conversionPp} deltaUnit="pp" />
-              <KpiCard label="Средний чек" value={o.avgCheckLabel || "—"} />
-              <KpiCard label="Потеряно" value={o.lost} onClick={() => void openDrill("lost")} />
+              <KpiCard label={uiText("Обращения")} value={o.inquiries} delta={o.deltas?.inquiries} onClick={() => void openDrill("inquiries")} />
+              <KpiCard label={uiText("Новые клиенты")} value={o.clients} onClick={() => void openDrill("clients")} />
+              <KpiCard label={uiText("Заявки")} value={o.requests} onClick={() => void openDrill("inquiries")} />
+              <KpiCard label={uiText("Создано сделок")} value={o.dealsCreated} onClick={() => void openDrill("deals")} />
+              <KpiCard label={uiText("Договоры")} value={o.contracts} />
+              <KpiCard label={uiText("Продажи")} value={o.won} delta={o.deltas?.won} onClick={() => void openDrill("won")} />
+              <KpiCard label={uiText("Продано")} value={o.revenueLabel || "—"} delta={o.deltas?.revenue} onClick={() => void openDrill("won")} />
+              <KpiCard label={uiText("Конверсия")} value={o.conversion != null ? `${o.conversion}%` : "—"} delta={o.deltas?.conversionPp} deltaUnit="pp" />
+              <KpiCard label={uiText("Средний чек")} value={o.avgCheckLabel || "—"} />
+              <KpiCard label={uiText("Потеряно")} value={o.lost} onClick={() => void openDrill("lost")} />
             </div>
             {data.dataQuality ? (
               <p className="muted stats-quality-hint">
-                Качество данных: без телефона {data.dataQuality.noPhone}, без источника {data.dataQuality.noSource}, без
-                ответственного {data.dataQuality.noOwner}, потерь без причины {data.dataQuality.lostNoReason}, без next
-                action {data.dataQuality.openNoNextAction}
+                {uiText("Качество данных: без телефона")}{" "}{data.dataQuality.noPhone}{uiText(", без источника")}{" "}{data.dataQuality.noSource}{uiText(", без ответственного")}{" "}{data.dataQuality.noOwner}{uiText(", потерь без причины")}{" "}{data.dataQuality.lostNoReason}{uiText(", без next action")}{" "}{data.dataQuality.openNoNextAction}
               </p>
             ) : null}
           </div>
 
           <div className="sit-section">
             <div className="sit-section-head">
-              <h3>Динамика</h3>
+              <h3>{uiText("Динамика")}</h3>
               <div className="stats-metric-switch">
-                {TREND_METRICS.map((m) => (
+                {localizeUiOptions(TREND_METRICS, uiText).map((m) => (
                   <button
                     key={m.id}
                     type="button"
                     className={trendMetric === m.id ? "btn sit-chip" : "btn secondary sit-chip"}
-                    {...tip(METRIC_HINTS[m.id])}
+                    {...tip(localizeUiOptions(METRIC_HINTS, uiText)[m.id])}
                     onClick={() => setTrendMetric(m.id)}
                   >
                     {m.label}
@@ -583,44 +576,41 @@ export function StatsPage() {
               points={trendPoints}
               comparePoints={comparePoints}
               metric={trendMetric}
-              label={`Динамика: ${TREND_METRICS.find((m) => m.id === trendMetric)?.label}`}
+              label={uiText("Динамика: {p0}", {p0: localizeUiOptions(TREND_METRICS, uiText).find((m) => m.id === trendMetric)?.label})}
             />
           </div>
 
           <div className="stats-overview-split">
             <div className="sit-section">
               <div className="sit-section-head">
-                <h3>По этапам</h3>
+                <h3>{uiText("По этапам")}</h3>
               </div>
               <p className="stats-funnel-mini">
                 {(data.funnel?.steps || []).map((s: any) => s.count).join(" → ")}
               </p>
               {data.biggestLoss?.lost > 0 ? (
                 <p className="muted">
-                  Самая большая потеря: {data.biggestLoss.from} → {data.biggestLoss.to} ({data.biggestLoss.lost})
+                  {uiText("Самая большая потеря:")}{" "}{data.biggestLoss.from} → {data.biggestLoss.to} ({data.biggestLoss.lost})
                 </p>
               ) : null}
               <button type="button" className="btn secondary" onClick={() => setTab("funnel")}>
-                Открыть этапы
-              </button>
+                {uiText("Открыть этапы")}</button>
             </div>
             <div className="sit-section">
               <div className="sit-section-head">
-                <h3>Источники</h3>
+                <h3>{uiText("Источники")}</h3>
               </div>
               <BarChart items={data.sources || []} valueKey="inquiries" />
               <button type="button" className="btn secondary" onClick={() => setTab("sources")}>
-                Подробнее
-              </button>
+                {uiText("Подробнее")}</button>
             </div>
             <div className="sit-section">
               <div className="sit-section-head">
-                <h3>Услуги и товары</h3>
+                <h3>{uiText("Услуги и товары")}</h3>
               </div>
               <BarChart items={data.services || []} valueKey="revenue" />
               <button type="button" className="btn secondary" onClick={() => setTab("services")}>
-                Подробнее
-              </button>
+                {uiText("Подробнее")}</button>
             </div>
           </div>
         </>
@@ -629,22 +619,20 @@ export function StatsPage() {
       {tab === "funnel" && data ? (
         <div className="sit-section">
           <div className="sit-section-head">
-            <h3>Этапы продаж</h3>
+            <h3>{uiText("Этапы продаж")}</h3>
             <div className="stats-metric-switch">
               <button
                 type="button"
                 className={funnelMode === "events" ? "btn sit-chip" : "btn secondary sit-chip"}
                 onClick={() => setFunnelMode("events")}
               >
-                Что случилось за период
-              </button>
+                {uiText("Что случилось за период")}</button>
               <button
                 type="button"
                 className={funnelMode === "cohort" ? "btn sit-chip" : "btn secondary sit-chip"}
                 onClick={() => setFunnelMode("cohort")}
               >
-                Кто пришёл за период
-              </button>
+                {uiText("Кто пришёл за период")}</button>
             </div>
           </div>
           <div className="stats-funnel-steps">
@@ -653,8 +641,8 @@ export function StatsPage() {
                 <div>
                   <b>{s.name}</b>
                   <div className="muted">
-                    {s.fromStartPct != null ? `${s.fromStartPct}% от начала` : null}
-                    {i > 0 && s.fromPrevPct != null ? ` · ${s.fromPrevPct}% от предыдущего` : null}
+                    {s.fromStartPct != null ? uiText("{p0}% от начала", {p0: s.fromStartPct}) : null}
+                    {i > 0 && s.fromPrevPct != null ? uiText(" · {p0}% от предыдущего", {p0: s.fromPrevPct}) : null}
                   </div>
                 </div>
                 <strong>{s.count}</strong>
@@ -662,16 +650,16 @@ export function StatsPage() {
             ))}
           </div>
 
-          <h4>Потери между этапами</h4>
+          <h4>{uiText("Потери между этапами")}</h4>
           <div className="stats-table-wrap">
             <table className="stats-table">
               <thead>
                 <tr>
-                  <th>Переход</th>
-                  <th>Было</th>
-                  <th>Перешло</th>
-                  <th>Потеря</th>
-                  <th>Конверсия</th>
+                  <th>{uiText("Переход")}</th>
+                  <th>{uiText("Было")}</th>
+                  <th>{uiText("Перешло")}</th>
+                  <th>{uiText("Потеря")}</th>
+                  <th>{uiText("Конверсия")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -690,15 +678,15 @@ export function StatsPage() {
             </table>
           </div>
 
-          <h4>Время прохождения</h4>
+          <h4>{uiText("Время прохождения")}</h4>
           <div className="stats-table-wrap">
             <table className="stats-table">
               <thead>
                 <tr>
-                  <th>Стадия</th>
-                  <th>Среднее</th>
-                  <th>Медиана</th>
-                  <th>Зависших</th>
+                  <th>{uiText("Стадия")}</th>
+                  <th>{uiText("Среднее")}</th>
+                  <th>{uiText("Медиана")}</th>
+                  <th>{uiText("Зависших")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -715,10 +703,10 @@ export function StatsPage() {
           </div>
 
           <div className="sit-kpi-grid stats-kpi-grid">
-            <KpiCard label="Средний цикл продажи" value={sales.cycle?.avgDays != null ? `${sales.cycle.avgDays} дн.` : "—"} />
-            <KpiCard label="Медианный цикл" value={sales.cycle?.medianDays != null ? `${sales.cycle.medianDays} дн.` : "—"} />
-            <KpiCard label="Самая быстрая" value={sales.cycle?.minDays != null ? `${sales.cycle.minDays} дн.` : "—"} />
-            <KpiCard label="Самая длинная" value={sales.cycle?.maxDays != null ? `${sales.cycle.maxDays} дн.` : "—"} />
+            <KpiCard label={uiText("Средний цикл продажи")} value={sales.cycle?.avgDays != null ? uiText("{p0} дн.", {p0: sales.cycle.avgDays}) : "—"} />
+            <KpiCard label={uiText("Медианный цикл")} value={sales.cycle?.medianDays != null ? uiText("{p0} дн.", {p0: sales.cycle.medianDays}) : "—"} />
+            <KpiCard label={uiText("Самая быстрая")} value={sales.cycle?.minDays != null ? uiText("{p0} дн.", {p0: sales.cycle.minDays}) : "—"} />
+            <KpiCard label={uiText("Самая длинная")} value={sales.cycle?.maxDays != null ? uiText("{p0} дн.", {p0: sales.cycle.maxDays}) : "—"} />
           </div>
         </div>
       ) : null}
@@ -726,22 +714,22 @@ export function StatsPage() {
       {tab === "sales" && data ? (
         <div className="sit-section">
           <div className="sit-section-head">
-            <h3>Продажи</h3>
+            <h3>{uiText("Продажи")}</h3>
           </div>
           <div className="sit-kpi-grid stats-kpi-grid">
-            <KpiCard label="Продажи" value={sales.won} onClick={() => void openDrill("won")} />
-            <KpiCard label="Продано" value={sales.revenueLabel || "—"} onClick={() => void openDrill("won")} />
-            <KpiCard label="Средний чек" value={sales.avgCheckLabel || "—"} />
-            <KpiCard label="Медианный чек" value={sales.medianCheckLabel || "—"} />
-            <KpiCard label="Максимальная сделка" value={sales.maxCheckLabel || "—"} />
-            <KpiCard label="В работе" value={sales.pipelineLabel || "—"} />
+            <KpiCard label={uiText("Продажи")} value={sales.won} onClick={() => void openDrill("won")} />
+            <KpiCard label={uiText("Продано")} value={sales.revenueLabel || "—"} onClick={() => void openDrill("won")} />
+            <KpiCard label={uiText("Средний чек")} value={sales.avgCheckLabel || "—"} />
+            <KpiCard label={uiText("Медианный чек")} value={sales.medianCheckLabel || "—"} />
+            <KpiCard label={uiText("Максимальная сделка")} value={sales.maxCheckLabel || "—"} />
+            <KpiCard label={uiText("В работе")} value={sales.pipelineLabel || "—"} />
             <KpiCard
-              label="Прогноз"
+              label={uiText("Прогноз")}
               value={sales.weightedPipelineLabel || "—"}
             />
-            <KpiCard label="План" value={sales.planLabel || "не задан"} />
+            <KpiCard label={uiText("План")} value={sales.planLabel || uiText("не задан")} />
             <KpiCard
-              label="План / факт"
+              label={uiText("План / факт")}
               value={sales.planPercent != null ? `${sales.planPercent}%` : "—"}
             />
           </div>
@@ -751,35 +739,35 @@ export function StatsPage() {
                 key={m}
                 type="button"
                 className={trendMetric === m ? "btn sit-chip" : "btn secondary sit-chip"}
-                {...tip(METRIC_HINTS[m])}
+                {...tip(localizeUiOptions(METRIC_HINTS, uiText)[m])}
                 onClick={() => setTrendMetric(m)}
               >
-                {m === "won" ? "Количество продаж" : "Сумма продаж"}
+                {m === "won" ? uiText("Количество продаж") : uiText("Сумма продаж")}
               </button>
             ))}
           </div>
-          <LineChart points={trendPoints} comparePoints={comparePoints} metric={trendMetric} label="Продажи по времени" />
+          <LineChart points={trendPoints} comparePoints={comparePoints} metric={trendMetric} label={uiText("Продажи по времени")} />
         </div>
       ) : null}
 
       {tab === "sources" && data ? (
         <div className="sit-section">
           <div className="sit-section-head">
-            <h3>Источники привлечения</h3>
+            <h3>{uiText("Источники привлечения")}</h3>
             <div className="stats-metric-switch">
               {(
                 [
-                  ["inquiries", "По обращениям"],
-                  ["won", "По продажам"],
-                  ["revenue", "По выручке"],
-                  ["conversion", "По конверсии"],
+                  ["inquiries", uiText("По обращениям")],
+                  ["won", uiText("По продажам")],
+                  ["revenue", uiText("По выручке")],
+                  ["conversion", uiText("По конверсии")],
                 ] as [BarMetric, string][]
               ).map(([id, label]) => (
                 <button
                   key={id}
                   type="button"
                   className={sourceBar === id ? "btn sit-chip" : "btn secondary sit-chip"}
-                  {...tip(METRIC_HINTS[id])}
+                  {...tip(localizeUiOptions(METRIC_HINTS, uiText)[id])}
                   onClick={() => setSourceBar(id)}
                 >
                   {label}
@@ -792,13 +780,13 @@ export function StatsPage() {
             <table className="stats-table">
               <thead>
                 <tr>
-                  <th>Источник</th>
-                  <th>Обращения</th>
-                  <th>Сделки</th>
-                  <th>Продажи</th>
-                  <th>Конверсия</th>
-                  <th>Выручка</th>
-                  <th>Средний чек</th>
+                  <th>{uiText("Источник")}</th>
+                  <th>{uiText("Обращения")}</th>
+                  <th>{uiText("Сделки")}</th>
+                  <th>{uiText("Продажи")}</th>
+                  <th>{uiText("Конверсия")}</th>
+                  <th>{uiText("Выручка")}</th>
+                  <th>{uiText("Средний чек")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -825,29 +813,28 @@ export function StatsPage() {
             </table>
           </div>
           <button type="button" className="btn secondary" disabled={!exportAllowed} onClick={() => exportAnalyticsCsv(data, "sources")}>
-            CSV источников
-          </button>
+            {uiText("CSV источников")}</button>
         </div>
       ) : null}
 
       {tab === "services" && data ? (
         <div className="sit-section">
           <div className="sit-section-head">
-            <h3>Услуги и товары</h3>
+            <h3>{uiText("Услуги и товары")}</h3>
             <div className="stats-metric-switch">
               {(
                 [
-                  ["revenue", "Выручка"],
-                  ["won", "Продажи"],
-                  ["inquiries", "Обращения"],
-                  ["conversion", "Конверсия"],
+                  ["revenue", uiText("Выручка")],
+                  ["won", uiText("Продажи")],
+                  ["inquiries", uiText("Обращения")],
+                  ["conversion", uiText("Конверсия")],
                 ] as [BarMetric, string][]
               ).map(([id, label]) => (
                 <button
                   key={id}
                   type="button"
                   className={serviceBar === id ? "btn sit-chip" : "btn secondary sit-chip"}
-                  {...tip(METRIC_HINTS[id])}
+                  {...tip(localizeUiOptions(METRIC_HINTS, uiText)[id])}
                   onClick={() => setServiceBar(id)}
                 >
                   {label}
@@ -860,12 +847,12 @@ export function StatsPage() {
             <table className="stats-table">
               <thead>
                 <tr>
-                  <th>Услуга / товар</th>
-                  <th>Обращения</th>
-                  <th>Продажи</th>
-                  <th>Конверсия</th>
-                  <th>Выручка</th>
-                  <th>Средний чек</th>
+                  <th>{uiText("Услуга / товар")}</th>
+                  <th>{uiText("Обращения")}</th>
+                  <th>{uiText("Продажи")}</th>
+                  <th>{uiText("Конверсия")}</th>
+                  <th>{uiText("Выручка")}</th>
+                  <th>{uiText("Средний чек")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -903,13 +890,13 @@ export function StatsPage() {
       {tab === "losses" && data ? (
         <div className="sit-section">
           <div className="sit-section-head">
-            <h3>Потери</h3>
+            <h3>{uiText("Потери")}</h3>
           </div>
           <div className="sit-kpi-grid stats-kpi-grid">
-            <KpiCard label="Потери" value={data.losses?.lost ?? 0} onClick={() => void openDrill("lost")} />
-            <KpiCard label="Потерянная сумма" value={data.losses?.lostAmountLabel || "—"} onClick={() => void openDrill("lost")} />
+            <KpiCard label={uiText("Потери")} value={data.losses?.lost ?? 0} onClick={() => void openDrill("lost")} />
+            <KpiCard label={uiText("Потерянная сумма")} value={data.losses?.lostAmountLabel || "—"} onClick={() => void openDrill("lost")} />
           </div>
-          <h4>Почему теряем</h4>
+          <h4>{uiText("Почему теряем")}</h4>
           <BarChart
             items={(data.losses?.reasons || []).map((r: any) => ({ name: r.reason, inquiries: r.count }))}
             valueKey="inquiries"
@@ -918,8 +905,8 @@ export function StatsPage() {
             <table className="stats-table">
               <thead>
                 <tr>
-                  <th>Причина</th>
-                  <th>Количество</th>
+                  <th>{uiText("Причина")}</th>
+                  <th>{uiText("Количество")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -940,9 +927,9 @@ export function StatsPage() {
             <table className="stats-table">
               <thead>
                 <tr>
-                  <th>Стадия</th>
-                  <th>Потеряно</th>
-                  <th>Потенциальная сумма</th>
+                  <th>{uiText("Стадия")}</th>
+                  <th>{uiText("Потеряно")}</th>
+                  <th>{uiText("Потенциальная сумма")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -966,23 +953,23 @@ export function StatsPage() {
       {tab === "managers" && data ? (
         <div className="sit-section">
           <div className="sit-section-head">
-            <h3>Менеджеры</h3>
-            <span className="muted">По текущему ответственному и по сделке</span>
+            <h3>{uiText("Менеджеры")}</h3>
+            <span className="muted">{uiText("По текущему ответственному и по сделке")}</span>
           </div>
           <div className="stats-table-wrap">
             <table className="stats-table">
               <thead>
                 <tr>
-                  <th>Менеджер</th>
-                  <th>Заявки</th>
-                  <th>Продажи</th>
-                  <th>Потери</th>
-                  <th>Конверсия</th>
-                  <th>Выручка</th>
-                  <th>Ср. ответ</th>
-                  <th>Просрочки</th>
-                  <th>Без шага</th>
-                  <th>Цикл</th>
+                  <th>{uiText("Менеджер")}</th>
+                  <th>{uiText("Заявки")}</th>
+                  <th>{uiText("Продажи")}</th>
+                  <th>{uiText("Потери")}</th>
+                  <th>{uiText("Конверсия")}</th>
+                  <th>{uiText("Выручка")}</th>
+                  <th>{uiText("Ср. ответ")}</th>
+                  <th>{uiText("Просрочки")}</th>
+                  <th>{uiText("Без шага")}</th>
+                  <th>{uiText("Цикл")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1006,10 +993,10 @@ export function StatsPage() {
                     </td>
                     <td>{m.conversion != null ? `${m.conversion}%` : "—"}</td>
                     <td>{m.revenueLabel || "—"}</td>
-                    <td>{m.avgFirstResponseMin != null ? `${m.avgFirstResponseMin} мин` : "—"}</td>
+                    <td>{m.avgFirstResponseMin != null ? uiText("{p0} мин", {p0: m.avgFirstResponseMin}) : "—"}</td>
                     <td>{m.overdueTasks}</td>
                     <td>{m.noNextAction}</td>
-                    <td>{m.avgCycleDays != null ? `${m.avgCycleDays} дн.` : "—"}</td>
+                    <td>{m.avgCycleDays != null ? uiText("{p0} дн.", {p0: m.avgCycleDays}) : "—"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -1021,19 +1008,19 @@ export function StatsPage() {
       {tab === "tasks" && data ? (
         <div className="sit-section">
           <div className="sit-section-head">
-            <h3>Задачи</h3>
+            <h3>{uiText("Задачи")}</h3>
           </div>
           <div className="sit-kpi-grid stats-kpi-grid">
-            <KpiCard label="Создано" value={data.tasks?.created ?? 0} />
-            <KpiCard label="Выполнено" value={data.tasks?.done ?? 0} />
-            <KpiCard label="В срок" value={data.tasks?.doneOnTime ?? 0} />
-            <KpiCard label="С просрочкой" value={data.tasks?.doneLate ?? 0} />
-            <KpiCard label="Открыто" value={data.tasks?.open ?? 0} />
-            <KpiCard label="Просрочено" value={data.tasks?.overdue ?? 0} />
-            <KpiCard label="Отменено" value={data.tasks?.canceled ?? 0} />
-            <KpiCard label="% в срок" value={data.tasks?.onTimePct != null ? `${data.tasks.onTimePct}%` : "—"} />
+            <KpiCard label={uiText("Создано")} value={data.tasks?.created ?? 0} />
+            <KpiCard label={uiText("Выполнено")} value={data.tasks?.done ?? 0} />
+            <KpiCard label={uiText("В срок")} value={data.tasks?.doneOnTime ?? 0} />
+            <KpiCard label={uiText("С просрочкой")} value={data.tasks?.doneLate ?? 0} />
+            <KpiCard label={uiText("Открыто")} value={data.tasks?.open ?? 0} />
+            <KpiCard label={uiText("Просрочено")} value={data.tasks?.overdue ?? 0} />
+            <KpiCard label={uiText("Отменено")} value={data.tasks?.canceled ?? 0} />
+            <KpiCard label={uiText("% в срок")} value={data.tasks?.onTimePct != null ? `${data.tasks.onTimePct}%` : "—"} />
           </div>
-          <h4>По типам</h4>
+          <h4>{uiText("По типам")}</h4>
           <BarChart
             items={(data.tasks?.byType || []).map((t: any) => ({ name: t.type, inquiries: t.created, won: t.done }))}
             valueKey="inquiries"
@@ -1042,10 +1029,10 @@ export function StatsPage() {
             <table className="stats-table">
               <thead>
                 <tr>
-                  <th>Тип</th>
-                  <th>Создано</th>
-                  <th>Выполнено</th>
-                  <th>Просрочено</th>
+                  <th>{uiText("Тип")}</th>
+                  <th>{uiText("Создано")}</th>
+                  <th>{uiText("Выполнено")}</th>
+                  <th>{uiText("Просрочено")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1060,15 +1047,15 @@ export function StatsPage() {
               </tbody>
             </table>
           </div>
-          <h4>Встречи и созвоны</h4>
+          <h4>{uiText("Встречи и созвоны")}</h4>
           <div className="sit-kpi-grid stats-kpi-grid">
-            <KpiCard label="Созвоны" value={data.tasks?.meetings?.calls ?? 0} />
-            <KpiCard label="Онлайн" value={data.tasks?.meetings?.online ?? 0} />
-            <KpiCard label="Личные" value={data.tasks?.meetings?.offline ?? 0} />
-            <KpiCard label="Состоялось" value={data.tasks?.meetings?.done ?? 0} />
-            <KpiCard label="Перенесено" value={data.tasks?.meetings?.rescheduled ?? 0} />
-            <KpiCard label="Отменено" value={data.tasks?.meetings?.cancelled ?? 0} />
-            <KpiCard label="Пропущено" value={data.tasks?.meetings?.missed ?? 0} />
+            <KpiCard label={uiText("Созвоны")} value={data.tasks?.meetings?.calls ?? 0} />
+            <KpiCard label={uiText("Онлайн")} value={data.tasks?.meetings?.online ?? 0} />
+            <KpiCard label={uiText("Личные")} value={data.tasks?.meetings?.offline ?? 0} />
+            <KpiCard label={uiText("Состоялось")} value={data.tasks?.meetings?.done ?? 0} />
+            <KpiCard label={uiText("Перенесено")} value={data.tasks?.meetings?.rescheduled ?? 0} />
+            <KpiCard label={uiText("Отменено")} value={data.tasks?.meetings?.cancelled ?? 0} />
+            <KpiCard label={uiText("Пропущено")} value={data.tasks?.meetings?.missed ?? 0} />
           </div>
         </div>
       ) : null}
@@ -1076,22 +1063,22 @@ export function StatsPage() {
       {tab === "communications" && data ? (
         <div className="sit-section">
           <div className="sit-section-head">
-            <h3>Коммуникации</h3>
+            <h3>{uiText("Коммуникации")}</h3>
           </div>
           <div className="sit-kpi-grid stats-kpi-grid">
-            <KpiCard label="Входящие" value={data.communications?.inbound ?? 0} />
-            <KpiCard label="Исходящие" value={data.communications?.outbound ?? 0} />
-            <KpiCard label="Диалоги" value={data.communications?.dialogs ?? 0} />
+            <KpiCard label={uiText("Входящие")} value={data.communications?.inbound ?? 0} />
+            <KpiCard label={uiText("Исходящие")} value={data.communications?.outbound ?? 0} />
+            <KpiCard label={uiText("Диалоги")} value={data.communications?.dialogs ?? 0} />
             <KpiCard
-              label="Среднее время ответа"
-              value={data.communications?.avgResponseMin != null ? `${data.communications.avgResponseMin} мин` : "—"}
+              label={uiText("Среднее время ответа")}
+              value={data.communications?.avgResponseMin != null ? uiText("{p0} мин", {p0: data.communications.avgResponseMin}) : "—"}
             />
-            <KpiCard label="Ждали &gt;15 мин" value={data.communications?.waitedOver15 ?? 0} />
-            <KpiCard label="AI обработал" value={data.communications?.aiHandled ?? 0} />
-            <KpiCard label="Менеджер обработал" value={data.communications?.staffHandled ?? 0} />
+            <KpiCard label={uiText("Ждали &gt;15 мин")} value={data.communications?.waitedOver15 ?? 0} />
+            <KpiCard label={uiText("AI обработал")} value={data.communications?.aiHandled ?? 0} />
+            <KpiCard label={uiText("Менеджер обработал")} value={data.communications?.staffHandled ?? 0} />
             <KpiCard label="AI → Human" value={data.communications?.handedToHuman ?? 0} />
           </div>
-          <h4>Время ответа</h4>
+          <h4>{uiText("Время ответа")}</h4>
           <BarChart
             items={(data.communications?.responseBuckets || []).map((b: any) => ({
               name: b.key,
@@ -1105,23 +1092,23 @@ export function StatsPage() {
       {tab === "ai" && data ? (
         <div className="sit-section">
           <div className="sit-section-head">
-            <h3>AI-менеджер</h3>
+            <h3>{uiText("AI-менеджер")}</h3>
           </div>
           <div className="sit-kpi-grid stats-kpi-grid">
-            <KpiCard label="Диалогов AI" value={data.aiManager?.dialogs ?? 0} />
-            <KpiCard label="Клиентов" value={data.aiManager?.clients ?? 0} />
-            <KpiCard label="С потребностью" value={data.aiManager?.qualified ?? 0} />
-            <KpiCard label="Задач из AI" value={data.aiManager?.tasksCreated ?? 0} />
-            <KpiCard label="Передано человеку" value={data.aiManager?.handedToHuman ?? 0} />
-            <KpiCard label="Дошло до сделки" value={data.aiManager?.dealsReached ?? 0} />
-            <KpiCard label="Продажи с AI" value={data.aiManager?.won ?? 0} onClick={() => void openDrill("won")} />
+            <KpiCard label={uiText("Диалогов AI")} value={data.aiManager?.dialogs ?? 0} />
+            <KpiCard label={uiText("Клиентов")} value={data.aiManager?.clients ?? 0} />
+            <KpiCard label={uiText("С потребностью")} value={data.aiManager?.qualified ?? 0} />
+            <KpiCard label={uiText("Задач из AI")} value={data.aiManager?.tasksCreated ?? 0} />
+            <KpiCard label={uiText("Передано человеку")} value={data.aiManager?.handedToHuman ?? 0} />
+            <KpiCard label={uiText("Дошло до сделки")} value={data.aiManager?.dealsReached ?? 0} />
+            <KpiCard label={uiText("Продажи с AI")} value={data.aiManager?.won ?? 0} onClick={() => void openDrill("won")} />
           </div>
           <p className="stats-funnel-mini">
             {data.aiManager?.funnel?.clients ?? 0} → {data.aiManager?.funnel?.qualified ?? 0} →{" "}
             {data.aiManager?.funnel?.deals ?? 0} → {data.aiManager?.funnel?.won ?? 0}
           </p>
-          <p className="muted">Клиенты → потребность → сделки → продажи</p>
-          <h4>Причины передачи человеку</h4>
+          <p className="muted">{uiText("Клиенты → потребность → сделки → продажи")}</p>
+          <h4>{uiText("Причины передачи человеку")}</h4>
           <BarChart
             items={(data.aiManager?.handoffReasons || []).map((r: any) => ({ name: r.reason, inquiries: r.count }))}
             valueKey="inquiries"
@@ -1132,24 +1119,24 @@ export function StatsPage() {
       {tab === "campaigns" && data ? (
         <div className="sit-section">
           <div className="sit-section-head">
-            <h3>Рассылки</h3>
+            <h3>{uiText("Рассылки")}</h3>
           </div>
           {(data.campaigns || []).length === 0 ? (
-            <p className="empty">За период рассылок нет.</p>
+            <p className="empty">{uiText("За период рассылок нет.")}</p>
           ) : (
             <>
               <div className="stats-table-wrap">
                 <table className="stats-table">
                   <thead>
                     <tr>
-                      <th>Рассылка</th>
-                      <th>Получатели</th>
-                      <th>Доставлено</th>
-                      <th>Прочитано</th>
-                      <th>Ответили</th>
-                      <th>Заявки</th>
-                      <th>Сделки</th>
-                      <th>Продажи</th>
+                      <th>{uiText("Рассылка")}</th>
+                      <th>{uiText("Получатели")}</th>
+                      <th>{uiText("Доставлено")}</th>
+                      <th>{uiText("Прочитано")}</th>
+                      <th>{uiText("Ответили")}</th>
+                      <th>{uiText("Заявки")}</th>
+                      <th>{uiText("Сделки")}</th>
+                      <th>{uiText("Продажи")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1175,7 +1162,7 @@ export function StatsPage() {
                     {c.funnel.recipients} → {c.funnel.delivered} → {c.funnel.read} → {c.funnel.replied} →{" "}
                     {c.funnel.inquiries} → {c.funnel.deals} → {c.funnel.won}
                   </p>
-                  <p className="muted">получатели → доставлено → прочитано → ответили → заявки → сделки → продажи</p>
+                  <p className="muted">{uiText("получатели → доставлено → прочитано → ответили → заявки → сделки → продажи")}</p>
                 </div>
               ))}
             </>
@@ -1187,32 +1174,31 @@ export function StatsPage() {
         <div className="stats-modal-backdrop" onClick={() => setDrill(null)}>
           <div className="stats-modal stats-drill-modal" onClick={(e) => e.stopPropagation()}>
             <div className="sit-section-head">
-              <h3>{drill.title || "Детализация"}</h3>
+              <h3>{drill.title || uiText("Детализация")}</h3>
               <button type="button" className="btn secondary sit-chip" onClick={() => setDrill(null)}>
-                Закрыть
-              </button>
+                {uiText("Закрыть")}</button>
             </div>
-            <p className="muted">{drillLoading ? "Загрузка…" : `Всего: ${drill.total ?? drill.items?.length ?? 0}`}</p>
+            <p className="muted">{drillLoading ? uiText("Загрузка…") : uiText("Всего: {p0}", {p0: drill.total ?? drill.items?.length ?? 0})}</p>
             <div className="stats-table-wrap">
               <table className="stats-table">
                 <thead>
                   <tr>
-                    <th>Дата</th>
-                    <th>Клиент</th>
-                    <th>Телефон</th>
-                    <th>Название</th>
-                    <th>Сумма</th>
-                    <th>Статус</th>
-                    <th>Менеджер</th>
+                    <th>{uiText("Дата")}</th>
+                    <th>{uiText("Клиент")}</th>
+                    <th>{uiText("Телефон")}</th>
+                    <th>{uiText("Название")}</th>
+                    <th>{uiText("Сумма")}</th>
+                    <th>{uiText("Статус")}</th>
+                    <th>{uiText("Менеджер")}</th>
                     <th />
                   </tr>
                 </thead>
                 <tbody>
                   {(drill.items || []).map((item: any) => (
                     <tr key={`${item.kind}-${item.id}`}>
-                      <td>{item.date ? new Date(item.date).toLocaleDateString("ru-RU") : "—"}</td>
+                      <td>{item.date ? new Date(item.date).toLocaleDateString(uiFormatLocale()) : "—"}</td>
                       <td>{item.client}</td>
-                      <td>{item.phone || "Нет телефона"}</td>
+                      <td>{item.phone || uiText("Нет телефона")}</td>
                       <td>{item.title}</td>
                       <td>{item.amountLabel || "—"}</td>
                       <td>{item.status || item.source || "—"}</td>
@@ -1220,8 +1206,7 @@ export function StatsPage() {
                       <td>
                         {item.href ? (
                           <Link to={item.href} onClick={() => setDrill(null)}>
-                            Открыть
-                          </Link>
+                            {uiText("Открыть")}</Link>
                         ) : null}
                       </td>
                     </tr>
@@ -1229,7 +1214,7 @@ export function StatsPage() {
                 </tbody>
               </table>
             </div>
-            {!drillLoading && !(drill.items || []).length ? <p className="empty">Список пуст.</p> : null}
+            {!drillLoading && !(drill.items || []).length ? <p className="empty">{uiText("Список пуст.")}</p> : null}
           </div>
         </div>
       ) : null}
@@ -1237,17 +1222,17 @@ export function StatsPage() {
       {exportOpen ? (
         <div className="stats-modal-backdrop" onClick={() => setExportOpen(false)}>
           <div className="stats-modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Скачать отчёт</h3>
-            <p className="muted">Включить в отчёт</p>
+            <h3>{uiText("Скачать отчёт")}</h3>
+            <p className="muted">{uiText("Включить в отчёт")}</p>
             <div className="stats-export-checks">
               {(
                 [
-                  ["overview", "Общий результат"],
-                  ["funnel", "Этапы"],
-                  ["sources", "Источники"],
-                  ["services", "Услуги и товары"],
-                  ["sales", "Продажи"],
-                  ["losses", "Потери"],
+                  ["overview", uiText("Общий результат")],
+                  ["funnel", uiText("Этапы")],
+                  ["sources", uiText("Источники")],
+                  ["services", uiText("Услуги и товары")],
+                  ["sales", uiText("Продажи")],
+                  ["losses", uiText("Потери")],
                 ] as const
               ).map(([key, label]) => (
                 <label key={key}>
@@ -1289,11 +1274,9 @@ export function StatsPage() {
                   setExportOpen(false);
                 }}
               >
-                CSV этапов
-              </button>
+                {uiText("CSV этапов")}</button>
               <button type="button" className="btn secondary" onClick={() => setExportOpen(false)}>
-                Отмена
-              </button>
+                {uiText("Отмена")}</button>
             </div>
           </div>
         </div>

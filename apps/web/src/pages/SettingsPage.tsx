@@ -1,3 +1,4 @@
+import { uiNotificationBody, uiText, useUiText, localizeUiOptions, uiMessage } from "../lib/uiText";
 import { DocumentNumberingPanel } from "./DocumentNumberingPanel";
 import { ServiceCatalogPanel } from "./ServiceCatalogPanel";
 import { useEffect, useState, type FormEvent } from "react";
@@ -480,8 +481,8 @@ function NotificationsSection({ locale }: { locale: Locale }) {
         {notices.slice(0, 20).map((item) => (
           <div className="row" key={item.id}>
             <div>
-              <b>{item.title}</b>
-              <div className="muted">{item.body}</div>
+              <b>{uiMessage(item.title, locale)}</b>
+              <div className="muted">{uiNotificationBody(item.type, item.body, locale)}</div>
             </div>
             <Link className="btn secondary" to={item.href || "/today"}>
               {t(locale, "common.open")}
@@ -494,6 +495,7 @@ function NotificationsSection({ locale }: { locale: Locale }) {
 }
 
 function InterfaceSection({ locale }: { locale: Locale }) {
+  const uiText = useUiText();
   const { me } = useSession();
   const [status, setStatus] = useState("");
   const [dirty, setDirty] = useState(false);
@@ -521,8 +523,8 @@ function InterfaceSection({ locale }: { locale: Locale }) {
       <label>
         {t(locale, "settings.language")}
         <select name="locale" defaultValue={me?.user?.locale || "ru"}>
-          <option value="ru">Русский</option>
-          <option value="kk">Қазақша</option>
+          <option value="ru">{uiText("Русский")}</option>
+          <option value="kk">{uiText("Қазақша")}</option>
           <option value="en">English</option>
         </select>
       </label>
@@ -559,6 +561,7 @@ const memberRoles = [
 type MemberCapacity = { active: number; pending: number; limit: number | null; remaining: number | null; canInvite: boolean; entitled: boolean; planName: string };
 
 function MembersSection({ locale }: { locale: Locale }) {
+  const uiText = useUiText();
   const [items, setItems] = useState<any[]>([]);
   const [invitations, setInvitations] = useState<any[]>([]);
   const [capacity, setCapacity] = useState<MemberCapacity | null>(null);
@@ -574,12 +577,12 @@ function MembersSection({ locale }: { locale: Locale }) {
     setInvitations(data.invitations || []);
     setCapacity(data.capacity);
   }
-  useEffect(() => { void load().catch((err) => setError(err instanceof Error ? err.message : "Не удалось загрузить сотрудников")); }, []);
+  useEffect(() => { void load().catch((err) => setError(err instanceof Error ? err.message : uiText("Не удалось загрузить сотрудников"))); }, []);
 
   async function run(action: () => Promise<void>) {
     setBusy(true); setError("");
     try { await action(); await load(); }
-    catch (err) { setError(err instanceof Error ? err.message : "Не удалось сохранить изменения"); }
+    catch (err) { setError(err instanceof Error ? err.message : uiText("Не удалось сохранить изменения")); }
     finally { setBusy(false); }
   }
   function showLink(value: any) { setLink(value); setCopied(false); }
@@ -587,15 +590,15 @@ function MembersSection({ locale }: { locale: Locale }) {
   return (
     <div className="panel members-panel">
       <div className="members-heading">
-        <div><h2>{t(locale, "settings.members")}</h2><p className="muted">Управляйте доступом команды к вашей компании.</p></div>
-        <button className="btn" disabled={busy || !capacity?.canInvite} onClick={() => setAdding(true)}>Добавить сотрудника</button>
+        <div><h2>{t(locale, "settings.members")}</h2><p className="muted">{uiText("Управляйте доступом команды к вашей компании.")}</p></div>
+        <button className="btn" disabled={busy || !capacity?.canInvite} onClick={() => setAdding(true)}>{uiText("Добавить сотрудника")}</button>
       </div>
       {error ? <p className="error" role="alert">{error}</p> : null}
       {capacity ? <div className="members-capacity">
-        <div><b>{capacity.planName}</b><p>Сотрудников: <strong>{capacity.active}{capacity.limit === null ? " · без ограничения" : ` / ${capacity.limit}`}</strong></p></div>
-        <div><b>{capacity.remaining === null ? "Места доступны" : `Свободных мест: ${capacity.remaining}`}</b><p className="muted">Ожидают приглашения: {capacity.pending}. Они также занимают места.</p></div>
-        {!capacity.canInvite ? <div className="members-limit"><p>{capacity.entitled ? "Все места заняты. Отмените ненужное приглашение или подключите дополнительные места." : "Для добавления сотрудников выберите тариф с командной работой."}</p><Link to="/billing">Тарифы и дополнительные места →</Link></div> : null}
-      </div> : !error ? <p className="muted" role="status">Загружаем сотрудников и доступные места…</p> : null}
+        <div><b>{capacity.planName}</b><p>{uiText("Сотрудников:")}{" "}<strong>{capacity.active}{capacity.limit === null ? uiText(" · без ограничения") : ` / ${capacity.limit}`}</strong></p></div>
+        <div><b>{capacity.remaining === null ? uiText("Места доступны") : uiText("Свободных мест: {p0}", {p0: capacity.remaining})}</b><p className="muted">{uiText("Ожидают приглашения:")}{" "}{capacity.pending}{uiText(". Они также занимают места.")}</p></div>
+        {!capacity.canInvite ? <div className="members-limit"><p>{capacity.entitled ? uiText("Все места заняты. Отмените ненужное приглашение или подключите дополнительные места.") : uiText("Для добавления сотрудников выберите тариф с командной работой.")}</p><Link to="/billing">{uiText("Тарифы и дополнительные места →")}</Link></div> : null}
+      </div> : !error ? <p className="muted" role="status">{uiText("Загружаем сотрудников и доступные места…")}</p> : null}
       {adding && capacity?.canInvite ? <form className="member-invite-form" onSubmit={event => {
         event.preventDefault(); const form = new FormData(event.currentTarget);
         void run(async () => {
@@ -603,38 +606,38 @@ function MembersSection({ locale }: { locale: Locale }) {
           showLink(result); setAdding(false);
         });
       }}>
-        <h3>Пригласить сотрудника</h3>
-        <p className="muted">Создайте ссылку и передайте её сотруднику. При первом входе он сам задаст пароль. Письмо автоматически не отправляется.</p>
+        <h3>{uiText("Пригласить сотрудника")}</h3>
+        <p className="muted">{uiText("Создайте ссылку и передайте её сотруднику. При первом входе он сам задаст пароль. Письмо автоматически не отправляется.")}</p>
         <div className="member-fields">
-          <label>Имя сотрудника<input name="name" required maxLength={160} autoComplete="off" placeholder="Имя и фамилия" /></label>
-          <label>Электронная почта<input name="email" type="email" required maxLength={254} autoComplete="off" placeholder="name@company.kz" /></label>
-          <label>Роль<select name="role" defaultValue="manager">{memberRoles.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          <label>{uiText("Имя сотрудника")}<input name="name" required maxLength={160} autoComplete="off" placeholder={uiText("Имя и фамилия")} /></label>
+          <label>{uiText("Электронная почта")}<input name="email" type="email" required maxLength={254} autoComplete="off" placeholder="name@company.kz" /></label>
+          <label>{uiText("Роль")}<select name="role" defaultValue="manager">{localizeUiOptions(memberRoles, uiText).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
         </div>
-        <div className="member-actions"><button className="btn" disabled={busy}>{busy ? "Создаём приглашение…" : "Создать приглашение"}</button><button type="button" className="btn secondary" disabled={busy} onClick={() => setAdding(false)}>Отмена</button></div>
+        <div className="member-actions"><button className="btn" disabled={busy}>{busy ? uiText("Создаём приглашение…") : uiText("Создать приглашение")}</button><button type="button" className="btn secondary" disabled={busy} onClick={() => setAdding(false)}>{uiText("Отмена")}</button></div>
       </form> : null}
       {link ? <div className="member-invite-link" role="status">
-        <b>Приглашение для {link.email} готово</b>
-        <p>Передайте ссылку лично сотруднику. Она действует до {formatDateTime(link.expiresAt, { locale })}.</p>
-        <div className="member-link-controls"><input aria-label="Ссылка приглашения" readOnly value={link.inviteUrl} onFocus={e => e.currentTarget.select()} /><button className="btn secondary" onClick={async () => {
+        <b>{uiText("Приглашение для")}{" "}{link.email} {" "}{uiText("готово")}</b>
+        <p>{uiText("Передайте ссылку лично сотруднику. Она действует до")}{" "}{formatDateTime(link.expiresAt, { locale })}.</p>
+        <div className="member-link-controls"><input aria-label={uiText("Ссылка приглашения")} readOnly value={link.inviteUrl} onFocus={e => e.currentTarget.select()} /><button className="btn secondary" onClick={async () => {
           try { await navigator.clipboard.writeText(link.inviteUrl); setCopied(true); }
-          catch { setError("Не удалось скопировать автоматически. Выделите ссылку и скопируйте её вручную."); }
-        }}>{copied ? "Скопировано" : "Скопировать ссылку"}</button></div>
+          catch { setError(uiText("Не удалось скопировать автоматически. Выделите ссылку и скопируйте её вручную.")); }
+        }}>{copied ? uiText("Скопировано") : uiText("Скопировать ссылку")}</button></div>
       </div> : null}
       {items.map(item => <form key={item.id} className="member-card" onSubmit={event => {
         event.preventDefault(); const form = new FormData(event.currentTarget);
-        void run(async () => { await api.updateCompanyMember(item.id, { role: form.get("role"), jobTitle: form.get("jobTitle") }); notifySaved("Сотрудник обновлён"); });
+        void run(async () => { await api.updateCompanyMember(item.id, { role: form.get("role"), jobTitle: form.get("jobTitle") }); notifySaved(uiText("Сотрудник обновлён")); });
       }}>
-        <div className="member-info"><b>{item.name}{item.isMe ? " (вы)" : ""}</b><div className="muted">{item.email}</div>{!item.active ? <span className="muted">Доступ приостановлен</span> : null}</div>
+        <div className="member-info"><b>{item.name}{item.isMe ? uiText(" (вы)") : ""}</b><div className="muted">{item.email}</div>{!item.active ? <span className="muted">{uiText("Доступ приостановлен")}</span> : null}</div>
         <div className="member-fields">
-          <label>Должность<input name="jobTitle" defaultValue={item.jobTitle || ""} placeholder="Укажите должность" /></label>
-          <label>Роль<select name="role" defaultValue={item.role}>{memberRoles.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          <label>{uiText("Должность")}<input name="jobTitle" defaultValue={item.jobTitle || ""} placeholder={uiText("Укажите должность")} /></label>
+          <label>{uiText("Роль")}<select name="role" defaultValue={item.role}>{localizeUiOptions(memberRoles, uiText).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
         </div>
         <button className="btn secondary" disabled={busy}>{t(locale, "settings.save")}</button>
       </form>)}
-      {invitations.length ? <section className="member-invitations"><h3>Приглашения</h3><p className="muted">После обновления ссылки прежняя перестанет действовать.</p>
+      {invitations.length ? <section className="member-invitations"><h3>{uiText("Приглашения")}</h3><p className="muted">{uiText("После обновления ссылки прежняя перестанет действовать.")}</p>
         {invitations.map(item => <div className="member-card" key={item.id}>
-          <div className="member-info"><b>{item.name || item.email}</b><div className="muted">{item.email} · {memberRoles.find(([role]) => role === item.role)?.[1] || "Сотрудник"}</div><div className="muted">{new Date(item.expiresAt).getTime() > Date.now() ? "Ожидает принятия · до " : "Срок истёк · "}{formatDateTime(item.expiresAt, { locale })}</div></div>
-          <div className="member-actions"><button className="btn secondary" disabled={busy || !capacity?.entitled || (new Date(item.expiresAt).getTime() <= Date.now() && !capacity?.canInvite)} onClick={() => void run(async () => showLink(await api.renewCompanyInvitation(item.id)))}>Обновить ссылку</button><button className="btn secondary" disabled={busy} onClick={() => void run(async () => { await api.revokeCompanyInvitation(item.id); if (link?.email === item.email) setLink(null); })}>Отменить приглашение</button></div>
+          <div className="member-info"><b>{item.name || item.email}</b><div className="muted">{item.email} · {localizeUiOptions(memberRoles, uiText).find(([role]) => role === item.role)?.[1] || uiText("Сотрудник")}</div><div className="muted">{new Date(item.expiresAt).getTime() > Date.now() ? uiText("Ожидает принятия · до ") : uiText("Срок истёк · ")}{formatDateTime(item.expiresAt, { locale })}</div></div>
+          <div className="member-actions"><button className="btn secondary" disabled={busy || !capacity?.entitled || (new Date(item.expiresAt).getTime() <= Date.now() && !capacity?.canInvite)} onClick={() => void run(async () => showLink(await api.renewCompanyInvitation(item.id)))}>{uiText("Обновить ссылку")}</button><button className="btn secondary" disabled={busy} onClick={() => void run(async () => { await api.revokeCompanyInvitation(item.id); if (link?.email === item.email) setLink(null); })}>{uiText("Отменить приглашение")}</button></div>
         </div>)}
       </section> : null}
     </div>
@@ -642,6 +645,7 @@ function MembersSection({ locale }: { locale: Locale }) {
 }
 
 function OpsSection({ locale }: { locale: Locale }) {
+  const uiText = useUiText();
   const [ops, setOps] = useState<any>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -656,7 +660,7 @@ function OpsSection({ locale }: { locale: Locale }) {
   }
 
   useEffect(() => {
-    void load().catch((err) => setError(err instanceof Error ? err.message : "Ошибка"));
+    void load().catch((err) => setError(err instanceof Error ? err.message : uiText("Ошибка")));
   }, []);
 
   async function save() {
@@ -677,10 +681,10 @@ function OpsSection({ locale }: { locale: Locale }) {
         lostReasons: lostText.split("\n").map((line) => line.trim()).filter(Boolean),
         stageSlaDays,
       });
-      notifySaved("Операционные настройки сохранены");
+      notifySaved(uiText("Операционные настройки сохранены"));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не сохранено");
+      setError(err instanceof Error ? err.message : uiText("Не сохранено"));
     } finally {
       setBusy(false);
     }
@@ -691,11 +695,10 @@ function OpsSection({ locale }: { locale: Locale }) {
   return (
     <div className="panel">
       <b>{t(locale, "settings.ops")}</b>
-      <p className="muted">SLA этапов, причины потери и план продаж. Эти же значения использует «Ситуация».</p>
+      <p className="muted">{uiText("SLA этапов, причины потери и план продаж. Эти же значения использует «Ситуация».")}</p>
       {error ? <p className="error">{error}</p> : null}
       <label>
-        Дней без движения, чтобы сделка считалась зависшей
-        <input
+        {uiText("Дней без движения, чтобы сделка считалась зависшей")}<input
           type="number"
           min={1}
           max={90}
@@ -704,8 +707,7 @@ function OpsSection({ locale }: { locale: Locale }) {
         />
       </label>
       <label>
-        Дней после КП без ответа
-        <input
+        {uiText("Дней после КП без ответа")}<input
           type="number"
           min={1}
           max={90}
@@ -714,8 +716,7 @@ function OpsSection({ locale }: { locale: Locale }) {
         />
       </label>
       <label>
-        Дней тишины по клиенту
-        <input
+        {uiText("Дней тишины по клиенту")}<input
           type="number"
           min={1}
           max={180}
@@ -724,10 +725,9 @@ function OpsSection({ locale }: { locale: Locale }) {
         />
       </label>
       <label>
-        План продаж за период, ₸
-        <input value={plan} onChange={(e) => setPlan(e.target.value)} placeholder="например 10000000" />
+        {uiText("План продаж за период, ₸")}<input value={plan} onChange={(e) => setPlan(e.target.value)} placeholder={uiText("например 10000000")} />
       </label>
-      <b>SLA по этапам, дни</b>
+      <b>{uiText("SLA по этапам, дни")}</b>
       {(ops.stages || []).map((stage: any, index: number) => (
         <label key={stage.systemKey}>
           {stage.name}
@@ -745,8 +745,7 @@ function OpsSection({ locale }: { locale: Locale }) {
         </label>
       ))}
       <label>
-        Причины потери — по одной на строку
-        <textarea rows={8} value={lostText} onChange={(e) => setLostText(e.target.value)} />
+        {uiText("Причины потери — по одной на строку")}<textarea rows={8} value={lostText} onChange={(e) => setLostText(e.target.value)} />
       </label>
       <button type="button" className="btn" disabled={busy} onClick={() => void save()}>
         {t(locale, "settings.save")}
@@ -756,6 +755,7 @@ function OpsSection({ locale }: { locale: Locale }) {
 }
 
 function AuditSection({ locale }: { locale: Locale }) {
+  const uiText = useUiText();
   const { me } = useSession();
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
@@ -768,7 +768,7 @@ function AuditSection({ locale }: { locale: Locale }) {
       setData(result);
       setError("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Ошибка");
+      setError(err instanceof Error ? err.message : uiText("Ошибка"));
     }
   }
 
@@ -779,7 +779,7 @@ function AuditSection({ locale }: { locale: Locale }) {
   return (
     <div className="panel">
       <b>{t(locale, "settings.audit")}</b>
-      <p className="muted">Кто что изменил в этой компании. Журнал доступен администратору и директору.</p>
+      <p className="muted">{uiText("Кто что изменил в этой компании. Журнал доступен администратору и директору.")}</p>
       {error ? <p className="error">{error}</p> : null}
       <form
         className="row"
@@ -789,16 +789,16 @@ function AuditSection({ locale }: { locale: Locale }) {
           void load(1, q);
         }}
       >
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="сделка, клиент, настройки…" />
-        <button className="btn secondary">Найти</button>
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={uiText("сделка, клиент, настройки…")} />
+        <button className="btn secondary">{uiText("Найти")}</button>
       </form>
       {(data?.items || []).map((item: any) => (
         <div className="row" key={item.id} style={{ alignItems: "flex-start" }}>
           <div>
-            <b>{item.actionLabel || "Действие в системе"}</b>
+            <b>{uiMessage(item.actionLabel) || uiText("Действие в системе")}</b>
             <div className="muted">
-              {item.actorLabel}
-              {item.entityLabel ? ` · ${item.entityLabel}` : ""}
+              {uiMessage(item.actorLabel)}
+              {uiMessage(item.entityLabel) ? ` · ${uiMessage(item.entityLabel)}` : ""}
               {" · "}
               {formatDateTime(item.createdAt, { timeZone: me?.user?.timezone, locale })}
             </div>
@@ -818,8 +818,7 @@ function AuditSection({ locale }: { locale: Locale }) {
               void load(next);
             }}
           >
-            Назад
-          </button>
+            {uiText("Назад")}</button>
           <button
             type="button"
             className="btn secondary"
@@ -830,8 +829,7 @@ function AuditSection({ locale }: { locale: Locale }) {
               void load(next);
             }}
           >
-            Дальше
-          </button>
+            {uiText("Дальше")}</button>
         </div>
       ) : null}
     </div>
@@ -864,6 +862,7 @@ type ControlUser = {
 };
 
 function ControlSection({ locale }: { locale: Locale }) {
+  const uiText = useUiText();
   const { me } = useSession();
   const [data, setData] = useState<{ enabled: boolean; users: ControlUser[] } | null>(null);
   const [history, setHistory] = useState<any>(null);
@@ -881,7 +880,7 @@ function ControlSection({ locale }: { locale: Locale }) {
       setHistory(hist);
       setError("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Ошибка");
+      setError(err instanceof Error ? err.message : uiText("Ошибка"));
     }
   }
 
@@ -891,19 +890,19 @@ function ControlSection({ locale }: { locale: Locale }) {
 
   async function toggleCompany(enabled: boolean) {
     await api.updateControlSettings({ enabled });
-    notifySaved(enabled ? "BasQar Control включён" : "BasQar Control выключен");
+    notifySaved(enabled ? uiText("BasQar Control включён") : uiText("BasQar Control выключен"));
     await load();
   }
 
   async function toggleUser(user: ControlUser, enabled: boolean) {
     await api.upsertControlAccess(user.userId, { enabled });
-    notifySaved(enabled ? `${user.name}: доступ включён` : `${user.name}: доступ выключен`);
+    notifySaved(enabled ? uiText("{p0}: доступ включён", {p0: user.name}) : uiText("{p0}: доступ выключен", {p0: user.name}));
     await load();
   }
 
   async function saveFlags(user: ControlUser, patch: Record<string, boolean>) {
     await api.upsertControlAccess(user.userId, patch);
-    notifySaved("Разрешения сохранены");
+    notifySaved(uiText("Разрешения сохранены"));
     await load();
   }
 
@@ -916,9 +915,9 @@ function ControlSection({ locale }: { locale: Locale }) {
       phone,
     })) as { verificationCode?: string | null };
     if (result.verificationCode) {
-      notifySaved(`Код подтверждения: ${result.verificationCode}`);
+      notifySaved(uiText("Код подтверждения: {p0}", {p0: result.verificationCode}));
     } else {
-      notifySaved("Номер привязан");
+      notifySaved(uiText("Номер привязан"));
     }
     await load();
   }
@@ -947,14 +946,11 @@ function ControlSection({ locale }: { locale: Locale }) {
       <div className="panel">
         <b>{t(locale, "settings.control")}</b>
         <p className="muted">
-          Внешний AI (WhatsApp и другие каналы) получает данные и выполняет команды только через CRM, от имени
-          конкретного сотрудника и с его правами. Совпадение номера само по себе не является входом.
-        </p>
+          {uiText("Внешний AI (WhatsApp и другие каналы) получает данные и выполняет команды только через CRM, от имени конкретного сотрудника и с его правами. Совпадение номера само по себе не является входом.")}</p>
         {error ? <p className="error">{error}</p> : null}
         <label className="row" style={{ alignItems: "center", gap: 8 }}>
           <input type="checkbox" checked={data.enabled} onChange={(e) => void toggleCompany(e.target.checked)} />
-          BasQar Control включён для компании
-        </label>
+          {uiText("BasQar Control включён для компании")}</label>
       </div>
       {data.users.map((user) => (
         <div className="panel" key={user.userId}>
@@ -964,23 +960,23 @@ function ControlSection({ locale }: { locale: Locale }) {
               <div className="muted">
                 {user.email} · {user.role}
                 {user.lastActivityAt
-                  ? ` · последняя активность ${formatDateTime(user.lastActivityAt, { timeZone: me?.user?.timezone, locale })}`
+                  ? uiText(" · последняя активность {p0}", {p0: formatDateTime(user.lastActivityAt, { timeZone: me?.user?.timezone, locale })})
                   : ""}
               </div>
             </div>
             <button type="button" className="btn secondary" onClick={() => void toggleUser(user, !user.enabled)}>
-              {user.enabled ? "Отключить доступ" : "Включить доступ"}
+              {user.enabled ? uiText("Отключить доступ") : uiText("Включить доступ")}
             </button>
           </div>
           <div className="row" style={{ flexWrap: "wrap", gap: 12 }}>
             {(
               [
-                ["canReadFinancialData", "Финансы"],
-                ["canReadTeamData", "Команда"],
-                ["canCreateTasks", "Задачи"],
-                ["canModifyDeals", "Сделки"],
-                ["canPerformBulkActions", "Массовые действия"],
-                ["requiresConfirmationForWrites", "Подтверждать записи"],
+                ["canReadFinancialData", uiText("Финансы")],
+                ["canReadTeamData", uiText("Команда")],
+                ["canCreateTasks", uiText("Задачи")],
+                ["canModifyDeals", uiText("Сделки")],
+                ["canPerformBulkActions", uiText("Массовые действия")],
+                ["requiresConfirmationForWrites", uiText("Подтверждать записи")],
               ] as const
             ).map(([key, label]) => (
               <label key={key} className="muted">
@@ -1000,20 +996,18 @@ function ControlSection({ locale }: { locale: Locale }) {
                   {ident.provider} · {ident.phoneNormalized || ident.externalUserId}
                 </b>
                 <div className="muted">
-                  {ident.verified ? "подтверждён" : "ожидает подтверждения"}
-                  {ident.enabled ? "" : " · отключён"}
+                  {ident.verified ? uiText("подтверждён") : uiText("ожидает подтверждения")}
+                  {ident.enabled ? "" : uiText(" · отключён")}
                 </div>
               </div>
               <div className="actions">
                 {!ident.verified ? (
                   <button type="button" className="btn secondary" onClick={() => void api.verifyControlIdentity(ident.id).then(load)}>
-                    Подтвердить в CRM
-                  </button>
+                    {uiText("Подтвердить в CRM")}</button>
                 ) : null}
                 {ident.enabled ? (
                   <button type="button" className="btn secondary" onClick={() => void api.disableControlIdentity(ident.id).then(load)}>
-                    Отключить канал
-                  </button>
+                    {uiText("Отключить канал")}</button>
                 ) : null}
               </div>
             </div>
@@ -1026,18 +1020,17 @@ function ControlSection({ locale }: { locale: Locale }) {
             }}
           >
             <input
-              placeholder="WhatsApp номер, +7…"
+              placeholder={uiText("WhatsApp номер, +7…")}
               value={phoneByUser[user.userId] || ""}
               onChange={(e) => setPhoneByUser((prev) => ({ ...prev, [user.userId]: e.target.value }))}
             />
             <button className="btn secondary" type="submit">
-              Привязать WhatsApp
-            </button>
+              {uiText("Привязать WhatsApp")}</button>
           </form>
         </div>
       ))}
       <div className="panel">
-        <b>История команд</b>
+        <b>{uiText("История команд")}</b>
         <form
           className="row"
           onSubmit={(event) => {
@@ -1046,28 +1039,28 @@ function ControlSection({ locale }: { locale: Locale }) {
           }}
         >
           <input
-            placeholder="действие, GET_LEADS_STATS"
+            placeholder={uiText("действие, GET_LEADS_STATS")}
             value={filters.action}
             onChange={(e) => setFilters({ ...filters, action: e.target.value })}
           />
           <input
-            placeholder="источник, WHATSAPP"
+            placeholder={uiText("источник, WHATSAPP")}
             value={filters.source}
             onChange={(e) => setFilters({ ...filters, source: e.target.value })}
           />
           <input
-            placeholder="статус, OK"
+            placeholder={uiText("статус, OK")}
             value={filters.status}
             onChange={(e) => setFilters({ ...filters, status: e.target.value })}
           />
-          <button className="btn secondary">Найти</button>
+          <button className="btn secondary">{uiText("Найти")}</button>
         </form>
         {(history?.items || []).map((item: any) => (
           <div className="row" key={item.id}>
             <div>
               <b>{item.action}</b>
               <div className="muted">
-                {item.actor?.name || item.actor?.email || "сотрудник"}
+                {item.actor?.name || item.actor?.email || uiText("сотрудник")}
                 {item.source ? ` · ${item.source}` : ""}
                 {item.status ? ` · ${item.status}` : ""}
                 {" · "}

@@ -32,3 +32,5 @@ export {
 } from "./companyRequisites.ts";
 
 export * from "./documentSignMeta.ts";
+
+export { systemText, systemMessage, kkSystemMessages } from "./systemLocale.ts";

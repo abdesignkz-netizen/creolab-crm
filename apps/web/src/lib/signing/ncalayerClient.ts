@@ -1,3 +1,4 @@
+import { uiText, useUiText, localizeUiOptions } from "../uiText";
 /** Official NCALayer Basics: https://github.com/pkigovkz/sdkinfo/wiki/KNCA-Basics-Module */
 export const NCALAYER_MODULE = "kz.gov.pki.knca.basics";
 export const NCALAYER_SIGN = "sign";
@@ -53,15 +54,15 @@ type BasicsResponse = {
 function mapNcalayerFailure(payload: BasicsResponse): NcalayerError {
   const text = `${payload.message || ""} ${payload.code || ""} ${payload.details || ""}`.toLowerCase();
   if (/cancel|отмен|denied by user|user.?cancel/.test(text)) {
-    return new NcalayerError("USER_CANCELLED", payload.message || "Подпись отменена");
+    return new NcalayerError("USER_CANCELLED", payload.message || uiText("Подпись отменена"));
   }
   if (/expired|истёк|истек/.test(text)) {
-    return new NcalayerError("CERTIFICATE_EXPIRED", payload.message || "Срок действия сертификата истёк");
+    return new NcalayerError("CERTIFICATE_EXPIRED", payload.message || uiText("Срок действия сертификата истёк"));
   }
   if (/not.?select|не выбран|certificate/.test(text) && /select|выбор/.test(text)) {
-    return new NcalayerError("CERTIFICATE_NOT_SELECTED", payload.message || "Сертификат не выбран");
+    return new NcalayerError("CERTIFICATE_NOT_SELECTED", payload.message || uiText("Сертификат не выбран"));
   }
-  return new NcalayerError("SIGNATURE_FAILED", payload.message || payload.code || "Подпись отклонена NCALayer");
+  return new NcalayerError("SIGNATURE_FAILED", payload.message || payload.code || uiText("Подпись отклонена NCALayer"));
 }
 
 export class NCALayerSigningClient implements SigningClient {
@@ -75,14 +76,14 @@ export class NCALayerSigningClient implements SigningClient {
         const ws = new WebSocket(NCALAYER_URL);
         const timer = window.setTimeout(() => {
           ws.close();
-          reject(new NcalayerError("NCALAYER_NOT_RUNNING", "NCALayer не отвечает. Запустите приложение с ncl.pki.gov.kz"));
+          reject(new NcalayerError("NCALAYER_NOT_RUNNING", uiText("NCALayer не отвечает. Запустите приложение с ncl.pki.gov.kz")));
         }, 4000);
         ws.onopen = () => {
           /* handshake message comes next */
         };
         ws.onerror = () => {
           window.clearTimeout(timer);
-          reject(new NcalayerError("NCALAYER_NOT_RUNNING", "Нет связи с NCALayer на 127.0.0.1:13579"));
+          reject(new NcalayerError("NCALAYER_NOT_RUNNING", uiText("Нет связи с NCALayer на 127.0.0.1:13579")));
         };
         ws.onmessage = (event) => {
           window.clearTimeout(timer);
@@ -199,7 +200,7 @@ export class NCALayerSigningClient implements SigningClient {
     return new Promise<string>((resolve, reject) => {
       const ws = this.socket!;
       const timer = window.setTimeout(
-        () => reject(new NcalayerError("SIGNATURE_FAILED", "NCALayer не ответил на подпись")),
+        () => reject(new NcalayerError("SIGNATURE_FAILED", uiText("NCALayer не ответил на подпись"))),
         120000,
       );
       ws.onmessage = (event) => {
@@ -209,7 +210,7 @@ export class NCALayerSigningClient implements SigningClient {
         try {
           payload = JSON.parse(String(event.data)) as BasicsResponse;
         } catch {
-          reject(new NcalayerError("SIGNATURE_FAILED", "NCALayer вернул некорректный ответ"));
+          reject(new NcalayerError("SIGNATURE_FAILED", uiText("NCALayer вернул некорректный ответ")));
           return;
         }
         if (payload.status === false) {
@@ -219,18 +220,18 @@ export class NCALayerSigningClient implements SigningClient {
         const raw = payload.body?.result;
         const result = Array.isArray(raw) && raw.length === 1 ? raw[0] : raw;
         if (result == null || result === "" || (Array.isArray(result) && result.length === 0)) {
-          reject(new NcalayerError("USER_CANCELLED", "Подпись отменена"));
+          reject(new NcalayerError("USER_CANCELLED", uiText("Подпись отменена")));
           return;
         }
         if (typeof result !== "string" || !result.trim()) {
-          reject(new NcalayerError("SIGNATURE_FAILED", "NCALayer вернул неподходящий формат подписи. Для одного документа ожидается одна подпись. Повторите подписание."));
+          reject(new NcalayerError("SIGNATURE_FAILED", uiText("NCALayer вернул неподходящий формат подписи. Для одного документа ожидается одна подпись. Повторите подписание.")));
           return;
         }
         resolve(result);
       };
       ws.onerror = () => {
         window.clearTimeout(timer);
-        reject(new NcalayerError("NCALAYER_NOT_RUNNING", "Связь с NCALayer оборвалась"));
+        reject(new NcalayerError("NCALAYER_NOT_RUNNING", uiText("Связь с NCALayer оборвалась")));
       };
       ws.send(JSON.stringify(request));
     });
@@ -245,13 +246,13 @@ export function createNcalayerClient() {
   return new NCALayerSigningClient();
 }
 
-export function ncalayerUserMessage(error: unknown, fallback = "Не удалось подписать") {
+export function ncalayerUserMessage(error: unknown, fallback = uiText("Не удалось подписать")) {
   if (error instanceof NcalayerError) {
-    if (error.code === "USER_CANCELLED") return "Подпись отменена";
+    if (error.code === "USER_CANCELLED") return uiText("Подпись отменена");
     return error.message;
   }
   if (error && typeof error === "object" && "canceledByUser" in error && (error as { canceledByUser?: boolean }).canceledByUser) {
-    return "Подпись отменена";
+    return uiText("Подпись отменена");
   }
   return error instanceof Error ? error.message : fallback;
 }

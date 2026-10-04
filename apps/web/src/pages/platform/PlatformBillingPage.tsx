@@ -1,3 +1,4 @@
+import { uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale } from "../../lib/uiText";
 import { FEATURE_LIST, FEATURE_LABEL, LIMIT_LIST, LIMIT_LABEL } from "@creolab/contracts";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
@@ -23,18 +24,19 @@ type BillingRequest = {
 };
 
 function formatKzt(value: number) {
-  return `${Number(value).toLocaleString("ru-RU")} ₸`;
+  return `${Number(value).toLocaleString(uiFormatLocale())} ₸`;
 }
 
 export function PlatformBillingPage() {
+  const uiText = useUiText();
   const [freeStats, setFreeStats] = useState<any>(null);
   const [freeCap, setFreeCap] = useState(0);
   async function loadFree() { const result: any = await api.adminFreeMetrics(); setFreeStats(result); setFreeCap(result.maxActiveFreeTenants); }
   useEffect(() => { void loadFree().catch(err => setError(err.message)); }, []);
   async function saveFreePolicy() {
     setBusy(true); setError("");
-    try { await api.adminUpdateFreePolicy({ maxActiveFreeTenants: freeCap }); await loadFree(); notifySaved("Лимит Free сохранён"); }
-    catch (err) { setError(err instanceof Error ? err.message : "Ошибка сохранения"); }
+    try { await api.adminUpdateFreePolicy({ maxActiveFreeTenants: freeCap }); await loadFree(); notifySaved(uiText("Лимит Free сохранён")); }
+    catch (err) { setError(err instanceof Error ? err.message : uiText("Ошибка сохранения")); }
     finally { setBusy(false); }
   }
   const [status, setStatus] = useState("");
@@ -49,7 +51,7 @@ export function PlatformBillingPage() {
   }
 
   useEffect(() => {
-    load().catch((err) => setError(err instanceof Error ? err.message : "Ошибка"));
+    load().catch((err) => setError(err instanceof Error ? err.message : uiText("Ошибка")));
   }, [status]);
 
   async function openRequest(id: string) {
@@ -72,13 +74,13 @@ export function PlatformBillingPage() {
         features: Object.fromEntries(FEATURE_LIST.map(key => [key, values.get(`feature:${key}`) === "on"])),
       } : undefined;
       await api.adminConfirmBillingRequest(selected.request.id, { startDate, endDate, ...(enterpriseTerms ? { enterpriseTerms } : {}) });
-      notifySaved("Оплата подтверждена, тариф активирован");
+      notifySaved(uiText("Оплата подтверждена, тариф активирован"));
       setConfirmOpen(false);
       setSelected(null);
       await load();
       await loadFree();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось активировать");
+      setError(err instanceof Error ? err.message : uiText("Не удалось активировать"));
     } finally {
       setBusy(false);
     }
@@ -86,15 +88,15 @@ export function PlatformBillingPage() {
 
   async function reject() {
     if (!selected?.request?.id) return;
-    const reason = window.prompt("Причина отклонения") || "";
+    const reason = window.prompt(uiText("Причина отклонения")) || "";
     setBusy(true);
     try {
       await api.adminRejectBillingRequest(selected.request.id, { reason });
-      notifySaved("Запрос отклонён");
+      notifySaved(uiText("Запрос отклонён"));
       setSelected(null);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось отклонить");
+      setError(err instanceof Error ? err.message : uiText("Не удалось отклонить"));
     } finally {
       setBusy(false);
     }
@@ -106,25 +108,25 @@ export function PlatformBillingPage() {
     <div className="stack">
       <div className="page-head">
         <div>
-          <h2>Запросы на подключение</h2>
-          <p className="muted">Клиент оплачивает вне системы. После проверки нажмите «Подтвердить оплату и активировать».</p>
+          <h2>{uiText("Запросы на подключение")}</h2>
+          <p className="muted">{uiText("Клиент оплачивает вне системы. После проверки нажмите «Подтвердить оплату и активировать».")}</p>
         </div>
         <select value={status} onChange={(event) => setStatus(event.target.value)}>
-          <option value="">Все статусы</option>
-          <option value="AWAITING_PAYMENT">Ожидает оплаты</option>
-          <option value="PAYMENT_REVIEW">На проверке</option>
-          <option value="ACTIVATED">Активированы</option>
-          <option value="REJECTED">Отклонены</option>
-          <option value="CANCELLED">Отменены</option>
+          <option value="">{uiText("Все статусы")}</option>
+          <option value="AWAITING_PAYMENT">{uiText("Ожидает оплаты")}</option>
+          <option value="PAYMENT_REVIEW">{uiText("На проверке")}</option>
+          <option value="ACTIVATED">{uiText("Активированы")}</option>
+          <option value="REJECTED">{uiText("Отклонены")}</option>
+          <option value="CANCELLED">{uiText("Отменены")}</option>
         </select>
       </div>
       {freeStats ? <section className="panel stack"><h3>BasQar Free</h3><div className="billing-usage-grid">
-        {[["Всего Free", freeStats.total], ["Активные за 30 дней", freeStats.active], ["Неактивные", freeStats.inactive], ["Новые за месяц", freeStats.newThisMonth], ["Перешли на платный", freeStats.converted], ["Free → Start", freeStats.freeToStart], ["Free → CRM + AI", freeStats.freeToCrmAi]].map(([label,value]) => <div key={label}><span>{label}</span><p><b>{value}</b></p></div>)}
-      </div><form className="actions" onSubmit={event => { event.preventDefault(); void saveFreePolicy(); }}><label>Максимум активных Free<input type="number" min="0" step="1" value={freeCap} onChange={event => setFreeCap(Number(event.target.value))} /></label><button className="btn secondary" disabled={busy}>Сохранить лимит</button></form><p className="muted">Активность — изменение рабочих данных за последние 30 дней. Изменение лимита не отключает существующие компании.</p></section> : null}
+        {[[uiText("Всего Free"), freeStats.total], [uiText("Активные за 30 дней"), freeStats.active], [uiText("Неактивные"), freeStats.inactive], [uiText("Новые за месяц"), freeStats.newThisMonth], [uiText("Перешли на платный"), freeStats.converted], ["Free → Start", freeStats.freeToStart], ["Free → CRM + AI", freeStats.freeToCrmAi]].map(([label,value]) => <div key={label}><span>{label}</span><p><b>{value}</b></p></div>)}
+      </div><form className="actions" onSubmit={event => { event.preventDefault(); void saveFreePolicy(); }}><label>{uiText("Максимум активных Free")}<input type="number" min="0" step="1" value={freeCap} onChange={event => setFreeCap(Number(event.target.value))} /></label><button className="btn secondary" disabled={busy}>{uiText("Сохранить лимит")}</button></form><p className="muted">{uiText("Активность — изменение рабочих данных за последние 30 дней. Изменение лимита не отключает существующие компании.")}</p></section> : null}
       {error ? <p className="error">{error}</p> : null}
       <div className="panel">
         {items.length === 0 ? (
-          <p className="muted">Пока нет запросов на тариф.</p>
+          <p className="muted">{uiText("Пока нет запросов на тариф.")}</p>
         ) : (
           <div className="signup-request-list">
             {items.map((item) => (
@@ -133,7 +135,7 @@ export function PlatformBillingPage() {
                   <b>{item.company}</b>
                   <div className="muted">{item.ownerName || "—"} · {item.ownerEmail || "—"}</div>
                   <div className="muted">
-                    {item.planName || item.planCode} · {item.planCode === "CRM_ENTERPRISE" && !item.finalAmountMinor ? "Индивидуально" : formatKzt(item.finalAmountMinor)} · {item.statusLabel} · {formatDateTime(item.createdAt)}
+                    {item.planName || item.planCode} · {item.planCode === "CRM_ENTERPRISE" && !item.finalAmountMinor ? uiText("Индивидуально") : formatKzt(item.finalAmountMinor)} · {uiMessage(item.statusLabel)} · {formatDateTime(item.createdAt)}
                   </div>
                 </div>
               </button>
@@ -145,29 +147,29 @@ export function PlatformBillingPage() {
       {selected ? (
         <div className="panel stack">
           <h3>{selected.company?.name}</h3>
-          <p>Владелец: {selected.owner?.name || "—"} · {selected.owner?.email || "—"} · {selected.owner?.phone || "—"}</p>
-          <p>Текущий тариф: {selected.billing?.planName || "Нет"}</p>
-          <p>Запрошено: {selected.request?.planName || selected.request?.planCode}</p>
+          <p>{uiText("Владелец:")}{" "}{selected.owner?.name || "—"} · {selected.owner?.email || "—"} · {selected.owner?.phone || "—"}</p>
+          <p>{uiText("Текущий тариф:")}{" "}{selected.billing?.planName || uiText("Нет")}</p>
+          <p>{uiText("Запрошено:")}{" "}{selected.request?.planName || selected.request?.planCode}</p>
           <p>
-            Дополнения:{" "}
+            {uiText("Дополнения:")}{" "}
             {(selected.request?.addOns || []).length
               ? selected.request.addOns.map((row: { code: string; qty: number }) => `${row.code} × ${row.qty}`).join(", ")
-              : "нет"}
+              : uiText("нет")}
           </p>
-          <p>Период: {selected.request?.billingPeriod === "YEARLY" ? "1 год" : "1 месяц"}</p>
-          <p>Базовая цена: {formatKzt(selected.request?.baseAmountMinor || 0)}</p>
-          <dl>{(selected.request?.snapshot?.lines || []).filter((row: any) => row.kind === "addon").map((row: any) => <div key={row.code}>{row.name} × {row.qty}: {formatKzt(row.amountMinor)}{row.chargeType === "ONE_TIME" ? " · разово" : ""}</div>)}</dl>
-          <p>Итого: {formatKzt(selected.request?.finalAmountMinor || 0)}</p>
-          <p>Статус: {selected.request?.statusLabel}</p>
-          <p className="muted"><Link to={`/admin/companies/${selected.company?.id}`}>Открыть компанию</Link></p>
+          <p>{uiText("Период:")}{" "}{selected.request?.billingPeriod === "YEARLY" ? uiText("1 год") : uiText("1 месяц")}</p>
+          <p>{uiText("Базовая цена:")}{" "}{formatKzt(selected.request?.baseAmountMinor || 0)}</p>
+          <dl>{(selected.request?.snapshot?.lines || []).filter((row: any) => row.kind === "addon").map((row: any) => <div key={row.code}>{row.name} × {row.qty}: {formatKzt(row.amountMinor)}{row.chargeType === "ONE_TIME" ? uiText(" · разово") : ""}</div>)}</dl>
+          <p>{uiText("Итого:")}{" "}{formatKzt(selected.request?.finalAmountMinor || 0)}</p>
+          <p>{uiText("Статус:")}{" "}{uiMessage(selected.request?.statusLabel)}</p>
+          <p className="muted"><Link to={`/admin/companies/${selected.company?.id}`}>{uiText("Открыть компанию")}</Link></p>
           <div className="actions">
             {["PENDING", "AWAITING_PAYMENT", "PAYMENT_REVIEW", "APPROVED"].includes(selected.request?.status) ? (
               <>
-                <button className="btn" type="button" onClick={() => setConfirmOpen(true)}>Подтвердить оплату и активировать</button>
-                <button className="btn secondary" type="button" disabled={busy} onClick={() => void reject()}>Отклонить</button>
+                <button className="btn" type="button" onClick={() => setConfirmOpen(true)}>{uiText("Подтвердить оплату и активировать")}</button>
+                <button className="btn secondary" type="button" disabled={busy} onClick={() => void reject()}>{uiText("Отклонить")}</button>
               </>
             ) : null}
-            <button className="btn secondary" type="button" onClick={() => setSelected(null)}>Закрыть</button>
+            <button className="btn secondary" type="button" onClick={() => setSelected(null)}>{uiText("Закрыть")}</button>
           </div>
         </div>
       ) : null}
@@ -175,23 +177,23 @@ export function PlatformBillingPage() {
       {confirmOpen && selected ? (
         <div className="paywall-backdrop" role="dialog" aria-modal="true">
           <form id="billing-confirm-form" className="panel paywall-card stack" onSubmit={(event) => { event.preventDefault(); void confirm(); }}>
-            <h2>Подтвердить оплату?</h2>
-            <p>Компания: {selected.company?.name}</p>
-            <p>Тариф: {selected.request?.planName}</p>
-            <p>Сумма: {selected.request?.planCode === "CRM_ENTERPRISE" && !selected.request?.finalAmountMinor ? "Укажите согласованную цену ниже" : formatKzt(selected.request?.finalAmountMinor || 0)}</p>
-            <p>Период: {selected.request?.billingPeriod === "YEARLY" ? "1 год" : "1 месяц"}</p>
-            {selected.request?.planCode === "CRM_ENTERPRISE" ? <fieldset className="stack"><legend>Индивидуальные условия</legend>
-              <label>Согласованная цена за период, ₸<input name="customPriceMinor" type="number" min="1" step="1" required /></label>
-              <label>Условия поддержки / SLA<textarea name="sla" maxLength={4000} /></label><label>Согласованные интеграции<textarea name="integrations" maxLength={4000} /></label>
-              <p className="muted">Лимиты: −1 означает без квоты. Возможности откроются только после подтверждения оплаты.</p>
+            <h2>{uiText("Подтвердить оплату?")}</h2>
+            <p>{uiText("Компания:")}{" "}{selected.company?.name}</p>
+            <p>{uiText("Тариф:")}{" "}{selected.request?.planName}</p>
+            <p>{uiText("Сумма:")}{" "}{selected.request?.planCode === "CRM_ENTERPRISE" && !selected.request?.finalAmountMinor ? uiText("Укажите согласованную цену ниже") : formatKzt(selected.request?.finalAmountMinor || 0)}</p>
+            <p>{uiText("Период:")}{" "}{selected.request?.billingPeriod === "YEARLY" ? uiText("1 год") : uiText("1 месяц")}</p>
+            {selected.request?.planCode === "CRM_ENTERPRISE" ? <fieldset className="stack"><legend>{uiText("Индивидуальные условия")}</legend>
+              <label>{uiText("Согласованная цена за период, ₸")}<input name="customPriceMinor" type="number" min="1" step="1" required /></label>
+              <label>{uiText("Условия поддержки / SLA")}<textarea name="sla" maxLength={4000} /></label><label>{uiText("Согласованные интеграции")}<textarea name="integrations" maxLength={4000} /></label>
+              <p className="muted">{uiText("Лимиты: −1 означает без квоты. Возможности откроются только после подтверждения оплаты.")}</p>
               <div className="billing-usage-grid">{LIMIT_LIST.filter(key => key !== "STORAGE_GB").map(key => <label key={key}>{LIMIT_LABEL[key]}<input name={`limit:${key}`} type="number" min="-1" step="1" defaultValue={selected.request?.snapshot?.limits?.[key] ?? 0} required /></label>)}</div>
               <div className="billing-usage-grid">{FEATURE_LIST.map(key => <label key={key}><input name={`feature:${key}`} type="checkbox" defaultChecked={Boolean(selected.request?.snapshot?.features?.[key])} />{FEATURE_LABEL[key]}</label>)}</div>
             </fieldset> : null}
-            <label>Начало<input name="startDate" type="date" /></label>
-            <label>Окончание<input name="endDate" type="date" /></label>
+            <label>{uiText("Начало")}<input name="startDate" type="date" /></label>
+            <label>{uiText("Окончание")}<input name="endDate" type="date" /></label>
             <div className="actions">
-              <button className="btn secondary" type="button" onClick={() => setConfirmOpen(false)}>Отмена</button>
-              <button className="btn" disabled={busy}>Подтвердить и активировать</button>
+              <button className="btn secondary" type="button" onClick={() => setConfirmOpen(false)}>{uiText("Отмена")}</button>
+              <button className="btn" disabled={busy}>{uiText("Подтвердить и активировать")}</button>
             </div>
           </form>
         </div>

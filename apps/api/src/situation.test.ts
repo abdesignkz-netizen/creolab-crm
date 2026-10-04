@@ -575,4 +575,64 @@ describe("Situation API", () => {
     assert.equal(commandBody.command, true);
     assert.equal(commandBody.intent, "command");
   });
+  it("Kazakh profile localizes dashboard API, navigation and answers without translating customer data", async () => {
+    await resetDemo();
+    const owner = await prisma.user.findUniqueOrThrow({ where: { email: "owner@demo-agency.example" } });
+    const originalLocale = owner.locale;
+    await prisma.user.update({ where: { id: owner.id }, data: { locale: "kk" } });
+    try {
+      const created = await fetch(`${base}/api/v1/inquiries`, {
+        method: "POST", headers: { "Content-Type": "application/json", cookie },
+        body: JSON.stringify({ name: "Русское имя клиента", phone: "+77015550888", subject: "Договор — русский текст клиента" }),
+      });
+      assert.equal(created.status, 201);
+      const inquiry = await created.json();
+      const response = await fetch(`${base}/api/v1/situation/overview`, { headers: { cookie } });
+      assert.equal(response.status, 200);
+      const overview = await response.json();
+      assert.equal(overview.period.label, "Бүгін");
+      assert.match(overview.aiManager.label, /ЖИ/);
+      assert.match(overview.brief, /өтініш/);
+      assert.doesNotMatch(overview.attention.principle, /клиенту|должен|диалог у AI/);
+      const item = overview.attention.items.find((row: any) => row.entityId === inquiry.id);
+      assert.ok(item);
+      assert.equal(item.title, "Договор — русский текст клиента");
+      assert.equal(item.contactName, "Русское имя клиента");
+      assert.equal(item.whyLabel, "Өтінім жұмысқа алынбаған");
+      assert.equal(item.reason, "Жаңа өтінім, әлі қабылданбаған");
+      const badges = await fetch(`${base}/api/v1/nav-badges`, { headers: { cookie } });
+      assert.equal(badges.status, 200);
+      const badgeData = await badges.json();
+      assert.match(badgeData.hints["/today"], /назар аударуды қажет етеді/);
+      assert.doesNotMatch(badgeData.hints["/today"], /требуют|заявк/);
+      const answer = await fetch(`${base}/api/v1/situation/ask`, {
+        method: "POST", headers: { "Content-Type": "application/json", cookie },
+        body: JSON.stringify({ text: "Қай өтінімдер өңделмеген?" }),
+      });
+      assert.equal(answer.status, 200);
+      const data = await answer.json();
+      assert.equal(data.intent, "inquiries");
+      assert.match(data.headline, /өтінім/);
+      assert.equal(data.links[0].label, "Жаңа өтінімдер");
+      assert.ok(data.bullets.some((row: any) => row.text.includes("Русское имя клиента")));
+    } finally {
+      await prisma.user.update({ where: { id: owner.id }, data: { locale: originalLocale } });
+    }
+  });
+
+  it("Kazakh dashboard questions retain their intended filters", async () => {
+    const { classifySituationQuestion } = await import("./services/situationAskService.ts");
+    for (const [question, intent] of [
+      ["Бүгін неге назар аударуым керек?", "attention"],
+      ["Қай мәмілелер тоқтап тұр?", "deals"],
+      ["Қай өтінімдер өңделмеген?", "inquiries"],
+      ["Бүгін не өзгерді?", "period"],
+      ["Кімнің жұмыс жүктемесі жоғары?", "team"],
+      ["Клиенттер қай кезеңде кетіп қалады?", "funnel"],
+      ["Өткен аптамен салыстыр.", "period"],
+    ]) assert.equal(classifySituationQuestion(question).intent, intent, question);
+    assert.equal(classifySituationQuestion("Өткен аптамен салыстыр.").suggestedPeriod, "last_7");
+    assert.equal(classifySituationQuestion("Хабарлама жаз клиентке").command, true);
+  });
+
 });

@@ -1,3 +1,4 @@
+import { uiText, useUiText, localizeUiOptions } from "../lib/uiText";
 import { notifySaved } from "../components/SaveNotice";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
@@ -51,6 +52,7 @@ const EMPTY: Profile = {
 };
 
 export function LegalSettingsPanel() {
+  const uiText = useUiText();
   const [profile, setProfile] = useState<Profile>(EMPTY);
   const [vatChoice, setVatChoice] = useState<"unset" | "none" | "12" | "custom">("unset");
   const [customRate, setCustomRate] = useState("12");
@@ -91,7 +93,7 @@ export function LegalSettingsPanel() {
         setLoaded(true);
         if (location.hash === "#company-requisites") document.getElementById("company-requisites")?.scrollIntoView();
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "Не удалось загрузить реквизиты"));
+      .catch((err) => setError(err instanceof Error ? err.message : uiText("Не удалось загрузить реквизиты")));
     void loadPreflight();
   }, []);
 
@@ -123,9 +125,9 @@ export function LegalSettingsPanel() {
       })) as Profile;
       applyLoaded(next);
       setEditing(false);
-      notifySaved("Реквизиты сохранены");
+      notifySaved(uiText("Реквизиты сохранены"));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось сохранить");
+      setError(err instanceof Error ? err.message : uiText("Не удалось сохранить"));
     } finally {
       setBusy(false);
     }
@@ -133,101 +135,89 @@ export function LegalSettingsPanel() {
 
   return (
     <div className="panel" id="company-requisites">
-      <h3>Реквизиты компании</h3>
+      <h3>{uiText("Реквизиты компании")}</h3>
       <p className="muted">
-        Реквизиты вашей организации. Они подставляются в договоры, счета, АВР и ЭСФ.
-      </p>
+        {uiText("Реквизиты вашей организации. Они подставляются в договоры, счета, АВР и ЭСФ.")}</p>
       {error ? <p className="error">{error}</p> : null}
-      {!loaded ? (error ? <button className="btn secondary" onClick={()=>location.reload()}>Повторить загрузку</button> : <p role="status">Загружаем реквизиты…</p>) : !editing ? <>
+      {!loaded ? (error ? <button className="btn secondary" onClick={()=>location.reload()}>{uiText("Повторить загрузку")}</button> : <p role="status">{uiText("Загружаем реквизиты…")}</p>) : !editing ? <>
       <dl className="deal-edit">
         {([
-          ["Юридическое название", profile.legalName],
-          ["БИН / ИИН", profile.bin || profile.iin],
-          ["Юридический адрес", profile.legalAddress],
-          ["Директор", profile.directorName],
-          ["Телефон", profile.phone],
+          [uiText("Юридическое название"), profile.legalName],
+          [uiText("БИН / ИИН"), profile.bin || profile.iin],
+          [uiText("Юридический адрес"), profile.legalAddress],
+          [uiText("Директор"), profile.directorName],
+          [uiText("Телефон"), profile.phone],
           ["Email", profile.email],
-          ["Банк", profile.bankName],
-          ["ИИК / IBAN", profile.iban],
-          ["БИК", profile.bik],
+          [uiText("Банк"), profile.bankName],
+          [uiText("ИИК / IBAN"), profile.iban],
+          [uiText("БИК"), profile.bik],
           ...(CONTRACT_SIGNING_ENABLED
-            ? [["Подписание ЭЦП", profile.contractSigningEnabled ? "Включено" : "Выключено"] as const]
+            ? [[uiText("Подписание ЭЦП"), profile.contractSigningEnabled ? uiText("Включено") : uiText("Выключено")] as const]
             : []),
-        ]).map(([label, value]) => <div key={label}><dt className="muted">{label}</dt><dd style={{margin:0}}>{value || "Не заполнено"}</dd></div>)}
+        ]).map(([label, value]) => <div key={label}><dt className="muted">{label}</dt><dd style={{margin:0}}>{value || uiText("Не заполнено")}</dd></div>)}
       </dl>
       <div className="actions">
-        <button type="button" className="btn secondary" autoFocus onClick={() => setEditing(true)}>Изменить реквизиты</button>
+        <button type="button" className="btn secondary" autoFocus onClick={() => setEditing(true)}>{uiText("Изменить реквизиты")}</button>
       </div>
       <InvoiceMarksEditor profile={profile} busy={busy} setBusy={setBusy} setError={setError} onUpdated={applyLoaded} />
       </> : <>
       <div className="deal-edit">
         <label>
-          Юридическое название
-          <input
+          {uiText("Юридическое название")}<input
             value={profile.legalName || ""}
             onChange={(e) => setProfile({ ...profile, legalName: e.target.value })}
           />
         </label>
         <label>
-          БИН
-          <input value={profile.bin || ""} onChange={(e) => setProfile({ ...profile, bin: e.target.value })} />
+          {uiText("БИН")}<input value={profile.bin || ""} onChange={(e) => setProfile({ ...profile, bin: e.target.value })} />
         </label>
-        <label>ИИН (для ИП)<input value={profile.iin || ""} onChange={(e) => setProfile({ ...profile, iin: e.target.value })} /></label>
+        <label>{uiText("ИИН (для ИП)")}<input value={profile.iin || ""} onChange={(e) => setProfile({ ...profile, iin: e.target.value })} /></label>
         <label>
-          Юридический адрес
-          <input
+          {uiText("Юридический адрес")}<input
             value={profile.legalAddress || ""}
             onChange={(e) => setProfile({ ...profile, legalAddress: e.target.value })}
           />
         </label>
         <label>
-          Банк
-          <input value={profile.bankName || ""} onChange={(e) => setProfile({ ...profile, bankName: e.target.value })} />
+          {uiText("Банк")}<input value={profile.bankName || ""} onChange={(e) => setProfile({ ...profile, bankName: e.target.value })} />
         </label>
         <label>
-          ИИК / IBAN
-          <input value={profile.iban || ""} onChange={(e) => setProfile({ ...profile, iban: e.target.value })} />
+          {uiText("ИИК / IBAN")}<input value={profile.iban || ""} onChange={(e) => setProfile({ ...profile, iban: e.target.value })} />
         </label>
         <label>
-          БИК
-          <input value={profile.bik || ""} onChange={(e) => setProfile({ ...profile, bik: e.target.value })} />
+          {uiText("БИК")}<input value={profile.bik || ""} onChange={(e) => setProfile({ ...profile, bik: e.target.value })} />
         </label>
         <label>
-          Директор
-          <input
+          {uiText("Директор")}<input
             value={profile.directorName || ""}
             onChange={(e) => setProfile({ ...profile, directorName: e.target.value })}
           />
         </label>
         <label>
-          Телефон
-          <input value={profile.phone || ""} onChange={(e) => setProfile({ ...profile, phone: e.target.value })} />
+          {uiText("Телефон")}<input value={profile.phone || ""} onChange={(e) => setProfile({ ...profile, phone: e.target.value })} />
         </label>
         <label>
           Email
           <input value={profile.email || ""} onChange={(e) => setProfile({ ...profile, email: e.target.value })} />
         </label>
         <label>
-          Идентификатор ТРУ (G 18)
-          <input
+          {uiText("Идентификатор ТРУ (G 18)")}<input
             value={profile.defaultCatalogTruId || ""}
             onChange={(e) => setProfile({ ...profile, defaultCatalogTruId: e.target.value })}
-            placeholder="Из справочника ИС ЭСФ, не выдумывать"
+            placeholder={uiText("Из справочника ИС ЭСФ, не выдумывать")}
           />
         </label>
         <label>
-          НДС по умолчанию
-          <select value={vatChoice} onChange={(e) => setVatChoice(e.target.value as typeof vatChoice)}>
-            <option value="unset">Не выбрано — не подставлять автоматически</option>
-            <option value="none">Без НДС</option>
+          {uiText("НДС по умолчанию")}<select value={vatChoice} onChange={(e) => setVatChoice(e.target.value as typeof vatChoice)}>
+            <option value="unset">{uiText("Не выбрано — не подставлять автоматически")}</option>
+            <option value="none">{uiText("Без НДС")}</option>
             <option value="12">12%</option>
-            <option value="custom">Своя ставка</option>
+            <option value="custom">{uiText("Своя ставка")}</option>
           </select>
         </label>
         {vatChoice === "custom" ? (
           <label>
-            Ставка, %
-            <input value={customRate} onChange={(e) => setCustomRate(e.target.value)} />
+            {uiText("Ставка, %")}<input value={customRate} onChange={(e) => setCustomRate(e.target.value)} />
           </label>
         ) : null}
         <label>
@@ -236,8 +226,7 @@ export function LegalSettingsPanel() {
             checked={profile.documentsEnabled}
             onChange={(e) => setProfile({ ...profile, documentsEnabled: e.target.checked })}
           />{" "}
-          Черновики договора, счёта, АВР и ЭСФ. Раздел «Документы» в меню
-        </label>
+          {uiText("Черновики договора, счёта, АВР и ЭСФ. Раздел «Документы» в меню")}</label>
         {CONTRACT_SIGNING_ENABLED ? (
         <label>
           <input
@@ -245,8 +234,7 @@ export function LegalSettingsPanel() {
             checked={profile.contractSigningEnabled}
             onChange={(e) => setProfile({ ...profile, contractSigningEnabled: e.target.checked })}
           />{" "}
-          Подписание договора ЭЦП (NCALayer)
-        </label>
+          {uiText("Подписание договора ЭЦП (NCALayer)")}</label>
         ) : null}
         <label>
           <input
@@ -254,26 +242,24 @@ export function LegalSettingsPanel() {
             checked={profile.esfIntegrationEnabled}
             onChange={(e) => setProfile({ ...profile, esfIntegrationEnabled: e.target.checked })}
           />{" "}
-          Контур ИС ЭСФ включён. Подключение кабинета — в{" "}
-          <Link to="/integrations/esf">Интеграции → ИС ЭСФ</Link>, не путь к ЭЦП и не PIN.
-        </label>
+          {uiText("Контур ИС ЭСФ включён. Подключение кабинета — в")}{" "}
+          <Link to="/integrations/esf">{uiText("Интеграции → ИС ЭСФ")}</Link>{uiText(", не путь к ЭЦП и не PIN.")}</label>
         {preflight ? (
           <div className={preflight.ready ? "banner" : "banner warn"} style={{ marginTop: 12 }}>
-            <b>{preflight.ready ? "ИС ЭСФ готов к отправке" : "ИС ЭСФ ещё не готов"}</b>
+            <b>{preflight.ready ? uiText("ИС ЭСФ готов к отправке") : uiText("ИС ЭСФ ещё не готов")}</b>
             <p className="muted">
               {preflight.ready
-                ? "Кабинет подключается в Интеграции → ИС ЭСФ через NCALayer."
-                : "Отправка в ИС ЭСФ пока недоступна. Если кабинет уже должен работать — обратитесь в поддержку."}
+                ? uiText("Кабинет подключается в Интеграции → ИС ЭСФ через NCALayer.")
+                : uiText("Отправка в ИС ЭСФ пока недоступна. Если кабинет уже должен работать — обратитесь в поддержку.")}
             </p>
             <button type="button" className="btn secondary" disabled={busy} onClick={() => void loadPreflight()}>
-              Проверить снова
-            </button>
+              {uiText("Проверить снова")}</button>
           </div>
         ) : null}
       </div>
       <div className="actions" style={{ marginTop: 12 }}>
         <button type="button" className="btn" disabled={busy} onClick={() => void save()}>
-          {busy ? "Сохраняем…" : "Сохранить реквизиты"}
+          {busy ? uiText("Сохраняем…") : uiText("Сохранить реквизиты")}
         </button>
       </div>
       <InvoiceMarksEditor profile={profile} busy={busy} setBusy={setBusy} setError={setError} onUpdated={applyLoaded} />
@@ -295,6 +281,7 @@ function InvoiceMarksEditor({
   setError: (v: string) => void;
   onUpdated: (data: Profile) => void;
 }) {
+  const uiText = useUiText();
   async function upload(kind: "stamp" | "signature", file: File | undefined) {
     if (!file || busy) return;
     setBusy(true);
@@ -302,15 +289,15 @@ function InvoiceMarksEditor({
     try {
       const contentBase64 = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
-        reader.onerror = () => reject(new Error("Не удалось прочитать файл"));
+        reader.onerror = () => reject(new Error(uiText("Не удалось прочитать файл")));
         reader.onload = () => resolve(String(reader.result || ""));
         reader.readAsDataURL(file);
       });
       const next = (await api.uploadLegalMark(kind, { contentBase64, mimeType: file.type || "image/png" })) as Profile;
       onUpdated(next);
-      notifySaved(kind === "stamp" ? "Печать сохранена" : "Подпись сохранена");
+      notifySaved(kind === "stamp" ? uiText("Печать сохранена") : uiText("Подпись сохранена"));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось загрузить файл");
+      setError(err instanceof Error ? err.message : uiText("Не удалось загрузить файл"));
     } finally {
       setBusy(false);
     }
@@ -322,25 +309,25 @@ function InvoiceMarksEditor({
     try {
       onUpdated((await api.deleteLegalMark(kind)) as Profile);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось удалить файл");
+      setError(err instanceof Error ? err.message : uiText("Не удалось удалить файл"));
     } finally {
       setBusy(false);
     }
   }
   return (
     <div className="invoice-marks" style={{ marginTop: 16 }}>
-      <h4>Печать и подпись на счёте</h4>
-      <p className="muted">PNG или JPEG. Используются, когда в просмотре счёта выбран вариант «С подписью и печатью».</p>
+      <h4>{uiText("Печать и подпись на счёте")}</h4>
+      <p className="muted">{uiText("PNG или JPEG. Используются, когда в просмотре счёта выбран вариант «С подписью и печатью».")}</p>
       <div className="invoice-marks-grid">
         {(
           [
-            ["stamp", "Печать", profile.hasStamp],
-            ["signature", "Подпись", profile.hasSignature],
+            ["stamp", uiText("Печать"), profile.hasStamp],
+            ["signature", uiText("Подпись"), profile.hasSignature],
           ] as const
         ).map(([kind, label, ready]) => (
           <label key={kind}>
             {label}
-            {ready ? <img src={`${api.legalMarkUrl(kind)}?t=${Number(Boolean(profile.hasStamp))}${Number(Boolean(profile.hasSignature))}`} alt={label} /> : <span className="muted">Не загружена</span>}
+            {ready ? <img src={`${api.legalMarkUrl(kind)}?t=${Number(Boolean(profile.hasStamp))}${Number(Boolean(profile.hasSignature))}`} alt={label} /> : <span className="muted">{uiText("Не загружена")}</span>}
             <input
               type="file"
               accept="image/png,image/jpeg,image/webp"
@@ -353,8 +340,7 @@ function InvoiceMarksEditor({
             />
             {ready ? (
               <button type="button" className="btn secondary" disabled={busy} onClick={() => void remove(kind)}>
-                Удалить
-              </button>
+                {uiText("Удалить")}</button>
             ) : null}
           </label>
         ))}

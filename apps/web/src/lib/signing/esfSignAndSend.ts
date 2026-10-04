@@ -1,3 +1,4 @@
+import { uiText, useUiText, localizeUiOptions } from "../uiText";
 import { ESF_MODULE_REQUIRED_MESSAGE, sanitizeEsfSignerPublicMeta } from "@creolab/contracts";
 import { api } from "../api";
 import { createEsfNcaLayerClient } from "./esfNcaLayerClient";
@@ -9,7 +10,7 @@ export async function signAndSendEsfDocument(documentId: string, onProgress?: (p
   const client = createEsfNcaLayerClient();
   try {
     if (!(await client.isAvailable())) {
-      throw new NcalayerError("NCALAYER_NOT_RUNNING", "Запустите NCALayer и повторите подпись");
+      throw new NcalayerError("NCALAYER_NOT_RUNNING", uiText("Запустите NCALayer и повторите подпись"));
     }
     const probe = await client.probe();
     if (!probe.officialModuleInstalled) {

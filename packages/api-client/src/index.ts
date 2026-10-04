@@ -11,10 +11,21 @@ export type ClientOptions = {
   getToken?: () => string | null | Promise<string | null>;
   getTenantId?: () => string | null;
   onUnknownTenant?: () => void;
+  formatErrorMessage?: (message: string, code?: string) => string;
   onFeatureRequired?: (info: { message: string; feature?: string; body: unknown }) => void;
 };
 
 export function createApiClient(options: ClientOptions) {
+  async function fetchResponse(url: string, init: RequestInit) {
+    try { return await fetch(url, init); }
+    catch (error) {
+      if (error instanceof Error && error.name !== "AbortError" && options.formatErrorMessage) {
+        error.message = options.formatErrorMessage(error.message);
+      }
+      throw error;
+    }
+  }
+
   async function request<T>(path: string, init: RequestInit = {}, retried = false): Promise<T> {
     const headers = new Headers(init.headers);
     headers.set("Content-Type", "application/json");
@@ -22,7 +33,7 @@ export function createApiClient(options: ClientOptions) {
     if (token) headers.set("Authorization", `Bearer ${token}`);
     const tenantId = options.getTenantId?.();
     if (tenantId) headers.set("x-tenant-id", tenantId);
-    const response = await fetch(`${options.baseUrl}${path}`, {
+    const response = await fetchResponse(`${options.baseUrl}${path}`, {
       ...init,
       headers,
       credentials: "include",
@@ -32,7 +43,7 @@ export function createApiClient(options: ClientOptions) {
       if (shouldRetryUnknownTenant(response.status, data, tenantId, retried)) {
         return request<T>(path, init, true);
       }
-      const error = new Error(data.message || `HTTP ${response.status}`) as Error & {
+      const error = new Error(options.formatErrorMessage?.(data.message || `HTTP ${response.status}`, data.code) || data.message || `HTTP ${response.status}`) as Error & {
         status: number;
         code?: string;
         body: unknown;
@@ -42,7 +53,7 @@ export function createApiClient(options: ClientOptions) {
       error.body = data;
       if (error.code === "feature_required" || error.code === "limit_exceeded") {
         options.onFeatureRequired?.({
-          message: String((data as { message?: string }).message || "Эта функция доступна после активации тарифа BasQar."),
+          message: error.message,
           feature: (data as { details?: { feature?: string } }).details?.feature,
           body: data,
         });
@@ -66,13 +77,13 @@ export function createApiClient(options: ClientOptions) {
     if (token) headers.set("Authorization", `Bearer ${token}`);
     const tenantId = options.getTenantId?.();
     if (tenantId) headers.set("x-tenant-id", tenantId);
-    const response = await fetch(`${options.baseUrl}${path}`, { headers, credentials: "include" });
+    const response = await fetchResponse(`${options.baseUrl}${path}`, { headers, credentials: "include" });
     if (!response.ok) {
       const data = (await response.json().catch(() => ({}))) as { message?: string; code?: string };
       if (shouldRetryUnknownTenant(response.status, data, tenantId, retried)) {
         return downloadBlob(path, fallbackName, true);
       }
-      const error = new Error(data.message || `HTTP ${response.status}`) as Error & {
+      const error = new Error(options.formatErrorMessage?.(data.message || `HTTP ${response.status}`, data.code) || data.message || `HTTP ${response.status}`) as Error & {
         status: number;
         code?: string;
         body: unknown;
@@ -672,6 +683,13 @@ export function createApiClient(options: ClientOptions) {
     connectCompanyTelegram: (token: string) => request("/api/v1/integrations/telegram/connect", { method: "POST", body: JSON.stringify({ token }) }),
     disconnectCompanyTelegram: (id: string) => request(`/api/v1/integrations/telegram/${encodeURIComponent(id)}/disconnect`, { method: "POST" }),
     checkCompanyTelegram: (id: string) => request(`/api/v1/integrations/telegram/${encodeURIComponent(id)}/check`, { method: "POST" }),
+    whatsAppConnections: () => request("/api/v1/integrations/whatsapp"),
+    setWhatsAppAi: (id: string, enabled: boolean) => request(`/api/v1/integrations/whatsapp/${encodeURIComponent(id)}/ai`, { method: "POST", body: JSON.stringify({ enabled }) }),
+    connectWhatsAppQr: () => request("/api/v1/integrations/whatsapp/qr", { method: "POST" }),
+    whatsAppQr: (id: string) => request(`/api/v1/integrations/whatsapp/${encodeURIComponent(id)}/qr`),
+    connectWhatsAppCloud: (body: { appId: string; wabaId: string; phoneNumberId: string; accessToken: string; appSecret: string }) => request("/api/v1/integrations/whatsapp/cloud", { method: "POST", body: JSON.stringify(body) }),
+    activateWhatsAppCloud: (id: string) => request(`/api/v1/integrations/whatsapp/${encodeURIComponent(id)}/activate`, { method: "POST" }),
+    disconnectDirectWhatsApp: (id: string) => request(`/api/v1/integrations/whatsapp/${encodeURIComponent(id)}/disconnect`, { method: "POST" }),
     connectWhatsApp: (body: { instanceId?: string; apiToken?: string; sellerUrl?: string; secret?: string }) =>
       request("/api/v1/integrations/whatsapp-seller/connect", {
         method: "POST",

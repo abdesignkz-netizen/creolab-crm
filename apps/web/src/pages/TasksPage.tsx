@@ -1,3 +1,4 @@
+import { uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale } from "../lib/uiText";
 import {
   displayTaskStatus,
   isAiAssignableTaskType,
@@ -72,7 +73,7 @@ function readFileBase64(file: File) {
       const result = String(reader.result || "");
       resolve(result.includes(",") ? result.split(",")[1] : result);
     };
-    reader.onerror = () => reject(new Error("Не удалось прочитать файл"));
+    reader.onerror = () => reject(new Error(uiText("Не удалось прочитать файл")));
     reader.readAsDataURL(file);
   });
 }
@@ -221,20 +222,20 @@ function itemBoardLane(item: any): TaskBoardLane {
 }
 
 function createdByText(item: any) {
-  if (item?.createdByLabel) return item.createdByLabel;
+  if (item?.createdByLabel) return item.createdByKind === "user" ? item.createdByLabel : uiText(item.createdByLabel);
   const kind = item?.createdByKind || taskCreatedByKind(item || {});
-  return kind === "user" ? "Не указан" : taskCreatedByLabel(kind);
+  return kind === "user" ? uiText("Не указан") : uiText(taskCreatedByLabel(kind));
 }
 
 function assigneeText(item: any) {
-  if (item?.assigneeLabel) return item.assigneeLabel;
+  if (item?.assigneeLabel) return item.assigneeKind === "user" ? item.assigneeLabel : uiText(item.assigneeLabel);
   const kind = item?.assigneeKind || taskAssigneeKind(item || {});
   if (kind === "ai") return "AI Manager";
-  return item.assigneeName || item.owner?.user?.name || "Не назначен";
+  return item.assigneeName || item.owner?.user?.name || uiText("Не назначен");
 }
 
 function statusText(item: any) {
-  return displayTaskStatus(item?.status) || item?.statusLabel || item?.status || "";
+  return uiText(displayTaskStatus(item?.status)) || item?.statusLabel || item?.status || "";
 }
 
 function isDueToday(item: any, now: Date) {
@@ -261,9 +262,9 @@ function taskDoneAt(item: any) {
 function doneDateLabel(value: Date, now: Date) {
   const day = startOfDay(value);
   const today = startOfDay(now);
-  if (day === today) return "Сегодня";
-  if (day === today - 86400000) return "Вчера";
-  return value.toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
+  if (day === today) return uiText("Сегодня");
+  if (day === today - 86400000) return uiText("Вчера");
+  return value.toLocaleDateString(uiFormatLocale(), { day: "numeric", month: "long" });
 }
 
 function groupDoneByDate(list: any[], now: Date) {
@@ -289,21 +290,21 @@ function taskResultLine(item: any) {
     return `${item.doneSummary}: ${text}`;
   }
   if (item.doneSummary) return item.doneSummary;
-  if (item.resultLabel && text) return `${item.resultLabel}: ${text}`;
+  if (item.resultLabel && text) return `${uiMessage(item.resultLabel)}: ${text}`;
   if (text) return text;
-  if (item.resultLabel) return item.resultLabel;
-  if (item.status === "canceled") return "Отменена";
-  if (item.status === "done") return "Сделано";
+  if (item.resultLabel) return uiMessage(item.resultLabel);
+  if (item.status === "canceled") return uiText("Отменена");
+  if (item.status === "done") return uiText("Сделано");
   return null;
 }
 
 function suggestedTitle(type: string, mode: TargetMode, client?: PickerClient | null, groupCount?: number, segmentLabel?: string) {
-  const typeLabel = TASK_TYPES.find(([id]) => id === type)?.[1] || "Задача";
+  const typeLabel = localizeUiOptions(TASK_TYPES, uiText).find(([id]) => id === type)?.[1] || uiText("Задача");
   if (mode === "client" && client) {
     return `${typeLabel} — ${client.name}${client.interest ? ` / ${client.interest}` : ""}`;
   }
   if (mode === "group") {
-    return `${typeLabel} — ${segmentLabel || "группа"}${groupCount ? ` / ${groupCount} клиентов` : ""}`;
+    return `${typeLabel} — ${segmentLabel || uiText("группа")}${groupCount ? uiText(" / {p0} клиентов", {p0: groupCount}) : ""}`;
   }
   return typeLabel;
 }
@@ -313,6 +314,7 @@ function toggleValue(list: string[], value: string) {
 }
 
 export function TasksPage() {
+  const uiText = useUiText();
   const caps = useCapabilities();
   const [items, setItems] = useState<any[]>([]);
   const [error, setError] = useState("");
@@ -421,7 +423,7 @@ export function TasksPage() {
       setWhatsappReady(Boolean(wa?.configured && wa?.reachable !== false));
       setError("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Ошибка");
+      setError(err instanceof Error ? err.message : uiText("Ошибка"));
     }
   }
 
@@ -613,7 +615,7 @@ export function TasksPage() {
         setConversationId(data.conversations?.[0]?.id || "");
         if (!title.trim()) setTitle(suggestedTitle(type, "client", selectedClient));
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "Не удалось загрузить клиента"));
+      .catch((err) => setError(err instanceof Error ? err.message : uiText("Не удалось загрузить клиента")));
   }, [selectedClient?.id]);
 
   const segmentBody = useMemo(
@@ -639,7 +641,7 @@ export function TasksPage() {
       else if (!segmentLabel) setSegmentLabel(buildSegmentLabel(extra));
       setError("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось построить выборку");
+      setError(err instanceof Error ? err.message : uiText("Не удалось построить выборку"));
     } finally {
       setPreviewBusy(false);
     }
@@ -649,15 +651,15 @@ export function TasksPage() {
     const parts: string[] = [];
     const cats = (extra.serviceCategories as string[]) || serviceCategories;
     const dates = (extra.datePreset as string) || datePreset;
-    if (cats.includes("WEB")) parts.push("Сайты");
-    if (cats.includes("PRESENTATION")) parts.push("Презентации");
-    if (cats.includes("ADVERTISING")) parts.push("Реклама");
-    if (dates === "today") parts.push("сегодня");
-    if (dates === "yesterday") parts.push("вчера");
-    if (extra.needsReply) parts.push("ждут ответа");
-    if (extra.missingNextAction) parts.push("без следующего шага");
-    if (extra.hot) parts.push("горячие");
-    return parts.join(" · ") || "Выборка";
+    if (cats.includes("WEB")) parts.push(uiText("Сайты"));
+    if (cats.includes("PRESENTATION")) parts.push(uiText("Презентации"));
+    if (cats.includes("ADVERTISING")) parts.push(uiText("Реклама"));
+    if (dates === "today") parts.push(uiText("сегодня"));
+    if (dates === "yesterday") parts.push(uiText("вчера"));
+    if (extra.needsReply) parts.push(uiText("ждут ответа"));
+    if (extra.missingNextAction) parts.push(uiText("без следующего шага"));
+    if (extra.hot) parts.push(uiText("горячие"));
+    return parts.join(" · ") || uiText("Выборка");
   }
 
   const membershipId = me?.activeTenant?.membershipId;
@@ -726,23 +728,23 @@ export function TasksPage() {
     event.preventDefault();
     try {
       if (targetMode === "client" && !selectedClient) {
-        setError("Выберите клиента");
+        setError(uiText("Выберите клиента"));
         return;
       }
       if (ownerId === AI_ASSIGNEE && !isAiAssignableTaskType(type)) {
-        setError("AI Manager не выполняет этот тип задачи. Выберите «Написать», «Напомнить» или отправку документов.");
+        setError(uiText("AI Manager не выполняет этот тип задачи. Выберите «Написать», «Напомнить» или отправку документов."));
         return;
       }
       if (ownerId === AI_ASSIGNEE && targetMode !== "client") {
-        setError("Для AI Manager нужна привязка к клиенту");
+        setError(uiText("Для AI Manager нужна привязка к клиенту"));
         return;
       }
       if (targetMode === "group" && selectedIds.length === 0) {
-        setError("Выберите хотя бы одного клиента");
+        setError(uiText("Выберите хотя бы одного клиента"));
         return;
       }
       if (targetMode === "group" && selectedIds.length >= 100) {
-        const ok = window.confirm(`Задача будет создана для ${selectedIds.length} клиентов. Продолжить?`);
+        const ok = window.confirm(uiText("Задача будет создана для {p0} клиентов. Продолжить?", {p0: selectedIds.length}));
         if (!ok) return;
       }
 
@@ -796,10 +798,10 @@ export function TasksPage() {
       setSelectedIds([]);
       setSegmentTotal(0);
       setShowCreate(false);
-      notifySaved("Задача создана");
+      notifySaved(uiText("Задача создана"));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось создать");
+      setError(err instanceof Error ? err.message : uiText("Не удалось создать"));
     }
   }
 
@@ -807,12 +809,12 @@ export function TasksPage() {
     api
       .setTaskStatus(id, status)
       .then(() => load())
-      .catch((err) => setError(err instanceof Error ? err.message : "Не удалось обновить статус"));
+      .catch((err) => setError(err instanceof Error ? err.message : uiText("Не удалось обновить статус")));
   }
 
   async function openTaskEditor(taskId: string) {
     if (String(taskId).startsWith("campaign:")) {
-      setError("Это запланированная рассылка. Откройте «Массовая отправка», если нужно изменить её.");
+      setError(uiText("Это запланированная рассылка. Откройте «Массовая отправка», если нужно изменить её."));
       return;
     }
     setBusy(true);
@@ -831,7 +833,7 @@ export function TasksPage() {
           : detail.ownerMembershipId || membershipId || "",
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось открыть задачу");
+      setError(err instanceof Error ? err.message : uiText("Не удалось открыть задачу"));
     } finally {
       setBusy(false);
     }
@@ -852,7 +854,7 @@ export function TasksPage() {
       setTaskDetail(detail);
       setPreview(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось прикрепить файл");
+      setError(err instanceof Error ? err.message : uiText("Не удалось прикрепить файл"));
     } finally {
       setBusy(false);
     }
@@ -867,7 +869,7 @@ export function TasksPage() {
   async function onSaveTaskEdits() {
     if (!activeTaskId || busy) return;
     if (isScheduledSend(taskDetail) && editDueAt && !isFutureDue(editDueAt)) {
-      setError("Укажите время в будущем — иначе сообщение уйдёт сразу.");
+      setError(uiText("Укажите время в будущем — иначе сообщение уйдёт сразу."));
       return;
     }
     setBusy(true);
@@ -886,11 +888,11 @@ export function TasksPage() {
       setEditDueAt("");
       setEditOwnerId("");
       setPreview(null);
-      notifySaved("Правки задачи сохранены");
+      notifySaved(uiText("Правки задачи сохранены"));
       setError("");
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось сохранить правки");
+      setError(err instanceof Error ? err.message : uiText("Не удалось сохранить правки"));
     } finally {
       setBusy(false);
     }
@@ -905,7 +907,7 @@ export function TasksPage() {
       setPreview(data);
       setExecResult(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось подготовить");
+      setError(err instanceof Error ? err.message : uiText("Не удалось подготовить"));
     } finally {
       setBusy(false);
     }
@@ -937,7 +939,7 @@ export function TasksPage() {
         await load();
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Отправка не удалась");
+      setError(err instanceof Error ? err.message : uiText("Отправка не удалась"));
     } finally {
       setBusy(false);
     }
@@ -961,7 +963,7 @@ export function TasksPage() {
         await load();
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Повтор не удался");
+      setError(err instanceof Error ? err.message : uiText("Повтор не удался"));
     } finally {
       setBusy(false);
     }
@@ -981,7 +983,7 @@ export function TasksPage() {
       await openTaskEditor(taskId);
       setExecResult(result);
       setPreview({
-        actionLabel: "Повтор отправки файла",
+        actionLabel: uiText("Повтор отправки файла"),
         client: { name: "Клиент", phone: null },
         request: null,
         channel: "WhatsApp",
@@ -995,7 +997,7 @@ export function TasksPage() {
       });
       await load();
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Повтор не удался";
+      const message = err instanceof Error ? err.message : uiText("Повтор не удался");
       setError(message);
       if (/подтверд|stale|confirm/i.test(message)) {
         await openTaskEditor(taskId);
@@ -1008,15 +1010,15 @@ export function TasksPage() {
   function addCmdPhone() {
     const phone = cmdPhoneDraft.trim();
     if (phone.length < 5) {
-      setError("Укажите телефон полностью");
+      setError(uiText("Укажите телефон полностью"));
       return;
     }
     if (cmdPhones.some((item) => item.phone === phone)) {
-      setError("Этот номер уже добавлен");
+      setError(uiText("Этот номер уже добавлен"));
       return;
     }
     if (cmdPhones.length >= 30) {
-      setError("Не больше 30 номеров за раз");
+      setError(uiText("Не больше 30 номеров за раз"));
       return;
     }
     setCmdPhones((prev) => [...prev, { phone, name: cmdPhoneNameDraft.trim() }]);
@@ -1033,7 +1035,7 @@ export function TasksPage() {
       setCmdPendingFiles((prev) => [...prev, ...pending].slice(0, 20));
       setError("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось прочитать файл");
+      setError(err instanceof Error ? err.message : uiText("Не удалось прочитать файл"));
     }
   }
 
@@ -1056,11 +1058,11 @@ export function TasksPage() {
   async function onParseCommand() {
     if (!commandText.trim()) return;
     if (cmdWhoMode === "contact" && cmdSelectedContacts.length === 0) {
-      setError("Добавьте хотя бы одного клиента");
+      setError(uiText("Добавьте хотя бы одного клиента"));
       return;
     }
     if (cmdWhoMode === "phone" && cmdPhones.length === 0) {
-      setError("Добавьте хотя бы один телефон");
+      setError(uiText("Добавьте хотя бы один телефон"));
       return;
     }
     const massIntent = /отправ|разошли|рассыл|всем\s+этим|кп|презентац|файл/i.test(commandText);
@@ -1123,7 +1125,7 @@ export function TasksPage() {
       setShowCreate(true);
       setError("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось понять команду");
+      setError(err instanceof Error ? err.message : uiText("Не удалось понять команду"));
     } finally {
       setBusy(false);
     }
@@ -1132,16 +1134,16 @@ export function TasksPage() {
   async function onCreateFromCommand() {
     const phonesPayload = cmdWhoMode === "phone" ? cmdPhones.map((item) => item.phone) : cmdPhonesUnresolved;
     if (!commandParse || (commandSelectedIds.length === 0 && phonesPayload.length === 0)) {
-      setError("Выберите клиентов или добавьте телефоны");
+      setError(uiText("Выберите клиентов или добавьте телефоны"));
       return;
     }
     if (commandDueMode === "scheduled") {
       if (!commandDueAt) {
-        setError("Укажите дату и время срока");
+        setError(uiText("Укажите дату и время срока"));
         return;
       }
       if (!isFutureDue(commandDueAt)) {
-        setError("Укажите время в будущем. Сейчас выбранный срок уже наступил — сообщение уйдёт сразу.");
+        setError(uiText("Укажите время в будущем. Сейчас выбранный срок уже наступил — сообщение уйдёт сразу."));
         return;
       }
     }
@@ -1190,7 +1192,7 @@ export function TasksPage() {
       setError("");
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось создать из команды");
+      setError(err instanceof Error ? err.message : uiText("Не удалось создать из команды"));
     } finally {
       setBusy(false);
     }
@@ -1254,7 +1256,7 @@ export function TasksPage() {
       }
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Отправка не удалась");
+      setError(err instanceof Error ? err.message : uiText("Отправка не удалась"));
     } finally {
       setBusy(false);
     }
@@ -1284,7 +1286,7 @@ export function TasksPage() {
       }
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Повтор отправки файла не удался");
+      setError(err instanceof Error ? err.message : uiText("Повтор отправки файла не удался"));
     } finally {
       setBusy(false);
     }
@@ -1326,37 +1328,36 @@ export function TasksPage() {
     <section>
       <div className="page-head">
         <div>
-          <h2>Задачи</h2>
-          <p className="muted page-head-sub">Все действия команды и AI в одном месте.</p>
+          <h2>{uiText("Задачи")}</h2>
+          <p className="muted page-head-sub">{uiText("Все действия команды и AI в одном месте.")}</p>
         </div>
         <div className="actions">
           {caps.manageTasks ? (
             <button
               type="button"
               className={showCreate && composeMode === "manual" ? "btn" : "btn"}
-              {...tip("Создать задачу: что сделать, к чему относится, кто выполнит, срок")}
+              {...tip(uiText("Создать задачу: что сделать, к чему относится, кто выполнит, срок"))}
               onClick={() => {
                 setComposeMode("manual");
                 setShowCampaignPanel(false);
                 setShowCreate(true);
               }}
             >
-              + Новая задача
-            </button>
+              {uiText("+ Новая задача")}</button>
           ) : null}
         </div>
       </div>
       <div className="actions task-quick-filters">
         {(
           [
-            ["all", "Все"],
-            ["mine", "Мои"],
-            ["today", "Сегодня"],
-            ["scheduled", "Запланированные"],
-            ["no_due", "Без срока"],
-            ["waiting", "Жду"],
-            ["overdue", "Просроченные"],
-            ["done", "Завершённые"],
+            ["all", uiText("Все")],
+            ["mine", uiText("Мои")],
+            ["today", uiText("Сегодня")],
+            ["scheduled", uiText("Запланированные")],
+            ["no_due", uiText("Без срока")],
+            ["waiting", uiText("Жду")],
+            ["overdue", uiText("Просроченные")],
+            ["done", uiText("Завершённые")],
           ] as const
         ).map(([value, label]) => (
           <button
@@ -1364,20 +1365,20 @@ export function TasksPage() {
             className={filter === value ? "btn" : "btn secondary"}
             {...tip(
               value === "all"
-                ? "Все доступные задачи"
+                ? uiText("Все доступные задачи")
                 : value === "mine"
-                  ? "Назначены на вас — не те, что вы поставили другим"
+                  ? uiText("Назначены на вас — не те, что вы поставили другим")
                   : value === "today"
-                    ? "Срок сегодня"
+                    ? uiText("Срок сегодня")
                     : value === "scheduled"
-                      ? "Срок в будущем или запланированная отправка"
+                      ? uiText("Срок в будущем или запланированная отправка")
                       : value === "no_due"
-                        ? "Незавершённые задачи без даты выполнения"
+                        ? uiText("Незавершённые задачи без даты выполнения")
                         : value === "waiting"
-                          ? "Ждёте ответа клиента или внешней реакции"
+                          ? uiText("Ждёте ответа клиента или внешней реакции")
                           : value === "overdue"
-                            ? "Срок уже прошёл, задача ещё не завершена"
-                            : "Что уже сделано или отменено",
+                            ? uiText("Срок уже прошёл, задача ещё не завершена")
+                            : uiText("Что уже сделано или отменено"),
             )}
             onClick={() => setFilter(value)}
           >
@@ -1387,82 +1388,74 @@ export function TasksPage() {
         <button
           type="button"
           className={showExtraFilters || extraFilterActive ? "btn" : "btn secondary"}
-          {...tip("Исполнитель, кто поставил, статус, привязка, период, источник")}
+          {...tip(uiText("Исполнитель, кто поставил, статус, привязка, период, источник"))}
           onClick={() => setShowExtraFilters((open) => !open)}
         >
-          Фильтры
-        </button>
+          {uiText("Фильтры")}</button>
       </div>
       {showExtraFilters ? (
         <div className="panel task-extra-filters">
           <div className="task-extra-grid">
             <label>
-              Исполнитель
-              <select value={extraAssignee} onChange={(event) => setExtraAssignee(event.target.value)}>
-                <option value="">Все</option>
+              {uiText("Исполнитель")}<select value={extraAssignee} onChange={(event) => setExtraAssignee(event.target.value)}>
+                <option value="">{uiText("Все")}</option>
                 <option value={AI_ASSIGNEE}>AI Manager</option>
                 {members.map((member) => (
                   <option key={member.id} value={member.id}>
                     {member.name}
-                    {member.isMe ? " (я)" : ""}
+                    {member.isMe ? uiText(" (я)") : ""}
                   </option>
                 ))}
               </select>
             </label>
             <label>
-              Кто поставил
-              <select value={extraCreatedBy} onChange={(event) => setExtraCreatedBy(event.target.value)}>
-                <option value="">Все</option>
-                <option value="user">Сотрудник</option>
+              {uiText("Кто поставил")}<select value={extraCreatedBy} onChange={(event) => setExtraCreatedBy(event.target.value)}>
+                <option value="">{uiText("Все")}</option>
+                <option value="user">{uiText("Сотрудник")}</option>
                 <option value="ai">AI Manager</option>
-                <option value="system">Автоматизация</option>
+                <option value="system">{uiText("Автоматизация")}</option>
               </select>
             </label>
             <label>
-              Статус
-              <select value={extraStatus} onChange={(event) => setExtraStatus(event.target.value)}>
-                <option value="">Все</option>
-                <option value="open">К выполнению</option>
-                <option value="in_progress">В работе</option>
-                <option value="waiting">Жду</option>
-                <option value="done">Завершено</option>
-                <option value="canceled">Отменено</option>
+              {uiText("Статус")}<select value={extraStatus} onChange={(event) => setExtraStatus(event.target.value)}>
+                <option value="">{uiText("Все")}</option>
+                <option value="open">{uiText("К выполнению")}</option>
+                <option value="in_progress">{uiText("В работе")}</option>
+                <option value="waiting">{uiText("Жду")}</option>
+                <option value="done">{uiText("Завершено")}</option>
+                <option value="canceled">{uiText("Отменено")}</option>
               </select>
             </label>
             <label>
-              Связано с
-              <select value={extraLink} onChange={(event) => setExtraLink(event.target.value)}>
-                <option value="">Все</option>
-                <option value="none">Без привязки</option>
-                <option value="client">Клиент</option>
-                <option value="company">Компания</option>
-                <option value="inquiry">Заявка</option>
-                <option value="deal">Сделка</option>
-                <option value="conversation">Диалог</option>
+              {uiText("Связано с")}<select value={extraLink} onChange={(event) => setExtraLink(event.target.value)}>
+                <option value="">{uiText("Все")}</option>
+                <option value="none">{uiText("Без привязки")}</option>
+                <option value="client">{uiText("Клиент")}</option>
+                <option value="company">{uiText("Компания")}</option>
+                <option value="inquiry">{uiText("Заявка")}</option>
+                <option value="deal">{uiText("Сделка")}</option>
+                <option value="conversation">{uiText("Диалог")}</option>
               </select>
             </label>
             <label>
-              Источник
-              <select value={extraSource} onChange={(event) => setExtraSource(event.target.value)}>
-                <option value="">Все</option>
-                <option value="ai">От AI</option>
-                <option value="managers">Команда</option>
-                <option value="notes">Без клиента</option>
-                <option value="manual">Вручную</option>
-                <option value="ai_command">Команда AI</option>
-                <option value="ai_automation">Автоматизация AI</option>
-                <option value="context_engine">Из WhatsApp</option>
-                <option value="campaign">Рассылка</option>
-                <option value="rule">Правило</option>
+              {uiText("Источник")}<select value={extraSource} onChange={(event) => setExtraSource(event.target.value)}>
+                <option value="">{uiText("Все")}</option>
+                <option value="ai">{uiText("От AI")}</option>
+                <option value="managers">{uiText("Команда")}</option>
+                <option value="notes">{uiText("Без клиента")}</option>
+                <option value="manual">{uiText("Вручную")}</option>
+                <option value="ai_command">{uiText("Команда AI")}</option>
+                <option value="ai_automation">{uiText("Автоматизация AI")}</option>
+                <option value="context_engine">{uiText("Из WhatsApp")}</option>
+                <option value="campaign">{uiText("Рассылка")}</option>
+                <option value="rule">{uiText("Правило")}</option>
               </select>
             </label>
             <label>
-              Срок с
-              <input type="date" value={extraPeriodFrom} onChange={(event) => setExtraPeriodFrom(event.target.value)} />
+              {uiText("Срок с")}<input type="date" value={extraPeriodFrom} onChange={(event) => setExtraPeriodFrom(event.target.value)} />
             </label>
             <label>
-              Срок по
-              <input type="date" value={extraPeriodTo} onChange={(event) => setExtraPeriodTo(event.target.value)} />
+              {uiText("Срок по")}<input type="date" value={extraPeriodTo} onChange={(event) => setExtraPeriodTo(event.target.value)} />
             </label>
           </div>
           {extraFilterActive ? (
@@ -1480,8 +1473,7 @@ export function TasksPage() {
                   setExtraPeriodTo("");
                 }}
               >
-                Сбросить фильтры
-              </button>
+                {uiText("Сбросить фильтры")}</button>
             </div>
           ) : null}
         </div>
@@ -1490,10 +1482,8 @@ export function TasksPage() {
       {whatsappReady === false ? (
         <div className="banner warn">
           <span>
-            WhatsApp-бот не подключён или недоступен. Создавать и закрывать задачи можно, а отправка сообщений/КП из задачи —
-            только после подключения в{" "}
-            <Link to="/integrations">Интеграциях</Link>. Для рассылки по списку номеров используйте «Массовая отправка».
-          </span>
+            {uiText("WhatsApp-бот не подключён или недоступен. Создавать и закрывать задачи можно, а отправка сообщений/КП из задачи — только после подключения в")}{" "}
+            <Link to="/integrations">{uiText("Интеграциях")}</Link>{uiText(". Для рассылки по списку номеров используйте «Массовая отправка».")}</span>
         </div>
       ) : null}
 
@@ -1526,8 +1516,8 @@ export function TasksPage() {
         <div className="panel task-form command-compose">
           <div className="command-compose-head">
             <div>
-              <b>Новая задача командой</b>
-              <p className="muted">Сначала укажите, кому. Затем напишите, что сделать — своими словами.</p>
+              <b>{uiText("Новая задача командой")}</b>
+              <p className="muted">{uiText("Сначала укажите, кому. Затем напишите, что сделать — своими словами.")}</p>
             </div>
             <button
               type="button"
@@ -1537,21 +1527,20 @@ export function TasksPage() {
                 setCommandParse(null);
               }}
             >
-              Скрыть
-            </button>
+              {uiText("Скрыть")}</button>
           </div>
 
           <div className="command-step">
-            <div className="command-step-label">1. Кому</div>
+            <div className="command-step-label">{uiText("1. Кому")}</div>
             <div className="chip-row">
               {(
                 [
-                  ["contact", "Клиент из CRM"],
-                  ["group", "Группа из CRM"],
-                  ["phone", "По номеру"],
-                  ["list", "Список номеров"],
-                  ["import", "Импорт контактов"],
-                  ["auto", "Из текста команды"],
+                  ["contact", uiText("Клиент из CRM")],
+                  ["group", uiText("Группа из CRM")],
+                  ["phone", uiText("По номеру")],
+                  ["list", uiText("Список номеров")],
+                  ["import", uiText("Импорт контактов")],
+                  ["auto", uiText("Из текста команды")],
                 ] as const
               ).map(([value, label]) => (
                 <button
@@ -1595,13 +1584,13 @@ export function TasksPage() {
                 {cmdSelectedContacts.length ? (
                   <div className="cmd-selected-list">
                     <div className="muted" style={{ marginBottom: 6 }}>
-                      Выбрано: {cmdSelectedContacts.length}
+                      {uiText("Выбрано:")}{" "}{cmdSelectedContacts.length}
                     </div>
                     {cmdSelectedContacts.map((client) => (
                       <div key={client.id} className="selected-client compact">
                         <div>
                           <b>{client.name}</b>
-                          <div className="muted">{[client.phone, client.interest].filter(Boolean).join(" · ") || "Без телефона"}</div>
+                          <div className="muted">{[client.phone, client.interest].filter(Boolean).join(" · ") || uiText("Без телефона")}</div>
                         </div>
                         <button
                           type="button"
@@ -1611,18 +1600,16 @@ export function TasksPage() {
                             setCommandParse(null);
                           }}
                         >
-                          Убрать
-                        </button>
+                          {uiText("Убрать")}</button>
                       </div>
                     ))}
                   </div>
                 ) : null}
                 <label>
-                  Найти или выбрать клиента
-                  <input
+                  {uiText("Найти или выбрать клиента")}<input
                     value={cmdSearchQ}
                     onChange={(event) => setCmdSearchQ(event.target.value)}
-                    placeholder="Имя, телефон или компания"
+                    placeholder={uiText("Имя, телефон или компания")}
                     autoComplete="off"
                   />
                 </label>
@@ -1630,10 +1617,10 @@ export function TasksPage() {
                   <>
                     <div className="muted" style={{ marginTop: 8 }}>
                       {cmdSearchQ.trim()
-                        ? `Найдено: ${cmdSearchHits.length}`
-                        : "Клиенты CRM — нажмите, чтобы выбрать"}
+                        ? uiText("Найдено: {p0}", {p0: cmdSearchHits.length})
+                        : uiText("Клиенты CRM — нажмите, чтобы выбрать")}
                     </div>
-                    <div className="picker-list" role="listbox" aria-label="Клиенты CRM">
+                    <div className="picker-list" role="listbox" aria-label={uiText("Клиенты CRM")}>
                       {cmdSearchHits.map((hit) => {
                         const already = cmdSelectedContacts.some((item) => item.id === hit.id);
                         return (
@@ -1652,10 +1639,10 @@ export function TasksPage() {
                           >
                             <b>{hit.name}</b>
                             <div className="muted">
-                              {[hit.phone, hit.companyName, hit.interest, hit.statusLabel]
+                              {[hit.phone, hit.companyName, hit.interest, uiMessage(hit.statusLabel)]
                                 .filter(Boolean)
                                 .join(" · ")}
-                              {already ? " · уже выбран" : ""}
+                              {already ? uiText(" · уже выбран") : ""}
                             </div>
                           </button>
                         );
@@ -1663,9 +1650,9 @@ export function TasksPage() {
                     </div>
                   </>
                 ) : cmdSearchQ.trim() ? (
-                  <p className="muted">Никого не нашли. Попробуйте другой запрос или режим «По номеру».</p>
+                  <p className="muted">{uiText("Никого не нашли. Попробуйте другой запрос или режим «По номеру».")}</p>
                 ) : (
-                  <p className="muted">Загрузка клиентов…</p>
+                  <p className="muted">{uiText("Загрузка клиентов…")}</p>
                 )}
               </div>
             ) : null}
@@ -1675,7 +1662,7 @@ export function TasksPage() {
                 {cmdPhones.length ? (
                   <div className="cmd-selected-list">
                     <div className="muted" style={{ marginBottom: 6 }}>
-                      Номеров: {cmdPhones.length}
+                      {uiText("Номеров:")}{" "}{cmdPhones.length}
                     </div>
                     {cmdPhones.map((item) => (
                       <div key={item.phone} className="selected-client compact">
@@ -1692,16 +1679,14 @@ export function TasksPage() {
                             setCmdPhonesUnresolved([]);
                           }}
                         >
-                          Убрать
-                        </button>
+                          {uiText("Убрать")}</button>
                       </div>
                     ))}
                   </div>
                 ) : null}
                 <div className="command-phone-grid">
                   <label>
-                    Телефон
-                    <input
+                    {uiText("Телефон")}<input
                       value={cmdPhoneDraft}
                       onChange={(event) => setCmdPhoneDraft(event.target.value)}
                       placeholder="+7 701 000 00 00"
@@ -1715,11 +1700,10 @@ export function TasksPage() {
                     />
                   </label>
                   <label>
-                    Имя (если нового)
-                    <input
+                    {uiText("Имя (если нового)")}<input
                       value={cmdPhoneNameDraft}
                       onChange={(event) => setCmdPhoneNameDraft(event.target.value)}
-                      placeholder="Необязательно"
+                      placeholder={uiText("Необязательно")}
                       onKeyDown={(event) => {
                         if (event.key === "Enter") {
                           event.preventDefault();
@@ -1731,20 +1715,19 @@ export function TasksPage() {
                 </div>
                 <div className="actions">
                   <button type="button" className="btn secondary" onClick={addCmdPhone} disabled={cmdPhoneDraft.trim().length < 5}>
-                    Добавить номер
-                  </button>
+                    {uiText("Добавить номер")}</button>
                 </div>
-                <p className="muted">Несколько номеров — по одному. Существующие найдём, новых создадим при постановке.</p>
+                <p className="muted">{uiText("Несколько номеров — по одному. Существующие найдём, новых создадим при постановке.")}</p>
               </div>
             ) : null}
 
             {cmdWhoMode === "auto" ? (
-              <p className="muted">CRM сама найдёт клиента или группу по тексту задачи (имя, «вчерашним», услуга…).</p>
+              <p className="muted">{uiText("CRM сама найдёт клиента или группу по тексту задачи (имя, «вчерашним», услуга…).")}</p>
             ) : null}
           </div>
 
           <div className="command-step">
-            <div className="command-step-label">2. Что сделать</div>
+            <div className="command-step-label">{uiText("2. Что сделать")}</div>
             <textarea
               value={commandText}
               onChange={(event) => {
@@ -1752,9 +1735,9 @@ export function TasksPage() {
                 setCommandParse(null);
               }}
               rows={3}
-              placeholder="Любая задача своими словами: попросить реквизиты, согласовать макет, напомнить про оплату…"
+              placeholder={uiText("Любая задача своими словами: попросить реквизиты, согласовать макет, напомнить про оплату…")}
             />
-            <p className="muted">Пишите как есть. AI соберёт текст клиенту из вашей задачи — не из готовых шаблонов.</p>
+            <p className="muted">{uiText("Пишите как есть. AI соберёт текст клиенту из вашей задачи — не из готовых шаблонов.")}</p>
           </div>
 
           <div
@@ -1763,12 +1746,11 @@ export function TasksPage() {
             onDrop={onCmdDrop}
           >
             <div className="command-step-label">
-              3. Вложения{cmdPendingFiles.length ? ` · ${cmdPendingFiles.length}` : ""}
+              {uiText("3. Вложения")}{cmdPendingFiles.length ? ` · ${cmdPendingFiles.length}` : ""}
             </div>
             <div className="actions">
               <label className="btn secondary">
-                + Файл
-                <input
+                {uiText("+ Файл")}<input
                   type="file"
                   hidden
                   multiple
@@ -1777,8 +1759,7 @@ export function TasksPage() {
                 />
               </label>
               <label className="btn secondary">
-                + Документ
-                <input
+                {uiText("+ Документ")}<input
                   type="file"
                   hidden
                   multiple
@@ -1787,8 +1768,7 @@ export function TasksPage() {
                 />
               </label>
               <label className="btn secondary">
-                + Фото
-                <input
+                {uiText("+ Фото")}<input
                   type="file"
                   hidden
                   multiple
@@ -1797,7 +1777,7 @@ export function TasksPage() {
                 />
               </label>
             </div>
-            <p className="muted">Перетащите файлы сюда. PDF, DOC/X, XLS/X, PPT/X, JPG/PNG/WEBP — как в рассылке.</p>
+            <p className="muted">{uiText("Перетащите файлы сюда. PDF, DOC/X, XLS/X, PPT/X, JPG/PNG/WEBP — как в рассылке.")}</p>
             {cmdPendingFiles.length ? (
               <div className="picker-list">
                 {cmdPendingFiles.map((file) => (
@@ -1813,8 +1793,7 @@ export function TasksPage() {
                       className="btn secondary"
                       onClick={() => setCmdPendingFiles((prev) => prev.filter((item) => item.localId !== file.localId))}
                     >
-                      Удалить
-                    </button>
+                      {uiText("Удалить")}</button>
                   </div>
                 ))}
               </div>
@@ -1822,15 +1801,14 @@ export function TasksPage() {
           </div>
 
           <div className="command-step">
-            <div className="command-step-label">4. Срок исполнения</div>
+            <div className="command-step-label">{uiText("4. Срок исполнения")}</div>
             <div className="segmented">
               <button
                 type="button"
                 className={commandDueMode === "now" ? "btn" : "btn secondary"}
                 onClick={() => setCommandDueMode("now")}
               >
-                Сейчас
-              </button>
+                {uiText("Сейчас")}</button>
               <button
                 type="button"
                 className={commandDueMode === "scheduled" ? "btn" : "btn secondary"}
@@ -1841,25 +1819,22 @@ export function TasksPage() {
                   }
                 }}
               >
-                По дате и времени
-              </button>
+                {uiText("По дате и времени")}</button>
             </div>
             {commandDueMode === "scheduled" ? (
               <>
                 <label>
-                  Когда выполнить
-                  <input
+                  {uiText("Когда выполнить")}<input
                     type="datetime-local"
                     value={commandDueAt}
                     onChange={(event) => setCommandDueAt(event.target.value)}
                   />
                 </label>
                 <p className="muted">
-                  Задача сразу попадёт в «Запланировано». После подтверждения CRM отправит сообщение в это время, не раньше.
-                </p>
+                  {uiText("Задача сразу попадёт в «Запланировано». После подтверждения CRM отправит сообщение в это время, не раньше.")}</p>
               </>
             ) : (
-              <p className="muted">Задача появится сразу в открытых. После подтверждения CRM отправит сообщение сейчас.</p>
+              <p className="muted">{uiText("Задача появится сразу в открытых. После подтверждения CRM отправит сообщение сейчас.")}</p>
             )}
           </div>
 
@@ -1875,8 +1850,7 @@ export function TasksPage() {
               }
               onClick={onParseCommand}
             >
-              Понять задачу
-            </button>
+              {uiText("Понять задачу")}</button>
             <button
               type="button"
               className="btn secondary"
@@ -1895,28 +1869,27 @@ export function TasksPage() {
                 setCmdPendingFiles([]);
               }}
             >
-              Очистить
-            </button>
+              {uiText("Очистить")}</button>
           </div>
 
           {commandParse ? (
             <div className="command-understanding">
-              <h3>Так CRM поняла задачу</h3>
+              <h3>{uiText("Так CRM поняла задачу")}</h3>
               <div className="command-summary">
                 <div>
-                  <span className="muted">Действие</span>
+                  <span className="muted">{uiText("Действие")}</span>
                   <b>{commandParse.understanding?.action}</b>
                 </div>
                 <div>
-                  <span className="muted">Кому</span>
+                  <span className="muted">{uiText("Кому")}</span>
                   <b>{commandParse.understanding?.who}</b>
                 </div>
                 <div>
-                  <span className="muted">Когда</span>
+                  <span className="muted">{uiText("Когда")}</span>
                   <b>
                     {commandDueMode === "scheduled" && commandDueAt
                       ? formatDateTimeLocalInput(commandDueAt)
-                      : commandParse.understanding?.when || "Сейчас"}
+                      : commandParse.understanding?.when || uiText("Сейчас")}
                   </b>
                 </div>
               </div>
@@ -1924,21 +1897,20 @@ export function TasksPage() {
                 {commandParse.command?.intent === "document_action"
                   ? commandParse.understanding?.consequence
                   : commandWillSchedule
-                  ? "После подтверждения CRM поставит задачу в «Запланировано» и отправит сообщение в указанное время, не сразу."
+                  ? uiText("После подтверждения CRM поставит задачу в «Запланировано» и отправит сообщение в указанное время, не сразу.")
                   : commandParse.understanding?.consequence}
               </p>
               {commandParse.command?.intent === "document_action" ? (
                 <div className="panel soft" style={{ marginTop: 12 }}>
-                  <b>Это команда по документам</b>
-                  <p className="muted">WhatsApp-задачу не создаём.</p>
+                  <b>{uiText("Это команда по документам")}</b>
+                  <p className="muted">{uiText("WhatsApp-задачу не создаём.")}</p>
                   {(commandParse.document?.deals || []).map((deal: { id: string; title: string; href: string }) => (
                     <div key={deal.id}>
                       <Link to={deal.href}>{deal.title}</Link>
                     </div>
                   ))}
                   <Link className="btn" to={`/documents?command=${encodeURIComponent(commandText)}`}>
-                    Открыть в Документах
-                  </Link>
+                    {uiText("Открыть в Документах")}</Link>
                 </div>
               ) : null}
 
@@ -1952,7 +1924,7 @@ export function TasksPage() {
 
               {cmdPhonesUnresolved.length ? (
                 <div className="panel soft">
-                  <b>Новые клиенты по номерам</b>
+                  <b>{uiText("Новые клиенты по номерам")}</b>
                   <ul className="cmd-phone-unresolved">
                     {cmdPhonesUnresolved.map((phone) => {
                       const name = cmdPhones.find((item) => item.phone === phone)?.name;
@@ -1964,14 +1936,14 @@ export function TasksPage() {
                       );
                     })}
                   </ul>
-                  <p className="muted">Создадим при постановке задачи.</p>
+                  <p className="muted">{uiText("Создадим при постановке задачи.")}</p>
                 </div>
               ) : null}
 
               {(commandParse.clients || []).length > 0 ? (
                 <div className="field-block">
                   <div className="muted" style={{ marginBottom: 8 }}>
-                    Получатели · выбрано {commandSelectedIds.length}
+                    {uiText("Получатели · выбрано")}{" "}{commandSelectedIds.length}
                     {(commandParse.clients || []).length > 1 ? (
                       <>
                         {" · "}
@@ -1980,8 +1952,7 @@ export function TasksPage() {
                           className="linkish"
                           onClick={() => setCommandSelectedIds((commandParse.clients || []).map((c: any) => c.id))}
                         >
-                          Выбрать всех
-                        </button>
+                          {uiText("Выбрать всех")}</button>
                       </>
                     ) : null}
                   </div>
@@ -2011,8 +1982,7 @@ export function TasksPage() {
                             </div>
                             {client.id ? (
                               <Link to={`/contacts/${client.id}`} onClick={(e) => e.stopPropagation()}>
-                                Открыть
-                              </Link>
+                                {uiText("Открыть")}</Link>
                             ) : null}
                           </span>
                         </label>
@@ -2028,20 +1998,18 @@ export function TasksPage() {
                 commandParse.command?.taskType === "message" ||
                 commandDraft) ? (
                 <label>
-                  Сообщение клиенту
-                  <textarea value={commandDraft} onChange={(event) => setCommandDraft(event.target.value)} rows={3} />
-                  <span className="muted">ИИ составил из вашей команды. Можно править перед постановкой.</span>
+                  {uiText("Сообщение клиенту")}<textarea value={commandDraft} onChange={(event) => setCommandDraft(event.target.value)} rows={3} />
+                  <span className="muted">{uiText("ИИ составил из вашей команды. Можно править перед постановкой.")}</span>
                 </label>
               ) : null}
 
               {cmdPendingFiles.length ? (
-                <p className="muted">К задаче будет прикреплено файлов: {cmdPendingFiles.length}</p>
+                <p className="muted">{uiText("К задаче будет прикреплено файлов:")}{" "}{cmdPendingFiles.length}</p>
               ) : null}
 
               <div className="actions">
                 <button type="button" className="btn secondary" onClick={() => setCommandParse(null)}>
-                  Изменить
-                </button>
+                  {uiText("Изменить")}</button>
                 {commandParse.command?.intent !== "document_action" ? (
                 <button
                   type="button"
@@ -2055,32 +2023,30 @@ export function TasksPage() {
                   onClick={onCreateFromCommand}
                 >
                   {commandParse.command?.executionMode === "prepare_only"
-                    ? "Подготовить черновик"
+                    ? uiText("Подготовить черновик")
                     : commandParse.command?.riskLevel >= 3
-                      ? "Подготовить к исполнению"
-                      : "Создать задачу"}
+                      ? uiText("Подготовить к исполнению")
+                      : uiText("Создать задачу")}
                 </button>
                 ) : null}
               </div>
 
               {commandTaskId && commandParse.command?.riskLevel >= 3 && commandParse.command?.executionMode !== "prepare_only" ? (
                 <div className="panel soft" style={{ marginTop: 12 }}>
-                  <b>Проверьте перед отправкой</b>
+                  <b>{uiText("Проверьте перед отправкой")}</b>
                   <p>
                     {commandParse.understanding?.action}
                     {" · "}
                     {Math.max(commandSelectedIds.length, cmdPhones.length, cmdPhonesUnresolved.length)}{" "}
                     {Math.max(commandSelectedIds.length, cmdPhones.length, cmdPhonesUnresolved.length) === 1
-                      ? "клиенту"
-                      : "клиентам"}{" "}
-                    через WhatsApp.
-                  </p>
+                      ? uiText("клиенту")
+                      : uiText("клиентам")}{" "}
+                    {uiText("через WhatsApp.")}</p>
                   <div className="actions">
                     <button type="button" className="btn secondary" onClick={() => setCommandTaskId(null)}>
-                      Вернуться и изменить
-                    </button>
+                      {uiText("Вернуться и изменить")}</button>
                     <button type="button" className="btn" disabled={busy} onClick={onConfirmCommandSend}>
-                      {commandWillSchedule ? "Запланировать отправку" : "Подтвердить и отправить"}
+                      {commandWillSchedule ? uiText("Запланировать отправку") : uiText("Подтвердить и отправить")}
                     </button>
                   </div>
                 </div>
@@ -2090,36 +2056,35 @@ export function TasksPage() {
                 <div className="panel soft" style={{ marginTop: 12 }}>
                   {batchResult.scheduled ? (
                     <>
-                      <b>Запланировано</b>
+                      <b>{uiText("Запланировано")}</b>
                       <p>
                         {batchResult.dueAt
-                          ? `Отправка запланирована на ${formatDateTimeRu(batchResult.dueAt)}. Задача остаётся в «Запланировано».`
-                          : batchResult.message || "Задача остаётся в «Запланировано»."}
+                          ? uiText("Отправка запланирована на {p0}. Задача остаётся в «Запланировано».", {p0: formatDateTimeRu(batchResult.dueAt)})
+                          : batchResult.message || uiText("Задача остаётся в «Запланировано».")}
                       </p>
                     </>
                   ) : batchResult.prepareOnly ? (
                     <p>{batchResult.message}</p>
                   ) : (
                     <>
-                      <b>Выполнено</b>
+                      <b>{uiText("Выполнено")}</b>
                       <p>
-                        Успешно: {batchResult.success} · Ошибка: {batchResult.failed} · Всего: {batchResult.total}
+                        {uiText("Успешно:")}{" "}{batchResult.success} {" "}{uiText("· Ошибка:")}{" "}{batchResult.failed} {" "}{uiText("· Всего:")}{" "}{batchResult.total}
                       </p>
                       {batchResult.textOk === false ? (
-                        <p className="error">Текст не отправлен: {batchResult.textError || "ошибка"}</p>
+                        <p className="error">{uiText("Текст не отправлен:")}{" "}{batchResult.textError || uiText("ошибка")}</p>
                       ) : batchResult.textOk ? (
-                        <p className="muted">Текст отправлен ✓</p>
+                        <p className="muted">{uiText("Текст отправлен ✓")}</p>
                       ) : null}
                       {(batchResult.files || []).map((f: any) => (
                         <p key={f.id || f.fileName} className={f.ok ? "muted" : "error"}>
-                          {f.fileName}: {f.ok ? "✓" : `✕ ${f.error || "ошибка"}`}
+                          {f.fileName}: {f.ok ? "✓" : `✕ ${f.error || uiText("ошибка")}`}
                         </p>
                       ))}
                       {batchResult.retryFilesAvailable ? (
                         <div className="actions" style={{ marginTop: 8 }}>
                           <button type="button" className="btn" disabled={busy} onClick={onRetryCommandFiles}>
-                            Повторить отправку файла
-                          </button>
+                            {uiText("Повторить отправку файла")}</button>
                         </div>
                       ) : null}
                     </>
@@ -2133,57 +2098,52 @@ export function TasksPage() {
 
       {showCreate && composeMode === "manual" && !showCampaignPanel ? (
       <form className="panel task-form" onSubmit={submitTask}>
-        <b>Новая задача</b>
-        <p className="muted">Что нужно сделать, к чему относится, кто выполнит и когда.</p>
+        <b>{uiText("Новая задача")}</b>
+        <p className="muted">{uiText("Что нужно сделать, к чему относится, кто выполнит и когда.")}</p>
         <div className="actions" style={{ marginBottom: 12 }}>
           <button
             type="button"
             className="btn secondary"
-            {...tip("Опишите задачу своими словами — система разберёт, кому и что сделать")}
+            {...tip(uiText("Опишите задачу своими словами — система разберёт, кому и что сделать"))}
             onClick={() => {
               setComposeMode("command");
               setShowCampaignPanel(false);
             }}
           >
-            Описать своими словами
-          </button>
+            {uiText("Описать своими словами")}</button>
           <button
             type="button"
             className="btn secondary"
-            {...tip("Рассылка одного сообщения или файла списку номеров / сегменту CRM")}
+            {...tip(uiText("Рассылка одного сообщения или файла списку номеров / сегменту CRM"))}
             onClick={() => {
               setComposeMode("campaign");
               setShowCampaignPanel(true);
               setCampaignSeed({ whoMode: "phones" });
             }}
           >
-            Массовая отправка
-          </button>
+            {uiText("Массовая отправка")}</button>
         </div>
 
         <label>
-          Что нужно сделать
-          <input
+          {uiText("Что нужно сделать")}<input
             value={title}
             onChange={(event) => setTitle(event.target.value)}
-            placeholder="Например: подготовить коммерческое предложение"
+            placeholder={uiText("Например: подготовить коммерческое предложение")}
             required
             maxLength={200}
           />
         </label>
         <label>
-          Описание / подробности
-          <textarea
+          {uiText("Описание / подробности")}<textarea
             value={description}
             onChange={(event) => setDescription(event.target.value)}
             rows={2}
-            placeholder="Необязательно"
+            placeholder={uiText("Необязательно")}
             maxLength={2000}
           />
         </label>
         <label>
-          Тип действия
-          <select
+          {uiText("Тип действия")}<select
             value={type}
             onChange={(event) => {
               const next = event.target.value;
@@ -2193,7 +2153,7 @@ export function TasksPage() {
               }
             }}
           >
-            {CREATE_TASK_TYPES.map(([id, label]) => (
+            {localizeUiOptions(CREATE_TASK_TYPES, uiText).map(([id, label]) => (
               <option key={id} value={id}>
                 {label}
               </option>
@@ -2203,16 +2163,15 @@ export function TasksPage() {
 
         <div className="field-block">
           <div className="muted" style={{ marginBottom: 8 }}>
-            Связать с
-          </div>
+            {uiText("Связать с")}</div>
           <div className="chip-row">
             {(
                 [
-                ["client", "Один клиент"],
-                ["group", "Группа CRM"],
-                ["list", "Список номеров"],
-                ["import", "Импорт контактов"],
-                ["none", "Без привязки"],
+                ["client", uiText("Один клиент")],
+                ["group", uiText("Группа CRM")],
+                ["list", uiText("Список номеров")],
+                ["import", uiText("Импорт контактов")],
+                ["none", uiText("Без привязки")],
               ] as const
             ).map(([value, label]) => (
               <button
@@ -2238,8 +2197,7 @@ export function TasksPage() {
           </div>
           {targetMode === "none" ? (
             <p className="muted" style={{ marginTop: 8 }}>
-              Внутренняя задача команды — без клиента, заявки или сделки.
-            </p>
+              {uiText("Внутренняя задача команды — без клиента, заявки или сделки.")}</p>
           ) : null}
         </div>
 
@@ -2247,11 +2205,10 @@ export function TasksPage() {
           <div className="field-block">
             {!selectedClient ? (
               <label>
-                Найти или выбрать клиента
-                <input
+                {uiText("Найти или выбрать клиента")}<input
                   value={searchQ}
                   onChange={(event) => setSearchQ(event.target.value)}
-                  placeholder="Имя, телефон, компания"
+                  placeholder={uiText("Имя, телефон, компания")}
                   autoComplete="off"
                 />
               </label>
@@ -2259,9 +2216,9 @@ export function TasksPage() {
             {!selectedClient && searchHits.length > 0 ? (
               <>
                 <div className="muted" style={{ marginTop: 8 }}>
-                  {searchQ.trim() ? `Найдено: ${searchHits.length}` : "Клиенты CRM — нажмите, чтобы выбрать"}
+                  {searchQ.trim() ? uiText("Найдено: {p0}", {p0: searchHits.length}) : uiText("Клиенты CRM — нажмите, чтобы выбрать")}
                 </div>
-                <div className="picker-list" role="listbox" aria-label="Клиенты CRM">
+                <div className="picker-list" role="listbox" aria-label={uiText("Клиенты CRM")}>
                   {searchHits.map((hit) => (
                     <button
                       key={hit.id}
@@ -2274,60 +2231,57 @@ export function TasksPage() {
                     >
                       <b>{hit.name}</b>
                       <div className="muted">
-                        {[hit.phone, hit.companyName, hit.interest, hit.statusLabel].filter(Boolean).join(" · ")}
+                        {[hit.phone, hit.companyName, hit.interest, uiMessage(hit.statusLabel)].filter(Boolean).join(" · ")}
                       </div>
-                      {hit.lastContactLabel ? <div className="muted">Последний контакт: {hit.lastContactLabel}</div> : null}
+                      {hit.lastContactLabel ? <div className="muted">{uiText("Последний контакт:")}{" "}{hit.lastContactLabel}</div> : null}
                     </button>
                   ))}
                 </div>
               </>
             ) : null}
             {!selectedClient && !searchHits.length ? (
-              <p className="muted">{searchQ.trim() ? "Никого не нашли." : "Загрузка клиентов…"}</p>
+              <p className="muted">{searchQ.trim() ? uiText("Никого не нашли.") : uiText("Загрузка клиентов…")}</p>
             ) : null}
 
             {selectedClient ? (
               <div className="selected-client">
                 <div>
                   <b>{selectedClient.name}</b>
-                  <div className="muted">{selectedClient.phone || "Телефон не указан"}</div>
+                  <div className="muted">{selectedClient.phone || uiText("Телефон не указан")}</div>
                   {overview?.currentRequest ? (
                     <div className="muted">
-                      Текущая заявка: {overview.currentRequest.title} · {overview.currentRequest.statusLabel}
+                      {uiText("Текущая заявка:")}{" "}{overview.currentRequest.title} · {uiMessage(overview.currentRequest.statusLabel)}
                     </div>
                   ) : null}
                   {overview?.attribution?.sourceType || selectedClient.source ? (
-                    <div className="muted">Источник: {overview?.attribution?.sourceType || selectedClient.source}</div>
+                    <div className="muted">{uiText("Источник:")}{" "}{overview?.attribution?.sourceType || selectedClient.source}</div>
                   ) : null}
                   {selectedClient.lastContactLabel || overview?.control?.lastContactLabel ? (
                     <div className="muted">
-                      Последний контакт: {overview?.control?.lastContactLabel || selectedClient.lastContactLabel}
+                      {uiText("Последний контакт:")}{" "}{overview?.control?.lastContactLabel || selectedClient.lastContactLabel}
                     </div>
                   ) : null}
                 </div>
                 <button type="button" className="btn secondary" onClick={() => setSelectedClient(null)}>
-                  Изменить клиента
-                </button>
+                  {uiText("Изменить клиента")}</button>
               </div>
             ) : null}
 
             {overview ? (
               <>
                 <label>
-                  Заявка
-                  <select value={inquiryId} onChange={(event) => setInquiryId(event.target.value)}>
-                    <option value="">Без заявки</option>
+                  {uiText("Заявка")}<select value={inquiryId} onChange={(event) => setInquiryId(event.target.value)}>
+                    <option value="">{uiText("Без заявки")}</option>
                     {(overview.requests || []).map((item: any) => (
                       <option key={item.id} value={item.id}>
-                        {item.title} · {item.statusLabel} · {item.receivedLabel}
+                        {item.title} · {uiMessage(item.statusLabel)} · {item.receivedLabel}
                       </option>
                     ))}
                   </select>
                 </label>
                 <label>
-                  Сделка
-                  <select value={dealId} onChange={(event) => setDealId(event.target.value)}>
-                    <option value="">Сделки нет</option>
+                  {uiText("Сделка")}<select value={dealId} onChange={(event) => setDealId(event.target.value)}>
+                    <option value="">{uiText("Сделки нет")}</option>
                     {(overview.deals || []).map((item: any) => (
                       <option key={item.id} value={item.id}>
                         {item.title}
@@ -2337,9 +2291,8 @@ export function TasksPage() {
                   </select>
                 </label>
                 <label>
-                  Диалог
-                  <select value={conversationId} onChange={(event) => setConversationId(event.target.value)}>
-                    <option value="">Без диалога</option>
+                  {uiText("Диалог")}<select value={conversationId} onChange={(event) => setConversationId(event.target.value)}>
+                    <option value="">{uiText("Без диалога")}</option>
                     {(overview.conversations || []).map((item: any) => (
                       <option key={item.id} value={item.id}>
                         {item.channel} · {item.updatedLabel}
@@ -2355,10 +2308,9 @@ export function TasksPage() {
         {targetMode === "group" ? (
           <div className="field-block">
             <div className="muted" style={{ marginBottom: 8 }}>
-              Быстрый выбор
-            </div>
+              {uiText("Быстрый выбор")}</div>
             <div className="chip-row">
-              {QUICK_SEGMENTS.map((item) => (
+              {localizeUiOptions(QUICK_SEGMENTS, uiText).map((item) => (
                 <button
                   key={item.id}
                   type="button"
@@ -2376,9 +2328,9 @@ export function TasksPage() {
 
             <div className="filter-grid">
               <div>
-                <div className="muted">Интерес / услуга</div>
+                <div className="muted">{uiText("Интерес / услуга")}</div>
                 <div className="chip-row">
-                  {SERVICE_OPTIONS.map((item) => (
+                  {localizeUiOptions(SERVICE_OPTIONS, uiText).map((item) => (
                     <button
                       key={item.id}
                       type="button"
@@ -2391,21 +2343,21 @@ export function TasksPage() {
                 </div>
               </div>
               <div>
-                <div className="muted">Дата обращения</div>
+                <div className="muted">{uiText("Дата обращения")}</div>
                 <select value={datePreset} onChange={(event) => setDatePreset(event.target.value)}>
-                  <option value="">Любая</option>
-                  <option value="today">Сегодня</option>
-                  <option value="yesterday">Вчера</option>
-                  <option value="last_3_days">Последние 3 дня</option>
-                  <option value="last_7_days">Последние 7 дней</option>
-                  <option value="last_30_days">Последние 30 дней</option>
-                  <option value="this_month">Этот месяц</option>
+                  <option value="">{uiText("Любая")}</option>
+                  <option value="today">{uiText("Сегодня")}</option>
+                  <option value="yesterday">{uiText("Вчера")}</option>
+                  <option value="last_3_days">{uiText("Последние 3 дня")}</option>
+                  <option value="last_7_days">{uiText("Последние 7 дней")}</option>
+                  <option value="last_30_days">{uiText("Последние 30 дней")}</option>
+                  <option value="this_month">{uiText("Этот месяц")}</option>
                 </select>
               </div>
               <div>
-                <div className="muted">Статус</div>
+                <div className="muted">{uiText("Статус")}</div>
                 <div className="chip-row">
-                  {STATUS_OPTIONS.map((item) => (
+                  {localizeUiOptions(STATUS_OPTIONS, uiText).map((item) => (
                     <button
                       key={item.id}
                       type="button"
@@ -2418,9 +2370,9 @@ export function TasksPage() {
                 </div>
               </div>
               <div>
-                <div className="muted">Источник</div>
+                <div className="muted">{uiText("Источник")}</div>
                 <div className="chip-row">
-                  {SOURCE_OPTIONS.map((item) => (
+                  {localizeUiOptions(SOURCE_OPTIONS, uiText).map((item) => (
                     <button
                       key={item.id}
                       type="button"
@@ -2436,7 +2388,7 @@ export function TasksPage() {
 
             <div className="actions" style={{ marginTop: 12 }}>
               <button type="button" className="btn secondary" disabled={previewBusy} onClick={() => runPreview()}>
-                {previewBusy ? "Ищем…" : "Показать клиентов"}
+                {previewBusy ? uiText("Ищем…") : uiText("Показать клиентов")}
               </button>
               {segmentClients.length ? (
                 <button
@@ -2444,14 +2396,14 @@ export function TasksPage() {
                   className="btn secondary"
                   onClick={() => setSelectedIds(segmentClients.map((item) => item.id))}
                 >
-                  Выбрать всех {segmentClients.length}
+                  {uiText("Выбрать всех")}{" "}{segmentClients.length}
                 </button>
               ) : null}
             </div>
 
             {segmentTotal > 0 ? (
               <p className="muted">
-                Найдено: {segmentTotal} · Выбрано: {selectedIds.length}
+                {uiText("Найдено:")}{" "}{segmentTotal} {" "}{uiText("· Выбрано:")}{" "}{selectedIds.length}
                 {segmentLabel ? ` · ${segmentLabel}` : ""}
               </p>
             ) : null}
@@ -2485,17 +2437,15 @@ export function TasksPage() {
 
         {SENDABLE.has(type) ? (
           <label>
-            Текст сообщения клиенту
-            <textarea
+            {uiText("Текст сообщения клиенту")}<textarea
               value={messageDraft}
               onChange={(event) => setMessageDraft(event.target.value)}
-              placeholder="Текст, который уйдёт клиенту после подтверждения"
+              placeholder={uiText("Текст, который уйдёт клиенту после подтверждения")}
             />
           </label>
         ) : null}
         <label>
-          Исполнитель
-          <select
+          {uiText("Исполнитель")}<select
             value={ownerId}
             onChange={(event) => {
               const next = event.target.value;
@@ -2507,38 +2457,35 @@ export function TasksPage() {
             }}
             required
           >
-            <option value="">Выберите</option>
+            <option value="">{uiText("Выберите")}</option>
             {isAiAssignableTaskType(type) || ownerId === AI_ASSIGNEE ? (
               <option value={AI_ASSIGNEE}>AI Manager</option>
             ) : null}
             {members.map((member) => (
               <option key={member.id} value={member.id}>
                 {member.name}
-                {member.isMe ? " (я)" : ""}
+                {member.isMe ? uiText(" (я)") : ""}
               </option>
             ))}
           </select>
         </label>
         {ownerId === AI_ASSIGNEE ? (
-          <p className="muted">AI выполнит только действие, которое система уже умеет отправлять в WhatsApp.</p>
+          <p className="muted">{uiText("AI выполнит только действие, которое система уже умеет отправлять в WhatsApp.")}</p>
         ) : null}
         <label>
-          Срок
-          <input type="datetime-local" value={dueAt} onChange={(event) => setDueAt(event.target.value)} />
+          {uiText("Срок")}<input type="datetime-local" value={dueAt} onChange={(event) => setDueAt(event.target.value)} />
         </label>
         <label>
-          Приоритет
-          <select value={priority} onChange={(event) => setPriority(event.target.value)}>
-            <option value="low">Низкий</option>
-            <option value="normal">Обычный</option>
-            <option value="high">Высокий</option>
+          {uiText("Приоритет")}<select value={priority} onChange={(event) => setPriority(event.target.value)}>
+            <option value="low">{uiText("Низкий")}</option>
+            <option value="normal">{uiText("Обычный")}</option>
+            <option value="high">{uiText("Высокий")}</option>
           </select>
         </label>
         <div className="actions">
-          <button className="btn">Создать</button>
+          <button className="btn">{uiText("Создать")}</button>
           <button type="button" className="btn secondary" onClick={() => setShowCreate(false)}>
-            Скрыть
-          </button>
+            {uiText("Скрыть")}</button>
         </div>
       </form>
       ) : null}
@@ -2547,19 +2494,18 @@ export function TasksPage() {
 
       {activeTaskId && taskDetail && !preview ? (
         <div className="panel task-form">
-          <b>{isScheduledSend(taskDetail) ? "Изменить запланированную задачу" : "Подготовка отправки"}</b>
+          <b>{isScheduledSend(taskDetail) ? uiText("Изменить запланированную задачу") : uiText("Подготовка отправки")}</b>
           <div className="muted">{taskDetail.title}</div>
           {isScheduledSend(taskDetail) ? (
             <p className="muted">
-              Сохраните правки — задача останется в «Запланировано», сообщение уйдёт в указанное время, не сразу.
-            </p>
+              {uiText("Сохраните правки — задача останется в «Запланировано», сообщение уйдёт в указанное время, не сразу.")}</p>
           ) : null}
           {taskDetail.briefing ? (
             <div className="task-briefing-card">
-              {taskDetail.briefing.basisLabel ? <div className="muted">{taskDetail.briefing.basisLabel}</div> : null}
+              {uiMessage(taskDetail.briefing.basisLabel) ? <div className="muted">{uiMessage(taskDetail.briefing.basisLabel)}</div> : null}
               {taskDetail.briefing.client ? (
                 <div>
-                  <span className="muted">Клиент</span>
+                  <span className="muted">{uiText("Клиент")}</span>
                   <div>
                     {nameWithPhone(taskDetail.briefing.client.name, taskDetail.briefing.client.phone)}
                     {taskDetail.briefing.client.companyName ? ` · ${taskDetail.briefing.client.companyName}` : ""}
@@ -2568,19 +2514,19 @@ export function TasksPage() {
               ) : null}
               {taskDetail.briefing.purpose ? (
                 <div>
-                  <span className="muted">Цель</span>
+                  <span className="muted">{uiText("Цель")}</span>
                   <div>{taskDetail.briefing.purpose}</div>
                 </div>
               ) : null}
               {taskDetail.briefing.briefingText ? (
                 <div>
-                  <span className="muted">Перед встречей</span>
+                  <span className="muted">{uiText("Перед встречей")}</span>
                   <div>{taskDetail.briefing.briefingText}</div>
                 </div>
               ) : null}
               {(taskDetail.briefing.preparationHints || []).length ? (
                 <div>
-                  <span className="muted">Что подготовить</span>
+                  <span className="muted">{uiText("Что подготовить")}</span>
                   <ul>
                     {taskDetail.briefing.preparationHints.map((h: string) => (
                       <li key={h}>{h}</li>
@@ -2590,80 +2536,75 @@ export function TasksPage() {
               ) : null}
               {(taskDetail.briefing.sourceMessages || []).length ? (
                 <div>
-                  <span className="muted">Последняя переписка</span>
+                  <span className="muted">{uiText("Последняя переписка")}</span>
                   <div className="picker-list">
                     {taskDetail.briefing.sourceMessages.map((m: any) => (
                       <div key={m.id} className="picker-item">
-                        <b>{m.actorLabel}</b>
+                        <b>{uiMessage(m.actorLabel)}</b>
                         <div className="muted">{m.text}</div>
                       </div>
                     ))}
                   </div>
                   {taskDetail.briefing.conversationId ? (
-                    <Link to={`/conversations/${taskDetail.briefing.conversationId}`}>Открыть весь диалог</Link>
+                    <Link to={`/conversations/${taskDetail.briefing.conversationId}`}>{uiText("Открыть весь диалог")}</Link>
                   ) : null}
                 </div>
               ) : null}
             </div>
           ) : null}
           <label>
-            Сообщение
-            <textarea value={messageDraft} onChange={(event) => setMessageDraft(event.target.value)} rows={5} />
+            {uiText("Сообщение")}<textarea value={messageDraft} onChange={(event) => setMessageDraft(event.target.value)} rows={5} />
           </label>
           <label>
-            Когда выполнить
-            <input type="datetime-local" value={editDueAt} onChange={(event) => setEditDueAt(event.target.value)} disabled={!caps.manageTasks} />
+            {uiText("Когда выполнить")}<input type="datetime-local" value={editDueAt} onChange={(event) => setEditDueAt(event.target.value)} disabled={!caps.manageTasks} />
           </label>
           <div>
-            <span className="muted">Создана</span>
+            <span className="muted">{uiText("Создана")}</span>
             <div>{formatDateTimeRu(taskDetail.createdAt) || "—"}</div>
           </div>
           {caps.manageTasks ? (
             <>
               <div>
-                <span className="muted">Поставил</span>
+                <span className="muted">{uiText("Поставил")}</span>
                 <div>{createdByText(taskDetail)}</div>
               </div>
             <label>
-              Исполнитель
-              <select value={editOwnerId} onChange={(event) => setEditOwnerId(event.target.value)}>
+              {uiText("Исполнитель")}<select value={editOwnerId} onChange={(event) => setEditOwnerId(event.target.value)}>
                 {isAiAssignableTaskType(taskDetail.type) || editOwnerId === AI_ASSIGNEE ? (
                   <option value={AI_ASSIGNEE}>AI Manager</option>
                 ) : null}
                 {members.map((member) => (
                   <option key={member.id} value={member.id}>
                     {member.name}
-                    {member.isMe ? " (я)" : ""}
+                    {member.isMe ? uiText(" (я)") : ""}
                   </option>
                 ))}
               </select>
             </label>
             {editOwnerId === AI_ASSIGNEE ? (
-              <p className="muted">AI выполнит только действие, которое система уже умеет отправлять в WhatsApp.</p>
+              <p className="muted">{uiText("AI выполнит только действие, которое система уже умеет отправлять в WhatsApp.")}</p>
             ) : null}
             </>
           ) : (
             <div>
-              <span className="muted">Поставил / исполнитель</span>
+              <span className="muted">{uiText("Поставил / исполнитель")}</span>
               <div>
                 {createdByText(taskDetail)} → {assigneeText(taskDetail)}
               </div>
             </div>
           )}
           <label>
-            Тип файла
-            <select value={docType} onChange={(event) => setDocType(event.target.value)}>
-              <option value="proposal">Коммерческое предложение</option>
-              <option value="presentation">Презентация</option>
-              <option value="contract">Договор</option>
-              <option value="invoice">Счёт</option>
-              <option value="document">Документ</option>
-              <option value="other">Другое</option>
+            {uiText("Тип файла")}<select value={docType} onChange={(event) => setDocType(event.target.value)}>
+              <option value="proposal">{uiText("Коммерческое предложение")}</option>
+              <option value="presentation">{uiText("Презентация")}</option>
+              <option value="contract">{uiText("Договор")}</option>
+              <option value="invoice">{uiText("Счёт")}</option>
+              <option value="document">{uiText("Документ")}</option>
+              <option value="other">{uiText("Другое")}</option>
             </select>
           </label>
           <label>
-            Прикрепить файл
-            <input
+            {uiText("Прикрепить файл")}<input
               type="file"
               accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.webp,.zip"
               onChange={(event) => {
@@ -2679,8 +2620,7 @@ export function TasksPage() {
                 <div key={file.id} className="picker-item">
                   <b>{file.originalFileName || file.fileName}</b>
                   <div className="muted">
-                    {file.documentType} · {(file.sizeBytes / 1024).toFixed(0)} КБ
-                    {file.sendState === "failed" ? " · не отправлен" : ""}
+                    {file.documentType} · {(file.sizeBytes / 1024).toFixed(0)} {" "}{uiText("КБ")}{file.sendState === "failed" ? uiText(" · не отправлен") : ""}
                   </div>
                   <button
                     type="button"
@@ -2692,8 +2632,7 @@ export function TasksPage() {
                         .catch((err) => setError(err.message))
                     }
                   >
-                    Удалить файл
-                  </button>
+                    {uiText("Удалить файл")}</button>
                 </div>
               ))}
             </div>
@@ -2702,47 +2641,42 @@ export function TasksPage() {
             <button
               type="button"
               className="btn secondary"
-              {...tip("Закрыть панель без отправки")}
+              {...tip(uiText("Закрыть панель без отправки"))}
               onClick={() => { setActiveTaskId(null); setTaskDetail(null); setEditDueAt(""); }}
             >
-              Закрыть
-            </button>
+              {uiText("Закрыть")}</button>
             <button
               type="button"
               className="btn secondary"
               disabled={busy}
-              {...tip("Сохранить текст и срок. Если отправка уже запланирована, она перенесётся на новое время")}
+              {...tip(uiText("Сохранить текст и срок. Если отправка уже запланирована, она перенесётся на новое время"))}
               onClick={() => void onSaveTaskEdits()}
             >
-              Сохранить правки
-            </button>
+              {uiText("Сохранить правки")}</button>
             <button
               type="button"
               className="btn"
               disabled={busy}
-              {...tip("Проверить канал и показать подтверждение перед отправкой в WhatsApp")}
+              {...tip(uiText("Проверить канал и показать подтверждение перед отправкой в WhatsApp"))}
               onClick={onPrepare}
             >
-              Подготовить отправку
-            </button>
+              {uiText("Подготовить отправку")}</button>
           </div>
           <p className="muted" style={{ marginTop: 8 }}>
-            Отправка идёт через WhatsApp-диалог клиента (sellerLead). Если диалога нет — сначала синхронизируйте бота в Интеграциях
-            или используйте «Массовая отправка» по номеру.
-          </p>
+            {uiText("Отправка идёт через WhatsApp-диалог клиента (sellerLead). Если диалога нет — сначала синхронизируйте бота в Интеграциях или используйте «Массовая отправка» по номеру.")}</p>
         </div>
       ) : null}
 
       {preview ? (
         <div className="panel task-form confirm-panel">
-          <b>Проверьте перед отправкой</b>
-          <p className="muted">CRM поняла задачу следующим образом:</p>
+          <b>{uiText("Проверьте перед отправкой")}</b>
+          <p className="muted">{uiText("CRM поняла задачу следующим образом:")}</p>
           <div className="kv">
-            <div><span>Действие</span><b>{preview.actionLabel}</b></div>
-            <div><span>Кому</span><b>{preview.client?.name}</b></div>
-            <div><span>Телефон</span><b>{preview.client?.phone || "не указан"}</b></div>
-            <div><span>По заявке</span><b>{preview.request?.title || "Не указано"}</b></div>
-            <div><span>Канал</span><b>{preview.channel}</b></div>
+            <div><span>{uiText("Действие")}</span><b>{uiMessage(preview.actionLabel)}</b></div>
+            <div><span>{uiText("Кому")}</span><b>{preview.client?.name}</b></div>
+            <div><span>{uiText("Телефон")}</span><b>{preview.client?.phone || uiText("не указан")}</b></div>
+            <div><span>{uiText("По заявке")}</span><b>{preview.request?.title || uiText("Не указано")}</b></div>
+            <div><span>{uiText("Канал")}</span><b>{preview.channel}</b></div>
           </div>
           <div className="message-preview">{preview.message}</div>
           {(preview.attachments || []).length ? (
@@ -2757,13 +2691,13 @@ export function TasksPage() {
               ))}
             </div>
           ) : (
-            <p className="muted">Без вложений</p>
+            <p className="muted">{uiText("Без вложений")}</p>
           )}
           {execResult && !(execResult as any).success ? (
             <div className={(execResult as any).partial || (execResult as any).textOk ? "task-partial" : "error"}>
               {(execResult as any).note ? <div>{(execResult as any).note}</div> : null}
               <div>
-                {(execResult as any).textOk ? "Сообщение отправлено ✓" : "Сообщение не отправлено ✕"}
+                {(execResult as any).textOk ? uiText("Сообщение отправлено ✓") : uiText("Сообщение не отправлено ✕")}
                 {(execResult as any).textError ? ` · ${(execResult as any).textError}` : ""}
               </div>
               {(execResult as any).files?.map((f: any) => (
@@ -2773,8 +2707,7 @@ export function TasksPage() {
               ))}
               {(execResult as any).retryFilesAvailable ? (
                 <div className="muted" style={{ marginTop: 6 }}>
-                  Задача остаётся открытой, пока файл не уйдёт.
-                </div>
+                  {uiText("Задача остаётся открытой, пока файл не уйдёт.")}</div>
               ) : null}
             </div>
           ) : null}
@@ -2786,17 +2719,15 @@ export function TasksPage() {
                 setPreview(null);
               }}
             >
-              Вернуться и изменить
-            </button>
+              {uiText("Вернуться и изменить")}</button>
             {execResult && (execResult as any).retryFilesAvailable ? (
               <button type="button" className="btn" disabled={busy} onClick={onRetryFiles}>
-                Повторить отправку файла
-              </button>
+                {uiText("Повторить отправку файла")}</button>
             ) : (
               <button type="button" className="btn" disabled={busy} onClick={onConfirmAndSend}>
                 {preview.scheduled || isFutureDue(taskDetail?.dueAt)
-                  ? "Запланировать отправку"
-                  : preview.buttons?.confirm || "Подтвердить и отправить"}
+                  ? uiText("Запланировать отправку")
+                  : preview.buttons?.confirm || uiText("Подтвердить и отправить")}
               </button>
             )}
           </div>
@@ -2805,14 +2736,14 @@ export function TasksPage() {
 
       {nextPanel ? (
         <div className="panel task-form">
-          <b>Что дальше?</b>
+          <b>{uiText("Что дальше?")}</b>
           <p className="muted">
-            {nextPanel.note || "Задача выполнена. Подтвердите следующий шаг — AI только предлагает."}
+            {nextPanel.note || uiText("Задача выполнена. Подтвердите следующий шаг — AI только предлагает.")}
           </p>
           <div className="chip-row">
             {nextPanel.actions.map((action) => (
               <button
-                key={action.title}
+                key={uiMessage(action.title)}
                 type="button"
                 className="chip"
                 onClick={() =>
@@ -2825,65 +2756,61 @@ export function TasksPage() {
                     .catch((err) => setError(err.message))
                 }
               >
-                {action.title}
-                {action.requiresConfirm ? " · нужно подтверждение" : ""}
+                {uiMessage(action.title)}
+                {action.requiresConfirm ? uiText(" · нужно подтверждение") : ""}
               </button>
             ))}
             <button type="button" className="chip" onClick={() => setNextPanel(null)}>
-              Без следующего действия
-            </button>
+              {uiText("Без следующего действия")}</button>
           </div>
         </div>
       ) : null}
 
       {completeOpen ? (
         <div className="panel task-form">
-          <b>Завершить задачу</b>
+          <b>{uiText("Завершить задачу")}</b>
           <label>
-            Результат
-            <select
+            {uiText("Результат")}<select
               value={resultCode}
               onChange={(event) => setResultCode(event.target.value)}
             >
               {completeTaskType === "meeting" || completeTaskType === "call" ? (
                 <>
-                  <option value="agreed">Договорились</option>
-                  <option value="needs_estimate">Нужен расчёт</option>
-                  <option value="send_proposal">Отправить КП</option>
-                  <option value="send_contract">Отправить договор</option>
-                  <option value="client_thinking">Клиент думает</option>
-                  <option value="callback_later">Перезвонить</option>
-                  <option value="reschedule">Перенести встречу</option>
-                  <option value="reached">Дозвонился / состоялось</option>
-                  <option value="no_answer">Не ответил / не состоялось</option>
-                  <option value="refused">Отказ</option>
-                  <option value="other">Другое</option>
+                  <option value="agreed">{uiText("Договорились")}</option>
+                  <option value="needs_estimate">{uiText("Нужен расчёт")}</option>
+                  <option value="send_proposal">{uiText("Отправить КП")}</option>
+                  <option value="send_contract">{uiText("Отправить договор")}</option>
+                  <option value="client_thinking">{uiText("Клиент думает")}</option>
+                  <option value="callback_later">{uiText("Перезвонить")}</option>
+                  <option value="reschedule">{uiText("Перенести встречу")}</option>
+                  <option value="reached">{uiText("Дозвонился / состоялось")}</option>
+                  <option value="no_answer">{uiText("Не ответил / не состоялось")}</option>
+                  <option value="refused">{uiText("Отказ")}</option>
+                  <option value="other">{uiText("Другое")}</option>
                 </>
               ) : (
                 <>
-                  <option value="reached">Дозвонился</option>
-                  <option value="no_answer">Не ответил</option>
-                  <option value="callback_later">Перезвонить позже</option>
-                  <option value="refused">Клиент отказался</option>
-                  <option value="agreed">Договорились</option>
-                  <option value="other">Другое</option>
+                  <option value="reached">{uiText("Дозвонился")}</option>
+                  <option value="no_answer">{uiText("Не ответил")}</option>
+                  <option value="callback_later">{uiText("Перезвонить позже")}</option>
+                  <option value="refused">{uiText("Клиент отказался")}</option>
+                  <option value="agreed">{uiText("Договорились")}</option>
+                  <option value="other">{uiText("Другое")}</option>
                 </>
               )}
             </select>
           </label>
           <label>
-            Комментарий
-            <textarea
+            {uiText("Комментарий")}<textarea
               rows={3}
               value={resultText}
               onChange={(event) => setResultText(event.target.value)}
-              placeholder="Например: обсудили структуру, клиент попросил финальное КП завтра до обеда"
+              placeholder={uiText("Например: обсудили структуру, клиент попросил финальное КП завтра до обеда")}
             />
           </label>
           <div className="actions">
             <button type="button" className="btn secondary" onClick={() => setCompleteOpen(null)}>
-              Отмена
-            </button>
+              {uiText("Отмена")}</button>
             <button
               type="button"
               className="btn"
@@ -2903,8 +2830,7 @@ export function TasksPage() {
                   .catch((err) => setError(err.message))
               }
             >
-              Завершить задачу
-            </button>
+              {uiText("Завершить задачу")}</button>
           </div>
         </div>
       ) : null}
@@ -2912,20 +2838,20 @@ export function TasksPage() {
       {visible.length === 0 ? (
         <p className="empty">
           {filter === "waiting"
-            ? "Задач в ожидании нет."
+            ? uiText("Задач в ожидании нет.")
             : filter === "no_due"
-              ? "Незавершённых задач без срока нет."
+              ? uiText("Незавершённых задач без срока нет.")
               : filter === "scheduled"
-                ? "Запланированных задач нет."
+                ? uiText("Запланированных задач нет.")
                 : filter === "overdue"
-                  ? "Просроченных задач нет."
+                  ? uiText("Просроченных задач нет.")
                   : filter === "mine"
-                    ? "У вас нет активных задач."
+                    ? uiText("У вас нет активных задач.")
                     : filter === "today"
-                      ? "На сегодня задач нет."
+                      ? uiText("На сегодня задач нет.")
                       : filter === "done"
-                        ? "Завершённых задач пока нет."
-                        : "Задач пока нет."}
+                        ? uiText("Завершённых задач пока нет.")
+                        : uiText("Задач пока нет.")}
         </p>
       ) : null}
 
@@ -2933,7 +2859,7 @@ export function TasksPage() {
         ? groups.map((group) =>
         group.items.length === 0 ? null : (
           <div key={group.key}>
-            <h3>{GROUP_TITLE[group.key]}</h3>
+            <h3>{localizeUiOptions(GROUP_TITLE, uiText)[group.key]}</h3>
             {group.items.map((item) => (
               <div className={`row task-row${item.overdue ? " task-row-overdue" : ""}${item.status === "in_progress" ? " task-row-progress" : ""}${item.status === "waiting" ? " task-row-waiting" : ""}`} key={item.id}>
                 <div className="task-row-main">
@@ -2946,50 +2872,50 @@ export function TasksPage() {
                     >
                       {statusText(item)}
                     </span>
-                    {item.overdue && !isScheduledSend(item) ? <span className="deal-flag">Просрочено</span> : null}
-                    {isScheduledSend(item) ? <span className="deal-flag">Отправка запланирована</span> : null}
+                    {item.overdue && !isScheduledSend(item) ? <span className="deal-flag">{uiText("Просрочено")}</span> : null}
+                    {isScheduledSend(item) ? <span className="deal-flag">{uiText("Отправка запланирована")}</span> : null}
                     {item.executionStatus === "failed" && !isScheduledSend(item) ? (
-                      <span className="deal-flag">Отправка не удалась</span>
+                      <span className="deal-flag">{uiText("Отправка не удалась")}</span>
                     ) : null}
-                    {item.campaignId ? <span className="deal-flag">Рассылка</span> : null}
+                    {item.campaignId ? <span className="deal-flag">{uiText("Рассылка")}</span> : null}
                   </div>
                   <div className="task-meta-grid">
                     <div>
-                      <span className="muted">Срок</span>
-                      <div>{item.dueAt ? formatDateTimeRu(item.dueAt) : "Без срока"}</div>
+                      <span className="muted">{uiText("Срок")}</span>
+                      <div>{item.dueAt ? formatDateTimeRu(item.dueAt) : uiText("Без срока")}</div>
                     </div>
                     <div>
-                      <span className="muted">Создана</span>
+                      <span className="muted">{uiText("Создана")}</span>
                       <div>{formatDateTimeRu(item.createdAt) || "—"}</div>
                     </div>
                     <div>
-                      <span className="muted">Поставил</span>
+                      <span className="muted">{uiText("Поставил")}</span>
                       <div>{createdByText(item)}</div>
                     </div>
                     <div>
-                      <span className="muted">Исполнитель</span>
+                      <span className="muted">{uiText("Исполнитель")}</span>
                       <div>{assigneeText(item)}</div>
                     </div>
                     <div>
-                      <span className="muted">Статус</span>
+                      <span className="muted">{uiText("Статус")}</span>
                       <div>{statusText(item)}</div>
                     </div>
                   </div>
                   {caps.manageTasks && !String(item.id).startsWith("campaign:") ? (
                     <div className="chip-row task-note-marks">
-                      {NOTE_STATUS_MARKS.map(([value, label]) => (
+                      {localizeUiOptions(NOTE_STATUS_MARKS, uiText).map(([value, label]) => (
                         <button
                           key={value}
                           type="button"
                           className={item.status === value ? "chip active" : "chip"}
                           {...tip(
                             value === "open"
-                              ? "Вернуть к выполнению"
+                              ? uiText("Вернуть к выполнению")
                               : value === "in_progress"
-                                ? "Взять в работу"
+                                ? uiText("Взять в работу")
                                 : value === "waiting"
-                                  ? "Жду ответа"
-                                  : "Завершить",
+                                  ? uiText("Жду ответа")
+                                  : uiText("Завершить"),
                           )}
                           onClick={() => setNoteStatus(item.id, value)}
                         >
@@ -2999,12 +2925,11 @@ export function TasksPage() {
                     </div>
                   ) : null}
                   <div className="task-who">
-                    <span className="muted">Кому</span>
+                    <span className="muted">{uiText("Кому")}</span>
                     <div>
                       {item.targetType === "group" ? (
                         <>
-                          Группа
-                          {item.progress ? ` · выполнено ${item.progress.label}` : ""}
+                          {uiText("Группа")}{item.progress ? uiText(" · выполнено {p0}", {p0: item.progress.label}) : ""}
                           {(item.segmentSnapshotJson as any)?.label
                             ? ` · ${(item.segmentSnapshotJson as any).label}`
                             : item.contextLabel
@@ -3018,72 +2943,71 @@ export function TasksPage() {
                               {item.whoName ||
                                 item.contact.name ||
                                 [item.contact.firstName, item.contact.lastName].filter(Boolean).join(" ") ||
-                                "Клиент"}
+                                uiText("Клиент")}
                             </Link>
                           ) : (
-                            <b>{item.whoName || "Клиент"}</b>
+                            <b>{item.whoName || uiText("Клиент")}</b>
                           )}
                           <span className="muted"> · {phoneText(item.whoPhone)}</span>
                         </>
                       ) : (
-                        <span className="muted">{item.contextLabel || "Без привязки к клиенту"}</span>
+                        <span className="muted">{item.contextLabel || uiText("Без привязки к клиенту")}</span>
                       )}
                     </div>
                   </div>
                   {(item.aboutLines || []).length ? (
                     <div className="task-about">
-                      <span className="muted">По поводу</span>
+                      <span className="muted">{uiText("По поводу")}</span>
                       <ul>
                         {(item.aboutLines as string[]).map((line: string) => (
                           <li key={line}>{line}</li>
                         ))}
                       </ul>
                       <div className="task-about-links">
-                        {item.inquiryId ? <Link to={`/requests/${item.inquiryId}`}>Открыть заявку</Link> : null}
-                        {item.dealId ? <Link to={`/deals/${item.dealId}`}>Открыть сделку</Link> : null}
+                        {item.inquiryId ? <Link to={`/requests/${item.inquiryId}`}>{uiText("Открыть заявку")}</Link> : null}
+                        {item.dealId ? <Link to={`/deals/${item.dealId}`}>{uiText("Открыть сделку")}</Link> : null}
                         {item.conversationId ? (
-                          <Link to={`/conversations/${item.conversationId}`}>Открыть диалог</Link>
+                          <Link to={`/conversations/${item.conversationId}`}>{uiText("Открыть диалог")}</Link>
                         ) : null}
                         {(item.contactId || item.contact?.id) ? (
-                          <Link to={`/contacts/${item.contactId || item.contact.id}`}>Карточка клиента</Link>
+                          <Link to={`/contacts/${item.contactId || item.contact.id}`}>{uiText("Карточка клиента")}</Link>
                         ) : null}
                       </div>
                     </div>
                   ) : null}
                   {item.messagePreview && SENDABLE.has(item.type) ? (
-                    <div className="task-desc muted">Сообщение: {item.messagePreview}</div>
+                    <div className="task-desc muted">{uiText("Сообщение:")}{" "}{item.messagePreview}</div>
                   ) : null}
                   {item.briefingText || item.purpose || item.source === "context_engine" ? (
                     <div className="task-briefing">
                       {item.purpose ? (
                         <div>
-                          <span className="muted">Цель</span>
+                          <span className="muted">{uiText("Цель")}</span>
                           <div>{item.purpose}</div>
                         </div>
                       ) : null}
                       {item.briefingText ? (
                         <div>
-                          <span className="muted">Перед контактом</span>
+                          <span className="muted">{uiText("Перед контактом")}</span>
                           <div>{item.briefingText}</div>
                         </div>
                       ) : null}
                       {item.source === "context_engine" ? (
-                        <div className="muted">Основание: создано автоматически из договорённости в WhatsApp</div>
+                        <div className="muted">{uiText("Основание: создано автоматически из договорённости в WhatsApp")}</div>
                       ) : null}
                       {item.commandStatus === "needs_confirmation" ? (
-                        <div className="warn-text">Нужно подтверждение перед внешней отправкой</div>
+                        <div className="warn-text">{uiText("Нужно подтверждение перед внешней отправкой")}</div>
                       ) : null}
                       {item.conversationId ? (
-                        <Link to={`/conversations/${item.conversationId}`}>Открыть весь диалог</Link>
+                        <Link to={`/conversations/${item.conversationId}`}>{uiText("Открыть весь диалог")}</Link>
                       ) : null}
                       <button
                         type="button"
                         className="btn secondary"
-                        {...tip("Показать цель, что известно и черновик сообщения клиенту")}
+                        {...tip(uiText("Показать цель, что известно и черновик сообщения клиенту"))}
                         onClick={() => openTaskEditor(item.id)}
                       >
-                        Брифинг и сообщение
-                      </button>
+                        {uiText("Брифинг и сообщение")}</button>
                     </div>
                   ) : null}
                   {item.targetType === "group" && item.children?.length ? (
@@ -3093,7 +3017,7 @@ export function TasksPage() {
                         className="btn secondary"
                         onClick={() => setExpanded(expanded === item.id ? null : item.id)}
                       >
-                        {expanded === item.id ? "Скрыть клиентов" : `Клиенты (${item.children.length})`}
+                        {expanded === item.id ? uiText("Скрыть клиентов") : uiText("Клиенты ({p0})", {p0: item.children.length})}
                       </button>
                       {expanded === item.id ? (
                         <div className="picker-list" style={{ marginTop: 8 }}>
@@ -3103,12 +3027,11 @@ export function TasksPage() {
                                 {child.status === "done" ? "✓ " : "○ "}
                                 {nameWithPhone(child.contactName, child.phone)}
                               </b>
-                              <div className="muted">{child.statusLabel || child.status}</div>
+                              <div className="muted">{uiMessage(child.statusLabel) || child.status}</div>
                               <div className="actions" style={{ marginTop: 6 }}>
                                 {child.contactId ? (
                                   <Link className="btn secondary" to={`/contacts/${child.contactId}`}>
-                                    Клиент
-                                  </Link>
+                                    {uiText("Клиент")}</Link>
                                 ) : null}
                                 {child.status === "open" || child.status === "waiting" ? (
                                   <button
@@ -3118,11 +3041,10 @@ export function TasksPage() {
                                       api
                                         .completeTask(child.id)
                                         .then(load)
-                                        .catch((err) => setError(err instanceof Error ? err.message : "Ошибка"))
+                                        .catch((err) => setError(err instanceof Error ? err.message : uiText("Ошибка")))
                                     }
                                   >
-                                    Сделано
-                                  </button>
+                                    {uiText("Сделано")}</button>
                                 ) : null}
                               </div>
                             </div>
@@ -3135,34 +3057,32 @@ export function TasksPage() {
                 <div className="actions">
                   {item.needsFileRetry ? (
                     <div className="task-partial-inline">
-                      <span>Текст ушёл · файл не отправлен</span>
+                      <span>{uiText("Текст ушёл · файл не отправлен")}</span>
                       <button
                         type="button"
                         className="btn"
                         disabled={busy}
                         onClick={() => void retryFilesFromList(item.id)}
                       >
-                        Повторить файл
-                      </button>
+                        {uiText("Повторить файл")}</button>
                     </div>
                   ) : null}
                   {item.status === "open" || item.status === "waiting" ? (
                     <>
                       {String(item.id).startsWith("campaign:") ? (
-                        <span className="muted">Отправка уйдёт в срок рассылки</span>
+                        <span className="muted">{uiText("Отправка уйдёт в срок рассылки")}</span>
                       ) : (
                       <button
                         className={isScheduledSend(item) ? "btn" : "btn secondary"}
                         type="button"
                         {...tip(
                           isScheduledSend(item)
-                            ? "Изменить текст или время отправки. Сообщение не уйдёт сразу"
-                            : "Изменить текст, срок или черновик задачи",
+                            ? uiText("Изменить текст или время отправки. Сообщение не уйдёт сразу")
+                            : uiText("Изменить текст, срок или черновик задачи"),
                         )}
                         onClick={() => openTaskEditor(item.id)}
                       >
-                        Изменить
-                      </button>
+                        {uiText("Изменить")}</button>
                       )}
                       {SENDABLE.has(item.type) && item.targetType !== "group" && !isScheduledSend(item) ? (
                         <button
@@ -3170,25 +3090,25 @@ export function TasksPage() {
                           type="button"
                           {...tip(
                             item.needsFileRetry
-                              ? "Открыть задачу, чтобы повторить отправку файла"
-                              : "Открыть черновик и отправить сообщение/файл клиенту в WhatsApp",
+                              ? uiText("Открыть задачу, чтобы повторить отправку файла")
+                              : uiText("Открыть черновик и отправить сообщение/файл клиенту в WhatsApp"),
                           )}
                           onClick={() => openTaskEditor(item.id)}
                         >
-                          {item.needsFileRetry ? "Открыть задачу" : "Подготовить отправку"}
+                          {item.needsFileRetry ? uiText("Открыть задачу") : uiText("Подготовить отправку")}
                         </button>
                       ) : null}
                       {caps.manageTasks && SENDABLE.has(item.type) && item.targetType === "group" && !item.campaignId ? (
                         <button
                           className="btn"
                           type="button"
-                          {...tip("Открыть массовую рассылку по клиентам этой групповой задачи")}
+                          {...tip(uiText("Открыть массовую рассылку по клиентам этой групповой задачи"))}
                           onClick={() => {
                             const ids = (item.children || [])
                               .map((child: any) => child.contactId)
                               .filter(Boolean);
                             if (!ids.length) {
-                              setError("В группе нет клиентов для рассылки");
+                              setError(uiText("В группе нет клиентов для рассылки"));
                               return;
                             }
                             setComposeMode("campaign");
@@ -3202,14 +3122,13 @@ export function TasksPage() {
                             });
                           }}
                         >
-                          Массовая отправка группе
-                        </button>
+                          {uiText("Массовая отправка группе")}</button>
                       ) : null}
                       {MANUAL_COMPLETE.has(item.type) ? (
                         <button
                           className="btn secondary"
                           type="button"
-                          {...tip("Закрыть задачу с результатом (дозвон, итог встречи и т.п.) и получить следующий шаг")}
+                          {...tip(uiText("Закрыть задачу с результатом (дозвон, итог встречи и т.п.) и получить следующий шаг"))}
                           onClick={() => {
                             setCompleteOpen(item.id);
                             setCompleteTaskType(item.type);
@@ -3217,47 +3136,42 @@ export function TasksPage() {
                             setResultText("");
                           }}
                         >
-                          С результатом
-                        </button>
+                          {uiText("С результатом")}</button>
                       ) : null}
                       {item.status === "open" || item.status === "in_progress" ? (
                         <button
                           className="btn secondary"
-                          {...tip("Отложить: ждёте ответа клиента. Задача уйдёт в «Жду»")}
+                          {...tip(uiText("Отложить: ждёте ответа клиента. Задача уйдёт в «Жду»"))}
                           onClick={() => api.waitTask(item.id).then(load).catch((err) => setError(err.message))}
                         >
-                          Жду
-                        </button>
+                          {uiText("Жду")}</button>
                       ) : null}
                       {item.status === "waiting" ? (
                         <button
                           className="btn secondary"
-                          {...tip("Вернуть задачу из ожидания обратно в открытые")}
+                          {...tip(uiText("Вернуть задачу из ожидания обратно в открытые"))}
                           onClick={() => api.reopenTask(item.id).then(load).catch((err) => setError(err.message))}
                         >
-                          Вернуть в работу
-                        </button>
+                          {uiText("Вернуть в работу")}</button>
                       ) : null}
                       <button
                         className="btn"
                         type="button"
-                        {...tip("Сразу отметить задачу выполненной без заполнения результата")}
+                        {...tip(uiText("Сразу отметить задачу выполненной без заполнения результата"))}
                         onClick={() =>
                           api
                             .completeTask(item.id)
                             .then(load)
-                            .catch((err) => setError(err instanceof Error ? err.message : "Нельзя закрыть"))
+                            .catch((err) => setError(err instanceof Error ? err.message : uiText("Нельзя закрыть")))
                         }
                       >
-                        Завершить
-                      </button>
+                        {uiText("Завершить")}</button>
                       <button
                         className="btn secondary task-cancel"
-                        {...tip("Отменить задачу — она больше не будет в работе")}
+                        {...tip(uiText("Отменить задачу — она больше не будет в работе"))}
                         onClick={() => api.cancelTask(item.id).then(load).catch((err) => setError(err.message))}
                       >
-                        Отменить
-                      </button>
+                        {uiText("Отменить")}</button>
                     </>
                   ) : (
                     <span className="muted">{statusText(item)}</span>
@@ -3272,7 +3186,7 @@ export function TasksPage() {
 
       {showDoneGroups && doneGroups.length ? (
         <div className="task-done-log">
-          {filter === "all" && activeItems.length ? <h3>Уже сделано</h3> : null}
+          {filter === "all" && activeItems.length ? <h3>{uiText("Уже сделано")}</h3> : null}
           {doneGroups.map((group) => (
             <div key={`done-${group.key}`}>
               <h3 className={filter === "all" && activeItems.length ? "task-done-date" : undefined}>{group.title}</h3>
@@ -3285,51 +3199,51 @@ export function TasksPage() {
                       <div className="task-row-title">
                         <b>{item.title}</b>
                         <span className={`deal-flag ${item.status === "canceled" ? "" : "deal-flag-done"}`}>
-                          {item.status === "canceled" ? "Отменена" : "Сделано"}
+                          {item.status === "canceled" ? uiText("Отменена") : uiText("Сделано")}
                         </span>
                       </div>
                       <div className="task-meta-grid">
                         <div>
-                          <span className="muted">Создана</span>
+                          <span className="muted">{uiText("Создана")}</span>
                           <div>{formatDateTimeRu(item.createdAt) || "—"}</div>
                         </div>
                         <div>
-                          <span className="muted">Результат</span>
-                          <div>{result || statusText(item) || "Завершено"}</div>
+                          <span className="muted">{uiText("Результат")}</span>
+                          <div>{result || statusText(item) || uiText("Завершено")}</div>
                         </div>
                         <div>
-                          <span className="muted">Когда</span>
+                          <span className="muted">{uiText("Когда")}</span>
                           <div>
                             {when.getTime()
-                              ? when.toLocaleString("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })
+                              ? when.toLocaleString(uiFormatLocale(), { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })
                               : "—"}
                           </div>
                         </div>
                         <div>
-                          <span className="muted">Поставил</span>
+                          <span className="muted">{uiText("Поставил")}</span>
                           <div>{createdByText(item)}</div>
                         </div>
                         <div>
-                          <span className="muted">Исполнитель</span>
+                          <span className="muted">{uiText("Исполнитель")}</span>
                           <div>{assigneeText(item)}</div>
                         </div>
                       </div>
                       <div className="task-who">
-                        <span className="muted">Кому</span>
+                        <span className="muted">{uiText("Кому")}</span>
                         <div>
                           {item.contact?.id || item.whoName ? (
                             <>
                               {item.contact?.id ? (
                                 <Link to={`/contacts/${item.contact.id}`}>
-                                  {item.whoName || item.contact.name || "Клиент"}
+                                  {item.whoName || item.contact.name || uiText("Клиент")}
                                 </Link>
                               ) : (
-                                <b>{item.whoName || "Клиент"}</b>
+                                <b>{item.whoName || uiText("Клиент")}</b>
                               )}
                               <span className="muted"> · {phoneText(item.whoPhone)}</span>
                             </>
                           ) : (
-                            <span className="muted">{item.contextLabel || "Без привязки к клиенту"}</span>
+                            <span className="muted">{item.contextLabel || uiText("Без привязки к клиенту")}</span>
                           )}
                         </div>
                       </div>

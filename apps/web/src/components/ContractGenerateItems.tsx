@@ -1,3 +1,4 @@
+import { uiText, useUiText, localizeUiOptions, uiFormatLocale } from "../lib/uiText";
 import { MeasureUnitSelect } from "./MeasureUnitSelect";
 
 export type ContractDraftLine = {
@@ -28,10 +29,10 @@ export function parseContractDraftLines(lines: ContractDraftLine[]) {
     const quantity = Number(String(line.quantity).replace(",", "."));
     const unitPrice = Number(String(line.unitPrice).replace(/\s+/g, "").replace(",", ".")) || 0;
     if (!Number.isFinite(quantity) || quantity <= 0) {
-      throw new Error(`Укажите количество для «${name}»`);
+      throw new Error(uiText("Укажите количество для «{p0}»", {p0: name}));
     }
     if (!Number.isFinite(unitPrice) || unitPrice < 0) {
-      throw new Error(`Укажите цену для «${name}»`);
+      throw new Error(uiText("Укажите цену для «{p0}»", {p0: name}));
     }
     items.push({
       name,
@@ -41,7 +42,7 @@ export function parseContractDraftLines(lines: ContractDraftLine[]) {
       vatRate: Number(line.vatRate) || 0,
     });
   }
-  if (!items.length) throw new Error("Добавьте хотя бы одну услугу или товар");
+  if (!items.length) throw new Error(uiText("Добавьте хотя бы одну услугу или товар"));
   return items;
 }
 
@@ -65,6 +66,7 @@ export function ContractGenerateItems({
   completionTerms: string;
   onCompletionTermsChange: (value: string) => void;
 }) {
+  const uiText = useUiText();
   const total = lines.reduce((sum, line) => sum + lineSum(line), 0);
   function patch(key: string, next: Partial<ContractDraftLine>) {
     onChange(lines.map((line) => (line.key === key ? { ...line, ...next } : line)));
@@ -73,8 +75,8 @@ export function ContractGenerateItems({
     <div className="contract-gen-items">
       <div className="saved-editor-summary">
         <div>
-          <b>Услуги и товары</b>
-          <p className="muted">Попадут в договор, счёт и АВР. НДС выбирается в каждой строке.</p>
+          <b>{uiText("Услуги и товары")}</b>
+          <p className="muted">{uiText("Попадут в договор, счёт и АВР. НДС выбирается в каждой строке.")}</p>
         </div>
         <button
           type="button"
@@ -82,36 +84,31 @@ export function ContractGenerateItems({
           disabled={disabled}
           onClick={() => onChange([...lines, newContractDraftLine()])}
         >
-          Добавить позицию
-        </button>
+          {uiText("Добавить позицию")}</button>
       </div>
       {lines.map((line, index) => (
         <div className="contract-gen-line" key={line.key}>
           <label>
-            Услуга / товар
-            <input
+            {uiText("Услуга / товар")}<input
               value={line.name}
               disabled={disabled}
-              placeholder="Разработка презентации"
+              placeholder={uiText("Разработка презентации")}
               onChange={(e) => patch(line.key, { name: e.target.value })}
             />
           </label>
           <label>
-            Кол-во
-            <input value={line.quantity} disabled={disabled} onChange={(e) => patch(line.key, { quantity: e.target.value })} />
+            {uiText("Кол-во")}<input value={line.quantity} disabled={disabled} onChange={(e) => patch(line.key, { quantity: e.target.value })} />
           </label>
           <label>
-            Ед. изм.
-            <MeasureUnitSelect
+            {uiText("Ед. изм.")}<MeasureUnitSelect
               value={line.unit}
               disabled={disabled}
-              aria-label={`Единица измерения ${index + 1}`}
+              aria-label={uiText("Единица измерения {p0}", {p0: index + 1})}
               onChange={(unit) => patch(line.key, { unit })}
             />
           </label>
           <label>
-            Цена без НДС (₸)
-            <input
+            {uiText("Цена без НДС (₸)")}<input
               value={line.unitPrice}
               disabled={disabled}
               placeholder="0"
@@ -119,15 +116,14 @@ export function ContractGenerateItems({
             />
           </label>
           <label>
-            НДС
-            <select
-              aria-label={`НДС ${index + 1}`}
+            {uiText("НДС")}<select
+              aria-label={uiText("НДС {p0}", {p0: index + 1})}
               disabled={disabled}
               value={line.vatRate}
               onChange={(e) => patch(line.key, { vatRate: e.target.value })}
             >
-              <option value="0">Без НДС</option>
-              <option value="12">С НДС (12%)</option>
+              <option value="0">{uiText("Без НДС")}</option>
+              <option value="12">{uiText("С НДС (12%)")}</option>
             </select>
           </label>
           {lines.length > 1 ? (
@@ -137,26 +133,24 @@ export function ContractGenerateItems({
               disabled={disabled}
               onClick={() => onChange(lines.filter((row) => row.key !== line.key))}
             >
-              Убрать
-            </button>
+              {uiText("Убрать")}</button>
           ) : null}
         </div>
       ))}
       <p className="contract-gen-total">
-        Итого: <b>{total.toLocaleString("ru-RU")} ₸</b>
+        {uiText("Итого:")}{" "}<b>{total.toLocaleString(uiFormatLocale())} ₸</b>
       </p>
       <label>
-        Срок выполнения работ / оказания услуг
-        <textarea
+        {uiText("Срок выполнения работ / оказания услуг")}<textarea
           value={completionTerms}
           onChange={(event) => onCompletionTermsChange(event.target.value)}
           disabled={disabled}
           maxLength={2000}
           rows={2}
-          placeholder="Например: 10 рабочих дней после предоплаты или до 15.10.2026"
+          placeholder={uiText("Например: 10 рабочих дней после предоплаты или до 15.10.2026")}
         />
       </label>
-      <p className="muted">Срок для всех позиций договора. Если не заполнить — по согласованию сторон.</p>
+      <p className="muted">{uiText("Срок для всех позиций договора. Если не заполнить — по согласованию сторон.")}</p>
     </div>
   );
 }

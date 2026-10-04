@@ -290,24 +290,22 @@ describe("shared AI Manager SaaS", () => {
     });
     assert.equal(failed?.inputTokens, null);
     assert.equal(failed?.totalCost, null);
-    const orig = prisma.aIUsageEvent.create.bind(prisma.aIUsageEvent);
-    prisma.aIUsageEvent.create = (async () => {
-      throw new Error("telemetry down");
-    }) as typeof prisma.aIUsageEvent.create;
-    try {
-      const ignored = await recordAiUsage(prisma, {
-        tenantId: tenantA,
-        provider: "openai",
-        model: "gpt-4o-mini",
-        feature: "AI_OTHER",
-        status: "ok",
-        inputTokens: 1,
-        outputTokens: 1,
-      });
-      assert.equal(ignored, null);
-    } finally {
-      prisma.aIUsageEvent.create = orig;
-    }
+    // Usage writes now run on a transaction client; patching the root delegate
+    // does not simulate a storage failure inside that transaction.
+    const unavailableLedger = new Proxy(prisma, { get(target, property, receiver) {
+      if (property === "$transaction") return async () => { throw new Error("telemetry down"); };
+      return Reflect.get(target, property, receiver);
+    } });
+    const ignored = await recordAiUsage(unavailableLedger, {
+      tenantId: tenantA,
+      provider: "openai",
+      model: "gpt-4o-mini",
+      feature: "AI_OTHER",
+      status: "ok",
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+    assert.equal(ignored, null);
   });
 
   it("keeps prompt and knowledge tenant-scoped; draft is unused until publish", async () => {

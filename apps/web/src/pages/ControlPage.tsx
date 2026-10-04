@@ -1,3 +1,4 @@
+import { uiText, useUiText, localizeUiOptions, uiMessage , uiDurationLabel } from "../lib/uiText";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { nameWithPhone, phoneText } from "../lib/contactDisplay";
@@ -14,6 +15,7 @@ type Filter =
 
 
 export function ControlPage() {
+  const uiText = useUiText();
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
@@ -28,7 +30,7 @@ export function ControlPage() {
       setData(overview);
       setError("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Ошибка загрузки");
+      setError(err instanceof Error ? err.message : uiText("Ошибка загрузки"));
     }
   }
 
@@ -43,26 +45,25 @@ export function ControlPage() {
     setError("");
     try {
       const result = await action();
-      if (result?.note) setNote(result.note);
+      if (result?.note) setNote(uiMessage(result.note));
       else if (result?.sellerError) setNote(result.sellerError);
-      else if (result?.appliedOnSeller === false) setNote("Записано в CRM, но на AI это не повлияло.");
+      else if (result?.appliedOnSeller === false) setNote(uiText("Записано в CRM, но на AI это не повлияло."));
       else setNote("");
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Команда не выполнена");
+      setError(err instanceof Error ? err.message : uiText("Команда не выполнена"));
     } finally {
       setBusyKey("");
     }
   }
 
-  if (!data && !error) return <div className="state">Загрузка…</div>;
+  if (!data && !error) return <div className="state">{uiText("Загрузка…")}</div>;
   if (!data) {
     return (
       <section>
         <p className="error">{error}</p>
         <button type="button" className="btn" onClick={() => void load()}>
-          Повторить
-        </button>
+          {uiText("Повторить")}</button>
       </section>
     );
   }
@@ -80,8 +81,8 @@ export function ControlPage() {
     <section className="management-page">
       <div className="page-head">
         <div>
-          <h2>Управление</h2>
-          <p className="muted">Где отвечает AI, а где нужен сотрудник.</p>
+          <h2>{uiText("Управление")}</h2>
+          <p className="muted">{uiText("Где отвечает AI, а где нужен сотрудник.")}</p>
         </div>
       </div>
       {error ? <p className="error">{error}</p> : null}
@@ -90,44 +91,43 @@ export function ControlPage() {
       <div className="panel management-ai-status">
         <div className="management-ai-status-head">
           <div>
-            <b>AI-менеджер</b>
+            <b>{uiText("AI-менеджер")}</b>
             <span className={`mgmt-dot ${ai.statusTone === "ok" ? "ok" : "warn"}`} />
-            <span>{ai.status}</span>
+            <span>{uiMessage(ai.status)}</span>
           </div>
-          <span className="muted">Обновлено: {ai.updatedAtLabel || "—"}</span>
+          <span className="muted">{uiText("Обновлено:")}{" "}{ai.updatedAtLabel || "—"}</span>
         </div>
-        <p className="muted">{ai.note}</p>
+        <p className="muted">{uiMessage(ai.note)}</p>
         <div className="mgmt-metrics">
           <div>
             <b>{ai.aiControlled ?? 0}</b>
-            <span>AI ведёт</span>
+            <span>{uiText("AI ведёт")}</span>
           </div>
           <div>
             <b>{ai.humanControlled ?? 0}</b>
-            <span>Ведут сотрудники</span>
+            <span>{uiText("Ведут сотрудники")}</span>
           </div>
           <div>
             <b>{ai.waitingClient ?? 0}</b>
-            <span>Ждём клиента</span>
+            <span>{uiText("Ждём клиента")}</span>
           </div>
           <div>
             <b>{ai.needsIntervention ?? 0}</b>
-            <span>Нужно вмешательство</span>
+            <span>{uiText("Нужно вмешательство")}</span>
           </div>
           <div>
             <b>{ai.pendingApprovals ?? 0}</b>
-            <span>Ожидают подтверждения</span>
+            <span>{uiText("Ожидают подтверждения")}</span>
           </div>
           <div>
             <b>{ai.problems ?? 0}</b>
-            <span>Проблемы</span>
+            <span>{uiText("Проблемы")}</span>
           </div>
         </div>
         <div className="actions">
           {!ai.paused ? (
             <button type="button" className="btn secondary" onClick={() => setConfirmPause(true)} disabled={busyKey === "pause"}>
-              Приостановить AI
-            </button>
+              {uiText("Приостановить AI")}</button>
           ) : (
             <button
               type="button"
@@ -135,28 +135,23 @@ export function ControlPage() {
               disabled={busyKey === "pause"}
               onClick={() => run("pause", () => api.setAiManagerPause(false))}
             >
-              Возобновить AI
-            </button>
+              {uiText("Возобновить AI")}</button>
           )}
           <button type="button" className="btn secondary" onClick={() => setConfirmClaimAll(true)} disabled={busyKey === "claim-all"}>
-            Забрать все диалоги у AI
-          </button>
+            {uiText("Забрать все диалоги у AI")}</button>
           <Link className="btn secondary" to="/integrations">
-            Открыть интеграции
-          </Link>
+            {uiText("Открыть интеграции")}</Link>
         </div>
       </div>
 
       {confirmPause ? (
         <div className="panel soft">
-          <b>Приостановить AI-менеджера?</b>
+          <b>{uiText("Приостановить AI-менеджера?")}</b>
           <p className="muted">
-            AI перестанет сам отвечать клиентам. Новые сообщения и заявки по-прежнему будут приходить в CRM.
-          </p>
+            {uiText("AI перестанет сам отвечать клиентам. Новые сообщения и заявки по-прежнему будут приходить в CRM.")}</p>
           <div className="actions">
             <button type="button" className="btn secondary" onClick={() => setConfirmPause(false)}>
-              Отмена
-            </button>
+              {uiText("Отмена")}</button>
             <button
               type="button"
               className="btn"
@@ -166,23 +161,19 @@ export function ControlPage() {
                 void run("pause", () => api.setAiManagerPause(true));
               }}
             >
-              Приостановить
-            </button>
+              {uiText("Приостановить")}</button>
           </div>
         </div>
       ) : null}
 
       {confirmClaimAll ? (
         <div className="panel soft">
-          <b>Забрать все диалоги у AI?</b>
+          <b>{uiText("Забрать все диалоги у AI?")}</b>
           <p className="muted">
-            AI сейчас ведёт {ai.aiControlled ?? 0} активных диалогов. После подтверждения автоматические ответы в этих
-            диалогах будут остановлены и управление будет передано сотрудникам. Ответственные за сделки не меняются.
-          </p>
+            {uiText("AI сейчас ведёт")}{" "}{ai.aiControlled ?? 0} {" "}{uiText("активных диалогов. После подтверждения автоматические ответы в этих диалогах будут остановлены и управление будет передано сотрудникам. Ответственные за сделки не меняются.")}</p>
           <div className="actions">
             <button type="button" className="btn secondary" onClick={() => setConfirmClaimAll(false)}>
-              Отмена
-            </button>
+              {uiText("Отмена")}</button>
             <button
               type="button"
               className="btn"
@@ -192,8 +183,7 @@ export function ControlPage() {
                 void run("claim-all", () => api.claimAllAiConversations());
               }}
             >
-              Забрать все
-            </button>
+              {uiText("Забрать все")}</button>
           </div>
         </div>
       ) : null}
@@ -201,13 +191,13 @@ export function ControlPage() {
       <div className="chip-row" style={{ marginBottom: 12 }}>
         {(
           [
-            ["all", "Все"],
-            ["intervention", "Нужно вмешательство"],
-            ["ai", "AI ведёт"],
-            ["human", "Человек ведёт"],
-            ["waiting_client", "Ждём клиента"],
-            ["approvals", "Ожидают подтверждения"],
-            ["problems", "Проблемы"],
+            ["all", uiText("Все")],
+            ["intervention", uiText("Нужно вмешательство")],
+            ["ai", uiText("AI ведёт")],
+            ["human", uiText("Человек ведёт")],
+            ["waiting_client", uiText("Ждём клиента")],
+            ["approvals", uiText("Ожидают подтверждения")],
+            ["problems", uiText("Проблемы")],
           ] as Array<[Filter, string]>
         ).map(([id, label]) => (
           <button key={id} type="button" className={filter === id ? "chip active" : "chip"} onClick={() => setFilter(id)}>
@@ -219,11 +209,11 @@ export function ControlPage() {
       {showInterventions ? (
         <div className="panel">
           <div className="mgmt-section-head">
-            <h3>Требует вмешательства</h3>
+            <h3>{uiText("Требует вмешательства")}</h3>
             <span className="muted">{(data.interventions || []).length}</span>
           </div>
           {(data.interventions || []).length === 0 ? (
-            <p className="empty">Сейчас AI не требует вмешательства.</p>
+            <p className="empty">{uiText("Сейчас AI не требует вмешательства.")}</p>
           ) : (
             (data.interventions || []).map((item: any) => (
               <div className="mgmt-card" key={item.id}>
@@ -235,9 +225,9 @@ export function ControlPage() {
                     {[item.topic, item.budgetLabel, item.stageLabel].filter(Boolean).join(" · ")}
                   </div>
                   <p>
-                    <b>Почему требуется человек</b>
+                    <b>{uiText("Почему требуется человек")}</b>
                     <br />
-                    {item.reasonLabel}
+                    {uiMessage(item.reasonLabel)}
                     {item.summary ? ` — ${item.summary}` : ""}
                   </p>
                   {item.recentMessages?.length ? (
@@ -257,15 +247,12 @@ export function ControlPage() {
                     disabled={busyKey === item.id}
                     onClick={() => run(item.id, () => api.takeConversation(item.id))}
                   >
-                    Забрать себе
-                  </button>
+                    {uiText("Забрать себе")}</button>
                   <Link className="btn secondary" to={`/conversations/${item.id}`}>
-                    Открыть диалог
-                  </Link>
+                    {uiText("Открыть диалог")}</Link>
                   {item.dealId ? (
                     <Link className="btn secondary" to={`/deals/${item.dealId}`}>
-                      Открыть сделку
-                    </Link>
+                      {uiText("Открыть сделку")}</Link>
                   ) : null}
                 </div>
               </div>
@@ -277,11 +264,11 @@ export function ControlPage() {
       {showWaiting ? (
         <div className="panel">
           <div className="mgmt-section-head">
-            <h3>Ждут менеджера</h3>
+            <h3>{uiText("Ждут менеджера")}</h3>
             <span className="muted">{(data.waitingForManager || []).length}</span>
           </div>
           {(data.waitingForManager || []).length === 0 ? (
-            <p className="empty">Нет клиентов, ожидающих менеджера.</p>
+            <p className="empty">{uiText("Нет клиентов, ожидающих менеджера.")}</p>
           ) : (
             (data.waitingForManager || []).map((item: any) => (
               <div className="mgmt-card compact" key={`wait-${item.id}`}>
@@ -291,7 +278,7 @@ export function ControlPage() {
                     {item.companyName ? ` · ${item.companyName}` : ""}
                   </b>
                   <div className="muted">
-                    Ждёт {item.waitLabel || "—"} · {item.reasonLabel}
+                    {uiText("Ждёт")}{" "}{uiDurationLabel(item.waitLabel) || "—"} · {uiMessage(item.reasonLabel)}
                   </div>
                   <div className="muted">{[item.topic, item.budgetLabel, item.stageLabel].filter(Boolean).join(" · ")}</div>
                 </div>
@@ -302,11 +289,9 @@ export function ControlPage() {
                     disabled={busyKey === `wait-${item.id}`}
                     onClick={() => run(`wait-${item.id}`, () => api.takeConversation(item.id))}
                   >
-                    Забрать
-                  </button>
+                    {uiText("Забрать")}</button>
                   <Link className="btn secondary" to={`/conversations/${item.id}`}>
-                    Открыть
-                  </Link>
+                    {uiText("Открыть")}</Link>
                 </div>
               </div>
             ))
@@ -317,17 +302,17 @@ export function ControlPage() {
       {showApprovals ? (
         <div className="panel">
           <div className="mgmt-section-head">
-            <h3>Ожидают подтверждения</h3>
+            <h3>{uiText("Ожидают подтверждения")}</h3>
             <span className="muted">{(data.pendingApprovals || []).length}</span>
           </div>
           {(data.pendingApprovals || []).length === 0 ? (
-            <p className="empty">Нет действий AI, ожидающих подтверждения.</p>
+            <p className="empty">{uiText("Нет действий AI, ожидающих подтверждения.")}</p>
           ) : (
             (data.pendingApprovals || []).map((item: any) => (
               <div className="mgmt-card compact" key={item.id}>
                 <div>
                   <b>
-                    {item.actionLabel}
+                    {uiMessage(item.actionLabel)}
                     {item.contactName || item.phone ? ` · ${nameWithPhone(item.contactName, item.phone)}` : ""}
                   </b>
                   <div className="muted">
@@ -336,8 +321,7 @@ export function ControlPage() {
                 </div>
                 <div className="actions">
                   <Link className="btn" to={item.href || "/tasks"}>
-                    Проверить
-                  </Link>
+                    {uiText("Проверить")}</Link>
                 </div>
               </div>
             ))
@@ -348,7 +332,7 @@ export function ControlPage() {
       {showAiList || showWaitingClient ? (
         <div className="panel">
           <div className="mgmt-section-head">
-            <h3>{showWaitingClient ? "Ждём клиента" : "AI сейчас ведёт"}</h3>
+            <h3>{showWaitingClient ? uiText("Ждём клиента") : uiText("AI сейчас ведёт")}</h3>
             <span className="muted">
               {showWaitingClient ? ai.waitingClient ?? 0 : (data.aiConversations || []).length}
             </span>
@@ -359,7 +343,7 @@ export function ControlPage() {
               )
             : data.aiConversations || []
           ).length === 0 ? (
-            <p className="empty">{showWaitingClient ? "Никто не ждёт клиента." : "AI сейчас не ведёт активных диалогов."}</p>
+            <p className="empty">{showWaitingClient ? uiText("Никто не ждёт клиента.") : uiText("AI сейчас не ведёт активных диалогов.")}</p>
           ) : (
             <div className="mgmt-table">
               {(showWaitingClient
@@ -372,8 +356,8 @@ export function ControlPage() {
                   <span>{nameWithPhone(item.contactName, item.phone)}</span>
                   <span className="muted">{phoneText(item.phone)}</span>
                   <span className="muted">{item.topic}</span>
-                  <span className="muted">{item.stageLabel || item.modeLabel}</span>
-                  <span className="muted">{item.activityLabel || "—"}</span>
+                  <span className="muted">{item.stageLabel || uiMessage(item.modeLabel)}</span>
+                  <span className="muted">{uiDurationLabel(item.activityLabel) || "—"}</span>
                 </Link>
               ))}
             </div>
@@ -384,11 +368,11 @@ export function ControlPage() {
       {showHumanList ? (
         <div className="panel">
           <div className="mgmt-section-head">
-            <h3>Ведут сотрудники</h3>
+            <h3>{uiText("Ведут сотрудники")}</h3>
             <span className="muted">{(data.humanConversations || []).length}</span>
           </div>
           {(data.humanConversations || []).length === 0 ? (
-            <p className="empty">Нет диалогов у сотрудников.</p>
+            <p className="empty">{uiText("Нет диалогов у сотрудников.")}</p>
           ) : (
             <div className="mgmt-table">
               {(data.humanConversations || []).map((item: any) => (
@@ -397,15 +381,14 @@ export function ControlPage() {
                   <span className="muted">{phoneText(item.phone)}</span>
                   <span className="muted">{item.topic}</span>
                   <span className="muted">{item.assigneeName || "—"}</span>
-                  <span className="muted">{item.activityLabel || "—"}</span>
+                  <span className="muted">{uiDurationLabel(item.activityLabel) || "—"}</span>
                   <button
                     type="button"
                     className="btn secondary"
                     disabled={busyKey === `ret-${item.id}`}
                     onClick={() => run(`ret-${item.id}`, () => api.returnToAi(item.id))}
                   >
-                    Передать AI
-                  </button>
+                    {uiText("Передать AI")}</button>
                 </div>
               ))}
             </div>
@@ -416,11 +399,11 @@ export function ControlPage() {
       {showProblems ? (
         <div className="panel">
           <div className="mgmt-section-head">
-            <h3>Проблемы AI</h3>
+            <h3>{uiText("Проблемы AI")}</h3>
             <span className="muted">{(data.problems || []).length}</span>
           </div>
           {(data.problems || []).length === 0 ? (
-            <p className="empty">Сбоев у AI сейчас нет.</p>
+            <p className="empty">{uiText("Сбоев у AI сейчас нет.")}</p>
           ) : (
             (data.problems || []).map((item: any) => (
               <div className="mgmt-card compact" key={item.id}>
@@ -431,7 +414,7 @@ export function ControlPage() {
                 <div className="actions">
                   {item.href ? (
                     <Link className="btn secondary" to={item.href}>
-                      {item.href.includes("integrations") ? "Открыть интеграции" : "Открыть диалог"}
+                      {item.href.includes("integrations") ? uiText("Открыть интеграции") : uiText("Открыть диалог")}
                     </Link>
                   ) : null}
                 </div>
@@ -443,10 +426,10 @@ export function ControlPage() {
 
       {(data.audit || []).length ? (
         <div className="panel soft">
-          <h3>Недавние действия</h3>
+          <h3>{uiText("Недавние действия")}</h3>
           {(data.audit || []).slice(0, 8).map((row: any) => (
             <div className="muted" key={row.id}>
-              {row.atLabel} · {row.text}
+              {row.atLabel} · {uiMessage(row.text)}
             </div>
           ))}
         </div>

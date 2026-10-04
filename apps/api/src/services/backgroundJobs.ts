@@ -22,7 +22,14 @@ export async function processOutbox(prisma: PrismaClient) {
   });
   for (const event of due) {
     try {
-      if (event.type === "campaign.run") {
+      if (event.type === "whatsapp.ai_reply") {
+        const { processWhatsAppAiReply } = await import("./whatsappAiService.ts");
+        await processWhatsAppAiReply(prisma, event);
+      } else if (event.type === "whatsapp.cloud_send") {
+        const { deliverCloudMessage } = await import("./whatsappSendService.ts");
+        const integrationId = (event.payloadJson as { integrationId?: string }).integrationId;
+        if (integrationId) await deliverCloudMessage(prisma, event.tenantId, integrationId, event.entityId);
+      } else if (event.type === "campaign.run") {
         const payload = (event.payloadJson || {}) as { campaignId?: string };
         if (payload.campaignId) await processCampaignQueue(prisma, payload.campaignId);
       } else if (event.type === "conversation.context") {

@@ -1,3 +1,4 @@
+import { uiText, useUiText, localizeUiOptions } from "../lib/uiText";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
@@ -146,16 +147,17 @@ function hintFor(element: HTMLElement) {
   const explicit = element.dataset.tip || element.getAttribute("title");
   if (explicit) return explicit;
   const label = (element.getAttribute("aria-label") || (element instanceof HTMLInputElement ? element.value : element.textContent) || "").replace(/\s+/g, " ").trim();
-  if (element.closest(".nav-links") && element.querySelector(".nav-link-label")) return `Открыть раздел «${element.querySelector(".nav-link-label")?.textContent?.trim()}»`;
-  if (ACTION_HINTS[label]) return ACTION_HINTS[label];
-  if (element.getAttribute("role") === "tab") return `Показать раздел «${label}»`;
-  if (element.matches(".conv-row")) return "Открыть переписку с клиентом";
-  if (element.matches(".client-row")) return `Открыть карточку клиента: ${element.querySelector("b")?.textContent || "клиент"}`;
-  if (/^\d+$/.test(label)) return "Показать записи, вошедшие в этот показатель";
-  if (element.closest(".chip-row, .stats-metric-switch, .sit-tabs")) return `Показать: ${label}`;
+  if (element.closest(".nav-links") && element.querySelector(".nav-link-label")) return uiText("Открыть раздел «{p0}»", {p0: element.querySelector(".nav-link-label")?.textContent?.trim()});
+  const hintKey = Object.keys(ACTION_HINTS).find(key => uiText(key) === label);
+  if (hintKey) return uiText(ACTION_HINTS[hintKey]);
+  if (element.getAttribute("role") === "tab") return uiText("Показать раздел «{p0}»", {p0: label});
+  if (element.matches(".conv-row")) return uiText("Открыть переписку с клиентом");
+  if (element.matches(".client-row")) return uiText("Открыть карточку клиента: {p0}", {p0: element.querySelector("b")?.textContent || uiText("клиент")});
+  if (/^\d+$/.test(label)) return uiText("Показать записи, вошедшие в этот показатель");
+  if (element.closest(".chip-row, .stats-metric-switch, .sit-tabs")) return uiText("Показать: {p0}", {p0: label});
   const shortLabel = label.length > 140 ? `${label.slice(0, 137)}…` : label;
-  if (element.matches("a")) return `Открыть: ${shortLabel || "связанная запись"}`;
-  return shortLabel ? `Действие: ${shortLabel}` : "Открыть доступное действие";
+  if (element.matches("a")) return uiText("Открыть: {p0}", {p0: shortLabel || uiText("связанная запись")});
+  return shortLabel ? uiText("Действие: {p0}", {p0: shortLabel}) : uiText("Открыть доступное действие");
 }
 
 /** One tooltip surface for every button, including dynamically loaded panels. */

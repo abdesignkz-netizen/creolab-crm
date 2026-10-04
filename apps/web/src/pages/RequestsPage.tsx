@@ -1,3 +1,4 @@
+import { uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale } from "../lib/uiText";
 import { catalogItemLabel, type TenantService } from "../lib/tenantServices";
 import { notifySaved } from "../components/SaveNotice";
 import { useRequestVersion } from "../lib/useUrlState";
@@ -67,6 +68,7 @@ const FILTER_LABELS: Record<string, string> = { ai_processing: "AI обраба�
 ) };
 
 export function RequestsPage() {
+  const uiText = useUiText();
   const requestVersion = useRequestVersion();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
@@ -160,7 +162,7 @@ export function RequestsPage() {
   ) {
     const request = ++requestVersion.current;
     if (nextPeriod === "custom" && (!nextFrom || !nextTo)) {
-      setError("Укажите даты С и По");
+      setError(uiText("Укажите даты С и По"));
       setLoading(false);
       return;
     }
@@ -184,7 +186,7 @@ export function RequestsPage() {
       setError("");
     } catch (err) {
       if (request !== requestVersion.current) return;
-      setError(err instanceof Error ? err.message : "Ошибка загрузки");
+      setError(err instanceof Error ? err.message : uiText("Ошибка загрузки"));
     } finally {
       if (request === requestVersion.current) setLoading(false);
     }
@@ -198,7 +200,7 @@ export function RequestsPage() {
   const sourceCounts = data?.sourceCounts || {};
   const categoryCounts = data?.categoryCounts || {};
   const services = data?.serviceOptions || [];
-  const serviceOptions = services.map((item) => ({ value: item.code, label: `${catalogItemLabel(item)}${item.active ? "" : " (архив)"}` }));
+  const serviceOptions = services.map((item) => ({ value: item.code, label: `${catalogItemLabel(item)}${item.active ? "" : uiText(" (архив)")}` }));
 
   function patchParams(patch: Record<string, string | null>) {
     const nextParams = new URLSearchParams(params);
@@ -246,23 +248,23 @@ export function RequestsPage() {
   }
 
   const activeExtras = [
-    filter !== "all" ? { key: "filter", label: FILTER_LABELS[filter] || filter } : null,
+    filter !== "all" ? { key: "filter", label: localizeUiOptions(FILTER_LABELS, uiText)[filter] || filter } : null,
     period !== "all"
-      ? { key: "period", label: `Период: ${data?.period?.label || period}` }
+      ? { key: "period", label: uiText("Период: {p0}", {p0: data?.period?.label || period}) }
       : null,
     sourceChannel
       ? {
           key: "source",
-          label: `Откуда: ${SOURCE_OPTIONS.find((o) => o.value === sourceChannel)?.label || sourceChannel}`,
+          label: uiText("Откуда: {p0}", {p0: localizeUiOptions(SOURCE_OPTIONS, uiText).find((o) => o.value === sourceChannel)?.label || sourceChannel}),
         }
       : null,
     serviceCategory
       ? {
           key: "category",
-          label: `Услуга / товар: ${serviceOptions.find((o) => o.value === serviceCategory)?.label || (serviceCategory === "__undefined" ? "Не определено" : serviceCategory)}`,
+          label: uiText("Услуга / товар: {p0}", {p0: serviceOptions.find((o) => o.value === serviceCategory)?.label || (serviceCategory === "__undefined" ? uiText("Не определено") : serviceCategory)}),
         }
       : null,
-    q ? { key: "q", label: `Поиск: ${q}` } : null,
+    q ? { key: "q", label: uiText("Поиск: {p0}", {p0: q}) } : null,
   ].filter(Boolean) as Array<{ key: string; label: string }>;
 
   async function onPhoneBlur(phone: string) {
@@ -296,10 +298,10 @@ export function RequestsPage() {
         forceNewContact: forceNew,
       })) as { id: string };
       setShowCreate(false);
-      notifySaved("Заявка создана");
+      notifySaved(uiText("Заявка создана"));
       navigate(`/requests/${created.id}`);
     } catch (err: any) {
-      setCreateError(err.body?.field_errors?.phone || err.message || "Не удалось создать");
+      setCreateError(err.body?.field_errors?.phone || err.message || uiText("Не удалось создать"));
     }
   }
 
@@ -312,25 +314,25 @@ export function RequestsPage() {
         : [];
   const attentionHint =
     counts.attention_intakes
-      ? `${counts.attention_inquiries ?? 0} заявок · ${counts.attention_intakes} без телефона`
-      : "новые, без ответа или без телефона";
+      ? uiText("{p0} заявок · {p1} без телефона", {p0: counts.attention_inquiries ?? 0, p1: counts.attention_intakes})
+      : uiText("новые, без ответа или без телефона");
 
-  if (loading && !data) return <div className="state">Загрузка заявок…</div>;
+  if (loading && !data) return <div className="state">{uiText("Загрузка заявок…")}</div>;
 
   return (
     <section className="requests-page">
       <div className="page-head">
         <div>
-          <h2>Заявки</h2>
+          <h2>{uiText("Заявки")}</h2>
           <p className="muted">
             {filter === "attention"
-              ? "Заявки, которые ждут действия: новые, без ответа или без телефона."
-              : "Новые обращения и те, что ещё нужно взять в работу."}
+              ? uiText("Заявки, которые ждут действия: новые, без ответа или без телефона.")
+              : uiText("Новые обращения и те, что ещё нужно взять в работу.")}
           </p>
         </div>
         <div className="actions">
           <button type="button" className="btn" onClick={() => setShowCreate((v) => !v)}>
-            {showCreate ? "Скрыть форму" : "+ Новая заявка"}
+            {showCreate ? uiText("Скрыть форму") : uiText("+ Новая заявка")}
           </button>
         </div>
       </div>
@@ -373,28 +375,28 @@ export function RequestsPage() {
           aria-pressed={filter === "attention"}
           onClick={() => setFilter("attention")}
         >
-          <span className="muted">Требуют внимания</span>
+          <span className="muted">{uiText("Требуют внимания")}</span>
           <strong>{counts.attention ?? 0}</strong>
           {attentionHint ? <span className="kpi-hint">{attentionHint}</span> : null}
         </button>
         <button type="button" className={`card ${filter === "all" ? "active" : ""}`} aria-pressed={filter === "all"} onClick={() => setFilter("all")}>
-          <span className="muted">Все{period !== "all" ? " за период" : ""}</span>
+          <span className="muted">{uiText("Все")}{period !== "all" ? uiText(" за период") : ""}</span>
           <strong>{counts.all ?? 0}</strong>
         </button>
         <button type="button" className={`card ${filter === "new" ? "active" : ""}`} aria-pressed={filter === "new"} onClick={() => setFilter("new")}>
-          <span className="muted">Новые</span>
+          <span className="muted">{uiText("Новые")}</span>
           <strong>{counts.new ?? 0}</strong>
         </button>
         <button type="button" className={`card ${filter === "needs_reply" ? "active" : ""}`} aria-pressed={filter === "needs_reply"} onClick={() => setFilter("needs_reply")}>
-          <span className="muted">Нужен ответ</span>
+          <span className="muted">{uiText("Нужен ответ")}</span>
           <strong>{counts.needs_reply ?? 0}</strong>
         </button>
         <button type="button" className={`card ${filter === "in_progress" ? "active" : ""}`} aria-pressed={filter === "in_progress"} onClick={() => setFilter("in_progress")}>
-          <span className="muted">В работе</span>
+          <span className="muted">{uiText("В работе")}</span>
           <strong>{counts.in_progress ?? 0}</strong>
         </button>
         <button type="button" className={`card ${filter === "needs_clarification" ? "active" : ""}`} aria-pressed={filter === "needs_clarification"} onClick={() => setFilter("needs_clarification")}>
-          <span className="muted">Требует уточнения</span>
+          <span className="muted">{uiText("Требует уточнения")}</span>
           <strong>{counts.needs_clarification ?? 0}</strong>
         </button>
       </div>
@@ -403,18 +405,17 @@ export function RequestsPage() {
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Имя, телефон, компания, тема или задача"
+          placeholder={uiText("Имя, телефон, компания, тема или задача")}
         />
         <button className="btn secondary" type="submit">
-          Найти
-        </button>
+          {uiText("Найти")}</button>
       </form>
 
       <div className="request-filter-board">
         <div className="request-filter-group">
-          <span className="request-filter-label">Статус</span>
-          <div className="request-status-tabs" role="tablist" aria-label="Статус заявок">
-            {STATUS_FILTERS.map((item) => (
+          <span className="request-filter-label">{uiText("Статус")}</span>
+          <div className="request-status-tabs" role="tablist" aria-label={uiText("Статус заявок")}>
+            {localizeUiOptions(STATUS_FILTERS, uiText).map((item) => (
               <button
                 key={item.key}
                 type="button"
@@ -430,14 +431,13 @@ export function RequestsPage() {
 
         <div className="request-toolbar">
           <label className="request-filter-label" style={{ display: "grid", gap: 4 }}>
-            Внимание
-            <select
+            {uiText("Внимание")}<select
               className="filter-select"
               value={ATTENTION_FILTERS.some((f) => f.key === filter) ? filter : ""}
               onChange={(e) => setFilter(e.target.value || "all")}
             >
-              <option value="">Не выбрано</option>
-              {ATTENTION_FILTERS.map((item) => (
+              <option value="">{uiText("Не выбрано")}</option>
+              {localizeUiOptions(ATTENTION_FILTERS, uiText).map((item) => (
                 <option key={item.key} value={item.key}>
                   {item.label}
                   {counts[item.key] != null ? ` (${counts[item.key]})` : ""}
@@ -447,14 +447,13 @@ export function RequestsPage() {
           </label>
 
           <label className="request-filter-label" style={{ display: "grid", gap: 4 }}>
-            Откуда пришли
-            <select
+            {uiText("Откуда пришли")}<select
               className="filter-select"
               value={sourceChannel}
               onChange={(e) => setSource(e.target.value)}
             >
-              <option value="">Все источники</option>
-              {SOURCE_OPTIONS.map((opt) => (
+              <option value="">{uiText("Все источники")}</option>
+              {localizeUiOptions(SOURCE_OPTIONS, uiText).map((opt) => (
                 <option key={opt.value} value={opt.value}>
                   {opt.label}
                   {sourceCounts[opt.value] != null ? ` (${sourceCounts[opt.value]})` : ""}
@@ -464,14 +463,13 @@ export function RequestsPage() {
           </label>
 
           <label className="request-filter-label" style={{ display: "grid", gap: 4 }}>
-            Услуга / товар
-            <select
+            {uiText("Услуга / товар")}<select
               className="filter-select"
               value={serviceCategory}
               onChange={(e) => setCategory(e.target.value)}
             >
-              <option value="">Все услуги и товары</option>
-              <option value="__undefined">Не определено{categoryCounts.__undefined != null ? ` (${categoryCounts.__undefined})` : ""}</option>
+              <option value="">{uiText("Все услуги и товары")}</option>
+              <option value="__undefined">{uiText("Не определено")}{categoryCounts.__undefined != null ? ` (${categoryCounts.__undefined})` : ""}</option>
               {serviceOptions.map((opt) => (
                 <option key={opt.value} value={opt.value}>
                   {opt.label}
@@ -484,7 +482,7 @@ export function RequestsPage() {
 
         {activeExtras.length > 0 ? (
           <div className="request-filter-active">
-            <span className="muted">Сейчас:</span>
+            <span className="muted">{uiText("Сейчас:")}</span>
             {activeExtras.map((item) => (
               <button
                 key={item.key}
@@ -500,15 +498,14 @@ export function RequestsPage() {
                     patchParams({ q: null });
                   }
                 }}
-                title="Сбросить"
+                title={uiText("Сбросить")}
               >
                 {item.label} ×
               </button>
             ))}
             {(sourceChannel || serviceCategory || filter !== "all" || period !== "all") && (
               <button type="button" className="linkish" onClick={clearExtraFilters}>
-                Сбросить фильтры
-              </button>
+                {uiText("Сбросить фильтры")}</button>
             )}
           </div>
         ) : null}
@@ -519,20 +516,18 @@ export function RequestsPage() {
 
       {showCreate ? (
         <form className="panel request-create" onSubmit={createRequest}>
-          <b>Новая заявка</b>
+          <b>{uiText("Новая заявка")}</b>
           <label>
-            Клиент
-            <input
+            {uiText("Клиент")}<input
               key={contactPrefill.name || "name-empty"}
               name="name"
               required
-              placeholder="Имя, телефон или существующий клиент"
+              placeholder={uiText("Имя, телефон или существующий клиент")}
               defaultValue={contactPrefill.name}
             />
           </label>
           <label>
-            Телефон
-            <input
+            {uiText("Телефон")}<input
               key={contactPrefill.phone || "phone-empty"}
               name="phone"
               placeholder="+7 ..."
@@ -543,49 +538,44 @@ export function RequestsPage() {
           {lookup?.found ? (
             <div className="panel soft lookup-banner">
               <div>
-                <b>Найден существующий клиент</b>
+                <b>{uiText("Найден существующий клиент")}</b>
                 <div>{lookup.contact.name}</div>
                 <div className="muted">
-                  {lookup.contact.inquiryCount} предыдущих заявок
-                  {lookup.contact.lastInquiryAt
-                    ? ` · последний контакт: ${new Date(lookup.contact.lastInquiryAt).toLocaleDateString("ru-RU")}`
+                  {lookup.contact.inquiryCount} {" "}{uiText("предыдущих заявок")}{lookup.contact.lastInquiryAt
+                    ? uiText(" · последний контакт: {p0}", {p0: new Date(lookup.contact.lastInquiryAt).toLocaleDateString(uiFormatLocale())})
                     : ""}
                 </div>
               </div>
               <div className="actions">
                 <button type="button" className={`btn ${!forceNew ? "" : "secondary"}`} onClick={() => setForceNew(false)}>
-                  Использовать клиента
-                </button>
+                  {uiText("Использовать клиента")}</button>
                 <button
                   type="button"
                   className={`btn ${forceNew ? "" : "secondary"}`}
                   onClick={() => {
                     if (
                       forceNew ||
-                      window.confirm("Может получиться дубль клиента. Создать нового всё равно?")
+                      window.confirm(uiText("Может получиться дубль клиента. Создать нового всё равно?"))
                     ) {
                       setForceNew(true);
                     }
                   }}
                 >
-                  Создать нового всё равно
-                </button>
+                  {uiText("Создать нового всё равно")}</button>
               </div>
             </div>
           ) : null}
           <label>
-            Компания
-            <input
+            {uiText("Компания")}<input
               key={companyPrefill || "company-empty"}
               name="company"
-              placeholder="необязательно"
+              placeholder={uiText("необязательно")}
               defaultValue={companyPrefill}
             />
           </label>
           <label>
-            Услуга / товар компании
-            <select name="serviceCategory" defaultValue="">
-              <option value="">Не определено</option>
+            {uiText("Услуга / товар компании")}<select name="serviceCategory" defaultValue="">
+              <option value="">{uiText("Не определено")}</option>
               {services.filter((item) => item.active).map((item) => ({ value: item.code, label: catalogItemLabel(item) })).map((opt) => (
                 <option key={opt.value} value={opt.value}>
                   {opt.label}
@@ -594,17 +584,14 @@ export function RequestsPage() {
             </select>
           </label>
           <label>
-            Краткая тема
-            <input name="subject" placeholder="Кратко опишите запрос клиента" />
+            {uiText("Краткая тема")}<input name="subject" placeholder={uiText("Кратко опишите запрос клиента")} />
           </label>
           <label>
-            Задача
-            <textarea name="message" placeholder="Опишите потребность клиента" rows={3} />
+            {uiText("Задача")}<textarea name="message" placeholder={uiText("Опишите потребность клиента")} rows={3} />
           </label>
           <label>
-            Источник обращения
-            <select name="sourceChannel" defaultValue="manual">
-              {SOURCE_OPTIONS.map((opt) => (
+            {uiText("Источник обращения")}<select name="sourceChannel" defaultValue="manual">
+              {localizeUiOptions(SOURCE_OPTIONS, uiText).map((opt) => (
                 <option key={opt.value} value={opt.value}>
                   {opt.label}
                 </option>
@@ -613,14 +600,13 @@ export function RequestsPage() {
           </label>
           {createError ? <p className="error">{createError}</p> : null}
           <button className="btn" type="submit">
-            Создать заявку
-          </button>
+            {uiText("Создать заявку")}</button>
         </form>
       ) : null}
 
       {shownClarification.length > 0 ? (
         <div className="panel soft">
-          <h3>{filter === "attention" ? "Обращения без телефона" : "Требует уточнения"}</h3>
+          <h3>{filter === "attention" ? uiText("Обращения без телефона") : uiText("Требует уточнения")}</h3>
           {shownClarification.map((item) => (
             <div className="row request-clarify" key={`${item.kind}-${item.id}`}>
               <div>
@@ -633,8 +619,7 @@ export function RequestsPage() {
                   <CompleteIntakeInline id={item.id} onDone={() => void load()} />
                 ) : (
                   <Link className="btn secondary" to={`/requests/${item.inquiryId || item.id}`}>
-                    Уточнить
-                  </Link>
+                    {uiText("Уточнить")}</Link>
                 )}
               </div>
             </div>
@@ -645,16 +630,16 @@ export function RequestsPage() {
       <div className="request-list">
         {!data?.items?.length && shownClarification.length === 0 ? (
           <p className="empty" style={{ border: 0, margin: 0 }}>
-            {filter === "attention" ? "Нет заявок, которые требуют действия" : "Заявок по этому фильтру нет"}
+            {filter === "attention" ? uiText("Нет заявок, которые требуют действия") : uiText("Заявок по этому фильтру нет")}
           </p>
         ) : null}
         {data?.items?.length ? (
           <div className="request-list-head" aria-hidden>
-            <span>Клиент</span>
-            <span>Тема / услуга / товар</span>
-            <span>Источник</span>
-            <span>Статус</span>
-            <span>Следующий шаг</span>
+            <span>{uiText("Клиент")}</span>
+            <span>{uiText("Тема / услуга / товар")}</span>
+            <span>{uiText("Источник")}</span>
+            <span>{uiText("Статус")}</span>
+            <span>{uiText("Следующий шаг")}</span>
             <span />
           </div>
         ) : null}
@@ -663,7 +648,7 @@ export function RequestsPage() {
             <div className="request-row-main">
               <div className="request-cell">
                 <b>{item.contactName}</b>
-                <div className="muted">{item.phone || "Нет телефона"}</div>
+                <div className="muted">{item.phone || uiText("Нет телефона")}</div>
                 <div className="muted">{item.receivedLabel}</div>
               </div>
               <div className="request-cell">
@@ -674,29 +659,29 @@ export function RequestsPage() {
                 <div>{item.sourceLine}</div>
                 <div className="client-meta" style={{ marginTop: 4 }}>
                   {item.aiProcess?.status && item.aiProcess.status !== "none" ? (
-                    <span className="badge">{item.aiProcess.statusLabel}</span>
+                    <span className="badge">{uiMessage(item.aiProcess.statusLabel)}</span>
                   ) : null}
                   {item.needsReply ? (
                     <span className="badge warn">
-                      Нужен ответ{item.waitingMinutes != null ? ` · ${formatWaitSince(item.waitingMinutes)}` : ""}
+                      {uiText("Нужен ответ")}{item.waitingMinutes != null ? ` · ${formatWaitSince(item.waitingMinutes)}` : ""}
                     </span>
                   ) : null}
-                  {item.hasDeal ? <span className="badge">Сделка</span> : null}
-                  {item.test ? <span className="badge warn">Тест</span> : null}
-                  {!item.hasPhone ? <span className="badge danger">Нет телефона</span> : null}
+                  {item.hasDeal ? <span className="badge">{uiText("Сделка")}</span> : null}
+                  {item.test ? <span className="badge warn">{uiText("Тест")}</span> : null}
+                  {!item.hasPhone ? <span className="badge danger">{uiText("Нет телефона")}</span> : null}
                 </div>
               </div>
               <div className="request-cell">
-                <span className="badge">{item.statusLabel}</span>
+                <span className="badge">{uiMessage(item.statusLabel)}</span>
                 <div className="muted" style={{ marginTop: 4 }}>
-                  {item.assigneeName || "не назначен"}
+                  {item.assigneeName || uiText("не назначен")}
                 </div>
               </div>
               <div className="request-cell">
-                <div>{item.nextStep || "не задан"}</div>
+                <div>{item.nextStep || uiText("не задан")}</div>
               </div>
             </div>
-            <span className="request-row-open">Открыть</span>
+            <span className="request-row-open">{uiText("Открыть")}</span>
           </Link>
         ))}
       </div>
@@ -706,10 +691,11 @@ export function RequestsPage() {
 }
 
 function CompleteIntakeInline({ id, onDone }: { id: string; onDone: () => void }) {
+  const uiText = useUiText();
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  if (saved) return <p className="ok">Контакт сохранён</p>;
+  if (saved) return <p className="ok">{uiText("Контакт сохранён")}</p>;
   return (
     <form
       className="inline-form"
@@ -722,17 +708,17 @@ function CompleteIntakeInline({ id, onDone }: { id: string; onDone: () => void }
         try {
           await api.completeIntake(id, { phone: form.get("phone"), name: form.get("name") });
           setSaved(true);
-          notifySaved("Контакт сохранён");
+          notifySaved(uiText("Контакт сохранён"));
           onDone();
         } catch (err) {
-          setError(err instanceof Error ? err.message : "Не удалось сохранить контакт");
+          setError(err instanceof Error ? err.message : uiText("Не удалось сохранить контакт"));
         } finally { setBusy(false); }
       }}
     >
-      <input name="name" placeholder="Имя" />
+      <input name="name" placeholder={uiText("Имя")} />
       <input name="phone" required placeholder="+7..." />
       <button className="btn" type="submit" disabled={busy}>
-        {busy ? "Сохранение…" : "Сохранить"}
+        {busy ? uiText("Сохранение…") : uiText("Сохранить")}
       </button>
       {error ? <span className="error" role="alert">{error}</span> : null}
     </form>

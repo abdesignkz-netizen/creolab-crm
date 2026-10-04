@@ -1,3 +1,4 @@
+import { uiText, useUiText, localizeUiOptions, uiMessage } from "../lib/uiText";
 import { notifySaved } from "../components/SaveNotice";
 import { useUrlState, useRequestVersion } from "../lib/useUrlState";
 import { useEffect, useRef, useState } from "react";
@@ -33,7 +34,7 @@ const IMPORT_FIELDS = [
 function readBase64(file: File) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
-    reader.onerror = () => reject(new Error("Не удалось прочитать файл"));
+    reader.onerror = () => reject(new Error(uiText("Не удалось прочитать файл")));
     reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
     reader.readAsDataURL(file);
   });
@@ -42,17 +43,18 @@ function readBase64(file: File) {
 function clientsNewLabel(n: number) {
   const n10 = n % 10;
   const n100 = n % 100;
-  const word = n10 === 1 && n100 !== 11 ? "новый клиент" : n10 >= 2 && n10 <= 4 && (n100 < 12 || n100 > 14) ? "новых клиента" : "новых клиентов";
+  const word = n10 === 1 && n100 !== 11 ? uiText("новый клиент") : n10 >= 2 && n10 <= 4 && (n100 < 12 || n100 > 14) ? uiText("новых клиента") : uiText("новых клиентов");
   return `${n} ${word}`;
 }
 
 export function ClientsPage() {
+  const uiText = useUiText();
   const requestVersion = useRequestVersion();
   const navigate = useNavigate();
   const caps = useCapabilities();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingCreate = useRef<Record<string, unknown> | null>(null);
-  const [filter, setFilter] = useUrlState("filter", "all", FILTERS.map(([value]) => value));
+  const [filter, setFilter] = useUrlState("filter", "all", localizeUiOptions(FILTERS, uiText).map(([value]) => value));
   const [q, setQ] = useUrlState<string>("q", "");
   const [draft, setDraft] = useState(q);
   const [showFilters, setShowFilters] = useState(false);
@@ -100,7 +102,7 @@ export function ClientsPage() {
       setError("");
     } catch (err) {
       if (request !== requestVersion.current) return;
-      setError(err instanceof Error ? err.message : "Ошибка");
+      setError(err instanceof Error ? err.message : uiText("Ошибка"));
     } finally {
       if (request === requestVersion.current) setLoading(false);
     }
@@ -123,7 +125,7 @@ export function ClientsPage() {
     if (!payload) return;
     try {
       const created = (await api.createContact({ ...payload, forceCreate: force || undefined })) as any;
-      notifySaved("Клиент создан");
+      notifySaved(uiText("Клиент создан"));
       setDuplicates([]);
       pendingCreate.current = null;
       navigate(`/contacts/${created.client.id}`);
@@ -139,11 +141,11 @@ export function ClientsPage() {
             });
             setDuplicates(dup.duplicates || []);
           } catch {
-            setError(err instanceof Error ? err.message : "Не создано");
+            setError(err instanceof Error ? err.message : uiText("Не создано"));
           }
         }
       } else {
-        setError(err instanceof Error ? err.message : "Не создано");
+        setError(err instanceof Error ? err.message : uiText("Не создано"));
       }
     }
   }
@@ -158,7 +160,7 @@ export function ClientsPage() {
       setImportPreview(preview);
       setImportMapping(preview.mapping || {});
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось разобрать файл");
+      setError(err instanceof Error ? err.message : uiText("Не удалось разобрать файл"));
     } finally {
       setImportBusy(false);
     }
@@ -175,7 +177,7 @@ export function ClientsPage() {
       });
       setImportPreview(preview);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось применить сопоставление");
+      setError(err instanceof Error ? err.message : uiText("Не удалось применить сопоставление"));
     }
   }
 
@@ -189,10 +191,10 @@ export function ClientsPage() {
         mapping: importMapping,
       });
       setImportResult(result);
-      notifySaved(`Импортировано: ${(result as any).created}`);
+      notifySaved(uiText("Импортировано: {p0}", {p0: (result as any).created}));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Импорт не выполнен");
+      setError(err instanceof Error ? err.message : uiText("Импорт не выполнен"));
     } finally {
       setImportBusy(false);
     }
@@ -202,17 +204,16 @@ export function ClientsPage() {
     <section className="clients-page">
       <div className="page-head">
         <div>
-          <h2>Клиенты</h2>
+          <h2>{uiText("Клиенты")}</h2>
           {filter === "new" ? (
-          <p className="muted">Новые клиенты, которых ещё не взяли в работу.</p>
+          <p className="muted">{uiText("Новые клиенты, которых ещё не взяли в работу.")}</p>
           ) : (
-            <p className="muted">Кто пришёл, откуда и что делать дальше.</p>
+            <p className="muted">{uiText("Кто пришёл, откуда и что делать дальше.")}</p>
           )}
         </div>
         <div className="actions">
           <button type="button" className="btn secondary" onClick={() => fileInputRef.current?.click()}>
-            Импорт
-          </button>
+            {uiText("Импорт")}</button>
           <button
             type="button"
             className="btn secondary"
@@ -225,14 +226,12 @@ export function ClientsPage() {
                 link.download = result.filename || "clients.csv";
                 link.click();
                 URL.revokeObjectURL(url);
-              }).catch((err) => setError(err instanceof Error ? err.message : "Не удалось выгрузить"));
+              }).catch((err) => setError(err instanceof Error ? err.message : uiText("Не удалось выгрузить")));
             }}
           >
-            Экспорт
-          </button>
+            {uiText("Экспорт")}</button>
           <button className="btn" onClick={() => setCreating((value) => !value)}>
-            + Клиент
-          </button>
+            {uiText("+ Клиент")}</button>
           <input
             ref={fileInputRef}
             type="file"
@@ -248,15 +247,14 @@ export function ClientsPage() {
       </div>
 
       {period !== "all" || owner ? <div className="active-filter-note">
-        <span>{period !== "all" ? `Первое обращение: ${period === "custom" ? formatCustomPeriodLabel(dateFrom, dateTo) : PERIOD_OPTIONS.find(option => option.id === period)?.label || period}` : ""}{owner ? ` · ${owner === "me" ? "Мои клиенты" : "Без ответственного"}` : ""}</span>
-        <button className="btn secondary" onClick={() => navigate("/contacts")}>Снять отбор</button>
+        <span>{period !== "all" ? uiText("Первое обращение: {p0}", {p0: period === "custom" ? formatCustomPeriodLabel(dateFrom, dateTo) : localizeUiOptions(PERIOD_OPTIONS, uiText).find(option => option.id === period)?.label || period}) : ""}{owner ? ` · ${owner === "me" ? uiText("Мои клиенты") : uiText("Без ответственного")}` : ""}</span>
+        <button className="btn secondary" onClick={() => navigate("/contacts")}>{uiText("Снять отбор")}</button>
       </div> : null}
       {filter !== "new" && !q && newClients > 0 ? (
         <div className="active-filter-note">
-          <span>{clientsNewLabel(newClients)} ещё не взяты в работу.</span>
+          <span>{clientsNewLabel(newClients)} {" "}{uiText("ещё не взяты в работу.")}</span>
           <button type="button" className="btn secondary" onClick={openNewClients}>
-            Показать
-          </button>
+            {uiText("Показать")}</button>
         </div>
       ) : null}
       {creating ? (
@@ -276,61 +274,54 @@ export function ClientsPage() {
               pendingCreate.current = createdPayload;
               await submitCreate(false);
             } catch (err) {
-              setError(err instanceof Error ? err.message : "Не создано");
+              setError(err instanceof Error ? err.message : uiText("Не создано"));
             }
           }}
         >
-          <b>Новый клиент</b>
+          <b>{uiText("Новый клиент")}</b>
           <label>
-            Имя
-            <input name="name" required />
+            {uiText("Имя")}<input name="name" required />
           </label>
           <label>
-            Телефон
-            <input name="phone" placeholder="+7 ..." />
+            {uiText("Телефон")}<input name="phone" placeholder="+7 ..." />
           </label>
           <label>
-            Компания
-            <input name="companyName" />
+            {uiText("Компания")}<input name="companyName" />
           </label>
           <label>
-            Источник
-            <select name="source" defaultValue="manual">
-              <option value="manual">Вручную</option>
+            {uiText("Источник")}<select name="source" defaultValue="manual">
+              <option value="manual">{uiText("Вручную")}</option>
               <option value="whatsapp">WhatsApp</option>
-              <option value="form">Форма сайта</option>
-              <option value="phone_call">Звонок</option>
+              <option value="form">{uiText("Форма сайта")}</option>
+              <option value="phone_call">{uiText("Звонок")}</option>
               <option value="api">API</option>
             </select>
           </label>
           <label>
-            Задача / комментарий
-            <textarea name="comment" />
+            {uiText("Задача / комментарий")}<textarea name="comment" />
           </label>
-          <button className="btn">Создать</button>
+          <button className="btn">{uiText("Создать")}</button>
           {duplicates.length ? (
             <div className="sit-section" style={{ marginTop: 12 }}>
-              <b>Возможный дубликат</b>
+              <b>{uiText("Возможный дубликат")}</b>
               {duplicates.map((item) => (
                 <div key={item.id} className="row" style={{ marginTop: 8 }}>
                   <div>
                     <div>{item.name}</div>
                     <div className="muted">
-                      {[item.phone, item.companyName, item.activeDealsCount != null ? `${item.activeDealsCount} сделок` : null]
+                      {[item.phone, item.companyName, item.activeDealsCount != null ? uiText("{p0} сделок", {p0: item.activeDealsCount}) : null]
                         .filter(Boolean)
                         .join(" · ")}
                     </div>
                   </div>
                   <div className="actions">
                     <Link className="btn secondary" to={`/contacts/${item.id}`}>
-                      Открыть существующего
-                    </Link>
+                      {uiText("Открыть существующего")}</Link>
                   </div>
                 </div>
               ))}
               <button type="button" className="btn secondary" style={{ marginTop: 8 }} onClick={() => void submitCreate(true)}>
-                Создать отдельно
-              </button>
+                {uiText("Создать отдельно")}</button>
             </div>
           ) : null}
         </form>
@@ -338,9 +329,9 @@ export function ClientsPage() {
 
       {importPreview ? (
         <div className="panel">
-          <b>Импорт клиентов</b>
+          <b>{uiText("Импорт клиентов")}</b>
           <p className="muted">
-            Строк: {importPreview.summary?.totalRows} · с телефоном: {importPreview.summary?.withPhone}
+            {uiText("Строк:")}{" "}{importPreview.summary?.totalRows} {" "}{uiText("· с телефоном:")}{" "}{importPreview.summary?.withPhone}
           </p>
           {(importPreview.headers || []).map((header: string) => (
             <label key={header}>
@@ -349,7 +340,7 @@ export function ClientsPage() {
                 value={importMapping[header] || "skip"}
                 onChange={(event) => void reapplyImportMapping({ ...importMapping, [header]: event.target.value })}
               >
-                {IMPORT_FIELDS.map(([id, label]) => (
+                {localizeUiOptions(IMPORT_FIELDS, uiText).map(([id, label]) => (
                   <option key={id} value={id}>
                     {label}
                   </option>
@@ -359,8 +350,7 @@ export function ClientsPage() {
           ))}
           <div className="actions">
             <button type="button" className="btn" disabled={importBusy} onClick={() => void runImport()}>
-              Импортировать
-            </button>
+              {uiText("Импортировать")}</button>
             <button
               type="button"
               className="btn secondary"
@@ -370,21 +360,20 @@ export function ClientsPage() {
                 setImportResult(null);
               }}
             >
-              Отмена
-            </button>
+              {uiText("Отмена")}</button>
           </div>
           {importResult ? (
             <div>
               <p className="muted">
-                Создано {importResult.created}, пропущено {importResult.skipped}, ошибок {importResult.errors}
+                {uiText("Создано")}{" "}{importResult.created}{uiText(", пропущено")}{" "}{importResult.skipped}{uiText(", ошибок")}{" "}{importResult.errors}
               </p>
               {(importResult.skippedRows || []).slice(0, 8).map((row: any) => (
                 <div key={`${row.row}-${row.existingId || ""}`} className="muted">
-                  Строка {row.row}: {row.reason}
+                  {uiText("Строка")}{" "}{row.row}: {row.reason}
                   {row.existingId ? (
                     <>
                       {" · "}
-                      <Link to={`/contacts/${row.existingId}`}>открыть</Link>
+                      <Link to={`/contacts/${row.existingId}`}>{uiText("открыть")}</Link>
                       {caps.companyAdmin ? (
                         <>
                           {" · "}
@@ -393,8 +382,7 @@ export function ClientsPage() {
                             className="btn secondary"
                             onClick={() => setMergeKeep(row.existingId)}
                           >
-                            оставить этого
-                          </button>
+                            {uiText("оставить этого")}</button>
                         </>
                       ) : null}
                     </>
@@ -408,34 +396,31 @@ export function ClientsPage() {
 
       {caps.companyAdmin ? (
         <details className="panel">
-          <summary>Объединить дубликаты</summary>
+          <summary>{uiText("Объединить дубликаты")}</summary>
           <form
             onSubmit={async (event) => {
               event.preventDefault();
               if (!mergeKeep || !mergeSource) return;
               try {
                 await api.mergeContacts({ keepId: mergeKeep, mergeId: mergeSource });
-                notifySaved("Клиенты объединены");
+                notifySaved(uiText("Клиенты объединены"));
                 setMergeKeep("");
                 setMergeSource("");
                 await load();
               } catch (err) {
-                setError(err instanceof Error ? err.message : "Не удалось объединить");
+                setError(err instanceof Error ? err.message : uiText("Не удалось объединить"));
               }
             }}
           >
-            <p className="muted">Оставляем первого клиента, второго архивируем и переносим заявки, сделки и диалоги.</p>
+            <p className="muted">{uiText("Оставляем первого клиента, второго архивируем и переносим заявки, сделки и диалоги.")}</p>
             <label>
-              Оставить
-              <input value={mergeKeep} onChange={(e) => setMergeKeep(e.target.value)} placeholder="id клиента" />
+              {uiText("Оставить")}<input value={mergeKeep} onChange={(e) => setMergeKeep(e.target.value)} placeholder={uiText("id клиента")} />
             </label>
             <label>
-              Объединить в него
-              <input value={mergeSource} onChange={(e) => setMergeSource(e.target.value)} placeholder="id дубликата" />
+              {uiText("Объединить в него")}<input value={mergeSource} onChange={(e) => setMergeSource(e.target.value)} placeholder={uiText("id дубликата")} />
             </label>
             <button className="btn secondary" disabled={!mergeKeep || !mergeSource}>
-              Объединить
-            </button>
+              {uiText("Объединить")}</button>
           </form>
         </details>
       ) : null}
@@ -450,51 +435,48 @@ export function ClientsPage() {
         <input
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
-          placeholder="Имя, телефон, компания, задача, тег…"
+          placeholder={uiText("Имя, телефон, компания, задача, тег…")}
         />
-        <button className="btn">Найти</button>
+        <button className="btn">{uiText("Найти")}</button>
         <button type="button" className="btn secondary" onClick={() => setShowFilters((value) => !value)}>
-          Фильтры
-        </button>
+          {uiText("Фильтры")}</button>
       </form>
 
       {showFilters ? (
         <div className="filter-panel">
           <label>
-            Статус
-            <select value={status} onChange={(event) => setStatus(event.target.value)}>
-              <option value="">Любой</option>
-              <option value="new">Новый</option>
-              <option value="in_progress">В работе</option>
-              <option value="active">Активный</option>
-              <option value="paused">На паузе</option>
-              <option value="lost">Потерян</option>
+            {uiText("Статус")}<select value={status} onChange={(event) => setStatus(event.target.value)}>
+              <option value="">{uiText("Любой")}</option>
+              <option value="new">{uiText("Новый")}</option>
+              <option value="in_progress">{uiText("В работе")}</option>
+              <option value="active">{uiText("Активный")}</option>
+              <option value="paused">{uiText("На паузе")}</option>
+              <option value="lost">{uiText("Потерян")}</option>
             </select>
           </label>
           <label>
-            Источник
-            <select value={source} onChange={(event) => setSource(event.target.value)}>
-              <option value="">Любой</option>
+            {uiText("Источник")}<select value={source} onChange={(event) => setSource(event.target.value)}>
+              <option value="">{uiText("Любой")}</option>
               <option value="whatsapp">WhatsApp</option>
-              <option value="form">Форма</option>
-              <option value="manual">Вручную</option>
+              <option value="form">{uiText("Форма")}</option>
+              <option value="manual">{uiText("Вручную")}</option>
             </select>
           </label>
         </div>
       ) : null}
 
       <div className="actions chip-row">
-        {FILTERS.map(([value, label]) => (
+        {localizeUiOptions(FILTERS, uiText).map(([value, label]) => (
           <button
             key={value}
             type="button"
             className={filter === value ? "btn" : "btn secondary"}
             {...(value === "today"
-              ? tip("Клиенты, с которыми был контакт сегодня")
+              ? tip(uiText("Клиенты, с которыми был контакт сегодня"))
               : value === "new"
-                ? tip("Клиенты со статусом «Новый»")
+                ? tip(uiText("Клиенты со статусом «Новый»"))
                 : value === "needs_reply"
-                  ? tip("Последнее сообщение было от клиента — ещё не ответили")
+                  ? tip(uiText("Последнее сообщение было от клиента — ещё не ответили"))
                   : {})}
             onClick={() => (value === "new" ? openNewClients() : setFilter(value))}
           >
@@ -506,16 +488,16 @@ export function ClientsPage() {
       </div>
 
       {error ? <p className="error">{error}</p> : null}
-      {!data ? <div className="state">Загрузка…</div> : null}
+      {!data ? <div className="state">{uiText("Загрузка…")}</div> : null}
       {data && data.items.length === 0 ? (
         <p className="empty">
           {filter === "new"
-            ? "Нет новых клиентов."
+            ? uiText("Нет новых клиентов.")
             : filter === "needs_reply"
-            ? "Нет клиентов, которые ждут ответа."
+            ? uiText("Нет клиентов, которые ждут ответа.")
             : q || filter !== "all"
-              ? "По выбранным условиям клиенты не найдены."
-              : "Здесь появятся ваши клиенты после подключения каналов."}
+              ? uiText("По выбранным условиям клиенты не найдены.")
+              : uiText("Здесь появятся ваши клиенты после подключения каналов.")}
         </p>
       ) : null}
 
@@ -527,35 +509,35 @@ export function ClientsPage() {
               <b>{item.name}</b>
               {item.companyName ? <span className="muted"> · {item.companyName}</span> : null}
             </div>
-            <div className="muted">{item.phone || "Нет телефона"}</div>
+            <div className="muted">{item.phone || uiText("Нет телефона")}</div>
             <div className="client-meta">
-              <span className={statusBadgeClass(item.lifecycleLabel)}>{item.lifecycleLabel}</span>
-              {item.inquiryStatusLabel ? <span className="badge">{item.inquiryStatusLabel}</span> : null}
+              <span className={statusBadgeClass(uiMessage(item.lifecycleLabel))}>{uiMessage(item.lifecycleLabel)}</span>
+              {uiMessage(item.inquiryStatusLabel) ? <span className="badge">{uiMessage(item.inquiryStatusLabel)}</span> : null}
               {item.needsReply ? (
                 <span className="badge warn">
-                  Нужен ответ{item.waitMinutes != null ? ` · ${formatWaitSince(item.waitMinutes)}` : ""}
+                  {uiText("Нужен ответ")}{item.waitMinutes != null ? ` · ${formatWaitSince(item.waitMinutes)}` : ""}
                 </span>
               ) : null}
-              {item.overdue ? <span className="badge danger">Просрочено</span> : null}
-              {item.activeDeal ? <span className="badge">Сделка</span> : null}
+              {item.overdue ? <span className="badge danger">{uiText("Просрочено")}</span> : null}
+              {item.activeDeal ? <span className="badge">{uiText("Сделка")}</span> : null}
             </div>
             <div className="muted">
-              {item.interest || "Интерес пока не определён"}
+              {item.interest || uiText("Интерес пока не определён")}
               {item.interestSource === "conversation" ? (
-                <span className="badge" {...tip("Определено по сообщению клиента. Откройте карточку, чтобы проверить переписку.")}>Из переписки</span>
+                <span className="badge" {...tip(uiText("Определено по сообщению клиента. Откройте карточку, чтобы проверить переписку."))}>{uiText("Из переписки")}</span>
               ) : null}
               {item.sourceLabel ? ` · ${item.sourceLabel}` : ""}
               {item.acquisition ? ` · ${item.acquisition}` : ""}
             </div>
             <div className="muted">
-              Первое: {item.firstContactLabel || "—"} · Последний: {item.lastContactLabel || "—"}
-              {item.inquiryCount ? ` · Заявок: ${item.inquiryCount}` : ""}
-              {item.openTaskCount ? ` · Задач: ${item.openTaskCount}` : ""}
+              {uiText("Первое:")}{" "}{item.firstContactLabel || "—"} {" "}{uiText("· Последний:")}{" "}{item.lastContactLabel || "—"}
+              {item.inquiryCount ? uiText(" · Заявок: {p0}", {p0: item.inquiryCount}) : ""}
+              {item.openTaskCount ? uiText(" · Задач: {p0}", {p0: item.openTaskCount}) : ""}
             </div>
           </div>
           <div className="client-row-side">
             <div>
-              <span className="muted">Следующее действие</span>
+              <span className="muted">{uiText("Следующее действие")}</span>
               <div>
                 {item.nextAction ? (
                   <>
@@ -563,13 +545,13 @@ export function ClientsPage() {
                     {item.nextAction.dueLabel ? ` · ${item.nextAction.dueLabel}` : ""}
                   </>
                 ) : item.missingNextAction ? (
-                  <span className="warn-text">Нет следующего действия</span>
+                  <span className="warn-text">{uiText("Нет следующего действия")}</span>
                 ) : (
                   "—"
                 )}
               </div>
             </div>
-            <div className="muted">Ответственный: {item.ownerName || "не назначен"}</div>
+            <div className="muted">{uiText("Ответственный:")}{" "}{item.ownerName || uiText("не назначен")}</div>
           </div>
         </Link>
       ))}

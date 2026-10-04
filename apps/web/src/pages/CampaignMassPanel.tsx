@@ -1,3 +1,4 @@
+import { uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale } from "../lib/uiText";
 import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { nameWithPhone } from "../lib/contactDisplay";
 import { api } from "../lib/api";
@@ -100,7 +101,7 @@ function readFileBase64(file: File) {
       const result = String(reader.result || "");
       resolve(result.includes(",") ? result.split(",")[1] : result);
     };
-    reader.onerror = () => reject(new Error("Не удалось прочитать файл"));
+    reader.onerror = () => reject(new Error(uiText("Не удалось прочитать файл")));
     reader.readAsDataURL(file);
   });
 }
@@ -151,6 +152,7 @@ export function CampaignMassPanel({
   onClose?: () => void;
   onScheduled?: (info: { dueAt: string; recipients: number; title: string }) => void;
 }) {
+  const uiText = useUiText();
   const [whoMode, setWhoMode] = useState<"contacts" | "phones" | "segment" | "import">(
     initialWhoMode || (initialContactIds.length ? "contacts" : initialSegment ? "segment" : "phones"),
   );
@@ -201,7 +203,7 @@ export function CampaignMassPanel({
       setPhonePreview(data);
       setError("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось разобрать номера");
+      setError(err instanceof Error ? err.message : uiText("Не удалось разобрать номера"));
     } finally {
       setBusy(false);
     }
@@ -217,7 +219,7 @@ export function CampaignMassPanel({
       setContactIds((data.clients || []).map((c: any) => c.id));
       setError("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось загрузить сегмент");
+      setError(err instanceof Error ? err.message : uiText("Не удалось загрузить сегмент"));
     } finally {
       setBusy(false);
     }
@@ -237,7 +239,7 @@ export function CampaignMassPanel({
       }
       setError("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось разобрать файл");
+      setError(err instanceof Error ? err.message : uiText("Не удалось разобрать файл"));
     } finally {
       setBusy(false);
     }
@@ -259,7 +261,7 @@ export function CampaignMassPanel({
         await parsePhones(data.phoneListText);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось применить mapping");
+      setError(err instanceof Error ? err.message : uiText("Не удалось применить mapping"));
     } finally {
       setBusy(false);
     }
@@ -320,7 +322,7 @@ export function CampaignMassPanel({
     const date = parseScheduleDate(scheduledAt, scheduleInputRef.current);
     if (!date || date.getTime() <= Date.now()) {
       document.getElementById("campaign-when")?.scrollIntoView({ behavior: "smooth", block: "center" });
-      return { iso: null, error: "Укажите дату и время в будущем" };
+      return { iso: null, error: uiText("Укажите дату и время в будущем") };
     }
     const normalized = toDateTimeLocal(date);
     if (normalized !== scheduledAt) setScheduledAt(normalized);
@@ -372,7 +374,7 @@ export function CampaignMassPanel({
       }
       setError("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось создать рассылку");
+      setError(err instanceof Error ? err.message : uiText("Не удалось создать рассылку"));
     } finally {
       setBusy(false);
     }
@@ -392,7 +394,7 @@ export function CampaignMassPanel({
 
   async function onPersonalizeOffers() {
     if (!campaignId) {
-      setError("Сначала подготовьте черновик рассылки — затем составим тексты каждому");
+      setError(uiText("Сначала подготовьте черновик рассылки — затем составим тексты каждому"));
       return;
     }
     setBusy(true);
@@ -408,7 +410,7 @@ export function CampaignMassPanel({
       setPrepare(null);
       setError("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось составить предложения");
+      setError(err instanceof Error ? err.message : uiText("Не удалось составить предложения"));
     } finally {
       setBusy(false);
     }
@@ -466,7 +468,7 @@ export function CampaignMassPanel({
       await refreshCampaign();
       setPrepare(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось прикрепить файл");
+      setError(err instanceof Error ? err.message : uiText("Не удалось прикрепить файл"));
     } finally {
       setBusy(false);
     }
@@ -487,7 +489,7 @@ export function CampaignMassPanel({
       setMessage(draft.messageDraft);
       setMessageMode("ai");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось сформировать текст");
+      setError(err instanceof Error ? err.message : uiText("Не удалось сформировать текст"));
     } finally {
       setBusy(false);
     }
@@ -522,13 +524,13 @@ export function CampaignMassPanel({
         kind: "prepare",
         title: "Проверьте рассылку",
         text: schedule.iso
-          ? "Ниже подтвердите — тогда появится задача в «Запланировано». Пока ничего не уходит."
-          : "Ниже подтвердите отправку. Пока сообщения не ушли.",
+          ? uiText("Ниже подтвердите — тогда появится задача в «Запланировано». Пока ничего не уходит.")
+          : uiText("Ниже подтвердите отправку. Пока сообщения не ушли."),
       });
       setError("");
       requestAnimationFrame(() => confirmRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось подготовить");
+      setError(err instanceof Error ? err.message : uiText("Не удалось подготовить"));
     } finally {
       setBusy(false);
     }
@@ -560,8 +562,8 @@ export function CampaignMassPanel({
           kind: "scheduled",
           title: "Задача создана в «Запланировано»",
           text: due
-            ? `Отправка ${recipients || "получателям"} запланирована на ${new Date(due).toLocaleString("ru-RU")}. Сообщения уйдут в это время, не сразу.`
-            : "Рассылка стоит в очереди. Откройте фильтр «Запланировано».",
+            ? uiText("Отправка {p0} запланирована на {p1}. Сообщения уйдут в это время, не сразу.", {p0: recipients || uiText("получателям"), p1: new Date(due).toLocaleString(uiFormatLocale())})
+            : uiText("Рассылка стоит в очереди. Откройте фильтр «Запланировано»."),
         });
         onScheduled?.({
           dueAt: String(due || ""),
@@ -578,10 +580,10 @@ export function CampaignMassPanel({
       setNotice({
         kind: "sent",
         title: "Рассылка запущена",
-        text: "Сообщения поставлены в очередь на отправку.",
+        text: uiText("Сообщения поставлены в очередь на отправку."),
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось запустить");
+      setError(err instanceof Error ? err.message : uiText("Не удалось запустить"));
     } finally {
       setBusy(false);
     }
@@ -597,13 +599,12 @@ export function CampaignMassPanel({
     <div className="panel task-form command-compose">
       <div className="command-compose-head">
         <div>
-          <b>Массовая отправка</b>
-          <p className="muted">Подготовка → проверка → подтверждение → очередь. Без мгновенной отправки.</p>
+          <b>{uiText("Массовая отправка")}</b>
+          <p className="muted">{uiText("Подготовка → проверка → подтверждение → очередь. Без мгновенной отправки.")}</p>
         </div>
         {onClose ? (
           <button type="button" className="btn secondary" onClick={onClose}>
-            Скрыть
-          </button>
+            {uiText("Скрыть")}</button>
         ) : null}
       </div>
 
@@ -616,14 +617,14 @@ export function CampaignMassPanel({
       ) : null}
 
       <div className="command-step">
-        <div className="command-step-label">Получатели</div>
+        <div className="command-step-label">{uiText("Получатели")}</div>
         <div className="chip-row">
           {(
             [
-              ["phones", "Список номеров"],
-              ["segment", "Группа из CRM"],
-              ["contacts", "Клиенты CRM"],
-              ["import", "Импорт контактов"],
+              ["phones", uiText("Список номеров")],
+              ["segment", uiText("Группа из CRM")],
+              ["contacts", uiText("Клиенты CRM")],
+              ["import", uiText("Импорт контактов")],
             ] as const
           ).map(([value, label]) => (
             <button
@@ -649,8 +650,7 @@ export function CampaignMassPanel({
             {whoMode === "import" ? (
               <div className="field-block">
                 <label className="btn secondary">
-                  Загрузить CSV / XLSX
-                  <input
+                  {uiText("Загрузить CSV / XLSX")}<input
                     type="file"
                     hidden
                     accept=".csv,.xlsx,.xls,text/csv"
@@ -659,9 +659,9 @@ export function CampaignMassPanel({
                 </label>
                 {importPreview ? (
                   <div className="panel soft" style={{ marginTop: 8 }}>
-                    <b>Сопоставление колонок</b>
+                    <b>{uiText("Сопоставление колонок")}</b>
                     <p className="muted">
-                      Строк: {importPreview.summary?.totalRows} · с телефоном: {importPreview.summary?.withPhone}
+                      {uiText("Строк:")}{" "}{importPreview.summary?.totalRows} {" "}{uiText("· с телефоном:")}{" "}{importPreview.summary?.withPhone}
                     </p>
                     {(importPreview.headers || []).map((header: string) => (
                       <label key={header}>
@@ -672,7 +672,7 @@ export function CampaignMassPanel({
                             void reapplyImportMapping({ ...importMapping, [header]: event.target.value })
                           }
                         >
-                          {MAP_FIELDS.map(([id, label]) => (
+                          {localizeUiOptions(MAP_FIELDS, uiText).map(([id, label]) => (
                             <option key={id} value={id}>
                               {label}
                             </option>
@@ -680,16 +680,15 @@ export function CampaignMassPanel({
                         </select>
                       </label>
                     ))}
-                    <p className="muted">До подтверждения ничего не импортируем и не отправляем.</p>
+                    <p className="muted">{uiText("До подтверждения ничего не импортируем и не отправляем.")}</p>
                   </div>
                 ) : (
-                  <p className="muted">Нужны колонки: телефон (обязательно), имя, компания, email, услуга, комментарий.</p>
+                  <p className="muted">{uiText("Нужны колонки: телефон (обязательно), имя, компания, email, услуга, комментарий.")}</p>
                 )}
               </div>
             ) : (
               <label>
-                Вставьте номера
-                <textarea
+                {uiText("Вставьте номера")}<textarea
                   rows={6}
                   value={phoneText}
                   onChange={(event) => {
@@ -703,37 +702,36 @@ export function CampaignMassPanel({
             {whoMode === "phones" ? (
               <div className="actions">
                 <button type="button" className="btn" disabled={busy || !phoneText.trim()} onClick={() => parsePhones()}>
-                  Распознать список
-                </button>
+                  {uiText("Распознать список")}</button>
               </div>
             ) : null}
             {summary ? (
               <div className="panel soft">
-                <b>Распознано {summary.total} контактов</b>
+                <b>{uiText("Распознано")}{" "}{summary.total} {" "}{uiText("контактов")}</b>
                 <div className="command-summary" style={{ marginTop: 8 }}>
                   <div>
-                    <span className="muted">Корректные</span>
+                    <span className="muted">{uiText("Корректные")}</span>
                     <b>{summary.valid}</b>
                   </div>
                   <div>
-                    <span className="muted">Найдены в CRM</span>
+                    <span className="muted">{uiText("Найдены в CRM")}</span>
                     <b>{summary.existing}</b>
                   </div>
                   <div>
-                    <span className="muted">Новые номера</span>
+                    <span className="muted">{uiText("Новые номера")}</span>
                     <b>{summary.neu}</b>
                   </div>
                   <div>
-                    <span className="muted">Некорректные</span>
+                    <span className="muted">{uiText("Некорректные")}</span>
                     <b>{summary.invalid}</b>
                   </div>
                   <div>
-                    <span className="muted">Дубликаты</span>
+                    <span className="muted">{uiText("Дубликаты")}</span>
                     <b>{summary.duplicates}</b>
                   </div>
                 </div>
                 <button type="button" className="linkish" onClick={() => setShowAll((v) => !v)}>
-                  {showAll ? "Скрыть список" : "Посмотреть все"}
+                  {showAll ? uiText("Скрыть список") : uiText("Посмотреть все")}
                 </button>
                 {showAll ? (
                   <div className="picker-list" style={{ marginTop: 8 }}>
@@ -750,9 +748,9 @@ export function CampaignMassPanel({
                             <div className="muted">
                               {item.displayName && item.phoneRaw ? item.phoneRaw : null}
                               {item.status === "ok_existing"
-                                ? ` Найден в CRM${item.interest ? ` · ${item.interest}` : ""}`
+                                ? uiText(" Найден в CRM{p0}", {p0: item.interest ? ` · ${item.interest}` : ""})
                                 : item.status === "ok_new"
-                                  ? " Новый контакт"
+                                  ? uiText(" Новый контакт")
                                   : ` ${item.reason || item.status}`}
                             </div>
                           </div>
@@ -764,7 +762,7 @@ export function CampaignMassPanel({
                                 setExcludedRaws((prev) => (excluded ? prev.filter((x) => x !== item.raw) : [...prev, item.raw]))
                               }
                             >
-                              {excluded ? "Вернуть" : "Снять"}
+                              {excluded ? uiText("Вернуть") : uiText("Снять")}
                             </button>
                           )}
                         </div>
@@ -780,7 +778,7 @@ export function CampaignMassPanel({
         {whoMode === "segment" ? (
           <div className="field-block">
             <div className="chip-row">
-              {QUICK_SEGMENTS.map((item) => (
+              {localizeUiOptions(QUICK_SEGMENTS, uiText).map((item) => (
                 <button key={item.id} type="button" className="chip" onClick={() => void runSegment(item.body as SegmentBody)}>
                   {item.label}
                 </button>
@@ -788,15 +786,14 @@ export function CampaignMassPanel({
             </div>
             <div className="actions">
               <button type="button" className="btn secondary" disabled={busy} onClick={() => void runSegment(segment || {}, false)}>
-                Обновить выборку
-              </button>
+                {uiText("Обновить выборку")}</button>
             </div>
             {segmentPreview ? (
               <p>
-                В сегменте: <b>{segmentPreview.total}</b> · к отправке: <b>{contactIds.length}</b>
+                {uiText("В сегменте:")}{" "}<b>{segmentPreview.total}</b> {" "}{uiText("· к отправке:")}{" "}<b>{contactIds.length}</b>
               </p>
             ) : (
-              <p className="muted">Выберите сегмент — например «Сайты · 30 дней · без продажи».</p>
+              <p className="muted">{uiText("Выберите сегмент — например «Сайты · 30 дней · без продажи».")}</p>
             )}
           </div>
         ) : null}
@@ -806,7 +803,7 @@ export function CampaignMassPanel({
             {selectedContacts.length ? (
               <div className="cmd-selected-list">
                 <div className="muted" style={{ marginBottom: 6 }}>
-                  Выбрано клиентов из CRM: {selectedContacts.length}
+                  {uiText("Выбрано клиентов из CRM:")}{" "}{selectedContacts.length}
                 </div>
                 {selectedContacts.map((client) => (
                   <div key={client.id} className="selected-client compact">
@@ -815,29 +812,27 @@ export function CampaignMassPanel({
                       <div className="muted">{[client.companyName, client.interest].filter(Boolean).join(" · ")}</div>
                     </div>
                     <button type="button" className="btn secondary" onClick={() => toggleContact(client)}>
-                      Убрать
-                    </button>
+                      {uiText("Убрать")}</button>
                   </div>
                 ))}
               </div>
             ) : (
-              <p className="muted">Выбрано клиентов из CRM: 0</p>
+              <p className="muted">{uiText("Выбрано клиентов из CRM: 0")}</p>
             )}
             <label>
-              Найти или выбрать клиента
-              <input
+              {uiText("Найти или выбрать клиента")}<input
                 value={searchQ}
                 onChange={(event) => setSearchQ(event.target.value)}
-                placeholder="Имя, телефон, компания"
+                placeholder={uiText("Имя, телефон, компания")}
                 autoComplete="off"
               />
             </label>
             {searchHits.length > 0 ? (
               <>
                 <div className="muted" style={{ marginTop: 8 }}>
-                  {searchQ.trim() ? `Найдено: ${searchHits.length}` : "Клиенты CRM — нажмите, чтобы выбрать"}
+                  {searchQ.trim() ? uiText("Найдено: {p0}", {p0: searchHits.length}) : uiText("Клиенты CRM — нажмите, чтобы выбрать")}
                 </div>
-                <div className="picker-list" role="listbox" aria-label="Клиенты CRM">
+                <div className="picker-list" role="listbox" aria-label={uiText("Клиенты CRM")}>
                   {searchHits.map((hit) => {
                     const already = selectedContacts.some((item) => item.id === hit.id);
                     return (
@@ -854,8 +849,8 @@ export function CampaignMassPanel({
                       >
                         <b>{nameWithPhone(hit.name, hit.phone)}</b>
                         <div className="muted">
-                          {[hit.companyName, hit.interest, hit.statusLabel].filter(Boolean).join(" · ")}
-                          {already ? " · уже выбран" : ""}
+                          {[hit.companyName, hit.interest, uiMessage(hit.statusLabel)].filter(Boolean).join(" · ")}
+                          {already ? uiText(" · уже выбран") : ""}
                         </div>
                       </button>
                     );
@@ -863,36 +858,34 @@ export function CampaignMassPanel({
                 </div>
               </>
             ) : searchQ.trim() ? (
-              <p className="muted">Никого не нашли. Попробуйте другой запрос или вкладку «Список номеров».</p>
+              <p className="muted">{uiText("Никого не нашли. Попробуйте другой запрос или вкладку «Список номеров».")}</p>
             ) : (
-              <p className="muted">{searchLoading ? "Загрузка клиентов…" : "В CRM пока нет клиентов для выбора."}</p>
+              <p className="muted">{searchLoading ? uiText("Загрузка клиентов…") : uiText("В CRM пока нет клиентов для выбора.")}</p>
             )}
           </div>
         ) : null}
 
         {whoMode === "phones" || whoMode === "import" ? (
           <fieldset className="field-block">
-            <legend className="muted">Что делать с новыми контактами?</legend>
+            <legend className="muted">{uiText("Что делать с новыми контактами?")}</legend>
             <label className="check-row">
               <input type="radio" checked={createMissing} onChange={() => setCreateMissing(true)} />
-              Создать клиентов автоматически (минимальные записи)
-            </label>
+              {uiText("Создать клиентов автоматически (минимальные записи)")}</label>
             <label className="check-row">
               <input type="radio" checked={!createMissing} onChange={() => setCreateMissing(false)} />
-              Отправить без создания клиента
-            </label>
+              {uiText("Отправить без создания клиента")}</label>
           </fieldset>
         ) : null}
       </div>
 
       <div className="command-step">
-        <div className="command-step-label">Сообщение</div>
+        <div className="command-step-label">{uiText("Сообщение")}</div>
         <div className="chip-row">
           {(
             [
-              ["ai", "Сформировать с AI"],
-              ["manual", "Написать вручную"],
-              ["file_only", "Без текста — только файл"],
+              ["ai", uiText("Сформировать с AI")],
+              ["manual", uiText("Написать вручную")],
+              ["file_only", uiText("Без текста — только файл")],
             ] as const
           ).map(([value, label]) => (
             <button
@@ -916,19 +909,18 @@ export function CampaignMassPanel({
               onChange={(event) => setMessage(event.target.value)}
               placeholder={
                 messageMode === "ai" || personalizeEach
-                  ? "Что сделать клиентам, например: уточнить удобное время для созвона"
-                  : "{{firstName}}, добрый день! ..."
+                  ? uiText("Что сделать клиентам, например: уточнить удобное время для созвона")
+                  : uiText("{{firstName}}, добрый день! ...")
               }
             />
             {messageMode === "ai" && !personalizeEach ? (
               <button type="button" className="btn secondary" disabled={busy} onClick={onAiDraft}>
-                Сгенерировать черновик
-              </button>
+                {uiText("Сгенерировать черновик")}</button>
             ) : null}
             <p className="muted">
               {messageMode === "ai" || personalizeEach
-                ? "Это задача для CRM, не текст в WhatsApp. В письмо пойдёт смысл команды, а факты — из заявки, без копирования приказа и без выдуманных цен."
-                : `Переменные: {{firstName}}, {{companyName}}, {{service}}, {{managerName}}. Пустое имя не даст «, добрый день!».`}
+                ? uiText("Это задача для CRM, не текст в WhatsApp. В письмо пойдёт смысл команды, а факты — из заявки, без копирования приказа и без выдуманных цен.")
+                : uiText("Переменные: {{firstName}}, {{companyName}}, {{service}}, {{managerName}}. Пустое имя не даст «, добрый день!».")}
             </p>
             <label className="check-row">
               <input
@@ -939,24 +931,22 @@ export function CampaignMassPanel({
                   setPrepare(null);
                 }}
               />
-              Составить разное предложение каждому получателю
-            </label>
+              {uiText("Составить разное предложение каждому получателю")}</label>
             {personalizeEach ? (
               <div className="field-block">
                 <p className="muted">
-                  CRM возьмёт суть вашей команды и подставит факты заявки: имя, что просил клиент, компания. Цены, скидки и сроки не выдумываем.
-                </p>
+                  {uiText("CRM возьмёт суть вашей команды и подставит факты заявки: имя, что просил клиент, компания. Цены, скидки и сроки не выдумываем.")}</p>
                 <button type="button" className="btn secondary" disabled={busy || !campaignId} onClick={() => void onPersonalizeOffers()}>
-                  {campaign?.recipients?.some((row: any) => row.messageDraft) ? "Пересобрать предложения" : "Составить предложения из задачи"}
+                  {campaign?.recipients?.some((row: any) => row.messageDraft) ? uiText("Пересобрать предложения") : uiText("Составить предложения из задачи")}
                 </button>
-                {!campaignId ? <p className="muted">Сначала подготовьте черновик — кнопка станет активной.</p> : null}
+                {!campaignId ? <p className="muted">{uiText("Сначала подготовьте черновик — кнопка станет активной.")}</p> : null}
                 {(campaign?.recipients || []).filter((row: any) => row.status === "pending").some((row: any) => row.messageDraft) ? (
                   <div className="campaign-offer-list">
                     {(campaign.recipients as any[])
                       .filter((row) => row.status === "pending")
                       .map((row) => (
                         <label key={row.id} className="campaign-offer-item">
-                          <b>{row.displayName || row.phoneRaw || "Контакт"}</b>
+                          <b>{row.displayName || row.phoneRaw || uiText("Контакт")}</b>
                           <textarea
                             rows={3}
                             value={row.messageDraft || ""}
@@ -970,12 +960,12 @@ export function CampaignMassPanel({
             ) : null}
           </>
         ) : (
-          <p className="muted">Отправим только вложения — убедитесь, что канал это позволяет.</p>
+          <p className="muted">{uiText("Отправим только вложения — убедитесь, что канал это позволяет.")}</p>
         )}
       </div>
 
       <div className="command-step" id="campaign-when">
-        <div className="command-step-label">Когда</div>
+        <div className="command-step-label">{uiText("Когда")}</div>
         <div className="chip-row">
           <button
             type="button"
@@ -985,8 +975,7 @@ export function CampaignMassPanel({
               setPrepare(null);
             }}
           >
-            Сейчас
-          </button>
+            {uiText("Сейчас")}</button>
           <button
             type="button"
             className={whenMode === "schedule" ? "chip active" : "chip"}
@@ -996,13 +985,11 @@ export function CampaignMassPanel({
               if (!scheduledAt) setScheduledAt(toDateTimeLocal(new Date(Date.now() + 60 * 60 * 1000)));
             }}
           >
-            Запланировать
-          </button>
+            {uiText("Запланировать")}</button>
         </div>
         {whenMode === "schedule" ? (
           <label>
-            Дата и время
-            <input
+            {uiText("Дата и время")}<input
               ref={scheduleInputRef}
               type="datetime-local"
               step="60"
@@ -1019,15 +1006,13 @@ export function CampaignMassPanel({
 
       <div className="command-step" onDragOver={(event) => event.preventDefault()} onDrop={onDrop}>
         <div className="command-step-label">
-          Вложения
-          {attachments.length || queuedUploads.length
+          {uiText("Вложения")}{attachments.length || queuedUploads.length
             ? ` · ${attachments.length + queuedUploads.length}`
             : ""}
         </div>
         <div className="actions">
           <label className="btn secondary">
-            + Файл
-            <input
+            {uiText("+ Файл")}<input
               type="file"
               hidden
               multiple
@@ -1036,8 +1021,7 @@ export function CampaignMassPanel({
             />
           </label>
           <label className="btn secondary">
-            + Документ
-            <input
+            {uiText("+ Документ")}<input
               type="file"
               hidden
               multiple
@@ -1046,8 +1030,7 @@ export function CampaignMassPanel({
             />
           </label>
           <label className="btn secondary">
-            + Фото
-            <input
+            {uiText("+ Фото")}<input
               type="file"
               hidden
               multiple
@@ -1057,15 +1040,13 @@ export function CampaignMassPanel({
           </label>
           {!campaignId ? (
             <button type="button" className="btn" disabled={busy || !canCreateDraft} onClick={createDraft}>
-              Создать черновик рассылки
-            </button>
+              {uiText("Создать черновик рассылки")}</button>
           ) : (
-            <span className="muted">Черновик · {campaignId.slice(0, 8)}</span>
+            <span className="muted">{uiText("Черновик ·")}{" "}{campaignId.slice(0, 8)}</span>
           )}
         </div>
         <p className="muted">
-          Перетащите файлы сюда. PDF, DOC/X, XLS/X, PPT/X, JPG/PNG/WEBP.
-          {!campaignId ? " Можно прикрепить до черновика — загрузим при создании." : ""}
+          {uiText("Перетащите файлы сюда. PDF, DOC/X, XLS/X, PPT/X, JPG/PNG/WEBP.")}{!campaignId ? uiText(" Можно прикрепить до черновика — загрузим при создании.") : ""}
         </p>
         {queuedUploads.length ? (
           <div className="picker-list">
@@ -1074,7 +1055,7 @@ export function CampaignMassPanel({
                 <div>
                   <b>{file.fileName}</b>
                   <div className="muted">
-                    в очереди · {file.documentType}
+                    {uiText("в очереди ·")}{" "}{file.documentType}
                     {file.sizeBytes ? ` · ${formatBytes(file.sizeBytes)}` : ""}
                   </div>
                 </div>
@@ -1083,8 +1064,7 @@ export function CampaignMassPanel({
                   className="btn secondary"
                   onClick={() => setQueuedUploads((prev) => prev.filter((_, i) => i !== index))}
                 >
-                  Удалить
-                </button>
+                  {uiText("Удалить")}</button>
               </div>
             ))}
           </div>
@@ -1109,8 +1089,7 @@ export function CampaignMassPanel({
                     setPrepare(null);
                   }}
                 >
-                  Удалить
-                </button>
+                  {uiText("Удалить")}</button>
               </div>
             ))}
           </div>
@@ -1120,53 +1099,51 @@ export function CampaignMassPanel({
       <div className="actions">
         {!campaignId ? (
           <button type="button" className="btn" disabled={busy || !canCreateDraft} onClick={createDraft}>
-            Подготовить черновик
-          </button>
+            {uiText("Подготовить черновик")}</button>
         ) : (
           <button type="button" className="btn" disabled={busy} onClick={onPrepare}>
-            Проверить и подготовить
-          </button>
+            {uiText("Проверить и подготовить")}</button>
         )}
       </div>
 
       {prepare ? (
         <div className="panel soft confirm-panel" id="campaign-confirm" ref={confirmRef}>
-          <h3>{prepare.title || "Проверьте рассылку"}</h3>
+          <h3>{prepare.title || uiText("Проверьте рассылку")}</h3>
           <div className="kv">
             <div>
-              <span>Действие</span>
+              <span>{uiText("Действие")}</span>
               <b>{prepare.action}</b>
             </div>
             <div>
-              <span>Получатели</span>
+              <span>{uiText("Получатели")}</span>
               <b>{prepare.recipients}</b>
             </div>
             <div>
-              <span>В CRM / новые</span>
+              <span>{uiText("В CRM / новые")}</span>
               <b>
                 {prepare.foundInCrm} / {prepare.newContacts}
               </b>
             </div>
             <div>
-              <span>Исключено</span>
+              <span>{uiText("Исключено")}</span>
               <b>{prepare.excluded}</b>
             </div>
             <div>
-              <span>Канал</span>
+              <span>{uiText("Канал")}</span>
               <b>{prepare.channel}</b>
             </div>
             <div>
-              <span>Когда</span>
-              <b>{prepare.when === "Сейчас" ? "Сейчас" : new Date(prepare.when).toLocaleString("ru-RU")}</b>
+              <span>{uiText("Когда")}</span>
+              <b>{prepare.when === "Сейчас" ? uiText("Сейчас") : new Date(prepare.when).toLocaleString(uiFormatLocale())}</b>
             </div>
           </div>
           {prepare.message ? <div className="message-preview">{prepare.message}</div> : null}
           {prepare.personalizeEach ? (
-            <p className="muted">Каждому получателю уйдёт свой текст — проверьте список ниже.</p>
+            <p className="muted">{uiText("Каждому получателю уйдёт свой текст — проверьте список ниже.")}</p>
           ) : null}
           {(prepare.personalizationPreviews || []).length ? (
             <div className="field-block">
-              <div className="muted">{prepare.personalizeEach ? "Тексты получателям" : "Примеры персонализации"}</div>
+              <div className="muted">{prepare.personalizeEach ? uiText("Тексты получателям") : uiText("Примеры персонализации")}</div>
               {(prepare.personalizationPreviews as any[]).map((item, index) => (
                 <div key={`${item.label}-${index}`} className="panel soft">
                   <b>{item.label}</b>
@@ -1176,12 +1153,12 @@ export function CampaignMassPanel({
             </div>
           ) : null}
           <details>
-            <summary>Посмотреть {prepare.recipients} получателей</summary>
+            <summary>{uiText("Посмотреть")}{" "}{prepare.recipients} {" "}{uiText("получателей")}</summary>
             <div className="picker-list">
               {(prepare.recipientsPreview || []).map((item: any) => (
                 <div key={item.id} className="picker-item">
                   <div>
-                    <b>{item.name || item.phone || "Контакт"}</b>
+                    <b>{item.name || item.phone || uiText("Контакт")}</b>
                     <div className="muted">{item.phone}</div>
                     {item.message ? <p className="campaign-offer-preview">{item.message}</p> : null}
                   </div>
@@ -1191,7 +1168,7 @@ export function CampaignMassPanel({
           </details>
           {prepare.excluded > 0 ? (
             <details>
-              <summary>Не будут отправлены · {prepare.excluded}</summary>
+              <summary>{uiText("Не будут отправлены ·")}{" "}{prepare.excluded}</summary>
               <div className="picker-list">
                 {(prepare.excludedPreview || []).map((item: any) => (
                   <div key={item.id} className="picker-item">
@@ -1204,10 +1181,10 @@ export function CampaignMassPanel({
           ) : null}
           <div className="actions">
             <button type="button" className="btn secondary" onClick={() => setPrepare(null)}>
-              {prepare.buttons?.back || "Вернуться и изменить"}
+              {prepare.buttons?.back || uiText("Вернуться и изменить")}
             </button>
             <button type="button" className="btn" disabled={busy} onClick={onConfirmAndSend}>
-              {prepare.buttons?.confirm || `Подтвердить и отправить ${prepare.recipients} контактам`}
+              {prepare.buttons?.confirm || uiText("Подтвердить и отправить {p0} контактам", {p0: prepare.recipients})}
             </button>
           </div>
         </div>
@@ -1218,40 +1195,36 @@ export function CampaignMassPanel({
           <b>
             {campaign.status === "scheduled"
               ? campaign.scheduledAt
-                ? `Запланирована на ${new Date(campaign.scheduledAt).toLocaleString("ru-RU")}`
-                : "Запланирована"
-              : `Статус: ${campaign.status}`}
+                ? uiText("Запланирована на {p0}", {p0: new Date(campaign.scheduledAt).toLocaleString(uiFormatLocale())})
+                : uiText("Запланирована")
+              : uiText("Статус: {p0}", {p0: campaign.status})}
           </b>
           <p>
             {campaign.status === "scheduled"
-              ? "Задача должна быть в фильтре «Запланировано». Сообщения уйдут в это время, не сразу."
+              ? uiText("Задача должна быть в фильтре «Запланировано». Сообщения уйдут в это время, не сразу.")
               : null}
-            Всего {(campaign.summary || campaign.statsJson)?.total ?? "—"} · отправлено{" "}
-            {(campaign.summary || campaign.statsJson)?.sent ?? 0} · ошибки {(campaign.summary || campaign.statsJson)?.failed ?? 0}
+            {uiText("Всего")}{" "}{(campaign.summary || campaign.statsJson)?.total ?? "—"} {" "}{uiText("· отправлено")}{" "}
+            {(campaign.summary || campaign.statsJson)?.sent ?? 0} {" "}{uiText("· ошибки")}{" "}{(campaign.summary || campaign.statsJson)?.failed ?? 0}
           </p>
           <div className="actions">
             {campaign.status === "running" ? (
               <>
                 <button type="button" className="btn secondary" onClick={() => campaignId && api.pauseCampaign(campaignId).then(() => refreshCampaign())}>
-                  Приостановить
-                </button>
+                  {uiText("Приостановить")}</button>
                 <button
                   type="button"
                   className="btn secondary"
                   onClick={() => campaignId && api.cancelCampaignRemainder(campaignId).then(() => refreshCampaign())}
                 >
-                  Отменить остаток
-                </button>
+                  {uiText("Отменить остаток")}</button>
               </>
             ) : null}
             {(campaign.summary || campaign.statsJson)?.failed > 0 ? (
               <button type="button" className="btn" onClick={() => campaignId && api.retryFailedCampaign(campaignId).then(() => refreshCampaign())}>
-                Повторить для неуспешных
-              </button>
+                {uiText("Повторить для неуспешных")}</button>
             ) : null}
             <button type="button" className="btn secondary" onClick={() => refreshCampaign()}>
-              Обновить
-            </button>
+              {uiText("Обновить")}</button>
           </div>
         </div>
       ) : null}

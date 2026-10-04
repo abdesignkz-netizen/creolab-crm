@@ -7,6 +7,17 @@ describe("WhatsApp AI activation labels", () => {
   const knowledge = [{ title: "FAQ", content: "Цена 10 000" }];
   const fps = publishedAiFingerprints({ tenantPrompt: prompt, knowledge });
 
+  it("shows published settings active for enabled QR and Meta without seller synchronization", () => {
+    for (const type of ["whatsapp_qr", "whatsapp_cloud"]) {
+      const integration = { type, status: "active", channelConnections: [{ status: "active", autoReply: true }] };
+      const live = describeWhatsAppAiActivation({ prompt, knowledge, integration, enabled: true });
+      assert.equal(live.prompt.live, true); assert.equal(live.knowledge.live, true); assert.equal(live.syncedAt, null);
+      assert.equal(describeWhatsAppAiActivation({ prompt, knowledge, integration, enabled: false }).prompt.live, false);
+      integration.channelConnections[0].autoReply = false;
+      assert.equal(describeWhatsAppAiActivation({ prompt, knowledge, integration }).prompt.live, false);
+    }
+  });
+
   it("marks prompt and knowledge inactive when WhatsApp is not connected", () => {
     const result = describeWhatsAppAiActivation({ prompt, knowledge, integration: null });
     assert.equal(result.prompt.live, false);

@@ -1,3 +1,4 @@
+import { uiText, useUiText, localizeUiOptions } from "../uiText";
 import { api } from "../api";
 import { createNcalayerClient, NcalayerError } from "./ncalayerClient";
 
@@ -29,11 +30,11 @@ function isWsseRequired(err: any) {
 
 /** Existing AUTH-ticket flow, shared by integration settings and the document card. */
 export async function connectEsfAuthTicket(iin: string, cabinetPassword?: string) {
-  if (!/^\d{12}$/.test(iin.trim())) throw new Error("Укажите ИИН пользователя — 12 цифр");
+  if (!/^\d{12}$/.test(iin.trim())) throw new Error(uiText("Укажите ИИН пользователя — 12 цифр"));
   const client = createNcalayerClient();
   try {
     if (!(await client.isAvailable())) {
-      throw new NcalayerError("NCALAYER_NOT_RUNNING", "Запустите NCALayer и повторите подключение");
+      throw new NcalayerError("NCALAYER_NOT_RUNNING", uiText("Запустите NCALayer и повторите подключение"));
     }
     const ticket = (await api.esfAuthTicket(iin.trim())) as { authTicketXml: string };
     const signedAuthTicket = await client.signXml(ticket.authTicketXml, { extKeyUsageOids: [] });
@@ -52,7 +53,7 @@ export async function ensureEsfCabinetSession(opts: { iin?: string; cabinetPassw
   const current = (await api.esfConnection()) as any;
   if (current.system?.esfEnv === "off") {
     throw new EsfCabinetAuthError(
-      "Подключение к ИС ЭСФ выключено на сервере. Для отправки АВР нужно включить режим ИС ЭСФ в настройках сервера.",
+      uiText("Подключение к ИС ЭСФ выключено на сервере. Для отправки АВР нужно включить режим ИС ЭСФ в настройках сервера."),
       "esf_env_off",
     );
   }
@@ -62,7 +63,7 @@ export async function ensureEsfCabinetSession(opts: { iin?: string; cabinetPassw
     if (current.system?.provider === "live") {
       if (current.wsseRequired && !String(opts.cabinetPassword || "").trim()) {
         throw new EsfCabinetAuthError(
-          "Портал запросил пароль кабинета ИС ЭСФ. Введите его ниже и снова нажмите «Подписать и отправить». Это не PIN ЭЦП.",
+          uiText("Портал запросил пароль кабинета ИС ЭСФ. Введите его ниже и снова нажмите «Подписать и отправить». Это не PIN ЭЦП."),
           "esf_wsse_required",
           true,
           current,
@@ -70,14 +71,14 @@ export async function ensureEsfCabinetSession(opts: { iin?: string; cabinetPassw
       }
       const iin = digitsIin(opts.iin || current.connection?.signerIin);
       if (!/^\d{12}$/.test(iin)) {
-        throw new EsfCabinetAuthError("Укажите ИИН пользователя для входа в ИС ЭСФ — 12 цифр.", "esf_iin_required");
+        throw new EsfCabinetAuthError(uiText("Укажите ИИН пользователя для входа в ИС ЭСФ — 12 цифр."), "esf_iin_required");
       }
       await connectEsfAuthTicket(iin, opts.cabinetPassword);
     } else {
       const basics = createNcalayerClient();
       try {
         if (!(await basics.isAvailable())) {
-          throw new NcalayerError("NCALAYER_NOT_RUNNING", "Запустите NCALayer и повторите отправку");
+          throw new NcalayerError("NCALAYER_NOT_RUNNING", uiText("Запустите NCALayer и повторите отправку"));
         }
         const cms = await basics.selectAuthCertificate();
         await api.esfConnect({
@@ -92,7 +93,7 @@ export async function ensureEsfCabinetSession(opts: { iin?: string; cabinetPassw
   } catch (err: any) {
     if (err instanceof EsfCabinetAuthError || err instanceof NcalayerError) throw err;
     throw new EsfCabinetAuthError(
-      err?.body?.message || err?.message || "Авторизация ИС ЭСФ не завершена",
+      err?.body?.message || err?.message || uiText("Авторизация ИС ЭСФ не завершена"),
       err?.body?.code || err?.code || "REAUTH_REQUIRED",
       isWsseRequired(err),
       err?.body,
@@ -102,7 +103,7 @@ export async function ensureEsfCabinetSession(opts: { iin?: string; cabinetPassw
   const updated = (await api.esfConnection()) as any;
   if (!updated.connection?.sessionActive) {
     throw new EsfCabinetAuthError(
-      updated.connection?.lastErrorMessage || "Авторизация ИС ЭСФ не завершена",
+      updated.connection?.lastErrorMessage || uiText("Авторизация ИС ЭСФ не завершена"),
       updated.code || "REAUTH_REQUIRED",
       Boolean(updated.wsseRequired),
       updated,

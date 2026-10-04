@@ -1,3 +1,4 @@
+import { uiText, useUiText, localizeUiOptions } from "../lib/uiText";
 import { useSession } from "../lib/session";
 import { notifySaved } from "../components/SaveNotice";
 import { useEffect, useState } from "react";
@@ -149,6 +150,7 @@ function ScheduleEditor({
   onChange: (next: ScheduleWindow) => void;
   timezone: string;
 }) {
+  const uiText = useUiText();
   function toggleDay(day: number) {
     const has = value.days.includes(day);
     const days = has ? value.days.filter((d) => d !== day) : [...value.days, day].sort((a, b) => a - b);
@@ -157,9 +159,9 @@ function ScheduleEditor({
 
   return (
     <div className="stack" style={{ marginTop: 10, gap: 10 }}>
-      <div className="muted">Часовой пояс: {timezone}</div>
+      <div className="muted">{uiText("Часовой пояс:")}{" "}{timezone}</div>
       <div className="actions" style={{ flexWrap: "wrap" }}>
-        {DAY_OPTIONS.map((d) => (
+        {localizeUiOptions(DAY_OPTIONS, uiText).map((d) => (
           <button
             key={d.value}
             type="button"
@@ -172,16 +174,14 @@ function ScheduleEditor({
       </div>
       <div className="row" style={{ gap: 12, alignItems: "end" }}>
         <label>
-          С
-          <input
+          {uiText("С")}<input
             type="time"
             value={value.start}
             onChange={(e) => onChange({ ...value, start: e.target.value || value.start })}
           />
         </label>
         <label>
-          До
-          <input
+          {uiText("До")}<input
             type="time"
             value={value.end}
             onChange={(e) => onChange({ ...value, end: e.target.value || value.end })}
@@ -189,14 +189,13 @@ function ScheduleEditor({
         </label>
       </div>
       <p className="muted">
-        Вне окна AI всё ещё анализирует и готовит задачу, но не пишет клиенту сам — дождётся
-        рабочего времени или кнопки менеджера.
-      </p>
+        {uiText("Вне окна AI всё ещё анализирует и готовит задачу, но не пишет клиенту сам — дождётся рабочего времени или кнопки менеджера.")}</p>
     </div>
   );
 }
 
 export function AiAutomationSettingsPage() {
+  const uiText = useUiText();
   const { me } = useSession();
   const aiManagerAllowed = Boolean(me?.billing?.entitlements?.AI_MANAGER);
   const aiManagerTrial = aiManagerAllowed && me?.billing?.planCode === "BASQAR_FREE";
@@ -275,7 +274,7 @@ export function AiAutomationSettingsPage() {
       }
       setError("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось загрузить");
+      setError(err instanceof Error ? err.message : uiText("Не удалось загрузить"));
     }
   }
 
@@ -302,32 +301,30 @@ export function AiAutomationSettingsPage() {
         followUp,
         conversationHours,
       })) as { message?: string };
-      setHint(result.message || "Сохранено");
+      setHint(result.message || uiText("Сохранено"));
       setEditing(false);
-      notifySaved("Настройки AI сохранены");
+      notifySaved(uiText("Настройки AI сохранены"));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Ошибка сохранения");
+      setError(err instanceof Error ? err.message : uiText("Ошибка сохранения"));
     } finally {
       setBusy(false);
     }
   }
 
-  if (!aiManagerAllowed) return <section className="panel"><h2>ИИ-менеджер</h2><p>ИИ-менеджер не входит в ваш тариф. Пробный режим доступен в Free; работа с клиентами — в Business и Pro.</p><Link to="/billing">Посмотреть тарифы</Link></section>;
-  if (!data && !error) return <div className="state">Загрузка настроек…</div>;
+  if (!aiManagerAllowed) return <section className="panel"><h2>{uiText("ИИ-менеджер")}</h2><p>{uiText("ИИ-менеджер не входит в ваш тариф. Пробный режим доступен в Free; работа с клиентами — в Business и Pro.")}</p><Link to="/billing">{uiText("Посмотреть тарифы")}</Link></section>;
+  if (!data && !error) return <div className="state">{uiText("Загрузка настроек…")}</div>;
 
   return (
     <section>
-      {aiManagerTrial ? <p className="banner">Пробный режим ИИ-менеджера для ознакомления с консультациями клиентов и обработкой заявок. В Free доступно 100 AI-кредитов один раз, общих для всех AI-функций.</p> : null}
+      {aiManagerTrial ? <p className="banner">{uiText("Пробный режим ИИ-менеджера для ознакомления с консультациями клиентов и обработкой заявок. В Free доступно 100 AI-кредитов один раз, общих для всех AI-функций.")}</p> : null}
       <div className="page-head">
         <div>
           <p className="page-kicker">
-            <Link to="/settings">Настройки</Link> · AI-менеджер
-          </p>
-          <h2>AI-менеджер</h2>
+            <Link to="/settings">{uiText("Настройки")}</Link> {" "}{uiText("· AI-менеджер")}</p>
+          <h2>{uiText("AI-менеджер")}</h2>
           <p className="muted">
-            Как компания обрабатывает заявки и диалоги. Текст ответов и база знаний задаёт администратор сервиса.
-          </p>
+            {uiText("Как компания обрабатывает заявки и диалоги. Текст ответов и база знаний задаёт администратор сервиса.")}</p>
         </div>
       </div>
 
@@ -335,7 +332,7 @@ export function AiAutomationSettingsPage() {
       {hint ? <p className="ok">{hint}</p> : null}
 
       <div className="actions task-board-tabs">
-        {SECTION_ITEMS.map((item) => (
+        {localizeUiOptions(SECTION_ITEMS, uiText).map((item) => (
           <button
             key={item.id}
             type="button"
@@ -348,15 +345,15 @@ export function AiAutomationSettingsPage() {
       </div>
 
       {!editing ? <div className="panel saved-editor-summary">
-        <b>Настройки AI-менеджера сохранены</b>
-        <button type="button" className="btn secondary" autoFocus onClick={() => { setEditing(true); setHint(""); }}>Изменить настройки</button>
+        <b>{uiText("Настройки AI-менеджера сохранены")}</b>
+        <button type="button" className="btn secondary" autoFocus onClick={() => { setEditing(true); setHint(""); }}>{uiText("Изменить настройки")}</button>
       </div> : <>
       {section === "requests" ? (
         <>
-      <p className="muted">Как обрабатывать новые заявки. Уже запущенные задачи не меняются.</p>
+      <p className="muted">{uiText("Как обрабатывать новые заявки. Уже запущенные задачи не меняются.")}</p>
       <div className="panel">
-        <b>Режим по умолчанию</b>
-        <div className="ai-mode-grid" role="group" aria-label="Режим обработки новых заявок">
+        <b>{uiText("Режим по умолчанию")}</b>
+        <div className="ai-mode-grid" role="group" aria-label={uiText("Режим обработки новых заявок")}>
           {(data?.modes || []).map((item: { mode: string; label: string }) => (
             <label key={item.mode} className={`ai-mode-card${mode === item.mode ? " is-selected" : ""}`}>
               <input
@@ -367,7 +364,7 @@ export function AiAutomationSettingsPage() {
               />
               <span>
                 <b>{item.label}</b>
-                <span className="ai-mode-help">{MODE_HELP[item.mode]}</span>
+                <span className="ai-mode-help">{localizeUiOptions(MODE_HELP, uiText)[item.mode]}</span>
               </span>
             </label>
           ))}
@@ -377,24 +374,21 @@ export function AiAutomationSettingsPage() {
       <div className="panel">
         <label className="check-row">
           <input type="checkbox" checked={processRepeat} onChange={(e) => setProcessRepeat(e.target.checked)} />
-          <span>Автоматически обрабатывать повторные заявки</span>
+          <span>{uiText("Автоматически обрабатывать повторные заявки")}</span>
         </label>
         <label>
-          Первичный контакт
-          <select value={sla} onChange={(e) => setSla(Number(e.target.value))}>
+          {uiText("Первичный контакт")}<select value={sla} onChange={(e) => setSla(Number(e.target.value))}>
             {[5, 10, 15, 30, 60].map((m) => (
               <option key={m} value={m}>
-                до {m} минут
-              </option>
+                {uiText("до")}{" "}{m} {" "}{uiText("минут")}</option>
             ))}
           </select>
         </label>
         <label>
-          Автообработка
-          <select value={scheduleMode} onChange={(e) => setScheduleMode(e.target.value)}>
-            <option value="always">Всегда</option>
-            <option value="working_hours">Только рабочее время</option>
-            <option value="custom">По расписанию</option>
+          {uiText("Автообработка")}<select value={scheduleMode} onChange={(e) => setScheduleMode(e.target.value)}>
+            <option value="always">{uiText("Всегда")}</option>
+            <option value="working_hours">{uiText("Только рабочее время")}</option>
+            <option value="custom">{uiText("По расписанию")}</option>
           </select>
         </label>
         {scheduleMode === "working_hours" ? (
@@ -406,60 +400,55 @@ export function AiAutomationSettingsPage() {
       </div>
 
       <button type="button" className="linkish" onClick={() => setShowAdvanced((v) => !v)}>
-        {showAdvanced ? "Скрыть дополнительные настройки" : "Дополнительные настройки"}
+        {showAdvanced ? uiText("Скрыть дополнительные настройки") : uiText("Дополнительные настройки")}
       </button>
 
       {showAdvanced ? (
         <div className="panel soft">
           <p className="muted">
-            При режиме «Сам пишет клиенту» заявки с формы сайта тоже обрабатываются сразу: AI пишет
-            приветствие на номер из заявки. Если номера нет в WhatsApp, это появится на Главной. Заявки, созданные вручную, AI сам не берёт.
-          </p>
+            {uiText("При режиме «Сам пишет клиенту» заявки с формы сайта тоже обрабатываются сразу: AI пишет приветствие на номер из заявки. Если номера нет в WhatsApp, это появится на Главной. Заявки, созданные вручную, AI сам не берёт.")}</p>
         </div>
       ) : null}
         </>
       ) : null}
 
       {section === "crm" ? <div className="panel">
-        <b>CRM по переписке</b>
-        <p className="muted">При включённой настройке AI сохраняет подтверждённые факты в режимах AUTO и «После подтверждения». В HUMAN обновления могут продолжаться без ответов клиенту. ASSIST и пауза оставляют только предложения; ручной режим отключает автообновления.</p>
+        <b>{uiText("CRM по переписке")}</b>
+        <p className="muted">{uiText("При включённой настройке AI сохраняет подтверждённые факты в режимах AUTO и «После подтверждения». В HUMAN обновления могут продолжаться без ответов клиенту. ASSIST и пауза оставляют только предложения; ручной режим отключает автообновления.")}</p>
         <div className="stack">
-          {CRM_OPTIONS.map(([key, label]) => <label className="check-row" key={key}>
+          {localizeUiOptions(CRM_OPTIONS, uiText).map(([key, label]) => <label className="check-row" key={key}>
             <input type="checkbox" checked={crm[key]} disabled={key !== "enabled" && !crm.enabled}
               onChange={event => setCrm(current => ({ ...current, [key]: event.target.checked }))} />
             <span>{label}</span>
           </label>)}
         </div>
-        <p className="muted">AI не подтверждает оплату, не закрывает сделки и не отправляет документы по этим настройкам. Неоднозначные суммы и время требуют уточнения. Сумма по позициям сделки сохраняется.</p>
+        <p className="muted">{uiText("AI не подтверждает оплату, не закрывает сделки и не отправляет документы по этим настройкам. Неоднозначные суммы и время требуют уточнения. Сумма по позициям сделки сохраняется.")}</p>
       </div> : null}
 
       {section === "prompt" ? (
         <div className="panel">
-          <b>Промпт</b>
+          <b>{uiText("Промпт")}</b>
           <p className="muted">
-            Текст, по которому AI отвечает клиентам, задаёт администратор сервиса. Компания его здесь не меняет —
-            чтобы не сломать уже работающие ответы.
-          </p>
-          <Link className="btn secondary" to="/settings">Назад</Link>
+            {uiText("Текст, по которому AI отвечает клиентам, задаёт администратор сервиса. Компания его здесь не меняет — чтобы не сломать уже работающие ответы.")}</p>
+          <Link className="btn secondary" to="/settings">{uiText("Назад")}</Link>
         </div>
       ) : null}
 
       {section === "knowledge" ? (
         <div className="panel">
-          <b>База знаний</b>
+          <b>{uiText("База знаний")}</b>
           <p className="muted">
-            Материалы о компании и услугах тоже задаёт администратор сервиса. Здесь их нельзя переписать.
-          </p>
-          <Link className="btn secondary" to="/settings">Назад</Link>
+            {uiText("Материалы о компании и услугах тоже задаёт администратор сервиса. Здесь их нельзя переписать.")}</p>
+          <Link className="btn secondary" to="/settings">{uiText("Назад")}</Link>
         </div>
       ) : null}
 
       {section === "handoff" ? (
         <div className="panel">
-          <b>Передача менеджеру</b>
-          <p className="muted">Когда AI должен перестать вести диалог сам и отдать его сотруднику.</p>
+          <b>{uiText("Передача менеджеру")}</b>
+          <p className="muted">{uiText("Когда AI должен перестать вести диалог сам и отдать его сотруднику.")}</p>
           <div className="stack" style={{ marginTop: 12, gap: 10 }}>
-            {HANDOFF_OPTIONS.map((item) => (
+            {localizeUiOptions(HANDOFF_OPTIONS, uiText).map((item) => (
               <label key={item.key} className="check-row">
                 <input
                   type="checkbox"
@@ -479,7 +468,7 @@ export function AiAutomationSettingsPage() {
             ))}
           </div>
           <div className="stack" style={{ marginTop: 16, gap: 10 }}>
-            <b>После передачи</b>
+            <b>{uiText("После передачи")}</b>
             <label className="radio-row">
               <input
                 type="radio"
@@ -488,8 +477,8 @@ export function AiAutomationSettingsPage() {
                 onChange={() => setHandoff((prev) => ({ ...prev, afterMode: "human" }))}
               />
               <span>
-                <b>AI прекращает отвечать</b>
-                <div className="muted">Диалог забирает сотрудник. Бот клиенту больше не пишет.</div>
+                <b>{uiText("AI прекращает отвечать")}</b>
+                <div className="muted">{uiText("Диалог забирает сотрудник. Бот клиенту больше не пишет.")}</div>
               </span>
             </label>
             <label className="radio-row">
@@ -500,8 +489,8 @@ export function AiAutomationSettingsPage() {
                 onChange={() => setHandoff((prev) => ({ ...prev, afterMode: "assist" }))}
               />
               <span>
-                <b>AI подсказывает менеджеру</b>
-                <div className="muted">Клиенту не пишет, но оставляет подсказку сотруднику.</div>
+                <b>{uiText("AI подсказывает менеджеру")}</b>
+                <div className="muted">{uiText("Клиенту не пишет, но оставляет подсказку сотруднику.")}</div>
               </span>
             </label>
           </div>
@@ -510,15 +499,15 @@ export function AiAutomationSettingsPage() {
 
       {section === "followup" ? (
         <div className="panel">
-          <b>Повторный контакт</b>
-          <p className="muted">AI может повторно написать клиенту, если клиент перестал отвечать. Текст берётся из последнего разговора, не из шаблона.</p>
+          <b>{uiText("Повторный контакт")}</b>
+          <p className="muted">{uiText("AI может повторно написать клиенту, если клиент перестал отвечать. Текст берётся из последнего разговора, не из шаблона.")}</p>
           <label className="check-row">
             <input
               type="checkbox"
               checked={followUp.enabled}
               onChange={(event) => setFollowUp((prev) => ({ ...prev, enabled: event.target.checked }))}
             />
-            <span>Автоматический повторный контакт</span>
+            <span>{uiText("Автоматический повторный контакт")}</span>
           </label>
           {followUp.enabled ? (
             <div className="stack" style={{ marginTop: 14, gap: 12 }}>
@@ -527,7 +516,7 @@ export function AiAutomationSettingsPage() {
                 return (
                   <div key={index} className="row" style={{ gap: 12, alignItems: "end", flexWrap: "wrap" }}>
                     <label>
-                      {index === 0 ? "Первый повтор" : index === 1 ? "Второй" : `${index + 1}-й`}
+                      {index === 0 ? uiText("Первый повтор") : index === 1 ? uiText("Второй") : uiText("{p0}-й", {p0: index + 1})}
                       <input
                         type="number"
                         min={1}
@@ -541,8 +530,7 @@ export function AiAutomationSettingsPage() {
                       />
                     </label>
                     <label>
-                      Через
-                      <select
+                      {uiText("Через")}<select
                         value={ui.unit}
                         onChange={(event) => {
                           const unit = event.target.value === "days" ? "days" : "hours";
@@ -551,16 +539,15 @@ export function AiAutomationSettingsPage() {
                           setFollowUp((prev) => ({ ...prev, delaysMinutes: next }));
                         }}
                       >
-                        <option value="hours">часов</option>
-                        <option value="days">дней</option>
+                        <option value="hours">{uiText("часов")}</option>
+                        <option value="days">{uiText("дней")}</option>
                       </select>
                     </label>
                   </div>
                 );
               })}
               <label>
-                Максимум повторов
-                <select
+                {uiText("Максимум повторов")}<select
                   value={followUp.maxAttempts}
                   onChange={(event) => {
                     const maxAttempts = Number(event.target.value);
@@ -579,23 +566,23 @@ export function AiAutomationSettingsPage() {
               </label>
               <label className="check-row">
                 <input type="checkbox" checked={followUp.skipIfRefused} onChange={(e) => setFollowUp((p) => ({ ...p, skipIfRefused: e.target.checked }))} />
-                <span>Не писать после явного отказа клиента</span>
+                <span>{uiText("Не писать после явного отказа клиента")}</span>
               </label>
               <label className="check-row">
                 <input type="checkbox" checked={followUp.skipIfHandedToHuman} onChange={(e) => setFollowUp((p) => ({ ...p, skipIfHandedToHuman: e.target.checked }))} />
-                <span>Не писать после передачи менеджеру</span>
+                <span>{uiText("Не писать после передачи менеджеру")}</span>
               </label>
               <label className="check-row">
                 <input type="checkbox" checked={followUp.skipIfDealClosed} onChange={(e) => setFollowUp((p) => ({ ...p, skipIfDealClosed: e.target.checked }))} />
-                <span>Не писать после закрытия сделки</span>
+                <span>{uiText("Не писать после закрытия сделки")}</span>
               </label>
               <label className="check-row">
                 <input type="checkbox" checked={followUp.skipIfClientReplied} onChange={(e) => setFollowUp((p) => ({ ...p, skipIfClientReplied: e.target.checked }))} />
-                <span>Не писать, если клиент уже ответил</span>
+                <span>{uiText("Не писать, если клиент уже ответил")}</span>
               </label>
               <label className="check-row">
                 <input type="checkbox" checked={followUp.respectWorkingHours} onChange={(e) => setFollowUp((p) => ({ ...p, respectWorkingHours: e.target.checked }))} />
-                <span>Учитывать рабочее время</span>
+                <span>{uiText("Учитывать рабочее время")}</span>
               </label>
             </div>
           ) : null}
@@ -604,8 +591,8 @@ export function AiAutomationSettingsPage() {
 
       {section === "hours" ? (
         <div className="panel">
-          <b>Рабочее время</b>
-          <p className="muted">Когда AI отвечает сам. Часовой пояс компании, не сервера. Пока включено «Круглосуточно», расписание новых заявок из вкладки «Новые заявки» не меняется.</p>
+          <b>{uiText("Рабочее время")}</b>
+          <p className="muted">{uiText("Когда AI отвечает сам. Часовой пояс компании, не сервера. Пока включено «Круглосуточно», расписание новых заявок из вкладки «Новые заявки» не меняется.")}</p>
           <div className="stack" style={{ gap: 10 }}>
             <label className="radio-row">
               <input
@@ -615,8 +602,8 @@ export function AiAutomationSettingsPage() {
                 onChange={() => setConversationHours((prev) => ({ ...prev, mode: "always" }))}
               />
               <span>
-                <b>Круглосуточно</b>
-                <div className="muted">AI может отвечать в любое время.</div>
+                <b>{uiText("Круглосуточно")}</b>
+                <div className="muted">{uiText("AI может отвечать в любое время.")}</div>
               </span>
             </label>
             <label className="radio-row">
@@ -627,14 +614,13 @@ export function AiAutomationSettingsPage() {
                 onChange={() => setConversationHours((prev) => ({ ...prev, mode: "schedule" }))}
               />
               <span>
-                <b>По расписанию</b>
-                <div className="muted">Вне окна действует правило ниже.</div>
+                <b>{uiText("По расписанию")}</b>
+                <div className="muted">{uiText("Вне окна действует правило ниже.")}</div>
               </span>
             </label>
           </div>
           <label>
-            Часовой пояс
-            <select value={timezone} onChange={(event) => setTimezone(event.target.value)}>
+            {uiText("Часовой пояс")}<select value={timezone} onChange={(event) => setTimezone(event.target.value)}>
               {(TIMEZONES.includes(timezone) ? TIMEZONES : [timezone, ...TIMEZONES]).map((zone) => (
                 <option key={zone} value={zone}>
                   {zone}
@@ -645,7 +631,7 @@ export function AiAutomationSettingsPage() {
           {conversationHours.mode === "schedule" ? (
             <>
               <div className="stack" style={{ marginTop: 12, gap: 8 }}>
-                {WEEK_DAYS.map((day) => {
+                {localizeUiOptions(WEEK_DAYS, uiText).map((day) => {
                   const row = conversationHours.days[day.value] || DEFAULT_HOURS.days[day.value];
                   return (
                     <div key={day.value} className="row" style={{ gap: 12, alignItems: "center", flexWrap: "wrap" }}>
@@ -665,8 +651,7 @@ export function AiAutomationSettingsPage() {
                       {row.enabled ? (
                         <>
                           <label>
-                            С
-                            <input
+                            {uiText("С")}<input
                               type="time"
                               value={row.start}
                               onChange={(event) =>
@@ -678,8 +663,7 @@ export function AiAutomationSettingsPage() {
                             />
                           </label>
                           <label>
-                            До
-                            <input
+                            {uiText("До")}<input
                               type="time"
                               value={row.end}
                               onChange={(event) =>
@@ -692,14 +676,14 @@ export function AiAutomationSettingsPage() {
                           </label>
                         </>
                       ) : (
-                        <span className="muted">Выходной</span>
+                        <span className="muted">{uiText("Выходной")}</span>
                       )}
                     </div>
                   );
                 })}
               </div>
               <div className="stack" style={{ marginTop: 16, gap: 10 }}>
-                <b>Вне рабочего времени</b>
+                <b>{uiText("Вне рабочего времени")}</b>
                 <label className="radio-row">
                   <input
                     type="radio"
@@ -707,7 +691,7 @@ export function AiAutomationSettingsPage() {
                     checked={conversationHours.offHoursBehavior === "continue"}
                     onChange={() => setConversationHours((prev) => ({ ...prev, offHoursBehavior: "continue" }))}
                   />
-                  <span>AI продолжает отвечать</span>
+                  <span>{uiText("AI продолжает отвечать")}</span>
                 </label>
                 <label className="radio-row">
                   <input
@@ -716,7 +700,7 @@ export function AiAutomationSettingsPage() {
                     checked={conversationHours.offHoursBehavior === "accept_no_process"}
                     onChange={() => setConversationHours((prev) => ({ ...prev, offHoursBehavior: "accept_no_process" }))}
                   />
-                  <span>AI принимает обращение, но не начинает полноценную обработку</span>
+                  <span>{uiText("AI принимает обращение, но не начинает полноценную обработку")}</span>
                 </label>
                 <label className="radio-row">
                   <input
@@ -725,7 +709,7 @@ export function AiAutomationSettingsPage() {
                     checked={conversationHours.offHoursBehavior === "no_reply"}
                     onChange={() => setConversationHours((prev) => ({ ...prev, offHoursBehavior: "no_reply" }))}
                   />
-                  <span>AI не отвечает</span>
+                  <span>{uiText("AI не отвечает")}</span>
                 </label>
               </div>
             </>
@@ -736,11 +720,9 @@ export function AiAutomationSettingsPage() {
       {section === "prompt" || section === "knowledge" ? null : (
       <div className="actions">
         <button className="btn" disabled={busy} onClick={() => void save()}>
-          Сохранить
-        </button>
+          {uiText("Сохранить")}</button>
         <Link className="btn secondary" to="/settings">
-          Назад
-        </Link>
+          {uiText("Назад")}</Link>
       </div>
       )}
       </>}

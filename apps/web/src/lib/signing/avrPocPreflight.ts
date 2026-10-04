@@ -1,3 +1,4 @@
+import { uiText, useUiText, localizeUiOptions } from "../uiText";
 async function sha256(bytes: Uint8Array<ArrayBuffer>) {
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -6,7 +7,7 @@ async function sha256(bytes: Uint8Array<ArrayBuffer>) {
 export async function verifyFrozenAvrPayload(prepared: { payload: string; byteLength: number; payloadSha256: string }) {
   const bytes = new TextEncoder().encode(prepared.payload);
   if (bytes.length !== prepared.byteLength || await sha256(bytes) !== prepared.payloadSha256) {
-    throw new Error("SHA-256 или длина XML не совпали. Подпись и отправка остановлены.");
+    throw new Error(uiText("SHA-256 или длина XML не совпали. Подпись и отправка остановлены."));
   }
 }
 

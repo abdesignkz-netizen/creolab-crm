@@ -1,3 +1,4 @@
+import { uiMessage, uiText, useUiText, localizeUiOptions } from "../lib/uiText";
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
@@ -33,13 +34,14 @@ type Preview = {
 function readBase64(file: File) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
-    reader.onerror = () => reject(new Error("Не удалось прочитать файл"));
+    reader.onerror = () => reject(new Error(uiText("Не удалось прочитать файл")));
     reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
     reader.readAsDataURL(file);
   });
 }
 
 export function ContractTemplatePanel({ onSaved }: { onSaved?: () => void }) {
+  const uiText = useUiText();
   const [items, setItems] = useState<TemplateRow[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -116,7 +118,7 @@ export function ContractTemplatePanel({ onSaved }: { onSaved?: () => void }) {
       });
       setError("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось загрузить шаблоны");
+      setError(err instanceof Error ? err.message : uiText("Не удалось загрузить шаблоны"));
     } finally {
       setTemplatesLoading(false);
     }
@@ -125,7 +127,7 @@ export function ContractTemplatePanel({ onSaved }: { onSaved?: () => void }) {
   async function recognize() {
     if (busy || !file) return;
     if (!/\.(docx|doc)$/i.test(file.name) || file.size > 20 * 1024 * 1024) {
-      setError("Выберите Word (.docx или .doc) размером до 20 МБ");
+      setError(uiText("Выберите Word (.docx или .doc) размером до 20 МБ"));
       return;
     }
     setBusy(true);
@@ -142,7 +144,7 @@ export function ContractTemplatePanel({ onSaved }: { onSaved?: () => void }) {
         nameRef.current?.select();
       }, 0);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось распознать шаблон");
+      setError(err instanceof Error ? err.message : uiText("Не удалось распознать шаблон"));
     } finally {
       setBusy(false);
     }
@@ -162,8 +164,8 @@ export function ContractTemplatePanel({ onSaved }: { onSaved?: () => void }) {
       });
       const saved = created.template;
       const title = saved?.name || name.trim();
-      notifySaved(`Шаблон «${title}» сохранён`);
-      setSavedNotice(`Шаблон «${title}» сохранён.`);
+      notifySaved(uiText("Шаблон «{p0}» сохранён", {p0: title}));
+      setSavedNotice(uiText("Шаблон «{p0}» сохранён.", {p0: title}));
       setJustSavedId(saved?.id || "");
       if (saved?.id) setTemplateId(saved.id);
       closeUpload();
@@ -176,7 +178,7 @@ export function ContractTemplatePanel({ onSaved }: { onSaved?: () => void }) {
       }
       await loadTemplates();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось сохранить шаблон");
+      setError(err instanceof Error ? err.message : uiText("Не удалось сохранить шаблон"));
     } finally {
       setBusy(false);
     }
@@ -188,20 +190,20 @@ export function ContractTemplatePanel({ onSaved }: { onSaved?: () => void }) {
       await api.updateContractTemplate(id, { isDefault: true });
       await loadTemplates();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось выбрать шаблон");
+      setError(err instanceof Error ? err.message : uiText("Не удалось выбрать шаблон"));
     } finally {
       setBusy(false);
     }
   }
 
   async function remove(id: string) {
-    if (!window.confirm("Удалить этот шаблон договора?")) return;
+    if (!window.confirm(uiText("Удалить этот шаблон договора?"))) return;
     setBusy(true);
     try {
       await api.deleteContractTemplate(id);
       await loadTemplates();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось удалить шаблон");
+      setError(err instanceof Error ? err.message : uiText("Не удалось удалить шаблон"));
     } finally {
       setBusy(false);
     }
@@ -214,13 +216,13 @@ export function ContractTemplatePanel({ onSaved }: { onSaved?: () => void }) {
     try {
       const title = renameValue.trim();
       await api.updateContractTemplate(renameId, { name: title });
-      notifySaved(`Шаблон переименован в «${title}»`);
-      setSavedNotice(`Шаблон теперь называется «${title}».`);
+      notifySaved(uiText("Шаблон переименован в «{p0}»", {p0: title}));
+      setSavedNotice(uiText("Шаблон теперь называется «{p0}».", {p0: title}));
       setJustSavedId(renameId);
       setRenameId("");
       await loadTemplates();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось переименовать шаблон");
+      setError(err instanceof Error ? err.message : uiText("Не удалось переименовать шаблон"));
     } finally {
       setBusy(false);
     }
@@ -232,28 +234,28 @@ export function ContractTemplatePanel({ onSaved }: { onSaved?: () => void }) {
     try {
       items = parseContractDraftLines(lines);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Проверьте услуги");
+      setError(err instanceof Error ? err.message : uiText("Проверьте услуги"));
       return;
     }
     setFormBusy(true);
     setError("");
     try {
       const result: any = await api.createCompanyContractFromTemplate(companyId, { templateId, items, completionTerms, number: contractNumber, documentDate: contractDate });
-      if (!result.previewId) throw new Error("Не удалось сформировать договор");
+      if (!result.previewId) throw new Error(uiText("Не удалось сформировать договор"));
       setFormed({ previewId: result.previewId, number: result.number, companyId });
       setViewOpen(true);
-      notifySaved("Договор сформирован по шаблону");
+      notifySaved(uiText("Договор сформирован по шаблону"));
     } catch (err: any) {
       const missing = err?.body?.details?.missingFields || err?.body?.missingFields;
       if (Array.isArray(missing) && missing.length) {
         setError(
-          `Не хватает данных для договора: ${(err.body?.details?.missingFieldLabels
+          uiText("Не хватает данных для договора: {p0}", {p0: (err.body?.details?.missingFieldLabels
             ? missing.map((code: string) => err.body.details.missingFieldLabels[code] || code)
             : missing
-          ).join("; ")}`,
+          ).join("; ")}),
         );
       } else {
-        setError(err instanceof Error ? err.message : "Не удалось сформировать договор");
+        setError(err instanceof Error ? err.message : uiText("Не удалось сформировать договор"));
       }
     } finally {
       setFormBusy(false);
@@ -266,12 +268,12 @@ export function ContractTemplatePanel({ onSaved }: { onSaved?: () => void }) {
     setError("");
     try {
       await api.createCompanyContractFromTemplate(formed.companyId, { save: true, previewId: formed.previewId });
-      notifySaved("Договор сохранён");
+      notifySaved(uiText("Договор сохранён"));
       setFormed(null);
       setViewOpen(false);
       onSaved?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось сохранить договор");
+      setError(err instanceof Error ? err.message : uiText("Не удалось сохранить договор"));
     } finally {
       setFormBusy(false);
     }
@@ -281,10 +283,9 @@ export function ContractTemplatePanel({ onSaved }: { onSaved?: () => void }) {
     <div className="panel manual-pdf-import">
       <div className="saved-editor-summary">
         <div>
-          <b>Шаблоны договоров</b>
+          <b>{uiText("Шаблоны договоров")}</b>
           <p className="muted">
-            Word-шаблон для новых договоров: стороны, номер, дата и сумма подставятся, юридический текст останется как в файле.
-          </p>
+            {uiText("Word-шаблон для новых договоров: стороны, номер, дата и сумма подставятся, юридический текст останется как в файле.")}</p>
         </div>
         <div className="actions">
           <button
@@ -293,7 +294,7 @@ export function ContractTemplatePanel({ onSaved }: { onSaved?: () => void }) {
             disabled={busy}
             onClick={() => (open ? closeUpload() : openUpload())}
           >
-            {open ? "Закрыть" : "Загрузить шаблон"}
+            {open ? uiText("Закрыть") : uiText("Загрузить шаблон")}
           </button>
           <button
             type="button"
@@ -301,86 +302,81 @@ export function ContractTemplatePanel({ onSaved }: { onSaved?: () => void }) {
             disabled={busy}
             onClick={() => (generateOpen ? closeGenerate() : openGenerate())}
           >
-            {generateOpen ? "Скрыть шаблоны" : "Сформировать по шаблону"}
+            {generateOpen ? uiText("Скрыть шаблоны") : uiText("Сформировать по шаблону")}
           </button>
         </div>
       </div>
       {savedNotice ? <p className="ok" role="status">{savedNotice}</p> : null}
       {error ? <p className="error" role="alert">{error}</p> : null}
       {open ? (
-        <div className="contract-template-upload" role="region" aria-label="Загрузка шаблона договора">
+        <div className="contract-template-upload" role="region" aria-label={uiText("Загрузка шаблона договора")}>
           {!preview ? (
             <>
               <label>
-                Файл шаблона (DOCX, DOC)
-                <input
+                {uiText("Файл шаблона (DOCX, DOC)")}<input
                   type="file"
                   accept=".docx,.doc,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                   disabled={busy}
                   onChange={(e) => { setFile(e.target.files?.[0] || null); setError(""); setSavedNotice(""); }}
                 />
               </label>
-              <p className="muted">До 20 МБ. После разбора видно, какие данные система считает переменными. Название шаблона можно задать своё.</p>
+              <p className="muted">{uiText("До 20 МБ. После разбора видно, какие данные система считает переменными. Название шаблона можно задать своё.")}</p>
               <div className="actions">
                 <button type="button" className="btn" disabled={busy || !file} onClick={() => void recognize()}>
-                  {busy ? "Распознаём…" : "Распознать шаблон"}
+                  {busy ? uiText("Распознаём…") : uiText("Распознать шаблон")}
                 </button>
                 <button type="button" className="btn secondary" disabled={busy} onClick={closeUpload}>
-                  Закрыть
-                </button>
+                  {uiText("Закрыть")}</button>
               </div>
             </>
           ) : (
             <>
               <label>
-                Название шаблона
-                <input
+                {uiText("Название шаблона")}<input
                   ref={nameRef}
                   value={name}
                   maxLength={200}
-                  placeholder="Например: Договор на презентацию"
+                  placeholder={uiText("Например: Договор на презентацию")}
                   onChange={(e) => setName(e.target.value)}
                 />
               </label>
-              <p className="muted">Так шаблон будет называться в списке. Предложенное имя можно заменить на своё.</p>
+              <p className="muted">{uiText("Так шаблон будет называться в списке. Предложенное имя можно заменить на своё.")}</p>
               <p className="muted">
-                Исполнитель: {preview.seller.name || "—"}{preview.seller.bin ? ` · БИН ${preview.seller.bin}` : ""}
+                {uiText("Исполнитель:")}{" "}{preview.seller.name || "—"}{preview.seller.bin ? uiText(" · БИН {p0}", {p0: preview.seller.bin}) : ""}
                 {" · "}
-                Заказчик: {preview.buyer.name || "—"}{preview.buyer.bin ? ` · БИН ${preview.buyer.bin}` : ""}
+                {uiText("Заказчик:")}{" "}{preview.buyer.name || "—"}{preview.buyer.bin ? uiText(" · БИН {p0}", {p0: preview.buyer.bin}) : ""}
               </p>
               {preview.fields?.some((field) => field.found) ? (
                 <div className="template-field-map">
-                  <p className="muted">Что меняется от сделки к сделке</p>
+                  <p className="muted">{uiText("Что меняется от сделки к сделке")}</p>
                   <ul>
                     {preview.fields.filter((field) => field.found).map((field) => (
                       <li key={field.key}>
-                        <b>{field.label}</b>
-                        {field.sample ? <span className="muted"> · в файле: {field.sample}</span> : null}
+                        <b>{uiMessage(field.label)}</b>
+                        {field.sample ? <span className="muted"> {" "}{uiText("· в файле:")}{" "}{field.sample}</span> : null}
                       </li>
                     ))}
                   </ul>
-                  <p className="muted">Остальной текст пунктов, приложений и формулировок остаётся как в файле.</p>
+                  <p className="muted">{uiText("Остальной текст пунктов, приложений и формулировок остаётся как в файле.")}</p>
                 </div>
               ) : (
-                <p className="muted">Поля: {preview.placeholders.join(", ") || "не найдены"}</p>
+                <p className="muted">{uiText("Поля:")}{" "}{preview.placeholders.join(", ") || uiText("не найдены")}</p>
               )}
               {preview.warnings.length ? (
                 <ul className="pdf-import-warnings">
-                  {preview.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+                  {preview.warnings.map((warning) => <li key={warning}>{uiMessage(warning)}</li>)}
                 </ul>
               ) : null}
-              <p className="muted">Полный текст шаблона — прокрутите, чтобы увидеть все пункты. Сохраняется целиком, не только то, что видно в окне.</p>
+              <p className="muted">{uiText("Полный текст шаблона — прокрутите, чтобы увидеть все пункты. Сохраняется целиком, не только то, что видно в окне.")}</p>
               <pre className="contract-template-preview">{preview.body}</pre>
               <div className="actions">
                 <button type="button" className="btn" disabled={busy || !name.trim()} onClick={() => void save()}>
-                  {busy ? "Сохраняем…" : name.trim() ? `Сохранить как «${name.trim()}»` : "Сохранить шаблон"}
+                  {busy ? uiText("Сохраняем…") : name.trim() ? uiText("Сохранить как «{p0}»", {p0: name.trim()}) : uiText("Сохранить шаблон")}
                 </button>
                 <button type="button" className="btn secondary" disabled={busy} onClick={() => { setPreview(null); setFile(null); }}>
-                  Другой файл
-                </button>
+                  {uiText("Другой файл")}</button>
                 <button type="button" className="btn secondary" disabled={busy} onClick={closeUpload}>
-                  Закрыть
-                </button>
+                  {uiText("Закрыть")}</button>
               </div>
             </>
           )}
@@ -388,11 +384,11 @@ export function ContractTemplatePanel({ onSaved }: { onSaved?: () => void }) {
       ) : null}
 
       {generateOpen ? (
-        <div className="contract-template-expand stack" role="region" aria-label="Формирование договора по шаблону">
+        <div className="contract-template-expand stack" role="region" aria-label={uiText("Формирование договора по шаблону")}>
           {templatesLoading ? (
-            <p className="muted">Загрузка шаблонов…</p>
+            <p className="muted">{uiText("Загрузка шаблонов…")}</p>
           ) : !items.length ? (
-            <p className="muted">Нет шаблонов. Сначала загрузите договор в Word.</p>
+            <p className="muted">{uiText("Нет шаблонов. Сначала загрузите договор в Word.")}</p>
           ) : (
             <>
               {items.map((row) => (
@@ -400,8 +396,7 @@ export function ContractTemplatePanel({ onSaved }: { onSaved?: () => void }) {
                   <div>
                     {renameId === row.id ? (
                       <label>
-                        Новое название
-                        <input
+                        {uiText("Новое название")}<input
                           value={renameValue}
                           maxLength={200}
                           autoFocus
@@ -411,8 +406,8 @@ export function ContractTemplatePanel({ onSaved }: { onSaved?: () => void }) {
                     ) : (
                       <>
                         <b>{row.name}</b>
-                        {row.id === justSavedId ? <span className="muted"> · только что сохранён</span> : null}
-                        {row.isDefault ? <span className="muted"> · по умолчанию</span> : null}
+                        {row.id === justSavedId ? <span className="muted"> {" "}{uiText("· только что сохранён")}</span> : null}
+                        {row.isDefault ? <span className="muted"> {" "}{uiText("· по умолчанию")}</span> : null}
                         {row.fromWord ? <span className="muted"> · Word</span> : null}
                         <div className="muted">
                           {(row.fields || [])
@@ -428,11 +423,9 @@ export function ContractTemplatePanel({ onSaved }: { onSaved?: () => void }) {
                     {renameId === row.id ? (
                       <>
                         <button type="button" className="btn" disabled={busy || !renameValue.trim()} onClick={() => void saveRename()}>
-                          Сохранить имя
-                        </button>
+                          {uiText("Сохранить имя")}</button>
                         <button type="button" className="btn secondary" disabled={busy} onClick={() => setRenameId("")}>
-                          Отмена
-                        </button>
+                          {uiText("Отмена")}</button>
                       </>
                     ) : (
                       <>
@@ -442,41 +435,36 @@ export function ContractTemplatePanel({ onSaved }: { onSaved?: () => void }) {
                           disabled={busy}
                           onClick={() => { setRenameId(row.id); setRenameValue(row.name); }}
                         >
-                          Переименовать
-                        </button>
+                          {uiText("Переименовать")}</button>
                         {!row.isDefault ? (
                           <button type="button" className="btn secondary" disabled={busy} onClick={() => void makeDefault(row.id)}>
-                            По умолчанию
-                          </button>
+                            {uiText("По умолчанию")}</button>
                         ) : null}
                         <button type="button" className="btn secondary" disabled={busy} onClick={() => void remove(row.id)}>
-                          Удалить
-                        </button>
+                          {uiText("Удалить")}</button>
                       </>
                     )}
                   </div>
                 </div>
               ))}
-              <b>Сформировать договор по шаблону</b>
-              <p className="muted">Выберите компанию и шаблон Word — договор повторит его текст, а не короткую форму CRM.</p>
+              <b>{uiText("Сформировать договор по шаблону")}</b>
+              <p className="muted">{uiText("Выберите компанию и шаблон Word — договор повторит его текст, а не короткую форму CRM.")}</p>
               <label>
-                Компания
-                <select
+                {uiText("Компания")}<select
                   value={companyId}
                   onChange={(e) => {
                     setCompanyId(e.target.value);
                     setFormed(null);
                   }}
                 >
-                  <option value="">Выберите компанию</option>
+                  <option value="">{uiText("Выберите компанию")}</option>
                   {companies.map((company) => (
                     <option key={company.id} value={company.id}>{company.name}</option>
                   ))}
                 </select>
               </label>
               <label>
-                Шаблон
-                <select
+                {uiText("Шаблон")}<select
                   value={templateId}
                   onChange={(e) => {
                     const id = e.target.value;
@@ -493,30 +481,29 @@ export function ContractTemplatePanel({ onSaved }: { onSaved?: () => void }) {
                   }}
                 >
                   {items.map((row) => (
-                    <option key={row.id} value={row.id}>{row.name}{row.isDefault ? " (по умолчанию)" : ""}</option>
+                    <option key={row.id} value={row.id}>{row.name}{row.isDefault ? uiText(" (по умолчанию)") : ""}</option>
                   ))}
                 </select>
               </label>
-              <label>Номер договора<input maxLength={40} value={contractNumber} disabled={formBusy} placeholder="Автоматически по настройкам нумерации" onChange={event => { setContractNumber(event.target.value); setFormed(null); }} /></label>
-              <label>Дата договора<input type="date" value={contractDate} disabled={formBusy} onChange={event => { setContractDate(event.target.value); setFormed(null); }} /></label>
+              <label>{uiText("Номер договора")}<input maxLength={40} value={contractNumber} disabled={formBusy} placeholder={uiText("Автоматически по настройкам нумерации")} onChange={event => { setContractNumber(event.target.value); setFormed(null); }} /></label>
+              <label>{uiText("Дата договора")}<input type="date" value={contractDate} disabled={formBusy} onChange={event => { setContractDate(event.target.value); setFormed(null); }} /></label>
               <ContractGenerateItems lines={lines} onChange={(next) => { setLines(next); setFormed(null); }}
                 completionTerms={completionTerms} onCompletionTermsChange={(value) => { setCompletionTerms(value); setFormed(null); }} disabled={formBusy} />
               <div className="actions">
                 {formed ? (
                   <>
                     <button type="button" className="btn" disabled={formBusy} onClick={() => setViewOpen(true)}>
-                      Посмотреть договор
-                    </button>
+                      {uiText("Посмотреть договор")}</button>
                     <button type="button" className="btn secondary" disabled={formBusy} onClick={() => void saveFormedContract()}>
-                      {formBusy ? "Сохраняем…" : "Сохранить договор"}
+                      {formBusy ? uiText("Сохраняем…") : uiText("Сохранить договор")}
                     </button>
                   </>
                 ) : (
                   <button type="button" className="btn" disabled={formBusy || !companyId || !templateId} onClick={() => void generateForCompany()}>
-                    {formBusy ? "Формируем…" : "Сформировать по шаблону"}
+                    {formBusy ? uiText("Формируем…") : uiText("Сформировать по шаблону")}
                   </button>
                 )}
-                {companyId ? <Link className="btn secondary" to={`/companies/${companyId}`}>Карточка компании</Link> : null}
+                {companyId ? <Link className="btn secondary" to={`/companies/${companyId}`}>{uiText("Карточка компании")}</Link> : null}
               </div>
             </>
           )}

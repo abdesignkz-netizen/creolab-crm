@@ -1,3 +1,5 @@
+import { systemText } from "@creolab/contracts";
+import { supportArticleLocale } from "./supportKnowledgeLocale.ts";
 import type { PrismaClient } from "@creolab/db";
 import { upsertSupportCatalog, SUPPORT_CATEGORIES } from "@creolab/db";
 import { ApiError } from "../errors.ts";
@@ -30,7 +32,7 @@ function normalizeSearch(value: string) {
   return String(value || "")
     .toLowerCase()
     .replace(/ё/g, "е")
-    .replace(/[^a-z0-9а-я\s]+/gi, " ")
+    .replace(/[^\p{L}\p{N}\s]+/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -76,11 +78,11 @@ function publicArticle(row: {
   relatedRoute: string | null;
   relatedLabel: string | null;
   updatedAt: Date;
-}) {
+}, locale = "ru") {
   return {
     id: row.id,
     category: row.category,
-    categoryTitle: SUPPORT_CATEGORY_TITLES[row.category] || row.category,
+    categoryTitle: systemText(locale, SUPPORT_CATEGORY_TITLES[row.category] || row.category),
     title: row.title,
     slug: row.slug,
     content: row.content,
@@ -108,10 +110,11 @@ export async function searchSupportArticles(
   if (!auth.user.id) throw new ApiError(401, "unauthorized", "Нужна авторизация");
   await ensureSupportCatalog(prisma);
   const module = supportModuleFromRoute(query.route);
-  const published = await prisma.supportArticle.findMany({
+  const publishedRows = await prisma.supportArticle.findMany({
     where: { isPublished: true },
     orderBy: [{ sortOrder: "asc" }, { title: "asc" }],
   });
+  const published = publishedRows.map(row => supportArticleLocale(row, auth.user.locale || "ru"));
   const q = String(query.q || "").trim();
   const ranked = published
     .map((article) => ({ article, score: scoreArticle(article, q, module) }))
@@ -130,10 +133,10 @@ export async function searchSupportArticles(
   const limit = Math.min(30, Math.max(5, Number(query.limit) || 12));
   return {
     module,
-    categories: SUPPORT_CATEGORIES.map((item) => ({ id: item.id, title: item.title })),
-    popular: popular.map(publicArticle),
-    contextual: contextual.map(publicArticle),
-    items: ranked.slice(0, limit).map((row) => publicArticle(row.article)),
+    categories: SUPPORT_CATEGORIES.map((item) => ({ id: item.id, title: systemText(auth.user.locale || "ru", item.title) })),
+    popular: popular.map(row => publicArticle(row, auth.user.locale || "ru")),
+    contextual: contextual.map(row => publicArticle(row, auth.user.locale || "ru")),
+    items: ranked.slice(0, limit).map((row) => publicArticle(row.article, auth.user.locale || "ru")),
   };
 }
 
@@ -153,7 +156,7 @@ export async function getSupportArticle(prisma: PrismaClient, auth: AuthContext,
     });
     myFeedback = row ? row.helpful : null;
   }
-  return { ...publicArticle(article), myFeedback };
+  return { ...publicArticle(supportArticleLocale(article, auth.user.locale || "ru"), auth.user.locale || "ru"), myFeedback };
 }
 
 export async function submitSupportArticleFeedback(

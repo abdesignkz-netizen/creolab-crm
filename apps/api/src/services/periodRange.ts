@@ -1,3 +1,4 @@
+import { systemText } from "@creolab/contracts";
 import { ApiError } from "../errors.ts";
 
 export type PeriodPreset =
@@ -98,7 +99,7 @@ export function isoWeekKeyFromYmd(ymd: { year: number; month: number; day: numbe
   return `${utc.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
 }
 
-export function formatBucketLabel(key: string, granularity: TrendGranularity) {
+export function formatBucketLabel(key: string, granularity: TrendGranularity, locale = "ru") {
   if (granularity === "hour") {
     const match = key.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2})$/);
     if (!match) return key;
@@ -107,19 +108,19 @@ export function formatBucketLabel(key: string, granularity: TrendGranularity) {
   if (granularity === "day") {
     const [year, month, day] = key.split("-").map(Number);
     if (!year || !month || !day) return key;
-    return new Date(Date.UTC(year, month - 1, day)).toLocaleDateString("ru-RU", {
+    return new Date(Date.UTC(year, month - 1, day)).toLocaleDateString(locale === "kk" ? "kk-KZ" : "ru-RU", {
       day: "numeric",
       month: "short",
       timeZone: "UTC",
     });
   }
   if (granularity === "week") {
-    return key.replace("-W", " · нед. ");
+    return key.replace("-W", locale === "kk" ? " · апта " : " · нед. ");
   }
   if (granularity === "month") {
     const [year, month] = key.split("-").map(Number);
     if (!year || !month) return key;
-    return new Date(Date.UTC(year, month - 1, 1)).toLocaleDateString("ru-RU", {
+    return new Date(Date.UTC(year, month - 1, 1)).toLocaleDateString(locale === "kk" ? "kk-KZ" : "ru-RU", {
       month: "short",
       year: "numeric",
       timeZone: "UTC",
@@ -232,7 +233,7 @@ function fillKeysBetween(existingKeys: string[], granularity: TrendGranularity) 
   return sorted;
 }
 
-export function periodLabel(preset: PeriodPreset, from: Date | null, to: Date | null, timeZone: string) {
+export function periodLabel(preset: PeriodPreset, from: Date | null, to: Date | null, timeZone: string, locale = "ru") {
   const labels: Record<PeriodPreset, string> = {
     today: "Сегодня",
     yesterday: "Вчера",
@@ -247,9 +248,9 @@ export function periodLabel(preset: PeriodPreset, from: Date | null, to: Date | 
   if (preset === "custom" && from && to) {
     const end = new Date(to.getTime() - 1);
     const opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short", timeZone };
-    return `${from.toLocaleDateString("ru-RU", opts)} — ${end.toLocaleDateString("ru-RU", opts)}`;
+    return `${from.toLocaleDateString(locale === "kk" ? "kk-KZ" : "ru-RU", opts)} — ${end.toLocaleDateString(locale === "kk" ? "kk-KZ" : "ru-RU", opts)}`;
   }
-  return labels[preset];
+  return systemText(locale, labels[preset]);
 }
 
 export function resolvePeriodRange(

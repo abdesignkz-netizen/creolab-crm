@@ -1,3 +1,4 @@
+import { deliveredConversationMessage } from "./conversationMessageState.ts";
 import { randomUUID } from "node:crypto";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { crmModeToSeller } from "@creolab/contracts";
@@ -195,7 +196,7 @@ async function conversationGuards(
   const conversation = await prisma.conversation.findFirst({
     where: { id: conversationId, tenantId },
     include: {
-      messages: { where: { internal: false }, orderBy: { createdAt: "desc" }, take: 30 },
+      messages: { where: deliveredConversationMessage, orderBy: { createdAt: "desc" }, take: 30 },
       contact: true,
     },
   });
@@ -280,7 +281,7 @@ export async function refreshConversationFollowUp(prisma: PrismaClient, tenantId
 export async function afterConversationActivity(prisma: PrismaClient, tenantId: string, conversationId: string) {
   const conversation = await prisma.conversation.findFirst({
     where: { id: conversationId, tenantId },
-    include: { messages: { where: { internal: false }, orderBy: { createdAt: "desc" }, take: 8 } },
+    include: { messages: { where: deliveredConversationMessage, orderBy: { createdAt: "desc" }, take: 8 } },
   });
   if (!conversation) return;
   const last = lastNonInternal(conversation.messages);

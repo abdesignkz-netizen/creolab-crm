@@ -1,3 +1,4 @@
+import { uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale } from "../lib/uiText";
 import { NavIcon } from "../components/NavIcon";
 import { ContractWorkspaceModal } from "../components/ContractWorkspaceModal";
 import { ManualPdfImportPanel } from "./ManualPdfImportPanel";
@@ -54,10 +55,11 @@ const STATUS_FILTERS: Record<string, Array<[string, string]>> = {
 };
 
 export function DocumentsPage() {
+  const uiText = useUiText();
   const requestVersion = useRequestVersion();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [kind] = useUrlState<(typeof KINDS)[number][0]>("kind", "", KINDS.map(([value]) => value));
-  const statusAllowed = ["", ...(STATUS_FILTERS[kind] || []).map(([value]) => value)] as const;
+  const [kind] = useUrlState<(typeof KINDS)[number][0]>("kind", "", localizeUiOptions(KINDS, uiText).map(([value]) => value));
+  const statusAllowed = ["", ...(localizeUiOptions(STATUS_FILTERS, uiText)[kind] || []).map(([value]) => value)] as const;
   const [status, setStatus] = useUrlState<string>("status", "", statusAllowed);
   const [attention] = useUrlState<"" | "1">("attention", "", ["", "1"]);
   const [q, setQ] = useState("");
@@ -99,7 +101,7 @@ export function DocumentsPage() {
       const result: any = await api.request("/api/v1/documents/avr/eligible-deals?filter=all");
       setEsfDeals(result.items || []);
     } catch (err) {
-      setEsfError(err instanceof Error ? err.message : "Не удалось загрузить сделки");
+      setEsfError(err instanceof Error ? err.message : uiText("Не удалось загрузить сделки"));
     } finally { setEsfBusy(false); }
   }
 
@@ -117,7 +119,7 @@ export function DocumentsPage() {
       window.dispatchEvent(new Event("creolab:attention-changed"));
       await load(0);
     } catch (err) {
-      setEsfError(err instanceof Error ? err.message : "Не удалось создать ЭСФ");
+      setEsfError(err instanceof Error ? err.message : uiText("Не удалось создать ЭСФ"));
     } finally { esfFlight.current = false; setEsfBusy(false); }
   }
 
@@ -149,7 +151,7 @@ export function DocumentsPage() {
         setTotal(0);
         setError("");
       } else {
-        setError(err instanceof Error ? err.message : "Ошибка");
+        setError(err instanceof Error ? err.message : uiText("Ошибка"));
       }
     } finally {
       if (version === requestVersion.current) setLoading(false);
@@ -177,7 +179,7 @@ export function DocumentsPage() {
       setCommandDealId(data.document?.deals?.length === 1 ? firstDeal : "");
       setError("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось понять команду");
+      setError(err instanceof Error ? err.message : uiText("Не удалось понять команду"));
     } finally {
       setCommandBusy(false);
     }
@@ -221,7 +223,7 @@ export function DocumentsPage() {
           document: { ...(commandParse?.document || {}), deals: details.deals },
         });
       }
-      setError(err instanceof Error ? err.message : "Не удалось выполнить команду");
+      setError(err instanceof Error ? err.message : uiText("Не удалось выполнить команду"));
     } finally {
       setCommandBusy(false);
     }
@@ -233,15 +235,14 @@ export function DocumentsPage() {
 
   return (
     <section className="documents-page">
-      {dealFilter ? <div className="active-filter-note"><span>Документы выбранной сделки</span><Link to={`/deals/${dealFilter}`}>Открыть сделку</Link><button type="button" className="btn secondary" onClick={() => setSearchParams(previous => { const next = new URLSearchParams(previous); next.delete("dealId"); next.delete("offset"); return next; })}>Показать все документы</button></div> : null}
+      {dealFilter ? <div className="active-filter-note"><span>{uiText("Документы выбранной сделки")}</span><Link to={`/deals/${dealFilter}`}>{uiText("Открыть сделку")}</Link><button type="button" className="btn secondary" onClick={() => setSearchParams(previous => { const next = new URLSearchParams(previous); next.delete("dealId"); next.delete("offset"); return next; })}>{uiText("Показать все документы")}</button></div> : null}
       <div className="row sit-head">
         <div>
-          <h2>Документы</h2>
-          <p className="muted">Договоры, счета, АВР и ЭСФ по всем сделкам</p>
+          <h2>{uiText("Документы")}</h2>
+          <p className="muted">{uiText("Договоры, счета, АВР и ЭСФ по всем сделкам")}</p>
         </div>
         <Link className="btn secondary" to="/settings#company-requisites">
-          Реквизиты
-        </Link>
+          {uiText("Реквизиты")}</Link>
       </div>
 
       {!disabled ? (
@@ -259,19 +260,18 @@ export function DocumentsPage() {
         }}
       >
         <div className="command-compose-head">
-          <b>Что сделать</b>
-          <p className="muted">Например: сформировать договор, проверить АВР, отправить ЭСФ.</p>
+          <b>{uiText("Что сделать")}</b>
+          <p className="muted">{uiText("Например: сформировать договор, проверить АВР, отправить ЭСФ.")}</p>
         </div>
         <textarea
           value={commandText}
           onChange={(e) => setCommandText(e.target.value)}
           rows={2}
-          placeholder="Сформируй договор по сделке …"
+          placeholder={uiText("Сформируй договор по сделке …")}
         />
         <div className="actions">
           <button type="submit" className="btn secondary" disabled={commandBusy || !commandText.trim()}>
-            Разобрать
-          </button>
+            {uiText("Разобрать")}</button>
           <button
             type="button"
             className="btn"
@@ -285,8 +285,7 @@ export function DocumentsPage() {
             }
             onClick={() => void runCommand()}
           >
-            Сделать
-          </button>
+            {uiText("Сделать")}</button>
         </div>
         {commandParse?.command?.intent === "document_action" ? (
           <div className="command-understanding" style={{ marginTop: 12 }}>
@@ -294,9 +293,8 @@ export function DocumentsPage() {
             <p className="muted">{commandParse.understanding?.consequence}</p>
             {(commandParse.document?.deals || []).length > 1 ? (
               <label>
-                Сделка
-                <select value={commandDealId} onChange={(e) => setCommandDealId(e.target.value)}>
-                  <option value="">Выберите сделку</option>
+                {uiText("Сделка")}<select value={commandDealId} onChange={(e) => setCommandDealId(e.target.value)}>
+                  <option value="">{uiText("Выберите сделку")}</option>
                   {(commandParse.document.deals as Array<{ id: string; title: string }>).map((deal) => (
                     <option key={deal.id} value={deal.id}>
                       {deal.title}
@@ -312,27 +310,27 @@ export function DocumentsPage() {
           </div>
         ) : commandParse ? (
           <p className="muted">
-            Это не команда по документам.{" "}
-            <Link to={`/tasks?command=${encodeURIComponent(commandText)}`}>Открыть в задачах</Link>
+            {uiText("Это не команда по документам.")}{" "}
+            <Link to={`/tasks?command=${encodeURIComponent(commandText)}`}>{uiText("Открыть в задачах")}</Link>
           </p>
         ) : null}
         {commandResult?.deal?.id ? (
           <p>
-            {commandResult.prepareOnly ? "Черновик готов. " : "Готово. "}
+            {commandResult.prepareOnly ? uiText("Черновик готов. ") : uiText("Готово. ")}
             {commandResult.result?.invoice?.id ? (
-              <Link to={`/documents/invoices/${commandResult.result.invoice.id}`}>Открыть счёт</Link>
+              <Link to={`/documents/invoices/${commandResult.result.invoice.id}`}>{uiText("Открыть счёт")}</Link>
             ) : commandResult.result?.contract?.id ? (
-              <Link to={contractHref(commandResult.result.contract.id)}>Открыть договор</Link>
+              <Link to={contractHref(commandResult.result.contract.id)}>{uiText("Открыть договор")}</Link>
             ) : (
-              <Link to={`/deals/${commandResult.deal.id}`}>Открыть сделку</Link>
+              <Link to={`/deals/${commandResult.deal.id}`}>{uiText("Открыть сделку")}</Link>
             )}
           </p>
         ) : null}
       </form>
 
       <div className="sit-toolbar documents-toolbar">
-        <div className="sit-periods document-kind-filters" role="group" aria-label="Тип документа">
-          {KINDS.map(([id, label]) => (
+        <div className="sit-periods document-kind-filters" role="group" aria-label={uiText("Тип документа")}>
+          {localizeUiOptions(KINDS, uiText).map(([id, label]) => (
             <button
               key={id || "all"}
               type="button"
@@ -361,14 +359,14 @@ export function DocumentsPage() {
               }, { replace: true });
             }}
           >
-            Требуют внимания{counts.attention ? ` · ${counts.attention}` : ""}
+            {uiText("Требуют внимания")}{counts.attention ? ` · ${counts.attention}` : ""}
           </button>
         </div>
         <form className="companies-search" onSubmit={onSearch}>
-          {STATUS_FILTERS[kind] ? (
-            <select value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Статус">
-              <option value="">Все статусы</option>
-              {STATUS_FILTERS[kind].map(([value, label]) => (
+          {localizeUiOptions(STATUS_FILTERS, uiText)[kind] ? (
+            <select value={status} onChange={(e) => setStatus(e.target.value)} aria-label={uiText("Статус")}>
+              <option value="">{uiText("Все статусы")}</option>
+              {localizeUiOptions(STATUS_FILTERS, uiText)[kind].map(([value, label]) => (
                 <option key={value} value={value}>
                   {label}
                 </option>
@@ -378,11 +376,10 @@ export function DocumentsPage() {
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Номер, сделка, компания или БИН"
+            placeholder={uiText("Номер, сделка, компания или БИН")}
           />
           <button type="submit" className="btn secondary">
-            Найти
-          </button>
+            {uiText("Найти")}</button>
         </form>
       </div>
 
@@ -390,38 +387,37 @@ export function DocumentsPage() {
       {disabled ? (
         <div className="sit-section">
           <p className="empty">
-            Контур документов выключен. Включите черновики в{" "}
-            <Link to="/settings">настройках реквизитов</Link>.
+            {uiText("Контур документов выключен. Включите черновики в")}{" "}
+            <Link to="/settings">{uiText("настройках реквизитов")}</Link>.
           </p>
         </div>
       ) : null}
-      {loading ? <div className="state">Загрузка…</div> : null}
+      {loading ? <div className="state">{uiText("Загрузка…")}</div> : null}
 
       {!disabled ? <div className="sit-section">
         {kind === "INVOICE" || kind === "AVR" || kind === "ESF" ? <div className="row sit-head">
-          <h3>{kind === "INVOICE" ? "Счета" : kind === "AVR" ? "АВР" : "ЭСФ"}</h3>
+          <h3>{kind === "INVOICE" ? uiText("Счета") : kind === "AVR" ? uiText("АВР") : uiText("ЭСФ")}</h3>
           {kind === "INVOICE"
-            ? <Link className="btn" to="/documents/invoices/new">Создать счёт</Link>
+            ? <Link className="btn" to="/documents/invoices/new">{uiText("Создать счёт")}</Link>
             : kind === "AVR"
-            ? <Link className="btn" to="/documents/avr/new">Создать АВР</Link>
-            : <button type="button" className="btn" disabled={esfBusy} onClick={() => void openEsfCreate()}>Создать ЭСФ</button>}
+            ? <Link className="btn" to="/documents/avr/new">{uiText("Создать АВР")}</Link>
+            : <button type="button" className="btn" disabled={esfBusy} onClick={() => void openEsfCreate()}>{uiText("Создать ЭСФ")}</button>}
         </div> : null}
         {kind === "ESF" && esfCreateOpen ? <form className="panel" onSubmit={createEsf}>
-          <label>Сделка для ЭСФ
-            <select value={esfDealId} disabled={esfBusy} onChange={e => setEsfDealId(e.target.value)}>
-              <option value="">Выберите сделку</option>
+          <label>{uiText("Сделка для ЭСФ")}<select value={esfDealId} disabled={esfBusy} onChange={e => setEsfDealId(e.target.value)}>
+              <option value="">{uiText("Выберите сделку")}</option>
               {esfDeals.map(deal => <option key={deal.id} value={deal.id}>{deal.title} — {deal.companyName || deal.contactName}</option>)}
             </select>
           </label>
-          {!esfBusy && !esfDeals.length && !esfError ? <p className="muted">Нет сделок для создания ЭСФ.</p> : null}
+          {!esfBusy && !esfDeals.length && !esfError ? <p className="muted">{uiText("Нет сделок для создания ЭСФ.")}</p> : null}
           {esfError ? <p className="error" role="alert">{esfError}</p> : null}
           <div className="actions">
-            <button type="submit" className="btn" disabled={esfBusy || !esfDealId}>Создать черновик ЭСФ</button>
-            <button type="button" className="btn secondary" disabled={esfBusy} onClick={() => setEsfCreateOpen(false)}>Отмена</button>
+            <button type="submit" className="btn" disabled={esfBusy || !esfDealId}>{uiText("Создать черновик ЭСФ")}</button>
+            <button type="button" className="btn secondary" disabled={esfBusy} onClick={() => setEsfCreateOpen(false)}>{uiText("Отмена")}</button>
           </div>
         </form> : null}
-        {kind === "ESF" && createdEsf ? <p role="status">ЭСФ {createdEsf.number} сохранён. <Link to={`/deals/${createdEsf.dealId}#esf`}>Открыть ЭСФ</Link></p> : null}
-        {!loading && !items.length ? <p className="empty">{kind === "INVOICE" ? "Счетов пока нет. Нажмите «Создать счёт»." : kind === "AVR" ? "АВР пока нет. Нажмите «Создать АВР»." : kind === "ESF" ? "ЭСФ пока нет. Нажмите «Создать ЭСФ»." : "Документов пока нет. Загрузите документ или создайте его в карточке сделки."}</p> : null}
+        {kind === "ESF" && createdEsf ? <p role="status">{uiText("ЭСФ")}{" "}{createdEsf.number} {" "}{uiText("сохранён.")}{" "}<Link to={`/deals/${createdEsf.dealId}#esf`}>{uiText("Открыть ЭСФ")}</Link></p> : null}
+        {!loading && !items.length ? <p className="empty">{kind === "INVOICE" ? uiText("Счетов пока нет. Нажмите «Создать счёт».") : kind === "AVR" ? uiText("АВР пока нет. Нажмите «Создать АВР».") : kind === "ESF" ? uiText("ЭСФ пока нет. Нажмите «Создать ЭСФ».") : uiText("Документов пока нет. Загрузите документ или создайте его в карточке сделки.")}</p> : null}
         {items.length > 0 ? (
           <div className="documents-table-wrap">
             <table className={`documents-table${kind ? " documents-table-kind-filtered" : ""}`}>
@@ -440,17 +436,17 @@ export function DocumentsPage() {
               </colgroup>
               <thead>
                 <tr>
-                  <th>№ документа</th>
-                  <th>Клиент</th>
-                  <th>Сделка</th>
-                  <th>Сумма</th>
-                  <th>Дата</th>
-                  {kind ? null : <th>Тип</th>}
-                  <th>Статус</th>
-                  {kind === "AVR" ? null : <th>АВР</th>}
-                  {kind === "ESF" ? null : <th>ЭСФ</th>}
-                  <th>Ответственный</th>
-                  <th>Действия</th>
+                  <th>{uiText("№ документа")}</th>
+                  <th>{uiText("Клиент")}</th>
+                  <th>{uiText("Сделка")}</th>
+                  <th>{uiText("Сумма")}</th>
+                  <th>{uiText("Дата")}</th>
+                  {kind ? null : <th>{uiText("Тип")}</th>}
+                  <th>{uiText("Статус")}</th>
+                  {kind === "AVR" ? null : <th>{uiText("АВР")}</th>}
+                  {kind === "ESF" ? null : <th>{uiText("ЭСФ")}</th>}
+                  <th>{uiText("Ответственный")}</th>
+                  <th>{uiText("Действия")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -459,21 +455,21 @@ export function DocumentsPage() {
                     <td className="documents-cell-number">
                       <Link to={item.kind === "CONTRACT" ? contractHref(item.id) : item.href}>{item.number}</Link>
                     </td>
-                    <td className="documents-cell-client">{item.companyName || "Не указан"}</td>
+                    <td className="documents-cell-client">{item.companyName || uiText("Не указан")}</td>
                     <td className="documents-cell-deal">
                       <Link to={`/deals/${item.dealId}`}>{item.dealTitle}</Link>
                     </td>
-                    <td className="documents-cell-amount">{Number(item.totalAmount).toLocaleString("ru-RU")} ₸</td>
-                    <td className="documents-cell-date">{new Date(item.date || item.updatedAt).toLocaleDateString("ru-RU")}</td>
-                    {kind ? null : <td className="documents-cell-kind">{item.kindLabel}</td>}
+                    <td className="documents-cell-amount">{Number(item.totalAmount).toLocaleString(uiFormatLocale())} ₸</td>
+                    <td className="documents-cell-date">{new Date(item.date || item.updatedAt).toLocaleDateString(uiFormatLocale())}</td>
+                    {kind ? null : <td className="documents-cell-kind">{uiMessage(item.kindLabel)}</td>}
                     <td className="documents-cell-status">
-                      <span className={`document-status status-${item.errorCode ? "ERROR" : item.status}`}>{item.statusLabel}</span>
+                      <span className={`document-status status-${item.errorCode ? "ERROR" : item.status}`}>{uiMessage(item.statusLabel)}</span>
                     </td>
-                    {kind === "AVR" ? null : <td className="documents-cell-avr">{item.avrStatus || "Требуется"}</td>}
+                    {kind === "AVR" ? null : <td className="documents-cell-avr">{item.avrStatus || uiText("Требуется")}</td>}
                     {kind === "ESF" ? null : <td className="documents-cell-esf">{item.esfStatus}</td>}
-                    <td className="documents-cell-owner">{item.responsible || "Не назначен"}</td>
+                    <td className="documents-cell-owner">{item.responsible || uiText("Не назначен")}</td>
                     <td className="documents-cell-actions">
-                      <Link to={item.kind === "CONTRACT" ? contractHref(item.id) : item.href}>Открыть</Link>
+                      <Link to={item.kind === "CONTRACT" ? contractHref(item.id) : item.href}>{uiText("Открыть")}</Link>
                       {item.kind === "CONTRACT" ? (
                         <DeleteContractButton
                           id={item.id}

@@ -1,3 +1,4 @@
+import { uiText, useUiText, localizeUiOptions, uiFormatLocale } from "../lib/uiText";
 import { useState } from "react";
 import { signatureCheckLabel } from "../lib/signing/verificationLabels";
 
@@ -8,6 +9,7 @@ export function ContractSignatureSummary({ signed, signers, verificationUrl, dow
   signed: boolean; signers: Signer[]; verificationUrl?: string | null;
   download: (format: "pdf" | "zip") => Promise<{ blob: Blob; filename: string }>;
 }) {
+  const uiText = useUiText();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   async function save(format: "pdf" | "zip") {
@@ -19,25 +21,25 @@ export function ContractSignatureSummary({ signed, signers, verificationUrl, dow
       const link = document.createElement("a"); link.href = url; link.download = file.filename;
       document.body.appendChild(link); link.click(); link.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch (err) { setError(err instanceof Error ? err.message : "Не удалось скачать документ"); }
+    } catch (err) { setError(err instanceof Error ? err.message : uiText("Не удалось скачать документ")); }
     finally { setBusy(false); }
   }
   if (!signers.length && !signed) return null;
-  return <section className="panel" aria-label={`Подписи ${documentLabel}`}>
-    <h3>{signed ? "Подписан обеими сторонами" : `Подписи ${documentLabel}`}</h3>
+  return <section className="panel" aria-label={uiText("Подписи {p0}", {p0: uiText(documentLabel)})}>
+    <h3>{signed ? uiText("Подписан обеими сторонами") : uiText("Подписи {p0}", {p0: uiText(documentLabel)})}</h3>
     {signers.map((signer, index) => <p key={`${signer.role}-${index}`}>
       {(signer.role === "SELLER" ? sellerName : buyerName) ? <><span>{signer.role === "SELLER" ? sellerName : buyerName}</span><br /></> : null}
-      <strong>{signer.role === "SELLER" ? "Исполнитель" : signer.role === "BUYER" ? "Заказчик" : "Подписант"}: {signer.name || "—"}</strong><br />
-      {signer.signedAt ? new Date(signer.signedAt).toLocaleString("ru-RU") : ""}
+      <strong>{signer.role === "SELLER" ? uiText("Исполнитель") : signer.role === "BUYER" ? uiText("Заказчик") : uiText("Подписант")}: {signer.name || "—"}</strong><br />
+      {signer.signedAt ? new Date(signer.signedAt).toLocaleString(uiFormatLocale()) : ""}
       {signatureCheckLabel(signer) ? ` · ${signatureCheckLabel(signer)}` : ""}
     </p>)}
-    {verificationUrl ? <p><a href={verificationUrl} target="_blank" rel="noreferrer">Проверить подписание</a></p> : null}
+    {verificationUrl ? <p><a href={verificationUrl} target="_blank" rel="noreferrer">{uiText("Проверить подписание")}</a></p> : null}
     {signed ? <>
       <div className="actions">
-        <button type="button" className="btn" disabled={busy} onClick={() => void save("pdf")}>{busy ? "Подождите…" : "Скачать PDF с отметками"}</button>
-        <button type="button" className="btn secondary" disabled={busy} onClick={() => void save("zip")}>Скачать оригинал и ЭЦП</button>
+        <button type="button" className="btn" disabled={busy} onClick={() => void save("pdf")}>{busy ? uiText("Подождите…") : uiText("Скачать PDF с отметками")}</button>
+        <button type="button" className="btn secondary" disabled={busy} onClick={() => void save("zip")}>{uiText("Скачать оригинал и ЭЦП")}</button>
       </div>
-      <p className="muted">PDF содержит документ и лист подписания с QR-кодом. В архиве — неизменённый оригинал, обе ЭЦП и сведения о подписании.</p>
+      <p className="muted">{uiText("PDF содержит документ и лист подписания с QR-кодом. В архиве — неизменённый оригинал, обе ЭЦП и сведения о подписании.")}</p>
     </> : null}
     {error ? <p className="error" role="alert">{error}</p> : null}
   </section>;

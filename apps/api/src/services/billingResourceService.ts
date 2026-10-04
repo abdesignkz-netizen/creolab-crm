@@ -50,7 +50,7 @@ export async function initializeTenantUsage(tx: Db, tenantId: string, limits: Re
     tx.membership.count({ where: { tenantId, active: true } }),
     tx.inquiry.count({ where: { tenantId, receivedAt: { gte: billingMonthStart() } } }),
     tx.attachment.aggregate({ where: { tenantId, NOT: { parentType: { startsWith: 'support' } } }, _sum: { sizeBytes: true } }),
-    tx.integration.count({ where: { tenantId, type: 'whatsapp_seller', NOT: { OR: [{ status: 'disabled' }, { connectionStatus: 'DISCONNECTED' }] } } }),
+    tx.integration.count({ where: { tenantId, type: { in: ['whatsapp_seller', 'whatsapp_qr', 'whatsapp_cloud'] }, NOT: { OR: [{ status: 'disabled' }, { connectionStatus: 'DISCONNECTED' }] } } }),
   ]);
   const databaseBytes = await measureDatabaseBytes(tx, tenantId);
   await tx.tenantUsage.create({ data: { tenantId, limitsJson: limits, period: billingMonth(), databaseBytes,
@@ -60,6 +60,7 @@ export async function initializeTenantUsage(tx: Db, tenantId: string, limits: Re
 }
 
 export async function getUsage(prisma: PrismaClient, tenantId: string, code: string): Promise<number> {
+  if (code === 'WHATSAPP_CONNECTIONS') return prisma.integration.count({ where: { tenantId, type: { in: ['whatsapp_seller', 'whatsapp_qr', 'whatsapp_cloud'] }, NOT: { OR: [{ status: 'disabled' }, { connectionStatus: 'DISCONNECTED' }] } } });
   const row = await prisma.tenantUsage.findUnique({ where: { tenantId } });
   if (['AI_CREDITS', 'AI_USAGE', 'AUTOMATION_RUNS', 'DOCUMENTS', 'DOCUMENTS_COUNT', 'CAMPAIGN_RECIPIENTS'].includes(code)) {
     const resource = code === 'AI_USAGE' ? 'AI_CREDITS' : code === 'DOCUMENTS' ? 'DOCUMENTS_COUNT' : code;
@@ -80,7 +81,6 @@ export async function getUsage(prisma: PrismaClient, tenantId: string, code: str
   if (code === 'FILE_STORAGE_MB') return Number((await prisma.attachment.aggregate({ where: { tenantId, NOT: { parentType: { startsWith: 'support' } } }, _sum: { sizeBytes: true } }))._sum.sizeBytes || 0) / 1048576;
   if (code === 'PIPELINES') return (await prisma.dealStage.count({ where: { tenantId } })) ? 1 : 0;
   if (code === 'AI_USAGE' || code === 'AI_CREDITS') return prisma.aIUsageEvent.count({ where: { tenantId, createdAt: { gte: billingMonthStart() }, status: 'ok' } });
-  if (code === 'WHATSAPP_CONNECTIONS') return prisma.integration.count({ where: { tenantId, type: 'whatsapp_seller', NOT: { OR: [{ status: 'disabled' }, { connectionStatus: 'DISCONNECTED' }] } } });
   return 0;
 }
 

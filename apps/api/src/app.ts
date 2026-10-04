@@ -1,4 +1,7 @@
 import { getLegalBundle, renderLegalDocument } from "./services/legalDocuments.ts";
+import { setDirectWhatsAppAi } from "./services/whatsappAiService.ts";
+import { connectWhatsAppQr, listWhatsAppConnections, getWhatsAppQr, disconnectDirectWhatsApp } from "./services/whatsappConnectionService.ts";
+import { whatsappCloudSchema, connectWhatsAppCloud, activateWhatsAppCloud, verifyWhatsAppCloud, receiveWhatsAppCloud } from "./services/whatsappCloudService.ts";
 import { getConversationAvatar } from "./services/conversationAvatarService.ts";
 import { requirePlatformAdmin } from "./lib/access.ts";
 import { listTenantServices, saveTenantService } from "./services/tenantServiceCatalog.ts";
@@ -2271,6 +2274,36 @@ export function createApp(prisma: PrismaClient) {
   app.post("/api/v1/integrations/tiktok/:id/disconnect", async (req, res) => { res.json(await disconnectTikTok(prisma, await requireAuth(req), req.params.id)); });
   app.post("/public/integrations/tiktok/:id/:key", rawJson, async (req, res) => {
     res.json(await receiveTikTok(prisma, req.params.id, req.params.key, Buffer.isBuffer(req.body) ? req.body : Buffer.from("{}")));
+  });
+
+  app.get("/api/v1/integrations/whatsapp", async (req, res) => {
+    res.set("Cache-Control", "no-store").json(await listWhatsAppConnections(prisma, await requireAuth(req)));
+  });
+  app.post("/api/v1/integrations/whatsapp/qr", async (req, res) => {
+    res.json(await connectWhatsAppQr(prisma, await requireAuth(req)));
+  });
+  app.get("/api/v1/integrations/whatsapp/:id/qr", async (req, res) => {
+    res.set("Cache-Control", "no-store").json(await getWhatsAppQr(prisma, await requireAuth(req), req.params.id));
+  });
+  app.post("/api/v1/integrations/whatsapp/cloud", json, async (req, res) => {
+    const auth = await requireAuth(req); await requireFeature(prisma, auth, FEATURES.WHATSAPP);
+    res.set("Cache-Control", "no-store").json(await connectWhatsAppCloud(prisma, auth, whatsappCloudSchema.parse(req.body)));
+  });
+  app.post("/api/v1/integrations/whatsapp/:id/activate", async (req, res) => {
+    res.json(await activateWhatsAppCloud(prisma, await requireAuth(req), req.params.id));
+  });
+  app.post("/api/v1/integrations/whatsapp/:id/disconnect", async (req, res) => {
+    res.json(await disconnectDirectWhatsApp(prisma, await requireAuth(req), req.params.id));
+  });
+  app.post("/api/v1/integrations/whatsapp/:id/ai", json, async (req, res) => {
+    if (typeof req.body?.enabled !== "boolean") throw new ApiError(422, "invalid", "Укажите состояние ИИ-ответов");
+    res.json(await setDirectWhatsAppAi(prisma, await requireAuth(req), req.params.id, req.body.enabled));
+  });
+  app.get("/public/integrations/whatsapp-cloud/:id", async (req, res) => {
+    res.type("text/plain").send(await verifyWhatsAppCloud(prisma, req.params.id, String(req.query["hub.mode"] || ""), String(req.query["hub.verify_token"] || ""), String(req.query["hub.challenge"] || "")));
+  });
+  app.post("/public/integrations/whatsapp-cloud/:id", rawJson, async (req, res) => {
+    res.json(await receiveWhatsAppCloud(prisma, req.params.id, Buffer.isBuffer(req.body) ? req.body : Buffer.from("{}"), req.header("x-hub-signature-256") || ""));
   });
 
   app.get("/api/v1/integrations/meta", async (req, res) => { res.json(await listMetaConnections(prisma, await requireAuth(req))); });

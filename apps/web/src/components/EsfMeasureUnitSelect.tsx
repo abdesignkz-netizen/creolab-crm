@@ -1,3 +1,4 @@
+import { uiText, useUiText, localizeUiOptions } from "../lib/uiText";
 import {
   ESF_MEASURE_UNIT_GROUPS,
   ESF_MEASURE_UNITS,
@@ -27,6 +28,7 @@ export function EsfMeasureUnitSelect({
   name,
   "aria-label": ariaLabel,
 }: Props) {
+  const uiText = useUiText();
   const selected = resolveEsfMeasureUnitCode(value);
   const extra = !findEsfMeasureUnit(selected);
   return (
@@ -37,17 +39,17 @@ export function EsfMeasureUnitSelect({
       required={required}
       disabled={disabled}
       aria-invalid={invalid || undefined}
-      aria-label={ariaLabel || "Единица измерения"}
-      title="Код единицы измерения из классификатора ИС ЭСФ (ОКЕИ)"
+      aria-label={ariaLabel || uiText("Единица измерения")}
+      title={uiText("Код единицы измерения из классификатора ИС ЭСФ (ОКЕИ)")}
       value={selected}
       onChange={(event) => onChange(event.target.value)}
     >
-      {extra ? <option value={selected}>{selected} — код из документа</option> : null}
+      {extra ? <option value={selected}>{selected} {" "}{uiText("— код из документа")}</option> : null}
       {ESF_MEASURE_UNIT_GROUPS.map((group) => (
-        <optgroup key={group.id} label={group.label}>
+        <optgroup key={group.id} label={uiText(group.label)}>
           {ESF_MEASURE_UNITS.filter((unit) => unit.group === group.id).map((unit) => (
             <option key={unit.code} value={unit.code}>
-              {esfMeasureUnitOptionLabel(unit)}
+              {`${unit.code} — ${uiText(unit.name)} (${uiText(unit.symbol)})`}
             </option>
           ))}
         </optgroup>

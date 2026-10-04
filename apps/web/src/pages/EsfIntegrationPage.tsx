@@ -1,3 +1,4 @@
+import { uiText, useUiText, localizeUiOptions } from "../lib/uiText";
 import { connectEsfAuthTicket } from "../lib/signing/esfConnect";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
@@ -45,6 +46,7 @@ function statusClass(status: string) {
 }
 
 export function EsfIntegrationPage() {
+  const uiText = useUiText();
   const [data, setData] = useState<ConnectionPayload | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -71,7 +73,7 @@ export function EsfIntegrationPage() {
       if (next.connection.signerIin && !cabinetUsername) setCabinetUsername(next.connection.signerIin);
       setAskCabinet(Boolean(next.wsseRequired && next.connection.status !== "CONNECTED"));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось загрузить ИС ЭСФ");
+      setError(err instanceof Error ? err.message : uiText("Не удалось загрузить ИС ЭСФ"));
     }
   }
 
@@ -92,8 +94,8 @@ export function EsfIntegrationPage() {
           setPoc((current: any) => ({ ...current, esfAuth: auth.raw }));
           setPocNote(
             auth.publicCertificate
-              ? `AUTH через модуль ИС ЭСФ: ${auth.keyInfo?.subjectCn || "сертификат получен"}`
-              : "method auth не вернул PEM — fallback на basics",
+              ? uiText("AUTH через модуль ИС ЭСФ: {p0}", {p0: auth.keyInfo?.subjectCn || uiText("сертификат получен")})
+              : uiText("method auth не вернул PEM — fallback на basics"),
           );
           if (auth.publicCertificate) {
             setAuthPem(auth.publicCertificate);
@@ -107,7 +109,7 @@ export function EsfIntegrationPage() {
     const basics = createNcalayerClient();
     try {
       if (!(await basics.isAvailable())) {
-        throw new NcalayerError("NCALAYER_NOT_RUNNING", "Запустите NCALayer и повторите подключение");
+        throw new NcalayerError("NCALAYER_NOT_RUNNING", uiText("Запустите NCALayer и повторите подключение"));
       }
       const cms = await basics.selectAuthCertificate();
       setAuthCms(cms);
@@ -141,19 +143,19 @@ export function EsfIntegrationPage() {
         // Connect errors contain connection data, but not the system configuration.
         setData(current => current ? {
           ...current, ...body, system: current.system,
-          avrPoc: { ready: false, reasons: [body.message || "Подключение ИС ЭСФ не завершено"], sessionExpiresAt: null },
+          avrPoc: { ready: false, reasons: [body.message || uiText("Подключение ИС ЭСФ не завершено")], sessionExpiresAt: null },
         } : current);
       }
       setAskCabinet(Boolean(body?.wsseRequired || body?.code === "esf_wsse_required"));
       if (body?.wsseRequired || body?.code === "esf_wsse_required") {
         setAskCabinet(true);
-        setError(body?.message || "ИС ЭСФ запросила пароль кабинета. Это не PIN ЭЦП.");
+        setError(body?.message || uiText("ИС ЭСФ запросила пароль кабинета. Это не PIN ЭЦП."));
       } else if (body?.code === "CERTIFICATE_NOT_VALID") {
-        setError("ИС ЭСФ не приняла сертификат для входа. На тестовом стенде используйте свой действующий ключ НУЦ для входа, не ключ подписи. Организация должна быть зарегистрирована на test3.esf.kgd.gov.kz.");
+        setError(uiText("ИС ЭСФ не приняла сертификат для входа. На тестовом стенде используйте свой действующий ключ НУЦ для входа, не ключ подписи. Организация должна быть зарегистрирована на test3.esf.kgd.gov.kz."));
       } else if (err instanceof NcalayerError) {
         setError(err.message);
       } else {
-        setError(err instanceof Error ? err.message : "Не удалось подключить ИС ЭСФ");
+        setError(err instanceof Error ? err.message : uiText("Не удалось подключить ИС ЭСФ"));
       }
     } finally {
       setCabinetPassword("");
@@ -170,19 +172,19 @@ export function EsfIntegrationPage() {
       setCabinetPassword("");
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось отключить");
+      setError(err instanceof Error ? err.message : uiText("Не удалось отключить"));
     } finally {
       setBusy(false);
     }
   }
 
-  if (!data && !error) return <div className="state">Загрузка…</div>;
+  if (!data && !error) return <div className="state">{uiText("Загрузка…")}</div>;
 
   const status = data?.connection.status || "NOT_CONNECTED";
   const connected = status === "CONNECTED";
-  const pocReasons = [...(data?.avrPoc?.reasons || ["Проверка сессии ещё не выполнена"])];
-  if (data?.avrPoc?.sessionExpiresAt && Date.parse(data.avrPoc.sessionExpiresAt) <= now) pocReasons.push("Сессия истекла");
-  if (avrPoc?.code === "POC_AVR_NCALAYER_SUCCESS") pocReasons.push("POC завершён успешно");
+  const pocReasons = [...(data?.avrPoc?.reasons || [uiText("Проверка сессии ещё не выполнена")])];
+  if (data?.avrPoc?.sessionExpiresAt && Date.parse(data.avrPoc.sessionExpiresAt) <= now) pocReasons.push(uiText("Сессия истекла"));
+  if (avrPoc?.code === "POC_AVR_NCALAYER_SUCCESS") pocReasons.push(uiText("POC завершён успешно"));
   const pocReady = Boolean(data?.avrPoc?.ready && connected && data?.connection.sessionActive &&
     data.system.esfEnv === "test" && pocReasons.length === 0);
 
@@ -191,9 +193,8 @@ export function EsfIntegrationPage() {
       <div className="page-head">
         <div>
           <p className="muted">
-            <Link to="/integrations">Интеграции</Link> → ИС ЭСФ
-          </p>
-          <h2>ИС ЭСФ</h2>
+            <Link to="/integrations">{uiText("Интеграции")}</Link> {" "}{uiText("→ ИС ЭСФ")}</p>
+          <h2>{uiText("ИС ЭСФ")}</h2>
         </div>
       </div>
       {error ? <p className="error">{error}</p> : null}
@@ -203,14 +204,14 @@ export function EsfIntegrationPage() {
         <div className="esf-status-row">
           <span className={`esf-dot ${statusClass(status)}`} />
           <div>
-            <b>{STATUS_LABEL[status] || status}</b>
+            <b>{localizeUiOptions(STATUS_LABEL, uiText)[status] || status}</b>
             <p className="muted">
               {data?.system.esfEnv === "prod"
-                ? "Боевой кабинет"
+                ? uiText("Боевой кабинет")
                 : data?.system.esfEnv === "test"
-                  ? "Тестовый кабинет"
+                  ? uiText("Тестовый кабинет")
                   : data?.system.esfEnv || "—"}
-              {data?.system.provider === "mock" ? " · без ИС ЭСФ" : ""}
+              {data?.system.provider === "mock" ? uiText(" · без ИС ЭСФ") : ""}
             </p>
           </div>
         </div>
@@ -218,33 +219,31 @@ export function EsfIntegrationPage() {
         {connected ? (
           <dl className="esf-facts">
             <div>
-              <dt>Организация</dt>
+              <dt>{uiText("Организация")}</dt>
               <dd>{data?.organization.legalName || "—"}</dd>
             </div>
             <div>
-              <dt>БИН</dt>
+              <dt>{uiText("БИН")}</dt>
               <dd>{data?.organization.bin || data?.connection.organizationBin || "—"}</dd>
             </div>
             <div>
-              <dt>Авторизован</dt>
+              <dt>{uiText("Авторизован")}</dt>
               <dd>{data?.connection.signerIin || "—"}</dd>
             </div>
             <div>
-              <dt>Сессия</dt>
-              <dd>{data?.connection.sessionActive ? "активна" : "нет"}</dd>
+              <dt>{uiText("Сессия")}</dt>
+              <dd>{data?.connection.sessionActive ? uiText("активна") : uiText("нет")}</dd>
             </div>
           </dl>
         ) : (
           <p className="muted">
-            Для подключения запустите NCALayer и авторизуйтесь с помощью ЭЦП. Путь к файлу и PIN сервер не спрашивает
-            — их принимает только NCALayer на этом компьютере.
-          </p>
+            {uiText("Для подключения запустите NCALayer и авторизуйтесь с помощью ЭЦП. Путь к файлу и PIN сервер не спрашивает — их принимает только NCALayer на этом компьютере.")}</p>
         )}
 
         {data?.system.provider === "live" ? (
           <div className="stack">
-            <p className="muted">NCALayer подпишет запрос авторизации ИС ЭСФ. Если портал запросит пароль кабинета, поле появится здесь. PIN ЭЦП вводится только в NCALayer.</p>
-            <label>ИИН пользователя<input value={cabinetUsername} onChange={(e) => setCabinetUsername(e.target.value)} inputMode="numeric" maxLength={12} autoComplete="username" /></label>
+            <p className="muted">{uiText("NCALayer подпишет запрос авторизации ИС ЭСФ. Если портал запросит пароль кабинета, поле появится здесь. PIN ЭЦП вводится только в NCALayer.")}</p>
+            <label>{uiText("ИИН пользователя")}<input value={cabinetUsername} onChange={(e) => setCabinetUsername(e.target.value)} inputMode="numeric" maxLength={12} autoComplete="username" /></label>
           </div>
         ) : null}
         {askCabinet && !connected ? (
@@ -255,14 +254,12 @@ export function EsfIntegrationPage() {
               void connect();
             }}
           >
-            <p className="muted">Портал запросил пароль кабинета ИС ЭСФ. Он используется только для входа и не сохраняется. PIN ЭЦП вводится в NCALayer.</p>
+            <p className="muted">{uiText("Портал запросил пароль кабинета ИС ЭСФ. Он используется только для входа и не сохраняется. PIN ЭЦП вводится в NCALayer.")}</p>
             <label>
-              ИИН / логин кабинета
-              <input value={cabinetUsername} onChange={(e) => setCabinetUsername(e.target.value)} autoComplete="username" />
+              {uiText("ИИН / логин кабинета")}<input value={cabinetUsername} onChange={(e) => setCabinetUsername(e.target.value)} autoComplete="username" />
             </label>
             <label>
-              Пароль кабинета ИС ЭСФ
-              <input
+              {uiText("Пароль кабинета ИС ЭСФ")}<input
                 type="password"
                 value={cabinetPassword}
                 onChange={(e) => setCabinetPassword(e.target.value)}
@@ -271,7 +268,7 @@ export function EsfIntegrationPage() {
             </label>
             <div className="actions">
               <button className="btn" disabled={busy}>
-                {busy ? "Подключаем…" : "Продолжить"}
+                {busy ? uiText("Подключаем…") : uiText("Продолжить")}
               </button>
             </div>
           </form>
@@ -280,29 +277,26 @@ export function EsfIntegrationPage() {
         <div className="actions" style={{ marginTop: 16 }}>
           {!connected ? (
             <button type="button" className="btn" disabled={busy} onClick={() => void connect()}>
-              {busy ? "Подключаем…" : status === "NOT_CONNECTED" ? "Подключить через NCALayer" : "Переподключить"}
+              {busy ? uiText("Подключаем…") : status === "NOT_CONNECTED" ? uiText("Подключить через NCALayer") : uiText("Переподключить")}
             </button>
           ) : (
             <>
               <button type="button" className="btn" disabled={busy} onClick={() => void connect(false)}>
-                Переподключить
-              </button>
+                {uiText("Переподключить")}</button>
               <button type="button" className="btn secondary" disabled={busy} onClick={() => void disconnect()}>
-                Отключить
-              </button>
+                {uiText("Отключить")}</button>
             </>
           )}
         </div>
         <p className="muted" style={{ marginTop: 12 }}>
-          БИН компании задаётся в <Link to="/settings">реквизитах</Link>. PIN ключа вводится только в NCALayer на этом компьютере.
-        </p>
+          {uiText("БИН компании задаётся в")}{" "}<Link to="/settings">{uiText("реквизитах")}</Link>{uiText(". PIN ключа вводится только в NCALayer на этом компьютере.")}</p>
       </div>
 
       {import.meta.env.DEV ? (
         <div className="panel" style={{ marginTop: 16 }}>
-          <h3>DEV: модуль ИС ЭСФ</h3>
+          <h3>{uiText("DEV: модуль ИС ЭСФ")}</h3>
           <p>Environment: {data?.system.esfEnv.toUpperCase() || "—"}<br />Endpoint host: {data?.system.endpointHost || "—"}</p>
-          <p className="muted">Диагностика только в development. Подпись документа — через официальный модуль, не basics cms/xml.</p>
+          <p className="muted">{uiText("Диагностика только в development. Подпись документа — через официальный модуль, не basics cms/xml.")}</p>
           {pocNote ? <p className={/ошиб|не /i.test(pocNote) ? "error" : "muted"}>{pocNote}</p> : null}
           <div className="actions" style={{ marginTop: 8 }}>
             <button
@@ -329,16 +323,15 @@ export function EsfIntegrationPage() {
                   if (liveResult.status === "fulfilled") setProbe(liveResult.value);
                   const live = liveResult.status === "fulfilled" ? liveResult.value : null;
                   const moduleNote = live?.officialModuleInstalled
-                    ? `Официальный модуль: ${live.bundleName || "—"} ${live.bundleVersion || ""} · ${live.serviceName || ""}`
-                    : live?.ncalayer ? ESF_MODULE_REQUIRED_MESSAGE : "Не удалось подтвердить связь с NCALayer";
-                  setPocNote(moduleNote + (diagResult.status === "rejected" ? ". Диагностика сервера ИС ЭСФ не выполнена; подключение NCALayer проверено отдельно." : ""));
+                    ? uiText("Официальный модуль: {p0} {p1} · {p2}", {p0: live.bundleName || "—", p1: live.bundleVersion || "", p2: live.serviceName || ""})
+                    : live?.ncalayer ? ESF_MODULE_REQUIRED_MESSAGE : uiText("Не удалось подтвердить связь с NCALayer");
+                  setPocNote(moduleNote + (diagResult.status === "rejected" ? uiText(". Диагностика сервера ИС ЭСФ не выполнена; подключение NCALayer проверено отдельно.") : ""));
                 })()
-                  .catch((err) => setPocNote(err instanceof Error ? err.message : "Не удалось получить диагностику"))
+                  .catch((err) => setPocNote(err instanceof Error ? err.message : uiText("Не удалось получить диагностику")))
                   .finally(() => setBusy(false));
               }}
             >
-              Проверить NCALayer
-            </button>
+              {uiText("Проверить NCALayer")}</button>
             <button
               type="button"
               className="btn secondary"
@@ -348,7 +341,7 @@ export function EsfIntegrationPage() {
                 setPocNote("");
                 const client = createEsfNcaLayerClient();
                 void (async () => {
-                  if (!(await client.isAvailable())) throw new NcalayerError("NCALAYER_NOT_RUNNING", "Запустите NCALayer");
+                  if (!(await client.isAvailable())) throw new NcalayerError("NCALAYER_NOT_RUNNING", uiText("Запустите NCALayer"));
                   const live = await client.probe();
                   setProbe(live);
                   if (!live.officialModuleInstalled) throw new NcalayerError("SIGNATURE_FAILED", ESF_MODULE_REQUIRED_MESSAGE);
@@ -357,11 +350,11 @@ export function EsfIntegrationPage() {
                   if (auth.publicCertificate) setAuthPem(auth.publicCertificate);
                   setPocNote(
                     auth.publicCertificate
-                      ? "DEV auth: публичный PEM получен. Схема ответа ниже, без private data."
-                      : "DEV auth: PEM в ответе не найден. Для createSession остаётся basics AUTH.",
+                      ? uiText("DEV auth: публичный PEM получен. Схема ответа ниже, без private data.")
+                      : uiText("DEV auth: PEM в ответе не найден. Для createSession остаётся basics AUTH."),
                   );
                 })()
-                  .catch((err) => setPocNote(err instanceof Error ? err.message : "DEV auth не выполнен"))
+                  .catch((err) => setPocNote(err instanceof Error ? err.message : uiText("DEV auth не выполнен")))
                   .finally(() => {
                     client.disconnect();
                     setBusy(false);
@@ -384,11 +377,11 @@ export function EsfIntegrationPage() {
                       setPoc((current: any) => ({ ...current, legacySign: row }));
                       setPocNote(
                         row.ok
-                          ? `TEST A: LocalService ${row.analysis?.format || ""} · ${row.analysis?.length || 0} байт`
+                          ? uiText("TEST A: LocalService {p0} · {p1} байт", {p0: row.analysis?.format || "", p1: row.analysis?.length || 0})
                           : `TEST A: ${row.message || row.code}`,
                       );
                     })
-                    .catch((err) => setPocNote(err instanceof Error ? err.message : "TEST A не выполнен"))
+                    .catch((err) => setPocNote(err instanceof Error ? err.message : uiText("TEST A не выполнен")))
                     .finally(() => setBusy(false));
                 }}
               >
@@ -418,8 +411,8 @@ export function EsfIntegrationPage() {
                 setAvrPoc(attempt);
                 void (async () => {
                   const fresh: any = await api.esfNcaLayerPoc();
-                  if (!fresh.avrPoc?.ready) throw new Error(fresh.avrPoc?.reasons?.join("; ") || "POC АВР недоступен");
-                  if (!(await client.isAvailable())) throw new NcalayerError("NCALAYER_NOT_RUNNING", "Запустите NCALayer");
+                  if (!fresh.avrPoc?.ready) throw new Error(fresh.avrPoc?.reasons?.join("; ") || uiText("POC АВР недоступен"));
+                  if (!(await client.isAvailable())) throw new NcalayerError("NCALAYER_NOT_RUNNING", uiText("Запустите NCALayer"));
                   const prepared: any = Object.freeze(await api.esfPocAvrPayload());
                   await verifyFrozenAvrPayload(prepared);
                   attempt.payload = { byteLength: prepared.byteLength, sha256: prepared.payloadSha256 };
@@ -448,13 +441,13 @@ export function EsfIntegrationPage() {
                     const details = err?.body?.details;
                     if (details?.soap) {
                       setAvrPoc(details);
-                      setPocNote(details.soap.errorMessage || "POC АВР не выполнен");
+                      setPocNote(details.soap.errorMessage || uiText("POC АВР не выполнен"));
                     } else {
                       // Do not render arbitrary NCALayer/transport errors: they may contain key material.
                       attempt.soap.errorCode = "ESF_POC_CLIENT_STOPPED";
                       attempt.soap.errorMessage = /^(ESF_POC_SESSION_GUARD|ESF_POC_SESSION_CHANGED|esf_bin_required)$/.test(err?.body?.code || "")
                         ? err.body.message
-                        : "Подготовка или подпись не завершена. Проверьте TEST-сессию и NCALayer; uploadAwp не подтверждён.";
+                        : uiText("Подготовка или подпись не завершена. Проверьте TEST-сессию и NCALayer; uploadAwp не подтверждён.");
                       setAvrPoc({ ...attempt });
                       setPocNote(attempt.soap.errorMessage);
                     }
@@ -465,19 +458,18 @@ export function EsfIntegrationPage() {
                   });
               }}
             >
-              POC АВР: подписать и отправить
-            </button>
+              {uiText("POC АВР: подписать и отправить")}</button>
           </div>
-          {!pocReady ? <p className="muted">POC АВР: {pocReasons.join("; ") || "Нет активной TEST-сессии"}</p> : null}
+          {!pocReady ? <p className="muted">{uiText("POC АВР:")}{" "}{pocReasons.join("; ") || uiText("Нет активной TEST-сессии")}</p> : null}
           {probe ? (
             <dl className="esf-facts" style={{ marginTop: 12 }}>
               <div>
                 <dt>NCALayer</dt>
-                <dd>{probe.ncalayer ? "запущен" : "нет"}</dd>
+                <dd>{probe.ncalayer ? uiText("запущен") : uiText("нет")}</dd>
               </div>
               <div>
-                <dt>Модуль ИС ЭСФ</dt>
-                <dd>{probe.officialModuleInstalled ? `${probe.bundleName} ${probe.bundleVersion || ""}` : "не установлен"}</dd>
+                <dt>{uiText("Модуль ИС ЭСФ")}</dt>
+                <dd>{probe.officialModuleInstalled ? `${probe.bundleName} ${probe.bundleVersion || ""}` : uiText("не установлен")}</dd>
               </div>
               <div>
                 <dt>Service</dt>
@@ -491,7 +483,7 @@ export function EsfIntegrationPage() {
           ) : null}
           {poc?.esfAuth ? (
             <div style={{ marginTop: 12 }}>
-              <p className="muted">DEV auth: sanitized response модуля ИС ЭСФ:</p>
+              <p className="muted">{uiText("DEV auth: sanitized response модуля ИС ЭСФ:")}</p>
               <pre className="muted" style={{ whiteSpace: "pre-wrap", maxHeight: 260, overflow: "auto" }}>
                 {JSON.stringify(poc.esfAuth, null, 2)}
               </pre>
@@ -499,7 +491,7 @@ export function EsfIntegrationPage() {
           ) : null}
           {data?.authCertificate || poc?.certificate ? (
             <div style={{ marginTop: 12 }}>
-              <p className="muted">AUTH-сертификат (без private key / PEM):</p>
+              <p className="muted">{uiText("AUTH-сертификат (без private key / PEM):")}</p>
               <pre className="muted" style={{ whiteSpace: "pre-wrap", maxHeight: 260, overflow: "auto" }}>
                 {JSON.stringify(data?.authCertificate || poc?.certificate, null, 2)}
               </pre>

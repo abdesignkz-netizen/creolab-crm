@@ -1,3 +1,4 @@
+import { uiText, useUiText, localizeUiOptions } from "../../lib/uiText";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../../lib/api";
@@ -14,6 +15,7 @@ function tokens(value: number) {
 }
 
 export function PlatformAiUsagePage({ lockedTenantId }: { lockedTenantId?: string }) {
+  const uiText = useUiText();
   const [period, setPeriod] = useState("last_7");
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState("");
@@ -28,7 +30,7 @@ export function PlatformAiUsagePage({ lockedTenantId }: { lockedTenantId?: strin
           : await api.adminAiUsage(query),
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось загрузить AI Usage");
+      setError(err instanceof Error ? err.message : uiText("Не удалось загрузить AI Usage"));
     }
   }
 
@@ -37,23 +39,23 @@ export function PlatformAiUsagePage({ lockedTenantId }: { lockedTenantId?: strin
   }, [lockedTenantId]);
 
   if (error) return <p className="error">{error}</p>;
-  if (!data) return <div className="state">Загрузка…</div>;
+  if (!data) return <div className="state">{uiText("Загрузка…")}</div>;
   const totals = data.totals || {};
 
   return (
     <div className="stack">
       <div className="page-head">
         <div>
-          <h2>Расход AI</h2>
-          <p className="muted">Внутренняя себестоимость. Клиентам не показывается.</p>
+          <h2>{uiText("Расход AI")}</h2>
+          <p className="muted">{uiText("Внутренняя себестоимость. Клиентам не показывается.")}</p>
         </div>
         <div className="actions">
           {[
-            ["today", "Сегодня"],
-            ["yesterday", "Вчера"],
-            ["last_7", "7 дней"],
-            ["last_30", "30 дней"],
-            ["custom", "Диапазон"],
+            ["today", uiText("Сегодня")],
+            ["yesterday", uiText("Вчера")],
+            ["last_7", uiText("7 дней")],
+            ["last_30", uiText("30 дней")],
+            ["custom", uiText("Диапазон")],
           ].map(([value, label]) => (
             <button
               key={value}
@@ -61,13 +63,13 @@ export function PlatformAiUsagePage({ lockedTenantId }: { lockedTenantId?: strin
               className={period === value ? "btn" : "btn secondary"}
               onClick={() => {
                 if (value === "custom") {
-                  const from = window.prompt("С (YYYY-MM-DD)", "") || "";
-                  const to = window.prompt("По (YYYY-MM-DD)", "") || "";
+                  const from = window.prompt(uiText("С (YYYY-MM-DD)"), "") || "";
+                  const to = window.prompt(uiText("По (YYYY-MM-DD)"), "") || "";
                   setPeriod("custom");
                   const query = { period: "custom", from, to, tenantId: lockedTenantId };
                   void (lockedTenantId ? api.adminCompanyAiUsage(lockedTenantId, query) : api.adminAiUsage(query))
                     .then(setData)
-                    .catch((err) => setError(err instanceof Error ? err.message : "Ошибка"));
+                    .catch((err) => setError(err instanceof Error ? err.message : uiText("Ошибка")));
                   return;
                 }
                 setPeriod(value);
@@ -98,7 +100,7 @@ export function PlatformAiUsagePage({ lockedTenantId }: { lockedTenantId?: strin
           <ul>
             {(data.anomalies || []).map((row: any) => (
               <li key={row.tenantId}>
-                {row.name}: {tokens(row.tokens)} при обычных {tokens(row.usual)}
+                {row.name}: {tokens(row.tokens)} {" "}{uiText("при обычных")}{" "}{tokens(row.usual)}
               </li>
             ))}
           </ul>
@@ -106,11 +108,11 @@ export function PlatformAiUsagePage({ lockedTenantId }: { lockedTenantId?: strin
       ) : null}
       {data.tenants ? (
         <div className="panel">
-          <h4>По компаниям</h4>
+          <h4>{uiText("По компаниям")}</h4>
           <table className="table">
             <thead>
               <tr>
-                <th>Компания</th>
+                <th>{uiText("Компания")}</th>
                 <th>Requests</th>
                 <th>Tokens</th>
                 <th>Cost</th>
@@ -135,7 +137,7 @@ export function PlatformAiUsagePage({ lockedTenantId }: { lockedTenantId?: strin
       ) : null}
       {data.byFeature ? (
         <div className="panel">
-          <h4>По функциям</h4>
+          <h4>{uiText("По функциям")}</h4>
           {(data.byFeature || []).map((row: any) => (
             <p key={row.name}>{row.name} · {tokens(row.totalTokens)} · {money(row.cost)}</p>
           ))}
@@ -143,7 +145,7 @@ export function PlatformAiUsagePage({ lockedTenantId }: { lockedTenantId?: strin
       ) : null}
       {data.byProvider ? (
         <div className="panel">
-          <h4>По provider</h4>
+          <h4>{uiText("По provider")}</h4>
           {(data.byProvider || []).map((row: any) => (
             <p key={row.name}>{row.name} · {tokens(row.totalTokens)} · {money(row.cost)}</p>
           ))}
@@ -151,7 +153,7 @@ export function PlatformAiUsagePage({ lockedTenantId }: { lockedTenantId?: strin
       ) : null}
       {data.byModel ? (
         <div className="panel">
-          <h4>По моделям</h4>
+          <h4>{uiText("По моделям")}</h4>
           {(data.byModel || []).map((row: any) => (
             <p key={row.name}>{row.name} · {tokens(row.totalTokens)} · {money(row.cost)}</p>
           ))}

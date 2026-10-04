@@ -225,12 +225,17 @@ describe("CRM conversation integration (real isolated database)", () => {
     assert.equal(Number((await prisma.deal.findUniqueOrThrow({ where: { id: f.deal.id } })).offerAmountMinor), 450000);
     assert.equal(await prisma.task.count({ where: { tenantId: f.tenant.id } }), 1);
   });
-  it("reads the newest history window and ignores failed outbound messages", async () => {
+  it("reads the newest history window and ignores unsent outbound messages", async () => {
     const f = await fixture();
     await prisma.message.createMany({ data: Array.from({ length: 85 }, (_, index) => ({ tenantId: f.tenant.id, conversationId: f.conversation.id,
       senderKind: "client", direction: "inbound", text: "Здравствуйте", createdAt: new Date(at.getTime() - (index + 1) * 1000) })) });
-    await prisma.message.create({ data: { tenantId: f.tenant.id, conversationId: f.conversation.id, senderKind: "staff", direction: "outbound",
-      text: "Это не отправлено", operationState: "failed", createdAt: new Date(at.getTime() + 1000) } });
+    for (const operationState of ["queued", "sending", "failed", "canceled", "unknown"]) {
+      const unsent = await prisma.message.create({ data: { tenantId: f.tenant.id, conversationId: f.conversation.id, senderKind: "ai", direction: "outbound",
+        text: "Это не отправлено", operationState, createdAt: new Date(at.getTime() + 1000) } });
+      await enqueueConversationContext(prisma, f.tenant.id, f.conversation.id, unsent.id);
+      const skipped = await processConversationContextJob(prisma, f.tenant.id, f.conversation.id, { useLlm: false, sourceMessageId: unsent.id });
+      assert.equal(skipped.skipped, "message_not_delivered");
+    }
     const result = await f.analyze(); assert.equal(result.sourceMessageId, f.message.id); assert.equal(result.messageCount, 80);
     await f.run(); assert.equal(await prisma.task.count({ where: { tenantId: f.tenant.id } }), 1);
   });

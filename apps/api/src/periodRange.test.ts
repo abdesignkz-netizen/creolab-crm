@@ -29,3 +29,10 @@ describe("period buckets for analytics trend", () => {
     assert.equal(isoWeekKeyFromYmd({ year: 2026, month: 9, day: 7 }), "2026-W37");
   });
 });
+
+it("formats Kazakh trend buckets without changing Russian labels or bucket keys", () => {
+  assert.match(formatBucketLabel("2026-09-28", "day", "kk"), /қыр/);
+  assert.match(formatBucketLabel("2026-09-28", "day", "ru"), /сент/);
+  assert.equal(formatBucketLabel("2026-W40", "week", "kk"), "2026 · апта 40");
+  assert.equal(formatBucketLabel("2026-09-28T12", "hour", "kk"), "28.09 12:00");
+});

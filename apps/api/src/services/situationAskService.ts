@@ -1,3 +1,4 @@
+import { systemText } from "@creolab/contracts";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
 import type { PrismaClient } from "@creolab/db";
@@ -51,10 +52,10 @@ function itemLabel(item: {
   title?: string | null;
   reason?: string | null;
   phone?: string | null;
-}) {
+}, locale = "ru") {
   const who = [item.contactName, item.phone].filter(Boolean).join(" · ");
   const title = item.title && item.title !== item.contactName ? item.title : "";
-  return [who || title || "Пункт", item.reason].filter(Boolean).join(" — ");
+  return [who || title || systemText(locale, "Пункт"), item.reason].filter(Boolean).join(" — ");
 }
 
 export function classifySituationQuestion(text: string): {
@@ -63,8 +64,22 @@ export function classifySituationQuestion(text: string): {
   suggestedPeriod: PeriodPreset | null;
 } {
   const q = text.toLowerCase();
+  // Kazakh presets and natural questions use the same stable intents as Russian.
+  const kkPeriod: PeriodPreset | null = /өткен апта|аптамен салыстыр|апта ішінде/.test(q) ? "last_7"
+    : /кеше/.test(q) ? "yesterday" : /өткен ай/.test(q) ? "last_month" : /осы ай/.test(q) ? "this_month" : null;
+  if (/^(?:тапсырма (?:құр|жаса)|қоңырау шал|хабарлама (?:жаз|жібер)|жаз|жібер|нақтыла)(?:\s|$)/i.test(q.trim())) {
+    return { intent: "command", command: true, suggestedPeriod: kkPeriod };
+  }
+  if (/назар|басымдық|неден баст/.test(q)) return { intent: "attention", command: false, suggestedPeriod: kkPeriod };
+  if (/клиенттер.*қай кезең|сату кезең|клиенттер.*кетіп/.test(q)) return { intent: "funnel", command: false, suggestedPeriod: kkPeriod };
+  if (/мәміле.*тоқтап|қай мәміле/.test(q)) return { intent: "deals", command: false, suggestedPeriod: kkPeriod };
+  if (/өтінім|өтініш/.test(q)) return { intent: "inquiries", command: false, suggestedPeriod: kkPeriod };
+  if (/жүктеме|кімнің жұмысы/.test(q)) return { intent: "team", command: false, suggestedPeriod: kkPeriod };
+  if (/қай тапсырма|мерзімі өткен/.test(q)) return { intent: "tasks", command: false, suggestedPeriod: kkPeriod };
+  if (/жауап күт|жауап берілмеген/.test(q)) return { intent: "clients", command: false, suggestedPeriod: kkPeriod };
+  if (/салыстыр|не өзгер|нәтиже/.test(q)) return { intent: "period", command: false, suggestedPeriod: kkPeriod };
   const command = TASK_COMMAND_RE.test(text) && !LEADING_QUESTION_RE.test(q.trim());
-  let suggestedPeriod: PeriodPreset | null = null;
+  let suggestedPeriod: PeriodPreset | null = kkPeriod;
   if (/прошл\w* недел|за недел|сравни.*недел/.test(q)) suggestedPeriod = "last_7";
   else if (/вчера/.test(q)) suggestedPeriod = "yesterday";
   else if (/прошл\w* месяц/.test(q)) suggestedPeriod = "last_month";
@@ -158,7 +173,7 @@ function snapshotFromOverview(overview: Awaited<ReturnType<typeof getSituationOv
 
 function fallbackAnswer(
   intent: SituationAskIntent,
-  overview: Awaited<ReturnType<typeof getSituationOverview>>,
+  overview: Awaited<ReturnType<typeof getSituationOverview>>, locale = "ru",
 ): { headline: string; bullets: SituationAskItem[]; links: SituationAskLink[] } {
   const s = overview.attention.summary;
   const c = overview.current;
@@ -176,16 +191,16 @@ function fallbackAnswer(
   if (intent === "attention" || intent === "other") {
     const headline =
       s.needsReply || s.overdueTasks || s.needsHuman || c.newInquiries || s.overSlaDeals || s.paymentOverdue || s.noNextAction
-        ? `Сейчас требуют внимания: ${s.needsReply} ждут ответа, ${s.needsHuman} диалогов без человека, ${s.overdueTasks} просроченных задач, ${s.noNextAction ?? 0} без следующего шага, ${s.overSlaDeals ?? 0} сверх SLA, ${s.paymentOverdue ?? 0} с просроченной оплатой.`
-        : "Критических действий сейчас нет — можно разобрать плановые задачи и сделки в работе.";
-    const bullets = items.slice(0, 6).map((item) => ({ text: itemLabel(item), href: safeHref(item.href) }));
+        ? systemText(locale, "Сейчас требуют внимания: {p0} ждут ответа, {p1} диалогов без человека, {p2} просроченных задач, {p3} без следующего шага, {p4} сверх SLA, {p5} с просроченной оплатой.", { p0: s.needsReply, p1: s.needsHuman, p2: s.overdueTasks, p3: s.noNextAction ?? 0, p4: s.overSlaDeals ?? 0, p5: s.paymentOverdue ?? 0 })
+        : systemText(locale, "Критических действий сейчас нет — можно разобрать плановые задачи и сделки в работе.");
+    const bullets = items.slice(0, 6).map((item) => ({ text: itemLabel(item, locale), href: safeHref(item.href) }));
     return {
       headline,
       bullets: bullets.length ? bullets : (overview.insights || []).map((item: any) => ({ text: item.text, href: safeHref(item.href) })),
       links: [
-        { label: "Требует внимания", href: "/today#attention" },
-        { label: "Ждут ответа", href: "/contacts?filter=needs_reply" },
-        { label: "Просроченные задачи", href: "/tasks?filter=overdue" },
+        { label: systemText(locale, "Требует внимания"), href: "/today#attention" },
+        { label: systemText(locale, "Ждут ответа"), href: "/contacts?filter=needs_reply" },
+        { label: systemText(locale, "Просроченные задачи"), href: "/tasks?filter=overdue" },
       ],
     };
   }
@@ -194,10 +209,10 @@ function fallbackAnswer(
     const reply = items.filter((item) => item.group === "needs_reply" || item.kind === "contact_needs_reply");
     return {
       headline: s.needsReply
-        ? `${s.needsReply} клиент(ов) ждут ответа — это входящие без исходящего после них.`
-        : "Клиентов, которые ждут ответа, сейчас нет.",
-      bullets: (reply.length ? reply : items).slice(0, 6).map((item) => ({ text: itemLabel(item), href: safeHref(item.href) })),
-      links: [{ label: "Клиенты · нужен ответ", href: "/contacts?filter=needs_reply" }],
+        ? systemText(locale, "{p0} клиент(ов) ждут ответа — это входящие без исходящего после них.", { p0: s.needsReply })
+        : systemText(locale, "Клиентов, которые ждут ответа, сейчас нет."),
+      bullets: (reply.length ? reply : items).slice(0, 6).map((item) => ({ text: itemLabel(item, locale), href: safeHref(item.href) })),
+      links: [{ label: systemText(locale, "Клиенты · нужен ответ"), href: "/contacts?filter=needs_reply" }],
     };
   }
 
@@ -205,15 +220,15 @@ function fallbackAnswer(
     const deals = (overview.importantDeals || []) as Array<{ title?: string; reason?: string; href?: string }>;
     return {
       headline: c.stalledDeals || s.overSlaDeals || s.noNextAction
-        ? `${c.stalledDeals} сделок зависли. ${s.overSlaDeals ?? 0} сверх SLA. ${s.noNextAction ?? 0} без следующего шага. В работе ${c.activeDeals}.`
-        : `Открытых сделок: ${c.activeDeals}. Зависших по активности нет.`,
+        ? systemText(locale, "{p0} сделок зависли. {p1} сверх SLA. {p2} без следующего шага. В работе {p3}.", { p0: c.stalledDeals, p1: s.overSlaDeals ?? 0, p2: s.noNextAction ?? 0, p3: c.activeDeals })
+        : systemText(locale, "Открытых сделок: {p0}. Зависших по активности нет.", { p0: c.activeDeals }),
       bullets: deals.slice(0, 6).map((deal) => ({
         text: [deal.title, deal.reason].filter(Boolean).join(" — "),
         href: safeHref(deal.href),
       })),
       links: [
-        { label: "Зависшие сделки", href: "/deals?focus=stalled" },
-        { label: "Все сделки", href: "/deals" },
+        { label: systemText(locale, "Зависшие сделки"), href: "/deals?focus=stalled" },
+        { label: systemText(locale, "Все сделки"), href: "/deals" },
       ],
     };
   }
@@ -226,14 +241,14 @@ function fallbackAnswer(
       href?: string;
     }>;
     return {
-      headline: `${c.newInquiries} новых заявок ещё не взяты, ${c.inWorkInquiries} уже в работе. За период: ${r.inquiries} обращений.`,
+      headline: systemText(locale, "{p0} новых заявок ещё не взяты, {p1} уже в работе. За период: {p2} обращений.", { p0: c.newInquiries, p1: c.inWorkInquiries, p2: r.inquiries }),
       bullets: recent.slice(0, 6).map((item) => ({
         text: [item.contactName || item.title, item.status].filter(Boolean).join(" · "),
         href: safeHref(item.href),
       })),
       links: [
-        { label: "Новые заявки", href: "/inquiries?filter=new&test=false" },
-        { label: "Требуют внимания", href: "/inquiries?filter=attention" },
+        { label: systemText(locale, "Новые заявки"), href: "/inquiries?filter=new&test=false" },
+        { label: systemText(locale, "Требуют внимания"), href: "/inquiries?filter=attention" },
       ],
     };
   }
@@ -246,14 +261,14 @@ function fallbackAnswer(
       href?: string;
     }>;
     return {
-      headline: `${overview.todayTasks.overdue} просрочено, сегодня ещё ${overview.todayTasks.remaining} задач со сроком.`,
+      headline: systemText(locale, "{p0} просрочено, сегодня ещё {p1} задач со сроком.", { p0: overview.todayTasks.overdue, p1: overview.todayTasks.remaining }),
       bullets: nearest.slice(0, 6).map((task) => ({
-        text: `${task.overdue ? "Просрочено · " : ""}${[task.title, task.contactName].filter(Boolean).join(" — ")}`,
+        text: `${task.overdue ? systemText(locale, "Просрочено · ") : ""}${[task.title, task.contactName].filter(Boolean).join(" — ")}`,
         href: safeHref(task.href) || "/tasks",
       })),
       links: [
-        { label: "Просроченные", href: "/tasks?filter=overdue" },
-        { label: "Запланированные", href: "/tasks?filter=scheduled" },
+        { label: systemText(locale, "Просроченные"), href: "/tasks?filter=overdue" },
+        { label: systemText(locale, "Запланированные"), href: "/tasks?filter=scheduled" },
       ],
     };
   }
@@ -268,12 +283,12 @@ function fallbackAnswer(
     const loaded = [...team].sort((a, b) => (b.attention || 0) - (a.attention || 0));
     return {
       headline: loaded[0]
-        ? `Выше нагрузка у «${loaded[0].name}»: ${loaded[0].attention || 0} пунктов внимания, ${loaded[0].overdueTasks || 0} просроченных задач.`
-        : "По команде за выбранные условия данных нет.",
+        ? systemText(locale, "Выше нагрузка у «{p0}»: {p1} пунктов внимания, {p2} просроченных задач.", { p0: loaded[0].name || "", p1: loaded[0].attention || 0, p2: loaded[0].overdueTasks || 0 })
+        : systemText(locale, "По команде за выбранные условия данных нет."),
       bullets: loaded.slice(0, 6).map((row) => ({
-        text: `${row.name}: внимание ${row.attention || 0}, в работе ${row.inWork || 0}, просрочено ${row.overdueTasks || 0}`,
+        text: systemText(locale, "{p0}: внимание {p1}, в работе {p2}, просрочено {p3}", { p0: row.name || "", p1: row.attention || 0, p2: row.inWork || 0, p3: row.overdueTasks || 0 }),
       })),
-      links: [{ label: "Команда на Главной", href: "/today#team" }],
+      links: [{ label: systemText(locale, "Команда на Главной"), href: "/today#team" }],
     };
   }
 
@@ -282,10 +297,10 @@ function fallbackAnswer(
     const stages = (overview.pipeline?.stages || []) as Array<{ name?: string; count?: number }>;
     return {
       headline: drop
-        ? `Клиенты чаще всего теряются между «${drop.fromName}» и «${drop.toName}» (${drop.fromCount} → ${drop.toCount}).`
-        : "По открытой воронке сильного провала между стадиями нет.",
+        ? systemText(locale, "Клиенты чаще всего теряются между «{p0}» и «{p1}» ({p2} → {p3}).", { p0: drop.fromName, p1: drop.toName, p2: drop.fromCount, p3: drop.toCount })
+        : systemText(locale, "По открытой воронке сильного провала между стадиями нет."),
       bullets: stages.map((stage) => ({ text: `${stage.name}: ${stage.count ?? 0}` })),
-      links: [{ label: "Воронка сделок", href: "/today#funnel" }],
+      links: [{ label: systemText(locale, "Воронка сделок"), href: "/today#funnel" }],
     };
   }
 
@@ -295,14 +310,14 @@ function fallbackAnswer(
     inqDelta == null
       ? ""
       : inqDelta === 0
-        ? " Обращений столько же, сколько в прошлом периоде."
-        : ` Обращений ${inqDelta > 0 ? "на " + inqDelta + " больше" : "на " + Math.abs(inqDelta) + " меньше"}, чем в прошлом периоде.`;
+        ? systemText(locale, " Обращений столько же, сколько в прошлом периоде.")
+        : systemText(locale, inqDelta > 0 ? " Обращений на {count} больше, чем в прошлом периоде." : " Обращений на {count} меньше, чем в прошлом периоде.", { count: Math.abs(inqDelta) });
   return {
     headline: `${overview.brief}${extra}`,
     bullets: (overview.insights || []).map((item: any) => ({ text: item.text, href: safeHref(item.href) })),
     links: [
-      { label: "Результат периода", href: "/today#sit-result" },
-      { label: "Статистика", href: "/stats" },
+      { label: systemText(locale, "Результат периода"), href: "/today#sit-result" },
+      { label: systemText(locale, "Статистика"), href: "/stats" },
     ],
   };
 }
@@ -319,8 +334,9 @@ export async function askSituation(
     onlyImportant?: boolean;
   },
 ): Promise<SituationAskResult> {
+  const locale = auth.user.locale || "ru";
   const text = String(input.text || "").trim();
-  if (text.length < 2) throw new ApiError(422, "invalid", "Напишите вопрос");
+  if (text.length < 2) throw new ApiError(422, "invalid", systemText(locale, "Напишите вопрос"));
 
   const classified = classifySituationQuestion(text);
   if (classified.command) {
@@ -334,12 +350,12 @@ export async function askSituation(
       period: input.period,
       suggestedPeriod: classified.suggestedPeriod,
       headline: document
-        ? "Это команда по документам сделки. Откройте раздел «Документы»."
-        : "Это команда на действие. Откройте постановку задачи — CRM подготовит черновик.",
+        ? systemText(locale, "Это команда по документам сделки. Откройте раздел «Документы».")
+        : systemText(locale, "Это команда на действие. Откройте постановку задачи — CRM подготовит черновик."),
       bullets: [],
       links: document
-        ? [{ label: "Открыть документы", href: `/documents?command=${encodeURIComponent(text)}` }]
-        : [{ label: "Поставить задачу", href: `/tasks?command=${encodeURIComponent(text)}` }],
+        ? [{ label: systemText(locale, "Открыть документы"), href: `/documents?command=${encodeURIComponent(text)}` }]
+        : [{ label: systemText(locale, "Поставить задачу"), href: `/tasks?command=${encodeURIComponent(text)}` }],
     };
   }
 
@@ -355,7 +371,7 @@ export async function askSituation(
   const llm = process.env.NODE_ENV === "test" ? null : await answerSituationAskWithLlm(text, snapshot, {
     prisma,
     tenantId: auth.activeMembership?.tenantId,
-  });
+  }, locale);
   const base = llm
     ? {
         headline: llm.headline,
@@ -371,10 +387,10 @@ export async function askSituation(
           ? llm.intent
           : classified.intent) as SituationAskIntent,
       }
-    : { ...fallbackAnswer(classified.intent, overview), intent: classified.intent };
+    : { ...fallbackAnswer(classified.intent, overview, locale), intent: classified.intent };
 
   if (!base.bullets.length && !base.links.length) {
-    const fallback = fallbackAnswer(classified.intent, overview);
+    const fallback = fallbackAnswer(classified.intent, overview, locale);
     base.bullets = fallback.bullets;
     base.links = fallback.links;
   }

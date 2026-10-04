@@ -53,13 +53,17 @@ BEGIN
     counter_key := 'USERS'; delta := COALESCE((n->>'active')::boolean::int,0) - COALESCE((o->>'active')::boolean::int,0);
   ELSIF TG_TABLE_NAME = 'Integration' THEN
     counter_key := 'WHATSAPP_CONNECTIONS';
-    delta := COALESCE((n->>'type' = 'whatsapp_seller' AND n->>'status' <> 'disabled' AND n->>'connectionStatus' <> 'DISCONNECTED')::int,0)
-           - COALESCE((o->>'type' = 'whatsapp_seller' AND o->>'status' <> 'disabled' AND o->>'connectionStatus' <> 'DISCONNECTED')::int,0);
+    delta := COALESCE((n->>'type' IN ('whatsapp_seller','whatsapp_qr','whatsapp_cloud') AND n->>'status' <> 'disabled' AND n->>'connectionStatus' <> 'DISCONNECTED')::int,0)
+           - COALESCE((o->>'type' IN ('whatsapp_seller','whatsapp_qr','whatsapp_cloud') AND o->>'status' <> 'disabled' AND o->>'connectionStatus' <> 'DISCONNECTED')::int,0);
   ELSIF TG_TABLE_NAME = 'Inquiry' AND TG_OP = 'INSERT' THEN
     counter_key := 'MONTHLY_LEADS'; delta := 1;
   END IF;
   IF counter_key IS NOT NULL THEN
     next_value := GREATEST(0, COALESCE((u."countersJson"->>counter_key)::bigint,0) + delta);
+    IF TG_TABLE_NAME = 'Integration' THEN
+      SELECT count(*) INTO next_value FROM "Integration" WHERE "tenantId" = tid
+        AND type IN ('whatsapp_seller','whatsapp_qr','whatsapp_cloud') AND status <> 'disabled' AND "connectionStatus" <> 'DISCONNECTED';
+    END IF;
     cap := (u."limitsJson"->>counter_key)::numeric;
     IF delta > 0 AND cap >= 0 AND next_value > cap THEN
       RAISE EXCEPTION 'BASQAR_LIMIT:%', counter_key;

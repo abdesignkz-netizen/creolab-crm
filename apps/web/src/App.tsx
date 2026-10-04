@@ -1,3 +1,4 @@
+import { uiText, useUiText, localizeUiOptions, uiMessage, uiNotificationBody } from "./lib/uiText";
 import { lazy, Suspense, useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { api, clearTenant, setTenant } from "./lib/api";
@@ -407,8 +408,8 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
         const items = Array.isArray(data) ? data : data.items || [];
         return items.map((item) => ({
           id: item.id,
-          title: item.title,
-          body: item.body,
+          title: uiMessage(item.title, locale),
+          body: uiNotificationBody(item.type, item.body, locale),
           type: item.type,
           priority: item.priority,
           href: item.href || "/today",
@@ -423,7 +424,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
       onNavigate: (url) => navigate(url),
     });
     return stop;
-  }, [tenantId, navigate]);
+  }, [tenantId, navigate, locale]);
 
   useEffect(() => {
     if (!moreOpen) return;
@@ -1073,9 +1074,10 @@ function Today() {
 }
 
 function SimpleList({ title, load, render }: { title: string; load: () => Promise<any>; render: (item: any) => ReactNode }) {
+  const uiText = useUiText();
   const [state] = useQuery(load);
   if (state.status !== "ready" || !state.data) {
-    return <StateView state={state} onRetry={() => location.reload()} empty="Пока пусто" />;
+    return <StateView state={state} onRetry={() => location.reload()} empty={uiText("Пока пусто")} />;
   }
   return (
     <section>
@@ -1086,6 +1088,7 @@ function SimpleList({ title, load, render }: { title: string; load: () => Promis
 }
 
 export function App() {
+  const uiText = useUiText();
   const location = useLocation();
   const publicSigningPage = /^\/(sign|verify)\/(?:avr\/)?[^/]+\/?$/.test(location.pathname);
   const [me, setMe] = useState<any>(null);
@@ -1120,19 +1123,19 @@ export function App() {
           .body?.details;
         setTenantBlock({
           code,
-          message: error instanceof Error ? error.message : "Нет доступа к выбранной компании",
+          message: error instanceof Error ? error.message : uiText("Нет доступа к выбранной компании"),
           memberships: details?.memberships || [],
         });
         setBoot("tenant-blocked");
       } else {
-        setBootError("Не удалось связаться с CRM. Проверьте соединение и повторите загрузку.");
+        setBootError(uiText("Не удалось связаться с CRM. Проверьте соединение и повторите загрузку."));
         setBoot("error");
       }
     });
     return () => { cancelled = true; };
   }, [bootRevision, publicSigningPage]);
   if (boot === "loading") return <div className="state">{t(getPublicLocale(), "common.loading")}</div>;
-  if (boot === "error") return <div className="state"><p>{bootError}</p><button className="btn" onClick={() => setBootRevision(value => value + 1)}>Повторить</button></div>;
+  if (boot === "error") return <div className="state"><p>{bootError}</p><button className="btn" onClick={() => setBootRevision(value => value + 1)}>{uiText("Повторить")}</button></div>;
   if (boot === "tenant-blocked" && tenantBlock) {
     return (
       <div className="login">
@@ -1141,11 +1144,11 @@ export function App() {
             <BrandLogo variant="login" />
           </div>
           <div className="panel">
-            <h2>Компания недоступна</h2>
+            <h2>{uiText("Компания недоступна")}</h2>
             <p className="error">{tenantBlock.message}</p>
             {tenantBlock.memberships.length ? (
               <>
-                <p className="muted">Выберите доступную организацию. Автоматического перехода на другую компанию нет.</p>
+                <p className="muted">{uiText("Выберите доступную организацию. Автоматического перехода на другую компанию нет.")}</p>
                 <div className="tenant-choice-list">
                   {tenantBlock.memberships.map((item) => (
                     <button
@@ -1163,10 +1166,10 @@ export function App() {
                 </div>
               </>
             ) : (
-              <p className="muted">Других доступных компаний нет. Обратитесь к администратору.</p>
+              <p className="muted">{uiText("Других доступных компаний нет. Обратитесь к администратору.")}</p>
             )}
             <p className="muted login-alt">
-              <Link to="/login" onClick={() => localStorage.removeItem("crm_tenant")}>Выйти на экран входа</Link>
+              <Link to="/login" onClick={() => localStorage.removeItem("crm_tenant")}>{uiText("Выйти на экран входа")}</Link>
             </p>
           </div>
         </div>
@@ -1199,17 +1202,17 @@ export function App() {
       <Route
         path="/invite/:token"
         element={
-          <Suspense fallback={<div className="state">Загрузка…</div>}>
+          <Suspense fallback={<div className="state">{uiText("Загрузка…")}</div>}>
             <InvitePage />
           </Suspense>
         }
       />
-      <Route path="/sign/avr/:token" element={<Suspense fallback={<div className="state">Загрузка…</div>}><SignPage avr /></Suspense>} />
-      <Route path="/verify/avr/:verificationId" element={<Suspense fallback={<div className="state">Загрузка…</div>}><VerifyPage avr /></Suspense>} />
+      <Route path="/sign/avr/:token" element={<Suspense fallback={<div className="state">{uiText("Загрузка…")}</div>}><SignPage avr /></Suspense>} />
+      <Route path="/verify/avr/:verificationId" element={<Suspense fallback={<div className="state">{uiText("Загрузка…")}</div>}><VerifyPage avr /></Suspense>} />
       <Route
         path="/sign/:token"
         element={
-          <Suspense fallback={<div className="state">Загрузка…</div>}>
+          <Suspense fallback={<div className="state">{uiText("Загрузка…")}</div>}>
             <SignPage />
           </Suspense>
         }
@@ -1217,7 +1220,7 @@ export function App() {
       <Route
         path="/verify/:verificationId"
         element={
-          <Suspense fallback={<div className="state">Загрузка…</div>}>
+          <Suspense fallback={<div className="state">{uiText("Загрузка…")}</div>}>
             <VerifyPage />
           </Suspense>
         }
@@ -1230,7 +1233,7 @@ export function App() {
           ) : (
             <SessionContext.Provider value={{ me, caps: me?.capabilities || emptyCaps }}>
             <Shell me={me}>
-              <Suspense fallback={<div className="state" role="status">Загрузка раздела…</div>}>
+              <Suspense fallback={<div className="state" role="status">{uiText("Загрузка раздела…")}</div>}>
               <Routes>
                 <Route path="/today" element={!me?.activeTenant && me?.user?.platformAdmin ? <Navigate to="/admin" replace /> : <Today />} />
                 <Route path="/billing" element={<BillingPage />} />

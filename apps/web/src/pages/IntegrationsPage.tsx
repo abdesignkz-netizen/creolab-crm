@@ -1,3 +1,5 @@
+import { WhatsAppConnectionsPanel } from "./WhatsAppConnectionsPanel";
+import { uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale } from "../lib/uiText";
 import { useSession } from "../lib/session";
 import { TikTokConnectionsPanel } from "./TikTokConnectionsPanel";
 import { MetaConnectionsPanel } from "./MetaConnectionsPanel";
@@ -12,17 +14,18 @@ import { IntegrationHelp } from "../components/IntegrationHelp";
 type ConnectMethod = "html" | "existing" | "js" | "tilda";
 
 function whatsappStatusNote(wa: any) {
-  if (!wa?.configured) return "Укажите Instance ID и API Token из личного кабинета Green API.";
+  if (!wa?.configured) return uiText("Укажите Instance ID и API Token из личного кабинета Green API.");
   if (wa.reachable) {
     if (typeof wa.leadCountOnBot === "number") {
-      return `На WhatsApp ${wa.leadCountOnBot} переписок · в CRM ${wa.conversationCount ?? 0} диалогов.`;
+      return uiText("На WhatsApp {p0} переписок · в CRM {p1} диалогов.", {p0: wa.leadCountOnBot, p1: wa.conversationCount ?? 0});
     }
-    return "WhatsApp подключён.";
+    return uiText("WhatsApp подключён.");
   }
-  return "WhatsApp не отвечает. Проверьте Instance ID и API Token или обратитесь в поддержку.";
+  return uiText("WhatsApp не отвечает. Проверьте Instance ID и API Token или обратитесь в поддержку.");
 }
 
 export function IntegrationsPage() {
+  const uiText = useUiText();
   const { me } = useSession();
   const aiManagerAllowed = Boolean(me?.billing?.entitlements?.AI_MANAGER);
   const aiManagerTrial = aiManagerAllowed && me?.billing?.planCode === "BASQAR_FREE";
@@ -44,7 +47,7 @@ export function IntegrationsPage() {
       setCatalog(c);
       setSetup(s);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Ошибка загрузки");
+      setError(err instanceof Error ? err.message : uiText("Ошибка загрузки"));
     }
   }
 
@@ -52,14 +55,13 @@ export function IntegrationsPage() {
     void load();
   }, []);
 
-  if (!catalog && !setup && !error) return <div className="state">Загрузка…</div>;
+  if (!catalog && !setup && !error) return <div className="state">{uiText("Загрузка…")}</div>;
   if (!catalog && !setup) {
     return (
       <section>
         <p className="error">{error}</p>
         <button className="btn" onClick={() => void load()}>
-          Повторить
-        </button>
+          {uiText("Повторить")}</button>
       </section>
     );
   }
@@ -78,26 +80,26 @@ export function IntegrationsPage() {
     <section className="integrations-page">
       <div className="page-head">
         <div>
-          <h2>Интеграции</h2>
-          <p className="muted">Каналы общения, источники заявок, календарь и кабинет ИС ЭСФ.</p>
-          <p className="muted">Подключение каналов доступно после активации тарифа. Сейчас можно изучить интерфейс.</p>
+          <h2>{uiText("Интеграции")}</h2>
+          <p className="muted">{uiText("Каналы общения, источники заявок, календарь и кабинет ИС ЭСФ.")}</p>
+          <p className="muted">{uiText("Подключение каналов доступно после активации тарифа. Сейчас можно изучить интерфейс.")}</p>
         </div>
       </div>
       {error ? <p className="error">{error}</p> : null}
       {note ? <p className="ok">{note}</p> : null}
 
-      <h3 className="integ-section-title">Приём заявок и обращений</h3>
+      <h3 className="integ-section-title">{uiText("Приём заявок и обращений")}</h3>
       <div className="integ-grid">
         {(leadCards).map((card: any) => (
           <div className="panel integ-card" key={card.catalogType}>
             <div className="integ-card-head">
-              <b>{card.title}</b>
-              <span className={statusBadgeClass(card.healthLabel)}>{card.healthLabel}</span>
+              <b>{uiMessage(card.title)}</b>
+              <span className={statusBadgeClass(uiMessage(card.healthLabel))}>{uiMessage(card.healthLabel)}</span>
             </div>
             {card.connected ? (
               <>
                 <p className="muted">
-                  {card.inquiryCount != null ? `${card.inquiryCount} заявок` : null}
+                  {card.inquiryCount != null ? uiText("{p0} заявок", {p0: card.inquiryCount}) : null}
                 </p>
                 {card.integrationId ? (
                   <button
@@ -106,18 +108,17 @@ export function IntegrationsPage() {
                     onClick={async () => {
                       try {
                         const result = await api.integrationHealthCheck(card.integrationId) as { healthLabel: string };
-                        setNote(`Проверка «${card.title}»: ${result.healthLabel}`);
+                        setNote(uiText("Проверка «{p0}»: {p1}", {p0: uiMessage(card.title), p1: uiMessage(result.healthLabel)}));
                       } catch (err) {
-                        setError(err instanceof Error ? err.message : "Проверка не выполнена");
+                        setError(err instanceof Error ? err.message : uiText("Проверка не выполнена"));
                       }
                     }}
                   >
-                    Проверить подключение
-                  </button>
+                    {uiText("Проверить подключение")}</button>
                 ) : null}
               </>
             ) : (
-              <p className="muted">{card.note || "Не подключено"}</p>
+              <p className="muted">{uiMessage(card.note) || uiText("Не подключено")}</p>
             )}
             <IntegrationHelp kind={card.catalogType === "WEBSITE_FORM" ? "website_form" : card.catalogType === "WEBHOOK_API" ? "webhook_api" : card.catalogType === "GOOGLE_FORMS" ? "google_forms" : card.catalogType === "META_LEAD_FORMS" ? "meta_leads" : card.catalogType === "TIKTOK_LEADS" ? "tiktok" : "website_form"} />
           </div>
@@ -126,16 +127,16 @@ export function IntegrationsPage() {
 
       {setup?.form?.connected && submitUrl ? (
         <div className="panel">
-          <h3>Форма сайта — подключение</h3>
+          <h3>{uiText("Форма сайта — подключение")}</h3>
           <IntegrationHelp kind="website_form" />
-          <p className="muted integration-endpoint">Адрес для заявок: {submitUrl}</p>
+          <p className="muted integration-endpoint">{uiText("Адрес для заявок:")}{" "}{submitUrl}</p>
           <div className="actions" style={{ marginBottom: 12 }}>
             {(
               [
-                ["html", "Готовая HTML-форма"],
-                ["existing", "Существующая форма"],
+                ["html", uiText("Готовая HTML-форма")],
+                ["existing", uiText("Существующая форма")],
                 ["js", "JavaScript / React"],
-                ["tilda", "Tilda / конструктор"],
+                ["tilda", uiText("Tilda / конструктор")],
               ] as Array<[ConnectMethod, string]>
             ).map(([key, label]) => (
               <button
@@ -150,57 +151,32 @@ export function IntegrationsPage() {
           </div>
           {formMethod === "html" ? (
             <>
-              <p className="muted">Готовый HTML. Дополнительных ключей не нужно.</p>
-              <pre className="code">{`<form method="POST" action="${submitUrl}">
-  <input name="name" required />
-  <input name="phone" required />
-  <input name="company" />
-  <textarea name="message"></textarea>
-  <input name="utm_source" type="hidden" />
-  <input name="pageUrl" type="hidden" />
-  <input name="website" style="display:none" tabindex="-1" autocomplete="off" />
-  <button type="submit">Отправить</button>
-</form>`}</pre>
+              <p className="muted">{uiText("Готовый HTML. Дополнительных ключей не нужно.")}</p>
+              <pre className="code">{uiText("<form method=\"POST\" action=\"{p0}\">\n  <input name=\"name\" required />\n  <input name=\"phone\" required />\n  <input name=\"company\" />\n  <textarea name=\"message\"></textarea>\n  <input name=\"utm_source\" type=\"hidden\" />\n  <input name=\"pageUrl\" type=\"hidden\" />\n  <input name=\"website\" style=\"display:none\" tabindex=\"-1\" autocomplete=\"off\" />\n  <button type=\"submit\">Отправить</button>\n</form>", {p0: submitUrl})}</pre>
             </>
           ) : null}
           {formMethod === "js" ? (
             <>
-              <p className="muted">Отправка заявки из кода сайта.</p>
-              <pre className="code">{`await fetch("${submitUrl}", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-    "X-Submission-Id": crypto.randomUUID(),
-  },
-  body: JSON.stringify({
-    name: "Имя",
-    phone: "+7701...",
-    message: "Текст",
-    pageUrl: location.href,
-    utm_source: new URLSearchParams(location.search).get("utm_source"),
-  }),
-});`}</pre>
+              <p className="muted">{uiText("Отправка заявки из кода сайта.")}</p>
+              <pre className="code">{uiText("await fetch(\"{p0}\", {\n  method: \"POST\",\n  headers: {\n    \"Content-Type\": \"application/json\",\n    \"X-Submission-Id\": crypto.randomUUID(),\n  },\n  body: JSON.stringify({\n    name: \"Имя\",\n    phone: \"+7701...\",\n    message: \"Текст\",\n    pageUrl: location.href,\n    utm_source: new URLSearchParams(location.search).get(\"utm_source\"),\n  }),\n});", {p0: submitUrl})}</pre>
             </>
           ) : null}
           {formMethod === "existing" ? (
             <p className="muted">
-              В action формы укажите адрес выше. Поля: name, phone, message, company. Скрытое поле website оставьте пустым — оно отсекает спам.
-            </p>
+              {uiText("В action формы укажите адрес выше. Поля: name, phone, message, company. Скрытое поле website оставьте пустым — оно отсекает спам.")}</p>
           ) : null}
           {formMethod === "tilda" ? (
             <p className="muted">
-              В Tilda: Настройки сайта → Формы → Webhook. Укажите адрес выше и поля name, phone, message.
-            </p>
+              {uiText("В Tilda: Настройки сайта → Формы → Webhook. Укажите адрес выше и поля name, phone, message.")}</p>
           ) : null}
           <p className="muted">
-            Режим заявок:{" "}
+            {uiText("Режим заявок:")}{" "}
             {formCard?.testMode || setup?.form?.testMode ? (
-              <b>тестовый</b>
+              <b>{uiText("тестовый")}</b>
             ) : (
-              <b>обычный</b>
+              <b>{uiText("обычный")}</b>
             )}
-            . Телефон обязателен.
-          </p>
+            {uiText(". Телефон обязателен.")}</p>
           {(formCard?.integrationId || setup?.form?.integrationId) && (formCard?.testMode || setup?.form?.testMode) ? (
             <button
               type="button"
@@ -209,15 +185,14 @@ export function IntegrationsPage() {
                 try {
                   const id = formCard?.integrationId || setup?.form?.integrationId;
                   const result = (await api.setIntegrationTestMode(id, false)) as any;
-                  setNote(result.note || "Заявки теперь обычные");
+                  setNote(result.note || uiText("Заявки теперь обычные"));
                   await load();
                 } catch (err) {
-                  setError(err instanceof Error ? err.message : "Не удалось сменить режим");
+                  setError(err instanceof Error ? err.message : uiText("Не удалось сменить режим"));
                 }
               }}
             >
-              Сделать заявки обычными
-            </button>
+              {uiText("Сделать заявки обычными")}</button>
           ) : null}
           {(formCard?.integrationId || setup?.form?.integrationId) && !(formCard?.testMode || setup?.form?.testMode) ? (
             <button
@@ -227,15 +202,14 @@ export function IntegrationsPage() {
                 try {
                   const id = formCard?.integrationId || setup?.form?.integrationId;
                   const result = (await api.setIntegrationTestMode(id, true)) as any;
-                  setNote(result.note || "Включён тестовый режим");
+                  setNote(result.note || uiText("Включён тестовый режим"));
                   await load();
                 } catch (err) {
-                  setError(err instanceof Error ? err.message : "Не удалось сменить режим");
+                  setError(err instanceof Error ? err.message : uiText("Не удалось сменить режим"));
                 }
               }}
             >
-              Включить тестовый режим
-            </button>
+              {uiText("Включить тестовый режим")}</button>
           ) : null}
         </div>
       ) : null}
@@ -244,63 +218,62 @@ export function IntegrationsPage() {
       <MetaConnectionsPanel onChange={() => void load()} />
       <TikTokConnectionsPanel onChange={() => void load()} />
       <div className="panel">
-        <h3>Telegram-бот компании</h3>
+        <h3>{uiText("Telegram-бот компании")}</h3>
         <IntegrationHelp kind="telegram_bot" />
-        <p className="muted">Клиенты пишут вашему боту, сотрудники отвечают в разделе «Диалоги». Сообщения не создают заявки автоматически.</p>
-        <p><span className="badge">{companyTelegram?.healthLabel || "Не подключено"}</span> {companyTelegram?.username ? `@${companyTelegram.username}` : ""}</p>
+        <p className="muted">{uiText("Клиенты пишут вашему боту, сотрудники отвечают в разделе «Диалоги». Сообщения не создают заявки автоматически.")}</p>
+        <p><span className="badge">{uiMessage(companyTelegram?.healthLabel) || uiText("Не подключено")}</span> {companyTelegram?.username ? `@${companyTelegram.username}` : ""}</p>
         <form onSubmit={async event => {
           event.preventDefault(); setSavingBot(true); setError(""); setNote("");
-          try { await api.connectCompanyTelegram(botToken); setBotToken(""); setNote("Telegram-бот подключён. Напишите ему из другого аккаунта для проверки."); await load(); }
-          catch (err) { setError(err instanceof Error ? err.message : "Не удалось подключить бота"); }
+          try { await api.connectCompanyTelegram(botToken); setBotToken(""); setNote(uiText("Telegram-бот подключён. Напишите ему из другого аккаунта для проверки.")); await load(); }
+          catch (err) { setError(err instanceof Error ? err.message : uiText("Не удалось подключить бота")); }
           finally { setSavingBot(false); }
         }}>
-          <label>Токен бота из BotFather<input type="password" autoComplete="new-password" value={botToken} onChange={event => setBotToken(event.target.value)} placeholder="Токен Telegram-бота" required disabled={savingBot} /></label>
-          <p className="muted">Создайте бота командой /newbot в @BotFather. Используйте отдельного бота, который не подключён к другой системе. Токен хранится зашифрованным.</p>
-          <button className="btn" type="submit" disabled={savingBot || !botToken.trim()}>{savingBot ? "Подключение…" : "Подключить или обновить бота"}</button>
+          <label>{uiText("Токен бота из BotFather")}<input type="password" autoComplete="new-password" value={botToken} onChange={event => setBotToken(event.target.value)} placeholder={uiText("Токен Telegram-бота")} required disabled={savingBot} /></label>
+          <p className="muted">{uiText("Создайте бота командой /newbot в @BotFather. Используйте отдельного бота, который не подключён к другой системе. Токен хранится зашифрованным.")}</p>
+          <button className="btn" type="submit" disabled={savingBot || !botToken.trim()}>{savingBot ? uiText("Подключение…") : uiText("Подключить или обновить бота")}</button>
         </form>
-        {(companyTelegram?.connections || []).map((bot: any) => <div className="panel" key={bot.integrationId}><p><b>{bot.username ? `@${bot.username}` : "Telegram"}</b> · {bot.healthLabel}</p><div className="actions">
+        {(companyTelegram?.connections || []).map((bot: any) => <div className="panel" key={bot.integrationId}><p><b>{bot.username ? `@${bot.username}` : "Telegram"}</b> · {uiMessage(bot.healthLabel)}</p><div className="actions">
           <button type="button" className="btn secondary" disabled={savingBot} onClick={async () => {
             setSavingBot(true); setError("");
-            try { const result = await api.checkCompanyTelegram(bot.integrationId) as { healthLabel: string }; setNote(result.healthLabel); await load(); }
-            catch (err) { setError(err instanceof Error ? err.message : "Проверка не выполнена"); }
+            try { const result = await api.checkCompanyTelegram(bot.integrationId) as { healthLabel: string }; setNote(uiMessage(result.healthLabel)); await load(); }
+            catch (err) { setError(err instanceof Error ? err.message : uiText("Проверка не выполнена")); }
             finally { setSavingBot(false); }
-          }}>Проверить подключение</button>
+          }}>{uiText("Проверить подключение")}</button>
           {bot.status !== "disabled" ? <button type="button" className="btn secondary" disabled={savingBot} onClick={async () => {
             setSavingBot(true); setError("");
-            try { await api.disconnectCompanyTelegram(bot.integrationId); setNote("Telegram-бот отключён. История диалогов сохранена."); await load(); }
-            catch (err) { setError(err instanceof Error ? err.message : "Не удалось отключить бота"); }
+            try { await api.disconnectCompanyTelegram(bot.integrationId); setNote(uiText("Telegram-бот отключён. История диалогов сохранена.")); await load(); }
+            catch (err) { setError(err instanceof Error ? err.message : uiText("Не удалось отключить бота")); }
             finally { setSavingBot(false); }
-          }}>Отключить бота</button> : null}
+          }}>{uiText("Отключить бота")}</button> : null}
         </div></div>)}
       </div>
 
-      <div className="panel">
-        <h3>WhatsApp</h3>
+      <WhatsAppConnectionsPanel>
+      <div>
+        <h4>Green API</h4>
         <IntegrationHelp kind="whatsapp" />
         {setup?.whatsapp?.warning ? <div className="banner warn">{setup.whatsapp.warning}</div> : null}
         <p className="muted">{whatsappStatusNote(setup?.whatsapp)}</p>
-        <p className="muted">{aiManagerAllowed ? "Как бот отвечает клиентам, задаёт администратор сервиса: промпт и база знаний компании." : "WhatsApp доступен для переписки с клиентами. ИИ-менеджер не включён в ваш тариф."}</p>
+        <p className="muted">{aiManagerAllowed ? uiText("Как бот отвечает клиентам, задаёт администратор сервиса: промпт и база знаний компании.") : uiText("WhatsApp доступен для переписки с клиентами. ИИ-менеджер не включён в ваш тариф.")}</p>
         <p className="integ-status-line">
-          Статус подключения
-          <span className={statusBadgeClass(setup?.whatsapp?.configured ? "Подключён" : "Не подключён")}>
-            {setup?.whatsapp?.reachable ? "Работает" : setup?.whatsapp?.configured ? "Ошибка проверки" : "Не подключён"}
+          {uiText("Статус подключения")}<span className={statusBadgeClass(setup?.whatsapp?.configured ? "Подключён" : "Не подключён")}>
+            {setup?.whatsapp?.reachable ? uiText("Работает") : setup?.whatsapp?.configured ? uiText("Ошибка проверки") : uiText("Не подключён")}
           </span>
         </p>
         <p className="integ-status-line">
-          AI-менеджер
-          {!aiManagerAllowed ? <span className="badge">Не входит в тариф</span> : aiManagerTrial ? <span className="badge">Пробный режим · 100 AI-кредитов один раз</span> : setup?.whatsapp?.reachable ? (
-            <span className="badge ok">Активен</span>
+          {uiText("AI-менеджер")}{!aiManagerAllowed ? <span className="badge">{uiText("Не входит в тариф")}</span> : aiManagerTrial ? <span className="badge">{uiText("Пробный режим · 100 AI-кредитов один раз")}</span> : setup?.whatsapp?.reachable ? (
+            <span className="badge ok">{uiText("Активен")}</span>
           ) : setup?.whatsapp?.configured ? (
-            <span className="badge warn">Не отвечает</span>
+            <span className="badge warn">{uiText("Не отвечает")}</span>
           ) : (
-            <span className="badge">Ожидает подключение</span>
+            <span className="badge">{uiText("Ожидает подключение")}</span>
           )}
         </p>
         {whatsappSender ? <p>WhatsApp · {whatsappSender}</p> : null}
-        <p className="muted">Диалоги · {setup?.whatsapp?.conversationCount ?? 0}</p>
+        <p className="muted">{uiText("Диалоги ·")}{" "}{setup?.whatsapp?.conversationCount ?? 0}</p>
         <p className="muted">
-          Последняя синхронизация ·{" "}
-          {setup?.whatsapp?.lastSyncAt ? new Date(setup.whatsapp.lastSyncAt).toLocaleString("ru-RU") : "ещё не было"}
+          {uiText("Последняя синхронизация ·")}{" "}
+          {setup?.whatsapp?.lastSyncAt ? new Date(setup.whatsapp.lastSyncAt).toLocaleString(uiFormatLocale()) : uiText("ещё не было")}
         </p>
         {editingWhatsApp ? (
           <form
@@ -318,14 +291,14 @@ export function IntegrationsPage() {
                 })) as any;
                 setNote(
                   result?.reachable
-                    ? "WhatsApp подключён."
-                    : "Сохранено. Подключение пока не подтверждено. Проверьте Instance ID и API Token.",
+                    ? uiText("WhatsApp подключён.")
+                    : uiText("Сохранено. Подключение пока не подтверждено. Проверьте Instance ID и API Token."),
                 );
                 setEditingWhatsApp(false);
-                notifySaved("WhatsApp подключён");
+                notifySaved(uiText("WhatsApp подключён"));
                 await load();
               } catch (err) {
-                setError(err instanceof Error ? err.message : "Не удалось сохранить");
+                setError(err instanceof Error ? err.message : uiText("Не удалось сохранить"));
               } finally {
                 setSavingWhatsApp(false);
               }
@@ -337,11 +310,11 @@ export function IntegrationsPage() {
             </label>
             <label>
               API Token
-              <input name="apiToken" type="password" autoComplete="off" placeholder={setup?.whatsapp?.configured ? "оставьте пустым, чтобы не менять" : ""} required={!setup?.whatsapp?.configured} />
+              <input name="apiToken" type="password" autoComplete="off" placeholder={setup?.whatsapp?.configured ? uiText("оставьте пустым, чтобы не менять") : ""} required={!setup?.whatsapp?.configured} />
             </label>
             <div className="actions">
-              <button className="btn" disabled={savingWhatsApp}>{savingWhatsApp ? "Подключаем…" : "Подключить"}</button>
-              <button type="button" className="btn secondary" onClick={() => setEditingWhatsApp(false)}>Отмена</button>
+              <button className="btn" disabled={savingWhatsApp}>{savingWhatsApp ? uiText("Подключаем…") : uiText("Подключить")}</button>
+              <button type="button" className="btn secondary" onClick={() => setEditingWhatsApp(false)}>{uiText("Отмена")}</button>
             </div>
           </form>
         ) : null}
@@ -352,16 +325,15 @@ export function IntegrationsPage() {
             onClick={async () => {
               try {
                 await load();
-                setNote("Проверка подключения выполнена.");
+                setNote(uiText("Проверка подключения выполнена."));
               } catch (err) {
-                setError(err instanceof Error ? err.message : "Проверка не выполнена");
+                setError(err instanceof Error ? err.message : uiText("Проверка не выполнена"));
               }
             }}
           >
-            Проверить подключение
-          </button>
+            {uiText("Проверить подключение")}</button>
           <button type="button" className="btn secondary" onClick={() => setEditingWhatsApp(true)}>
-            {setup?.whatsapp?.configured ? "Переподключить" : "Подключить"}
+            {setup?.whatsapp?.configured ? uiText("Переподключить") : uiText("Подключить")}
           </button>
           {setup?.whatsapp?.configured ? (
             <button
@@ -370,16 +342,15 @@ export function IntegrationsPage() {
               onClick={async () => {
                 try {
                   const result = (await api.disconnectWhatsApp()) as any;
-                  setNote(result.note || "WhatsApp отключён.");
-                  notifySaved("WhatsApp отключён");
+                  setNote(result.note || uiText("WhatsApp отключён."));
+                  notifySaved(uiText("WhatsApp отключён"));
                   await load();
                 } catch (err) {
-                  setError(err instanceof Error ? err.message : "Не удалось отключить");
+                  setError(err instanceof Error ? err.message : uiText("Не удалось отключить"));
                 }
               }}
             >
-              Отключить
-            </button>
+              {uiText("Отключить")}</button>
           ) : null}
           <button
             type="button"
@@ -389,41 +360,41 @@ export function IntegrationsPage() {
                 const result = (await api.syncWhatsApp()) as any;
                 setNote(
                   result.note ||
-                    `Синхронизация: новых ${result.imported}, обновлено ${result.updated}.`,
+                    uiText("Синхронизация: новых {p0}, обновлено {p1}.", {p0: result.imported, p1: result.updated}),
                 );
               } catch (err) {
-                setError(err instanceof Error ? err.message : "Синхронизация не выполнена");
+                setError(err instanceof Error ? err.message : uiText("Синхронизация не выполнена"));
               }
             }}
           >
-            Забрать диалоги из бота
-          </button>
+            {uiText("Забрать диалоги из бота")}</button>
         </div>
       </div>
 
-      <h3 className="integ-section-title">Документы и ИС ЭСФ</h3>
+      </WhatsAppConnectionsPanel>
+
+      <h3 className="integ-section-title">{uiText("Документы и ИС ЭСФ")}</h3>
       <div className="integ-grid">
         <div className="panel integ-card">
           <div className="integ-card-head">
-            <b>ИС ЭСФ</b>
+            <b>{uiText("ИС ЭСФ")}</b>
             <span className="badge warn">NCALayer</span>
           </div>
-          <p className="muted">Подключение кабинета через ЭЦП на этом компьютере. PIN ключа на сервер не передаётся.</p>
+          <p className="muted">{uiText("Подключение кабинета через ЭЦП на этом компьютере. PIN ключа на сервер не передаётся.")}</p>
           <Link className="btn" to="/integrations/esf">
-            Открыть ИС ЭСФ
-          </Link>
+            {uiText("Открыть ИС ЭСФ")}</Link>
           <IntegrationHelp kind="esf" />
         </div>
       </div>
 
       {
         <>
-          <h3 className="integ-section-title">Уведомления</h3>
+          <h3 className="integ-section-title">{uiText("Уведомления")}</h3>
           <div className="panel">
-            <b>Telegram сотрудника</b>
+            <b>{uiText("Telegram сотрудника")}</b>
             <IntegrationHelp kind="employee_telegram" />
-            <p className="muted">Личные уведомления. Это не заявки с сайта.</p>
-            {!telegramReady ? <p className="muted">Администратору сервиса нужно настроить Telegram-бота для уведомлений.</p> : null}
+            <p className="muted">{uiText("Личные уведомления. Это не заявки с сайта.")}</p>
+            {!telegramReady ? <p className="muted">{uiText("Администратору сервиса нужно настроить Telegram-бота для уведомлений.")}</p> : null}
             <button
               className="btn"
               disabled={!telegramReady}
@@ -432,21 +403,19 @@ export function IntegrationsPage() {
                 setTelegram(result);
               }}
             >
-              Подключить Telegram
-            </button>
+              {uiText("Подключить Telegram")}</button>
             {telegram ? (
               <p>
                 {telegram.deepLink ? (
                   <a href={telegram.deepLink} target="_blank" rel="noreferrer">
-                    Открыть бота
-                  </a>
+                    {uiText("Открыть бота")}</a>
                 ) : (
-                  "Откройте бота и отправьте /start."
+                  uiText("Откройте бота и отправьте /start.")
                 )}
               </p>
             ) : null}
             <p className="muted" style={{ marginTop: 8 }}>
-              Также: <Link to="/settings">Настройки</Link>
+              {uiText("Также:")}{" "}<Link to="/settings">{uiText("Настройки")}</Link>
             </p>
           </div>
         </>

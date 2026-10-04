@@ -1,3 +1,4 @@
+import { uiMessage, uiText, useUiText, localizeUiOptions, uiFormatLocale } from "../lib/uiText";
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
@@ -13,7 +14,7 @@ import { EsfMeasureUnitSelect } from "../components/EsfMeasureUnitSelect";
 import { PdfDocumentViewer } from "../components/PdfDocumentViewer";
 import { notifySaved } from "../components/SaveNotice";
 
-const money = (v: unknown) => Number(v || 0).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const money = (v: unknown) => Number(v || 0).toLocaleString(uiFormatLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const empty: InvoiceEditorInput = {
   documentDate: new Date().toISOString().slice(0, 10),
   paymentPercent: 100,
@@ -36,6 +37,7 @@ const partyFields = [
 const labels: Record<string, string> = { DRAFT: "Черновик", ISSUED: "Выставлен", PARTIALLY_PAID: "Частично оплачен", PAID: "Оплачен", OVERDUE: "Просрочен", CANCELLED: "Отменён" };
 
 export function InvoiceEditorPage() {
+  const uiText = useUiText();
   const { id } = useParams();
   const [params] = useSearchParams();
   const navigate = useNavigate();
@@ -80,7 +82,7 @@ export function InvoiceEditorPage() {
         setPreviewUrl(objectUrl);
       })
       .catch((err: unknown) => {
-        if (live) setPreviewError(err instanceof Error ? err.message : "Не удалось открыть счёт");
+        if (live) setPreviewError(err instanceof Error ? err.message : uiText("Не удалось открыть счёт"));
       });
     return () => {
       live = false;
@@ -182,7 +184,7 @@ export function InvoiceEditorPage() {
       const created: any = await api.createInvoiceDealForCompany(companyId);
       await loadDeal(created.dealId);
     } catch (e: any) {
-      setError(e.message || "Не удалось создать счёт по компании");
+      setError(e.message || uiText("Не удалось создать счёт по компании"));
       setBusy(false);
     }
   }
@@ -198,11 +200,11 @@ export function InvoiceEditorPage() {
   function localCheck() {
     const result = invoiceEditorSchema.safeParse(form);
     if (result.success) return true;
-    setIssues(Object.fromEntries(result.error.issues.map((i) => [i.path.join("."), i.message])));
+    setIssues(Object.fromEntries(result.error.issues.map((i) => [i.path.join("."), uiMessage(i.message)])));
     return false;
   }
   async function save() {
-    if (!context || !localCheck()) throw new Error("Проверьте поля документа");
+    if (!context || !localCheck()) throw new Error(uiText("Проверьте поля документа"));
     if (immutable) return doc;
     const result: any = doc
       ? await api.updateInvoiceDraft(doc.id, { ...form, updatedAt: doc.updatedAt })
@@ -222,7 +224,7 @@ export function InvoiceEditorPage() {
     try {
       await fn();
     } catch (e: any) {
-      setError(e.message || "Не удалось выполнить действие");
+      setError(e.message || uiText("Не удалось выполнить действие"));
       const fields = documentErrorFields(e, editingBuyer);
       if (Object.keys(fields).length) setIssues(fields);
     } finally {
@@ -238,7 +240,7 @@ export function InvoiceEditorPage() {
       setDoc(r.invoice);
       setDirty(false);
       setPreview(null);
-      notifySaved("Счёт выставлен");
+      notifySaved(uiText("Счёт выставлен"));
       window.dispatchEvent(new Event("creolab:attention-changed"));
       navigate("/documents?kind=INVOICE");
     } catch (e) {
@@ -261,7 +263,7 @@ export function InvoiceEditorPage() {
     setContext(updated);
     setEditingBuyer(false);
     setIssues({});
-    notifySaved("Реквизиты сохранены в карточке компании");
+    notifySaved(uiText("Реквизиты сохранены в карточке компании"));
   }
   const fieldError = (key: string) => (issues[key] ? <span className="error" role="alert">{issues[key]}</span> : null);
 
@@ -269,14 +271,14 @@ export function InvoiceEditorPage() {
     <section className="avr-editor">
       <div className="row">
         <div>
-          <Link to="/documents?kind=INVOICE">Счета</Link>
-          <h2>{doc ? `Счёт ${doc.number}` : "Создание счёта на оплату"}</h2>
+          <Link to="/documents?kind=INVOICE">{uiText("Счета")}</Link>
+          <h2>{doc ? uiText("Счёт {p0}", {p0: doc.number}) : uiText("Создание счёта на оплату")}</h2>
         </div>
-        <span className={`document-status status-${doc?.status || "DRAFT"}`}>{labels[doc?.status || "DRAFT"] || doc?.status}</span>
+        <span className={`document-status status-${doc?.status || "DRAFT"}`}>{localizeUiOptions(labels, uiText)[doc?.status || "DRAFT"] || doc?.status}</span>
       </div>
       {error || Object.keys(issues).length ? (
         <div ref={issueSummary} className="panel" role="alert">
-          <b>{Object.keys(issues).length ? "Нужно исправить:" : error}</b>
+          <b>{Object.keys(issues).length ? uiText("Нужно исправить:") : error}</b>
           {error && Object.keys(issues).length && !/^Проверьте поля/.test(error) ? <p>{error}</p> : null}
           <ul>
             {Object.entries(issues).map(([key, message]) => (
@@ -290,46 +292,41 @@ export function InvoiceEditorPage() {
       {!context ? (
         id || params.get("dealId") ? (
           <div className="panel">
-            <p>{error || "Загружаем счёт…"}</p>
+            <p>{error || uiText("Загружаем счёт…")}</p>
           </div>
         ) : (
           <div className="panel">
-            <h3>Основание счёта</h3>
-            <p className="muted">Выберите сделку или компанию. Если сделки ещё нет, она создастся вместе со счётом.</p>
+            <h3>{uiText("Основание счёта")}</h3>
+            <p className="muted">{uiText("Выберите сделку или компанию. Если сделки ещё нет, она создастся вместе со счётом.")}</p>
             <div className="actions">
               <button className={source === "deals" ? "btn" : "btn secondary"} onClick={() => { setSource("deals"); setQ(""); }}>
-                Сделки
-              </button>
+                {uiText("Сделки")}</button>
               <button className={source === "companies" ? "btn" : "btn secondary"} onClick={() => { setSource("companies"); setQ(""); }}>
-                Компании
-              </button>
+                {uiText("Компании")}</button>
             </div>
             {source === "deals" ? (
               <>
                 <div className="actions">
                   <button className={filter === "all" ? "btn" : "btn secondary"} onClick={() => setFilter("all")}>
-                    Все сделки
-                  </button>
+                    {uiText("Все сделки")}</button>
                   <button className={filter === "ready" ? "btn" : "btn secondary"} onClick={() => setFilter("ready")}>
-                    Готовы к выставлению
-                  </button>
+                    {uiText("Готовы к выставлению")}</button>
                 </div>
                 <label>
-                  Найти сделку
-                  <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Название или компания" />
+                  {uiText("Найти сделку")}<input value={q} onChange={(e) => setQ(e.target.value)} placeholder={uiText("Название или компания")} />
                 </label>
-                {!deals.length ? <p>Подходящих сделок нет.</p> : null}
+                {!deals.length ? <p>{uiText("Подходящих сделок нет.")}</p> : null}
                 {deals.map((d) => (
                   <div className="card" key={d.id}>
                     <b>
                       {d.title} — {d.companyName || d.contactName}
                     </b>
                     <p>
-                      Сделка #{d.number} · {money(d.amount)} ₸ · {d.stage} · {d.responsible || "Ответственный не назначен"}
+                      {uiText("Сделка #")}{d.number} · {money(d.amount)} ₸ · {d.stage} · {d.responsible || uiText("Ответственный не назначен")}
                     </p>
-                    <p className={d.ready ? "ok" : "pdf-import-warnings"}>{d.ready ? "Можно выставить счёт" : d.reasons.join("; ")}</p>
+                    <p className={d.ready ? "ok" : "pdf-import-warnings"}>{d.ready ? uiText("Можно выставить счёт") : d.reasons.map((reason: string) => uiMessage(reason)).join("; ")}</p>
                     <button className="btn secondary" disabled={busy} onClick={() => void loadDeal(d.id)}>
-                      {d.invoiceId ? "Открыть счёт" : "Выбрать"}
+                      {d.invoiceId ? uiText("Открыть счёт") : uiText("Выбрать")}
                     </button>
                   </div>
                 ))}
@@ -337,23 +334,21 @@ export function InvoiceEditorPage() {
             ) : (
               <>
                 <label>
-                  Найти компанию
-                  <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Название или БИН" />
+                  {uiText("Найти компанию")}<input value={q} onChange={(e) => setQ(e.target.value)} placeholder={uiText("Название или БИН")} />
                 </label>
-                {!companies.length ? <p>Подходящих компаний нет.</p> : null}
+                {!companies.length ? <p>{uiText("Подходящих компаний нет.")}</p> : null}
                 {companies.map((c) => (
                   <div className="card" key={c.id}>
                     <b>{c.name}</b>
                     <p>
-                      {c.bin ? `БИН / ИИН ${c.bin}` : "БИН не указан"}
+                      {c.bin ? uiText("БИН / ИИН {p0}", {p0: c.bin}) : uiText("БИН не указан")}
                       {c.city ? ` · ${c.city}` : ""}
                     </p>
                     <p className="muted">
-                      {c.openDealsCount ? `Открытых сделок: ${c.openDealsCount}` : "Открытых сделок нет — сделка создастся вместе со счётом"}
+                      {c.openDealsCount ? uiText("Открытых сделок: {p0}", {p0: c.openDealsCount}) : uiText("Открытых сделок нет — сделка создастся вместе со счётом")}
                     </p>
                     <button className="btn" disabled={busy} onClick={() => void pickCompany(c.id)}>
-                      Создать счёт
-                    </button>
+                      {uiText("Создать счёт")}</button>
                   </div>
                 ))}
               </>
@@ -364,7 +359,7 @@ export function InvoiceEditorPage() {
         <>
           <div className="panel">
             <div className="row">
-              <h3>Основание</h3>
+              <h3>{uiText("Основание")}</h3>
               {!doc ? (
                 <button
                   className="btn secondary"
@@ -375,15 +370,14 @@ export function InvoiceEditorPage() {
                     setDirty(false);
                   }}
                 >
-                  Выбрать другое основание
-                </button>
+                  {uiText("Выбрать другое основание")}</button>
               ) : null}
             </div>
             <Link to={`/deals/${context.deal.id}`}>{context.deal.title}</Link>
             <p>
-              Сделка #{context.deal.number} · {context.deal.contactName || "Контакт не указан"} · {context.deal.responsible || "Ответственный не назначен"}
+              {uiText("Сделка #")}{context.deal.number} · {context.deal.contactName || uiText("Контакт не указан")} · {context.deal.responsible || uiText("Ответственный не назначен")}
             </p>
-            <div className="invoice-preview-marks" role="radiogroup" aria-label="Договор">
+            <div className="invoice-preview-marks" role="radiogroup" aria-label={uiText("Договор")}>
               <label>
                 <input
                   type="radio"
@@ -398,8 +392,7 @@ export function InvoiceEditorPage() {
                     })
                   }
                 />{" "}
-                По договору
-              </label>
+                {uiText("По договору")}</label>
               <label>
                 <input
                   type="radio"
@@ -408,47 +401,41 @@ export function InvoiceEditorPage() {
                   checked={Boolean(form.withoutContract)}
                   onChange={() => edit({ withoutContract: true, contractNumber: "", contractDate: "" })}
                 />{" "}
-                Без договора
-              </label>
+                {uiText("Без договора")}</label>
             </div>
             {form.withoutContract ? (
-              <p className="muted">В печатной форме будет указано «без договора», без даты.</p>
+              <p className="muted">{uiText("В печатной форме будет указано «без договора», без даты.")}</p>
             ) : (
               <>
                 <label>
-                  Номер договора
-                  <input
+                  {uiText("Номер договора")}<input
                     maxLength={100}
                     disabled={busy || immutable}
                     aria-invalid={Boolean(issues.contractNumber)}
                     value={form.contractNumber || ""}
                     onChange={(e) => edit({ contractNumber: e.target.value })}
-                    placeholder="Например 19122025/01"
+                    placeholder={uiText("Например 19122025/01")}
                   />
                   {fieldError("contractNumber")}
                 </label>
                 <label>
-                  Дата договора
-                  <input type="date" disabled={busy || immutable} aria-invalid={Boolean(issues.contractDate)} value={form.contractDate || ""} onChange={(e) => edit({ contractDate: e.target.value })} />
+                  {uiText("Дата договора")}<input type="date" disabled={busy || immutable} aria-invalid={Boolean(issues.contractDate)} value={form.contractDate || ""} onChange={(e) => edit({ contractDate: e.target.value })} />
                   {fieldError("contractDate")}
                 </label>
-                {context.contract && context.contract.status !== "SIGNED" ? <p className="muted">Договор ещё не подписан. Номер в счёте можно изменить.</p> : null}
+                {context.contract && context.contract.status !== "SIGNED" ? <p className="muted">{uiText("Договор ещё не подписан. Номер в счёте можно изменить.")}</p> : null}
               </>
             )}
-            {doc?.importedPdf ? <p className="muted">Загруженный PDF сохраняется в исходном виде. Для изменения данных создайте новый документ.</p> : null}
+            {doc?.importedPdf ? <p className="muted">{uiText("Загруженный PDF сохраняется в исходном виде. Для изменения данных создайте новый документ.")}</p> : null}
             <label>
-              Номер счёта
-              <input disabled={busy || immutable} maxLength={40} aria-invalid={Boolean(issues.number)} value={form.number || ""} placeholder="Автоматически по настройкам нумерации" onChange={(e) => edit({ number: e.target.value })} />
+              {uiText("Номер счёта")}<input disabled={busy || immutable} maxLength={40} aria-invalid={Boolean(issues.number)} value={form.number || ""} placeholder={uiText("Автоматически по настройкам нумерации")} onChange={(e) => edit({ number: e.target.value })} />
               {fieldError("number")}
             </label>
             <label>
-              Дата счёта
-              <input type="date" disabled={busy || immutable} aria-invalid={Boolean(issues.documentDate)} value={form.documentDate} onChange={(e) => edit({ documentDate: e.target.value })} />
+              {uiText("Дата счёта")}<input type="date" disabled={busy || immutable} aria-invalid={Boolean(issues.documentDate)} value={form.documentDate} onChange={(e) => edit({ documentDate: e.target.value })} />
               {fieldError("documentDate")}
             </label>
             <label>
-              Доля счёта, %
-              <input
+              {uiText("Доля счёта, %")}<input
                 type="number"
                 min="10"
                 max="100"
@@ -461,31 +448,29 @@ export function InvoiceEditorPage() {
               {fieldError("paymentPercent")}
             </label>
             <label>
-              Назначение платежа
-              <select disabled={busy || immutable} value={form.paymentKind} onChange={(e) => edit({ paymentKind: e.target.value as InvoiceEditorInput["paymentKind"] })}>
-                <option value="FULL">Полный счёт</option>
-                <option value="PREPAYMENT">Предоплата</option>
-                <option value="BALANCE">Остаток</option>
+              {uiText("Назначение платежа")}<select disabled={busy || immutable} value={form.paymentKind} onChange={(e) => edit({ paymentKind: e.target.value as InvoiceEditorInput["paymentKind"] })}>
+                <option value="FULL">{uiText("Полный счёт")}</option>
+                <option value="PREPAYMENT">{uiText("Предоплата")}</option>
+                <option value="BALANCE">{uiText("Остаток")}</option>
               </select>
             </label>
-            <p className="muted">Укажите долю от 10 до 100% с шагом 10. Например, 30% предоплата или 70% остаток.</p>
+            <p className="muted">{uiText("Укажите долю от 10 до 100% с шагом 10. Например, 30% предоплата или 70% остаток.")}</p>
           </div>
           <div className="pdf-import-parties">
             <div className="panel">
-              <h3>Поставщик</h3>
-              {partyFields.map(([k, l]) => (
+              <h3>{uiText("Поставщик")}</h3>
+              {localizeUiOptions(partyFields, uiText).map(([k, l]) => (
                 <p key={k}>
-                  {l}: <b>{context.organization?.[k] || (k === "bin" ? context.organization?.iin : null) || "Не заполнено"}</b>
+                  {l}: <b>{context.organization?.[k] || (k === "bin" ? context.organization?.iin : null) || uiText("Не заполнено")}</b>
                   {fieldError(`organization.${k}`)}
                 </p>
               ))}
               <p>
-                КБе: <b>{context.organization?.kbe || "17"}</b> · КНП: <b>{context.organization?.knp || "859"}</b>
+                {uiText("КБе:")}{" "}<b>{context.organization?.kbe || "17"}</b> {" "}{uiText("· КНП:")}{" "}<b>{context.organization?.knp || "859"}</b>
               </p>
-              <p>НДС: {context.organization?.vatPayer === true ? "Плательщик НДС" : context.organization?.vatPayer === false ? "Без НДС" : "Не указан"}</p>
+              <p>{uiText("НДС:")}{" "}{context.organization?.vatPayer === true ? uiText("Плательщик НДС") : context.organization?.vatPayer === false ? uiText("Без НДС") : uiText("Не указан")}</p>
               <Link className="btn secondary" to="/settings#company-requisites" target="_blank">
-                Заполнить данные
-              </Link>
+                {uiText("Заполнить данные")}</Link>
               <button
                 className="btn secondary"
                 disabled={busy}
@@ -496,13 +481,12 @@ export function InvoiceEditorPage() {
                   })
                 }
               >
-                Обновить реквизиты
-              </button>
+                {uiText("Обновить реквизиты")}</button>
             </div>
             <div className="panel">
-              <h3>Покупатель</h3>
-              <p>Контактное лицо: {context.deal.contactName || "Не указано"}</p>
-              {partyFields.map(([k, l]) =>
+              <h3>{uiText("Покупатель")}</h3>
+              <p>{uiText("Контактное лицо:")}{" "}{context.deal.contactName || uiText("Не указано")}</p>
+              {localizeUiOptions(partyFields, uiText).map(([k, l]) =>
                 editingBuyer ? (
                   <label key={k}>
                     {l}
@@ -511,7 +495,7 @@ export function InvoiceEditorPage() {
                   </label>
                 ) : (
                   <p key={k}>
-                    {l}: <b>{context.company?.[k] || (k === "legalName" ? context.company?.name : k === "bin" ? context.company?.iin : null) || "Не заполнено"}</b>
+                    {l}: <b>{context.company?.[k] || (k === "legalName" ? context.company?.name : k === "bin" ? context.company?.iin : null) || uiText("Не заполнено")}</b>
                     {fieldError(`customer.${k}`)}
                   </p>
                 ),
@@ -519,56 +503,48 @@ export function InvoiceEditorPage() {
               {fieldError("customer.company")}
               {editingBuyer ? (
                 <button className="btn" disabled={busy} onClick={() => void action(saveBuyer)}>
-                  Сохранить в компании
-                </button>
+                  {uiText("Сохранить в компании")}</button>
               ) : (
                 <button
                   className="btn secondary"
                   disabled={busy || immutable}
                   onClick={() => {
-                    setBuyer(Object.fromEntries(partyFields.map(([k]) => [k, context.company?.[k] || (k === "legalName" ? context.company?.name : k === "bin" ? context.company?.iin : "") || ""])));
+                    setBuyer(Object.fromEntries(localizeUiOptions(partyFields, uiText).map(([k]) => [k, context.company?.[k] || (k === "legalName" ? context.company?.name : k === "bin" ? context.company?.iin : "") || ""])));
                     setEditingBuyer(true);
                   }}
                 >
-                  Заполнить данные
-                </button>
+                  {uiText("Заполнить данные")}</button>
               )}
             </div>
           </div>
           <div className="panel">
-            <h3>Позиции счёта</h3>
+            <h3>{uiText("Позиции счёта")}</h3>
             {fieldError("deal.items")}
             {form.items.map((r, i) => (
               <fieldset disabled={busy || immutable} className="avr-line" key={i}>
                 <label>
-                  Работа / услуга
-                  <input aria-invalid={Boolean(issues[`items.${i}.name`])} value={r.name} onChange={(e) => item(i, { name: e.target.value })} />
+                  {uiText("Работа / услуга")}<input aria-invalid={Boolean(issues[`items.${i}.name`])} value={r.name} onChange={(e) => item(i, { name: e.target.value })} />
                   {fieldError(`items.${i}.name`)}
                 </label>
                 <label>
-                  Количество
-                  <input type="number" min="0.001" step="0.001" aria-invalid={Boolean(issues[`items.${i}.quantity`])} value={r.quantity} onChange={(e) => item(i, { quantity: Number(e.target.value) })} />
+                  {uiText("Количество")}<input type="number" min="0.001" step="0.001" aria-invalid={Boolean(issues[`items.${i}.quantity`])} value={r.quantity} onChange={(e) => item(i, { quantity: Number(e.target.value) })} />
                   {fieldError(`items.${i}.quantity`)}
                 </label>
                 <label>
-                  Ед. изм.
-                  <EsfMeasureUnitSelect aria-label={`Единица измерения ${i + 1}`} invalid={Boolean(issues[`items.${i}.unit`])} value={r.unit} onChange={(unit) => item(i, { unit })} />
+                  {uiText("Ед. изм.")}<EsfMeasureUnitSelect aria-label={uiText("Единица измерения {p0}", {p0: i + 1})} invalid={Boolean(issues[`items.${i}.unit`])} value={r.unit} onChange={(unit) => item(i, { unit })} />
                   {fieldError(`items.${i}.unit`)}
                 </label>
                 <label>
-                  Цена без НДС
-                  <input type="number" min="0" step="0.01" aria-invalid={Boolean(issues[`items.${i}.unitPrice`])} value={r.unitPrice} onChange={(e) => item(i, { unitPrice: Number(e.target.value) })} />
+                  {uiText("Цена без НДС")}<input type="number" min="0" step="0.01" aria-invalid={Boolean(issues[`items.${i}.unitPrice`])} value={r.unitPrice} onChange={(e) => item(i, { unitPrice: Number(e.target.value) })} />
                   {fieldError(`items.${i}.unitPrice`)}
                 </label>
                 <label>
-                  НДС, %
-                  <input type="number" min="0" max="100" step="0.01" aria-invalid={Boolean(issues[`items.${i}.vatRate`])} value={r.vatRate} onChange={(e) => item(i, { vatRate: Number(e.target.value) })} />
+                  {uiText("НДС, %")}<input type="number" min="0" max="100" step="0.01" aria-invalid={Boolean(issues[`items.${i}.vatRate`])} value={r.vatRate} onChange={(e) => item(i, { vatRate: Number(e.target.value) })} />
                   {fieldError(`items.${i}.vatRate`)}
                 </label>
                 <p>{money(totals?.items.rows[i]?.totalAmount)} ₸</p>
                 <button className="btn secondary" onClick={() => edit({ items: form.items.filter((_, n) => n !== i) })}>
-                  Удалить
-                </button>
+                  {uiText("Удалить")}</button>
               </fieldset>
             ))}
             <button
@@ -580,12 +556,11 @@ export function InvoiceEditorPage() {
                 })
               }
             >
-              + Добавить позицию
-            </button>
+              {uiText("+ Добавить позицию")}</button>
             <p>
-              Позиции: {money(totals?.items.totals.totalAmount)} ₸
-              {form.paymentPercent < 100 ? ` · ${form.paymentKind === "BALANCE" ? "остаток" : "предоплата"} ${form.paymentPercent}%: ${money(totals?.payable.totalAmount)} ₸` : null} ·{" "}
-              <b>К оплате: {money(totals?.payable.totalAmount)} ₸</b>
+              {uiText("Позиции:")}{" "}{money(totals?.items.totals.totalAmount)} ₸
+              {form.paymentPercent < 100 ? ` · ${form.paymentKind === "BALANCE" ? uiText("остаток") : uiText("предоплата")} ${form.paymentPercent}%: ${money(totals?.payable.totalAmount)} ₸` : null} ·{" "}
+              <b>{uiText("К оплате:")}{" "}{money(totals?.payable.totalAmount)} ₸</b>
             </p>
             {fieldError("")}
             <button
@@ -594,16 +569,15 @@ export function InvoiceEditorPage() {
               onClick={() =>
                 void action(async () => {
                   await save();
-                  notifySaved("Черновик счёта сохранён");
+                  notifySaved(uiText("Черновик счёта сохранён"));
                 })
               }
             >
-              Сохранить черновик
-            </button>
+              {uiText("Сохранить черновик")}</button>
           </div>
           <div className="panel">
-            <h3>Печатная форма</h3>
-            <p className="muted">Счёт собирается по форме 1С. Сформируйте PDF, сверьте реквизиты и сумму, затем выставьте счёт.</p>
+            <h3>{uiText("Печатная форма")}</h3>
+            <p className="muted">{uiText("Счёт собирается по форме 1С. Сформируйте PDF, сверьте реквизиты и сумму, затем выставьте счёт.")}</p>
             <div className="actions">
               <button
                 className="btn"
@@ -615,24 +589,22 @@ export function InvoiceEditorPage() {
                   })
                 }
               >
-                Сформировать счёт
-              </button>
+                {uiText("Сформировать счёт")}</button>
             </div>
           </div>
           {preview ? (
             <div className="stats-modal-backdrop" onClick={() => setPreview(null)}>
               <div className="stats-modal invoice-preview-modal" onClick={(e) => e.stopPropagation()}>
                 <div className="row">
-                  <h3>Счёт {doc?.number || ""}</h3>
+                  <h3>{uiText("Счёт")}{" "}{doc?.number || ""}</h3>
                   <button
                     type="button"
                     className="btn"
                     disabled={busy || immutable || doc?.importedPdf}
-                    title={doc?.importedPdf ? "Загруженный PDF уже сохранён в исходном виде" : undefined}
+                    title={doc?.importedPdf ? uiText("Загруженный PDF уже сохранён в исходном виде") : undefined}
                     onClick={() => void action(issueInvoice)}
                   >
-                    Выставить счёт
-                  </button>
+                    {uiText("Выставить счёт")}</button>
                 </div>
                 <div className="invoice-preview-marks">
                   <label>
@@ -642,8 +614,7 @@ export function InvoiceEditorPage() {
                       checked={!preview.stamped}
                       onChange={() => setPreview({ ...preview, stamped: false })}
                     />{" "}
-                    Без подписи и печати
-                  </label>
+                    {uiText("Без подписи и печати")}</label>
                   <label>
                     <input
                       type="radio"
@@ -651,23 +622,20 @@ export function InvoiceEditorPage() {
                       checked={preview.stamped}
                       onChange={() => setPreview({ ...preview, stamped: true })}
                     />{" "}
-                    С подписью и печатью
-                  </label>
+                    {uiText("С подписью и печатью")}</label>
                 </div>
                 {preview.stamped && !(context.organization?.hasStamp || context.organization?.hasSignature) ? (
                   <p className="muted">
-                    Загрузите печать и подпись в{" "}
+                    {uiText("Загрузите печать и подпись в")}{" "}
                     <Link to="/settings#company-requisites" target="_blank">
-                      реквизитах компании
-                    </Link>
-                    , затем обновите реквизиты на этой странице.
-                  </p>
+                      {uiText("реквизитах компании")}</Link>
+                    {uiText(", затем обновите реквизиты на этой странице.")}</p>
                 ) : null}
                 {previewError ? <p className="error">{previewError}</p> : null}
                 {previewUrl ? (
-                  <PdfDocumentViewer title="Просмотр счёта" src={previewUrl} />
+                  <PdfDocumentViewer title={uiText("Просмотр счёта")} src={previewUrl} />
                 ) : previewError ? null : (
-                  <p className="muted">Готовим PDF…</p>
+                  <p className="muted">{uiText("Готовим PDF…")}</p>
                 )}
                 <div className="actions">
                   <button
@@ -677,21 +645,19 @@ export function InvoiceEditorPage() {
                     onClick={() =>
                       void action(async () => {
                         await downloadInvoicePdf(preview.id, preview.stamped);
-                        notifySaved("PDF счёта скачан");
+                        notifySaved(uiText("PDF счёта скачан"));
                       })
                     }
                   >
-                    Скачать
-                  </button>
+                    {uiText("Скачать")}</button>
                   <button
                     type="button"
                     className="btn"
                     disabled={busy || immutable || doc?.importedPdf}
-                    title={doc?.importedPdf ? "Загруженный PDF уже сохранён в исходном виде" : undefined}
+                    title={doc?.importedPdf ? uiText("Загруженный PDF уже сохранён в исходном виде") : undefined}
                     onClick={() => void action(issueInvoice)}
                   >
-                    Выставить счёт
-                  </button>
+                    {uiText("Выставить счёт")}</button>
                 </div>
               </div>
             </div>

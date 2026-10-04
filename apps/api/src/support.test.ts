@@ -95,6 +95,28 @@ describe("BasQar support center", () => {
     assert.ok((contextual.data.contextual || []).some((item: { slug: string }) => item.slug === "connect-whatsapp"));
   });
 
+  it("serves and searches Kazakh help, preserving administrator edits and Russian articles", async () => {
+    const owner = await prisma.user.findFirstOrThrow({ where: { email: "owner@creolab.example" } });
+    await prisma.user.update({ where: { id: owner.id }, data: { locale: "kk" } });
+    try {
+      const search = await req(ownerA, "/api/v1/support/articles?q=" + encodeURIComponent("қызметкерді"));
+      assert.equal(search.status, 200);
+      assert.ok(search.data.items.some((item: { slug: string; title: string }) => item.slug === "add-member" && item.title.includes("Қызметкерді")));
+      const article = await req(ownerA, "/api/v1/support/articles/connect-whatsapp");
+      assert.equal(article.data.title, "WhatsApp қалай қосылады?");
+      assert.match(article.data.content, /Интеграциялар/);
+      const row = await prisma.supportArticle.findFirstOrThrow({ where: { slug: "connect-whatsapp" } });
+      await prisma.supportArticle.update({ where: { id: row.id }, data: { title: "Авторский заголовок", content: "Текст администратора" } });
+      try {
+        const edited = await req(ownerA, "/api/v1/support/articles/connect-whatsapp");
+        assert.equal(edited.data.title, "Авторский заголовок");
+        assert.equal(edited.data.content, "Текст администратора");
+      } finally { await prisma.supportArticle.update({ where: { id: row.id }, data: { title: row.title, content: row.content } }); }
+    } finally { await prisma.user.update({ where: { id: owner.id }, data: { locale: owner.locale } }); }
+    const russian = await req(ownerA, "/api/v1/support/articles/connect-whatsapp");
+    assert.match(russian.data.title, /Как подключить WhatsApp/);
+  });
+
   it("stores article feedback for the active tenant", async () => {
     const list = await req(ownerA, "/api/v1/support/articles");
     const article = (list.data.popular || list.data.items || []).find((item: { slug: string }) => item.slug === "connect-whatsapp");

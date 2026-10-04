@@ -1008,13 +1008,13 @@ export async function connectWhatsAppSeller(
     throw new ApiError(403, "forbidden", "Нет права управлять интеграциями");
   }
   const existing = await getSellerIntegration(prisma, membership.tenantId);
-  if (!existing) {
+  if (!existing || existing.status === "disabled" || existing.connectionStatus === "DISCONNECTED") {
     const { requireLimitAvailable } = await import("./entitlementService.ts");
     const { LIMITS } = await import("@creolab/contracts");
     const used = await prisma.integration.count({
       where: {
         tenantId: membership.tenantId,
-        type: "whatsapp_seller",
+        type: { in: ["whatsapp_seller", "whatsapp_qr", "whatsapp_cloud"] },
         NOT: { OR: [{ status: "disabled" }, { connectionStatus: "DISCONNECTED" }] },
       },
     });

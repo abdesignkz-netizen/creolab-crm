@@ -381,6 +381,7 @@ model Integration {
   inquiries        Inquiry[]
   inboundEvents    InboundEvent[]
   incompleteIntakes IncompleteIntake[]
+  whatsappQrSession WhatsAppQrSession?
 
   @@unique([tenantId, id])
   @@index([tenantId, type, status])
@@ -681,6 +682,7 @@ model Conversation {
   assigneeMembershipId String?
   controlVersion     Int      @default(1)
   messageRevision    Int      @default(0)
+  lastInboundMessageId String?
   needsAttention     Boolean  @default(false)
   attentionReason    String?
   sellerLeadId       String?
@@ -1486,6 +1488,7 @@ model OutboundOperation {
   state            String    @default("queued")
   providerRef      String?
   error            String?
+  requestHash      String?
   createdAt        DateTime  @default(now())
   tenant           Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   conversation     Conversation @relation(fields: [tenantId, conversationId], references: [tenantId, id])
@@ -2199,4 +2202,35 @@ model TenantUsage {
   lastActivityAt DateTime?
   reconciledAt DateTime @default(now())
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+// QR pairing/auth keys are encrypted using the application secret store.
+model WhatsAppQrSession {
+  integrationId String @id
+  owner String?
+  leaseUntil DateTime? @db.Timestamptz
+  encryptedQr String?
+  qrExpiresAt DateTime? @db.Timestamptz
+  reconnectAt DateTime? @db.Timestamptz
+  attempts Int @default(0)
+  integration Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  keys WhatsAppQrKey[]
+  jobs WhatsAppQrJob[]
+}
+model WhatsAppQrKey {
+  integrationId String
+  key String
+  encryptedValue String
+  session WhatsAppQrSession @relation(fields: [integrationId], references: [integrationId], onDelete: Cascade)
+  @@id([integrationId, key])
+}
+model WhatsAppQrJob {
+  id String @id
+  integrationId String
+  kind String
+  encryptedPayload String
+  state String @default("queued")
+  createdAt DateTime @default(now()) @db.Timestamptz
+  session WhatsAppQrSession @relation(fields: [integrationId], references: [integrationId], onDelete: Cascade)
+  @@index([integrationId, state, createdAt], map: "WhatsAppQrJob_pending")
 }

@@ -1,3 +1,4 @@
+import { uiText, useUiText, localizeUiOptions, uiMessage } from "../../lib/uiText";
 import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../../lib/api";
@@ -48,6 +49,7 @@ function ProviderAssignForm({
   companies: CompanyOption[];
   lockedTenantId?: string;
 }) {
+  const uiText = useUiText();
   const [tenantId, setTenantId] = useState(lockedTenantId || "");
   const [members, setMembers] = useState<MemberOption[]>([]);
   const [existing, setExisting] = useState<any>(null);
@@ -76,7 +78,7 @@ function ProviderAssignForm({
         setMembers((people as any).members || []);
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Не удалось загрузить компанию");
+        if (!cancelled) setError(err instanceof Error ? err.message : uiText("Не удалось загрузить компанию"));
       });
     return () => {
       cancelled = true;
@@ -101,15 +103,15 @@ function ProviderAssignForm({
       const result = existing && !item.multiple
         ? ((await api.adminUpdateCompanyIntegration(tenantId, existing.id, body)) as any)
         : ((await api.adminCreateCompanyIntegration(tenantId, body)) as any);
-      setNote(result.note || (result.reachable === false ? "Сохранено, мост не ответил" : "Подключено к компании"));
+      setNote(result.note || (result.reachable === false ? uiText("Сохранено, мост не ответил") : uiText("Подключено к компании")));
       if (result.secret) setSecret(result.secret);
       if (result.bridgeSecret) setSecret(result.bridgeSecret);
-      notifySaved(result.reachable ? "Мост ответил" : "Интеграция сохранена для компании");
+      notifySaved(result.reachable ? uiText("Мост ответил") : uiText("Интеграция сохранена для компании"));
       setExisting(result.id ? result : existing);
       const refreshed = (await api.adminCompanyIntegrations(tenantId)) as any;
       setExisting((refreshed.items || []).find((row: any) => row.type === item.type) || result);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось подключить");
+      setError(err instanceof Error ? err.message : uiText("Не удалось подключить"));
     } finally {
       setBusy(false);
     }
@@ -122,14 +124,13 @@ function ProviderAssignForm({
     <form className="stack" key={`${item.type}-${tenantId}-${existing?.id || "new"}`} onSubmit={onSubmit}>
       {!lockedTenantId ? (
         <label>
-          Компания
-          <select value={tenantId} onChange={(e) => setTenantId(e.target.value)} required>
-            <option value="">Выберите компанию</option>
+          {uiText("Компания")}<select value={tenantId} onChange={(e) => setTenantId(e.target.value)} required>
+            <option value="">{uiText("Выберите компанию")}</option>
             {companies.map((company) => (
               <option key={company.id} value={company.id} disabled={company.status === "suspended"}>
                 {company.name}
-                {company.integrationTypes?.includes(item.type) ? " · уже подключено" : ""}
-                {company.status === "suspended" ? " · приостановлена" : ""}
+                {company.integrationTypes?.includes(item.type) ? uiText(" · уже подключено") : ""}
+                {company.status === "suspended" ? uiText(" · приостановлена") : ""}
               </option>
             ))}
           </select>
@@ -137,15 +138,14 @@ function ProviderAssignForm({
       ) : null}
       {already && existing ? (
         <p className="muted">
-          Сейчас: {existing.lifecycleLabel || existing.lifecycle}.{" "}
+          {uiText("Сейчас:")}{" "}{uiMessage(existing.lifecycleLabel) || existing.lifecycle}.{" "}
           {existing.schema?.instanceId ? `Instance: ${existing.schema.instanceId}` : null}{" "}
-          <Link to={`/admin/companies/${tenantId}`}>Карточка компании</Link>
+          <Link to={`/admin/companies/${tenantId}`}>{uiText("Карточка компании")}</Link>
         </p>
       ) : null}
       {fields.includes("name") ? (
         <label>
-          Название
-          <input name="name" defaultValue={existing?.name || ""} placeholder={item.title} />
+          {uiText("Название")}<input name="name" defaultValue={existing?.name || ""} placeholder={item.title} />
         </label>
       ) : null}
       {fields.includes("instanceId") ? (
@@ -162,15 +162,14 @@ function ProviderAssignForm({
             type="password"
             autoComplete="off"
             required={!already}
-            placeholder={existing?.schema?.apiTokenSet ? "задан, введите чтобы заменить" : ""}
+            placeholder={existing?.schema?.apiTokenSet ? uiText("задан, введите чтобы заменить") : ""}
           />
         </label>
       ) : null}
       {fields.includes("assigneeMembershipId") ? (
         <label>
-          Ответственный сотрудник
-          <select name="assigneeMembershipId" defaultValue={existing?.assignment?.membershipId || ""}>
-            <option value="">Администратор компании</option>
+          {uiText("Ответственный сотрудник")}<select name="assigneeMembershipId" defaultValue={existing?.assignment?.membershipId || ""}>
+            <option value="">{uiText("Администратор компании")}</option>
             {members.map((member) => (
               <option key={member.id} value={member.id}>
                 {member.name} ({member.email})
@@ -181,7 +180,7 @@ function ProviderAssignForm({
       ) : null}
       <div className="actions">
         <button className="btn" disabled={busy || !tenantId}>
-          {busy ? "Подключаем…" : already ? "Обновить подключение" : "Подключить к компании"}
+          {busy ? uiText("Подключаем…") : already ? uiText("Обновить подключение") : uiText("Подключить к компании")}
         </button>
       </div>
       {note ? <p className="ok">{note}</p> : null}

@@ -444,6 +444,7 @@ export async function setAiManagerRuntimePause(prisma: PrismaClient, auth: AuthC
         sellerErrors += 1;
       }
     }
+    if (!paused) { const { enqueueWhatsAppAi } = await import("./whatsappAiService.ts"); await enqueueWhatsAppAi(prisma, tid, conversation.id); }
   }
 
   await prisma.auditEvent.create({

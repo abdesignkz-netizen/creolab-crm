@@ -1,3 +1,4 @@
+import { uiText, useUiText, localizeUiOptions, uiMessage } from "../lib/uiText";
 import { notifySaved } from "../components/SaveNotice";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -78,6 +79,7 @@ function draftFromCompany(c: any): CompanyDraft {
 }
 
 export function CompanyPage() {
+  const uiText = useUiText();
   const caps = useCapabilities();
   const { id = "" } = useParams();
   const navigate = useNavigate();
@@ -117,7 +119,7 @@ export function CompanyPage() {
       }
       setError("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Ошибка");
+      setError(err instanceof Error ? err.message : uiText("Ошибка"));
     }
   }
 
@@ -167,7 +169,7 @@ export function CompanyPage() {
 
   async function saveCompany() {
     if (!editDraft?.name.trim()) {
-      setError("Укажите название компании");
+      setError(uiText("Укажите название компании"));
       return;
     }
     setBusy(true);
@@ -194,23 +196,23 @@ export function CompanyPage() {
         assigneeMembershipId: editDraft.assigneeMembershipId || null,
       });
       setEditOpen(false);
-      notifySaved("Данные компании сохранены");
+      notifySaved(uiText("Данные компании сохранены"));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось сохранить");
+      setError(err instanceof Error ? err.message : uiText("Не удалось сохранить"));
     } finally {
       setBusy(false);
     }
   }
 
   async function removeCompany() {
-    if (!window.confirm("Удалить компанию из списка? Клиенты, заявки и сделки останутся.")) return;
+    if (!window.confirm(uiText("Удалить компанию из списка? Клиенты, заявки и сделки останутся."))) return;
     setBusy(true);
     try {
       await api.deleteCompany(id);
       navigate("/companies");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось удалить");
+      setError(err instanceof Error ? err.message : uiText("Не удалось удалить"));
       setBusy(false);
     }
   }
@@ -227,23 +229,23 @@ export function CompanyPage() {
         isBillingContact: personEdit.isBillingContact,
       });
       setPersonEdit(null);
-      notifySaved("Данные сотрудника сохранены");
+      notifySaved(uiText("Данные сотрудника сохранены"));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось сохранить состав");
+      setError(err instanceof Error ? err.message : uiText("Не удалось сохранить состав"));
     } finally {
       setBusy(false);
     }
   }
 
   async function removePerson(person: any) {
-    if (!window.confirm(`Убрать «${person.name}» из состава компании? Карточка клиента останется.`)) return;
+    if (!window.confirm(uiText("Убрать «{p0}» из состава компании? Карточка клиента останется.", {p0: person.name}))) return;
     setBusy(true);
     try {
       await api.unlinkCompanyContact(id, person.linkId);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось убрать контакт");
+      setError(err instanceof Error ? err.message : uiText("Не удалось убрать контакт"));
     } finally {
       setBusy(false);
     }
@@ -267,18 +269,18 @@ export function CompanyPage() {
       setIsBillingContact(false);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось связать");
+      setError(err instanceof Error ? err.message : uiText("Не удалось связать"));
     } finally {
       setBusy(false);
     }
   }
 
-  if (!data && !error) return <div className="state">Загрузка…</div>;
+  if (!data && !error) return <div className="state">{uiText("Загрузка…")}</div>;
   if (!data) {
     return (
       <section>
         <p className="error">{error}</p>
-        <Link to="/companies">К списку</Link>
+        <Link to="/companies">{uiText("К списку")}</Link>
       </section>
     );
   }
@@ -292,34 +294,29 @@ export function CompanyPage() {
       <div className="row sit-head">
         <div>
           <Link className="muted" to="/companies">
-            ← Компании
-          </Link>
+            {uiText("← Компании")}</Link>
           <h2>{c.name}</h2>
           <p className="muted">
-            {[c.lifecycleLabel, c.industry, c.city].filter(Boolean).join(" · ")}
+            {[uiMessage(c.lifecycleLabel), c.industry, c.city].filter(Boolean).join(" · ")}
           </p>
           <p className="muted">
-            {[c.website, c.bin ? `БИН: ${c.bin}` : null, c.iin ? `ИИН: ${c.iin}` : null].filter(Boolean).join(" · ")}
+            {[c.website, c.bin ? uiText("БИН: {p0}", {p0: c.bin}) : null, c.iin ? uiText("ИИН: {p0}", {p0: c.iin}) : null].filter(Boolean).join(" · ")}
           </p>
-          <p className="muted">Ответственный: {c.assigneeName || "—"}</p>
+          <p className="muted">{uiText("Ответственный:")}{" "}{c.assigneeName || "—"}</p>
         </div>
         <div className="sit-toolbar-side">
           {!caps.manager ? (
             <>
           <button type="button" className="btn secondary" onClick={openEdit}>
-            Изменить
-          </button>
+            {uiText("Изменить")}</button>
           <button type="button" className="btn danger" disabled={busy} onClick={() => void removeCompany()}>
-            Удалить
-          </button>
+            {uiText("Удалить")}</button>
             </>
           ) : null}
           <button type="button" className="btn" onClick={() => setLinkOpen(true)}>
-            Добавить контакт
-          </button>
+            {uiText("Добавить контакт")}</button>
           <Link className="btn secondary" to={`/inquiries?company=${c.id}`}>
-            Создать заявку
-          </Link>
+            {uiText("Создать заявку")}</Link>
         </div>
       </div>
 
@@ -327,54 +324,53 @@ export function CompanyPage() {
 
       <div className="sit-section">
         <div className="sit-section-head">
-          <h3>Сейчас</h3>
+          <h3>{uiText("Сейчас")}</h3>
         </div>
         <div className="sit-kpi-grid stats-kpi-grid">
           <div className="sit-kpi">
-            <span className="muted">Активные заявки</span>
+            <span className="muted">{uiText("Активные заявки")}</span>
             <strong>{cur.activeRequests}</strong>
           </div>
           <div className="sit-kpi">
-            <span className="muted">Активные сделки</span>
+            <span className="muted">{uiText("Активные сделки")}</span>
             <strong>{cur.activeDeals}</strong>
           </div>
           {!caps.manager ? (
           <div className="sit-kpi">
-            <span className="muted">Сумма сделок</span>
+            <span className="muted">{uiText("Сумма сделок")}</span>
             <strong>{cur.pipelineLabel || "—"}</strong>
           </div>
           ) : null}
           <div className="sit-kpi">
-            <span className="muted">На договоре</span>
+            <span className="muted">{uiText("На договоре")}</span>
             <strong>{cur.contractDeals}</strong>
           </div>
           <div className="sit-kpi">
-            <span className="muted">Нужен ответ</span>
+            <span className="muted">{uiText("Нужен ответ")}</span>
             <strong>{cur.needsReply}</strong>
           </div>
           <div className="sit-kpi">
-            <span className="muted">Просрочено</span>
+            <span className="muted">{uiText("Просрочено")}</span>
             <strong>{cur.overdueTasks}</strong>
           </div>
         </div>
         {cur.nextAction ? (
           <p style={{ marginTop: 10 }}>
-            <b>Следующее действие:</b>{" "}
+            <b>{uiText("Следующее действие:")}</b>{" "}
             <Link to={cur.nextAction.href}>{cur.nextAction.title}</Link>
             {cur.nextAction.dueLabel ? <span className="muted"> · {cur.nextAction.dueLabel}</span> : null}
           </p>
         ) : (
           <p className="muted" style={{ marginTop: 10 }}>
-            Нет следующего действия
-          </p>
+            {uiText("Нет следующего действия")}</p>
         )}
       </div>
 
       <div className="sit-section">
         <div className="sit-section-head">
-          <h3>Контактные лица</h3>
+          <h3>{uiText("Контактные лица")}</h3>
         </div>
-        {!data.contacts?.length ? <p className="empty">Пока нет связанных контактов</p> : null}
+        {!data.contacts?.length ? <p className="empty">{uiText("Пока нет связанных контактов")}</p> : null}
         <div className="companies-list">
           {(data.contacts || []).map((person: any) => (
             <div key={person.linkId} className="company-row">
@@ -385,22 +381,21 @@ export function CompanyPage() {
                 </div>
                 <div className="muted">
                   {[
-                    person.isPrimary ? "Основной контакт" : null,
-                    person.isDecisionMaker ? "ЛПР" : null,
-                    person.isBillingContact ? "Финансовый контакт" : null,
+                    person.isPrimary ? uiText("Основной контакт") : null,
+                    person.isDecisionMaker ? uiText("ЛПР") : null,
+                    person.isBillingContact ? uiText("Финансовый контакт") : null,
                   ]
                     .filter(Boolean)
                     .join(" · ")}
                 </div>
                 <div className="muted">{[phoneText(person.phone), person.email].filter(Boolean).join(" · ")}</div>
                 {person.lastContactLabel ? (
-                  <div className="muted">Последний контакт: {person.lastContactLabel}</div>
+                  <div className="muted">{uiText("Последний контакт:")}{" "}{person.lastContactLabel}</div>
                 ) : null}
               </div>
               <div className="company-row-actions">
                 <Link className="btn secondary" to={person.href}>
-                  Открыть
-                </Link>
+                  {uiText("Открыть")}</Link>
                 <button
                   type="button"
                   className="btn secondary"
@@ -416,11 +411,9 @@ export function CompanyPage() {
                     })
                   }
                 >
-                  Изменить
-                </button>
+                  {uiText("Изменить")}</button>
                 <button type="button" className="btn danger" disabled={busy} onClick={() => void removePerson(person)}>
-                  Убрать
-                </button>
+                  {uiText("Убрать")}</button>
               </div>
             </div>
           ))}
@@ -429,16 +422,16 @@ export function CompanyPage() {
 
       <div className="sit-section">
         <div className="sit-section-head">
-          <h3>Сделки</h3>
+          <h3>{uiText("Сделки")}</h3>
         </div>
         <div className="stats-table-wrap">
           <table className="stats-table">
             <thead>
               <tr>
-                <th>Сделка</th>
-                <th>Стадия</th>
-                <th>Сумма</th>
-                <th>Контакты</th>
+                <th>{uiText("Сделка")}</th>
+                <th>{uiText("Стадия")}</th>
+                <th>{uiText("Сумма")}</th>
+                <th>{uiText("Контакты")}</th>
               </tr>
             </thead>
             <tbody>
@@ -455,7 +448,7 @@ export function CompanyPage() {
                     {[
                       nameWithPhone(d.primaryContactName || d.contactName, d.primaryContactPhone || d.phone),
                       d.decisionMakerName
-                        ? `ЛПР: ${nameWithPhone(d.decisionMakerName, d.decisionMakerPhone)}`
+                        ? uiText("ЛПР: {p0}", {p0: nameWithPhone(d.decisionMakerName, d.decisionMakerPhone)})
                         : null,
                     ]
                       .filter(Boolean)
@@ -471,15 +464,14 @@ export function CompanyPage() {
       {caps.documents ? (
       <div className="sit-section">
         <div className="sit-section-head">
-          <h3>Документы</h3>
-          <Link className="btn secondary" to="/documents">Все документы</Link>
+          <h3>{uiText("Документы")}</h3>
+          <Link className="btn secondary" to="/documents">{uiText("Все документы")}</Link>
         </div>
         {templates.length ? (
           <div className="stack" style={{ marginBottom: 12 }}>
-            <p className="muted">Сформировать договор по сохранённому шаблону — реквизиты этой компании подставятся в текст.</p>
+            <p className="muted">{uiText("Сформировать договор по сохранённому шаблону — реквизиты этой компании подставятся в текст.")}</p>
             <label>
-              Шаблон
-              <select
+              {uiText("Шаблон")}<select
                 value={templateId}
                 disabled={templateBusy}
                 onChange={(e) => {
@@ -497,20 +489,19 @@ export function CompanyPage() {
                 }}
               >
                 {templates.map((row) => (
-                  <option key={row.id} value={row.id}>{row.name}{row.isDefault ? " (по умолчанию)" : ""}</option>
+                  <option key={row.id} value={row.id}>{row.name}{row.isDefault ? uiText(" (по умолчанию)") : ""}</option>
                 ))}
               </select>
             </label>
-            <label>Номер договора<input maxLength={40} value={contractNumber} disabled={templateBusy} placeholder="Автоматически по настройкам нумерации" onChange={event => { setContractNumber(event.target.value); setFormed(null); }} /></label>
-              <label>Дата договора<input type="date" value={contractDate} disabled={templateBusy} onChange={event => { setContractDate(event.target.value); setFormed(null); }} /></label>
+            <label>{uiText("Номер договора")}<input maxLength={40} value={contractNumber} disabled={templateBusy} placeholder={uiText("Автоматически по настройкам нумерации")} onChange={event => { setContractNumber(event.target.value); setFormed(null); }} /></label>
+              <label>{uiText("Дата договора")}<input type="date" value={contractDate} disabled={templateBusy} onChange={event => { setContractDate(event.target.value); setFormed(null); }} /></label>
               <ContractGenerateItems lines={contractLines} onChange={(next) => { setContractLines(next); setFormed(null); }}
               completionTerms={completionTerms} onCompletionTermsChange={(value) => { setCompletionTerms(value); setFormed(null); }} disabled={templateBusy} />
             <div className="actions">
               {formed ? (
                 <>
                   <button type="button" className="btn" disabled={templateBusy} onClick={() => setViewOpen(true)}>
-                    Посмотреть договор
-                  </button>
+                    {uiText("Посмотреть договор")}</button>
                   <button
                     type="button"
                     className="btn secondary"
@@ -521,16 +512,16 @@ export function CompanyPage() {
                       void api
                         .createCompanyContractFromTemplate(id, { save: true, previewId: formed.previewId })
                         .then(async () => {
-                          notifySaved("Договор сохранён");
+                          notifySaved(uiText("Договор сохранён"));
                           setFormed(null);
                           setViewOpen(false);
                           await load();
                         })
-                        .catch((err) => setError(err instanceof Error ? err.message : "Не удалось сохранить договор"))
+                        .catch((err) => setError(err instanceof Error ? err.message : uiText("Не удалось сохранить договор")))
                         .finally(() => setTemplateBusy(false));
                     }}
                   >
-                    {templateBusy ? "Сохраняем…" : "Сохранить договор"}
+                    {templateBusy ? uiText("Сохраняем…") : uiText("Сохранить договор")}
                   </button>
                 </>
               ) : (
@@ -543,36 +534,36 @@ export function CompanyPage() {
                     try {
                       items = parseContractDraftLines(contractLines);
                     } catch (err) {
-                      setError(err instanceof Error ? err.message : "Проверьте услуги");
+                      setError(err instanceof Error ? err.message : uiText("Проверьте услуги"));
                       return;
                     }
                     setTemplateBusy(true);
                     setError("");
                     void api.createCompanyContractFromTemplate(id, { templateId, items, completionTerms, number: contractNumber, documentDate: contractDate })
                       .then((result: any) => {
-                        if (!result.previewId) throw new Error("Не удалось сформировать договор");
+                        if (!result.previewId) throw new Error(uiText("Не удалось сформировать договор"));
                         setFormed({ previewId: result.previewId, number: result.number });
                         setViewOpen(true);
-                        notifySaved("Договор сформирован по шаблону");
+                        notifySaved(uiText("Договор сформирован по шаблону"));
                       })
-                      .catch((err) => setError(err instanceof Error ? err.message : "Не удалось сформировать договор"))
+                      .catch((err) => setError(err instanceof Error ? err.message : uiText("Не удалось сформировать договор")))
                       .finally(() => setTemplateBusy(false));
                   }}
                 >
-                  {templateBusy ? "Формируем…" : "Сформировать по шаблону"}
+                  {templateBusy ? uiText("Формируем…") : uiText("Сформировать по шаблону")}
                 </button>
               )}
             </div>
           </div>
         ) : null}
-        {!documents.length ? <p className="empty">Документов по этой компании пока нет.</p> : null}
+        {!documents.length ? <p className="empty">{uiText("Документов по этой компании пока нет.")}</p> : null}
         {documents.map((item) => (
           <Link key={`${item.kind}-${item.id}`} className="sit-list-row" to={item.href}>
             <div>
-              <b>{item.kindLabel} {item.number}</b>
+              <b>{uiMessage(item.kindLabel)} {item.number}</b>
               <div className="muted">{item.dealTitle}</div>
             </div>
-            <span className={item.attention ? "deal-flag" : "muted"}>{item.statusLabel}</span>
+            <span className={item.attention ? "deal-flag" : "muted"}>{uiMessage(item.statusLabel)}</span>
           </Link>
         ))}
       </div>
@@ -587,16 +578,16 @@ export function CompanyPage() {
 
       <div className="sit-section">
         <div className="sit-section-head">
-          <h3>Заявки</h3>
+          <h3>{uiText("Заявки")}</h3>
         </div>
         <div className="stats-table-wrap">
           <table className="stats-table">
             <thead>
               <tr>
-                <th>Заявка</th>
-                <th>Обратился</th>
-                <th>Источник</th>
-                <th>Дата</th>
+                <th>{uiText("Заявка")}</th>
+                <th>{uiText("Обратился")}</th>
+                <th>{uiText("Источник")}</th>
+                <th>{uiText("Дата")}</th>
               </tr>
             </thead>
             <tbody>
@@ -618,9 +609,9 @@ export function CompanyPage() {
 
       <div className="sit-section">
         <div className="sit-section-head">
-          <h3>Задачи</h3>
+          <h3>{uiText("Задачи")}</h3>
         </div>
-        {(data.tasks || []).length === 0 ? <p className="empty">Нет открытых задач</p> : null}
+        {(data.tasks || []).length === 0 ? <p className="empty">{uiText("Нет открытых задач")}</p> : null}
         <ul className="company-task-list">
           {(data.tasks || []).map((t: any) => (
             <li key={t.id}>
@@ -633,33 +624,33 @@ export function CompanyPage() {
 
       <div className="sit-section">
         <div className="sit-section-head">
-          <h3>Итог отношений</h3>
+          <h3>{uiText("Итог отношений")}</h3>
         </div>
         <div className="sit-kpi-grid stats-kpi-grid">
           <div className="sit-kpi">
-            <span className="muted">С нами с</span>
+            <span className="muted">{uiText("С нами с")}</span>
             <strong style={{ fontSize: "1rem" }}>{life.withUsSinceLabel}</strong>
           </div>
           <div className="sit-kpi">
-            <span className="muted">Заявок</span>
+            <span className="muted">{uiText("Заявок")}</span>
             <strong>{life.requests}</strong>
           </div>
           <div className="sit-kpi">
-            <span className="muted">Сделок</span>
+            <span className="muted">{uiText("Сделок")}</span>
             <strong>{life.deals}</strong>
           </div>
           <div className="sit-kpi">
-            <span className="muted">Продажи</span>
+            <span className="muted">{uiText("Продажи")}</span>
             <strong>{life.wonDeals}</strong>
           </div>
           {!caps.manager ? (
           <>
           <div className="sit-kpi">
-            <span className="muted">Продано</span>
+            <span className="muted">{uiText("Продано")}</span>
             <strong>{life.revenueLabel || "—"}</strong>
           </div>
           <div className="sit-kpi">
-            <span className="muted">Средний чек</span>
+            <span className="muted">{uiText("Средний чек")}</span>
             <strong>{life.averageDealLabel || "—"}</strong>
           </div>
           </>
@@ -682,33 +673,30 @@ export function CompanyPage() {
               </div>
             </div>
           ))}
-          {!data.timeline?.length ? <p className="empty">Пока нет событий</p> : null}
+          {!data.timeline?.length ? <p className="empty">{uiText("Пока нет событий")}</p> : null}
         </div>
       </div>
 
       {editOpen && editDraft && !caps.manager ? (
         <div className="stats-modal-backdrop" onClick={() => setEditOpen(false)}>
           <div className="stats-modal company-edit-modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Изменить компанию</h3>
+            <h3>{uiText("Изменить компанию")}</h3>
             <div className="company-create-grid">
               <label className="span-2">
-                Название *
-                <input value={editDraft.name} onChange={(e) => setEditDraft({ ...editDraft, name: e.target.value })} />
+                {uiText("Название *")}<input value={editDraft.name} onChange={(e) => setEditDraft({ ...editDraft, name: e.target.value })} />
               </label>
               <label className="span-2">
-                Юридическое название
-                <input
+                {uiText("Юридическое название")}<input
                   value={editDraft.legalName}
                   onChange={(e) => setEditDraft({ ...editDraft, legalName: e.target.value })}
                 />
               </label>
               <label>
-                Статус
-                <select
+                {uiText("Статус")}<select
                   value={editDraft.lifecycleStatus}
                   onChange={(e) => setEditDraft({ ...editDraft, lifecycleStatus: e.target.value })}
                 >
-                  {LIFECYCLE_OPTIONS.map(([value, label]) => (
+                  {localizeUiOptions(LIFECYCLE_OPTIONS, uiText).map(([value, label]) => (
                     <option key={value} value={value}>
                       {label}
                     </option>
@@ -716,15 +704,14 @@ export function CompanyPage() {
                 </select>
               </label>
               <label>
-                Ответственный
-                <select
+                {uiText("Ответственный")}<select
                   value={editDraft.assigneeMembershipId}
                   onChange={(e) => setEditDraft({ ...editDraft, assigneeMembershipId: e.target.value })}
                 >
-                  <option value="">Без ответственного</option>
+                  <option value="">{uiText("Без ответственного")}</option>
                   {editDraft.assigneeMembershipId && !members.some((m) => m.id === editDraft.assigneeMembershipId) ? (
                     <option value={editDraft.assigneeMembershipId}>
-                      {data.company.assigneeName || "Текущий ответственный"}
+                      {data.company.assigneeName || uiText("Текущий ответственный")}
                     </option>
                   ) : null}
                   {members.map((m) => (
@@ -735,16 +722,13 @@ export function CompanyPage() {
                 </select>
               </label>
               <label>
-                БИН
-                <input value={editDraft.bin} onChange={(e) => setEditDraft({ ...editDraft, bin: e.target.value })} />
+                {uiText("БИН")}<input value={editDraft.bin} onChange={(e) => setEditDraft({ ...editDraft, bin: e.target.value })} />
               </label>
               <label>
-                ИИН
-                <input value={editDraft.iin} onChange={(e) => setEditDraft({ ...editDraft, iin: e.target.value })} />
+                {uiText("ИИН")}<input value={editDraft.iin} onChange={(e) => setEditDraft({ ...editDraft, iin: e.target.value })} />
               </label>
               <label className="span-2">
-                Юридический адрес
-                <input
+                {uiText("Юридический адрес")}<input
                   value={editDraft.legalAddress}
                   onChange={(e) => setEditDraft({ ...editDraft, legalAddress: e.target.value })}
                 />
@@ -756,72 +740,60 @@ export function CompanyPage() {
                     checked={editDraft.vatPayer}
                     onChange={(e) => setEditDraft({ ...editDraft, vatPayer: e.target.checked })}
                   />
-                  Плательщик НДС
-                </span>
+                  {uiText("Плательщик НДС")}</span>
               </label>
               <label>
-                Руководитель
-                <input
+                {uiText("Руководитель")}<input
                   value={editDraft.directorName}
                   onChange={(e) => setEditDraft({ ...editDraft, directorName: e.target.value })}
-                  placeholder="Фамилия И. О."
+                  placeholder={uiText("Фамилия И. О.")}
                 />
               </label>
               <label>
-                Должность
-                <input
+                {uiText("Должность")}<input
                   value={editDraft.directorPosition}
                   onChange={(e) => setEditDraft({ ...editDraft, directorPosition: e.target.value })}
-                  placeholder="Директор"
+                  placeholder={uiText("Директор")}
                 />
               </label>
               <p className="muted tiny span-2">
-                Для договора: «в лице директора / генерального директора». Если пусто — подставим «Директор».
-              </p>
+                {uiText("Для договора: «в лице директора / генерального директора». Если пусто — подставим «Директор».")}</p>
               <label>
-                Банк
-                <input
+                {uiText("Банк")}<input
                   value={editDraft.bankName}
                   onChange={(e) => setEditDraft({ ...editDraft, bankName: e.target.value })}
                 />
               </label>
               <label>
-                ИИК / IBAN
-                <input value={editDraft.iban} onChange={(e) => setEditDraft({ ...editDraft, iban: e.target.value })} />
+                {uiText("ИИК / IBAN")}<input value={editDraft.iban} onChange={(e) => setEditDraft({ ...editDraft, iban: e.target.value })} />
               </label>
               <label>
-                БИК
-                <input value={editDraft.bik} onChange={(e) => setEditDraft({ ...editDraft, bik: e.target.value })} />
+                {uiText("БИК")}<input value={editDraft.bik} onChange={(e) => setEditDraft({ ...editDraft, bik: e.target.value })} />
               </label>
               <label>
-                Отрасль
-                <input
+                {uiText("Отрасль")}<input
                   value={editDraft.industry}
                   onChange={(e) => setEditDraft({ ...editDraft, industry: e.target.value })}
                 />
               </label>
               <label>
-                Город
-                <input value={editDraft.city} onChange={(e) => setEditDraft({ ...editDraft, city: e.target.value })} />
+                {uiText("Город")}<input value={editDraft.city} onChange={(e) => setEditDraft({ ...editDraft, city: e.target.value })} />
               </label>
               <label>
-                Сайт
-                <input
+                {uiText("Сайт")}<input
                   value={editDraft.website}
                   onChange={(e) => setEditDraft({ ...editDraft, website: e.target.value })}
                 />
               </label>
               <label>
-                Телефон
-                <input value={editDraft.phone} onChange={(e) => setEditDraft({ ...editDraft, phone: e.target.value })} />
+                {uiText("Телефон")}<input value={editDraft.phone} onChange={(e) => setEditDraft({ ...editDraft, phone: e.target.value })} />
               </label>
               <label>
                 Email
                 <input value={editDraft.email} onChange={(e) => setEditDraft({ ...editDraft, email: e.target.value })} />
               </label>
               <label className="span-2">
-                Комментарий
-                <textarea
+                {uiText("Комментарий")}<textarea
                   value={editDraft.description}
                   onChange={(e) => setEditDraft({ ...editDraft, description: e.target.value })}
                   rows={3}
@@ -830,11 +802,9 @@ export function CompanyPage() {
             </div>
             <div className="modal-actions">
               <button type="button" className="btn" disabled={busy || !editDraft.name.trim()} onClick={() => void saveCompany()}>
-                Сохранить
-              </button>
+                {uiText("Сохранить")}</button>
               <button type="button" className="btn secondary" onClick={() => setEditOpen(false)}>
-                Отмена
-              </button>
+                {uiText("Отмена")}</button>
             </div>
           </div>
         </div>
@@ -843,18 +813,16 @@ export function CompanyPage() {
       {personEdit ? (
         <div className="stats-modal-backdrop" onClick={() => setPersonEdit(null)}>
           <div className="stats-modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Состав компании</h3>
+            <h3>{uiText("Состав компании")}</h3>
             <p className="muted">{personEdit.name}</p>
             <label>
-              Должность
-              <input
+              {uiText("Должность")}<input
                 value={personEdit.position}
                 onChange={(e) => setPersonEdit({ ...personEdit, position: e.target.value })}
               />
             </label>
             <label>
-              Отдел
-              <input
+              {uiText("Отдел")}<input
                 value={personEdit.department}
                 onChange={(e) => setPersonEdit({ ...personEdit, department: e.target.value })}
               />
@@ -865,31 +833,26 @@ export function CompanyPage() {
                 checked={personEdit.isPrimary}
                 onChange={(e) => setPersonEdit({ ...personEdit, isPrimary: e.target.checked })}
               />{" "}
-              Основной контакт
-            </label>
+              {uiText("Основной контакт")}</label>
             <label>
               <input
                 type="checkbox"
                 checked={personEdit.isDecisionMaker}
                 onChange={(e) => setPersonEdit({ ...personEdit, isDecisionMaker: e.target.checked })}
               />{" "}
-              ЛПР
-            </label>
+              {uiText("ЛПР")}</label>
             <label>
               <input
                 type="checkbox"
                 checked={personEdit.isBillingContact}
                 onChange={(e) => setPersonEdit({ ...personEdit, isBillingContact: e.target.checked })}
               />{" "}
-              Финансовый контакт
-            </label>
+              {uiText("Финансовый контакт")}</label>
             <div className="row" style={{ gap: 8, marginTop: 12 }}>
               <button type="button" className="btn" disabled={busy} onClick={() => void savePerson()}>
-                Сохранить
-              </button>
+                {uiText("Сохранить")}</button>
               <button type="button" className="btn secondary" onClick={() => setPersonEdit(null)}>
-                Отмена
-              </button>
+                {uiText("Отмена")}</button>
             </div>
           </div>
         </div>
@@ -898,35 +861,29 @@ export function CompanyPage() {
       {linkOpen ? (
         <div className="stats-modal-backdrop" onClick={() => setLinkOpen(false)}>
           <div className="stats-modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Добавить контакт</h3>
+            <h3>{uiText("Добавить контакт")}</h3>
             <label>
-              Найти клиента
-              <input value={searchQ} onChange={(e) => setSearchQ(e.target.value)} placeholder="Имя или телефон" />
+              {uiText("Найти клиента")}<input value={searchQ} onChange={(e) => setSearchQ(e.target.value)} placeholder={uiText("Имя или телефон")} />
             </label>
             <label>
-              Должность
-              <input value={position} onChange={(e) => setPosition(e.target.value)} />
+              {uiText("Должность")}<input value={position} onChange={(e) => setPosition(e.target.value)} />
             </label>
             <label>
-              <input type="checkbox" checked={isPrimary} onChange={(e) => setIsPrimary(e.target.checked)} /> Основной
-              контакт
-            </label>
+              <input type="checkbox" checked={isPrimary} onChange={(e) => setIsPrimary(e.target.checked)} /> {" "}{uiText("Основной контакт")}</label>
             <label>
               <input
                 type="checkbox"
                 checked={isDecisionMaker}
                 onChange={(e) => setIsDecisionMaker(e.target.checked)}
               />{" "}
-              ЛПР
-            </label>
+              {uiText("ЛПР")}</label>
             <label>
               <input
                 type="checkbox"
                 checked={isBillingContact}
                 onChange={(e) => setIsBillingContact(e.target.checked)}
               />{" "}
-              Финансовый контакт
-            </label>
+              {uiText("Финансовый контакт")}</label>
             <div className="picker-list" style={{ marginTop: 8 }}>
               {hits.map((hit) => (
                 <button
@@ -942,8 +899,7 @@ export function CompanyPage() {
               ))}
             </div>
             <button type="button" className="btn secondary" style={{ marginTop: 8 }} onClick={() => setLinkOpen(false)}>
-              Закрыть
-            </button>
+              {uiText("Закрыть")}</button>
           </div>
         </div>
       ) : null}

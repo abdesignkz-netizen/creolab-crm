@@ -1,8 +1,10 @@
+import { systemText } from "@creolab/contracts";
+import { useLocale } from "../lib/session";
 import { Link, useLocation } from "react-router-dom";
 import { api } from "../lib/api";
 import { useSession } from "../lib/session";
 import { notifySaved } from "../components/SaveNotice";
-import { normalizeLocale, t } from "../i18n";
+import { t } from "../i18n";
 
 const STEPS = [
   { id: "company", title: "Данные компании", text: "Заполните реквизиты, когда будете готовы выставлять документы.", to: "/settings?section=company" },
@@ -12,9 +14,10 @@ const STEPS = [
 ];
 
 export function OnboardingWizard() {
+  const locale = useLocale();
   const { me } = useSession();
   const location = useLocation();
-  const locale = normalizeLocale(me?.user?.locale);
+
   const billing = me?.billing;
   if (!billing) return null;
   if (billing.previewMode) {
@@ -34,7 +37,7 @@ export function OnboardingWizard() {
 
   async function skip() {
     await api.skipOnboarding();
-    notifySaved("Можно настроить позже");
+    notifySaved(systemText(locale, "Можно настроить позже"));
     window.location.reload();
   }
 
@@ -45,28 +48,26 @@ export function OnboardingWizard() {
 
   return (
     <div className="panel onboarding-card">
-      <h3>Настройте рабочий кабинет</h3>
-      <p className="muted">Тариф активен. Пройдите шаги, когда будет удобно — ничего не блокируется.</p>
+      <h3>{systemText(locale, "Настройте рабочий кабинет")}</h3>
+      <p className="muted">{systemText(locale, "Тариф активен. Пройдите шаги, когда будет удобно — ничего не блокируется.")}</p>
       <ol className="onboarding-steps">
         {steps.map((step, index) => (
           <li key={step.id} className={done[step.id] ? "is-done" : ""}>
             <div>
               <b>
-                Шаг {index + 1}. {step.title}
+                {systemText(locale, "Шаг {number}. {title}", { number: index + 1, title: systemText(locale, step.title) })}
               </b>
-              <p className="muted">{step.text}</p>
+              <p className="muted">{systemText(locale, step.text)}</p>
             </div>
             <div className="actions">
               {done[step.id] ? (
-                <span className="muted">Готово</span>
+                <span className="muted">{systemText(locale, "Готово")}</span>
               ) : (
                 <>
                   <Link className="btn" to={step.to} onClick={() => void complete(step.id)}>
-                    Настроить
-                  </Link>
+                    {systemText(locale, "Настроить")}</Link>
                   <button className="btn secondary" type="button" onClick={() => void complete(step.id)}>
-                    Настроить позже
-                  </button>
+                    {systemText(locale, "Настроить позже")}</button>
                 </>
               )}
             </div>
@@ -74,8 +75,7 @@ export function OnboardingWizard() {
         ))}
       </ol>
       <button className="btn secondary" type="button" onClick={() => void skip()}>
-        Настроить позже
-      </button>
+        {systemText(locale, "Настроить позже")}</button>
     </div>
   );
 }

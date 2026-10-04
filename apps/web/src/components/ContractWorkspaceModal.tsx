@@ -1,3 +1,4 @@
+import { uiText, useUiText, localizeUiOptions, uiFormatLocale } from "../lib/uiText";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
 import { readContractReview, writeContractReview } from "../lib/contractReview";
@@ -20,6 +21,7 @@ type Template = { id: string; name: string };
 export function ContractWorkspaceModal({ contractId, onClose, onChanged }: {
   contractId: string; onClose: () => void; onChanged: () => Promise<void>;
 }) {
+  const uiText = useUiText();
   const [bundle, setBundle] = useState<Bundle | null>(null);
   const [signing, setSigning] = useState<Signing>({ requests: [] });
   const [error, setError] = useState("");
@@ -69,7 +71,7 @@ export function ContractWorkspaceModal({ contractId, onClose, onChanged }: {
     if (inFlight.current) return;
     inFlight.current = true; setBusy(true); setError(""); setNote("");
     try { await work(); }
-    catch (err) { setError(err instanceof Error ? err.message : "Не удалось выполнить действие"); }
+    catch (err) { setError(err instanceof Error ? err.message : uiText("Не удалось выполнить действие")); }
     finally { inFlight.current = false; setBusy(false); }
   }
 
@@ -91,34 +93,34 @@ export function ContractWorkspaceModal({ contractId, onClose, onChanged }: {
     setReview({ viewed: false, confirmed: false });
     writeContractReview(fileKey, { viewed: false, confirmed: false });
     await refresh();
-    setNote("Изменения сохранены. Просмотрите и подтвердите новую версию договора.");
+    setNote(uiText("Изменения сохранены. Просмотрите и подтвердите новую версию договора."));
   }
 
   async function sign() {
     if (!bundle || !review.confirmed) return;
     const checked = await read();
     if (checked.contract.generatedFileId !== bundle.contract.generatedFileId || checked.versions.at(-1)?.id !== bundle.versions.at(-1)?.id) {
-      throw new Error("Договор изменился. Просмотрите и подтвердите его новую версию.");
+      throw new Error(uiText("Договор изменился. Просмотрите и подтвердите его новую версию."));
     }
     const client = createSigningClient();
     try {
       // The company signs first. This request does not create or release a buyer link.
       const prepared = await api.prepareContractSellerSign(contractId) as Signing;
       const request = prepared.requests.find(row => row.signerType === "SELLER" && ["PENDING", "OPENED"].includes(row.status));
-      if (!request) { await refresh(); throw new Error("Обновлён статус подписи. Проверьте доступные действия."); }
+      if (!request) { await refresh(); throw new Error(uiText("Обновлён статус подписи. Проверьте доступные действия.")); }
       const { blob } = await api.downloadContractFile(contractId);
       const bytes = new Uint8Array(await blob.arrayBuffer());
       const expectedHash = checked.versions.at(-1)?.sha256;
       const hash = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))).map(value => value.toString(16).padStart(2, "0")).join("");
-      if (!expectedHash || hash !== expectedHash) throw new Error("Файл договора изменился. Обновите просмотр перед подписанием.");
+      if (!expectedHash || hash !== expectedHash) throw new Error(uiText("Файл договора изменился. Обновите просмотр перед подписанием."));
       let binary = "";
       for (let offset = 0; offset < bytes.length; offset += 32768) binary += String.fromCharCode(...bytes.subarray(offset, offset + 32768));
-      setNote("Выберите ключ подписи в NCALayer и подтвердите подписание договора.");
+      setNote(uiText("Выберите ключ подписи в NCALayer и подтвердите подписание договора."));
       await client.connect();
       const cms = await client.signDocument(btoa(binary));
       await api.signSignatureRequest(request.id, cms);
       await refresh();
-      setNote("Договор подписан со стороны компании. Теперь его можно отправить на подпись заказчику.");
+      setNote(uiText("Договор подписан со стороны компании. Теперь его можно отправить на подпись заказчику."));
     } catch (err) {
       await read().catch(() => undefined);
       setNote(""); throw new Error(ncalayerUserMessage(err));
@@ -128,22 +130,22 @@ export function ContractWorkspaceModal({ contractId, onClose, onChanged }: {
   async function sendToBuyer() {
     const result = await api.sendContractToBuyer(contractId) as Signing;
     const url = result.requests.find(row => row.signerType === "BUYER")?.signUrl;
-    if (!url) throw new Error("Ссылка на подпись не получена. Обновите состояние договора.");
+    if (!url) throw new Error(uiText("Ссылка на подпись не получена. Обновите состояние договора."));
     setBuyerLink(url);
     await refresh();
-    setNote("Ссылка для подписи готова. Скопируйте её и отправьте заказчику.");
+    setNote(uiText("Ссылка для подписи готова. Скопируйте её и отправьте заказчику."));
   }
   async function cancelSigning() {
-    if (!window.confirm("Отменить подписание договора и вернуть его в исправление? Подпись исполнителя и ссылка заказчику будут аннулированы.")) return;
+    if (!window.confirm(uiText("Отменить подписание договора и вернуть его в исправление? Подпись исполнителя и ссылка заказчику будут аннулированы."))) return;
     await api.cancelContractSigning(contractId);
     setBuyerLink("");
     await refresh();
-    setNote("Подписание отменено. Договор снова можно исправлять.");
+    setNote(uiText("Подписание отменено. Договор снова можно исправлять."));
   }
   async function deleteCurrentContract() {
-    if (!window.confirm("Удалить этот договор? Действие нельзя отменить.")) return;
+    if (!window.confirm(uiText("Удалить этот договор? Действие нельзя отменить."))) return;
     await api.deleteContract(contractId);
-    setNote("Договор удалён");
+    setNote(uiText("Договор удалён"));
     await onChanged();
     onClose();
   }
@@ -155,35 +157,35 @@ export function ContractWorkspaceModal({ contractId, onClose, onChanged }: {
     onClose={onClose}
     onViewed={markViewed}
     actions={ready => <>
-      <button type="button" className="btn secondary" disabled={busy || !editable || editing} onClick={() => void action(edit)}>Изменить</button>
+      <button type="button" className="btn secondary" disabled={busy || !editable || editing} onClick={() => void action(edit)}>{uiText("Изменить")}</button>
       {contract && !review.confirmed && !seller && !fullySigned ? <button type="button" className="btn" disabled={busy || editing || !ready || !fileKey} onClick={() => {
-        const next = { viewed: true, confirmed: true }; setReview(next); writeContractReview(fileKey, next); setError(""); setNote("Договор подтверждён. Можно подписать его со стороны компании.");
-      }}>Подтвердить</button> : null}
-      {contract && !seller && !fullySigned ? <button type="button" className="btn" disabled={busy || editing || !ready || !review.confirmed || !CONTRACT_SIGNING_ENABLED} onClick={() => void action(sign)}>{busy ? "Подождите…" : "Подписать"}</button> : null}
-      {seller && !buyerSigned && !fullySigned ? <button type="button" className="btn" disabled={busy || !CONTRACT_SIGNING_ENABLED} onClick={() => void action(sendToBuyer)}>Отправить на подпись заказчику</button> : null}
-      {signing.requests.length > 0 && !buyerSigned && !fullySigned ? <button type="button" className="btn secondary" disabled={busy || !CONTRACT_SIGNING_ENABLED} onClick={() => void action(cancelSigning)}>Отменить подпись и исправить договор</button> : null}
-      {contract && !seller && !buyerSigned && !fullySigned ? <button type="button" className="btn secondary" disabled={busy} onClick={() => void action(deleteCurrentContract)}>Удалить договор</button> : null}
+        const next = { viewed: true, confirmed: true }; setReview(next); writeContractReview(fileKey, next); setError(""); setNote(uiText("Договор подтверждён. Можно подписать его со стороны компании."));
+      }}>{uiText("Подтвердить")}</button> : null}
+      {contract && !seller && !fullySigned ? <button type="button" className="btn" disabled={busy || editing || !ready || !review.confirmed || !CONTRACT_SIGNING_ENABLED} onClick={() => void action(sign)}>{busy ? uiText("Подождите…") : uiText("Подписать")}</button> : null}
+      {seller && !buyerSigned && !fullySigned ? <button type="button" className="btn" disabled={busy || !CONTRACT_SIGNING_ENABLED} onClick={() => void action(sendToBuyer)}>{uiText("Отправить на подпись заказчику")}</button> : null}
+      {signing.requests.length > 0 && !buyerSigned && !fullySigned ? <button type="button" className="btn secondary" disabled={busy || !CONTRACT_SIGNING_ENABLED} onClick={() => void action(cancelSigning)}>{uiText("Отменить подпись и исправить договор")}</button> : null}
+      {contract && !seller && !buyerSigned && !fullySigned ? <button type="button" className="btn secondary" disabled={busy} onClick={() => void action(deleteCurrentContract)}>{uiText("Удалить договор")}</button> : null}
     </>}
   >
     {error ? <p className="error" role="alert">{error}</p> : null}
-    {!contract && !error ? <p className="muted">Загружаем сведения о договоре…</p> : null}
-    {!contract && error ? <button type="button" className="btn secondary" disabled={busy} onClick={() => void action(async () => { await read(); })}>Повторить загрузку</button> : null}
+    {!contract && !error ? <p className="muted">{uiText("Загружаем сведения о договоре…")}</p> : null}
+    {!contract && error ? <button type="button" className="btn secondary" disabled={busy} onClick={() => void action(async () => { await read(); })}>{uiText("Повторить загрузку")}</button> : null}
     {note ? <p role="status">{note}</p> : null}
-    {contract ? <p className="muted">{Number(contract.totalAmount).toLocaleString("ru-RU")} {contract.currency === "KZT" ? "₸" : contract.currency} · {fullySigned ? "Подписан обеими сторонами" : seller ? "Подписан компанией, ожидается подпись заказчика" : review.confirmed ? "Подтверждён" : "Требует проверки"}</p> : null}
-    {contract?.importedPdf ? <p className="muted">Загруженный договор сохраняется в исходном виде. Для изменения загрузите новую редакцию.</p> : contract && !editable ? <p className="muted">{seller || fullySigned ? "Договор уже подписан компанией. Изменение этой версии недоступно." : "Версия договора зафиксирована для подписания. Если попытка не удалась, нажмите «Подписать» повторно."}</p> : null}
+    {contract ? <p className="muted">{Number(contract.totalAmount).toLocaleString(uiFormatLocale())} {contract.currency === "KZT" ? "₸" : contract.currency} · {fullySigned ? uiText("Подписан обеими сторонами") : seller ? uiText("Подписан компанией, ожидается подпись заказчика") : review.confirmed ? uiText("Подтверждён") : uiText("Требует проверки")}</p> : null}
+    {contract?.importedPdf ? <p className="muted">{uiText("Загруженный договор сохраняется в исходном виде. Для изменения загрузите новую редакцию.")}</p> : contract && !editable ? <p className="muted">{seller || fullySigned ? uiText("Договор уже подписан компанией. Изменение этой версии недоступно.") : uiText("Версия договора зафиксирована для подписания. Если попытка не удалась, нажмите «Подписать» повторно.")}</p> : null}
     {editing ? <form className="panel contract-edit-form" onSubmit={event => { event.preventDefault(); void action(save); }}>
-      <label>Номер договора<input maxLength={40} value={form.number} disabled={busy} onChange={event => setForm({ ...form, number: event.target.value })}/></label>
-      <label>Дата договора<input type="date" required value={form.documentDate} disabled={busy} onChange={event => setForm({ ...form, documentDate: event.target.value })}/></label>
-      <label>Предмет договора<textarea required value={form.subject} disabled={busy} onChange={event => setForm({ ...form, subject: event.target.value })}/></label>
-      <label>Условия оплаты<textarea value={form.paymentTerms} disabled={busy} onChange={event => setForm({ ...form, paymentTerms: event.target.value })}/></label>
-      <label>Срок исполнения<input value={form.completionTerms} disabled={busy} onChange={event => setForm({ ...form, completionTerms: event.target.value })}/></label>
-      <label>Шаблон<select value={form.templateId} disabled={busy} onChange={event => setForm({ ...form, templateId: event.target.value })}><option value="">Шаблон по умолчанию</option>{templates.map(template => <option value={template.id} key={template.id}>{template.name}</option>)}</select></label>
-      <p className="muted">Сохранение сформирует новую PDF-копию договора. Её потребуется подтвердить заново.</p>
-      <div className="actions"><button className="btn" disabled={busy}>Сохранить изменения</button><button type="button" className="btn secondary" disabled={busy} onClick={() => setEditing(false)}>Отмена</button></div>
+      <label>{uiText("Номер договора")}<input maxLength={40} value={form.number} disabled={busy} onChange={event => setForm({ ...form, number: event.target.value })}/></label>
+      <label>{uiText("Дата договора")}<input type="date" required value={form.documentDate} disabled={busy} onChange={event => setForm({ ...form, documentDate: event.target.value })}/></label>
+      <label>{uiText("Предмет договора")}<textarea required value={form.subject} disabled={busy} onChange={event => setForm({ ...form, subject: event.target.value })}/></label>
+      <label>{uiText("Условия оплаты")}<textarea value={form.paymentTerms} disabled={busy} onChange={event => setForm({ ...form, paymentTerms: event.target.value })}/></label>
+      <label>{uiText("Срок исполнения")}<input value={form.completionTerms} disabled={busy} onChange={event => setForm({ ...form, completionTerms: event.target.value })}/></label>
+      <label>{uiText("Шаблон")}<select value={form.templateId} disabled={busy} onChange={event => setForm({ ...form, templateId: event.target.value })}><option value="">{uiText("Шаблон по умолчанию")}</option>{templates.map(template => <option value={template.id} key={template.id}>{template.name}</option>)}</select></label>
+      <p className="muted">{uiText("Сохранение сформирует новую PDF-копию договора. Её потребуется подтвердить заново.")}</p>
+      <div className="actions"><button className="btn" disabled={busy}>{uiText("Сохранить изменения")}</button><button type="button" className="btn secondary" disabled={busy} onClick={() => setEditing(false)}>{uiText("Отмена")}</button></div>
     </form> : null}
     <ContractSignatureSummary signed={fullySigned} verificationUrl={signing.verificationUrl} sellerName={signing.sellerName} buyerName={signing.buyerName}
       signers={(signing.signatures || []).map(row => ({ ...row, name: row.signerName, role: signing.requests.find(request => request.id === row.signatureRequestId)?.signerType }))}
       download={format => api.downloadSignedContract(contractId, format)} />
-    {buyerLink ? <div className="panel"><label>Ссылка заказчику для подписи<input readOnly value={buyerLink} onFocus={event => event.target.select()}/></label><button type="button" className="btn secondary" onClick={() => void action(async () => { await navigator.clipboard.writeText(buyerLink); setNote("Ссылка скопирована. Отправьте её заказчику."); })}>Скопировать ссылку</button></div> : null}
+    {buyerLink ? <div className="panel"><label>{uiText("Ссылка заказчику для подписи")}<input readOnly value={buyerLink} onFocus={event => event.target.select()}/></label><button type="button" className="btn secondary" onClick={() => void action(async () => { await navigator.clipboard.writeText(buyerLink); setNote(uiText("Ссылка скопирована. Отправьте её заказчику.")); })}>{uiText("Скопировать ссылку")}</button></div> : null}
   </ContractPreviewModal>;
 }

@@ -1,3 +1,4 @@
+import { uiMessage, uiText, useUiText, localizeUiOptions, uiFormatLocale } from "../lib/uiText";
 import { EsfSubmissionStatus, ESF_SEND_PHASES, type EsfSubmission } from "../components/EsfSubmissionStatus";
 import { notifySaved } from "../components/SaveNotice";
 import { esfMeasureUnitShortLabel, INVOICE_PAYMENT_KIND_LABEL, type PdfImportDraft } from "@creolab/contracts";
@@ -80,8 +81,8 @@ const INVOICE_ESF_STATUS_LABEL: Record<string, string> = {
 
 function esfStatusLabel(type: string, status?: string) {
   if (!status) return "";
-  if (type === "ESF") return INVOICE_ESF_STATUS_LABEL[status] || status;
-  return AWP_STATUS_LABEL[status] || status;
+  if (type === "ESF") return localizeUiOptions(INVOICE_ESF_STATUS_LABEL, uiText)[status] || status;
+  return localizeUiOptions(AWP_STATUS_LABEL, uiText)[status] || status;
 }
 
 function MissingList({
@@ -104,7 +105,7 @@ function MissingList({
       <p className="error">{title}</p>
       <ul>
         {(fields || []).map((code) => (
-          <li key={code}>{labels?.[code] || code}</li>
+          <li key={code}>{uiMessage(labels?.[code]) || code}</li>
         ))}
       </ul>
     </div>
@@ -141,6 +142,7 @@ export function DealDocumentsPanel(props: {
   esfInvoicePreview: any;
   setEsfInvoicePreview: (value: any) => void;
 }) {
+  const uiText = useUiText();
   const {
     deal: d,
     docs,
@@ -233,7 +235,7 @@ export function DealDocumentsPanel(props: {
     let phase = "CHECKING";
     submission(type, { phase });
     try {
-      if (!document?.id) throw new Error(`Сначала создайте ${type}`);
+      if (!document?.id) throw new Error(uiText("Сначала создайте {p0}", {p0: type}));
       await api.validateElectronicDocument(document.id);
       phase = "AUTHORIZING"; submission(type, { phase });
       await ensureEsfCabinetSession({ iin: esfIin, cabinetPassword });
@@ -246,13 +248,13 @@ export function DealDocumentsPanel(props: {
       const receipt = { document: result.sent.document, provider: result.sent.provider };
       submission(type, receipt);
       try { await load(); }
-      catch { submission(type, { ...receipt, error: "Ответ об отправке получен, но обновить карточку сделки не удалось. Обновите страницу." }); }
+      catch { submission(type, { ...receipt, error: uiText("Ответ об отправке получен, но обновить карточку сделки не удалось. Обновите страницу.") }); }
     } catch (err: any) {
       if (err.wsseRequired || err.body?.wsseRequired || err.code === "esf_wsse_required" || err.body?.code === "esf_wsse_required") {
         setAskCabinet(true);
       }
       const code = err.code || err.body?.error?.code || err.body?.error || err.body?.code;
-      const error = code === "USER_CANCELLED" ? "Подпись отменена. Документ не отправлен." : phase === "SENDING" && !err.body ? "Связь с сервером прервалась. Ответ об отправке не получен." : err.message || `Не удалось отправить ${type}`;
+      const error = code === "USER_CANCELLED" ? uiText("Подпись отменена. Документ не отправлен.") : phase === "SENDING" && !err.body ? uiText("Связь с сервером прервалась. Ответ об отправке не получен.") : err.message || uiText("Не удалось отправить {p0}", {p0: type});
       const uncertain = phase === "SENDING" && (!err.body || code === "send_result_unknown" || code === "document_sending");
       let saved;
       if (document?.id) {
@@ -273,7 +275,7 @@ export function DealDocumentsPanel(props: {
       submission(type, { document: saved, provider: previous.provider });
       await load();
     } catch (err: any) {
-      submission(type, { ...previous, error: `Не удалось обновить статус: ${err.message}`, phase: undefined });
+      submission(type, { ...previous, error: uiText("Не удалось обновить статус: {p0}", {p0: err.message}), phase: undefined });
     } finally { setBusy(false); }
   }
   const [legacyPocEnabled, setLegacyPocEnabled] = useState(false);
@@ -318,19 +320,19 @@ export function DealDocumentsPanel(props: {
     if (!fileKey || !contract?.id) return;
     if (!fromPreview && !review.viewed) {
       openContractPreview();
-      setError("Просмотрите договор, затем нажмите «Подтвердить».");
+      setError(uiText("Просмотрите договор, затем нажмите «Подтвердить»."));
       return;
     }
     setReviewState({ viewed: true, confirmed: true });
     setError("");
-    notifySaved("Договор подтверждён");
+    notifySaved(uiText("Договор подтверждён"));
   }
 
   function sendContractForSignature() {
     const contractId = contract?.id;
     if (!contractId) return;
     if (needsReview && !review.confirmed) {
-      setError("Сначала просмотрите и подтвердите договор");
+      setError(uiText("Сначала просмотрите и подтвердите договор"));
       return;
     }
     setBusy(true);
@@ -342,7 +344,7 @@ export function DealDocumentsPanel(props: {
         if (url) setBuyerLink(url);
         return load();
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "Не удалось отправить на подпись"))
+      .catch((err) => setError(err instanceof Error ? err.message : uiText("Не удалось отправить на подпись")))
       .finally(() => setBusy(false));
   }
 
@@ -366,7 +368,7 @@ export function DealDocumentsPanel(props: {
         contractId = created.contract.id;
       }
       const generated: any = await api.generateContract(contractId!, contractPayload());
-      notifySaved("Договор сформирован");
+      notifySaved(uiText("Договор сформирован"));
       setContractEditOpen(false);
       await load();
       setPreviewContract({
@@ -382,7 +384,7 @@ export function DealDocumentsPanel(props: {
           missingFieldLabels: err.body?.details?.missingFieldLabels || err.body?.missingFieldLabels || {},
         });
       }
-      setError(err instanceof Error ? err.message : "Не удалось сформировать договор");
+      setError(err instanceof Error ? err.message : uiText("Не удалось сформировать договор"));
     } finally {
       setBusy(false);
     }
@@ -394,23 +396,23 @@ export function DealDocumentsPanel(props: {
     try {
       if (contracts[0]?.status === "READY_TO_SIGN") await api.generateContract(contracts[0].id, contractPayload());
       else await api.createContractDraft(d.id, contractPayload());
-      notifySaved("Договор сохранён");
+      notifySaved(uiText("Договор сохранён"));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось сохранить договор");
+      setError(err instanceof Error ? err.message : uiText("Не удалось сохранить договор"));
     } finally {
       setBusy(false);
     }
   }
 
   const steps = [
-    { id: "contract", label: "Договор", tone: stepTone(contract?.status === "SIGNED", Boolean(contract)) },
-    { id: "invoice", label: "Счёт — по необходимости", tone: stepTone(["ISSUED", "PARTIALLY_PAID", "PAID"].includes(invoice?.status), Boolean(invoice)) },
-    { id: "avr", label: "АВР", tone: stepTone(avr?.status === "ACCEPTED", Boolean(avr)) },
-    { id: "esf", label: "ЭСФ", tone: stepTone(esf?.status === "ACCEPTED", Boolean(esf)) },
+    { id: "contract", label: uiText("Договор"), tone: stepTone(contract?.status === "SIGNED", Boolean(contract)) },
+    { id: "invoice", label: uiText("Счёт — по необходимости"), tone: stepTone(["ISSUED", "PARTIALLY_PAID", "PAID"].includes(invoice?.status), Boolean(invoice)) },
+    { id: "avr", label: uiText("АВР"), tone: stepTone(avr?.status === "ACCEPTED", Boolean(avr)) },
+    { id: "esf", label: uiText("ЭСФ"), tone: stepTone(esf?.status === "ACCEPTED", Boolean(esf)) },
     {
       id: "close",
-      label: "Закрытие",
+      label: uiText("Закрытие"),
       tone: stepTone(d.outcome === "won" || closeReadiness?.alreadyClosed, Boolean(closeReadiness?.ready)),
     },
   ];
@@ -420,15 +422,14 @@ export function DealDocumentsPanel(props: {
       <div className="panel">
         <div className="row sit-head">
           <div>
-            <b>Документы</b>
-            {docs?.documentState?<p className="deal-flag">{docs.documentState.label}</p>:null}
-            <p className="muted">АВР и ЭСФ формируются из договора, позиций сделки и реквизитов сторон. Счёт на оплату — отдельный документ, его загрузка или создание не обязательны.</p>
+            <b>{uiText("Документы")}</b>
+            {docs?.documentState?<p className="deal-flag">{uiMessage(docs.documentState.label)}</p>:null}
+            <p className="muted">{uiText("АВР и ЭСФ формируются из договора, позиций сделки и реквизитов сторон. Счёт на оплату — отдельный документ, его загрузка или создание не обязательны.")}</p>
           </div>
           <Link className="btn secondary" to="/documents">
-            Все документы
-          </Link>
+            {uiText("Все документы")}</Link>
         </div>
-        <div className="doc-progress" aria-label="Этапы документов">
+        <div className="doc-progress" aria-label={uiText("Этапы документов")}>
           {steps.map((step) => (
             <span key={step.id} className={`doc-progress-chip ${step.tone}`}>
               {step.label}
@@ -438,34 +439,34 @@ export function DealDocumentsPanel(props: {
 
         <div className="doc-step" id="contract">
           <div className="doc-step-title">
-            <b>Договор</b>
+            <b>{uiText("Договор")}</b>
           </div>
           <MissingList
             ready={readiness?.ready}
-            ok="Данных достаточно для договора."
-            title={contracts[0]?.importedPdf ? "Для следующих документов нужно дополнить реквизиты:" : "Не хватает данных для договора:"}
+            ok={uiText("Данных достаточно для договора.")}
+            title={contracts[0]?.importedPdf ? uiText("Для следующих документов нужно дополнить реквизиты:") : uiText("Не хватает данных для договора:")}
             fields={readiness?.missingFields}
             labels={readiness?.missingFieldLabels}
           />
           {contracts[0]?.importedPdf && readiness?.missingFields?.some((field:string)=>field.startsWith("organization.")) ? (
             <div className="stack">
-              <p className="muted">Заполните реквизиты исполнителя из сохранённого договора. Если часть данных была пропущена, система повторно прочитает его PDF-копию.</p>
+              <p className="muted">{uiText("Заполните реквизиты исполнителя из сохранённого договора. Если часть данных была пропущена, система повторно прочитает его PDF-копию.")}</p>
               <button className="btn secondary" disabled={busy} onClick={()=>{
                 setBusy(true);setError("");
                 void api.request(`/api/v1/contracts/${contracts[0].id}/imported-requisites`,{method:"POST"})
-                  .then(async()=>{await load();notifySaved("Реквизиты из договора сохранены");})
+                  .then(async()=>{await load();notifySaved(uiText("Реквизиты из договора сохранены"));})
                   .catch(err=>setError(err.message)).finally(()=>setBusy(false));
-              }}>Заполнить реквизиты из договора</button>
-              <Link to="/settings#company-requisites">Реквизиты компании в настройках</Link>
+              }}>{uiText("Заполнить реквизиты из договора")}</button>
+              <Link to="/settings#company-requisites">{uiText("Реквизиты компании в настройках")}</Link>
             </div>
           ) : null}
           {contracts.map((doc: any) => (
             <div className="row" key={doc.id}>
               <div>
-                <button type="button" className="contract-number-link" onClick={() => setPreviewContract({ id: doc.id, number: doc.number })}>Договор {doc.number}</button>
-                {doc.originalFileName && /\.docx?$/i.test(doc.originalFileName) ? <a className="btn secondary" href={`/api/v1/contracts/${doc.id}/original`}>Скачать оригинал Word</a> : null}{doc.importedPdf ? <div className="muted">Загружен вручную</div> : null}
+                <button type="button" className="contract-number-link" onClick={() => setPreviewContract({ id: doc.id, number: doc.number })}>{uiText("Договор")}{" "}{doc.number}</button>
+                {doc.originalFileName && /\.docx?$/i.test(doc.originalFileName) ? <a className="btn secondary" href={`/api/v1/contracts/${doc.id}/original`}>{uiText("Скачать оригинал Word")}</a> : null}{doc.importedPdf ? <div className="muted">{uiText("Загружен вручную")}</div> : null}
                 <div className="muted">
-                  {CONTRACT_STATUS_LABEL[doc.status] || doc.status} · {Number(doc.totalAmount).toLocaleString("ru-RU")} ₸
+                  {localizeUiOptions(CONTRACT_STATUS_LABEL, uiText)[doc.status] || doc.status} · {Number(doc.totalAmount).toLocaleString(uiFormatLocale())} ₸
                 </div>
               </div>
               <DeleteContractButton id={doc.id} number={doc.number} disabled={busy} onDeleted={async()=>{setBuyerLink("");setContractEditOpen(false);await load();}} />
@@ -474,46 +475,44 @@ export function DealDocumentsPanel(props: {
           {readyView ? (
             <>
               {needsReview && review.confirmed ? (
-                <p className="muted">Договор просмотрен и подтверждён. Можно отправить на подпись.</p>
+                <p className="muted">{uiText("Договор просмотрен и подтверждён. Можно отправить на подпись.")}</p>
               ) : needsReview && review.viewed ? (
-                <p className="muted">Договор просмотрен. Подтвердите его перед отправкой на подпись.</p>
+                <p className="muted">{uiText("Договор просмотрен. Подтвердите его перед отправкой на подпись.")}</p>
               ) : needsReview ? (
-                <p className="muted">Просмотрите PDF, подтвердите текст, затем отправьте на подпись.</p>
+                <p className="muted">{uiText("Просмотрите PDF, подтвердите текст, затем отправьте на подпись.")}</p>
               ) : contract?.status === "SIGNED" ? (
-                <p className="muted">Договор подписан.</p>
+                <p className="muted">{uiText("Договор подписан.")}</p>
               ) : contract?.status === "PENDING_SIGNATURE" || contract?.status === "PARTIALLY_SIGNED" ? (
-                <p className="muted">Договор уже отправлен на подпись.</p>
+                <p className="muted">{uiText("Договор уже отправлен на подпись.")}</p>
               ) : null}
               <div className="actions" style={{ marginTop: 8 }}>
                 <button
                   type="button"
                   className="btn"
                   disabled={busy}
-                  {...tip("Открыть сформированный PDF для проверки")}
+                  {...tip(uiText("Открыть сформированный PDF для проверки"))}
                   onClick={openContractPreview}
                 >
-                  Просмотр договора
-                </button>
+                  {uiText("Просмотр договора")}</button>
                 {canEditContract ? (
                   <button
                     type="button"
                     className="btn secondary"
                     disabled={busy}
-                    {...tip("Открыть шаблон и условия, чтобы сформировать договор заново")}
+                    {...tip(uiText("Открыть шаблон и условия, чтобы сформировать договор заново"))}
                     onClick={() => { setError(""); setContractEditOpen(true); }}
                   >
-                    Изменить
-                  </button>
+                    {uiText("Изменить")}</button>
                 ) : null}
                 {needsReview ? (
                   <button
                     type="button"
                     className="btn secondary"
                     disabled={busy || review.confirmed}
-                    {...tip("Подтвердить, что текст договора проверен и его можно отправлять на подпись")}
+                    {...tip(uiText("Подтвердить, что текст договора проверен и его можно отправлять на подпись"))}
                     onClick={() => confirmContract()}
                   >
-                    {review.confirmed ? "Подтверждён" : "Подтвердить"}
+                    {review.confirmed ? uiText("Подтверждён") : uiText("Подтвердить")}
                   </button>
                 ) : null}
                 {canSendForSign ? (
@@ -523,40 +522,37 @@ export function DealDocumentsPanel(props: {
                     disabled={busy || (needsReview && !review.confirmed)}
                     {...tip(
                       needsReview && !review.confirmed
-                        ? "Сначала просмотрите и подтвердите договор"
-                        : "Отправить договор исполнителю и заказчику на подпись ЭЦП",
+                        ? uiText("Сначала просмотрите и подтвердите договор")
+                        : uiText("Отправить договор исполнителю и заказчику на подпись ЭЦП"),
                     )}
                     onClick={sendContractForSignature}
                   >
-                    Отправить на подпись
-                  </button>
+                    {uiText("Отправить на подпись")}</button>
                 ) : null}
               </div>
             </>
           ) : (
             <>
               {contractEditOpen ? (
-                <p className="muted">После изменения позиций, шаблона или срока сформируйте договор заново — на подпись уйдёт новая PDF-копия.</p>
+                <p className="muted">{uiText("После изменения позиций, шаблона или срока сформируйте договор заново — на подпись уйдёт новая PDF-копия.")}</p>
               ) : null}
               <div className="actions" style={{ marginTop: 8 }}>
-                <label>Номер договора<input maxLength={40} value={contractNumber} disabled={busy || importedContract} placeholder="Автоматически по настройкам нумерации" onChange={event => setContractNumber(event.target.value)} /></label>
-                <label>Дата договора<input type="date" value={contractDate} disabled={busy || importedContract} onChange={event => setContractDate(event.target.value)} /></label>
+                <label>{uiText("Номер договора")}<input maxLength={40} value={contractNumber} disabled={busy || importedContract} placeholder={uiText("Автоматически по настройкам нумерации")} onChange={event => setContractNumber(event.target.value)} /></label>
+                <label>{uiText("Дата договора")}<input type="date" value={contractDate} disabled={busy || importedContract} onChange={event => setContractDate(event.target.value)} /></label>
                 {templates.length ? (
                   <label>
-                    Шаблон договора
-                    <select value={templateId} disabled={busy || importedContract} onChange={(e) => setTemplateId(e.target.value)}>
+                    {uiText("Шаблон договора")}<select value={templateId} disabled={busy || importedContract} onChange={(e) => setTemplateId(e.target.value)}>
                       {templates.map((row) => (
-                        <option key={row.id} value={row.id}>{row.name}{row.isDefault ? " (по умолчанию)" : ""}</option>
+                        <option key={row.id} value={row.id}>{row.name}{row.isDefault ? uiText(" (по умолчанию)") : ""}</option>
                       ))}
                     </select>
                   </label>
                 ) : null}
                 <label>
-                  Срок исполнения
-                  <input
+                  {uiText("Срок исполнения")}<input
                     value={completionTerms}
                     disabled={busy || importedContract}
-                    placeholder="5–7 рабочих дней"
+                    placeholder={uiText("5–7 рабочих дней")}
                     onChange={(e) => setCompletionTerms(e.target.value)}
                   />
                 </label>
@@ -564,11 +560,10 @@ export function DealDocumentsPanel(props: {
                   type="button"
                   className="btn"
                   disabled={busy || readiness?.ready === false || importedContract}
-                  title={importedContract ? "Загруженный PDF уже сохранён в исходном виде" : undefined}
+                  title={importedContract ? uiText("Загруженный PDF уже сохранён в исходном виде") : undefined}
                   onClick={() => void generateWord()}
                 >
-                  Сформировать договор
-                </button>
+                  {uiText("Сформировать договор")}</button>
                 {importedContract ? null : (
                   <button
                     type="button"
@@ -576,8 +571,7 @@ export function DealDocumentsPanel(props: {
                     disabled={busy}
                     onClick={() => void saveContract()}
                   >
-                    Сохранить договор
-                  </button>
+                    {uiText("Сохранить договор")}</button>
                 )}
                 {contractEditOpen ? (
                   <button
@@ -586,8 +580,7 @@ export function DealDocumentsPanel(props: {
                     disabled={busy}
                     onClick={() => setContractEditOpen(false)}
                   >
-                    Отмена
-                  </button>
+                    {uiText("Отмена")}</button>
                 ) : null}
               </div>
             </>
@@ -597,9 +590,9 @@ export function DealDocumentsPanel(props: {
         {CONTRACT_SIGNING_ENABLED ? (
         <div className="doc-step">
           <div className="doc-step-title">
-            <b>Подпись договора</b>
+            <b>{uiText("Подпись договора")}</b>
           </div>
-          <p className="muted">Сначала исполнитель в кабинете, затем заказчик по ссылке. Нужен NCALayer с ключом подписи НУЦ.</p>
+          <p className="muted">{uiText("Сначала исполнитель в кабинете, затем заказчик по ссылке. Нужен NCALayer с ключом подписи НУЦ.")}</p>
           {(signing?.requests || []).map((row: any) => {
             const signature = (signing?.signatures || []).find(
               (item: any) =>
@@ -611,7 +604,7 @@ export function DealDocumentsPanel(props: {
             return (
             <div className="row" key={row.id}>
               <div>
-                <b>{row.signerType === "SELLER" ? "Исполнитель" : "Заказчик"}</b>
+                <b>{row.signerType === "SELLER" ? uiText("Исполнитель") : uiText("Заказчик")}</b>
                 <div className="muted">
                   {row.signerName || "—"} · {row.status}
                   {check ? ` · ${check}` : ""}
@@ -622,30 +615,29 @@ export function DealDocumentsPanel(props: {
           })}
           {buyerLink ? (
             <p className="muted" style={{ wordBreak: "break-all" }}>
-              Ссылка заказчику: <a href={buyerLink}>{buyerLink}</a>
+              {uiText("Ссылка заказчику:")}{" "}<a href={buyerLink}>{buyerLink}</a>
             </p>
           ) : null}
           {signing?.verificationUrl ? (
             <p>
-              <Link to={signing.verificationUrl}>Страница проверки</Link>
+              <Link to={signing.verificationUrl}>{uiText("Страница проверки")}</Link>
             </p>
           ) : null}
           <div className="actions" style={{ marginTop: 8 }}>
             {confirmSellerSign ? (
               <div className="panel" style={{ marginTop: 8 }}>
                 <p>
-                  Подписать ЭЦП договор <b>{contracts[0]?.number}</b>?
+                  {uiText("Подписать ЭЦП договор")}{" "}<b>{contracts[0]?.number}</b>?
                 </p>
                 <p className="muted">
-                  {d.company?.name || d.companyName || contracts[0]?.companyName || "Контрагент"}
+                  {d.company?.name || d.companyName || contracts[0]?.companyName || uiText("Контрагент")}
                   {contracts[0]?.totalAmount != null
-                    ? ` · ${Number(contracts[0].totalAmount).toLocaleString("ru-RU")} ${contracts[0].currency || "KZT"}`
+                    ? ` · ${Number(contracts[0].totalAmount).toLocaleString(uiFormatLocale())} ${contracts[0].currency || "KZT"}`
                     : ""}
                 </p>
                 <div className="actions">
                   <button type="button" className="btn secondary" disabled={busy} onClick={() => setConfirmSellerSign(false)}>
-                    Отмена
-                  </button>
+                    {uiText("Отмена")}</button>
                   <button
                     type="button"
                     className="btn"
@@ -654,7 +646,7 @@ export function DealDocumentsPanel(props: {
                       const current = contracts[0];
                       const seller = signing?.requests?.find((row: any) => row.signerType === "SELLER");
                       if (!current || !seller) {
-                        setError("Сначала отправьте договор на подпись");
+                        setError(uiText("Сначала отправьте договор на подпись"));
                         setConfirmSellerSign(false);
                         return;
                       }
@@ -662,7 +654,7 @@ export function DealDocumentsPanel(props: {
                       const client = createSigningClient();
                       void (async () => {
                         const pdf = await fetch(api.contractPdfUrl(current.id), { credentials: "include" });
-                        if (!pdf.ok) throw new Error("Не удалось открыть договор");
+                        if (!pdf.ok) throw new Error(uiText("Не удалось открыть договор"));
                         const bytes = new Uint8Array(await pdf.arrayBuffer());
                         let binary = "";
                         bytes.forEach((byte) => {
@@ -683,7 +675,7 @@ export function DealDocumentsPanel(props: {
                         });
                     }}
                   >
-                    {busy ? "Подписываем…" : "Подписать ЭЦП"}
+                    {busy ? uiText("Подписываем…") : uiText("Подписать ЭЦП")}
                   </button>
                 </div>
               </div>
@@ -696,14 +688,13 @@ export function DealDocumentsPanel(props: {
                 const current = contracts[0];
                 const seller = signing?.requests?.find((row: any) => row.signerType === "SELLER");
                 if (!current || !seller) {
-                  setError("Сначала отправьте договор на подпись");
+                  setError(uiText("Сначала отправьте договор на подпись"));
                   return;
                 }
                 setConfirmSellerSign(true);
               }}
             >
-              Подписать со стороны компании
-            </button>
+              {uiText("Подписать со стороны компании")}</button>
             )}
           </div>
         </div>
@@ -711,45 +702,44 @@ export function DealDocumentsPanel(props: {
 
         <div className="doc-step">
           <div className="doc-step-title">
-            <b>Счёт на оплату — по необходимости</b>
+            <b>{uiText("Счёт на оплату — по необходимости")}</b>
           </div>
           <MissingList
             ready={invoiceReadiness?.ready}
-            ok="Можно сформировать счёт."
-            title="Не хватает данных для счёта:"
+            ok={uiText("Можно сформировать счёт.")}
+            title={uiText("Не хватает данных для счёта:")}
             fields={invoiceReadiness?.missingFields}
             labels={invoiceReadiness?.missingFieldLabels}
           />
           {invoices.map((doc: any) => (
             <div className="row" key={doc.id}>
               <div>
-                <Link to={`/documents/invoices/${doc.id}`}><b>Счёт {doc.number}</b> · Открыть</Link>
-                {doc.importedPdf ? <div className="muted">Загружен вручную</div> : null}
+                <Link to={`/documents/invoices/${doc.id}`}><b>{uiText("Счёт")}{" "}{doc.number}</b> {" "}{uiText("· Открыть")}</Link>
+                {doc.importedPdf ? <div className="muted">{uiText("Загружен вручную")}</div> : null}
                 {doc.importDetails ? <>
                   <div>{doc.importDetails.subject}</div>
                   {doc.importDetails.paymentKind && doc.importDetails.paymentKind !== "UNSPECIFIED" ? <div>{INVOICE_PAYMENT_KIND_LABEL[doc.importDetails.paymentKind as NonNullable<PdfImportDraft["paymentKind"]>]}</div> : null}
                   {doc.importDetails.paymentTerms && doc.importDetails.paymentTerms !== doc.importDetails.subject ? <div className="muted">{doc.importDetails.paymentTerms}</div> : null}
-                  {doc.items?.map((item: {id:string;name:string;quantity:number;unit:string;unitPrice:number;totalAmount:number})=><div className="muted" key={item.id}>{item.name}: {Number(item.quantity).toLocaleString("ru-RU")} {esfMeasureUnitShortLabel(item.unit)} × {Number(item.unitPrice).toLocaleString("ru-RU")} ₸ без НДС · итого {Number(item.totalAmount).toLocaleString("ru-RU")} ₸</div>)}
+                  {doc.items?.map((item: {id:string;name:string;quantity:number;unit:string;unitPrice:number;totalAmount:number})=><div className="muted" key={item.id}>{item.name}: {Number(item.quantity).toLocaleString(uiFormatLocale())} {esfMeasureUnitShortLabel(item.unit)} × {Number(item.unitPrice).toLocaleString(uiFormatLocale())} {" "}{uiText("₸ без НДС · итого")}{" "}{Number(item.totalAmount).toLocaleString(uiFormatLocale())} ₸</div>)}
                 </> : null}
                 <div className="muted">
-                  {INVOICE_STATUS_LABEL[doc.status] || doc.status} · {Number(doc.totalAmount).toLocaleString("ru-RU")} ₸
+                  {localizeUiOptions(INVOICE_STATUS_LABEL, uiText)[doc.status] || doc.status} · {Number(doc.totalAmount).toLocaleString(uiFormatLocale())} ₸
                 </div>
               </div>
               {doc.pdfFileId ? (
                 <a className="btn secondary" href={api.invoicePdfUrl(doc.id)} target="_blank" rel="noreferrer">
-                  Открыть счёт
-                </a>
+                  {uiText("Открыть счёт")}</a>
               ) : null}
             </div>
           ))}
           <div className="actions" style={{ marginTop: 8 }}>
-            <Link className="btn" to={`/documents/invoices/new?dealId=${d.id}`}>Создать счёт</Link>
+            <Link className="btn" to={`/documents/invoices/new?dealId=${d.id}`}>{uiText("Создать счёт")}</Link>
 
             <button
               type="button"
               className="btn"
               disabled={busy || invoiceReadiness?.ready === false || invoices[0]?.importedPdf}
-              title={invoices[0]?.importedPdf ? "Загруженный PDF уже сохранён в исходном виде" : undefined}
+              title={invoices[0]?.importedPdf ? uiText("Загруженный PDF уже сохранён в исходном виде") : undefined}
               onClick={() => {
                 setBusy(true);
                 void (async () => {
@@ -771,27 +761,26 @@ export function DealDocumentsPanel(props: {
                         missingFieldLabels: err.body?.details?.missingFieldLabels || err.body?.missingFieldLabels || {},
                       });
                     }
-                    setError(err instanceof Error ? err.message : "Не удалось сформировать счёт");
+                    setError(err instanceof Error ? err.message : uiText("Не удалось сформировать счёт"));
                   })
                   .finally(() => setBusy(false));
               }}
             >
-              Сформировать счёт
-            </button>
+              {uiText("Сформировать счёт")}</button>
           </div>
         </div>
 
         <div className="doc-step" id="avr" style={{ scrollMarginTop: 24 }}>
           <div className="doc-step-title">
-            <b>АВР</b>
+            <b>{uiText("АВР")}</b>
           </div>
-          <p className="muted">Счёт на оплату не требуется. АВР можно сформировать и проверить до подписания договора. Excel и PDF (форма Р-1) скачиваются локально, без входа в ИС ЭСФ.</p>
-          {avrReadiness?.warnings?.map((warning:string)=><p className="pdf-import-warnings" role="status" key={warning}>{warning}</p>)}
-          <p className="muted">Подпись и отправка подтверждаются на странице заполненного АВР.</p>
+          <p className="muted">{uiText("Счёт на оплату не требуется. АВР можно сформировать и проверить до подписания договора. Excel и PDF (форма Р-1) скачиваются локально, без входа в ИС ЭСФ.")}</p>
+          {avrReadiness?.warnings?.map((warning:string)=><p className="pdf-import-warnings" role="status" key={warning}>{uiMessage(warning)}</p>)}
+          <p className="muted">{uiText("Подпись и отправка подтверждаются на странице заполненного АВР.")}</p>
           <MissingList
             ready={avrReadiness?.ready}
-            ok="Данных достаточно, АВР можно проверить."
-            title="Для проверки и отправки АВР требуется:"
+            ok={uiText("Данных достаточно, АВР можно проверить.")}
+            title={uiText("Для проверки и отправки АВР требуется:")}
             fields={avrReadiness?.missingFields}
             labels={avrReadiness?.missingFieldLabels}
           />
@@ -800,9 +789,9 @@ export function DealDocumentsPanel(props: {
             .map((doc: any) => (
               <div className="row" key={doc.id}>
                 <div>
-                  <Link to={`/documents/avr/${doc.id}`}><b>АВР {doc.number}</b> · Открыть</Link>
+                  <Link to={`/documents/avr/${doc.id}`}><b>{uiText("АВР")}{" "}{doc.number}</b> {" "}{uiText("· Открыть")}</Link>
                   <div className="muted">
-                    {EDOC_STATUS_LABEL[doc.status] || doc.status}
+                    {localizeUiOptions(EDOC_STATUS_LABEL, uiText)[doc.status] || doc.status}
                     {doc.xmlPrepared ? " · XML AwpV1" : ""}
                     {doc.externalStatus ? ` · ${esfStatusLabel(doc.type, doc.externalStatus)}` : ""}
                     {doc.externalId ? ` · ${doc.externalId}` : ""}
@@ -817,7 +806,7 @@ export function DealDocumentsPanel(props: {
               disabled={busy}
               onClick={() => navigate(avr?.id ? `/documents/avr/${avr.id}` : `/documents/avr/new?dealId=${d.id}`)}
             >
-              {avr ? "Редактировать АВР" : "Создать АВР"}
+              {avr ? uiText("Редактировать АВР") : uiText("Создать АВР")}
             </button>
             <button
               type="button"
@@ -835,12 +824,11 @@ export function DealDocumentsPanel(props: {
                   }
                   await downloadAvrExcel(documentId!);
                 })()
-                  .catch((err) => setError(err instanceof Error ? err.message : "Не удалось скачать Excel АВР"))
+                  .catch((err) => setError(err instanceof Error ? err.message : uiText("Не удалось скачать Excel АВР")))
                   .finally(() => setBusy(false));
               }}
             >
-              Скачать Excel
-            </button>
+              {uiText("Скачать Excel")}</button>
             <button
               type="button"
               className="btn secondary"
@@ -857,12 +845,11 @@ export function DealDocumentsPanel(props: {
                   }
                   await downloadAvrPdf(documentId!);
                 })()
-                  .catch((err) => setError(err instanceof Error ? err.message : "Не удалось скачать PDF АВР"))
+                  .catch((err) => setError(err instanceof Error ? err.message : uiText("Не удалось скачать PDF АВР")))
                   .finally(() => setBusy(false));
               }}
             >
-              Скачать PDF
-            </button>
+              {uiText("Скачать PDF")}</button>
             <button
               type="button"
               className="btn"
@@ -888,13 +875,12 @@ export function DealDocumentsPanel(props: {
                         missingFieldLabels: err.body?.details?.missingFieldLabels || err.body?.missingFieldLabels || {},
                       });
                     }
-                    setError(err instanceof Error ? err.message : "Не удалось проверить АВР");
+                    setError(err instanceof Error ? err.message : uiText("Не удалось проверить АВР"));
                   })
                   .finally(() => setBusy(false));
               }}
             >
-              Проверить АВР
-            </button>
+              {uiText("Проверить АВР")}</button>
             <button
               type="button"
               className="btn secondary"
@@ -911,16 +897,14 @@ export function DealDocumentsPanel(props: {
                   setEsfPreview(preview);
                   await load();
                 })()
-                  .catch((err) => setError(err instanceof Error ? err.message : "Не удалось собрать XML АВР"))
+                  .catch((err) => setError(err instanceof Error ? err.message : uiText("Не удалось собрать XML АВР")))
                   .finally(() => setBusy(false));
               }}
             >
-              XML для ИС ЭСФ
-            </button>
+              {uiText("XML для ИС ЭСФ")}</button>
             {avr?.id ? (
               <Link className="btn" to={`/documents/avr/${avr.id}#sign`}>
-                Открыть АВР и подтвердить отправку
-              </Link>
+                {uiText("Открыть АВР и подтвердить отправку")}</Link>
             ) : (
               <button
                 type="button"
@@ -933,12 +917,11 @@ export function DealDocumentsPanel(props: {
                     const created: any = await api.createElectronicDocumentDraft(d.id, { type: "AVR" });
                     navigate(`/documents/avr/${created.document.id}#sign`);
                   })()
-                    .catch((err) => setError(err instanceof Error ? err.message : "Не удалось открыть АВР"))
+                    .catch((err) => setError(err instanceof Error ? err.message : uiText("Не удалось открыть АВР")))
                     .finally(() => setBusy(false));
                 }}
               >
-                Открыть АВР и подтвердить отправку
-              </button>
+                {uiText("Открыть АВР и подтвердить отправку")}</button>
             )}
             {legacyPocEnabled ? (
             <button
@@ -950,7 +933,7 @@ export function DealDocumentsPanel(props: {
                 void (async () => {
                   const documentId = avr?.id as string | undefined;
                   if (!documentId) {
-                    setError("Сначала создайте и проверьте АВР");
+                    setError(uiText("Сначала создайте и проверьте АВР"));
                     return;
                   }
                   const sent = await api.sendElectronicDocumentEsf(documentId);
@@ -960,13 +943,12 @@ export function DealDocumentsPanel(props: {
                   .catch((err: any) => {
                     const details = err?.body?.details;
                     if (details?.validation || details?.signing) setEsfPreview({ ...details, error: err.message });
-                    setError(err instanceof Error ? err.message : "Не удалось отправить в ИС ЭСФ");
+                    setError(err instanceof Error ? err.message : uiText("Не удалось отправить в ИС ЭСФ"));
                   })
                   .finally(() => setBusy(false));
               }}
             >
-              Отправить в TEST ИС ЭСФ
-            </button>
+              {uiText("Отправить в TEST ИС ЭСФ")}</button>
             ) : null}
             <button
               type="button"
@@ -974,21 +956,20 @@ export function DealDocumentsPanel(props: {
               disabled={busy || !currentDocument("AVR", avr)?.externalId}
               onClick={() => void refreshSubmission("AVR", currentDocument("AVR", avr))}
             >
-              Обновить статус ИС ЭСФ
-            </button>
+              {uiText("Обновить статус ИС ЭСФ")}</button>
           </div>
           {(avr || submissions.AVR) ? <EsfSubmissionStatus document={currentDocument("AVR", avr)} submission={submissions.AVR} system={esfSystem} statusLabel={esfStatusLabel("AVR", currentDocument("AVR", avr)?.externalStatus)} /> : null}
           {currentDocument("AVR", avr)?.errorMessage && !currentDocument("AVR", avr)?.externalId ? (
-            <p className="muted">Это результат прошлой отправки с карточки сделки. Откройте заполненный АВР, проверьте данные и подтвердите отправку там.</p>
+            <p className="muted">{uiText("Это результат прошлой отправки с карточки сделки. Откройте заполненный АВР, проверьте данные и подтвердите отправку там.")}</p>
           ) : null}
           {esfPreview?.validation || esfPreview?.externalStatus ? (
             <div style={{ marginTop: 12 }}>
               <p className="muted">
-                {esfPreview.validation ? `AwpV1 XSD: ${esfPreview.validation.valid ? "ок" : "ошибки"}` : ""}
-                {esfPreview.signing?.code ? ` · подпись: ${esfPreview.signing.code}` : ""}
+                {esfPreview.validation ? `AwpV1 XSD: ${esfPreview.validation.valid ? uiText("ок") : uiText("ошибки")}` : ""}
+                {esfPreview.signing?.code ? uiText(" · подпись: {p0}", {p0: esfPreview.signing.code}) : ""}
                 {esfPreview.provider ? ` · ${esfPreview.provider}` : ""}
                 {esfPreview.externalStatus
-                  ? ` · ${AWP_STATUS_LABEL[esfPreview.externalStatus] || esfPreview.externalStatus}`
+                  ? ` · ${localizeUiOptions(AWP_STATUS_LABEL, uiText)[esfPreview.externalStatus] || esfPreview.externalStatus}`
                   : ""}
               </p>
               {esfPreview.xml ? (
@@ -1002,18 +983,18 @@ export function DealDocumentsPanel(props: {
 
         <div className="doc-step" id="esf" style={{ scrollMarginTop: 24 }}>
           <div className="doc-step-title">
-            <b>ЭСФ</b>
+            <b>{uiText("ЭСФ")}</b>
           </div>
-          <p className="muted">Счёт на оплату не требуется. Данные берутся из сделки и договора.</p>
-          {esfInvoiceReadiness?.warnings?.map((warning:string)=><p className="pdf-import-warnings" role="status" key={warning}>{warning}</p>)}
+          <p className="muted">{uiText("Счёт на оплату не требуется. Данные берутся из сделки и договора.")}</p>
+          {esfInvoiceReadiness?.warnings?.map((warning:string)=><p className="pdf-import-warnings" role="status" key={warning}>{uiMessage(warning)}</p>)}
           <MissingList
             ready={esfInvoiceReadiness?.ready}
             ok={
               esfInvoiceReadiness?.sendReady
-                ? "Можно отправить ЭСФ через syncInvoice."
-                : "XML ЭСФ можно собрать. Отправка — после АВР в ИС ЭСФ."
+                ? uiText("Можно отправить ЭСФ через syncInvoice.")
+                : uiText("XML ЭСФ можно собрать. Отправка — после АВР в ИС ЭСФ.")
             }
-            title="Не готов к ЭСФ:"
+            title={uiText("Не готов к ЭСФ:")}
             fields={esfInvoiceReadiness?.missingFields}
             labels={esfInvoiceReadiness?.missingFieldLabels}
           />
@@ -1022,9 +1003,9 @@ export function DealDocumentsPanel(props: {
             .map((doc: any) => (
               <div className="row" key={doc.id}>
                 <div>
-                  <b>ЭСФ {doc.number}</b>
+                  <b>{uiText("ЭСФ")}{" "}{doc.number}</b>
                   <div className="muted">
-                    {EDOC_STATUS_LABEL[doc.status] || doc.status}
+                    {localizeUiOptions(EDOC_STATUS_LABEL, uiText)[doc.status] || doc.status}
                     {doc.xmlPrepared ? " · XML InvoiceV2" : ""}
                     {doc.externalStatus ? ` · ${esfStatusLabel(doc.type, doc.externalStatus)}` : ""}
                     {doc.externalId ? ` · ${doc.externalId}` : ""}
@@ -1042,12 +1023,11 @@ export function DealDocumentsPanel(props: {
                 void api
                   .createElectronicDocumentDraft(d.id, { type: "ESF" })
                   .then(() => load())
-                  .catch((err) => setError(err instanceof Error ? err.message : "Не удалось создать ЭСФ"))
+                  .catch((err) => setError(err instanceof Error ? err.message : uiText("Не удалось создать ЭСФ")))
                   .finally(() => setBusy(false));
               }}
             >
-              Черновик ЭСФ
-            </button>
+              {uiText("Черновик ЭСФ")}</button>
             <button
               type="button"
               className="btn"
@@ -1073,13 +1053,12 @@ export function DealDocumentsPanel(props: {
                         missingFieldLabels: err.body?.details?.missingFieldLabels || err.body?.missingFieldLabels || {},
                       });
                     }
-                    setError(err instanceof Error ? err.message : "Не удалось проверить ЭСФ");
+                    setError(err instanceof Error ? err.message : uiText("Не удалось проверить ЭСФ"));
                   })
                   .finally(() => setBusy(false));
               }}
             >
-              Проверить ЭСФ
-            </button>
+              {uiText("Проверить ЭСФ")}</button>
             <button
               type="button"
               className="btn secondary"
@@ -1096,19 +1075,18 @@ export function DealDocumentsPanel(props: {
                   setEsfInvoicePreview(preview);
                   await load();
                 })()
-                  .catch((err) => setError(err instanceof Error ? err.message : "Не удалось собрать XML ЭСФ"))
+                  .catch((err) => setError(err instanceof Error ? err.message : uiText("Не удалось собрать XML ЭСФ")))
                   .finally(() => setBusy(false));
               }}
             >
-              XML ЭСФ InvoiceV2
-            </button>
+              {uiText("XML ЭСФ InvoiceV2")}</button>
             <button
               type="button"
               className="btn"
               disabled={sendBlocked("ESF", esf)}
               onClick={() => void sendDocument("ESF", esf)}
             >
-              {submissions.ESF?.phase ? ESF_SEND_PHASES[submissions.ESF.phase!] : "Подписать и отправить"}
+              {submissions.ESF?.phase ? localizeUiOptions(ESF_SEND_PHASES, uiText)[submissions.ESF.phase!] : uiText("Подписать и отправить")}
             </button>
             {legacyPocEnabled ? (
             <button
@@ -1120,7 +1098,7 @@ export function DealDocumentsPanel(props: {
                 void (async () => {
                   const documentId = esf?.id as string | undefined;
                   if (!documentId) {
-                    setError("Сначала создайте и проверьте ЭСФ");
+                    setError(uiText("Сначала создайте и проверьте ЭСФ"));
                     return;
                   }
                   const sent = await api.sendElectronicDocumentEsf(documentId);
@@ -1130,13 +1108,12 @@ export function DealDocumentsPanel(props: {
                   .catch((err: any) => {
                     const details = err?.body?.details;
                     if (details?.validation || details?.signing) setEsfInvoicePreview({ ...details, error: err.message });
-                    setError(err instanceof Error ? err.message : "Не удалось отправить ЭСФ");
+                    setError(err instanceof Error ? err.message : uiText("Не удалось отправить ЭСФ"));
                   })
                   .finally(() => setBusy(false));
               }}
             >
-              Отправить ЭСФ в ИС ЭСФ
-            </button>
+              {uiText("Отправить ЭСФ в ИС ЭСФ")}</button>
             ) : null}
             <button
               type="button"
@@ -1144,18 +1121,17 @@ export function DealDocumentsPanel(props: {
               disabled={busy || !currentDocument("ESF", esf)?.externalId}
               onClick={() => void refreshSubmission("ESF", currentDocument("ESF", esf))}
             >
-              Обновить статус ИС ЭСФ
-            </button>
+              {uiText("Обновить статус ИС ЭСФ")}</button>
           </div>
           {(esf || submissions.ESF) ? <EsfSubmissionStatus document={currentDocument("ESF", esf)} submission={submissions.ESF} system={esfSystem} statusLabel={esfStatusLabel("ESF", currentDocument("ESF", esf)?.externalStatus)} /> : null}
           {esfInvoicePreview?.validation || esfInvoicePreview?.externalStatus ? (
             <div style={{ marginTop: 12 }}>
               <p className="muted">
-                {esfInvoicePreview.validation ? `InvoiceV2 XSD: ${esfInvoicePreview.validation.valid ? "ок" : "ошибки"}` : ""}
-                {esfInvoicePreview.signing?.code ? ` · подпись: ${esfInvoicePreview.signing.code}` : ""}
+                {esfInvoicePreview.validation ? `InvoiceV2 XSD: ${esfInvoicePreview.validation.valid ? uiText("ок") : uiText("ошибки")}` : ""}
+                {esfInvoicePreview.signing?.code ? uiText(" · подпись: {p0}", {p0: esfInvoicePreview.signing.code}) : ""}
                 {esfInvoicePreview.provider ? ` · ${esfInvoicePreview.provider}` : ""}
                 {esfInvoicePreview.externalStatus
-                  ? ` · ${INVOICE_ESF_STATUS_LABEL[esfInvoicePreview.externalStatus] || esfInvoicePreview.externalStatus}`
+                  ? ` · ${localizeUiOptions(INVOICE_ESF_STATUS_LABEL, uiText)[esfInvoicePreview.externalStatus] || esfInvoicePreview.externalStatus}`
                   : ""}
               </p>
               {esfInvoicePreview.xml ? (
@@ -1169,19 +1145,19 @@ export function DealDocumentsPanel(props: {
 
         <div className="doc-step">
           <div className="doc-step-title">
-            <b>Закрытие</b>
+            <b>{uiText("Закрытие")}</b>
           </div>
           {closeReadiness ? (
             closeReadiness.alreadyClosed ? (
-              <p className="muted">Сделка уже закрыта.</p>
+              <p className="muted">{uiText("Сделка уже закрыта.")}</p>
             ) : closeReadiness.ready ? (
-              <p className="muted">ЭСФ доставлен в ИС ЭСФ — сделку можно закрыть.</p>
+              <p className="muted">{uiText("ЭСФ доставлен в ИС ЭСФ — сделку можно закрыть.")}</p>
             ) : (
               <div>
-                <p className="error">Ещё рано закрывать сделку:</p>
+                <p className="error">{uiText("Ещё рано закрывать сделку:")}</p>
                 <ul>
                   {(closeReadiness.missingFields || []).map((code: string) => (
-                    <li key={code}>{closeReadiness.missingFieldLabels?.[code] || code}</li>
+                    <li key={code}>{uiMessage(closeReadiness.missingFieldLabels?.[code]) || code}</li>
                   ))}
                 </ul>
               </div>
@@ -1197,12 +1173,11 @@ export function DealDocumentsPanel(props: {
                 void api
                   .syncDealEsf(d.id)
                   .then(() => load())
-                  .catch((err) => setError(err instanceof Error ? err.message : "Не удалось синхронизировать ИС ЭСФ"))
+                  .catch((err) => setError(err instanceof Error ? err.message : uiText("Не удалось синхронизировать ИС ЭСФ")))
                   .finally(() => setBusy(false));
               }}
             >
-              Синхронизировать ИС ЭСФ
-            </button>
+              {uiText("Синхронизировать ИС ЭСФ")}</button>
             <button
               type="button"
               className="btn"
@@ -1212,12 +1187,11 @@ export function DealDocumentsPanel(props: {
                 void api
                   .markDealWon(d.id, { wonAmountMinor: d.amount })
                   .then(() => load())
-                  .catch((err) => setError(err instanceof Error ? err.message : "Не удалось закрыть сделку"))
+                  .catch((err) => setError(err instanceof Error ? err.message : uiText("Не удалось закрыть сделку")))
                   .finally(() => setBusy(false));
               }}
             >
-              Закрыть сделку
-            </button>
+              {uiText("Закрыть сделку")}</button>
           </div>
         </div>
       </div>

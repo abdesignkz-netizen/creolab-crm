@@ -1,3 +1,4 @@
+import { systemText } from "@creolab/contracts";
 import { formatDurationMinutes } from "@creolab/contracts";
 import type { PrismaClient } from "@creolab/db";
 import { WhatsAppSellerBridge } from "@creolab/integrations";
@@ -52,6 +53,7 @@ export type SituationItem = {
   phone: string | null;
   interest: string | null;
   reason: string;
+  attentionCode?: string;
   nextAction: SituationNextAction;
   severity: "critical" | "high" | "normal" | "low";
   ownerMembershipId: string | null;
@@ -85,7 +87,8 @@ const CONVERSATION_COMMANDS = new Set<SituationNextAction>([
 ]);
 
 function requireTenant(auth: AuthContext) {
-  if (!auth.activeMembership) throw new ApiError(403, "no_tenant", "Нет активной компании");
+  const locale = auth.user.locale || "ru";
+  if (!auth.activeMembership) throw new ApiError(403, "no_tenant", systemText(locale, "Нет активной компании"));
   return auth.activeMembership;
 }
 
@@ -193,23 +196,23 @@ function conversationPriorityReason(
   kind: Extract<SituationKind, "conversation_human" | "conversation_paused" | "conversation_attention">,
   conversation: { attentionReason?: string | null },
   waitingReply: boolean,
-  waitMinutes: number | null,
+  waitMinutes: number | null, locale = "ru",
 ) {
   if (kind === "conversation_human") {
     if (waitingReply) {
       return waitMinutes != null
-        ? `Клиент написал, ответа нет ${formatDurationMinutes(waitMinutes)}`
-        : "Клиент написал, ответа ещё нет";
+        ? systemText(locale, "Клиент написал, ответа нет {p0}", { p0: formatDurationMinutes(waitMinutes, locale) || "" })
+        : systemText(locale, "Клиент написал, ответа ещё нет");
     }
-    return attentionReasonLabel(conversation.attentionReason, "AI передал диалог менеджеру");
+    return attentionReasonLabel(conversation.attentionReason, systemText(locale, "AI передал диалог менеджеру"), locale);
   }
   if (kind === "conversation_paused") {
-    return "Диалог на паузе больше двух часов — AI не отвечает, нужно решить";
+    return systemText(locale, "Диалог на паузе больше двух часов — AI не отвечает, нужно решить");
   }
   if (conversation.attentionReason === "seller_lead_rematched") {
-    return "Чат отвязался от WhatsApp. Откройте актуальный диалог клиента, не этот старый.";
+    return systemText(locale, "Чат отвязался от WhatsApp. Откройте актуальный диалог клиента, не этот старый.");
   }
-  return attentionReasonLabel(conversation.attentionReason, "AI не может продолжить без человека");
+  return attentionReasonLabel(conversation.attentionReason, systemText(locale, "AI не может продолжить без человека"), locale);
 }
 
 function pickConversationsForBoard<T extends {
@@ -240,7 +243,7 @@ function pickConversationsForBoard<T extends {
   return [...bestByKey.values()];
 }
 
-async function tenantSellerFreshness(prisma: PrismaClient, tenantId: string) {
+async function tenantSellerFreshness(prisma: PrismaClient, tenantId: string, locale = "ru") {
   const integration = await prisma.integration.findFirst({
     where: { tenantId, type: "whatsapp_seller" },
   });
@@ -271,11 +274,11 @@ async function tenantSellerFreshness(prisma: PrismaClient, tenantId: string) {
     const leadCountOnBot = typeof health.leadCount === "number" ? health.leadCount : null;
     const storePathKind = health.storePathKind || null;
     let warning: string | null = null;
-    if (!lastSyncAt) warning = "Ждём первую загрузку диалогов";
+    if (!lastSyncAt) warning = systemText(locale, "Ждём первую загрузку диалогов");
     else if (leadCountOnBot !== null && leadCountOnBot > 0 && conversationCount === 0) {
-      warning = "На WhatsApp есть переписки, которых ещё нет в CRM";
+      warning = systemText(locale, "На WhatsApp есть переписки, которых ещё нет в CRM");
     } else if (Date.now() - lastSyncAt.getTime() > STALE_SYNC_MS && conversationCount > 0) {
-      warning = "Список диалогов устарел — обновится сам";
+      warning = systemText(locale, "Список диалогов устарел — обновится сам");
     }
     return {
       configured: true,
@@ -294,7 +297,7 @@ async function tenantSellerFreshness(prisma: PrismaClient, tenantId: string) {
       leadCountOnBot: null,
       conversationCount,
       storePathKind: null,
-      warning: "Картина неполная: бот не отвечает",
+      warning: systemText(locale, "Картина неполная: бот не отвечает"),
     };
   }
 }
@@ -304,6 +307,7 @@ export async function getSituation(
   auth: AuthContext,
   query: { scope?: string; includeSnoozed?: string | boolean } = {},
 ) {
+  const locale = auth.user.locale || "ru";
   const membership = requireTenant(auth);
   const tid = membership.tenantId;
   const timeZone = membership.tenant.timezone || "Asia/Almaty";
@@ -369,7 +373,7 @@ export async function getSituation(
       },
     }),
     prisma.situationSnooze.findMany({ where: { tenantId: tid } }),
-    tenantSellerFreshness(prisma, tid),
+    tenantSellerFreshness(prisma, tid, locale),
     prisma.contact.findMany({
       where: { tenantId: tid, archivedAt: null },
       include: { methods: { select: { type: true, rawValue: true, normalizedValue: true, primary: true } } },
@@ -412,7 +416,7 @@ export async function getSituation(
 
   for (const intake of intakes) {
     const raw = (intake.rawFieldsJson || {}) as { contact?: { name?: string }; inquiry?: { subject?: string } };
-    const title = intake.contact?.name || raw.contact?.name || "Обращение без телефона";
+    const title = intake.contact?.name || raw.contact?.name || systemText(locale, "Обращение без телефона");
     const task = tasks.find((row) => row.incompleteIntakeId === intake.id || row.dedupeKey === `intake-phone:${intake.id}`);
     items.push({
       id: `needs_phone:${intake.id}`,
@@ -422,7 +426,7 @@ export async function getSituation(
       contactName: intake.contact ? displayName(intake.contact) : raw.contact?.name || null,
       phone: phoneFromContact(intake.contact),
       interest: raw.inquiry?.subject || resolveInterest(intake.contactId, intake.conversationId),
-      reason: "Нет телефона — нельзя принять заявку и написать клиенту",
+      reason: systemText(locale, "Нет телефона — нельзя принять заявку и написать клиенту"),
       nextAction: "complete_phone",
       severity: "critical",
       ownerMembershipId: intake.assigneeMembershipId,
@@ -447,12 +451,13 @@ export async function getSituation(
       items.push({
         id: `inquiry_ai_blocked:${inquiry.id}`,
         kind: "inquiry_ai_blocked",
+        attentionCode: blockedCode,
         entityId: inquiry.id,
-        title: inquiry.subject || inquiry.contact?.name || "Заявка",
+        title: inquiry.subject || inquiry.contact?.name || systemText(locale, "Заявка"),
         contactName: inquiry.contact ? displayName(inquiry.contact) : null,
         phone: phoneFromContact(inquiry.contact, inquiry),
         interest: resolveInterest(inquiry.contactId, inquiry.conversationId, inquiry),
-        reason: inquiry.nextStep || attentionReasonLabel(blockedCode),
+        reason: inquiry.nextStep || attentionReasonLabel(blockedCode, undefined, locale),
         nextAction: "open_inquiry",
         severity: "high",
         ownerMembershipId: inquiry.assigneeMembershipId,
@@ -478,11 +483,11 @@ export async function getSituation(
       id: `${kind}:${inquiry.id}`,
       kind,
       entityId: inquiry.id,
-      title: inquiry.subject || inquiry.contact?.name || "Заявка",
+      title: inquiry.subject || inquiry.contact?.name || systemText(locale, "Заявка"),
       contactName: inquiry.contact ? displayName(inquiry.contact) : null,
       phone: phoneFromContact(inquiry.contact, inquiry),
       interest: resolveInterest(inquiry.contactId, inquiry.conversationId, inquiry),
-      reason: kind === "inquiry_new" ? "Новая заявка, ещё не принята" : "Принята, нет следующего шага",
+      reason: kind === "inquiry_new" ? systemText(locale, "Новая заявка, ещё не принята") : systemText(locale, "Принята, нет следующего шага"),
       nextAction: kind === "inquiry_new" ? "accept_inquiry" : "open_inquiry",
       severity: kind === "inquiry_new" ? "high" : "normal",
       ownerMembershipId: inquiry.assigneeMembershipId,
@@ -522,11 +527,11 @@ export async function getSituation(
       id: `${kind}:${conversation.id}`,
       kind,
       entityId: conversation.id,
-      title: conversation.contact?.name || (conversation.sellerLeadId ? "Диалог WhatsApp" : "Диалог"),
+      title: conversation.contact?.name || (conversation.sellerLeadId ? systemText(locale, "Диалог WhatsApp") : systemText(locale, "Диалог")),
       contactName: conversation.contact ? displayName(conversation.contact) : null,
       phone: phoneFromContact(conversation.contact, { externalThreadId: conversation.externalThreadId }),
       interest: resolveInterest(conversation.contactId, conversation.id),
-      reason: conversationPriorityReason(kind, conversation, waitingReply, waitMinutes),
+      reason: conversationPriorityReason(kind, conversation, waitingReply, waitMinutes, locale),
       nextAction,
       severity: kind === "conversation_human" ? "high" : kind === "conversation_attention" ? "high" : "normal",
       ownerMembershipId: conversation.assigneeMembershipId,
@@ -578,7 +583,7 @@ export async function getSituation(
       contactName: task.contact ? displayName(task.contact) : null,
       phone: phoneFromContact(task.contact, task.inquiry),
       interest: resolveInterest(task.contactId || task.inquiry?.contactId, task.conversationId, task.inquiry),
-      reason: overdue ? "Срок прошёл" : dueToday ? "Срок сегодня" : "Высокий приоритет без ответственного",
+      reason: overdue ? systemText(locale, "Срок прошёл") : dueToday ? systemText(locale, "Срок сегодня") : systemText(locale, "Высокий приоритет без ответственного"),
       nextAction: unassignedHot ? "assign_owner" : "complete_task",
       severity: overdue || unassignedHot ? "high" : "normal",
       ownerMembershipId: task.ownerMembershipId,
@@ -606,11 +611,11 @@ export async function getSituation(
       id: `contact_needs_reply:${contact.id}`,
       entityId: contact.id,
       kind: "contact_needs_reply",
-      title: contact.name || contact.firstName || "Клиент ждёт ответа",
+      title: contact.name || contact.firstName || systemText(locale, "Клиент ждёт ответа"),
       contactName: displayName(contact),
       phone: phoneFromContact(contact),
       interest: resolveInterest(contact.id),
-      reason: `Клиент ждёт ${formatDurationMinutes(ageMinutes(inbound!, now))}`,
+      reason: systemText(locale, "Клиент ждёт {p0}", { p0: formatDurationMinutes(ageMinutes(inbound!, now), locale) || "" }),
       nextAction: "open_contact",
       severity: "high",
       ownerMembershipId: contact.ownerMembershipId,
@@ -637,11 +642,11 @@ export async function getSituation(
       id: `missing_next_action:${inquiry.id}`,
       kind: "missing_next_action",
       entityId: inquiry.id,
-      title: inquiry.subject || inquiry.contact?.name || "Заявка без шага",
+      title: inquiry.subject || inquiry.contact?.name || systemText(locale, "Заявка без шага"),
       contactName: inquiry.contact ? displayName(inquiry.contact) : null,
       phone: phoneFromContact(inquiry.contact, inquiry),
       interest: resolveInterest(inquiry.contactId, inquiry.conversationId, inquiry),
-      reason: "Нет следующего действия",
+      reason: systemText(locale, "Нет следующего действия"),
       nextAction: "create_next_action",
       severity: "normal",
       ownerMembershipId: inquiry.assigneeMembershipId,
@@ -710,19 +715,20 @@ export async function snoozeSituation(
   auth: AuthContext,
   input: { itemId: string; until: string; reason?: string },
 ) {
+  const locale = auth.user.locale || "ru";
   const membership = requireTenant(auth);
   const itemId = String(input.itemId || "").trim();
   const until = new Date(input.until);
   if (!itemId || Number.isNaN(until.getTime())) {
-    throw new ApiError(422, "invalid", "Укажите строку ситуации и срок");
+    throw new ApiError(422, "invalid", systemText(locale, "Укажите строку ситуации и срок"));
   }
   const kind = itemId.split(":")[0] as SituationKind;
   const maxMs = kind === "needs_phone" || kind === "inquiry_new" ? 7 * 86400000 : 30 * 86400000;
   if (until.getTime() - Date.now() > maxMs) {
-    throw new ApiError(422, "snooze_forbidden", "Нельзя скрыть эту строку навсегда");
+    throw new ApiError(422, "snooze_forbidden", systemText(locale, "Нельзя скрыть эту строку навсегда"));
   }
   if (until.getTime() <= Date.now()) {
-    throw new ApiError(422, "invalid", "Срок отложения должен быть в будущем");
+    throw new ApiError(422, "invalid", systemText(locale, "Срок отложения должен быть в будущем"));
   }
   const row = await prisma.situationSnooze.upsert({
     where: { tenantId_itemId: { tenantId: membership.tenantId, itemId } },

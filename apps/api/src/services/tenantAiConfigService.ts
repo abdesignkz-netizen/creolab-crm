@@ -85,8 +85,17 @@ function describePiece(
 export function describeWhatsAppAiActivation(input: {
   prompt: string;
   knowledge: Array<{ title: string; content: string }>;
-  integration: { status?: string | null; schemaJson?: unknown } | null;
+  integration: { type?: string; status?: string | null; schemaJson?: unknown; channelConnections?: Array<{ autoReply: boolean; status: string }> } | null;
+  enabled?: boolean;
 }): WhatsAppAiActivation {
+  if (["whatsapp_qr", "whatsapp_cloud"].includes(input.integration?.type || "")) {
+    const connected = input.integration?.status === "active";
+    const enabled = connected && input.enabled !== false && input.integration?.channelConnections?.some(channel => channel.status === "active" && channel.autoReply);
+    const piece = (ready: boolean, kind: "prompt" | "knowledge"): AiLivePiece => ({ ready, live: Boolean(ready && enabled),
+      label: !ready ? (kind === "prompt" ? "Не задан" : "Не задана") : enabled ? (kind === "prompt" ? "Активен в WhatsApp" : "Активна в WhatsApp") : (kind === "prompt" ? "Не активен в WhatsApp" : "Не активна в WhatsApp"),
+      reason: enabled ? "ИИ использует опубликованную версию при подготовке каждого ответа." : "Включите ИИ-ответы для подключённого номера в разделе интеграций." });
+    return { whatsappConnected: connected, prompt: piece(Boolean(input.prompt.trim()), "prompt"), knowledge: piece(input.knowledge.some(item => item.content.trim()), "knowledge"), syncedAt: null, note: "QR и Meta используют опубликованные настройки напрямую.", delivery: null };
+  }
   const schema = asRecord(input.integration?.schemaJson) as WhatsAppSellerSchema;
   const sync = schema.aiSync;
   const whatsappConnected = Boolean(input.integration);
@@ -111,6 +120,16 @@ export function describeWhatsAppAiActivation(input: {
   };
 }
 
+const whatsappAiTypes = ["whatsapp_seller", "whatsapp_qr", "whatsapp_cloud"];
+const aiChannels = { channelConnections: { select: { autoReply: true, status: true } } } as const;
+function pickAiConnection<T extends { status: string; type: string; channelConnections: Array<{ autoReply: boolean; status: string }> }>(rows: T[]): T | null {
+  const rank = (row: T) => row.status === "active" ? (row.type === "whatsapp_seller" || row.channelConnections.some(channel => channel.autoReply && channel.status === "active") ? 2 : 1) : 0;
+  return [...rows].sort((a, b) => rank(b) - rank(a))[0] || null;
+}
+async function findAiConnection(prisma: PrismaClient, tenantId: string) {
+  return pickAiConnection(await prisma.integration.findMany({ where: { tenantId, type: { in: whatsappAiTypes } }, include: aiChannels, orderBy: { id: "asc" } }));
+}
+
 async function readActivation(prisma: PrismaClient, tenantId: string): Promise<WhatsAppAiActivation> {
   const [config, knowledge, integration] = await Promise.all([
     prisma.aIConfiguration.findFirst({ where: { tenantId } }),
@@ -119,10 +138,10 @@ async function readActivation(prisma: PrismaClient, tenantId: string): Promise<W
       orderBy: { updatedAt: "desc" },
       select: { title: true, content: true },
     }),
-    prisma.integration.findFirst({ where: { tenantId, type: "whatsapp_seller" } }),
+    findAiConnection(prisma, tenantId),
   ]);
   const prompt = config?.promptStatus === "published" ? String(config.systemPrompt || "").trim() : "";
-  return describeWhatsAppAiActivation({ prompt, knowledge, integration });
+  return describeWhatsAppAiActivation({ prompt, knowledge, integration, enabled: config?.enabled });
 }
 
 async function persistAiSync(
@@ -208,7 +227,7 @@ export async function getTenantAiManagerAdmin(prisma: PrismaClient, auth: AuthCo
   const [config, knowledge, integration, usage] = await Promise.all([
     prisma.aIConfiguration.findFirst({ where: { tenantId } }),
     prisma.knowledgeDocument.findMany({ where: { tenantId }, orderBy: { updatedAt: "desc" }, take: 100 }),
-    prisma.integration.findFirst({ where: { tenantId, type: "whatsapp_seller" } }),
+    findAiConnection(prisma, tenantId),
     prisma.aIUsageEvent.aggregate({
       where: { tenantId },
       _count: { id: true },
@@ -239,6 +258,7 @@ export async function getTenantAiManagerAdmin(prisma: PrismaClient, auth: AuthCo
     })),
     knowledgeCount: knowledge.length,
     activation: describeWhatsAppAiActivation({
+      enabled: config?.enabled,
       prompt: config?.promptStatus === "published" ? String(config.systemPrompt || "").trim() : "",
       knowledge: knowledge
         .filter((item) => item.status === "published")
@@ -392,12 +412,12 @@ export async function listWhatsAppAiManagersAdmin(
       select: { tenantId: true, status: true, updatedAt: true, title: true, content: true },
     }),
     prisma.integration.findMany({
-      where: { tenantId: { in: ids }, type: "whatsapp_seller" },
-      select: { tenantId: true, status: true, lastEventAt: true, lastSuccessAt: true, schemaJson: true },
+      where: { tenantId: { in: ids }, type: { in: whatsappAiTypes } },
+      select: { tenantId: true, type: true, status: true, lastEventAt: true, lastSuccessAt: true, schemaJson: true, ...aiChannels },
     }),
   ]);
   const configBy = new Map(configs.map((row) => [row.tenantId, row]));
-  const integrationBy = new Map(integrations.map((row) => [row.tenantId, row]));
+  const integrationBy = new Map(ids.map(id => [id, pickAiConnection(integrations.filter(row => row.tenantId === id))]));
   return {
     items: tenants.map((tenant) => {
       const config = configBy.get(tenant.id);
@@ -406,6 +426,7 @@ export async function listWhatsAppAiManagersAdmin(
       const prompt = String(config?.promptStatus === "published" ? config.systemPrompt || "" : "").trim();
       const integration = integrationBy.get(tenant.id) || null;
       const activation = describeWhatsAppAiActivation({
+        enabled: config?.enabled,
         prompt,
         knowledge: publishedDocs.map((row) => ({ title: row.title, content: row.content })),
         integration,

@@ -1,3 +1,4 @@
+import { uiText, useUiText, localizeUiOptions } from "../uiText";
 import {
   ESF_MODULE_REQUIRED_MESSAGE,
   ESF_NCALAYER_SERVICE,
@@ -43,11 +44,11 @@ export class EsfNcaLayerClient {
       const ws = new WebSocket(NCALAYER_URL);
       const timer = window.setTimeout(() => {
         ws.close();
-        reject(new NcalayerError("NCALAYER_NOT_RUNNING", "NCALayer не отвечает. Запустите приложение с ncl.pki.gov.kz"));
+        reject(new NcalayerError("NCALAYER_NOT_RUNNING", uiText("NCALayer не отвечает. Запустите приложение с ncl.pki.gov.kz")));
       }, 4000);
       ws.onerror = () => {
         window.clearTimeout(timer);
-        reject(new NcalayerError("NCALAYER_NOT_RUNNING", "Нет связи с NCALayer на 127.0.0.1:13579"));
+        reject(new NcalayerError("NCALAYER_NOT_RUNNING", uiText("Нет связи с NCALayer на 127.0.0.1:13579")));
       };
       ws.onmessage = () => {
         window.clearTimeout(timer);
@@ -137,7 +138,7 @@ export class EsfNcaLayerClient {
     return new Promise<unknown>((resolve, reject) => {
       const ws = this.socket!;
       const timer = window.setTimeout(() => {
-        reject(new NcalayerError("SIGNATURE_FAILED", "NCALayer не ответил"));
+        reject(new NcalayerError("SIGNATURE_FAILED", uiText("NCALayer не ответил")));
       }, timeoutMs);
       ws.onmessage = (event) => {
         window.clearTimeout(timer);
@@ -145,12 +146,12 @@ export class EsfNcaLayerClient {
         try {
           resolve(parseJson(String(event.data)));
         } catch {
-          reject(new NcalayerError("SIGNATURE_FAILED", "NCALayer вернул некорректный ответ"));
+          reject(new NcalayerError("SIGNATURE_FAILED", uiText("NCALayer вернул некорректный ответ")));
         }
       };
       ws.onerror = () => {
         window.clearTimeout(timer);
-        reject(new NcalayerError("NCALAYER_NOT_RUNNING", "Связь с NCALayer оборвалась"));
+        reject(new NcalayerError("NCALAYER_NOT_RUNNING", uiText("Связь с NCALayer оборвалась")));
       };
       ws.send(JSON.stringify(body));
     });

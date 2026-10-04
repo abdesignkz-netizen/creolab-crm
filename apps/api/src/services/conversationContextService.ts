@@ -1,3 +1,4 @@
+import { deliveredConversationMessage } from "./conversationMessageState.ts";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { inferClientInterest } from "./contactInterestService.ts";
 import { assertConversationReachable } from "../lib/access.ts";
@@ -716,10 +717,10 @@ export async function analyzeConversationContext(
     conversation.contact?.methods[0]?.normalizedValue ||
     conversation.externalThreadId;
   const threadIds = await listThreadConversationIds(prisma, tid, conversation, phone);
-  const source = options.sourceMessageId ? await prisma.message.findFirst({ where: { tenantId: tid, conversationId: { in: threadIds }, id: options.sourceMessageId, internal: false } }) : null;
+  const source = options.sourceMessageId ? await prisma.message.findFirst({ where: { tenantId: tid, conversationId: { in: threadIds }, id: options.sourceMessageId, ...deliveredConversationMessage } }) : null;
   if (options.sourceMessageId && !source) throw new ApiError(404, "not_found", "Сообщение не найдено");
   const messages = await prisma.message.findMany({
-    where: { tenantId: tid, conversationId: { in: threadIds }, ...(source ? { OR: [{ createdAt: { lt: source.createdAt } }, { createdAt: source.createdAt, id: { lte: source.id } }] } : {}), internal: false, operationState: { notIn: ["queued", "failed", "unknown"] } },
+    where: { tenantId: tid, conversationId: { in: threadIds }, ...(source ? { OR: [{ createdAt: { lt: source.createdAt } }, { createdAt: source.createdAt, id: { lte: source.id } }] } : {}), ...deliveredConversationMessage },
     include: { attachments: { orderBy: { createdAt: "asc" } } },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: 80,

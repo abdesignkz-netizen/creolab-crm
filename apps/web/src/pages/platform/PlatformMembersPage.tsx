@@ -1,3 +1,4 @@
+import { uiText, useUiText, localizeUiOptions } from "../../lib/uiText";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../../lib/api";
@@ -6,6 +7,7 @@ import { notifySaved } from "../../components/SaveNotice";
 import { statusBadgeClass } from "../../lib/statusBadge";
 
 export function PlatformMembersPage() {
+  const uiText = useUiText();
   const [q, setQ] = useState("");
   const [data, setData] = useState<any>(null);
   const [companies, setCompanies] = useState<any[]>([]);
@@ -19,12 +21,12 @@ export function PlatformMembersPage() {
 
   useEffect(() => {
     api.adminTenants({ limit: 100 }).then((row: any) => setCompanies(row.items || [])).catch(() => undefined);
-    void load().catch((err) => setError(err instanceof Error ? err.message : "Ошибка"));
+    void load().catch((err) => setError(err instanceof Error ? err.message : uiText("Ошибка")));
   }, []);
 
   return (
     <div className="stack">
-      <h2>Участники</h2>
+      <h2>{uiText("Участники")}</h2>
       <form
         className="panel stack"
         onSubmit={async (event) => {
@@ -38,50 +40,48 @@ export function PlatformMembersPage() {
               role: String(form.get("role") || "manager"),
             })) as any;
             setInviteUrl(result.inviteUrl);
-            notifySaved("Ссылка приглашения создана");
+            notifySaved(uiText("Ссылка приглашения создана"));
             await load();
           } catch (err) {
-            setError(err instanceof Error ? err.message : "Ошибка");
+            setError(err instanceof Error ? err.message : uiText("Ошибка"));
           }
         }}
       >
-        <h3>Пригласить участника</h3>
+        <h3>{uiText("Пригласить участника")}</h3>
         <label>
-          Компания
-          <select name="tenantId" required>
-            <option value="">Выберите компанию</option>
+          {uiText("Компания")}<select name="tenantId" required>
+            <option value="">{uiText("Выберите компанию")}</option>
             {companies.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
           </select>
         </label>
-        <label>Имя<input name="name" /></label>
+        <label>{uiText("Имя")}<input name="name" /></label>
         <label>Email<input name="email" type="email" required /></label>
         <label>
-          Роль
-          <select name="role" defaultValue="manager">
-            <option value="owner">Администратор компании</option>
-            <option value="director">Директор</option>
-            <option value="sales_lead">Руководитель продаж</option>
-            <option value="manager">Менеджер</option>
+          {uiText("Роль")}<select name="role" defaultValue="manager">
+            <option value="owner">{uiText("Администратор компании")}</option>
+            <option value="director">{uiText("Директор")}</option>
+            <option value="sales_lead">{uiText("Руководитель продаж")}</option>
+            <option value="manager">{uiText("Менеджер")}</option>
           </select>
         </label>
-        <button className="btn">Создать ссылку</button>
-        {inviteUrl ? <p>Статус: ссылка создана. <button type="button" className="btn secondary" onClick={() => void navigator.clipboard.writeText(inviteUrl)}>Копировать</button></p> : null}
+        <button className="btn">{uiText("Создать ссылку")}</button>
+        {inviteUrl ? <p>{uiText("Статус: ссылка создана.")}{" "}<button type="button" className="btn secondary" onClick={() => void navigator.clipboard.writeText(inviteUrl)}>{uiText("Копировать")}</button></p> : null}
       </form>
       <form className="filters" onSubmit={(e) => { e.preventDefault(); void load(); }}>
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Поиск" />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={uiText("Поиск")} />
         <select value={tenantId} onChange={(e) => setTenantId(e.target.value)}>
-          <option value="">Все компании</option>
+          <option value="">{uiText("Все компании")}</option>
           {companies.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
         </select>
-        <button className="btn secondary">Найти</button>
+        <button className="btn secondary">{uiText("Найти")}</button>
       </form>
       {error ? <p className="error">{error}</p> : null}
-      {!data ? <div className="state">Загрузка…</div> : (
+      {!data ? <div className="state">{uiText("Загрузка…")}</div> : (
         <div className="stats-table-wrap">
           <table className="stats-table">
             <thead>
               <tr>
-                <th>Имя</th><th>Email</th><th>Телефон</th><th>Компания</th><th>Роль</th><th>Статус</th><th>Добавлен</th><th>Последний вход</th>
+                <th>{uiText("Имя")}</th><th>Email</th><th>{uiText("Телефон")}</th><th>{uiText("Компания")}</th><th>{uiText("Роль")}</th><th>{uiText("Статус")}</th><th>{uiText("Добавлен")}</th><th>{uiText("Последний вход")}</th>
               </tr>
             </thead>
             <tbody>
@@ -94,7 +94,7 @@ export function PlatformMembersPage() {
                   <td>{item.roleLabel}</td>
                   <td>
                     <span className={statusBadgeClass(item.active ? "Активен" : "Приостановлен")}>
-                      {item.active ? "Активен" : "Приостановлен"}
+                      {item.active ? uiText("Активен") : uiText("Приостановлен")}
                     </span>
                   </td>
                   <td>{formatDateTime(item.createdAt)}</td>

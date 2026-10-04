@@ -1,3 +1,4 @@
+import { uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale } from "../../lib/uiText";
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { api } from "../../lib/api";
@@ -23,6 +24,7 @@ const TABS = [
 ] as const;
 
 export function PlatformCompanyPage() {
+  const uiText = useUiText();
   const params = useParams();
   const { pathname } = useLocation();
   const id = params.id || pathname.match(/^\/admin\/companies\/([^/]+)$/)?.[1] || "";
@@ -35,23 +37,23 @@ export function PlatformCompanyPage() {
   }
 
   useEffect(() => {
-    load().catch((err) => setError(err instanceof Error ? err.message : "Ошибка"));
+    load().catch((err) => setError(err instanceof Error ? err.message : uiText("Ошибка")));
   }, [id]);
 
   if (error) return <p className="error">{error}</p>;
-  if (!company) return <div className="state">Загрузка…</div>;
+  if (!company) return <div className="state">{uiText("Загрузка…")}</div>;
 
   return (
     <div className="stack">
       <div className="page-head">
         <div>
-          <p className="muted"><Link to="/admin/companies">Компании</Link></p>
+          <p className="muted"><Link to="/admin/companies">{uiText("Компании")}</Link></p>
           <h3>{company.name}</h3>
           <p className="muted integ-status-line">
             <span className={statusBadgeClass(company.status === "suspended" ? "Приостановлена" : "Активна")}>
-              {company.status === "suspended" ? "Приостановлена" : "Активна"}
+              {company.status === "suspended" ? uiText("Приостановлена") : uiText("Активна")}
             </span>
-            {company.subscriptionStatus === "none" ? " · режим просмотра" : company.planName ? ` · ${company.planName}` : ""}
+            {company.subscriptionStatus === "none" ? uiText(" · режим просмотра") : company.planName ? ` · ${company.planName}` : ""}
             {company.slug}
           </p>
         </div>
@@ -59,13 +61,13 @@ export function PlatformCompanyPage() {
           {company.status === "active" ? (
             <button className="btn secondary" onClick={async () => {
               setCompany(await api.adminSuspendCompany(id));
-              notifySaved("Доступ приостановлен");
-            }}>Приостановить</button>
+              notifySaved(uiText("Доступ приостановлен"));
+            }}>{uiText("Приостановить")}</button>
           ) : (
             <button className="btn" onClick={async () => {
               setCompany(await api.adminRestoreCompany(id));
-              notifySaved("Доступ восстановлен");
-            }}>Восстановить</button>
+              notifySaved(uiText("Доступ восстановлен"));
+            }}>{uiText("Восстановить")}</button>
           )}
           {company.subscriptionStatus === "none" || company.previewMode ? (
             <button className="btn" onClick={async () => {
@@ -75,13 +77,13 @@ export function PlatformCompanyPage() {
                 planName?: string;
               };
               setCompany({ ...company, ...billing, subscriptionStatus: billing.subscriptionStatus, previewMode: billing.previewMode, planName: billing.planName });
-              notifySaved("Тариф активирован");
-            }}>Активировать тариф</button>
+              notifySaved(uiText("Тариф активирован"));
+            }}>{uiText("Активировать тариф")}</button>
           ) : null}
         </div>
       </div>
       <nav className="settings-nav horizontal">
-        {TABS.map(([key, label]) => (
+        {localizeUiOptions(TABS, uiText).map(([key, label]) => (
           <button key={key} type="button" className={tab === key ? "active" : ""} onClick={() => setTab(key)}>{label}</button>
         ))}
       </nav>
@@ -98,6 +100,7 @@ export function PlatformCompanyPage() {
 }
 
 function CompanyInfo({ company, onSaved }: { company: any; onSaved: (row: any) => void }) {
+  const uiText = useUiText();
   const [error, setError] = useState("");
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -112,38 +115,39 @@ function CompanyInfo({ company, onSaved }: { company: any; onSaved: (row: any) =
         city: String(form.get("city") || ""),
         timezone: String(form.get("timezone") || ""),
       }));
-      notifySaved("Данные компании сохранены");
+      notifySaved(uiText("Данные компании сохранены"));
       setError("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Ошибка");
+      setError(err instanceof Error ? err.message : uiText("Ошибка"));
     }
   }
   return (
     <form className="panel stack" onSubmit={onSubmit}>
       <p className="muted">
-        Владелец: {company.owner?.name || "—"} · {company.ownerEmail || company.owner?.email || "—"}
+        {uiText("Владелец:")}{" "}{company.owner?.name || "—"} · {company.ownerEmail || company.owner?.email || "—"}
       </p>
       <p className="muted">
-        Подписка: {company.subscriptionStatus || "—"}
+        {uiText("Подписка:")}{" "}{company.subscriptionStatus || "—"}
         {company.planName ? ` · ${company.planName}` : ""}
-        {company.whatsappConnected ? " · WhatsApp подключён" : " · WhatsApp не подключён"}
-        {company.aiEnabled ? " · AI включён" : " · AI выключен"}
+        {company.whatsappConnected ? uiText(" · WhatsApp подключён") : uiText(" · WhatsApp не подключён")}
+        {company.aiEnabled ? uiText(" · AI включён") : uiText(" · AI выключен")}
         {company.onboardingStatus ? ` · onboarding: ${company.onboardingStatus}` : ""}
       </p>
-      <label>Название<input name="name" defaultValue={company.name} required /></label>
-      <label>Юридическое название<input name="legalName" defaultValue={company.legalName || ""} /></label>
-      <label>БИН<input name="bin" defaultValue={company.bin || ""} /></label>
+      <label>{uiText("Название")}<input name="name" defaultValue={company.name} required /></label>
+      <label>{uiText("Юридическое название")}<input name="legalName" defaultValue={company.legalName || ""} /></label>
+      <label>{uiText("БИН")}<input name="bin" defaultValue={company.bin || ""} /></label>
       <label>Email<input name="contactEmail" defaultValue={company.contactEmail || ""} /></label>
-      <label>Телефон<input name="contactPhone" defaultValue={company.contactPhone || ""} /></label>
-      <label>Город<input name="city" defaultValue={company.city || ""} /></label>
-      <label>Часовой пояс<input name="timezone" defaultValue={company.timezone || ""} /></label>
+      <label>{uiText("Телефон")}<input name="contactPhone" defaultValue={company.contactPhone || ""} /></label>
+      <label>{uiText("Город")}<input name="city" defaultValue={company.city || ""} /></label>
+      <label>{uiText("Часовой пояс")}<input name="timezone" defaultValue={company.timezone || ""} /></label>
       {error ? <p className="error">{error}</p> : null}
-      <button className="btn">Сохранить</button>
+      <button className="btn">{uiText("Сохранить")}</button>
     </form>
   );
 }
 
 function CompanySubscription({ company, onSaved }: { company: any; onSaved: (row: any) => void }) {
+  const uiText = useUiText();
   const [planCode, setPlanCode] = useState(company.planCode && company.planCode !== "starter" ? company.planCode : "CRM_START");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
@@ -155,9 +159,9 @@ function CompanySubscription({ company, onSaved }: { company: any; onSaved: (row
     try {
       await fn();
       onSaved(await api.adminCompany(company.id));
-      notifySaved("Подписка обновлена");
+      notifySaved(uiText("Подписка обновлена"));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Ошибка");
+      setError(err instanceof Error ? err.message : uiText("Ошибка"));
     } finally {
       setBusy("");
     }
@@ -165,26 +169,26 @@ function CompanySubscription({ company, onSaved }: { company: any; onSaved: (row
 
   return (
     <div className="panel stack">
-      <h3>Подписка</h3>
-      {company.accessBreakdown ? <details><summary>Источники доступа и лимитов</summary>
-        <p>Base plan: {company.accessBreakdown.basePlan || "Grandfathered"} · Legacy: {company.accessBreakdown.legacy ? "да" : "нет"} · Grandfathered: {company.accessBreakdown.grandfathered ? "да" : "нет"}</p>
-        {[["Base features", company.accessBreakdown.baseFeatures], ["Base limits", company.accessBreakdown.baseLimits], ["Addons", company.accessBreakdown.addOns], ["Overrides", company.accessBreakdown.overrides], ["Согласованные функции", company.accessBreakdown.subscriptionFeatures], ["Согласованные лимиты", company.accessBreakdown.subscriptionLimits], ["Effective features", company.accessBreakdown.effectiveFeatures], ["Effective limits", company.accessBreakdown.effectiveLimits], ["Enterprise custom settings", company.enterpriseTerms]].map(([label,value]) => <div key={String(label)}><b>{String(label)}</b><pre style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere"}}>{value == null ? "Отдельный снимок отсутствует в прежнем договоре" : JSON.stringify(value,null,2)}</pre></div>)}
+      <h3>{uiText("Подписка")}</h3>
+      {company.accessBreakdown ? <details><summary>{uiText("Источники доступа и лимитов")}</summary>
+        <p>Base plan: {company.accessBreakdown.basePlan || "Grandfathered"} · Legacy: {company.accessBreakdown.legacy ? uiText("да") : uiText("нет")} · Grandfathered: {company.accessBreakdown.grandfathered ? uiText("да") : uiText("нет")}</p>
+        {[["Base features", company.accessBreakdown.baseFeatures], ["Base limits", company.accessBreakdown.baseLimits], ["Addons", company.accessBreakdown.addOns], ["Overrides", company.accessBreakdown.overrides], [uiText("Согласованные функции"), company.accessBreakdown.subscriptionFeatures], [uiText("Согласованные лимиты"), company.accessBreakdown.subscriptionLimits], ["Effective features", company.accessBreakdown.effectiveFeatures], ["Effective limits", company.accessBreakdown.effectiveLimits], ["Enterprise custom settings", company.enterpriseTerms]].map(([label,value]) => <div key={String(label)}><b>{String(label)}</b><pre style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere"}}>{value == null ? uiText("Отдельный снимок отсутствует в прежнем договоре") : JSON.stringify(value,null,2)}</pre></div>)}
       </details> : null}
-      <p>Тариф: <b>{company.planName || "Нет"}</b></p>
-      <p>Статус: <b>{company.subscriptionStatus || "—"}</b></p>
-      <p>Стоимость: {company.amountMinor != null ? `${Number(company.amountMinor).toLocaleString("ru-RU")} ₸` : "—"}</p>
-      <p>Начало: {company.activatedAt ? new Date(company.activatedAt).toLocaleDateString("ru-RU") : "—"}</p>
-      <p>Окончание: {company.expiresAt ? new Date(company.expiresAt).toLocaleDateString("ru-RU") : "—"}</p>
-      <p>Оплата: {company.paymentMethod === "MANUAL" ? "Подтверждена вручную" : company.paymentMethod || "—"}</p>
-      <p>Подтвердил: {company.confirmedBy?.name || "—"}</p>
+      <p>{uiText("Тариф:")}{" "}<b>{company.planName || uiText("Нет")}</b></p>
+      <p>{uiText("Статус:")}{" "}<b>{company.subscriptionStatus || "—"}</b></p>
+      <p>{uiText("Стоимость:")}{" "}{company.amountMinor != null ? `${Number(company.amountMinor).toLocaleString(uiFormatLocale())} ₸` : "—"}</p>
+      <p>{uiText("Начало:")}{" "}{company.activatedAt ? new Date(company.activatedAt).toLocaleDateString(uiFormatLocale()) : "—"}</p>
+      <p>{uiText("Окончание:")}{" "}{company.expiresAt ? new Date(company.expiresAt).toLocaleDateString(uiFormatLocale()) : "—"}</p>
+      <p>{uiText("Оплата:")}{" "}{company.paymentMethod === "MANUAL" ? uiText("Подтверждена вручную") : company.paymentMethod || "—"}</p>
+      <p>{uiText("Подтвердил:")}{" "}{company.confirmedBy?.name || "—"}</p>
       {company.currentRequest ? (
         <p className="muted">
-          Открытый запрос: {company.currentRequest.planName} · {company.currentRequest.statusLabel} ·{" "}
-          <Link to="/admin/billing">открыть</Link>
+          {uiText("Открытый запрос:")}{" "}{company.currentRequest.planName} · {uiMessage(company.currentRequest.statusLabel)} ·{" "}
+          <Link to="/admin/billing">{uiText("открыть")}</Link>
         </p>
       ) : null}
       {(company.usage || []).map((row: { key: string; label: string; used: number; cap: number }) => (
-        <p key={row.key} className="muted">{row.label}: {row.used} / {row.cap < 0 ? "Без квоты" : row.cap}</p>
+        <p key={row.key} className="muted">{row.label}: {row.used} / {row.cap < 0 ? uiText("Без квоты") : row.cap}</p>
       ))}
       <form className="panel stack" onSubmit={async (event) => {
         event.preventDefault();
@@ -204,50 +208,50 @@ function CompanySubscription({ company, onSaved }: { company: any; onSaved: (row
             ...(price ? { customPriceMinor: Number(price) } : {}),
             grantAiCredits: Number(form.get("grantAiCredits") || 0), reason: String(form.get("reason") || "") });
           onSaved(await api.adminCompany(company.id));
-          notifySaved("Индивидуальные лимиты сохранены");
-        } catch (err) { setOverrideError(err instanceof Error ? err.message : "Ошибка"); }
+          notifySaved(uiText("Индивидуальные лимиты сохранены"));
+        } catch (err) { setOverrideError(err instanceof Error ? err.message : uiText("Ошибка")); }
         finally { setBusy(""); }
       }}>
-        <h4>Индивидуальные лимиты и функции</h4>
-        <p className="muted">Пустое поле сохраняет текущие условия, включая ранее согласованные лимиты. −1 означает без квоты.</p>
-        {EDITABLE_LIMITS.map((key) => <label key={key}>{LIMIT_LABEL[key as LimitKey]}<input name={key} type="number" min="-1" step={key === "STORAGE_GB" ? "0.01" : "1"} placeholder={`Сейчас: ${company.accessBreakdown?.effectiveLimits?.[key] ?? "по тарифу"}`} /></label>)}
-        <label>Дополнительные AI-кредиты<input name="grantAiCredits" type="number" min="0" step="1" placeholder="0" /></label>
-        <p className="muted">Увеличивает согласованный лимит AI. На Free пакет остаётся разовым, на платном тарифе — ежемесячным.</p>
-        <label>Индивидуальная цена за период, ₸<input name="customPriceMinor" type="number" min="0" step="1" placeholder="Без изменения" /></label>
-        <label>Массовые рассылки<select name="MASS_MESSAGING" defaultValue="keep"><option value="keep">Без изменения</option><option value="on">Разрешить</option><option value="off">Запретить</option></select></label>
-        <label>Причина<input name="reason" placeholder="Причина изменения" /></label>
+        <h4>{uiText("Индивидуальные лимиты и функции")}</h4>
+        <p className="muted">{uiText("Пустое поле сохраняет текущие условия, включая ранее согласованные лимиты. −1 означает без квоты.")}</p>
+        {EDITABLE_LIMITS.map((key) => <label key={key}>{LIMIT_LABEL[key as LimitKey]}<input name={key} type="number" min="-1" step={key === "STORAGE_GB" ? "0.01" : "1"} placeholder={uiText("Сейчас: {p0}", {p0: company.accessBreakdown?.effectiveLimits?.[key] ?? uiText("по тарифу")})} /></label>)}
+        <label>{uiText("Дополнительные AI-кредиты")}<input name="grantAiCredits" type="number" min="0" step="1" placeholder="0" /></label>
+        <p className="muted">{uiText("Увеличивает согласованный лимит AI. На Free пакет остаётся разовым, на платном тарифе — ежемесячным.")}</p>
+        <label>{uiText("Индивидуальная цена за период, ₸")}<input name="customPriceMinor" type="number" min="0" step="1" placeholder={uiText("Без изменения")} /></label>
+        <label>{uiText("Массовые рассылки")}<select name="MASS_MESSAGING" defaultValue="keep"><option value="keep">{uiText("Без изменения")}</option><option value="on">{uiText("Разрешить")}</option><option value="off">{uiText("Запретить")}</option></select></label>
+        <label>{uiText("Причина")}<input name="reason" placeholder={uiText("Причина изменения")} /></label>
         {overrideError ? <p className="error">{overrideError}</p> : null}
-        <button className="btn secondary" type="submit" disabled={Boolean(busy)}>Сохранить индивидуальные настройки</button>
+        <button className="btn secondary" type="submit" disabled={Boolean(busy)}>{uiText("Сохранить индивидуальные настройки")}</button>
       </form>
       <label>
-        Тариф
-        <select value={planCode} onChange={(event) => setPlanCode(event.target.value)}>
+        {uiText("Тариф")}<select value={planCode} onChange={(event) => setPlanCode(event.target.value)}>
           <option value="BASQAR_FREE">BasQar Free</option>
           <option value="CRM_START">BasQar Start</option>
           <option value="CONTROL">BasQar Business</option>
           <option value="SALES">BasQar Pro</option>
-          {company.planCode === 'FULL' ? <option value="FULL">Full (действующий договор)</option> : null}
-          {company.accessBreakdown?.legacy ? <option value={company.planCode}>{company.planName} (legacy, продление по договору)</option> : null}
+          {company.planCode === 'FULL' ? <option value="FULL">{uiText("Full (действующий договор)")}</option> : null}
+          {company.accessBreakdown?.legacy ? <option value={company.planCode}>{company.planName} {" "}{uiText("(legacy, продление по договору)")}</option> : null}
           <option value="CRM_ENTERPRISE">Enterprise</option>
         </select>
       </label>
       {error ? <p className="error">{error}</p> : null}
       <div className="actions" style={{ flexWrap: "wrap" }}>
-        <button className="btn" disabled={Boolean(busy)} onClick={() => void run("plan", () => api.adminActivateSubscription(company.id, { planCode, source: "platform_admin", reason: "Ручная активация" }))}>Изменить тариф</button>
-        <button className="btn secondary" disabled={Boolean(busy)} onClick={() => void run("extend", () => api.adminExtendSubscription(company.id, { reason: "Продление администратором" }))}>Продлить</button>
-        <button className="btn secondary" disabled={Boolean(busy)} onClick={() => void run("suspend", () => api.adminSuspendSubscription(company.id, { reason: "Приостановлено администратором" }))}>Приостановить</button>
-        <button className="btn secondary" disabled={Boolean(busy)} onClick={() => void run("reactivate", () => api.adminReactivateSubscription(company.id, { reason: "Восстановлено администратором" }))}>Активировать</button>
-        <button className="btn secondary" disabled={Boolean(busy)} onClick={() => void run("free", () => api.adminActivateSubscription(company.id, { planCode, source: "complimentary", reason: "Бесплатный период" }))}>Дать бесплатный период</button>
+        <button className="btn" disabled={Boolean(busy)} onClick={() => void run("plan", () => api.adminActivateSubscription(company.id, { planCode, source: "platform_admin", reason: "Ручная активация" }))}>{uiText("Изменить тариф")}</button>
+        <button className="btn secondary" disabled={Boolean(busy)} onClick={() => void run("extend", () => api.adminExtendSubscription(company.id, { reason: "Продление администратором" }))}>{uiText("Продлить")}</button>
+        <button className="btn secondary" disabled={Boolean(busy)} onClick={() => void run("suspend", () => api.adminSuspendSubscription(company.id, { reason: "Приостановлено администратором" }))}>{uiText("Приостановить")}</button>
+        <button className="btn secondary" disabled={Boolean(busy)} onClick={() => void run("reactivate", () => api.adminReactivateSubscription(company.id, { reason: "Восстановлено администратором" }))}>{uiText("Активировать")}</button>
+        <button className="btn secondary" disabled={Boolean(busy)} onClick={() => void run("free", () => api.adminActivateSubscription(company.id, { planCode, source: "complimentary", reason: "Бесплатный период" }))}>{uiText("Дать бесплатный период")}</button>
       </div>
     </div>
   );
 }
 
 function sourceLabel(source: string) {
-  return source === "tenant" ? "изменено" : source === "plan" ? "план" : source === "env" ? "инфраструктура" : "по умолчанию сервиса";
+  return source === "tenant" ? uiText("изменено") : source === "plan" ? uiText("план") : source === "env" ? uiText("инфраструктура") : uiText("по умолчанию сервиса");
 }
 
 function CompanySettings({ company, onSaved }: { company: any; onSaved: (row: any) => void }) {
+  const uiText = useUiText();
   const features = company.settings?.features || {};
   const limits = company.settings?.limits || {};
   const [error, setError] = useState("");
@@ -277,35 +281,36 @@ function CompanySettings({ company, onSaved }: { company: any; onSaved: (row: an
         apiKey: String(form.get("aiKey") || ""),
       })) as any;
       onSaved({ ...saved, settings: { ...saved.settings, ai: ai.ai } });
-      notifySaved("Настройки компании сохранены");
+      notifySaved(uiText("Настройки компании сохранены"));
       setError("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Ошибка");
+      setError(err instanceof Error ? err.message : uiText("Ошибка"));
     }
   }
   return (
     <form className="panel stack" onSubmit={onSubmit}>
-      <p className="muted">Значения сервиса по умолчанию можно переопределить для этой компании. Секреты других компаний не наследуются.</p>
+      <p className="muted">{uiText("Значения сервиса по умолчанию можно переопределить для этой компании. Секреты других компаний не наследуются.")}</p>
       {(["forms", "webhook", "whatsapp", "documents", "ai", "esf"] as const).map((key) => (
         <label key={key} className="check">
           <input type="checkbox" name={key} defaultChecked={Boolean(features[key]?.value)} />
           {key} <span className="muted">({sourceLabel(features[key]?.source)})</span>
         </label>
       ))}
-      <label>Лимит участников<input name="members" type="number" defaultValue={limits.members?.value || 20} /></label>
-      <p className="muted">Сейчас: {limits.members?.value} ({sourceLabel(limits.members?.source)})</p>
-      <h4>AI компании</h4>
-      <label>Провайдер<input name="aiProvider" defaultValue={company.settings?.ai?.provider || ""} /></label>
-      <label>Модель<input name="aiModel" defaultValue={company.settings?.ai?.model || ""} /></label>
-      <label>Ключ API (не показывается, замена)<input name="aiKey" type="password" autoComplete="off" /></label>
-      <p className="muted">Текущий ключ компании {company.settings?.ai?.hasOwnCredential ? "задан" : "не задан, используется инфраструктура сервиса, если AI включён"}.</p>
+      <label>{uiText("Лимит участников")}<input name="members" type="number" defaultValue={limits.members?.value || 20} /></label>
+      <p className="muted">{uiText("Сейчас:")}{" "}{limits.members?.value} ({sourceLabel(limits.members?.source)})</p>
+      <h4>{uiText("AI компании")}</h4>
+      <label>{uiText("Провайдер")}<input name="aiProvider" defaultValue={company.settings?.ai?.provider || ""} /></label>
+      <label>{uiText("Модель")}<input name="aiModel" defaultValue={company.settings?.ai?.model || ""} /></label>
+      <label>{uiText("Ключ API (не показывается, замена)")}<input name="aiKey" type="password" autoComplete="off" /></label>
+      <p className="muted">{uiText("Текущий ключ компании")}{" "}{company.settings?.ai?.hasOwnCredential ? uiText("задан") : uiText("не задан, используется инфраструктура сервиса, если AI включён")}.</p>
       {error ? <p className="error">{error}</p> : null}
-      <button className="btn">Сохранить настройки</button>
+      <button className="btn">{uiText("Сохранить настройки")}</button>
     </form>
   );
 }
 
 function CompanyMembers({ tenantId }: { tenantId: string }) {
+  const uiText = useUiText();
   const [data, setData] = useState<any>(null);
   const [inviteUrl, setInviteUrl] = useState("");
   const [error, setError] = useState("");
@@ -313,9 +318,9 @@ function CompanyMembers({ tenantId }: { tenantId: string }) {
   async function load() {
     setData(await api.adminCompanyMembers(tenantId));
   }
-  useEffect(() => { void load().catch((err) => setError(err instanceof Error ? err.message : "Ошибка")); }, [tenantId]);
+  useEffect(() => { void load().catch((err) => setError(err instanceof Error ? err.message : uiText("Ошибка"))); }, [tenantId]);
 
-  if (!data) return <div className="state">Загрузка…</div>;
+  if (!data) return <div className="state">{uiText("Загрузка…")}</div>;
   return (
     <div className="stack">
       <form
@@ -331,39 +336,38 @@ function CompanyMembers({ tenantId }: { tenantId: string }) {
               role: String(form.get("role") || "manager"),
             })) as any;
             setInviteUrl(result.inviteUrl);
-            notifySaved(result.existingUser ? "Ссылка создана. Пользователь уже есть в сервисе — дубликат не создавался." : "Ссылка приглашения создана");
+            notifySaved(result.existingUser ? uiText("Ссылка создана. Пользователь уже есть в сервисе — дубликат не создавался.") : uiText("Ссылка приглашения создана"));
             await load();
             setError("");
           } catch (err) {
-            setError(err instanceof Error ? err.message : "Ошибка");
+            setError(err instanceof Error ? err.message : uiText("Ошибка"));
           }
         }}
       >
-        <h4>Пригласить</h4>
-        <label>Имя<input name="name" /></label>
+        <h4>{uiText("Пригласить")}</h4>
+        <label>{uiText("Имя")}<input name="name" /></label>
         <label>Email<input name="email" type="email" required /></label>
-        <label>Телефон<input name="phone" /></label>
+        <label>{uiText("Телефон")}<input name="phone" /></label>
         <label>
-          Роль
-          <select name="role" defaultValue="manager">
-            <option value="owner">Администратор компании</option>
-            <option value="director">Директор</option>
-            <option value="sales_lead">Руководитель продаж</option>
-            <option value="manager">Менеджер</option>
+          {uiText("Роль")}<select name="role" defaultValue="manager">
+            <option value="owner">{uiText("Администратор компании")}</option>
+            <option value="director">{uiText("Директор")}</option>
+            <option value="sales_lead">{uiText("Руководитель продаж")}</option>
+            <option value="manager">{uiText("Менеджер")}</option>
           </select>
         </label>
-        <button className="btn">Создать ссылку</button>
+        <button className="btn">{uiText("Создать ссылку")}</button>
         {inviteUrl ? (
           <p>
-            Статус: ссылка создана.{" "}
-            <button type="button" className="btn secondary" onClick={() => void navigator.clipboard.writeText(inviteUrl)}>Копировать</button>
+            {uiText("Статус: ссылка создана.")}{" "}
+            <button type="button" className="btn secondary" onClick={() => void navigator.clipboard.writeText(inviteUrl)}>{uiText("Копировать")}</button>
           </p>
         ) : null}
       </form>
       {error ? <p className="error">{error}</p> : null}
       <div className="stats-table-wrap">
         <table className="stats-table">
-          <thead><tr><th>Участник</th><th>Email</th><th>Роль</th><th>Статус</th><th>Добавлен</th><th>Вход</th><th></th></tr></thead>
+          <thead><tr><th>{uiText("Участник")}</th><th>Email</th><th>{uiText("Роль")}</th><th>{uiText("Статус")}</th><th>{uiText("Добавлен")}</th><th>{uiText("Вход")}</th><th></th></tr></thead>
           <tbody>
             {(data.members || []).map((item: any) => (
               <tr key={item.id}>
@@ -373,21 +377,21 @@ function CompanyMembers({ tenantId }: { tenantId: string }) {
                   <select defaultValue={item.role} onChange={async (e) => {
                     try {
                       await api.adminUpdateMember(item.id, { role: e.target.value });
-                      notifySaved("Роль изменена");
+                      notifySaved(uiText("Роль изменена"));
                     } catch (err) {
-                      setError(err instanceof Error ? err.message : "Ошибка");
+                      setError(err instanceof Error ? err.message : uiText("Ошибка"));
                       await load();
                     }
                   }}>
-                    <option value="owner">Администратор компании</option>
-                    <option value="director">Директор</option>
-                    <option value="sales_lead">Руководитель продаж</option>
-                    <option value="manager">Менеджер</option>
+                    <option value="owner">{uiText("Администратор компании")}</option>
+                    <option value="director">{uiText("Директор")}</option>
+                    <option value="sales_lead">{uiText("Руководитель продаж")}</option>
+                    <option value="manager">{uiText("Менеджер")}</option>
                   </select>
                 </td>
                 <td>
                   <span className={statusBadgeClass(item.active ? "Активен" : "Приостановлен")}>
-                    {item.active ? "Активен" : "Приостановлен"}
+                    {item.active ? uiText("Активен") : uiText("Приостановлен")}
                   </span>
                 </td>
                 <td>{formatDateTime(item.createdAt)}</td>
@@ -395,34 +399,34 @@ function CompanyMembers({ tenantId }: { tenantId: string }) {
                 <td className="actions">
                   <button className="btn secondary" onClick={async () => {
                     await api.adminUpdateMember(item.id, { active: !item.active });
-                    notifySaved(item.active ? "Участие приостановлено" : "Участие восстановлено");
+                    notifySaved(item.active ? uiText("Участие приостановлено") : uiText("Участие восстановлено"));
                     await load();
-                  }}>{item.active ? "Приостановить" : "Восстановить"}</button>
+                  }}>{item.active ? uiText("Приостановить") : uiText("Восстановить")}</button>
                   <button className="btn secondary" onClick={async () => {
                     await api.adminRevokeMemberSessions(item.id);
-                    notifySaved("Сессии пользователя завершены во всех компаниях");
-                  }}>Завершить сессии</button>
+                    notifySaved(uiText("Сессии пользователя завершены во всех компаниях"));
+                  }}>{uiText("Завершить сессии")}</button>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      <h4>Приглашения</h4>
+      <h4>{uiText("Приглашения")}</h4>
       {(data.invitations || []).map((item: any) => (
         <div className="row" key={item.id}>
           <div>
             <b>{item.email}</b>
-            <div className="muted">{item.roleLabel} · {item.status} · до {formatDateTime(item.expiresAt)}</div>
+            <div className="muted">{item.roleLabel} · {item.status} {" "}{uiText("· до")}{" "}{formatDateTime(item.expiresAt)}</div>
           </div>
           {item.status === "pending" || item.status === "expired" ? (
             <div className="actions">
               <button className="btn secondary" onClick={async () => {
                 const result = (await api.adminRepeatInvitation(item.id)) as any;
                 await navigator.clipboard.writeText(result.inviteUrl).catch(() => undefined);
-                notifySaved("Ссылка создана и скопирована");
-              }}>Повторить</button>
-              <button className="btn secondary" onClick={async () => { await api.adminRevokeInvitation(item.id); notifySaved("Приглашение отозвано"); await load(); }}>Отозвать</button>
+                notifySaved(uiText("Ссылка создана и скопирована"));
+              }}>{uiText("Повторить")}</button>
+              <button className="btn secondary" onClick={async () => { await api.adminRevokeInvitation(item.id); notifySaved(uiText("Приглашение отозвано")); await load(); }}>{uiText("Отозвать")}</button>
             </div>
           ) : null}
         </div>
@@ -432,6 +436,7 @@ function CompanyMembers({ tenantId }: { tenantId: string }) {
 }
 
 function CompanyIntegrations({ tenantId }: { tenantId: string }) {
+  const uiText = useUiText();
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState("");
   const [events, setEvents] = useState<any[] | null>(null);
@@ -440,15 +445,15 @@ function CompanyIntegrations({ tenantId }: { tenantId: string }) {
   async function load() {
     setData(await api.adminCompanyIntegrations(tenantId));
   }
-  useEffect(() => { void load().catch((err) => setError(err instanceof Error ? err.message : "Ошибка")); }, [tenantId]);
-  if (!data) return <div className="state">Загрузка…</div>;
+  useEffect(() => { void load().catch((err) => setError(err instanceof Error ? err.message : uiText("Ошибка"))); }, [tenantId]);
+  if (!data) return <div className="state">{uiText("Загрузка…")}</div>;
   const connectable = (data.catalog || []).filter((item: any) => item.connectable);
   const companies = [{ id: tenantId, name: "Эта компания", integrationTypes: (data.items || []).map((row: any) => row.type) }];
 
   return (
     <div className="stack">
       {(data.needsAssignment || []).length ? (
-        <p className="error">Есть подключения без назначения этой компании. Общие секреты сервера не используются автоматически.</p>
+        <p className="error">{uiText("Есть подключения без назначения этой компании. Общие секреты сервера не используются автоматически.")}</p>
       ) : null}
       {error ? <p className="error">{error}</p> : null}
       {connectable.map((item: any) => (
@@ -464,7 +469,7 @@ function CompanyIntegrations({ tenantId }: { tenantId: string }) {
               <p className="muted">{(item.steps as string[])[0]}</p>
             ) : (
             <div className="notify-steps">
-              <b>Как подключить</b>
+              <b>{uiText("Как подключить")}</b>
               <ol>
                 {(item.steps as string[]).map((step: string) => (
                   <li key={step}>{step}</li>
@@ -481,34 +486,34 @@ function CompanyIntegrations({ tenantId }: { tenantId: string }) {
           <div className="page-head">
             <div>
               <b>{item.name}</b>
-              <div className="muted">{item.type} · {item.lifecycleLabel}</div>
+              <div className="muted">{item.type} · {uiMessage(item.lifecycleLabel)}</div>
             </div>
             <div className="actions">
               <button className="btn secondary" onClick={async () => {
                 const result = (await api.adminTestCompanyIntegration(tenantId, item.id)) as any;
                 setNote(result.message);
                 await load();
-              }}>Проверить</button>
+              }}>{uiText("Проверить")}</button>
               {item.type === "webhook" ? (
                 <button className="btn secondary" onClick={async () => {
                   const result = (await api.adminRotateCompanyWebhook(tenantId, item.id)) as any;
-                  setNote(`${result.note || "Ключ заменён"} ${result.secret || ""}`);
-                  notifySaved("Ключ заменён. Значение в журнал не записано.");
-                }}>Заменить ключ</button>
+                  setNote(`${result.note || uiText("Ключ заменён")} ${result.secret || ""}`);
+                  notifySaved(uiText("Ключ заменён. Значение в журнал не записано."));
+                }}>{uiText("Заменить ключ")}</button>
               ) : null}
               <button className="btn secondary" onClick={async () => {
                 await api.adminDisableCompanyIntegration(tenantId, item.id, item.lifecycle !== "disabled");
-                notifySaved(item.lifecycle === "disabled" ? "Включено" : "Отключено");
+                notifySaved(item.lifecycle === "disabled" ? uiText("Включено") : uiText("Отключено"));
                 await load();
-              }}>{item.lifecycle === "disabled" ? "Включить" : "Отключить"}</button>
+              }}>{item.lifecycle === "disabled" ? uiText("Включить") : uiText("Отключить")}</button>
               <button className="btn secondary" onClick={async () => {
                 const result = (await api.adminCompanyIntegrationEvents(tenantId, item.id)) as any;
                 setEvents(result.items || []);
-              }}>События</button>
+              }}>{uiText("События")}</button>
             </div>
           </div>
           {item.schema?.instanceId ? <p className="muted">Instance: {item.schema.instanceId}</p> : null}
-          {item.forms?.[0]?.submitUrl ? <p className="muted">Форма: {item.forms[0].submitUrl}</p> : null}
+          {item.forms?.[0]?.submitUrl ? <p className="muted">{uiText("Форма:")}{" "}{item.forms[0].submitUrl}</p> : null}
           {item.eventsUrl ? <p className="muted">Webhook: {item.eventsUrl}</p> : null}
           {item.lastError ? <p className="error">{item.lastError}</p> : null}
         </div>
@@ -523,8 +528,8 @@ function CompanyIntegrations({ tenantId }: { tenantId: string }) {
       {note ? <p className="ok">{note}</p> : null}
       {events ? (
         <div className="panel">
-          <h4>История событий</h4>
-          {events.length === 0 ? <p className="muted">Пока нет событий</p> : events.map((item) => (
+          <h4>{uiText("История событий")}</h4>
+          {events.length === 0 ? <p className="muted">{uiText("Пока нет событий")}</p> : events.map((item) => (
             <p key={item.id} className="muted">{formatDateTime(item.receivedAt)} · {item.status} · {item.lastError || item.eventType}</p>
           ))}
         </div>
@@ -534,18 +539,19 @@ function CompanyIntegrations({ tenantId }: { tenantId: string }) {
 }
 
 function CompanyAudit({ tenantId }: { tenantId: string }) {
+  const uiText = useUiText();
   const [data, setData] = useState<any>(null);
   useEffect(() => {
     api.adminAudit({ tenantId, limit: 50 }).then(setData).catch(() => setData({ items: [] }));
   }, [tenantId]);
-  if (!data) return <div className="state">Загрузка…</div>;
+  if (!data) return <div className="state">{uiText("Загрузка…")}</div>;
   return (
     <div className="stack">
       {(data.items || []).map((item: any) => (
         <div className="row" key={item.id}>
           <div>
             <b>{item.action}</b>
-            <div className="muted">{formatDateTime(item.createdAt)} · {item.actor?.email || "система"}</div>
+            <div className="muted">{formatDateTime(item.createdAt)} · {item.actor?.email || uiText("система")}</div>
           </div>
         </div>
       ))}

@@ -1,3 +1,4 @@
+import { uiText, useUiText, localizeUiOptions, uiMessage } from "../lib/uiText";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { notifySaved } from "../components/SaveNotice";
 import { Link, useNavigate } from "react-router-dom";
@@ -27,13 +28,14 @@ const emptyDraft = () => ({
 function readBase64(file: File) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
-    reader.onerror = () => reject(new Error("Не удалось прочитать файл"));
+    reader.onerror = () => reject(new Error(uiText("Не удалось прочитать файл")));
     reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
     reader.readAsDataURL(file);
   });
 }
 
 export function CompaniesPage() {
+  const uiText = useUiText();
   const navigate = useNavigate();
   const requestVersion = useRequestVersion();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -78,7 +80,7 @@ export function CompaniesPage() {
       setError("");
     } catch (err) {
       if (version !== requestVersion.current) return;
-      setError(err instanceof Error ? err.message : "Ошибка");
+      setError(err instanceof Error ? err.message : uiText("Ошибка"));
     } finally {
       if (version === requestVersion.current) setLoading(false);
     }
@@ -96,11 +98,11 @@ export function CompaniesPage() {
   async function parseRequisites(file = requisitesFile, text = requisitesText) {
     if (parseBusy || createBusy) return;
     if (!file && !text.trim()) {
-      setParseError("Вставьте текст реквизитов или выберите PDF / Word");
+      setParseError(uiText("Вставьте текст реквизитов или выберите PDF / Word"));
       return;
     }
     if (file && (file.size > 20 * 1024 * 1024 || !/\.(pdf|docx|doc)$/i.test(file.name))) {
-      setParseError("Выберите PDF или Word (.docx, .doc) размером до 20 МБ");
+      setParseError(uiText("Выберите PDF или Word (.docx, .doc) размером до 20 МБ"));
       return;
     }
     setParseBusy(true);
@@ -130,7 +132,7 @@ export function CompaniesPage() {
       }));
       setParseWarnings(Array.isArray(result.warnings) ? result.warnings : []);
     } catch (err) {
-      setParseError(err instanceof Error ? err.message : "Не удалось распознать реквизиты");
+      setParseError(err instanceof Error ? err.message : uiText("Не удалось распознать реквизиты"));
     } finally {
       setParseBusy(false);
     }
@@ -158,7 +160,7 @@ export function CompaniesPage() {
       setRequisitesText("");
       setRequisitesFile(null);
       setDraft(emptyDraft());
-      notifySaved("Компания создана");
+      notifySaved(uiText("Компания создана"));
       navigate(`/companies/${created.id}`);
     } catch (err: any) {
       if (err?.status === 409) {
@@ -175,11 +177,11 @@ export function CompaniesPage() {
             });
             setDuplicates(dup.duplicates || []);
           } catch {
-            setError(err instanceof Error ? err.message : "Ошибка создания");
+            setError(err instanceof Error ? err.message : uiText("Ошибка создания"));
           }
         }
       } else {
-        setError(err instanceof Error ? err.message : "Ошибка создания");
+        setError(err instanceof Error ? err.message : uiText("Ошибка создания"));
       }
     } finally {
       setCreateBusy(false);
@@ -190,21 +192,20 @@ export function CompaniesPage() {
     <section className="companies-page">
       <div className="row sit-head">
         <div>
-          <h2>Компании</h2>
-          <p className="muted">Организации, с которыми вы работаете.</p>
+          <h2>{uiText("Компании")}</h2>
+          <p className="muted">{uiText("Организации, с которыми вы работаете.")}</p>
         </div>
         <button type="button" className="btn" onClick={() => setShowCreate(true)}>
-          + Компания
-        </button>
+          {uiText("+ Компания")}</button>
       </div>
 
       <div className="sit-toolbar">
         <div className="sit-periods">
           {(
             [
-              ["all", "Все"],
-              ["mine", "Мои"],
-              ["unassigned", "Без ответственного"],
+              ["all", uiText("Все")],
+              ["mine", uiText("Мои")],
+              ["unassigned", uiText("Без ответственного")],
             ] as const
           ).map(([id, label]) => (
             <button
@@ -221,28 +222,27 @@ export function CompaniesPage() {
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Название, БИН, контакт, телефон…"
+            placeholder={uiText("Название, БИН, контакт, телефон…")}
           />
           <select value={lifecycleStatus} onChange={(e) => setLifecycleStatus(e.target.value)}>
-            <option value="">Все статусы</option>
-            <option value="PROSPECT">Потенциальный клиент</option>
-            <option value="CUSTOMER">Клиент</option>
-            <option value="INACTIVE_CUSTOMER">Неактивный</option>
-            <option value="PARTNER">Партнёр</option>
-            <option value="ARCHIVED">Архив</option>
+            <option value="">{uiText("Все статусы")}</option>
+            <option value="PROSPECT">{uiText("Потенциальный клиент")}</option>
+            <option value="CUSTOMER">{uiText("Клиент")}</option>
+            <option value="INACTIVE_CUSTOMER">{uiText("Неактивный")}</option>
+            <option value="PARTNER">{uiText("Партнёр")}</option>
+            <option value="ARCHIVED">{uiText("Архив")}</option>
           </select>
           <button type="submit" className="btn secondary">
-            Найти
-          </button>
+            {uiText("Найти")}</button>
         </form>
       </div>
 
       {error ? <p className="error">{error}</p> : null}
-      {loading ? <div className="state">Загрузка…</div> : null}
+      {loading ? <div className="state">{uiText("Загрузка…")}</div> : null}
 
       {!loading && !items.length ? (
         <div className="sit-section">
-          <p className="empty">Пока нет компаний. Клиентов без организации можно вести в разделе «Клиенты».</p>
+          <p className="empty">{uiText("Пока нет компаний. Клиентов без организации можно вести в разделе «Клиенты».")}</p>
         </div>
       ) : null}
 
@@ -252,21 +252,21 @@ export function CompaniesPage() {
             <div>
               <b>{item.name}</b>
               <div className="muted">
-                {[item.lifecycleLabel, item.industry, item.city].filter(Boolean).join(" · ")}
+                {[uiMessage(item.lifecycleLabel), item.industry, item.city].filter(Boolean).join(" · ")}
               </div>
               {item.primaryContact ? (
                 <div className="muted">
-                  Основной контакт: {item.primaryContact.name}
+                  {uiText("Основной контакт:")}{" "}{item.primaryContact.name}
                   {item.primaryContact.position ? ` · ${item.primaryContact.position}` : ""}
                 </div>
               ) : null}
             </div>
             <div className="company-row-meta">
-              <div>Контактов: {item.contactsCount}</div>
-              <div>Активных сделок: {item.activeDealsCount}</div>
-              <div>Сумма сделки: {item.pipelineLabel || "—"}</div>
-              <div className="muted">{item.lastActivityLabel || "Нет активности"}</div>
-              <div className="muted">{item.assigneeName || "Без ответственного"}</div>
+              <div>{uiText("Контактов:")}{" "}{item.contactsCount}</div>
+              <div>{uiText("Активных сделок:")}{" "}{item.activeDealsCount}</div>
+              <div>{uiText("Сумма сделки:")}{" "}{item.pipelineLabel || "—"}</div>
+              <div className="muted">{item.lastActivityLabel || uiText("Нет активности")}</div>
+              <div className="muted">{item.assigneeName || uiText("Без ответственного")}</div>
             </div>
           </Link>
         ))}
@@ -275,10 +275,10 @@ export function CompaniesPage() {
       {showCreate ? (
         <div className="stats-modal-backdrop" onClick={closeCreate}>
           <div className="stats-modal company-create-modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Новая компания</h3>
+            <h3>{uiText("Новая компания")}</h3>
             <div className="company-requisites">
-              <b>Из реквизитов</b>
-              <p className="muted">PDF, Word или вставьте текст — распознаем название, БИН, адрес и банк.</p>
+              <b>{uiText("Из реквизитов")}</b>
+              <p className="muted">{uiText("PDF, Word или вставьте текст — распознаем название, БИН, адрес и банк.")}</p>
               <div className="company-requisites-actions">
                 <input
                   ref={fileInputRef}
@@ -293,7 +293,7 @@ export function CompaniesPage() {
                   disabled={parseBusy || createBusy}
                   onClick={() => fileInputRef.current?.click()}
                 >
-                  {requisitesFile ? requisitesFile.name : "Загрузить PDF / Word"}
+                  {requisitesFile ? requisitesFile.name : uiText("Загрузить PDF / Word")}
                 </button>
                 {requisitesFile ? (
                   <button
@@ -305,15 +305,14 @@ export function CompaniesPage() {
                       if (fileInputRef.current) fileInputRef.current.value = "";
                     }}
                   >
-                    Убрать файл
-                  </button>
+                    {uiText("Убрать файл")}</button>
                 ) : null}
               </div>
               <textarea
                 value={requisitesText}
                 onChange={(e) => setRequisitesText(e.target.value)}
                 rows={4}
-                placeholder="Вставьте реквизиты компании…"
+                placeholder={uiText("Вставьте реквизиты компании…")}
               />
               <button
                 type="button"
@@ -321,79 +320,66 @@ export function CompaniesPage() {
                 disabled={parseBusy || createBusy}
                 onClick={() => void parseRequisites()}
               >
-                {parseBusy ? "Распознаём…" : "Распознать"}
+                {parseBusy ? uiText("Распознаём…") : uiText("Распознать")}
               </button>
               {parseError ? <p className="error">{parseError}</p> : null}
               {parseWarnings.length ? (
                 <ul className="company-requisites-warnings">
                   {parseWarnings.map((warning) => (
-                    <li key={warning}>{warning}</li>
+                    <li key={warning}>{uiMessage(warning)}</li>
                   ))}
                 </ul>
               ) : null}
             </div>
             <div className="company-create-grid">
               <label className="span-2">
-                Название *
-                <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+                {uiText("Название *")}<input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
               </label>
               <label className="span-2">
-                Юридическое название
-                <input value={draft.legalName} onChange={(e) => setDraft({ ...draft, legalName: e.target.value })} />
+                {uiText("Юридическое название")}<input value={draft.legalName} onChange={(e) => setDraft({ ...draft, legalName: e.target.value })} />
               </label>
               <label>
-                БИН / ИИН
-                <input value={draft.bin} onChange={(e) => setDraft({ ...draft, bin: e.target.value })} />
+                {uiText("БИН / ИИН")}<input value={draft.bin} onChange={(e) => setDraft({ ...draft, bin: e.target.value })} />
               </label>
               <label>
-                Город
-                <input value={draft.city} onChange={(e) => setDraft({ ...draft, city: e.target.value })} />
+                {uiText("Город")}<input value={draft.city} onChange={(e) => setDraft({ ...draft, city: e.target.value })} />
               </label>
               <label className="span-2">
-                Юридический адрес
-                <input
+                {uiText("Юридический адрес")}<input
                   value={draft.legalAddress}
                   onChange={(e) => setDraft({ ...draft, legalAddress: e.target.value })}
                 />
               </label>
               <label>
-                Директор
-                <input
+                {uiText("Директор")}<input
                   value={draft.directorName}
                   onChange={(e) => setDraft({ ...draft, directorName: e.target.value })}
                 />
               </label>
               <label>
-                Банк
-                <input value={draft.bankName} onChange={(e) => setDraft({ ...draft, bankName: e.target.value })} />
+                {uiText("Банк")}<input value={draft.bankName} onChange={(e) => setDraft({ ...draft, bankName: e.target.value })} />
               </label>
               <label>
-                ИИК / IBAN
-                <input value={draft.iban} onChange={(e) => setDraft({ ...draft, iban: e.target.value })} />
+                {uiText("ИИК / IBAN")}<input value={draft.iban} onChange={(e) => setDraft({ ...draft, iban: e.target.value })} />
               </label>
               <label>
-                БИК
-                <input value={draft.bik} onChange={(e) => setDraft({ ...draft, bik: e.target.value })} />
+                {uiText("БИК")}<input value={draft.bik} onChange={(e) => setDraft({ ...draft, bik: e.target.value })} />
               </label>
               <label>
-                Отрасль
-                <input value={draft.industry} onChange={(e) => setDraft({ ...draft, industry: e.target.value })} />
+                {uiText("Отрасль")}<input value={draft.industry} onChange={(e) => setDraft({ ...draft, industry: e.target.value })} />
               </label>
               <label>
-                Телефон
-                <input value={draft.phone} onChange={(e) => setDraft({ ...draft, phone: e.target.value })} />
+                {uiText("Телефон")}<input value={draft.phone} onChange={(e) => setDraft({ ...draft, phone: e.target.value })} />
               </label>
               <label>
                 Email
                 <input value={draft.email} onChange={(e) => setDraft({ ...draft, email: e.target.value })} />
               </label>
               <label className="span-2">
-                Сайт
-                <input value={draft.website} onChange={(e) => setDraft({ ...draft, website: e.target.value })} />
+                {uiText("Сайт")}<input value={draft.website} onChange={(e) => setDraft({ ...draft, website: e.target.value })} />
               </label>
               <label className="span-2">
-                Комментарий
-                <textarea
+                {uiText("Комментарий")}<textarea
                   value={draft.description}
                   onChange={(e) => setDraft({ ...draft, description: e.target.value })}
                   rows={3}
@@ -402,34 +388,30 @@ export function CompaniesPage() {
             </div>
             {duplicates.length ? (
               <div className="sit-section" style={{ marginTop: 12 }}>
-                <b>Возможно, компания уже существует</b>
+                <b>{uiText("Возможно, компания уже существует")}</b>
                 {duplicates.map((d) => (
                   <div key={d.id} className="row" style={{ marginTop: 8 }}>
                     <div>
                       <div>{d.name}</div>
                       <div className="muted">
-                        {[d.bin ? `БИН ${d.bin}` : null, `${d.contactsCount} контактов`, `${d.activeDealsCount} сделок`]
+                        {[d.bin ? uiText("БИН {p0}", {p0: d.bin}) : null, uiText("{p0} контактов", {p0: d.contactsCount}), uiText("{p0} сделок", {p0: d.activeDealsCount})]
                           .filter(Boolean)
                           .join(" · ")}
                       </div>
                     </div>
                     <Link className="btn secondary" to={`/companies/${d.id}`}>
-                      Открыть
-                    </Link>
+                      {uiText("Открыть")}</Link>
                   </div>
                 ))}
                 <button type="button" className="btn secondary" style={{ marginTop: 8 }} onClick={() => void createCompany(true)}>
-                  Всё равно создать
-                </button>
+                  {uiText("Всё равно создать")}</button>
               </div>
             ) : null}
             <div className="row" style={{ gap: 8, marginTop: 12 }}>
               <button type="button" className="btn" disabled={createBusy || parseBusy || !draft.name.trim()} onClick={() => void createCompany(false)}>
-                Создать
-              </button>
+                {uiText("Создать")}</button>
               <button type="button" className="btn secondary" disabled={createBusy || parseBusy} onClick={closeCreate}>
-                Отмена
-              </button>
+                {uiText("Отмена")}</button>
             </div>
           </div>
         </div>

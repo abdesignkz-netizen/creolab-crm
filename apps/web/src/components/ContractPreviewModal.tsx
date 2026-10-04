@@ -1,3 +1,4 @@
+import { uiText, useUiText, localizeUiOptions } from "../lib/uiText";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api, downloadContractFile, downloadContractPreview } from "../lib/api";
 import { PdfDocumentViewer } from "./PdfDocumentViewer";
@@ -27,6 +28,7 @@ export function ContractPreviewModal({
   children?: ReactNode;
   actions?: (ready: boolean) => ReactNode;
 }) {
+  const uiText = useUiText();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [pdfUrl, setPdfUrl] = useState("");
@@ -59,7 +61,7 @@ export function ContractPreviewModal({
           : await api.downloadContractFile(contract.id);
         if (cancelled) return;
         if (!isPdfFile(file.blob, file.filename)) {
-          setError("Договор должен открываться как PDF. Сформируйте его ещё раз.");
+          setError(uiText("Договор должен открываться как PDF. Сформируйте его ещё раз."));
           setLoading(false);
           return;
         }
@@ -71,8 +73,8 @@ export function ContractPreviewModal({
         if (!cancelled) {
           const code = (err as { code?: string })?.code;
           setError(code === "word_conversion_failed" || code === "word_conversion_unavailable"
-            ? "Не удалось подготовить PDF для просмотра. Повторите открытие или скачайте исходный договор в Word."
-            : err instanceof Error ? err.message : "Не удалось открыть договор");
+            ? uiText("Не удалось подготовить PDF для просмотра. Повторите открытие или скачайте исходный договор в Word.")
+            : err instanceof Error ? err.message : uiText("Не удалось открыть договор"));
           setLoading(false);
         }
       }
@@ -89,7 +91,7 @@ export function ContractPreviewModal({
     try {
       await (contract.preview ? downloadContractPreview(contract.id, format) : downloadContractFile(contract.id, format));
     } catch (err) {
-      setDownloadError(err instanceof Error ? err.message : "Не удалось скачать договор. Повторите попытку.");
+      setDownloadError(err instanceof Error ? err.message : uiText("Не удалось скачать договор. Повторите попытку."));
     } finally { setDownloading(false); }
   }
 
@@ -99,28 +101,27 @@ export function ContractPreviewModal({
         className="stats-modal invoice-preview-modal contract-preview-modal"
         role="dialog"
         aria-modal="true"
-        aria-label={`Просмотр договора ${contract.number || ""}`}
+        aria-label={uiText("Просмотр договора {p0}", {p0: contract.number || ""})}
         onClick={(event) => event.stopPropagation()}
       >
         <div className="row sit-head">
-          <h3>Договор {contract.number || ""}</h3>
+          <h3>{uiText("Договор")}{" "}{contract.number || ""}</h3>
           <button type="button" className="btn secondary" disabled={busy} onClick={onClose}>
-            Закрыть
-          </button>
+            {uiText("Закрыть")}</button>
         </div>
         {children}
-        {error ? <div role="alert"><p className="error">{error}</p><button type="button" className="btn secondary" disabled={busy} onClick={() => setRetry(value => value + 1)}>Повторить открытие PDF</button></div> : null}
-        {loading ? <p className="muted">Открываем PDF…</p> : null}
-        {pdfUrl ? <PdfDocumentViewer title={`Договор ${contract.number || ""}`} src={pdfUrl} /> : null}
+        {error ? <div role="alert"><p className="error">{error}</p><button type="button" className="btn secondary" disabled={busy} onClick={() => setRetry(value => value + 1)}>{uiText("Повторить открытие PDF")}</button></div> : null}
+        {loading ? <p className="muted">{uiText("Открываем PDF…")}</p> : null}
+        {pdfUrl ? <PdfDocumentViewer title={uiText("Договор {p0}", {p0: contract.number || ""})} src={pdfUrl} /> : null}
         {downloadError ? <p className="error" role="alert">{downloadError}</p> : null}
         <div className="actions">
           {actions?.(!loading && !error && Boolean(pdfUrl))}
           <div className="actions contract-download-actions">
-            <select aria-label="Формат скачивания договора" value={format} disabled={busy || downloading} onChange={(event) => setFormat(event.target.value as "pdf" | "docx")}>
+            <select aria-label={uiText("Формат скачивания договора")} value={format} disabled={busy || downloading} onChange={(event) => setFormat(event.target.value as "pdf" | "docx")}>
               <option value="pdf">PDF</option><option value="docx">Word (.docx)</option>
             </select>
             <button type="button" className="btn" disabled={busy || downloading || (format === "pdf" && loading)} onClick={() => void download()}>
-              {downloading ? "Скачиваем…" : `Скачать в ${format === "pdf" ? "PDF" : "Word"}`}
+              {downloading ? uiText("Скачиваем…") : uiText("Скачать в {p0}", {p0: format === "pdf" ? "PDF" : "Word"})}
             </button>
           </div>
           {onConfirm && !contract.preview ? (
@@ -133,12 +134,11 @@ export function ContractPreviewModal({
                 onClose();
               }}
             >
-              {confirmed ? "Подтверждён" : "Подтвердить"}
+              {confirmed ? uiText("Подтверждён") : uiText("Подтвердить")}
             </button>
           ) : null}
           <button type="button" className="btn secondary" disabled={busy} onClick={onClose}>
-            Закрыть
-          </button>
+            {uiText("Закрыть")}</button>
         </div>
       </div>
     </div>

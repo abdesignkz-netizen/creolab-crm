@@ -1,7 +1,9 @@
+import { uiMessage } from "./uiText";
 import { createApiClient } from "@creolab/api-client";
 
 export const api = createApiClient({
   baseUrl: "",
+  formatErrorMessage: (message) => uiMessage(message),
   getTenantId: () => localStorage.getItem("crm_tenant"),
   onUnknownTenant: () => localStorage.removeItem("crm_tenant"),
   onFeatureRequired: (info) => {

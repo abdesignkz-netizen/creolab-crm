@@ -1,9 +1,13 @@
+import { t } from "../i18n";
+import { systemText } from "@creolab/contracts";
+import { useLocale } from "../lib/session";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, setTenant } from "../lib/api";
 import { PasswordInput } from "../components/PasswordInput";
 
 export function InvitePage() {
+  const locale = useLocale();
   const { token = "" } = useParams();
   const navigate = useNavigate();
   const [preview, setPreview] = useState<any>(null);
@@ -17,27 +21,27 @@ export function InvitePage() {
         if (!cancelled) setPreview(data);
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Ссылка недействительна");
+        if (!cancelled) setError(locale !== "kk" && err instanceof Error ? err.message : systemText(locale, "Ссылка недействительна"));
       });
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [token, locale]);
 
   if (error) {
     return (
       <div className="login">
         <div className="login-stage">
           <form className="panel">
-            <h2>Приглашение</h2>
+            <h2>{systemText(locale, "Приглашение")}</h2>
             <p className="error">{error}</p>
-            <Link className="btn secondary" to="/login">Войти</Link>
+            <Link className="btn secondary" to="/login">{systemText(locale, "Войти")}</Link>
           </form>
         </div>
       </div>
     );
   }
-  if (!preview) return <div className="state">Загрузка…</div>;
+  if (!preview) return <div className="state">{systemText(locale, "Загрузка…")}</div>;
 
   return (
     <div className="login">
@@ -61,33 +65,31 @@ export function InvitePage() {
                 navigate("/login");
                 return;
               }
-              setError(err instanceof Error ? err.message : "Не удалось принять приглашение");
+              setError(locale !== "kk" && err instanceof Error ? err.message : systemText(locale, "Не удалось принять приглашение"));
             } finally {
               setBusy(false);
             }
           }}
         >
-          <h2>Приглашение в {preview.tenantName}</h2>
+          <h2>{systemText(locale, "Приглашение в {company}", { company: preview.tenantName })}</h2>
           <p className="muted">
-            {preview.email} · {preview.role}
-            {preview.existingUser ? " · аккаунт уже есть — войдите тем же email" : ""}
+            {preview.email} · {locale === "kk" && ["owner", "director", "sales_lead", "manager"].includes(preview.role) ? t(locale, `settings.currentRole.${preview.role}`) : preview.role}
+            {preview.existingUser ? systemText(locale, " · аккаунт уже есть — войдите тем же email") : ""}
           </p>
           {preview.requiresPassword ? (
             <>
               <label>
-                Имя
-                <input name="name" defaultValue={preview.name || ""} />
+                {systemText(locale, "Имя")}<input name="name" defaultValue={preview.name || ""} />
               </label>
               <label>
-                Пароль
-                <PasswordInput name="password" required minLength={8} autoComplete="new-password" />
+                {systemText(locale, "Пароль")}<PasswordInput name="password" required minLength={8} autoComplete="new-password" />
               </label>
             </>
           ) : (
-            <p className="muted">Если вы уже вошли в нужный аккаунт, нажмите «Принять». Иначе сначала войдите.</p>
+            <p className="muted">{systemText(locale, "Если вы уже вошли в нужный аккаунт, нажмите «Принять». Иначе сначала войдите.")}</p>
           )}
           {error ? <p className="error">{error}</p> : null}
-          <button className="btn" disabled={busy}>{busy ? "Сохранение…" : "Принять приглашение"}</button>
+          <button className="btn" disabled={busy}>{busy ? systemText(locale, "Сохранение…") : systemText(locale, "Принять приглашение")}</button>
         </form>
       </div>
     </div>

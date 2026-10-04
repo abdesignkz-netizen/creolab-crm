@@ -1,3 +1,4 @@
+import { uiText, useUiText, localizeUiOptions } from "../../lib/uiText";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../../lib/api";
@@ -5,6 +6,7 @@ import { notifySaved } from "../../components/SaveNotice";
 import { AssignIntegrationForm } from "./PlatformAssignIntegration";
 
 export function PlatformCatalogPage() {
+  const uiText = useUiText();
   const [params] = useSearchParams();
   const [items, setItems] = useState<any[]>([]);
   const [companies, setCompanies] = useState<any[]>([]);
@@ -21,7 +23,7 @@ export function PlatformCatalogPage() {
   }
 
   useEffect(() => {
-    void load().catch((err) => setError(err instanceof Error ? err.message : "Ошибка"));
+    void load().catch((err) => setError(err instanceof Error ? err.message : uiText("Ошибка")));
   }, []);
 
   useEffect(() => {
@@ -31,10 +33,9 @@ export function PlatformCatalogPage() {
 
   return (
     <div className="stack">
-      <h2>Каталог интеграций</h2>
+      <h2>{uiText("Каталог интеграций")}</h2>
       <p className="muted">
-        Подключение всегда к выбранной компании. Общий WhatsApp-мост сервера к организации не подставляется.
-      </p>
+        {uiText("Подключение всегда к выбранной компании. Общий WhatsApp-мост сервера к организации не подставляется.")}</p>
       {error ? <p className="error">{error}</p> : null}
       {items.map((item) => (
         <div className="panel stack" key={item.type} id={`integration-${item.type}`}>
@@ -44,7 +45,7 @@ export function PlatformCatalogPage() {
               <div className="muted">{item.type} · {item.authMethod}</div>
             </div>
             <span className={`badge ${item.connectable ? "" : "warn"}`}>
-              {item.connectable ? "Можно подключить к компании" : item.implementationReady ? "Не из этой панели" : "Модуль не готов"}
+              {item.connectable ? uiText("Можно подключить к компании") : item.implementationReady ? uiText("Не из этой панели") : uiText("Модуль не готов")}
             </span>
           </div>
           <p>{item.description}</p>
@@ -53,7 +54,7 @@ export function PlatformCatalogPage() {
               <p className="muted">{(item.steps as string[])[0]}</p>
             ) : (
             <div className={`notify-steps ${focusType === item.type ? "catalog-steps-focus" : ""}`}>
-              <b>Как подключить</b>
+              <b>{uiText("Как подключить")}</b>
               <ol>
                 {(item.steps as string[]).map((step: string) => (
                   <li key={step}>{step}</li>
@@ -65,14 +66,13 @@ export function PlatformCatalogPage() {
             <p className="muted">{item.connectHint}</p>
           ) : null}
           <AssignIntegrationForm item={item} companies={companies} />
-          {item.type === "form" ? null : <p className="muted">Функции: {(item.functions || []).join(", ") || "нет"}</p>}
+          {item.type === "form" ? null : <p className="muted">{uiText("Функции:")}{" "}{(item.functions || []).join(", ") || uiText("нет")}</p>}
           <label>
-            Описание
-            <textarea
+            {uiText("Описание")}<textarea
               defaultValue={item.description}
               onBlur={async (event) => {
                 await api.adminUpdateIntegrationType(item.type, { description: event.target.value });
-                notifySaved("Описание сохранено");
+                notifySaved(uiText("Описание сохранено"));
               }}
             />
           </label>
@@ -82,12 +82,11 @@ export function PlatformCatalogPage() {
               defaultChecked={item.available}
               onChange={async (event) => {
                 await api.adminUpdateIntegrationType(item.type, { available: event.target.checked });
-                notifySaved("Доступность обновлена");
+                notifySaved(uiText("Доступность обновлена"));
                 await load();
               }}
             />
-            Доступен компаниям (если модуль готов)
-          </label>
+            {uiText("Доступен компаниям (если модуль готов)")}</label>
         </div>
       ))}
     </div>

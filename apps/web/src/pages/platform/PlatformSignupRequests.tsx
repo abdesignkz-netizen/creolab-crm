@@ -1,3 +1,4 @@
+import { uiText, useUiText, localizeUiOptions, uiMessage } from "../../lib/uiText";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../../lib/api";
 import { formatDateTime } from "../../lib/datetime";
@@ -11,7 +12,8 @@ type SignupRequest = {
   createdAt: string;
 };
 
-export function PlatformSignupRequests({ title = "Регистрации" }: { title?: string }) {
+export function PlatformSignupRequests({ title }: { title?: string }) {
+  const uiText = useUiText();
   const [items, setItems] = useState<SignupRequest[]>([]);
   const [pendingCount, setPendingCount] = useState(0);
   const [error, setError] = useState("");
@@ -24,7 +26,7 @@ export function PlatformSignupRequests({ title = "Регистрации" }: { t
   }, []);
 
   useEffect(() => {
-    load().catch((err) => setError(err instanceof Error ? err.message : "Не удалось загрузить запросы"));
+    load().catch((err) => setError(err instanceof Error ? err.message : uiText("Не удалось загрузить запросы")));
   }, [load]);
 
   async function setStatus(id: string, status: "NEW" | "DONE") {
@@ -34,7 +36,7 @@ export function PlatformSignupRequests({ title = "Регистрации" }: { t
       await api.adminUpdateSignupRequest(id, { status });
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось обновить запрос");
+      setError(err instanceof Error ? err.message : uiText("Не удалось обновить запрос"));
     } finally {
       setBusyId("");
     }
@@ -43,12 +45,12 @@ export function PlatformSignupRequests({ title = "Регистрации" }: { t
   return (
     <div className="panel stack">
       <div>
-        <h3>{title}{pendingCount > 0 ? ` · ${pendingCount}` : ""}</h3>
-        <p className="muted">Заявки с экрана входа и самостоятельные регистрации. Новые компании создаются автоматически — вручную заводить кабинет больше не обязательно.</p>
+        <h3>{title || uiText("Регистрации")}{pendingCount > 0 ? ` · ${pendingCount}` : ""}</h3>
+        <p className="muted">{uiText("Заявки с экрана входа и самостоятельные регистрации. Новые компании создаются автоматически — вручную заводить кабинет больше не обязательно.")}</p>
       </div>
       {error ? <p className="error">{error}</p> : null}
       {items.length === 0 ? (
-        <p className="muted">Пока нет запросов.</p>
+        <p className="muted">{uiText("Пока нет запросов.")}</p>
       ) : (
         <div className="signup-request-list">
           {items.map((item) => (
@@ -56,7 +58,7 @@ export function PlatformSignupRequests({ title = "Регистрации" }: { t
               <div>
                 <b>{item.companyName}</b>
                 <div className="muted">{item.email}</div>
-                <div className="muted">{formatDateTime(item.createdAt)} · {item.statusLabel}</div>
+                <div className="muted">{formatDateTime(item.createdAt)} · {uiMessage(item.statusLabel)}</div>
               </div>
               {item.status === "NEW" ? (
                 <button
@@ -65,8 +67,7 @@ export function PlatformSignupRequests({ title = "Регистрации" }: { t
                   disabled={busyId === item.id}
                   onClick={() => void setStatus(item.id, "DONE")}
                 >
-                  Обработано
-                </button>
+                  {uiText("Обработано")}</button>
               ) : (
                 <button
                   type="button"
@@ -74,8 +75,7 @@ export function PlatformSignupRequests({ title = "Регистрации" }: { t
                   disabled={busyId === item.id}
                   onClick={() => void setStatus(item.id, "NEW")}
                 >
-                  Вернуть
-                </button>
+                  {uiText("Вернуть")}</button>
               )}
             </div>
           ))}

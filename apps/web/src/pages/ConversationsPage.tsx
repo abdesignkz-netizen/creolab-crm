@@ -1,3 +1,4 @@
+import { uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale , uiDurationLabel } from "../lib/uiText";
 import { useSession } from "../lib/session";
 import { ChannelIcon, ConversationAvatar, CONVERSATION_CHANNELS } from "../components/ConversationIdentity";
 import { useUrlState, useRequestVersion } from "../lib/useUrlState";
@@ -44,7 +45,7 @@ function readFileBase64(file: File) {
       const result = String(reader.result || "");
       resolve(result.includes(",") ? result.split(",")[1] : result);
     };
-    reader.onerror = () => reject(new Error("Не удалось прочитать файл"));
+    reader.onerror = () => reject(new Error(uiText("Не удалось прочитать файл")));
     reader.readAsDataURL(file);
   });
 }
@@ -52,7 +53,7 @@ function readFileBase64(file: File) {
 async function filesToPending(files: FileList | File[]): Promise<PendingFile[]> {
   const out: PendingFile[] = [];
   for (const file of Array.from(files)) {
-    if (file.size > 16 * 1024 * 1024) throw new Error(`«${file.name}» больше 16 МБ`);
+    if (file.size > 16 * 1024 * 1024) throw new Error(uiText("«{p0}» больше 16 МБ", {p0: file.name}));
     out.push({
       localId: `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(36).slice(2, 8)}`,
       fileName: file.name,
@@ -66,6 +67,7 @@ async function filesToPending(files: FileList | File[]): Promise<PendingFile[]> 
 }
 
 function MessageBody({ message }: { message: any }) {
+  const uiText = useUiText();
   const attachments = Array.isArray(message.attachments) ? message.attachments : [];
   const type = String(message.type || "text");
   return (
@@ -74,7 +76,7 @@ function MessageBody({ message }: { message: any }) {
         <div key={file.id} className="bubble-media">
           {file.kind === "image" ? (
             <a href={file.url} target="_blank" rel="noreferrer">
-              <img src={file.url} alt={file.fileName || "Фото"} />
+              <img src={file.url} alt={file.fileName || uiText("Фото")} />
             </a>
           ) : file.kind === "video" ? (
             <video src={file.url} controls preload="metadata" />
@@ -82,13 +84,13 @@ function MessageBody({ message }: { message: any }) {
             <audio src={file.url} controls preload="metadata" />
           ) : (
             <a className="bubble-file" href={file.url} target="_blank" rel="noreferrer">
-              {file.fileName || "Файл"}
+              {file.fileName || uiText("Файл")}
             </a>
           )}
         </div>
       ))}
       {!attachments.length && type !== "text" ? (
-        <div className="bubble-media-placeholder">{message.previewLabel || "Вложение"}</div>
+        <div className="bubble-media-placeholder">{message.previewLabel || uiText("Вложение")}</div>
       ) : null}
       {message.text ? <div>{message.text}</div> : null}
     </>
@@ -96,6 +98,7 @@ function MessageBody({ message }: { message: any }) {
 }
 
 export function ConversationsPage() {
+  const uiText = useUiText();
   const { me } = useSession();
   const aiManagerAllowed = Boolean(me?.billing?.entitlements?.AI_MANAGER);
   const listVersion = useRequestVersion();
@@ -106,8 +109,8 @@ export function ConversationsPage() {
   selectedRef.current = selectedId;
   const [historyLoading, setHistoryLoading] = useState(false);
   const [searchParams] = useSearchParams();
-  const [filter, setFilter] = useUrlState("filter", "all", FILTERS.map(([value]) => value));
-  const [channel] = useUrlState("channel", "all", CONVERSATION_CHANNELS.map(([value]) => value));
+  const [filter, setFilter] = useUrlState("filter", "all", localizeUiOptions(FILTERS, uiText).map(([value]) => value));
+  const [channel] = useUrlState("channel", "all", localizeUiOptions(CONVERSATION_CHANNELS, uiText).map(([value]) => value));
   const [availableChannels, setAvailableChannels] = useState<string[]>([]);
   const [q, setQ] = useState("");
   const [items, setItems] = useState<any[]>([]);
@@ -142,7 +145,7 @@ export function ConversationsPage() {
       setError("");
     } catch (err) {
       if (request !== listVersion.current) return;
-      setError(err instanceof Error ? err.message : "Ошибка");
+      setError(err instanceof Error ? err.message : uiText("Ошибка"));
     } finally {
       if (request === listVersion.current) setListLoading(false);
     }
@@ -164,8 +167,8 @@ export function ConversationsPage() {
                 unread: false,
                 urgent: false,
                 needsAttention: false,
-                businessStatus: item.businessStatus === "Новая" ? "В работе" : item.businessStatus,
-                inquiryStatusLabel: item.inquiryStatusLabel === "Новая" ? "В работе" : item.inquiryStatusLabel,
+                businessStatus: item.businessStatus === "Новая" ? uiText("В работе") : item.businessStatus,
+                inquiryStatusLabel: item.inquiryStatusLabel === "Новая" ? uiText("В работе") : item.inquiryStatusLabel,
               }
             : item,
         );
@@ -179,7 +182,7 @@ export function ConversationsPage() {
       setError("");
     } catch (err) {
       if (request !== workspaceVersion.current) return;
-      setError(err instanceof Error ? err.message : "Диалог недоступен");
+      setError(err instanceof Error ? err.message : uiText("Диалог недоступен"));
       setWorkspace(null);
     }
   }
@@ -260,7 +263,7 @@ export function ConversationsPage() {
     if (busy || !id) return;
     setBusy(true);
     try { await action(); if (selectedRef.current === id) await loadWorkspace(id); await loadList(); }
-    catch (err) { if (selectedRef.current === id) setError(err instanceof Error ? err.message : "Не удалось изменить режим"); }
+    catch (err) { if (selectedRef.current === id) setError(err instanceof Error ? err.message : uiText("Не удалось изменить режим")); }
     finally { setBusy(false); }
   }
 
@@ -276,7 +279,7 @@ export function ConversationsPage() {
       });
       setError("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось прикрепить файл");
+      setError(err instanceof Error ? err.message : uiText("Не удалось прикрепить файл"));
     }
   }
 
@@ -297,31 +300,31 @@ export function ConversationsPage() {
   const listPane = (
     <div className="conv-list-pane">
       <div className="page-head">
-        <h2>Диалоги</h2><span className="badge" title="Диалогов по выбранным условиям">{items.length}</span>
+        <h2>{uiText("Диалоги")}</h2><span className="badge" title={uiText("Диалогов по выбранным условиям")}>{items.length}</span>
       </div>
       <input
         className="conv-search"
         value={q}
         onChange={(event) => setQ(event.target.value)}
-        placeholder="Поиск клиента или сообщения"
-        aria-label="Поиск по имени, телефону, компании, теме или сообщению"
+        placeholder={uiText("Поиск клиента или сообщения")}
+        aria-label={uiText("Поиск по имени, телефону, компании, теме или сообщению")}
       />
-      <div className="conv-primary-filters" role="group" aria-label="Статус диалогов">
-        {FILTERS.filter(([value]) => ["all", "unread", "needs_reply"].includes(value)).map(([value, label]) => (
+      <div className="conv-primary-filters" role="group" aria-label={uiText("Статус диалогов")}>
+        {localizeUiOptions(FILTERS, uiText).filter(([value]) => ["all", "unread", "needs_reply"].includes(value)).map(([value, label]) => (
           <button key={value} type="button" className={filter === value ? "chip active" : "chip"} aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}</button>
         ))}
       </div>
       <details className="conv-more-filters">
-        <summary>Ещё фильтры{!["all", "unread", "needs_reply"].includes(filter) ? ` · ${FILTERS.find(([value]) => value === filter)?.[1]}` : ""}</summary>
+        <summary>{uiText("Ещё фильтры")}{!["all", "unread", "needs_reply"].includes(filter) ? ` · ${localizeUiOptions(FILTERS, uiText).find(([value]) => value === filter)?.[1]}` : ""}</summary>
         <div className="chip-row">
-          {FILTERS.filter(([value]) => !["all", "unread", "needs_reply"].includes(value)).map(([value, label]) => (
+          {localizeUiOptions(FILTERS, uiText).filter(([value]) => !["all", "unread", "needs_reply"].includes(value)).map(([value, label]) => (
             <button key={value} type="button" className={filter === value ? "chip active" : "chip"} aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}</button>
           ))}
         </div>
       </details>
-      {listLoading ? <p className="muted" role="status">Загрузка диалогов…</p> : null}
+      {listLoading ? <p className="muted" role="status">{uiText("Загрузка диалогов…")}</p> : null}
       {!listLoading && items.length === 0 ? (
-        <p className="empty">{q || filter !== "all" || channel !== "all" ? "По выбранным условиям диалоги не найдены." : "Диалоги появятся после подключения каналов. Сейчас можно посмотреть, как устроен этот раздел."}</p>
+        <p className="empty">{q || filter !== "all" || channel !== "all" ? uiText("По выбранным условиям диалоги не найдены.") : uiText("Диалоги появятся после подключения каналов. Сейчас можно посмотреть, как устроен этот раздел.")}</p>
       ) : null}
       <div className="conv-list">
         {items.map((item) => (
@@ -335,17 +338,17 @@ export function ConversationsPage() {
             <div className="conv-row-copy">
               <div className="conv-row-top">
                 <b>{item.title}</b>
-                {item.unread ? <span className="conv-unread-dot" title="Непрочитанные сообщения" aria-label="Непрочитанные сообщения" /> : null}
+                {item.unread ? <span className="conv-unread-dot" title={uiText("Непрочитанные сообщения")} aria-label={uiText("Непрочитанные сообщения")} /> : null}
               </div>
-              <div className="conv-preview">{item.lastMessagePreview || "Пока нет сообщений"}</div>
+              <div className="conv-preview">{item.lastMessagePreview || uiText("Пока нет сообщений")}</div>
               <div className="conv-row-detail" title={[item.phone, item.topic, item.sourceLine].filter(Boolean).join(" · ")}>
                 {item.topic || phoneText(item.phone)}
               </div>
               <div className="conv-meta">
-                <span className={item.needsReply ? "conv-reply-badge" : ""}>{item.needsReply ? "Ждёт ответа" : item.businessStatus}</span>
-                <span className="badge">{item.modeLabel}</span>
+                <span className={item.needsReply ? "conv-reply-badge" : ""}>{item.needsReply ? uiText("Ждёт ответа") : item.businessStatus}</span>
+                <span className="badge">{uiMessage(item.modeLabel)}</span>
               </div>
-              <div className="conv-row-when muted">{item.lastMessageLabel}{item.waitLabel ? ` · ${item.waitLabel}` : ""}</div>
+              <div className="conv-row-when muted">{item.lastMessageLabel}{uiDurationLabel(item.waitLabel) ? ` · ${uiDurationLabel(item.waitLabel)}` : ""}</div>
             </div>
           </button>
         ))}
@@ -362,104 +365,100 @@ export function ConversationsPage() {
     <div className="conv-chat-pane">
       <div className="conv-header">
         <div className="conv-person">
-          <ConversationAvatar conversationId={workspace.conversation.id} name={workspace.client?.name || "Диалог"} channel={workspace.conversation.channelType || "other"} />
+          <ConversationAvatar conversationId={workspace.conversation.id} name={workspace.client?.name || uiText("Диалог")} channel={workspace.conversation.channelType || "other"} />
           <div className="conv-person-copy">
-          <Link className="btn secondary conversation-back" to={`/conversations?${searchParams}`}>← Диалоги</Link>
-          <b>{nameWithPhone(workspace.client?.name || "Диалог", workspace.client?.phone)}</b>
+          <Link className="btn secondary conversation-back" to={`/conversations?${searchParams}`}>{uiText("← Диалоги")}</Link>
+          <b>{nameWithPhone(workspace.client?.name || uiText("Диалог"), workspace.client?.phone)}</b>
           <div className="muted">
             <span className={`conv-channel-label channel-${workspace.conversation.channelType || "other"}`}><ChannelIcon channel={workspace.conversation.channelType || "other"} />{workspace.conversation.channel}</span>
-            {workspace.conversation.channelConnected === false ? " · Канал отключён" : ""}
+            {workspace.conversation.channelConnected === false ? uiText(" · Канал отключён") : ""}
           </div>
           <div className="conv-topic">{workspace.conversation.topic}</div>
           {workspace.currentRequest ? (
             <div className="muted">
-              Заявка:{" "}
+              {uiText("Заявка:")}{" "}
               <Link to={`/requests/${workspace.currentRequest.id}`}>
-                {workspace.currentRequest.title} · {workspace.currentRequest.statusLabel}
+                {workspace.currentRequest.title} · {uiMessage(workspace.currentRequest.statusLabel)}
               </Link>
             </div>
           ) : (
-            <div className="muted">Заявка не определена</div>
+            <div className="muted">{uiText("Заявка не определена")}</div>
           )}
           </div>
         </div>
         <div className="conv-header-actions">
-          <span className="badge">{workspace.conversation.modeLabel}</span>
-          <div className="muted">Ответственный: {workspace.conversation.assigneeName || "Не назначен"}</div>
+          <span className="badge">{uiMessage(workspace.conversation.modeLabel)}</span>
+          <div className="muted">{uiText("Ответственный:")}{" "}{workspace.conversation.assigneeName || uiText("Не назначен")}</div>
           <div className="actions">
             {workspace.client?.id ? (
               <Link
                 className="btn secondary"
                 to={`/contacts/${workspace.client.id}`}
-                {...tip("Открыть карточку клиента 360°")}
+                {...tip(uiText("Открыть карточку клиента 360°"))}
               >
-                Карточка клиента
-              </Link>
+                {uiText("Карточка клиента")}</Link>
             ) : null}
             <button
               type="button"
               className="btn secondary mobile-only"
-              {...tip("Заявка, сделка и договорённости по диалогу")}
+              {...tip(uiText("Заявка, сделка и договорённости по диалогу"))}
               onClick={() => setShowContext(true)}
             >
-              Информация
-            </button>
+              {uiText("Информация")}</button>
             {workspace.conversation.mode !== "human" ? (
               <button
                 className="btn"
                 type="button"
-                {...tip("AI перестанет отвечать — диалог забираете вы")}
+                {...tip(uiText("AI перестанет отвечать — диалог забираете вы"))}
                 disabled={busy}
                 onClick={() => changeMode(() => api.takeConversation(workspace.conversation.id))}
               >
-                Передать менеджеру
-              </button>
-            ) : !staffOnly && aiManagerAllowed ? (
+                {uiText("Передать менеджеру")}</button>
+            ) : !staffOnly && aiManagerAllowed && workspace.conversation.aiAvailable !== false ? (
               <button
                 className="btn secondary"
                 type="button"
-                {...tip("Вернуть диалог AI-менеджеру — бот снова отвечает сам")}
+                {...tip(uiText("Вернуть диалог AI-менеджеру — бот снова отвечает сам"))}
                 disabled={busy}
                 onClick={() => changeMode(() => api.returnToAi(workspace.conversation.id))}
               >
-                Вернуть AI
-              </button>
+                {uiText("Вернуть AI")}</button>
             ) : null}
           </div>
         </div>
       </div>
 
       <div className="conv-context-strip">
-        <span>Первое обращение: {workspace.client?.firstContactLabel || "—"}</span>
-        <span>Последнее: {workspace.conversation.lastMessageLabel || "—"}</span>
-        <span>Последним написал: {workspace.conversation.lastWriterLabel}</span>
+        <span>{uiText("Первое обращение:")}{" "}{workspace.client?.firstContactLabel || "—"}</span>
+        <span>{uiText("Последнее:")}{" "}{workspace.conversation.lastMessageLabel || "—"}</span>
+        <span>{uiText("Последним написал:")}{" "}{uiMessage(workspace.conversation.lastWriterLabel)}</span>
         {workspace.conversation.needsReply ? (
-          <span className="warn-text">{workspace.conversation.waitLabel || "Нужен ответ"}</span>
+          <span className="warn-text">{uiDurationLabel(workspace.conversation.waitLabel) || uiText("Нужен ответ")}</span>
         ) : (
-          <span>Ждём клиента</span>
+          <span>{uiText("Ждём клиента")}</span>
         )}
       </div>
 
       {(workspace.conversation.needsManagerAssign ??
         (workspace.conversation.mode === "human" && !workspace.conversation.assigneeMembershipId)) ? (
         <div className="conv-attention">
-          <b>Требуется менеджер</b>
-          <div className="muted">{workspace.conversation.attentionReasonLabel || workspace.conversation.attentionReason || "Назначьте ответственного за этот диалог"}</div>
+          <b>{uiText("Требуется менеджер")}</b>
+          <div className="muted">{uiMessage(workspace.conversation.attentionReasonLabel) || workspace.conversation.attentionReason || uiText("Назначьте ответственного за этот диалог")}</div>
           <div className="conv-attention-assign">
             <select
-              aria-label="Менеджер диалога"
+              aria-label={uiText("Менеджер диалога")}
               disabled={busy}
               value={assigneePick}
               onChange={(event) => setAssigneePick(event.target.value)}
             >
-              <option value="">Выберите менеджера</option>
+              <option value="">{uiText("Выберите менеджера")}</option>
               {assigneePick && !members.some((member) => member.id === assigneePick) ? (
-                <option value={assigneePick}>{workspace.conversation.assigneeName || "Текущий ответственный"}</option>
+                <option value={assigneePick}>{workspace.conversation.assigneeName || uiText("Текущий ответственный")}</option>
               ) : null}
               {members.map((member) => (
                 <option key={member.id} value={member.id}>
                   {member.name}
-                  {member.isMe ? " · вы" : ""}
+                  {member.isMe ? uiText(" · вы") : ""}
                 </option>
               ))}
             </select>
@@ -467,13 +466,12 @@ export function ConversationsPage() {
               type="button"
               className="btn"
               disabled={busy || !assigneePick}
-              {...tip("Назначить выбранного сотрудника ответственным за этот диалог")}
+              {...tip(uiText("Назначить выбранного сотрудника ответственным за этот диалог"))}
               onClick={() =>
                 changeMode(() => api.assignConversation(workspace.conversation.id, assigneePick))
               }
             >
-              Закрепить менеджера
-            </button>
+              {uiText("Закрепить менеджера")}</button>
           </div>
         </div>
       ) : null}
@@ -486,20 +484,20 @@ export function ConversationsPage() {
             const page: any = await api.conversationMessages(id, workspace.messages[0].id);
             if (selectedRef.current !== id) return;
             setWorkspace((previous: any) => ({ ...previous, messages: [...page.messages, ...previous.messages], hasEarlierMessages: page.hasEarlierMessages }));
-          } catch (err) { if (selectedRef.current === id) setError(err instanceof Error ? err.message : "Не удалось загрузить историю"); }
+          } catch (err) { if (selectedRef.current === id) setError(err instanceof Error ? err.message : uiText("Не удалось загрузить историю")); }
           finally { setHistoryLoading(false); }
-        }}>{historyLoading ? "Загрузка…" : "Показать более ранние сообщения"}</button> : null}
+        }}>{historyLoading ? uiText("Загрузка…") : uiText("Показать более ранние сообщения")}</button> : null}
         {workspace.messages.map((message: any) => (
           <div
             key={message.id}
             className={`bubble ${message.direction === "inbound" || message.senderKind === "client" ? "in" : "out"}`}
           >
             <div className="bubble-meta">
-              <span>{message.actorLabel}</span>
+              <span>{uiMessage(message.actorLabel)}</span>
               <span>{message.createdLabel}</span>
             </div>
             <MessageBody message={message} />
-            {message.deliveryLabel ? <div className="muted tiny">{message.deliveryLabel}</div> : null}
+            {uiMessage(message.deliveryLabel) ? <div className="muted tiny">{uiMessage(message.deliveryLabel)}</div> : null}
           </div>
         ))}
       </div>
@@ -532,7 +530,7 @@ export function ConversationsPage() {
             await loadWorkspace(workspace.conversation.id);
             await loadList();
           } catch (err) {
-            setError(err instanceof Error ? err.message : "Не отправилось");
+            setError(err instanceof Error ? err.message : uiText("Не отправилось"));
           } finally {
             setBusy(false);
           }
@@ -557,8 +555,7 @@ export function ConversationsPage() {
                 {file.kind === "video" ? <video src={file.previewUrl} muted /> : null}
                 <span>{file.fileName}</span>
                 <button type="button" className="btn secondary" onClick={() => removePendingFile(file.localId)}>
-                  Убрать
-                </button>
+                  {uiText("Убрать")}</button>
               </div>
             ))}
           </div>
@@ -567,8 +564,8 @@ export function ConversationsPage() {
           type="button"
           className="btn secondary conv-attach-btn"
           disabled={!canAttach || workspace.conversation.mode !== "human" || busy}
-          aria-label="Прикрепить файл"
-          {...tip("Прикрепить фото, видео, документ или другой файл")}
+          aria-label={uiText("Прикрепить файл")}
+          {...tip(uiText("Прикрепить фото, видео, документ или другой файл"))}
           onClick={() => fileInputRef.current?.click()}
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -588,9 +585,9 @@ export function ConversationsPage() {
           onChange={(event) => setText(event.target.value)}
           autoFocus={focusReply}
           placeholder={
-            incomingMail ? "Входящая почта. Отправляйте ответы из Gmail." : !canSend ? "Канал отключён. Подключите его в настройках интеграций." : workspace.conversation.mode === "human"
-              ? "Написать сообщение..."
-              : "Сначала передайте диалог менеджеру, затем отвечайте"
+            incomingMail ? uiText("Входящая почта. Отправляйте ответы из Gmail.") : !canSend ? uiText("Канал отключён. Подключите его в настройках интеграций.") : workspace.conversation.mode === "human"
+              ? uiText("Написать сообщение...")
+              : uiText("Сначала передайте диалог менеджеру, затем отвечайте")
           }
           disabled={!canSend || workspace.conversation.mode !== "human" || busy}
         />
@@ -599,67 +596,65 @@ export function ConversationsPage() {
           disabled={!canSend || workspace.conversation.mode !== "human" || busy || (!text.trim() && !pendingFiles.length)}
           {...tip(
             workspace.conversation.mode !== "human"
-              ? "Сначала нажмите «Передать менеджеру» — иначе сообщение не уйдёт"
+              ? uiText("Сначала нажмите «Передать менеджеру» — иначе сообщение не уйдёт")
               : pendingFiles.length
-                ? "Отправить сообщение и вложения клиенту"
-                : "Отправить сообщение клиенту",
+                ? uiText("Отправить сообщение и вложения клиенту")
+                : uiText("Отправить сообщение клиенту"),
           )}
         >
-          Отправить
-        </button>
+          {uiText("Отправить")}</button>
       </form>
     </div>
   ) : (
     <div className="conv-chat-pane empty-pane">
       <div className="conv-welcome">
         <span className="conv-welcome-icon"><ChannelIcon channel="all" /></span>
-        <h3>Вся переписка — в одном месте</h3>
-        <p className="muted">Выберите диалог, чтобы прочитать сообщения и увидеть данные клиента, заявки и сделки.</p>
+        <h3>{uiText("Вся переписка — в одном месте")}</h3>
+        <p className="muted">{uiText("Выберите диалог, чтобы прочитать сообщения и увидеть данные клиента, заявки и сделки.")}</p>
       </div>
     </div>
   );
 
   const contextPane = workspace ? (
-    <aside className={`conv-context-pane ${showContext ? "open" : ""}`} aria-label="Информация о клиенте и диалоге">
+    <aside className={`conv-context-pane ${showContext ? "open" : ""}`} aria-label={uiText("Информация о клиенте и диалоге")}>
       <div className="conv-context-identity">
-        <ConversationAvatar conversationId={workspace.conversation.id} name={workspace.client?.name || "Клиент"} channel={workspace.conversation.channelType || "other"} />
-        <div><b>{workspace.client?.name || "Клиент"}</b><div className="muted">{workspace.client?.companyName || phoneText(workspace.client?.phone)}</div></div>
+        <ConversationAvatar conversationId={workspace.conversation.id} name={workspace.client?.name || uiText("Клиент")} channel={workspace.conversation.channelType || "other"} />
+        <div><b>{workspace.client?.name || uiText("Клиент")}</b><div className="muted">{workspace.client?.companyName || phoneText(workspace.client?.phone)}</div></div>
       </div>
       <div className="page-head mobile-only">
-        <b>Контекст</b>
+        <b>{uiText("Контекст")}</b>
         <button type="button" className="btn secondary" onClick={() => setShowContext(false)}>
-          Закрыть
-        </button>
+          {uiText("Закрыть")}</button>
       </div>
 
       <div className="panel soft">
-        <b>Сейчас</b>
-        <div>{workspace.control.situationLabel}</div>
-        <div className="muted">{workspace.control.waitLabel}</div>
-        {workspace.conversation.waitingForLabel ? (
-          <div className="muted">{workspace.conversation.waitingForLabel}</div>
+        <b>{uiText("Сейчас")}</b>
+        <div>{uiMessage(workspace.control.situationLabel)}</div>
+        <div className="muted">{uiDurationLabel(workspace.control.waitLabel)}</div>
+        {uiMessage(workspace.conversation.waitingForLabel) ? (
+          <div className="muted">{uiMessage(workspace.conversation.waitingForLabel)}</div>
         ) : null}
         {workspace.deal ? (
           <div className="muted">
-            Сделка: {workspace.deal.title}
+            {uiText("Сделка:")}{" "}{workspace.deal.title}
             {workspace.deal.stage ? ` · ${workspace.deal.stage}` : ""}
           </div>
         ) : null}
         {workspace.control.nextAction ? (
           <div>
-            Следующее действие: {workspace.control.nextAction.title}
+            {uiText("Следующее действие:")}{" "}{workspace.control.nextAction.title}
             {workspace.control.nextAction.dueLabel ? ` · ${workspace.control.nextAction.dueLabel}` : ""}
           </div>
         ) : (
-          <div className="muted">Нет следующего действия</div>
+          <div className="muted">{uiText("Нет следующего действия")}</div>
         )}
-        {workspace.control.overdue ? <div className="warn-text">Просрочено: {workspace.control.overdueTitle}</div> : null}
+        {workspace.control.overdue ? <div className="warn-text">{uiText("Просрочено:")}{" "}{workspace.control.overdueTitle}</div> : null}
         <button
           type="button"
           className="btn secondary"
           style={{ marginTop: 8 }}
           disabled={busy || !aiManagerAllowed}
-          {...tip("Проанализировать переписку и выделить потребность и договорённости")}
+          {...tip(uiText("Проанализировать переписку и выделить потребность и договорённости"))}
           onClick={async () => {
             setBusy(true);
             setError("");
@@ -673,42 +668,41 @@ export function ConversationsPage() {
               const parts = [
                 analysis.summaryUpdate,
                 analysis.detectedNeed && analysis.summaryUpdate && !String(analysis.summaryUpdate).includes(analysis.detectedNeed)
-                  ? `Потребность: ${analysis.detectedNeed}`
+                  ? uiText("Потребность: {p0}", {p0: analysis.detectedNeed})
                   : null,
                 (analysis.agreements || []).length
-                  ? `Договорённости: ${analysis.agreements.length}`
+                  ? uiText("Договорённости: {p0}", {p0: analysis.agreements.length})
                   : null,
               ].filter(Boolean);
-              setContextNote(parts.join(" ") || "Контекст разобран, новых фактов нет.");
+              setContextNote(parts.join(" ") || uiText("Контекст разобран, новых фактов нет."));
             } catch (err) {
-              setError(err instanceof Error ? err.message : "Не удалось понять контекст");
+              setError(err instanceof Error ? err.message : uiText("Не удалось понять контекст"));
             } finally {
               setBusy(false);
             }
           }}
         >
-          {busy ? "Разбираем…" : "Понять контекст"}
+          {busy ? uiText("Разбираем…") : uiText("Понять контекст")}
         </button>
         {contextNote ? <div className="muted" style={{ marginTop: 8 }}>{contextNote}</div> : null}
       </div>
 
       {(workspace.agreements || []).length ? (
         <div className="panel soft">
-          <b>Договорённости</b>
+          <b>{uiText("Договорённости")}</b>
           {workspace.agreements.map((agr: any) => (
             <div key={agr.id} style={{ marginTop: 8 }}>
               <div>
-                <b>{agr.typeLabel}</b>
-                <span className="muted"> · {agr.confidenceUserLabel || agr.statusLabel}</span>
+                <b>{uiMessage(agr.typeLabel)}</b>
+                <span className="muted"> · {uiMessage(agr.confidenceUserLabel) || uiMessage(agr.statusLabel)}</span>
               </div>
               <div className="muted">{agr.scheduledLabel || agr.title}</div>
               {agr.meetingProvider ? <div className="muted">{agr.meetingProvider}</div> : null}
               {agr.meetingUrl ? (
                 <a href={agr.meetingUrl} target="_blank" rel="noreferrer">
-                  Открыть встречу
-                </a>
+                  {uiText("Открыть встречу")}</a>
               ) : agr.type === "ONLINE_MEETING" ? (
-                <div className="warn-text">Ссылка на встречу не добавлена</div>
+                <div className="warn-text">{uiText("Ссылка на встречу не добавлена")}</div>
               ) : null}
               {agr.locationName || agr.address ? (
                 <div className="muted">
@@ -717,7 +711,7 @@ export function ConversationsPage() {
               ) : null}
               {agr.clarificationNeeded ? <div className="warn-text">{agr.clarificationNeeded}</div> : null}
               {agr.taskId ? (
-                <Link to={`/tasks?open=${agr.taskId}`}>Открыть задачу</Link>
+                <Link to={`/tasks?open=${agr.taskId}`}>{uiText("Открыть задачу")}</Link>
               ) : null}
             </div>
           ))}
@@ -725,75 +719,74 @@ export function ConversationsPage() {
       ) : null}
 
       <div className="panel soft">
-        <b>Кратко</b>
+        <b>{uiText("Кратко")}</b>
         <p>{workspace.conversation.contextSummary || workspace.client?.summary}</p>
       </div>
 
       <div className="panel soft">
-        <b>Клиент</b>
+        <b>{uiText("Клиент")}</b>
         <div>{workspace.client?.name}</div>
         <div className="muted">{phoneText(workspace.client?.phone)}</div>
         {workspace.client?.companyName ? <div className="muted">{workspace.client.companyName}</div> : null}
-        {workspace.client?.id ? <Link to={`/contacts/${workspace.client.id}`}>Открыть карточку</Link> : null}
+        {workspace.client?.id ? <Link to={`/contacts/${workspace.client.id}`}>{uiText("Открыть карточку")}</Link> : null}
       </div>
 
       <div className="panel soft">
-        <b>Интерес / заявка</b>
+        <b>{uiText("Интерес / заявка")}</b>
         <div>{workspace.conversation.topic}</div>
         {workspace.currentRequest ? (
           <>
             <div>
               <Link to={`/requests/${workspace.currentRequest.id}`}>{workspace.currentRequest.title || workspace.conversation.topic}</Link>
             </div>
-            <div className="muted">{workspace.currentRequest.statusLabel}</div>
-            {workspace.currentRequest.budgetLabel ? <div className="muted">Бюджет: {workspace.currentRequest.budgetLabel}</div> : null}
-            {workspace.currentRequest.desiredDeadline ? <div className="muted">Срок: {workspace.currentRequest.desiredDeadline}</div> : null}
+            <div className="muted">{uiMessage(workspace.currentRequest.statusLabel)}</div>
+            {workspace.currentRequest.budgetLabel ? <div className="muted">{uiText("Бюджет:")}{" "}{workspace.currentRequest.budgetLabel}</div> : null}
+            {workspace.currentRequest.desiredDeadline ? <div className="muted">{uiText("Срок:")}{" "}{workspace.currentRequest.desiredDeadline}</div> : null}
           </>
         ) : (
-          <div className="muted">Заявка не определена</div>
+          <div className="muted">{uiText("Заявка не определена")}</div>
         )}
       </div>
 
       <div className="panel soft">
-        <b>Источник</b>
+        <b>{uiText("Источник")}</b>
         <div>{workspace.conversation.sourceLine}</div>
         {workspace.attribution.utmCampaign ? (
           <details>
-            <summary className="muted">Откуда пришёл</summary>
-            <div className="muted">Кампания: {workspace.attribution.utmCampaign}</div>
-            {workspace.attribution.landingPage ? <div className="muted">Страница: {workspace.attribution.landingPage}</div> : null}
+            <summary className="muted">{uiText("Откуда пришёл")}</summary>
+            <div className="muted">{uiText("Кампания:")}{" "}{workspace.attribution.utmCampaign}</div>
+            {workspace.attribution.landingPage ? <div className="muted">{uiText("Страница:")}{" "}{workspace.attribution.landingPage}</div> : null}
           </details>
         ) : null}
       </div>
 
       {workspace.deal ? (
         <div className="panel soft">
-          <b>Сделка</b>
+          <b>{uiText("Сделка")}</b>
           <div>{workspace.deal.title}</div>
           <div className="muted">
             {dealOutcomeLabel(workspace.deal.outcome, workspace.deal.stage)}
-            {workspace.deal.amountMinor != null ? ` · ${Number(workspace.deal.amountMinor).toLocaleString("ru-RU")} ${workspace.deal.currency || "KZT"}` : ""}
+            {workspace.deal.amountMinor != null ? ` · ${Number(workspace.deal.amountMinor).toLocaleString(uiFormatLocale())} ${workspace.deal.currency || "KZT"}` : ""}
           </div>
         </div>
       ) : null}
 
       <div className="panel soft">
-        <b>Определено из разговора</b>
-        <div className="muted">Услуга: {workspace.extracted.service || "не указана"}</div>
-        <div className="muted">Бюджет: {workspace.extracted.budget || "не определён"}</div>
-        <div className="muted">Срок: {workspace.extracted.deadline || "не указан"}</div>
-        <div className="muted">Компания: {workspace.extracted.company || "не указана"}</div>
-        <div className="muted">Город: {workspace.extracted.city || "не указан"}</div>
+        <b>{uiText("Определено из разговора")}</b>
+        <div className="muted">{uiText("Услуга:")}{" "}{workspace.extracted.service || uiText("не указана")}</div>
+        <div className="muted">{uiText("Бюджет:")}{" "}{workspace.extracted.budget || uiText("не определён")}</div>
+        <div className="muted">{uiText("Срок:")}{" "}{workspace.extracted.deadline || uiText("не указан")}</div>
+        <div className="muted">{uiText("Компания:")}{" "}{workspace.extracted.company || uiText("не указана")}</div>
+        <div className="muted">{uiText("Город:")}{" "}{workspace.extracted.city || uiText("не указан")}</div>
       </div>
 
       <div className="actions">
         <Link
           className="btn secondary"
           to={`/tasks?conversationId=${workspace.conversation.id}${workspace.client?.id ? `&contactId=${workspace.client.id}` : ""}${workspace.deal?.id ? `&dealId=${workspace.deal.id}` : ""}`}
-          {...tip("Создать задачу по этому диалогу с уже выбранным клиентом")}
+          {...tip(uiText("Создать задачу по этому диалогу с уже выбранным клиентом"))}
         >
-          Создать задачу
-        </Link>
+          {uiText("Создать задачу")}</Link>
       </div>
     </aside>
   ) : (
@@ -803,9 +796,9 @@ export function ConversationsPage() {
   return (
     <section className={`conversations-layout ${selectedId ? "has-selection" : ""}`}>
       {error ? <p className="error" style={{ gridColumn: "1 / -1" }} role="alert">{error}</p> : null}
-      <nav className="conversation-channels" aria-label="Каналы диалогов">
+      <nav className="conversation-channels" aria-label={uiText("Каналы диалогов")}>
         {CONVERSATION_CHANNELS.filter(([value]) => value === "all" || value === channel || availableChannels.includes(value)).map(([value, label]) => (
-          <button key={value} type="button" className={`conversation-channel channel-${value}${channel === value ? " active" : ""}`} aria-pressed={channel === value} aria-label={`${label}: диалоги`} onClick={() => {
+          <button key={value} type="button" className={`conversation-channel channel-${value}${channel === value ? " active" : ""}`} aria-pressed={channel === value} aria-label={uiText("{p0}: диалоги", {p0: label})} onClick={() => {
             const next = new URLSearchParams(searchParams);
             if (value === "all") next.delete("channel"); else next.set("channel", value);
             next.delete("focus");

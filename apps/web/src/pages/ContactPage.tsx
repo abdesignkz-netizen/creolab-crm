@@ -1,3 +1,4 @@
+import { uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale } from "../lib/uiText";
 import { notifySaved } from "../components/SaveNotice";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -11,6 +12,7 @@ import { tip } from "../lib/tip";
 import { conversationModeLabel, dealOutcomeLabel } from "../lib/labels";
 
 export function ContactPage() {
+  const uiText = useUiText();
   const caps = useCapabilities();
   const { id } = useParams();
   const navigate = useNavigate();
@@ -43,7 +45,7 @@ export function ContactPage() {
       setData(await api.contactOverview(id));
       setError("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Ошибка");
+      setError(err instanceof Error ? err.message : uiText("Ошибка"));
     }
   }
 
@@ -69,12 +71,12 @@ export function ContactPage() {
     return () => clearTimeout(t);
   }, [companySearch, companyLinkOpen]);
 
-  if (!data && !error) return <div className="state">Загрузка…</div>;
+  if (!data && !error) return <div className="state">{uiText("Загрузка…")}</div>;
   if (!data) {
     return (
       <section>
         <p className="error">{error}</p>
-        <button className="btn" onClick={load}>Повторить</button>
+        <button className="btn" onClick={load}>{uiText("Повторить")}</button>
       </section>
     );
   }
@@ -92,7 +94,7 @@ export function ContactPage() {
       navigate(`/conversations/${opened.conversationId}?focus=reply`);
     } catch (err) {
       const code = err && typeof err === "object" && "code" in err ? String((err as { code?: string }).code) : "";
-      const message = err instanceof Error ? err.message : "Не удалось открыть WhatsApp";
+      const message = err instanceof Error ? err.message : uiText("Не удалось открыть WhatsApp");
       if (code === "WHATSAPP_NOT_REGISTERED") {
         setWriteBlocked(true);
       }
@@ -106,24 +108,24 @@ export function ContactPage() {
     <section className="contact-page">
       <div className="page-head">
         <div>
-          <Link className="muted" to="/contacts">← Клиенты</Link>
+          <Link className="muted" to="/contacts">{uiText("← Клиенты")}</Link>
           <h2>{nameWithPhone(client.name, client.phone)}</h2>
           <div className="muted">
             {phoneText(client.phone)}
             {client.companyName ? ` · ${client.companyName}` : ""}
           </div>
           <div className="client-meta">
-            <span className={statusBadgeClass(client.lifecycleLabel)}>{client.lifecycleLabel}</span>
-            {client.temperatureLabel && client.leadTemperature !== "unknown" ? (
-              <span className="badge">{client.temperatureLabel}</span>
+            <span className={statusBadgeClass(uiMessage(client.lifecycleLabel))}>{uiMessage(client.lifecycleLabel)}</span>
+            {uiMessage(client.temperatureLabel) && client.leadTemperature !== "unknown" ? (
+              <span className="badge">{uiMessage(client.temperatureLabel)}</span>
             ) : null}
             {control.needsReply ? (
               <span className="badge warn">
-                Нужен ответ{control.waitMinutes != null ? ` · ${formatWaitSince(control.waitMinutes)}` : ""}
+                {uiText("Нужен ответ")}{control.waitMinutes != null ? ` · ${formatWaitSince(control.waitMinutes)}` : ""}
               </span>
             ) : null}
-            {control.overdue ? <span className="badge danger">Просрочка</span> : null}
-            {control.missingNextAction ? <span className="badge warn">Нет следующего действия</span> : null}
+            {control.overdue ? <span className="badge danger">{uiText("Просрочка")}</span> : null}
+            {control.missingNextAction ? <span className="badge warn">{uiText("Нет следующего действия")}</span> : null}
           </div>
         </div>
         <div className="actions sticky-actions">
@@ -131,94 +133,84 @@ export function ContactPage() {
             <Link
               className="btn"
               to={`/conversations/${whatsapp.id}?focus=reply`}
-              {...tip("Открыть WhatsApp-диалог и ответить клиенту")}
+              {...tip(uiText("Открыть WhatsApp-диалог и ответить клиенту"))}
             >
-              Написать
-            </Link>
+              {uiText("Написать")}</Link>
           ) : writeBlocked ? (
-            <button className="btn secondary" disabled {...tip("Этот номер не зарегистрирован в WhatsApp")}>
-              Написать
-            </button>
+            <button className="btn secondary" disabled {...tip(uiText("Этот номер не зарегистрирован в WhatsApp"))}>
+              {uiText("Написать")}</button>
           ) : !tel ? (
-            <button className="btn secondary" disabled {...tip("Укажите телефон клиента, чтобы написать в WhatsApp")}>
-              Написать
-            </button>
+            <button className="btn secondary" disabled {...tip(uiText("Укажите телефон клиента, чтобы написать в WhatsApp"))}>
+              {uiText("Написать")}</button>
           ) : (
             <button
               className="btn"
               disabled={writeBusy}
-              {...tip("Открыть WhatsApp, даже если переписки ещё не было")}
+              {...tip(uiText("Открыть WhatsApp, даже если переписки ещё не было"))}
               onClick={() => void openWhatsAppChat()}
             >
-              {writeBusy ? "Открываем…" : "Написать"}
+              {writeBusy ? uiText("Открываем…") : uiText("Написать")}
             </button>
           )}
           {CALLS_ENABLED && tel ? (
-            <a className="btn secondary" href={`tel:+${tel}`} {...tip("Позвонить с телефона")}>
-              Позвонить
-            </a>
+            <a className="btn secondary" href={`tel:+${tel}`} {...tip(uiText("Позвонить с телефона"))}>
+              {uiText("Позвонить")}</a>
           ) : null}
           {CALLS_ENABLED && !tel ? (
-            <button className="btn secondary" disabled {...tip("Телефон не указан")}>
-              Позвонить
-            </button>
+            <button className="btn secondary" disabled {...tip(uiText("Телефон не указан"))}>
+              {uiText("Позвонить")}</button>
           ) : null}
-          <Link className="btn secondary" to={`/tasks?contactId=${client.id}`} {...tip("Создать задачу по этому клиенту")}>
-            + Задача
-          </Link>
+          <Link className="btn secondary" to={`/tasks?contactId=${client.id}`} {...tip(uiText("Создать задачу по этому клиенту"))}>
+            {uiText("+ Задача")}</Link>
           {currentRequest ? (
             <Link
               className="btn secondary"
               to={`/requests/${currentRequest.id}`}
-              {...tip("Открыть текущую заявку клиента")}
+              {...tip(uiText("Открыть текущую заявку клиента"))}
             >
-              + Сделка / заявка
-            </Link>
+              {uiText("+ Сделка / заявка")}</Link>
           ) : (
             <Link
               className="btn secondary"
               to={`/inquiries?contact=${client.id}`}
-              {...tip("Создать новую заявку с уже выбранным клиентом")}
+              {...tip(uiText("Создать новую заявку с уже выбранным клиентом"))}
             >
-              + Заявка
-            </Link>
+              {uiText("+ Заявка")}</Link>
           )}
           <div className="menu-wrap">
             <button
               className="btn secondary"
-              {...tip("Дополнительные действия: редактировать, теги, архив, удаление")}
+              {...tip(uiText("Дополнительные действия: редактировать, теги, архив, удаление"))}
               onClick={() => setMenuOpen((value) => !value)}
             >
               •••
             </button>
             {menuOpen ? (
               <div className="menu">
-                {!caps.manager ? <button type="button" onClick={() => { setEditOpen(true); setMenuOpen(false); }}>Редактировать</button> : null}
+                {!caps.manager ? <button type="button" onClick={() => { setEditOpen(true); setMenuOpen(false); }}>{uiText("Редактировать")}</button> : null}
                 <button
                   type="button"
                   onClick={async () => {
-                    const text = prompt("Внутренняя заметка");
+                    const text = prompt(uiText("Внутренняя заметка"));
                     if (!text) return;
                     await api.addContactNote(client.id, { text });
-                    notifySaved("Заметка сохранена");
+                    notifySaved(uiText("Заметка сохранена"));
                     await load();
                     setMenuOpen(false);
                   }}
                 >
-                  Добавить заметку
-                </button>
+                  {uiText("Добавить заметку")}</button>
                 <button
                   type="button"
                   onClick={async () => {
-                    const name = prompt("Тег");
+                    const name = prompt(uiText("Тег"));
                     if (!name) return;
                     await api.addContactTag(client.id, name);
                     await load();
                     setMenuOpen(false);
                   }}
                 >
-                  Добавить тег
-                </button>
+                  {uiText("Добавить тег")}</button>
                 <button
                   type="button"
                   onClick={async () => {
@@ -226,8 +218,7 @@ export function ContactPage() {
                     navigate("/contacts");
                   }}
                 >
-                  Архивировать
-                </button>
+                  {uiText("Архивировать")}</button>
                 {caps.companyAdmin ? (
                   <button
                     type="button"
@@ -238,8 +229,7 @@ export function ContactPage() {
                       setMenuOpen(false);
                     }}
                   >
-                    Удалить клиента
-                  </button>
+                    {uiText("Удалить клиента")}</button>
                 ) : null}
               </div>
             ) : null}
@@ -252,8 +242,7 @@ export function ContactPage() {
       {deleteConfirm && caps.companyAdmin ? (
         <div className="panel contact-delete-confirm" role="alertdialog" aria-labelledby="contact-delete-title">
           <p id="contact-delete-title">
-            Удалить клиента безвозвратно вместе с заявками и диалогами? Сделки с выставленными счетами, подписанными договорами или ЭСФ удалить нельзя — тогда архивируйте карточку. Отменить удаление нельзя.
-          </p>
+            {uiText("Удалить клиента безвозвратно вместе с заявками и диалогами? Сделки с выставленными счетами, подписанными договорами или ЭСФ удалить нельзя — тогда архивируйте карточку. Отменить удаление нельзя.")}</p>
           {deleteError ? <p className="error" role="alert">{deleteError}</p> : null}
           <div className="actions">
             <button
@@ -266,17 +255,17 @@ export function ContactPage() {
                 setDeleteError("");
                 try {
                   await api.deleteContact(client.id);
-                  notifySaved("Клиент удалён");
+                  notifySaved(uiText("Клиент удалён"));
                   window.dispatchEvent(new Event("creolab:attention-changed"));
                   navigate("/contacts");
                 } catch (err) {
-                  setDeleteError(err instanceof Error ? err.message : "Не удалось удалить клиента");
+                  setDeleteError(err instanceof Error ? err.message : uiText("Не удалось удалить клиента"));
                 } finally {
                   setDeleteBusy(false);
                 }
               }}
             >
-              {deleteBusy ? "Удаляем…" : "Да, удалить"}
+              {deleteBusy ? uiText("Удаляем…") : uiText("Да, удалить")}
             </button>
             <button
               type="button"
@@ -287,8 +276,7 @@ export function ContactPage() {
                 setDeleteError("");
               }}
             >
-              Отмена
-            </button>
+              {uiText("Отмена")}</button>
           </div>
         </div>
       ) : null}
@@ -319,40 +307,38 @@ export function ContactPage() {
                 ...(composedName ? { name: composedName } : {}),
               });
               setEditOpen(false);
-              notifySaved("Данные клиента сохранены");
+              notifySaved(uiText("Данные клиента сохранены"));
               setError("");
               await load();
             } catch (err) {
-              setError(err instanceof Error ? err.message : "Не удалось сохранить клиента");
+              setError(err instanceof Error ? err.message : uiText("Не удалось сохранить клиента"));
             } finally {
               setEditBusy(false);
             }
           }}
         >
-          <b>Редактировать клиента</b>
-          <p className="muted">Изменения применятся после сохранения. Пустые поля можно оставить — они не обязательны.</p>
-          <label>Имя<input name="firstName" defaultValue={client.firstName || ""} /></label>
-          <label>Фамилия<input name="lastName" defaultValue={client.lastName || ""} /></label>
-          <label>Компания<input name="companyName" defaultValue={client.companyName || ""} /></label>
-          <label>Должность<input name="jobTitle" defaultValue={client.jobTitle || ""} /></label>
-          <label>Город<input name="city" defaultValue={client.city || ""} /></label>
+          <b>{uiText("Редактировать клиента")}</b>
+          <p className="muted">{uiText("Изменения применятся после сохранения. Пустые поля можно оставить — они не обязательны.")}</p>
+          <label>{uiText("Имя")}<input name="firstName" defaultValue={client.firstName || ""} /></label>
+          <label>{uiText("Фамилия")}<input name="lastName" defaultValue={client.lastName || ""} /></label>
+          <label>{uiText("Компания")}<input name="companyName" defaultValue={client.companyName || ""} /></label>
+          <label>{uiText("Должность")}<input name="jobTitle" defaultValue={client.jobTitle || ""} /></label>
+          <label>{uiText("Город")}<input name="city" defaultValue={client.city || ""} /></label>
           <label>
-            Насколько горячий клиент
-            <select name="leadTemperature" defaultValue={client.leadTemperature || "unknown"}>
-              <option value="unknown">Не указано</option>
-              <option value="hot">Горячий — готов обсуждать</option>
-              <option value="warm">Тёплый — думает</option>
-              <option value="cold">Холодный — пока не актуально</option>
+            {uiText("Насколько горячий клиент")}<select name="leadTemperature" defaultValue={client.leadTemperature || "unknown"}>
+              <option value="unknown">{uiText("Не указано")}</option>
+              <option value="hot">{uiText("Горячий — готов обсуждать")}</option>
+              <option value="warm">{uiText("Тёплый — думает")}</option>
+              <option value="cold">{uiText("Холодный — пока не актуально")}</option>
             </select>
           </label>
-          <label>Кратко о клиенте<textarea name="summary" defaultValue={client.summary || ""} /></label>
+          <label>{uiText("Кратко о клиенте")}<textarea name="summary" defaultValue={client.summary || ""} /></label>
           <div className="actions">
             <button type="submit" className="btn" disabled={editBusy}>
-              {editBusy ? "Сохранение…" : "Сохранить"}
+              {editBusy ? uiText("Сохранение…") : uiText("Сохранить")}
             </button>
             <button type="button" className="btn secondary" onClick={() => setEditOpen(false)}>
-              Отмена
-            </button>
+              {uiText("Отмена")}</button>
           </div>
         </form>
       ) : null}
@@ -361,29 +347,29 @@ export function ContactPage() {
         <p>{client.summary}</p>
         <div className="summary-grid">
           <div>
-            <span className="muted">Интерес</span>
-            <div>{client.interest || currentRequest?.title || "Интерес пока не определён"}</div>
-            {client.interestSource === "conversation" ? <span className="badge" {...tip("Определено по сообщению клиента в переписке")}>Из переписки</span> : null}
+            <span className="muted">{uiText("Интерес")}</span>
+            <div>{client.interest || currentRequest?.title || uiText("Интерес пока не определён")}</div>
+            {client.interestSource === "conversation" ? <span className="badge" {...tip(uiText("Определено по сообщению клиента в переписке"))}>{uiText("Из переписки")}</span> : null}
           </div>
           <div>
-            <span className="muted">Источник</span>
+            <span className="muted">{uiText("Источник")}</span>
             <div>
-              {attribution.sourceType || "Не указано"}
+              {attribution.sourceType || uiText("Не указано")}
               {attribution.utmSource ? ` · ${attribution.utmSource}` : ""}
               {attribution.utmCampaign ? ` / ${attribution.utmCampaign}` : ""}
             </div>
           </div>
           <div>
-            <span className="muted">Следующий шаг</span>
+            <span className="muted">{uiText("Следующий шаг")}</span>
             <div>
               {control.nextAction
                 ? `${control.nextAction.title}${control.nextAction.dueLabel ? ` · ${control.nextAction.dueLabel}` : ""}`
-                : control.nextStepText || <span className="warn-text">Нет следующего действия</span>}
+                : control.nextStepText || <span className="warn-text">{uiText("Нет следующего действия")}</span>}
             </div>
           </div>
           <div>
-            <span className="muted">Ответственный</span>
-            <div>{control.ownerName || "не назначен"}</div>
+            <span className="muted">{uiText("Ответственный")}</span>
+            <div>{control.ownerName || uiText("не назначен")}</div>
           </div>
         </div>
       </div>
@@ -391,44 +377,43 @@ export function ContactPage() {
       <div className="contact-layout">
         <div className="contact-main">
           <div className="card">
-            <b>Текущая заявка</b>
+            <b>{uiText("Текущая заявка")}</b>
             {currentRequest ? (
               <>
                 <p>{currentRequest.title}</p>
-                <p className="muted">{currentRequest.description || "Описание не указано"}</p>
+                <p className="muted">{currentRequest.description || uiText("Описание не указано")}</p>
                 <div className="muted">
-                  Статус: {currentRequest.statusLabel}
-                  {currentRequest.service ? ` · Услуга: ${currentRequest.service}` : ""}
-                  {currentRequest.budgetLabel ? ` · Бюджет: ${currentRequest.budgetLabel}` : " · Бюджет пока не определён"}
-                  {currentRequest.desiredDeadline ? ` · Срок: ${currentRequest.desiredDeadline}` : ""}
+                  {uiText("Статус:")}{" "}{uiMessage(currentRequest.statusLabel)}
+                  {currentRequest.service ? uiText(" · Услуга: {p0}", {p0: currentRequest.service}) : ""}
+                  {currentRequest.budgetLabel ? uiText(" · Бюджет: {p0}", {p0: currentRequest.budgetLabel}) : uiText(" · Бюджет пока не определён")}
+                  {currentRequest.desiredDeadline ? uiText(" · Срок: {p0}", {p0: currentRequest.desiredDeadline}) : ""}
                 </div>
                 <div className="actions" style={{ marginTop: 10 }}>
                   <Link className="btn secondary" to={`/requests/${currentRequest.id}`}>
-                    Открыть заявку
-                  </Link>
+                    {uiText("Открыть заявку")}</Link>
                 </div>
               </>
             ) : (
-              <p className="muted">Активной заявки нет. <button className="linkish" onClick={() => navigate("/inquiries")}>Добавить</button></p>
+              <p className="muted">{uiText("Активной заявки нет.")}{" "}<button className="linkish" onClick={() => navigate("/inquiries")}>{uiText("Добавить")}</button></p>
             )}
           </div>
 
           <div className="card">
-            <b>Контактные данные</b>
+            <b>{uiText("Контактные данные")}</b>
             <dl className="kv">
-              <div><dt>Имя</dt><dd>{client.firstName || client.name || "Не указано"}</dd></div>
-              <div><dt>Фамилия</dt><dd>{client.lastName || "Не указано"}</dd></div>
-              <div><dt>Телефон</dt><dd>{client.phone || "Не указано"}</dd></div>
-              <div><dt>Email</dt><dd>{client.email || "Не указано"}</dd></div>
-              <div><dt>Компания (текст)</dt><dd>{client.companyName || "Не указано"}</dd></div>
-              <div><dt>Должность</dt><dd>{client.jobTitle || "Не указано"}</dd></div>
-              <div><dt>Город</dt><dd>{client.city || "Не указано"}</dd></div>
-              <div><dt>Язык</dt><dd>{client.language === "unknown" ? "Не указано" : client.language}</dd></div>
+              <div><dt>{uiText("Имя")}</dt><dd>{client.firstName || client.name || uiText("Не указано")}</dd></div>
+              <div><dt>{uiText("Фамилия")}</dt><dd>{client.lastName || uiText("Не указано")}</dd></div>
+              <div><dt>{uiText("Телефон")}</dt><dd>{client.phone || uiText("Не указано")}</dd></div>
+              <div><dt>Email</dt><dd>{client.email || uiText("Не указано")}</dd></div>
+              <div><dt>{uiText("Компания (текст)")}</dt><dd>{client.companyName || uiText("Не указано")}</dd></div>
+              <div><dt>{uiText("Должность")}</dt><dd>{client.jobTitle || uiText("Не указано")}</dd></div>
+              <div><dt>{uiText("Город")}</dt><dd>{client.city || uiText("Не указано")}</dd></div>
+              <div><dt>{uiText("Язык")}</dt><dd>{client.language === "unknown" ? uiText("Не указано") : client.language}</dd></div>
             </dl>
           </div>
 
           <div className="card">
-            <b>Компания</b>
+            <b>{uiText("Компания")}</b>
             {(data.companies || []).length ? (
               (data.companies || []).map((item: any) => (
                 <div key={item.linkId} style={{ marginTop: 10 }}>
@@ -438,9 +423,9 @@ export function ContactPage() {
                   <div className="muted">
                     {[
                       item.position,
-                      item.isPrimary ? "Основной контакт" : null,
-                      item.isDecisionMaker ? "ЛПР" : null,
-                      item.isBillingContact ? "Финансовый" : null,
+                      item.isPrimary ? uiText("Основной контакт") : null,
+                      item.isDecisionMaker ? uiText("ЛПР") : null,
+                      item.isBillingContact ? uiText("Финансовый") : null,
                     ]
                       .filter(Boolean)
                       .join(" · ")}
@@ -450,48 +435,45 @@ export function ContactPage() {
                     className="linkish"
                     style={{ marginTop: 4 }}
                     onClick={async () => {
-                      if (!window.confirm(`Убрать клиента из «${item.company.name}»?`)) return;
+                      if (!window.confirm(uiText("Убрать клиента из «{p0}»?", {p0: item.company.name}))) return;
                       try {
                         await api.unlinkCompanyContact(item.company.id, item.linkId);
                         await load();
                       } catch (err) {
-                        setError(err instanceof Error ? err.message : "Не удалось убрать из компании");
+                        setError(err instanceof Error ? err.message : uiText("Не удалось убрать из компании"));
                       }
                     }}
                   >
-                    Убрать из компании
-                  </button>
+                    {uiText("Убрать из компании")}</button>
                 </div>
               ))
             ) : (
               <p className="muted" style={{ marginTop: 8 }}>
-                Компания не указана
-              </p>
+                {uiText("Компания не указана")}</p>
             )}
             <div className="actions" style={{ marginTop: 10 }}>
               <button type="button" className="btn secondary" onClick={() => setCompanyLinkOpen(true)}>
-                Связать с компанией
-              </button>
+                {uiText("Связать с компанией")}</button>
             </div>
           </div>
 
           <div className="card">
-            <b>Откуда пришёл</b>
+            <b>{uiText("Откуда пришёл")}</b>
             <dl className="kv">
-              <div><dt>Источник обращения</dt><dd>{attribution.sourceType || "Не указано"}</dd></div>
-              <div><dt>Канал</dt><dd>{attribution.sourceChannel || "Не указано"}</dd></div>
-              <div><dt>Интеграция</dt><dd>{attribution.sourceIntegration || "Не указано"}</dd></div>
-              <div><dt>Откуда пришёл</dt><dd>{attribution.utmSource || "Не указано"}</dd></div>
-              <div><dt>Канал рекламы</dt><dd>{attribution.utmMedium || "Не указано"}</dd></div>
-              <div><dt>Кампания</dt><dd>{attribution.utmCampaign || "Не указано"}</dd></div>
-              <div><dt>Страница</dt><dd>{attribution.landingPage || "Не указано"}</dd></div>
-              <div><dt>Предыдущая страница</dt><dd>{attribution.referrer || "Не указано"}</dd></div>
+              <div><dt>{uiText("Источник обращения")}</dt><dd>{attribution.sourceType || uiText("Не указано")}</dd></div>
+              <div><dt>{uiText("Канал")}</dt><dd>{attribution.sourceChannel || uiText("Не указано")}</dd></div>
+              <div><dt>{uiText("Интеграция")}</dt><dd>{attribution.sourceIntegration || uiText("Не указано")}</dd></div>
+              <div><dt>{uiText("Откуда пришёл")}</dt><dd>{attribution.utmSource || uiText("Не указано")}</dd></div>
+              <div><dt>{uiText("Канал рекламы")}</dt><dd>{attribution.utmMedium || uiText("Не указано")}</dd></div>
+              <div><dt>{uiText("Кампания")}</dt><dd>{attribution.utmCampaign || uiText("Не указано")}</dd></div>
+              <div><dt>{uiText("Страница")}</dt><dd>{attribution.landingPage || uiText("Не указано")}</dd></div>
+              <div><dt>{uiText("Предыдущая страница")}</dt><dd>{attribution.referrer || uiText("Не указано")}</dd></div>
             </dl>
           </div>
 
           {notes.filter((item: any) => item.pinned).length ? (
             <div className="card">
-              <b>Важно</b>
+              <b>{uiText("Важно")}</b>
               {notes.filter((item: any) => item.pinned).map((item: any) => (
                 <p key={item.id}>{item.text}</p>
               ))}
@@ -501,22 +483,22 @@ export function ContactPage() {
 
         <aside className="contact-side">
           <div className="card control-card">
-            <b>Контроль</b>
+            <b>{uiText("Контроль")}</b>
             <dl className="kv">
               <div>
-                <dt>Ответственный</dt>
+                <dt>{uiText("Ответственный")}</dt>
                 <dd>
                   <select
                     value={control.ownerMembershipId || ""}
                     onChange={async (event) => {
                       try {
                         await api.updateContact(client.id, { ownerMembershipId: event.target.value || null });
-                        notifySaved("Ответственный сохранён");
+                        notifySaved(uiText("Ответственный сохранён"));
                         await load();
-                      } catch (err) { setError(err instanceof Error ? err.message : "Не удалось сохранить ответственного"); }
+                      } catch (err) { setError(err instanceof Error ? err.message : uiText("Не удалось сохранить ответственного")); }
                     }}
                   >
-                    <option value="">Не назначен</option>
+                    <option value="">{uiText("Не назначен")}</option>
                     {members.map((member: any) => (
                       <option key={member.id} value={member.id}>{member.name}</option>
                     ))}
@@ -524,63 +506,63 @@ export function ContactPage() {
                 </dd>
               </div>
               <div>
-                <dt>Следующее действие</dt>
+                <dt>{uiText("Следующее действие")}</dt>
                 <dd>
                   {control.nextAction ? (
                     <>
-                      {control.nextAction.typeLabel}: {control.nextAction.title}
+                      {uiMessage(control.nextAction.typeLabel)}: {control.nextAction.title}
                       <div className="muted">
-                        {control.nextAction.dueLabel || "без срока"}
-                        {control.nextAction.overdue ? ` · Просрочено на ${control.nextAction.overdueHours} ч` : ""}
+                        {control.nextAction.dueLabel || uiText("без срока")}
+                        {control.nextAction.overdue ? uiText(" · Просрочено на {p0} ч", {p0: control.nextAction.overdueHours}) : ""}
                       </div>
                     </>
                   ) : control.nextStepText ? (
                     control.nextStepText
                   ) : (
-                    <span className="warn-text">Нет следующего действия</span>
+                    <span className="warn-text">{uiText("Нет следующего действия")}</span>
                   )}
                 </dd>
               </div>
-              <div><dt>Последний контакт</dt><dd>{control.lastContactLabel || "—"}</dd></div>
-              <div><dt>Последним написал</dt><dd>{control.lastWriterLabel}</dd></div>
-              <div><dt>AI</dt><dd>{control.aiModeLabel}</dd></div>
-              {control.attentionReason ? <div><dt>Причина эскалации</dt><dd>{control.attentionReason}</dd></div> : null}
-              <div><dt>Просрочка</dt><dd>{control.overdue ? "Да" : "Нет"}</dd></div>
+              <div><dt>{uiText("Последний контакт")}</dt><dd>{control.lastContactLabel || "—"}</dd></div>
+              <div><dt>{uiText("Последним написал")}</dt><dd>{uiMessage(control.lastWriterLabel)}</dd></div>
+              <div><dt>AI</dt><dd>{uiMessage(control.aiModeLabel)}</dd></div>
+              {control.attentionReason ? <div><dt>{uiText("Причина эскалации")}</dt><dd>{control.attentionReason}</dd></div> : null}
+              <div><dt>{uiText("Просрочка")}</dt><dd>{control.overdue ? uiText("Да") : uiText("Нет")}</dd></div>
             </dl>
           </div>
 
           <div className="card">
-            <b>Статус клиента</b>
+            <b>{uiText("Статус клиента")}</b>
             <select
               value={client.lifecycleStatus}
               onChange={async (event) => {
                 try {
                   await api.updateContact(client.id, { lifecycleStatus: event.target.value });
-                  notifySaved("Статус клиента сохранён");
+                  notifySaved(uiText("Статус клиента сохранён"));
                   await load();
-                } catch (err) { setError(err instanceof Error ? err.message : "Не удалось сохранить статус"); }
+                } catch (err) { setError(err instanceof Error ? err.message : uiText("Не удалось сохранить статус")); }
               }}
             >
-              <option value="new">Новый</option>
-              <option value="in_progress">В работе</option>
-              <option value="active">Активный</option>
-              <option value="paused">На паузе</option>
-              <option value="lost">Потерян</option>
-              <option value="archived">Архив</option>
+              <option value="new">{uiText("Новый")}</option>
+              <option value="in_progress">{uiText("В работе")}</option>
+              <option value="active">{uiText("Активный")}</option>
+              <option value="paused">{uiText("На паузе")}</option>
+              <option value="lost">{uiText("Потерян")}</option>
+              <option value="archived">{uiText("Архив")}</option>
             </select>
             <div className="muted" style={{ marginTop: 10 }}>
-              Первое обращение: {client.firstContactLabel || "—"}
+              {uiText("Первое обращение:")}{" "}{client.firstContactLabel || "—"}
               <br />
-              Последний inbound: {client.lastInboundLabel || "—"}
+              {uiText("Последний inbound:")}{" "}{client.lastInboundLabel || "—"}
               <br />
-              Последний outbound: {client.lastOutboundLabel || "—"}
+              {uiText("Последний outbound:")}{" "}{client.lastOutboundLabel || "—"}
             </div>
           </div>
 
           <div className="card">
-            <b>Теги</b>
+            <b>{uiText("Теги")}</b>
             <div className="client-meta">
-              {tags.length === 0 ? <span className="muted">Нет тегов</span> : null}
+              {tags.length === 0 ? <span className="muted">{uiText("Нет тегов")}</span> : null}
               {tags.map((tag: any) => (
                 <button
                   key={tag.id}
@@ -589,7 +571,7 @@ export function ContactPage() {
                     await api.removeContactTag(client.id, tag.id);
                     await load();
                   }}
-                  title="Убрать тег"
+                  title={uiText("Убрать тег")}
                 >
                   {tag.name} ×
                 </button>
@@ -599,7 +581,7 @@ export function ContactPage() {
 
           {gaps?.length ? (
             <div className="card">
-              <b>Не хватает данных</b>
+              <b>{uiText("Не хватает данных")}</b>
               <p className="muted">{gaps.join(", ")}</p>
             </div>
           ) : null}
@@ -609,11 +591,11 @@ export function ContactPage() {
       <div className="actions chip-row">
         {(
           [
-            ["history", "История"],
-            ["requests", "Заявки"],
-            ["conversations", "Диалоги"],
-            ["deals", "Сделки"],
-            ["tasks", "Задачи"],
+            ["history", uiText("История")],
+            ["requests", uiText("Заявки")],
+            ["conversations", uiText("Диалоги")],
+            ["deals", uiText("Сделки")],
+            ["tasks", uiText("Задачи")],
           ] as const
         ).map(([value, label]) => (
           <button key={value} className={tab === value ? "btn" : "btn secondary"} onClick={() => setTab(value)}>
@@ -624,7 +606,7 @@ export function ContactPage() {
 
       {tab === "history" ? (
         <div className="timeline">
-          {timeline.length === 0 ? <p className="empty">История пока пуста</p> : null}
+          {timeline.length === 0 ? <p className="empty">{uiText("История пока пуста")}</p> : null}
           {timeline.map((item: any) => (
             <div className="timeline-item" key={`${item.kind}-${item.id}`}>
               <div className="muted">{item.atLabel}</div>
@@ -633,18 +615,18 @@ export function ContactPage() {
             </div>
           ))}
           <div className="card">
-            <b>Заметки</b>
-            {notes.length === 0 ? <p className="muted">Нет заметок</p> : null}
+            <b>{uiText("Заметки")}</b>
+            {notes.length === 0 ? <p className="muted">{uiText("Нет заметок")}</p> : null}
             {notes.map((item: any) => (
               <div key={item.id} className="row" style={{ marginTop: 8 }}>
                 <div>
-                  {item.pinned ? <span className="badge">Закреплено</span> : null}
+                  {item.pinned ? <span className="badge">{uiText("Закреплено")}</span> : null}
                   <div>{item.text}</div>
                   <div className="muted">{item.createdLabel}</div>
                 </div>
               </div>
             ))}
-            {!noteOpen ? <button type="button" className="btn secondary" onClick={() => setNoteOpen(true)}>Добавить заметку</button> : <form
+            {!noteOpen ? <button type="button" className="btn secondary" onClick={() => setNoteOpen(true)}>{uiText("Добавить заметку")}</button> : <form
               className="inline-form"
               onSubmit={async (event) => {
                 event.preventDefault();
@@ -659,18 +641,17 @@ export function ContactPage() {
                   });
                   formElement.reset();
                   setNoteOpen(false);
-                  notifySaved("Заметка сохранена");
+                  notifySaved(uiText("Заметка сохранена"));
                   await load();
                 } catch (err) {
-                  setError(err instanceof Error ? err.message : "Не удалось сохранить заметку");
+                  setError(err instanceof Error ? err.message : uiText("Не удалось сохранить заметку"));
                 } finally { setNoteBusy(false); }
               }}
             >
-              <input name="text" required placeholder="Внутренняя заметка" />
+              <input name="text" required placeholder={uiText("Внутренняя заметка")} />
               <label className="check">
-                <input type="checkbox" name="pinned" /> Закрепить
-              </label>
-              <button className="btn" disabled={noteBusy}>{noteBusy ? "Сохраняем…" : "Сохранить"}</button>
+                <input type="checkbox" name="pinned" /> {" "}{uiText("Закрепить")}</label>
+              <button className="btn" disabled={noteBusy}>{noteBusy ? uiText("Сохраняем…") : uiText("Сохранить")}</button>
             </form>}
           </div>
         </div>
@@ -682,9 +663,9 @@ export function ContactPage() {
             <div className="row" key={item.id}>
               <div>
                 <b>{item.title}</b>
-                <div className="muted">{item.receivedLabel} · {item.statusLabel}</div>
+                <div className="muted">{item.receivedLabel} · {uiMessage(item.statusLabel)}</div>
               </div>
-              <Link to={`/requests/${item.id}`}>Открыть</Link>
+              <Link to={`/requests/${item.id}`}>{uiText("Открыть")}</Link>
             </div>
           ))}
         </div>
@@ -692,14 +673,14 @@ export function ContactPage() {
 
       {tab === "conversations" ? (
         <div>
-          {conversations.length === 0 ? <p className="empty">Диалогов нет</p> : null}
+          {conversations.length === 0 ? <p className="empty">{uiText("Диалогов нет")}</p> : null}
           {conversations.map((item: any) => (
             <Link className="row" key={item.id} to={`/conversations/${item.id}`}>
               <div>
                 <b>{item.channel}</b>
-                <div className="muted">{item.updatedLabel} · {item.lastMessage || "нет сообщений"}</div>
+                <div className="muted">{item.updatedLabel} · {item.lastMessage || uiText("нет сообщений")}</div>
               </div>
-              <span className="badge">{conversationModeLabel(item.mode, item.modeLabel)}</span>
+              <span className="badge">{conversationModeLabel(item.mode, uiMessage(item.modeLabel))}</span>
             </Link>
           ))}
         </div>
@@ -707,14 +688,14 @@ export function ContactPage() {
 
       {tab === "deals" ? (
         <div>
-          {deals.length === 0 ? <p className="empty">Сделок нет</p> : null}
+          {deals.length === 0 ? <p className="empty">{uiText("Сделок нет")}</p> : null}
           {deals.map((item: any) => (
             <div className="row" key={item.id}>
               <div>
                 <b>{item.title}</b>
                 <div className="muted">
                   {dealOutcomeLabel(item.outcome, item.stage)}
-                  {item.amountMinor != null ? ` · ${Number(item.amountMinor).toLocaleString("ru-RU")} ${item.currency || "₸"}` : ""}
+                  {item.amountMinor != null ? ` · ${Number(item.amountMinor).toLocaleString(uiFormatLocale())} ${item.currency || "₸"}` : ""}
                   {item.createdLabel ? ` · ${item.createdLabel}` : ""}
                 </div>
               </div>
@@ -725,15 +706,15 @@ export function ContactPage() {
 
       {tab === "tasks" ? (
         <div>
-          {tasks.length === 0 ? <p className="empty">Задач нет</p> : null}
+          {tasks.length === 0 ? <p className="empty">{uiText("Задач нет")}</p> : null}
           {tasks.map((item: any) => (
             <div className="row" key={item.id}>
               <div>
                 <b>{item.title}</b>
                 <div className="muted">
-                  {item.typeLabel} · {item.status}
+                  {uiMessage(item.typeLabel)} · {item.status}
                   {item.dueLabel ? ` · ${item.dueLabel}` : ""}
-                  {item.overdue ? " · просрочено" : ""}
+                  {item.overdue ? uiText(" · просрочено") : ""}
                 </div>
               </div>
             </div>
@@ -742,13 +723,13 @@ export function ContactPage() {
       ) : null}
 
       <details className="card">
-        <summary>Системная информация</summary>
+        <summary>{uiText("Системная информация")}</summary>
         <p className="muted">
           Client ID: {client.id}
           <br />
-          Создан: {client.firstContactLabel}
+          {uiText("Создан:")}{" "}{client.firstContactLabel}
           <br />
-          Обновлён: {client.lastContactLabel}
+          {uiText("Обновлён:")}{" "}{client.lastContactLabel}
           <br />
           Score: {client.leadScore ?? "—"}
         </p>
@@ -757,30 +738,25 @@ export function ContactPage() {
       {companyLinkOpen ? (
         <div className="stats-modal-backdrop" onClick={() => setCompanyLinkOpen(false)}>
           <div className="stats-modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Связать с компанией</h3>
+            <h3>{uiText("Связать с компанией")}</h3>
             <label>
-              Поиск компании
-              <input
+              {uiText("Поиск компании")}<input
                 value={companySearch}
                 onChange={(e) => setCompanySearch(e.target.value)}
-                placeholder="Название или БИН"
+                placeholder={uiText("Название или БИН")}
               />
             </label>
             <label>
-              Должность
-              <input value={linkPosition} onChange={(e) => setLinkPosition(e.target.value)} />
+              {uiText("Должность")}<input value={linkPosition} onChange={(e) => setLinkPosition(e.target.value)} />
             </label>
             <label>
               <input type="checkbox" checked={linkPrimary} onChange={(e) => setLinkPrimary(e.target.checked)} />{" "}
-              Основной контакт
-            </label>
+              {uiText("Основной контакт")}</label>
             <label>
-              <input type="checkbox" checked={linkLpr} onChange={(e) => setLinkLpr(e.target.checked)} /> ЛПР
-            </label>
+              <input type="checkbox" checked={linkLpr} onChange={(e) => setLinkLpr(e.target.checked)} /> {" "}{uiText("ЛПР")}</label>
             <label>
               <input type="checkbox" checked={linkBilling} onChange={(e) => setLinkBilling(e.target.checked)} />{" "}
-              Финансовый контакт
-            </label>
+              {uiText("Финансовый контакт")}</label>
             <div className="picker-list">
               {companyHits.map((hit) => (
                 <button
@@ -801,7 +777,7 @@ export function ContactPage() {
                       setCompanyLinkOpen(false);
                       await load();
                     } catch (err) {
-                      setError(err instanceof Error ? err.message : "Ошибка");
+                      setError(err instanceof Error ? err.message : uiText("Ошибка"));
                     } finally {
                       setLinkBusy(false);
                     }
@@ -814,11 +790,10 @@ export function ContactPage() {
             </div>
             <hr />
             <label>
-              Или создать компанию
-              <input
+              {uiText("Или создать компанию")}<input
                 value={newCompanyName}
                 onChange={(e) => setNewCompanyName(e.target.value)}
-                placeholder={client.companyName || "Название"}
+                placeholder={client.companyName || uiText("Название")}
               />
             </label>
             <button
@@ -843,17 +818,15 @@ export function ContactPage() {
                   setCompanyLinkOpen(false);
                   await load();
                 } catch (err) {
-                  setError(err instanceof Error ? err.message : "Ошибка");
+                  setError(err instanceof Error ? err.message : uiText("Ошибка"));
                 } finally {
                   setLinkBusy(false);
                 }
               }}
             >
-              + Создать компанию и связать
-            </button>
+              {uiText("+ Создать компанию и связать")}</button>
             <button type="button" className="btn secondary" onClick={() => setCompanyLinkOpen(false)}>
-              Закрыть
-            </button>
+              {uiText("Закрыть")}</button>
           </div>
         </div>
       ) : null}

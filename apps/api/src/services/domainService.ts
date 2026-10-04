@@ -1049,8 +1049,9 @@ export async function setConversationMode(
     if (!current) throw new ApiError(404, "not_found", "Диалог не найден");
 
     if (mode === "ai" && current.connectionId) {
-      const channel = await tx.channelConnection.findFirst({ where: { id: current.connectionId, tenantId: tid } });
+      const channel = await tx.channelConnection.findFirst({ where: { id: current.connectionId, tenantId: tid }, include: { integration: true } });
       if (["telegram", "email", "instagram"].includes(channel?.channelType || "")) throw new ApiError(409, "channel_ai_unavailable", "Для этого канала сейчас доступны ответы сотрудников. Автоматические ответы AI не подключены.");
+      if (["whatsapp_qr", "whatsapp_cloud"].includes(channel?.integration.type || "") && !channel?.autoReply) throw new ApiError(409, "whatsapp_ai_disabled", "Сначала включите ИИ-ответы для номера в разделе интеграций");
     }
 
     const selfId = auth.activeMembership?.id;
@@ -1117,6 +1118,7 @@ export async function setConversationMode(
 
     if (alreadySameMode || sameOwnerTake) {
       await settleTakeoverNotices();
+      if (mode === "ai") { const { enqueueWhatsAppAi } = await import("./whatsappAiService.ts"); await enqueueWhatsAppAi(tx, tid, id); }
       return { ...current, appliedOnSeller: true as const, sellerError: null as string | null };
     }
 
@@ -1136,6 +1138,7 @@ export async function setConversationMode(
       where: { tenantId: tid, conversationId: id, state: { in: ["queued", "generating"] } },
       data: { state: "canceled", error: "taken_by_human" },
     });
+    if (mode === "ai") { const { enqueueWhatsAppAi } = await import("./whatsappAiService.ts"); await enqueueWhatsAppAi(tx, tid, id); }
     let appliedOnSeller = false;
     let sellerError: string | null = null;
     if (current.sellerLeadId) {
@@ -1217,7 +1220,11 @@ export async function addConversationMessage(
     });
   }
   if (conversation.connectionId) {
-    const connection = await prisma.channelConnection.findFirst({ where: { id: conversation.connectionId, tenantId: tid } });
+    const connection = await prisma.channelConnection.findFirst({ where: { id: conversation.connectionId, tenantId: tid }, include: { integration: true } });
+    if (connection && ["whatsapp_qr", "whatsapp_cloud"].includes(connection.integration.type)) {
+      const { sendDirectWhatsApp } = await import("./whatsappSendService.ts");
+      return sendDirectWhatsApp(prisma, auth, id, input);
+    }
     if (connection?.channelType === "instagram") {
       const { sendInstagramReply } = await import("./metaConnectionService.ts");
       return sendInstagramReply(prisma, auth, id, input);

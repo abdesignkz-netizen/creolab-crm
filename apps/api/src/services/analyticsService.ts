@@ -358,6 +358,7 @@ async function buildTrend(
   inquiryExtra: Record<string, unknown>,
   dealExtra: Record<string, unknown>,
   metric: TrendMetric,
+  locale = "ru",
 ) {
   const granularity = chooseGranularity(preset, from, to);
   const received = rangeFilter(from, to);
@@ -411,7 +412,7 @@ async function buildTrend(
     const conversion = pct(v.won, v.inquiries);
     return {
       key,
-      label: formatBucketLabel(key, granularity),
+      label: formatBucketLabel(key, granularity, locale),
       inquiries: v.inquiries,
       clients: v.clients,
       deals: v.deals,
@@ -601,7 +602,7 @@ export async function getAnalyticsDashboard(prisma: PrismaClient, auth: AuthCont
       ? null
       : metricBundle(prisma, tid, cmp.from, cmp.to, inquiryExtra, dealExtra),
     buildFunnel(prisma, tid, range.from, range.to, funnelMode, inquiryExtra, dealExtra),
-    buildTrend(prisma, tid, range.from, range.to, preset, timeZone, inquiryExtra, dealExtra, "inquiries"),
+    buildTrend(prisma, tid, range.from, range.to, preset, timeZone, inquiryExtra, dealExtra, "inquiries", auth.user.locale),
     buildStageDurations(prisma, tid, range.from, range.to).catch((err) => {
       console.error("analytics stageDurations", err);
       return [];
@@ -628,6 +629,7 @@ export async function getAnalyticsDashboard(prisma: PrismaClient, auth: AuthCont
           inquiryExtra,
           dealExtra,
           "inquiries",
+          auth.user.locale,
         );
 
   const relatedInquiryIds = [
@@ -796,7 +798,7 @@ export async function getAnalyticsDashboard(prisma: PrismaClient, auth: AuthCont
     currency,
     period: {
       preset,
-      label: periodLabel(preset, range.from, range.to, timeZone),
+      label: periodLabel(preset, range.from, range.to, timeZone, auth.user.locale),
       from: range.from?.toISOString() || null,
       to: range.to?.toISOString() || null,
     },
@@ -807,7 +809,7 @@ export async function getAnalyticsDashboard(prisma: PrismaClient, auth: AuthCont
       label:
         compareMode === "none"
           ? null
-          : periodLabel("custom", cmp.from, cmp.to, timeZone),
+          : periodLabel("custom", cmp.from, cmp.to, timeZone, auth.user.locale),
     },
     filters: {
       assignee: query.assignee || null,
@@ -1475,7 +1477,7 @@ export async function getAnalyticsTrend(
   const metric = (["inquiries", "clients", "deals", "won", "revenue", "conversion"].includes(String(query.metric))
     ? query.metric
     : "inquiries") as TrendMetric;
-  return buildTrend(prisma, tid, range.from, range.to, preset, timeZone, inquiryExtra, dealExtra, metric);
+  return buildTrend(prisma, tid, range.from, range.to, preset, timeZone, inquiryExtra, dealExtra, metric, auth.user.locale);
 }
 
 export type DrillEntity =
