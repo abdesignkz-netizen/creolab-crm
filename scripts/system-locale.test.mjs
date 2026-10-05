@@ -314,3 +314,64 @@ test('Google integration details show only the chosen service while the legacy c
   for(const {kind} of items){const html=render(kind);assert.ok(html.includes('RESOURCE-'+kind));for(const other of items.filter(x=>x.kind!==kind))assert.ok(!html.includes('RESOURCE-'+other.kind));}
   for(const {kind} of items)assert.ok(render().includes('RESOURCE-'+kind));
 });
+
+test('Task summaries keep deadlines, ownership and send warnings visible; workflows remain inside closed disclosures', async () => {
+  const fixtures = [
+    {id:'task-open',title:'Обсудить макет',status:'open',type:'call',whoName:'Клиент Алия',assigneeName:'Дана',dueAt:'2020-01-01T12:00:00Z',createdAt:'2020-01-01T11:00:00Z',briefingText:'PRIVATE BRIEFING',conversationId:'conversation-1'},
+    {id:'task-progress',title:'Проверить смету',status:'in_progress',type:'other',assigneeName:'Ерлан',createdAt:'2020-01-01T11:00:00Z'},
+    {id:'task-file',title:'Отправить файл',status:'waiting',type:'message',needsFileRetry:true,createdAt:'2020-01-01T11:00:00Z'},
+    {id:'task-done',title:'Согласовать договор',status:'done',type:'other',doneAt:'2020-01-02T12:00:00Z',createdAt:'2020-01-01T11:00:00Z'},
+  ];
+  const plugin={name:'task-fixtures',setup(build){build.onLoad({filter:/TasksPage\.tsx$/},args=>({
+    contents:readFileSync(args.path,'utf8').replace('[items, setItems] = useState<any[]>([])',`[items, setItems] = useState<any[]>(${JSON.stringify(fixtures)})`)+'\nexport {dueGroup};',loader:'tsx',resolveDir:path.dirname(args.path),
+  }));}};
+  const {render,dueGroup}=await bundle(`
+    import {renderToStaticMarkup} from 'react-dom/server'; import {MemoryRouter} from 'react-router-dom';
+    import {SessionContext,emptyCaps} from './lib/session'; import {TasksPage} from './pages/TasksPage';
+    export {dueGroup} from './pages/TasksPage';
+    export const render=(locale,url='/tasks')=>renderToStaticMarkup(<SessionContext.Provider value={{me:{user:{locale}},caps:{...emptyCaps,manageTasks:true}}}><MemoryRouter initialEntries={[url]}><TasksPage /></MemoryRouter></SessionContext.Provider>);
+  `,[plugin]);
+  const prior=globalThis.localStorage;
+  try {
+    for(const locale of ['ru','kk','en']) {
+      globalThis.localStorage={getItem:()=>locale};
+      const html=render(locale);
+      const cards=[...html.matchAll(/<details class="task-card[^]*?<\/details>/g)].map(m=>m[0]);
+      assert.equal(cards.length,4);
+      for(const card of cards) {
+        assert.doesNotMatch(card, /^<details[^>]*\bopen(?:=|\s|>)/);
+        const summary=card.split('</summary>')[0];
+        assert.doesNotMatch(summary, /PRIVATE BRIEFING|<button|<a\s|<input/);
+        assert.match(summary,/task-card-owner/);
+      }
+      assert.match(cards[0].split('</summary>')[0],/Клиент Алия/);
+      assert.match(cards[0],/PRIVATE BRIEFING/);
+      assert.match(cards[0],/href="\/conversations\/conversation-1"/);
+      assert.match(cards[2].split('</summary>')[0],/task-card-alerts/);
+      if(locale==='ru') {
+        assert.match(cards[1],/>Изменить<\/button>/);
+        assert.match(cards[1],/>Завершить<\/button>/);
+        assert.match(cards[2].split('</summary>')[0],/Текст ушёл · файл не отправлен/);
+        assert.match(html,/type="search"/);
+      }
+      if(locale==='kk')assert.match(html,/Тапсырмаларды іздеу/);
+      if(locale==='en')assert.match(html,/Search tasks/);
+    }
+    globalThis.localStorage={getItem:()=> 'ru'};
+    const search=render('ru','/tasks?taskSearch='+encodeURIComponent('МАКЕТ дана'));
+    assert.equal((search.match(/<details class="task-card/g)||[]).length,1);
+    assert.match(search,/Обсудить макет/);
+    assert.doesNotMatch(search,/Проверить смету|Согласовать договор/);
+    assert.match(render('ru','/tasks?taskSearch=does-not-exist'),/Ничего не найдено/);
+    const completed=render('ru','/tasks?filter=done');
+    assert.equal((completed.match(/<details class="task-card/g)||[]).length,1);
+    assert.match(completed,/Согласовать договор/);
+    // Later today belongs to Today, rather than Upcoming; scheduled sends retain their own group.
+    const now=new Date('2035-03-15T10:00:00');
+    assert.equal(dueGroup({status:'open',dueAt:'2035-03-15T15:00:00'},now),'today');
+    assert.equal(dueGroup({status:'open',dueAt:'2035-03-15T09:00:00'},now),'overdue');
+    assert.equal(dueGroup({status:'open',dueAt:'2035-03-16T15:00:00'},now),'later');
+    assert.equal(dueGroup({status:'open'},now),'none');
+    assert.equal(dueGroup({status:'open',dueAt:'2035-03-15T15:00:00',sendScheduled:true},now),'later');
+  } finally {if(prior)globalThis.localStorage=prior;else delete globalThis.localStorage;}
+});

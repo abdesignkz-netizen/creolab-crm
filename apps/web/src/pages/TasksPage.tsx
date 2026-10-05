@@ -10,7 +10,7 @@ import {
 } from "@creolab/contracts";
 import { notifySaved } from "../components/SaveNotice";
 import { useUrlState, useRequestVersion } from "../lib/useUrlState";
-import { useEffect, useMemo, useState, type DragEvent, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type DragEvent, type FormEvent, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { nameWithPhone, phoneText } from "../lib/contactDisplay";
 import { api } from "../lib/api";
@@ -205,7 +205,6 @@ function dueGroup(item: any, now: Date) {
   if (!item.dueAt) return "none";
   const due = new Date(item.dueAt);
   if (due.getTime() < now.getTime() && item.status !== "done" && item.status !== "canceled") return "overdue";
-  if (due.getTime() > now.getTime()) return "later";
   if (due.toDateString() === now.toDateString()) return "today";
   return "later";
 }
@@ -313,11 +312,58 @@ function toggleValue(list: string[], value: string) {
   return list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
 }
 
+function TaskCard({ item, children }: { item: any; children: ReactNode }) {
+  const uiText = useUiText();
+  const closed = isClosedTask(item);
+  const overdue = !closed && dueGroup(item, new Date()) === "overdue";
+  const client = item.targetType === "group"
+    ? item.segmentSnapshotJson?.label || item.contextLabel || uiText("Группа")
+    : item.whoName || item.contact?.name || [item.contact?.firstName, item.contact?.lastName].filter(Boolean).join(" ") || item.contextLabel;
+  return (
+    <details className={`task-card${overdue ? " is-overdue" : ""}${closed ? " is-closed" : ""}`}>
+      <summary className="task-card-summary">
+        <span className={`task-card-icon${item.status === "done" ? " is-complete" : item.status === "canceled" ? " is-canceled" : ""}`} aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            {closed ? <path d={item.status === "canceled" ? "M6 6l12 12M6 18L18 6" : "m5 12 4 4L19 6"} /> : <><rect x="5" y="4" width="14" height="17" rx="3" /><path d="M9 3h6v3H9zM9 11h6M9 15h4" /></>}
+          </svg>
+        </span>
+        <span className="task-card-heading">
+          <strong>{item.title}</strong>
+          {client ? <span className="task-card-client">{client}</span> : null}
+          {item.campaignId ? <span className="task-card-client">{uiText("Рассылка")}</span> : null}
+          <span className="task-card-alerts">
+            {item.needsFileRetry ? <span>{uiText("Текст ушёл · файл не отправлен")}</span>
+              : item.executionStatus === "failed" && !isScheduledSend(item) ? <span>{uiText("Отправка не удалась")}</span> : null}
+            {item.commandStatus === "needs_confirmation" ? <span>{uiText("Нужно подтверждение перед внешней отправкой")}</span> : null}
+          </span>
+        </span>
+        <span className={`task-card-status status-${item.status}`}>
+          {isScheduledSend(item) ? uiText("Отправка запланирована") : statusText(item)}
+        </span>
+        <span className="task-card-deadline">
+          <span className="task-card-label">{closed ? uiText("Когда") : overdue ? uiText("Просрочено") : uiText("Срок")}</span>
+          <span>{closed ? (taskDoneAt(item).getTime() ? formatDateTimeRu(taskDoneAt(item)) : "—") : item.dueAt ? formatDateTimeRu(item.dueAt) : uiText("Без срока")}</span>
+        </span>
+        <span className="task-card-owner"><span className="task-card-label">{uiText("Исполнитель")}</span><span>{assigneeText(item)}</span></span>
+        <svg className="task-card-chevron" aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m9 5 7 7-7 7" /></svg>
+      </summary>
+      <div className="task-card-details">
+        {children}
+        <button type="button" className="task-collapse" onClick={(event) => {
+          const card = event.currentTarget.closest("details");
+          if (card) { card.open = false; card.querySelector("summary")?.focus(); }
+        }}>{uiText("Свернуть задачу")}</button>
+      </div>
+    </details>
+  );
+}
+
 export function TasksPage() {
   const uiText = useUiText();
   const caps = useCapabilities();
   const [items, setItems] = useState<any[]>([]);
   const [error, setError] = useState("");
+  const [taskSearch, setTaskSearch] = useUrlState<string>("taskSearch", "");
   const [filter, setFilter] = useUrlState<Filter>("filter", "all", ["open", "waiting", "scheduled", "overdue", "mine", "done", "all", "today", "no_due"]);
   const [me, setMe] = useState<any>(null);
   const [members, setMembers] = useState<any[]>([]);
@@ -665,7 +711,10 @@ export function TasksPage() {
   const membershipId = me?.activeTenant?.membershipId;
   const now = new Date();
   const boardItems = items;
+  const searchTerms = taskSearch.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
   const extraFiltered = boardItems.filter((item) => {
+    const searchable = [item.title, item.whoName, item.whoPhone, item.contact?.name, item.contact?.firstName, item.contact?.lastName, item.contextLabel, assigneeText(item)].filter(Boolean).join(" ").toLocaleLowerCase();
+    if (!searchTerms.every((term) => searchable.includes(term))) return false;
     if (extraAssignee === AI_ASSIGNEE && (item.assigneeKind || taskAssigneeKind(item)) !== "ai") return false;
     if (extraAssignee && extraAssignee !== AI_ASSIGNEE && item.ownerMembershipId !== extraAssignee) return false;
     if (extraCreatedBy && (item.createdByKind || taskCreatedByKind(item)) !== extraCreatedBy) return false;
@@ -1325,11 +1374,11 @@ export function TasksPage() {
   const commandWillSchedule = commandDueMode === "scheduled" && Boolean(commandDueAt);
 
   return (
-    <section>
+    <section className="tasks-page">
       <div className="page-head">
         <div>
           <h2>{uiText("Задачи")}</h2>
-          <p className="muted page-head-sub">{uiText("Все действия команды и AI в одном месте.")}</p>
+          <p className="muted page-head-sub">{uiText("Сроки, ответственные и следующие шаги — всё под рукой.")}</p>
         </div>
         <div className="actions">
           {caps.manageTasks ? (
@@ -1347,25 +1396,39 @@ export function TasksPage() {
           ) : null}
         </div>
       </div>
-      <div className="actions task-quick-filters">
+      <div className="task-toolbar">
+        <label className="task-search">
+          <svg aria-hidden="true" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 5 5" /></svg>
+          <input type="search" aria-label={uiText("Поиск по задачам")} placeholder={uiText("Найти задачу, клиента или исполнителя")} value={taskSearch} onChange={(event) => setTaskSearch(event.target.value)} />
+        </label>
+        <button type="button" className={extraFilterActive ? "btn" : "btn secondary"} aria-expanded={showExtraFilters} aria-controls="task-extra-filters" onClick={() => setShowExtraFilters((open) => !open)}>
+          {uiText("Фильтры")}{extraFilterActive ? " •" : ""}
+        </button>
+      </div>
+      <div className="task-quick-filters" role="group" aria-label={uiText("Показать задачи")}>
         {(
           [
             ["all", uiText("Все")],
+            ["open", uiText("К выполнению")],
             ["mine", uiText("Мои")],
             ["today", uiText("Сегодня")],
+            ["overdue", uiText("Просроченные")],
             ["scheduled", uiText("Запланированные")],
             ["no_due", uiText("Без срока")],
             ["waiting", uiText("Жду")],
-            ["overdue", uiText("Просроченные")],
             ["done", uiText("Завершённые")],
           ] as const
         ).map(([value, label]) => (
           <button
             key={value}
-            className={filter === value ? "btn" : "btn secondary"}
+            type="button"
+            aria-pressed={filter === value}
+            className={`task-filter${filter === value ? " is-active" : ""}${value === "overdue" && filterCounts.overdue ? " has-overdue" : ""}`}
             {...tip(
               value === "all"
                 ? uiText("Все доступные задачи")
+                : value === "open"
+                  ? uiText("К выполнению")
                 : value === "mine"
                   ? uiText("Назначены на вас — не те, что вы поставили другим")
                   : value === "today"
@@ -1382,19 +1445,12 @@ export function TasksPage() {
             )}
             onClick={() => setFilter(value)}
           >
-            {label} · {filterCounts[value]}
+            {label}<span className="task-filter-count">{filterCounts[value]}</span>
           </button>
         ))}
-        <button
-          type="button"
-          className={showExtraFilters || extraFilterActive ? "btn" : "btn secondary"}
-          {...tip(uiText("Исполнитель, кто поставил, статус, привязка, период, источник"))}
-          onClick={() => setShowExtraFilters((open) => !open)}
-        >
-          {uiText("Фильтры")}</button>
       </div>
       {showExtraFilters ? (
-        <div className="panel task-extra-filters">
+        <div className="panel task-extra-filters" id="task-extra-filters">
           <div className="task-extra-grid">
             <label>
               {uiText("Исполнитель")}<select value={extraAssignee} onChange={(event) => setExtraAssignee(event.target.value)}>
@@ -2837,7 +2893,7 @@ export function TasksPage() {
 
       {visible.length === 0 ? (
         <p className="empty">
-          {filter === "waiting"
+          {taskSearch.trim() || extraFilterActive ? uiText("Ничего не найдено. Измените запрос или фильтры.") : filter === "waiting"
             ? uiText("Задач в ожидании нет.")
             : filter === "no_due"
               ? uiText("Незавершённых задач без срока нет.")
@@ -2858,27 +2914,11 @@ export function TasksPage() {
       {showActiveGroups
         ? groups.map((group) =>
         group.items.length === 0 ? null : (
-          <div key={group.key}>
-            <h3>{localizeUiOptions(GROUP_TITLE, uiText)[group.key]}</h3>
+          <div className={`task-list-group group-${group.key}`} key={group.key}>
+            <h3>{localizeUiOptions(GROUP_TITLE, uiText)[group.key]}<span>{group.items.length}</span></h3>
             {group.items.map((item) => (
-              <div className={`row task-row${item.overdue ? " task-row-overdue" : ""}${item.status === "in_progress" ? " task-row-progress" : ""}${item.status === "waiting" ? " task-row-waiting" : ""}`} key={item.id}>
+              <TaskCard item={item} key={item.id}>
                 <div className="task-row-main">
-                  <div className="task-row-title">
-                    <b>{item.title}</b>
-                    <span
-                      className={`deal-flag${item.status === "done" ? " deal-flag-done" : ""}${
-                        item.status === "in_progress" ? " deal-flag-progress" : ""
-                      }`}
-                    >
-                      {statusText(item)}
-                    </span>
-                    {item.overdue && !isScheduledSend(item) ? <span className="deal-flag">{uiText("Просрочено")}</span> : null}
-                    {isScheduledSend(item) ? <span className="deal-flag">{uiText("Отправка запланирована")}</span> : null}
-                    {item.executionStatus === "failed" && !isScheduledSend(item) ? (
-                      <span className="deal-flag">{uiText("Отправка не удалась")}</span>
-                    ) : null}
-                    {item.campaignId ? <span className="deal-flag">{uiText("Рассылка")}</span> : null}
-                  </div>
                   <div className="task-meta-grid">
                     <div>
                       <span className="muted">{uiText("Срок")}</span>
@@ -3067,7 +3107,7 @@ export function TasksPage() {
                         {uiText("Повторить файл")}</button>
                     </div>
                   ) : null}
-                  {item.status === "open" || item.status === "waiting" ? (
+                  {item.status === "open" || item.status === "in_progress" || item.status === "waiting" ? (
                     <>
                       {String(item.id).startsWith("campaign:") ? (
                         <span className="muted">{uiText("Отправка уйдёт в срок рассылки")}</span>
@@ -3177,7 +3217,7 @@ export function TasksPage() {
                     <span className="muted">{statusText(item)}</span>
                   )}
                 </div>
-              </div>
+              </TaskCard>
             ))}
           </div>
         ),
@@ -3194,14 +3234,8 @@ export function TasksPage() {
                 const result = taskResultLine(item);
                 const when = taskDoneAt(item);
                 return (
-                  <div className={`row task-row task-row-done${item.status === "canceled" ? " task-row-canceled" : ""}`} key={item.id}>
+                  <TaskCard item={item} key={item.id}>
                     <div className="task-row-main">
-                      <div className="task-row-title">
-                        <b>{item.title}</b>
-                        <span className={`deal-flag ${item.status === "canceled" ? "" : "deal-flag-done"}`}>
-                          {item.status === "canceled" ? uiText("Отменена") : uiText("Сделано")}
-                        </span>
-                      </div>
                       <div className="task-meta-grid">
                         <div>
                           <span className="muted">{uiText("Создана")}</span>
@@ -3248,7 +3282,7 @@ export function TasksPage() {
                         </div>
                       </div>
                     </div>
-                  </div>
+                  </TaskCard>
                 );
               })}
             </div>
