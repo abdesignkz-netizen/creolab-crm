@@ -6,6 +6,7 @@ import { resolvePeriodRange, type PeriodPreset } from "./periodRange.ts";
 
 export const AI_FEATURES = [
   "AI_MANAGER_REPLY",
+  "AI_VOICE_TRANSCRIPTION",
   "AI_CRM_COMMAND",
   "AI_SUMMARY",
   "AI_REPORT",

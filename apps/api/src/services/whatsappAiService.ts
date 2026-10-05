@@ -6,12 +6,13 @@ import { writeAudit } from "../lib/audit.ts";
 import { encryptSecret } from "../lib/secretBox.ts";
 import { directWhatsAppTypes, ownedWhatsApp } from "./whatsappConnectionService.ts";
 import { getEntitlements, requireFeature } from "./entitlementService.ts";
-import { canConsume } from "./billingResourceService.ts";
+import { canConsume, aiCreditCost } from "./billingResourceService.ts";
 import { getEffectiveTenantSettings, getEffectiveLlmConfig } from "./runtimeSettings.ts";
 import { decideAutomationPolicy } from "./aiAutomationPolicyService.ts";
 import { parseAIAutomationSettings, isWithinAiSchedule } from "./aiAutomationSettings.ts";
 import { detectHandoffReason, isClientRefusalText } from "./aiConversationPolicyService.ts";
 import { answerWhatsAppWithLlm } from "./llmClient.ts";
+import { isVoiceAttachment, transcribeVoiceAttachment, voiceTranscript } from "./voiceTranscriptionService.ts";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 export function whatsAppAiFailureReason(code: string | null | undefined) {
@@ -21,6 +22,8 @@ export function whatsAppAiFailureReason(code: string | null | undefined) {
     ai_credits_exhausted: "AI_CREDITS_EXHAUSTED", http_401: "AI_PROVIDER_AUTH", http_403: "AI_PROVIDER_AUTH",
     http_429: "AI_PROVIDER_LIMIT", http_400: "AI_PROVIDER_CONFIG", http_404: "AI_PROVIDER_CONFIG",
     ai_invalid_response: "AI_INVALID_RESPONSE", empty_completion: "AI_INVALID_RESPONSE",
+    voice_unavailable: "AI_VOICE_UNAVAILABLE", voice_empty: "AI_VOICE_UNAVAILABLE", voice_interrupted: "AI_VOICE_UNAVAILABLE",
+    voice_unsupported: "AI_VOICE_UNSUPPORTED", voice_too_large: "AI_VOICE_UNSUPPORTED", voice_provider_error: "AI_VOICE_UNAVAILABLE",
   };
   return reasons[code || ""] || "AI_PROVIDER_UNAVAILABLE";
 }
@@ -115,11 +118,11 @@ export async function processWhatsAppAiReply(prisma: PrismaClient, event: { id: 
   const readiness = await directAiReadiness(prisma, tenantId);
   if (readiness) { await handoff(prisma, tenantId, conversationId, version, revision, whatsAppAiFailureReason(readiness)); return; }
   if (!await directAiSendAllowed(prisma, tenantId, conversationId, version, revision)) { await handoff(prisma, tenantId, conversationId, version, revision, "AI_CHANNEL_RESTRICTED"); return; }
-  const history = await prisma.message.findMany({ where: { tenantId, conversationId, internal: false, operationState: { notIn: ["queued", "sending", "failed", "canceled", "unknown"] } }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 30, include: { attachments: { select: { id: true } } } });
+  const history = await prisma.message.findMany({ where: { tenantId, conversationId, internal: false, operationState: { notIn: ["queued", "sending", "failed", "canceled", "unknown"] } }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 30, include: { attachments: { select: { id: true, mimeType: true, fileName: true, transcriptionJson: true } } } });
   const latest = history.find(message => message.id === payload.messageId);
   if (!latest || latest.direction !== "inbound") return;
   const detected = detectHandoffReason(latest.text || "");
-  if (isClientRefusalText(latest.text || "") || /адаммен|оператормен|менеджермен|адамға|менеджерге|talk to.*human|speak to.*human/i.test(latest.text || "") || detected && (detected.code === "CLIENT_REQUESTED_HUMAN" || settings.handoff.triggers[detected.trigger]) || latest.attachments.length && !latest.text?.trim()) {
+  if (isClientRefusalText(latest.text || "") || /адаммен|оператормен|менеджермен|адамға|менеджерге|talk to.*human|speak to.*human/i.test(latest.text || "") || detected && (detected.code === "CLIENT_REQUESTED_HUMAN" || settings.handoff.triggers[detected.trigger]) || latest.attachments.length && !latest.text?.trim() && !latest.attachments.some(isVoiceAttachment)) {
     await handoff(prisma, tenantId, conversationId, version, revision, detected?.code || "CLIENT_REQUESTED_HUMAN", settings.handoff.afterMode === "assist" ? "paused" : "human"); return;
   }
   if (!(await canConsume(prisma, tenantId, "AI_CREDITS", 1)).allowed) { await handoff(prisma, tenantId, conversationId, version, revision, "AI_CREDITS_EXHAUSTED"); return; }
@@ -139,11 +142,48 @@ export async function processWhatsAppAiReply(prisma: PrismaClient, event: { id: 
     return tx.outboundOperation.create({ data: { tenantId, conversationId, idempotencyKey: event.id, controlVersion: version, requestHash: String(revision), state: "generating" } });
   });
   if (!claim) return;
+  const cancel = async () => { await prisma.outboundOperation.updateMany({ where: { id: claim.id, state: "generating" }, data: { state: "canceled" } }); };
+  const messageContent = (message: typeof latest) => [(message.text || "").slice(0, 6000), ...message.attachments.map(file => {
+    const transcript = voiceTranscript(file.transcriptionJson);
+    return transcript ? `[Расшифровка голосового сообщения]: ${transcript}` : "[К сообщению приложен файл, содержимое недоступно.]";
+  })].filter(Boolean).join("\n");
+  // Include a burst of voice notes followed by text, not just the final message.
+  const lastReply = history.findIndex(message => message.direction === "outbound");
+  const pending = history.slice(0, lastReply < 0 ? history.length : lastReply).filter(message => message.direction === "inbound");
+  if (!pending.some(message => message.id === latest.id)) pending.push(latest);
+  const voices = pending.flatMap(message => message.attachments.filter(file => isVoiceAttachment(file) && !voiceTranscript(file.transcriptionJson)));
+  const voiceDeadline = AbortSignal.timeout(55000);
   let answer: Awaited<ReturnType<typeof answerWhatsAppWithLlm>> = null;
   let failureReason = "AI_PROVIDER_UNAVAILABLE";
-  try { answer = await generate({ prisma, tenantId, integrationId: conversation.connection!.integrationId, conversationId,
-    history: [...history.reverse().filter(message => message.id !== latest.id), latest].map(message => ({ role: message.direction === "inbound" ? "user" : "assistant", content: (message.text || "").slice(0, 6000) + (message.attachments.length ? "\n[К сообщению приложен файл, содержимое недоступно.]" : "") })) }); }
-  catch (error) { failureReason = whatsAppAiFailureReason(error instanceof ApiError ? error.code : null); }
+  try {
+    if (voices.length > 5) throw new ApiError(422, "voice_unsupported", "Слишком много голосовых сообщений");
+    if (voices.length && !(await canConsume(prisma, tenantId, "AI_CREDITS", voices.length * aiCreditCost("AI_VOICE_TRANSCRIPTION") + aiCreditCost("AI_MANAGER_REPLY"))).allowed) {
+      throw new ApiError(403, "ai_credits_exhausted", "Недостаточно AI-кредитов");
+    }
+    for (const file of voices.reverse()) {
+      if (!await directAiSendAllowed(prisma, tenantId, conversationId, version, revision)) { await cancel(); return; }
+      const text = await transcribeVoiceAttachment({ prisma, tenantId, conversationId, integrationId: conversation.connection!.integrationId, attachmentId: file.id, signal: voiceDeadline });
+      file.transcriptionJson = { status: "done", text };
+    }
+    if (!await directAiSendAllowed(prisma, tenantId, conversationId, version, revision)) { await cancel(); return; }
+    for (const message of pending) {
+      if (message.id !== latest.id && !message.attachments.some(isVoiceAttachment)) continue;
+      const text = messageContent(message), reason = detectHandoffReason(text);
+      if (isClientRefusalText(text) || /адаммен|оператормен|менеджермен|адамға|менеджерге|talk to.*human|speak to.*human/i.test(text) || reason && (reason.code === "CLIENT_REQUESTED_HUMAN" || settings.handoff.triggers[reason.trigger])) {
+        await cancel();
+        await handoff(prisma, tenantId, conversationId, version, revision, reason?.code || "CLIENT_REQUESTED_HUMAN", settings.handoff.afterMode === "assist" ? "paused" : "human"); return;
+      }
+    }
+    answer = await generate({ prisma, tenantId, integrationId: conversation.connection!.integrationId, conversationId,
+      history: [...[...history].reverse().filter(message => message.id !== latest.id), latest].map(message => ({ role: message.direction === "inbound" ? "user" : "assistant", content: messageContent(message).slice(0, 18000) })) });
+  } catch (error) {
+    if (error instanceof ApiError && error.code === "voice_pending") {
+      // A newer revision can overlap an earlier transcription. Retry using its durable cache.
+      await prisma.outboundOperation.deleteMany({ where: { id: claim.id, state: "generating" } });
+      throw new ApiError(409, "ai_generating", "ИИ распознаёт голосовое сообщение");
+    }
+    failureReason = voiceDeadline.aborted ? "AI_VOICE_UNAVAILABLE" : whatsAppAiFailureReason(error instanceof ApiError ? error.code : null);
+  }
   if (!answer || answer.handoff) {
     await prisma.outboundOperation.updateMany({ where: { id: claim.id, state: "generating" }, data: { state: "failed", error: answer?.handoff ? "needs_human" : failureReason } });
     await handoff(prisma, tenantId, conversationId, version, revision, answer?.handoff ? "LOW_CONFIDENCE" : failureReason, answer?.handoff && settings.handoff.afterMode === "assist" ? "paused" : "human"); return;

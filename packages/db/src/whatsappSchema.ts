@@ -1,5 +1,6 @@
 // Additive schema shared by PostgreSQL deployments and the local PGlite database.
 export const WHATSAPP_SQL = [
+  `ALTER TABLE "Attachment" ADD COLUMN IF NOT EXISTS "transcriptionJson" JSONB NOT NULL DEFAULT '{}'`,
   `ALTER TABLE "Conversation" ADD COLUMN IF NOT EXISTS "lastInboundMessageId" TEXT`,
   `ALTER TABLE "OutboundOperation" ADD COLUMN IF NOT EXISTS "requestHash" TEXT`,
   `CREATE TABLE IF NOT EXISTS "WhatsAppQrSession" (

@@ -1,0 +1,1 @@
+ALTER TABLE "Attachment" ADD COLUMN IF NOT EXISTS "transcriptionJson" JSONB NOT NULL DEFAULT '{}';

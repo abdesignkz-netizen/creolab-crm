@@ -777,6 +777,7 @@ model Attachment {
   mimeType       String
   sizeBytes      Int
   checksum       String?
+  transcriptionJson Json   @default("{}")
   documentType   String   @default("document")
   status         String   @default("stored")
   uploadedById   String?

@@ -87,7 +87,7 @@ export async function getUsage(prisma: PrismaClient, tenantId: string, code: str
 export const AI_CREDIT_COSTS: Readonly<Record<string, number>> = Object.freeze({
   AI_MANAGER_REPLY: 1, AI_CRM_COMMAND: 1, AI_SUMMARY: 1, AI_REPORT: 1,
   AI_LEAD_ANALYSIS: 1, AI_FOLLOW_UP: 1, AI_DOCUMENT: 1, AI_CLASSIFICATION: 1,
-  AI_KNOWLEDGE: 1, AI_OTHER: 1,
+  AI_KNOWLEDGE: 1, AI_VOICE_TRANSCRIPTION: 1, AI_OTHER: 1,
 });
 export function aiCreditCost(feature: string) { return AI_CREDIT_COSTS[feature] ?? AI_CREDIT_COSTS.AI_OTHER; }
 

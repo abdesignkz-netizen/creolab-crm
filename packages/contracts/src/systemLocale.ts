@@ -1,5 +1,7 @@
 /** Reviewed product copy only. Never pass customer content to this function. */
 export const kkSystemMessages: Readonly<Record<string, string>> = {
+  "Не удалось распознать голосовое сообщение. Прослушайте запись и ответьте клиенту.": "Дауыстық хабарламаны мәтінге айналдыру мүмкін болмады. Жазбаны тыңдап, клиентке жауап беріңіз.",
+  "Формат или размер голосового сообщения не поддерживается. Прослушайте запись и ответьте клиенту.": "Дауыстық хабарламаның пішіміне немесе көлеміне қолдау көрсетілмейді. Жазбаны тыңдап, клиентке жауап беріңіз.",
   "Конверсия закрытых сделок": "Аяқталған мәмілелердің сатылымға айналу үлесі",
   "Нет закрытых сделок": "Аяқталған мәмілелер жоқ",
   "Неизвестный результат отправки": "Жіберу нәтижесі белгісіз",
@@ -4844,6 +4846,8 @@ export const kkSystemMessages: Readonly<Record<string, string>> = {
 };
 
 const enAiMessages: Readonly<Record<string, string>> = {
+  "Не удалось распознать голосовое сообщение. Прослушайте запись и ответьте клиенту.": "Could not transcribe the voice message. Listen to the recording and reply to the customer.",
+  "Формат или размер голосового сообщения не поддерживается. Прослушайте запись и ответьте клиенту.": "The voice message format or size is not supported. Listen to the recording and reply to the customer.",
   "заявка": "inquiry",
   "Заявка с сайта": "Website inquiry",
   "Заявка из WhatsApp": "Inquiry from WhatsApp",
