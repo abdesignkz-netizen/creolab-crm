@@ -2,6 +2,7 @@ import { uiText, useUiText, localizeUiOptions } from "../../lib/uiText";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../../lib/api";
+import { formatDateTime } from "../../lib/datetime";
 
 function money(value: number) {
   return `$${Number(value || 0).toFixed(2)}`;
@@ -94,6 +95,26 @@ export function PlatformAiUsagePage({ lockedTenantId }: { lockedTenantId?: strin
           <div className="panel"><b>Average Cost / Tenant</b><p>{money(totals.averageCostPerTenant)}</p></div>
         ) : null}
       </div>
+      {(data.failedRequests || []).length ? (
+        <section className="panel">
+          <h3>{uiText("Ошибки запросов ИИ")}</h3>
+          <p className="muted">{uiText("Последние 50 ошибок за выбранный период. Код ошибки помогает определить причину сбоя.")}</p>
+          <div style={{ overflowX: "auto" }}>
+            <table className="table">
+              <thead><tr>
+                <th>{uiText("Дата")}</th><th>{uiText("Компания")}</th><th>{uiText("Провайдер")}</th>
+                <th>{uiText("Модель")}</th><th>{uiText("Операция")}</th><th>{uiText("Код ошибки")}</th>
+              </tr></thead>
+              <tbody>{data.failedRequests.map((row: any) => <tr key={row.id}>
+                <td>{formatDateTime(row.createdAt)}</td><td>{row.companyName || "—"}</td>
+                <td>{row.provider}</td><td>{row.model}</td>
+                <td>{row.feature === "AI_VOICE_TRANSCRIPTION" ? uiText("Распознавание голосового сообщения") : row.feature}</td>
+                <td><code>{row.errorCode}</code></td>
+              </tr>)}</tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
       {(data.anomalies || []).length ? (
         <div className="banner warn">
           ⚠ AI Usage anomaly

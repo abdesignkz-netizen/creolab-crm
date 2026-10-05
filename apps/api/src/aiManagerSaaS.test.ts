@@ -7,7 +7,7 @@ import { decryptSecret } from "./lib/secretBox.ts";
 import type { AuthContext } from "./lib/types.ts";
 import { sharedAiManagerUrl } from "./services/aiManagerConfig.ts";
 import { setGreenApiFetchForTests } from "./services/greenApiWebhook.ts";
-import { recordAiUsage, listPlatformAiUsage } from "./services/aiUsageService.ts";
+import { recordAiUsage, listPlatformAiUsage, getTenantAiUsage } from "./services/aiUsageService.ts";
 import {
   getPublishedTenantAiContext,
   buildTenantAiSystemPreamble,
@@ -484,5 +484,23 @@ describe("shared AI Manager SaaS", () => {
     assert.equal(healthBody.sellerUrl, undefined);
     assert.ok(!JSON.stringify(healthBody).includes("inputTokens"));
     assert.ok(!JSON.stringify(healthBody).includes("totalCost"));
+  });
+
+  it("shows bounded failure diagnostics to service admins and respects company and period filters", async () => {
+    await prisma.aIUsageEvent.createMany({ data: [
+      { tenantId: tenantA, provider: "openai", model: "whisper-1", feature: "AI_VOICE_TRANSCRIPTION", status: "failed", errorCode: "voice_http_404" },
+      { tenantId: tenantB, provider: "anymodel", model: "whisper-1", feature: "AI_VOICE_TRANSCRIPTION", status: "failed", errorCode: "voice_timeout" },
+      { tenantId: tenantA, provider: "openai", model: "whisper-1", feature: "AI_VOICE_TRANSCRIPTION", status: "failed", errorCode: "PRIVATE BODY WITH CUSTOMER CONTENT" },
+      { tenantId: tenantA, provider: "openai", model: "old-model", feature: "AI_VOICE_TRANSCRIPTION", status: "failed", errorCode: "old_error", createdAt: new Date("2020-01-01") },
+    ] });
+    const platform = await listPlatformAiUsage(prisma, platformAuth, { period: "today", tenantId: tenantA, feature: "AI_VOICE_TRANSCRIPTION" });
+    assert.equal(platform.failedRequests.length, 2);
+    assert.ok(platform.failedRequests.some(row => row.errorCode === "voice_http_404"));
+    assert.ok(platform.failedRequests.some(row => row.errorCode === "unknown_error"));
+    assert.doesNotMatch(JSON.stringify(platform.failedRequests), /PRIVATE BODY|old_error|voice_timeout/);
+    const tenant = await getTenantAiUsage(prisma, platformAuth, tenantB, { period: "today" });
+    assert.ok(tenant.failedRequests.some(row => row.errorCode === "voice_timeout"));
+    assert.ok(!tenant.failedRequests.some(row => row.errorCode === "voice_http_404"));
+    await assert.rejects(() => getTenantAiUsage(prisma, ownerAuth, tenantB, { period: "today" }));
   });
 });

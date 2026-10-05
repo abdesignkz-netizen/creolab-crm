@@ -29,6 +29,7 @@ describe("WhatsApp provider connections", () => {
   let mediaResponse = Buffer.alloc(0);
   let llmCalls = 0, llmStatus = 200, llmInput: any;
   let voiceCalls = 0, voiceStatus = 200, voiceText = "Сәлеметсіз бе! Қызметтеріңіз туралы айтып беріңізші.";
+  let voiceBody: string | undefined;
   let onTranscribe: (() => Promise<void>) | undefined;
   let onCloudSend: (() => Promise<void>) | undefined;
   const oldLlmKey = process.env.OPENAI_API_KEY, oldLlmUrl = process.env.OPENAI_BASE_URL;
@@ -56,7 +57,7 @@ describe("WhatsApp provider connections", () => {
         assert.ok(file.size > 0); assert.ok(init.signal); assert.equal(init.redirect, "error");
         const hook = onTranscribe; onTranscribe = undefined; await hook?.();
         if (voiceStatus === 0) throw new DOMException("Timed out", "TimeoutError");
-        return new Response(JSON.stringify(voiceStatus === 200 ? { text: voiceText } : { error: "PRIVATE-VOICE-PROVIDER-ERROR" }), { status: voiceStatus, headers: { "x-request-id": `voice-${voiceCalls}` } });
+        return new Response(voiceBody ?? JSON.stringify(voiceStatus === 200 ? { text: voiceText } : { error: "PRIVATE-VOICE-PROVIDER-ERROR" }), { status: voiceStatus, headers: { "x-request-id": `voice-${voiceCalls}` } });
       }
       if (u.hostname === "llm.example.test") { llmCalls++; llmInput = JSON.parse(String(init?.body)); if (llmStatus !== 200) return new Response(JSON.stringify({ error: { message: "PRIVATE-PROVIDER-ERROR" } }), { status: llmStatus }); return new Response(JSON.stringify({ id: `ai-request-${llmCalls}`, choices: [{ message: { content: JSON.stringify({ reply: "Сәлеметсіз бе! Компаниямыздың қызметтері туралы айтып беремін.", handoff: false }) } }], usage: { prompt_tokens: 50, completion_tokens: 20, total_tokens: 70 } }), { headers: { "content-type": "application/json" } }); }
       if (u.hostname === "mmg.whatsapp.net") { assert.equal(init?.redirect, "error"); assert.ok(init?.signal); return new Response(new Uint8Array(mediaResponse)); }
@@ -434,7 +435,16 @@ describe("WhatsApp provider connections", () => {
       const { event } = await voiceEvent(qrId);
       await processWhatsAppAiReply(prisma, event, async () => { assert.fail("Must hand off a spoken request for a human"); });
       assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id: event.entityId } })).attentionReason, "CLIENT_REQUESTED_HUMAN");
-      for (const [status, text, reason] of [[200, "", "AI_VOICE_UNAVAILABLE"], [500, "", "AI_VOICE_UNAVAILABLE"], [0, "", "AI_VOICE_UNAVAILABLE"], [401, "", "AI_PROVIDER_AUTH"], [429, "", "AI_PROVIDER_LIMIT"]] as const) {
+      for (const [status, text, reason, code] of [
+        [200, "", "AI_VOICE_EMPTY", "voice_empty"],
+        [500, "", "AI_VOICE_PROVIDER_UNAVAILABLE", "voice_http_500"],
+        [0, "", "AI_VOICE_TIMEOUT", "voice_timeout"],
+        [400, "", "AI_VOICE_CONFIG", "voice_http_400"],
+        [404, "", "AI_VOICE_CONFIG", "voice_http_404"],
+        [413, "", "AI_VOICE_UNSUPPORTED", "voice_http_413"],
+        [401, "", "AI_PROVIDER_AUTH", "voice_http_401"],
+        [429, "", "AI_PROVIDER_LIMIT", "voice_http_429"],
+      ] as const) {
         voiceStatus = status; voiceText = text;
         const { event, file } = await voiceEvent(cloudId);
         await processWhatsAppAiReply(prisma, event, async () => { assert.fail("Never invent an answer to unrecognised speech"); });
@@ -443,13 +453,32 @@ describe("WhatsApp provider connections", () => {
         const saved = await prisma.attachment.findUniqueOrThrow({ where: { id: file.id } });
         assert.doesNotMatch(JSON.stringify(saved.transcriptionJson), /PRIVATE-VOICE/);
         const usage = await prisma.aIUsageEvent.findFirstOrThrow({ where: { conversationId: event.entityId, feature: "AI_VOICE_TRANSCRIPTION" } }); assert.equal(usage.status, "failed");
+        assert.equal(usage.errorCode, code);
+        assert.equal((saved.transcriptionJson as any).errorCode, code);
         assert.equal(await prisma.message.count({ where: { connectionScopedId: event.id } }), 0);
       }
-      for (const reason of ["AI_VOICE_UNAVAILABLE", "AI_VOICE_UNSUPPORTED"]) {
+      for (const reason of ["AI_VOICE_UNAVAILABLE", "AI_VOICE_UNSUPPORTED", "AI_VOICE_EMPTY", "AI_VOICE_CONFIG", "AI_VOICE_TIMEOUT", "AI_VOICE_PROVIDER_UNAVAILABLE", "AI_VOICE_INVALID_RESPONSE"]) {
         const ru = attentionReasonLabel(reason, undefined, "ru");
         assert.notEqual(attentionReasonLabel(reason, undefined, "kk"), ru); assert.notEqual(attentionReasonLabel(reason, undefined, "en"), ru);
       }
     } finally { voiceText = originalText; voiceStatus = 200; }
+  });
+  it("distinguishes invalid provider responses and retries a stored voice after the service recovers", async () => {
+    try {
+      for (const body of ["<html>PRIVATE provider error</html>", JSON.stringify({ error: "PRIVATE invalid response" }), JSON.stringify({ text: "x".repeat(12001) })]) {
+        voiceBody = body;
+        const { event, file } = await voiceEvent(qrId);
+        await processWhatsAppAiReply(prisma, event, async () => { assert.fail("Invalid transcription must not generate a reply"); });
+        assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id: event.entityId } })).attentionReason, "AI_VOICE_INVALID_RESPONSE");
+        assert.deepEqual((await prisma.attachment.findUniqueOrThrow({ where: { id: file.id } })).transcriptionJson, { status: "failed", errorCode: "voice_invalid_response" });
+        voiceBody = undefined;
+        assert.equal((await post(`/api/v1/conversations/${event.entityId}/return-to-ai`)).status, 200);
+        const retry = await prisma.outboxEvent.findFirstOrThrow({ where: { entityId: event.entityId, type: "whatsapp.ai_reply", id: { not: event.id } } });
+        await processWhatsAppAiReply(prisma, retry);
+        assert.equal(await prisma.message.count({ where: { connectionScopedId: retry.id } }), 1);
+        assert.equal(voiceTranscript((await prisma.attachment.findUniqueOrThrow({ where: { id: file.id } })).transcriptionJson), voiceText);
+      }
+    } finally { voiceBody = undefined; }
   });
   it("blocks foreign attachments, unsafe paths, missing files, oversized and unsupported audio before provider calls", async () => {
     const { event, file } = await voiceEvent(qrId);

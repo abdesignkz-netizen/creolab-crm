@@ -22,10 +22,14 @@ export function whatsAppAiFailureReason(code: string | null | undefined) {
     ai_credits_exhausted: "AI_CREDITS_EXHAUSTED", http_401: "AI_PROVIDER_AUTH", http_403: "AI_PROVIDER_AUTH",
     http_429: "AI_PROVIDER_LIMIT", http_400: "AI_PROVIDER_CONFIG", http_404: "AI_PROVIDER_CONFIG",
     ai_invalid_response: "AI_INVALID_RESPONSE", empty_completion: "AI_INVALID_RESPONSE",
-    voice_unavailable: "AI_VOICE_UNAVAILABLE", voice_empty: "AI_VOICE_UNAVAILABLE", voice_interrupted: "AI_VOICE_UNAVAILABLE",
+    voice_unavailable: "AI_VOICE_UNAVAILABLE", voice_empty: "AI_VOICE_EMPTY", voice_interrupted: "AI_VOICE_UNAVAILABLE",
     voice_unsupported: "AI_VOICE_UNSUPPORTED", voice_too_large: "AI_VOICE_UNSUPPORTED", voice_provider_error: "AI_VOICE_UNAVAILABLE",
+    voice_timeout: "AI_VOICE_TIMEOUT", voice_network_error: "AI_VOICE_PROVIDER_UNAVAILABLE", voice_invalid_response: "AI_VOICE_INVALID_RESPONSE",
+    voice_http_400: "AI_VOICE_CONFIG", voice_http_404: "AI_VOICE_CONFIG", voice_http_405: "AI_VOICE_CONFIG", voice_http_422: "AI_VOICE_CONFIG",
+    voice_http_401: "AI_PROVIDER_AUTH", voice_http_403: "AI_PROVIDER_AUTH", voice_http_402: "AI_PROVIDER_LIMIT", voice_http_429: "AI_PROVIDER_LIMIT",
+    voice_http_413: "AI_VOICE_UNSUPPORTED", voice_http_415: "AI_VOICE_UNSUPPORTED", voice_http_408: "AI_VOICE_TIMEOUT", voice_http_504: "AI_VOICE_TIMEOUT",
   };
-  return reasons[code || ""] || "AI_PROVIDER_UNAVAILABLE";
+  return reasons[code || ""] || (code?.startsWith("voice_http_") ? "AI_VOICE_PROVIDER_UNAVAILABLE" : "AI_PROVIDER_UNAVAILABLE");
 }
 const record = (value: unknown) => value && typeof value === "object" ? value as Record<string, any> : {};
 const clientAiMode = (value: unknown) => { const setting = record(value).aiAutomation; return typeof setting === "string" ? setting : record(setting).mode; };
@@ -182,7 +186,7 @@ export async function processWhatsAppAiReply(prisma: PrismaClient, event: { id: 
       await prisma.outboundOperation.deleteMany({ where: { id: claim.id, state: "generating" } });
       throw new ApiError(409, "ai_generating", "ИИ распознаёт голосовое сообщение");
     }
-    failureReason = voiceDeadline.aborted ? "AI_VOICE_UNAVAILABLE" : whatsAppAiFailureReason(error instanceof ApiError ? error.code : null);
+    failureReason = voiceDeadline.aborted ? "AI_VOICE_TIMEOUT" : whatsAppAiFailureReason(error instanceof ApiError ? error.code : null);
   }
   if (!answer || answer.handoff) {
     await prisma.outboundOperation.updateMany({ where: { id: claim.id, state: "generating" }, data: { state: "failed", error: answer?.handoff ? "needs_human" : failureReason } });

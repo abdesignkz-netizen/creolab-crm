@@ -49,6 +49,20 @@ References: [Baileys session storage](https://baileys.wiki/authentication/sessio
 
 Voice recognition uses the company's effective AI provider, endpoint and credentials, independently of the WhatsApp transport. The provider must support `POST /audio/transcriptions` with multipart audio. The default model is `whisper-1`; optional `OPENAI_TRANSCRIPTION_MODEL` / `ANYMODEL_TRANSCRIPTION_MODEL` select the speech model for the corresponding provider. They do not change the reply model. There is no fallback to another provider or another company's key. Language is detected from the recording; recognition does not translate it. API format reference: https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create.
 
+### Diagnosing voice failures
+
+Service administrators can open **AI Usage → AI request errors**, globally or within a company. The report shows the latest 50 failed calls in the selected period with provider, model, operation and a safe error code. It includes previously recorded failures; older `voice_provider_error` / `voice_unavailable` values lack the original HTTP status and cannot establish its cause retroactively. The report never includes provider response bodies, prompts, recordings, transcripts or credentials, and remains inaccessible to tenant administrators.
+
+- `voice_http_400/404/405/422`: check the provider's transcription endpoint, available speech model and accepted audio format. A working chat model alone does not confirm that transcription is supported.
+- `voice_http_401/403`: check the selected company's provider credential and permissions.
+- `voice_http_402/429`: check provider balance and request limits.
+- `voice_http_413/415`: audio size or format rejected.
+- `voice_timeout`, `voice_http_408/504`: recognition exceeded the request timeout or provider deadline.
+- Other `voice_http_5xx` or `voice_network_error`: provider/network failure.
+- `voice_empty`: a valid text response was empty; `voice_invalid_response`: JSON or response structure was invalid.
+
+After correcting the cause, **Return to AI** retries the stored failed voice recording. Successful transcripts are cached; do not ask the customer to resend an attachment that is already stored. A screenshot of the generic failure banner alone does not prove a provider configuration problem or successful production transcription.
+
 Supported audio: OGG/Opus (WhatsApp voice notes), MP3, M4A/MP4 audio, WAV, FLAC and WebM audio, up to the existing 16 MiB attachment limit. AAC and AMR are retained for staff but are not converted automatically. Requests time out after 20 seconds per recording; a batch of up to five unprocessed recordings has a 55-second total recognition budget. A voice note followed immediately by text is included in the same reply context.
 
 The original audio and caption remain unchanged. Successful transcripts are cached privately on the attachment, scoped to the tenant and conversation. No public audio URL is sent to the model. Storage access verifies the owning inbound message, the file path and actual file size. Concurrent workers share a transcription claim; retries reuse completed transcripts. A crashed, unfinished claim is handed to staff rather than automatically repeating an uncertain paid request.

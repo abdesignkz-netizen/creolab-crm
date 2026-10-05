@@ -84,16 +84,26 @@ export async function transcribeVoiceAttachment(input: {
     requestId = response.headers.get("x-request-id");
     if (!response.ok) {
       await response.body?.cancel();
-      throw fail([401, 403, 429].includes(response.status) ? `http_${response.status}` : "voice_provider_error");
+      // Preserve the HTTP status without storing the provider body (which may
+      // contain customer content). A rejected model is not unrecognisable speech.
+      throw fail(`voice_http_${response.status}`);
     }
-    const data = await response.json();
-    text = typeof data?.text === "string" ? data.text.trim() : "";
-    if (!text || text.length > 12000) { text = ""; throw fail("voice_empty"); }
+    let data: unknown;
+    try { data = await response.json(); }
+    catch (error) {
+      if (signal.aborted) throw error;
+      throw fail("voice_invalid_response");
+    }
+    if (typeof object(data).text !== "string") throw fail("voice_invalid_response");
+    text = (object(data).text as string).trim();
+    if (text.length > 12000) { text = ""; throw fail("voice_invalid_response"); }
+    if (!text) throw fail("voice_empty");
     await prisma.attachment.updateMany({ where: { id: attachmentId, tenantId, transcriptionJson: { equals: claim } },
       data: { transcriptionJson: { status: "done", text } } });
     return text;
   } catch (error) {
-    errorCode = error instanceof ApiError ? (error.code === "limit_exceeded" ? "ai_credits_exhausted" : error.code === "subscription_required" ? "feature_required" : error.code) : "voice_unavailable";
+    errorCode = error instanceof ApiError ? (error.code === "limit_exceeded" ? "ai_credits_exhausted" : error.code === "subscription_required" ? "feature_required" : error.code)
+      : input.signal?.aborted || error instanceof Error && ["TimeoutError", "AbortError"].includes(error.name) ? "voice_timeout" : "voice_network_error";
     await prisma.attachment.updateMany({ where: { id: attachmentId, tenantId, transcriptionJson: { equals: claim } },
       data: { transcriptionJson: { status: "failed", errorCode } } });
     throw fail(errorCode);

@@ -205,6 +205,16 @@ function sumTokens(rows: Array<{ inputTokens: number | null; outputTokens: numbe
   return { requests, inputTokens, outputTokens, totalTokens, cost };
 }
 
+async function recentFailedRequests(prisma: PrismaClient, where: Prisma.AIUsageEventWhereInput) {
+  // Only service administrators call the reports below. Do not expose prompts,
+  // recordings, transcripts, credentials or raw provider response bodies here.
+  const rows = await prisma.aIUsageEvent.findMany({ where: { ...where, status: "failed" },
+    select: { id: true, createdAt: true, tenant: { select: { name: true } }, provider: true, model: true,
+      feature: true, errorCode: true, latencyMs: true }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 50 });
+  return rows.map(({ tenant, errorCode, ...row }) => ({ ...row, companyName: tenant?.name || null,
+    errorCode: errorCode && /^[a-zA-Z0-9_:-]{1,100}$/.test(errorCode) ? errorCode : "unknown_error" }));
+}
+
 export async function listPlatformAiUsage(
   prisma: PrismaClient,
   auth: AuthContext,
@@ -281,6 +291,7 @@ export async function listPlatformAiUsage(
 
   return {
     period: { preset, from, to },
+    failedRequests: await recentFailedRequests(prisma, where),
     totals: {
       requests: totals.requests,
       inputTokens: totals.inputTokens,
@@ -359,6 +370,7 @@ export async function getTenantAiUsage(
   const limits = (config?.limitsJson || {}) as { monthlyAiSoftLimit?: number; monthlyAiHardLimit?: number };
   return {
     tenantId,
+    failedRequests: await recentFailedRequests(prisma, where),
     period: { preset, from, to },
     totals,
     byFeature: group((row) => row.feature),
