@@ -16,7 +16,10 @@ describe("integrations foundation", () => {
     const { seedDatabase } = await import("../../../packages/db/src/seed.ts");
     await seedDatabase();
     const form = await prisma.formDefinition.findFirst({ where: { active: true } });
-    formKey = form?.publicKey || "";
+    // Simulate an existing deployment whose seeded form still has its historical key.
+    assert.ok(form);
+    await prisma.formDefinition.update({ where: { id: form.id }, data: { publicKey: "frm_creolab_site_demo" } });
+    formKey = "frm_creolab_site_demo";
     assert.ok(formKey);
 
     const app = createApp(prisma);
@@ -49,6 +52,9 @@ describe("integrations foundation", () => {
     assert.ok(Array.isArray(body.leads));
     assert.ok(body.leads.some((i: { catalogType: string }) => i.catalogType === "WEBSITE_FORM"));
     assert.ok(body.leads.some((i: { catalogType: string }) => i.catalogType === "WEBHOOK_API"));
+    const site = body.leads.find((item: any) => item.catalogType === "WEBSITE_FORM");
+    assert.match(site.submitUrl, /\/frm_basqar_site_demo\/submissions$/);
+    assert.equal(site.publicKey, "frm_basqar_site_demo");
     assert.ok(body.notifications?.employeeTelegram);
     assert.ok(Array.isArray(body.eventLog));
   });
@@ -141,4 +147,37 @@ describe("integrations foundation", () => {
     const forbidden = await fetch(`${url}/api/v1/integrations/${other.id}/health-check`, { method: "POST", headers: { cookie } });
     assert.equal(forbidden.status, 404);
   });
+  it("BasQar and historical form URLs share deduplication and origin restrictions", async () => {
+    const payload = { name: "Brand migration", phone: "+77013000003", message: "same submission through either alias" };
+    for (const [key, expected] of [["frm_basqar_site_demo", 202], ["frm_creolab_site_demo", 200]] as const) {
+      const response = await fetch(`${url}/public/forms/${key}/submissions`, {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload),
+      });
+      assert.equal(response.status, expected, await response.text());
+    }
+    const blocked = await fetch(`${url}/public/forms/frm_basqar_site_demo/submissions`, {
+      method: "POST", headers: { "content-type": "application/json", origin: "https://untrusted.example" }, body: JSON.stringify(payload),
+    });
+    assert.equal(blocked.status, 403);
+    const form = await prisma.formDefinition.findUniqueOrThrow({ where: { publicKey: formKey } });
+    const { publicIntegration } = await import("./services/platformIntegrationService.ts");
+    const integration = await prisma.integration.findUniqueOrThrow({ where: { id: form.integrationId }, include: { forms: true } });
+    const serialized = publicIntegration(integration);
+    assert.ok(JSON.stringify(serialized.forms).includes("frm_basqar_site_demo"));
+    assert.ok(!JSON.stringify(serialized.forms).includes("frm_creolab_site_demo"));
+  });
+
+  it("rejects ambiguous aliases instead of delivering a lead to another company", async () => {
+    const original = await prisma.formDefinition.findUniqueOrThrow({ where: { publicKey: formKey } });
+    const tenant = await prisma.tenant.findFirstOrThrow({ where: { id: { not: original.tenantId } } });
+    const integration = await prisma.integration.create({ data: { tenantId: tenant.id, type: "form", name: "Collision", status: "active" } });
+    const collision = await prisma.formDefinition.create({ data: { tenantId: tenant.id, integrationId: integration.id, publicKey: "frm_basqar_site_demo", name: "Collision", fieldsJson: {} } });
+    try {
+      for (const key of [formKey, "frm_basqar_site_demo"]) {
+        const response = await fetch(`${url}/public/forms/${key}/submissions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Do not route", phone: "+77013000004" }) });
+        assert.equal(response.status, 404);
+      }
+    } finally { await prisma.formDefinition.delete({ where: { id: collision.id } }); }
+  });
+
 });

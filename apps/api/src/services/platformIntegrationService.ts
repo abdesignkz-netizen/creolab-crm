@@ -1,3 +1,4 @@
+import { publicFormKey } from "@creolab/contracts";
 import { randomBytes } from "node:crypto";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { config } from "../config.ts";
@@ -81,16 +82,16 @@ export function publicIntegration(row: {
     lastErrorCode: row.lastErrorCode,
     automationMode: row.automationMode,
     testMode: row.testMode,
-    publicKey: row.publicKey,
+    publicKey: row.type === "form" && row.publicKey ? publicFormKey(row.publicKey) : row.publicKey,
     secretSet: Boolean(row.secretHash),
     forms: (row.forms || []).map((form) => ({
       id: form.id,
-      publicKey: form.publicKey,
+      publicKey: publicFormKey(form.publicKey),
       name: form.name,
       fields: form.fieldsJson,
       allowedDomains: form.allowedDomains,
       active: form.active,
-      submitUrl: `${config.apiBaseUrl}/public/forms/${form.publicKey}/submissions`,
+      submitUrl: `${config.apiBaseUrl}/public/forms/${publicFormKey(form.publicKey)}/submissions`,
     })),
     eventsUrl: row.type === "webhook" ? `${config.apiBaseUrl}/api/v1/integrations/${row.id}/events` : null,
   };

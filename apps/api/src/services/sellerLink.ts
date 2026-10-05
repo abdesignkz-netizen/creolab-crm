@@ -1,3 +1,4 @@
+import { publicFormKey } from "@creolab/contracts";
 import { createHash, randomBytes } from "node:crypto";
 import type { PrismaClient } from "@creolab/db";
 import { crmModeToSeller, sellerModeToCrm, validateClientPhone } from "@creolab/contracts";
@@ -1450,8 +1451,8 @@ export async function integrationSetup(prisma: PrismaClient, auth: AuthContext) 
       ? {
           connected: true,
           name: form.name,
-          publicKey: form.publicKey,
-          submitUrl: `${apiBase}/public/forms/${form.publicKey}/submissions`,
+          publicKey: publicFormKey(form.publicKey),
+          submitUrl: `${apiBase}/public/forms/${publicFormKey(form.publicKey)}/submissions`,
           connectionStatus: "CONNECTED",
           healthStatus: formHealth,
           healthLabel:

@@ -1,3 +1,4 @@
+import { publicFormKeyAliases } from "@creolab/contracts";
 import { canUseFeature } from "./entitlementService.ts";
 import { loadTenantServices, matchTenantService, detectTenantService, validateTenantService } from "./tenantServiceCatalog.ts";
 import { createHash } from "node:crypto";
@@ -592,10 +593,13 @@ export async function submitPublicForm(
   body: Record<string, unknown>,
   meta: { origin?: string; submissionId?: string },
 ) {
-  const form = await prisma.formDefinition.findUnique({
-    where: { publicKey },
+  const forms = await prisma.formDefinition.findMany({
+    where: { publicKey: { in: publicFormKeyAliases(publicKey) } },
     include: { integration: true },
+    take: 2,
   });
+  // Never route an ambiguous alias to a different company's form.
+  const form = forms.length === 1 ? forms[0] : null;
   if (!form || !form.active) {
     throw new ApiError(404, "not_found", "Форма недоступна");
   }
@@ -642,7 +646,7 @@ export async function submitPublicForm(
   const eventKey =
     meta.submissionId ||
     lead.externalLeadId ||
-    `form:${hashPayload({ publicKey, name, phone: phone.normalized, message: lead.message })}`;
+    `form:${hashPayload({ publicKey: form.publicKey, name, phone: phone.normalized, message: lead.message })}`;
   const payloadHash = hashPayload({
     name,
     phone: phone.normalized,

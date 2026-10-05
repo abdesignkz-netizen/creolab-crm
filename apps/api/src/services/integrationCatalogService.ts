@@ -1,3 +1,4 @@
+import { publicFormKey } from "@creolab/contracts";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
@@ -159,8 +160,8 @@ export async function listIntegrationCatalog(prisma: PrismaClient, auth: AuthCon
             ? MODE_LABEL[row.automationMode as AutomationMode] || row.automationMode
             : "Наследует глобальные настройки",
         integrationId: row?.id || null,
-        submitUrl: form ? `${apiBase}/public/forms/${form.publicKey}/submissions` : null,
-        publicKey: form?.publicKey || null,
+        submitUrl: form ? `${apiBase}/public/forms/${publicFormKey(form.publicKey)}/submissions` : null,
+        publicKey: form ? publicFormKey(form.publicKey) : null,
         testMode: Boolean(row?.testMode),
         available: true,
       });
@@ -398,7 +399,7 @@ export async function runIntegrationHealthCheck(prisma: PrismaClient, auth: Auth
       ok: Boolean(integration.forms[0]?.publicKey),
       label: "Публичный endpoint",
       detail: integration.forms[0]
-        ? `${config.apiBaseUrl}/public/forms/${integration.forms[0].publicKey}/submissions`
+        ? `${config.apiBaseUrl}/public/forms/${publicFormKey(integration.forms[0].publicKey)}/submissions`
         : undefined,
     });
   }

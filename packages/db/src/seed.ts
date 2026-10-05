@@ -197,7 +197,7 @@ export async function seedDatabase() {
 
   await applyCreolabAiManagerDefaults(prisma, creolab.id);
 
-  const formPublicKey = "frm_creolab_site_demo";
+  const formPublicKey = "frm_basqar_site_demo";
   let formIntegration = await prisma.integration.findFirst({
     where: { tenantId: creolab.id, type: "form", name: "Форма сайта CREOLAB" },
   });

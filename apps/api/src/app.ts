@@ -1,3 +1,4 @@
+import { publicFormKey } from "@creolab/contracts";
 import { protectBrowserMutation, securityHeaders } from "./lib/httpSecurity.ts";
 import { getLegalBundle, renderLegalDocument } from "./services/legalDocuments.ts";
 import { setDirectWhatsAppAi } from "./services/whatsappAiService.ts";
@@ -517,7 +518,7 @@ export function createApp(prisma: PrismaClient) {
 
   // Public form: JSON + urlencoded (HTML / Tilda / WordPress webhooks). Multipart later for files.
   app.post("/public/forms/:publicKey/submissions", json, urlencoded, async (req, res) => {
-    rateLimit(`form:${req.params.publicKey}:${req.ip}`, 20);
+    rateLimit(`form:${publicFormKey(req.params.publicKey)}:${req.ip}`, 20);
     publicFormCors(req, res);
     const result = await submitPublicForm(prisma, req.params.publicKey, req.body || {}, {
       origin: req.get("origin") || undefined,
