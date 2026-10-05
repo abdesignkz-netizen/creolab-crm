@@ -697,13 +697,13 @@ export function SituationPage() {
         <div className="sit-ask-presets">
           {ASK_PRESETS.map((preset) => (
             <button
-              key={systemText(locale, preset)}
+              key={preset}
               type="button"
               className="sit-ask-chip"
               disabled={askBusy}
               onClick={() => void goAsk(systemText(locale, preset))}
             >
-              {preset}
+              {systemText(locale, preset)}
             </button>
           ))}
         </div>

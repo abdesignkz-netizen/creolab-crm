@@ -134,6 +134,10 @@ test('Entire owner and manager dashboards render translated controls while prese
   `, plugins);
   const kk = render('kk');
   for (const text of ['Кімнің жазбаларын көрсету керек','Бүкіл команда','Маған тағайындалған','Бизнес туралы сұраңыз','Жауап беру керек','Мерзімі өткен','Кезең','Русский заголовок клиента','Русское имя']) assert.ok(kk.includes(text), text);
+  const chips = html => [...html.matchAll(/<button[^>]*class="sit-ask-chip"[^>]*>(.*?)<\/button>/g)].map(match => match[1]);
+  assert.deepEqual(chips(kk), ['Бүгін неге назар аударуым керек?', 'Қай мәмілелер тоқтап тұр?', 'Қай өтінімдер өңделмеген?', 'Бүгін не өзгерді?', 'Кімнің жұмыс жүктемесі жоғары?', 'Клиенттер қай кезеңде кетіп қалады?', 'Өткен аптамен салыстыр.']);
+  assert.deepEqual(chips(render('ru')), ['Что сегодня требует моего внимания?', 'Какие сделки зависли?', 'Какие заявки не обработаны?', 'Что изменилось сегодня?', 'У кого высокая нагрузка?', 'Где теряются клиенты?', 'Сравни с прошлой неделей.']);
+  assert.deepEqual(chips(render('en')), chips(render('ru'))); // Preserve the current English fallback.
   assert.doesNotMatch(kk, /Чьи записи|Все действия|Спросите о бизнесе|Нужно ответить|Обновлено|Добрый|Важные сделки/);
   assert.match(render('kk',true), /Қазір маңызды/);
   assert.match(render('ru'), /Чьи записи показывать/);
