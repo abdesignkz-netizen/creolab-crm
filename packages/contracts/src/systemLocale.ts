@@ -1,5 +1,7 @@
 /** Reviewed product copy only. Never pass customer content to this function. */
 export const kkSystemMessages: Readonly<Record<string, string>> = {
+  "Для QR и Meta ручная синхронизация не нужна: опубликованные промпт и база знаний применяются автоматически при подготовке ответов. Green API для этого не требуется.": "QR және Meta үшін қолмен синхрондау қажет емес: жауап дайындау кезінде жарияланған ЖИ нұсқаулығы мен білім қоры автоматты түрде қолданылады. Ол үшін Green API қажет емес.",
+  "Эта синхронизация относится только к данному подключению Green API.": "Бұл синхрондау тек осы Green API қосылымына қатысты.",
   "QR и Meta используют этот ключ модели. Green API продолжает работать через подключённый AI Manager, куда передаются промпт, база знаний и название модели. Ключ модели ИИ отличается от API Token Green API.": "QR және Meta осы модель кілтін пайдаланады. Green API бұрын қосылған AI Manager арқылы жұмысын жалғастырады: оған ЖИ нұсқаулығы, білім қоры және модель атауы беріледі. ЖИ моделінің кілті мен Green API токені — бөлек деректер.",
   "При смене провайдера укажите ключ новой модели ИИ.": "Провайдерді ауыстырғанда жаңа ЖИ моделінің кілтін енгізіңіз.",
   "Это подключение через Green API. Для QR-кода и официального WhatsApp Business используйте соответствующий способ подключения.": "Бұл — Green API арқылы қосылу. QR-код немесе ресми WhatsApp Business үшін тиісті қосылу тәсілін таңдаңыз.",
@@ -4782,6 +4784,8 @@ export const kkSystemMessages: Readonly<Record<string, string>> = {
 };
 
 const enAiMessages: Readonly<Record<string, string>> = {
+  "Для QR и Meta ручная синхронизация не нужна: опубликованные промпт и база знаний применяются автоматически при подготовке ответов. Green API для этого не требуется.": "QR and Meta need no manual synchronization: published prompts and knowledge are applied automatically when preparing replies. Green API is not required.",
+  "Эта синхронизация относится только к данному подключению Green API.": "This synchronization applies only to this Green API connection.",
   "QR и Meta используют этот ключ модели. Green API продолжает работать через подключённый AI Manager, куда передаются промпт, база знаний и название модели. Ключ модели ИИ отличается от API Token Green API.": "QR and Meta use this model key. Green API continues through its connected AI Manager, which receives the prompt, knowledge base and model name. The AI model key is separate from the Green API token.",
   "При смене провайдера укажите ключ новой модели ИИ.": "When changing providers, enter the new AI model key.",
   "Это подключение через Green API. Для QR-кода и официального WhatsApp Business используйте соответствующий способ подключения.": "This connects through Green API. For QR or official WhatsApp Business, choose the corresponding connection method.",

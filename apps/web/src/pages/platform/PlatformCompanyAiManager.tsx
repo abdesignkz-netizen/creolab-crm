@@ -93,14 +93,7 @@ export function PlatformCompanyAiManager({ tenantId }: { tenantId: string }) {
             {activation.syncedAt ? uiText(" · последняя отправка {p0}", {p0: formatDateTime(activation.syncedAt)}) : ""}
           </p>
         </div>
-        {syncError ? <p className="error">{syncError}</p> : null}
-        {data.connections?.some((connection: any) => connection.type === "whatsapp_seller") ? (
-          <div className="actions">
-            <button type="button" className="btn secondary" disabled={syncBusy} onClick={() => void sendToWhatsApp()}>
-              {syncBusy ? uiText("Отправляем…") : uiText("Синхронизировать Green API")}
-            </button>
-          </div>
-        ) : null}
+        <p className="muted">{uiText("Для QR и Meta ручная синхронизация не нужна: опубликованные промпт и база знаний применяются автоматически при подготовке ответов. Green API для этого не требуется.")}</p>
       </div>
       <ModelSettings tenantId={tenantId} runtime={data.runtime || {}} onSaved={load} />
       <section className="panel stack">
@@ -109,6 +102,15 @@ export function PlatformCompanyAiManager({ tenantId }: { tenantId: string }) {
           <b>{connection.type === "whatsapp_qr" ? "WhatsApp · QR" : connection.type === "whatsapp_cloud" ? "WhatsApp · Meta" : "WhatsApp · Green API"} · {connection.name}</b>
           <p>{uiMessage(connection.activation?.prompt?.label)}</p>
           <p className="muted">{uiMessage(connection.activation?.prompt?.reason)}</p>
+          {connection.type === "whatsapp_seller" && connection.status === "active" ? <>
+            <p className="muted">{uiText("Эта синхронизация относится только к данному подключению Green API.")}</p>
+            {syncError ? <p className="error">{syncError}</p> : null}
+            <div className="actions">
+              <button type="button" className="btn secondary" disabled={syncBusy} onClick={() => void sendToWhatsApp()}>
+                {syncBusy ? uiText("Отправляем…") : uiText("Синхронизировать Green API")}
+              </button>
+            </div>
+          </> : null}
         </div>)}
         {!data.connections?.length && <p>{uiText("Подключите WhatsApp в кабинете компании любым удобным способом.")}</p>}
       </section>
