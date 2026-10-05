@@ -537,7 +537,7 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
     conversation: {
       id: conversation.id,
       mode: conversation.mode,
-      modeLabel: conversation.mode === "human" ? "Менеджер отвечает" : conversation.mode === "paused" ? "AI отключён" : "AI отвечает",
+      modeLabel: conversation.mode === "human" ? "Менеджер отвечает" : conversation.mode === "paused" ? "AI на паузе" : "AI отвечает",
       status: conversation.status,
       channel,
       channelType: conversation.connection?.channelType || (conversation.sellerLeadId ? "whatsapp" : null),

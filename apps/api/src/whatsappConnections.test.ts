@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHmac, createCipheriv, createHash, randomBytes } from "node:crypto";
-import { getMediaKeys } from "@whiskeysockets/baileys";
+import { getMediaKeys, proto } from "@whiskeysockets/baileys";
 import { EventEmitter } from "node:events";
 import { after, before, describe, it } from "node:test";
 import { createPrismaClient } from "@creolab/db";
@@ -357,6 +357,49 @@ describe("WhatsApp provider connections", () => {
     const file = await prisma.attachment.findFirstOrThrow({ where: { tenantId, message: { conversationId: event.entityId } } });
     return { event, file };
   }
+  it("restores protobuf media bytes after the durable QR queue and processes a real-shaped voice event", async () => {
+    const mediaKey = randomBytes(32), keys = await getMediaKeys(mediaKey, "audio");
+    const plain = Buffer.from("OggS-protobuf-voice-fixture");
+    const cipher = createCipheriv("aes-256-cbc", keys.cipherKey, keys.iv);
+    const ciphertext = Buffer.concat([cipher.update(plain), cipher.final()]);
+    const mac = createHmac("sha256", keys.macKey).update(Buffer.concat([keys.iv, ciphertext])).digest().subarray(0, 10);
+    mediaResponse = Buffer.concat([ciphertext, mac]);
+    const message = proto.WebMessageInfo.fromObject({ key: { id: "qr-protobuf-voice", remoteJid: "77018887766@s.whatsapp.net" },
+      messageTimestamp: Math.floor(Date.now() / 1000), message: { audioMessage: {
+        url: "https://mmg.whatsapp.net/voice", directPath: "/voice", mediaKey,
+        fileSha256: createHash("sha256").update(plain).digest(), fileEncSha256: createHash("sha256").update(mediaResponse).digest(),
+        fileLength: plain.length, mimetype: "audio/ogg; codecs=opus", ptt: true,
+      } } });
+    // Actual Baileys protobuf objects encode binary fields as base64, unlike plain-object fixtures.
+    assert.equal(typeof JSON.parse(JSON.stringify(message)).message.audioMessage.fileSha256, "string");
+    sockets[1].ev.emit("messages.upsert", { type: "notify", messages: [message] });
+    await until(async () => (await prisma.$queryRaw<Array<{ n: bigint }>>`SELECT count(*) as n FROM "WhatsAppQrJob" WHERE "integrationId" = ${qrId} AND kind = 'inbound'`)[0].n > 0n);
+    await runtime!.tick();
+    const stored = await prisma.message.findFirstOrThrow({ where: { tenantId, providerMessageId: "qr-protobuf-voice" }, include: { attachments: true } });
+    assert.equal(stored.text, ""); assert.equal(stored.attachments.length, 1);
+    assert.equal(stored.attachments[0].mimeType, "audio/ogg");
+    assert.equal(stored.attachments[0].checksum, createHash("sha256").update(plain).digest("hex"));
+    const event = await prisma.outboxEvent.findFirstOrThrow({ where: { entityId: stored.conversationId, type: "whatsapp.ai_reply" } });
+    const before = voiceCalls;
+    await processWhatsAppAiReply(prisma, event);
+    assert.equal(voiceCalls, before + 1);
+    assert.ok(JSON.stringify(llmInput).includes(voiceText));
+    assert.equal(await prisma.message.count({ where: { connectionScopedId: event.id } }), 1);
+  });
+  it("shows a paused conversation consistently and resumes it while the number's AI remains enabled", async () => {
+    const { event } = await voiceEvent(qrId);
+    assert.equal((await post(`/api/v1/conversations/${event.entityId}/pause`)).status, 200);
+    const workspace = await (await get(`/api/v1/conversations/${event.entityId}`)).json();
+    assert.equal(workspace.conversation.mode, "paused");
+    assert.equal(workspace.conversation.modeLabel, "AI на паузе");
+    assert.equal(workspace.conversation.aiAvailable, true);
+    const channel = await prisma.channelConnection.findFirstOrThrow({ where: { integrationId: qrId } }); assert.equal(channel.autoReply, true);
+    assert.equal((await post(`/api/v1/conversations/${event.entityId}/return-to-ai`)).status, 200);
+    const resumed = await prisma.conversation.findUniqueOrThrow({ where: { id: event.entityId } }); assert.equal(resumed.mode, "ai");
+    const replyEvent = await prisma.outboxEvent.findFirstOrThrow({ where: { entityId: event.entityId, type: "whatsapp.ai_reply", id: { not: event.id } } });
+    await processWhatsAppAiReply(prisma, replyEvent);
+    assert.equal(await prisma.message.count({ where: { connectionScopedId: replyEvent.id } }), 1);
+  });
   it("transcribes QR and Meta voice notes with company context, caches once and preserves the original", async () => {
     for (const integrationId of [qrId, cloudId]) {
       const { event, file } = await voiceEvent(integrationId);

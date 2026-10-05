@@ -193,7 +193,13 @@ export function startWhatsAppQrRuntime(prisma: PrismaClient, socketFactory = mak
         for (const job of jobs) {
           if (!await claimQrLease(prisma, id, owner)) break;
           try {
-            if (job.kind === "inbound") await receiveQrMessage(prisma, id, local.socket, decode(job.encryptedPayload));
+            // Protobuf's toJSON runs before BufferJSON.replacer and turns media
+            // keys/hashes into bare base64 strings. Restore the protobuf types,
+            // including for jobs saved before this fix, before verifying media.
+            if (job.kind === "inbound") {
+              const message = proto.WebMessageInfo.fromObject(decode(job.encryptedPayload));
+              if (message.key) await receiveQrMessage(prisma, id, local.socket, { ...message, key: message.key });
+            }
             else {
               await prisma.$executeRaw`UPDATE "WhatsAppQrJob" SET state = 'sending' WHERE id = ${job.id}`;
               await deliverQrMessage(prisma, id, local.socket, decode(job.encryptedPayload).messageId, () => guardLease(prisma, id, owner));

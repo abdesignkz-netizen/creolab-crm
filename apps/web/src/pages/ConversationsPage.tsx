@@ -414,7 +414,8 @@ export function ConversationsPage() {
                 onClick={() => changeMode(() => api.takeConversation(workspace.conversation.id))}
               >
                 {uiText("Передать менеджеру")}</button>
-            ) : !staffOnly && aiManagerAllowed && workspace.conversation.aiAvailable !== false ? (
+            ) : null}
+            {workspace.conversation.mode !== "ai" && !staffOnly && aiManagerAllowed && workspace.conversation.aiAvailable !== false ? (
               <button
                 className="btn secondary"
                 type="button"

@@ -427,3 +427,37 @@ test('Server-owned contact and inquiry label catalogs have Kazakh coverage', () 
     visit(source);
   }
 });
+
+test('Paused conversations offer both AI resume and human takeover without bypassing channel or plan restrictions', async t => {
+  const previousStorage = globalThis.localStorage;
+  const previousFixture = globalThis.__conversationFixture;
+  globalThis.localStorage = { getItem: key => key === 'basqar.locale' ? globalThis.__conversationFixture?.locale || 'ru' : null };
+  t.after(() => {
+    if (previousStorage === undefined) delete globalThis.localStorage; else globalThis.localStorage = previousStorage;
+    if (previousFixture === undefined) delete globalThis.__conversationFixture; else globalThis.__conversationFixture = previousFixture;
+  });
+  const plugins = [{ name: 'paused-conversation-fixture', setup(build) { build.onLoad({ filter: /ConversationsPage\.tsx$/ }, args => {
+    const source = readFileSync(args.path, 'utf8');
+    assert.ok(source.includes('const [workspace, setWorkspace] = useState<any>(null)'));
+    return { contents: source.replace('const [workspace, setWorkspace] = useState<any>(null)', 'const [workspace, setWorkspace] = useState<any>(globalThis.__conversationFixture)'), loader: 'tsx', resolveDir: path.dirname(args.path) };
+  }); } }];
+  const { render } = await bundle(`
+    import { renderToStaticMarkup } from 'react-dom/server';
+    import { MemoryRouter } from 'react-router-dom';
+    import { ConversationsPage } from './pages/ConversationsPage';
+    import { SessionContext, emptyCaps } from './lib/session';
+    export function render(locale, mode='paused', allowed=true, channel='whatsapp') {
+      globalThis.__conversationFixture = { locale, conversation:{id:'test-conv', mode, modeLabel:mode==='paused'?'AI на паузе':'AI', channelType:channel, aiAvailable:true}, client:{id:'customer',name:'Имя клиента'}, messages:[],control:{},attribution:{},extracted:{} };
+      return renderToStaticMarkup(<SessionContext.Provider value={{me:{user:{locale},billing:{entitlements:{AI_MANAGER:allowed}}},caps:emptyCaps}}><MemoryRouter><ConversationsPage /></MemoryRouter></SessionContext.Provider>);
+    }
+  `, plugins);
+  const buttonLabels = html => [...html.matchAll(/<button\b[^>]*>(.*?)<\/button>/gs)].map(match => match[1].trim());
+  const paused = render('ru');
+  assert.match(paused, /AI на паузе/); assert.doesNotMatch(paused, /AI отключён/);
+  assert.ok(buttonLabels(paused).includes('Вернуть AI')); assert.ok(buttonLabels(paused).includes('Передать менеджеру'));
+  assert.ok(buttonLabels(render('ru','human')).includes('Вернуть AI'));
+  assert.ok(!buttonLabels(render('ru','ai')).includes('Вернуть AI'));
+  assert.ok(!buttonLabels(render('ru','paused',false)).includes('Вернуть AI'));
+  assert.ok(!buttonLabels(render('ru','paused',true,'email')).includes('Вернуть AI'));
+  const kk = render('kk'); assert.match(kk, /ЖИ кідіртілген/); assert.doesNotMatch(kk, /AI на паузе|Вернуть AI|Передать менеджеру/);
+});
