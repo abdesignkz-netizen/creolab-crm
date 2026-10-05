@@ -13,3 +13,15 @@ export function signatureCheckLabel(signer: {
   if (signer.verificationStatus === "PARSED") return uiText("Сертификат прочитан, криптопроверка ГОСТ не выполнена");
   return "";
 }
+
+export function signatureRequestLabel(status: string) {
+  const labels: Record<string, string> = {
+    PENDING: uiText("Ожидает подписания"),
+    OPENED: uiText("Ссылка открыта"),
+    SIGNED: uiText("Документ подписан"),
+    DECLINED: uiText("Подписание отклонено"),
+    EXPIRED: uiText("Срок ссылки истёк"),
+    CANCELLED: uiText("Запрос отменён"),
+  };
+  return labels[status] || status;
+}

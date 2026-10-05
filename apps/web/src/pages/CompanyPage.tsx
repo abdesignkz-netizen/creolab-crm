@@ -1,4 +1,4 @@
-import { uiText, useUiText, localizeUiOptions, uiMessage } from "../lib/uiText";
+import { uiTaskTitle, uiText, useUiText, localizeUiOptions, uiMessage } from "../lib/uiText";
 import { notifySaved } from "../components/SaveNotice";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -357,7 +357,7 @@ export function CompanyPage() {
         {cur.nextAction ? (
           <p style={{ marginTop: 10 }}>
             <b>{uiText("Следующее действие:")}</b>{" "}
-            <Link to={cur.nextAction.href}>{cur.nextAction.title}</Link>
+            <Link to={cur.nextAction.href}>{uiTaskTitle(cur.nextAction)}</Link>
             {cur.nextAction.dueLabel ? <span className="muted"> · {cur.nextAction.dueLabel}</span> : null}
           </p>
         ) : (
@@ -615,7 +615,7 @@ export function CompanyPage() {
         <ul className="company-task-list">
           {(data.tasks || []).map((t: any) => (
             <li key={t.id}>
-              <Link to={t.href}>{t.title}</Link>
+              <Link to={t.href}>{uiTaskTitle(t)}</Link>
               <span className="muted">{t.dueLabel ? ` · ${t.dueLabel}` : ""}</span>
             </li>
           ))}

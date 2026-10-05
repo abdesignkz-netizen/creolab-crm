@@ -1,3 +1,4 @@
+import { taskTitlePresentation } from "@creolab/contracts";
 import { randomUUID } from "node:crypto";
 import { resolveEsfMeasureUnitCode } from "@creolab/contracts";
 import type { PrismaClient } from "@creolab/db";
@@ -330,7 +331,7 @@ function serializeDeal(deal: any, ops: ReturnType<typeof parseOpsSettings>, curr
     amountFromItems: Boolean(items.length),
     tasks: (deal.tasks || []).map((t: any) => ({
       id: t.id,
-      title: t.title,
+      title: t.title, titlePresentation: taskTitlePresentation(t),
       dueAt: t.dueAt?.toISOString?.() || null,
       status: t.status,
       type: t.type,

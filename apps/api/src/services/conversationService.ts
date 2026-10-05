@@ -1,3 +1,4 @@
+import { taskTitlePresentation, localizedTaskTitle, systemText } from "@creolab/contracts";
 import { formatWaitReply, formatWaitSince } from "@creolab/contracts";
 import { resolvePeriodRange } from "./periodRange.ts";
 import { inferClientInterest } from "./contactInterestService.ts";
@@ -372,7 +373,7 @@ export async function listConversationsBoard(
         contactId: contact?.id || null,
         inquiryId: linkedInquiry?.id || null,
         dealId: deal?.id || null,
-        nextAction: nextTask ? { title: nextTask.title, dueAt: nextTask.dueAt, dueLabel: formatWhen(nextTask.dueAt, timeZone) } : null,
+        nextAction: nextTask ? { title: nextTask.title, titlePresentation: taskTitlePresentation(nextTask), dueAt: nextTask.dueAt, dueLabel: formatWhen(nextTask.dueAt, timeZone) } : null,
         operationalFlags,
         isToday,
         needsAttention: Boolean(conversation.needsAttention),
@@ -509,16 +510,17 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
       : displayName(contact)
     : "Неизвестный клиент";
 
+  const text = (source: string, params: Record<string, string> = {}) => systemText(auth.user.locale, source, params);
   const summary =
     conversation.contextSummary ||
     contact?.summary ||
     [
-      topic ? `Интерес: ${topic}.` : null,
-      linkedInquiry ? budgetLabel(linkedInquiry) ? `Бюджет: ${budgetLabel(linkedInquiry)}.` : "Бюджет пока не определён." : null,
-      nextTask ? `Следующее действие — ${nextTask.title}.` : "Нет следующего действия.",
+      topic ? text("Интерес: {p0}.", {p0: topic}) : null,
+      linkedInquiry ? budgetLabel(linkedInquiry) ? text("Бюджет: {p0}.", {p0: budgetLabel(linkedInquiry) || ""}) : text("Бюджет пока не определён.") : null,
+      nextTask ? text("Следующее действие — {p0}.", {p0: localizedTaskTitle(auth.user.locale || "ru", nextTask)}) : text("Нет следующего действия."),
     ]
       .filter(Boolean)
-      .join(" ") || "Краткое резюме пока не сформировано.";
+      .join(" ") || text("Краткое резюме пока не сформировано.");
 
   const extracted = {
     service: linkedInquiry?.service || null,
@@ -645,7 +647,7 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
       nextAction: nextTask
         ? {
             id: nextTask.id,
-            title: nextTask.title,
+            title: nextTask.title, titlePresentation: taskTitlePresentation(nextTask),
             dueLabel: formatWhen(nextTask.dueAt, timeZone),
             overdue: Boolean(nextTask.dueAt && nextTask.dueAt.getTime() < now.getTime()),
             ownerName: nextTask.owner?.user?.name || null,

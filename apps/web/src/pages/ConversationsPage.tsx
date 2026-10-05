@@ -1,4 +1,4 @@
-import { uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale , uiDurationLabel } from "../lib/uiText";
+import { uiTaskTitle, uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale , uiDurationLabel } from "../lib/uiText";
 import { useSession } from "../lib/session";
 import { ChannelIcon, ConversationAvatar, CONVERSATION_CHANNELS } from "../components/ConversationIdentity";
 import { useUrlState, useRequestVersion } from "../lib/useUrlState";
@@ -642,7 +642,7 @@ export function ConversationsPage() {
         ) : null}
         {workspace.control.nextAction ? (
           <div>
-            {uiText("Следующее действие:")}{" "}{workspace.control.nextAction.title}
+            {uiText("Следующее действие:")}{" "}{uiTaskTitle(workspace.control.nextAction)}
             {workspace.control.nextAction.dueLabel ? ` · ${workspace.control.nextAction.dueLabel}` : ""}
           </div>
         ) : (

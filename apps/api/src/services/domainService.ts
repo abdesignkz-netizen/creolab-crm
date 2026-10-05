@@ -1,3 +1,4 @@
+import { systemText } from "@creolab/contracts";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import {
   crmModeToSeller,
@@ -123,22 +124,22 @@ function taskContextLabel(item: {
   conversation?: { contact?: { name?: string | null } | null } | null;
   childTasks?: Array<{ status: string }>;
   segmentSnapshotJson?: unknown;
-}) {
+}, locale = "ru") {
   if (item.targetType === "group") {
     const snap = (item.segmentSnapshotJson || {}) as Record<string, unknown>;
-    const label = typeof snap.label === "string" ? snap.label : "Группа клиентов";
+    const label = typeof snap.label === "string" ? snap.label : systemText(locale, "Группа клиентов");
     const total = item.childTasks?.length || 0;
     const done = item.childTasks?.filter((child) => child.status === "done").length || 0;
     return `${label} · ${done} / ${total}`;
   }
   if (item.contact) {
     const name = [item.contact.firstName, item.contact.lastName].filter(Boolean).join(" ").trim() || item.contact.name;
-    return name || "Клиент";
+    return name || systemText(locale, "Клиент");
   }
-  if (item.inquiry) return item.inquiry.subject || item.inquiry.phoneRaw || "Заявка";
-  if (item.deal) return item.deal.title || "Сделка";
+  if (item.inquiry) return item.inquiry.subject || item.inquiry.phoneRaw || systemText(locale, "Заявка");
+  if (item.deal) return item.deal.title || systemText(locale, "Сделка");
   if (item.conversation?.contact?.name) return item.conversation.contact.name;
-  return "Без привязки";
+  return systemText(locale, "Без привязки");
 }
 
 const TASK_STATUS_LABEL: Record<string, string> = {
@@ -179,14 +180,14 @@ function taskDoneSummary(item: {
   resultText?: string | null;
   executionStatus?: string | null;
   sentAt?: Date | null;
-}) {
-  if (item.status === "canceled") return "Отменена";
+}, locale = "ru") {
+  if (item.status === "canceled") return systemText(locale, "Отменена");
   const result = item.resultCode ? TASK_RESULT_LABEL[item.resultCode] || null : null;
   const sent = item.executionStatus === "sent" || Boolean(item.sentAt) || item.resultCode === "sent";
-  if (sent && result && result !== "Отправлено") return `Отправлено · ${result}`;
-  if (sent) return "Отправлено";
-  if (result) return result;
-  return "Сделано";
+  if (sent && result && result !== "Отправлено") return `${systemText(locale, "Отправлено")} · ${systemText(locale, result)}`;
+  if (sent) return systemText(locale, "Отправлено");
+  if (result) return systemText(locale, result);
+  return systemText(locale, "Сделано");
 }
 
 const TASK_TYPE_LABEL: Record<string, string> = {
@@ -360,6 +361,7 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
     : [];
   const creatorById = new Map(creatorRows.map((row) => [row.id, row]));
 
+  const text = (source: string, params: Record<string, string | number> = {}) => systemText(auth.user.locale, source, params);
   const rows = items.map((item) => {
     const conversation = item.conversationId ? byId.get(item.conversationId) || null : null;
     const childTotal = item.childTasks.length;
@@ -385,32 +387,32 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
     const aboutParts: string[] = [];
     if (item.inquiry) {
       aboutParts.push(
-        `Заявка: ${item.inquiry.subject || item.inquiry.service || item.inquiry.companyName || "без темы"}` +
-          (item.inquiry.status ? ` (${INQUIRY_STATUS_LABEL[item.inquiry.status] || item.inquiry.status})` : ""),
+        text("Заявка: {p0}", {p0: item.inquiry.subject || item.inquiry.service || item.inquiry.companyName || text("без темы")}) +
+          (item.inquiry.status ? ` (${text(INQUIRY_STATUS_LABEL[item.inquiry.status] || item.inquiry.status)})` : ""),
       );
-      if (item.inquiry.city) aboutParts.push(`Город: ${item.inquiry.city}`);
+      if (item.inquiry.city) aboutParts.push(text("Город: {p0}", {p0: item.inquiry.city}));
     }
     if (item.deal) {
       aboutParts.push(
-        `Сделка: ${item.deal.title}` + (item.deal.stage?.name ? ` · ${item.deal.stage.name}` : ""),
+        text("Сделка: {p0}", {p0: item.deal.title}) + (item.deal.stage?.name ? ` · ${item.deal.stage.name}` : ""),
       );
     }
     if (item.company?.name) {
-      aboutParts.push(`Компания: ${item.company.name}`);
+      aboutParts.push(text("Компания: {p0}", {p0: item.company.name}));
     }
     if (conversation && !item.inquiry && !item.deal) {
-      aboutParts.push("Диалог WhatsApp");
+      aboutParts.push(text("Диалог WhatsApp"));
     }
     if (item.targetType === "group") {
-      aboutParts.push(`Группа · ${childDone} из ${childTotal}`);
+      aboutParts.push(text("Группа · {p0} из {p1}", {p0: childDone, p1: childTotal}));
     }
-    if (!aboutParts.length && !contactName) aboutParts.push("Без привязки к клиенту");
+    if (!aboutParts.length && !contactName) aboutParts.push(text("Без привязки к клиенту"));
 
     return {
       ...item,
       contact: resolvedContact || item.contact,
       conversation,
-      contextLabel: taskContextLabel({ ...item, conversation }),
+      contextLabel: taskContextLabel({ ...item, conversation }, auth.user.locale || "ru"),
       statusLabel: TASK_STATUS_LABEL[item.status] || item.status,
       typeLabel: TASK_TYPE_LABEL[item.type] || item.type,
       ...taskPeopleFields(item, creatorById),
@@ -425,10 +427,10 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
       overdue,
       doneAt: taskDoneAt(item),
       resultLabel: item.resultCode ? TASK_RESULT_LABEL[item.resultCode] || null : null,
-      doneSummary: item.status === "done" || item.status === "canceled" ? taskDoneSummary(item) : null,
+      doneSummary: item.status === "done" || item.status === "canceled" ? taskDoneSummary(item, auth.user.locale || "ru") : null,
       progress:
         item.targetType === "group"
-          ? { done: childDone, total: childTotal, label: `${childDone} из ${childTotal}` }
+          ? { done: childDone, total: childTotal, label: text("{p0} из {p1}", {p0: childDone, p1: childTotal}) }
           : null,
       children: item.childTasks.map((child) => ({
         id: child.id,

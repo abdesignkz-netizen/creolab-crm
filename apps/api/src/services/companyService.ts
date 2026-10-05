@@ -1,3 +1,4 @@
+import { taskTitlePresentation } from "@creolab/contracts";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { normalizeKzTaxId } from "@creolab/contracts";
 import { ApiError } from "../errors.ts";
@@ -798,7 +799,7 @@ export async function getCompanyOverview(prisma: PrismaClient, auth: AuthContext
         ? {
             kind: "task",
             id: nextTask.id,
-            title: nextTask.title,
+            title: nextTask.title, titlePresentation: taskTitlePresentation(nextTask),
             dueAt: nextTask.dueAt?.toISOString() || null,
             dueLabel: nextTask.dueAt ? formatWhen(nextTask.dueAt, timeZone) : null,
             href: `/tasks?task=${nextTask.id}`,
@@ -862,7 +863,7 @@ export async function getCompanyOverview(prisma: PrismaClient, auth: AuthContext
     }),
     tasks: tasks.slice(0, 15).map((t) => ({
       id: t.id,
-      title: t.title,
+      title: t.title, titlePresentation: taskTitlePresentation(t),
       status: t.status,
       dueAt: t.dueAt?.toISOString() || null,
       dueLabel: t.dueAt ? formatWhen(t.dueAt, timeZone) : null,

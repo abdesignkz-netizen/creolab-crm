@@ -1,4 +1,4 @@
-import { uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale } from "../lib/uiText";
+import { uiTaskStatus, uiTaskTitle, uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale } from "../lib/uiText";
 import { notifySaved } from "../components/SaveNotice";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -363,7 +363,7 @@ export function ContactPage() {
             <span className="muted">{uiText("Следующий шаг")}</span>
             <div>
               {control.nextAction
-                ? `${control.nextAction.title}${control.nextAction.dueLabel ? ` · ${control.nextAction.dueLabel}` : ""}`
+                ? `${uiTaskTitle(control.nextAction)}${control.nextAction.dueLabel ? ` · ${control.nextAction.dueLabel}` : ""}`
                 : control.nextStepText || <span className="warn-text">{uiText("Нет следующего действия")}</span>}
             </div>
           </div>
@@ -510,7 +510,7 @@ export function ContactPage() {
                 <dd>
                   {control.nextAction ? (
                     <>
-                      {uiMessage(control.nextAction.typeLabel)}: {control.nextAction.title}
+                      {uiMessage(control.nextAction.typeLabel)}: {uiTaskTitle(control.nextAction)}
                       <div className="muted">
                         {control.nextAction.dueLabel || uiText("без срока")}
                         {control.nextAction.overdue ? uiText(" · Просрочено на {p0} ч", {p0: control.nextAction.overdueHours}) : ""}
@@ -610,7 +610,7 @@ export function ContactPage() {
           {timeline.map((item: any) => (
             <div className="timeline-item" key={`${item.kind}-${item.id}`}>
               <div className="muted">{item.atLabel}</div>
-              <b>{item.title}</b>
+              <b>{item.kind === "activity" ? uiMessage(item.title) : item.title}</b>
               {item.description ? <div>{item.description}</div> : null}
             </div>
           ))}
@@ -710,9 +710,9 @@ export function ContactPage() {
           {tasks.map((item: any) => (
             <div className="row" key={item.id}>
               <div>
-                <b>{item.title}</b>
+                <b>{uiTaskTitle(item)}</b>
                 <div className="muted">
-                  {uiMessage(item.typeLabel)} · {item.status}
+                  {uiMessage(item.typeLabel)} · {uiTaskStatus(item.status)}
                   {item.dueLabel ? ` · ${item.dueLabel}` : ""}
                   {item.overdue ? uiText(" · просрочено") : ""}
                 </div>

@@ -1,4 +1,4 @@
-import { uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale } from "../lib/uiText";
+import { uiSourceLine, uiTaskStatus, uiTaskTitle, uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale } from "../lib/uiText";
 import { catalogItemLabel, type TenantService } from "../lib/tenantServices";
 import { FormEvent, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
@@ -111,7 +111,7 @@ export function RequestDetailPage() {
           <div className="muted">{phoneText(data.phone)}</div>
           {data.companyName ? <div>{data.companyName}</div> : null}
           <div className="muted" style={{ marginTop: 8 }}>
-            {uiText("Источник:")}{" "}{data.sourceLine}
+            {uiText("Источник:")}{" "}{uiSourceLine(data)}
           </div>
           <div className="muted">{uiText("Создана:")}{" "}{data.receivedLabel}</div>
           <div className="muted">{uiText("Ответственный:")}{" "}{data.assigneeName || uiText("Не назначен")}</div>
@@ -574,9 +574,9 @@ export function RequestDetailPage() {
             {(data.tasks || []).map((task: any) => (
               <div className="row" key={task.id} style={{ marginTop: 8 }}>
                 <div>
-                  <b>{task.title}</b>
+                  <b>{uiTaskTitle(task)}</b>
                   <div className="muted">
-                    {task.status}
+                    {uiTaskStatus(task.status)}
                     {task.dueAt ? ` · ${new Date(task.dueAt).toLocaleString(uiFormatLocale())}` : ""}
                   </div>
                 </div>

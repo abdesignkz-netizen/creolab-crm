@@ -1,3 +1,4 @@
+import { taskTitlePresentation } from "@creolab/contracts";
 import { systemText } from "@creolab/contracts";
 import { getEntitlements } from "./entitlementService.ts";
 import type { PrismaClient } from "@creolab/db";
@@ -1271,7 +1272,7 @@ export async function getSituationOverview(
         .slice(0, 10)
         .map((t) => ({
           id: t.id,
-          title: t.title,
+          title: t.title, titlePresentation: taskTitlePresentation(t),
           type: t.type,
           typeLabel: taskTypeBucket(t.type, t.title, locale),
           dueAt: t.dueAt?.toISOString() || null,

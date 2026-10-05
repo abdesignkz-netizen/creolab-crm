@@ -35,3 +35,4 @@ export * from "./documentSignMeta.ts";
 
 export { systemText, systemMessage, kkSystemMessages } from "./systemLocale.ts";
 export { publicFormKey, publicFormKeyAliases, BASQAR_SITE_FORM_KEY } from "./publicFormBranding.ts";
+export { taskTitlePresentation, localizedTaskTitle, type TaskTitlePresentation } from "./taskPresentation.ts";

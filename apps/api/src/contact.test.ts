@@ -472,4 +472,34 @@ describe("Contact 360", () => {
     assert.match(exportedBody.csv, /name,phone,email/);
   });
 
+  it("Kazakh display localizes generated summaries and carries task provenance without changing customer data", async () => {
+    const user = await prisma.user.findUniqueOrThrow({ where: { email: "owner@creolab.example" } });
+    const tenant = await prisma.tenant.findFirstOrThrow({ where: { slug: "creolab" } });
+    const client = await prisma.contact.create({ data: { tenantId: tenant.id, name: "Русское имя клиента для проверки" } });
+    const inquiry = await prisma.inquiry.create({ data: { tenantId: tenant.id, contactId: client.id, source: "whatsapp", subject: "Заявка из WhatsApp" } });
+    const task = await prisma.task.create({ data: { tenantId: tenant.id, contactId: client.id, inquiryId: inquiry.id,
+      type: "process_inquiry", source: "rule", dedupeKey: `inquiry-process:${inquiry.id}`, title: "Связаться с клиентом: Заявка из WhatsApp" } });
+    try {
+      await prisma.user.update({ where: { id: user.id }, data: { locale: "kk" } });
+      const response = await fetch(`${base}/api/v1/contacts/${client.id}/overview`, { headers: { cookie } });
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.client.name, client.name);
+      assert.match(body.client.summary, /Келесі әрекет — Клиентпен байланысу: WhatsApp арқылы келген өтінім/);
+      assert.doesNotMatch(body.client.summary, /Следующее действие|Обратился|Бюджет пока/);
+      assert.equal(body.control.nextAction.title, task.title);
+      assert.deepEqual(body.control.nextAction.titlePresentation, { kind: "inquiry_contact", subject: "Заявка из WhatsApp" });
+      assert.deepEqual(body.tasks.find((row: any) => row.id === task.id).titlePresentation, body.control.nextAction.titlePresentation);
+      const listResponse = await fetch(`${base}/api/v1/contacts?q=${encodeURIComponent(client.name)}`, { headers: { cookie } });
+      const list = await listResponse.json();
+      assert.deepEqual(list.items.find((row: any) => row.id === client.id).nextAction.titlePresentation, body.control.nextAction.titlePresentation);
+      assert.equal((await prisma.task.findUniqueOrThrow({ where: { id: task.id } })).title, task.title);
+      await prisma.contact.update({ where: { id: client.id }, data: { summary: "Клиент просит сохранить мой текст без перевода." } });
+      const custom = await (await fetch(`${base}/api/v1/contacts/${client.id}/overview`, { headers: { cookie } })).json();
+      assert.equal(custom.client.summary, "Клиент просит сохранить мой текст без перевода.");
+    } finally {
+      await prisma.user.update({ where: { id: user.id }, data: { locale: user.locale } });
+    }
+  });
+
 });

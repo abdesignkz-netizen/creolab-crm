@@ -1,4 +1,4 @@
-import { uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale } from "../lib/uiText";
+import { uiTaskTitle, uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale } from "../lib/uiText";
 import {
   displayTaskStatus,
   isAiAssignableTaskType,
@@ -328,7 +328,7 @@ function TaskCard({ item, children }: { item: any; children: ReactNode }) {
           </svg>
         </span>
         <span className="task-card-heading">
-          <strong>{item.title}</strong>
+          <strong>{uiTaskTitle(item)}</strong>
           {client ? <span className="task-card-client">{client}</span> : null}
           {item.campaignId ? <span className="task-card-client">{uiText("Рассылка")}</span> : null}
           <span className="task-card-alerts">
@@ -713,7 +713,7 @@ export function TasksPage() {
   const boardItems = items;
   const searchTerms = taskSearch.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
   const extraFiltered = boardItems.filter((item) => {
-    const searchable = [item.title, item.whoName, item.whoPhone, item.contact?.name, item.contact?.firstName, item.contact?.lastName, item.contextLabel, assigneeText(item)].filter(Boolean).join(" ").toLocaleLowerCase();
+    const searchable = [item.title, uiTaskTitle(item), item.whoName, item.whoPhone, item.contact?.name, item.contact?.firstName, item.contact?.lastName, item.contextLabel, assigneeText(item)].filter(Boolean).join(" ").toLocaleLowerCase();
     if (!searchTerms.every((term) => searchable.includes(term))) return false;
     if (extraAssignee === AI_ASSIGNEE && (item.assigneeKind || taskAssigneeKind(item)) !== "ai") return false;
     if (extraAssignee && extraAssignee !== AI_ASSIGNEE && item.ownerMembershipId !== extraAssignee) return false;
@@ -2551,7 +2551,7 @@ export function TasksPage() {
       {activeTaskId && taskDetail && !preview ? (
         <div className="panel task-form">
           <b>{isScheduledSend(taskDetail) ? uiText("Изменить запланированную задачу") : uiText("Подготовка отправки")}</b>
-          <div className="muted">{taskDetail.title}</div>
+          <div className="muted">{uiTaskTitle(taskDetail)}</div>
           {isScheduledSend(taskDetail) ? (
             <p className="muted">
               {uiText("Сохраните правки — задача останется в «Запланировано», сообщение уйдёт в указанное время, не сразу.")}</p>
@@ -2751,7 +2751,7 @@ export function TasksPage() {
           )}
           {execResult && !(execResult as any).success ? (
             <div className={(execResult as any).partial || (execResult as any).textOk ? "task-partial" : "error"}>
-              {(execResult as any).note ? <div>{(execResult as any).note}</div> : null}
+              {(execResult as any).note ? <div>{uiMessage((execResult as any).note)}</div> : null}
               <div>
                 {(execResult as any).textOk ? uiText("Сообщение отправлено ✓") : uiText("Сообщение не отправлено ✕")}
                 {(execResult as any).textError ? ` · ${(execResult as any).textError}` : ""}
@@ -3000,7 +3000,7 @@ export function TasksPage() {
                       <span className="muted">{uiText("По поводу")}</span>
                       <ul>
                         {(item.aboutLines as string[]).map((line: string) => (
-                          <li key={line}>{line}</li>
+                          <li key={line}>{uiMessage(line)}</li>
                         ))}
                       </ul>
                       <div className="task-about-links">

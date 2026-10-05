@@ -164,7 +164,7 @@ export function IntegrationsPage() {
       <div>
         <h4>Green API</h4>
         <IntegrationHelp kind="whatsapp" />
-        {setup?.whatsapp?.warning ? <div className="banner warn">{setup.whatsapp.warning}</div> : null}
+        {setup?.whatsapp?.warning ? <div className="banner warn">{uiMessage(setup.whatsapp.warning)}</div> : null}
         <p className="muted">{whatsappStatusNote(setup?.whatsapp)}</p>
         <p className="muted">{aiManagerAllowed ? uiText("Как бот отвечает клиентам, задаёт администратор сервиса: промпт и база знаний компании.") : uiText("WhatsApp доступен для переписки с клиентами. ИИ-менеджер не включён в ваш тариф.")}</p>
         <p className="integ-status-line">

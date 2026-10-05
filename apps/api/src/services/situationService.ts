@@ -1,3 +1,4 @@
+import { taskTitlePresentation, type TaskTitlePresentation } from "@creolab/contracts";
 import { systemText } from "@creolab/contracts";
 import { formatDurationMinutes } from "@creolab/contracts";
 import type { PrismaClient } from "@creolab/db";
@@ -45,6 +46,7 @@ export type SituationNextAction =
   | "open_deal";
 
 export type SituationItem = {
+  titlePresentation?: TaskTitlePresentation | null;
   id: string;
   kind: SituationKind;
   entityId: string;
@@ -579,7 +581,7 @@ export async function getSituation(
       id: `${kind}:${task.id}`,
       kind,
       entityId: task.id,
-      title: task.title,
+      title: task.title, titlePresentation: taskTitlePresentation(task),
       contactName: task.contact ? displayName(task.contact) : null,
       phone: phoneFromContact(task.contact, task.inquiry),
       interest: resolveInterest(task.contactId || task.inquiry?.contactId, task.conversationId, task.inquiry),

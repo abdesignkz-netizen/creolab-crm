@@ -1,3 +1,4 @@
+import { taskTitlePresentation } from "@creolab/contracts";
 import {
   INQUIRY_STATUS_LABEL,
   INTAKE_REASON_LABEL,
@@ -116,6 +117,8 @@ type InquiryLike = {
     stage?: { name?: string | null } | null;
   } | null;
   tasks?: Array<{
+    source?: string | null;
+    dedupeKey?: string | null;
     id: string;
     title: string;
     status: string;
@@ -374,7 +377,7 @@ export function mapInquiryDetail(inquiry: InquiryLike & {
       : null,
     tasks: (inquiry.tasks || []).map((t) => ({
       id: t.id,
-      title: t.title,
+      title: t.title, titlePresentation: taskTitlePresentation(t),
       status: t.status,
       dueAt: t.dueAt || null,
       executionStatus: t.executionStatus || null,

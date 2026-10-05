@@ -375,3 +375,51 @@ test('Task summaries keep deadlines, ownership and send warnings visible; workfl
     assert.equal(dueGroup({status:'open',dueAt:'2035-03-15T15:00:00',sendScheduled:true},now),'later');
   } finally {if(prior)globalThis.localStorage=prior;else delete globalThis.localStorage;}
 });
+
+test('Kazakh generated task titles translate on client cards and tasks while preserving manual text and names', async () => {
+  const task={id:'generated-task',title:'Связаться с клиентом: Заявка из WhatsApp',source:'rule',dedupeKey:'inquiry-process:inquiry-1',type:'process_inquiry',status:'open',createdAt:'2026-09-22T10:00:00Z'};
+  const manual={...task,id:'manual-task',source:'manual',dedupeKey:null};
+  const nextAction={title:task.title,titlePresentation:{kind:'inquiry_contact',subject:'Заявка из WhatsApp'}};
+  const fixture={items:[{id:'client-1',name:'Владелец CREOLAB',ownerName:'Владелец CREOLAB',sourceLabel:'Форма сайта',nextAction}],total:1,offset:0,limit:25};
+  const plugin={name:'kazakh-record-fixtures',setup(build){build.onLoad({filter:/(Clients|Tasks)Page\.tsx$/},args=>({
+    contents:readFileSync(args.path,'utf8')
+      .replace('useState<any>(null)',`useState<any>(${JSON.stringify(fixture)})`)
+      .replace('[items, setItems] = useState<any[]>([])',`[items, setItems] = useState<any[]>(${JSON.stringify([task,manual])})`),loader:'tsx',resolveDir:path.dirname(args.path),
+  }));}};
+  const {render,localizedTaskTitle,taskTitlePresentation}=await bundle(`
+    import {renderToStaticMarkup} from 'react-dom/server';import {MemoryRouter} from 'react-router-dom';
+    import {SessionContext,emptyCaps} from './lib/session';import {ClientsPage} from './pages/ClientsPage';import {TasksPage} from './pages/TasksPage';
+    export {localizedTaskTitle,taskTitlePresentation} from '@creolab/contracts';
+    export const render=(page,locale)=>renderToStaticMarkup(<SessionContext.Provider value={{me:{user:{locale}},caps:emptyCaps}}><MemoryRouter>{page==='clients'?<ClientsPage />:<TasksPage />}</MemoryRouter></SessionContext.Provider>);
+  `,[plugin]);
+  const prior=globalThis.localStorage;
+  try {
+    globalThis.localStorage={getItem:()=> 'kk'};
+    const clients=render('clients','kk');
+    assert.match(clients,/Клиентпен байланысу: WhatsApp арқылы келген өтінім/);
+    assert.match(clients,/Сайттағы форма/);
+    assert.match(clients,/Владелец CREOLAB/);
+    assert.doesNotMatch(clients,/Связаться с клиентом|Заявка из WhatsApp|Форма сайта/);
+    const tasks=render('tasks','kk');
+    assert.match(tasks,/Клиентпен байланысу: WhatsApp арқылы келген өтінім/);
+    assert.match(tasks,/Связаться с клиентом: Заявка из WhatsApp/); // Identical manual task is still user content.
+    assert.equal(localizedTaskTitle('ru',task),task.title);
+    assert.equal(localizedTaskTitle('en',task),'Contact the client: Inquiry from WhatsApp');
+    assert.equal(localizedTaskTitle('kk',manual),manual.title);
+    assert.equal(taskTitlePresentation({...task,title:'Моя изменённая задача'}),null);
+    const custom={...task,title:'Связаться с клиентом: Создать сайт для ТОО Пример'};
+    assert.equal(localizedTaskTitle('kk',custom),'Клиентпен байланысу: Создать сайт для ТОО Пример');
+    assert.equal(localizedTaskTitle('kk',nextAction),localizedTaskTitle('kk',task));
+  } finally {if(prior)globalThis.localStorage=prior;else delete globalThis.localStorage;}
+});
+
+test('Server-owned contact and inquiry label catalogs have Kazakh coverage', () => {
+  for (const relative of ['apps/api/src/services/contactLabels.ts', 'apps/api/src/services/inquiryPresentation.ts']) {
+    const source=ts.createSourceFile(relative,readFileSync(path.join(root,relative),'utf8'),ts.ScriptTarget.Latest,true);
+    function visit(node) {
+      if(ts.isStringLiteral(node) && /[а-яё]/i.test(node.text)) assert.ok(known.has(node.text),`${relative}: ${node.text}`);
+      ts.forEachChild(node,visit);
+    }
+    visit(source);
+  }
+});

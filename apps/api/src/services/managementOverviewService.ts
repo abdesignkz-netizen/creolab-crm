@@ -1,3 +1,4 @@
+import { taskTitlePresentation } from "@creolab/contracts";
 import type { PrismaClient } from "@creolab/db";
 import { crmModeToSeller, formatDurationMinutes } from "@creolab/contracts";
 import { ApiError } from "../errors.ts";
@@ -299,7 +300,7 @@ export async function getManagementOverview(prisma: PrismaClient, auth: AuthCont
 
   const pendingApprovals = pendingTasks.map((task) => ({
     id: task.id,
-    title: task.title,
+    title: task.title, titlePresentation: taskTitlePresentation(task),
     actionLabel:
       task.type === "proposal"
         ? "Отправить КП"

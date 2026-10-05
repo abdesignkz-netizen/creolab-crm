@@ -1,4 +1,4 @@
-import { systemText, systemMessage } from "@creolab/contracts";
+import { systemText, systemMessage, localizedTaskTitle, displayTaskStatus } from "@creolab/contracts";
 import { getPublicLocale } from "../i18n";
 import { useLocale } from "./session";
 
@@ -48,4 +48,16 @@ export function uiDurationLabel(source: string | null | undefined, locale = getP
 export function uiNotificationBody(type: string, body: string, locale = getPublicLocale()): string {
   return ["billing.subscription", "contract.signed", "conversation.needs_human", "agreement.needs_confirmation"].includes(type)
     ? uiMessage(body, locale) : body;
+}
+
+/** Display generated task templates in the selected language, preserving record text. */
+export function uiTaskTitle(task: Parameters<typeof localizedTaskTitle>[1], locale = getPublicLocale()) {
+  return localizedTaskTitle(locale, task);
+}
+
+export function uiTaskStatus(status: string) { return uiText(displayTaskStatus(status)); }
+
+export function uiSourceLine(record: { sourceLine?: string | null; channelLabel?: string | null; attributionLabel?: string | null }) {
+  if (!record.channelLabel) return uiMessage(record.sourceLine);
+  return [record.attributionLabel, uiMessage(record.channelLabel)].filter(Boolean).join(" → ");
 }

@@ -12,7 +12,7 @@ import { signAndSendEsfDocument } from "../lib/signing/esfSignAndSend";
 import { ensureEsfCabinetSession } from "../lib/signing/esfConnect";
 import { createSigningClient, ncalayerUserMessage } from "../lib/signing/ncalayerClient";
 import { CONTRACT_SIGNING_ENABLED } from "../lib/featureFlags";
-import { signatureCheckLabel } from "../lib/signing/verificationLabels";
+import { signatureCheckLabel, signatureRequestLabel } from "../lib/signing/verificationLabels";
 import { tip } from "../lib/tip";
 
 const CONTRACT_STATUS_LABEL: Record<string, string> = {
@@ -606,7 +606,7 @@ export function DealDocumentsPanel(props: {
               <div>
                 <b>{row.signerType === "SELLER" ? uiText("Исполнитель") : uiText("Заказчик")}</b>
                 <div className="muted">
-                  {row.signerName || "—"} · {row.status}
+                  {row.signerName || "—"} · {signatureRequestLabel(row.status)}
                   {check ? ` · ${check}` : ""}
                 </div>
               </div>

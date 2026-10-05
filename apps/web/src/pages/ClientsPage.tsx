@@ -1,4 +1,4 @@
-import { uiText, useUiText, localizeUiOptions, uiMessage } from "../lib/uiText";
+import { uiTaskTitle, uiText, useUiText, localizeUiOptions, uiMessage } from "../lib/uiText";
 import { notifySaved } from "../components/SaveNotice";
 import { useUrlState, useRequestVersion } from "../lib/useUrlState";
 import { useEffect, useRef, useState } from "react";
@@ -526,7 +526,7 @@ export function ClientsPage() {
               {item.interestSource === "conversation" ? (
                 <span className="badge" {...tip(uiText("Определено по сообщению клиента. Откройте карточку, чтобы проверить переписку."))}>{uiText("Из переписки")}</span>
               ) : null}
-              {item.sourceLabel ? ` · ${item.sourceLabel}` : ""}
+              {item.sourceLabel ? ` · ${uiMessage(item.sourceLabel)}` : ""}
               {item.acquisition ? ` · ${item.acquisition}` : ""}
             </div>
             <div className="muted">
@@ -541,7 +541,7 @@ export function ClientsPage() {
               <div>
                 {item.nextAction ? (
                   <>
-                    {item.nextAction.title}
+                    {uiTaskTitle(item.nextAction)}
                     {item.nextAction.dueLabel ? ` · ${item.nextAction.dueLabel}` : ""}
                   </>
                 ) : item.missingNextAction ? (

@@ -1,4 +1,4 @@
-import { uiText, useUiText, localizeUiOptions, uiFormatLocale , uiDurationLabel } from "../lib/uiText";
+import { uiTaskTitle, uiMessage, uiText, useUiText, localizeUiOptions, uiFormatLocale , uiDurationLabel } from "../lib/uiText";
 import { esfMeasureUnitSymbol } from "@creolab/contracts";
 import { notifySaved } from "../components/SaveNotice";
 import { MeasureUnitSelect } from "../components/MeasureUnitSelect";
@@ -330,7 +330,7 @@ export function DealsPage() {
           <p className="muted">{uiText("Заказы, суммы и состояние документов по каждой сделке.")}</p>
         </div>
         <div className="sit-toolbar-side">
-          {data.period?.label ? <span className="muted">{data.period.label}</span> : null}
+          {data.period?.label ? <span className="muted">{uiMessage(data.period.label)}</span> : null}
           <button type="button" className="btn" onClick={() => setCreateOpen(true)}>
             {uiText("Новая сделка")}</button>
         </div>
@@ -1193,7 +1193,7 @@ export function DealDetailPage() {
         <select value={lossReason} onChange={(e) => setLossReason(e.target.value)} title={uiText("Причина проигрыша")}>
           {(board?.lostReasons || ["Дорого", "Другое"]).map((r: string) => (
             <option key={r} value={r}>
-              {board?.lostReasons?.length ? r : uiText(r)}
+              {uiMessage(r)}
             </option>
           ))}
         </select>
@@ -1252,7 +1252,7 @@ export function DealDetailPage() {
           {d.tasks.map((t: any) => (
             <div className="row" key={t.id}>
               <div>
-                <b>{t.title}</b>
+                <b>{uiTaskTitle(t)}</b>
                 <div className="muted">{t.dueAt ? new Date(t.dueAt).toLocaleString(uiFormatLocale()) : uiText("без срока")}</div>
               </div>
             </div>

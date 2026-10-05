@@ -1,4 +1,4 @@
-import { uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale } from "../lib/uiText";
+import { uiSourceLine, uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale } from "../lib/uiText";
 import { catalogItemLabel, type TenantService } from "../lib/tenantServices";
 import { notifySaved } from "../components/SaveNotice";
 import { useRequestVersion } from "../lib/useUrlState";
@@ -656,7 +656,7 @@ export function RequestsPage() {
                 <div className="muted">{item.serviceLabel || "—"}</div>
               </div>
               <div className="request-cell">
-                <div>{item.sourceLine}</div>
+                <div>{uiSourceLine(item)}</div>
                 <div className="client-meta" style={{ marginTop: 4 }}>
                   {item.aiProcess?.status && item.aiProcess.status !== "none" ? (
                     <span className="badge">{uiMessage(item.aiProcess.statusLabel)}</span>

@@ -222,7 +222,7 @@ export function ControlPage() {
                     {[item.companyName, nameWithPhone(item.contactName, item.phone)].filter(Boolean).join(" · ")}
                   </b>
                   <div className="muted">
-                    {[item.topic, item.budgetLabel, item.stageLabel].filter(Boolean).join(" · ")}
+                    {[item.topic, item.budgetLabel, uiMessage(item.stageLabel)].filter(Boolean).join(" · ")}
                   </div>
                   <p>
                     <b>{uiText("Почему требуется человек")}</b>
@@ -280,7 +280,7 @@ export function ControlPage() {
                   <div className="muted">
                     {uiText("Ждёт")}{" "}{uiDurationLabel(item.waitLabel) || "—"} · {uiMessage(item.reasonLabel)}
                   </div>
-                  <div className="muted">{[item.topic, item.budgetLabel, item.stageLabel].filter(Boolean).join(" · ")}</div>
+                  <div className="muted">{[item.topic, item.budgetLabel, uiMessage(item.stageLabel)].filter(Boolean).join(" · ")}</div>
                 </div>
                 <div className="actions">
                   <button
@@ -356,7 +356,7 @@ export function ControlPage() {
                   <span>{nameWithPhone(item.contactName, item.phone)}</span>
                   <span className="muted">{phoneText(item.phone)}</span>
                   <span className="muted">{item.topic}</span>
-                  <span className="muted">{item.stageLabel || uiMessage(item.modeLabel)}</span>
+                  <span className="muted">{uiMessage(item.stageLabel) || uiMessage(item.modeLabel)}</span>
                   <span className="muted">{uiDurationLabel(item.activityLabel) || "—"}</span>
                 </Link>
               ))}
@@ -408,8 +408,8 @@ export function ControlPage() {
             (data.problems || []).map((item: any) => (
               <div className="mgmt-card compact" key={item.id}>
                 <div>
-                  <b>{item.title}</b>
-                  <div className="muted">{item.detail}</div>
+                  <b>{uiMessage(item.title)}</b>
+                  <div className="muted">{item.conversationId ? item.detail : uiMessage(item.detail)}</div>
                 </div>
                 <div className="actions">
                   {item.href ? (

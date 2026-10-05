@@ -1,4 +1,4 @@
-import { uiText, useUiText, localizeUiOptions, uiFormatLocale } from "../lib/uiText";
+import { uiMessage, uiText, useUiText, localizeUiOptions, uiFormatLocale } from "../lib/uiText";
 import { useSession, useLocale } from "../lib/session";
 import { useUrlState, useRequestVersion } from "../lib/useUrlState";
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
@@ -533,7 +533,7 @@ export function StatsPage() {
         <>
           <div className="sit-section">
             <div className="sit-section-head">
-              <h3>{uiText("Обзор ·")}{" "}{data.period?.label}</h3>
+              <h3>{uiText("Обзор ·")}{" "}{uiMessage(data.period?.label)}</h3>
               {data.compare?.label ? <span className="muted">vs {data.compare.label}</span> : null}
             </div>
             <div className="sit-kpi-grid stats-kpi-grid">
@@ -912,7 +912,7 @@ export function StatsPage() {
               <tbody>
                 {(data.losses?.reasons || []).map((r: any) => (
                   <tr key={r.reason}>
-                    <td>{r.reason}</td>
+                    <td>{uiMessage(r.reason)}</td>
                     <td>
                       <button type="button" className="linkish" onClick={() => void openDrill("loss_reason", r.reason)}>
                         {r.count}
@@ -1038,7 +1038,7 @@ export function StatsPage() {
               <tbody>
                 {(data.tasks?.byType || []).map((t: any) => (
                   <tr key={t.type}>
-                    <td>{t.type}</td>
+                    <td>{uiMessage(t.type)}</td>
                     <td>{t.created}</td>
                     <td>{t.done}</td>
                     <td>{t.overdue}</td>

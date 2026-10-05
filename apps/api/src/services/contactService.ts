@@ -1,3 +1,4 @@
+import { taskTitlePresentation, localizedTaskTitle, systemText } from "@creolab/contracts";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { validateClientPhone } from "@creolab/contracts";
 import { ApiError } from "../errors.ts";
@@ -134,28 +135,30 @@ function buildSummary(args: {
   } | null;
   nextTask: { title: string; dueAt: Date | null } | null;
   timeZone: string;
+  locale: string;
 }) {
+  const text = (source: string, params: Record<string, string> = {}) => systemText(args.locale, source, params);
   if (args.contact.summary?.trim()) return args.contact.summary.trim();
-  if (!args.inquiry) return "Пока нет активной заявки. Добавьте задачу или заявку.";
+  if (!args.inquiry) return text("Пока нет активной заявки. Добавьте задачу или заявку.");
   const parts: string[] = [];
   const when = formatWhen(args.contact.firstSeenAt, args.timeZone);
   const source = SOURCE_LABEL[args.inquiry.sourceType || args.inquiry.source || ""] || args.inquiry.source || "неизвестный источник";
   const channel = args.inquiry.utmSource || args.inquiry.utmCampaign;
-  parts.push(`Обратился ${when || "недавно"} через ${source}${channel ? ` (${channel})` : ""}.`);
+  parts.push(text("Обратился {p0} через {p1}.", {p0: when || text("недавно"), p1: text(source) + (channel ? ` (${channel})` : "")}));
   if (args.inquiry.subject || args.inquiry.service) {
-    parts.push(`Интерес: ${args.inquiry.service || args.inquiry.subject}.`);
+    parts.push(text("Интерес: {p0}.", {p0: args.inquiry.service || args.inquiry.subject || ""}));
   }
   const budget = budgetLabel(args.inquiry);
-  parts.push(budget ? `Бюджет: ${budget}.` : "Бюджет пока не определён.");
-  if (args.inquiry.desiredDeadline) parts.push(`Срок: ${args.inquiry.desiredDeadline}.`);
+  parts.push(budget ? text("Бюджет: {p0}.", {p0: budget}) : text("Бюджет пока не определён."));
+  if (args.inquiry.desiredDeadline) parts.push(text("Срок: {p0}.", {p0: args.inquiry.desiredDeadline}));
   if (args.nextTask) {
     parts.push(
-      `Следующее действие — ${args.nextTask.title}${args.nextTask.dueAt ? ` · ${formatWhen(args.nextTask.dueAt, args.timeZone)}` : ""}.`,
+      text("Следующее действие — {p0}.", {p0: localizedTaskTitle(args.locale, args.nextTask) + (args.nextTask.dueAt ? ` · ${formatWhen(args.nextTask.dueAt, args.timeZone)}` : "")}),
     );
   } else if (args.inquiry.nextStep) {
-    parts.push(`Следующий шаг: ${args.inquiry.nextStep}.`);
+    parts.push(text("Следующий шаг: {p0}.", {p0: text(args.inquiry.nextStep)}));
   } else {
-    parts.push("Нет следующего действия.");
+    parts.push(text("Нет следующего действия."));
   }
   return parts.join(" ");
 }
@@ -384,7 +387,7 @@ export async function listContactsBoard(
         nextAction: nextTask
           ? {
               id: nextTask.id,
-              title: nextTask.title,
+              title: nextTask.title, titlePresentation: taskTitlePresentation(nextTask),
               type: nextTask.type,
               typeLabel: TASK_TYPE_LABEL[nextTask.type] || nextTask.type,
               dueAt: nextTask.dueAt,
@@ -392,7 +395,7 @@ export async function listContactsBoard(
               overdue: Boolean(nextTask.dueAt && nextTask.dueAt.getTime() < now.getTime()),
             }
           : currentInquiry?.nextStep
-            ? { id: null, title: currentInquiry.nextStep, type: "other", typeLabel: "Шаг", dueAt: null, dueLabel: null, overdue: false }
+            ? { id: null, title: systemText(auth.user.locale, currentInquiry.nextStep), type: "other", typeLabel: "Шаг", dueAt: null, dueLabel: null, overdue: false }
             : null,
         activeDeal: contact.deals[0]
           ? {
@@ -530,8 +533,8 @@ export async function getContactOverview(prisma: PrismaClient, auth: AuthContext
   };
   const interest = inquiryInterest(currentInquiry) || (await loadConversationInterests(prisma, tid, [contactId])).get(contactId);
   const summary = !contact.summary?.trim() && !currentInquiry && interest
-    ? `Интерес из переписки: ${interest.text}`
-    : buildSummary({ contact, inquiry: currentInquiry, nextTask, timeZone });
+    ? systemText(auth.user.locale, "Интерес из переписки: {p0}", {p0: interest.text})
+    : buildSummary({ contact, inquiry: currentInquiry, nextTask, timeZone, locale: auth.user.locale || "ru" });
   const conversationMode = contact.conversations[0]?.mode || null;
   const aiMode =
     conversationMode === "human" ? "HUMAN" : conversationMode === "paused" ? "DISABLED" : conversationMode === "ai" ? "AUTO" : "UNKNOWN";
@@ -586,7 +589,7 @@ export async function getContactOverview(prisma: PrismaClient, auth: AuthContext
     nextAction: nextTask
       ? {
           id: nextTask.id,
-          title: nextTask.title,
+          title: nextTask.title, titlePresentation: taskTitlePresentation(nextTask),
           type: nextTask.type,
           typeLabel: TASK_TYPE_LABEL[nextTask.type] || nextTask.type,
           dueAt: nextTask.dueAt,
@@ -736,7 +739,7 @@ export async function getContactOverview(prisma: PrismaClient, auth: AuthContext
     })),
     tasks: contact.tasks.map((item) => ({
       id: item.id,
-      title: item.title,
+      title: item.title, titlePresentation: taskTitlePresentation(item),
       type: item.type,
       typeLabel: TASK_TYPE_LABEL[item.type] || item.type,
       status: item.status,

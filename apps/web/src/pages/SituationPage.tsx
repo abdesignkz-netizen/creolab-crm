@@ -1,3 +1,4 @@
+import { uiTaskTitle, uiMessage } from "../lib/uiText";
 import { systemText } from "@creolab/contracts";
 import { useLocale } from "../lib/session";
 import { notifySaved } from "../components/SaveNotice";
@@ -370,7 +371,7 @@ export function SituationPage() {
           {items.slice(0, 40).map((item: any) => (
             <div className="dash-attn-item" key={item.id}>
               <div>
-                <b>{item.title}</b>
+                <b>{uiTaskTitle(item)}</b>
                 <div className="muted">{item.subtitle || item.reason || item.kind}</div>
               </div>
               {item.href ? (
@@ -607,7 +608,7 @@ export function SituationPage() {
                 <b>{nameWithPhone(item.contactName || item.title, item.phone, locale)}</b>
                 {item.interest && item.interest !== item.reason ? <div className="muted">{item.interest}</div> : null}
                 {item.contactName && item.title && item.title !== item.contactName && item.title !== item.interest ? (
-                  <div className="muted">{item.title}</div>
+                  <div className="muted">{uiTaskTitle(item)}</div>
                 ) : null}
                 <div className="attention-next muted">
                   <span>{actionLabel(locale, item) || item.nextAction}</span>
@@ -811,7 +812,7 @@ export function SituationPage() {
           <Kpi
             label={systemText(locale, "Потеряно")}
             value={r.lostDeals}
-            hint={r.lostReasons?.[0] ? `${r.lostReasons[0].reason} · ${r.lostReasons[0].count}` : undefined}
+            hint={r.lostReasons?.[0] ? `${uiMessage(r.lostReasons[0].reason)} · ${r.lostReasons[0].count}` : undefined}
             to={path("/deals", { timeMode: "period", basis: "closed", outcome: "lost" }, true)}
             tone="rose"
             icon={ICONS.lost}
@@ -1024,7 +1025,7 @@ export function SituationPage() {
           {today.nearest?.map((task: any) => (
             <Link className="sit-list-row" key={task.id} to={`/tasks?open=${task.id}`}>
               <div>
-                <b>{task.title}</b>
+                <b>{uiTaskTitle(task)}</b>
                 <div className="muted">
                   {task.typeLabel}
                   {task.contactName || task.phone ? ` · ${nameWithPhone(task.contactName, task.phone, locale)}` : ""}
