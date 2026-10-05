@@ -21,7 +21,7 @@ describe("WhatsApp provider connections", () => {
   const appSecret = "test-whatsapp-app-secret-123456", accessToken = "test-whatsapp-access-token-123456";
   let sends = 0, qrSends = 0, logoutCount = 0, failQrSend = false;
   let mediaResponse = Buffer.alloc(0);
-  let llmCalls = 0, llmInput: any;
+  let llmCalls = 0, llmStatus = 200, llmInput: any;
   let onCloudSend: (() => Promise<void>) | undefined;
   const oldLlmKey = process.env.OPENAI_API_KEY, oldLlmUrl = process.env.OPENAI_BASE_URL;
   const oldAnyModelKey = process.env.ANYMODEL_API_KEY;
@@ -37,7 +37,7 @@ describe("WhatsApp provider connections", () => {
     config.apiBaseUrl = "https://bsqr.example.test";
     globalThis.fetch = async (url, init) => {
       const u = new URL(String(url));
-      if (u.hostname === "llm.example.test") { llmCalls++; llmInput = JSON.parse(String(init?.body)); return new Response(JSON.stringify({ id: `ai-request-${llmCalls}`, choices: [{ message: { content: JSON.stringify({ reply: "Сәлеметсіз бе! Компаниямыздың қызметтері туралы айтып беремін.", handoff: false }) } }], usage: { prompt_tokens: 50, completion_tokens: 20, total_tokens: 70 } }), { headers: { "content-type": "application/json" } }); }
+      if (u.hostname === "llm.example.test") { llmCalls++; llmInput = JSON.parse(String(init?.body)); if (llmStatus !== 200) return new Response(JSON.stringify({ error: { message: "PRIVATE-PROVIDER-ERROR" } }), { status: llmStatus }); return new Response(JSON.stringify({ id: `ai-request-${llmCalls}`, choices: [{ message: { content: JSON.stringify({ reply: "Сәлеметсіз бе! Компаниямыздың қызметтері туралы айтып беремін.", handoff: false }) } }], usage: { prompt_tokens: 50, completion_tokens: 20, total_tokens: 70 } }), { headers: { "content-type": "application/json" } }); }
       if (u.hostname === "mmg.whatsapp.net") { assert.equal(init?.redirect, "error"); assert.ok(init?.signal); return new Response(new Uint8Array(mediaResponse)); }
       if (u.hostname !== "graph.facebook.com") return nativeFetch(url, init);
       const reply = (data: unknown) => new Response(JSON.stringify(data), { headers: { "content-type": "application/json" } });
@@ -321,6 +321,52 @@ describe("WhatsApp provider connections", () => {
       assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id: conversation.id } })).mode, "human");
       assert.equal(await prisma.message.count({ where: { conversationId: conversation.id, direction: "outbound" } }), 0);
     }
+  });
+  it("reports model failures safely for direct channels without sending a customer message", async () => {
+    const channel = await prisma.channelConnection.findFirstOrThrow({ where: { integrationId: qrId } });
+    const contact = await prisma.contact.create({ data: { tenantId, name: "Model error test" } });
+    const beforeSends = sends + qrSends;
+    try {
+      for (const [status, reason] of [[401, "AI_PROVIDER_AUTH"], [429, "AI_PROVIDER_LIMIT"], [400, "AI_PROVIDER_CONFIG"]] as const) {
+        llmStatus = status;
+        const conversation = await prisma.conversation.create({ data: { tenantId, contactId: contact.id, connectionId: channel.id, mode: "ai", waitingFor: "MANAGER" } });
+        const message = await prisma.message.create({ data: { tenantId, conversationId: conversation.id, direction: "inbound", senderKind: "client", text: "Здравствуйте" } });
+        await enqueueWhatsAppAi(prisma, tenantId, conversation.id, message.id);
+        const event = await prisma.outboxEvent.findFirstOrThrow({ where: { entityId: conversation.id, type: "whatsapp.ai_reply" } });
+        await processWhatsAppAiReply(prisma, event);
+        const result = await prisma.conversation.findUniqueOrThrow({ where: { id: conversation.id } });
+        assert.equal(result.mode, "human"); assert.equal(result.attentionReason, reason);
+        assert.equal(await prisma.message.count({ where: { conversationId: result.id, direction: "outbound" } }), 0);
+        const operation = await prisma.outboundOperation.findUniqueOrThrow({ where: { tenantId_idempotencyKey: { tenantId, idempotencyKey: event.id } } });
+        assert.doesNotMatch(JSON.stringify(operation), /PRIVATE-PROVIDER-ERROR/);
+      }
+      assert.equal(sends + qrSends, beforeSends);
+    } finally { llmStatus = 200; }
+  });
+  it("lets only platform admins test a model and lists QR and Meta readiness without exposing keys", async () => {
+    const path = `/api/v1/admin/tenants/${tenantId}/ai-manager/test`;
+    assert.equal((await post(path)).status, 403);
+    const login = await nativeFetch(`${base}/api/v1/auth/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: "platform@creolab.example", password: process.env.SEED_PASSWORD }) });
+    assert.equal(login.status, 200);
+    const adminCookie = (login.headers.get("set-cookie") || "").split(";")[0];
+    const listing = await nativeFetch(`${base}/api/v1/admin/tenants/${tenantId}/ai-manager`, { headers: { cookie: adminCookie } });
+    const data = await listing.json(); assert.equal(listing.status, 200);
+    assert.ok(data.connections.some((item: any) => item.type === "whatsapp_qr"));
+    assert.ok(data.connections.some((item: any) => item.type === "whatsapp_cloud"));
+    assert.equal(data.runtime.hasCredential, true);
+    assert.doesNotMatch(JSON.stringify(data), /mock-key-not-real|test-whatsapp-access-token/);
+    const beforeSends = sends + qrSends;
+    const beforeMessages = await prisma.message.count({ where: { tenantId } });
+    const result = await post(path, {}, { cookie: adminCookie });
+    assert.equal(result.status, 200); assert.equal((await result.json()).ok, true);
+    try {
+      llmStatus = 401;
+      const failed = await post(path, {}, { cookie: adminCookie });
+      const failure = await failed.json(); assert.equal(failure.ok, false); assert.equal(failure.reason, "AI_PROVIDER_AUTH");
+      assert.doesNotMatch(JSON.stringify(failure), /PRIVATE-PROVIDER-ERROR/);
+    } finally { llmStatus = 200; }
+    assert.equal(sends + qrSends, beforeSends);
+    assert.equal(await prisma.message.count({ where: { tenantId } }), beforeMessages);
   });
   it("denies access to another company's QR and disconnects without deleting conversation history", async () => {
     const other = await prisma.tenant.create({ data: { name: "Other company", slug: "other-company-wa", status: "active" } });

@@ -4,7 +4,7 @@ import { ApiError } from "../errors.ts";
 import { requirePlatformAdmin } from "../lib/access.ts";
 import { writeAudit } from "../lib/audit.ts";
 import type { AuthContext } from "../lib/types.ts";
-import { invalidateRuntimeConfig } from "./runtimeSettings.ts";
+import { getEffectiveTenantSettings, getEffectiveLlmConfig, invalidateRuntimeConfig } from "./runtimeSettings.ts";
 import type { WhatsAppSellerSchema } from "./aiManagerConfig.ts";
 
 const PLATFORM_BASE_PROMPT = `Базовые правила BasQar:
@@ -104,7 +104,7 @@ export function describeWhatsAppAiActivation(input: {
   }
   const schema = asRecord(input.integration?.schemaJson) as WhatsAppSellerSchema;
   const sync = schema.aiSync;
-  const whatsappConnected = Boolean(input.integration);
+  const whatsappConnected = Boolean(input.integration && (!input.integration.status || input.integration.status === "active"));
   const promptText = String(input.prompt || "").trim();
   const publishedKnowledge = input.knowledge.filter((item) => String(item.content || "").trim());
   const prompt = describePiece("prompt", Boolean(promptText), fingerprint(promptText), whatsappConnected, sync);
@@ -248,7 +248,20 @@ export async function getTenantAiManagerAdmin(prisma: PrismaClient, auth: AuthCo
     }),
   ]);
   const schema = asRecord(integration?.schemaJson);
+  const [connections, runtime, llm] = await Promise.all([
+    prisma.integration.findMany({ where: { tenantId, type: { in: whatsappAiTypes } }, include: aiChannels }),
+    getEffectiveTenantSettings(prisma, tenantId), getEffectiveLlmConfig(prisma, tenantId),
+  ]);
+  const connectionStates = await Promise.all(connections.map(async connection => ({
+    id: connection.id, type: connection.type, name: connection.name, status: connection.status,
+    activation: await describeTenantWhatsAppAiActivation(prisma, tenantId, {
+      prompt: config?.promptStatus === "published" ? config.systemPrompt || "" : "",
+      knowledge: knowledge.filter(item => item.status === "published"), integration: connection, enabled: config?.enabled,
+    }),
+  })));
   return {
+    runtime: { ...runtime.ai, hasCredential: Boolean(llm.apiKey) },
+    connections: connectionStates,
     tenant: { id: tenant.id, name: tenant.name, slug: tenant.slug, status: tenant.status },
     status: integration?.status === "active" ? "active" : integration ? integration.status : "not_connected",
     model: config?.model || null,
@@ -281,6 +294,7 @@ export async function getTenantAiManagerAdmin(prisma: PrismaClient, auth: AuthCo
     integration: integration
       ? {
           id: integration.id,
+          type: integration.type,
           status: integration.status,
           instanceId: schema.instanceId || null,
           secretSet: Boolean(schema.secretEnc),

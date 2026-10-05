@@ -2665,6 +2665,24 @@ export function createApp(prisma: PrismaClient) {
     res.json(await previewTenantAi(prisma, await requireAuth(req), req.params.id, String(req.body?.message || "")));
   });
 
+  app.post("/api/v1/admin/tenants/:id/ai-manager/test", async (req, res) => {
+    const auth = await requireAuth(req);
+    if (!auth.user.platformAdmin) throw new ApiError(403, "forbidden", "Доступно только администратору сервиса");
+    rateLimit(`ai-model-test:${auth.user.id}:${req.params.id}`, 5, 60000);
+    const { directAiReadiness, whatsAppAiFailureReason } = await import("./services/whatsappAiService.ts");
+    const { attentionReasonLabel } = await import("./services/attentionReasons.ts");
+    const reason = await directAiReadiness(prisma, req.params.id);
+    if (reason) { res.json({ ok: false, reason: whatsAppAiFailureReason(reason), message: attentionReasonLabel(whatsAppAiFailureReason(reason)) }); return; }
+    try {
+      const { answerWhatsAppWithLlm } = await import("./services/llmClient.ts");
+      const answer = await answerWhatsAppWithLlm({ prisma, tenantId: req.params.id, history: [{ role: "user", content: "Здравствуйте" }] });
+      res.json({ ok: Boolean(answer), message: answer ? "Модель ИИ отвечает. Сообщение клиенту не отправлялось." : "Не удалось проверить модель ИИ." });
+    } catch (error) {
+      const reason = whatsAppAiFailureReason(error instanceof ApiError ? error.code : null);
+      res.json({ ok: false, reason, message: attentionReasonLabel(reason) });
+    }
+  });
+
   app.post("/api/v1/admin/tenants/:id/ai-manager/sync", async (req, res) => {
     const { syncTenantAiToWhatsApp } = await import("./services/tenantAiConfigService.ts");
     res.json(await syncTenantAiToWhatsApp(prisma, await requireAuth(req), req.params.id));

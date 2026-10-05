@@ -613,6 +613,10 @@ export async function saveTenantAiSettings(
   input: Record<string, unknown>,
 ) {
   const existing = await prisma.aIConfiguration.findFirst({ where: { tenantId } });
+  const nextProvider = String(input.provider || existing?.provider || "").trim().toLowerCase();
+  if (existing?.credentialId && nextProvider !== String(existing.provider || "").toLowerCase() && !String(input.apiKey || "").trim()) {
+    throw new ApiError(422, "ai_provider_key_required", "При смене провайдера укажите ключ новой модели ИИ.");
+  }
   let credentialId = existing?.credentialId || null;
   if (typeof input.apiKey === "string" && input.apiKey.trim()) {
     const encrypted = encryptSecret(input.apiKey.trim());
@@ -635,7 +639,7 @@ export async function saveTenantAiSettings(
     }
   }
   const data = {
-    provider: input.provider ? String(input.provider) : existing?.provider || null,
+    provider: nextProvider || null,
     model: input.model ? String(input.model) : existing?.model || null,
     enabled: "enabled" in input ? Boolean(input.enabled) : existing?.enabled ?? true,
     credentialId,

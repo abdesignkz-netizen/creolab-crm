@@ -882,6 +882,8 @@ export function createApiClient(options: ClientOptions) {
         method: "POST",
         body: JSON.stringify({ message }),
       }),
+    adminTestCompanyAiModel: (tenantId: string) =>
+      request(`/api/v1/admin/tenants/${tenantId}/ai-manager/test`, { method: "POST" }),
     adminSyncCompanyAiManager: (tenantId: string) =>
       request(`/api/v1/admin/tenants/${tenantId}/ai-manager/sync`, { method: "POST" }),
     adminMembers: (query?: Record<string, string | number | undefined>) => {

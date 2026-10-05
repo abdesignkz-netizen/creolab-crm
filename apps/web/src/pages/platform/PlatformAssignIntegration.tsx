@@ -151,7 +151,7 @@ function ProviderAssignForm({
       {fields.includes("instanceId") ? (
         <label>
           Instance ID Green API
-          <input name="instanceId" defaultValue={existing?.schema?.instanceId || ""} required={!already} />
+          <input name="instanceId" autoComplete="off" inputMode="numeric" pattern="[0-9]+" defaultValue={existing?.schema?.instanceId || ""} required={!already} />
         </label>
       ) : null}
       {fields.includes("apiToken") ? (

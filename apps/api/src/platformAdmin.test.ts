@@ -237,7 +237,9 @@ describe("platform admin panel", () => {
     assert.equal(catalog.status, 200);
     const whatsapp = (catalog.data.items || []).find((item: { type: string }) => item.type === "whatsapp_seller");
     assert.equal(whatsapp.connectable, true);
-    assert.ok(Array.isArray(whatsapp.steps) && whatsapp.steps.length >= 4);
+    assert.match(whatsapp.title, /Green API/);
+    assert.ok(whatsapp.steps.some((step: string) => step.includes("QR")));
+    for (const type of ["whatsapp_qr", "whatsapp_cloud"]) assert.ok(catalog.data.items.some((item: { type: string }) => item.type === type));
     assert.equal((await req(ownerCookie, "/api/v1/admin/integrations/catalog")).status, 403);
 
     const tenant = await prisma.tenant.create({

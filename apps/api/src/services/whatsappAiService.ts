@@ -14,6 +14,16 @@ import { detectHandoffReason, isClientRefusalText } from "./aiConversationPolicy
 import { answerWhatsAppWithLlm } from "./llmClient.ts";
 
 type Db = PrismaClient | Prisma.TransactionClient;
+export function whatsAppAiFailureReason(code: string | null | undefined) {
+  const reasons: Record<string, string> = {
+    ai_not_configured: "AI_PROMPT_MISSING", ai_model_missing: "AI_MODEL_MISSING", ai_disabled: "AI_DISABLED",
+    feature_required: "AI_PLAN_REQUIRED", tenant_inactive: "AI_TENANT_INACTIVE",
+    ai_credits_exhausted: "AI_CREDITS_EXHAUSTED", http_401: "AI_PROVIDER_AUTH", http_403: "AI_PROVIDER_AUTH",
+    http_429: "AI_PROVIDER_LIMIT", http_400: "AI_PROVIDER_CONFIG", http_404: "AI_PROVIDER_CONFIG",
+    ai_invalid_response: "AI_INVALID_RESPONSE", empty_completion: "AI_INVALID_RESPONSE",
+  };
+  return reasons[code || ""] || "AI_PROVIDER_UNAVAILABLE";
+}
 const record = (value: unknown) => value && typeof value === "object" ? value as Record<string, any> : {};
 const clientAiMode = (value: unknown) => { const setting = record(value).aiAutomation; return typeof setting === "string" ? setting : record(setting).mode; };
 export function automaticWhatsAppMode(settingsJson: unknown, integration: { id: string; type: string; automationMode?: string | null }, contact: { doNotContact?: boolean; attributionJson?: unknown }) {
@@ -102,7 +112,9 @@ export async function processWhatsAppAiReply(prisma: PrismaClient, event: { id: 
     // The durable outbox retries after the configured quiet period, never a socket callback.
     throw new ApiError(409, "ai_outside_hours", "ИИ ожидает рабочего времени");
   }
-  if (!await directAiSendAllowed(prisma, tenantId, conversationId, version, revision)) { await handoff(prisma, tenantId, conversationId, version, revision, "AI_ERROR"); return; }
+  const readiness = await directAiReadiness(prisma, tenantId);
+  if (readiness) { await handoff(prisma, tenantId, conversationId, version, revision, whatsAppAiFailureReason(readiness)); return; }
+  if (!await directAiSendAllowed(prisma, tenantId, conversationId, version, revision)) { await handoff(prisma, tenantId, conversationId, version, revision, "AI_CHANNEL_RESTRICTED"); return; }
   const history = await prisma.message.findMany({ where: { tenantId, conversationId, internal: false, operationState: { notIn: ["queued", "sending", "failed", "canceled", "unknown"] } }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 30, include: { attachments: { select: { id: true } } } });
   const latest = history.find(message => message.id === payload.messageId);
   if (!latest || latest.direction !== "inbound") return;
@@ -110,7 +122,7 @@ export async function processWhatsAppAiReply(prisma: PrismaClient, event: { id: 
   if (isClientRefusalText(latest.text || "") || /адаммен|оператормен|менеджермен|адамға|менеджерге|talk to.*human|speak to.*human/i.test(latest.text || "") || detected && (detected.code === "CLIENT_REQUESTED_HUMAN" || settings.handoff.triggers[detected.trigger]) || latest.attachments.length && !latest.text?.trim()) {
     await handoff(prisma, tenantId, conversationId, version, revision, detected?.code || "CLIENT_REQUESTED_HUMAN", settings.handoff.afterMode === "assist" ? "paused" : "human"); return;
   }
-  if (!(await canConsume(prisma, tenantId, "AI_CREDITS", 1)).allowed) { await handoff(prisma, tenantId, conversationId, version, revision, "AI_ERROR"); return; }
+  if (!(await canConsume(prisma, tenantId, "AI_CREDITS", 1)).allowed) { await handoff(prisma, tenantId, conversationId, version, revision, "AI_CREDITS_EXHAUSTED"); return; }
   const claim = await prisma.$transaction(async tx => {
     await tx.$queryRaw`SELECT id FROM "Conversation" WHERE id = ${conversationId} AND "tenantId" = ${tenantId} FOR UPDATE`;
     const current = await tx.conversation.findFirst({ where: { id: conversationId, tenantId, mode: "ai", controlVersion: version, messageRevision: revision } });
@@ -128,12 +140,13 @@ export async function processWhatsAppAiReply(prisma: PrismaClient, event: { id: 
   });
   if (!claim) return;
   let answer: Awaited<ReturnType<typeof answerWhatsAppWithLlm>> = null;
+  let failureReason = "AI_PROVIDER_UNAVAILABLE";
   try { answer = await generate({ prisma, tenantId, integrationId: conversation.connection!.integrationId, conversationId,
     history: [...history.reverse().filter(message => message.id !== latest.id), latest].map(message => ({ role: message.direction === "inbound" ? "user" : "assistant", content: (message.text || "").slice(0, 6000) + (message.attachments.length ? "\n[К сообщению приложен файл, содержимое недоступно.]" : "") })) }); }
-  catch { /* Fail closed, with a visible handoff instead of repeated billed generation. */ }
+  catch (error) { failureReason = whatsAppAiFailureReason(error instanceof ApiError ? error.code : null); }
   if (!answer || answer.handoff) {
-    await prisma.outboundOperation.updateMany({ where: { id: claim.id, state: "generating" }, data: { state: "failed", error: answer?.handoff ? "needs_human" : "ai_unavailable" } });
-    await handoff(prisma, tenantId, conversationId, version, revision, answer?.handoff ? "LOW_CONFIDENCE" : "AI_ERROR", answer?.handoff && settings.handoff.afterMode === "assist" ? "paused" : "human"); return;
+    await prisma.outboundOperation.updateMany({ where: { id: claim.id, state: "generating" }, data: { state: "failed", error: answer?.handoff ? "needs_human" : failureReason } });
+    await handoff(prisma, tenantId, conversationId, version, revision, answer?.handoff ? "LOW_CONFIDENCE" : failureReason, answer?.handoff && settings.handoff.afterMode === "assist" ? "paused" : "human"); return;
   }
   if (!await directAiSendAllowed(prisma, tenantId, conversationId, version, revision)) {
     await prisma.outboundOperation.updateMany({ where: { id: claim.id, state: "generating" }, data: { state: "canceled" } }); return;

@@ -10,7 +10,7 @@ export const DEFAULT_PLATFORM_SETTINGS = {
   ai: {
     enabled: true,
     provider: process.env.OPENAI_API_KEY ? "openai" : process.env.ANYMODEL_API_KEY ? "anymodel" : "",
-    model: process.env.ANYMODEL_MODEL || process.env.OPENAI_MODEL || "gpt-4o-mini",
+    model: envLlm().model,
   },
   features: {
     forms: true,
@@ -28,21 +28,15 @@ export const DEFAULT_PLATFORM_SETTINGS = {
 
 export type PlatformSettings = typeof DEFAULT_PLATFORM_SETTINGS;
 
-function envLlm() {
-  const anyModelKey = String(process.env.ANYMODEL_API_KEY || "").trim();
-  const openAiKey = String(process.env.OPENAI_API_KEY || "").trim();
-  const apiKey = openAiKey || anyModelKey;
-  const useAnyModel = Boolean(anyModelKey) && !openAiKey;
-  const baseUrl =
-    process.env.ANYMODEL_BASE_URL ||
-    process.env.OPENAI_BASE_URL ||
-    (useAnyModel ? "https://anymodel.org/v1" : "https://api.openai.com/v1");
-  const model = process.env.ANYMODEL_MODEL || process.env.OPENAI_MODEL || "gpt-4o-mini";
+export function envLlm(selectedProvider?: string) {
+  const provider = String(selectedProvider || (process.env.OPENAI_API_KEY ? "openai" : process.env.ANYMODEL_API_KEY ? "anymodel" : "openai")).trim().toLowerCase();
+  const anymodel = provider === "anymodel";
+  const supported = anymodel || provider === "openai";
   return {
-    apiKey,
-    baseUrl: baseUrl.replace(/\/$/, ""),
-    model,
-    provider: openAiKey ? "openai" : useAnyModel ? "anymodel" : "",
+    apiKey: supported ? String(process.env[anymodel ? "ANYMODEL_API_KEY" : "OPENAI_API_KEY"] || "").trim() : "",
+    baseUrl: String(process.env[anymodel ? "ANYMODEL_BASE_URL" : "OPENAI_BASE_URL"] || (anymodel ? "https://anymodel.org/v1" : "https://api.openai.com/v1")).replace(/\/$/, ""),
+    model: String(process.env[anymodel ? "ANYMODEL_MODEL" : "OPENAI_MODEL"] || "gpt-4o-mini"),
+    provider,
   };
 }
 
@@ -224,13 +218,14 @@ export async function getEffectiveTenantSettings(
 }
 
 export async function getEffectiveLlmConfig(prisma: PrismaClient, tenantId?: string | null) {
-  const env = envLlm();
-  if (!tenantId) return env;
+  if (!tenantId) return envLlm();
   const settings = await getEffectiveTenantSettings(prisma, tenantId);
+  const env = envLlm(settings.ai.provider);
   if (!settings.ai.enabled) return { ...env, apiKey: "", model: settings.ai.model };
   const aiRow = await prisma.aIConfiguration.findFirst({ where: { tenantId } });
   let apiKey = env.apiKey;
   if (aiRow?.credentialId) {
+    apiKey = ""; // Never fall back to another credential when the configured one is missing.
     const cred = await prisma.credential.findFirst({
       where: { id: aiRow.credentialId, tenantId },
     });

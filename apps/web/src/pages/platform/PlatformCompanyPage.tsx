@@ -26,11 +26,14 @@ const TABS = [
 export function PlatformCompanyPage() {
   const uiText = useUiText();
   const params = useParams();
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   const id = params.id || pathname.match(/^\/admin\/companies\/([^/]+)$/)?.[1] || "";
-  const [tab, setTab] = useState<(typeof TABS)[number][0]>("info");
+  const [tab, setTab] = useState<(typeof TABS)[number][0]>(() => new URLSearchParams(search).get("tab") === "ai-manager" ? "ai-manager" : "info");
   const [company, setCompany] = useState<any>(null);
   const [error, setError] = useState("");
+  useEffect(() => {
+    setTab(new URLSearchParams(search).get("tab") === "ai-manager" ? "ai-manager" : "info");
+  }, [id, search]);
 
   async function load() {
     setCompany(await api.adminCompany(id));

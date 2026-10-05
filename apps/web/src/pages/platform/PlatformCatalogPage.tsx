@@ -1,6 +1,6 @@
 import { uiText, useUiText, localizeUiOptions } from "../../lib/uiText";
 import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../../lib/api";
 import { notifySaved } from "../../components/SaveNotice";
 import { AssignIntegrationForm } from "./PlatformAssignIntegration";
@@ -10,6 +10,7 @@ export function PlatformCatalogPage() {
   const [params] = useSearchParams();
   const [items, setItems] = useState<any[]>([]);
   const [companies, setCompanies] = useState<any[]>([]);
+  const [aiTenantId, setAiTenantId] = useState("");
   const [error, setError] = useState("");
   const focusType = params.get("type") || "";
 
@@ -37,6 +38,15 @@ export function PlatformCatalogPage() {
       <p className="muted">
         {uiText("Подключение всегда к выбранной компании. Общий WhatsApp-мост сервера к организации не подставляется.")}</p>
       {error ? <p className="error">{error}</p> : null}
+      <section className="panel stack">
+        <h3>{uiText("ИИ-менеджер для любого подключения WhatsApp")}</h3>
+        <p>{uiText("QR-код, Green API и официальный WhatsApp используют промпт и базу знаний выбранной компании. Настройте ИИ отдельно от подключения номера.")}</p>
+        <label>{uiText("Компания")}<select value={aiTenantId} onChange={event => setAiTenantId(event.target.value)}>
+          <option value="">{uiText("Выберите компанию")}</option>
+          {companies.map(company => <option key={company.id} value={company.id}>{company.name}</option>)}
+        </select></label>
+        {aiTenantId && <Link className="btn" to={`/admin/companies/${aiTenantId}?tab=ai-manager`}>{uiText("Настроить ИИ-менеджера")}</Link>}
+      </section>
       {items.map((item) => (
         <div className="panel stack" key={item.type} id={`integration-${item.type}`}>
           <div className="page-head">
@@ -48,7 +58,7 @@ export function PlatformCatalogPage() {
               {item.connectable ? uiText("Можно подключить к компании") : item.implementationReady ? uiText("Не из этой панели") : uiText("Модуль не готов")}
             </span>
           </div>
-          <p>{item.description}</p>
+          <p>{uiText(item.description)}</p>
           {(item.steps || []).length ? (
             item.type === "form" ? (
               <p className="muted">{(item.steps as string[])[0]}</p>
@@ -57,7 +67,7 @@ export function PlatformCatalogPage() {
               <b>{uiText("Как подключить")}</b>
               <ol>
                 {(item.steps as string[]).map((step: string) => (
-                  <li key={step}>{step}</li>
+                  <li key={step}>{uiText(step)}</li>
                 ))}
               </ol>
             </div>

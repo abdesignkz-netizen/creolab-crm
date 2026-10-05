@@ -49,7 +49,7 @@ export const INTEGRATION_IMPLEMENTATIONS: IntegrationImplementation[] = [
   },
   {
     type: "whatsapp_seller",
-    title: "WhatsApp",
+    title: "WhatsApp · Green API",
     purpose: "Подключение WhatsApp компании к общему AI Manager: Instance ID и API Token Green API.",
     functions: ["receive_messages", "sync_leads"],
     authMethod: "green_api",
@@ -59,13 +59,19 @@ export const INTEGRATION_IMPLEMENTATIONS: IntegrationImplementation[] = [
     connectable: true,
     connectHint: "",
     steps: [
-      "Выберите компанию, к которой привязывается WhatsApp-номер.",
-      "Укажите Instance ID и API Token Green API этой компании. Адрес AI Manager задаётся платформой и не вводится вручную.",
-      "Секрет интеграции создаёт BasQar автоматически. Глобальный CRM_BRIDGE_SECRET на запросы компании не ставится.",
-      "При сохранении CRM регистрирует Integration в AI Manager (INTERNAL_SERVICE_SECRET) и выставляет webhook Green API на /webhook/<token>.",
-      "Голый /webhook без token для зарегистрированной компании не принимается.",
+      "Это подключение через Green API. Для QR-кода и официального WhatsApp Business используйте соответствующий способ подключения.",
+      "Выберите компанию и укажите Instance ID и API Token её аккаунта Green API.",
+      "Промпт, база знаний и модель настраиваются в карточке компании, на вкладке «AI-менеджер», для всех способов подключения WhatsApp.",
     ],
   },
+  ...[
+    { type: "whatsapp_qr", title: "WhatsApp · QR", authMethod: "qr", purpose: "Подключение WhatsApp по QR-коду без аккаунта Green API." },
+    { type: "whatsapp_cloud", title: "WhatsApp · Meta", authMethod: "meta_cloud", purpose: "Официальное подключение WhatsApp Business через Meta." },
+  ].map(provider => ({ ...provider, functions: ["receive_messages", "send_text", "send_media", "ai_replies"],
+    implementationReady: true, multiple: true, fields: [], connectable: false,
+    connectHint: "Номер подключается в кабинете компании: Интеграции → WhatsApp. ИИ настраивается администратором в карточке компании.",
+    steps: ["Подключите номер в кабинете компании выбранным способом.", "Откройте вкладку «AI-менеджер» в карточке компании, настройте модель и опубликуйте промпт и базу знаний.", "Включите ИИ-ответы у нужного номера в кабинете компании."],
+  })),
   {
     type: "esf",
     title: "ИС ЭСФ",
@@ -213,8 +219,8 @@ export async function listPlatformCatalog(prisma: PrismaClient) {
     const connectable = Boolean(impl?.connectable && implementationReady && row.available);
     return {
       type: row.type,
-      title: row.title,
-      description: row.description || impl?.purpose || "",
+      title: row.type === "whatsapp_seller" ? impl!.title : row.title,
+      description: row.type === "whatsapp_seller" && (!row.description || row.description === "Подключение моста WhatsApp AI Manager компании: адрес и секрет.") ? impl!.purpose : row.description || impl?.purpose || "",
       purpose: row.purpose || impl?.purpose || "",
       functions: impl?.functions || [],
       authMethod: impl?.authMethod || "none",

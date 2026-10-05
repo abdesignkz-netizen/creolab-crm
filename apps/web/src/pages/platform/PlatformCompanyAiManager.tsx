@@ -50,7 +50,7 @@ export function PlatformCompanyAiManager({ tenantId }: { tenantId: string }) {
   const activation = (data.activation || {}) as Activation;
   const promptState = activation.prompt || {};
   const knowledgeState = activation.knowledge || {};
-  const whatsappLabel = data.integration ? uiText("Подключён") : uiText("Не подключён");
+  const whatsappLabel = activation.whatsappConnected ? uiText("Подключён") : uiText("Не подключён");
 
   async function sendToWhatsApp() {
     setSyncBusy(true);
@@ -72,7 +72,7 @@ export function PlatformCompanyAiManager({ tenantId }: { tenantId: string }) {
     <div className="stack">
       <div className="panel stack">
         <p>
-          {uiText("Промт и база знаний WhatsApp AI этой компании хранятся здесь. Клиенты CRM их не редактируют. Зелёный статус значит, что бот уже отвечает по этим текстам. Если статус жёлтый — в админке сохранено, в WhatsApp ещё нет.")}</p>
+          {uiText("QR-код, Green API и официальный WhatsApp используют промпт и базу знаний выбранной компании. Настройте ИИ отдельно от подключения номера.")}</p>
         <div className="ai-activation">
           <p className="integ-status-line">
             {uiText("Промт")}<span className={statusBadgeClass(promptState.label || "Не задан")}>{uiMessage(promptState.label) || uiText("Не задан")}</span>
@@ -94,14 +94,24 @@ export function PlatformCompanyAiManager({ tenantId }: { tenantId: string }) {
           </p>
         </div>
         {syncError ? <p className="error">{syncError}</p> : null}
-        {data.integration ? (
+        {data.connections?.some((connection: any) => connection.type === "whatsapp_seller") ? (
           <div className="actions">
             <button type="button" className="btn secondary" disabled={syncBusy} onClick={() => void sendToWhatsApp()}>
-              {syncBusy ? uiText("Отправляем…") : uiText("Отправить в WhatsApp")}
+              {syncBusy ? uiText("Отправляем…") : uiText("Синхронизировать Green API")}
             </button>
           </div>
         ) : null}
       </div>
+      <ModelSettings tenantId={tenantId} runtime={data.runtime || {}} onSaved={load} />
+      <section className="panel stack">
+        <h3>{uiText("Подключения WhatsApp и готовность ИИ")}</h3>
+        {(data.connections || []).map((connection: any) => <div className="card stack" key={connection.id}>
+          <b>{connection.type === "whatsapp_qr" ? "WhatsApp · QR" : connection.type === "whatsapp_cloud" ? "WhatsApp · Meta" : "WhatsApp · Green API"} · {connection.name}</b>
+          <p>{uiMessage(connection.activation?.prompt?.label)}</p>
+          <p className="muted">{uiMessage(connection.activation?.prompt?.reason)}</p>
+        </div>)}
+        {!data.connections?.length && <p>{uiText("Подключите WhatsApp в кабинете компании любым удобным способом.")}</p>}
+      </section>
       <PromptEditor tenantId={tenantId} initial={promptText} activation={promptState} onSaved={load} />
       <KnowledgeEditor tenantId={tenantId} items={data.knowledge || []} activation={knowledgeState} onSaved={load} />
     </div>
@@ -298,4 +308,47 @@ function KnowledgeEditor({
       </div>
     </div>
   );
+}
+
+function ModelSettings({ tenantId, runtime, onSaved }: { tenantId: string; runtime: any; onSaved: () => Promise<void> }) {
+  const uiText = useUiText();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  return <form className="panel stack" key={`${tenantId}-${runtime.provider}-${runtime.model}-${runtime.enabled}`} onSubmit={async event => {
+    event.preventDefault();
+    const element = event.currentTarget;
+    const form = new FormData(element);
+    setBusy(true); setError("");
+    try {
+      await api.adminUpdateCompanyAi(tenantId, { provider: String(form.get("provider")), model: String(form.get("model")),
+        enabled: form.get("enabled") === "on", apiKey: String(form.get("apiKey") || "") });
+      const field = element.elements.namedItem("apiKey") as HTMLInputElement | null;
+      if (field) field.value = "";
+      await api.adminSyncCompanyAiManager(tenantId);
+      await onSaved(); notifySaved(uiText("Настройки ИИ сохранены"));
+    } catch (error) { setError(error instanceof Error ? error.message : uiText("Ошибка")); }
+    finally { setBusy(false); }
+  }}>
+    <h3>{uiText("Модель ИИ компании")}</h3>
+    <p className="muted">{uiText("QR и Meta используют этот ключ модели. Green API продолжает работать через подключённый AI Manager, куда передаются промпт, база знаний и название модели. Ключ модели ИИ отличается от API Token Green API.")}</p>
+    <label>{uiText("Провайдер")}<select name="provider" defaultValue={runtime.provider || "openai"}>
+      <option value="openai">OpenAI</option><option value="anymodel">AnyModel</option>
+      {runtime.provider && !["openai", "anymodel"].includes(runtime.provider) && <option value={runtime.provider}>{runtime.provider}</option>}
+    </select></label>
+    <label>{uiText("Модель")}<input name="model" defaultValue={runtime.model || ""} required /></label>
+    <label>{uiText("Ключ API (не показывается, замена)")}<input type="password" name="apiKey" autoComplete="new-password" /></label>
+    <p>{runtime.enabled === false ? uiText("ИИ отключён в настройках компании или сервиса.") : runtime.hasCredential ? uiText("Ключ модели настроен") : uiText("Ключ модели отсутствует или не читается. Укажите действующий ключ.")}</p>
+    <label className="check"><input type="checkbox" name="enabled" defaultChecked={runtime.enabled !== false} />{uiText("Разрешить ИИ-ответы компании")}</label>
+    {error && <p className="error">{error}</p>}
+    <button className="btn" disabled={busy}>{busy ? uiText("Сохраняем…") : uiText("Сохранить настройки ИИ")}</button>
+    <p className="muted">{uiText("Проверка использует сохранённые настройки и AI-кредиты. Сообщения клиентам не отправляются.")}</p>
+    <button type="button" className="btn secondary" disabled={busy} onClick={async () => {
+      setBusy(true); setError("");
+      try {
+        const result = await api.adminTestCompanyAiModel(tenantId) as { ok: boolean; message: string };
+        if (result.ok) notifySaved(uiMessage(result.message)); else setError(uiMessage(result.message));
+      } catch (error) { setError(error instanceof Error ? error.message : uiText("Ошибка")); }
+      finally { setBusy(false); }
+    }}>{uiText("Проверить модель ИИ")}</button>
+  </form>;
 }

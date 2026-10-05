@@ -1,5 +1,42 @@
 /** Reviewed product copy only. Never pass customer content to this function. */
 export const kkSystemMessages: Readonly<Record<string, string>> = {
+  "QR и Meta используют этот ключ модели. Green API продолжает работать через подключённый AI Manager, куда передаются промпт, база знаний и название модели. Ключ модели ИИ отличается от API Token Green API.": "QR және Meta осы модель кілтін пайдаланады. Green API бұрын қосылған AI Manager арқылы жұмысын жалғастырады: оған ЖИ нұсқаулығы, білім қоры және модель атауы беріледі. ЖИ моделінің кілті мен Green API токені — бөлек деректер.",
+  "При смене провайдера укажите ключ новой модели ИИ.": "Провайдерді ауыстырғанда жаңа ЖИ моделінің кілтін енгізіңіз.",
+  "Это подключение через Green API. Для QR-кода и официального WhatsApp Business используйте соответствующий способ подключения.": "Бұл — Green API арқылы қосылу. QR-код немесе ресми WhatsApp Business үшін тиісті қосылу тәсілін таңдаңыз.",
+  "Выберите компанию и укажите Instance ID и API Token её аккаунта Green API.": "Компанияны таңдап, оның Green API аккаунтының Instance ID және API Token мәндерін енгізіңіз.",
+  "Промпт, база знаний и модель настраиваются в карточке компании, на вкладке «AI-менеджер», для всех способов подключения WhatsApp.": "WhatsApp-қа қосылудың барлық тәсілі үшін ЖИ нұсқаулығы, білім қоры және модель компания карточкасындағы «AI-менеджер» қойындысында бапталады.",
+  "Подключите номер в кабинете компании выбранным способом.": "Компания кабинетінде нөмірді таңдаған тәсілмен қосыңыз.",
+  "Откройте вкладку «AI-менеджер» в карточке компании, настройте модель и опубликуйте промпт и базу знаний.": "Компания карточкасындағы «AI-менеджер» қойындысын ашып, модельді баптаңыз және ЖИ нұсқаулығы мен білім қорын жариялаңыз.",
+  "Включите ИИ-ответы у нужного номера в кабинете компании.": "Компания кабинетінде қажетті нөмір үшін ЖИ жауаптарын қосыңыз.",
+  "Подключение WhatsApp по QR-коду без аккаунта Green API.": "WhatsApp-ты Green API аккаунтынсыз QR-код арқылы қосу.",
+  "Официальное подключение WhatsApp Business через Meta.": "WhatsApp Business-ті Meta арқылы ресми түрде қосу.",
+  "Подключение WhatsApp компании к общему AI Manager: Instance ID и API Token Green API.": "Компанияның WhatsApp нөмірін ортақ AI Manager-ге қосу: Green API аккаунтының Instance ID және API Token мәндері қажет.",
+  "ИИ-менеджер для любого подключения WhatsApp": "WhatsApp-қа қосылудың барлық тәсіліне арналған ЖИ-менеджер",
+  "QR-код, Green API и официальный WhatsApp используют промпт и базу знаний выбранной компании. Настройте ИИ отдельно от подключения номера.": "QR-код, Green API және ресми WhatsApp таңдалған компанияның ЖИ нұсқаулығы мен білім қорын пайдаланады. Нөмірді қосу мен ЖИ баптаулары бөлек реттеледі.",
+  "Настроить ИИ-менеджера": "ЖИ-менеджерді баптау",
+  "Подключения WhatsApp и готовность ИИ": "WhatsApp қосылымдары және ЖИ дайындығы",
+  "Подключите WhatsApp в кабинете компании любым удобным способом.": "Компания кабинетінде WhatsApp-ты өзіңізге ыңғайлы тәсілмен қосыңыз.",
+  "Синхронизировать Green API": "Green API баптауларын синхрондау",
+  "Настройки ИИ сохранены": "ЖИ баптаулары сақталды",
+  "Модель ИИ компании": "Компанияның ЖИ моделі",
+  "Эти настройки не зависят от способа подключения WhatsApp. Ключ модели ИИ отличается от API Token Green API.": "Бұл баптаулар WhatsApp-қа қосылу тәсіліне тәуелді емес. ЖИ моделінің кілті мен Green API токені — бөлек деректер.",
+  "Ключ модели настроен": "Модель кілті бапталған",
+  "Ключ модели отсутствует или не читается. Укажите действующий ключ.": "Модель кілті жоқ немесе оны оқу мүмкін емес. Жарамды кілтті енгізіңіз.",
+  "Разрешить ИИ-ответы компании": "Компания үшін ЖИ жауаптарына рұқсат беру",
+  "Сохранить настройки ИИ": "ЖИ баптауларын сақтау",
+  "Проверка использует сохранённые настройки и AI-кредиты. Сообщения клиентам не отправляются.": "Тексеру сақталған баптаулар мен ЖИ кредиттерін пайдаланады. Клиенттерге хабарлама жіберілмейді.",
+  "Проверить модель ИИ": "ЖИ моделін тексеру",
+  "Модель ИИ отвечает. Сообщение клиенту не отправлялось.": "ЖИ моделі жауап беріп тұр. Клиентке хабарлама жіберілген жоқ.",
+  "Не удалось проверить модель ИИ.": "ЖИ моделін тексеру мүмкін болмады.",
+  "Промпт компании не опубликован. Обратитесь к администратору.": "Компанияның ЖИ нұсқаулығы жарияланбаған. Әкімшіге хабарласыңыз.",
+  "Модель ИИ не подключена. Администратору нужно проверить ключ модели.": "ЖИ моделі қосылмаған. Әкімші модель кілтін тексеруі керек.",
+  "Закончились AI-кредиты. Пополните лимит для продолжения ответов.": "ЖИ кредиттері таусылды. Жауап беруді жалғастыру үшін лимитті толықтырыңыз.",
+  "Провайдер ИИ отклонил ключ доступа. Обратитесь к администратору.": "ЖИ провайдері кіру кілтін қабылдамады. Әкімшіге хабарласыңыз.",
+  "Провайдер ИИ ограничил запросы. Администратору нужно проверить баланс и лимиты.": "ЖИ провайдері сұрауларды шектеді. Әкімші баланс пен лимиттерді тексеруі керек.",
+  "Провайдер ИИ отклонил настройки модели. Обратитесь к администратору.": "ЖИ провайдері модель баптауларын қабылдамады. Әкімшіге хабарласыңыз.",
+  "Модель ИИ вернула ответ в неподдерживаемом формате.": "ЖИ моделі қолдау көрсетілмейтін пішімде жауап берді.",
+  "Не удалось получить ответ от модели ИИ. Повторите позже или обратитесь к администратору.": "ЖИ моделінен жауап алу мүмкін болмады. Кейінірек қайталаңыз немесе әкімшіге хабарласыңыз.",
+  "Автоответ остановлен настройками диалога, подключения или ограничением WhatsApp.": "Автоматты жауап диалог не қосылым баптауларына немесе WhatsApp шектеуіне байланысты тоқтатылды.",
   "Промпт опубликован. Настройте подключение к модели ИИ.": "ЖИ нұсқаулығы жарияланған. ЖИ моделіне қосылымды баптаңыз.",
   "ИИ отключён в настройках компании или сервиса.": "Компания немесе сервис баптауларында ЖИ өшірілген.",
   "Опубликуйте промпт компании для ИИ-ответов.": "ЖИ жауап беруі үшін компанияның ЖИ нұсқаулығын жариялаңыз.",
@@ -4744,8 +4781,48 @@ export const kkSystemMessages: Readonly<Record<string, string>> = {
   "Номер в шаблоне не размечен. При формировании возьмём номер из CRM, если в тексте есть «Договор №».": "Үлгідегі нөмір өріс ретінде белгіленбеген. Мәтінде «Договор №» болса, құжат жасалғанда нөмір CRM жүйесінен алынады."
 };
 
+const enAiMessages: Readonly<Record<string, string>> = {
+  "QR и Meta используют этот ключ модели. Green API продолжает работать через подключённый AI Manager, куда передаются промпт, база знаний и название модели. Ключ модели ИИ отличается от API Token Green API.": "QR and Meta use this model key. Green API continues through its connected AI Manager, which receives the prompt, knowledge base and model name. The AI model key is separate from the Green API token.",
+  "При смене провайдера укажите ключ новой модели ИИ.": "When changing providers, enter the new AI model key.",
+  "Это подключение через Green API. Для QR-кода и официального WhatsApp Business используйте соответствующий способ подключения.": "This connects through Green API. For QR or official WhatsApp Business, choose the corresponding connection method.",
+  "Выберите компанию и укажите Instance ID и API Token её аккаунта Green API.": "Select the company and enter its Green API account’s Instance ID and API Token.",
+  "Промпт, база знаний и модель настраиваются в карточке компании, на вкладке «AI-менеджер», для всех способов подключения WhatsApp.": "Configure the prompt, knowledge base and model in the company’s AI Manager tab for all WhatsApp connection methods.",
+  "Подключите номер в кабинете компании выбранным способом.": "Connect the number using your chosen method in the company workspace.",
+  "Откройте вкладку «AI-менеджер» в карточке компании, настройте модель и опубликуйте промпт и базу знаний.": "Open the company’s AI Manager tab, configure the model, and publish the prompt and knowledge base.",
+  "Включите ИИ-ответы у нужного номера в кабинете компании.": "Enable AI replies for the required number in the company workspace.",
+  "Подключение WhatsApp по QR-коду без аккаунта Green API.": "Connect WhatsApp by QR code without a Green API account.",
+  "Официальное подключение WhatsApp Business через Meta.": "Official WhatsApp Business connection through Meta.",
+  "Подключение WhatsApp компании к общему AI Manager: Instance ID и API Token Green API.": "Connect the company’s WhatsApp to the shared AI Manager using its Green API Instance ID and API Token.",
+  "ИИ-менеджер для любого подключения WhatsApp": "AI Manager for every WhatsApp connection",
+  "QR-код, Green API и официальный WhatsApp используют промпт и базу знаний выбранной компании. Настройте ИИ отдельно от подключения номера.": "QR, Green API and official WhatsApp use the selected company’s prompt and knowledge base. Configure AI separately from the phone connection.",
+  "Настроить ИИ-менеджера": "Configure AI Manager",
+  "Подключения WhatsApp и готовность ИИ": "WhatsApp connections and AI readiness",
+  "Подключите WhatsApp в кабинете компании любым удобным способом.": "Connect WhatsApp using your preferred method in the company workspace.",
+  "Синхронизировать Green API": "Synchronize Green API",
+  "Настройки ИИ сохранены": "AI settings saved",
+  "Модель ИИ компании": "Company AI model",
+  "Эти настройки не зависят от способа подключения WhatsApp. Ключ модели ИИ отличается от API Token Green API.": "These settings are independent of the WhatsApp connection method. The AI model key is separate from the Green API token.",
+  "Ключ модели настроен": "Model key configured",
+  "Ключ модели отсутствует или не читается. Укажите действующий ключ.": "Model key is missing or cannot be read. Enter a valid key.",
+  "Разрешить ИИ-ответы компании": "Enable AI replies for the company",
+  "Сохранить настройки ИИ": "Save AI settings",
+  "Проверка использует сохранённые настройки и AI-кредиты. Сообщения клиентам не отправляются.": "This check uses saved settings and AI credits. No messages are sent to customers.",
+  "Проверить модель ИИ": "Test AI model",
+  "Модель ИИ отвечает. Сообщение клиенту не отправлялось.": "The AI model responds. No message was sent to a customer.",
+  "Не удалось проверить модель ИИ.": "Could not test the AI model.",
+  "Промпт компании не опубликован. Обратитесь к администратору.": "The company prompt is not published. Contact the administrator.",
+  "Модель ИИ не подключена. Администратору нужно проверить ключ модели.": "The AI model is not connected. The administrator needs to check its key.",
+  "Закончились AI-кредиты. Пополните лимит для продолжения ответов.": "AI credits have run out. Add credits to resume replies.",
+  "Провайдер ИИ отклонил ключ доступа. Обратитесь к администратору.": "The AI provider rejected the access key. Contact the administrator.",
+  "Провайдер ИИ ограничил запросы. Администратору нужно проверить баланс и лимиты.": "The AI provider limited requests. The administrator needs to check its balance and limits.",
+  "Провайдер ИИ отклонил настройки модели. Обратитесь к администратору.": "The AI provider rejected the model settings. Contact the administrator.",
+  "Модель ИИ вернула ответ в неподдерживаемом формате.": "The AI model returned an unsupported response format.",
+  "Не удалось получить ответ от модели ИИ. Повторите позже или обратитесь к администратору.": "Could not get a response from the AI model. Try again later or contact the administrator.",
+  "Автоответ остановлен настройками диалога, подключения или ограничением WhatsApp.": "Automatic replies stopped because of conversation settings, connection settings, or a WhatsApp restriction."
+};
+
 export function systemText(locale: string | null | undefined, source: string, params: Record<string, string | number> = {}): string {
-  const text = locale?.toLowerCase().split(/[-_]/)[0] === "kk" ? kkSystemMessages[source] ?? source : source;
+  const text = locale?.toLowerCase().split(/[-_]/)[0] === "kk" ? kkSystemMessages[source] ?? source : locale?.toLowerCase().split(/[-_]/)[0] === "en" ? enAiMessages[source] ?? source : source;
   return text.replace(/\{([a-zA-Z]\w*)\}/g, (match, key: string) => params[key] == null ? match : String(params[key]));
 }
 
@@ -4762,6 +4839,7 @@ const messagePatterns = Object.keys(kkSystemMessages)
   });
 
 export function systemMessage(locale: string, source: string): string {
+  if (/^en(?:[-_]|$)/i.test(locale)) return enAiMessages[source] ?? source;
   if (!/^kk(?:[-_]|$)/i.test(locale)) return source;
   if (kkSystemMessages[source]) return kkSystemMessages[source];
   for (const { key, parameters, expression } of messagePatterns) {

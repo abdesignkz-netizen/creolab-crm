@@ -1,9 +1,8 @@
+import { ApiError } from "../errors.ts";
 import { CALLS_ENABLED } from "../lib/featureFlags.ts";
 import type { PrismaClient } from "@creolab/db";
 import { recordAiUsage } from "./aiUsageService.ts";
-import { getEffectiveLlmConfig } from "./runtimeSettings.ts";
-
-const DEFAULT_ANYMODEL_BASE_URL = "https://anymodel.org/v1";
+import { envLlm, getEffectiveLlmConfig } from "./runtimeSettings.ts";
 
 export type LlmRuntime = {
   prisma?: PrismaClient | null;
@@ -22,23 +21,7 @@ type ChatUsage = {
   completion_tokens_details?: { reasoning_tokens?: number };
 };
 
-function llmConfig() {
-  const anyModelKey = String(process.env.ANYMODEL_API_KEY || "").trim();
-  const openAiKey = String(process.env.OPENAI_API_KEY || "").trim();
-  const apiKey = openAiKey || anyModelKey;
-  const useAnyModel = Boolean(anyModelKey) && !openAiKey;
-  const baseUrl =
-    process.env.ANYMODEL_BASE_URL ||
-    process.env.OPENAI_BASE_URL ||
-    (useAnyModel ? DEFAULT_ANYMODEL_BASE_URL : "https://api.openai.com/v1");
-  const model = process.env.ANYMODEL_MODEL || process.env.OPENAI_MODEL || "gpt-4o-mini";
-  return {
-    apiKey,
-    baseUrl: baseUrl.replace(/\/$/, ""),
-    model,
-    provider: openAiKey ? "openai" : useAnyModel ? "anymodel" : "openai",
-  };
-}
+function llmConfig() { return envLlm(); }
 
 async function resolveLlm(runtime?: LlmRuntime) {
   if (runtime?.prisma && runtime.tenantId) {
@@ -62,7 +45,7 @@ async function completeChat(input: {
 }) {
   const runtime = input.runtime || {};
   const { apiKey, baseUrl, model, provider } = await resolveLlm(runtime);
-  if (!apiKey) return { content: null as string | null };
+  if (!apiKey) return { content: null as string | null, errorCode: "ai_model_missing" };
   let releaseReservation: (() => Promise<void>) | null = null;
   if (runtime.prisma && runtime.tenantId) {
     try {
@@ -70,13 +53,13 @@ async function completeChat(input: {
       const { LIMITS } = await import("@creolab/contracts");
       const resolved = await getEntitlements(runtime.prisma, runtime.tenantId);
       if (!resolved.snapshot.grandfathered) {
-        if (!resolved.entitlements.AI_MANAGER && !resolved.entitlements.AI_CONTROL) return { content: null as string | null };
-        if (["AI_MANAGER_REPLY", "AI_LEAD_ANALYSIS", "AI_FOLLOW_UP"].includes(runtime.feature || input.feature) && !resolved.entitlements.AI_MANAGER) return { content: null as string | null };
+        if (!resolved.entitlements.AI_MANAGER && !resolved.entitlements.AI_CONTROL) return { content: null as string | null, errorCode: "feature_required" };
+        if (["AI_MANAGER_REPLY", "AI_LEAD_ANALYSIS", "AI_FOLLOW_UP"].includes(runtime.feature || input.feature) && !resolved.entitlements.AI_MANAGER) return { content: null as string | null, errorCode: "feature_required" };
         const { reserveAiCall, aiCreditCost } = await import("./billingResourceService.ts");
         releaseReservation = await reserveAiCall(runtime.prisma, runtime.tenantId, (input.timeoutMs ?? 15000) + 120000, aiCreditCost(runtime.feature || input.feature));
       }
-    } catch {
-      return { content: null as string | null };
+    } catch (error) {
+      return { content: null as string | null, errorCode: error instanceof ApiError && error.code === "limit_exceeded" ? "ai_credits_exhausted" : error instanceof ApiError && error.code === "subscription_required" ? "feature_required" : "llm_request_failed" };
     }
   }
   const started = Date.now();
@@ -137,7 +120,7 @@ async function completeChat(input: {
     errorCode,
   });
   await releaseReservation?.().catch(() => {});
-  return { content: status === "ok" ? content : null };
+  return { content: status === "ok" ? content : null, errorCode };
 }
 
 function parseJson<T>(content: string | null): T | null {
@@ -151,13 +134,13 @@ function parseJson<T>(content: string | null): T | null {
 
 /** Direct-channel replies use the same tenant model, published knowledge and credit ledger. */
 export async function answerWhatsAppWithLlm(input: {
-  prisma: PrismaClient; tenantId: string; integrationId: string; conversationId: string;
+  prisma: PrismaClient; tenantId: string; integrationId?: string; conversationId?: string;
   history: Array<{ role: "user" | "assistant"; content: string }>;
 }) {
   const { getPublishedTenantAiContext, buildTenantAiSystemPreamble } = await import("./tenantAiConfigService.ts");
   const context = await getPublishedTenantAiContext(input.prisma, input.tenantId);
-  if (!context.tenantPrompt) return null;
-  const { content } = await completeChat({ runtime: { ...input, feature: "AI_MANAGER_REPLY" }, feature: "AI_MANAGER_REPLY",
+  if (!context.tenantPrompt) throw new ApiError(409, "ai_not_configured", "Опубликуйте промпт компании");
+  const { content, errorCode } = await completeChat({ runtime: { ...input, feature: "AI_MANAGER_REPLY" }, feature: "AI_MANAGER_REPLY",
     json: true, timeoutMs: 20000, temperature: context.temperature ?? 0.2,
     maxOutputTokens: Math.min(context.maxOutputTokens || 1000, 2000),
     messages: [{ role: "system", content: [buildTenantAiSystemPreamble(context).slice(0, 80000),
@@ -168,8 +151,9 @@ export async function answerWhatsAppWithLlm(input: {
       'Верни JSON: {"reply":"текст ответа до 4000 символов", "handoff":false}. При передаче сотруднику верни {"reply":"", "handoff":true}.',
     ].join("\n") }, ...input.history],
   });
+  if (!content) throw new ApiError(502, errorCode || "llm_request_failed", "Не удалось получить ответ модели ИИ");
   const value = parseJson<{ reply?: unknown; handoff?: unknown }>(content);
-  if (!value || typeof value.handoff !== "boolean" || typeof value.reply !== "string" || value.reply.length > 4000) return null;
+  if (!value || typeof value.handoff !== "boolean" || typeof value.reply !== "string" || value.reply.length > 4000) throw new ApiError(502, "ai_invalid_response", "Модель вернула некорректный ответ");
   if (value.handoff) return { reply: "", handoff: true };
   const reply = value.reply.trim();
   return reply ? { reply, handoff: false } : null;
