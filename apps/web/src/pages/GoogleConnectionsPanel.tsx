@@ -9,7 +9,7 @@ const descriptions: Record<string,string> = {
   google_forms: "Новые ответы формы становятся заявками. Если нет телефона, обращение поступает в очередь уточнения. Поля можно сопоставить после подключения.",
   email: "Новые входящие письма Gmail и поддерживаемые вложения появляются в диалогах. Ответы отправляйте из Gmail; автоматические заявки из писем не создаются.",
 };
-export function GoogleConnectionsPanel({ onChange }: { onChange: () => void }) {
+export function GoogleConnectionsPanel({ onChange, kind }: { onChange: () => void; kind?: string }) {
   const uiText = useUiText();
   const [data,setData] = useState<{ configured: boolean; items: Connection[] } | null>(null);
   const [busy,setBusy] = useState(""); const [error,setError] = useState(""); const [note,setNote] = useState("");
@@ -19,10 +19,10 @@ export function GoogleConnectionsPanel({ onChange }: { onChange: () => void }) {
   async function load() { setData(await api.googleConnections() as typeof data); }
   useEffect(() => { void load().catch(err => setError(err.message)); },[]);
   async function run(key: string, action: () => Promise<void>) { setBusy(key);setError("");setNote("");try { await action();await load(); onChange(); } catch(err) { setError(err instanceof Error ? err.message : uiText("Не удалось выполнить действие")); } finally { setBusy(""); } }
-  return <div className="panel"><div className="row"><h3>{uiText("Google: календарь, формы и входящая почта")}</h3><IntegrationHelp kind="google_calendar" /></div>
+  return <div className="panel"><div className="row"><h3>{kind ? ({ calendar: "Google Calendar", google_forms: "Google Forms", email: "Gmail" }[kind] || "Google") : uiText("Google: календарь, формы и входящая почта")}</h3><IntegrationHelp kind={kind === "google_forms" ? "google_forms" : kind === "email" ? "google_email" : "google_calendar"} /></div>
     {error ? <p className="error">{error}</p> : null}{note ? <p className="ok">{note}</p> : null}
     {!data?.configured && data ? <p className="muted">{uiText("Администратору сервиса нужно настроить подключение приложения к Google. После этого здесь станет доступен вход в аккаунт.")}</p> : null}
-    {(data?.items || []).map(item => <div key={item.kind} className="panel">
+    {(data?.items || []).filter(item => !kind || item.kind === kind).map(item => <div key={item.kind} className="panel">
       <h4>{item.title} · {item.connected ? uiText("Подключено") : uiText("Не подключено")}</h4><p className="muted">{localizeUiOptions(descriptions, uiText)[item.kind]}</p><IntegrationHelp kind={item.kind === "calendar" ? "google_calendar" : item.kind === "google_forms" ? "google_forms" : "google_email"} />
       {item.resource ? <p>{item.resource}</p> : null}{item.lastError ? <p className="error">{item.lastError}</p> : null}
       {item.kind !== "email" ? <label>{item.kind === "calendar" ? uiText("ID календаря (primary — основной)") : uiText("ID Google Forms из адреса редактора")}<input value={resource[item.kind] || ""} onChange={event => setResource({...resource,[item.kind]:event.target.value})} /></label> : null}

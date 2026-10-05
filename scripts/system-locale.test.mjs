@@ -264,3 +264,53 @@ test('Fetched client, document, control and analytics screens show Kazakh system
     locale='ru';assert.match(render('SignPage','ru'),/Акт выполненных работ/);
   } finally {if(before)globalThis.localStorage=before;else delete globalThis.localStorage;}
 });
+
+test('Integration catalog prioritizes messaging, shows actual provider status and keeps settings collapsed', async () => {
+  const catalog = {leads:[{catalogType:'WEBSITE_FORM',title:'Форма сайта',connected:true,healthLabel:'Работает',integrationId:'form-1'}], messaging:[], notifications:{employeeTelegram:{connected:false}}};
+  const setup = {form:{connected:true,submitUrl:'https://example.test/secret-form-endpoint'},whatsapp:{configured:false}};
+  const summaries = {whatsapp:{items:[{provider:'qr',status:'CONNECTED'}]},google:{failed:true},esf:{connection:{status:'CONNECTED',sessionActive:true}}};
+  const plugin = {name:'catalog-fixture',setup(build) {build.onLoad({filter:/IntegrationsPage\.tsx$/}, args => ({
+    contents:readFileSync(args.path,'utf8')
+      .replace('[catalog, setCatalog] = useState<any>(null)',`[catalog, setCatalog] = useState<any>(${JSON.stringify(catalog)})`)
+      .replace('[setup, setSetup] = useState<any>(null)',`[setup, setSetup] = useState<any>(${JSON.stringify(setup)})`)
+      .replace('[summaries, setSummaries] = useState<Record<string, any>>({})',`[summaries, setSummaries] = useState<Record<string, any>>(${JSON.stringify(summaries)})`),
+    loader:'tsx',resolveDir:path.dirname(args.path),
+  }));}};
+  const {render} = await bundle(`
+    import {renderToStaticMarkup} from 'react-dom/server'; import {MemoryRouter} from 'react-router-dom';
+    import {SessionContext,emptyCaps} from './lib/session'; import {IntegrationsPage} from './pages/IntegrationsPage';
+    export const render=locale=>renderToStaticMarkup(<SessionContext.Provider value={{me:{user:{locale}},caps:emptyCaps}}><MemoryRouter><IntegrationsPage /></MemoryRouter></SessionContext.Provider>);
+  `,[plugin]);
+  const prior = globalThis.localStorage;
+  try {
+    for (const locale of ['ru','kk','en']) {
+      globalThis.localStorage={getItem:()=>locale};
+      const html=render(locale);
+      const ids=[...html.matchAll(/<details[^>]*id="integration-([^"]+)"/g)].map(match=>match[1]);
+      assert.equal(ids.length,12); assert.deepEqual(ids.slice(0,3),['whatsapp','instagram','telegram']);
+      assert.doesNotMatch(html,/<details[^>]*\bopen(?:=|\s|>)/);
+      assert.doesNotMatch(html,/secret-form-endpoint|<form|<input|<pre|Page Access Token/);
+      const whatsapp=html.split('id="integration-whatsapp"')[1].split('</details>')[0];
+      assert.match(whatsapp,/integration-tile-status ok/);
+      const google=html.split('id="integration-calendar"')[1].split('</details>')[0];
+      assert.match(google, /integration-tile-status warn/);
+      assert.match(google, locale==='kk'?/Тексеру мүмкін болмады/:locale==='en'?/Could not check/:/Не удалось проверить/);
+      if(locale==='kk') assert.doesNotMatch(html, /Подключено|Не подключено|Заявки|Переписка|Выберите карточку/);
+      if(locale==='en') assert.doesNotMatch(html, /Подключено|Не подключено|Заявки|Переписка|Выберите карточку/);
+    }
+  } finally { if(prior) globalThis.localStorage=prior; else delete globalThis.localStorage; }
+});
+
+test('Google integration details show only the chosen service while the legacy combined panel remains available', async () => {
+  const items=['calendar','google_forms','email'].map(kind=>({kind,title:kind,id:kind,connected:true,resource:`RESOURCE-${kind}`}));
+  const plugin={name:'google-fixture',setup(build) {build.onLoad({filter:/GoogleConnectionsPanel\.tsx$/},args=>({
+    contents:readFileSync(args.path,'utf8').replace('useState<{ configured: boolean; items: Connection[] } | null>(null)',`useState<{ configured: boolean; items: Connection[] } | null>(${JSON.stringify({configured:true,items})})`),loader:'tsx',resolveDir:path.dirname(args.path),
+  }));}};
+  const {render}=await bundle(`
+    import {renderToStaticMarkup} from 'react-dom/server'; import {GoogleConnectionsPanel} from './pages/GoogleConnectionsPanel';
+    import {SessionContext,emptyCaps} from './lib/session';
+    export const render=kind=>renderToStaticMarkup(<SessionContext.Provider value={{me:{user:{locale:'ru'}},caps:emptyCaps}}><GoogleConnectionsPanel kind={kind} onChange={()=>{}} /></SessionContext.Provider>);
+  `,[plugin]);
+  for(const {kind} of items){const html=render(kind);assert.ok(html.includes('RESOURCE-'+kind));for(const other of items.filter(x=>x.kind!==kind))assert.ok(!html.includes('RESOURCE-'+other.kind));}
+  for(const {kind} of items)assert.ok(render().includes('RESOURCE-'+kind));
+});

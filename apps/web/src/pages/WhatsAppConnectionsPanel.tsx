@@ -6,7 +6,7 @@ import { WhatsAppAiControls } from "../components/WhatsAppAiControls";
 type Connection = { id: string; provider: "qr" | "cloud"; status: string; phone: string | null; callbackUrl: string | null; webhookVerified: boolean; lastError: string | null; aiEnabled: boolean; aiAvailable: boolean; aiUnavailableReason: string | null };
 type Qr = { qr: string | null; expiresAt: string | null; status: string };
 
-export function WhatsAppConnectionsPanel({ children }: { children?: ReactNode } = {}) {
+export function WhatsAppConnectionsPanel({ children, onChange }: { children?: ReactNode; onChange?: () => void } = {}) {
   const locale = useLocale();
   const translate = (ru: string, kk: string, en: string) => locale === "kk" ? kk : locale === "en" ? en : ru;
   const [method, setMethod] = useState<"green" | "qr" | "cloud">("green");
@@ -20,7 +20,7 @@ export function WhatsAppConnectionsPanel({ children }: { children?: ReactNode } 
   const [loaded, setLoaded] = useState(false);
   async function load() {
     const result = await api.whatsAppConnections() as { items: Connection[]; qrAvailable: boolean };
-    setItems(result.items); setQrAvailable(result.qrAvailable); setLoaded(true);
+    setItems(result.items); setQrAvailable(result.qrAvailable); setLoaded(true); onChange?.();
   }
   async function perform(work: () => Promise<unknown>) {
     if (busy) return;

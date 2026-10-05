@@ -3755,3 +3755,45 @@ html[data-theme="dark"] {
 .login .legal-consents input[type="checkbox"] { width: 18px; height: 18px; flex: 0 0 18px; margin: 2px 0 0; }
 .legal-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 20px; font-size: 13px; line-height: 1.5; padding: 16px; text-align: center; }
 .legal-links a { overflow-wrap: anywhere; }
+
+/* Compact integration catalog. Forms mount only after the first expansion. */
+.integration-catalog-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.integration-tile { min-width: 0; background: var(--card); border: 1px solid var(--line); border-radius: 18px; overflow: hidden; }
+.integration-tile > summary { position: relative; display: grid; grid-template-columns: 44px minmax(0, 1fr) 18px; grid-template-rows: 1fr auto; align-items: start; gap: 14px; padding: 22px; min-height: 166px; cursor: pointer; list-style: none; }
+.integration-tile > summary::-webkit-details-marker { display: none; }
+.integration-tile > summary:hover { background: var(--bg); }
+.integration-tile > summary:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; border-radius: 17px; }
+.integration-tile-icon { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 13px; background: var(--accent-soft); color: var(--accent); }
+.integration-tile-icon svg { width: 26px; height: 26px; }
+.integration-icon-whatsapp { color: #168648; background: #e8f7ee; }
+.integration-icon-instagram { color: #b63e83; background: #fbeef6; }
+.integration-icon-telegram, .integration-icon-notification { color: #167eae; background: #e8f5fc; }
+.integration-icon-form { color: #7656b3; background: #f1ecfa; }
+.integration-icon-email { color: #bc4949; background: #fceded; }
+.integration-tile-copy { display: grid; gap: 7px; min-width: 0; }
+.integration-tile-copy strong { font-size: 1.04rem; line-height: 1.35; overflow-wrap: anywhere; }
+.integration-tile-copy > span { color: var(--muted); font-size: .9rem; line-height: 1.5; }
+.integration-tile-chevron { grid-column: 3; grid-row: 1; width: 18px; height: 18px; margin-top: 12px; color: var(--muted); }
+.integration-tile-status { grid-column: 2 / 4; display: flex; align-items: center; gap: 7px; font-size: .82rem; color: var(--muted); line-height: 1.4; }
+.integration-tile-status i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+.integration-tile-status.ok { color: var(--ok); }
+.integration-tile-status.warn { color: var(--warn); }
+.integration-tile[open] { grid-column: 1 / -1; border-color: var(--accent); }
+.integration-tile[open] > summary { min-height: 0; grid-template-columns: 44px minmax(0, 1fr) auto 18px; align-items: center; background: var(--accent-soft); }
+.integration-tile[open] .integration-tile-status { grid-column: 3; grid-row: 1; }
+.integration-tile[open] .integration-tile-chevron { grid-column: 4; transform: rotate(180deg); margin-top: 0; }
+.integration-tile-body { padding: 24px; border-top: 1px solid var(--line); min-width: 0; overflow-wrap: anywhere; }
+.integration-tile-body > .panel, .integration-tile-body > .integ-grid > .panel { box-shadow: none; border: 0; padding: 0; margin: 0 0 20px; }
+.integration-tile-body .code { max-width: 100%; overflow: auto; }
+.integration-tile-body .actions { flex-wrap: wrap; }
+.integration-tile-body .integ-section-title:first-child { margin-top: 0; }
+@media (max-width: 1150px) { .integration-catalog-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 650px) {
+  .integration-catalog-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .integration-tile > summary { padding: 18px; min-height: 140px; }
+  .integration-tile[open] > summary { grid-template-columns: 44px minmax(0, 1fr) 18px; }
+  .integration-tile[open] .integration-tile-status { grid-column: 2 / 4; grid-row: 2; }
+  .integration-tile[open] .integration-tile-chevron { grid-column: 3; }
+  .integration-tile-body { padding: 18px; }
+}
+.integration-collapse { margin-top: 20px; }
