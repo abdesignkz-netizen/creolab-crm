@@ -4,7 +4,8 @@ import { assertProductionSecurity } from "../apps/api/src/lib/productionSecurity
 // Run in the intended deployment environment. Never print the values of secrets.
 dotenv.config({ quiet: true });
 try {
-  assertProductionSecurity({ ...process.env, NODE_ENV: "production" });
+  // A temporary startup exception must never turn into a successful security sign-off.
+  assertProductionSecurity({ ...process.env, NODE_ENV: "production" }, { requireStrongEncryptionKey: true });
   for (const key of ["APP_BASE_URL", "API_BASE_URL", "ALLOWED_ORIGINS", "STORAGE_DIR"]) {
     if (!process.env[key]?.trim()) throw new Error(`${key} must be explicitly configured before deployment`);
   }
