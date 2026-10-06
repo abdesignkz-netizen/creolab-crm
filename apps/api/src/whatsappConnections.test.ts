@@ -16,9 +16,11 @@ import { recordExternalMessage } from "./services/externalMessageService.ts";
 import { transcribeVoiceAttachment, voiceTranscript } from "./services/voiceTranscriptionService.ts";
 import { attentionReasonLabel } from "./services/attentionReasons.ts";
 import { getTranscriptionConfig, getTranscriptionStatus } from "./services/transcriptionConfig.ts";
-import { unlink, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
 import { resolveUploadPath } from "./lib/storage.ts";
 import { storeMessageAttachment } from "./services/conversationMedia.ts";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 describe("WhatsApp provider connections", () => {
   let prisma: Awaited<ReturnType<typeof createPrismaClient>>, server: ReturnType<ReturnType<typeof createApp>["listen"]>;
@@ -35,7 +37,7 @@ describe("WhatsApp provider connections", () => {
   let onCloudSend: (() => Promise<void>) | undefined;
   const oldLlmKey = process.env.OPENAI_API_KEY, oldLlmUrl = process.env.OPENAI_BASE_URL;
   const oldAnyModelKey = process.env.ANYMODEL_API_KEY;
-  const speechEnvNames = ["TRANSCRIPTION_API_KEY", "TRANSCRIPTION_BASE_URL", "TRANSCRIPTION_MODEL", "ANYMODEL_BASE_URL"];
+  const speechEnvNames = ["TRANSCRIPTION_ENGINE", "TRANSCRIPTION_PYTHON", "TRANSCRIPTION_MODEL_PATH", "TRANSCRIPTION_API_KEY", "TRANSCRIPTION_BASE_URL", "TRANSCRIPTION_MODEL", "ANYMODEL_BASE_URL"];
   const oldSpeechEnv = Object.fromEntries(speechEnvNames.map(key => [key, process.env[key]]));
   const speechKey = "speech-test-key-separate-from-chat";
   const authSnapshots: any[] = [];
@@ -48,6 +50,7 @@ describe("WhatsApp provider connections", () => {
   };
   before(async () => {
     config.apiBaseUrl = "https://bsqr.example.test";
+    process.env.TRANSCRIPTION_ENGINE = "http";
     process.env.TRANSCRIPTION_API_KEY = speechKey;
     process.env.TRANSCRIPTION_BASE_URL = "https://speech.example.test/v1";
     process.env.TRANSCRIPTION_MODEL = "whisper-1";
@@ -369,12 +372,15 @@ describe("WhatsApp provider connections", () => {
     return { event, file };
   }
   it("keeps speech credentials, endpoint and model independent of all reply configuration", () => {
-    const independent = getTranscriptionConfig({ TRANSCRIPTION_API_KEY: "speech-only" });
-    assert.equal(independent.baseUrl, "https://api.openai.com/v1"); assert.equal(independent.model, "whisper-1");
+    const independent = getTranscriptionConfig({ TRANSCRIPTION_ENGINE: "http", TRANSCRIPTION_API_KEY: "speech-only", TRANSCRIPTION_BASE_URL: "https://speech.example.test/v1", TRANSCRIPTION_MODEL: "speech-model" });
+    assert.equal(independent.baseUrl, "https://speech.example.test/v1"); assert.equal(independent.model, "speech-model");
     assert.equal(independent.apiKey, "speech-only"); assert.equal(independent.errorCode, null);
-    assert.equal(getTranscriptionConfig({ OPENAI_API_KEY: "chat-only", ANYMODEL_API_KEY: "other-chat", ANYMODEL_TRANSCRIPTION_MODEL: "legacy" }).errorCode, "voice_service_missing");
+    const local = getTranscriptionConfig({ OPENAI_API_KEY: "chat-only", ANYMODEL_API_KEY: "other-chat", TRANSCRIPTION_API_KEY: "old-external-key", TRANSCRIPTION_BASE_URL: "https://api.openai.com/v1" });
+    assert.equal(local.engine, "local"); assert.equal(local.apiKey, ""); assert.equal(local.baseUrl, "");
+    assert.equal(local.provider, "local");
+    assert.equal(getTranscriptionConfig({ TRANSCRIPTION_ENGINE: "http" }).errorCode, "voice_service_config");
     for (const baseUrl of ["not a url", "http://speech.example.test/v1", "https://user:password@speech.example.test/v1", "https://speech.example.test/v1?key=secret", "https://speech.example.test/v1#secret"]) {
-      assert.equal(getTranscriptionConfig({ TRANSCRIPTION_API_KEY: "speech-only", TRANSCRIPTION_BASE_URL: baseUrl }).errorCode, "voice_service_config");
+      assert.equal(getTranscriptionConfig({ TRANSCRIPTION_ENGINE: "http", TRANSCRIPTION_API_KEY: "speech-only", TRANSCRIPTION_MODEL: "speech-model", TRANSCRIPTION_BASE_URL: baseUrl }).errorCode, "voice_service_config");
     }
     assert.doesNotMatch(JSON.stringify(getTranscriptionStatus()), /speech-test-key|apiKey|baseUrl/);
   });
@@ -406,6 +412,41 @@ describe("WhatsApp provider connections", () => {
       await prisma.aIConfiguration.update({ where: { id: ai.id }, data: original }); invalidateRuntimeConfig();
       if (anyKey === undefined) delete process.env.ANYMODEL_API_KEY; else process.env.ANYMODEL_API_KEY = anyKey;
       if (anyUrl === undefined) delete process.env.ANYMODEL_BASE_URL; else process.env.ANYMODEL_BASE_URL = anyUrl;
+    }
+  });
+  it("feeds local transcripts to the reply model for QR and Meta without any speech HTTP request", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "basqar-local-speech-"));
+    const old = Object.fromEntries(speechEnvNames.map(key => [key, process.env[key]]));
+    const python = join(dir, "worker");
+    try {
+      for (const name of ["model.bin", "config.json", "tokenizer.json"]) await writeFile(join(dir, name), "fixture");
+      await writeFile(python, `#!/bin/sh\ncat >/dev/null\nprintf '{"text":"Хочу узнать стоимость услуг"}'\n`, { mode: 0o700 });
+      process.env.TRANSCRIPTION_ENGINE = "local";
+      process.env.TRANSCRIPTION_PYTHON = python; process.env.TRANSCRIPTION_MODEL_PATH = dir;
+      delete process.env.TRANSCRIPTION_API_KEY;
+      const beforeSpeech = voiceCalls;
+      for (const integrationId of [qrId, cloudId]) {
+        const { event, file } = await voiceEvent(integrationId);
+        await processWhatsAppAiReply(prisma, event);
+        assert.equal(voiceCalls, beforeSpeech, "Local audio must never be sent to an external speech service");
+        assert.match(JSON.stringify(llmInput), /Хочу узнать стоимость услуг/);
+        assert.match(JSON.stringify(llmInput), /PUBLIC-COMPANY-PROMPT/);
+        assert.doesNotMatch(JSON.stringify(llmInput), /OggS|input_audio|data:audio/);
+        const usage = await prisma.aIUsageEvent.findFirstOrThrow({ where: { conversationId: event.entityId, feature: "AI_VOICE_TRANSCRIPTION" } });
+        assert.equal(usage.provider, "local"); assert.equal(usage.status, "ok");
+        assert.equal(await transcribeVoiceAttachment({ prisma, tenantId, conversationId: event.entityId, integrationId, attachmentId: file.id }), "Хочу узнать стоимость услуг");
+      }
+      const { event, file } = await voiceEvent(qrId);
+      await writeFile(python, `#!/bin/sh\nprintf '{"error":"voice_pending"}'\n`);
+      await assert.rejects(() => processWhatsAppAiReply(prisma, event), (error: any) => error.code === "ai_generating");
+      assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id: event.entityId } })).mode, "ai");
+      await writeFile(python, `#!/bin/sh\nprintf '{"error":"voice_resources"}'\n`);
+      await processWhatsAppAiReply(prisma, event);
+      assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id: event.entityId } })).attentionReason, "AI_VOICE_RESOURCES");
+      assert.deepEqual((await prisma.attachment.findUniqueOrThrow({ where: { id: file.id } })).transcriptionJson, { status: "failed", errorCode: "voice_resources" });
+    } finally {
+      for (const [key, value] of Object.entries(old)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+      await rm(dir, { recursive: true, force: true });
     }
   });
   it("does not fall back to chat credentials when the separate speech key is missing", async () => {
@@ -632,7 +673,7 @@ describe("WhatsApp provider connections", () => {
     const serviceSettings = await nativeFetch(`${base}/api/v1/admin/settings`, { headers: { cookie: adminCookie } });
     assert.equal(serviceSettings.status, 200);
     const serviceBody = await serviceSettings.json();
-    assert.deepEqual(serviceBody.transcription, { model: "whisper-1", provider: "openai-compatible", configured: true, errorCode: null });
+    assert.deepEqual(serviceBody.transcription, { engine: "http", model: "whisper-1", provider: "openai-compatible", configured: true, errorCode: null });
     assert.doesNotMatch(JSON.stringify(serviceBody), /speech-test-key|speech.example.test|apiKey/);
     const saveSettings = await nativeFetch(`${base}/api/v1/admin/settings`, { method: "PATCH", headers: { cookie: adminCookie, "content-type": "application/json" },
       body: JSON.stringify({ transcription: { apiKey: "must-not-save", model: "must-not-change" } }) });

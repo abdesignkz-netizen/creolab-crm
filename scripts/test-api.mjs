@@ -37,6 +37,9 @@ try {
         OPENAI_API_KEY: "",
         ANYMODEL_API_KEY: "",
         TRANSCRIPTION_API_KEY: "",
+        TRANSCRIPTION_ENGINE: "local",
+        TRANSCRIPTION_PYTHON: "/nonexistent/basqar-test-python",
+        TRANSCRIPTION_MODEL_PATH: "/nonexistent/basqar-test-speech-model",
       },
     });
     if (result.status !== 0) failures += 1;

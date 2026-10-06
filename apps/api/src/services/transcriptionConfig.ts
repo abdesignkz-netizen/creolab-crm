@@ -1,21 +1,32 @@
-/** Platform speech-to-text service. Never reads a company's reply model or credentials. */
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+
+/** Local by default. An external service requires an explicit opt-in and its own settings. */
 export function getTranscriptionConfig(env: NodeJS.ProcessEnv = process.env) {
+  const engine = (env.TRANSCRIPTION_ENGINE || "local").trim();
+  const python = env.TRANSCRIPTION_PYTHON || "/opt/basqar-speech/venv/bin/python";
+  const modelPath = env.TRANSCRIPTION_MODEL_PATH || "/opt/basqar-speech/model";
+  if (engine !== "http") {
+    const errorCode = engine !== "local" ? "voice_service_config"
+      : !existsSync(python) || !["model.bin", "config.json", "tokenizer.json"].every(file => existsSync(join(modelPath, file))) ? "voice_local_missing" : null;
+    return { engine: "local" as const, python, modelPath, model: "faster-whisper-small-int8", provider: "local", apiKey: "", baseUrl: "", errorCode };
+  }
   const apiKey = (env.TRANSCRIPTION_API_KEY || "").trim();
-  const model = (env.TRANSCRIPTION_MODEL || "").trim() || "whisper-1";
-  const baseUrl = (env.TRANSCRIPTION_BASE_URL || "").trim().replace(/\/+$/, "") || "https://api.openai.com/v1";
+  const model = (env.TRANSCRIPTION_MODEL || "").trim();
+  const baseUrl = (env.TRANSCRIPTION_BASE_URL || "").trim().replace(/\/+$/, "");
   let validUrl = false, provider = "openai-compatible";
   try {
     const url = new URL(baseUrl);
     validUrl = url.protocol === "https:" && !url.username && !url.password && !url.search && !url.hash;
     if (url.origin === "https://api.openai.com") provider = "openai";
   } catch { /* Report a safe configuration error, never the configured URL or key. */ }
-  const errorCode = !validUrl || model.length > 120 || /[\r\n]/.test(model) ? "voice_service_config"
+  const errorCode = !validUrl || !model || model.length > 120 || /[\r\n]/.test(model) ? "voice_service_config"
     : !apiKey ? "voice_service_missing" : null;
-  return { apiKey, baseUrl, model, provider, errorCode };
+  return { engine: "http" as const, python, modelPath, apiKey, baseUrl, model, provider, errorCode };
 }
 
 /** Safe, read-only configuration status for service administration; not a connectivity check. */
 export function getTranscriptionStatus() {
-  const { model, provider, errorCode } = getTranscriptionConfig();
-  return { model, provider, configured: errorCode === null, errorCode };
+  const { engine, model, provider, errorCode } = getTranscriptionConfig();
+  return { engine, model, provider, configured: errorCode === null, errorCode };
 }

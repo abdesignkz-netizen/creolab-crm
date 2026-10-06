@@ -13,6 +13,7 @@ import { parseAIAutomationSettings, isWithinAiSchedule } from "./aiAutomationSet
 import { detectHandoffReason, isClientRefusalText } from "./aiConversationPolicyService.ts";
 import { answerWhatsAppWithLlm } from "./llmClient.ts";
 import { isVoiceAttachment, transcribeVoiceAttachment, voiceTranscript } from "./voiceTranscriptionService.ts";
+import { getTranscriptionConfig } from "./transcriptionConfig.ts";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 export function whatsAppAiFailureReason(code: string | null | undefined) {
@@ -26,6 +27,8 @@ export function whatsAppAiFailureReason(code: string | null | undefined) {
     voice_unsupported: "AI_VOICE_UNSUPPORTED", voice_too_large: "AI_VOICE_UNSUPPORTED", voice_provider_error: "AI_VOICE_UNAVAILABLE",
     voice_timeout: "AI_VOICE_TIMEOUT", voice_network_error: "AI_VOICE_PROVIDER_UNAVAILABLE", voice_invalid_response: "AI_VOICE_INVALID_RESPONSE",
     voice_service_missing: "AI_VOICE_SERVICE_MISSING", voice_service_config: "AI_VOICE_SERVICE_CONFIG",
+    voice_local_missing: "AI_VOICE_LOCAL_MISSING", voice_resources: "AI_VOICE_RESOURCES",
+    voice_local_failed: "AI_VOICE_PROVIDER_UNAVAILABLE", voice_too_long: "AI_VOICE_TOO_LONG",
     voice_http_400: "AI_VOICE_CONFIG", voice_http_404: "AI_VOICE_CONFIG", voice_http_405: "AI_VOICE_CONFIG", voice_http_422: "AI_VOICE_CONFIG",
     voice_http_401: "AI_PROVIDER_AUTH", voice_http_403: "AI_PROVIDER_AUTH", voice_http_402: "AI_PROVIDER_LIMIT", voice_http_429: "AI_PROVIDER_LIMIT",
     voice_http_413: "AI_VOICE_UNSUPPORTED", voice_http_415: "AI_VOICE_UNSUPPORTED", voice_http_408: "AI_VOICE_TIMEOUT", voice_http_504: "AI_VOICE_TIMEOUT",
@@ -157,7 +160,7 @@ export async function processWhatsAppAiReply(prisma: PrismaClient, event: { id: 
   const pending = history.slice(0, lastReply < 0 ? history.length : lastReply).filter(message => message.direction === "inbound");
   if (!pending.some(message => message.id === latest.id)) pending.push(latest);
   const voices = pending.flatMap(message => message.attachments.filter(file => isVoiceAttachment(file) && !voiceTranscript(file.transcriptionJson)));
-  const voiceDeadline = AbortSignal.timeout(55000);
+  const voiceDeadline = AbortSignal.timeout(getTranscriptionConfig().engine === "local" ? 75000 : 55000);
   let answer: Awaited<ReturnType<typeof answerWhatsAppWithLlm>> = null;
   let failureReason = "AI_PROVIDER_UNAVAILABLE";
   try {

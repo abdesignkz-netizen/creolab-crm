@@ -1,8 +1,16 @@
 FROM node:24-bookworm-slim
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libreoffice-writer fonts-liberation fonts-dejavu-core openssl ca-certificates default-jdk-headless \
+    && apt-get install -y --no-install-recommends libreoffice-writer fonts-liberation fonts-dejavu-core openssl ca-certificates default-jdk-headless python3-venv libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
+# Cache the offline speech engine and pinned multilingual model independently of application changes.
+COPY scripts/speech-requirements.txt scripts/install-speech-model.py /opt/basqar-speech/
+RUN python3 -m venv /opt/basqar-speech/venv \
+    && /opt/basqar-speech/venv/bin/pip install --no-cache-dir -r /opt/basqar-speech/speech-requirements.txt \
+    && /opt/basqar-speech/venv/bin/python /opt/basqar-speech/install-speech-model.py /opt/basqar-speech/model
+ENV TRANSCRIPTION_ENGINE=local
+ENV TRANSCRIPTION_PYTHON=/opt/basqar-speech/venv/bin/python
+ENV TRANSCRIPTION_MODEL_PATH=/opt/basqar-speech/model
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY apps ./apps
 COPY packages ./packages

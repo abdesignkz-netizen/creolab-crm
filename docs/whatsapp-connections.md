@@ -49,26 +49,39 @@ References: [Baileys session storage](https://baileys.wiki/authentication/sessio
 
 Speech recognition is a separate platform service: **stored audio → transcription text → company AI manager**. It never reads the company's reply model, provider, API URL or credentials. The selected reply model (including `anymodel:cx/gpt-5.6-sol`) receives text with the published company prompt and knowledge; no audio is sent to the chat model. Language is detected from the recording, without translation.
 
-Set these variables in Render **Environment** on every API/worker instance processing voice jobs:
+### Local recognition (default; no OpenAI API)
+
+The Docker image includes **faster-whisper 1.2.1** and a pinned multilingual `small` model, executed with CPU INT8. It uses open-source Whisper weights; it does **not** use the OpenAI service, SDK, API account or key. The build downloads model files from Hugging Face once. At runtime recordings stay on the BasQar host and inference is offline; only the resulting text goes to the selected company reply provider.
 
 ```dotenv
-TRANSCRIPTION_API_KEY=<speech service API key, stored only on the server>
-TRANSCRIPTION_BASE_URL=https://api.openai.com/v1
-TRANSCRIPTION_MODEL=whisper-1
+TRANSCRIPTION_ENGINE=local
+TRANSCRIPTION_PYTHON=/opt/basqar-speech/venv/bin/python
+TRANSCRIPTION_MODEL_PATH=/opt/basqar-speech/model
 ```
 
-The URL and model above are defaults for OpenAI transcription. Use an OpenAI API key for that endpoint. A different speech provider can be used by setting its HTTPS base URL, compatible speech model and matching key; it must support multipart `POST /audio/transcriptions` returning JSON `{ "text": "..." }`. This adapter intentionally requires HTTPS and authentication. It does not reuse `OPENAI_API_KEY`, `ANYMODEL_API_KEY`, tenant credentials or the old `OPENAI_TRANSCRIPTION_MODEL` / `ANYMODEL_TRANSCRIPTION_MODEL` variables. Migrating from the old shared-provider setup requires setting the new speech key explicitly.
+These defaults are baked into the API Docker image. Redeploy that image on Render; if a previous `TRANSCRIPTION_ENGINE=http` override exists, change it to `local`. Old speech API URL/key/model variables are ignored in local mode. Do not change the company's chat model or encryption/session keys.
 
-Service administrators see a read-only status under **Service settings → Voice message transcription**. “Settings provided” confirms configuration presence, not successful provider access. Secrets are never returned to the UI or accepted through the generic settings endpoint. A missing speech key produces a specific setup notice and does not fall back to the chat provider. After saving environment variables, deploy the service and test an actual voice message; after a previous failure, **Return to AI** reuses the stored audio. Leave the company's chat model unchanged.
+**Capacity:** the worker requires at least **2 GiB available memory**, after the CRM, Java verifier, QR runtime and other processes. This is available headroom, not the server's advertised total. Start with a 4 GiB or larger instance and measure actual peak usage. The repository's `starter` Blueprint is not sized for this; the code does not automatically upgrade a paid plan. On insufficient or unknown Linux memory capacity, recognition returns `voice_resources` without loading the model. CRM and text replies keep working. The guard uses both host available memory and container cgroup v1/v2 headroom; it reduces risk but is not a guarantee against other processes consuming memory after the check.
 
-API format reference: https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create.
+Only one recognition process runs per host, including API/worker processes sharing `/tmp`. Other jobs retry through the existing outbox. The short-lived process releases its model memory on completion; two CPU threads and reduced process priority limit contention. Audio travels over stdin; no temporary recording is created. The decoder does not inherit application credentials, accepts only audio container formats and prohibits file/network URL protocols in playlists. Invalid audio and decode limits do not reach the reply model.
+
+Service administrators see the local engine under **Service settings → Voice message transcription**. Configuration presence does not prove sufficient runtime capacity or recognition quality. Check **AI Usage → AI request errors** after a test message. A failed stored recording can be retried with **Return to AI** after fixing deployment resources. No database migration or new provider key is needed for this switch.
+
+An optional external compatible transcription adapter is retained only for explicit `TRANSCRIPTION_ENGINE=http` configuration, with its own `TRANSCRIPTION_API_KEY`, HTTPS `TRANSCRIPTION_BASE_URL` and `TRANSCRIPTION_MODEL`. There is no default external endpoint, and no fallback to any company's chat credentials or model.
+
+Engine documentation: https://github.com/SYSTRAN/faster-whisper. Bundled model: https://huggingface.co/Systran/faster-whisper-small (revision pinned in `scripts/install-speech-model.py`).
 
 ### Diagnosing voice failures
 
 Service administrators can open **AI Usage → AI request errors**, globally or within a company. The report shows the latest 50 failed calls in the selected period with provider, model, operation and a safe error code. It includes previously recorded failures; older `voice_provider_error` / `voice_unavailable` values lack the original HTTP status and cannot establish its cause retroactively. The report never includes provider response bodies, prompts, recordings, transcripts or credentials, and remains inaccessible to tenant administrators.
 
 - `voice_http_400/404/405/422`: check the provider's transcription endpoint, available speech model and accepted audio format. A working chat model alone does not confirm that transcription is supported.
-- `voice_service_missing` / `voice_service_config`: configure the independent speech service in Render Environment; the company chat model is unrelated.
+- `voice_local_missing`: redeploy the Docker image containing Python, the speech engine and model files; check the configured paths on every worker.
+- `voice_resources`: fewer than 2 GiB of available memory, or capacity cannot be read. Check the actual Render instance resources; this is unrelated to the company reply model or API key.
+- `voice_local_failed`: local decoder/model process failed; inspect server resource metrics and deployment dependencies. Raw decoder output is not exposed or logged.
+- `voice_too_long`: decoded audio exceeds two minutes.
+- `voice_pending`: another local worker is busy; the outbox retries automatically without switching the conversation to a manager.
+- `voice_service_missing` / `voice_service_config`: invalid engine or incomplete explicitly selected external speech service configuration.
 - `voice_http_401/403`: check the independent speech service key and permissions.
 - `voice_http_402/429`: check provider balance and request limits.
 - `voice_http_413/415`: audio size or format rejected.
@@ -78,14 +91,18 @@ Service administrators can open **AI Usage → AI request errors**, globally or 
 
 After correcting the cause, **Return to AI** retries the stored failed voice recording. Successful transcripts are cached; do not ask the customer to resend an attachment that is already stored. A screenshot of the generic failure banner alone does not prove a provider configuration problem or successful production transcription.
 
-Supported audio: OGG/Opus (WhatsApp voice notes), MP3, M4A/MP4 audio, WAV, FLAC and WebM audio, up to the existing 16 MiB attachment limit. AAC and AMR are retained for staff but are not converted automatically. Requests time out after 20 seconds per recording; a batch of up to five unprocessed recordings has a 55-second total recognition budget. A voice note followed immediately by text is included in the same reply context.
+Supported audio: OGG/Opus (WhatsApp voice notes), MP3, M4A/MP4 audio, WAV, FLAC and WebM audio, up to the existing 16 MiB attachment limit. AAC and AMR are retained for staff but are not converted automatically. Local recordings are limited to two minutes of decoded audio, 65 seconds of execution per recording and a 75-second batch budget (up to five pending recordings). Optional HTTP recognition keeps its 20-second per-recording / 55-second batch budget. Execution deadlines also cover model loading and decoding; slower servers may time out before these duration limits. A voice note followed immediately by text is included in the same reply context.
 
 The original audio and caption remain unchanged. Successful transcripts are cached privately on the attachment, scoped to the tenant and conversation. No public audio URL is sent to the model. Storage access verifies the owning inbound message, the file path and actual file size. Concurrent workers share a transcription claim; retries reuse completed transcripts. A crashed, unfinished claim is handed to staff rather than automatically repeating an uncertain paid request.
 
-Successful recognition costs one AI credit per recording (`AI_VOICE_TRANSCRIPTION`); generating a reply uses the existing one-credit `AI_MANAGER_REPLY` operation. Cached recognition and failed recognition do not consume additional credits. Both stages use the existing reservation/usage ledger. Whisper's provider cost is duration-based; until duration pricing is supported the usage report marks its cost as unavailable, not zero. A preflight check requires credits for recognition and a reply; per-call reservations also enforce concurrent quota usage.
+Successful recognition costs one AI credit per recording (`AI_VOICE_TRANSCRIPTION`); generating a reply uses the existing one-credit `AI_MANAGER_REPLY` operation. Cached recognition and failed recognition do not consume additional credits. Both stages use the existing reservation/usage ledger. Local inference has no external speech API charge, but consumes hosting resources. Its usage entry is labelled `local / faster-whisper-small-int8`; unknown infrastructure cost remains unavailable rather than invented. A preflight check requires credits for recognition and a reply; per-call reservations also enforce concurrent quota usage.
 
 Human takeover, pauses, working hours, AI entitlements and Meta's 24-hour window are checked before recognition, between recordings and before reply delivery. Spoken requests for a person follow the existing handoff policy. Recognition failure, unsupported media or empty output hands the conversation to staff with a translated reason, without inventing a reply.
 
 Deploy the updated Prisma client and apply `packages/db/prisma/migrations/20261005_voice_transcription.sql` when migrations are managed externally. The normal database bootstrap applies this additive column for both PostgreSQL and PGlite. Green API's external seller transcription is unchanged.
 
 Acceptance coverage uses distinct mocked speech/model endpoints and keys for both direct transports: independence from AnyModel/OpenAI reply model selection, missing speech configuration without credential fallback, company prompt and published knowledge, cache and two-stage credit accounting, overlapping revisions, duplicate workers, human takeover during recognition, spoken handoff requests, empty output, timeout, provider errors, tenant isolation, missing/oversized files, path traversal and unsupported audio. Actual recognition quality and provider availability require a post-deploy voice note from a test phone (Kazakh and Russian) through each connected number; no live WhatsApp or speech-provider call is made by the tests.
+
+Local regression checks: `node --experimental-strip-types --test apps/api/src/localTranscription.test.ts`, `node scripts/test-api.mjs whatsappConnections.test.ts`, and (with `scripts/speech-requirements.txt` installed) `python scripts/test-local-transcription.py`. The process tests use protocol fixtures; they verify isolation, cancellation, bounds and error handling, not linguistic quality. Test real Kazakh and Russian voice notes after deployment before treating production recognition as verified.
+
+A separate real-engine smoke check on 2026-10-06 used a locally synthesized Russian sentence encoded to OGG/Opus. The bundled small/int8 engine transcribed the complete sentence with its meaning preserved in 7.49 seconds on the development Mac. This was not a Render performance test or a live WhatsApp/Kazakh recognition test. Docker/Render deployment still needs verification on the actual host.

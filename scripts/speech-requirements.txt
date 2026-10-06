@@ -1,0 +1,7 @@
+faster-whisper==1.2.1
+ctranslate2==4.8.2
+av==15.1.0
+onnxruntime==1.19.2
+numpy==2.0.2
+huggingface-hub==1.8.0
+tokenizers==0.22.2

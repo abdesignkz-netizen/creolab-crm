@@ -5,6 +5,7 @@ import { ApiError } from "../errors.ts";
 import { resolveUploadPath } from "../lib/storage.ts";
 import { CONVERSATION_MAX_FILE_BYTES, resolveConversationMime } from "./conversationMedia.ts";
 import { getTranscriptionConfig } from "./transcriptionConfig.ts";
+import { transcribeLocally } from "./localTranscription.ts";
 import { getEntitlements } from "./entitlementService.ts";
 import { reserveAiCall, aiCreditCost } from "./billingResourceService.ts";
 import { recordAiUsage } from "./aiUsageService.ts";
@@ -70,32 +71,38 @@ export async function transcribeVoiceAttachment(input: {
   const started = Date.now();
   try {
     release = await reserveAiCall(prisma, tenantId, 150000, aiCreditCost("AI_VOICE_TRANSCRIPTION"));
-    const form = new FormData();
-    form.set("model", model);
-    form.set("response_format", "json");
-    form.set("file", new Blob([new Uint8Array(bytes)], { type: mime }), `voice.${extension}`);
-    // Preserve the speaker's language; neither translate nor send the company prompt to speech recognition.
-    const signal = input.signal ? AbortSignal.any([input.signal, AbortSignal.timeout(20000)]) : AbortSignal.timeout(20000);
-    signal.throwIfAborted();
-    called = true;
-    const response = await fetch(`${speech.baseUrl}/audio/transcriptions`, {
-      method: "POST", headers: { Authorization: `Bearer ${speech.apiKey}` }, body: form, signal, redirect: "error",
-    });
-    requestId = response.headers.get("x-request-id");
-    if (!response.ok) {
-      await response.body?.cancel();
-      // Preserve the HTTP status without storing the provider body (which may
-      // contain customer content). A rejected model is not unrecognisable speech.
-      throw fail(`voice_http_${response.status}`);
+    if (speech.engine === "local") {
+      const signal = input.signal ? AbortSignal.any([input.signal, AbortSignal.timeout(65000)]) : AbortSignal.timeout(65000);
+      called = true;
+      text = await transcribeLocally(bytes, { ...speech, signal });
+    } else {
+      const form = new FormData();
+      form.set("model", model);
+      form.set("response_format", "json");
+      form.set("file", new Blob([new Uint8Array(bytes)], { type: mime }), `voice.${extension}`);
+      // Preserve the speaker's language; neither translate nor send the company prompt to speech recognition.
+      const signal = input.signal ? AbortSignal.any([input.signal, AbortSignal.timeout(20000)]) : AbortSignal.timeout(20000);
+      signal.throwIfAborted();
+      called = true;
+      const response = await fetch(`${speech.baseUrl}/audio/transcriptions`, {
+        method: "POST", headers: { Authorization: `Bearer ${speech.apiKey}` }, body: form, signal, redirect: "error",
+      });
+      requestId = response.headers.get("x-request-id");
+      if (!response.ok) {
+        await response.body?.cancel();
+        // Preserve the HTTP status without storing the provider body (which may
+        // contain customer content). A rejected model is not unrecognisable speech.
+        throw fail(`voice_http_${response.status}`);
+      }
+      let data: unknown;
+      try { data = await response.json(); }
+      catch (error) {
+        if (signal.aborted) throw error;
+        throw fail("voice_invalid_response");
+      }
+      if (typeof object(data).text !== "string") throw fail("voice_invalid_response");
+      text = (object(data).text as string).trim();
     }
-    let data: unknown;
-    try { data = await response.json(); }
-    catch (error) {
-      if (signal.aborted) throw error;
-      throw fail("voice_invalid_response");
-    }
-    if (typeof object(data).text !== "string") throw fail("voice_invalid_response");
-    text = (object(data).text as string).trim();
     if (text.length > 12000) { text = ""; throw fail("voice_invalid_response"); }
     if (!text) throw fail("voice_empty");
     await prisma.attachment.updateMany({ where: { id: attachmentId, tenantId, transcriptionJson: { equals: claim } },
