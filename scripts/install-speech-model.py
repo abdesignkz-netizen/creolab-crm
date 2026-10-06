@@ -2,6 +2,8 @@
 import gc
 import json
 import os
+import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -20,7 +22,7 @@ def install(output, profile="kaz-rus-turbo"):
         snapshot_download(repo_id="Systran/faster-whisper-tiny",
                           revision="d90ca5fe260221311c53c58e660288d3deb8d356", local_dir=str(output),
                           allow_patterns=["model.bin", "config.json", "tokenizer.json", "vocabulary.txt"])
-    elif profile == "kaz-rus-turbo":
+    elif profile in {"kaz-rus-turbo", "kaz-rus-turbo-q5"}:
         import torch
         from transformers import WhisperForConditionalGeneration, WhisperProcessor, WhisperTokenizerFast
         from peft import PeftModel
@@ -39,12 +41,33 @@ def install(output, profile="kaz-rus-turbo"):
             model = PeftModel.from_pretrained(model, adapter, local_files_only=True).merge_and_unload()
             merged = root / "merged"
             model.save_pretrained(merged, safe_serialization=True)
-            WhisperProcessor.from_pretrained(base, local_files_only=True).save_pretrained(merged)
+            processor = WhisperProcessor.from_pretrained(base, local_files_only=True)
+            processor.save_pretrained(merged)
             WhisperTokenizerFast.from_pretrained(adapter, local_files_only=True).save_pretrained(merged)
             del model
             gc.collect()
-            TransformersConverter(str(merged), copy_files=["tokenizer.json", "preprocessor_config.json"],
-                                  load_as_float16=False).convert(str(output), quantization="int8")
+            if profile == "kaz-rus-turbo-q5":
+                import numpy as np
+                source = Path(os.environ["BASQAR_WHISPER_CPP_SOURCE"])
+                runner = Path(os.environ["BASQAR_SPEECH_RUNNER"])
+                quantizer = Path(os.environ["BASQAR_SPEECH_QUANTIZER"])
+                assets = root / "assets" / "whisper" / "assets"
+                assets.mkdir(parents=True)
+                # Same Slaney filters as the trained model; no extra model download.
+                np.savez(assets / "mel_filters.npz", mel_128=processor.feature_extractor.mel_filters.T.astype(np.float32))
+                raw = root / "ggml"
+                raw.mkdir()
+                subprocess.run([sys.executable, str(source / "models/convert-h5-to-ggml.py"),
+                                str(merged), str(root / "assets"), str(raw)], check=True)
+                output.mkdir(exist_ok=True)
+                subprocess.run([str(quantizer), str(raw / "ggml-model.bin"), str(output / "model.bin"), "q5_0"], check=True)
+                shutil.copy2(runner, output / "speech-runner")
+                shutil.copy2(source / "LICENSE", output / "whisper-cpp-LICENSE")
+                for name in ("config.json", "tokenizer.json", "preprocessor_config.json"):
+                    shutil.copy2(merged / name, output / name)
+            else:
+                TransformersConverter(str(merged), copy_files=["tokenizer.json", "preprocessor_config.json"],
+                                      load_as_float16=False).convert(str(output), quantization="int8")
     else:
         raise ValueError("Unsupported speech model profile")
     # Marker only after successful installation; failed builds cannot look ready.

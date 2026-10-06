@@ -491,6 +491,12 @@ describe("WhatsApp provider connections", () => {
       await writeFile(join(dir, "basqar-profile.json"), JSON.stringify({ profile: "kaz-rus-turbo" }));
       assert.equal(getTranscriptionStatus().model, "whisper-turbo-kaz-rus-v1-int8");
       assert.equal(getTranscriptionStatus().requiredAvailableMiB, 4096);
+      await writeFile(join(dir, "basqar-profile.json"), JSON.stringify({ profile: "kaz-rus-turbo-q5" }));
+      assert.equal(getTranscriptionStatus().errorCode, "voice_service_config");
+      await writeFile(join(dir, "speech-runner"), "fixture");
+      assert.equal(getTranscriptionStatus().model, "whisper-turbo-kaz-rus-v1-q5");
+      assert.equal(getTranscriptionStatus().requiredAvailableMiB, 1408);
+      assert.equal(getTranscriptionStatus().configured, true);
       await writeFile(join(dir, "basqar-profile.json"), JSON.stringify({ profile: "tiny" }));
       const beforeSpeech = voiceCalls;
       for (const integrationId of [qrId, cloudId]) {

@@ -1,10 +1,21 @@
-# Heavy conversion dependencies are build-only; the runtime contains CT2 INT8 weights.
+# Heavy conversion dependencies are build-only; runtime uses the native Q5 decoder.
 FROM python:3.11-slim-bookworm AS speech-model
-RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 cmake g++ make curl ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN curl -fsSL --retry 3 https://codeload.github.com/ggml-org/whisper.cpp/tar.gz/2eeeba56e9edd762b4b38467bab96c2517163158 -o /tmp/whisper.tar.gz \
+    && echo '089b898aa83b24a8321e0fd554eeb0967fb03dd687e27f6374c72d3363b5b429  /tmp/whisper.tar.gz' | sha256sum -c - \
+    && mkdir /whisper && tar -xzf /tmp/whisper.tar.gz -C /whisper --strip-components=1 && rm /tmp/whisper.tar.gz
+COPY scripts/speech-cpp /build/native
+COPY scripts/test-native-speech.py /build/
+RUN cmake -S /build/native -B /build/native-build -DWHISPER_SOURCE_DIR=/whisper -DCMAKE_BUILD_TYPE=Release \
+    && cmake --build /build/native-build --target basqar-speech whisper-quantize -j 2 \
+    && python /build/test-native-speech.py /build/native-build/basqar-speech
+ENV BASQAR_WHISPER_CPP_SOURCE=/whisper
+ENV BASQAR_SPEECH_RUNNER=/build/native-build/basqar-speech
+ENV BASQAR_SPEECH_QUANTIZER=/build/native-build/bin/whisper-quantize
 COPY scripts/speech-build-requirements.txt scripts/install-speech-model.py /build/
 RUN pip install --no-cache-dir torch==2.9.1 --index-url https://download.pytorch.org/whl/cpu \
     && pip install --no-cache-dir -r /build/speech-build-requirements.txt \
-    && python /build/install-speech-model.py /model
+    && python /build/install-speech-model.py /model kaz-rus-turbo-q5
 
 FROM node:24-bookworm-slim
 RUN apt-get update \

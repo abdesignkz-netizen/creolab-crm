@@ -3,6 +3,8 @@ import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { existsSync } from "node:fs";
+import { setTimeout as delay } from "node:timers/promises";
 import { transcribeLocally } from "./services/localTranscription.ts";
 
 test("local speech process isolates secrets, bounds output, handles failures and cancellation", async () => {
@@ -25,6 +27,13 @@ test("local speech process isolates secrets, bounds output, handles failures and
     await assert.rejects(run, (error: any) => error.code === "voice_invalid_response");
     await script("exec sleep 60");
     await assert.rejects(() => run(AbortSignal.timeout(50)), (error: any) => error.code === "voice_timeout");
+    if (process.platform !== "win32") {
+      const marker = join(dir, "orphan-survived");
+      await script(`(sleep 0.4; printf orphan > '${marker}') &\nwait`);
+      await assert.rejects(() => run(AbortSignal.timeout(100)), (error: any) => error.code === "voice_timeout");
+      await delay(500);
+      assert.equal(existsSync(marker), false, "Cancellation must kill the native decoder's process group");
+    }
     await rm(python);
     await assert.rejects(run, (error: any) => error.code === "voice_local_missing");
   } finally {

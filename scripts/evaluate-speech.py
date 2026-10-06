@@ -43,8 +43,12 @@ def main():
     started = time.monotonic()
     text = speech.transcribe(data, args.model)
     rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    child_rss = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
+    unit = 1024**2 if sys.platform == "darwin" else 1024
     result = {"text": text, "seconds": round(time.monotonic() - started, 2),
-              "peakRssMiB": round(rss / (1024**2 if sys.platform == "darwin" else 1024), 1)}
+              "peakRssMiB": round(rss / unit, 1),
+              "childPeakRssMiB": round(child_rss / unit, 1),
+              "combinedPeakUpperBoundMiB": round((rss + child_rss) / unit, 1)}
     if args.reference:
         result["wordErrorRate"] = word_error_rate(Path(args.reference).read_text(), text)
     print(json.dumps(result, ensure_ascii=False))

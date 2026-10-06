@@ -7,6 +7,9 @@ import wave
 import tempfile
 import json
 from types import SimpleNamespace
+import subprocess
+import sys
+import numpy as np
 
 spec = importlib.util.spec_from_file_location("speech", Path(__file__).with_name("local-transcription.py"))
 speech = importlib.util.module_from_spec(spec)
@@ -14,6 +17,35 @@ spec.loader.exec_module(speech)
 
 
 class SpeechSafetyTest(unittest.TestCase):
+    @patch("faster_whisper.vad.get_speech_timestamps", return_value=[{"start": 0, "end": 16}])
+    def test_native_decoder_handles_memory_pressure_and_protocol(self, vad):
+        with tempfile.TemporaryDirectory() as directory:
+            runner = Path(directory) / "speech-runner"
+            def script(body):
+                runner.write_text("#!" + sys.executable + "\n" + body)
+                runner.chmod(0o700)
+            script('import sys\nsys.stdin.buffer.read()\nprint(\'{"text":"Сәлеметсіз бе!"}\')\n')
+            with patch.object(speech, "available_memory", return_value=2 * 1024**3):
+                self.assertEqual(speech.transcribe_native(np.zeros(16, dtype=np.float32), directory), "Сәлеметсіз бе!")
+            script('import time\ntime.sleep(30)\n')
+            with patch.object(speech, "available_memory", return_value=64 * 1024**2):
+                with self.assertRaisesRegex(ValueError, "voice_resources"):
+                    speech.transcribe_native(np.zeros(16, dtype=np.float32), directory)
+
+    @patch("faster_whisper.vad.get_speech_timestamps", return_value=[{"start": 0, "end": 16}])
+    def test_native_timeout_reaps_child(self, vad):
+        with tempfile.TemporaryDirectory() as directory:
+            runner = Path(directory) / "speech-runner"
+            runner.write_text("fixture"); runner.chmod(0o700)
+            with patch.object(speech.subprocess, "Popen") as factory:
+                child = factory.return_value
+                child.communicate.side_effect = [subprocess.TimeoutExpired("decoder", 60), (b"", b"")]
+                child.poll.return_value = None
+                with self.assertRaisesRegex(ValueError, "voice_timeout"):
+                    speech.transcribe_native(np.zeros(16, dtype=np.float32), directory)
+                child.kill.assert_called_once()
+                self.assertEqual(child.communicate.call_count, 2)
+
     def test_language_selection_is_limited_to_russian_and_kazakh(self):
         self.assertEqual(speech.select_language([("pl", .8), ("ru", .15), ("kk", .05)]), "ru")
         self.assertEqual(speech.select_language([("tr", .7), ("ru", .1), ("kk", .2)]), "kk")
@@ -86,6 +118,11 @@ class SpeechSafetyTest(unittest.TestCase):
             (root / "model.bin").write_bytes(b"fixture")
             (root / "basqar-profile.json").write_text(json.dumps({"profile": "kaz-rus-turbo"}))
             self.assertEqual(speech.required_available(root), 4096 * 1024**2)
+            (root / "basqar-profile.json").write_text(json.dumps({"profile": "kaz-rus-turbo-q5"}))
+            self.assertEqual(speech.required_available(root), 1408 * 1024**2)
+            with patch.object(speech.sys, "argv", ["worker", directory]), patch.object(speech, "available_memory", return_value=1300 * 1024**2), patch.object(speech, "transcribe") as transcribe:
+                self.assertEqual(speech.main(), {"error": "voice_resources"})
+                transcribe.assert_not_called()
             for value in [{"profile": "unknown"}, {"profile": "kaz-rus-turbo", "memory": 1}, []]:
                 (root / "basqar-profile.json").write_text(json.dumps(value))
                 with self.assertRaisesRegex(ValueError, "voice_service_config"):
