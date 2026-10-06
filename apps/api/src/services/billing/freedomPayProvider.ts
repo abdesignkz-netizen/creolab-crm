@@ -116,11 +116,51 @@ export class FreedomPayProvider implements PaymentProvider {
       );
     const parsed = parseFreedomResponse(await readProviderXml(res));
     const out = parsed.fields;
+    // Authentication failures can be unsigned: the gateway cannot authenticate
+    // the merchant. This is a rejection only, never proof of a payment or status.
+    if (
+      out.pg_status === "error" &&
+      ["1100", "9998"].includes(out.pg_error_code) &&
+      !out.pg_sig &&
+      !out.pg_payment_id &&
+      !out.pg_redirect_url
+    )
+      billingError(
+        "provider_credentials",
+        "Freedom Pay не принял настройки магазина. Администратору нужно проверить ID мерчанта и ключ приёма платежей.",
+        503,
+      );
+    // A narrowly classified diagnostic, not authorization to settle or retry.
+    if (
+      script === "get_status3.php" &&
+      out.pg_status === "error" &&
+      out.pg_error_code === "11068" &&
+      !out.pg_sig &&
+      !out.pg_payment_id &&
+      !out.pg_redirect_url
+    )
+      billingError(
+        "provider_not_found",
+        "Платёж не найден в текущем магазине Freedom Pay",
+        404,
+      );
     if (!parsed.verify(script, c.secret))
       billingError(
         "provider_signature",
         "Не удалось проверить ответ платёжного сервиса",
         502,
+      );
+    if (
+      script === "get_status3.php" &&
+      out.pg_status === "error" &&
+      out.pg_error_code === "11068" &&
+      !out.pg_payment_id &&
+      !out.pg_redirect_url
+    )
+      billingError(
+        "provider_not_found",
+        "Платёж не найден в текущем магазине Freedom Pay",
+        404,
       );
     if (out.pg_status !== "ok")
       billingError(

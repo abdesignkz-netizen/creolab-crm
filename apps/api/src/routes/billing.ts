@@ -1,3 +1,7 @@
+import {
+  checkOrderPayment,
+  releaseUncreatedPayment,
+} from "../services/billing/paymentCheck.ts";
 import { rateLimit, clientIp } from "../lib/rateLimit.ts";
 import express from "express";
 import { createHash } from "node:crypto";
@@ -96,6 +100,24 @@ export function registerBillingRoutes(
   );
   app.get(`${base}/orders/:id`, async (req, res) =>
     res.json(await checkoutDetail(db, await auth(req), String(req.params.id))),
+  );
+  app.post(`${base}/orders/:id/check`, async (req, res) => {
+    const who = await auth(req);
+    const tenantId = billingTenant(who);
+    rateLimit(`billing-check-order:${tenantId}`, 10);
+    res.json(await checkOrderPayment(db, who, String(req.params.id)));
+  });
+  app.post(
+    "/api/v1/admin/billing/payments/:id/release",
+    json,
+    async (req, res) => {
+      const who = await auth(req);
+      requirePlatformAdmin(who);
+      rateLimit(`billing-release:${who.user.id}`, 5);
+      res.json(
+        await releaseUncreatedPayment(db, who, String(req.params.id), req.body),
+      );
+    },
   );
   app.get(`${base}/orders/:id/kaspi-qr`, async (req, res) => {
     const d = await checkoutDetail(db, await auth(req), String(req.params.id));

@@ -378,12 +378,20 @@ export async function payOrder(
         error && typeof error === "object" && "code" in error
           ? String(error.code)
           : "provider_uncertain";
-      if (code === "provider_declined")
-        await failPayment(db, attempt.payment.id, "provider_declined");
+      if (["provider_declined", "provider_credentials"].includes(code))
+        await failPayment(db, attempt.payment.id, code);
       else
         await db.billingPayment.updateMany({
           where: { id: attempt.payment.id, status: "PROCESSING" },
-          data: { failureReason: "provider_uncertain" },
+          data: {
+            failureReason: [
+              "provider_signature",
+              "provider_response",
+              "provider_unavailable",
+            ].includes(code)
+              ? code
+              : "provider_uncertain",
+          },
         });
       // Uncertain network outcomes remain locked: another attempt could charge twice.
       throw error;

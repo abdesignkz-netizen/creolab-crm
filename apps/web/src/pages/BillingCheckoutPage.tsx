@@ -28,7 +28,6 @@ export function BillingCheckoutPage() {
     try {
       const d = await api.billingOrder(orderId);
       setData(d);
-      setError("");
       return d;
     } catch {
       setError(
@@ -100,6 +99,7 @@ export function BillingCheckoutPage() {
   async function action(fn: () => Promise<unknown>) {
     setBusy(true);
     setError("");
+    setNotice("");
     try {
       await fn();
       await load();
@@ -109,6 +109,58 @@ export function BillingCheckoutPage() {
     } finally {
       setBusy(false);
     }
+  }
+  async function checkPayment() {
+    await action(async () => {
+      const r = await api.billingCheckOrder(orderId);
+      const messages: Record<string, [string, string, string]> = {
+        paid: ["Оплата подтверждена.", "Төлем расталды.", "Payment confirmed."],
+        success: [
+          "Банк подтвердил оплату. Ожидаем уведомление для активации подписки. Повторно платить не нужно.",
+          "Банк төлемді растады. Жазылымды іске қосу үшін хабарламаны күтеміз. Қайта төлемеңіз.",
+          "The bank confirmed payment. Awaiting its activation callback. Do not pay again.",
+        ],
+        not_found: [
+          "В текущем магазине Freedom Pay платёж не найден. Администратору нужно сверить старую попытку и разблокировать заказ в разделе платежей.",
+          "Қазіргі Freedom Pay дүкенінде төлем табылмады. Әкімші ескі әрекетті тексеріп, төлемдер бөлімінде тапсырыстың бұғатын ашуы керек.",
+          "Payment was not found in the current Freedom Pay merchant. An administrator must reconcile the old attempt and release the order in Payments.",
+        ],
+        failed: [
+          "Банк сообщает об отклонении платежа. Администратору нужно запросить повторное уведомление Freedom Pay.",
+          "Банк төлемнің қабылданбағанын хабарлады. Әкімші Freedom Pay хабарламасын қайта жіберуді сұрауы керек.",
+          "The bank reports a failed payment. An administrator must request a Freedom Pay callback replay.",
+        ],
+        pending: [
+          "Проверено: банк ещё обрабатывает платёж. Повторно платить не нужно.",
+          "Тексерілді: банк төлемді әлі өңдеп жатыр. Қайта төлемеңіз.",
+          "Checked: the bank is still processing the payment. Do not pay again.",
+        ],
+        incomplete: [
+          "Оплата в банке не завершена. Если деньги не списаны, откройте страницу оплаты по ссылке ниже.",
+          "Банктегі төлем аяқталмады. Ақша алынбаса, төмендегі сілтеме арқылы төлем бетін ашыңыз.",
+          "Payment is incomplete. If you were not charged, open the payment page below.",
+        ],
+        manual_pending: [
+          "Подтверждение поступления пока не внесено. Ожидаем сверку администратором.",
+          "Ақшаның түскені әлі расталмады. Әкімшінің тексеруін күтеміз.",
+          "Receipt has not been confirmed yet. Awaiting administrator reconciliation.",
+        ],
+        no_attempt: [
+          "Активной попытки нет. Выберите способ оплаты.",
+          "Белсенді төлем әрекеті жоқ. Төлем тәсілін таңдаңыз.",
+          "No active attempt. Choose a payment method.",
+        ],
+      };
+      setNotice(
+        t(
+          ...(messages[r.status] || [
+            "Статус требует сверки с Freedom Pay. Обратитесь к администратору.",
+            "Мәртебені Freedom Pay арқылы тексеру қажет. Әкімшіге хабарласыңыз.",
+            "The status needs reconciliation with Freedom Pay. Contact an administrator.",
+          ]),
+        ),
+      );
+    });
   }
   async function pay(chosen: string) {
     await action(async () => {
@@ -195,6 +247,14 @@ export function BillingCheckoutPage() {
           {notice}
         </p>
       )}
+      {open &&
+        !payment &&
+        data.payments[0]?.failureReason === "provider_credentials" &&
+        !error && (
+          <p className="billing-warning" role="alert">
+            {errorText({ code: "provider_credentials" })}
+          </p>
+        )}
       {paid ? (
         <div className="billing-success" role="status">
           <h2>
@@ -383,7 +443,17 @@ export function BillingCheckoutPage() {
           )}
           {payment && (
             <div className="panel stack">
-              <BillingStatus status={payment.status} />
+              {payment.method === "CARD" && !payment.checkoutUrl ? (
+                <p className="billing-warning" role="status">
+                  {t(
+                    "Не удалось получить ссылку на оплату. Требуется проверка платёжного сервиса администратором. Если вы уже платили, не повторяйте оплату до сверки.",
+                    "Төлем сілтемесін алу мүмкін болмады. Әкімші төлем сервисін тексеруі керек. Төлеп қойған болсаңыз, тексеру аяқталғанша қайта төлемеңіз.",
+                    "The payment link is unavailable. An administrator needs to check the payment service. If you have paid, wait for verification before paying again.",
+                  )}
+                </p>
+              ) : (
+                <BillingStatus status={payment.status} />
+              )}
               <p>
                 {payment.method === "KASPI"
                   ? t(
@@ -392,11 +462,13 @@ export function BillingCheckoutPage() {
                       "An administrator will provide a Kaspi link for this order and verify your payment.",
                     )
                   : payment.method === "CARD"
-                    ? t(
-                        "Ждём подтверждение от платёжного сервиса. Повторно платить не нужно.",
-                        "Төлем сервисінің растауын күтіп отырмыз. Қайта төлеудің қажеті жоқ.",
-                        "Waiting for confirmation. Please do not pay again.",
-                      )
+                    ? payment.checkoutUrl
+                      ? t(
+                          "Ждём подтверждение от платёжного сервиса. Повторно платить не нужно.",
+                          "Төлем сервисінің растауын күтіп отырмыз. Қайта төлеудің қажеті жоқ.",
+                          "Waiting for confirmation. Please do not pay again.",
+                        )
+                      : ""
                     : t(
                         "Переведите сумму по реквизитам в счёте. Подписка включится после подтверждения поступления.",
                         "Шоттағы деректемелер бойынша төлеңіз. Ақшаның түскені расталғаннан кейін жазылым іске қосылады.",
@@ -430,9 +502,16 @@ export function BillingCheckoutPage() {
               <button
                 className="btn secondary"
                 disabled={busy}
-                onClick={() => void load()}
+                onClick={() => void checkPayment()}
+                aria-busy={busy}
               >
-                {t("Проверить оплату", "Төлемді тексеру", "Check payment")}
+                {busy
+                  ? t(
+                      "Проверяем в банке…",
+                      "Банкте тексерілуде…",
+                      "Checking with bank…",
+                    )
+                  : t("Проверить оплату", "Төлемді тексеру", "Check payment")}
               </button>
             </div>
           )}

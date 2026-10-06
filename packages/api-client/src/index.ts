@@ -137,6 +137,8 @@ export function createApiClient(options: ClientOptions) {
     billingKaspiQr: (id: string) => request<{image:string;url:string}>(`/api/v1/billing/orders/${encodeURIComponent(id)}/kaspi-qr`),
     billingOrder: (id: string) => request<any>(`/api/v1/billing/orders/${encodeURIComponent(id)}`),
     billingPay: (body: unknown) => request<any>("/api/v1/billing/payments", {method:"POST",body:JSON.stringify(body)}),
+    billingCheckOrder: (id: string) => request<any>(`/api/v1/billing/orders/${encodeURIComponent(id)}/check`, {method:"POST"}),
+    adminBillingRelease: (id: string, body: unknown) => request<any>(`/api/v1/admin/billing/payments/${encodeURIComponent(id)}/release`, {method:"POST",body:JSON.stringify(body)}),
     billingCancelOrder: (id: string) => request<any>(`/api/v1/billing/orders/${encodeURIComponent(id)}/cancel`, {method:"POST"}),
     billingHistory: () => request<any>("/api/v1/billing/history"),
     billingCancelRenewal: () => request<any>("/api/v1/billing/subscription/cancel-auto-renew", {method:"POST"}),

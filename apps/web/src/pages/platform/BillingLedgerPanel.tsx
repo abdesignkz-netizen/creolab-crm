@@ -271,6 +271,23 @@ export function BillingLedgerPanel() {
                                 )}
                               </button>
                             )}
+                            {p.provider === "FREEDOM_PAY" &&
+                              p.status === "PROCESSING" &&
+                              !p.providerPaymentId &&
+                              !p.checkoutUrl &&
+                              !p.recurring && (
+                                <button
+                                  className="btn secondary"
+                                  disabled={busy}
+                                  onClick={() => open(p, "release")}
+                                >
+                                  {t(
+                                    "Разблокировать после сверки",
+                                    "Тексергеннен кейін бұғатты ашу",
+                                    "Release after reconciliation",
+                                  )}
+                                </button>
+                              )}
                             {p.status === "PENDING" &&
                               ["KASPI", "BANK_TRANSFER"].includes(
                                 p.provider,
@@ -568,7 +585,9 @@ export function BillingLedgerPanel() {
                     })
                   : modal === "kaspi"
                     ? api.adminBillingKaspiLink(selected.id, form)
-                    : api.adminBillingPlan(selected.id, form),
+                    : modal === "release"
+                      ? api.adminBillingRelease(selected.id, form)
+                      : api.adminBillingPlan(selected.id, form),
               );
             }}
           >
@@ -585,9 +604,48 @@ export function BillingLedgerPanel() {
                       "Тапсырысқа арналған Kaspi сілтемесі",
                       "Kaspi link for this order",
                     )
-                  : t("Редактирование тарифа", "Тарифті өңдеу", "Edit plan")}
+                  : modal === "release"
+                    ? t(
+                        "Разблокировать неоплаченную попытку",
+                        "Төленбеген әрекеттің бұғатын ашу",
+                        "Release an unpaid attempt",
+                      )
+                    : t("Редактирование тарифа", "Тарифті өңдеу", "Edit plan")}
             </h3>
-            {modal === "confirm" ? (
+            {modal === "release" ? (
+              <>
+                <p>
+                  {t(
+                    "Проверьте отсутствие списания по этому заказу во всех использованных магазинах Freedom Pay, включая старый ID. Разблокировка разрешит новую попытку оплаты. Она не подтверждает оплату и не делает возврат.",
+                    "Осы тапсырыс бойынша бұрын қолданылған ID-ді қоса, барлық Freedom Pay дүкендерінде ақша алынбағанын тексеріңіз. Бұғатты ашу жаңа төлем әрекетіне мүмкіндік береді. Бұл төлемді растау немесе ақшаны қайтару емес.",
+                    "Verify there was no charge in every merchant used for this order, including the old ID. Releasing allows a new payment attempt. It does not confirm or refund a payment.",
+                  )}
+                </p>
+                {field(
+                  "reason",
+                  t(
+                    "Результат сверки: магазины и период проверки",
+                    "Тексеру нәтижесі: дүкендер және кезең",
+                    "Reconciliation evidence: merchants and period",
+                  ),
+                )}
+                <label>
+                  <input
+                    type="checkbox"
+                    required
+                    checked={Boolean(form.noChargeConfirmed)}
+                    onChange={(e) =>
+                      setForm({ ...form, noChargeConfirmed: e.target.checked })
+                    }
+                  />
+                  {t(
+                    "Сверил поступления: списания по этой попытке нет",
+                    "Түсімдерді тексердім: осы әрекет бойынша ақша алынбаған",
+                    "I reconciled receipts: this attempt was not charged",
+                  )}
+                </label>
+              </>
+            ) : modal === "confirm" ? (
               <>
                 {field(
                   "amount",

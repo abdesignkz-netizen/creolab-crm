@@ -150,6 +150,21 @@ export function useBillingError() {
       "Бұл төлем тәсілі әзірге қолжетімсіз. Басқасын таңдаңыз.",
       "This method is not available yet. Choose another method.",
     ],
+    provider_signature: [
+      "Не удалось проверить подлинность ответа Freedom Pay. Статус оплаты сохранён. Администратору нужно сверить платёж в кабинете банка.",
+      "Freedom Pay жауабының түпнұсқалығын тексеру мүмкін болмады. Төлем мәртебесі сақталды. Әкімші төлемді банк кабинетінде тексеруі керек.",
+      "Freedom Pay's response could not be verified. Payment status is unchanged. An administrator must reconcile it in the bank dashboard.",
+    ],
+    provider_mismatch: [
+      "Ответ банка не соответствует этому заказу. Администратору нужно проверить подключённый магазин Freedom Pay.",
+      "Банк жауабы осы тапсырысқа сәйкес келмейді. Әкімші қосылған Freedom Pay дүкенін тексеруі керек.",
+      "The bank response does not match this order. An administrator must check the connected Freedom Pay merchant.",
+    ],
+    provider_credentials: [
+      "Не удалось открыть оплату: Freedom Pay не принял настройки магазина. Администратору нужно проверить подключение.",
+      "Төлем бетін ашу мүмкін болмады: Freedom Pay дүкен баптауларын қабылдамады. Әкімші қосылымды тексеруі керек.",
+      "Unable to open checkout: Freedom Pay rejected the merchant settings. An administrator must check the connection.",
+    ],
   };
   return (error: unknown) => {
     const code =

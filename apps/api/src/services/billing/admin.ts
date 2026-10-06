@@ -184,48 +184,6 @@ export async function inspectProviderPayment(
   id: string,
 ) {
   requirePlatformAdmin(auth);
-  const p = await db.billingPayment.findUniqueOrThrow({ where: { id } });
-  if (p.provider !== "FREEDOM_PAY")
-    billingError("provider_unsupported", "Проверка доступна для Freedom Pay");
-  const { freedomPay } = await import("./freedomPayProvider.ts");
-  const { amountKzt } = await import("./config.ts");
-  const result = await freedomPay.getPaymentStatus(
-    p.providerPaymentId || "",
-    p.id,
-  );
-  if (
-    (p.providerPaymentId && result.pg_payment_id !== p.providerPaymentId) ||
-    (result.pg_order_id && result.pg_order_id !== p.id) ||
-    amountKzt(result.pg_amount) !== p.amountMinor ||
-    result.pg_currency !== p.currency
-  )
-    billingError(
-      "provider_mismatch",
-      "Ответ банка не соответствует платежу",
-      409,
-    );
-  const status = [
-    "success",
-    "failed",
-    "pending",
-    "incomplete",
-    "refunded",
-    "revoked",
-  ].includes(result.pg_payment_status)
-    ? result.pg_payment_status
-    : "unknown";
-  await billingAudit(
-    db,
-    p.tenantId,
-    "PAYMENT_STATUS_CHECKED",
-    p.id,
-    auth.user.id,
-    { providerStatus: status },
-  );
-  return {
-    status,
-    localStatus: p.status,
-    requiresCallback: p.status === "PROCESSING",
-    checkedAt: new Date(),
-  };
+  const { checkProviderPayment } = await import("./paymentCheck.ts");
+  return checkProviderPayment(db, id, auth.user.id);
 }

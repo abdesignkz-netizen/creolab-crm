@@ -95,3 +95,54 @@ it("card creation signs request, verifies response and rejects external redirect
   badSignature = true;
   await assert.rejects(() => freedomPay.createPayment(input));
 });
+it("unsigned authentication rejection is actionable but unsigned success never is", async () => {
+  process.env.BILLING_PROVIDER = "freedompay";
+  process.env.FREEDOM_PAY_MERCHANT_ID = "fixture";
+  process.env.FREEDOM_PAY_SECRET_KEY = "fixture-secret";
+  let body =
+    "<response><pg_status>error</pg_status><pg_error_code>1100</pg_error_code><pg_error_description>Incorrect signature</pg_error_description></response>";
+  globalThis.fetch = async () => new Response(body);
+  await assert.rejects(() => freedomPay.call("init_payment", {}), {
+    code: "provider_credentials",
+  });
+  body = body.replace(
+    "<pg_status>error</pg_status>",
+    "<pg_status>ok</pg_status>",
+  );
+  await assert.rejects(() => freedomPay.call("init_payment", {}), {
+    code: "provider_signature",
+  });
+  body =
+    "<response><pg_status>error</pg_status><pg_error_code>1100</pg_error_code><pg_payment_id>123</pg_payment_id></response>";
+  await assert.rejects(() => freedomPay.call("init_payment", {}), {
+    code: "provider_signature",
+  });
+  body =
+    "<response><pg_status>error</pg_status><pg_error_code>1100</pg_error_code><pg_sig>" +
+    "0".repeat(32) +
+    "</pg_sig></response>";
+  await assert.rejects(() => freedomPay.call("init_payment", {}), {
+    code: "provider_signature",
+  });
+});
+it("not-found is diagnostic only and restricted to the status endpoint", async () => {
+  process.env.BILLING_PROVIDER = "freedompay";
+  process.env.FREEDOM_PAY_MERCHANT_ID = "fixture";
+  process.env.FREEDOM_PAY_SECRET_KEY = "fixture-secret";
+  let body =
+    "<response><pg_status>error</pg_status><pg_error_code>11068</pg_error_code></response>";
+  globalThis.fetch = async () => new Response(body);
+  await assert.rejects(() => freedomPay.getPaymentStatus("", "orphan"), {
+    code: "provider_not_found",
+  });
+  await assert.rejects(() => freedomPay.call("init_payment", {}), {
+    code: "provider_signature",
+  });
+  body = body.replace(
+    "</response>",
+    "<pg_payment_id>123</pg_payment_id></response>",
+  );
+  await assert.rejects(() => freedomPay.getPaymentStatus("", "orphan"), {
+    code: "provider_signature",
+  });
+});

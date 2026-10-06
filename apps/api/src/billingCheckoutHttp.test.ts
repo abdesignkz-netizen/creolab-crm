@@ -184,3 +184,79 @@ it("duplicate callback fields fail before processing and success query never cha
   );
   assert.equal(detail.body.order.status, "PENDING_PAYMENT");
 });
+it("checkout check calls provider, enforces tenant ownership and does not mark a payment paid", async () => {
+  const { freedomPay } =
+    await import("./services/billing/freedomPayProvider.ts");
+  const original = freedomPay.getPaymentStatus;
+  const o = await db.billingOrder.create({
+    data: {
+      tenantId,
+      orderNumber: "BSQ-CHECK-HTTP",
+      planId: (await db.plan.findFirstOrThrow({ where: { code: "CONTROL" } }))
+        .id,
+      snapshotJson: {},
+      description: "Check fixture",
+      planCode: "CONTROL",
+      amountMinor: 34990,
+      currency: "KZT",
+      billingPeriod: "MONTHLY",
+      status: "PENDING_PAYMENT",
+      expiresAt: new Date(Date.now() + 86400000),
+    },
+  });
+  const p = await db.billingPayment.create({
+    data: {
+      tenantId,
+      orderId: o.id,
+      amountMinor: o.amountMinor,
+      currency: o.currency,
+      status: "PROCESSING",
+      method: "CARD",
+      provider: "FREEDOM_PAY",
+    },
+  });
+  let calls = 0;
+  freedomPay.getPaymentStatus = async (_id, ref) => {
+    calls++;
+    assert.equal(ref, p.id);
+    return {
+      pg_payment_id: "fixture-http",
+      pg_order_id: p.id,
+      pg_amount: String(p.amountMinor),
+      pg_currency: p.currency,
+      pg_payment_status: "pending",
+    };
+  };
+  try {
+    assert.equal(
+      (await request(`/api/v1/billing/orders/${o.id}/check`, "", {}, "POST"))
+        .status,
+      401,
+    );
+    const checked = await request(
+      `/api/v1/billing/orders/${o.id}/check`,
+      owner,
+      {},
+      "POST",
+    );
+    assert.equal(checked.status, 200, JSON.stringify(checked.body));
+    assert.equal(checked.body.status, "pending");
+    assert.equal(calls, 1);
+    assert.equal(
+      (await db.billingPayment.findUniqueOrThrow({ where: { id: p.id } }))
+        .status,
+      "PROCESSING",
+    );
+    assert.equal(
+      (
+        await request(`/api/v1/admin/billing/payments/${p.id}/release`, owner, {
+          noChargeConfirmed: true,
+          reason: "No charge confirmed by user",
+        })
+      ).status,
+      403,
+    );
+  } finally {
+    freedomPay.getPaymentStatus = original;
+  }
+});

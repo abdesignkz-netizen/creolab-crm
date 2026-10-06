@@ -617,3 +617,198 @@ it("database failure during activation rolls payment and subscription back toget
   await processPaymentNotice(db, notice(p));
   assert.equal((await checkoutDetail(db, a, o.id)).order.status, "PAID");
 });
+it("rejected merchant settings release a new checkout; uncertain outcomes stay locked", async () => {
+  const a = await tenant(),
+    o = await order(a);
+  const rejected = {
+    ...fake,
+    async createPayment(): Promise<never> {
+      throw new ApiError(503, "provider_credentials", "Merchant rejected");
+    },
+  };
+  await assert.rejects(
+    () => payOrder(db, a, { orderId: o.id, method: "CARD" }, rejected),
+    { code: "provider_credentials" },
+  );
+  const detail = await checkoutDetail(db, a, o.id);
+  assert.equal(detail.order.status, "PENDING_PAYMENT");
+  assert.equal(detail.payments[0].status, "FAILED");
+  assert.equal(detail.payments[0].failureReason, "provider_credentials");
+  // A bank invoice remains available after an explicit authentication rejection.
+  const bank = await payOrder(db, a, {
+    orderId: o.id,
+    method: "BANK_TRANSFER",
+    buyer,
+  });
+  assert(bank.invoice);
+  const b = await tenant(),
+    other = await order(b);
+  let calls = 0;
+  const uncertain = {
+    ...fake,
+    async createPayment(): Promise<never> {
+      calls++;
+      throw new ApiError(502, "provider_signature", "Unverified response");
+    },
+  };
+  await assert.rejects(() =>
+    payOrder(db, b, { orderId: other.id, method: "CARD" }, uncertain),
+  );
+  const pending = await payOrder(
+    db,
+    b,
+    { orderId: other.id, method: "CARD" },
+    uncertain,
+  );
+  assert.equal(calls, 1);
+  assert.equal(pending.payments[0].status, "PROCESSING");
+  assert.equal(pending.payments[0].failureReason, "provider_signature");
+  await assert.rejects(() => cancelOrder(db, b, other.id));
+});
+it("real status checks preserve uncertain payments; admin recovery requires reconciliation and no provider payment", async () => {
+  const { checkOrderPayment, releaseUncreatedPayment } =
+    await import("./services/billing/paymentCheck.ts");
+  const original = freedomPay.getPaymentStatus;
+  const a = await tenant(),
+    o = await order(a),
+    other = await tenant();
+  const p = await db.billingPayment.create({
+    data: {
+      tenantId: o.tenantId,
+      orderId: o.id,
+      amountMinor: o.amountMinor,
+      currency: o.currency,
+      method: "CARD",
+      provider: "FREEDOM_PAY",
+      status: "PROCESSING",
+      createdAt: new Date(Date.now() - 600_000),
+    },
+  });
+  let checks = 0;
+  freedomPay.getPaymentStatus = async (_id, ref) => {
+    checks++;
+    assert.equal(ref, p.id);
+    throw new ApiError(404, "provider_not_found", "Not found");
+  };
+  try {
+    await assert.rejects(() => checkOrderPayment(db, other, o.id), {
+      code: "not_found",
+    });
+    assert.equal(checks, 0);
+    assert.equal((await checkOrderPayment(db, a, o.id)).status, "not_found");
+    assert.equal(
+      (await db.billingPayment.findUniqueOrThrow({ where: { id: p.id } }))
+        .status,
+      "PROCESSING",
+    );
+    await assert.rejects(() =>
+      releaseUncreatedPayment(db, a, p.id, {
+        noChargeConfirmed: true,
+        reason: "Reconciled all merchant accounts",
+      }),
+    );
+    await assert.rejects(() =>
+      releaseUncreatedPayment(db, admin, p.id, {
+        reason: "Reconciled all merchant accounts",
+      }),
+    );
+    freedomPay.getPaymentStatus = async () => ({
+      pg_payment_id: "bank-123",
+      pg_order_id: p.id,
+      pg_amount: String(p.amountMinor),
+      pg_currency: p.currency,
+      pg_payment_status: "success",
+    });
+    assert.equal((await checkOrderPayment(db, a, o.id)).status, "success");
+    assert.equal(
+      (await checkoutDetail(db, a, o.id)).order.status,
+      "PENDING_PAYMENT",
+    );
+    await assert.rejects(
+      () =>
+        releaseUncreatedPayment(db, admin, p.id, {
+          noChargeConfirmed: true,
+          reason: "Reconciled all merchant accounts",
+        }),
+      { code: "payment_not_recoverable" },
+    );
+    freedomPay.getPaymentStatus = async () => ({
+      pg_payment_id: "bank-123",
+      pg_order_id: "wrong",
+      pg_amount: String(p.amountMinor),
+      pg_currency: p.currency,
+      pg_payment_status: "success",
+    });
+    await assert.rejects(() => checkOrderPayment(db, a, o.id), {
+      code: "provider_mismatch",
+    });
+    freedomPay.getPaymentStatus = async () => {
+      throw new ApiError(404, "provider_not_found", "Not found");
+    };
+    await releaseUncreatedPayment(db, admin, p.id, {
+      noChargeConfirmed: true,
+      reason: "Checked old and new merchants, no payment received",
+    });
+    assert.equal(
+      (await db.billingPayment.findUniqueOrThrow({ where: { id: p.id } }))
+        .status,
+      "FAILED",
+    );
+    await assert.rejects(
+      () =>
+        releaseUncreatedPayment(db, admin, p.id, {
+          noChargeConfirmed: true,
+          reason: "Checked all merchants again",
+        }),
+      { code: "payment_not_recoverable" },
+    );
+    const retry = await payOrder(
+      db,
+      a,
+      { orderId: o.id, method: "CARD" },
+      fake,
+    );
+    assert.equal(
+      retry.payments.filter((x: any) => x.status === "PROCESSING").length,
+      1,
+    );
+  } finally {
+    freedomPay.getPaymentStatus = original;
+  }
+});
+it("a callback arriving during recovery wins; the successful payment cannot be released", async () => {
+  const { releaseUncreatedPayment } =
+    await import("./services/billing/paymentCheck.ts");
+  const original = freedomPay.getPaymentStatus;
+  const a = await tenant(),
+    o = await order(a);
+  const p = await db.billingPayment.create({
+    data: {
+      tenantId: o.tenantId,
+      orderId: o.id,
+      amountMinor: o.amountMinor,
+      currency: o.currency,
+      method: "CARD",
+      provider: "FREEDOM_PAY",
+      status: "PROCESSING",
+      createdAt: new Date(Date.now() - 600_000),
+    },
+  });
+  freedomPay.getPaymentStatus = async () => {
+    await processPaymentNotice(db, notice(p));
+    throw new ApiError(404, "provider_not_found", "Not found");
+  };
+  try {
+    await assert.rejects(
+      () =>
+        releaseUncreatedPayment(db, admin, p.id, {
+          noChargeConfirmed: true,
+          reason: "Checked all merchant accounts",
+        }),
+      { code: "payment_not_recoverable" },
+    );
+    assert.equal((await checkoutDetail(db, a, o.id)).order.status, "PAID");
+  } finally {
+    freedomPay.getPaymentStatus = original;
+  }
+});
