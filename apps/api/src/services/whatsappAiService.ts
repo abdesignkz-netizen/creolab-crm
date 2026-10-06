@@ -25,6 +25,7 @@ export function whatsAppAiFailureReason(code: string | null | undefined) {
     voice_unavailable: "AI_VOICE_UNAVAILABLE", voice_empty: "AI_VOICE_EMPTY", voice_interrupted: "AI_VOICE_UNAVAILABLE",
     voice_unsupported: "AI_VOICE_UNSUPPORTED", voice_too_large: "AI_VOICE_UNSUPPORTED", voice_provider_error: "AI_VOICE_UNAVAILABLE",
     voice_timeout: "AI_VOICE_TIMEOUT", voice_network_error: "AI_VOICE_PROVIDER_UNAVAILABLE", voice_invalid_response: "AI_VOICE_INVALID_RESPONSE",
+    voice_service_missing: "AI_VOICE_SERVICE_MISSING", voice_service_config: "AI_VOICE_SERVICE_CONFIG",
     voice_http_400: "AI_VOICE_CONFIG", voice_http_404: "AI_VOICE_CONFIG", voice_http_405: "AI_VOICE_CONFIG", voice_http_422: "AI_VOICE_CONFIG",
     voice_http_401: "AI_PROVIDER_AUTH", voice_http_403: "AI_PROVIDER_AUTH", voice_http_402: "AI_PROVIDER_LIMIT", voice_http_429: "AI_PROVIDER_LIMIT",
     voice_http_413: "AI_VOICE_UNSUPPORTED", voice_http_415: "AI_VOICE_UNSUPPORTED", voice_http_408: "AI_VOICE_TIMEOUT", voice_http_504: "AI_VOICE_TIMEOUT",

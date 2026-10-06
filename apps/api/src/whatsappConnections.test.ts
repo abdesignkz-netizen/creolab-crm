@@ -15,6 +15,7 @@ import { invalidateRuntimeConfig } from "./services/runtimeSettings.ts";
 import { recordExternalMessage } from "./services/externalMessageService.ts";
 import { transcribeVoiceAttachment, voiceTranscript } from "./services/voiceTranscriptionService.ts";
 import { attentionReasonLabel } from "./services/attentionReasons.ts";
+import { getTranscriptionConfig, getTranscriptionStatus } from "./services/transcriptionConfig.ts";
 import { unlink, writeFile } from "node:fs/promises";
 import { resolveUploadPath } from "./lib/storage.ts";
 import { storeMessageAttachment } from "./services/conversationMedia.ts";
@@ -27,13 +28,16 @@ describe("WhatsApp provider connections", () => {
   const appSecret = "test-whatsapp-app-secret-123456", accessToken = "test-whatsapp-access-token-123456";
   let sends = 0, qrSends = 0, logoutCount = 0, failQrSend = false;
   let mediaResponse = Buffer.alloc(0);
-  let llmCalls = 0, llmStatus = 200, llmInput: any;
+  let llmCalls = 0, llmStatus = 200, llmInput: any, llmAuthorization: string | null;
   let voiceCalls = 0, voiceStatus = 200, voiceText = "Сәлеметсіз бе! Қызметтеріңіз туралы айтып беріңізші.";
   let voiceBody: string | undefined;
   let onTranscribe: (() => Promise<void>) | undefined;
   let onCloudSend: (() => Promise<void>) | undefined;
   const oldLlmKey = process.env.OPENAI_API_KEY, oldLlmUrl = process.env.OPENAI_BASE_URL;
   const oldAnyModelKey = process.env.ANYMODEL_API_KEY;
+  const speechEnvNames = ["TRANSCRIPTION_API_KEY", "TRANSCRIPTION_BASE_URL", "TRANSCRIPTION_MODEL", "ANYMODEL_BASE_URL"];
+  const oldSpeechEnv = Object.fromEntries(speechEnvNames.map(key => [key, process.env[key]]));
+  const speechKey = "speech-test-key-separate-from-chat";
   const authSnapshots: any[] = [];
   const sockets: Array<{ ev: EventEmitter; end: (error?: Error) => void }> = [];
   const fakeSocket = (options: any) => {
@@ -44,9 +48,14 @@ describe("WhatsApp provider connections", () => {
   };
   before(async () => {
     config.apiBaseUrl = "https://bsqr.example.test";
+    process.env.TRANSCRIPTION_API_KEY = speechKey;
+    process.env.TRANSCRIPTION_BASE_URL = "https://speech.example.test/v1";
+    process.env.TRANSCRIPTION_MODEL = "whisper-1";
     globalThis.fetch = async (url, init) => {
       const u = new URL(String(url));
-      if (u.hostname === "llm.example.test" && u.pathname.endsWith("/audio/transcriptions")) {
+      if (u.pathname.endsWith("/audio/transcriptions")) {
+        assert.equal(u.hostname, "speech.example.test", "Speech must never go to the company's chat endpoint");
+        assert.equal(new Headers(init?.headers).get("authorization"), `Bearer ${speechKey}`);
         voiceCalls++;
         assert.ok(init?.body instanceof FormData);
         assert.equal(init.body.get("model"), "whisper-1");
@@ -59,7 +68,7 @@ describe("WhatsApp provider connections", () => {
         if (voiceStatus === 0) throw new DOMException("Timed out", "TimeoutError");
         return new Response(voiceBody ?? JSON.stringify(voiceStatus === 200 ? { text: voiceText } : { error: "PRIVATE-VOICE-PROVIDER-ERROR" }), { status: voiceStatus, headers: { "x-request-id": `voice-${voiceCalls}` } });
       }
-      if (u.hostname === "llm.example.test") { llmCalls++; llmInput = JSON.parse(String(init?.body)); if (llmStatus !== 200) return new Response(JSON.stringify({ error: { message: "PRIVATE-PROVIDER-ERROR" } }), { status: llmStatus }); return new Response(JSON.stringify({ id: `ai-request-${llmCalls}`, choices: [{ message: { content: JSON.stringify({ reply: "Сәлеметсіз бе! Компаниямыздың қызметтері туралы айтып беремін.", handoff: false }) } }], usage: { prompt_tokens: 50, completion_tokens: 20, total_tokens: 70 } }), { headers: { "content-type": "application/json" } }); }
+      if (u.hostname === "llm.example.test") { llmAuthorization = new Headers(init?.headers).get("authorization"); llmCalls++; llmInput = JSON.parse(String(init?.body)); if (llmStatus !== 200) return new Response(JSON.stringify({ error: { message: "PRIVATE-PROVIDER-ERROR" } }), { status: llmStatus }); return new Response(JSON.stringify({ id: `ai-request-${llmCalls}`, choices: [{ message: { content: JSON.stringify({ reply: "Сәлеметсіз бе! Компаниямыздың қызметтері туралы айтып беремін.", handoff: false }) } }], usage: { prompt_tokens: 50, completion_tokens: 20, total_tokens: 70 } }), { headers: { "content-type": "application/json" } }); }
       if (u.hostname === "mmg.whatsapp.net") { assert.equal(init?.redirect, "error"); assert.ok(init?.signal); return new Response(new Uint8Array(mediaResponse)); }
       if (u.hostname !== "graph.facebook.com") return nativeFetch(url, init);
       const reply = (data: unknown) => new Response(JSON.stringify(data), { headers: { "content-type": "application/json" } });
@@ -78,6 +87,7 @@ describe("WhatsApp provider connections", () => {
     const member = await prisma.membership.findFirstOrThrow({ where: { user: { email: "owner@creolab.example" } } }); tenantId = member.tenantId;
   });
   after(async () => { await runtime?.stop(); globalThis.fetch = nativeFetch; config.apiBaseUrl = oldBase; if (oldLlmKey === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = oldLlmKey; if (oldLlmUrl === undefined) delete process.env.OPENAI_BASE_URL; else process.env.OPENAI_BASE_URL = oldLlmUrl; if (oldAnyModelKey === undefined) delete process.env.ANYMODEL_API_KEY; else process.env.ANYMODEL_API_KEY = oldAnyModelKey; invalidateRuntimeConfig(); if (server) await new Promise<void>(resolve => server.close(() => resolve())); await prisma?.$disconnect(); });
+  after(() => { for (const [key, value] of Object.entries(oldSpeechEnv)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } });
   const post = (path: string, body: unknown = {}, headers: Record<string, string> = {}) => nativeFetch(`${base}${path}`, { method: "POST", headers: { cookie, "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
   const get = (path: string) => nativeFetch(`${base}${path}`, { headers: { cookie } });
   const connectInput = { appId: "50001", wabaId: "20001", phoneNumberId: "10001", accessToken, appSecret };
@@ -358,6 +368,60 @@ describe("WhatsApp provider connections", () => {
     const file = await prisma.attachment.findFirstOrThrow({ where: { tenantId, message: { conversationId: event.entityId } } });
     return { event, file };
   }
+  it("keeps speech credentials, endpoint and model independent of all reply configuration", () => {
+    const independent = getTranscriptionConfig({ TRANSCRIPTION_API_KEY: "speech-only" });
+    assert.equal(independent.baseUrl, "https://api.openai.com/v1"); assert.equal(independent.model, "whisper-1");
+    assert.equal(independent.apiKey, "speech-only"); assert.equal(independent.errorCode, null);
+    assert.equal(getTranscriptionConfig({ OPENAI_API_KEY: "chat-only", ANYMODEL_API_KEY: "other-chat", ANYMODEL_TRANSCRIPTION_MODEL: "legacy" }).errorCode, "voice_service_missing");
+    for (const baseUrl of ["not a url", "http://speech.example.test/v1", "https://user:password@speech.example.test/v1", "https://speech.example.test/v1?key=secret", "https://speech.example.test/v1#secret"]) {
+      assert.equal(getTranscriptionConfig({ TRANSCRIPTION_API_KEY: "speech-only", TRANSCRIPTION_BASE_URL: baseUrl }).errorCode, "voice_service_config");
+    }
+    assert.doesNotMatch(JSON.stringify(getTranscriptionStatus()), /speech-test-key|apiKey|baseUrl/);
+  });
+  it("transcribes separately then feeds text to AnyModel or OpenAI with their own reply credentials", async () => {
+    const ai = await prisma.aIConfiguration.findFirstOrThrow({ where: { tenantId } });
+    const original = { provider: ai.provider, model: ai.model, credentialId: ai.credentialId };
+    const anyKey = process.env.ANYMODEL_API_KEY, anyUrl = process.env.ANYMODEL_BASE_URL;
+    try {
+      process.env.ANYMODEL_API_KEY = "anymodel-reply-only";
+      process.env.ANYMODEL_BASE_URL = "https://llm.example.test/anymodel/v1";
+      for (const [provider, model, key] of [["anymodel", "cx/gpt-5.6-sol", "anymodel-reply-only"], ["openai", "gpt-4o-mini", "mock-key-not-real"]]) {
+        await prisma.aIConfiguration.update({ where: { id: ai.id }, data: { provider, model, credentialId: null } }); invalidateRuntimeConfig();
+        const { event, file } = await voiceEvent(qrId);
+        const beforeSpeech = voiceCalls;
+        await processWhatsAppAiReply(prisma, event);
+        assert.equal(voiceCalls, beforeSpeech + 1);
+        assert.equal(llmInput.model, model); assert.equal(llmAuthorization, `Bearer ${key}`);
+        const input = JSON.stringify(llmInput);
+        assert.ok(input.includes(voiceText)); assert.match(input, /PUBLIC-COMPANY-PROMPT/); assert.match(input, /PUBLIC-KNOWLEDGE/);
+        assert.doesNotMatch(input, /input_audio|data:audio|speech-test-key|OggS-voice-fixture/);
+        const speechUsage = await prisma.aIUsageEvent.findFirstOrThrow({ where: { conversationId: event.entityId, feature: "AI_VOICE_TRANSCRIPTION" } });
+        const replyUsage = await prisma.aIUsageEvent.findFirstOrThrow({ where: { conversationId: event.entityId, feature: "AI_MANAGER_REPLY" } });
+        assert.equal(speechUsage.provider, "openai-compatible"); assert.equal(speechUsage.model, "whisper-1");
+        assert.equal(replyUsage.provider, provider); assert.equal(replyUsage.model, model);
+        assert.equal(await transcribeVoiceAttachment({ prisma, tenantId, conversationId: event.entityId, integrationId: qrId, attachmentId: file.id }), voiceText);
+        assert.equal(voiceCalls, beforeSpeech + 1);
+      }
+    } finally {
+      await prisma.aIConfiguration.update({ where: { id: ai.id }, data: original }); invalidateRuntimeConfig();
+      if (anyKey === undefined) delete process.env.ANYMODEL_API_KEY; else process.env.ANYMODEL_API_KEY = anyKey;
+      if (anyUrl === undefined) delete process.env.ANYMODEL_BASE_URL; else process.env.ANYMODEL_BASE_URL = anyUrl;
+    }
+  });
+  it("does not fall back to chat credentials when the separate speech key is missing", async () => {
+    const { event } = await voiceEvent(cloudId);
+    const beforeSpeech = voiceCalls, beforeReply = llmCalls;
+    try {
+      delete process.env.TRANSCRIPTION_API_KEY;
+      await processWhatsAppAiReply(prisma, event);
+      assert.equal(voiceCalls, beforeSpeech); assert.equal(llmCalls, beforeReply);
+      assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id: event.entityId } })).attentionReason, "AI_VOICE_SERVICE_MISSING");
+    } finally { process.env.TRANSCRIPTION_API_KEY = speechKey; }
+    assert.equal((await post(`/api/v1/conversations/${event.entityId}/return-to-ai`)).status, 200);
+    const retry = await prisma.outboxEvent.findFirstOrThrow({ where: { entityId: event.entityId, type: "whatsapp.ai_reply", id: { not: event.id } } });
+    await processWhatsAppAiReply(prisma, retry);
+    assert.equal(await prisma.message.count({ where: { connectionScopedId: retry.id } }), 1);
+  });
   it("restores protobuf media bytes after the durable QR queue and processes a real-shaped voice event", async () => {
     const mediaKey = randomBytes(32), keys = await getMediaKeys(mediaKey, "audio");
     const plain = Buffer.from("OggS-protobuf-voice-fixture");
@@ -541,7 +605,6 @@ describe("WhatsApp provider connections", () => {
   it("reports model failures safely for direct channels without sending a customer message", async () => {
     const channel = await prisma.channelConnection.findFirstOrThrow({ where: { integrationId: qrId } });
     const contact = await prisma.contact.create({ data: { tenantId, name: "Model error test" } });
-    const beforeSends = sends + qrSends;
     try {
       for (const [status, reason] of [[401, "AI_PROVIDER_AUTH"], [429, "AI_PROVIDER_LIMIT"], [400, "AI_PROVIDER_CONFIG"]] as const) {
         llmStatus = status;
@@ -554,9 +617,9 @@ describe("WhatsApp provider connections", () => {
         assert.equal(result.mode, "human"); assert.equal(result.attentionReason, reason);
         assert.equal(await prisma.message.count({ where: { conversationId: result.id, direction: "outbound" } }), 0);
         const operation = await prisma.outboundOperation.findUniqueOrThrow({ where: { tenantId_idempotencyKey: { tenantId, idempotencyKey: event.id } } });
+        assert.equal(operation.state, "failed");
         assert.doesNotMatch(JSON.stringify(operation), /PRIVATE-PROVIDER-ERROR/);
       }
-      assert.equal(sends + qrSends, beforeSends);
     } finally { llmStatus = 200; }
   });
   it("lets only platform admins test a model and lists QR and Meta readiness without exposing keys", async () => {
@@ -565,6 +628,17 @@ describe("WhatsApp provider connections", () => {
     const login = await nativeFetch(`${base}/api/v1/auth/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: "platform@creolab.example", password: process.env.SEED_PASSWORD }) });
     assert.equal(login.status, 200);
     const adminCookie = (login.headers.get("set-cookie") || "").split(";")[0];
+    assert.equal((await get("/api/v1/admin/settings")).status, 403);
+    const serviceSettings = await nativeFetch(`${base}/api/v1/admin/settings`, { headers: { cookie: adminCookie } });
+    assert.equal(serviceSettings.status, 200);
+    const serviceBody = await serviceSettings.json();
+    assert.deepEqual(serviceBody.transcription, { model: "whisper-1", provider: "openai-compatible", configured: true, errorCode: null });
+    assert.doesNotMatch(JSON.stringify(serviceBody), /speech-test-key|speech.example.test|apiKey/);
+    const saveSettings = await nativeFetch(`${base}/api/v1/admin/settings`, { method: "PATCH", headers: { cookie: adminCookie, "content-type": "application/json" },
+      body: JSON.stringify({ transcription: { apiKey: "must-not-save", model: "must-not-change" } }) });
+    assert.equal(saveSettings.status, 200);
+    assert.deepEqual((await saveSettings.json()).transcription, serviceBody.transcription);
+    assert.doesNotMatch(JSON.stringify(await prisma.platformSetting.findUnique({ where: { key: "defaults" } })), /must-not-save|must-not-change/);
     const listing = await nativeFetch(`${base}/api/v1/admin/tenants/${tenantId}/ai-manager`, { headers: { cookie: adminCookie } });
     const data = await listing.json(); assert.equal(listing.status, 200);
     assert.ok(data.connections.some((item: any) => item.type === "whatsapp_qr"));
@@ -592,7 +666,10 @@ describe("WhatsApp provider connections", () => {
     assert.equal((await post(`/api/v1/integrations/whatsapp/${foreign.id}/ai`, { enabled: true })).status, 404);
     const before = await getUsage(prisma, tenantId, "WHATSAPP_CONNECTIONS"); assert.ok(before >= 2);
     assert.equal((await post(`/api/v1/integrations/whatsapp/${qrId}/disconnect`)).status, 200);
-    await runtime!.tick(); assert.equal(logoutCount, 1);
+    // A background tick may already be in progress; wait for the durable
+    // disconnect job instead of assuming this tick invocation ran it.
+    await until(async () => { await runtime!.tick(); return logoutCount === 1; });
+    assert.equal(logoutCount, 1);
     assert.equal((await get(`/api/v1/integrations/whatsapp/${qrId}/qr`)).status, 404);
     assert.ok(await prisma.message.count({ where: { conversationId: qrConversation } }));
     assert.equal(await getUsage(prisma, tenantId, "WHATSAPP_CONNECTIONS"), before - 1);

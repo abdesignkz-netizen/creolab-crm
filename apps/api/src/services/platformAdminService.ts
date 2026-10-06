@@ -12,6 +12,7 @@ import {
   rotateInvitation,
 } from "./invitationService.ts";
 import { publicConnectionStatus } from "./platformCatalog.ts";
+import { getTranscriptionStatus } from "./transcriptionConfig.ts";
 import {
   getEffectiveTenantSettings,
   getPlatformSettings,
@@ -730,7 +731,7 @@ export async function listPlatformAudit(
 
 export async function getPlatformServiceSettings(prisma: PrismaClient, auth: AuthContext) {
   requirePlatformAdmin(auth);
-  return getPlatformSettings(prisma);
+  return { ...await getPlatformSettings(prisma), transcription: getTranscriptionStatus() };
 }
 
 export async function updatePlatformServiceSettings(
@@ -747,5 +748,5 @@ export async function updatePlatformServiceSettings(
     entityId: "defaults",
     changes: { keys: Object.keys(input) },
   });
-  return saved;
+  return { ...saved, transcription: getTranscriptionStatus() };
 }

@@ -36,6 +36,7 @@ try {
         VAPID_PRIVATE_KEY: "",
         OPENAI_API_KEY: "",
         ANYMODEL_API_KEY: "",
+        TRANSCRIPTION_API_KEY: "",
       },
     });
     if (result.status !== 0) failures += 1;

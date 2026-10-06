@@ -1,5 +1,14 @@
 /** Reviewed product copy only. Never pass customer content to this function. */
 export const kkSystemMessages: Readonly<Record<string, string>> = {
+  "Распознавание голосовых ещё не подключено. Администратору нужно настроить отдельный сервис распознавания.": "Дауыстық хабарламаларды мәтінге айналдыру әлі қосылмаған. Әкімші бөлек сөйлеуді тану сервисін баптауы керек.",
+  "Настройки сервиса распознавания некорректны. Обратитесь к администратору.": "Сөйлеуді тану сервисінің баптаулары қате. Әкімшіге хабарласыңыз.",
+  "Распознавание голосовых сообщений": "Дауыстық хабарламаларды мәтінге айналдыру",
+  "Аудио сначала преобразуется в текст отдельным сервисом. Затем ИИ-менеджер обрабатывает текст с промптом и базой знаний компании.": "Алдымен бөлек сервис аудионы мәтінге айналдырады. Содан кейін ЖИ менеджері мәтінді компанияның промпты мен білім қорын пайдаланып өңдейді.",
+  "Настройки распознавания заданы": "Сөйлеуді тану баптаулары берілген",
+  "Нужно настроить сервис распознавания": "Сөйлеуді тану сервисін баптау қажет",
+  "Настройки задаются на сервере отдельно от модели ИИ-менеджера: TRANSCRIPTION_API_KEY, TRANSCRIPTION_BASE_URL, TRANSCRIPTION_MODEL.": "Баптаулар серверде ЖИ менеджерінің моделінен бөлек беріледі: TRANSCRIPTION_API_KEY, TRANSCRIPTION_BASE_URL, TRANSCRIPTION_MODEL.",
+  "Наличие настроек не подтверждает доступность сервиса. Результаты запросов отображаются в разделе «Расход AI».": "Баптаулардың болуы сервистің қолжетімді екенін растамайды. Сұрау нәтижелері «ЖИ шығыны» бөлімінде көрсетіледі.",
+
   "Сервис распознавания отклонил запрос. Администратору нужно проверить модель, адрес сервиса и формат аудио.": "Сөйлеуді тану сервисі сұрауды қабылдамады. Әкімші модельді, сервис мекенжайын және аудио пішімін тексеруі керек.",
   "Сервис распознавания не ответил вовремя. Верните диалог ИИ, чтобы повторить попытку.": "Сөйлеуді тану сервисі уақытында жауап бермеді. Қайталап көру үшін диалогті ЖИ-ге қайтарыңыз.",
   "Сервис распознавания временно недоступен. Верните диалог ИИ позже, чтобы повторить попытку.": "Сөйлеуді тану сервисі уақытша қолжетімсіз. Қайталап көру үшін диалогті кейінірек ЖИ-ге қайтарыңыз.",
@@ -4857,6 +4866,15 @@ export const kkSystemMessages: Readonly<Record<string, string>> = {
 };
 
 const enAiMessages: Readonly<Record<string, string>> = {
+  "Распознавание голосовых ещё не подключено. Администратору нужно настроить отдельный сервис распознавания.": "Voice transcription is not connected yet. An administrator needs to configure a separate transcription service.",
+  "Настройки сервиса распознавания некорректны. Обратитесь к администратору.": "The transcription service configuration is invalid. Contact an administrator.",
+  "Распознавание голосовых сообщений": "Voice message transcription",
+  "Аудио сначала преобразуется в текст отдельным сервисом. Затем ИИ-менеджер обрабатывает текст с промптом и базой знаний компании.": "A separate service first converts audio to text. The AI manager then processes the text using the company prompt and knowledge base.",
+  "Настройки распознавания заданы": "Transcription settings provided",
+  "Нужно настроить сервис распознавания": "Transcription service setup required",
+  "Настройки задаются на сервере отдельно от модели ИИ-менеджера: TRANSCRIPTION_API_KEY, TRANSCRIPTION_BASE_URL, TRANSCRIPTION_MODEL.": "Configure these server settings separately from the AI manager model: TRANSCRIPTION_API_KEY, TRANSCRIPTION_BASE_URL, TRANSCRIPTION_MODEL.",
+  "Наличие настроек не подтверждает доступность сервиса. Результаты запросов отображаются в разделе «Расход AI».": "Configured settings do not confirm service availability. Request results appear in AI Usage.",
+
   "Сервис распознавания отклонил запрос. Администратору нужно проверить модель, адрес сервиса и формат аудио.": "The transcription service rejected the request. An administrator needs to check the model, service URL and audio format.",
   "Сервис распознавания не ответил вовремя. Верните диалог ИИ, чтобы повторить попытку.": "The transcription service timed out. Return the conversation to AI to try again.",
   "Сервис распознавания временно недоступен. Верните диалог ИИ позже, чтобы повторить попытку.": "The transcription service is temporarily unavailable. Return the conversation to AI later to try again.",

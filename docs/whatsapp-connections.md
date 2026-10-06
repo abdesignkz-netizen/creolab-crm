@@ -47,14 +47,29 @@ References: [Baileys session storage](https://baileys.wiki/authentication/sessio
 
 ## Voice notes (QR and Meta)
 
-Voice recognition uses the company's effective AI provider, endpoint and credentials, independently of the WhatsApp transport. The provider must support `POST /audio/transcriptions` with multipart audio. The default model is `whisper-1`; optional `OPENAI_TRANSCRIPTION_MODEL` / `ANYMODEL_TRANSCRIPTION_MODEL` select the speech model for the corresponding provider. They do not change the reply model. There is no fallback to another provider or another company's key. Language is detected from the recording; recognition does not translate it. API format reference: https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create.
+Speech recognition is a separate platform service: **stored audio → transcription text → company AI manager**. It never reads the company's reply model, provider, API URL or credentials. The selected reply model (including `anymodel:cx/gpt-5.6-sol`) receives text with the published company prompt and knowledge; no audio is sent to the chat model. Language is detected from the recording, without translation.
+
+Set these variables in Render **Environment** on every API/worker instance processing voice jobs:
+
+```dotenv
+TRANSCRIPTION_API_KEY=<speech service API key, stored only on the server>
+TRANSCRIPTION_BASE_URL=https://api.openai.com/v1
+TRANSCRIPTION_MODEL=whisper-1
+```
+
+The URL and model above are defaults for OpenAI transcription. Use an OpenAI API key for that endpoint. A different speech provider can be used by setting its HTTPS base URL, compatible speech model and matching key; it must support multipart `POST /audio/transcriptions` returning JSON `{ "text": "..." }`. This adapter intentionally requires HTTPS and authentication. It does not reuse `OPENAI_API_KEY`, `ANYMODEL_API_KEY`, tenant credentials or the old `OPENAI_TRANSCRIPTION_MODEL` / `ANYMODEL_TRANSCRIPTION_MODEL` variables. Migrating from the old shared-provider setup requires setting the new speech key explicitly.
+
+Service administrators see a read-only status under **Service settings → Voice message transcription**. “Settings provided” confirms configuration presence, not successful provider access. Secrets are never returned to the UI or accepted through the generic settings endpoint. A missing speech key produces a specific setup notice and does not fall back to the chat provider. After saving environment variables, deploy the service and test an actual voice message; after a previous failure, **Return to AI** reuses the stored audio. Leave the company's chat model unchanged.
+
+API format reference: https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create.
 
 ### Diagnosing voice failures
 
 Service administrators can open **AI Usage → AI request errors**, globally or within a company. The report shows the latest 50 failed calls in the selected period with provider, model, operation and a safe error code. It includes previously recorded failures; older `voice_provider_error` / `voice_unavailable` values lack the original HTTP status and cannot establish its cause retroactively. The report never includes provider response bodies, prompts, recordings, transcripts or credentials, and remains inaccessible to tenant administrators.
 
 - `voice_http_400/404/405/422`: check the provider's transcription endpoint, available speech model and accepted audio format. A working chat model alone does not confirm that transcription is supported.
-- `voice_http_401/403`: check the selected company's provider credential and permissions.
+- `voice_service_missing` / `voice_service_config`: configure the independent speech service in Render Environment; the company chat model is unrelated.
+- `voice_http_401/403`: check the independent speech service key and permissions.
 - `voice_http_402/429`: check provider balance and request limits.
 - `voice_http_413/415`: audio size or format rejected.
 - `voice_timeout`, `voice_http_408/504`: recognition exceeded the request timeout or provider deadline.
@@ -73,4 +88,4 @@ Human takeover, pauses, working hours, AI entitlements and Meta's 24-hour window
 
 Deploy the updated Prisma client and apply `packages/db/prisma/migrations/20261005_voice_transcription.sql` when migrations are managed externally. The normal database bootstrap applies this additive column for both PostgreSQL and PGlite. Green API's external seller transcription is unchanged.
 
-Acceptance coverage uses mocked speech/model endpoints for both direct transports: company prompt and published knowledge, cache and two-stage credit accounting, overlapping revisions, duplicate workers, human takeover during recognition, spoken handoff requests, empty output, timeout, provider errors, tenant isolation, missing/oversized files, path traversal and unsupported audio. Actual recognition quality and provider availability require a post-deploy voice note from a test phone (Kazakh and Russian) through each connected number; no live WhatsApp or speech-provider call is made by the tests.
+Acceptance coverage uses distinct mocked speech/model endpoints and keys for both direct transports: independence from AnyModel/OpenAI reply model selection, missing speech configuration without credential fallback, company prompt and published knowledge, cache and two-stage credit accounting, overlapping revisions, duplicate workers, human takeover during recognition, spoken handoff requests, empty output, timeout, provider errors, tenant isolation, missing/oversized files, path traversal and unsupported audio. Actual recognition quality and provider availability require a post-deploy voice note from a test phone (Kazakh and Russian) through each connected number; no live WhatsApp or speech-provider call is made by the tests.

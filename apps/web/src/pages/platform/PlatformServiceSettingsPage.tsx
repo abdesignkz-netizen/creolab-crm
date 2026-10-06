@@ -50,6 +50,14 @@ export function PlatformServiceSettingsPage() {
       <label className="check"><input type="checkbox" name="aiEnabled" defaultChecked={data.ai?.enabled} /> {" "}{uiText("AI включён на уровне сервиса")}</label>
       <label>{uiText("Провайдер")}<input name="provider" defaultValue={data.ai?.provider || ""} /></label>
       <label>{uiText("Модель")}<input name="model" defaultValue={data.ai?.model || ""} /></label>
+      <section className="panel stack">
+        <h4>{uiText("Распознавание голосовых сообщений")}</h4>
+        <p>{uiText("Аудио сначала преобразуется в текст отдельным сервисом. Затем ИИ-менеджер обрабатывает текст с промптом и базой знаний компании.")}</p>
+        <strong>{data.transcription?.configured ? uiText("Настройки распознавания заданы") : uiText("Нужно настроить сервис распознавания")}</strong>
+        {data.transcription?.configured ? <p className="muted">{uiText("Провайдер")}: {data.transcription.provider} · {uiText("Модель")}: {data.transcription.model}</p> : null}
+        <p className="muted">{uiText("Настройки задаются на сервере отдельно от модели ИИ-менеджера: TRANSCRIPTION_API_KEY, TRANSCRIPTION_BASE_URL, TRANSCRIPTION_MODEL.")}</p>
+        <p className="muted">{uiText("Наличие настроек не подтверждает доступность сервиса. Результаты запросов отображаются в разделе «Расход AI».")}</p>
+      </section>
       <h4>{uiText("Функции по умолчанию")}</h4>
       {(["forms", "webhook", "whatsapp", "documents", "aiFeature", "esf"] as const).map((key) => (
         <label key={key} className="check">

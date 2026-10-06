@@ -4,7 +4,7 @@ import type { PrismaClient, Prisma } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import { resolveUploadPath } from "../lib/storage.ts";
 import { CONVERSATION_MAX_FILE_BYTES, resolveConversationMime } from "./conversationMedia.ts";
-import { getEffectiveLlmConfig } from "./runtimeSettings.ts";
+import { getTranscriptionConfig } from "./transcriptionConfig.ts";
 import { getEntitlements } from "./entitlementService.ts";
 import { reserveAiCall, aiCreditCost } from "./billingResourceService.ts";
 import { recordAiUsage } from "./aiUsageService.ts";
@@ -45,9 +45,9 @@ export async function transcribeVoiceAttachment(input: {
   if (file.sizeBytes <= 0 || file.sizeBytes > CONVERSATION_MAX_FILE_BYTES) throw fail("voice_too_large");
   const access = await getEntitlements(prisma, tenantId);
   if (!access.entitlements.AI_MANAGER) throw fail("feature_required");
-  const llm = await getEffectiveLlmConfig(prisma, tenantId);
-  if (!llm.apiKey) throw fail("ai_model_missing");
-  const model = (llm.provider === "anymodel" ? process.env.ANYMODEL_TRANSCRIPTION_MODEL : process.env.OPENAI_TRANSCRIPTION_MODEL)?.trim() || "whisper-1";
+  const speech = getTranscriptionConfig();
+  if (speech.errorCode) throw fail(speech.errorCode);
+  const model = speech.model;
   let bytes: Buffer;
   try {
     const handle = await open(resolveUploadPath(file.storageKey), constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -78,8 +78,8 @@ export async function transcribeVoiceAttachment(input: {
     const signal = input.signal ? AbortSignal.any([input.signal, AbortSignal.timeout(20000)]) : AbortSignal.timeout(20000);
     signal.throwIfAborted();
     called = true;
-    const response = await fetch(`${llm.baseUrl.replace(/\/$/, "")}/audio/transcriptions`, {
-      method: "POST", headers: { Authorization: `Bearer ${llm.apiKey}` }, body: form, signal, redirect: "error",
+    const response = await fetch(`${speech.baseUrl}/audio/transcriptions`, {
+      method: "POST", headers: { Authorization: `Bearer ${speech.apiKey}` }, body: form, signal, redirect: "error",
     });
     requestId = response.headers.get("x-request-id");
     if (!response.ok) {
@@ -109,7 +109,7 @@ export async function transcribeVoiceAttachment(input: {
     throw fail(errorCode);
   } finally {
     try {
-      if (called) await recordAiUsage(prisma, { tenantId, integrationId, conversationId, provider: llm.provider, model,
+      if (called) await recordAiUsage(prisma, { tenantId, integrationId, conversationId, provider: speech.provider, model,
         feature: "AI_VOICE_TRANSCRIPTION", providerRequestId: requestId, latencyMs: Date.now() - started,
         status: text ? "ok" : "failed", errorCode: text ? null : errorCode });
     } finally { await release?.(); }
