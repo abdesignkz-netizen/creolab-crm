@@ -80,6 +80,17 @@ class SpeechSafetyTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "voice_service_config"):
                 speech.required_available(root)
 
+    def test_kaz_rus_turbo_profile_reserves_memory_and_rejects_bad_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "model.bin").write_bytes(b"fixture")
+            (root / "basqar-profile.json").write_text(json.dumps({"profile": "kaz-rus-turbo"}))
+            self.assertEqual(speech.required_available(root), 4096 * 1024**2)
+            for value in [{"profile": "unknown"}, {"profile": "kaz-rus-turbo", "memory": 1}, []]:
+                (root / "basqar-profile.json").write_text(json.dumps(value))
+                with self.assertRaisesRegex(ValueError, "voice_service_config"):
+                    speech.required_available(root)
+
     def test_busy_worker_retries_without_reading_audio(self):
         with patch.object(speech.fcntl, "flock", side_effect=BlockingIOError):
             self.assertEqual(speech.main(), {"error": "voice_pending"})

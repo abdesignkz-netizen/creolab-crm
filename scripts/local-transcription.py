@@ -18,9 +18,14 @@ def required_available(model_path):
         return 2 * 1024**3
     except (ValueError, OSError):
         raise ValueError("voice_service_config")
-    if profile != {"profile": "tiny"} or not 0 < (root / "model.bin").stat().st_size <= 100 * 1024**2:
+    profiles = {"tiny": (100, 768), "kaz-rus-turbo": (1600, 4096)}
+    name = profile.get("profile") if isinstance(profile, dict) else None
+    if name not in profiles or profile != {"profile": name}:
         raise ValueError("voice_service_config")
-    return 768 * 1024**2
+    max_model_mib, available_mib = profiles[name]
+    if not 0 < (root / "model.bin").stat().st_size <= max_model_mib * 1024**2:
+        raise ValueError("voice_service_config")
+    return available_mib * 1024**2
 
 
 def available_memory():

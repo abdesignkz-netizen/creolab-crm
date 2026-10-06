@@ -14,8 +14,13 @@ export function getTranscriptionConfig(env: NodeJS.ProcessEnv = process.env) {
       try {
         const profile = JSON.parse(readFileSync(join(modelPath, "basqar-profile.json"), "utf8"));
         const bytes = statSync(join(modelPath, "model.bin")).size;
-        if (profile?.profile !== "tiny" || Object.keys(profile).length !== 1 || bytes <= 0 || bytes > 100 * 1024 ** 2) throw new Error("Invalid profile");
-        model = "faster-whisper-tiny-int8"; requiredAvailableMiB = 768;
+        const profiles: Record<string, { model: string; memory: number; maxSize: number }> = {
+          tiny: { model: "faster-whisper-tiny-int8", memory: 768, maxSize: 100 },
+          "kaz-rus-turbo": { model: "whisper-turbo-kaz-rus-v1-int8", memory: 4096, maxSize: 1600 },
+        };
+        const selected = typeof profile?.profile === "string" && Object.hasOwn(profiles, profile.profile) ? profiles[profile.profile] : null;
+        if (!selected || Object.keys(profile).length !== 1 || bytes <= 0 || bytes > selected.maxSize * 1024 ** 2) throw new Error("Invalid profile");
+        model = selected.model; requiredAvailableMiB = selected.memory;
       } catch { errorCode = "voice_service_config"; }
     }
     return { engine: "local" as const, python, modelPath, model, requiredAvailableMiB, provider: "local", apiKey: "", baseUrl: "", errorCode };

@@ -488,6 +488,10 @@ describe("WhatsApp provider connections", () => {
       delete process.env.TRANSCRIPTION_API_KEY;
       assert.equal(getTranscriptionStatus().model, "faster-whisper-tiny-int8");
       assert.equal(getTranscriptionStatus().requiredAvailableMiB, 768);
+      await writeFile(join(dir, "basqar-profile.json"), JSON.stringify({ profile: "kaz-rus-turbo" }));
+      assert.equal(getTranscriptionStatus().model, "whisper-turbo-kaz-rus-v1-int8");
+      assert.equal(getTranscriptionStatus().requiredAvailableMiB, 4096);
+      await writeFile(join(dir, "basqar-profile.json"), JSON.stringify({ profile: "tiny" }));
       const beforeSpeech = voiceCalls;
       for (const integrationId of [qrId, cloudId]) {
         const { event, file } = await voiceEvent(integrationId);

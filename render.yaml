@@ -7,7 +7,7 @@ services:
     runtime: docker
     plan: starter
     # Starter is not sized for local speech recognition. Provision sufficient RAM
-    # in Dashboard (at least 768 MiB available beyond CRM/Java/QR usage) before enabling voice.
+    # in Dashboard (at least 4 GiB available beyond CRM/Java/QR usage) before enabling voice.
     # Runtime refuses inference on insufficient memory; ordinary CRM/text replies keep working.
     region: frankfurt
     dockerfilePath: ./apps/api/Dockerfile

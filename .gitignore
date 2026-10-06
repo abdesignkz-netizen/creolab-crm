@@ -25,3 +25,6 @@ packages/**/dist
 prisma/*.db
 
 *.tsbuildinfo
+
+# Installed offline speech weights (large generated artifacts).
+data/speech/
