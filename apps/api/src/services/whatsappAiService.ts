@@ -14,7 +14,8 @@ import { detectHandoffReason, isClientRefusalText } from "./aiConversationPolicy
 import { answerWhatsAppWithLlm } from "./llmClient.ts";
 import { isVoiceAttachment, transcribeVoiceAttachment, voiceTranscript } from "./voiceTranscriptionService.ts";
 import { getTranscriptionConfig } from "./transcriptionConfig.ts";
-import { VOICE_CLARIFICATION } from "./aiLanguagePolicy.ts";
+import { VOICE_CLARIFICATION, VOICE_SERVICE_FAILURE } from "./aiLanguagePolicy.ts";
+import { LOCAL_SPEECH_BATCH_MS, SPEECH_CLAIM_TTL_MS } from "./speechLimits.ts";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 export function whatsAppAiFailureReason(code: string | null | undefined) {
@@ -142,7 +143,7 @@ export async function processWhatsAppAiReply(prisma: PrismaClient, event: { id: 
     const existing = await tx.outboundOperation.findUnique({ where: { tenantId_idempotencyKey: { tenantId, idempotencyKey: event.id } } });
     if (existing) {
       if (existing.state === "generating") {
-        if (Date.now() - existing.createdAt.getTime() < 120000) throw new ApiError(409, "ai_generating", "ИИ готовит ответ");
+        if (Date.now() - existing.createdAt.getTime() < SPEECH_CLAIM_TTL_MS) throw new ApiError(409, "ai_generating", "ИИ готовит ответ");
         await tx.outboundOperation.update({ where: { id: existing.id }, data: { state: "failed", error: "generation_interrupted" } });
         await tx.conversation.update({ where: { id: conversationId }, data: { mode: "human", controlVersion: { increment: 1 }, needsAttention: true, attentionReason: "AI_ERROR" } });
       }
@@ -163,7 +164,7 @@ export async function processWhatsAppAiReply(prisma: PrismaClient, event: { id: 
   const voices = pending.flatMap(message => message.attachments.filter(file => isVoiceAttachment(file) && !voiceTranscript(file.transcriptionJson)
     // An earlier failed recording must not block a new text message or voice note.
     && (message.id === latest.id || !["failed", "done"].includes(record(file.transcriptionJson).status))));
-  const voiceDeadline = AbortSignal.timeout(getTranscriptionConfig().engine === "local" ? 75000 : 55000);
+  const voiceDeadline = AbortSignal.timeout(getTranscriptionConfig().engine === "local" ? LOCAL_SPEECH_BATCH_MS : 55000);
   let answer: Awaited<ReturnType<typeof answerWhatsAppWithLlm>> = null;
   let failureReason = "AI_PROVIDER_UNAVAILABLE";
   let voiceFailure: string | null = null;
@@ -199,7 +200,9 @@ export async function processWhatsAppAiReply(prisma: PrismaClient, event: { id: 
       // A speech failure asks for clarification through the normal, idempotent
       // delivery path. It must not disable AI for the next customer message.
       voiceFailure = failureReason;
-      answer = { reply: VOICE_CLARIFICATION, handoff: false };
+      // Infrastructure failures say nothing about the intelligibility of the speech.
+      const unclear = error instanceof ApiError && ["voice_empty", "voice_unsupported", "voice_too_long", "voice_too_large"].includes(error.code);
+      answer = { reply: unclear ? VOICE_CLARIFICATION : VOICE_SERVICE_FAILURE, handoff: false };
       // Preflight failures (e.g. missing speech configuration) happen before a
       // transcription claim. Mark those too, so they cannot block later text.
       for (const file of voices) {

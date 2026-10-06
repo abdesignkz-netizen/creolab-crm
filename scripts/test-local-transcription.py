@@ -45,6 +45,26 @@ class SpeechSafetyTest(unittest.TestCase):
                     speech.transcribe_native(np.zeros(16, dtype=np.float32), directory)
                 child.kill.assert_called_once()
                 self.assertEqual(child.communicate.call_count, 2)
+                self.assertEqual(child.communicate.call_args_list[0].kwargs["timeout"], 300)
+
+    def test_clean_inactive_model_cache_does_not_block_next_recording(self):
+        mib = 1024**2
+        values = {"/sys/fs/cgroup/memory.max": str(2048 * mib),
+                  "/sys/fs/cgroup/memory.current": str(900 * mib),
+                  "/sys/fs/cgroup/memory.stat": f"inactive_file {547 * mib}\nfile_dirty 0\nfile_writeback 0\nshmem 0\n"}
+        def reader(name):
+            if name not in values:
+                raise FileNotFoundError(name)
+            return io.StringIO(values[name])
+        with patch("builtins.open", side_effect=reader):
+            self.assertEqual(speech.available_memory(), 1695 * mib)
+            values["/sys/fs/cgroup/memory.stat"] = f"inactive_file {547 * mib}\nfile_dirty {100 * mib}\nfile_writeback {50 * mib}\nshmem {200 * mib}\n"
+            self.assertEqual(speech.available_memory(), 1345 * mib)
+            # Incomplete stats must not assume missing counters are zero.
+            values["/sys/fs/cgroup/memory.stat"] = f"inactive_file {547 * mib}\n"
+            self.assertEqual(speech.available_memory(), 1148 * mib)
+            values["/sys/fs/cgroup/memory.stat"] = "inactive_file -1\nfile_dirty 0\nfile_writeback 0\nshmem 0\n"
+            self.assertEqual(speech.available_memory(), 1148 * mib)
 
     def test_language_selection_is_limited_to_russian_and_kazakh(self):
         self.assertEqual(speech.select_language([("pl", .8), ("ru", .15), ("kk", .05)]), "ru")

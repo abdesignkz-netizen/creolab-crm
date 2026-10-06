@@ -11,6 +11,7 @@ from pathlib import Path, PurePosixPath
 
 MAX_BYTES = 16 * 1024 * 1024
 MAX_SECONDS = 120
+NATIVE_TIMEOUT_SECONDS = 300
 # Profiles keep engine-specific headroom. An old installation cannot silently
 # inherit the smaller native-Q5 budget just by updating the worker.
 def model_profile(model_path):
@@ -77,7 +78,22 @@ def available_memory():
                 ceiling = int(source.read().strip())
             with open(current) as source:
                 used = int(source.read().strip())
-            limits.append(max(0, ceiling - used))
+            # memory.current includes the model's file cache after a previous
+            # request. Count only clean inactive file pages as reclaimable, never
+            # anonymous process memory, tmpfs, dirty pages or active file pages.
+            # Missing/malformed stats retain the conservative raw-usage check.
+            reclaimable = 0
+            try:
+                with open(str(PurePosixPath(current).parent / "memory.stat")) as source:
+                    stats = dict(line.split() for line in source if line.strip())
+                keys = ("inactive_file", "file_dirty", "file_writeback", "shmem") if maximum.endswith("memory.max") else (
+                    "total_inactive_file", "total_dirty", "total_writeback", "total_shmem")
+                inactive, dirty, writeback, shared = [int(stats[key]) for key in keys]
+                if min(inactive, dirty, writeback, shared) >= 0:
+                    reclaimable = min(used, max(0, inactive - dirty - writeback - shared))
+            except (OSError, ValueError, KeyError):
+                pass
+            limits.append(max(0, ceiling - used + reclaimable))
         except (OSError, ValueError):
             pass
     # Production runs on Linux. Unknown capacity must not silently bypass the guard.
@@ -161,7 +177,7 @@ def transcribe_native(audio, model_path):
     monitor = threading.Thread(target=watch_memory, daemon=True)
     monitor.start()
     try:
-        output, _ = child.communicate(payload, timeout=60)
+        output, _ = child.communicate(payload, timeout=NATIVE_TIMEOUT_SECONDS)
         if low_memory.is_set():
             raise ValueError("voice_resources")
         try:

@@ -10,6 +10,7 @@ import { getEntitlements } from "./entitlementService.ts";
 import { reserveAiCall, aiCreditCost } from "./billingResourceService.ts";
 import { recordAiUsage } from "./aiUsageService.ts";
 import { hasSupportedAiScript } from "./aiLanguagePolicy.ts";
+import { LOCAL_SPEECH_TIMEOUT_MS, SPEECH_CLAIM_TTL_MS } from "./speechLimits.ts";
 
 const AUDIO_EXTENSIONS: Record<string, string> = {
   "audio/ogg": "ogg", "audio/mpeg": "mp3", "audio/mp3": "mp3", "audio/mp4": "m4a",
@@ -43,7 +44,7 @@ export async function transcribeVoiceAttachment(input: {
   // Do not reuse an old foreign-language result or silently charge to redo it.
   if (previous.status === "done") throw fail("voice_unsupported");
   if (previous.status === "processing") {
-    if (Date.now() - Number(previous.startedAt) < 120000) throw fail("voice_pending");
+    if (Date.now() - Number(previous.startedAt) < SPEECH_CLAIM_TTL_MS) throw fail("voice_pending");
     // A crashed request has an uncertain provider result. Do not silently bill it again.
     throw fail("voice_interrupted");
   }
@@ -76,9 +77,9 @@ export async function transcribeVoiceAttachment(input: {
   let errorCode = "voice_unavailable";
   const started = Date.now();
   try {
-    release = await reserveAiCall(prisma, tenantId, 150000, aiCreditCost("AI_VOICE_TRANSCRIPTION"));
+    release = await reserveAiCall(prisma, tenantId, SPEECH_CLAIM_TTL_MS, aiCreditCost("AI_VOICE_TRANSCRIPTION"));
     if (speech.engine === "local") {
-      const signal = input.signal ? AbortSignal.any([input.signal, AbortSignal.timeout(65000)]) : AbortSignal.timeout(65000);
+      const signal = input.signal ? AbortSignal.any([input.signal, AbortSignal.timeout(LOCAL_SPEECH_TIMEOUT_MS)]) : AbortSignal.timeout(LOCAL_SPEECH_TIMEOUT_MS);
       called = true;
       text = await transcribeLocally(bytes, { ...speech, signal });
     } else {

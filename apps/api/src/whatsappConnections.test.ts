@@ -555,7 +555,12 @@ describe("WhatsApp provider connections", () => {
     assert.equal(typeof JSON.parse(JSON.stringify(message)).message.audioMessage.fileSha256, "string");
     sockets[1].ev.emit("messages.upsert", { type: "notify", messages: [message] });
     await until(async () => (await prisma.$queryRaw<Array<{ n: bigint }>>`SELECT count(*) as n FROM "WhatsAppQrJob" WHERE "integrationId" = ${qrId} AND kind = 'inbound'`)[0].n > 0n);
-    await runtime!.tick();
+    // A timer tick may already be processing this durable job. tick() then
+    // returns immediately; wait for the stored result rather than that call.
+    await until(async () => {
+      await runtime!.tick();
+      return Boolean(await prisma.message.findFirst({ where: { tenantId, providerMessageId: "qr-protobuf-voice" } }));
+    });
     const stored = await prisma.message.findFirstOrThrow({ where: { tenantId, providerMessageId: "qr-protobuf-voice" }, include: { attachments: true } });
     assert.equal(stored.text, ""); assert.equal(stored.attachments.length, 1);
     assert.equal(stored.attachments[0].mimeType, "audio/ogg");
@@ -637,6 +642,11 @@ describe("WhatsApp provider connections", () => {
         assert.equal(usage.errorCode, code);
         assert.equal((saved.transcriptionJson as any).errorCode, code);
         assert.equal(await prisma.message.count({ where: { connectionScopedId: event.id } }), 1);
+        const customerReply = await prisma.message.findUniqueOrThrow({ where: { connectionScopedId: event.id } });
+        if (status === 0 || status === 500) {
+          assert.match(customerReply.text!, /технического сбоя/);
+          assert.doesNotMatch(customerReply.text!, /Не удалось разобрать/);
+        } else if (code === "voice_empty") assert.match(customerReply.text!, /Не удалось разобрать/);
         await processWhatsAppAiReply(prisma, event);
         assert.equal(await prisma.message.count({ where: { connectionScopedId: event.id } }), 1);
       }
@@ -691,8 +701,16 @@ describe("WhatsApp provider connections", () => {
     const running = processWhatsAppAiReply(prisma, event, async () => { assert.fail("Staff already took over"); });
     await started;
     try {
+      // CPU recognition can legitimately take longer than the old two-minute
+      // stale-claim threshold. A duplicate worker must not pause it or bill twice.
+      await prisma.outboundOperation.updateMany({ where: { idempotencyKey: event.id }, data: { createdAt: new Date(Date.now() - 180000) } });
+      const held = await prisma.attachment.findUniqueOrThrow({ where: { id: file.id } });
+      const claim = held.transcriptionJson as Record<string, any>;
+      await prisma.attachment.update({ where: { id: file.id }, data: { transcriptionJson: { ...claim, startedAt: Date.now() - 180000 } } });
       await assert.rejects(() => processWhatsAppAiReply(prisma, event), /ИИ готовит ответ/);
       await assert.rejects(() => transcribeVoiceAttachment({ prisma, tenantId, conversationId: event.entityId, integrationId: qrId, attachmentId: file.id }), (error: any) => error.code === "voice_pending");
+      await prisma.attachment.update({ where: { id: file.id }, data: { transcriptionJson: held.transcriptionJson! } });
+      assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id: event.entityId } })).mode, "ai");
       assert.equal((await post(`/api/v1/conversations/${event.entityId}/take`)).status, 200);
     } finally { release(); await running; }
     assert.equal(voiceCalls, before + 1);
