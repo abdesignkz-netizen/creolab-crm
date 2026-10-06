@@ -23,6 +23,14 @@ The official flow currently connects an already configured Meta account. It is *
 
 Disconnecting QR removes server-side auth keys and queued jobs; a running owner attempts logout. If the worker was offline during disconnect, remove **BasQar** manually from WhatsApp's Linked devices. Cloud disconnect stops local reception and deletes credentials without changing other subscriptions in the customer's Meta app.
 
+### QR reception while the customer closes BasQar
+
+The browser only polls pairing/status endpoints. Leaving Integrations, closing the tab or signing out of the customer account does not own or terminate the server socket. The API starts the QR runtime at boot, restores encrypted credentials from PostgreSQL and discovers saved sessions every three seconds without customer requests. The pinned Baileys transport sends keepalive probes; transient closes use a bounded reconnect backoff. A normal server restart closes the socket without logging the linked device out. Revocation from WhatsApp still requires pairing again.
+
+Continuous reception requires a continuously running API process, reachable PostgreSQL, the unchanged encryption key and outbound connectivity to WhatsApp. A suspended database or stopped server prevents it; browser polling cannot solve that. Render Free web services can sleep after idle traffic; use an always-running service for this workload. See https://render.com/docs/free#spinning-down-on-idle.
+
+`node scripts/test-api.mjs whatsappQrBackground.test.ts whatsappConnections.test.ts` verifies timer-driven receipt with no HTTP server/browser or manual ticks, lease renewal, network reconnection, offline append delivery, restoration after process restart and explicit WhatsApp logout. These tests use a simulated WhatsApp transport; production acceptance still requires closing BasQar in all browsers and sending a real test message while the API and database are healthy.
+
 ## AI replies
 
 Enable **AI replies** separately for each connected QR/Meta number in Integrations. A published company prompt, enabled AI configuration, configured LLM credentials and the AI Manager entitlement are required. New conversations start automatically when the existing automation policy permits AUTO; existing conversations use **Return to AI**. Human takeover, the company AI pause, working hours, client overrides and channel overrides continue to apply. Enabling a number does not take existing conversations away from staff.
