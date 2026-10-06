@@ -58,7 +58,7 @@ export function PlatformServiceSettingsPage() {
         <p className="muted">{data.transcription?.engine === "local"
           ? uiText("Аудио распознаётся локально на сервере BasQar. API-ключ для распознавания не нужен. Модель ИИ-менеджера выбирается отдельно.")
           : uiText("Настройки задаются на сервере отдельно от модели ИИ-менеджера: TRANSCRIPTION_API_KEY, TRANSCRIPTION_BASE_URL, TRANSCRIPTION_MODEL.")}</p>
-        {data.transcription?.engine === "local" ? <p className="muted">{uiText("Для распознавания нужно не менее 2 ГиБ свободной памяти. Одна запись — до двух минут; записи обрабатываются по очереди.")}</p> : null}
+        {data.transcription?.engine === "local" ? <p className="muted">{uiText("Свободная память для распознавания: {memory} МиБ. Одна запись — до двух минут; записи обрабатываются по очереди.").replace("{memory}", String(data.transcription.requiredAvailableMiB || 2048))}</p> : null}
         <p className="muted">{uiText("Наличие настроек не подтверждает доступность сервиса. Результаты запросов отображаются в разделе «Расход AI».")}</p>
       </section>
       <h4>{uiText("Функции по умолчанию")}</h4>

@@ -4,12 +4,23 @@ import io
 import json
 import os
 import sys
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 MAX_BYTES = 16 * 1024 * 1024
 MAX_SECONDS = 120
-# Small/int8 requires roughly 1.5 GiB for inference; leave additional headroom.
-REQUIRED_AVAILABLE = 2 * 1024**3
+# Tiny measured ~400 MiB on a short recording; reserve headroom for longer
+# inputs and platform differences. Unmarked legacy models retain the old guard.
+def required_available(model_path):
+    root = Path(model_path)
+    try:
+        profile = json.loads((root / "basqar-profile.json").read_text())
+    except FileNotFoundError:
+        return 2 * 1024**3
+    except (ValueError, OSError):
+        raise ValueError("voice_service_config")
+    if profile != {"profile": "tiny"} or not 0 < (root / "model.bin").stat().st_size <= 100 * 1024**2:
+        raise ValueError("voice_service_config")
+    return 768 * 1024**2
 
 
 def available_memory():
@@ -108,7 +119,8 @@ def main():
         except BlockingIOError:
             return {"error": "voice_pending"}
         remaining = available_memory()
-        if remaining is None or remaining < REQUIRED_AVAILABLE:
+        required = required_available(sys.argv[1])
+        if remaining is None or remaining < required:
             return {"error": "voice_resources"}
         data = sys.stdin.buffer.read(MAX_BYTES + 1)
         if not data or len(data) > MAX_BYTES:
@@ -128,7 +140,7 @@ if __name__ == "__main__":
         result = {"error": "voice_resources"}
     except ValueError as error:
         code = str(error)
-        result = {"error": code if code in {"voice_too_long", "voice_unsupported", "voice_empty"} else "voice_unsupported"}
+        result = {"error": code if code in {"voice_service_config", "voice_too_long", "voice_unsupported", "voice_empty"} else "voice_unsupported"}
     except Exception:
         result = {"error": "voice_local_failed"}
     print(json.dumps(result, ensure_ascii=True))

@@ -420,10 +420,13 @@ describe("WhatsApp provider connections", () => {
     const python = join(dir, "worker");
     try {
       for (const name of ["model.bin", "config.json", "tokenizer.json"]) await writeFile(join(dir, name), "fixture");
+      await writeFile(join(dir, "basqar-profile.json"), JSON.stringify({ profile: "tiny" }));
       await writeFile(python, `#!/bin/sh\ncat >/dev/null\nprintf '{"text":"Хочу узнать стоимость услуг"}'\n`, { mode: 0o700 });
       process.env.TRANSCRIPTION_ENGINE = "local";
       process.env.TRANSCRIPTION_PYTHON = python; process.env.TRANSCRIPTION_MODEL_PATH = dir;
       delete process.env.TRANSCRIPTION_API_KEY;
+      assert.equal(getTranscriptionStatus().model, "faster-whisper-tiny-int8");
+      assert.equal(getTranscriptionStatus().requiredAvailableMiB, 768);
       const beforeSpeech = voiceCalls;
       for (const integrationId of [qrId, cloudId]) {
         const { event, file } = await voiceEvent(integrationId);
@@ -433,7 +436,7 @@ describe("WhatsApp provider connections", () => {
         assert.match(JSON.stringify(llmInput), /PUBLIC-COMPANY-PROMPT/);
         assert.doesNotMatch(JSON.stringify(llmInput), /OggS|input_audio|data:audio/);
         const usage = await prisma.aIUsageEvent.findFirstOrThrow({ where: { conversationId: event.entityId, feature: "AI_VOICE_TRANSCRIPTION" } });
-        assert.equal(usage.provider, "local"); assert.equal(usage.status, "ok");
+        assert.equal(usage.provider, "local"); assert.equal(usage.model, "faster-whisper-tiny-int8"); assert.equal(usage.status, "ok");
         assert.equal(await transcribeVoiceAttachment({ prisma, tenantId, conversationId: event.entityId, integrationId, attachmentId: file.id }), "Хочу узнать стоимость услуг");
       }
       const { event, file } = await voiceEvent(qrId);

@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { ApiError } from "../errors.ts";
 
 const worker = fileURLToPath(new URL("../../../../scripts/local-transcription.py", import.meta.url));
-const safeErrors = new Set(["voice_local_missing", "voice_local_failed", "voice_resources", "voice_pending", "voice_too_long", "voice_unsupported", "voice_empty"]);
+const safeErrors = new Set(["voice_service_config", "voice_local_missing", "voice_local_failed", "voice_resources", "voice_pending", "voice_too_long", "voice_unsupported", "voice_empty"]);
 const fail = (code: string) => new ApiError(422, code, "Не удалось распознать голосовое сообщение");
 
 /** One short-lived process per recording. No shell, public media URL or inherited API credentials. */

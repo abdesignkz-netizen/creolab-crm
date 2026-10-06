@@ -4,6 +4,8 @@ from pathlib import Path
 import unittest
 from unittest.mock import patch
 import wave
+import tempfile
+import json
 
 spec = importlib.util.spec_from_file_location("speech", Path(__file__).with_name("local-transcription.py"))
 speech = importlib.util.module_from_spec(spec)
@@ -41,9 +43,25 @@ class SpeechSafetyTest(unittest.TestCase):
             self.assertEqual(speech.available_memory(), 624 * 1024**2)
 
     def test_insufficient_memory_does_not_load_engine_or_read_audio(self):
-        with patch.object(speech, "available_memory", return_value=1024), patch.object(speech, "transcribe") as transcribe:
+        with patch.object(speech.sys, "argv", ["worker", "/missing-model"]), patch.object(speech, "available_memory", return_value=1024), patch.object(speech, "transcribe") as transcribe:
             self.assertEqual(speech.main(), {"error": "voice_resources"})
             transcribe.assert_not_called()
+
+    def test_tiny_profile_lowers_memory_but_legacy_models_keep_their_guard(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.assertEqual(speech.required_available(root), 2048 * 1024**2)
+            (root / "model.bin").write_bytes(b"fixture")
+            (root / "basqar-profile.json").write_text(json.dumps({"profile": "tiny"}))
+            self.assertEqual(speech.required_available(root), 768 * 1024**2)
+            with patch.object(speech.sys, "argv", ["worker", directory]), patch.object(speech, "available_memory", return_value=512 * 1024**2), patch.object(speech, "transcribe") as transcribe:
+                self.assertEqual(speech.main(), {"error": "voice_resources"})
+                transcribe.assert_not_called()
+            # A larger custom model must not use the lightweight safety threshold.
+            with (root / "model.bin").open("wb") as file:
+                file.truncate(101 * 1024**2)
+            with self.assertRaisesRegex(ValueError, "voice_service_config"):
+                speech.required_available(root)
 
     def test_busy_worker_retries_without_reading_audio(self):
         with patch.object(speech.fcntl, "flock", side_effect=BlockingIOError):

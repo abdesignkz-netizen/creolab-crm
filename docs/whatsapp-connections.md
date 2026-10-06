@@ -59,7 +59,7 @@ Speech recognition is a separate platform service: **stored audio → transcript
 
 ### Local recognition (default; no OpenAI API)
 
-The Docker image includes **faster-whisper 1.2.1** and a pinned multilingual `small` model, executed with CPU INT8. It uses open-source Whisper weights; it does **not** use the OpenAI service, SDK, API account or key. The build downloads model files from Hugging Face once. At runtime recordings stay on the BasQar host and inference is offline; only the resulting text goes to the selected company reply provider.
+The Docker image includes **faster-whisper 1.2.1** and a pinned multilingual `tiny` model, executed with CPU INT8. It uses open-source Whisper weights; it does **not** use the OpenAI service, SDK, API account or key. The build downloads model files from Hugging Face once. At runtime recordings stay on the BasQar host and inference is offline; only the resulting text goes to the selected company reply provider.
 
 ```dotenv
 TRANSCRIPTION_ENGINE=local
@@ -67,9 +67,9 @@ TRANSCRIPTION_PYTHON=/opt/basqar-speech/venv/bin/python
 TRANSCRIPTION_MODEL_PATH=/opt/basqar-speech/model
 ```
 
-These defaults are baked into the API Docker image. Redeploy that image on Render; if a previous `TRANSCRIPTION_ENGINE=http` override exists, change it to `local`. Old speech API URL/key/model variables are ignored in local mode. Do not change the company's chat model or encryption/session keys.
+These defaults are baked into the API Docker image. The build writes `basqar-profile.json` after downloading the pinned tiny model. Both API metadata and the worker use that profile; an unmarked legacy model keeps its 2 GiB threshold and small label. A tiny profile with a model file larger than 100 MiB is rejected. Custom model directories must not be relabelled simply to bypass the guard. Redeploy that image on Render; if a previous `TRANSCRIPTION_ENGINE=http` override exists, change it to `local`. Old speech API URL/key/model variables are ignored in local mode. Do not change the company's chat model or encryption/session keys.
 
-**Capacity:** the worker requires at least **2 GiB available memory**, after the CRM, Java verifier, QR runtime and other processes. This is available headroom, not the server's advertised total. Start with a 4 GiB or larger instance and measure actual peak usage. The repository's `starter` Blueprint is not sized for this; the code does not automatically upgrade a paid plan. On insufficient or unknown Linux memory capacity, recognition returns `voice_resources` without loading the model. CRM and text replies keep working. The guard uses both host available memory and container cgroup v1/v2 headroom; it reduces risk but is not a guarantee against other processes consuming memory after the check.
+**Capacity:** the worker requires at least **768 MiB available memory** for the bundled tiny model, after the CRM, Java verifier, QR runtime and other processes. This is available headroom, not the server's advertised total. A 2 GiB instance may be sufficient if it leaves the required headroom; verify actual usage under CRM/Java/QR load. A 512 MiB total instance cannot meet this guard. This is a deployment target, not a guarantee of throughput or availability. The repository's `starter` Blueprint is not sized for this; the code does not automatically upgrade a paid plan. On insufficient or unknown Linux memory capacity, recognition returns `voice_resources` without loading the model. CRM and text replies keep working. The guard uses both host available memory and container cgroup v1/v2 headroom; it reduces risk but is not a guarantee against other processes consuming memory after the check.
 
 Only one recognition process runs per host, including API/worker processes sharing `/tmp`. Other jobs retry through the existing outbox. The short-lived process releases its model memory on completion; two CPU threads and reduced process priority limit contention. Audio travels over stdin; no temporary recording is created. The decoder does not inherit application credentials, accepts only audio container formats and prohibits file/network URL protocols in playlists. Invalid audio and decode limits do not reach the reply model.
 
@@ -77,7 +77,7 @@ Service administrators see the local engine under **Service settings → Voice m
 
 An optional external compatible transcription adapter is retained only for explicit `TRANSCRIPTION_ENGINE=http` configuration, with its own `TRANSCRIPTION_API_KEY`, HTTPS `TRANSCRIPTION_BASE_URL` and `TRANSCRIPTION_MODEL`. There is no default external endpoint, and no fallback to any company's chat credentials or model.
 
-Engine documentation: https://github.com/SYSTRAN/faster-whisper. Bundled model: https://huggingface.co/Systran/faster-whisper-small (revision pinned in `scripts/install-speech-model.py`).
+Engine documentation: https://github.com/SYSTRAN/faster-whisper. Bundled model: https://huggingface.co/Systran/faster-whisper-tiny (revision pinned in `scripts/install-speech-model.py`).
 
 ### Diagnosing voice failures
 
@@ -85,7 +85,7 @@ Service administrators can open **AI Usage → AI request errors**, globally or 
 
 - `voice_http_400/404/405/422`: check the provider's transcription endpoint, available speech model and accepted audio format. A working chat model alone does not confirm that transcription is supported.
 - `voice_local_missing`: redeploy the Docker image containing Python, the speech engine and model files; check the configured paths on every worker.
-- `voice_resources`: fewer than 2 GiB of available memory, or capacity cannot be read. Check the actual Render instance resources; this is unrelated to the company reply model or API key.
+- `voice_resources`: fewer than 768 MiB of available memory for tiny (2 GiB for the legacy small model), or capacity cannot be read. Check the actual Render instance resources; this is unrelated to the company reply model or API key.
 - `voice_local_failed`: local decoder/model process failed; inspect server resource metrics and deployment dependencies. Raw decoder output is not exposed or logged.
 - `voice_too_long`: decoded audio exceeds two minutes.
 - `voice_pending`: another local worker is busy; the outbox retries automatically without switching the conversation to a manager.
@@ -103,7 +103,7 @@ Supported audio: OGG/Opus (WhatsApp voice notes), MP3, M4A/MP4 audio, WAV, FLAC 
 
 The original audio and caption remain unchanged. Successful transcripts are cached privately on the attachment, scoped to the tenant and conversation. No public audio URL is sent to the model. Storage access verifies the owning inbound message, the file path and actual file size. Concurrent workers share a transcription claim; retries reuse completed transcripts. A crashed, unfinished claim is handed to staff rather than automatically repeating an uncertain paid request.
 
-Successful recognition costs one AI credit per recording (`AI_VOICE_TRANSCRIPTION`); generating a reply uses the existing one-credit `AI_MANAGER_REPLY` operation. Cached recognition and failed recognition do not consume additional credits. Both stages use the existing reservation/usage ledger. Local inference has no external speech API charge, but consumes hosting resources. Its usage entry is labelled `local / faster-whisper-small-int8`; unknown infrastructure cost remains unavailable rather than invented. A preflight check requires credits for recognition and a reply; per-call reservations also enforce concurrent quota usage.
+Successful recognition costs one AI credit per recording (`AI_VOICE_TRANSCRIPTION`); generating a reply uses the existing one-credit `AI_MANAGER_REPLY` operation. Cached recognition and failed recognition do not consume additional credits. Both stages use the existing reservation/usage ledger. Local inference has no external speech API charge, but consumes hosting resources. Its usage entry is labelled `local / faster-whisper-tiny-int8`; unknown infrastructure cost remains unavailable rather than invented. A preflight check requires credits for recognition and a reply; per-call reservations also enforce concurrent quota usage.
 
 Human takeover, pauses, working hours, AI entitlements and Meta's 24-hour window are checked before recognition, between recordings and before reply delivery. Spoken requests for a person follow the existing handoff policy. Recognition failure, unsupported media or empty output hands the conversation to staff with a translated reason, without inventing a reply.
 
@@ -113,4 +113,6 @@ Acceptance coverage uses distinct mocked speech/model endpoints and keys for bot
 
 Local regression checks: `node --experimental-strip-types --test apps/api/src/localTranscription.test.ts`, `node scripts/test-api.mjs whatsappConnections.test.ts`, and (with `scripts/speech-requirements.txt` installed) `python scripts/test-local-transcription.py`. The process tests use protocol fixtures; they verify isolation, cancellation, bounds and error handling, not linguistic quality. Test real Kazakh and Russian voice notes after deployment before treating production recognition as verified.
 
-A separate real-engine smoke check on 2026-10-06 used a locally synthesized Russian sentence encoded to OGG/Opus. The bundled small/int8 engine transcribed the complete sentence with its meaning preserved in 7.49 seconds on the development Mac. This was not a Render performance test or a live WhatsApp/Kazakh recognition test. Docker/Render deployment still needs verification on the actual host.
+A separate real-engine smoke check on 2026-10-06 used a locally synthesized Russian sentence encoded to OGG/Opus. The then-bundled small/int8 engine transcribed the complete sentence with its meaning preserved in 7.49 seconds on the development Mac. This was not a Render performance test or a live WhatsApp/Kazakh recognition test. Docker/Render deployment still needs verification on the actual host.
+
+The lightweight model prioritizes memory and speed over recognition accuracy. In a development-Mac comparison on the same Russian OGG/Opus sentence, tiny/int8 used 400.3 MiB peak RSS and 1.49 seconds versus small/int8 at 786.0 MiB and 5.51 seconds. Tiny preserved the basic request but introduced word-ending errors; small reproduced the sentence correctly. These are one synthetic sentence and macOS process measurements, not Linux/Render capacity guarantees or a Kazakh-quality evaluation. A follow-up using the same sentence repeated to 113.3 seconds took 33.51 seconds with 577.5 MiB peak RSS for tiny/int8. The 768 MiB guard exceeds both measured peaks; it is not a substitute for testing on the target host. Validate real Russian/Kazakh recordings after deployment.
