@@ -1,3 +1,4 @@
+import { applyBillingMigration } from "./billingMigration.ts";
 import { WHATSAPP_SQL } from "./whatsappSchema.ts";
 import { AVR_SIGNING_SQL } from "./avrSigningSchema.ts";
 import { BILLING_QUOTA_SQL } from "./billingQuotaSchema.ts";
@@ -1277,6 +1278,7 @@ export async function createPrismaClient(): Promise<PrismaClient> {
       datasourceUrl: databaseUrl,
     });
     await applyLivePostgresPatches(prisma);
+    await applyBillingMigration(prisma);
     globalForPrisma.prisma = prisma;
     return prisma;
   }
@@ -1318,6 +1320,7 @@ export async function createPrismaClient(): Promise<PrismaClient> {
   for (const sql of WHATSAPP_SQL) await pglite.exec(sql);
   const adapter = new PrismaPGlite(pglite);
   const prisma = new PrismaClient({ adapter } as never);
+  await applyBillingMigration(prisma);
   globalForPrisma.prisma = prisma;
   if (!globalForPrisma.crmDbShutdown) {
     globalForPrisma.crmDbShutdown = true;

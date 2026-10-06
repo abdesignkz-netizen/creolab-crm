@@ -23,7 +23,12 @@ export async function processOutbox(prisma: PrismaClient) {
   });
   for (const event of due) {
     try {
-      if (event.type === "whatsapp.ai_reply") {
+      if (event.type === "billing.email") {
+        const { sendMail } = await import("../lib/email.ts");
+        const payload = event.payloadJson as {to:string;subject:string;text:string};
+        const result = await sendMail({...payload, idempotencyKey:`billing/${event.id}`});
+        if (!result.delivered) throw new Error("Billing email not delivered");
+      } else if (event.type === "whatsapp.ai_reply") {
         const { processWhatsAppAiReply } = await import("./whatsappAiService.ts");
         await processWhatsAppAiReply(prisma, event);
       } else if (event.type === "whatsapp.cloud_send") {
@@ -255,6 +260,8 @@ export async function resumeRunningCampaigns(prisma: PrismaClient) {
 export function startBackgroundJobs(prisma: PrismaClient) {
   if (started || process.env.NODE_ENV === "test") return () => undefined;
   started = true;
+  let billingRunning = false;
+  let lastBillingRun = 0;
   const tick = () => {
     import("./billingResourceService.ts").then(({ reconcileBillingUsage }) => reconcileBillingUsage(prisma)).catch(error => logServerError(error, "background:billing usage"));
     processOutbox(prisma).catch((error) => logServerError(error, "background:outbox"));
@@ -266,9 +273,13 @@ export function startBackgroundJobs(prisma: PrismaClient) {
       .catch(() => undefined);
     processDueScheduledActions(prisma).catch((error) => logServerError(error, "background:scheduled"));
     resumeRunningCampaigns(prisma).catch((error) => logServerError(error, "background:campaign resume"));
-    import("./subscriptionActivationService.ts")
-      .then(({ expireDueSubscriptions }) => expireDueSubscriptions(prisma))
-      .catch((error) => logServerError(error, "background:billing expire"));
+    if (!billingRunning && Date.now() - lastBillingRun >= 60_000) {
+      billingRunning = true; lastBillingRun = Date.now();
+      import("./subscriptionActivationService.ts")
+        .then(({ expireDueSubscriptions }) => expireDueSubscriptions(prisma))
+        .catch((error) => logServerError(error, "background:billing expire"))
+        .finally(() => { billingRunning = false; });
+    }
   };
   tick();
   const timer = setInterval(tick, TICK_MS);

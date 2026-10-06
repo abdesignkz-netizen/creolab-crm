@@ -10,3 +10,5 @@ storage
 work
 .codex
 .agents
+deploy/billing.private.env
+deploy/billing-seller.private.json

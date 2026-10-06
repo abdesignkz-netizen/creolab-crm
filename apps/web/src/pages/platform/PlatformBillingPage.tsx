@@ -1,3 +1,5 @@
+import { BillingLedgerPanel } from "./BillingLedgerPanel";
+import { useBillingText } from "../../components/BillingCheckoutUi";
 import { uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale } from "../../lib/uiText";
 import { FEATURE_LIST, FEATURE_LABEL, LIMIT_LIST, LIMIT_LABEL } from "@creolab/contracts";
 import { useEffect, useState } from "react";
@@ -27,7 +29,7 @@ function formatKzt(value: number) {
   return `${Number(value).toLocaleString(uiFormatLocale())} ₸`;
 }
 
-export function PlatformBillingPage() {
+function LegacyBillingRequests() {
   const uiText = useUiText();
   const [freeStats, setFreeStats] = useState<any>(null);
   const [freeCap, setFreeCap] = useState(0);
@@ -200,4 +202,9 @@ export function PlatformBillingPage() {
       ) : null}
     </div>
   );
+}
+
+export function PlatformBillingPage() {
+  const [legacy, setLegacy] = useState(false); const t = useBillingText();
+  return <div className="stack"><BillingLedgerPanel /><button className="btn secondary" aria-expanded={legacy} onClick={() => setLegacy(!legacy)}>{t("Индивидуальные и прежние заявки", "Жеке және бұрынғы өтінімдер", "Custom and legacy requests")}</button>{legacy && <LegacyBillingRequests />}</div>;
 }

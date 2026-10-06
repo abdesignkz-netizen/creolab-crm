@@ -20,6 +20,12 @@ try {
       env: {
         ...process.env,
         NODE_ENV: "test",
+        BILLING_PROVIDER: "none",
+        FREEDOM_PAY_MERCHANT_ID: "",
+        FREEDOM_PAY_SECRET_KEY: "",
+        FREEDOM_PAY_RECURRING_ENABLED: "0",
+        FREEDOM_PAY_TESTING_MODE: "1",
+        BILLING_KASPI_MANUAL_ENABLED: "0",
         CRM_USE_PGLITE: "1",
         CRM_PGLITE_DIR: join(scratch, String(index)),
         STORAGE_DIR: join(scratch, "uploads", String(index)),

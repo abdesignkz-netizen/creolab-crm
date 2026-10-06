@@ -137,6 +137,15 @@ model TenantPlan {
   limitsSnapshotJson    Json      @default("{}")
   featuresSnapshotJson  Json      @default("{}")
   paymentMethod         String    @default("MANUAL")
+  currentPeriodStart    DateTime?
+  trialEndsAt           DateTime?
+  gracePeriodEndsAt     DateTime?
+  cancelledAt           DateTime?
+  autoRenew             Boolean   @default(false)
+  recurringProfileEncrypted String?
+  providerCustomerId    String?
+  renewalConsentAt      DateTime?
+  nextPlanJson          Json?
   confirmedByUserId     String?
   confirmedAt           DateTime?
   requestId             String?
@@ -145,6 +154,7 @@ model TenantPlan {
   plan                  Plan      @relation(fields: [planId], references: [id])
 
   @@index([tenantId, status])
+  @@unique([tenantId, id])
 }
 
 model SubscriptionRequest {
@@ -180,6 +190,20 @@ model BillingPayment {
   id                     String    @id @default(uuid())
   tenantId               String
   subscriptionRequestId  String?
+  orderId                String?
+  subscriptionId         String?
+  provider               String    @default("MANUAL")
+  providerPaymentId      String?
+  providerTransactionId  String?
+  idempotencyKey         String?   @unique
+  checkoutUrl            String?
+  recurring              Boolean   @default(false)
+  autoRenewRequested     Boolean   @default(false)
+  paidAt                 DateTime?
+  failedAt               DateTime?
+  refundedAt             DateTime?
+  failureReason          String?
+  metadataJson           Json      @default("{}")
   amountMinor            Int
   currency               String    @default("KZT")
   method                 String    @default("MANUAL")
@@ -192,6 +216,10 @@ model BillingPayment {
   tenant                 Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   request                SubscriptionRequest? @relation(fields: [subscriptionRequestId], references: [id], onDelete: SetNull)
 
+  @@unique([tenantId, id])
+  @@unique([provider, providerPaymentId])
+  @@unique([provider, providerTransactionId])
+  @@index([orderId])
   @@index([tenantId, createdAt])
   @@index([subscriptionRequestId])
 }
@@ -2234,4 +2262,68 @@ model WhatsAppQrJob {
   createdAt DateTime @default(now()) @db.Timestamptz
   session WhatsAppQrSession @relation(fields: [integrationId], references: [integrationId], onDelete: Cascade)
   @@index([integrationId, state, createdAt], map: "WhatsAppQrJob_pending")
+}
+
+// SaaS billing documents are separate from customer CRM deal invoices.
+model BillingOrder {
+  id              String   @id @default(uuid())
+  orderNumber     String   @unique
+  tenantId        String
+  subscriptionId  String?
+  planId          String
+  planCode        String
+  amountMinor     Int
+  currency        String   @default("KZT")
+  billingPeriod   String
+  kind            String   @default("NEW_SUBSCRIPTION")
+  status          String   @default("PENDING_PAYMENT")
+  description     String
+  snapshotJson    Json
+  renewalKey      String?  @unique
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+  expiresAt       DateTime
+  paidAt          DateTime?
+  effectiveAt     DateTime?
+  @@unique([tenantId, id])
+  @@index([tenantId, createdAt])
+  @@index([status, expiresAt])
+}
+
+model BillingInvoice {
+  id             String   @id @default(uuid())
+  invoiceNumber  String   @unique
+  tenantId       String
+  orderId        String   @unique
+  paymentId      String?
+  sellerJson     Json
+  buyerJson      Json
+  amountMinor    Int
+  currency       String   @default("KZT")
+  description    String
+  issueDate      DateTime @default(now())
+  dueDate        DateTime
+  status         String   @default("ISSUED")
+  paidAt         DateTime?
+  @@index([tenantId, issueDate])
+}
+
+model PaymentWebhookEvent {
+  id          String   @id @default(uuid())
+  provider    String
+  eventId     String
+  eventType   String
+  paymentId   String?
+  receivedAt  DateTime @default(now())
+  processedAt DateTime?
+  status      String
+  errorCode   String?
+  payloadJson Json     @default("{}")
+  @@unique([provider, eventId])
+  @@index([paymentId])
+}
+
+model BillingSequence {
+  key   String @id
+  value Int    @default(0)
 }

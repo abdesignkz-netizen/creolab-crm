@@ -1,3 +1,4 @@
+import { registerBillingRoutes } from "./routes/billing.ts";
 import { publicFormKey } from "@creolab/contracts";
 import { protectBrowserMutation, securityHeaders } from "./lib/httpSecurity.ts";
 import { getLegalBundle, renderLegalDocument } from "./services/legalDocuments.ts";
@@ -799,6 +800,8 @@ export function createApp(prisma: PrismaClient) {
     if (!membership) throw new ApiError(403, "forbidden", "Нет доступа к компании");
     res.json({ activeTenant: { membershipId: membership.id, role: membership.role, tenant: membership.tenant } });
   });
+
+  registerBillingRoutes(app, prisma, requireAuth);
 
   app.get("/api/v1/billing", async (req, res) => {
     const auth = await requireAuth(req);

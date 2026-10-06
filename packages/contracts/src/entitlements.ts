@@ -130,6 +130,8 @@ export const SUBSCRIPTION_STATUSES = {
   PENDING: "pending",
   ACTIVE: "active",
   PAST_DUE: "past_due",
+  TRIAL: "trial",
+  GRACE_PERIOD: "grace_period",
   CANCELED: "canceled",
   CANCEL_AT_PERIOD_END: "cancel_at_period_end",
   EXPIRED: "expired",

@@ -1,8 +1,9 @@
 import { systemText } from "@creolab/contracts";
 import { useLocale } from "../lib/session";
-import { CATALOG_BY_CODE } from "@creolab/contracts";
+import { BillingHistory } from "../components/BillingHistory";
+import { useBillingText } from "../components/BillingCheckoutUi";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import { useSession } from "../lib/session";
 import { OnboardingWizard } from "../components/OnboardingWizard";
@@ -23,7 +24,7 @@ const STATUS_LABEL: Record<string, string> = {
 };
 const AI_TIERS = ["ADDON_AI_START", "ADDON_AI_BUSINESS", "ADDON_AI_PRO"];
 const STEPPERS = ["ADDON_USER", "ADDON_WHATSAPP", "ADDON_AI_PACK", "ADDON_STORAGE_10GB", "ADDON_DEPARTMENT"];
-const FALLBACK_CATALOG = Object.values(CATALOG_BY_CODE).filter((item) => item.public && item.active && item.catalogStatus !== "HIDDEN");
+
 
 function formatDate(value: string, locale: string) {
   const date = new Date(value);
@@ -32,6 +33,7 @@ function formatDate(value: string, locale: string) {
 
 export function BillingPage() {
   const locale = useLocale();
+  const navigate = useNavigate(), bt = useBillingText();
   const { me } = useSession();
   const [data, setData] = useState<any>(me?.billing || null);
   const [catalog, setCatalog] = useState<BillingCatalogItem[] | null>(null);
@@ -71,7 +73,7 @@ export function BillingPage() {
     return () => { cancelled = true; };
   }, [period, retry]);
 
-  const items = catalog ?? FALLBACK_CATALOG;
+  const items = catalog ?? [];
   const plan = items.find((item) => item.code === planCode);
   const selectedAddOns = useMemo(() => Object.entries(addons).filter(([, qty]) => qty > 0).map(([code, qty]) => ({ code, qty })), [addons]);
   const quoteKey = JSON.stringify([planCode, period, selectedAddOns, retry, requestType]);
@@ -131,6 +133,10 @@ export function BillingPage() {
     if (!planCode || !quote || busy) return;
     setBusy(true); setError(""); setNotice("");
     try {
+      if (!free && !enterprise) {
+        const order = await api.billingCheckout({planCode, addOns:selectedAddOns, billingPeriod:period, renewal:requestType === "RENEWAL"});
+        navigate(`/billing/checkout/${order.id}`); return;
+      }
       await api.createBillingRequest({ planCode, addOns: selectedAddOns, billingPeriod: period, ...(requestType ? { requestType } : {}) });
       setNotice(free ? systemText(locale, "BasQar Free подключён без оплаты.") : enterprise ? systemText(locale, "Запрос на индивидуальные условия отправлен.") : systemText(locale, "Запрос на подключение отправлен. Доступ откроется после подтверждения оплаты."));
       await loadBilling();
@@ -147,12 +153,13 @@ export function BillingPage() {
 
   return <section className="billing-page stack">
     <div className="page-head">
-      <div><h2>{systemText(locale, "Тарифы и оплата")}</h2><p className="muted">{systemText(locale, "Выберите возможности для команды, сравните лимиты и отправьте запрос на подключение.")}</p></div>
+      <div><h2>{systemText(locale, "Тарифы и оплата")}</h2><p className="muted">{bt("Выберите тариф, сравните лимиты и перейдите к оплате.", "Тарифті таңдап, лимиттерді салыстырыңыз да, төлемге өтіңіз.", "Choose a plan, compare limits and continue to checkout.")}</p></div>
       <div className="billing-period-toggle" aria-label={systemText(locale, "Период оплаты")}>
         <button type="button" disabled={busy} aria-pressed={period === "MONTHLY"} className={`btn secondary ${period === "MONTHLY" ? "active" : ""}`} onClick={() => setPeriod("MONTHLY")}>{systemText(locale, "Месяц")}</button>
         <button type="button" disabled={busy} aria-pressed={period === "YEARLY"} className={`btn secondary ${period === "YEARLY" ? "active" : ""}`} onClick={() => setPeriod("YEARLY")}>{systemText(locale, "Год")}</button>
       </div>
     </div>
+    <BillingHistory onPay={() => data?.planCode && !currentFree ? configureCurrent("RENEWAL") : document.getElementById("billing-catalog")?.scrollIntoView({behavior:"smooth"})} />
     {error ? <p className="error" role="alert">{error}</p> : null}
     {notice ? <p className="billing-notice" role="status">{notice}</p> : null}
     {(data?.warnings || []).map((item: { code: string; message: string }) => <p key={item.code} className="warn">{warningText(item)}</p>)}
@@ -184,7 +191,7 @@ export function BillingPage() {
     <section className="panel stack"><h3>{systemText(locale, "Дополнительные ресурсы")}</h3>
       <p className="muted">{systemText(locale, "Для подходящего платного тарифа. Дополнительные ресурсы не открывают функции другого тарифа.")}</p>
       <div className="billing-addons">{extras.map(item => <div className="billing-addon" key={item.code}><div><b>{systemText(locale, item.name)}</b><p>{systemText(locale, item.description)}</p><p>{item.code === "ADDON_INTEGRATION" ? systemText(locale, "от ") : ""}{formatKzt(catalogPrice(item, period))} / {item.chargeType === "ONE_TIME" ? systemText(locale, "разово") : periodLabel}</p></div></div>)}</div>
-      {(data?.addOns || []).length ? <p>{systemText(locale, "Купленные ресурсы:")}{" "}{(data.addOns as Array<{code:string;qty:number}>).map(row => `${systemText(locale, items.find(item=>item.code===row.code)?.name || CATALOG_BY_CODE[row.code]?.name || "Прежний модуль")} × ${row.qty}`).join(", ")}</p> : null}
+      {(data?.addOns || []).length ? <p>{systemText(locale, "Купленные ресурсы:")}{" "}{(data.addOns as Array<{code:string;qty:number}>).map(row => `${systemText(locale, items.find(item=>item.code===row.code)?.name || "Прежний модуль")} × ${row.qty}`).join(", ")}</p> : null}
       {data?.accessBreakdown?.baseLimits ? <div className="billing-table-scroll"><table><thead><tr><th>{systemText(locale, "Ресурс")}</th><th>{systemText(locale, "В тарифе")}</th><th>{systemText(locale, "Итоговый лимит")}</th></tr></thead><tbody>{(data.usage || []).map((row: {key:string;label:string;cap:number}) => <tr key={row.key}><th>{systemText(locale, row.label)}</th><td>{data.accessBreakdown.baseLimits[row.key] ?? "—"}</td><td>{row.cap < 0 ? systemText(locale, "Без квоты") : row.cap}</td></tr>)}</tbody></table></div> : null}
     </section>
     <div ref={selection} className="billing-selection" tabIndex={-1}>
@@ -214,11 +221,11 @@ export function BillingPage() {
           {selectedAddOns.some((item) => item.code === "ADDON_INTEGRATION") ? <p className="muted">{systemText(locale, "Интеграция рассчитана по начальной стоимости. Окончательную цену согласуем по задаче.")}</p> : null}
           <p className="muted">{systemText(locale, "С учётом дополнений: пользователей —")}{" "}{quote.limits.USERS}{systemText(locale, ", воронок —")}{" "}{quote.limits.PIPELINES}{systemText(locale, ", коммуникационные подключения —")}{" "}{quote.limits.WHATSAPP_CONNECTIONS}{systemText(locale, ", AI-кредитов —")}{" "}{quote.limits.AI_USAGE?.toLocaleString("ru-RU")}{systemText(locale, ", хранилище —")}{" "}{quote.limits.STORAGE_GB} {" "}{systemText(locale, "ГБ.")}</p>
         </div> : null}
-        <div className="actions"><button className="btn" type="button" disabled={busy || !quote || Boolean(currentRequest)} onClick={() => void submit()}>{enterprise ? systemText(locale, "Отправить запрос на индивидуальные условия") : requestType === "RENEWAL" ? systemText(locale, "Отправить запрос на продление") : systemText(locale, "Отправить запрос на подключение")}</button></div>
+        <div className="actions"><button className="btn" type="button" disabled={busy || !quote || Boolean(currentRequest)} onClick={() => void submit()}>{enterprise ? systemText(locale, "Отправить запрос на индивидуальные условия") : requestType === "RENEWAL" ? bt("Продлить подписку", "Жазылымды ұзарту", "Renew subscription") : bt("Перейти к оплате", "Төлемге өту", "Continue to checkout")}</button></div>
         {currentRequest ? <p className="muted">{systemText(locale, "У вас уже есть открытый запрос. Дождитесь его обработки или отмените его, чтобы отправить новый.")}</p> : null}
       </div> : <p className="muted">{systemText(locale, "Выберите тариф выше — здесь появится его состав и итоговый расчёт.")}</p>}
     </div>
-    <section className="panel stack"><h3>{systemText(locale, "Как подключить")}</h3><ol className="billing-steps"><li>{systemText(locale, "Выберите тариф и нужные дополнения.")}</li><li>{systemText(locale, "Отправьте запрос. Оплата проходит вне системы.")}</li><li>{systemText(locale, "Администратор BasQar подтвердит оплату и откроет доступ.")}</li></ol><p className="muted">{systemText(locale, "Онлайн-оплата пока не подключена. Настройка внешних сервисов выполняется отдельно от выбора тарифа.")}</p>
+    <section className="panel stack"><h3>{systemText(locale, "Как подключить")}</h3><ol className="billing-steps"><li>{systemText(locale, "Выберите тариф и нужные дополнения.")}</li><li>{bt("Выберите карту, Kaspi или счёт на компанию.", "Картаны, Kaspi-ді немесе компанияға шотты таңдаңыз.", "Choose card, Kaspi or a company invoice.")}</li><li>{bt("После подтверждения оплаты тариф подключится автоматически.", "Төлем расталғаннан кейін тариф автоматты түрде қосылады.", "Your plan activates when payment is confirmed.")}</li></ol><p className="muted">{bt("Доступные способы показаны на странице оплаты. Поступления по Kaspi и счёту проверяет администратор.", "Қолжетімді тәсілдер төлем бетінде көрсетілген. Kaspi және шот бойынша төлемдерді әкімші тексереді.", "Available methods are shown at checkout. Kaspi and bank transfers are verified by an administrator.")}</p>
       {upcoming.length ? <p className="muted">{systemText(locale, "Дополнения в подготовке:")}{" "}{upcoming.map((item) => systemText(locale, item.name)).join(", ")}{systemText(locale, ". Они недоступны для заказа в этом каталоге.")}</p> : null}
     </section>
     <OnboardingWizard />{data?.entitlements?.SUPPORT ? <p className="muted">{systemText(locale, "Вопросы по подключению можно задать в")}{" "}<Link to="/billing?support=1">{systemText(locale, "поддержке")}</Link>.</p> : null}

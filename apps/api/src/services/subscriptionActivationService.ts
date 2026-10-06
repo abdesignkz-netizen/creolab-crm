@@ -20,6 +20,8 @@ export type ActivationInput = {
   source?: string;
   requestId?: string | null;
   paymentId?: string | null;
+  paymentMethod?: string;
+  allowExistingUsage?: boolean;
   notes?: string | null;
   amountMinor?: number | null;
   force?: boolean;
@@ -105,7 +107,7 @@ export async function activateSubscription(prisma: PrismaClient, input: Activati
     const effectiveLimits = { ...quote.limits, ...(override?.limitsJson as Record<string, number> || {}) };
     const { downgradeBlockers } = await import("./subscriptionRequestService.ts");
     const issues = await downgradeBlockers(prisma, input.tenantId, effectiveLimits);
-    if (issues.length) throw new ApiError(422, "LIMIT_EXCEEDED_AFTER_DOWNGRADE", "Использование превышает лимиты выбранной конфигурации", undefined, { issues });
+    if (issues.length && !input.allowExistingUsage) throw new ApiError(422, "LIMIT_EXCEEDED_AFTER_DOWNGRADE", "Использование превышает лимиты выбранной конфигурации", undefined, { issues });
   }
   const now = new Date();
   const current = await loadCurrentTenantPlan(prisma, input.tenantId);
@@ -143,7 +145,9 @@ export async function activateSubscription(prisma: PrismaClient, input: Activati
           priceSnapshotJson: (quote?.snapshot || {}) as Prisma.InputJsonValue,
           limitsSnapshotJson: limitsJson as Prisma.InputJsonValue,
           featuresSnapshotJson: featuresJson as Prisma.InputJsonValue,
-          paymentMethod: planCode === "BASQAR_FREE" ? "FREE" : "MANUAL",
+          paymentMethod: planCode === "BASQAR_FREE" ? "FREE" : input.paymentMethod || "MANUAL",
+          currentPeriodStart: startBase,
+          gracePeriodEndsAt: null,
           confirmedByUserId: input.actorUserId || null,
           confirmedAt: now,
           requestId: input.requestId || null,
@@ -165,7 +169,9 @@ export async function activateSubscription(prisma: PrismaClient, input: Activati
           priceSnapshotJson: (quote?.snapshot || {}) as Prisma.InputJsonValue,
           limitsSnapshotJson: limitsJson as Prisma.InputJsonValue,
           featuresSnapshotJson: featuresJson as Prisma.InputJsonValue,
-          paymentMethod: planCode === "BASQAR_FREE" ? "FREE" : "MANUAL",
+          paymentMethod: planCode === "BASQAR_FREE" ? "FREE" : input.paymentMethod || "MANUAL",
+          currentPeriodStart: startBase,
+          gracePeriodEndsAt: null,
           confirmedByUserId: input.actorUserId || null,
           confirmedAt: now,
           requestId: input.requestId || null,
@@ -227,27 +233,8 @@ export async function activateSubscription(prisma: PrismaClient, input: Activati
 }
 
 export async function expireDueSubscriptions(prisma: PrismaClient) {
-  const due = await prisma.tenantPlan.findMany({
-    where: {
-      status: { in: [SUBSCRIPTION_STATUSES.ACTIVE, SUBSCRIPTION_STATUSES.CANCEL_AT_PERIOD_END] },
-      endsAt: { lte: new Date() },
-    },
-    take: 40,
-  });
-  for (const row of due) {
-    await prisma.tenantPlan.update({
-      where: { id: row.id },
-      data: { status: SUBSCRIPTION_STATUSES.EXPIRED },
-    });
-    await writeAudit(prisma, {
-      tenantId: row.tenantId,
-      action: "subscription.expired",
-      entityType: "tenant_plan",
-      entityId: row.id,
-      changes: { endsAt: row.endsAt },
-    });
-  }
-  return { expired: due.length };
+  const { processBillingRenewals } = await import("./billing/renewals.ts");
+  return processBillingRenewals(prisma);
 }
 
 export function newId() {

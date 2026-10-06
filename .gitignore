@@ -5,6 +5,8 @@ build
 .next
 .env
 .env.local
+deploy/billing.private.env
+deploy/billing-seller.private.json
 data/*.db
 data/*.db-wal
 data/*.db-shm

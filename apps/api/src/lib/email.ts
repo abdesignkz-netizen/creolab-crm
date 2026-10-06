@@ -5,6 +5,7 @@ export type MailMessage = {
   subject: string;
   text: string;
   html?: string;
+  idempotencyKey?: string;
 };
 
 export function fromAddress() {
@@ -19,6 +20,7 @@ async function sendViaResend(message: MailMessage) {
     headers: {
       Authorization: `Bearer ${key}`,
       "content-type": "application/json",
+      ...(message.idempotencyKey ? {"Idempotency-Key":message.idempotencyKey} : {}),
     },
     body: JSON.stringify({
       from: fromAddress(),

@@ -97,6 +97,8 @@ export type TenantPlanRow = {
   status: string;
   startsAt: Date;
   endsAt: Date | null;
+  gracePeriodEndsAt?: Date | null;
+  trialEndsAt?: Date | null;
   billingPeriod?: string | null;
   amountMinor?: number | null;
   currency?: string | null;
@@ -165,7 +167,9 @@ export function snapshotFromPlan(
       row.endsAt.getTime() < Date.now() &&
       (status === SUBSCRIPTION_STATUSES.ACTIVE || status === SUBSCRIPTION_STATUSES.CANCEL_AT_PERIOD_END),
   );
-  const effectiveStatus = expired ? SUBSCRIPTION_STATUSES.EXPIRED : status;
+  const graceExpired = ["past_due", "grace_period"].includes(status) && (!row.gracePeriodEndsAt || row.gracePeriodEndsAt.getTime() <= Date.now());
+  const trialExpired = status === "trial" && (!row.trialEndsAt || row.trialEndsAt.getTime() <= Date.now());
+  const effectiveStatus = graceExpired ? SUBSCRIPTION_STATUSES.SUSPENDED : (expired || trialExpired) ? SUBSCRIPTION_STATUSES.EXPIRED : status;
   const previewMode = PREVIEW_STATUSES.has(effectiveStatus as typeof SUBSCRIPTION_STATUSES.NONE);
   const entitled = !previewMode && organizationStatus === "active";
   return {

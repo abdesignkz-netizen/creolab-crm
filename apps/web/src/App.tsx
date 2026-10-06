@@ -43,6 +43,7 @@ const RequestDetailPage = lazy(() => import("./pages/RequestDetailPage").then(m 
 const RequestsPage = lazy(() => import("./pages/RequestsPage").then(m => ({ default: m.RequestsPage })));
 const AiAutomationSettingsPage = lazy(() => import("./pages/AiAutomationSettingsPage").then(m => ({ default: m.AiAutomationSettingsPage })));
 const SituationPage = lazy(() => import("./pages/SituationPage").then(m => ({ default: m.SituationPage })));
+const BillingCheckoutPage = lazy(() => import("./pages/BillingCheckoutPage").then(m => ({ default: m.BillingCheckoutPage })));
 const BillingPage = lazy(() => import("./pages/BillingPage").then(m => ({ default: m.BillingPage })));
 const StatsPage = lazy(() => import("./pages/StatsPage").then(m => ({ default: m.StatsPage })));
 const TasksPage = lazy(() => import("./pages/TasksPage").then(m => ({ default: m.TasksPage })));
@@ -1238,6 +1239,7 @@ export function App() {
               <Routes>
                 <Route path="/today" element={!me?.activeTenant && me?.user?.platformAdmin ? <Navigate to="/admin" replace /> : <Today />} />
                 <Route path="/billing" element={<BillingPage />} />
+                <Route path="/billing/checkout/:orderId" element={<BillingCheckoutPage />} />
                 <Route path="/control" element={me?.capabilities?.manager ? <Navigate to="/today" replace /> : <ControlPage />} />
                 <Route path="/integrations" element={me?.capabilities?.integrations ? <IntegrationsPage /> : <Navigate to="/today" replace />} />
                 <Route path="/integrations/esf" element={me?.capabilities?.documents ? <EsfIntegrationPage /> : <Navigate to="/today" replace />} />

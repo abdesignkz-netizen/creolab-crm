@@ -1,26 +1,21 @@
-/**
- * Payment provider seam. Online checkout is not implemented.
- * Activation must come from a trusted server-side call (platform admin or signed webhook).
- */
-export type PaymentActivation = {
-  tenantId: string;
-  planCode?: string;
-  providerRef?: string;
+/** Provider adapters only move money. Subscription activation belongs to the billing ledger. */
+export type PaymentInput = {
+  paymentId: string; orderId: string; tenantId: string; amount: number; currency: string;
+  description: string; returnUrl: string; autoRenew: boolean;
 };
-
-export type PaymentProvider = {
+export type ProviderResult = { providerPaymentId: string; redirectUrl?: string };
+export type PaymentNotice = {
+  eventId: string; paymentId: string; tenantId: string; orderId: string;
+  providerPaymentId: string; amount: number; currency: string; paid: boolean;
+  recurringProfile?: string;
+};
+export interface PaymentProvider {
   readonly name: string;
   readonly configured: boolean;
-  createCheckout?: (input: {
-    tenantId: string;
-    planCode: string;
-    successUrl: string;
-    cancelUrl: string;
-  }) => Promise<{ url: string }>;
-  parseWebhook?: (rawBody: string, headers: Record<string, string | undefined>) => Promise<PaymentActivation | null>;
-};
-
-export const paymentProvider: PaymentProvider = {
-  name: "none",
-  configured: false,
-};
+  createPayment(input: PaymentInput): Promise<ProviderResult>;
+  createRecurringPayment(input: PaymentInput, profile: string): Promise<ProviderResult>;
+  getPaymentStatus(paymentId: string, merchantReference?: string): Promise<Record<string, unknown>>;
+  cancelPayment(paymentId: string): Promise<Record<string, unknown>>;
+  refundPayment(paymentId: string, amount: number): Promise<Record<string, unknown>>;
+  handleWebhook(fields: Record<string, string>): PaymentNotice;
+}
