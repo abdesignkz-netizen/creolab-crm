@@ -9,6 +9,7 @@ import { transcribeLocally } from "./localTranscription.ts";
 import { getEntitlements } from "./entitlementService.ts";
 import { reserveAiCall, aiCreditCost } from "./billingResourceService.ts";
 import { recordAiUsage } from "./aiUsageService.ts";
+import { hasSupportedAiScript } from "./aiLanguagePolicy.ts";
 
 const AUDIO_EXTENSIONS: Record<string, string> = {
   "audio/ogg": "ogg", "audio/mpeg": "mp3", "audio/mp3": "mp3", "audio/mp4": "m4a",
@@ -18,7 +19,7 @@ const AUDIO_EXTENSIONS: Record<string, string> = {
 const object = (value: unknown) => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 export const voiceTranscript = (value: unknown) => {
   const data = object(value);
-  return data.status === "done" && typeof data.text === "string" ? data.text : "";
+  return data.status === "done" && typeof data.text === "string" && hasSupportedAiScript(data.text) ? data.text : "";
 };
 export const isVoiceAttachment = (file: { mimeType: string; fileName: string }) => resolveConversationMime(file.fileName, file.mimeType).startsWith("audio/");
 const fail = (code: string) => new ApiError(422, code, "Не удалось распознать голосовое сообщение");
@@ -34,8 +35,13 @@ export async function transcribeVoiceAttachment(input: {
       conversation: { tenantId, connection: { integrationId } } } } });
   if (!file) throw fail("voice_unavailable");
   const cached = voiceTranscript(file.transcriptionJson);
-  if (cached) return cached;
+  if (cached) {
+    if (!hasSupportedAiScript(cached)) throw fail("voice_unsupported");
+    return cached;
+  }
   const previous = object(file.transcriptionJson);
+  // Do not reuse an old foreign-language result or silently charge to redo it.
+  if (previous.status === "done") throw fail("voice_unsupported");
   if (previous.status === "processing") {
     if (Date.now() - Number(previous.startedAt) < 120000) throw fail("voice_pending");
     // A crashed request has an uncertain provider result. Do not silently bill it again.
@@ -105,6 +111,7 @@ export async function transcribeVoiceAttachment(input: {
     }
     if (text.length > 12000) { text = ""; throw fail("voice_invalid_response"); }
     if (!text) throw fail("voice_empty");
+    if (!hasSupportedAiScript(text)) { text = ""; throw fail("voice_unsupported"); }
     await prisma.attachment.updateMany({ where: { id: attachmentId, tenantId, transcriptionJson: { equals: claim } },
       data: { transcriptionJson: { status: "done", text } } });
     return text;

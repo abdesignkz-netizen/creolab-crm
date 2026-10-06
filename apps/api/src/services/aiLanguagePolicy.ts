@@ -1,0 +1,10 @@
+export const AI_LANGUAGE_POLICY = "Общайся с клиентом только на русском или казахском языке. Выбирай между ними по последнему понятному сообщению клиента и контексту его сообщений. Не копируй другой язык из ошибочной расшифровки или старого ответа ИИ. Если язык неясен, используй ранее выбранный русский или казахский; если контекста нет — русский. Не переводи имена, бренды, ссылки и артикулы. Если смысл голосового неясен, не выдумывай его содержание и передай диалог сотруднику.";
+
+/** A script sanity check, not a linguistic classifier. Allows Latin brands/URLs
+ * within RU/KK prose, but blocks a foreign-language paragraph such as Polish. */
+export function hasSupportedAiScript(text: string) {
+  const prose = text.replace(/https?:\/\/\S+|[\w.+-]+@[\w.-]+\.[a-z]{2,}/gi, "");
+  const letters = prose.match(/\p{L}/gu) || [];
+  const cyrillic = prose.match(/[А-Яа-яЁёӘәҒғҚқҢңӨөҰұҮүҺһІі]/gu) || [];
+  return letters.length > 0 && cyrillic.length / letters.length >= 0.5;
+}

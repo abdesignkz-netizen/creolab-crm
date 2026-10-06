@@ -94,13 +94,24 @@ def decode_audio(data):
     return np.concatenate(pieces).astype(np.float32) / 32768.0
 
 
+def select_language(probabilities):
+    # Restrict language selection before decoding; never decode as Polish/etc.
+    supported = [(language, probability) for language, probability in probabilities
+                 if language in ("ru", "kk")]
+    if not supported:
+        raise ValueError("voice_unsupported")
+    return max(supported, key=lambda item: item[1])[0]
+
+
 def transcribe(data, model_path):
     # No model is downloaded during a customer request.
     from faster_whisper import WhisperModel
     audio = decode_audio(data)
     model = WhisperModel(model_path, device="cpu", compute_type="int8", cpu_threads=2,
                          num_workers=1, local_files_only=True)
-    segments, _ = model.transcribe(audio, beam_size=5, task="transcribe", vad_filter=True,
+    _, _, probabilities = model.detect_language(audio=audio)
+    language = select_language(probabilities)
+    segments, _ = model.transcribe(audio, language=language, beam_size=5, task="transcribe", vad_filter=True,
                                     condition_on_previous_text=False)
     text = " ".join(segment.text.strip() for segment in segments).strip()
     if not text:

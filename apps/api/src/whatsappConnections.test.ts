@@ -31,6 +31,7 @@ describe("WhatsApp provider connections", () => {
   let sends = 0, qrSends = 0, logoutCount = 0, failQrSend = false;
   let mediaResponse = Buffer.alloc(0);
   let llmCalls = 0, llmStatus = 200, llmInput: any, llmAuthorization: string | null;
+  let llmReply = "Сәлеметсіз бе! Компаниямыздың қызметтері туралы айтып беремін.";
   let voiceCalls = 0, voiceStatus = 200, voiceText = "Сәлеметсіз бе! Қызметтеріңіз туралы айтып беріңізші.";
   let voiceBody: string | undefined;
   let onTranscribe: (() => Promise<void>) | undefined;
@@ -71,7 +72,7 @@ describe("WhatsApp provider connections", () => {
         if (voiceStatus === 0) throw new DOMException("Timed out", "TimeoutError");
         return new Response(voiceBody ?? JSON.stringify(voiceStatus === 200 ? { text: voiceText } : { error: "PRIVATE-VOICE-PROVIDER-ERROR" }), { status: voiceStatus, headers: { "x-request-id": `voice-${voiceCalls}` } });
       }
-      if (u.hostname === "llm.example.test") { llmAuthorization = new Headers(init?.headers).get("authorization"); llmCalls++; llmInput = JSON.parse(String(init?.body)); if (llmStatus !== 200) return new Response(JSON.stringify({ error: { message: "PRIVATE-PROVIDER-ERROR" } }), { status: llmStatus }); return new Response(JSON.stringify({ id: `ai-request-${llmCalls}`, choices: [{ message: { content: JSON.stringify({ reply: "Сәлеметсіз бе! Компаниямыздың қызметтері туралы айтып беремін.", handoff: false }) } }], usage: { prompt_tokens: 50, completion_tokens: 20, total_tokens: 70 } }), { headers: { "content-type": "application/json" } }); }
+      if (u.hostname === "llm.example.test") { llmAuthorization = new Headers(init?.headers).get("authorization"); llmCalls++; llmInput = JSON.parse(String(init?.body)); if (llmStatus !== 200) return new Response(JSON.stringify({ error: { message: "PRIVATE-PROVIDER-ERROR" } }), { status: llmStatus }); return new Response(JSON.stringify({ id: `ai-request-${llmCalls}`, choices: [{ message: { content: JSON.stringify({ reply: llmReply, handoff: false }) } }], usage: { prompt_tokens: 50, completion_tokens: 20, total_tokens: 70 } }), { headers: { "content-type": "application/json" } }); }
       if (u.hostname === "mmg.whatsapp.net") { assert.equal(init?.redirect, "error"); assert.ok(init?.signal); return new Response(new Uint8Array(mediaResponse)); }
       if (u.hostname !== "graph.facebook.com") return nativeFetch(url, init);
       const reply = (data: unknown) => new Response(JSON.stringify(data), { headers: { "content-type": "application/json" } });
@@ -399,7 +400,7 @@ describe("WhatsApp provider connections", () => {
         assert.equal(voiceCalls, beforeSpeech + 1);
         assert.equal(llmInput.model, model); assert.equal(llmAuthorization, `Bearer ${key}`);
         const input = JSON.stringify(llmInput);
-        assert.ok(input.includes(voiceText)); assert.match(input, /PUBLIC-COMPANY-PROMPT/); assert.match(input, /PUBLIC-KNOWLEDGE/);
+        assert.ok(input.includes(voiceText)); assert.match(input, /только на русском или казахском/); assert.match(input, /PUBLIC-COMPANY-PROMPT/); assert.match(input, /PUBLIC-KNOWLEDGE/);
         assert.doesNotMatch(input, /input_audio|data:audio|speech-test-key|OggS-voice-fixture/);
         const speechUsage = await prisma.aIUsageEvent.findFirstOrThrow({ where: { conversationId: event.entityId, feature: "AI_VOICE_TRANSCRIPTION" } });
         const replyUsage = await prisma.aIUsageEvent.findFirstOrThrow({ where: { conversationId: event.entityId, feature: "AI_MANAGER_REPLY" } });
@@ -413,6 +414,28 @@ describe("WhatsApp provider connections", () => {
       if (anyKey === undefined) delete process.env.ANYMODEL_API_KEY; else process.env.ANYMODEL_API_KEY = anyKey;
       if (anyUrl === undefined) delete process.env.ANYMODEL_BASE_URL; else process.env.ANYMODEL_BASE_URL = anyUrl;
     }
+  });
+  it("does not send a Polish reply or feed a Polish transcript to AI", async () => {
+    const originalReply = llmReply, originalVoice = voiceText;
+    try {
+      llmReply = "Nie jestem pewien, czy dobrze zrozumiałem wiadomość głosową.";
+      const first = await voiceEvent(qrId);
+      await processWhatsAppAiReply(prisma, first.event);
+      assert.equal(await prisma.message.count({ where: { conversationId: first.event.entityId, direction: "outbound" } }), 0);
+      assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id: first.event.entityId } })).mode, "human");
+      llmReply = originalReply;
+      voiceText = "Potrzebuję strony internetowej dla mojej firmy.";
+      const second = await voiceEvent(cloudId);
+      const beforeReplies = llmCalls;
+      await processWhatsAppAiReply(prisma, second.event);
+      assert.equal(llmCalls, beforeReplies);
+      assert.deepEqual((await prisma.attachment.findUniqueOrThrow({ where: { id: second.file.id } })).transcriptionJson, { status: "failed", errorCode: "voice_unsupported" });
+      // Historical bad transcripts must not bypass validation or incur another recognition charge.
+      await prisma.attachment.update({ where: { id: second.file.id }, data: { transcriptionJson: { status: "done", text: voiceText } } });
+      const beforeSpeech = voiceCalls;
+      await assert.rejects(() => transcribeVoiceAttachment({ prisma, tenantId, conversationId: second.event.entityId, integrationId: cloudId, attachmentId: second.file.id }), (error: any) => error.code === "voice_unsupported");
+      assert.equal(voiceCalls, beforeSpeech);
+    } finally { llmReply = originalReply; voiceText = originalVoice; }
   });
   it("feeds local transcripts to the reply model for QR and Meta without any speech HTTP request", async () => {
     const dir = await mkdtemp(join(tmpdir(), "basqar-local-speech-"));

@@ -77,6 +77,8 @@ Service administrators see the local engine under **Service settings → Voice m
 
 An optional external compatible transcription adapter is retained only for explicit `TRANSCRIPTION_ENGINE=http` configuration, with its own `TRANSCRIPTION_API_KEY`, HTTPS `TRANSCRIPTION_BASE_URL` and `TRANSCRIPTION_MODEL`. There is no default external endpoint, and no fallback to any company's chat credentials or model.
 
+Local voice language selection is restricted to Russian (`ru`) and Kazakh (`kk`): the worker compares only those detection probabilities and explicitly passes the selected language to transcription (never translation). The shared AI Manager prompt requires RU/KK replies, following the customer's understandable messages rather than a foreign-language historical AI reply. A script sanity check blocks predominantly foreign-script transcripts/replies, including Polish, while allowing Latin brands and URLs inside Cyrillic prose. This check is not a full language classifier and cannot establish recognition accuracy. Invalid cached transcripts are not reused or automatically re-billed; direct-channel replies failing the check are handed to staff. Existing remote Green API prompt copies require their normal synchronization to receive the updated shared policy.
+
 Engine documentation: https://github.com/SYSTRAN/faster-whisper. Bundled model: https://huggingface.co/Systran/faster-whisper-tiny (revision pinned in `scripts/install-speech-model.py`).
 
 ### Diagnosing voice failures

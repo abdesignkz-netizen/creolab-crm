@@ -6,6 +6,7 @@ from unittest.mock import patch
 import wave
 import tempfile
 import json
+from types import SimpleNamespace
 
 spec = importlib.util.spec_from_file_location("speech", Path(__file__).with_name("local-transcription.py"))
 speech = importlib.util.module_from_spec(spec)
@@ -13,6 +14,22 @@ spec.loader.exec_module(speech)
 
 
 class SpeechSafetyTest(unittest.TestCase):
+    def test_language_selection_is_limited_to_russian_and_kazakh(self):
+        self.assertEqual(speech.select_language([("pl", .8), ("ru", .15), ("kk", .05)]), "ru")
+        self.assertEqual(speech.select_language([("tr", .7), ("ru", .1), ("kk", .2)]), "kk")
+        with self.assertRaisesRegex(ValueError, "voice_unsupported"):
+            speech.select_language([("en", 1)])
+
+    def test_decoding_explicitly_uses_selected_language_without_translation(self):
+        for language, text in [("ru", "Здравствуйте, мне нужен сайт."), ("kk", "Сәлеметсіз бе, маған сайт керек.")]:
+            with patch.object(speech, "decode_audio", return_value="audio"), patch("faster_whisper.WhisperModel") as factory:
+                model = factory.return_value
+                model.detect_language.return_value = ("pl", .8, [("pl", .8), (language, .2)])
+                model.transcribe.return_value = ([SimpleNamespace(text=text)], None)
+                self.assertEqual(speech.transcribe(b"recording", "local-model"), text)
+                self.assertEqual(model.transcribe.call_args.kwargs["language"], language)
+                self.assertEqual(model.transcribe.call_args.kwargs["task"], "transcribe")
+
     def test_memory_uses_container_headroom_not_host_ram(self):
         values = {"/proc/meminfo": "MemAvailable: 32000000 kB\n",
                   "/sys/fs/cgroup/memory.max": str(512 * 1024**2),
