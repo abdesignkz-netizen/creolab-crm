@@ -14,6 +14,7 @@ import { detectHandoffReason, isClientRefusalText } from "./aiConversationPolicy
 import { answerWhatsAppWithLlm } from "./llmClient.ts";
 import { isVoiceAttachment, transcribeVoiceAttachment, voiceTranscript } from "./voiceTranscriptionService.ts";
 import { getTranscriptionConfig } from "./transcriptionConfig.ts";
+import { VOICE_CLARIFICATION } from "./aiLanguagePolicy.ts";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 export function whatsAppAiFailureReason(code: string | null | undefined) {
@@ -159,10 +160,13 @@ export async function processWhatsAppAiReply(prisma: PrismaClient, event: { id: 
   const lastReply = history.findIndex(message => message.direction === "outbound");
   const pending = history.slice(0, lastReply < 0 ? history.length : lastReply).filter(message => message.direction === "inbound");
   if (!pending.some(message => message.id === latest.id)) pending.push(latest);
-  const voices = pending.flatMap(message => message.attachments.filter(file => isVoiceAttachment(file) && !voiceTranscript(file.transcriptionJson)));
+  const voices = pending.flatMap(message => message.attachments.filter(file => isVoiceAttachment(file) && !voiceTranscript(file.transcriptionJson)
+    // An earlier failed recording must not block a new text message or voice note.
+    && (message.id === latest.id || !["failed", "done"].includes(record(file.transcriptionJson).status))));
   const voiceDeadline = AbortSignal.timeout(getTranscriptionConfig().engine === "local" ? 75000 : 55000);
   let answer: Awaited<ReturnType<typeof answerWhatsAppWithLlm>> = null;
   let failureReason = "AI_PROVIDER_UNAVAILABLE";
+  let voiceFailure: string | null = null;
   try {
     if (voices.length > 5) throw new ApiError(422, "voice_unsupported", "Слишком много голосовых сообщений");
     if (voices.length && !(await canConsume(prisma, tenantId, "AI_CREDITS", voices.length * aiCreditCost("AI_VOICE_TRANSCRIPTION") + aiCreditCost("AI_MANAGER_REPLY"))).allowed) {
@@ -191,6 +195,20 @@ export async function processWhatsAppAiReply(prisma: PrismaClient, event: { id: 
       throw new ApiError(409, "ai_generating", "ИИ распознаёт голосовое сообщение");
     }
     failureReason = voiceDeadline.aborted ? "AI_VOICE_TIMEOUT" : whatsAppAiFailureReason(error instanceof ApiError ? error.code : null);
+    if (error instanceof ApiError && error.code.startsWith("voice_") || voiceDeadline.aborted) {
+      // A speech failure asks for clarification through the normal, idempotent
+      // delivery path. It must not disable AI for the next customer message.
+      voiceFailure = failureReason;
+      answer = { reply: VOICE_CLARIFICATION, handoff: false };
+      // Preflight failures (e.g. missing speech configuration) happen before a
+      // transcription claim. Mark those too, so they cannot block later text.
+      for (const file of voices) {
+        if (record(file.transcriptionJson).status) continue;
+        await prisma.attachment.updateMany({ where: { id: file.id, tenantId,
+          transcriptionJson: { equals: file.transcriptionJson as Prisma.InputJsonValue } },
+          data: { transcriptionJson: { status: "failed", errorCode: error instanceof ApiError ? error.code : "voice_timeout" } } });
+      }
+    }
   }
   if (!answer || answer.handoff) {
     await prisma.outboundOperation.updateMany({ where: { id: claim.id, state: "generating" }, data: { state: "failed", error: answer?.handoff ? "needs_human" : failureReason } });
@@ -202,7 +220,7 @@ export async function processWhatsAppAiReply(prisma: PrismaClient, event: { id: 
   await prisma.$transaction(async tx => {
     await tx.$queryRaw`SELECT id FROM "Conversation" WHERE id = ${conversationId} AND "tenantId" = ${tenantId} FOR UPDATE`;
     const current = await tx.conversation.findFirst({ where: { id: conversationId, tenantId, mode: "ai", controlVersion: version, messageRevision: revision } });
-    const operation = await tx.outboundOperation.updateMany({ where: { id: claim.id, state: "generating" }, data: { state: current ? "queued" : "canceled" } });
+    const operation = await tx.outboundOperation.updateMany({ where: { id: claim.id, state: "generating" }, data: { state: current ? "queued" : "canceled", ...(voiceFailure ? { error: voiceFailure } : {}) } });
     if (!current || !operation.count) return;
     const message = await tx.message.create({ data: { tenantId, conversationId, direction: "outbound", senderKind: "ai", text: answer!.reply, operationState: "queued", connectionScopedId: event.id } });
     await tx.outboundOperation.update({ where: { id: claim.id }, data: { providerRef: message.id } });

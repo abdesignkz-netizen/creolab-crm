@@ -31,6 +31,7 @@ describe("WhatsApp provider connections", () => {
   let sends = 0, qrSends = 0, logoutCount = 0, failQrSend = false;
   let mediaResponse = Buffer.alloc(0);
   let llmCalls = 0, llmStatus = 200, llmInput: any, llmAuthorization: string | null;
+  let llmReason: string | undefined;
   let llmReply = "Сәлеметсіз бе! Компаниямыздың қызметтері туралы айтып беремін.";
   let voiceCalls = 0, voiceStatus = 200, voiceText = "Сәлеметсіз бе! Қызметтеріңіз туралы айтып беріңізші.";
   let voiceBody: string | undefined;
@@ -72,7 +73,7 @@ describe("WhatsApp provider connections", () => {
         if (voiceStatus === 0) throw new DOMException("Timed out", "TimeoutError");
         return new Response(voiceBody ?? JSON.stringify(voiceStatus === 200 ? { text: voiceText } : { error: "PRIVATE-VOICE-PROVIDER-ERROR" }), { status: voiceStatus, headers: { "x-request-id": `voice-${voiceCalls}` } });
       }
-      if (u.hostname === "llm.example.test") { llmAuthorization = new Headers(init?.headers).get("authorization"); llmCalls++; llmInput = JSON.parse(String(init?.body)); if (llmStatus !== 200) return new Response(JSON.stringify({ error: { message: "PRIVATE-PROVIDER-ERROR" } }), { status: llmStatus }); return new Response(JSON.stringify({ id: `ai-request-${llmCalls}`, choices: [{ message: { content: JSON.stringify({ reply: llmReply, handoff: false }) } }], usage: { prompt_tokens: 50, completion_tokens: 20, total_tokens: 70 } }), { headers: { "content-type": "application/json" } }); }
+      if (u.hostname === "llm.example.test") { llmAuthorization = new Headers(init?.headers).get("authorization"); llmCalls++; llmInput = JSON.parse(String(init?.body)); if (llmStatus !== 200) return new Response(JSON.stringify({ error: { message: "PRIVATE-PROVIDER-ERROR" } }), { status: llmStatus }); return new Response(JSON.stringify({ id: `ai-request-${llmCalls}`, choices: [{ message: { content: JSON.stringify({ reply: llmReply, handoff: llmReason === "unclear_message", reason: llmReason }) } }], usage: { prompt_tokens: 50, completion_tokens: 20, total_tokens: 70 } }), { headers: { "content-type": "application/json" } }); }
       if (u.hostname === "mmg.whatsapp.net") { assert.equal(init?.redirect, "error"); assert.ok(init?.signal); return new Response(new Uint8Array(mediaResponse)); }
       if (u.hostname !== "graph.facebook.com") return nativeFetch(url, init);
       const reply = (data: unknown) => new Response(JSON.stringify(data), { headers: { "content-type": "application/json" } });
@@ -421,8 +422,9 @@ describe("WhatsApp provider connections", () => {
       llmReply = "Nie jestem pewien, czy dobrze zrozumiałem wiadomość głosową.";
       const first = await voiceEvent(qrId);
       await processWhatsAppAiReply(prisma, first.event);
-      assert.equal(await prisma.message.count({ where: { conversationId: first.event.entityId, direction: "outbound" } }), 0);
-      assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id: first.event.entityId } })).mode, "human");
+      assert.equal(await prisma.message.count({ where: { conversationId: first.event.entityId, direction: "outbound" } }), 1);
+      assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id: first.event.entityId } })).mode, "ai");
+      assert.doesNotMatch((await prisma.message.findFirstOrThrow({ where: { conversationId: first.event.entityId, direction: "outbound" } })).text || "", /Nie jestem/);
       llmReply = originalReply;
       voiceText = "Potrzebuję strony internetowej dla mojej firmy.";
       const second = await voiceEvent(cloudId);
@@ -436,6 +438,42 @@ describe("WhatsApp provider connections", () => {
       await assert.rejects(() => transcribeVoiceAttachment({ prisma, tenantId, conversationId: second.event.entityId, integrationId: cloudId, attachmentId: second.file.id }), (error: any) => error.code === "voice_unsupported");
       assert.equal(voiceCalls, beforeSpeech);
     } finally { llmReply = originalReply; voiceText = originalVoice; }
+  });
+  it("clarifies an unclear transcript instead of pausing for low confidence", async () => {
+    try {
+      llmReason = "unclear_message";
+      const { event } = await voiceEvent(qrId);
+      await processWhatsAppAiReply(prisma, event);
+      assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id: event.entityId } })).mode, "ai");
+      const reply = await prisma.message.findFirstOrThrow({ where: { connectionScopedId: event.id } });
+      assert.match(reply.text || "", /Дауыстық хабарламаны түсіне алмадым/);
+      assert.match(reply.text || "", /Не удалось разобрать голосовое/);
+    } finally { llmReason = undefined; }
+  });
+  it("continues after failed Kazakh voice without return-to-ai and preserves takeover during failure", async () => {
+    const oldBody = voiceBody;
+    try {
+      voiceBody = JSON.stringify({ text: "" });
+      const { event } = await voiceEvent(qrId);
+      await processWhatsAppAiReply(prisma, event);
+      const conversation = await prisma.conversation.findUniqueOrThrow({ where: { id: event.entityId } });
+      assert.equal(conversation.mode, "ai");
+      const beforeSpeech = voiceCalls;
+      voiceBody = undefined;
+      await recordExternalMessage(prisma, qrId, { eventId: `clarify-${voiceSequence}`, channel: "whatsapp", externalUserId: conversation.externalThreadId!, threadId: conversation.externalThreadId!,
+        messageId: `clarify-${voiceSequence}`, name: "Voice test", text: "Маған сайт керек. Бағасы қанша?", at: new Date(Date.now() + 1000), raw: {} });
+      const next = await prisma.outboxEvent.findFirstOrThrow({ where: { entityId: event.entityId, type: "whatsapp.ai_reply", id: { not: event.id } } });
+      await processWhatsAppAiReply(prisma, next);
+      assert.equal(voiceCalls, beforeSpeech, "Old failed audio must not block or rebill the new text");
+      assert.ok(JSON.stringify(llmInput).includes("Маған сайт керек"));
+      assert.equal(await prisma.message.count({ where: { connectionScopedId: next.id } }), 1);
+      assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id: event.entityId } })).mode, "ai");
+      const another = await voiceEvent(cloudId);
+      voiceBody = JSON.stringify({ text: "" });
+      onTranscribe = async () => { await prisma.conversation.update({ where: { id: another.event.entityId }, data: { mode: "human", controlVersion: { increment: 1 } } }); };
+      await processWhatsAppAiReply(prisma, another.event);
+      assert.equal(await prisma.message.count({ where: { connectionScopedId: another.event.id } }), 0);
+    } finally { voiceBody = oldBody; onTranscribe = undefined; }
   });
   it("feeds local transcripts to the reply model for QR and Meta without any speech HTTP request", async () => {
     const dir = await mkdtemp(join(tmpdir(), "basqar-local-speech-"));
@@ -468,7 +506,8 @@ describe("WhatsApp provider connections", () => {
       assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id: event.entityId } })).mode, "ai");
       await writeFile(python, `#!/bin/sh\nprintf '{"error":"voice_resources"}'\n`);
       await processWhatsAppAiReply(prisma, event);
-      assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id: event.entityId } })).attentionReason, "AI_VOICE_RESOURCES");
+      assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id: event.entityId } })).mode, "ai");
+      assert.equal((await prisma.outboundOperation.findFirstOrThrow({ where: { idempotencyKey: event.id } })).error, "AI_VOICE_RESOURCES");
       assert.deepEqual((await prisma.attachment.findUniqueOrThrow({ where: { id: file.id } })).transcriptionJson, { status: "failed", errorCode: "voice_resources" });
     } finally {
       for (const [key, value] of Object.entries(old)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
@@ -482,12 +521,12 @@ describe("WhatsApp provider connections", () => {
       delete process.env.TRANSCRIPTION_API_KEY;
       await processWhatsAppAiReply(prisma, event);
       assert.equal(voiceCalls, beforeSpeech); assert.equal(llmCalls, beforeReply);
-      assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id: event.entityId } })).attentionReason, "AI_VOICE_SERVICE_MISSING");
+      assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id: event.entityId } })).mode, "ai");
+      assert.equal((await prisma.outboundOperation.findFirstOrThrow({ where: { idempotencyKey: event.id } })).error, "AI_VOICE_SERVICE_MISSING");
     } finally { process.env.TRANSCRIPTION_API_KEY = speechKey; }
-    assert.equal((await post(`/api/v1/conversations/${event.entityId}/return-to-ai`)).status, 200);
-    const retry = await prisma.outboxEvent.findFirstOrThrow({ where: { entityId: event.entityId, type: "whatsapp.ai_reply", id: { not: event.id } } });
-    await processWhatsAppAiReply(prisma, retry);
-    assert.equal(await prisma.message.count({ where: { connectionScopedId: retry.id } }), 1);
+    const next = await voiceEvent(cloudId);
+    await processWhatsAppAiReply(prisma, next.event);
+    assert.equal(await prisma.message.count({ where: { connectionScopedId: next.event.id } }), 1);
   });
   it("restores protobuf media bytes after the durable QR queue and processes a real-shaped voice event", async () => {
     const mediaKey = randomBytes(32), keys = await getMediaKeys(mediaKey, "audio");
@@ -559,7 +598,7 @@ describe("WhatsApp provider connections", () => {
       else assert.equal((await prisma.$queryRaw<Array<{ n: bigint }>>`SELECT count(*) as n FROM "WhatsAppQrJob" WHERE id = ${outgoing.id}`)[0].n, 1n);
     }
   });
-  it("respects human requests in the transcript and leaves voice failures for staff in every language", async () => {
+  it("respects human requests but asks for clarification without pausing AI on speech failures", async () => {
     const originalText = voiceText;
     try {
       voiceText = "Менеджермен сөйлескім келеді";
@@ -580,13 +619,16 @@ describe("WhatsApp provider connections", () => {
         const { event, file } = await voiceEvent(cloudId);
         await processWhatsAppAiReply(prisma, event, async () => { assert.fail("Never invent an answer to unrecognised speech"); });
         const conversation = await prisma.conversation.findUniqueOrThrow({ where: { id: event.entityId } });
-        assert.equal(conversation.mode, "human"); assert.equal(conversation.attentionReason, reason);
+        assert.equal(conversation.mode, "ai");
+        assert.equal((await prisma.outboundOperation.findFirstOrThrow({ where: { conversationId: event.entityId, idempotencyKey: event.id } })).error, reason);
         const saved = await prisma.attachment.findUniqueOrThrow({ where: { id: file.id } });
         assert.doesNotMatch(JSON.stringify(saved.transcriptionJson), /PRIVATE-VOICE/);
         const usage = await prisma.aIUsageEvent.findFirstOrThrow({ where: { conversationId: event.entityId, feature: "AI_VOICE_TRANSCRIPTION" } }); assert.equal(usage.status, "failed");
         assert.equal(usage.errorCode, code);
         assert.equal((saved.transcriptionJson as any).errorCode, code);
-        assert.equal(await prisma.message.count({ where: { connectionScopedId: event.id } }), 0);
+        assert.equal(await prisma.message.count({ where: { connectionScopedId: event.id } }), 1);
+        await processWhatsAppAiReply(prisma, event);
+        assert.equal(await prisma.message.count({ where: { connectionScopedId: event.id } }), 1);
       }
       for (const reason of ["AI_VOICE_UNAVAILABLE", "AI_VOICE_UNSUPPORTED", "AI_VOICE_EMPTY", "AI_VOICE_CONFIG", "AI_VOICE_TIMEOUT", "AI_VOICE_PROVIDER_UNAVAILABLE", "AI_VOICE_INVALID_RESPONSE"]) {
         const ru = attentionReasonLabel(reason, undefined, "ru");
@@ -600,13 +642,11 @@ describe("WhatsApp provider connections", () => {
         voiceBody = body;
         const { event, file } = await voiceEvent(qrId);
         await processWhatsAppAiReply(prisma, event, async () => { assert.fail("Invalid transcription must not generate a reply"); });
-        assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id: event.entityId } })).attentionReason, "AI_VOICE_INVALID_RESPONSE");
+        assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id: event.entityId } })).mode, "ai");
         assert.deepEqual((await prisma.attachment.findUniqueOrThrow({ where: { id: file.id } })).transcriptionJson, { status: "failed", errorCode: "voice_invalid_response" });
         voiceBody = undefined;
-        assert.equal((await post(`/api/v1/conversations/${event.entityId}/return-to-ai`)).status, 200);
-        const retry = await prisma.outboxEvent.findFirstOrThrow({ where: { entityId: event.entityId, type: "whatsapp.ai_reply", id: { not: event.id } } });
-        await processWhatsAppAiReply(prisma, retry);
-        assert.equal(await prisma.message.count({ where: { connectionScopedId: retry.id } }), 1);
+        // Stored audio remains available for an explicit retry after service repair.
+        assert.equal(await transcribeVoiceAttachment({ prisma, tenantId, conversationId: event.entityId, integrationId: qrId, attachmentId: file.id }), voiceText);
         assert.equal(voiceTranscript((await prisma.attachment.findUniqueOrThrow({ where: { id: file.id } })).transcriptionJson), voiceText);
       }
     } finally { voiceBody = undefined; }
@@ -624,7 +664,7 @@ describe("WhatsApp provider connections", () => {
     await assert.rejects(() => transcribeVoiceAttachment(input), (error: any) => error.code === "voice_too_large");
     await prisma.attachment.update({ where: { id: file.id }, data: { sizeBytes: file.sizeBytes, mimeType: "audio/amr" } });
     await processWhatsAppAiReply(prisma, event, async () => { assert.fail("Unsupported voice must not reach the reply model"); });
-    assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id: event.entityId } })).attentionReason, "AI_VOICE_UNSUPPORTED");
+    assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id: event.entityId } })).mode, "ai");
     await prisma.attachment.update({ where: { id: file.id }, data: { mimeType: file.mimeType } });
     await writeFile(resolveUploadPath(file.storageKey), Buffer.alloc(17 * 1024 * 1024));
     await assert.rejects(() => transcribeVoiceAttachment(input), (error: any) => error.code === "voice_too_large");
