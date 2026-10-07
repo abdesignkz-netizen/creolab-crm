@@ -1,8 +1,11 @@
+import { WorkspaceSectionNav } from "../components/WorkspaceSectionNav";
+import { useUrlState } from "../lib/useUrlState";
+import "../entity-workspace.css";
 import { InlineFeedback } from "../components/InlineFeedback";
 import { uiTaskTitle, uiText, useUiText, localizeUiOptions, uiMessage } from "../lib/uiText";
 import { notifySaved } from "../components/SaveNotice";
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { nameWithPhone, phoneText } from "../lib/contactDisplay";
 import { api } from "../lib/api";
 import { useCapabilities } from "../lib/session";
@@ -83,7 +86,10 @@ export function CompanyPage() {
   const uiText = useUiText();
   const caps = useCapabilities();
   const { id = "" } = useParams();
+  const [section, setSection] = useUrlState("section", "overview", ["overview", "contacts", "deals", ...(caps.documents ? ["documents" as const] : []), "requests", "tasks", "history"] as const);
   const navigate = useNavigate();
+  const location = useLocation();
+  const returnTo = typeof location.state?.companyList === "string" && (location.state.companyList === "/companies" || location.state.companyList.startsWith("/companies?")) ? location.state.companyList : "/companies";
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState("");
   const [linkOpen, setLinkOpen] = useState(false);
@@ -294,7 +300,7 @@ export function CompanyPage() {
     <section className="company-page">
       <div className="row sit-head">
         <div>
-          <Link className="muted" to="/companies">
+          <Link className="muted" to={returnTo}>
             {uiText("← Компании")}</Link>
           <h2>{c.name}</h2>
           <p className="muted">
@@ -310,8 +316,8 @@ export function CompanyPage() {
             <>
           <button type="button" className="btn secondary" onClick={openEdit}>
             {uiText("Изменить")}</button>
-          <button type="button" className="btn danger" disabled={busy} onClick={() => void removeCompany()}>
-            {uiText("Удалить")}</button>
+          <details className="entity-more"><summary>{uiText("Ещё")}</summary><button type="button" className="btn danger" disabled={busy} onClick={() => void removeCompany()}>
+            {uiText("Удалить компанию")}</button></details>
             </>
           ) : null}
           <button type="button" className="btn" onClick={() => setLinkOpen(true)}>
@@ -321,44 +327,54 @@ export function CompanyPage() {
         </div>
       </div>
 
+      <WorkspaceSectionNav label={uiText("Раздел компании")} value={section} onChange={setSection} options={[
+        { id: "overview", label: uiText("Обзор") },
+        { id: "contacts", label: `${uiText("Контакты")} · ${data.contacts?.length || 0}` },
+        { id: "deals", label: `${uiText("Сделки")} · ${data.deals?.length || 0}` },
+        ...(caps.documents ? [{ id: "documents" as const, label: `${uiText("Документы")} · ${documents.length}` }] : []),
+        { id: "requests", label: `${uiText("Заявки")} · ${data.inquiries?.length || 0}` },
+        { id: "tasks", label: `${uiText("Задачи")} · ${data.tasks?.length || 0}` },
+        { id: "history", label: uiText("История") },
+      ]} />
+
       {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
 
-      <div className="sit-section">
+      <div className="sit-section entity-section" hidden={section !== "overview"}>
         <div className="sit-section-head">
           <h3>{uiText("Сейчас")}</h3>
         </div>
         <div className="sit-kpi-grid stats-kpi-grid">
-          <div className="sit-kpi">
+          <button type="button" className="sit-kpi entity-metric" onClick={() => setSection("requests")}>
             <span className="muted">{uiText("Активные заявки")}</span>
             <strong>{cur.activeRequests}</strong>
-          </div>
-          <div className="sit-kpi">
+          </button>
+          <button type="button" className="sit-kpi entity-metric" onClick={() => setSection("deals")}>
             <span className="muted">{uiText("Активные сделки")}</span>
             <strong>{cur.activeDeals}</strong>
-          </div>
+          </button>
           {!caps.manager ? (
-          <div className="sit-kpi">
+          <button type="button" className="sit-kpi entity-metric" onClick={() => setSection("deals")}>
             <span className="muted">{uiText("Сумма сделок")}</span>
             <strong>{cur.pipelineLabel || "—"}</strong>
-          </div>
+          </button>
           ) : null}
-          <div className="sit-kpi">
+          <button type="button" className="sit-kpi entity-metric" onClick={() => setSection("deals")}>
             <span className="muted">{uiText("На договоре")}</span>
             <strong>{cur.contractDeals}</strong>
-          </div>
-          <div className="sit-kpi">
+          </button>
+          <button type="button" className="sit-kpi entity-metric" onClick={() => setSection("contacts")}>
             <span className="muted">{uiText("Нужен ответ")}</span>
             <strong>{cur.needsReply}</strong>
-          </div>
-          <div className="sit-kpi">
+          </button>
+          <button type="button" className="sit-kpi entity-metric" onClick={() => setSection("tasks")}>
             <span className="muted">{uiText("Просрочено")}</span>
             <strong>{cur.overdueTasks}</strong>
-          </div>
+          </button>
         </div>
         {cur.nextAction ? (
           <p style={{ marginTop: 10 }}>
             <b>{uiText("Следующее действие:")}</b>{" "}
-            <Link to={cur.nextAction.href}>{uiTaskTitle(cur.nextAction)}</Link>
+            <Link to={cur.nextAction.href?.replace("?task=", "?open=")}>{uiTaskTitle(cur.nextAction)}</Link>
             {cur.nextAction.dueLabel ? <span className="muted"> · {cur.nextAction.dueLabel}</span> : null}
           </p>
         ) : (
@@ -367,7 +383,7 @@ export function CompanyPage() {
         )}
       </div>
 
-      <div className="sit-section">
+      <div className="sit-section entity-section" hidden={section !== "contacts"}>
         <div className="sit-section-head">
           <h3>{uiText("Контактные лица")}</h3>
         </div>
@@ -413,18 +429,19 @@ export function CompanyPage() {
                   }
                 >
                   {uiText("Изменить")}</button>
-                <button type="button" className="btn danger" disabled={busy} onClick={() => void removePerson(person)}>
-                  {uiText("Убрать")}</button>
+                <details className="entity-more"><summary>{uiText("Ещё")}</summary><button type="button" className="btn danger" disabled={busy} onClick={() => void removePerson(person)}>
+                  {uiText("Убрать")}</button></details>
               </div>
             </div>
           ))}
         </div>
       </div>
 
-      <div className="sit-section">
+      <div className="sit-section entity-section" hidden={section !== "deals"}>
         <div className="sit-section-head">
           <h3>{uiText("Сделки")}</h3>
         </div>
+        {!data.deals?.length ? <p className="empty">{uiText("Сделок нет")}</p> : null}
         <div className="stats-table-wrap">
           <table className="stats-table">
             <thead>
@@ -463,7 +480,7 @@ export function CompanyPage() {
       </div>
 
       {caps.documents ? (
-      <div className="sit-section">
+      <div className="sit-section entity-section" hidden={section !== "documents"}>
         <div className="sit-section-head">
           <h3>{uiText("Документы")}</h3>
           <Link className="btn secondary" to="/documents">{uiText("Все документы")}</Link>
@@ -577,10 +594,11 @@ export function CompanyPage() {
         />
       ) : null}
 
-      <div className="sit-section">
+      <div className="sit-section entity-section" hidden={section !== "requests"}>
         <div className="sit-section-head">
           <h3>{uiText("Заявки")}</h3>
         </div>
+        {!data.inquiries?.length ? <p className="empty">{uiText("Заявок нет")}</p> : null}
         <div className="stats-table-wrap">
           <table className="stats-table">
             <thead>
@@ -608,7 +626,7 @@ export function CompanyPage() {
         </div>
       </div>
 
-      <div className="sit-section">
+      <div className="sit-section entity-section" hidden={section !== "tasks"}>
         <div className="sit-section-head">
           <h3>{uiText("Задачи")}</h3>
         </div>
@@ -616,14 +634,14 @@ export function CompanyPage() {
         <ul className="company-task-list">
           {(data.tasks || []).map((t: any) => (
             <li key={t.id}>
-              <Link to={t.href}>{uiTaskTitle(t)}</Link>
+              <Link to={`/tasks?open=${t.id}`}>{uiTaskTitle(t)}</Link>
               <span className="muted">{t.dueLabel ? ` · ${t.dueLabel}` : ""}</span>
             </li>
           ))}
         </ul>
       </div>
 
-      <div className="sit-section">
+      <div className="sit-section entity-section" hidden={section !== "overview"}>
         <div className="sit-section-head">
           <h3>{uiText("Итог отношений")}</h3>
         </div>
@@ -659,9 +677,9 @@ export function CompanyPage() {
         </div>
       </div>
 
-      <div className="sit-section">
+      <div className="sit-section entity-section" hidden={section !== "history"}>
         <div className="sit-section-head">
-          <h3>Timeline</h3>
+          <h3>{uiText("История")}</h3>
         </div>
         <div className="company-timeline">
           {(data.timeline || []).map((a: any) => (

@@ -1,0 +1,185 @@
+.entity-section[hidden],
+.contact-page details[hidden] {
+  display: none !important;
+}
+.entity-form-disclosure { margin: 16px 0; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: #f8faff; }
+.entity-form-disclosure > summary { cursor: pointer; font-size: 14px; font-weight: 600; color: #43607f; }
+.entity-form-disclosure[open] > summary { margin-bottom: 16px; }
+.company-page button.entity-metric { text-align: left; cursor: pointer; font: inherit; color: inherit; }
+.company-page button.entity-metric:hover { background: #eaf2ff; }
+.company-page button.entity-metric:focus-visible { outline: 3px solid #bdd9ff; }
+.contact-page .workspace-section-nav,
+.company-page .workspace-section-nav {
+  margin: 0 0 20px;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.contact-page .workspace-section-nav .btn,
+.company-page .workspace-section-nav .btn {
+  min-height: 38px;
+  padding: 8px 13px;
+}
+.contact-page .summary-card {
+  padding: 18px 20px;
+  margin-bottom: 16px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+.contact-page .summary-card > p:empty {
+  display: none;
+}
+.contact-page .summary-grid {
+  gap: 16px;
+}
+.contact-page .contact-layout {
+  gap: 16px;
+}
+.contact-page .contact-main,
+.contact-page .contact-side {
+  gap: 16px;
+}
+.contact-page .card {
+  padding: 20px;
+  border-radius: 14px;
+}
+.contact-page .card > b {
+  display: block;
+  margin-bottom: 10px;
+}
+.contact-page .kv {
+  font-size: 13px;
+  margin: 0;
+}
+.contact-page .kv > div {
+  padding: 8px 0;
+}
+.entity-record-link {
+  padding: 16px 18px !important;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  text-decoration: none;
+  color: var(--ink);
+  margin-bottom: 8px;
+  gap: 16px;
+}
+.entity-record-link:hover {
+  border-color: #adc9ec;
+  background: #f7faff;
+}
+.entity-record-link .muted {
+  margin-top: 5px;
+}
+.company-page > .entity-section {
+  padding: 20px;
+  margin-top: 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+}
+.company-page .sit-head {
+  align-items: flex-start;
+}
+.company-page .sit-head h2 {
+  margin: 8px 0;
+}
+.company-page .sit-head p {
+  margin: 5px 0;
+}
+.company-page .sit-toolbar-side {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  max-width: 480px;
+  justify-content: flex-end;
+}
+.company-page .sit-section-head h3 {
+  font-size: 16px;
+  margin: 0 0 14px;
+}
+.company-page .sit-kpi-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.company-page .sit-kpi {
+  border: 0;
+  box-shadow: none;
+  border-radius: 12px;
+  background: #f5f7fb;
+  padding: 14px 16px;
+  min-width: 0;
+}
+.company-page .sit-kpi strong {
+  font-size: 23px;
+}
+.company-page .company-row {
+  padding: 16px 0;
+}
+.entity-more {
+  position: relative;
+}
+.entity-more > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--muted);
+  border-radius: 9px;
+  min-height: 38px;
+  box-sizing: border-box;
+}
+.entity-more > summary:hover {
+  background: #edf2f8;
+}
+.entity-more > summary::-webkit-details-marker {
+  display: none;
+}
+.entity-more[open] > button {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 5;
+  min-width: 180px;
+  box-shadow: 0 8px 25px #17243d20;
+  background: white;
+  white-space: nowrap;
+}
+@media (max-width: 767px) {
+  .company-page .sit-toolbar-side {
+    justify-content: flex-start;
+    max-width: none;
+  }
+  .company-page .sit-head {
+    display: grid;
+    gap: 16px;
+  }
+  .company-page .sit-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .company-page > .entity-section,
+  .contact-page .card {
+    padding: 16px;
+  }
+  .company-page .sit-kpi {
+    padding: 12px;
+  }
+  .company-page .sit-kpi strong {
+    font-size: 20px;
+  }
+  .company-page .company-row-actions {
+    flex-wrap: wrap;
+  }
+  .entity-more > summary {
+    min-height: 44px;
+  }
+  .entity-more[open] > button {
+    right: auto;
+    left: 0;
+  }
+  .contact-page .workspace-section-select,
+  .company-page .workspace-section-select {
+    margin-bottom: 16px;
+  }
+}

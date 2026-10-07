@@ -1,10 +1,11 @@
+import "../entity-workspace.css";
 import { InlineFeedback } from "../components/InlineFeedback";
 import { uiText, useUiText, localizeUiOptions, uiMessage } from "../lib/uiText";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { notifySaved } from "../components/SaveNotice";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
-import { useRequestVersion } from "../lib/useUrlState";
+import { useUrlState, useRequestVersion } from "../lib/useUrlState";
 
 type Scope = "all" | "mine" | "unassigned";
 
@@ -38,11 +39,12 @@ function readBase64(file: File) {
 export function CompaniesPage() {
   const uiText = useUiText();
   const navigate = useNavigate();
+  const location = useLocation();
   const requestVersion = useRequestVersion();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [scope, setScope] = useState<Scope>("all");
-  const [q, setQ] = useState("");
-  const [lifecycleStatus, setLifecycleStatus] = useState("");
+  const [scope, setScope] = useUrlState<Scope>("scope", "all", ["all", "mine", "unassigned"]);
+  const [q, setQ] = useUrlState<string>("q", "");
+  const [lifecycleStatus, setLifecycleStatus] = useUrlState<string>("status", "");
   const [items, setItems] = useState<any[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -50,6 +52,7 @@ export function CompaniesPage() {
   const [duplicates, setDuplicates] = useState<any[]>([]);
   const [createBusy, setCreateBusy] = useState(false);
   const [parseBusy, setParseBusy] = useState(false);
+  const [extraOpen, setExtraOpen] = useState(false);
   const [parseError, setParseError] = useState("");
   const [parseWarnings, setParseWarnings] = useState<string[]>([]);
   const [requisitesText, setRequisitesText] = useState("");
@@ -59,6 +62,7 @@ export function CompaniesPage() {
   function closeCreate() {
     if (createBusy || parseBusy) return;
     setShowCreate(false);
+    setExtraOpen(false);
     setDuplicates([]);
     setParseError("");
     setParseWarnings([]);
@@ -131,6 +135,7 @@ export function CompaniesPage() {
         phone: parsed.phone || current.phone,
         email: parsed.email || current.email,
       }));
+      setExtraOpen(true);
       setParseWarnings(Array.isArray(result.warnings) ? result.warnings : []);
     } catch (err) {
       setParseError(err instanceof Error ? err.message : uiText("Не удалось распознать реквизиты"));
@@ -249,7 +254,7 @@ export function CompaniesPage() {
 
       <div className="companies-list">
         {items.map((item) => (
-          <Link key={item.id} to={`/companies/${item.id}`} className="company-row">
+          <Link key={item.id} to={`/companies/${item.id}`} className="company-row" state={{ companyList: location.pathname + location.search }}>
             <div>
               <b>{item.name}</b>
               <div className="muted">
@@ -277,8 +282,9 @@ export function CompaniesPage() {
         <div className="stats-modal-backdrop" onClick={closeCreate}>
           <div className="stats-modal company-create-modal" onClick={(e) => e.stopPropagation()}>
             <h3>{uiText("Новая компания")}</h3>
-            <div className="company-requisites">
-              <b>{uiText("Из реквизитов")}</b>
+            <p className="muted">{uiText("Для начала достаточно названия. Остальные данные можно добавить позже.")}</p>
+            <details className="company-requisites entity-form-disclosure">
+              <summary>{uiText("Заполнить из реквизитов")}</summary>
               <p className="muted">{uiText("PDF, Word или вставьте текст — распознаем название, БИН, адрес и банк.")}</p>
               <div className="company-requisites-actions">
                 <input
@@ -331,19 +337,28 @@ export function CompaniesPage() {
                   ))}
                 </ul>
               ) : null}
-            </div>
+            </details>
             <div className="company-create-grid">
               <label className="span-2">
                 {uiText("Название *")}<input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
               </label>
+              <label>
+                {uiText("Город")}<input value={draft.city} onChange={(e) => setDraft({ ...draft, city: e.target.value })} />
+              </label>
+              <label>
+                {uiText("Телефон")}<input value={draft.phone} onChange={(e) => setDraft({ ...draft, phone: e.target.value })} />
+              </label>
+              <label>
+                Email
+                <input value={draft.email} onChange={(e) => setDraft({ ...draft, email: e.target.value })} />
+              </label>
+            </div>
+            <details className="entity-form-disclosure" open={extraOpen} onToggle={event => setExtraOpen(event.currentTarget.open)}><summary>{uiText("Реквизиты и дополнительные данные")}</summary><div className="company-create-grid">
               <label className="span-2">
                 {uiText("Юридическое название")}<input value={draft.legalName} onChange={(e) => setDraft({ ...draft, legalName: e.target.value })} />
               </label>
               <label>
                 {uiText("БИН / ИИН")}<input value={draft.bin} onChange={(e) => setDraft({ ...draft, bin: e.target.value })} />
-              </label>
-              <label>
-                {uiText("Город")}<input value={draft.city} onChange={(e) => setDraft({ ...draft, city: e.target.value })} />
               </label>
               <label className="span-2">
                 {uiText("Юридический адрес")}<input
@@ -369,13 +384,6 @@ export function CompaniesPage() {
               <label>
                 {uiText("Отрасль")}<input value={draft.industry} onChange={(e) => setDraft({ ...draft, industry: e.target.value })} />
               </label>
-              <label>
-                {uiText("Телефон")}<input value={draft.phone} onChange={(e) => setDraft({ ...draft, phone: e.target.value })} />
-              </label>
-              <label>
-                Email
-                <input value={draft.email} onChange={(e) => setDraft({ ...draft, email: e.target.value })} />
-              </label>
               <label className="span-2">
                 {uiText("Сайт")}<input value={draft.website} onChange={(e) => setDraft({ ...draft, website: e.target.value })} />
               </label>
@@ -386,7 +394,7 @@ export function CompaniesPage() {
                   rows={3}
                 />
               </label>
-            </div>
+            </div></details>
             {duplicates.length ? (
               <div className="sit-section" style={{ marginTop: 12 }}>
                 <b>{uiText("Возможно, компания уже существует")}</b>

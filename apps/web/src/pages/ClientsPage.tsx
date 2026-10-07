@@ -1,10 +1,11 @@
+import "../request-workspace.css";
 import { MergeClientsPanel } from "../components/MergeClientsPanel";
 import { InlineFeedback } from "../components/InlineFeedback";
 import { uiTaskTitle, uiText, useUiText, localizeUiOptions, uiMessage } from "../lib/uiText";
 import { notifySaved } from "../components/SaveNotice";
 import { useUrlState, useRequestVersion } from "../lib/useUrlState";
 import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { PERIOD_OPTIONS, formatCustomPeriodLabel } from "../lib/period";
 import { tip } from "../lib/tip";
 import { formatWaitSince } from "../lib/duration";
@@ -53,6 +54,7 @@ export function ClientsPage() {
   const uiText = useUiText();
   const requestVersion = useRequestVersion();
   const navigate = useNavigate();
+  const location = useLocation();
   const caps = useCapabilities();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingCreate = useRef<Record<string, unknown> | null>(null);
@@ -410,12 +412,17 @@ export function ClientsPage() {
           placeholder={uiText("Имя, телефон, компания, задача, тег…")}
         />
         <button className="btn">{uiText("Найти")}</button>
-        <button type="button" className="btn secondary" onClick={() => setShowFilters((value) => !value)}>
-          {uiText("Фильтры")}</button>
+        <button type="button" className="btn secondary" aria-expanded={showFilters} aria-controls="client-extra-filters" onClick={() => setShowFilters((value) => !value)}>
+          {uiText("Фильтры")}{[status, source].filter(Boolean).length ? ` · ${[status, source].filter(Boolean).length}` : ""}</button>
       </form>
 
+      {status || source ? <div className="request-filter-active" aria-label={uiText("Активные фильтры")}>
+        {status ? <button type="button" className="chip active" onClick={() => setStatus("")}>{uiText("Статус")}: {uiText(({ new: "Новый", in_progress: "В работе", active: "Активный", paused: "На паузе", lost: "Потерян" } as Record<string, string>)[status] || status)} ×</button> : null}
+        {source ? <button type="button" className="chip active" onClick={() => setSource("")}>{uiText("Источник")}: {source === "whatsapp" ? "WhatsApp" : source === "form" ? uiText("Форма") : source === "manual" ? uiText("Вручную") : source} ×</button> : null}
+      </div> : null}
+
       {showFilters ? (
-        <div className="filter-panel">
+        <div className="filter-panel" id="client-extra-filters">
           <label>
             {uiText("Статус")}<select value={status} onChange={(event) => setStatus(event.target.value)}>
               <option value="">{uiText("Любой")}</option>
@@ -475,7 +482,7 @@ export function ClientsPage() {
 
       {data ? <Pagination total={data.total} offset={data.offset} limit={data.limit} loading={loading} onChange={next => setOffset(String(next))} /> : null}
       {data?.items.map((item: any) => (
-        <Link className="client-row" key={item.id} to={`/contacts/${item.id}`}>
+        <Link className="client-row" key={item.id} to={`/contacts/${item.id}`} state={{ clientList: location.pathname + location.search }}>
           <div className="client-row-main">
             <div className="client-row-title">
               <b>{item.name}</b>

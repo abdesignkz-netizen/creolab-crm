@@ -1,3 +1,4 @@
+import "../request-workspace.css";
 import { InlineFeedback } from "../components/InlineFeedback";
 import { uiSourceLine, uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale } from "../lib/uiText";
 import { catalogItemLabel, type TenantService } from "../lib/tenantServices";
@@ -91,6 +92,7 @@ export function RequestsPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(Boolean(companyId || contactId));
+  const [showFilters, setShowFilters] = useState(false);
   const [createError, setCreateError] = useState("");
   const [lookup, setLookup] = useState<any>(null);
   const [forceNew, setForceNew] = useState(false);
@@ -313,10 +315,6 @@ export function RequestsPage() {
       : filter === "all" || filter === "needs_clarification"
         ? clarification
         : [];
-  const attentionHint =
-    counts.attention_intakes
-      ? uiText("{p0} заявок · {p1} без телефона", {p0: counts.attention_inquiries ?? 0, p1: counts.attention_intakes})
-      : uiText("новые, без ответа или без телефона");
 
   if (loading && !data) return <div className="state">{uiText("Загрузка заявок…")}</div>;
 
@@ -338,6 +336,37 @@ export function RequestsPage() {
         </div>
       </div>
 
+      <form className="search-bar" onSubmit={submitSearch}>
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={uiText("Имя, телефон, компания, тема или задача")}
+        />
+        <button className="btn secondary" type="submit">
+          {uiText("Найти")}</button>
+        <button className="btn secondary" type="button" aria-expanded={showFilters} aria-controls="request-extra-filters" onClick={() => setShowFilters(value => !value)}>{uiText("Фильтры")}{activeExtras.filter(item => item.key !== "q" && item.key !== "filter").length ? ` · ${activeExtras.filter(item => item.key !== "q" && item.key !== "filter").length}` : ""}</button>
+      </form>
+
+      <div className="request-filter-board">
+        <div className="request-filter-group">
+          <span className="request-filter-label">{uiText("Статус")}</span>
+          <div className="request-status-tabs" role="group" aria-label={uiText("Статус заявок")}>
+            {localizeUiOptions(STATUS_FILTERS, uiText).map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                className={`chip ${filter === item.key ? "active" : ""}`}
+                aria-pressed={filter === item.key}
+                onClick={() => setFilter(item.key)}
+              >
+                {item.label}
+                {counts[item.key] != null ? ` · ${counts[item.key]}` : ""}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div id="request-extra-filters" hidden={!showFilters}>
       <div className="sit-toolbar" style={{ marginBottom: 12 }}>
         <PeriodSelector
           period={period}
@@ -368,67 +397,6 @@ export function RequestsPage() {
           activeLabel={data?.period?.label}
         />
       </div>
-
-      <div className="request-metrics cards">
-        <button
-          type="button"
-          className={`card ${filter === "attention" ? "active" : ""}`}
-          aria-pressed={filter === "attention"}
-          onClick={() => setFilter("attention")}
-        >
-          <span className="muted">{uiText("Требуют внимания")}</span>
-          <strong>{counts.attention ?? 0}</strong>
-          {attentionHint ? <span className="kpi-hint">{attentionHint}</span> : null}
-        </button>
-        <button type="button" className={`card ${filter === "all" ? "active" : ""}`} aria-pressed={filter === "all"} onClick={() => setFilter("all")}>
-          <span className="muted">{uiText("Все")}{period !== "all" ? uiText(" за период") : ""}</span>
-          <strong>{counts.all ?? 0}</strong>
-        </button>
-        <button type="button" className={`card ${filter === "new" ? "active" : ""}`} aria-pressed={filter === "new"} onClick={() => setFilter("new")}>
-          <span className="muted">{uiText("Новые")}</span>
-          <strong>{counts.new ?? 0}</strong>
-        </button>
-        <button type="button" className={`card ${filter === "needs_reply" ? "active" : ""}`} aria-pressed={filter === "needs_reply"} onClick={() => setFilter("needs_reply")}>
-          <span className="muted">{uiText("Нужен ответ")}</span>
-          <strong>{counts.needs_reply ?? 0}</strong>
-        </button>
-        <button type="button" className={`card ${filter === "in_progress" ? "active" : ""}`} aria-pressed={filter === "in_progress"} onClick={() => setFilter("in_progress")}>
-          <span className="muted">{uiText("В работе")}</span>
-          <strong>{counts.in_progress ?? 0}</strong>
-        </button>
-        <button type="button" className={`card ${filter === "needs_clarification" ? "active" : ""}`} aria-pressed={filter === "needs_clarification"} onClick={() => setFilter("needs_clarification")}>
-          <span className="muted">{uiText("Требует уточнения")}</span>
-          <strong>{counts.needs_clarification ?? 0}</strong>
-        </button>
-      </div>
-
-      <form className="search-bar" onSubmit={submitSearch}>
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder={uiText("Имя, телефон, компания, тема или задача")}
-        />
-        <button className="btn secondary" type="submit">
-          {uiText("Найти")}</button>
-      </form>
-
-      <div className="request-filter-board">
-        <div className="request-filter-group">
-          <span className="request-filter-label">{uiText("Статус")}</span>
-          <div className="request-status-tabs" role="tablist" aria-label={uiText("Статус заявок")}>
-            {localizeUiOptions(STATUS_FILTERS, uiText).map((item) => (
-              <button
-                key={item.key}
-                type="button"
-                className={`chip ${filter === item.key ? "active" : ""}`}
-                onClick={() => setFilter(item.key)}
-              >
-                {item.label}
-                {counts[item.key] != null ? ` · ${counts[item.key]}` : ""}
-              </button>
-            ))}
-          </div>
-        </div>
 
         <div className="request-toolbar">
           <label className="request-filter-label" style={{ display: "grid", gap: 4 }}>
@@ -479,6 +447,8 @@ export function RequestsPage() {
               ))}
             </select>
           </label>
+        </div>
+
         </div>
 
         {activeExtras.length > 0 ? (

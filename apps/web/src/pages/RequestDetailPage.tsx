@@ -1,3 +1,4 @@
+import "../request-workspace.css";
 import { InlineFeedback } from "../components/InlineFeedback";
 import { uiSourceLine, uiTaskStatus, uiTaskTitle, uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale } from "../lib/uiText";
 import { catalogItemLabel, type TenantService } from "../lib/tenantServices";
@@ -108,7 +109,7 @@ export function RequestDetailPage() {
 
       <div className="request-hero panel">
         <div>
-          <b>{nameWithPhone(data.contactName, data.phone)}</b>
+          <b>{data.contactName || uiText("Без имени")}</b>
           <div className="muted">{phoneText(data.phone)}</div>
           {data.companyName ? <div>{data.companyName}</div> : null}
           <div className="muted" style={{ marginTop: 8 }}>
@@ -122,9 +123,21 @@ export function RequestDetailPage() {
             <button className="btn" disabled={busy} onClick={() => run(() => api.takeInquiry(data.id))}>
               {uiText("Принять в обработку")}</button>
           ) : null}
+          {data.conversationId ? (
+            <Link
+              className={data.status === "in_progress" ? "btn" : "btn secondary"}
+              to={`/conversations/${data.conversationId}`}
+              {...tip(uiText("Открыть WhatsApp-диалог по заявке"))}
+            >
+              {uiText("Написать")}</Link>
+          ) : data.contactId ? (
+            <Link className="btn secondary" to={`/contacts/${data.contactId}`} {...tip(uiText("Открыть карточку клиента"))}>
+              {uiText("Карточка клиента")}</Link>
+          ) : null}
+          {(aiManagerAllowed && data.automation?.canStart && !closed && !caps.manager) || data.automation?.canTakeover || (data.automation?.canReturnAi && !caps.manager) ? <details className="request-action-group"><summary>{uiText("Управление AI")}</summary><div className="actions">
           {aiManagerAllowed && data.automation?.canStart && !closed && !caps.manager ? (
             <button
-              className="btn"
+              className="btn secondary"
               disabled={busy}
               {...tip(
                 data.automation.status === "awaiting_confirm"
@@ -160,17 +173,7 @@ export function RequestDetailPage() {
             >
               {uiText("Передать обратно AI")}</button>
           ) : null}
-          {data.conversationId ? (
-            <Link
-              className="btn secondary"
-              to={`/conversations/${data.conversationId}`}
-              {...tip(uiText("Открыть WhatsApp-диалог по заявке"))}
-            >
-              {uiText("Написать")}</Link>
-          ) : data.contactId ? (
-            <Link className="btn secondary" to={`/contacts/${data.contactId}`} {...tip(uiText("Открыть карточку клиента"))}>
-              {uiText("Написать")}</Link>
-          ) : null}
+          </div></details> : null}
           {CALLS_ENABLED && canCall ? (
             <a
               className="btn secondary"
@@ -187,7 +190,7 @@ export function RequestDetailPage() {
             {uiText("Создать задачу")}</Link>
           {!data.hasDeal && !closed ? (
             <button
-              className="btn"
+              className="btn secondary"
               disabled={busy}
               {...tip(uiText("Создать сделку по этой заявке"))}
               onClick={() => setShowDealConfirm(true)}
@@ -397,8 +400,8 @@ export function RequestDetailPage() {
             </div>
           </div>
 
-          <div className="panel">
-            <h3>{uiText("Источник")}</h3>
+          <details className="panel request-detail-disclosure">
+            <summary>{uiText("Источник")}</summary>
             <div className="kv">
               <div>
                 <dt>{uiText("Канал обращения")}</dt>
@@ -423,10 +426,10 @@ export function RequestDetailPage() {
                 {data.utmCampaign ? ` · ${data.utmCampaign}` : ""}
               </p>
             ) : null}
-          </div>
+          </details>
 
-          <div className="panel">
-            <h3>{uiText("История")}</h3>
+          <details className="panel request-detail-disclosure">
+            <summary>{uiText("История")}</summary>
             <div className="timeline">
               {(data.timeline || []).length === 0 ? <p className="muted">{uiText("Пока пусто")}</p> : null}
               {(data.timeline || []).map((item: any) => (
@@ -437,7 +440,7 @@ export function RequestDetailPage() {
                 </div>
               ))}
             </div>
-          </div>
+          </details>
         </div>
 
         <div className="request-side-col">

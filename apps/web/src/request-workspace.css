@@ -1,0 +1,133 @@
+#request-extra-filters[hidden] {
+  display: none !important;
+}
+.requests-page .search-bar {
+  margin: 0 0 16px;
+  gap: 8px;
+}
+.requests-page .request-filter-board {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.requests-page .request-filter-group > .request-filter-label {
+  display: none;
+}
+.requests-page .request-status-tabs {
+  border: 0;
+  background: transparent;
+  border-radius: 0;
+  width: 100%;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.requests-page .request-status-tabs .chip {
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 10px;
+  padding: 9px 12px;
+  font-size: 13px;
+  color: var(--muted);
+  min-height: 38px;
+}
+.requests-page .request-status-tabs .chip.active {
+  background: #e8f1ff;
+  color: #0066cc;
+  border-color: #bdd5f5;
+  font-weight: 600;
+}
+#request-extra-filters {
+  padding: 18px;
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+}
+#request-extra-filters .request-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+#request-extra-filters .request-toolbar > label {
+  flex: 1;
+  min-width: 180px;
+}
+#request-extra-filters select {
+  width: 100%;
+}
+.request-filter-active {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0;
+}
+.request-filter-active .chip {
+  border-radius: 20px;
+  background: #edf3fb;
+  border: 1px solid #dce7f5;
+  color: #43607f;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 7px 11px;
+  min-height: 34px;
+}
+.request-action-group {
+  width: 100%;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+  order: 5;
+}
+.request-action-group summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 13px;
+  padding: 9px 0;
+}
+.request-action-group > .actions {
+  margin-top: 6px;
+}
+.request-detail-disclosure > summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 15px;
+}
+.request-detail-disclosure[open] > summary {
+  margin-bottom: 16px;
+}
+@media (max-width: 767px) {
+  .requests-page .request-status-tabs {
+    flex-wrap: nowrap;
+    overflow: auto;
+    padding-bottom: 8px;
+    max-width: 100%;
+    scrollbar-width: thin;
+  }
+  .requests-page .request-status-tabs .chip {
+    white-space: nowrap;
+    flex: none;
+    min-height: 44px;
+  }
+  .requests-page .request-filter-group {
+    min-width: 0;
+  }
+  .requests-page .search-bar {
+    display: flex;
+    flex-wrap: wrap;
+  }
+  .requests-page .search-bar > input {
+    width: 100%;
+    flex-basis: 100%;
+  }
+  .requests-page .search-bar > .btn {
+    flex: 1;
+  }
+  .request-filter-active .chip {
+    min-height: 40px;
+  }
+  #request-extra-filters {
+    padding: 14px;
+  }
+}

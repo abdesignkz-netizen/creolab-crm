@@ -2,6 +2,7 @@ import { uiText, useUiText, localizeUiOptions, uiMessage, uiNotificationBody } f
 import { lazy, Suspense, useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { api, clearTenant, setTenant } from "./lib/api";
+import { WorkspaceSearchDialog, WorkspaceSearchTrigger } from "./components/WorkspaceSearch";
 import { NavIcon } from "./components/NavIcon";
 import { BrandLogo } from "./components/BrandLogo";
 import { PasswordInput } from "./components/PasswordInput";
@@ -104,6 +105,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
   const [navHrefs, setNavHrefs] = useState<Record<string, string>>({});
   const [notifyBanner, setNotifyBanner] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [helpTicketId, setHelpTicketId] = useState<string | null>(null);
   const [helpUnread, setHelpUnread] = useState(0);
@@ -476,7 +478,9 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
         </div>
       ) : null}
       <PaywallDialog />
+      {hasCompany && !inServiceAdmin ? <WorkspaceSearchDialog key={tenantId} open={searchOpen} onOpen={() => setSearchOpen(true)} onClose={() => setSearchOpen(false)} /> : null}
       <header className="mobile-topbar">
+        {hasCompany && !inServiceAdmin ? <WorkspaceSearchTrigger compact onClick={() => setSearchOpen(true)} /> : null}
           <div className="mobile-topbar-title">
           <b>{pageTitle}</b>
           <span className="muted">{me.activeTenant?.tenant?.name || t(locale, "nav.noCompany")}</span>
@@ -561,7 +565,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
       <main className="main">
         <div className="workspace-toolbar">
           <div className="workspace-breadcrumb"><span>{pageTitle}</span></div>
-          {hasCompany && !inServiceAdmin ? <WorkspaceSearch /> : null}
+          {hasCompany && !inServiceAdmin ? <WorkspaceSearchTrigger onClick={() => setSearchOpen(true)} /> : null}
           <div className="workspace-identity">
             {inServiceAdmin || !me?.billing?.entitlements?.SUPPORT ? null : (
             <SupportHelpButton unread={helpUnread} onClick={() => { setHelpTicketId(null); setHelpOpen(true); }} />
@@ -985,83 +989,6 @@ function Login() {
           <a href={legalUrl("consent")} target="_blank" rel="noopener noreferrer">{t(locale, "legal.consent")}</a>
         </nav>
       </div>
-    </div>
-  );
-}
-
-function WorkspaceSearch() {
-  const locale = useLocale();
-  const navigate = useNavigate();
-  const [q, setQ] = useState("");
-  const [items, setItems] = useState<Array<{ type: string; id: string; title: string; subtitle?: string; href: string }>>([]);
-  const [open, setOpen] = useState(false);
-  const boxRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const query = q.trim();
-    if (query.length < 2) {
-      setItems([]);
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      void api.searchWorkspace(query).then((result: any) => {
-        if (q.trim() === query) setItems(result.items || []);
-      }).catch(() => {
-        if (q.trim() === query) setItems([]);
-      });
-    }, 220);
-    return () => window.clearTimeout(timer);
-  }, [q]);
-
-  useEffect(() => {
-    function onDoc(event: globalThis.MouseEvent) {
-      if (!boxRef.current?.contains(event.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, []);
-
-  const typeLabel: Record<string, string> = {
-    contact: t(locale, "search.contact"),
-    company: t(locale, "search.company"),
-    deal: t(locale, "search.deal"),
-    inquiry: t(locale, "search.inquiry"),
-    task: t(locale, "search.task"),
-    conversation: t(locale, "search.conversation"),
-  };
-
-  return (
-    <div className="workspace-search" ref={boxRef}>
-      <input
-        value={q}
-        onChange={(event) => {
-          setQ(event.target.value);
-          setOpen(true);
-        }}
-        onFocus={() => setOpen(true)}
-        placeholder={t(locale, "search.placeholder")}
-        aria-label={t(locale, "search.label")}
-      />
-      {open && q.trim().length >= 2 ? (
-        <div className="workspace-search-results">
-          {items.length === 0 ? <div className="muted">{t(locale, "search.empty")}</div> : null}
-          {items.map((item) => (
-            <button
-              type="button"
-              key={`${item.type}:${item.id}`}
-              className="workspace-search-item"
-              onClick={() => {
-                setOpen(false);
-                setQ("");
-                navigate(item.href);
-              }}
-            >
-              <span>{item.title}</span>
-              <span className="muted">{[typeLabel[item.type] || item.type, item.subtitle].filter(Boolean).join(" · ")}</span>
-            </button>
-          ))}
-        </div>
-      ) : null}
     </div>
   );
 }

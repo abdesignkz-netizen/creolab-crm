@@ -1,8 +1,11 @@
+import { WorkspaceSectionNav } from "../components/WorkspaceSectionNav";
+import { useUrlState } from "../lib/useUrlState";
+import "../entity-workspace.css";
 import { InlineFeedback } from "../components/InlineFeedback";
 import { uiTaskStatus, uiTaskTitle, uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale } from "../lib/uiText";
 import { notifySaved } from "../components/SaveNotice";
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { nameWithPhone, phoneText } from "../lib/contactDisplay";
 import { formatWaitSince } from "../lib/duration";
 import { api } from "../lib/api";
@@ -17,9 +20,11 @@ export function ContactPage() {
   const caps = useCapabilities();
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  const returnTo = typeof location.state?.clientList === "string" && (location.state.clientList === "/contacts" || location.state.clientList.startsWith("/contacts?")) ? location.state.clientList : "/contacts";
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState("");
-  const [tab, setTab] = useState<"history" | "requests" | "conversations" | "deals" | "tasks">("history");
+  const [tab, setTab] = useUrlState("section", "overview", ["overview", "history", "requests", "conversations", "deals", "tasks"] as const);
   const [menuOpen, setMenuOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [companyLinkOpen, setCompanyLinkOpen] = useState(false);
@@ -109,8 +114,8 @@ export function ContactPage() {
     <section className="contact-page">
       <div className="page-head">
         <div>
-          <Link className="muted" to="/contacts">{uiText("← Клиенты")}</Link>
-          <h2>{nameWithPhone(client.name, client.phone)}</h2>
+          <Link className="muted" to={returnTo}>{uiText("← Клиенты")}</Link>
+          <h2>{client.name || uiText("Без имени")}</h2>
           <div className="muted">
             {phoneText(client.phone)}
             {client.companyName ? ` · ${client.companyName}` : ""}
@@ -238,6 +243,15 @@ export function ContactPage() {
         </div>
       </div>
 
+      <WorkspaceSectionNav label={uiText("Раздел клиента")} value={tab} onChange={setTab} options={[
+        { id: "overview", label: uiText("Обзор") },
+        { id: "requests", label: `${uiText("Заявки")} · ${requests.length}` },
+        { id: "conversations", label: `${uiText("Диалоги")} · ${conversations.length}` },
+        { id: "deals", label: `${uiText("Сделки")} · ${deals.length}` },
+        { id: "tasks", label: `${uiText("Задачи")} · ${tasks.length}` },
+        { id: "history", label: uiText("История") },
+      ]} />
+
       {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
 
       {deleteConfirm && caps.companyAdmin ? (
@@ -344,6 +358,7 @@ export function ContactPage() {
         </form>
       ) : null}
 
+      <div hidden={tab !== "overview"} className="entity-section">
       <div className="summary-card">
         <p>{client.summary}</p>
         <div className="summary-grid">
@@ -589,23 +604,9 @@ export function ContactPage() {
         </aside>
       </div>
 
-      <div className="actions chip-row">
-        {(
-          [
-            ["history", uiText("История")],
-            ["requests", uiText("Заявки")],
-            ["conversations", uiText("Диалоги")],
-            ["deals", uiText("Сделки")],
-            ["tasks", uiText("Задачи")],
-          ] as const
-        ).map(([value, label]) => (
-          <button key={value} className={tab === value ? "btn" : "btn secondary"} onClick={() => setTab(value)}>
-            {label}
-          </button>
-        ))}
       </div>
 
-      {tab === "history" ? (
+      <div hidden={tab !== "history"} className="entity-section">
         <div className="timeline">
           {timeline.length === 0 ? <p className="empty">{uiText("История пока пуста")}</p> : null}
           {timeline.map((item: any) => (
@@ -656,10 +657,11 @@ export function ContactPage() {
             </form>}
           </div>
         </div>
-      ) : null}
+      </div>
 
       {tab === "requests" ? (
         <div>
+          {requests.length === 0 ? <p className="empty">{uiText("Заявок нет")}</p> : null}
           {requests.map((item: any) => (
             <div className="row" key={item.id}>
               <div>
@@ -691,7 +693,7 @@ export function ContactPage() {
         <div>
           {deals.length === 0 ? <p className="empty">{uiText("Сделок нет")}</p> : null}
           {deals.map((item: any) => (
-            <div className="row" key={item.id}>
+            <Link className="row entity-record-link" key={item.id} to={`/deals/${item.id}`}>
               <div>
                 <b>{item.title}</b>
                 <div className="muted">
@@ -700,7 +702,8 @@ export function ContactPage() {
                   {item.createdLabel ? ` · ${item.createdLabel}` : ""}
                 </div>
               </div>
-            </div>
+              <span aria-hidden="true">↗</span>
+            </Link>
           ))}
         </div>
       ) : null}
@@ -709,7 +712,7 @@ export function ContactPage() {
         <div>
           {tasks.length === 0 ? <p className="empty">{uiText("Задач нет")}</p> : null}
           {tasks.map((item: any) => (
-            <div className="row" key={item.id}>
+            <Link className="row entity-record-link" key={item.id} to={`/tasks?open=${item.id}`}>
               <div>
                 <b>{uiTaskTitle(item)}</b>
                 <div className="muted">
@@ -718,12 +721,13 @@ export function ContactPage() {
                   {item.overdue ? uiText(" · просрочено") : ""}
                 </div>
               </div>
-            </div>
+              <span aria-hidden="true">↗</span>
+            </Link>
           ))}
         </div>
       ) : null}
 
-      <details className="card">
+      <details className="card" hidden={tab !== "overview"}>
         <summary>{uiText("Системная информация")}</summary>
         <p className="muted">
           Client ID: {client.id}
