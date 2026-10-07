@@ -8,7 +8,6 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { PeriodSelector, type PeriodPreset } from "../components/PeriodSelector";
 import { nameWithPhone } from "../lib/contactDisplay";
-import { formatDurationMinutes } from "../lib/duration";
 import { api } from "../lib/api";
 import { useCapabilities, useSession } from "../lib/session";
 
@@ -55,13 +54,9 @@ const ASK_PRESETS = [
   "Сравни с прошлой неделей.",
 ];
 
-function ageLabel(locale: string, minutes?: number | null) {
-  return formatDurationMinutes(minutes, locale) || systemText(locale, "срок не указан");
-}
-
-function timeShort(locale: string, iso: string | null | undefined) {
+function timeShort(locale: string, iso: string | null | undefined, month: "short" | "2-digit" = "short") {
   if (!iso) return "";
-  return new Date(iso).toLocaleString(locale === "kk" ? "kk-KZ" : "ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+  return new Date(iso).toLocaleString(locale === "kk" ? "kk-KZ" : "ru-RU", { day: "2-digit", month, hour: "2-digit", minute: "2-digit" });
 }
 
 function dayGreeting(locale: string) {
@@ -573,26 +568,27 @@ export function SituationPage() {
       <div className="sit-section sit-attention dash-panel" id="attention">
         <div className="sit-section-head">
           <div>
-            <h3>{systemText(locale, "Требует внимания")}</h3>
-            <p className="muted sit-attn-principle">
-              {(locale !== "kk" && attention.principle) || systemText(locale, "Только то, где человек должен что-то сделать сейчас: ответить клиенту, забрать диалог у AI, закрыть просроченное, задать шаг или дописать телефон. Диалог уже у менеджера без ожидания ответа сюда не попадает.")}
-            </p>
+            <h3>{systemText(locale, "Требует внимания")} <span className="attention-count">{visibleAttention.length}</span></h3>
+            <p className="muted sit-attn-principle">{systemText(locale, "Клиенты, сроки и дела, которым нужен ваш следующий шаг.")}</p>
           </div>
         </div>
 
         <div className="dashboard-attention-filter" role="group" aria-label={systemText(locale, "Какие действия показывать")} aria-describedby="dashboard-attention-help">
-          <span className="muted">{systemText(locale, "Какие действия показывать")}</span>
           <div className="segmented sit-scope">
             <button type="button" className={!onlyImportant ? "btn" : "btn secondary"} aria-pressed={!onlyImportant}
               data-tip={systemText(locale, "Показать весь список действий, требующих внимания")} onClick={() => setOnlyImportant(false)}>{systemText(locale, "Все действия")}</button>
             <button type="button" className={onlyImportant ? "btn" : "btn secondary"} aria-pressed={onlyImportant}
               data-tip={systemText(locale, "Оставить ответы клиентам, просрочки, помощь AI и записи без контакта или следующего шага")} onClick={() => setOnlyImportant(true)}>{systemText(locale, "Приоритетные действия")}</button>
           </div>
-          <p className="muted dashboard-filter-help" id="dashboard-attention-help">
-            {onlyImportant
-              ? systemText(locale, "Ответы клиентам, просроченные задачи, сроки и оплаты, помощь AI, записи без контакта или следующего шага.")
-              : systemText(locale, "Все действия из списка «Требует внимания».")}
-            {" "}{systemText(locale, "Этот переключатель меняет только список ниже; показатели обзора остаются прежними.")}</p>
+          <details className="attention-help">
+            <summary>{systemText(locale, "Что в этом списке?")}</summary>
+            <p className="muted dashboard-filter-help" id="dashboard-attention-help">
+              {onlyImportant
+                ? systemText(locale, "Ответы клиентам, просроченные задачи, сроки и оплаты, помощь AI, записи без контакта или следующего шага.")
+                : systemText(locale, "Все действия из списка «Требует внимания».")}
+              {" "}{systemText(locale, "Этот переключатель меняет только список ниже; показатели обзора остаются прежними.")}
+            </p>
+          </details>
         </div>
         {attentionFilter ? <button className="btn secondary" onClick={() => setAttentionFilter("")}>{systemText(locale, "Снять отбор по типу действия")}</button> : null}
         {visibleAttention.length === 0 ? (
@@ -600,22 +596,21 @@ export function SituationPage() {
         ) : (
           visibleAttention.map((item: any) => (
             <div className={`dash-attn-item severity-${item.severity}`} key={item.id}>
-              <span className="attention-icon" aria-hidden="true"><DashIcon d={item.nextAction === "complete_phone" ? ICONS.phone : item.nextAction === "complete_task" ? ICONS.tasks : ICONS.warning} /></span>
               <div className="attention-content">
-                <div className="sit-attn-why">
-                  {item.whyLabel ? <b>{item.whyLabel}</b> : null}
-                  {item.reason && item.reason !== item.whyLabel ? <span>{item.reason}</span> : null}
+                <div className="attention-identity">
+                  <Link className="attention-name" to={item.href || "/today"}>{item.contactName || uiTaskTitle(item) || systemText(locale, "Без имени")}</Link>
+                  {item.phone ? <span className="attention-phone">{item.phone}</span> : null}
                 </div>
-                <b>{nameWithPhone(item.contactName || item.title, item.phone, locale)}</b>
-                {item.interest && item.interest !== item.reason ? <div className="muted">{item.interest}</div> : null}
-                {item.contactName && item.title && item.title !== item.contactName && item.title !== item.interest ? (
-                  <div className="muted">{uiTaskTitle(item)}</div>
-                ) : null}
-                <div className="attention-next muted">
-                  <span>{actionLabel(locale, item) || item.nextAction}</span>
-                  <span>{ageLabel(locale, item.ageMinutes)}</span>
-                  {item.ownerMembershipId ? null : <span>{systemText(locale, "Без ответственного")}</span>}
+                <div className="attention-context">
+                  {item.contactName && item.title && item.title !== item.contactName && item.title !== item.interest ? <span>{uiTaskTitle(item)}</span> : null}
+                  {item.interest && item.interest !== item.reason ? <span>{item.interest}</span> : null}
                 </div>
+                <div className="attention-state">
+                  {item.whyLabel ? <span className="attention-status"><DashIcon d={item.waitingReply || item.kind === "contact_needs_reply" ? ICONS.reply : item.nextAction === "complete_phone" ? ICONS.phone : ICONS.clock} />{item.whyLabel}</span> : null}
+                  {item.reason && item.reason !== item.whyLabel ? <span className="attention-reason">{item.reason}</span> : null}
+                  {item.dueAt && !item.waitingReply && item.kind !== "contact_needs_reply" ? <time className="attention-reason" dateTime={item.dueAt}>{systemText(locale, "Срок")}: {timeShort(locale, item.dueAt, "2-digit")}</time> : null}
+                </div>
+                {!item.ownerMembershipId ? <span className="attention-owner"><DashIcon d={ICONS.human} />{systemText(locale, "Без ответственного")}</span> : null}
                 {item.nextAction === "complete_phone" ? (
                   <form
                     className="inline-form"
@@ -628,18 +623,18 @@ export function SituationPage() {
                       );
                     }}
                   >
-                    <input name="name" placeholder={systemText(locale, "Имя")} />
-                    <input name="phone" required placeholder="+7..." />
+                    <input name="name" aria-label={systemText(locale, "Имя")} placeholder={systemText(locale, "Имя")} />
+                    <input name="phone" type="tel" aria-label={systemText(locale, "Телефон")} required placeholder="+7..." />
                     <button className="btn" disabled={busyId === item.id} type="submit">
                       {systemText(locale, "Сохранить контакт")}</button>
                   </form>
                 ) : null}
               </div>
-              <div className="actions">
+              <div className="attention-actions">
                 {item.nextAction !== "complete_phone" ? (
                   <button
                     type="button"
-                    className="btn"
+                    className="btn attention-primary"
                     disabled={busyId === item.id}
                     onClick={() => {
                       if (item.nextAction === "accept_inquiry") return void run(item, () => api.acceptInquiry(item.entityId));
@@ -670,8 +665,8 @@ export function SituationPage() {
                     {actionLabel(locale, item) || systemText(locale, "Открыть")}
                   </button>
                 ) : null}
-                <Link className="btn secondary" to={item.href || "/today"}>
-                  {systemText(locale, "Карточка")}</Link>
+                <Link className="attention-details" to={item.href || "/today"}>
+                  {systemText(locale, "Карточка")} <span aria-hidden="true">↗</span></Link>
               </div>
             </div>
           ))
