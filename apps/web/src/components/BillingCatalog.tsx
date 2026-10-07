@@ -77,6 +77,7 @@ export function BillingCatalog({ items, period, selected, current, disabled, onS
   disabled: boolean; onSelect: (code: string) => void;
 }) {
   const locale = useLocale();
+  const bt = (ru: string, kk: string, en: string) => locale === "kk" ? kk : locale === "en" ? en : ru;
   const available = items.filter((item) => item.kind !== "addon" && item.catalogStatus === "AVAILABLE");
   const enterprise = available.find((item) => item.code === "CRM_ENTERPRISE");
   const comparison = GROUPS[0].codes.flatMap(code => available.find(item => item.code === code) || []);
@@ -100,24 +101,21 @@ export function BillingCatalog({ items, period, selected, current, disabled, onS
       <p className="muted billing-audience">{systemText(locale, AUDIENCE[item.code] || item.description)}</p>
       {item.included?.length ? <p className="billing-composition">{systemText(locale, "В составе:")}{" "}{item.included.map((row) => items.find((entry) => entry.code === row.code)?.name || row.code).join(" + ")}.</p> : null}
       <p className="billing-price">{priceText(item)}</p>
-      <p className="muted billing-price-note">{free ? systemText(locale, "Ручная работа с клиентами, сделками и задачами. Без оплаты и подтверждения администратора.") : systemText(locale, "Указана стоимость базовой конфигурации. Дополнительные подключения и ресурсы оплачиваются отдельно.")}</p>
       <dl className="billing-plan-limits">
-        {DISPLAY_LIMITS.map((key) => <div key={key}><dt>{key === "AI_CREDITS" ? systemText(locale, "AI-кредиты") : key === "AUTOMATION_RUNS" ? systemText(locale, "Запуски автоматизации") : key === "DOCUMENTS_COUNT" ? systemText(locale, "Документы") : key === "CAMPAIGN_RECIPIENTS" ? systemText(locale, "Рассылки · получатели") : systemText(locale, LIMIT_LABEL[key])}</dt><dd>{item.limits[key] === -1 ? systemText(locale, "Без квоты") : item.limits[key] === 0 && key === "CAMPAIGN_RECIPIENTS" ? systemText(locale, "С тарифа Start") : item.limits[key] == null ? systemText(locale, "По условиям тарифа") : resourceText(item, key, locale)}</dd></div>)}
+        {DISPLAY_LIMITS.filter(key => ["USERS", "AI_CREDITS", "WHATSAPP_CONNECTIONS", "STORAGE_GB"].includes(key)).map((key) => <div key={key}><dt>{key === "AI_CREDITS" ? systemText(locale, "AI-кредиты") : key === "AUTOMATION_RUNS" ? systemText(locale, "Запуски автоматизации") : key === "DOCUMENTS_COUNT" ? systemText(locale, "Документы") : key === "CAMPAIGN_RECIPIENTS" ? systemText(locale, "Рассылки · получатели") : systemText(locale, LIMIT_LABEL[key])}</dt><dd>{item.limits[key] === -1 ? systemText(locale, "Без квоты") : item.limits[key] === 0 && key === "CAMPAIGN_RECIPIENTS" ? systemText(locale, "С тарифа Start") : item.limits[key] == null ? systemText(locale, "По условиям тарифа") : resourceText(item, key, locale)}</dd></div>)}
       </dl>
-      {item.code === "CRM_START" ? <p className="muted">{systemText(locale, "По сравнению с Free: ×10 автоматизаций и документов, до 3 пользователей, 5 ГБ хранилища, ежемесячные AI-кредиты и рассылки до 300 получателей.")}</p> : null}
-      <ul className="billing-feature-list">{highlights(item, locale).map((text) => <li key={text}>{text}</li>)}</ul>
       <button type="button" className={`btn ${selectedItem ? "" : "secondary"}`} aria-pressed={selectedItem} disabled={disabled || current === item.code} data-tip={systemText(locale, "Выбрать {p0} и посмотреть расчёт", { p0: item.name })} onClick={() => onSelect(item.code)}>
         {current === item.code ? systemText(locale, "Ваш тариф") : free ? systemText(locale, "Начать бесплатно") : selectedItem ? systemText(locale, "Выбран {p0}", { p0: item.name }) : systemText(locale, "Выбрать {p0}", { p0: item.name })}
       </button>
+      <details className="billing-details"><summary>{bt("Что входит в тариф", "Тарифке не кіреді", "What’s included")}</summary>
+      <p className="muted billing-price-note">{free ? systemText(locale, "Ручная работа с клиентами, сделками и задачами. Без оплаты и подтверждения администратора.") : systemText(locale, "Указана стоимость базовой конфигурации. Дополнительные подключения и ресурсы оплачиваются отдельно.")}</p>
+      {item.code === "CRM_START" ? <p className="muted">{systemText(locale, "По сравнению с Free: ×10 автоматизаций и документов, до 3 пользователей, 5 ГБ хранилища, ежемесячные AI-кредиты и рассылки до 300 получателей.")}</p> : null}
+      <ul className="billing-feature-list">{highlights(item, locale).map((text) => <li key={text}>{text}</li>)}</ul>
+      </details>
     </article>;
   }
   return <div id="billing-catalog" className="billing-catalog stack">
     <div><h3>{systemText(locale, "Выберите тариф под свою задачу")}</h3><p className="muted">{systemText(locale, "Один продукт — четыре масштаба работы. CRM и BasQar Control доступны во всех тарифах. ИИ-менеджер: пробный режим в Free, включён в Business и Pro. Массовые рассылки доступны со Start.")}</p></div>
-    <p className="muted">{systemText(locale, "1 AI-кредит ≈ одно стандартное AI-действие. Ресурсы обновляются каждый расчётный месяц, в том числе при оплате за год, и не переносятся. 100 AI-кредитов Free выдаются один раз, в том числе для ознакомления с ИИ-менеджером. AI-кредиты Start используются для BasQar Control и других доступных AI-действий; ИИ-менеджер в Start не входит. Стоимость услуг внешнего WhatsApp-провайдера не входит в тариф BasQar.")}</p>
-    <nav className="billing-section-links" aria-label={systemText(locale, "Группы тарифов")}>
-      {GROUPS.map((group) => <a key={group.id} href={`#billing-${group.id}`}>{systemText(locale, group.title)}</a>)}
-      <a href="#billing-comparison">{systemText(locale, "Сравнить возможности")}</a>
-    </nav>
     {GROUPS.map((group) => {
       const plans = group.codes.flatMap((code) => available.find((item) => item.code === code) || []);
       if (!plans.length) return null;
@@ -126,6 +124,9 @@ export function BillingCatalog({ items, period, selected, current, disabled, onS
         <div className={`billing-plan-grid ${plans.length === 3 ? "three" : ""}`}>{plans.map(card)}</div>
       </section>;
     })}
+    <details className="panel billing-details"><summary>{bt("Как считаются лимиты и AI-кредиты", "Лимиттер мен AI-кредиттер қалай есептеледі", "How limits and AI credits work")}</summary>
+    <p className="muted">{systemText(locale, "1 AI-кредит ≈ одно стандартное AI-действие. Ресурсы обновляются каждый расчётный месяц, в том числе при оплате за год, и не переносятся. 100 AI-кредитов Free выдаются один раз, в том числе для ознакомления с ИИ-менеджером. AI-кредиты Start используются для BasQar Control и других доступных AI-действий; ИИ-менеджер в Start не входит. Стоимость услуг внешнего WhatsApp-провайдера не входит в тариф BasQar.")}</p>
+    </details>
     <details id="billing-comparison" className="panel billing-comparison">
       <summary>{systemText(locale, "Подробное сравнение всех тарифов")}</summary>
       <p className="muted">{systemText(locale, "«Включено» означает доступ по тарифу. Каналы связи и ИС ЭСФ требуют настройки подключения. Количество подключений коммуникационных каналов указано в лимитах.")}</p>

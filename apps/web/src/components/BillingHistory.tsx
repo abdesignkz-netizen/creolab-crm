@@ -13,7 +13,13 @@ import {
   downloadBillingInvoice,
 } from "./BillingCheckoutUi";
 
-export function BillingHistory({ onPay }: { onPay: () => void }) {
+export function BillingHistory({
+  showHistory,
+  onPendingOrder,
+}: {
+  showHistory: boolean;
+  onPendingOrder: (id: string | null) => void;
+}) {
   const t = useBillingText(),
     errorText = useBillingError();
   const [data, setData] = useState<any>(null),
@@ -36,6 +42,13 @@ export function BillingHistory({ onPay }: { onPay: () => void }) {
   useEffect(() => {
     void load();
   }, []);
+  useEffect(() => {
+    if (data)
+      onPendingOrder(
+        data.orders.find((o: any) => o.status === "PENDING_PAYMENT")?.id ||
+          null,
+      );
+  }, [data, onPendingOrder]);
   const method = (m: string) =>
     ({
       CARD: t("Карта", "Карта", "Card"),
@@ -63,7 +76,14 @@ export function BillingHistory({ onPay }: { onPay: () => void }) {
     o?.snapshotJson?.lines?.find((l: any) => l.code === o.planCode)?.name ||
     "—";
   return (
-    <section className="panel stack">
+    <section
+      className="billing-payments stack"
+      aria-label={t(
+        "Заказы и платежи",
+        "Тапсырыстар мен төлемдер",
+        "Orders and payments",
+      )}
+    >
       {error && <InlineFeedback className="error">{error}</InlineFeedback>}
       {!data && !error && (
         <p role="status">
@@ -72,94 +92,24 @@ export function BillingHistory({ onPay }: { onPay: () => void }) {
       )}
       {data && (
         <>
-          <div className="billing-checkout-head">
-            <h3>
-              {t(
-                "Подписка и платежи",
-                "Жазылым және төлемдер",
-                "Subscription & payments",
-              )}
+          {data.subscription &&
+            ["past_due", "grace_period", "suspended", "expired"].includes(
+              data.subscription.status,
+            ) && (
+              <div className="billing-warning">
+                {t(
+                  "Для продолжения работы оплатите подписку. Данные компании сохранены.",
+                  "Жұмысты жалғастыру үшін жазылым ақысын төлеңіз. Компания деректері сақталған.",
+                  "Pay your subscription to continue. Your company data is preserved.",
+                )}
+                {data.subscription.gracePeriodEndsAt &&
+                  ` ${t("Оплатить до", "Төлем мерзімі", "Pay by")} ${billingDate(data.subscription.gracePeriodEndsAt)}`}
+              </div>
+            )}
+          {data.orders.some((o: any) => o.status === "PENDING_PAYMENT") && (
+            <h3 id="billing-orders">
+              {t("Требует внимания", "Назар аудару қажет", "Needs attention")}
             </h3>
-            {data.subscription && (
-              <BillingStatus status={data.subscription.status} />
-            )}
-          </div>
-          {data.subscription && (
-            <>
-              <p>
-                {billingMoney(data.subscription.amountMinor || 0)} /{" "}
-                {period(data.subscription.billingPeriod)} ·{" "}
-                {method(data.subscription.paymentMethod)}
-              </p>
-              <p>
-                {t(
-                  "Следующая дата оплаты",
-                  "Келесі төлем күні",
-                  "Next payment date",
-                )}
-                : {billingDate(data.subscription.endsAt)} ·{" "}
-                {t("Автопродление", "Автоматты ұзарту", "Auto-renewal")}:{" "}
-                {data.subscription.autoRenew
-                  ? t("Включено", "Қосулы", "On")
-                  : t("Выключено", "Өшірулі", "Off")}
-              </p>
-              {["past_due", "grace_period", "suspended", "expired"].includes(
-                data.subscription.status,
-              ) && (
-                <div className="billing-warning">
-                  {t(
-                    "Для продолжения работы оплатите подписку. Данные компании сохранены.",
-                    "Жұмысты жалғастыру үшін жазылым ақысын төлеңіз. Компания деректері сақталған.",
-                    "Pay your subscription to continue. Your company data is preserved.",
-                  )}{" "}
-                  {data.subscription.gracePeriodEndsAt &&
-                    `${t("Оплатить до", "Төлем мерзімі", "Pay by")} ${billingDate(data.subscription.gracePeriodEndsAt)}`}
-                </div>
-              )}
-              {data.subscription.autoRenew && (
-                <button
-                  className="btn secondary"
-                  disabled={busy}
-                  onClick={() => void action(() => api.billingCancelRenewal())}
-                >
-                  {t(
-                    "Отключить автопродление",
-                    "Автоматты ұзартуды өшіру",
-                    "Turn off auto-renewal",
-                  )}
-                </button>
-              )}
-              <button className="btn" disabled={busy} onClick={onPay}>
-                {t(
-                  "Оплатить / изменить способ оплаты",
-                  "Төлеу / төлем тәсілін өзгерту",
-                  "Pay / change payment method",
-                )}
-              </button>
-              <p className="muted">
-                {t(
-                  "Способ оплаты выбирается перед новым платежом. Списаний без подтверждения не будет.",
-                  "Төлем тәсілі жаңа төлем алдында таңдалады. Растаусыз ақша алынбайды.",
-                  "Choose the method before your new payment. This button does not charge you.",
-                )}
-              </p>
-            </>
-          )}
-          <h3 id="billing-orders">
-            {t(
-              "Незавершённые заказы",
-              "Аяқталмаған тапсырыстар",
-              "Unfinished orders",
-            )}
-          </h3>
-          {!data.orders.some((o: any) => o.status === "PENDING_PAYMENT") && (
-            <p className="muted">
-              {t(
-                "Неоплаченных заказов нет",
-                "Төленбеген тапсырыстар жоқ",
-                "No unpaid orders",
-              )}
-            </p>
           )}
           {data.orders
             .filter((o: any) => o.status === "PENDING_PAYMENT")
@@ -171,7 +121,7 @@ export function BillingHistory({ onPay }: { onPay: () => void }) {
                   p.status === "PROCESSING",
               );
               return (
-                <div key={o.id} className="billing-open-order stack">
+                <div key={o.id} className="panel billing-open-order stack">
                   <div className="billing-checkout-head">
                     <strong>
                       {o.orderNumber} · {planName(o)}
@@ -179,6 +129,19 @@ export function BillingHistory({ onPay }: { onPay: () => void }) {
                     <strong>{billingMoney(o.amountMinor)}</strong>
                   </div>
                   <BillingStatus status={blocked ? "PROCESSING" : o.status} />
+                  <p className="muted">
+                    {blocked
+                      ? t(
+                          "Результат оплаты ещё не подтверждён. Проверьте статус этого заказа.",
+                          "Төлем нәтижесі әлі расталмады. Осы тапсырыстың мәртебесін тексеріңіз.",
+                          "Payment is not confirmed yet. Check this order’s status.",
+                        )
+                      : t(
+                          "Заказ создан, но ещё не оплачен. Продолжите оплату или отмените заказ.",
+                          "Тапсырыс жасалды, бірақ әлі төленбеген. Төлемді жалғастырыңыз немесе тапсырысты жойыңыз.",
+                          "This order is unpaid. Continue checkout or cancel it.",
+                        )}
+                  </p>
                   <div className="actions">
                     <Link className="btn" to={`/billing/checkout/${o.id}`}>
                       {blocked
@@ -215,99 +178,123 @@ export function BillingHistory({ onPay }: { onPay: () => void }) {
               );
             })}
 
-          <h3>{t("История платежей", "Төлем тарихы", "Payment history")}</h3>
-          {!data.payments.length ? (
-            <p className="muted">
-              {t("Платежей пока нет", "Төлемдер әлі жоқ", "No payments yet")}
-            </p>
-          ) : (
-            <div className="billing-table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    {[
-                      t("Дата", "Күні", "Date"),
-                      t("Документ / тариф", "Құжат / тариф", "Document / plan"),
-                      t("Период", "Кезең", "Period"),
-                      t("Сумма", "Сома", "Amount"),
-                      t("Способ оплаты", "Төлем тәсілі", "Method"),
-                      t("Статус", "Мәртебе", "Status"),
-                      "PDF",
-                      t("Действия", "Әрекеттер", "Actions"),
-                    ].map((h) => (
-                      <th key={h}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
+          {showHistory && (
+            <section className="panel stack billing-history-panel">
+              {data.subscription && (
+                <details className="billing-details">
+                  <summary>
+                    {t(
+                      "Настройки продления",
+                      "Ұзарту параметрлері",
+                      "Renewal settings",
+                    )}
+                  </summary>
+                  <p>
+                    {t("Автопродление", "Автоматты ұзарту", "Auto-renewal")}:{" "}
+                    {data.subscription.autoRenew
+                      ? t("Включено", "Қосулы", "On")
+                      : t("Выключено", "Өшірулі", "Off")}
+                  </p>
+                  {data.subscription.autoRenew && (
+                    <button
+                      className="btn secondary"
+                      disabled={busy}
+                      onClick={() =>
+                        void action(() => api.billingCancelRenewal())
+                      }
+                    >
+                      {t(
+                        "Отключить автопродление",
+                        "Автоматты ұзартуды өшіру",
+                        "Turn off auto-renewal",
+                      )}
+                    </button>
+                  )}
+                </details>
+              )}
+              <h3>
+                {t("История платежей", "Төлем тарихы", "Payment history")}
+              </h3>
+              {!data.payments.length ? (
+                <p className="muted">
+                  {t(
+                    "Платежей пока нет",
+                    "Төлемдер әлі жоқ",
+                    "No payments yet",
+                  )}
+                </p>
+              ) : (
+                <div className="billing-payment-list">
                   {data.payments.map((p: any) => {
-                    const o = data.orders.find((x: any) => x.id === p.orderId),
-                      inv = data.invoices.find(
-                        (x: any) => x.orderId === p.orderId,
-                      );
+                    const o = data.orders.find((x: any) => x.id === p.orderId);
+                    const inv = data.invoices.find(
+                      (x: any) => x.orderId === p.orderId,
+                    );
                     return (
-                      <tr key={p.id}>
-                        <td>{billingDate(p.paidAt || p.createdAt)}</td>
-                        <td>
-                          {o ? (
+                      <article key={p.id} className="billing-payment-row">
+                        <div className="billing-payment-description">
+                          <strong>
+                            {o
+                              ? planName(o)
+                              : t(
+                                  "Прежний платёж",
+                                  "Бұрынғы төлем",
+                                  "Earlier payment",
+                                )}
+                          </strong>
+                          <span className="muted">
+                            {billingDate(p.paidAt || p.createdAt)} ·{" "}
+                            {method(p.method)}
+                            {o ? ` · ${period(o.billingPeriod)}` : ""}
+                          </span>
+                          {o && (
                             <Link to={`/billing/checkout/${o.id}`}>
                               {inv?.invoiceNumber || o.orderNumber}
                             </Link>
-                          ) : (
-                            t(
-                              "Прежний платёж",
-                              "Бұрынғы төлем",
-                              "Earlier payment",
-                            )
                           )}
-                          <small className="billing-block muted">
-                            {planName(o)}
-                          </small>
-                        </td>
-                        <td>{o ? period(o.billingPeriod) : "—"}</td>
-                        <td>{billingMoney(p.amountMinor)}</td>
-                        <td>{method(p.method)}</td>
-                        <td>
+                        </div>
+                        <div className="billing-payment-amount">
+                          <strong>{billingMoney(p.amountMinor)}</strong>
                           <BillingStatus status={p.status} />
-                        </td>
-                        <td>
-                          {inv ? (
+                        </div>
+                        <div className="actions">
+                          {inv && (
                             <button
                               className="btn secondary"
+                              disabled={busy}
                               onClick={() =>
                                 void action(() =>
                                   downloadBillingInvoice(inv.id),
                                 )
                               }
                             >
-                              PDF
+                              {t(
+                                "Скачать счёт",
+                                "Шотты жүктеу",
+                                "Download invoice",
+                              )}{" "}
+                              · PDF
                             </button>
-                          ) : (
-                            "—"
                           )}
-                        </td>
-                        <td>
-                          {o?.status === "PENDING_PAYMENT" ? (
+                          {o?.status === "PENDING_PAYMENT" && (
                             <Link
                               className="btn secondary"
                               to={`/billing/checkout/${o.id}`}
                             >
                               {t(
-                                "Управление заказом",
-                                "Тапсырысты басқару",
-                                "Manage order",
+                                "Открыть заказ",
+                                "Тапсырысты ашу",
+                                "Open order",
                               )}
                             </Link>
-                          ) : (
-                            "—"
                           )}
-                        </td>
-                      </tr>
+                        </div>
+                      </article>
                     );
                   })}
-                </tbody>
-              </table>
-            </div>
+                </div>
+              )}
+            </section>
           )}
         </>
       )}

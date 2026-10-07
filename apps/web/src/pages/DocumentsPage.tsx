@@ -72,6 +72,7 @@ export function DocumentsPage() {
   const [disabled, setDisabled] = useState(false);
   const [loading, setLoading] = useState(true);
   const [commandText, setCommandText] = useState(searchParams.get("command") || "");
+  const [documentTool, setDocumentTool] = useState<"" | "templates" | "import" | "ai">(searchParams.get("command") ? "ai" : "");
   const [commandParse, setCommandParse] = useState<any>(null);
   const [commandDealId, setCommandDealId] = useState("");
   const [commandBusy, setCommandBusy] = useState(false);
@@ -242,17 +243,20 @@ export function DocumentsPage() {
           <h2>{uiText("Документы")}</h2>
           <p className="muted">{uiText("Договоры, счета, АВР и ЭСФ по всем сделкам")}</p>
         </div>
-        <Link className="btn secondary" to="/settings#company-requisites">
+        <Link className="btn secondary" to="/settings?section=company">
           {uiText("Реквизиты")}</Link>
       </div>
 
-      {!disabled ? (
-        <div className="documents-start-grid">
-          <ContractTemplatePanel onSaved={() => void load()} />
-          <ManualPdfImportPanel onSaved={() => void load()} />
-        </div>
-      ) : null}
-
+      {!disabled ? <div className="workspace-tools" role="group" aria-label={uiText("Действия с документами")}>
+        {([["templates", "Создать документ"], ["import", "Загрузить документ"], ["ai", "Помощь AI"]] as const).map(([id, label]) => (
+          <button key={id} type="button" className={documentTool === id ? "btn" : "btn secondary"} aria-expanded={documentTool === id} aria-controls="document-tool" onClick={() => setDocumentTool(documentTool === id ? "" : id)}>{uiText(label)}</button>
+        ))}
+      </div> : null}
+      <div id="document-tool" hidden={!documentTool || disabled}>
+        <div className="workspace-tool-heading"><button type="button" className="btn secondary" onClick={() => setDocumentTool("")}>{uiText("Закрыть")}</button></div>
+        <div hidden={documentTool !== "templates"}><ContractTemplatePanel onSaved={() => void load()} /></div>
+        <div hidden={documentTool !== "import"}><ManualPdfImportPanel onSaved={() => void load()} /></div>
+        <div hidden={documentTool !== "ai"}>
       <form
         className="panel command-compose"
         onSubmit={(e) => {
@@ -328,6 +332,8 @@ export function DocumentsPage() {
           </p>
         ) : null}
       </form>
+        </div>
+      </div>
 
       <div className="sit-toolbar documents-toolbar">
         <div className="sit-periods document-kind-filters" role="group" aria-label={uiText("Тип документа")}>

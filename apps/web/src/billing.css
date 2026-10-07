@@ -239,3 +239,54 @@
 .billing-cancel p, .billing-cancel-confirm p { margin: 0; line-height: 1.5; }
 .billing-cancel-confirm { padding: 16px; border: 1px solid #e5c99c; border-radius: 12px; background: #fffaf0; }
 @media (max-width: 600px) { .billing-open-order { padding: 14px; } .billing-cancel .btn { width: 100%; } }
+
+/* Subscription workspace: one summary, focused sections, readable on phones. */
+.billing-page.stack { gap: 24px; }
+.billing-page .panel.stack { gap: 20px; }
+.billing-page .panel p { margin-block: 0; }
+.billing-overview { display: flex; justify-content: space-between; gap: 32px; align-items: center; border-top: 3px solid var(--primary, #0068cc); }
+.billing-overview-main { display: grid; gap: 12px; min-width: 0; }
+.billing-overview-title { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+.billing-overview-title h3 { font-size: 28px; margin: 0; }
+.billing-overview-price strong { font-size: 30px; letter-spacing: -.6px; }
+.billing-overview-actions { display: grid; gap: 10px; width: 270px; flex-shrink: 0; }
+.billing-overview-actions small { line-height: 1.5; }
+.billing-nav { display: flex; gap: 6px; padding: 6px; border: 1px solid var(--line, #dce4ef); border-radius: 14px; background: #fff; align-self: start; max-width: 100%; flex-wrap: wrap; }
+.billing-nav button { padding: 12px 18px; min-height: 44px; border: 0; border-radius: 10px; background: transparent; color: var(--muted, #62738d); font: inherit; font-weight: 600; cursor: pointer; }
+.billing-nav button.active { color: #005ac4; background: #eaf2ff; }
+.billing-nav button:hover { background: #f0f5fc; }
+.billing-nav button:focus-visible, .billing-details summary:focus-visible { outline: 2px solid #0068cc; outline-offset: 3px; }
+.billing-resources .billing-usage-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 20px; }
+.billing-resources .billing-usage { padding: 16px; border: 1px solid var(--line, #dce4ef); border-radius: 12px; }
+.billing-resources .billing-usage-label { gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
+.billing-details { line-height: 1.6; }
+.billing-details summary { cursor: pointer; font-weight: 600; padding-block: 8px; }
+.billing-details[open] > summary { margin-bottom: 16px; }
+.billing-details > p + p { margin-top: 12px; }
+.billing-payments:empty { display: none; }
+.billing-payments h3 { margin: 0; }
+.billing-payments .billing-open-order { border-color: #edd5a8; background: #fffdf8; }
+.billing-payment-row { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 14px 24px; padding: 20px 0; border-bottom: 1px solid var(--line, #dce4ef); }
+.billing-payment-row:last-child { border-bottom: 0; padding-bottom: 0; }
+.billing-payment-description, .billing-payment-amount { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.billing-payment-amount { align-items: flex-end; }
+.billing-payment-row > .actions:empty { display: none; }
+.billing-payment-row > .actions { grid-column: 1 / -1; }
+.billing-history-panel h3 { margin: 0; }
+.billing-selection { scroll-margin-top: 100px; }
+@media(max-width: 700px) {
+  .billing-overview { align-items: stretch; flex-direction: column; gap: 20px; }
+  .billing-overview-actions { width: auto; }
+  .billing-overview-title h3 { font-size: 24px; }
+  .billing-overview-price strong { font-size: 26px; }
+  .billing-nav { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
+  .billing-nav button { padding: 10px; font-size: 14px; }
+  .billing-resources .billing-usage-grid { grid-template-columns: 1fr; gap: 12px; }
+  .billing-payment-row { grid-template-columns: 1fr; }
+  .billing-payment-amount { align-items: flex-start; flex-direction: row; flex-wrap: wrap; }
+  .billing-payment-row .actions .btn { width: 100%; }
+  .billing-page .billing-checkout-head { align-items: flex-start; gap: 14px; flex-wrap: wrap; }
+}
+.billing-page > .page-head { margin-bottom: 0; }
+.billing-page .billing-resources h3 { margin: 0 0 8px; }
+.billing-page .billing-plan-card .billing-details { border-top: 1px solid var(--line, #dce4ef); }

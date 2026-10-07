@@ -1,3 +1,4 @@
+import { WorkspaceSectionNav } from "../components/WorkspaceSectionNav";
 import { InlineFeedback } from "../components/InlineFeedback";
 import { uiText, useUiText, localizeUiOptions } from "../lib/uiText";
 import { useSession } from "../lib/session";
@@ -315,9 +316,10 @@ export function AiAutomationSettingsPage() {
 
   if (!aiManagerAllowed) return <section className="panel"><h2>{uiText("ИИ-менеджер")}</h2><p>{uiText("ИИ-менеджер не входит в ваш тариф. Пробный режим доступен в Free; работа с клиентами — в Business и Pro.")}</p><Link to="/billing">{uiText("Посмотреть тарифы")}</Link></section>;
   if (!data && !error) return <div className="state">{uiText("Загрузка настроек…")}</div>;
+  if (!data) return <section><InlineFeedback kind="error">{error}</InlineFeedback><button type="button" className="btn" onClick={() => void load()}>{uiText("Повторить")}</button></section>;
 
   return (
-    <section>
+    <section className="ai-settings-workspace">
       {aiManagerTrial ? <p className="banner">{uiText("Пробный режим ИИ-менеджера для ознакомления с консультациями клиентов и обработкой заявок. В Free доступно 100 AI-кредитов один раз, общих для всех AI-функций.")}</p> : null}
       <div className="page-head">
         <div>
@@ -332,18 +334,13 @@ export function AiAutomationSettingsPage() {
       {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
       {hint ? <InlineFeedback kind="success" className="ok">{hint}</InlineFeedback> : null}
 
-      <div className="actions task-board-tabs">
-        {localizeUiOptions(SECTION_ITEMS, uiText).map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            className={section === item.id ? "btn" : "btn secondary"}
-            onClick={() => setSection(item.id)}
-          >
-            {item.label}
-          </button>
-        ))}
+      <div className="panel ai-current-summary">
+        <b>{uiText("Сейчас сохранено")}</b>
+        <p>{uiText("Новые заявки")}: {localizeUiOptions(MODE_HELP, uiText)[data?.defaultMode] || "—"}</p>
+        <p className="muted">{uiText("Обработка заявок")}: {data?.scheduleMode === "always" ? uiText("Круглосуточно") : `${uiText("По расписанию")} · ${(data?.scheduleMode === "custom" ? data?.customSchedule : data?.workingHours)?.start || "—"}–${(data?.scheduleMode === "custom" ? data?.customSchedule : data?.workingHours)?.end || "—"}`} · {data?.timezone || "Asia/Almaty"}</p>
+        <p className="muted">{uiText("Ответы в диалогах")}: {data?.conversationHours?.mode === "schedule" ? uiText("По расписанию") : uiText("Круглосуточно")}</p>
       </div>
+      <WorkspaceSectionNav label={uiText("Настройки AI")} value={section} options={localizeUiOptions(SECTION_ITEMS, uiText)} onChange={value => { setSection(value); setEditing(true); }} />
 
       {!editing ? <div className="panel saved-editor-summary">
         <b>{uiText("Настройки AI-менеджера сохранены")}</b>
@@ -364,7 +361,7 @@ export function AiAutomationSettingsPage() {
                 onChange={() => setMode(item.mode)}
               />
               <span>
-                <b>{item.label}</b>
+                <b>{uiText(item.label)}</b>
                 <span className="ai-mode-help">{localizeUiOptions(MODE_HELP, uiText)[item.mode]}</span>
               </span>
             </label>
@@ -430,8 +427,8 @@ export function AiAutomationSettingsPage() {
         <div className="panel">
           <b>{uiText("Промпт")}</b>
           <p className="muted">
-            {uiText("Текст, по которому AI отвечает клиентам, задаёт администратор сервиса. Компания его здесь не меняет — чтобы не сломать уже работающие ответы.")}</p>
-          <Link className="btn secondary" to="/settings">{uiText("Назад")}</Link>
+            {uiText("Промпт задаёт стиль общения и правила ответов AI. Чтобы изменить его, передайте администратору пожелания и примеры ответов.")}</p>
+          {me?.billing?.entitlements?.SUPPORT ? <Link className="btn secondary" to="/settings/ai-automation?support=1">{uiText("Обратиться в поддержку")}</Link> : <p className="muted">{uiText("Обратитесь к администратору вашей компании.")}</p>}
         </div>
       ) : null}
 
@@ -439,8 +436,8 @@ export function AiAutomationSettingsPage() {
         <div className="panel">
           <b>{uiText("База знаний")}</b>
           <p className="muted">
-            {uiText("Материалы о компании и услугах тоже задаёт администратор сервиса. Здесь их нельзя переписать.")}</p>
-          <Link className="btn secondary" to="/settings">{uiText("Назад")}</Link>
+            {uiText("База знаний содержит сведения о компании, услугах и ценах. Для обновления подготовьте материалы и передайте их администратору.")}</p>
+          {me?.billing?.entitlements?.SUPPORT ? <Link className="btn secondary" to="/settings/ai-automation?support=1">{uiText("Обратиться в поддержку")}</Link> : <p className="muted">{uiText("Обратитесь к администратору вашей компании.")}</p>}
         </div>
       ) : null}
 
@@ -718,14 +715,13 @@ export function AiAutomationSettingsPage() {
         </div>
       ) : null}
 
-      {section === "prompt" || section === "knowledge" ? null : (
-      <div className="actions">
+      {section !== "prompt" && section !== "knowledge" ? <div className="actions workspace-save-bar">
+        <span className="muted">{uiText("Изменения применятся после сохранения")}</span>
         <button className="btn" disabled={busy} onClick={() => void save()}>
           {uiText("Сохранить")}</button>
         <Link className="btn secondary" to="/settings">
           {uiText("Назад")}</Link>
-      </div>
-      )}
+      </div> : null}
       </>}
     </section>
   );

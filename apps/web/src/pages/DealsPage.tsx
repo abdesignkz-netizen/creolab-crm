@@ -1,3 +1,4 @@
+import { WorkspaceSectionNav } from "../components/WorkspaceSectionNav";
 import { InlineFeedback } from "../components/InlineFeedback";
 import { uiTaskTitle, uiMessage, uiText, useUiText, localizeUiOptions, uiFormatLocale , uiDurationLabel } from "../lib/uiText";
 import { esfMeasureUnitSymbol } from "@creolab/contracts";
@@ -5,7 +6,7 @@ import { notifySaved } from "../components/SaveNotice";
 import { MeasureUnitSelect } from "../components/MeasureUnitSelect";
 import { useUrlState, useRequestVersion } from "../lib/useUrlState";
 import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { PeriodSelector, type PeriodPreset } from "../components/PeriodSelector";
 import { nameWithPhone, phoneText } from "../lib/contactDisplay";
 import { api } from "../lib/api";
@@ -343,6 +344,58 @@ export function DealsPage() {
         <button className="btn secondary" onClick={() => navigate(`/deals?${new URLSearchParams({ timeMode, period, from: dateFrom, to: dateTo, basis, scope })}`)}>{uiText("Снять отбор")}</button>
       </div> : null}
 
+      <div className="sit-kpi-grid deals-summary" style={{ marginTop: 12 }}>
+        {s.mode === "period" ? (
+          <>
+            <div className="sit-kpi">
+              <span className="muted">{uiText("Создано сделок")}</span>
+              <strong>{s.createdDeals ?? "—"}</strong>
+            </div>
+            <div className="sit-kpi">
+              <span className="muted">{uiText("Закрыто успешно")}</span>
+              <strong>{s.wonDeals ?? "—"}</strong>
+            </div>
+            <div className="sit-kpi">
+              <span className="muted">{uiText("Потеряно")}</span>
+              <strong>{s.lostDeals ?? "—"}</strong>
+            </div>
+            <div className="sit-kpi">
+              <span className="muted">{uiText("Продано")}</span>
+              <strong>{s.soldAmountLabel || "—"}</strong>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="sit-kpi">
+              <span className="muted">{uiText("Активные")}</span>
+              <strong>{s.activeDeals}</strong>
+            </div>
+            <div className="sit-kpi">
+              <span className="muted">{uiText("Сумма сделок")}</span>
+              <strong>{s.pipelineAmountLabel || "—"}</strong>
+              {s.amountKnownOf ? (
+                <span className="kpi-hint">
+                  {uiText("сумма у")}{" "}{s.amountKnownCount} {" "}{uiText("из")}{" "}{s.amountKnownOf}
+                </span>
+              ) : null}
+            </div>
+            <div className="sit-kpi">
+              <span className="muted">{uiText("Ожидаемые оплаты")}</span>
+              <strong>{s.expectedPaymentsLabel || "—"}</strong>
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="deal-view-toolbar">
+        <div className="segmented" aria-label={uiText("Вид сделок")}>
+          <button type="button" className={view === "list" ? "btn" : "btn secondary"} aria-pressed={view === "list"} onClick={() => setView("list")}>{uiText("Список")}</button>
+          <button type="button" className={view === "board" ? "btn" : "btn secondary"} aria-pressed={view === "board"} onClick={() => setView("board")}>{uiText("Доска по этапам")}</button>
+        </div>
+        <button type="button" className="btn secondary" onClick={() => void load()}>{uiText("Обновить")}</button>
+      </div>
+      <details className="workspace-disclosure">
+        <summary>{uiText("Фильтры")}{[timeMode === "period", scope !== "all", timeMode === "now" && focus !== "all", !!stage, !!outcome].filter(Boolean).length ? ` · ${uiText("Активно")}: ${[timeMode === "period", scope !== "all", timeMode === "now" && focus !== "all", !!stage, !!outcome].filter(Boolean).length}` : ""}</summary>
       <div className="segmented sit-scope" style={{ width: "fit-content", marginBottom: 10 }}>
         {(
           [
@@ -395,49 +448,6 @@ export function DealsPage() {
         </>
       ) : null}
 
-      <div className="sit-kpi-grid deals-summary" style={{ marginTop: 12 }}>
-        {s.mode === "period" ? (
-          <>
-            <div className="sit-kpi">
-              <span className="muted">{uiText("Создано сделок")}</span>
-              <strong>{s.createdDeals ?? "—"}</strong>
-            </div>
-            <div className="sit-kpi">
-              <span className="muted">{uiText("Закрыто успешно")}</span>
-              <strong>{s.wonDeals ?? "—"}</strong>
-            </div>
-            <div className="sit-kpi">
-              <span className="muted">{uiText("Потеряно")}</span>
-              <strong>{s.lostDeals ?? "—"}</strong>
-            </div>
-            <div className="sit-kpi">
-              <span className="muted">{uiText("Продано")}</span>
-              <strong>{s.soldAmountLabel || "—"}</strong>
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="sit-kpi">
-              <span className="muted">{uiText("Активные")}</span>
-              <strong>{s.activeDeals}</strong>
-            </div>
-            <div className="sit-kpi">
-              <span className="muted">{uiText("Сумма сделок")}</span>
-              <strong>{s.pipelineAmountLabel || "—"}</strong>
-              {s.amountKnownOf ? (
-                <span className="kpi-hint">
-                  {uiText("сумма у")}{" "}{s.amountKnownCount} {" "}{uiText("из")}{" "}{s.amountKnownOf}
-                </span>
-              ) : null}
-            </div>
-            <div className="sit-kpi">
-              <span className="muted">{uiText("Ожидаемые оплаты")}</span>
-              <strong>{s.expectedPaymentsLabel || "—"}</strong>
-            </div>
-          </>
-        )}
-      </div>
-
       <div className="deals-filters-row">
         <div className="segmented sit-scope" style={{ width: "fit-content" }}>
           {(
@@ -483,15 +493,12 @@ export function DealsPage() {
         ) : null}
       </div>
 
-      <div className="deal-view-toolbar">
-        <div className="segmented" aria-label={uiText("Вид сделок")}>
-          <button type="button" className={view === "list" ? "btn" : "btn secondary"} aria-pressed={view === "list"} onClick={() => setView("list")}>{uiText("Список")}</button>
-          <button type="button" className={view === "board" ? "btn" : "btn secondary"} aria-pressed={view === "board"} onClick={() => setView("board")}>{uiText("Доска по этапам")}</button>
-        </div>
+        <div className="deal-view-toolbar">
         <label>{uiText("Этап")}<select aria-label={uiText("Этап")} value={stage} onChange={(event) => setStage(event.target.value)}><option value="">{uiText("Все этапы")}</option>{(data.columns || []).map((column: any) => <option key={column.stageId} value={column.systemKey}>{column.name}</option>)}</select></label>
         <label>{uiText("Статус сделки")}<select aria-label={uiText("Статус сделки")} value={outcome} onChange={(event) => setOutcome(event.target.value)}><option value="">{timeMode === "now" ? uiText("Активные и на паузе") : uiText("Все статусы")}</option><option value="open">{uiText("В работе")}</option><option value="on_hold">{uiText("На паузе")}</option><option value="won">{uiText("Успешно завершена")}</option><option value="lost">{uiText("Потеряна")}</option></select></label>
-        <button type="button" className="btn secondary" onClick={() => void load()}>{uiText("Обновить")}</button>
-      </div>
+          <button type="button" className="btn secondary" onClick={() => navigate(`/deals?view=${view}`)}>{uiText("Сбросить фильтры")}</button>
+        </div>
+      </details>
       {data.limitReached ? <p className="warn">{uiText("Показаны первые")}{" "}{data.limit} {" "}{uiText("сделок. Уточните период, этап или ответственного, чтобы сузить список.")}</p> : null}
       {view === "list" ? <DealList items={data.items || [...(data.columns || []).flatMap((column: any) => column.deals), ...(data.onHold || [])]} documentsAllowed={caps.documents && data.documentsAllowed !== false} onOpenContract={setSelectedContractId} /> : <div className="deal-kanban">
         {(data.columns || []).map((col: any) => (
@@ -622,6 +629,16 @@ export function DealsPage() {
 export function DealDetailPage() {
   const uiText = useUiText();
   const caps = useCapabilities();
+  const location = useLocation();
+  const [detailSection, setDetailSection] = useState("overview");
+  useEffect(() => {
+    if (location.hash && caps.documents) setDetailSection("documents");
+  }, [location.hash, caps.documents]);
+  useEffect(() => {
+    if (detailSection !== "documents" || !location.hash) return;
+    const frame = requestAnimationFrame(() => document.getElementById(location.hash.slice(1))?.scrollIntoView({ block: "start" }));
+    return () => cancelAnimationFrame(frame);
+  }, [detailSection, location.hash]);
   const { dealId } = useParams();
   const navigate = useNavigate();
   const [data, setData] = useState<any>(null);
@@ -738,7 +755,7 @@ export function DealDetailPage() {
     return () => clearTimeout(t);
   }, [companyQ]);
 
-  const [editing, setEditing] = useState(true);
+  const [editing, setEditing] = useState(false);
 
   async function save() {
     if (!dealId || busy) return;
@@ -842,11 +859,11 @@ export function DealDetailPage() {
         </div>
         {caps.documents ? (
           <>
-            <a className="sit-kpi" href="#avr">
+            <a className="sit-kpi" href="#avr" onClick={() => setDetailSection("documents")}>
               <span className="muted">{uiText("АВР")}</span>
               <strong>{electronicDocKpi(docs, "AVR")}</strong>
             </a>
-            <a className="sit-kpi" href="#esf">
+            <a className="sit-kpi" href="#esf" onClick={() => setDetailSection("documents")}>
               <span className="muted">{uiText("ЭСФ")}</span>
               <strong>{electronicDocKpi(docs, "ESF")}</strong>
             </a>
@@ -854,6 +871,187 @@ export function DealDetailPage() {
         ) : null}
       </div>
 
+      <WorkspaceSectionNav label={uiText("Раздел сделки")} value={detailSection} onChange={setDetailSection} options={[
+        { id: "overview", label: uiText("Обзор") },
+        { id: "documents", label: caps.documents ? uiText("Позиции и документы") : uiText("Позиции") },
+        ...(caps.confirmPayments ? [{ id: "payments", label: uiText("Платежи") }] : []),
+        { id: "history", label: uiText("История") },
+      ]} />
+      <div hidden={detailSection !== "overview"}>
+      {!editing ? <div className="panel saved-editor-summary">
+        <div><b>{uiText("Следующий шаг")}</b><p>{d.nextAction || uiText("Не запланирован")}</p><p className="muted">{d.nextActionAt ? new Date(d.nextActionAt).toLocaleString(uiFormatLocale()) : uiText("Без срока")}</p>
+          {d.contact?.id ? <Link to={`/contacts/${d.contact.id}`}>{uiText("Карточка клиента")}</Link> : null}
+          {d.inquiryId ? <> · <Link to={`/requests/${d.inquiryId}`}>{uiText("Заявка")}</Link></> : null}
+        </div>
+        <button type="button" className="btn secondary" onClick={() => setEditing(true)}>{uiText("Редактировать сделку")}</button>
+      </div> : <div className="panel deal-edit">
+        <b>{uiText("Редактирование")}</b>
+        <label>
+          {uiText("Сумма (₸)")}<input
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder={uiText("пусто = неизвестна")}
+            disabled={Boolean(d.amountFromItems) || caps.manager}
+          />
+        </label>
+        <label>
+          {uiText("Следующий шаг")}<input value={nextAction} onChange={(e) => setNextAction(e.target.value)} placeholder={uiText("Позвонить клиенту")} />
+        </label>
+        <label>
+          {uiText("Когда")}<input type="datetime-local" value={nextActionAt} onChange={(e) => setNextActionAt(e.target.value)} />
+        </label>
+        {caps.confirmPayments ? (
+        <label>
+          {uiText("Статус оплаты")}<select value={paymentStatus} onChange={(e) => setPaymentStatus(e.target.value)}>
+            {(board?.paymentStatuses || ["NOT_INVOICED", "INVOICED", "PAID"]).map((s: string) => (
+              <option key={s} value={s}>
+                {localizeUiOptions(PAYMENT_STATUS_LABEL, uiText)[s] || s}
+              </option>
+            ))}
+          </select>
+        </label>
+        ) : null}
+        <div className="actions">
+          <button
+            type="button"
+            className="btn"
+            disabled={busy}
+            {...tip(uiText("Сохранить сумму, следующий шаг и статус оплаты"))}
+            onClick={() => void save()}
+          >
+            {uiText("Сохранить")}</button>
+          {d.contact?.id ? (
+            <Link className="btn secondary" to={`/contacts/${d.contact.id}`} {...tip(uiText("Открыть карточку клиента"))}>
+              {uiText("Клиент")}</Link>
+          ) : null}
+          {d.inquiryId ? (
+            <Link className="btn secondary" to={`/requests/${d.inquiryId}`} {...tip(uiText("Открыть исходную заявку"))}>
+              {uiText("Заявка")}</Link>
+          ) : null}
+        </div>
+      </div>}
+
+      <details className="workspace-disclosure">
+        <summary>{uiText("Перевести на стадию")}</summary>
+        <div className="deal-stage-actions">
+          {(board?.columns || []).map((col: any) => (
+            <button
+              key={col.stageId}
+              type="button"
+              className={col.stageId === d.stageId ? "btn" : "btn secondary"}
+              disabled={busy || col.stageId === d.stageId}
+              onClick={() => {
+                setBusy(true);
+                void api
+                  .changeDealStage(d.id, { stageId: col.stageId })
+                  .then(() => load())
+                  .catch((err) => setError(err instanceof Error ? err.message : uiText("Ошибка")))
+                  .finally(() => setBusy(false));
+              }}
+            >
+              {col.name}
+            </button>
+          ))}
+        </div>
+      </details>
+
+      <details className="workspace-disclosure">
+        <summary>{uiText("Завершение и пауза сделки")}</summary>
+      <div className="actions">
+        <button
+          type="button"
+          className="btn"
+          disabled={busy || d.outcome === "won"}
+          {...tip(uiText("Отметить, что сделка продана"))}
+          onClick={() => {
+            setBusy(true);
+            void api
+              .markDealWon(d.id, { wonAmountMinor: d.amount })
+              .then(() => load())
+              .catch((err) => setError(err instanceof Error ? err.message : uiText("Ошибка")))
+              .finally(() => setBusy(false));
+          }}
+        >
+          {uiText("Продажа")}</button>
+        <button
+          type="button"
+          className="btn secondary"
+          disabled={busy}
+          {...tip(
+            d.outcome === "on_hold"
+              ? uiText("Вернуть сделку в работу")
+              : uiText("Отложить сделку, не закрывая её"),
+          )}
+          onClick={() => {
+            setBusy(true);
+            void api
+              .holdDeal(d.id, d.outcome !== "on_hold")
+              .then(() => load())
+              .catch((err) => setError(err instanceof Error ? err.message : uiText("Ошибка")))
+              .finally(() => setBusy(false));
+          }}
+        >
+          {d.outcome === "on_hold" ? uiText("Снять с паузы") : uiText("На паузу")}
+        </button>
+        <select value={lossReason} onChange={(e) => setLossReason(e.target.value)} title={uiText("Причина проигрыша")}>
+          {(board?.lostReasons || ["Дорого", "Другое"]).map((r: string) => (
+            <option key={r} value={r}>
+              {uiMessage(r)}
+            </option>
+          ))}
+        </select>
+        <input
+          value={lossNote}
+          onChange={(e) => setLossNote(e.target.value)}
+          placeholder={uiText("Комментарий к потере")}
+          style={{ minWidth: 160 }}
+        />
+        <button
+          type="button"
+          className="btn danger"
+          disabled={busy || d.outcome === "lost"}
+          {...tip(uiText("Отметить, что сделка не состоялась"))}
+          onClick={() => {
+            setBusy(true);
+            void api
+              .markDealLost(d.id, { lossReason, note: lossNote || undefined })
+              .then(() => load())
+              .catch((err) => setError(err instanceof Error ? err.message : uiText("Ошибка")))
+              .finally(() => setBusy(false));
+          }}
+        >
+          {uiText("Потеря")}</button>
+      </div>
+      </details>
+      <div className="actions">
+        <button
+          type="button"
+          className="btn secondary"
+          {...tip(uiText("Создать задачу, привязанную к этой сделке и клиенту"))}
+          onClick={() =>
+            navigate(
+              `/tasks?dealId=${d.id}${d.contact?.id || d.contactId ? `&contactId=${d.contact?.id || d.contactId}` : ""}`,
+            )
+          }
+        >
+          {uiText("+ Задача")}</button>
+      </div>
+
+      {d.tasks?.length ? (
+        <div className="panel">
+          <b>{uiText("Открытые задачи")}</b>
+          {d.tasks.map((t: any) => (
+            <div className="row" key={t.id}>
+              <div>
+                <b>{uiTaskTitle(t)}</b>
+                <div className="muted">{t.dueAt ? new Date(t.dueAt).toLocaleString(uiFormatLocale()) : uiText("без срока")}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      </div>
+      <div hidden={detailSection !== "documents"}>
       <div className="panel">
         <div className="row"><b>{uiText("Позиции")}</b><button type="button" className="btn secondary" disabled={busy} onClick={newItem}>{uiText("Добавить новую позицию")}</button></div>
         <p className="muted">{uiText("Они же попадут в договор, счёт, АВР и ЭСФ.")}</p>
@@ -1037,56 +1235,8 @@ export function DealDetailPage() {
       />
       ) : null}
 
-      {!editing ? <div className="panel saved-editor-summary">
-        <b>{uiText("Данные сделки")}</b>
-        <button type="button" className="btn secondary" autoFocus onClick={() => setEditing(true)}>{uiText("Редактировать сделку")}</button>
-      </div> : <div className="panel deal-edit">
-        <b>{uiText("Редактирование")}</b>
-        <label>
-          {uiText("Сумма (₸)")}<input
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            placeholder={uiText("пусто = неизвестна")}
-            disabled={Boolean(d.amountFromItems) || caps.manager}
-          />
-        </label>
-        <label>
-          {uiText("Следующий шаг")}<input value={nextAction} onChange={(e) => setNextAction(e.target.value)} placeholder={uiText("Позвонить клиенту")} />
-        </label>
-        <label>
-          {uiText("Когда")}<input type="datetime-local" value={nextActionAt} onChange={(e) => setNextActionAt(e.target.value)} />
-        </label>
-        {caps.confirmPayments ? (
-        <label>
-          {uiText("Статус оплаты")}<select value={paymentStatus} onChange={(e) => setPaymentStatus(e.target.value)}>
-            {(board?.paymentStatuses || ["NOT_INVOICED", "INVOICED", "PAID"]).map((s: string) => (
-              <option key={s} value={s}>
-                {localizeUiOptions(PAYMENT_STATUS_LABEL, uiText)[s] || s}
-              </option>
-            ))}
-          </select>
-        </label>
-        ) : null}
-        <div className="actions">
-          <button
-            type="button"
-            className="btn"
-            disabled={busy}
-            {...tip(uiText("Сохранить сумму, следующий шаг и статус оплаты"))}
-            onClick={() => void save()}
-          >
-            {uiText("Сохранить")}</button>
-          {d.contact?.id ? (
-            <Link className="btn secondary" to={`/contacts/${d.contact.id}`} {...tip(uiText("Открыть карточку клиента"))}>
-              {uiText("Клиент")}</Link>
-          ) : null}
-          {d.inquiryId ? (
-            <Link className="btn secondary" to={`/requests/${d.inquiryId}`} {...tip(uiText("Открыть исходную заявку"))}>
-              {uiText("Заявка")}</Link>
-          ) : null}
-        </div>
-      </div>}
-
+      </div>
+      <div hidden={detailSection !== "payments"}>
       {caps.confirmPayments ? (
       <div className="panel">
         <b>{uiText("Платежи")}</b>
@@ -1131,107 +1281,8 @@ export function DealDetailPage() {
       </div>
       ) : null}
 
-      <div className="panel">
-        <b>{uiText("Перевести на стадию")}</b>
-        <div className="deal-stage-actions">
-          {(board?.columns || []).map((col: any) => (
-            <button
-              key={col.stageId}
-              type="button"
-              className={col.stageId === d.stageId ? "btn" : "btn secondary"}
-              disabled={busy || col.stageId === d.stageId}
-              onClick={() => {
-                setBusy(true);
-                void api
-                  .changeDealStage(d.id, { stageId: col.stageId })
-                  .then(() => load())
-                  .catch((err) => setError(err instanceof Error ? err.message : uiText("Ошибка")))
-                  .finally(() => setBusy(false));
-              }}
-            >
-              {col.name}
-            </button>
-          ))}
-        </div>
       </div>
-
-      <div className="actions">
-        <button
-          type="button"
-          className="btn"
-          disabled={busy || d.outcome === "won"}
-          {...tip(uiText("Отметить, что сделка продана"))}
-          onClick={() => {
-            setBusy(true);
-            void api
-              .markDealWon(d.id, { wonAmountMinor: d.amount })
-              .then(() => load())
-              .catch((err) => setError(err instanceof Error ? err.message : uiText("Ошибка")))
-              .finally(() => setBusy(false));
-          }}
-        >
-          {uiText("Продажа")}</button>
-        <button
-          type="button"
-          className="btn secondary"
-          disabled={busy}
-          {...tip(
-            d.outcome === "on_hold"
-              ? uiText("Вернуть сделку в работу")
-              : uiText("Отложить сделку, не закрывая её"),
-          )}
-          onClick={() => {
-            setBusy(true);
-            void api
-              .holdDeal(d.id, d.outcome !== "on_hold")
-              .then(() => load())
-              .catch((err) => setError(err instanceof Error ? err.message : uiText("Ошибка")))
-              .finally(() => setBusy(false));
-          }}
-        >
-          {d.outcome === "on_hold" ? uiText("Снять с паузы") : uiText("На паузу")}
-        </button>
-        <select value={lossReason} onChange={(e) => setLossReason(e.target.value)} title={uiText("Причина проигрыша")}>
-          {(board?.lostReasons || ["Дорого", "Другое"]).map((r: string) => (
-            <option key={r} value={r}>
-              {uiMessage(r)}
-            </option>
-          ))}
-        </select>
-        <input
-          value={lossNote}
-          onChange={(e) => setLossNote(e.target.value)}
-          placeholder={uiText("Комментарий к потере")}
-          style={{ minWidth: 160 }}
-        />
-        <button
-          type="button"
-          className="btn danger"
-          disabled={busy || d.outcome === "lost"}
-          {...tip(uiText("Отметить, что сделка не состоялась"))}
-          onClick={() => {
-            setBusy(true);
-            void api
-              .markDealLost(d.id, { lossReason, note: lossNote || undefined })
-              .then(() => load())
-              .catch((err) => setError(err instanceof Error ? err.message : uiText("Ошибка")))
-              .finally(() => setBusy(false));
-          }}
-        >
-          {uiText("Потеря")}</button>
-        <button
-          type="button"
-          className="btn secondary"
-          {...tip(uiText("Создать задачу, привязанную к этой сделке и клиенту"))}
-          onClick={() =>
-            navigate(
-              `/tasks?dealId=${d.id}${d.contact?.id || d.contactId ? `&contactId=${d.contact?.id || d.contactId}` : ""}`,
-            )
-          }
-        >
-          {uiText("+ Задача")}</button>
-      </div>
-
+      <div hidden={detailSection !== "history"}>
       <div className="panel">
         <b>{uiText("История стадий")}</b>
         {(data.stageHistory || []).length === 0 ? <p className="empty">{uiText("Пока нет")}</p> : null}
@@ -1247,19 +1298,7 @@ export function DealDetailPage() {
         ))}
       </div>
 
-      {d.tasks?.length ? (
-        <div className="panel">
-          <b>{uiText("Открытые задачи")}</b>
-          {d.tasks.map((t: any) => (
-            <div className="row" key={t.id}>
-              <div>
-                <b>{uiTaskTitle(t)}</b>
-                <div className="muted">{t.dueAt ? new Date(t.dueAt).toLocaleString(uiFormatLocale()) : uiText("без срока")}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : null}
+      </div>
     </section>
   );
 }

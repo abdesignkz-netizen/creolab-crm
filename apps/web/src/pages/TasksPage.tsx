@@ -1,3 +1,4 @@
+import { WorkspaceSectionNav } from "../components/WorkspaceSectionNav";
 import { InlineFeedback } from "../components/InlineFeedback";
 import { uiTaskTitle, uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale } from "../lib/uiText";
 import {
@@ -1406,9 +1407,7 @@ export function TasksPage() {
           {uiText("Фильтры")}{extraFilterActive ? " •" : ""}
         </button>
       </div>
-      <div className="task-quick-filters" role="group" aria-label={uiText("Показать задачи")}>
-        {(
-          [
+      <WorkspaceSectionNav label={uiText("Показать задачи")} value={filter} onChange={setFilter} options={([
             ["all", uiText("Все")],
             ["open", uiText("К выполнению")],
             ["mine", uiText("Мои")],
@@ -1418,38 +1417,7 @@ export function TasksPage() {
             ["no_due", uiText("Без срока")],
             ["waiting", uiText("Жду")],
             ["done", uiText("Завершённые")],
-          ] as const
-        ).map(([value, label]) => (
-          <button
-            key={value}
-            type="button"
-            aria-pressed={filter === value}
-            className={`task-filter${filter === value ? " is-active" : ""}${value === "overdue" && filterCounts.overdue ? " has-overdue" : ""}`}
-            {...tip(
-              value === "all"
-                ? uiText("Все доступные задачи")
-                : value === "open"
-                  ? uiText("К выполнению")
-                : value === "mine"
-                  ? uiText("Назначены на вас — не те, что вы поставили другим")
-                  : value === "today"
-                    ? uiText("Срок сегодня")
-                    : value === "scheduled"
-                      ? uiText("Срок в будущем или запланированная отправка")
-                      : value === "no_due"
-                        ? uiText("Незавершённые задачи без даты выполнения")
-                        : value === "waiting"
-                          ? uiText("Ждёте ответа клиента или внешней реакции")
-                          : value === "overdue"
-                            ? uiText("Срок уже прошёл, задача ещё не завершена")
-                            : uiText("Что уже сделано или отменено"),
-            )}
-            onClick={() => setFilter(value)}
-          >
-            {label}<span className="task-filter-count">{filterCounts[value]}</span>
-          </button>
-        ))}
-      </div>
+          ] as const).map(([id, label]) => ({ id, label: `${label} · ${filterCounts[id]}` }))} />
       {showExtraFilters ? (
         <div className="panel task-extra-filters" id="task-extra-filters">
           <div className="task-extra-grid">
@@ -2157,30 +2125,6 @@ export function TasksPage() {
       <form className="panel task-form" onSubmit={submitTask}>
         <b>{uiText("Новая задача")}</b>
         <p className="muted">{uiText("Что нужно сделать, к чему относится, кто выполнит и когда.")}</p>
-        <div className="actions" style={{ marginBottom: 12 }}>
-          <button
-            type="button"
-            className="btn secondary"
-            {...tip(uiText("Опишите задачу своими словами — система разберёт, кому и что сделать"))}
-            onClick={() => {
-              setComposeMode("command");
-              setShowCampaignPanel(false);
-            }}
-          >
-            {uiText("Описать своими словами")}</button>
-          <button
-            type="button"
-            className="btn secondary"
-            {...tip(uiText("Рассылка одного сообщения или файла списку номеров / сегменту CRM"))}
-            onClick={() => {
-              setComposeMode("campaign");
-              setShowCampaignPanel(true);
-              setCampaignSeed({ whoMode: "phones" });
-            }}
-          >
-            {uiText("Массовая отправка")}</button>
-        </div>
-
         <label>
           {uiText("Что нужно сделать")}<input
             value={title}
@@ -2190,34 +2134,6 @@ export function TasksPage() {
             maxLength={200}
           />
         </label>
-        <label>
-          {uiText("Описание / подробности")}<textarea
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-            rows={2}
-            placeholder={uiText("Необязательно")}
-            maxLength={2000}
-          />
-        </label>
-        <label>
-          {uiText("Тип действия")}<select
-            value={type}
-            onChange={(event) => {
-              const next = event.target.value;
-              setType(next);
-              if (ownerId === AI_ASSIGNEE && !isAiAssignableTaskType(next)) {
-                setOwnerId(membershipId || "");
-              }
-            }}
-          >
-            {localizeUiOptions(CREATE_TASK_TYPES, uiText).map(([id, label]) => (
-              <option key={id} value={id}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </label>
-
         <div className="field-block">
           <div className="muted" style={{ marginBottom: 8 }}>
             {uiText("Связать с")}</div>
@@ -2225,26 +2141,14 @@ export function TasksPage() {
             {(
                 [
                 ["client", uiText("Один клиент")],
-                ["group", uiText("Группа CRM")],
-                ["list", uiText("Список номеров")],
-                ["import", uiText("Импорт контактов")],
                 ["none", uiText("Без привязки")],
               ] as const
             ).map(([value, label]) => (
               <button
                 key={value}
                 type="button"
-                className={targetMode === value || (value === "list" && showCampaignPanel && campaignSeed.whoMode === "phones") || (value === "import" && campaignSeed.whoMode === "import") ? "chip active" : "chip"}
+                className={targetMode === value ? "chip active" : "chip"}
                 onClick={() => {
-                  if (value === "list" || value === "import") {
-                    setComposeMode("campaign");
-                    setShowCampaignPanel(true);
-                    setCampaignSeed({
-                      whoMode: value === "list" ? "phones" : "import",
-                      message: messageDraft,
-                    });
-                    return;
-                  }
                   setTargetMode(value as TargetMode);
                 }}
               >
@@ -2252,6 +2156,14 @@ export function TasksPage() {
               </button>
             ))}
           </div>
+          <details className="workspace-disclosure" open={targetMode === "group" || undefined}>
+            <summary>{uiText("Несколько клиентов")}</summary>
+            <div className="actions">
+              <button type="button" className="btn secondary" onClick={() => setTargetMode("group")}>{uiText("Группа CRM")}</button>
+              <button type="button" className="btn secondary" onClick={() => { setComposeMode("campaign"); setShowCampaignPanel(true); setCampaignSeed({ whoMode: "phones", message: messageDraft }); }}>{uiText("Список номеров")}</button>
+              <button type="button" className="btn secondary" onClick={() => { setComposeMode("campaign"); setShowCampaignPanel(true); setCampaignSeed({ whoMode: "import", message: messageDraft }); }}>{uiText("Импорт контактов")}</button>
+            </div>
+          </details>
           {targetMode === "none" ? (
             <p className="muted" style={{ marginTop: 8 }}>
               {uiText("Внутренняя задача команды — без клиента, заявки или сделки.")}</p>
@@ -2532,6 +2444,36 @@ export function TasksPage() {
         <label>
           {uiText("Срок")}<input type="datetime-local" value={dueAt} onChange={(event) => setDueAt(event.target.value)} />
         </label>
+        <details className="workspace-disclosure">
+          <summary>{uiText("Дополнительные настройки")}</summary>
+        <label>
+          {uiText("Описание / подробности")}<textarea
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
+            rows={2}
+            placeholder={uiText("Необязательно")}
+            maxLength={2000}
+          />
+        </label>
+        <label>
+          {uiText("Тип действия")}<select
+            value={type}
+            onChange={(event) => {
+              const next = event.target.value;
+              setType(next);
+              if (ownerId === AI_ASSIGNEE && !isAiAssignableTaskType(next)) {
+                setOwnerId(membershipId || "");
+              }
+            }}
+          >
+            {localizeUiOptions(CREATE_TASK_TYPES, uiText).map(([id, label]) => (
+              <option key={id} value={id}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+
         <label>
           {uiText("Приоритет")}<select value={priority} onChange={(event) => setPriority(event.target.value)}>
             <option value="low">{uiText("Низкий")}</option>
@@ -2539,6 +2481,34 @@ export function TasksPage() {
             <option value="high">{uiText("Высокий")}</option>
           </select>
         </label>
+        </details>
+        <details className="workspace-disclosure">
+          <summary>{uiText("AI и массовая отправка")}</summary>
+        <div className="actions" style={{ marginBottom: 12 }}>
+          <button
+            type="button"
+            className="btn secondary"
+            {...tip(uiText("Опишите задачу своими словами — система разберёт, кому и что сделать"))}
+            onClick={() => {
+              setComposeMode("command");
+              setShowCampaignPanel(false);
+            }}
+          >
+            {uiText("Описать своими словами")}</button>
+          <button
+            type="button"
+            className="btn secondary"
+            {...tip(uiText("Рассылка одного сообщения или файла списку номеров / сегменту CRM"))}
+            onClick={() => {
+              setComposeMode("campaign");
+              setShowCampaignPanel(true);
+              setCampaignSeed({ whoMode: "phones" });
+            }}
+          >
+            {uiText("Массовая отправка")}</button>
+        </div>
+
+        </details>
         <div className="actions">
           <button className="btn">{uiText("Создать")}</button>
           <button type="button" className="btn secondary" onClick={() => setShowCreate(false)}>

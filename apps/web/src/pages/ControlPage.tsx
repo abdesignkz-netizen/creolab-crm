@@ -70,12 +70,12 @@ export function ControlPage() {
   }
 
   const ai = data.ai || {};
-  const showInterventions = filter === "all" || filter === "intervention";
-  const showWaiting = filter === "all" || filter === "intervention";
-  const showApprovals = filter === "all" || filter === "approvals";
-  const showAiList = filter === "all" || filter === "ai";
-  const showHumanList = filter === "all" || filter === "human";
-  const showProblems = filter === "all" || filter === "problems";
+  const showInterventions = (filter === "all" && (data.interventions || []).length > 0) || filter === "intervention";
+  const showWaiting = (filter === "all" && (data.waitingForManager || []).length > 0) || filter === "intervention";
+  const showApprovals = (filter === "all" && (data.pendingApprovals || []).length > 0) || filter === "approvals";
+  const showAiList = (filter === "all" && (data.aiConversations || []).length > 0) || filter === "ai";
+  const showHumanList = (filter === "all" && (data.humanConversations || []).length > 0) || filter === "human";
+  const showProblems = (filter === "all" && (data.problems || []).length > 0) || filter === "problems";
   const showWaitingClient = filter === "waiting_client";
 
   return (
@@ -100,36 +100,20 @@ export function ControlPage() {
         </div>
         <p className="muted">{uiMessage(ai.note)}</p>
         <div className="mgmt-metrics">
-          <div>
-            <b>{ai.aiControlled ?? 0}</b>
-            <span>{uiText("AI ведёт")}</span>
-          </div>
-          <div>
-            <b>{ai.humanControlled ?? 0}</b>
-            <span>{uiText("Ведут сотрудники")}</span>
-          </div>
-          <div>
-            <b>{ai.waitingClient ?? 0}</b>
-            <span>{uiText("Ждём клиента")}</span>
-          </div>
-          <div>
-            <b>{ai.needsIntervention ?? 0}</b>
-            <span>{uiText("Нужно вмешательство")}</span>
-          </div>
-          <div>
-            <b>{ai.pendingApprovals ?? 0}</b>
-            <span>{uiText("Ожидают подтверждения")}</span>
-          </div>
-          <div>
-            <b>{ai.problems ?? 0}</b>
-            <span>{uiText("Проблемы")}</span>
-          </div>
+          {([
+            ["intervention", ai.needsIntervention, "Нужно вмешательство"],
+            ["problems", ai.problems, "Проблемы"],
+            ["approvals", ai.pendingApprovals, "Ожидают подтверждения"],
+            ["ai", ai.aiControlled, "AI ведёт"],
+            ["human", ai.humanControlled, "Ведут сотрудники"],
+            ["waiting_client", ai.waitingClient, "Ждём клиента"],
+          ] as const).map(([id, count, label]) => <button key={id} type="button" className="workspace-metric" aria-pressed={filter === id} onClick={() => setFilter(id)}><b>{count ?? 0}</b><span>{uiText(label)}</span></button>)}
         </div>
         <div className="actions">
-          {!ai.paused ? (
+          {!ai.paused && (ai.configured || ai.aiControlled > 0) ? (
             <button type="button" className="btn secondary" onClick={() => setConfirmPause(true)} disabled={busyKey === "pause"}>
               {uiText("Приостановить AI")}</button>
-          ) : (
+          ) : ai.paused ? (
             <button
               type="button"
               className="btn"
@@ -137,8 +121,8 @@ export function ControlPage() {
               onClick={() => run("pause", () => api.setAiManagerPause(false))}
             >
               {uiText("Возобновить AI")}</button>
-          )}
-          <button type="button" className="btn secondary" onClick={() => setConfirmClaimAll(true)} disabled={busyKey === "claim-all"}>
+          ) : null}
+          <button type="button" className="btn secondary" onClick={() => setConfirmClaimAll(true)} disabled={busyKey === "claim-all" || !ai.aiControlled}>
             {uiText("Забрать все диалоги у AI")}</button>
           <Link className="btn secondary" to="/integrations">
             {uiText("Открыть интеграции")}</Link>
@@ -206,6 +190,34 @@ export function ControlPage() {
           </button>
         ))}
       </div>
+
+      {showProblems ? (
+        <div className="panel">
+          <div className="mgmt-section-head">
+            <h3>{uiText("Проблемы AI")}</h3>
+            <span className="muted">{(data.problems || []).length}</span>
+          </div>
+          {(data.problems || []).length === 0 ? (
+            <p className="empty">{uiText("Сбоев у AI сейчас нет.")}</p>
+          ) : (
+            (data.problems || []).map((item: any) => (
+              <div className="mgmt-card compact" key={item.id}>
+                <div>
+                  <b>{uiMessage(item.title)}</b>
+                  <div className="muted">{item.conversationId ? item.detail : uiMessage(item.detail)}</div>
+                </div>
+                <div className="actions">
+                  {item.href ? (
+                    <Link className="btn secondary" to={item.href}>
+                      {item.href.includes("integrations") ? uiText("Открыть интеграции") : uiText("Открыть диалог")}
+                    </Link>
+                  ) : null}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      ) : null}
 
       {showInterventions ? (
         <div className="panel">
@@ -397,33 +409,7 @@ export function ControlPage() {
         </div>
       ) : null}
 
-      {showProblems ? (
-        <div className="panel">
-          <div className="mgmt-section-head">
-            <h3>{uiText("Проблемы AI")}</h3>
-            <span className="muted">{(data.problems || []).length}</span>
-          </div>
-          {(data.problems || []).length === 0 ? (
-            <p className="empty">{uiText("Сбоев у AI сейчас нет.")}</p>
-          ) : (
-            (data.problems || []).map((item: any) => (
-              <div className="mgmt-card compact" key={item.id}>
-                <div>
-                  <b>{uiMessage(item.title)}</b>
-                  <div className="muted">{item.conversationId ? item.detail : uiMessage(item.detail)}</div>
-                </div>
-                <div className="actions">
-                  {item.href ? (
-                    <Link className="btn secondary" to={item.href}>
-                      {item.href.includes("integrations") ? uiText("Открыть интеграции") : uiText("Открыть диалог")}
-                    </Link>
-                  ) : null}
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      ) : null}
+      {filter === "all" && !["interventions", "waitingForManager", "pendingApprovals", "aiConversations", "humanConversations", "problems"].some(key => data[key]?.length) ? <p className="panel empty">{uiText("Сейчас нет диалогов и действий, требующих внимания.")}</p> : null}
 
       {(data.audit || []).length ? (
         <div className="panel soft">

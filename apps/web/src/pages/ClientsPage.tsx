@@ -1,3 +1,4 @@
+import { MergeClientsPanel } from "../components/MergeClientsPanel";
 import { InlineFeedback } from "../components/InlineFeedback";
 import { uiTaskTitle, uiText, useUiText, localizeUiOptions, uiMessage } from "../lib/uiText";
 import { notifySaved } from "../components/SaveNotice";
@@ -75,7 +76,6 @@ export function ClientsPage() {
   const [importResult, setImportResult] = useState<any>(null);
   const [importBusy, setImportBusy] = useState(false);
   const [mergeKeep, setMergeKeep] = useState("");
-  const [mergeSource, setMergeSource] = useState("");
   const [offset, setOffset] = useUrlState<string>("offset", "0");
   const [loading, setLoading] = useState(true);
 
@@ -395,36 +395,7 @@ export function ClientsPage() {
         </div>
       ) : null}
 
-      {caps.companyAdmin ? (
-        <details className="panel">
-          <summary>{uiText("Объединить дубликаты")}</summary>
-          <form
-            onSubmit={async (event) => {
-              event.preventDefault();
-              if (!mergeKeep || !mergeSource) return;
-              try {
-                await api.mergeContacts({ keepId: mergeKeep, mergeId: mergeSource });
-                notifySaved(uiText("Клиенты объединены"));
-                setMergeKeep("");
-                setMergeSource("");
-                await load();
-              } catch (err) {
-                setError(err instanceof Error ? err.message : uiText("Не удалось объединить"));
-              }
-            }}
-          >
-            <p className="muted">{uiText("Оставляем первого клиента, второго архивируем и переносим заявки, сделки и диалоги.")}</p>
-            <label>
-              {uiText("Оставить")}<input value={mergeKeep} onChange={(e) => setMergeKeep(e.target.value)} placeholder={uiText("id клиента")} />
-            </label>
-            <label>
-              {uiText("Объединить в него")}<input value={mergeSource} onChange={(e) => setMergeSource(e.target.value)} placeholder={uiText("id дубликата")} />
-            </label>
-            <button className="btn secondary" disabled={!mergeKeep || !mergeSource}>
-              {uiText("Объединить")}</button>
-          </form>
-        </details>
-      ) : null}
+      {caps.companyAdmin ? <MergeClientsPanel initialKeepId={mergeKeep} onMerged={() => load()} /> : null}
 
       <form
         className="search-bar"
@@ -513,7 +484,7 @@ export function ClientsPage() {
             <div className="muted">{item.phone || uiText("Нет телефона")}</div>
             <div className="client-meta">
               <span className={statusBadgeClass(uiMessage(item.lifecycleLabel))}>{uiMessage(item.lifecycleLabel)}</span>
-              {uiMessage(item.inquiryStatusLabel) ? <span className="badge">{uiMessage(item.inquiryStatusLabel)}</span> : null}
+              {uiMessage(item.inquiryStatusLabel) && uiMessage(item.inquiryStatusLabel) !== uiMessage(item.lifecycleLabel) ? <span className="badge">{uiMessage(item.inquiryStatusLabel)}</span> : null}
               {item.needsReply ? (
                 <span className="badge warn">
                   {uiText("Нужен ответ")}{item.waitMinutes != null ? ` · ${formatWaitSince(item.waitMinutes)}` : ""}

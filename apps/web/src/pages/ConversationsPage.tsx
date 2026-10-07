@@ -431,8 +431,10 @@ export function ConversationsPage() {
       </div>
 
       <div className="conv-context-strip">
-        <span>{uiText("Первое обращение:")}{" "}{workspace.client?.firstContactLabel || "—"}</span>
-        <span>{uiText("Последнее:")}{" "}{workspace.conversation.lastMessageLabel || "—"}</span>
+        <details className="conv-contact-history"><summary>{uiText("История контакта")}</summary>
+          <div>{uiText("Первое обращение:")}{" "}{workspace.client?.firstContactLabel || "—"}</div>
+          <div>{uiText("Последнее:")}{" "}{workspace.conversation.lastMessageLabel || "—"}</div>
+        </details>
         <span>{uiText("Последним написал:")}{" "}{uiMessage(workspace.conversation.lastWriterLabel)}</span>
         {workspace.conversation.needsReply ? (
           <span className="warn-text">{uiDurationLabel(workspace.conversation.waitLabel) || uiText("Нужен ответ")}</span>
@@ -623,6 +625,7 @@ export function ConversationsPage() {
         <ConversationAvatar conversationId={workspace.conversation.id} name={workspace.client?.name || uiText("Клиент")} channel={workspace.conversation.channelType || "other"} />
         <div><b>{workspace.client?.name || uiText("Клиент")}</b><div className="muted">{workspace.client?.companyName || phoneText(workspace.client?.phone)}</div></div>
       </div>
+        {workspace.client?.id ? <Link to={`/contacts/${workspace.client.id}`}>{uiText("Открыть карточку")}</Link> : null}
       <div className="page-head mobile-only">
         <b>{uiText("Контекст")}</b>
         <button type="button" className="btn secondary" onClick={() => setShowContext(false)}>
@@ -633,7 +636,7 @@ export function ConversationsPage() {
         <b>{uiText("Сейчас")}</b>
         <div>{uiMessage(workspace.control.situationLabel)}</div>
         <div className="muted">{uiDurationLabel(workspace.control.waitLabel)}</div>
-        {uiMessage(workspace.conversation.waitingForLabel) ? (
+        {uiMessage(workspace.conversation.waitingForLabel) && uiMessage(workspace.conversation.waitingForLabel) !== uiDurationLabel(workspace.control.waitLabel) ? (
           <div className="muted">{uiMessage(workspace.conversation.waitingForLabel)}</div>
         ) : null}
         {workspace.deal ? (
@@ -720,18 +723,10 @@ export function ConversationsPage() {
         </div>
       ) : null}
 
-      <div className="panel soft">
-        <b>{uiText("Кратко")}</b>
+      <details className="panel soft workspace-disclosure">
+        <summary>{uiText("Кратко")}</summary>
         <p>{workspace.conversation.contextSummary || workspace.client?.summary}</p>
-      </div>
-
-      <div className="panel soft">
-        <b>{uiText("Клиент")}</b>
-        <div>{workspace.client?.name}</div>
-        <div className="muted">{phoneText(workspace.client?.phone)}</div>
-        {workspace.client?.companyName ? <div className="muted">{workspace.client.companyName}</div> : null}
-        {workspace.client?.id ? <Link to={`/contacts/${workspace.client.id}`}>{uiText("Открыть карточку")}</Link> : null}
-      </div>
+      </details>
 
       <div className="panel soft">
         <b>{uiText("Интерес / заявка")}</b>
@@ -750,8 +745,8 @@ export function ConversationsPage() {
         )}
       </div>
 
-      <div className="panel soft">
-        <b>{uiText("Источник")}</b>
+      <details className="panel soft workspace-disclosure">
+        <summary>{uiText("Источник")}</summary>
         <div>{workspace.conversation.sourceLine}</div>
         {workspace.attribution.utmCampaign ? (
           <details>
@@ -760,7 +755,7 @@ export function ConversationsPage() {
             {workspace.attribution.landingPage ? <div className="muted">{uiText("Страница:")}{" "}{workspace.attribution.landingPage}</div> : null}
           </details>
         ) : null}
-      </div>
+      </details>
 
       {workspace.deal ? (
         <div className="panel soft">

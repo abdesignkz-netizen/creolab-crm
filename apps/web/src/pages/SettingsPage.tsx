@@ -3,7 +3,7 @@ import { uiNotificationBody, uiText, useUiText, localizeUiOptions, uiMessage } f
 import { DocumentNumberingPanel } from "./DocumentNumberingPanel";
 import { ServiceCatalogPanel } from "./ServiceCatalogPanel";
 import { useEffect, useState, type FormEvent } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams, useNavigate } from "react-router-dom";
 import { LegalSettingsPanel } from "./LegalSettingsPanel";
 import { api } from "../lib/api";
 import { PasswordInput } from "../components/PasswordInput";
@@ -52,6 +52,7 @@ function useUnsaved(dirty: boolean) {
 }
 
 export function SettingsPage() {
+  const navigate = useNavigate();
   const { me, caps } = useSession();
   const locale = normalizeLocale(me?.user?.locale);
   const [params, setParams] = useSearchParams();
@@ -96,6 +97,16 @@ export function SettingsPage() {
   return (
     <section className="settings-page">
       <h2>{t(locale, "settings.title")}</h2>
+      <label className="settings-mobile-nav">{t(locale, "settings.title")}
+        <select value={section} onChange={event => {
+          const item = items.find(entry => entry.id === event.target.value);
+          if (item?.to) navigate(item.to); else if (item) setParams({ section: item.id });
+        }}>
+          {(["personal", "company"] as const).map(group => <optgroup key={group} label={t(locale, group === "personal" ? "settings.personal" : "settings.company")}>
+            {items.filter(item => item.group === group).map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
+          </optgroup>)}
+        </select>
+      </label>
       <div className="settings-layout">
         <nav className="settings-nav" aria-label={t(locale, "settings.title")}>
           <p className="nav-section">{t(locale, "settings.personal")}</p>

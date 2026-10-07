@@ -2,7 +2,7 @@ import { InlineFeedback } from "../components/InlineFeedback";
 import { systemText } from "@creolab/contracts";
 import { useLocale } from "../lib/session";
 import { BillingHistory } from "../components/BillingHistory";
-import { useBillingText, useBillingError } from "../components/BillingCheckoutUi";
+import { BillingStatus, useBillingText, useBillingError } from "../components/BillingCheckoutUi";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
@@ -19,10 +19,6 @@ type Quote = {
   recommendation?: { code: string; name: string; saveMinor: number; message: string } | null;
 };
 
-const STATUS_LABEL: Record<string, string> = {
-  none: "Не подключён", pending: "Ожидает оплату", active: "Активен", past_due: "Просрочен",
-  canceled: "Отменён", cancel_at_period_end: "Отмена в конце периода", expired: "Истёк", suspended: "Приостановлен",
-};
 const AI_TIERS = ["ADDON_AI_START", "ADDON_AI_BUSINESS", "ADDON_AI_PRO"];
 const STEPPERS = ["ADDON_USER", "ADDON_WHATSAPP", "ADDON_AI_PACK", "ADDON_STORAGE_10GB", "ADDON_DEPARTMENT"];
 
@@ -52,6 +48,13 @@ export function BillingPage() {
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const selection = useRef<HTMLDivElement>(null);
+  const [view, setView] = useState<"overview" | "plans" | "resources" | "history">("overview");
+  const [pendingOrder, setPendingOrder] = useState<string | null>(null);
+  function openPlans() {
+    setView("plans"); setPlanCode(""); setError(""); setOrderConflict(false);
+    requestAnimationFrame(() => document.getElementById("billing-catalog")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }
+
 
   function warningText(item: { code: string; message: string }) {
     if (locale !== "kk") return item.message;
@@ -105,17 +108,21 @@ export function BillingPage() {
   const oneTime = quote?.lines.filter((line) => line.chargeType === "ONE_TIME").reduce((sum, line) => sum + line.amountMinor, 0) ?? 0;
 
   function scrollToSelection() {
-    requestAnimationFrame(() => selection.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    requestAnimationFrame(() => {
+      selection.current?.focus({ preventScroll: true });
+      selection.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
   }
   function pickOffer(code: string) {
-    setPlanCode(code); setAddons({}); setRequestType(undefined); setConstructorOpen(false); setError(""); setNotice(""); scrollToSelection();
+    setView("plans"); setPlanCode(code); setAddons({}); setRequestType(undefined); setConstructorOpen(false); setError(""); setNotice(""); scrollToSelection();
   }
   function configureCurrent(type: "RENEWAL" | "ADD_ADDON") {
     if (type !== "RENEWAL" && !items.some((item) => item.code === data?.planCode && item.catalogStatus === "AVAILABLE")) {
+      openPlans();
       setError(systemText(locale, "Для этого тарифа выберите актуальное предложение из каталога."));
-      document.getElementById("billing-catalog")?.scrollIntoView({ behavior: "smooth" });
       return;
     }
+    setView("plans");
     setPlanCode(data.planCode);
     setPeriod(data.billingPeriod === "YEARLY" ? "YEARLY" : "MONTHLY");
     setAddons(Object.fromEntries((data.addOns || []).filter((row: { code: string }) => items.find((item) => item.code === row.code)?.chargeType !== "ONE_TIME").map((row: { code: string; qty: number }) => [row.code, row.qty])));
@@ -159,52 +166,79 @@ export function BillingPage() {
 
   return <section className="billing-page stack">
     <div className="page-head">
-      <div><h2>{systemText(locale, "Тарифы и оплата")}</h2><p className="muted">{bt("Выберите тариф, сравните лимиты и перейдите к оплате.", "Тарифті таңдап, лимиттерді салыстырыңыз да, төлемге өтіңіз.", "Choose a plan, compare limits and continue to checkout.")}</p></div>
-      <div className="billing-period-toggle" aria-label={systemText(locale, "Период оплаты")}>
-        <button type="button" disabled={busy} aria-pressed={period === "MONTHLY"} className={`btn secondary ${period === "MONTHLY" ? "active" : ""}`} onClick={() => setPeriod("MONTHLY")}>{systemText(locale, "Месяц")}</button>
-        <button type="button" disabled={busy} aria-pressed={period === "YEARLY"} className={`btn secondary ${period === "YEARLY" ? "active" : ""}`} onClick={() => setPeriod("YEARLY")}>{systemText(locale, "Год")}</button>
-      </div>
+      <div><h2>{systemText(locale, "Тарифы и оплата")}</h2><p className="muted">{bt("Управляйте подпиской, ресурсами и платежами.", "Жазылымды, ресурстарды және төлемдерді басқарыңыз.", "Manage your subscription, resources and payments.")}</p></div>
     </div>
-    <BillingHistory onPay={() => data?.planCode && !currentFree ? configureCurrent("RENEWAL") : document.getElementById("billing-catalog")?.scrollIntoView({behavior:"smooth"})} />
+    <section className="panel billing-overview">
+      <div className="billing-overview-main">
+        <span className="muted">{systemText(locale, "Ваш тариф")}</span>
+        <div className="billing-overview-title"><h3>{preview ? systemText(locale, "Ознакомительный режим") : data?.planName || systemText(locale, "Не подключён")}</h3><BillingStatus status={data?.subscriptionStatus || "none"} /></div>
+        <div className="billing-overview-price"><strong>{formatKzt(data?.priceBreakdown?.recurring ?? data?.amountMinor ?? 0)}</strong><span className="muted"> / {data?.billingPeriod === "YEARLY" ? systemText(locale, "год") : systemText(locale, "месяц")}</span></div>
+        <p className="muted">{data?.expiresAt ? bt("Срок действия до", "Қолданылу мерзімі", "Valid until") + " " + formatDate(data.expiresAt, locale) : preview ? systemText(locale, "Платная подписка не подключена.") : currentFree ? bt("Бесплатно, без ограничения срока", "Тегін, мерзімі шектелмеген", "Free, with no expiry") : systemText(locale, "Не подключён")}</p>
+      </div>
+      <div className="billing-overview-actions">
+        <button className="btn" type="button" disabled={busy} onClick={() => pendingOrder ? navigate(`/billing/checkout/${pendingOrder}`) : data?.planCode && !currentFree && !preview ? configureCurrent("RENEWAL") : openPlans()}>{pendingOrder ? bt("Открыть текущий заказ", "Ағымдағы тапсырысты ашу", "Open current order") : data?.planCode && !currentFree && !preview ? bt("Продлить подписку", "Жазылымды ұзарту", "Renew subscription") : bt("Выбрать тариф", "Тарифті таңдау", "Choose a plan")}</button>
+        <button className="btn secondary" type="button" disabled={busy} onClick={openPlans}>{systemText(locale, "Изменить тариф")}</button>
+        <small className="muted">{bt("Способ оплаты выберете при оформлении заказа.", "Төлем тәсілін тапсырысты рәсімдегенде таңдайсыз.", "Choose your payment method at checkout.")}</small>
+      </div>
+    </section>
+    <nav className="billing-nav" aria-label={bt("Разделы оплаты", "Төлем бөлімдері", "Billing sections")}>
+      {([
+        ["overview", bt("Обзор", "Шолу", "Overview")],
+        ["plans", bt("Выбрать тариф", "Тарифті таңдау", "Choose a plan")],
+        ["resources", bt("Ресурсы", "Ресурстар", "Resources")],
+        ["history", bt("Платежи и документы", "Төлемдер мен құжаттар", "Payments & documents")],
+      ] as const).map(([key, label]) => <button key={key} className={view === key ? "active" : ""} type="button" aria-pressed={view === key} disabled={busy} onClick={() => key === "plans" ? openPlans() : setView(key)}>{label}</button>)}
+    </nav>
+    <BillingHistory showHistory={view === "history"} onPendingOrder={setPendingOrder} />
     {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
     {notice ? <InlineFeedback kind="info" className="billing-notice">{notice}</InlineFeedback> : null}
     {(data?.warnings || []).map((item: { code: string; message: string }) => <p key={item.code} className="warn">{warningText(item)}</p>)}
-    <div className="panel stack">
-      <h3>{systemText(locale, "Ваш тариф")}</h3>
-      <p><b>{preview ? systemText(locale, "Ознакомительный режим") : data?.planName || systemText(locale, "Не подключён")}</b>{data?.amountMinor ? ` · ${formatKzt(data.priceBreakdown?.recurring ?? data.amountMinor)} / ${data.billingPeriod === "YEARLY" ? systemText(locale, "год") : systemText(locale, "месяц")}` : ""}</p>
-      <p className="muted">{systemText(locale, "Статус:")}{" "}{systemText(locale, STATUS_LABEL[data?.subscriptionStatus] || data?.subscriptionStatus || "—")}.{data?.expiresAt ? systemText(locale, " Активен до {p0}", { p0: formatDate(data.expiresAt, locale) }) : preview ? systemText(locale, " Платная подписка не подключена.") : ""}</p>
+    {(view === "overview" || view === "resources") && <section className="panel stack billing-resources">
+      <div className="billing-checkout-head"><div><h3>{bt("Использование ресурсов", "Ресурстарды пайдалану", "Resource usage")}</h3><p className="muted">{bt("Что доступно вашей команде в текущем тарифе.", "Ағымдағы тарифте командаңызға қолжетімді ресурстар.", "What your team can use on the current plan.")}</p></div>
+      {view === "overview" ? <button type="button" className="btn secondary" onClick={() => setView("resources")}>{bt("Все ресурсы", "Барлық ресурстар", "All resources")}</button> : <button className="btn secondary" disabled={busy || !data?.planCode || currentFree || preview} onClick={() => configureCurrent("ADD_ADDON")}>{bt("Увеличить лимиты", "Лимиттерді ұлғайту", "Increase limits")}</button>}</div>
+      <div className="billing-usage-grid">{(view === "overview" ? (data?.usage || []).filter((row: { key: string }) => ["AI_CREDITS", "USERS", "WHATSAPP_CONNECTIONS", "FILE_STORAGE_MB"].includes(row.key)) : (data?.usage || [])).map((row: { key: string; label: string; used: number; cap: number; unit?: string; measured?: boolean }) => <div key={row.key} className="billing-usage"><div className="billing-usage-label"><span>{systemText(locale, row.label)}</span><span>{row.measured === false ? systemText(locale, "Ещё не рассчитано") : `${row.used} / ${row.cap < 0 ? systemText(locale, "без квоты") : row.cap}${row.unit ? ` ${row.unit}` : ""}`}</span></div><div className="usage-bar"><span style={{ width: `${row.cap > 0 ? Math.min(100, row.used / row.cap * 100) : 0}%` }} /></div></div>)}</div>
+      {data?.massCampaignsEnabled === false ? <p className="muted">{systemText(locale, "Массовые рассылки — с тарифа Start. Индивидуальные сообщения клиентам доступны.")}</p> : null}
+      <details className="billing-details"><summary>{bt("Условия и состав подписки", "Жазылым шарттары мен құрамы", "Subscription details")}</summary>
       {data?.priceBreakdown && !currentFree ? <dl className="billing-quote"><div>{systemText(locale, "Базовая стоимость:")}{" "}{formatKzt(data.priceBreakdown.base)}</div><div>{systemText(locale, "Дополнения:")}{" "}{formatKzt(data.priceBreakdown.addOns)}</div><div>{systemText(locale, "Итого:")}{" "}{formatKzt(data.priceBreakdown.recurring)} / {data.billingPeriod === "YEARLY" ? systemText(locale, "год") : systemText(locale, "месяц")}</div>{data.priceBreakdown.oneTime > 0 ? <div>{systemText(locale, "Разовые услуги:")}{" "}{formatKzt(data.priceBreakdown.oneTime)}</div> : null}</dl> : null}
       {data?.enterpriseTerms?.sla ? <p>{systemText(locale, "Поддержка / SLA:")}{" "}{data.enterpriseTerms.sla}</p> : null}
       {data?.enterpriseTerms?.integrations ? <p>{systemText(locale, "Согласованные интеграции:")}{" "}{data.enterpriseTerms.integrations}</p> : null}
       {currentFree ? <p>{systemText(locale, "0 ₸ · Для самостоятельной работы и знакомства с BasQar.")}</p> : null}
       {data?.entitlements?.AI_MANAGER && currentFree ? <p className="muted">{systemText(locale, "ИИ-менеджер доступен в пробном режиме для ознакомления с консультациями клиентов и обработкой заявок. 100 AI-кредитов выдаются один раз и используются всеми AI-функциями.")}</p> : data?.planCode === "CRM_START" && !data?.entitlements?.AI_MANAGER ? <p className="muted">{systemText(locale, "ИИ-менеджер не входит в Start. AI-кредиты доступны для BasQar Control и других AI-действий тарифа.")}</p> : null}
-      <div className="billing-usage-grid">{(data?.usage || []).map((row: { key: string; label: string; used: number; cap: number; unit?: string; measured?: boolean }) => <div key={row.key} className="billing-usage"><div className="billing-usage-label"><span>{systemText(locale, row.label)}</span><span>{row.measured === false ? systemText(locale, "Ещё не рассчитано") : `${row.used} / ${row.cap < 0 ? systemText(locale, "без квоты") : row.cap}${row.unit ? ` ${row.unit}` : ""}`}</span></div><div className="usage-bar"><span style={{ width: `${row.cap > 0 ? Math.min(100, row.used / row.cap * 100) : 0}%` }} /></div></div>)}</div>
-      {data?.massCampaignsEnabled === false ? <p className="muted">{systemText(locale, "Массовые рассылки — с тарифа Start. Индивидуальные сообщения клиентам доступны.")}</p> : null}
-      {!preview ? <div className="actions">
-        <button className="btn secondary" type="button" disabled={busy} onClick={() => document.getElementById("billing-catalog")?.scrollIntoView({ behavior: "smooth" })}>{systemText(locale, "Изменить тариф")}</button>
-        <button className="btn secondary" type="button" disabled={busy || !data?.planCode || currentFree} onClick={() => configureCurrent("ADD_ADDON")}>{systemText(locale, "Дополнительные ресурсы")}</button>
-        <button className="btn" type="button" disabled={busy || !data?.planCode || currentFree} onClick={() => configureCurrent("RENEWAL")}>{systemText(locale, "Продлить")}</button>
-      </div> : null}
-    </div>
+      </details>
+    </section>}
     {currentRequest ? <div className="panel stack">
       <h3>{systemText(locale, "Ваш запрос")}</h3><p>{currentRequest.planName || currentRequest.planCode} · {currentRequest.planCode === "CRM_ENTERPRISE" ? systemText(locale, "Индивидуальные условия") : systemText(locale, "{p0} за выбранный период и разовые услуги", { p0: formatKzt(currentRequest.finalAmountMinor) })}</p>
       <p>{systemText(locale, "Статус:")}{" "}<b>{systemText(locale, currentRequest.statusLabel || "Ожидает подтверждения оплаты")}</b></p>
       <p className="muted">{currentRequest.planCode === "CRM_ENTERPRISE" ? systemText(locale, "Администратор согласует с вами состав и стоимость.") : systemText(locale, "Оплата проходит вне системы. Администратор BasQar подтверждает оплату и открывает доступ.")}</p>
       <div className="actions"><button className="btn secondary" type="button" disabled={busy} onClick={() => void cancelRequest()}>{systemText(locale, "Отменить запрос")}</button></div>
     </div> : null}
+    {view === "plans" && !planCode && <div className="stack">
+      <div className="billing-checkout-head"><h3>{bt("Период подписки", "Жазылым кезеңі", "Subscription period")}</h3>
+      <div className="billing-period-toggle" aria-label={systemText(locale, "Период оплаты")}>
+        <button type="button" disabled={busy} aria-pressed={period === "MONTHLY"} className={`btn secondary ${period === "MONTHLY" ? "active" : ""}`} onClick={() => setPeriod("MONTHLY")}>{systemText(locale, "Месяц")}</button>
+        <button type="button" disabled={busy} aria-pressed={period === "YEARLY"} className={`btn secondary ${period === "YEARLY" ? "active" : ""}`} onClick={() => setPeriod("YEARLY")}>{systemText(locale, "Год")}</button>
+      </div>
+      </div>
     {catalogError ? <p className="warn">{systemText(locale, "Не удалось обновить каталог. Показаны справочные условия; итоговую стоимость проверим при выборе тарифа.")}{" "}<button className="btn secondary" onClick={() => setRetry((value) => value + 1)}>{systemText(locale, "Обновить каталог")}</button></p> : null}
+    {!catalog && !catalogError && <p role="status">{bt("Загружаем тарифы…", "Тарифтер жүктелуде…", "Loading plans…")}</p>}
     <BillingCatalog items={items} period={period} selected={planCode} current={preview ? undefined : data?.planCode} disabled={busy} onSelect={pickOffer} />
-    <section className="panel stack"><h3>{systemText(locale, "Дополнительные ресурсы")}</h3>
+    </div>}
+    {view === "resources" && <section className="panel stack"><h3>{systemText(locale, "Дополнительные ресурсы")}</h3>
       <p className="muted">{systemText(locale, "Для подходящего платного тарифа. Дополнительные ресурсы не открывают функции другого тарифа.")}</p>
       <div className="billing-addons">{extras.map(item => <div className="billing-addon" key={item.code}><div><b>{systemText(locale, item.name)}</b><p>{systemText(locale, item.description)}</p><p>{item.code === "ADDON_INTEGRATION" ? systemText(locale, "от ") : ""}{formatKzt(catalogPrice(item, period))} / {item.chargeType === "ONE_TIME" ? systemText(locale, "разово") : periodLabel}</p></div></div>)}</div>
       {(data?.addOns || []).length ? <p>{systemText(locale, "Купленные ресурсы:")}{" "}{(data.addOns as Array<{code:string;qty:number}>).map(row => `${systemText(locale, items.find(item=>item.code===row.code)?.name || "Прежний модуль")} × ${row.qty}`).join(", ")}</p> : null}
       {data?.accessBreakdown?.baseLimits ? <div className="billing-table-scroll"><table><thead><tr><th>{systemText(locale, "Ресурс")}</th><th>{systemText(locale, "В тарифе")}</th><th>{systemText(locale, "Итоговый лимит")}</th></tr></thead><tbody>{(data.usage || []).map((row: {key:string;label:string;cap:number}) => <tr key={row.key}><th>{systemText(locale, row.label)}</th><td>{data.accessBreakdown.baseLimits[row.key] ?? "—"}</td><td>{row.cap < 0 ? systemText(locale, "Без квоты") : row.cap}</td></tr>)}</tbody></table></div> : null}
-    </section>
-    <div ref={selection} className="billing-selection" tabIndex={-1}>
+    </section>}
+    {view === "plans" && planCode && <div ref={selection} className="billing-selection" tabIndex={-1}>
       {planCode ? <div className="panel stack">
-        <div className="page-head"><div><h3>{requestType === "RENEWAL" ? systemText(locale, "Продление: ") : systemText(locale, "Ваш выбор: ")}{plan?.name || planCode}</h3><p className="muted">{enterprise ? systemText(locale, "Стоимость и состав согласуем индивидуально.") : systemText(locale, "Период оплаты: {p0}.", { p0: period === "YEARLY" ? systemText(locale, "12 месяцев") : systemText(locale, "1 месяц") })}</p></div>
+        <div><button className="btn secondary" type="button" disabled={busy} onClick={openPlans}>← {bt("К выбору тарифа", "Тариф таңдауға оралу", "Back to plans")}</button></div>
+        <div className="page-head"><div><h3>{requestType === "RENEWAL" ? systemText(locale, "Продление: ") : systemText(locale, "Ваш выбор: ")}{plan?.name || quote?.planName || data?.planName || bt("Подписка", "Жазылым", "Subscription")}</h3><p className="muted">{enterprise ? systemText(locale, "Стоимость и состав согласуем индивидуально.") : systemText(locale, "Период оплаты: {p0}.", { p0: period === "YEARLY" ? systemText(locale, "12 месяцев") : systemText(locale, "1 месяц") })}</p></div>
           {!enterprise && !free ? <button className="btn secondary" disabled={busy} type="button" aria-expanded={constructorOpen} onClick={() => setConstructorOpen((open) => !open)}>{constructorOpen ? systemText(locale, "Скрыть дополнения") : systemText(locale, "Настроить под себя")}</button> : null}
         </div>
+        {!enterprise && !free && !requestType && <div className="billing-period-toggle" aria-label={systemText(locale, "Период оплаты")}>
+          <button className={`btn secondary ${period === "MONTHLY" ? "active" : ""}`} type="button" aria-pressed={period === "MONTHLY"} disabled={busy} onClick={() => setPeriod("MONTHLY")}>{systemText(locale, "Месяц")}</button>
+          <button className={`btn secondary ${period === "YEARLY" ? "active" : ""}`} type="button" aria-pressed={period === "YEARLY"} disabled={busy} onClick={() => setPeriod("YEARLY")}>{systemText(locale, "Год")}</button>
+        </div>}
         {constructorOpen && !enterprise && !free ? <div className="stack">
           <h4>{systemText(locale, "Дополнительные ресурсы")}</h4><p className="muted">{systemText(locale, "Ресурсы увеличивают лимиты тарифа и не открывают функции другого тарифа.")}</p>
           <div className="billing-addons">{extras.map((item) => {
@@ -227,14 +261,14 @@ export function BillingPage() {
           {selectedAddOns.some((item) => item.code === "ADDON_INTEGRATION") ? <p className="muted">{systemText(locale, "Интеграция рассчитана по начальной стоимости. Окончательную цену согласуем по задаче.")}</p> : null}
           <p className="muted">{systemText(locale, "С учётом дополнений: пользователей —")}{" "}{quote.limits.USERS}{systemText(locale, ", воронок —")}{" "}{quote.limits.PIPELINES}{systemText(locale, ", коммуникационные подключения —")}{" "}{quote.limits.WHATSAPP_CONNECTIONS}{systemText(locale, ", AI-кредитов —")}{" "}{quote.limits.AI_USAGE?.toLocaleString("ru-RU")}{systemText(locale, ", хранилище —")}{" "}{quote.limits.STORAGE_GB} {" "}{systemText(locale, "ГБ.")}</p>
         </div> : null}
-        <div className="actions"><button className="btn" type="button" disabled={busy || !quote || Boolean(currentRequest)} onClick={() => void submit()}>{enterprise ? systemText(locale, "Отправить запрос на индивидуальные условия") : requestType === "RENEWAL" ? bt("Продлить подписку", "Жазылымды ұзарту", "Renew subscription") : bt("Перейти к оплате", "Төлемге өту", "Continue to checkout")}</button></div>
-        {orderConflict && <a className="btn secondary" href="#billing-orders">{bt("Перейти к текущему заказу", "Ағымдағы тапсырысқа өту", "Go to current order")}</a>}
+        <div className="actions"><button className="btn" type="button" disabled={busy || !quote || Boolean(currentRequest) || Boolean(pendingOrder)} onClick={() => void submit()}>{enterprise ? systemText(locale, "Отправить запрос на индивидуальные условия") : free ? bt("Подключить бесплатно", "Тегін қосу", "Activate free plan") : bt("Перейти к оплате", "Төлемге өту", "Continue to checkout")}</button></div>
+        {(orderConflict || pendingOrder) && <a className="btn secondary" href="#billing-orders">{bt("Перейти к текущему заказу", "Ағымдағы тапсырысқа өту", "Go to current order")}</a>}
         {currentRequest ? <p className="muted">{systemText(locale, "У вас уже есть открытый запрос. Дождитесь его обработки или отмените его, чтобы отправить новый.")}</p> : null}
       </div> : <p className="muted">{systemText(locale, "Выберите тариф выше — здесь появится его состав и итоговый расчёт.")}</p>}
-    </div>
-    <section className="panel stack"><h3>{systemText(locale, "Как подключить")}</h3><ol className="billing-steps"><li>{systemText(locale, "Выберите тариф и нужные дополнения.")}</li><li>{bt("Выберите карту, Kaspi или счёт на компанию.", "Картаны, Kaspi-ді немесе компанияға шотты таңдаңыз.", "Choose card, Kaspi or a company invoice.")}</li><li>{bt("После подтверждения оплаты тариф подключится автоматически.", "Төлем расталғаннан кейін тариф автоматты түрде қосылады.", "Your plan activates when payment is confirmed.")}</li></ol><p className="muted">{bt("Доступные способы показаны на странице оплаты. Поступления по Kaspi и счёту проверяет администратор.", "Қолжетімді тәсілдер төлем бетінде көрсетілген. Kaspi және шот бойынша төлемдерді әкімші тексереді.", "Available methods are shown at checkout. Kaspi and bank transfers are verified by an administrator.")}</p>
+    </div>}
+    <details className="panel billing-details"><summary>{bt("Как проходит оплата", "Төлем қалай жасалады", "How payment works")}</summary><ol className="billing-steps"><li>{systemText(locale, "Выберите тариф и нужные дополнения.")}</li><li>{bt("Выберите карту, Kaspi или счёт на компанию.", "Картаны, Kaspi-ді немесе компанияға шотты таңдаңыз.", "Choose card, Kaspi or a company invoice.")}</li><li>{bt("После подтверждения оплаты тариф подключится автоматически.", "Төлем расталғаннан кейін тариф автоматты түрде қосылады.", "Your plan activates when payment is confirmed.")}</li></ol><p className="muted">{bt("Доступные способы показаны на странице оплаты. Поступления по Kaspi и счёту проверяет администратор.", "Қолжетімді тәсілдер төлем бетінде көрсетілген. Kaspi және шот бойынша төлемдерді әкімші тексереді.", "Available methods are shown at checkout. Kaspi and bank transfers are verified by an administrator.")}</p>
       {upcoming.length ? <p className="muted">{systemText(locale, "Дополнения в подготовке:")}{" "}{upcoming.map((item) => systemText(locale, item.name)).join(", ")}{systemText(locale, ". Они недоступны для заказа в этом каталоге.")}</p> : null}
-    </section>
-    <OnboardingWizard />{data?.entitlements?.SUPPORT ? <p className="muted">{systemText(locale, "Вопросы по подключению можно задать в")}{" "}<Link to="/billing?support=1">{systemText(locale, "поддержке")}</Link>.</p> : null}
+    </details>
+    {view === "overview" && <OnboardingWizard />}{data?.entitlements?.SUPPORT ? <p className="muted">{systemText(locale, "Вопросы по подключению можно задать в")}{" "}<Link to="/billing?support=1">{systemText(locale, "поддержке")}</Link>.</p> : null}
   </section>;
 }
