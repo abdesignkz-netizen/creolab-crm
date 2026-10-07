@@ -812,3 +812,51 @@ it("a callback arriving during recovery wins; the successful payment cannot be r
     freedomPay.getPaymentStatus = original;
   }
 });
+it("cancellation reconciles declined and expired attempts, but keeps uncertain or successful payments locked", async () => {
+  const original = freedomPay.getPaymentStatus;
+  try {
+    for (const status of ["failed", "incomplete", "pending", "success", "unknown", "refunded", "revoked", "not_found", "bad_signature", "wrong_amount", "wrong_order"]) {
+      const a = await tenant(), o = await order(a);
+      const d = await payOrder(db, a, { orderId: o.id, method: "CARD" }, fake);
+      const p = await db.billingPayment.findUniqueOrThrow({ where: { id: d.payments[0].id } });
+      freedomPay.getPaymentStatus = async () => {
+        if (status === "not_found") throw new ApiError(404, "provider_not_found", "Not found");
+        if (status === "bad_signature") throw new ApiError(502, "provider_signature", "Invalid signature");
+        return {
+          pg_payment_id: p.providerPaymentId!,
+          pg_order_id: status === "wrong_order" ? "wrong-order" : p.id,
+          pg_amount: String(p.amountMinor + (status === "wrong_amount" ? 1 : 0)),
+          pg_currency: p.currency,
+          pg_payment_status: status.startsWith("wrong_") ? "failed" : status,
+        };
+      };
+      if (["failed", "incomplete"].includes(status)) {
+        assert.equal((await cancelOrder(db, a, o.id)).status, "CANCELLED");
+        assert.equal((await db.billingPayment.findUniqueOrThrow({ where: { id: p.id } })).status, "FAILED");
+      } else {
+        await assert.rejects(() => cancelOrder(db, a, o.id));
+        assert.equal((await checkoutDetail(db, a, o.id)).order.status, "PENDING_PAYMENT", status);
+        assert.equal((await db.billingPayment.findUniqueOrThrow({ where: { id: p.id } })).status, "PROCESSING", status);
+      }
+    }
+  } finally { freedomPay.getPaymentStatus = original; }
+});
+it("cancellation checks ownership before querying provider and cannot overwrite a racing paid callback", async () => {
+  const original = freedomPay.getPaymentStatus;
+  const a = await tenant(), b = await tenant(), o = await order(a);
+  const d = await payOrder(db, a, { orderId: o.id, method: "CARD" }, fake);
+  const p = await db.billingPayment.findUniqueOrThrow({ where: { id: d.payments[0].id } });
+  let calls = 0;
+  freedomPay.getPaymentStatus = async () => {
+    calls++;
+    await processPaymentNotice(db, notice(p));
+    return { pg_payment_id: p.providerPaymentId!, pg_order_id: p.id, pg_amount: String(p.amountMinor), pg_currency: p.currency, pg_payment_status: "failed" };
+  };
+  try {
+    await assert.rejects(() => cancelOrder(db, b, o.id), { code: "not_found" });
+    assert.equal(calls, 0);
+    await assert.rejects(() => cancelOrder(db, a, o.id), { code: "order_closed" });
+    assert.equal((await checkoutDetail(db, a, o.id)).order.status, "PAID");
+    assert.equal((await db.billingPayment.findUniqueOrThrow({ where: { id: p.id } })).status, "PAID");
+  } finally { freedomPay.getPaymentStatus = original; }
+});

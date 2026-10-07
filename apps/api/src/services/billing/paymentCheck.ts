@@ -11,7 +11,7 @@ import {
 import { freedomPay } from "./freedomPayProvider.ts";
 import { amountKzt, billingError } from "./config.ts";
 
-/** A status lookup is diagnostic only. Activation requires the signed callback. */
+/** Verified terminal failures release checkout; activation still requires the signed callback. */
 export async function checkProviderPayment(
   db: PrismaClient,
   id: string,
@@ -69,6 +69,28 @@ export async function checkProviderPayment(
   await billingAudit(db, p.tenantId, "PAYMENT_STATUS_CHECKED", p.id, userId, {
     providerStatus: status,
   });
+  // getPaymentStatus verifies the provider signature before returning fields.
+  // A failed or expired attempt cannot keep an unpaid order locked forever
+  // just because its failure callback was lost. Never treat pending, success,
+  // refunds or a not-found response in a different merchant as a failure.
+  if (status === "failed" || status === "incomplete") {
+    await db.$transaction(async (tx) => {
+      await lockTenant(tx, p.tenantId);
+      const current = await tx.billingPayment.findUniqueOrThrow({
+        where: { id },
+      });
+      if (
+        current.providerPaymentId &&
+        current.providerPaymentId !== result.pg_payment_id
+      )
+        billingError(
+          "provider_mismatch",
+          "Ответ банка не соответствует платежу",
+          409,
+        );
+      await failPaymentInTransaction(tx, id, `provider_status_${status}`);
+    });
+  }
   const current = await db.billingPayment.findUniqueOrThrow({ where: { id } });
   return {
     status,

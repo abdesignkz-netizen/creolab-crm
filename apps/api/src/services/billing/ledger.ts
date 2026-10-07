@@ -775,6 +775,27 @@ export async function cancelOrder(
   id: string,
 ) {
   const tenantId = billingTenant(auth);
+  const before = await db.billingOrder.findFirst({ where: { id, tenantId } });
+  if (!before) billingError("not_found", "Заказ не найден", 404);
+  if (before.status !== "PENDING_PAYMENT")
+    billingError("order_closed", "Заказ уже закрыт", 409);
+  const processing = await db.billingPayment.findMany({
+    where: { orderId: id, tenantId, provider: "FREEDOM_PAY", status: "PROCESSING" },
+  });
+  // Network calls stay outside the transaction. Recheck under the tenant lock
+  // below so a concurrent successful callback or new attempt always wins.
+  if (processing.length) {
+    const { checkProviderPayment } = await import("./paymentCheck.ts");
+    for (const payment of processing) {
+      const result = await checkProviderPayment(db, payment.id, auth.user.id);
+      if (result.status === "not_found" && result.localStatus !== "PAID")
+        billingError(
+          "payment_reconciliation_required",
+          "Старая попытка не найдена в текущем магазине. Администратору нужно сверить её и разблокировать заказ в разделе платежей.",
+          409,
+        );
+    }
+  }
   return db.$transaction(async (tx) => {
     await lockTenant(tx, tenantId);
     const order = await tx.billingOrder.findFirst({ where: { id, tenantId } });

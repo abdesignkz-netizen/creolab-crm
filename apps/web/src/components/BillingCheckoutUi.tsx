@@ -125,6 +125,11 @@ export function useBillingError() {
       "Сізде аяқталмаған тапсырыс бар. Төлемді жалғастыру немесе бас тарту шарттарын көру үшін оны ашыңыз.",
       "You already have an unfinished order. Open it to continue payment or see cancellation options.",
     ],
+    payment_reconciliation_required: [
+      "Старая попытка не найдена в текущем магазине Freedom Pay. Администратору нужно открыть «Платежи», найти этот заказ и нажать «Разблокировать после сверки». После проверки отсутствия списания заказ можно отменить.",
+      "Ескі әрекет қазіргі Freedom Pay дүкенінде табылмады. Әкімші «Төлемдер» бөлімінде осы тапсырысты тауып, «Тексергеннен кейін бұғатты ашу» түймесін басуы керек. Ақша алынбағаны тексерілгеннен кейін тапсырыстан бас тартуға болады.",
+      "The old attempt was not found in the current Freedom Pay merchant. An administrator must find the order in Payments and select Release after reconciliation. After verifying no charge occurred, the order can be cancelled.",
+    ],
     payment_processing: [
       "Результат оплаты картой ещё не подтверждён. Откройте текущий заказ и проверьте статус. Если проверка зависла, обратитесь в поддержку.",
       "Карта төлемінің нәтижесі әлі расталмады. Ағымдағы тапсырысты ашып, мәртебені тексеріңіз. Тексеру тоқтап қалса, қолдау қызметіне хабарласыңыз.",

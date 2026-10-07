@@ -128,9 +128,9 @@ export function BillingCheckoutPage() {
           "Payment was not found in the current Freedom Pay merchant. An administrator must reconcile the old attempt and release the order in Payments.",
         ],
         failed: [
-          "Банк сообщает об отклонении платежа. Администратору нужно запросить повторное уведомление Freedom Pay.",
-          "Банк төлемнің қабылданбағанын хабарлады. Әкімші Freedom Pay хабарламасын қайта жіберуді сұрауы керек.",
-          "The bank reports a failed payment. An administrator must request a Freedom Pay callback replay.",
+          "Банк отклонил платёж. Теперь можно отменить заказ или выбрать способ оплаты.",
+          "Банк төлемді қабылдамады. Енді тапсырыстан бас тартуға немесе төлем тәсілін таңдауға болады.",
+          "The bank declined the payment. You can now cancel the order or choose a payment method.",
         ],
         pending: [
           "Проверено: банк ещё обрабатывает платёж. Повторно платить не нужно.",
@@ -138,9 +138,9 @@ export function BillingCheckoutPage() {
           "Checked: the bank is still processing the payment. Do not pay again.",
         ],
         incomplete: [
-          "Оплата в банке не завершена. Если деньги не списаны, откройте страницу оплаты по ссылке ниже.",
-          "Банктегі төлем аяқталмады. Ақша алынбаса, төмендегі сілтеме арқылы төлем бетін ашыңыз.",
-          "Payment is incomplete. If you were not charged, open the payment page below.",
+          "Срок оплаты истёк. Теперь можно отменить заказ или выбрать способ оплаты.",
+          "Төлем мерзімі өтті. Енді тапсырыстан бас тартуға немесе төлем тәсілін таңдауға болады.",
+          "The payment expired. You can now cancel the order or choose a payment method.",
         ],
         manual_pending: [
           "Подтверждение поступления пока не внесено. Ожидаем сверку администратором.",

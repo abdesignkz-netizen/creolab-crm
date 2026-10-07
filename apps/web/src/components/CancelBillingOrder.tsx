@@ -19,37 +19,39 @@ export function CancelBillingOrder({
   const [confirming, setConfirming] = useState(false);
   const support = new URLSearchParams(location.search);
   support.set("support", "1");
-  if (blocked)
-    return (
-      <div className="billing-cancel stack">
-        <button className="btn secondary" disabled aria-describedby={id}>
-          {t("Отменить заказ", "Тапсырыстан бас тарту", "Cancel order")}
-        </button>
-        <p id={id} className="muted">
-          {t(
-            "Отмена временно недоступна: результат оплаты картой ещё не подтверждён. Если страница оплаты не открылась или проверка зависла, администратор должен сверить попытку и разблокировать заказ. После этого здесь появится возможность отмены.",
-            "Бас тарту уақытша қолжетімсіз: карта төлемінің нәтижесі әлі расталмады. Төлем беті ашылмаса немесе тексеру тоқтап қалса, әкімші әрекетті тексеріп, тапсырыстың бұғатын ашуы керек. Содан кейін осы жерде бас тартуға болады.",
-            "Cancellation is temporarily unavailable while the card payment outcome is unconfirmed. If checkout never opened or verification is stuck, an administrator must reconcile the attempt and release the order. Cancellation will then become available here.",
-          )}
-        </p>
-        <Link className="btn secondary" to={`${location.pathname}?${support}`}>
-          {t(
-            "Обратиться в поддержку",
-            "Қолдау қызметіне хабарласу",
-            "Contact support",
-          )}
-        </Link>
-      </div>
-    );
   if (!confirming)
     return (
-      <button
-        className="btn secondary"
-        disabled={busy}
-        onClick={() => setConfirming(true)}
-      >
-        {t("Отменить заказ", "Тапсырыстан бас тарту", "Cancel order")}
-      </button>
+      <div className="billing-cancel stack">
+        <button
+          className="btn secondary"
+          disabled={busy}
+          onClick={() => setConfirming(true)}
+          aria-describedby={blocked ? id : undefined}
+        >
+          {t("Отменить заказ", "Тапсырыстан бас тарту", "Cancel order")}
+        </button>
+        {blocked && (
+          <p id={id} className="muted">
+            {t(
+              "Перед отменой проверим результат попытки оплаты. Если банк отклонил платёж или срок оплаты истёк, заказ будет отменён.",
+              "Бас тарту алдында төлем әрекетінің нәтижесін тексереміз. Банк төлемді қабылдамаса немесе төлем мерзімі өтсе, тапсырыс жойылады.",
+              "We will check the payment outcome first. If the bank declined it or the payment expired, the order will be cancelled.",
+            )}
+          </p>
+        )}
+        {blocked && (
+          <Link
+            className="btn secondary"
+            to={`${location.pathname}?${support}`}
+          >
+            {t(
+              "Обратиться в поддержку",
+              "Қолдау қызметіне хабарласу",
+              "Contact support",
+            )}
+          </Link>
+        )}
+      </div>
     );
   return (
     <div
@@ -85,7 +87,13 @@ export function CancelBillingOrder({
           }}
         >
           {busy
-            ? t("Отменяем…", "Бас тартылуда…", "Cancelling…")
+            ? blocked
+              ? t(
+                  "Проверяем оплату…",
+                  "Төлемді тексеріп жатырмыз…",
+                  "Checking payment…",
+                )
+              : t("Отменяем…", "Бас тартылуда…", "Cancelling…")
             : t("Да, отменить заказ", "Иә, бас тарту", "Yes, cancel order")}
         </button>
       </div>
