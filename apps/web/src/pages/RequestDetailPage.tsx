@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../components/InlineFeedback";
 import { uiSourceLine, uiTaskStatus, uiTaskTitle, uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale } from "../lib/uiText";
 import { catalogItemLabel, type TenantService } from "../lib/tenantServices";
 import { FormEvent, useEffect, useState } from "react";
@@ -72,7 +73,7 @@ export function RequestDetailPage() {
   if (!data) {
     return (
       <section>
-        <p className="error">{error}</p>
+        <InlineFeedback kind="error" className="error">{error}</InlineFeedback>
         <Link className="btn secondary" to="/inquiries">
           {uiText("К списку")}</Link>
       </section>
@@ -103,7 +104,7 @@ export function RequestDetailPage() {
         </div>
       </div>
 
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
 
       <div className="request-hero panel">
         <div>

@@ -1,8 +1,12 @@
+import { CancelBillingOrder } from "./CancelBillingOrder";
+import { InlineFeedback } from "./InlineFeedback";
+import { notifySaved } from "./SaveNotice";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import {
   useBillingText,
+  useBillingError,
   BillingStatus,
   billingMoney,
   billingDate,
@@ -10,7 +14,8 @@ import {
 } from "./BillingCheckoutUi";
 
 export function BillingHistory({ onPay }: { onPay: () => void }) {
-  const t = useBillingText();
+  const t = useBillingText(),
+    errorText = useBillingError();
   const [data, setData] = useState<any>(null),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
@@ -41,17 +46,13 @@ export function BillingHistory({ onPay }: { onPay: () => void }) {
     })[m] || "—";
   async function action(fn: () => Promise<unknown>) {
     setBusy(true);
+    setError("");
     try {
       await fn();
       await load();
-    } catch {
-      setError(
-        t(
-          "Не удалось выполнить действие. Обновите страницу и проверьте состояние оплаты.",
-          "Әрекетті орындау мүмкін болмады. Бетті жаңартып, төлем күйін тексеріңіз.",
-          "Unable to complete the action. Refresh and check the payment status.",
-        ),
-      );
+    } catch (error) {
+      await load();
+      setError(errorText(error));
     } finally {
       setBusy(false);
     }
@@ -63,7 +64,7 @@ export function BillingHistory({ onPay }: { onPay: () => void }) {
     "—";
   return (
     <section className="panel stack">
-      {error && <p role="alert">{error}</p>}
+      {error && <InlineFeedback className="error">{error}</InlineFeedback>}
       {!data && !error && (
         <p role="status">
           {t("Загружаем платежи…", "Төлемдер жүктелуде…", "Loading payments…")}
@@ -144,7 +145,13 @@ export function BillingHistory({ onPay }: { onPay: () => void }) {
               </p>
             </>
           )}
-          <h3>{t("Заказы", "Тапсырыстар", "Orders")}</h3>
+          <h3 id="billing-orders">
+            {t(
+              "Незавершённые заказы",
+              "Аяқталмаған тапсырыстар",
+              "Unfinished orders",
+            )}
+          </h3>
           {!data.orders.some((o: any) => o.status === "PENDING_PAYMENT") && (
             <p className="muted">
               {t(
@@ -156,20 +163,58 @@ export function BillingHistory({ onPay }: { onPay: () => void }) {
           )}
           {data.orders
             .filter((o: any) => o.status === "PENDING_PAYMENT")
-            .map((o: any) => (
-              <Link
-                key={o.id}
-                className="btn secondary"
-                to={`/billing/checkout/${o.id}`}
-              >
-                {t(
-                  "Продолжить оплату",
-                  "Төлемді жалғастыру",
-                  "Continue checkout",
-                )}{" "}
-                · {o.orderNumber} · {billingMoney(o.amountMinor)}
-              </Link>
-            ))}
+            .map((o: any) => {
+              const blocked = data.payments.some(
+                (p: any) =>
+                  p.orderId === o.id &&
+                  p.method === "CARD" &&
+                  p.status === "PROCESSING",
+              );
+              return (
+                <div key={o.id} className="billing-open-order stack">
+                  <div className="billing-checkout-head">
+                    <strong>
+                      {o.orderNumber} · {planName(o)}
+                    </strong>
+                    <strong>{billingMoney(o.amountMinor)}</strong>
+                  </div>
+                  <BillingStatus status={blocked ? "PROCESSING" : o.status} />
+                  <div className="actions">
+                    <Link className="btn" to={`/billing/checkout/${o.id}`}>
+                      {blocked
+                        ? t(
+                            "Открыть и проверить оплату",
+                            "Ашу және төлемді тексеру",
+                            "Open and check payment",
+                          )
+                        : t(
+                            "Продолжить оплату",
+                            "Төлемді жалғастыру",
+                            "Continue checkout",
+                          )}
+                    </Link>
+                  </div>
+                  <CancelBillingOrder
+                    blocked={blocked}
+                    busy={busy}
+                    orderNumber={o.orderNumber}
+                    onCancel={() =>
+                      action(async () => {
+                        await api.billingCancelOrder(o.id);
+                        notifySaved(
+                          t(
+                            "Заказ отменён. Действующий тариф сохранён.",
+                            "Тапсырыс жойылды. Қолданыстағы тариф сақталды.",
+                            "Order cancelled. Your current plan is unchanged.",
+                          ),
+                        );
+                      })
+                    }
+                  />
+                </div>
+              );
+            })}
+
           <h3>{t("История платежей", "Төлем тарихы", "Payment history")}</h3>
           {!data.payments.length ? (
             <p className="muted">
@@ -188,6 +233,7 @@ export function BillingHistory({ onPay }: { onPay: () => void }) {
                       t("Способ оплаты", "Төлем тәсілі", "Method"),
                       t("Статус", "Мәртебе", "Status"),
                       "PDF",
+                      t("Действия", "Әрекеттер", "Actions"),
                     ].map((h) => (
                       <th key={h}>{h}</th>
                     ))}
@@ -236,6 +282,22 @@ export function BillingHistory({ onPay }: { onPay: () => void }) {
                             >
                               PDF
                             </button>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td>
+                          {o?.status === "PENDING_PAYMENT" ? (
+                            <Link
+                              className="btn secondary"
+                              to={`/billing/checkout/${o.id}`}
+                            >
+                              {t(
+                                "Управление заказом",
+                                "Тапсырысты басқару",
+                                "Manage order",
+                              )}
+                            </Link>
                           ) : (
                             "—"
                           )}

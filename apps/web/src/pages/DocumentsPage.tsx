@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../components/InlineFeedback";
 import { uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale } from "../lib/uiText";
 import { NavIcon } from "../components/NavIcon";
 import { ContractWorkspaceModal } from "../components/ContractWorkspaceModal";
@@ -383,7 +384,7 @@ export function DocumentsPage() {
         </form>
       </div>
 
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
       {disabled ? (
         <div className="sit-section">
           <p className="empty">
@@ -410,7 +411,7 @@ export function DocumentsPage() {
             </select>
           </label>
           {!esfBusy && !esfDeals.length && !esfError ? <p className="muted">{uiText("Нет сделок для создания ЭСФ.")}</p> : null}
-          {esfError ? <p className="error" role="alert">{esfError}</p> : null}
+          {esfError ? <InlineFeedback kind="error" className="error">{esfError}</InlineFeedback> : null}
           <div className="actions">
             <button type="submit" className="btn" disabled={esfBusy || !esfDealId}>{uiText("Создать черновик ЭСФ")}</button>
             <button type="button" className="btn secondary" disabled={esfBusy} onClick={() => setEsfCreateOpen(false)}>{uiText("Отмена")}</button>

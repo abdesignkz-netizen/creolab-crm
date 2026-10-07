@@ -1,3 +1,4 @@
+import { InlineFeedback } from "./InlineFeedback";
 import { uiText, useUiText, localizeUiOptions, uiMessage } from "../lib/uiText";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -241,7 +242,7 @@ export function SupportCenter({
                 placeholder={uiText("Например: как подключить WhatsApp")}
               />
             </label>
-            {error ? <p className="error">{error}</p> : null}
+            {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
             <p className="muted">{query.trim() ? uiText("Результаты") : catalog?.contextual?.length ? uiText("По этому разделу и популярные вопросы") : uiText("Популярные вопросы")}</p>
             <div className="support-list">
               {list.map((item) => (
@@ -353,7 +354,7 @@ export function SupportCenter({
                 </p>
               </div>
             </div>
-            {error ? <p className="error">{error}</p> : null}
+            {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
             <div className="support-messages" ref={messagesRef}>
               {chat.messages.map((item) => (
                 <div

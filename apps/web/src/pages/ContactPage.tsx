@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../components/InlineFeedback";
 import { uiTaskStatus, uiTaskTitle, uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale } from "../lib/uiText";
 import { notifySaved } from "../components/SaveNotice";
 import { useEffect, useState } from "react";
@@ -75,7 +76,7 @@ export function ContactPage() {
   if (!data) {
     return (
       <section>
-        <p className="error">{error}</p>
+        <InlineFeedback kind="error" className="error">{error}</InlineFeedback>
         <button className="btn" onClick={load}>{uiText("Повторить")}</button>
       </section>
     );
@@ -237,13 +238,13 @@ export function ContactPage() {
         </div>
       </div>
 
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
 
       {deleteConfirm && caps.companyAdmin ? (
         <div className="panel contact-delete-confirm" role="alertdialog" aria-labelledby="contact-delete-title">
           <p id="contact-delete-title">
             {uiText("Удалить клиента безвозвратно вместе с заявками и диалогами? Сделки с выставленными счетами, подписанными договорами или ЭСФ удалить нельзя — тогда архивируйте карточку. Отменить удаление нельзя.")}</p>
-          {deleteError ? <p className="error" role="alert">{deleteError}</p> : null}
+          {deleteError ? <InlineFeedback kind="error" className="error">{deleteError}</InlineFeedback> : null}
           <div className="actions">
             <button
               type="button"

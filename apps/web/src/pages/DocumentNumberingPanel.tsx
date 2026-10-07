@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../components/InlineFeedback";
 import { systemText } from "@creolab/contracts";
 import { useLocale } from "../lib/session";
 import { useEffect, useState } from "react";
@@ -33,7 +34,7 @@ export function DocumentNumberingPanel() {
   return <form className="panel" id="document-numbering" onSubmit={event => void save(event)}>
     <h3>{systemText(locale, "Нумерация документов")}</h3>
     <p className="muted">{systemText(locale, "Укажите, с какого числа начинается нумерация каждого типа документов. Уже созданные документы сохранят свои номера. Если номера уже выдавались, отсчёт продолжится после последнего номера. Удаление документа не сбрасывает счётчик.")}</p>
-    {error ? <p className="error" role="alert">{error}</p> : null}
+    {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
     {settings ? <><div className="deal-edit">{types.map(([type, label]) => <label key={type}>{systemText(locale, "{type} — начальный номер", { type: systemText(locale, label) })}
       <input type="number" min="1" max="999999999" step="1" required disabled={busy} value={values[type] || ""} onChange={event => setValues(current => ({ ...current, [type]: event.target.value }))} />
       <span className="muted">{systemText(locale, "Следующий по сохранённым настройкам: {number}", { number: settings[type].example })}</span>

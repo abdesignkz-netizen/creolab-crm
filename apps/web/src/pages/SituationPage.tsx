@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../components/InlineFeedback";
 import { uiTaskTitle, uiMessage } from "../lib/uiText";
 import { systemText } from "@creolab/contracts";
 import { useLocale } from "../lib/session";
@@ -322,7 +323,7 @@ export function SituationPage() {
   if (!data) {
     return (
       <section>
-        <p className="error">{error}</p>
+        <InlineFeedback kind="error" className="error">{error}</InlineFeedback>
         <button type="button" className="btn" onClick={() => void load()}>
           {systemText(locale, "Повторить")}</button>
       </section>
@@ -350,7 +351,7 @@ export function SituationPage() {
             {badgeHint ? <p className="muted sit-badge-explain">{badgeHint}</p> : <p className="muted">{systemText(locale, "Что нужно сделать сейчас.")}</p>}
           </div>
         </div>
-        {error ? <p className="error">{error}</p> : null}
+        {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
         {liveSpotCount(inquiries.length) || liveSpotCount(deals.length) || liveSpotCount(tasks.length) || liveSpotCount(dialogs.length) ? (
           <>
             <p className="dash-block-label">{systemText(locale, "Сейчас важно")}</p>
@@ -529,7 +530,7 @@ export function SituationPage() {
         </p>
       </div>
 
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
 
       {(data.integrationAlerts || []).length > 0 ? (
         <div className="banner warn dash-alert">

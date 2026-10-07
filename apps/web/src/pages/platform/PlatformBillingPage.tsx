@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../../components/InlineFeedback";
 import { BillingLedgerPanel } from "./BillingLedgerPanel";
 import { useBillingText } from "../../components/BillingCheckoutUi";
 import { uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale } from "../../lib/uiText";
@@ -125,7 +126,7 @@ function LegacyBillingRequests() {
       {freeStats ? <section className="panel stack"><h3>BasQar Free</h3><div className="billing-usage-grid">
         {[[uiText("Всего Free"), freeStats.total], [uiText("Активные за 30 дней"), freeStats.active], [uiText("Неактивные"), freeStats.inactive], [uiText("Новые за месяц"), freeStats.newThisMonth], [uiText("Перешли на платный"), freeStats.converted], ["Free → Start", freeStats.freeToStart], ["Free → CRM + AI", freeStats.freeToCrmAi]].map(([label,value]) => <div key={label}><span>{label}</span><p><b>{value}</b></p></div>)}
       </div><form className="actions" onSubmit={event => { event.preventDefault(); void saveFreePolicy(); }}><label>{uiText("Максимум активных Free")}<input type="number" min="0" step="1" value={freeCap} onChange={event => setFreeCap(Number(event.target.value))} /></label><button className="btn secondary" disabled={busy}>{uiText("Сохранить лимит")}</button></form><p className="muted">{uiText("Активность — изменение рабочих данных за последние 30 дней. Изменение лимита не отключает существующие компании.")}</p></section> : null}
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
       <div className="panel">
         {items.length === 0 ? (
           <p className="muted">{uiText("Пока нет запросов на тариф.")}</p>

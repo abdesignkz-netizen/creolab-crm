@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../components/InlineFeedback";
 import { uiMessage, uiText, useUiText, localizeUiOptions, uiFormatLocale } from "../lib/uiText";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
@@ -163,7 +164,7 @@ export function ManualPdfImportPanel({ onSaved }: { onSaved: () => void }) {
       {!open?<button type="button" className="btn" onClick={()=>{setOpen(true);setSaved(null);setError("");}}>{uiText("Загрузить документ")}</button>:null}
     </div>
     {saved?<p className="ok">{saved.kind==="CONTRACT"?uiText("Договор сохранён и связан с новой сделкой."):saved.createdDeal?uiText("Новая сделка создана, счёт сохранён и связан с компанией."):uiText("Счёт сохранён.")} <Link to={`/deals/${saved.dealId}`}>{uiText("Открыть сделку")}</Link></p>:null}
-    {error?<p className="error" role="alert">{error}</p>:null}
+    {error?<InlineFeedback kind="error" className="error">{error}</InlineFeedback>:null}
     {open?<>
       {!preview?<div className="stack">
         <label>{uiText("Тип документа")}<select value={kind} disabled={busy} onChange={e=>{setKind(e.target.value as typeof kind);setFile(null);setError("");}}><option value="CONTRACT">{uiText("Договор")}</option><option value="INVOICE">{uiText("Счёт на оплату")}</option></select></label>

@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../../components/InlineFeedback";
 import { uiText, useUiText, localizeUiOptions } from "../../lib/uiText";
 import { useEffect, useState } from "react";
 import { api } from "../../lib/api";
@@ -24,7 +25,7 @@ export function PlatformAuditPage() {
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={uiText("Фильтр по действию")} />
         <button className="btn secondary">{uiText("Найти")}</button>
       </form>
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
       {!data ? <div className="state">{uiText("Загрузка…")}</div> : (data.items || []).map((item: any) => (
         <div className="row" key={item.id}>
           <div>

@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../components/InlineFeedback";
 import { uiText, useUiText, localizeUiOptions, uiMessage , uiDurationLabel } from "../lib/uiText";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
@@ -61,7 +62,7 @@ export function ControlPage() {
   if (!data) {
     return (
       <section>
-        <p className="error">{error}</p>
+        <InlineFeedback kind="error" className="error">{error}</InlineFeedback>
         <button type="button" className="btn" onClick={() => void load()}>
           {uiText("Повторить")}</button>
       </section>
@@ -85,8 +86,8 @@ export function ControlPage() {
           <p className="muted">{uiText("Где отвечает AI, а где нужен сотрудник.")}</p>
         </div>
       </div>
-      {error ? <p className="error">{error}</p> : null}
-      {note ? <p className="ok">{note}</p> : null}
+      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
+      {note ? <InlineFeedback kind="success" className="ok">{note}</InlineFeedback> : null}
 
       <div className="panel management-ai-status">
         <div className="management-ai-status-head">

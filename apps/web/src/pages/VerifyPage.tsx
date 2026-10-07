@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../components/InlineFeedback";
 import { uiText, useUiText, localizeUiOptions, uiFormatLocale } from "../lib/uiText";
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
@@ -39,7 +40,7 @@ export function VerifyPage({ avr = false }: { avr?: boolean }) {
       <div className="login-stage">
         <div className="panel" style={{ maxWidth: 560 }}>
           <h2>{uiText("Проверка документа")}</h2>
-          {error ? <p className="error">{error}</p> : null}
+          {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
           {data ? (
             <>
               <p>

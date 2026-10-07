@@ -1,7 +1,8 @@
+import { InlineFeedback } from "../components/InlineFeedback";
 import { systemText } from "@creolab/contracts";
 import { useLocale } from "../lib/session";
 import { BillingHistory } from "../components/BillingHistory";
-import { useBillingText } from "../components/BillingCheckoutUi";
+import { useBillingText, useBillingError } from "../components/BillingCheckoutUi";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
@@ -33,7 +34,7 @@ function formatDate(value: string, locale: string) {
 
 export function BillingPage() {
   const locale = useLocale();
-  const navigate = useNavigate(), bt = useBillingText();
+  const navigate = useNavigate(), bt = useBillingText(), billingErrorText = useBillingError();
   const { me } = useSession();
   const [data, setData] = useState<any>(me?.billing || null);
   const [catalog, setCatalog] = useState<BillingCatalogItem[] | null>(null);
@@ -47,6 +48,7 @@ export function BillingPage() {
   const [constructorOpen, setConstructorOpen] = useState(false);
   const [requestType, setRequestType] = useState<string | undefined>();
   const [error, setError] = useState("");
+  const [orderConflict, setOrderConflict] = useState(false);
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const selection = useRef<HTMLDivElement>(null);
@@ -131,7 +133,7 @@ export function BillingPage() {
   }
   async function submit() {
     if (!planCode || !quote || busy) return;
-    setBusy(true); setError(""); setNotice("");
+    setBusy(true); setError(""); setNotice(""); setOrderConflict(false);
     try {
       if (!free && !enterprise) {
         const order = await api.billingCheckout({planCode, addOns:selectedAddOns, billingPeriod:period, renewal:requestType === "RENEWAL"});
@@ -140,12 +142,16 @@ export function BillingPage() {
       await api.createBillingRequest({ planCode, addOns: selectedAddOns, billingPeriod: period, ...(requestType ? { requestType } : {}) });
       setNotice(free ? systemText(locale, "BasQar Free подключён без оплаты.") : enterprise ? systemText(locale, "Запрос на индивидуальные условия отправлен.") : systemText(locale, "Запрос на подключение отправлен. Доступ откроется после подтверждения оплаты."));
       await loadBilling();
-    } catch (err) { setError(locale !== "kk" && err instanceof Error ? err.message : systemText(locale, "Не удалось отправить запрос")); }
+     } catch (err) {
+      const conflict = Boolean(err && typeof err === "object" && "code" in err && ["checkout_exists", "payment_processing"].includes(String(err.code)));
+      setOrderConflict(conflict);
+      setError(conflict ? billingErrorText(err) : locale !== "kk" && err instanceof Error ? err.message : systemText(locale, "Не удалось отправить запрос"));
+    }
     finally { setBusy(false); }
   }
   async function cancelRequest() {
     if (!currentRequest?.id) return;
-    setBusy(true); setError(""); setNotice("");
+    setBusy(true); setError(""); setNotice(""); setOrderConflict(false);
     try { await api.cancelBillingRequest(currentRequest.id); await loadBilling(); }
     catch (err) { setError(locale !== "kk" && err instanceof Error ? err.message : systemText(locale, "Не удалось отменить запрос")); }
     finally { setBusy(false); }
@@ -160,8 +166,8 @@ export function BillingPage() {
       </div>
     </div>
     <BillingHistory onPay={() => data?.planCode && !currentFree ? configureCurrent("RENEWAL") : document.getElementById("billing-catalog")?.scrollIntoView({behavior:"smooth"})} />
-    {error ? <p className="error" role="alert">{error}</p> : null}
-    {notice ? <p className="billing-notice" role="status">{notice}</p> : null}
+    {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
+    {notice ? <InlineFeedback kind="info" className="billing-notice">{notice}</InlineFeedback> : null}
     {(data?.warnings || []).map((item: { code: string; message: string }) => <p key={item.code} className="warn">{warningText(item)}</p>)}
     <div className="panel stack">
       <h3>{systemText(locale, "Ваш тариф")}</h3>
@@ -214,7 +220,7 @@ export function BillingPage() {
             </div>;
           })}</div>
         </div> : null}
-        {quoteError ? <p className="error" role="alert">{quoteError} <button className="btn secondary" onClick={() => setRetry((value) => value + 1)}>{systemText(locale, "Повторить расчёт")}</button></p> : !quote ? <p className="muted" role="status">{systemText(locale, "Рассчитываем стоимость…")}</p> : !enterprise ? <div className="billing-quote" aria-live="polite">
+        {quoteError ? <InlineFeedback className="error" message={quoteError}>{quoteError} <button className="btn secondary" onClick={() => setRetry((value) => value + 1)}>{systemText(locale, "Повторить расчёт")}</button></InlineFeedback> : !quote ? <p className="muted" role="status">{systemText(locale, "Рассчитываем стоимость…")}</p> : !enterprise ? <div className="billing-quote" aria-live="polite">
           {quote.recommendation ? <div className="billing-notice"><p>{locale === "kk" ? systemText(locale, "{plan} выгоднее на {saving}.", { plan: quote.recommendation.name, saving: formatKzt(quote.recommendation.saveMinor) }) : quote.recommendation.message}</p><button className="btn secondary" onClick={() => pickOffer(quote.recommendation!.code)}>{systemText(locale, "Посмотреть")}{" "}{systemText(locale, quote.recommendation.name)}</button></div> : null}
           <h4>{systemText(locale, "Что входит в оплату")}</h4><dl>{quote.lines.map((line, index) => <div key={`${line.code}-${index}`}><dt>{systemText(locale, line.name)}{line.qty > 1 ? ` × ${line.qty}` : ""}{line.chargeType === "ONE_TIME" ? systemText(locale, " · разово") : ""}</dt><dd>{formatKzt(line.amountMinor)}</dd></div>)}</dl>
           <p>{systemText(locale, "Подписка:")}{" "}<b>{formatKzt(recurring)} / {periodLabel}</b>{oneTime > 0 ? systemText(locale, " · Разовые услуги: {p0}", { p0: formatKzt(oneTime) }) : ""}</p><p className="billing-total">{systemText(locale, "Итого к оплате:")}{" "}<strong>{formatKzt(quote.finalAmountMinor)}</strong></p>
@@ -222,6 +228,7 @@ export function BillingPage() {
           <p className="muted">{systemText(locale, "С учётом дополнений: пользователей —")}{" "}{quote.limits.USERS}{systemText(locale, ", воронок —")}{" "}{quote.limits.PIPELINES}{systemText(locale, ", коммуникационные подключения —")}{" "}{quote.limits.WHATSAPP_CONNECTIONS}{systemText(locale, ", AI-кредитов —")}{" "}{quote.limits.AI_USAGE?.toLocaleString("ru-RU")}{systemText(locale, ", хранилище —")}{" "}{quote.limits.STORAGE_GB} {" "}{systemText(locale, "ГБ.")}</p>
         </div> : null}
         <div className="actions"><button className="btn" type="button" disabled={busy || !quote || Boolean(currentRequest)} onClick={() => void submit()}>{enterprise ? systemText(locale, "Отправить запрос на индивидуальные условия") : requestType === "RENEWAL" ? bt("Продлить подписку", "Жазылымды ұзарту", "Renew subscription") : bt("Перейти к оплате", "Төлемге өту", "Continue to checkout")}</button></div>
+        {orderConflict && <a className="btn secondary" href="#billing-orders">{bt("Перейти к текущему заказу", "Ағымдағы тапсырысқа өту", "Go to current order")}</a>}
         {currentRequest ? <p className="muted">{systemText(locale, "У вас уже есть открытый запрос. Дождитесь его обработки или отмените его, чтобы отправить новый.")}</p> : null}
       </div> : <p className="muted">{systemText(locale, "Выберите тариф выше — здесь появится его состав и итоговый расчёт.")}</p>}
     </div>

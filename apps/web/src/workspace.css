@@ -278,12 +278,7 @@ a.sit-kpi:hover, button.sit-kpi:hover { background: var(--accent-soft); border-c
 .history-button { align-self: center; flex-shrink: 0; margin-bottom: 12px; }
 @media (max-width: 767px) { .page-head h2, .sit-head h2 { font-size: 26px; } .active-filter-note { flex-wrap: wrap; } }
 
-/* Save confirmation stays visible after an editor closes or the route changes. */
-.save-notice-region { position: fixed; top: max(20px, env(safe-area-inset-top)); right: 20px; z-index: 10000; max-width: min(440px, calc(100vw - 32px)); pointer-events: none; }
-.save-notice { display: flex; align-items: center; gap: 12px; padding: 14px 18px; color: #14532d; background: #f0fdf4; border: 1px solid #86cfa0; border-radius: 14px; box-shadow: 0 8px 28px #15251a24; pointer-events: auto; }
-.save-notice button { border: 0; background: transparent; color: inherit; font-size: 24px; padding: 4px 8px; cursor: pointer; }
 .saved-editor-summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
-@media (max-width: 600px) { .save-notice-region { top: max(12px, env(safe-area-inset-top)); right: 16px; left: 16px; } }
 
 .pdf-import-fields { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 16px; }
 .pdf-import-parties { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
@@ -605,4 +600,20 @@ select:disabled { cursor: not-allowed; opacity: .65; }
   .member-fields { grid-template-columns: minmax(0, 1fr); flex-basis: 100%; }
   .member-actions, .members-heading > .btn { width: 100%; }
   .member-actions .btn { flex: 1 1 auto; }
+}
+
+/* Action feedback stays in the viewport, independent of any page scroll container. */
+.feedback-region { position: fixed; right: max(24px, env(safe-area-inset-right)); bottom: max(24px, env(safe-area-inset-bottom)); z-index: 11000; display: flex; flex-direction: column; gap: 10px; width: min(460px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); overflow-y: auto; pointer-events: none; }
+.feedback-card { display: flex; align-items: flex-start; gap: 12px; padding: 16px; border: 1px solid #b7cef0; border-radius: 16px; background: #f5f9ff; color: #18385e; box-shadow: 0 8px 32px #172b4d26; pointer-events: auto; }
+.feedback-card--error { color: #922b25; background: #fff6f5; border-color: #efb9b3; }
+.feedback-card--success { color: #14532d; background: #f0fdf4; border-color: #86cfa0; }
+.feedback-icon { display: grid; place-items: center; flex: 0 0 24px; height: 24px; border-radius: 50%; border: 1.5px solid currentColor; font-weight: 700; }
+.feedback-message { flex: 1; min-width: 0; overflow-wrap: anywhere; line-height: 1.5; }
+.feedback-card button { flex: 0 0 32px; min-height: 32px; border: 0; border-radius: 8px; background: transparent; color: inherit; font-size: 24px; line-height: 1; cursor: pointer; }
+.feedback-card button:hover { background: #00000009; }
+.feedback-card button:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+@media (max-width: 760px) {
+  .feedback-region { right: 12px; left: 12px; bottom: calc(96px + env(safe-area-inset-bottom, 0px)); width: auto; max-height: min(45dvh, 400px); }
+  .feedback-card { padding: 12px; gap: 8px; }
+  .feedback-card button { flex-basis: 44px; min-height: 44px; margin: -6px; }
 }

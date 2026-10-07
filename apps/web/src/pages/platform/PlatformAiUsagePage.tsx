@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../../components/InlineFeedback";
 import { uiText, useUiText, localizeUiOptions } from "../../lib/uiText";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
@@ -39,7 +40,7 @@ export function PlatformAiUsagePage({ lockedTenantId }: { lockedTenantId?: strin
     void load();
   }, [lockedTenantId]);
 
-  if (error) return <p className="error">{error}</p>;
+  if (error) return <InlineFeedback kind="error" className="error">{error}</InlineFeedback>;
   if (!data) return <div className="state">{uiText("Загрузка…")}</div>;
   const totals = data.totals || {};
 

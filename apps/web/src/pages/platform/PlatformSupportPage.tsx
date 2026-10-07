@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../../components/InlineFeedback";
 import { uiText, useUiText, localizeUiOptions, uiMessage } from "../../lib/uiText";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -281,7 +282,7 @@ export function PlatformSupportPage() {
           </button>
         ))}
       </div>
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
 
       {tab === "signups" ? <PlatformSignupRequests title={uiText("Запросы с экрана входа")} /> : null}
 

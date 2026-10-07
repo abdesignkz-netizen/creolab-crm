@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../components/InlineFeedback";
 import { uiSourceLine, uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale } from "../lib/uiText";
 import { catalogItemLabel, type TenantService } from "../lib/tenantServices";
 import { notifySaved } from "../components/SaveNotice";
@@ -511,7 +512,7 @@ export function RequestsPage() {
         ) : null}
       </div>
 
-      {error ? <p className="error" role="alert">{error}</p> : null}
+      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
       {data ? <Pagination total={data.total} offset={data.offset} limit={data.limit} loading={loading} onChange={next => patchParams({ offset: next ? String(next) : null })} /> : null}
 
       {showCreate ? (
@@ -598,7 +599,7 @@ export function RequestsPage() {
               ))}
             </select>
           </label>
-          {createError ? <p className="error">{createError}</p> : null}
+          {createError ? <InlineFeedback kind="error" className="error">{createError}</InlineFeedback> : null}
           <button className="btn" type="submit">
             {uiText("Создать заявку")}</button>
         </form>

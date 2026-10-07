@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../components/InlineFeedback";
 import { IntegrationDisclosure } from "../components/IntegrationDisclosure";
 import { WhatsAppConnectionsPanel } from "./WhatsAppConnectionsPanel";
 import { uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale } from "../lib/uiText";
@@ -69,7 +70,7 @@ export function IntegrationsPage() {
   if (!catalog && !setup) {
     return (
       <section>
-        <p className="error">{error}</p>
+        <InlineFeedback kind="error" className="error">{error}</InlineFeedback>
         <button className="btn" onClick={() => void load()}>
           {uiText("Повторить")}</button>
       </section>
@@ -155,8 +156,8 @@ export function IntegrationsPage() {
           <p className="muted">{uiText("Выберите карточку, чтобы открыть настройки и инструкции.")}</p>
         </div>
       </div>
-      {error ? <p className="error">{error}</p> : null}
-      {note ? <p className="ok">{note}</p> : null}
+      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
+      {note ? <InlineFeedback kind="success" className="ok">{note}</InlineFeedback> : null}
 
       <div className="integration-catalog-grid">
         <IntegrationDisclosure id="whatsapp" icon="whatsapp" title="WhatsApp" description={uiText("Переписка и ИИ · QR, Green API, Meta")} {...whatsappSummary}>

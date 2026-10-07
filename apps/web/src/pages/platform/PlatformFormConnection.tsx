@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../../components/InlineFeedback";
 import { uiText, useUiText, localizeUiOptions, uiMessage } from "../../lib/uiText";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
@@ -345,7 +346,7 @@ export function FormConnectionWizard({
 
       {existing && !creatingNew ? (
         <div className="stack">
-          {note ? <p className="ok">{note}</p> : null}
+          {note ? <InlineFeedback kind="success" className="ok">{note}</InlineFeedback> : null}
           <div className="page-head">
             <div>
               <b>{existing.name}</b>
@@ -565,7 +566,7 @@ export function FormConnectionWizard({
             ) : null}
             {testError ? (
               <div>
-                <p className="error">{testError}</p>
+                <InlineFeedback kind="error" className="error">{testError}</InlineFeedback>
                 {testDetail ? (
                   <p>
                     <button className="btn secondary" type="button" onClick={() => setShowTestDetail((open) => !open)}>
@@ -580,7 +581,7 @@ export function FormConnectionWizard({
         </div>
       ) : null}
 
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
     </div>
   );
 }

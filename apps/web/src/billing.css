@@ -232,3 +232,10 @@
 .billing-modal::backdrop {
   background: #17243c66;
 }
+
+#billing-orders { scroll-margin-top: 100px; }
+.billing-open-order { padding: 20px; border: 1px solid var(--border, #dbe4f0); border-radius: 16px; }
+.billing-cancel { align-items: start; }
+.billing-cancel p, .billing-cancel-confirm p { margin: 0; line-height: 1.5; }
+.billing-cancel-confirm { padding: 16px; border: 1px solid #e5c99c; border-radius: 12px; background: #fffaf0; }
+@media (max-width: 600px) { .billing-open-order { padding: 14px; } .billing-cancel .btn { width: 100%; } }

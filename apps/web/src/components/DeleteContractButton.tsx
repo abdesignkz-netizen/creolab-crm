@@ -1,3 +1,4 @@
+import { InlineFeedback } from "./InlineFeedback";
 import { uiText, useUiText, localizeUiOptions } from "../lib/uiText";
 import { useState } from "react";
 import { api } from "../lib/api";
@@ -24,7 +25,7 @@ export function DeleteContractButton({ id, number, disabled, onDeleted }: {
   return <div className="contract-delete">
     {!confirm ? <button type="button" className="btn secondary" disabled={disabled} onClick={()=>setConfirm(true)}>{uiText("Удалить договор")}</button> : <div role="group" aria-label={uiText("Удаление договора {p0}", {p0: number})}>
       <p>{uiText("Удалить договор")}{" "}{number} {" "}{uiText("и его файлы? Сделка, позиции и реквизиты компании сохранятся. Отменить удаление нельзя.")}</p>
-      {error ? <p className="error" role="alert">{error}</p> : null}
+      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
       <div className="actions">
         <button type="button" className="btn" disabled={busy || disabled} onClick={()=>void remove()}>{busy ? uiText("Удаляем…") : uiText("Да, удалить")}</button>
         <button type="button" className="btn secondary" disabled={busy} onClick={()=>{setConfirm(false);setError("");}}>{uiText("Отмена")}</button>

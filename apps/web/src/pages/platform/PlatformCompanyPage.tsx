@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../../components/InlineFeedback";
 import { uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale } from "../../lib/uiText";
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
@@ -43,7 +44,7 @@ export function PlatformCompanyPage() {
     load().catch((err) => setError(err instanceof Error ? err.message : uiText("Ошибка")));
   }, [id]);
 
-  if (error) return <p className="error">{error}</p>;
+  if (error) return <InlineFeedback kind="error" className="error">{error}</InlineFeedback>;
   if (!company) return <div className="state">{uiText("Загрузка…")}</div>;
 
   return (
@@ -143,7 +144,7 @@ function CompanyInfo({ company, onSaved }: { company: any; onSaved: (row: any) =
       <label>{uiText("Телефон")}<input name="contactPhone" defaultValue={company.contactPhone || ""} /></label>
       <label>{uiText("Город")}<input name="city" defaultValue={company.city || ""} /></label>
       <label>{uiText("Часовой пояс")}<input name="timezone" defaultValue={company.timezone || ""} /></label>
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
       <button className="btn">{uiText("Сохранить")}</button>
     </form>
   );
@@ -223,7 +224,7 @@ function CompanySubscription({ company, onSaved }: { company: any; onSaved: (row
         <label>{uiText("Индивидуальная цена за период, ₸")}<input name="customPriceMinor" type="number" min="0" step="1" placeholder={uiText("Без изменения")} /></label>
         <label>{uiText("Массовые рассылки")}<select name="MASS_MESSAGING" defaultValue="keep"><option value="keep">{uiText("Без изменения")}</option><option value="on">{uiText("Разрешить")}</option><option value="off">{uiText("Запретить")}</option></select></label>
         <label>{uiText("Причина")}<input name="reason" placeholder={uiText("Причина изменения")} /></label>
-        {overrideError ? <p className="error">{overrideError}</p> : null}
+        {overrideError ? <InlineFeedback kind="error" className="error">{overrideError}</InlineFeedback> : null}
         <button className="btn secondary" type="submit" disabled={Boolean(busy)}>{uiText("Сохранить индивидуальные настройки")}</button>
       </form>
       <label>
@@ -237,7 +238,7 @@ function CompanySubscription({ company, onSaved }: { company: any; onSaved: (row
           <option value="CRM_ENTERPRISE">Enterprise</option>
         </select>
       </label>
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
       <div className="actions" style={{ flexWrap: "wrap" }}>
         <button className="btn" disabled={Boolean(busy)} onClick={() => void run("plan", () => api.adminActivateSubscription(company.id, { planCode, source: "platform_admin", reason: "Ручная активация" }))}>{uiText("Изменить тариф")}</button>
         <button className="btn secondary" disabled={Boolean(busy)} onClick={() => void run("extend", () => api.adminExtendSubscription(company.id, { reason: "Продление администратором" }))}>{uiText("Продлить")}</button>
@@ -306,7 +307,7 @@ function CompanySettings({ company, onSaved }: { company: any; onSaved: (row: an
       <label>{uiText("Модель")}<input name="aiModel" defaultValue={company.settings?.ai?.model || ""} /></label>
       <label>{uiText("Ключ API (не показывается, замена)")}<input name="aiKey" type="password" autoComplete="off" /></label>
       <p className="muted">{uiText("Текущий ключ компании")}{" "}{company.settings?.ai?.hasOwnCredential ? uiText("задан") : uiText("не задан, используется инфраструктура сервиса, если AI включён")}.</p>
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
       <button className="btn">{uiText("Сохранить настройки")}</button>
     </form>
   );
@@ -367,7 +368,7 @@ function CompanyMembers({ tenantId }: { tenantId: string }) {
           </p>
         ) : null}
       </form>
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
       <div className="stats-table-wrap">
         <table className="stats-table">
           <thead><tr><th>{uiText("Участник")}</th><th>Email</th><th>{uiText("Роль")}</th><th>{uiText("Статус")}</th><th>{uiText("Добавлен")}</th><th>{uiText("Вход")}</th><th></th></tr></thead>
@@ -458,7 +459,7 @@ function CompanyIntegrations({ tenantId }: { tenantId: string }) {
       {(data.needsAssignment || []).length ? (
         <p className="error">{uiText("Есть подключения без назначения этой компании. Общие секреты сервера не используются автоматически.")}</p>
       ) : null}
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
       {connectable.map((item: any) => (
         <div className="panel stack" key={item.type}>
           <div className="page-head">
@@ -528,7 +529,7 @@ function CompanyIntegrations({ tenantId }: { tenantId: string }) {
           {item.lastErrorMessage ? <p className="error">{item.lastErrorMessage}</p> : null}
         </div>
       ))}
-      {note ? <p className="ok">{note}</p> : null}
+      {note ? <InlineFeedback kind="success" className="ok">{note}</InlineFeedback> : null}
       {events ? (
         <div className="panel">
           <h4>{uiText("История событий")}</h4>

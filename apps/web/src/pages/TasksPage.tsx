@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../components/InlineFeedback";
 import { uiTaskTitle, uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale } from "../lib/uiText";
 import {
   displayTaskStatus,
@@ -2546,7 +2547,7 @@ export function TasksPage() {
       </form>
       ) : null}
 
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
 
       {activeTaskId && taskDetail && !preview ? (
         <div className="panel task-form">

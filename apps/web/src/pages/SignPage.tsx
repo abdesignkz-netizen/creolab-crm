@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../components/InlineFeedback";
 import { uiText, useUiText, localizeUiOptions, uiFormatLocale } from "../lib/uiText";
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
@@ -116,7 +117,7 @@ export function SignPage({ avr = false }: { avr?: boolean }) {
   return (
     <SignShell>
             <h1 id="sign-document-title">{data ? (meta.date ? uiText("{p0} от {p1}", {p0: `${uiText(meta.name)}${meta.number ? ` №${meta.number}` : ""}`, p1: meta.date}) : `${uiText(meta.name)}${meta.number ? ` №${meta.number}` : ""}`) : uiText("Не удалось открыть документ")}</h1>
-            {error ? <p className="error">{error}</p> : null}
+            {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
           {done ? <p className="muted">{done}</p> : null}
           {data ? (
             <>

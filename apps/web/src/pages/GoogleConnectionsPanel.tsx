@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../components/InlineFeedback";
 import { uiText, useUiText, localizeUiOptions } from "../lib/uiText";
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
@@ -20,7 +21,7 @@ export function GoogleConnectionsPanel({ onChange, kind }: { onChange: () => voi
   useEffect(() => { void load().catch(err => setError(err.message)); },[]);
   async function run(key: string, action: () => Promise<void>) { setBusy(key);setError("");setNote("");try { await action();await load(); onChange(); } catch(err) { setError(err instanceof Error ? err.message : uiText("Не удалось выполнить действие")); } finally { setBusy(""); } }
   return <div className="panel"><div className="row"><h3>{kind ? ({ calendar: "Google Calendar", google_forms: "Google Forms", email: "Gmail" }[kind] || "Google") : uiText("Google: календарь, формы и входящая почта")}</h3><IntegrationHelp kind={kind === "google_forms" ? "google_forms" : kind === "email" ? "google_email" : "google_calendar"} /></div>
-    {error ? <p className="error">{error}</p> : null}{note ? <p className="ok">{note}</p> : null}
+    {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}{note ? <InlineFeedback kind="success" className="ok">{note}</InlineFeedback> : null}
     {!data?.configured && data ? <p className="muted">{uiText("Администратору сервиса нужно настроить подключение приложения к Google. После этого здесь станет доступен вход в аккаунт.")}</p> : null}
     {(data?.items || []).filter(item => !kind || item.kind === kind).map(item => <div key={item.kind} className="panel">
       <h4>{item.title} · {item.connected ? uiText("Подключено") : uiText("Не подключено")}</h4><p className="muted">{localizeUiOptions(descriptions, uiText)[item.kind]}</p><IntegrationHelp kind={item.kind === "calendar" ? "google_calendar" : item.kind === "google_forms" ? "google_forms" : "google_email"} />

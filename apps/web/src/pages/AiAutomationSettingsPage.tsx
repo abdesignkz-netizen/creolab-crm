@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../components/InlineFeedback";
 import { uiText, useUiText, localizeUiOptions } from "../lib/uiText";
 import { useSession } from "../lib/session";
 import { notifySaved } from "../components/SaveNotice";
@@ -328,8 +329,8 @@ export function AiAutomationSettingsPage() {
         </div>
       </div>
 
-      {error ? <p className="error">{error}</p> : null}
-      {hint ? <p className="ok">{hint}</p> : null}
+      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
+      {hint ? <InlineFeedback kind="success" className="ok">{hint}</InlineFeedback> : null}
 
       <div className="actions task-board-tabs">
         {localizeUiOptions(SECTION_ITEMS, uiText).map((item) => (

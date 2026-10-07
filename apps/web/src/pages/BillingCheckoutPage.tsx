@@ -1,3 +1,5 @@
+import { CancelBillingOrder } from "../components/CancelBillingOrder";
+import { InlineFeedback } from "../components/InlineFeedback";
 import { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api } from "../lib/api";
@@ -238,14 +240,14 @@ export function BillingCheckoutPage() {
         </div>
       </div>
       {error && (
-        <p className="error" role="alert">
+        <InlineFeedback kind="error" className="error">
           {error}
-        </p>
+        </InlineFeedback>
       )}
       {notice && (
-        <p className="billing-notice" role="status">
+        <InlineFeedback kind="info" className="billing-notice">
           {notice}
-        </p>
+        </InlineFeedback>
       )}
       {open &&
         !payment &&
@@ -522,16 +524,17 @@ export function BillingCheckoutPage() {
               "Secure payment. BasQar does not store card details.",
             )}
           </p>
-          {payment?.status !== "PROCESSING" && (
-            <button
-              className="btn secondary"
-              disabled={busy}
-              onClick={() => void action(() => api.billingCancelOrder(orderId))}
-            >
-              {t("Отменить заказ", "Тапсырыстан бас тарту", "Cancel order")}
-            </button>
-          )}
         </>
+      )}
+      {order.status === "PENDING_PAYMENT" && (
+        <CancelBillingOrder
+          blocked={
+            payment?.method === "CARD" && payment?.status === "PROCESSING"
+          }
+          busy={busy}
+          orderNumber={order.orderNumber}
+          onCancel={() => action(() => api.billingCancelOrder(orderId))}
+        />
       )}
       {invoice && (
         <div className="panel stack">

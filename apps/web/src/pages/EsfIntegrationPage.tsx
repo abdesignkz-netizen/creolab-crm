@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../components/InlineFeedback";
 import { uiText, useUiText, localizeUiOptions } from "../lib/uiText";
 import { connectEsfAuthTicket } from "../lib/signing/esfConnect";
 import { useEffect, useState } from "react";
@@ -197,7 +198,7 @@ export function EsfIntegrationPage() {
           <h2>{uiText("ИС ЭСФ")}</h2>
         </div>
       </div>
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
       {data?.connection.reauthMessage ? <p className="error">{data.connection.reauthMessage}</p> : null}
 
       <div className="panel">

@@ -1,3 +1,4 @@
+import { InlineFeedback } from "./InlineFeedback";
 import { uiText, useUiText, localizeUiOptions, uiFormatLocale } from "../lib/uiText";
 import { useState } from "react";
 import { signatureCheckLabel } from "../lib/signing/verificationLabels";
@@ -41,6 +42,6 @@ export function ContractSignatureSummary({ signed, signers, verificationUrl, dow
       </div>
       <p className="muted">{uiText("PDF содержит документ и лист подписания с QR-кодом. В архиве — неизменённый оригинал, обе ЭЦП и сведения о подписании.")}</p>
     </> : null}
-    {error ? <p className="error" role="alert">{error}</p> : null}
+    {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
   </section>;
 }

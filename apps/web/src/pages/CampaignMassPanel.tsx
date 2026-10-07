@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../components/InlineFeedback";
 import { uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale } from "../lib/uiText";
 import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { nameWithPhone } from "../lib/contactDisplay";
@@ -608,11 +609,11 @@ export function CampaignMassPanel({
         ) : null}
       </div>
 
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
       {notice ? (
         <div className={notice.kind === "prepare" ? "banner warn" : "banner"} id="campaign-result" ref={notice.kind === "scheduled" ? confirmRef : undefined}>
           <b>{notice.title}</b>
-          <p>{notice.text}</p>
+          <InlineFeedback kind="info" message={`${notice.title}. ${notice.text}`}>{notice.text}</InlineFeedback>
         </div>
       ) : null}
 

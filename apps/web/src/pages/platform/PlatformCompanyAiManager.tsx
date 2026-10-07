@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../../components/InlineFeedback";
 import { uiMessage, uiText, useUiText, localizeUiOptions } from "../../lib/uiText";
 import { useEffect, useState } from "react";
 import { api } from "../../lib/api";
@@ -43,7 +44,7 @@ export function PlatformCompanyAiManager({ tenantId }: { tenantId: string }) {
     void load().catch((err) => setError(err instanceof Error ? err.message : uiText("Ошибка")));
   }, [tenantId]);
 
-  if (error) return <p className="error">{error}</p>;
+  if (error) return <InlineFeedback kind="error" className="error">{error}</InlineFeedback>;
   if (!data) return <div className="state">{uiText("Загрузка…")}</div>;
 
   const promptText = String(data.prompt?.published || data.prompt?.draft || "");
@@ -104,7 +105,7 @@ export function PlatformCompanyAiManager({ tenantId }: { tenantId: string }) {
           <p className="muted">{uiMessage(connection.activation?.prompt?.reason)}</p>
           {connection.type === "whatsapp_seller" && connection.status === "active" ? <>
             <p className="muted">{uiText("Эта синхронизация относится только к данному подключению Green API.")}</p>
-            {syncError ? <p className="error">{syncError}</p> : null}
+            {syncError ? <InlineFeedback kind="error" className="error">{syncError}</InlineFeedback> : null}
             <div className="actions">
               <button type="button" className="btn secondary" disabled={syncBusy} onClick={() => void sendToWhatsApp()}>
                 {syncBusy ? uiText("Отправляем…") : uiText("Синхронизировать Green API")}
@@ -173,7 +174,7 @@ function PromptEditor({
           placeholder={uiText("Например: ты менеджер компании… отвечай коротко… цены только из базы знаний…")}
         />
       </label>
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
       <div className="actions">
         <button type="button" className="btn" disabled={busy} onClick={() => void save()}>
           {busy ? uiText("Сохраняем…") : uiText("Сохранить промт")}
@@ -261,7 +262,7 @@ function KnowledgeEditor({
             placeholder={uiText("Факты для ответов клиенту")}
           />
         </label>
-        {error ? <p className="error">{error}</p> : null}
+        {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
         <div className="actions">
           <button type="button" className="btn" disabled={busy || !title.trim()} onClick={() => void save()}>
             {busy ? uiText("Сохраняем…") : editingId ? uiText("Сохранить материал") : uiText("Добавить в базу")}
@@ -341,7 +342,7 @@ function ModelSettings({ tenantId, runtime, onSaved }: { tenantId: string; runti
     <label>{uiText("Ключ API (не показывается, замена)")}<input type="password" name="apiKey" autoComplete="new-password" /></label>
     <p>{runtime.enabled === false ? uiText("ИИ отключён в настройках компании или сервиса.") : runtime.hasCredential ? uiText("Ключ модели настроен") : uiText("Ключ модели отсутствует или не читается. Укажите действующий ключ.")}</p>
     <label className="check"><input type="checkbox" name="enabled" defaultChecked={runtime.enabled !== false} />{uiText("Разрешить ИИ-ответы компании")}</label>
-    {error && <p className="error">{error}</p>}
+    {error && <InlineFeedback kind="error" className="error">{error}</InlineFeedback>}
     <button className="btn" disabled={busy}>{busy ? uiText("Сохраняем…") : uiText("Сохранить настройки ИИ")}</button>
     <p className="muted">{uiText("Проверка использует сохранённые настройки и AI-кредиты. Сообщения клиентам не отправляются.")}</p>
     <button type="button" className="btn secondary" disabled={busy} onClick={async () => {

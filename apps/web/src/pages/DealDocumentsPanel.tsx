@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../components/InlineFeedback";
 import { uiMessage, uiText, useUiText, localizeUiOptions, uiFormatLocale } from "../lib/uiText";
 import { EsfSubmissionStatus, ESF_SEND_PHASES, type EsfSubmission } from "../components/EsfSubmissionStatus";
 import { notifySaved } from "../components/SaveNotice";
@@ -102,7 +103,7 @@ function MissingList({
   if (ready) return <p className="muted">{ok}</p>;
   return (
     <div>
-      <p className="error">{title}</p>
+      <InlineFeedback kind="error" className="error">{title}</InlineFeedback>
       <ul>
         {(fields || []).map((code) => (
           <li key={code}>{uiMessage(labels?.[code]) || code}</li>

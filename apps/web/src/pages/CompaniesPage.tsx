@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../components/InlineFeedback";
 import { uiText, useUiText, localizeUiOptions, uiMessage } from "../lib/uiText";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { notifySaved } from "../components/SaveNotice";
@@ -237,7 +238,7 @@ export function CompaniesPage() {
         </form>
       </div>
 
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
       {loading ? <div className="state">{uiText("Загрузка…")}</div> : null}
 
       {!loading && !items.length ? (
@@ -322,7 +323,7 @@ export function CompaniesPage() {
               >
                 {parseBusy ? uiText("Распознаём…") : uiText("Распознать")}
               </button>
-              {parseError ? <p className="error">{parseError}</p> : null}
+              {parseError ? <InlineFeedback kind="error" className="error">{parseError}</InlineFeedback> : null}
               {parseWarnings.length ? (
                 <ul className="company-requisites-warnings">
                   {parseWarnings.map((warning) => (

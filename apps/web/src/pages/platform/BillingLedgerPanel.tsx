@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../../components/InlineFeedback";
 import { useEffect, useState, useRef } from "react";
 import { api } from "../../lib/api";
 import {
@@ -136,11 +137,9 @@ export function BillingLedgerPanel() {
         ))}
       </nav>
       {error && (
-        <p className="error" role="alert">
-          {error}
-        </p>
+        <InlineFeedback kind="error" className="error">{error}</InlineFeedback>
       )}
-      {notice && <p role="status">{notice}</p>}
+      {notice && <InlineFeedback kind="info">{notice}</InlineFeedback>}
       {!data ? (
         <p>{t("Загрузка…", "Жүктелуде…", "Loading…")}</p>
       ) : (
@@ -745,9 +744,7 @@ export function BillingLedgerPanel() {
               </>
             )}
             {error && (
-              <p className="error" role="alert">
-                {error}
-              </p>
+              <InlineFeedback kind="error" className="error">{error}</InlineFeedback>
             )}
             <div className="actions">
               <button className="btn" disabled={busy}>

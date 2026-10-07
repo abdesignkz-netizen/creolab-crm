@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../../components/InlineFeedback";
 import { uiText, useUiText, localizeUiOptions } from "../../lib/uiText";
 import { useEffect, useState, type FormEvent } from "react";
 import { api } from "../../lib/api";
@@ -12,7 +13,7 @@ export function PlatformServiceSettingsPage() {
     api.adminSettings().then(setData).catch((err) => setError(err instanceof Error ? err.message : uiText("Ошибка")));
   }, []);
 
-  if (error) return <p className="error">{error}</p>;
+  if (error) return <InlineFeedback kind="error" className="error">{error}</InlineFeedback>;
   if (!data) return <div className="state">{uiText("Загрузка…")}</div>;
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
@@ -69,7 +70,7 @@ export function PlatformServiceSettingsPage() {
         </label>
       ))}
       <label>{uiText("Лимит участников по умолчанию")}<input name="members" type="number" defaultValue={data.limits?.members || 20} /></label>
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
       <button className="btn">{uiText("Сохранить")}</button>
     </form>
   );

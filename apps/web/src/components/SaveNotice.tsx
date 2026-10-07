@@ -1,35 +1,68 @@
-import { useEffect, useState } from "react";
-
+import { useEffect, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import { useLocale } from "../lib/session";
 import { getPublicLocale, t } from "../i18n";
+import {
+  dismissFeedback,
+  feedbackSnapshot,
+  showFeedback,
+  subscribeFeedback,
+  type Feedback,
+} from "./feedbackStore";
 
-const SAVE_EVENT = "creolab:saved";
-
+let serial = 0;
 /** Call only after the write request succeeds, before refreshing or navigating. */
 export function notifySaved(message = t(getPublicLocale(), "common.saved")) {
-  window.dispatchEvent(new CustomEvent(SAVE_EVENT, { detail: message }));
+  showFeedback({ id: `saved-${++serial}`, message, kind: "success" });
 }
-
-export function SaveNotice() {
+function FeedbackCard({ item }: { item: Feedback }) {
   const locale = useLocale();
-  const [notice, setNotice] = useState<{ message: string } | null>(null);
+  const [hovered, setHovered] = useState(false),
+    [focused, setFocused] = useState(false);
   useEffect(() => {
-    const onSaved = (event: Event) => setNotice({ message: (event as CustomEvent<string>).detail });
-    window.addEventListener(SAVE_EVENT, onSaved);
-    return () => window.removeEventListener(SAVE_EVENT, onSaved);
-  }, []);
-  useEffect(() => {
-    if (!notice) return;
-    const timer = window.setTimeout(() => setNotice(null), 7000);
+    if (item.kind === "error" || hovered || focused) return;
+    const timer = window.setTimeout(() => dismissFeedback(item.id), 9000);
     return () => window.clearTimeout(timer);
-  }, [notice]);
+  }, [item, hovered, focused]);
   return (
-    <div className="save-notice-region" role="status" aria-live="polite" aria-atomic="true">
-      {notice ? <div className="save-notice">
-        <span aria-hidden="true">✓</span>
-        <span>{notice.message}</span>
-        <button type="button" aria-label={t(locale, "common.closeNotice")} onClick={() => setNotice(null)}>×</button>
-      </div> : null}
+    <div
+      className={`feedback-card feedback-card--${item.kind}`}
+      role={item.kind === "error" ? "alert" : "status"}
+      aria-atomic="true"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onFocus={() => setFocused(true)}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget))
+          setFocused(false);
+      }}
+    >
+      <span className="feedback-icon" aria-hidden="true">
+        {item.kind === "error" ? "!" : item.kind === "success" ? "✓" : "i"}
+      </span>
+      <span className="feedback-message">{item.message}</span>
+      <button
+        type="button"
+        aria-label={t(locale, "common.closeNotice")}
+        onClick={() => dismissFeedback(item.id)}
+      >
+        ×
+      </button>
     </div>
+  );
+}
+export function SaveNotice() {
+  const items = useSyncExternalStore(
+    subscribeFeedback,
+    feedbackSnapshot,
+    feedbackSnapshot,
+  );
+  return createPortal(
+    <div className="feedback-region">
+      {items.map((item) => (
+        <FeedbackCard key={item.id} item={item} />
+      ))}
+    </div>,
+    document.body,
   );
 }

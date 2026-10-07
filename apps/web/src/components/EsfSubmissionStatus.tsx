@@ -1,3 +1,4 @@
+import { InlineFeedback } from "./InlineFeedback";
 import { uiText, useUiText, localizeUiOptions, uiFormatLocale } from "../lib/uiText";
 export const ESF_SEND_PHASES: Record<string, string> = {
   CHECKING: "Проверяем документ…",
@@ -38,6 +39,6 @@ export function EsfSubmissionStatus({ document: doc, submission = {}, system, st
       <p>{uiText("Идентификатор в ИС ЭСФ:")}{" "}<b>{doc.externalId}</b>{doc.externalStatus ? <> {" "}{uiText("· Статус ИС ЭСФ:")}{" "}<b>{statusLabel || doc.externalStatus}</b></> : null}</p>
       {doc.sentAt ? <p>{uiText("Отправлено:")}{" "}{new Date(doc.sentAt).toLocaleString(uiFormatLocale())}</p> : null}
     </> : pending ? <p className="pdf-import-warnings"><b>{uiText("Результат отправки не подтверждён.")}</b> {" "}{uiText("Проверьте документ на портале ИС ЭСФ перед повторной отправкой. Повторная отправка заблокирована, чтобы не создать дубликат.")}</p> : <p className="muted">{error ? uiText("Подтверждения отправки в ИС ЭСФ нет.") : uiText("{p0} сохранён в CRM. Подтверждения регистрации в ИС ЭСФ пока нет.", {p0: type})}</p>}
-    {error ? <p className="error">{error}</p> : null}
+    {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
   </div>;
 }

@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../components/InlineFeedback";
 import { useEffect, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../lib/api";
@@ -198,7 +199,7 @@ export function ForgotPasswordPage() {
                 onChange={(event) => setEmail(event.target.value)}
               />
             </label>
-            {error ? <p className="error">{error}</p> : null}
+            {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
             <button className="btn" disabled={busy}>{t(locale, "login.resetContinue")}</button>
             <p className="muted login-alt">
               <Link to="/login">{t(locale, "login.backToLogin")}</Link>
@@ -211,7 +212,7 @@ export function ForgotPasswordPage() {
             <p className="muted">{t(locale, "login.resetCheckHint")}</p>
             <p className="muted">{maskEmail(email)}</p>
             <ResetCodeInputs locale={locale} value={digits} onChange={setDigits} disabled={busy} />
-            {error ? <p className="error">{error}</p> : null}
+            {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
             <button className="btn" disabled={busy || digits.join("").length !== 6}>
               {t(locale, "login.resetConfirm")}
             </button>
@@ -266,7 +267,7 @@ export function ForgotPasswordPage() {
                 onChange={(event) => setPasswordConfirm(event.target.value)}
               />
             </label>
-            {error ? <p className="error">{error}</p> : null}
+            {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
             <button className="btn" disabled={busy}>{t(locale, "login.resetSave")}</button>
           </form>
         ) : null}

@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../components/InlineFeedback";
 import { uiTaskTitle, uiText, useUiText, localizeUiOptions, uiMessage } from "../lib/uiText";
 import { notifySaved } from "../components/SaveNotice";
 import { useEffect, useState } from "react";
@@ -279,7 +280,7 @@ export function CompanyPage() {
   if (!data) {
     return (
       <section>
-        <p className="error">{error}</p>
+        <InlineFeedback kind="error" className="error">{error}</InlineFeedback>
         <Link to="/companies">{uiText("К списку")}</Link>
       </section>
     );
@@ -320,7 +321,7 @@ export function CompanyPage() {
         </div>
       </div>
 
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
 
       <div className="sit-section">
         <div className="sit-section-head">

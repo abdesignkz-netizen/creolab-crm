@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../components/InlineFeedback";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
@@ -40,7 +41,7 @@ export function PlatformLoginPage() {
             {t(locale, "login.password")}
             <PasswordInput locale={locale} name="password" required autoComplete="current-password" />
           </label>
-          {error ? <p className="error">{error}</p> : null}
+          {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
           <button className="btn">{t(locale, "login.submit")}</button>
           <p className="muted login-alt">
             <Link to="/forgot-password">{t(locale, "login.forgot")}</Link>

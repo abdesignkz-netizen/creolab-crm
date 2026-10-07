@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../components/InlineFeedback";
 import { uiTaskTitle, uiMessage, uiText, useUiText, localizeUiOptions, uiFormatLocale , uiDurationLabel } from "../lib/uiText";
 import { esfMeasureUnitSymbol } from "@creolab/contracts";
 import { notifySaved } from "../components/SaveNotice";
@@ -313,7 +314,7 @@ export function DealsPage() {
   if (!data) {
     return (
       <section>
-        <p className="error">{error}</p>
+        <InlineFeedback kind="error" className="error">{error}</InlineFeedback>
         <button type="button" className="btn" onClick={() => void load()}>
           {uiText("Повторить")}</button>
       </section>
@@ -336,7 +337,7 @@ export function DealsPage() {
         </div>
       </div>
 
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
       {stage || outcome ? <div className="active-filter-note">
         <span>{uiText("Отбор:")}{" "}{stage ? data.columns?.find((column: any) => column.systemKey === stage)?.name || stage : ""}{stage && outcome ? " · " : ""}{({ won: uiText("Продажи"), lost: uiText("Потери"), open: uiText("Активные"), on_hold: uiText("На паузе") } as Record<string, string>)[outcome]}</span>
         <button className="btn secondary" onClick={() => navigate(`/deals?${new URLSearchParams({ timeMode, period, from: dateFrom, to: dateTo, basis, scope })}`)}>{uiText("Снять отбор")}</button>
@@ -549,7 +550,7 @@ export function DealsPage() {
           <div className="stats-modal" onClick={(e) => e.stopPropagation()}>
             <h3>{uiText("Новая сделка")}</h3>
             <p className="muted">{uiText("Без заявки. Клиент обязателен, компанию можно указать позже.")}</p>
-            {createError ? <p className="error">{createError}</p> : null}
+            {createError ? <InlineFeedback kind="error" className="error">{createError}</InlineFeedback> : null}
             <label>
               {uiText("Название")}<input value={createTitle} onChange={(e) => setCreateTitle(e.target.value)} placeholder={uiText("Сайт для…")} />
             </label>
@@ -789,7 +790,7 @@ export function DealDetailPage() {
   if (!data) {
     return (
       <section>
-        <p className="error">{error}</p>
+        <InlineFeedback kind="error" className="error">{error}</InlineFeedback>
         <Link to="/deals">{uiText("К списку сделок")}</Link>
       </section>
     );
@@ -824,7 +825,7 @@ export function DealDetailPage() {
           </p>
         </div>
       </div>
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
 
       <div className={`sit-kpi-grid${caps.documents ? " deal-kpi-5" : ""}`}>
         <div className="sit-kpi">

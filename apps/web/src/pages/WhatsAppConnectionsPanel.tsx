@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../components/InlineFeedback";
 import { useEffect, useState, type ReactNode } from "react";
 import { api } from "../lib/api";
 import { useLocale } from "../lib/session";
@@ -54,7 +55,7 @@ export function WhatsAppConnectionsPanel({ children, onChange }: { children?: Re
       <button className={`btn ${method === "qr" ? "" : "secondary"}`} aria-pressed={method === "qr"} onClick={() => setMethod("qr")}>{translate("Через QR-код", "QR-код арқылы", "QR code")}</button>
       <button className={`btn ${method === "cloud" ? "" : "secondary"}`} aria-pressed={method === "cloud"} onClick={() => setMethod("cloud")}>{translate("Официальное подключение", "Ресми қосылым", "Official connection")}</button>
     </div>
-    {error && <p className="error" role="alert">{error}</p>}
+    {error && <InlineFeedback kind="error" className="error">{error}</InlineFeedback>}
     {method === "green" && <div style={{ marginTop: 16 }}>{children}</div>}
     {method === "qr" && <div className="stack" style={{ marginTop: 16 }}>
       <p>{translate("Подключите WhatsApp прямо к BasQar, без аккаунта Green API. На телефоне откройте WhatsApp → Связанные устройства → Привязка устройства и отсканируйте код.", "WhatsApp-ты Green API аккаунтынсыз тікелей BasQar-ға қосыңыз. Телефонда WhatsApp → Байланыстырылған құрылғылар → Құрылғыны байланыстыру бөлімін ашып, кодты сканерлеңіз.", "Connect WhatsApp directly to BasQar without a Green API account. On your phone, open WhatsApp → Linked devices → Link a device and scan the code.")}</p>

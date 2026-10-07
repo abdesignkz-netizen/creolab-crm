@@ -120,10 +120,15 @@ export function BuyerForm({
 export function useBillingError() {
   const t = useBillingText();
   const messages: Record<string, [string, string, string]> = {
+    checkout_exists: [
+      "У вас уже есть незавершённый заказ. Откройте его, чтобы продолжить оплату или посмотреть условия отмены.",
+      "Сізде аяқталмаған тапсырыс бар. Төлемді жалғастыру немесе бас тарту шарттарын көру үшін оны ашыңыз.",
+      "You already have an unfinished order. Open it to continue payment or see cancellation options.",
+    ],
     payment_processing: [
-      "Банк ещё проверяет платёж. Дождитесь результата, повторно платить не нужно.",
-      "Банк төлемді әлі тексеріп жатыр. Нәтижесін күтіңіз, қайта төлеудің қажеті жоқ.",
-      "The bank is still checking this payment. Please wait; do not pay again.",
+      "Результат оплаты картой ещё не подтверждён. Откройте текущий заказ и проверьте статус. Если проверка зависла, обратитесь в поддержку.",
+      "Карта төлемінің нәтижесі әлі расталмады. Ағымдағы тапсырысты ашып, мәртебені тексеріңіз. Тексеру тоқтап қалса, қолдау қызметіне хабарласыңыз.",
+      "The card payment outcome is unconfirmed. Open your current order and check its status. If verification is stuck, contact support.",
     ],
     provider_uncertain: [
       "Проверяем, принял ли банк платёж. Обновите статус через минуту.",

@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../components/InlineFeedback";
 import { uiMessage, uiText, useUiText, localizeUiOptions, uiFormatLocale } from "../lib/uiText";
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -631,7 +632,7 @@ export function InvoiceEditorPage() {
                       {uiText("реквизитах компании")}</Link>
                     {uiText(", затем обновите реквизиты на этой странице.")}</p>
                 ) : null}
-                {previewError ? <p className="error">{previewError}</p> : null}
+                {previewError ? <InlineFeedback kind="error" className="error">{previewError}</InlineFeedback> : null}
                 {previewUrl ? (
                   <PdfDocumentViewer title={uiText("Просмотр счёта")} src={previewUrl} />
                 ) : previewError ? null : (

@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../components/InlineFeedback";
 import { uiNotificationBody, uiText, useUiText, localizeUiOptions, uiMessage } from "../lib/uiText";
 import { DocumentNumberingPanel } from "./DocumentNumberingPanel";
 import { ServiceCatalogPanel } from "./ServiceCatalogPanel";
@@ -208,7 +209,7 @@ function ProfileSection({ locale }: { locale: Locale }) {
         {me?.user?.hasAvatar ? <img className="avatar-preview" src="/api/v1/me/avatar" alt="" /> : <p className="muted">{t(locale, "settings.noPhoto")}</p>}
         <input name="avatar" type="file" accept="image/jpeg,image/png,image/webp" />
         <button className="btn secondary" type="submit">{t(locale, "common.upload")}</button>
-        {avatarError ? <p className="error" role="alert">{avatarError}</p> : null}
+        {avatarError ? <InlineFeedback kind="error" className="error">{avatarError}</InlineFeedback> : null}
       </form>
       <form
         className="panel"
@@ -247,7 +248,7 @@ function ProfileSection({ locale }: { locale: Locale }) {
           <input value={me?.activeTenant?.jobTitle || (["owner", "director", "sales_lead", "manager"].includes(me?.activeTenant?.role) ? t(locale, `settings.currentRole.${me.activeTenant.role}`) : me?.activeTenant?.roleLabel || "")} readOnly />
         </label>
         <p className="muted">{t(locale, "settings.jobTitleHint")}</p>
-        {status ? <p className="ok">{status}</p> : null}
+        {status ? <InlineFeedback kind="success" className="ok">{status}</InlineFeedback> : null}
         <button className="btn">{t(locale, "settings.save")}</button>
       </form>
     </>
@@ -436,7 +437,7 @@ function NotificationsSection({ locale }: { locale: Locale }) {
           {t(locale, "settings.quietEnd")}
           <input name="quietEnd" type="time" defaultValue={prefs.quietHours?.end || "08:00"} />
         </label>
-        {status ? <p className="ok">{status}</p> : null}
+        {status ? <InlineFeedback kind="success" className="ok">{status}</InlineFeedback> : null}
         <button className="btn">{t(locale, "settings.save")}</button>
       </form>
 
@@ -548,7 +549,7 @@ function InterfaceSection({ locale }: { locale: Locale }) {
           <option value="system">{t(locale, "settings.themeSystem")}</option>
         </select>
       </label>
-      {status ? <p className="ok">{status}</p> : null}
+      {status ? <InlineFeedback kind="success" className="ok">{status}</InlineFeedback> : null}
       <button className="btn">{t(locale, "settings.save")}</button>
     </form>
   );
@@ -593,7 +594,7 @@ function MembersSection({ locale }: { locale: Locale }) {
         <div><h2>{t(locale, "settings.members")}</h2><p className="muted">{uiText("Управляйте доступом команды к вашей компании.")}</p></div>
         <button className="btn" disabled={busy || !capacity?.canInvite} onClick={() => setAdding(true)}>{uiText("Добавить сотрудника")}</button>
       </div>
-      {error ? <p className="error" role="alert">{error}</p> : null}
+      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
       {capacity ? <div className="members-capacity">
         <div><b>{capacity.planName}</b><p>{uiText("Сотрудников:")}{" "}<strong>{capacity.active}{capacity.limit === null ? uiText(" · без ограничения") : ` / ${capacity.limit}`}</strong></p></div>
         <div><b>{capacity.remaining === null ? uiText("Места доступны") : uiText("Свободных мест: {p0}", {p0: capacity.remaining})}</b><p className="muted">{uiText("Ожидают приглашения:")}{" "}{capacity.pending}{uiText(". Они также занимают места.")}</p></div>
@@ -696,7 +697,7 @@ function OpsSection({ locale }: { locale: Locale }) {
     <div className="panel">
       <b>{t(locale, "settings.ops")}</b>
       <p className="muted">{uiText("SLA этапов, причины потери и план продаж. Эти же значения использует «Ситуация».")}</p>
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
       <label>
         {uiText("Дней без движения, чтобы сделка считалась зависшей")}<input
           type="number"
@@ -780,7 +781,7 @@ function AuditSection({ locale }: { locale: Locale }) {
     <div className="panel">
       <b>{t(locale, "settings.audit")}</b>
       <p className="muted">{uiText("Кто что изменил в этой компании. Журнал доступен администратору и директору.")}</p>
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
       <form
         className="row"
         onSubmit={(event) => {
@@ -936,7 +937,7 @@ function ControlSection({ locale }: { locale: Locale }) {
     return (
       <div className="panel">
         <b>{t(locale, "settings.control")}</b>
-        {error ? <p className="error">{error}</p> : <p className="muted">{t(locale, "common.loading")}</p>}
+        {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : <p className="muted">{t(locale, "common.loading")}</p>}
       </div>
     );
   }
@@ -947,7 +948,7 @@ function ControlSection({ locale }: { locale: Locale }) {
         <b>{t(locale, "settings.control")}</b>
         <p className="muted">
           {uiText("Внешний AI (WhatsApp и другие каналы) получает данные и выполняет команды только через CRM, от имени конкретного сотрудника и с его правами. Совпадение номера само по себе не является входом.")}</p>
-        {error ? <p className="error">{error}</p> : null}
+        {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
         <label className="row" style={{ alignItems: "center", gap: 8 }}>
           <input type="checkbox" checked={data.enabled} onChange={(e) => void toggleCompany(e.target.checked)} />
           {uiText("BasQar Control включён для компании")}</label>

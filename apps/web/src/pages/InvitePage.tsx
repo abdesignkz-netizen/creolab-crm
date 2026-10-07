@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../components/InlineFeedback";
 import { t } from "../i18n";
 import { systemText } from "@creolab/contracts";
 import { useLocale } from "../lib/session";
@@ -34,7 +35,7 @@ export function InvitePage() {
         <div className="login-stage">
           <form className="panel">
             <h2>{systemText(locale, "Приглашение")}</h2>
-            <p className="error">{error}</p>
+            <InlineFeedback kind="error" className="error">{error}</InlineFeedback>
             <Link className="btn secondary" to="/login">{systemText(locale, "Войти")}</Link>
           </form>
         </div>
@@ -88,7 +89,7 @@ export function InvitePage() {
           ) : (
             <p className="muted">{systemText(locale, "Если вы уже вошли в нужный аккаунт, нажмите «Принять». Иначе сначала войдите.")}</p>
           )}
-          {error ? <p className="error">{error}</p> : null}
+          {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
           <button className="btn" disabled={busy}>{busy ? systemText(locale, "Сохранение…") : systemText(locale, "Принять приглашение")}</button>
         </form>
       </div>

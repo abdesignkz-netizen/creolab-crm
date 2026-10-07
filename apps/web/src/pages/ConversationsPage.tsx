@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../components/InlineFeedback";
 import { uiTaskTitle, uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale , uiDurationLabel } from "../lib/uiText";
 import { useSession } from "../lib/session";
 import { ChannelIcon, ConversationAvatar, CONVERSATION_CHANNELS } from "../components/ConversationIdentity";
@@ -796,7 +797,7 @@ export function ConversationsPage() {
 
   return (
     <section className={`conversations-layout ${selectedId ? "has-selection" : ""}`}>
-      {error ? <p className="error" style={{ gridColumn: "1 / -1" }} role="alert">{error}</p> : null}
+      {error ? <InlineFeedback className="error" style={{ gridColumn: "1 / -1" }}>{error}</InlineFeedback> : null}
       <nav className="conversation-channels" aria-label={uiText("Каналы диалогов")}>
         {CONVERSATION_CHANNELS.filter(([value]) => value === "all" || value === channel || availableChannels.includes(value)).map(([value, label]) => (
           <button key={value} type="button" className={`conversation-channel channel-${value}${channel === value ? " active" : ""}`} aria-pressed={channel === value} aria-label={uiText("{p0}: диалоги", {p0: label})} onClick={() => {

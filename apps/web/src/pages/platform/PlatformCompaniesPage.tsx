@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../../components/InlineFeedback";
 import { uiText, useUiText, localizeUiOptions } from "../../lib/uiText";
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -60,7 +61,7 @@ function CompanyList() {
         </select>
         <button className="btn secondary" type="submit">{uiText("Найти")}</button>
       </form>
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
       {!data ? <div className="state">{uiText("Загрузка…")}</div> : (
         <>
           <div className="stats-table-wrap">
@@ -178,7 +179,7 @@ function CreateCompanyForm() {
           <option value="director">{uiText("Директор")}</option>
         </select>
       </label>
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
       <p className="muted">{uiText("После сохранения будет создана ссылка приглашения. Статус: «Ссылка создана», без отправки email.")}</p>
       <div className="actions">
         <button className="btn" disabled={busy}>{busy ? uiText("Сохранение…") : uiText("Создать")}</button>

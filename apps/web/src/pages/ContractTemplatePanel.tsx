@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../components/InlineFeedback";
 import { uiMessage, uiText, useUiText, localizeUiOptions } from "../lib/uiText";
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
@@ -306,8 +307,8 @@ export function ContractTemplatePanel({ onSaved }: { onSaved?: () => void }) {
           </button>
         </div>
       </div>
-      {savedNotice ? <p className="ok" role="status">{savedNotice}</p> : null}
-      {error ? <p className="error" role="alert">{error}</p> : null}
+      {savedNotice ? <InlineFeedback kind="success" className="ok">{savedNotice}</InlineFeedback> : null}
+      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
       {open ? (
         <div className="contract-template-upload" role="region" aria-label={uiText("Загрузка шаблона договора")}>
           {!preview ? (

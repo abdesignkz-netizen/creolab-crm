@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../../components/InlineFeedback";
 import { uiText, useUiText, localizeUiOptions, uiMessage } from "../../lib/uiText";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../../lib/api";
@@ -48,7 +49,7 @@ export function PlatformSignupRequests({ title }: { title?: string }) {
         <h3>{title || uiText("Регистрации")}{pendingCount > 0 ? ` · ${pendingCount}` : ""}</h3>
         <p className="muted">{uiText("Заявки с экрана входа и самостоятельные регистрации. Новые компании создаются автоматически — вручную заводить кабинет больше не обязательно.")}</p>
       </div>
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
       {items.length === 0 ? (
         <p className="muted">{uiText("Пока нет запросов.")}</p>
       ) : (

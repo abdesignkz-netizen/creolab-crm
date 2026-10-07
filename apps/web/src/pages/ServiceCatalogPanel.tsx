@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../components/InlineFeedback";
 import { uiText, useUiText, localizeUiOptions } from "../lib/uiText";
 import { useEffect, useState, type FormEvent } from "react";
 import { api } from "../lib/api";
@@ -45,7 +46,7 @@ export function ServiceCatalogPanel() {
   return <section className="panel stack service-catalog-panel">
     <div className="page-head"><h3>{uiText("Услуги и товары")}</h3><button className="btn" type="button" disabled={busy || loading || creating || Boolean(editing)} onClick={() => edit(null)}>{uiText("Добавить позицию")}</button></div>
     <p className="muted">{uiText("Этот справочник виден только вашей компании. Его используют заявки, фильтр «Услуга / товар» и AI при определении потребности клиента.")}</p>
-    {error ? <p className="error" role="alert">{error}</p> : null}{notice ? <p role="status">{notice}</p> : null}
+    {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}{notice ? <InlineFeedback kind="info">{notice}</InlineFeedback> : null}
     {creating || editing ? <form className="stack service-catalog-form" onSubmit={save}>
       <h4>{editing ? uiText("Изменить позицию") : uiText("Новая позиция")}</h4>
       <label>{uiText("Тип позиции")}<select value={kind} onChange={(event) => setKind(event.target.value as TenantService["kind"])}><option value="SERVICE">{uiText("Услуга")}</option><option value="PRODUCT">{uiText("Товар")}</option></select></label>

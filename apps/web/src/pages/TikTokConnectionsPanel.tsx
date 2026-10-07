@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../components/InlineFeedback";
 import { uiText, useUiText, localizeUiOptions } from "../lib/uiText";
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
@@ -17,7 +18,7 @@ export function TikTokConnectionsPanel({ onChange }: { onChange: () => void }) {
   }
   return <div className="panel"><div className="row"><h3>TikTok Leads</h3><IntegrationHelp kind="tiktok" /></div>
     <p className="muted">{uiText("Новые заявки из Instant Form автоматически поступают в CRM. Нужны приложение TikTok for Business с доступом к Lead Generation и права администратора рекламного аккаунта.")}</p>
-    {error ? <p className="error">{error}</p> : null}
+    {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
     <form onSubmit={event => { event.preventDefault(); void run(async () => { await api.connectTikTok(form); setForm({ ...form, accessToken: "", appSecret: "" }); }); }}>
       <label>{uiText("App ID приложения TikTok")}<input required value={form.appId} onChange={event => setForm({ ...form, appId: event.target.value })}/></label>
       <label>{uiText("ID рекламного аккаунта")}<input required value={form.advertiserId} onChange={event => setForm({ ...form, advertiserId: event.target.value })}/></label>

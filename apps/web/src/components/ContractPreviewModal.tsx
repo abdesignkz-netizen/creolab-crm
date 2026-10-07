@@ -1,3 +1,4 @@
+import { InlineFeedback } from "./InlineFeedback";
 import { uiText, useUiText, localizeUiOptions } from "../lib/uiText";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api, downloadContractFile, downloadContractPreview } from "../lib/api";
@@ -110,10 +111,10 @@ export function ContractPreviewModal({
             {uiText("Закрыть")}</button>
         </div>
         {children}
-        {error ? <div role="alert"><p className="error">{error}</p><button type="button" className="btn secondary" disabled={busy} onClick={() => setRetry(value => value + 1)}>{uiText("Повторить открытие PDF")}</button></div> : null}
+        {error ? <div role="alert"><InlineFeedback kind="error" className="error">{error}</InlineFeedback><button type="button" className="btn secondary" disabled={busy} onClick={() => setRetry(value => value + 1)}>{uiText("Повторить открытие PDF")}</button></div> : null}
         {loading ? <p className="muted">{uiText("Открываем PDF…")}</p> : null}
         {pdfUrl ? <PdfDocumentViewer title={uiText("Договор {p0}", {p0: contract.number || ""})} src={pdfUrl} /> : null}
-        {downloadError ? <p className="error" role="alert">{downloadError}</p> : null}
+        {downloadError ? <InlineFeedback kind="error" className="error">{downloadError}</InlineFeedback> : null}
         <div className="actions">
           {actions?.(!loading && !error && Boolean(pdfUrl))}
           <div className="actions contract-download-actions">

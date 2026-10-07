@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../../components/InlineFeedback";
 import { uiText, useUiText, localizeUiOptions, uiMessage } from "../../lib/uiText";
 import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
@@ -183,10 +184,10 @@ function ProviderAssignForm({
           {busy ? uiText("Подключаем…") : already ? uiText("Обновить подключение") : uiText("Подключить к компании")}
         </button>
       </div>
-      {note ? <p className="ok">{note}</p> : null}
+      {note ? <InlineFeedback kind="success" className="ok">{note}</InlineFeedback> : null}
       {secret ? <pre className="code">{secret}</pre> : null}
       {existing?.eventsUrl ? <p className="muted">Webhook: {existing.eventsUrl}</p> : null}
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
     </form>
   );
 }

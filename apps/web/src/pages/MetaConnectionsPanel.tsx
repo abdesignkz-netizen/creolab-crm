@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../components/InlineFeedback";
 import { uiText, useUiText, localizeUiOptions } from "../lib/uiText";
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
@@ -13,7 +14,7 @@ export function MetaConnectionsPanel({ onChange, kind }: { onChange: () => void;
   async function run(action:()=>Promise<void>){setBusy(true);setError("");setNote("");try{await action();await load();onChange();}catch(err){setError(err instanceof Error?err.message:uiText("Ошибка подключения"));}finally{setBusy(false);}}
   return <div className="panel"><div className="row"><h3>{kind ? (kind === "instagram_direct" ? "Instagram Direct" : "Meta Lead Forms") : uiText("Instagram Direct и Meta Lead Forms")}</h3><IntegrationHelp kind={kind === "meta_lead_forms" ? "meta_leads" : "meta_instagram"} /></div>
     <p className="muted">{uiText("Подключение через страницу Facebook и токен приложения Meta. Для Instagram нужен привязанный профессиональный аккаунт. Для внешних клиентов приложение должно иметь необходимые разрешения Meta.")}</p>
-    {error?<p className="error">{error}</p>:null}{note?<p className="ok">{note}</p>:null}
+    {error?<InlineFeedback kind="error" className="error">{error}</InlineFeedback>:null}{note?<InlineFeedback kind="success" className="ok">{note}</InlineFeedback>:null}
     <form onSubmit={event=>{event.preventDefault();void run(async()=>{const result=await api.connectMeta(form)as{callbackUrl:string;verifyToken:string;note:string};if(result.verifyToken)setVerification(result);setForm({...form,accessToken:"",appSecret:""});setNote(result.note);});}}>
       {!kind && <label>{uiText("Подключение")}<select value={form.kind} onChange={event=>setForm({...form,kind:event.target.value})}><option value="instagram_direct">Instagram Direct</option><option value="meta_lead_forms">Meta Lead Forms</option></select></label>}
       <label>{uiText("App ID приложения Meta")}<input required value={form.appId} onChange={event=>setForm({...form,appId:event.target.value})}/></label>

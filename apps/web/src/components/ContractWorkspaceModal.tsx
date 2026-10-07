@@ -1,3 +1,4 @@
+import { InlineFeedback } from "./InlineFeedback";
 import { uiText, useUiText, localizeUiOptions, uiFormatLocale } from "../lib/uiText";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
@@ -167,10 +168,10 @@ export function ContractWorkspaceModal({ contractId, onClose, onChanged }: {
       {contract && !seller && !buyerSigned && !fullySigned ? <button type="button" className="btn secondary" disabled={busy} onClick={() => void action(deleteCurrentContract)}>{uiText("Удалить договор")}</button> : null}
     </>}
   >
-    {error ? <p className="error" role="alert">{error}</p> : null}
+    {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
     {!contract && !error ? <p className="muted">{uiText("Загружаем сведения о договоре…")}</p> : null}
     {!contract && error ? <button type="button" className="btn secondary" disabled={busy} onClick={() => void action(async () => { await read(); })}>{uiText("Повторить загрузку")}</button> : null}
-    {note ? <p role="status">{note}</p> : null}
+    {note ? <InlineFeedback kind="info">{note}</InlineFeedback> : null}
     {contract ? <p className="muted">{Number(contract.totalAmount).toLocaleString(uiFormatLocale())} {contract.currency === "KZT" ? "₸" : contract.currency} · {fullySigned ? uiText("Подписан обеими сторонами") : seller ? uiText("Подписан компанией, ожидается подпись заказчика") : review.confirmed ? uiText("Подтверждён") : uiText("Требует проверки")}</p> : null}
     {contract?.importedPdf ? <p className="muted">{uiText("Загруженный договор сохраняется в исходном виде. Для изменения загрузите новую редакцию.")}</p> : contract && !editable ? <p className="muted">{seller || fullySigned ? uiText("Договор уже подписан компанией. Изменение этой версии недоступно.") : uiText("Версия договора зафиксирована для подписания. Если попытка не удалась, нажмите «Подписать» повторно.")}</p> : null}
     {editing ? <form className="panel contract-edit-form" onSubmit={event => { event.preventDefault(); void action(save); }}>

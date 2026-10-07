@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../../components/InlineFeedback";
 import { uiText, useUiText, localizeUiOptions } from "../../lib/uiText";
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
@@ -37,7 +38,7 @@ export function PlatformCatalogPage() {
       <h2>{uiText("Каталог интеграций")}</h2>
       <p className="muted">
         {uiText("Подключение всегда к выбранной компании. Общий WhatsApp-мост сервера к организации не подставляется.")}</p>
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
       <section className="panel stack">
         <h3>{uiText("ИИ-менеджер для любого подключения WhatsApp")}</h3>
         <p>{uiText("QR-код, Green API и официальный WhatsApp используют промпт и базу знаний выбранной компании. Настройте ИИ отдельно от подключения номера.")}</p>

@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../../components/InlineFeedback";
 import { uiMessage, uiText, useUiText, localizeUiOptions } from "../../lib/uiText";
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
@@ -58,7 +59,7 @@ function AiManagerList() {
         <button className="btn secondary" type="submit">
           {uiText("Найти")}</button>
       </form>
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
       {!data ? (
         <div className="state">{uiText("Загрузка…")}</div>
       ) : !(data.items || []).length ? (

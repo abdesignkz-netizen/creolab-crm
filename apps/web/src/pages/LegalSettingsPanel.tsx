@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../components/InlineFeedback";
 import { uiText, useUiText, localizeUiOptions } from "../lib/uiText";
 import { notifySaved } from "../components/SaveNotice";
 import { useEffect, useState } from "react";
@@ -138,7 +139,7 @@ export function LegalSettingsPanel() {
       <h3>{uiText("Реквизиты компании")}</h3>
       <p className="muted">
         {uiText("Реквизиты вашей организации. Они подставляются в договоры, счета, АВР и ЭСФ.")}</p>
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
       {!loaded ? (error ? <button className="btn secondary" onClick={()=>location.reload()}>{uiText("Повторить загрузку")}</button> : <p role="status">{uiText("Загружаем реквизиты…")}</p>) : !editing ? <>
       <dl className="deal-edit">
         {([

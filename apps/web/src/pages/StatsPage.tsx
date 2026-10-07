@@ -1,3 +1,4 @@
+import { InlineFeedback } from "../components/InlineFeedback";
 import { uiMessage, uiText, useUiText, localizeUiOptions, uiFormatLocale } from "../lib/uiText";
 import { useSession, useLocale } from "../lib/session";
 import { useUrlState, useRequestVersion } from "../lib/useUrlState";
@@ -500,7 +501,7 @@ export function StatsPage() {
 
       {error ? (
         <div className="row">
-          <p className="error">{error}</p>
+          <InlineFeedback kind="error" className="error">{error}</InlineFeedback>
           <button type="button" className="btn secondary" onClick={() => void load()}>
             {uiText("Повторить")}</button>
         </div>
