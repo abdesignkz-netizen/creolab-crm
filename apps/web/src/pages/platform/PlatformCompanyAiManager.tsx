@@ -358,7 +358,7 @@ function ModelSettings({ tenantId, runtime, onSaved }: { tenantId: string; runti
       } catch (error) { setError(error instanceof Error ? error.message : uiText("Ошибка")); }
       finally { setBusy(false); setTesting(false); }
     }}>{testing ? uiText("Проверяем модель ИИ…") : uiText("Проверить модель ИИ")}</button>
-    {testResult && <div role="status" className={testResult.ok ? "banner success" : "banner warn"}>
+    {testResult && <div role="status" className={testResult.ok ? "banner success stack" : "banner warn stack"}>
       <p>{uiMessage(testResult.message)}</p>
       {testResult.errorCode && <p>{uiText("Код ошибки")}: <code>{testResult.errorCode}</code></p>}
       {typeof testResult.latencyMs === "number" && <p>{uiText("Время запроса, с")}: {(testResult.latencyMs / 1000).toFixed(1)}</p>}
