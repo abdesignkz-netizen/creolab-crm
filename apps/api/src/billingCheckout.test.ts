@@ -931,3 +931,71 @@ it("cancellation checks ownership before querying provider and cannot overwrite 
     assert.equal((await db.billingPayment.findUniqueOrThrow({ where: { id: p.id } })).status, "PAID");
   } finally { freedomPay.getPaymentStatus = original; }
 });
+
+it("admin fills only missing invoice signing fields, preserves the original bank snapshot and records one audit", async () => {
+  const { completeInvoiceSigning } = await import("./services/billing/invoiceSigning.ts");
+  const { createCanvas } = await import("@napi-rs/canvas");
+  const image = createCanvas(20, 20).toDataURL("image/png");
+  await saveSeller(db, admin, seller);
+  const a = await tenant(), o = await order(a);
+  const checkout = await payOrder(db, a, { orderId: o.id, method: "BANK_TRANSFER", buyer });
+  const original = await db.billingInvoice.findUniqueOrThrow({ where: { id: checkout.invoice!.id } });
+  const signing = { signerName: "Булан Асхат Болатұлы", signerPosition: "Директор", signatureDataUrl: image, stampDataUrl: image };
+  try {
+    await saveSeller(db, admin, { ...seller, ...signing, iban: "KZ223456789012345678", legalName: "Новое название" });
+    await assert.rejects(completeInvoiceSigning(db, a, original.id), (e: any) => e.status === 403);
+    const result = await completeInvoiceSigning(db, admin, original.id);
+    assert.equal(result.changed, true);
+    assert.equal(result.addedFields.length, 4);
+    const updated = await db.billingInvoice.findUniqueOrThrow({ where: { id: original.id } });
+    assert.deepEqual(updated, { ...original, sellerJson: { ...(original.sellerJson as object), ...signing } });
+    assert.equal((await completeInvoiceSigning(db, admin, original.id)).changed, false);
+    const events = await db.auditEvent.findMany({ where: { entityId: original.id, action: "billing.invoice.signing_completed" } });
+    assert.equal(events.length, 1);
+    assert.equal(events[0].actorUserId, admin.user.id);
+    assert(!JSON.stringify(events).includes("data:image"));
+    assert(JSON.stringify(events).includes("sha256"));
+    const { DOMMatrix, ImageData, Path2D } = await import("@napi-rs/canvas");
+    Object.assign(globalThis, { DOMMatrix, ImageData, Path2D });
+    const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    const task = getDocument({ data: new Uint8Array(await renderBillingInvoice(updated)), useSystemFonts: true });
+    const pdf = await task.promise;
+    const page = await pdf.getPage(1);
+    const text = (await page.getTextContent()).items.filter(i => "str" in i).map(i => (i as any).str).join(" ");
+    assert(text.includes(signing.signerName));
+    await task.destroy();
+  } finally { await saveSeller(db, admin, seller); }
+});
+it("invoice signing rejects different seller, different signer and all closed or paid states", async () => {
+  const { completeInvoiceSigning } = await import("./services/billing/invoiceSigning.ts");
+  const { createCanvas } = await import("@napi-rs/canvas");
+  const image = createCanvas(20, 20).toDataURL("image/png");
+  await saveSeller(db, admin, seller);
+  const a = await tenant(), o = await order(a);
+  const checkout = await payOrder(db, a, { orderId: o.id, method: "BANK_TRANSFER", buyer });
+  const id = checkout.invoice!.id;
+  const original = await db.billingInvoice.findUniqueOrThrow({ where: { id } });
+  const signing = { signerName: "Тестов А.Б.", signerPosition: "Директор", signatureDataUrl: image };
+  try {
+    await assert.rejects(completeInvoiceSigning(db, admin, id), (e: any) => e.code === "invoice_signing_missing");
+    await saveSeller(db, admin, { ...seller, ...signing, bin: "111111111111" });
+    await assert.rejects(completeInvoiceSigning(db, admin, id), (e: any) => e.code === "invoice_seller_mismatch");
+    await saveSeller(db, admin, { ...seller, ...signing });
+    for (const mismatch of [{ signerName: "Другой человек" }, { signerPosition: "Бухгалтер" }, { signatureDataUrl: createCanvas(30, 30).toDataURL("image/png"), signerName: signing.signerName }]) {
+      await db.billingInvoice.update({ where: { id }, data: { sellerJson: { ...(original.sellerJson as any), ...mismatch } } });
+      await assert.rejects(completeInvoiceSigning(db, admin, id), (e: any) => e.code === "invoice_signer_mismatch");
+    }
+    await db.billingInvoice.update({ where: { id }, data: { sellerJson: original.sellerJson! } });
+    for (const status of ["PAID", "CANCELLED", "EXPIRED"]) {
+      await db.billingInvoice.update({ where: { id }, data: { status } });
+      await assert.rejects(completeInvoiceSigning(db, admin, id), (e: any) => e.code === "invoice_closed");
+    }
+    await db.billingInvoice.update({ where: { id }, data: { status: "ISSUED" } });
+    await db.billingOrder.update({ where: { id: o.id }, data: { status: "CANCELLED" } });
+    await assert.rejects(completeInvoiceSigning(db, admin, id), (e: any) => e.code === "invoice_closed");
+    await db.billingOrder.update({ where: { id: o.id }, data: { status: "PENDING_PAYMENT" } });
+    await db.billingPayment.update({ where: { id: checkout.payments[0].id }, data: { status: "CONFIRMED", paidAt: new Date() } });
+    await assert.rejects(completeInvoiceSigning(db, admin, id), (e: any) => e.code === "invoice_closed");
+    assert.equal(await db.auditEvent.count({ where: { entityId: id, action: "billing.invoice.signing_completed" } }), 0);
+  } finally { await saveSeller(db, admin, seller); }
+});

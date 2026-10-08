@@ -1,6 +1,7 @@
 import { CATALOG_BY_CODE, CONTROL_ACTION_META } from "@creolab/contracts";
 
 export const AUDIT_ACTION_LABELS: Record<string, string> = {
+  "billing.invoice.signing_completed": "Дополнена подпись в счёте за подписку",
   "conversation.crm_updated": "AI обновил CRM по переписке",
   "conversation.context_analyzed": "Проанализирован контекст диалога",
   "auth.login": "Вход в аккаунт", "auth.login_failed": "Неудачная попытка входа", "auth.logout": "Выход из аккаунта", "auth.logout_all": "Завершены все сеансы",
@@ -34,6 +35,7 @@ for (const [code, label] of Object.entries({ telegram_bot: "Telegram", instagram
   for (const [suffix, verb] of Object.entries({ connected: "Подключение", configured: "Настройка", disconnected: "Отключение" })) AUDIT_ACTION_LABELS[`integration.${code}_${suffix}`] = `${verb}: ${label}`;
 }
 export const AUDIT_ENTITY_LABELS: Record<string, string> = {
+  billing_invoice: "Счёт за подписку",
   PendingRegistration: "Регистрация", ServiceSignupRequest: "Заявка на подключение", agreement: "Договорённость", ai_configuration: "Настройки AI", billing_override: "Индивидуальные условия", billing_payment: "Оплата тарифа", payment: "Оплата", contact: "Клиент", company: "Компания", contract: "Договор", contract_template: "Шаблон договора", control_access: "Доступ к BasQar Control", control_command: "BasQar Control", control_identity: "Аккаунт BasQar Control", conversation: "Диалог", deal: "Сделка", electronic_document: "Электронный документ", esf_connection: "Подключение ИС ЭСФ", inquiry: "Заявка", integration: "Интеграция", invitation: "Приглашение сотрудника", invoice: "Счёт", knowledge_document: "База знаний", membership: "Сотрудник", platform_setting: "Настройки сервиса", service_category: "Услуги и товары", session: "Сеанс", subscription: "Подписка", subscription_request: "Заявка на тариф", support_ticket: "Обращение в поддержку", tenant: "Компания", tenant_legal_profile: "Реквизиты компании", tenant_plan: "Тариф", user: "Пользователь", task: "Задача",
 };
 const VALUES: Record<string, string> = {

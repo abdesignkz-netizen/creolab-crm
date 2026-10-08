@@ -149,6 +149,7 @@ export function createApiClient(options: ClientOptions) {
     adminBillingCheck: (id: string) => request<any>(`/api/v1/admin/billing/payments/${encodeURIComponent(id)}/check`, { method: 'POST' }),
     adminBillingConfirm: (id: string, body: unknown) => request<any>(`/api/v1/admin/billing/payments/${encodeURIComponent(id)}/confirm`, {method:"POST",body:JSON.stringify(body)}),
     adminBillingKaspiLink: (id: string, body: unknown) => request<any>(`/api/v1/admin/billing/payments/${encodeURIComponent(id)}/kaspi-link`, {method:"POST",body:JSON.stringify(body)}),
+    adminBillingCompleteSigning: (id: string) => request<any>(`/api/v1/admin/billing/invoices/${encodeURIComponent(id)}/complete-signing`, { method: "POST" }),
     adminBillingSeller: (body: unknown) => request<any>("/api/v1/admin/billing/seller", {method:"PUT",body:JSON.stringify(body)}),
     adminBillingPlan: (id: string, body: unknown) => request<any>(`/api/v1/admin/billing/plans/${encodeURIComponent(id)}`, {method:"PUT",body:JSON.stringify(body)}),
     billing: () => request("/api/v1/billing"),

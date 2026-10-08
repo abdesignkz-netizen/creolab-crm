@@ -453,6 +453,10 @@ export function BillingLedgerPanel() {
                         >
                           PDF
                         </button>
+                        {i.status === "ISSUED" && <button type="button" className="btn secondary" disabled={busy}
+                          onClick={() => open(i, "signing")}>
+                          {t("Добавить подпись", "Қолтаңба қосу", "Add signature")}
+                        </button>}
                       </td>
                     </tr>
                   ))}
@@ -649,7 +653,9 @@ export function BillingLedgerPanel() {
                     ? api.adminBillingKaspiLink(selected.id, form)
                     : modal === "release"
                       ? api.adminBillingRelease(selected.id, form)
-                      : api.adminBillingPlan(selected.id, form),
+                      : modal === "signing"
+                        ? api.adminBillingCompleteSigning(selected.id)
+                        : api.adminBillingPlan(selected.id, form),
               );
             }}
           >
@@ -672,9 +678,19 @@ export function BillingLedgerPanel() {
                         "Төленбеген әрекеттің бұғатын ашу",
                         "Release an unpaid attempt",
                       )
-                    : t("Редактирование тарифа", "Тарифті өңдеу", "Edit plan")}
+                    : modal === "signing"
+                      ? t("Дополнить подпись в счёте", "Шотқа қолтаңба қосу", "Complete invoice signing")
+                      : t("Редактирование тарифа", "Тарифті өңдеу", "Edit plan")}
             </h3>
-            {modal === "release" ? (
+            {modal === "signing" ? (
+              <>
+                <strong>{selected.invoiceNumber}</strong>
+                <p>{t("В счёт будут добавлены недостающие ФИО, должность, подпись и печать из сохранённых реквизитов продавца. Сумма, номер и банковские реквизиты останутся прежними.",
+                  "Сатушының сақталған деректемелерінен шотқа жетіспейтін аты-жөні, лауазымы, қолтаңбасы мен мөрі қосылады. Сома, нөмір және банк деректемелері өзгермейді.",
+                  "Fill missing signatory details, signature and seal from the saved seller profile. The amount, number and bank details stay unchanged.")}</p>
+                <p>{data.seller?.signerPosition} · {data.seller?.signerName || t("Подписант не настроен", "Қол қоюшы белгіленбеген", "Signatory not configured")}</p>
+              </>
+            ) : modal === "release" ? (
               <>
                 <p>
                   {t(

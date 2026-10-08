@@ -288,3 +288,10 @@ it("seller image uploads accept a bounded PNG only for platform admins and stay 
   assert.equal(checkout.body.seller.signatureDataUrl, undefined);
   assert.equal((await request(path, admin, { ...details, signatureDataUrl: "data:image/svg+xml,<svg/>" }, "PUT")).status, 422);
 });
+
+it("invoice signing endpoint is restricted to platform administrators", async () => {
+  const path = "/api/v1/admin/billing/invoices/unknown/complete-signing";
+  assert.equal((await request(path, "", undefined, "POST")).status, 401);
+  assert.equal((await request(path, owner, undefined, "POST")).status, 403);
+  assert.equal((await request(path, admin, undefined, "POST")).status, 404);
+});

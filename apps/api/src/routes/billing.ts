@@ -1,3 +1,4 @@
+import { completeInvoiceSigning } from "../services/billing/invoiceSigning.ts";
 import {
   checkOrderPayment,
   releaseUncreatedPayment,
@@ -232,6 +233,9 @@ export function registerBillingRoutes(
         ),
       ),
   );
+  app.post("/api/v1/admin/billing/invoices/:id/complete-signing", async (req, res) => {
+    res.json(await completeInvoiceSigning(db, await auth(req), String(req.params.id)));
+  });
   app.put("/api/v1/admin/billing/seller", async (req, _res, next) => {
     try { requirePlatformAdmin(await auth(req)); next(); }
     catch (error) { next(error); }
