@@ -42,7 +42,11 @@ export async function adminBilling(
           billingPeriod: true,
         },
       }),
-      db.billingInvoice.findMany({ orderBy: { issueDate: "desc" }, take: 100 }),
+      db.billingInvoice.findMany({
+        orderBy: { issueDate: "desc" }, take: 100,
+        select: { id: true, tenantId: true, orderId: true, invoiceNumber: true,
+          amountMinor: true, currency: true, issueDate: true, dueDate: true, status: true },
+      }),
       db.plan.findMany({ orderBy: { sortOrder: "asc" } }),
       sellerProfile(db),
     ]);

@@ -17,6 +17,8 @@ import {
 } from "./services/billing/ledger.ts";
 import {
   saveSeller,
+  issueInvoice,
+  sellerProfile,
   renderBillingInvoice,
 } from "./services/billing/documents.ts";
 import { processBillingRenewals } from "./services/billing/renewals.ts";
@@ -166,6 +168,30 @@ it("versioned migration is repeatable and preserves existing subscription and le
     "BASQAR_FREE",
   );
 });
+it("subscription seller defaults to KNP 851 while keeping an explicitly configured code", async () => {
+  await saveSeller(db, admin, { ...seller, knp: "" });
+  assert.equal((await sellerProfile(db))!.knp, "851");
+  await db.platformSetting.update({ where: { key: "billing.seller" }, data: { valueJson: seller } });
+  assert.equal((await sellerProfile(db))!.knp, "851");
+  await saveSeller(db, admin, { ...seller, knp: "859" });
+  assert.equal((await sellerProfile(db))!.knp, "859");
+  await saveSeller(db, admin, seller);
+});
+it("invoice keeps the issued seller, signer and order snapshots after settings change", async () => {
+  const a = await tenant(), o = await order(a);
+  await saveSeller(db, admin, { ...seller, signerName: "Подписант А.Б.", signerPosition: "Исполнитель", knp: "859" });
+  try {
+    const checkout = await payOrder(db, a, { orderId: o.id, method: "BANK_TRANSFER", buyer });
+    const original = await db.billingInvoice.findUniqueOrThrow({ where: { id: checkout.invoice!.id } });
+    assert.deepEqual((original.sellerJson as any).orderBasis, { number: o.orderNumber, date: o.createdAt.toISOString() });
+    await saveSeller(db, admin, { ...seller, legalName: "Новый поставщик", signerName: "Другой подписант" });
+    const repeat = await issueInvoice(db, o, "another-payment", { ...buyer, legalName: "Другой покупатель" });
+    assert.equal(repeat.id, original.id);
+    assert.deepEqual(repeat.sellerJson, original.sellerJson);
+    assert.deepEqual(repeat.buyerJson, original.buyerJson);
+    assert.equal((repeat.sellerJson as any).signerName, "Подписант А.Б.");
+  } finally { await saveSeller(db, admin, seller); }
+});
 it("bank invoice prefill, PDF, atomic manual confirmation and duplicate confirmation", async () => {
   const a = await tenant(),
     o = await order(a);
@@ -175,6 +201,7 @@ it("bank invoice prefill, PDF, atomic manual confirmation and duplicate confirma
     buyer,
   });
   assert.match(d.invoice!.invoiceNumber, /^BSQ-INV-\d{4}-\d{6}$/);
+  assert.equal((d.invoice!.sellerJson as any).knp, "851");
   const pdf = await renderBillingInvoice(d.invoice!);
   assert.equal(pdf.subarray(0, 4).toString(), "%PDF");
   assert(pdf.length > 1000);

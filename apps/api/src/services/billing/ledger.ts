@@ -20,7 +20,7 @@ import { activateSubscription } from "../subscriptionActivationService.ts";
 import type { PaymentNotice, PaymentProvider } from "../paymentProvider.ts";
 import { freedomPay } from "./freedomPayProvider.ts";
 import { billingConfig, billingError } from "./config.ts";
-import { issueInvoice, nextNumber, sellerProfile } from "./documents.ts";
+import { issueInvoice, nextNumber, sellerProfile, sellerDetailsWithoutImages } from "./documents.ts";
 
 export type DB = PrismaClient | Prisma.TransactionClient;
 const openPayments = ["PENDING", "PROCESSING"];
@@ -245,9 +245,9 @@ export async function checkoutDetail(
   return {
     order,
     payments,
-    invoice,
+    invoice: invoice ? { ...invoice, sellerJson: sellerDetailsWithoutImages(invoice.sellerJson) } : null,
     buyer,
-    seller,
+    seller: sellerDetailsWithoutImages(seller),
     subscription,
     methods: {
       card: freedomPay.configured,

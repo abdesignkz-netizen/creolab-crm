@@ -260,3 +260,31 @@ it("checkout check calls provider, enforces tenant ownership and does not mark a
     freedomPay.getPaymentStatus = original;
   }
 });
+it("seller image uploads accept a bounded PNG only for platform admins and stay out of checkout polling", async () => {
+  const { createCanvas } = await import("@napi-rs/canvas");
+  const { randomFillSync } = await import("node:crypto");
+  const canvas = createCanvas(128, 128), ctx = canvas.getContext("2d");
+  const pixels = ctx.createImageData(128, 128);
+  randomFillSync(pixels.data);
+  ctx.putImageData(pixels, 0, 0);
+  const signatureDataUrl = canvas.toDataURL("image/png");
+  assert(signatureDataUrl.length > 32 * 1024);
+  const details = {
+    legalName: "Тестовый поставщик", bin: "123456789012", legalAddress: "Алматы, тестовый адрес",
+    iban: "KZ123456789012345678", bankName: "Тестовый банк", bik: "TESTKZKX", kbe: "17",
+    vatEnabled: false, vatRate: 0, supportEmail: "billing@example.test", supportPhone: "+77000000000",
+    invoicePrefix: "BSQ-INV", signerName: "Тестов А.Б.", signatureDataUrl,
+  };
+  const path = "/api/v1/admin/billing/seller";
+  assert.equal((await request(path, "", details, "PUT")).status, 401);
+  assert.equal((await request(path, owner, details, "PUT")).status, 403);
+  const saved = await request(path, admin, details, "PUT");
+  assert.equal(saved.status, 200);
+  assert.equal(saved.body.signatureDataUrl, signatureDataUrl);
+  const order = await db.billingOrder.findFirstOrThrow({ where: { tenantId } });
+  const checkout = await request("/api/v1/billing/orders/" + order.id, owner);
+  assert.equal(checkout.status, 200);
+  assert.equal(checkout.body.seller.legalName, details.legalName);
+  assert.equal(checkout.body.seller.signatureDataUrl, undefined);
+  assert.equal((await request(path, admin, { ...details, signatureDataUrl: "data:image/svg+xml,<svg/>" }, "PUT")).status, 422);
+});

@@ -1,13 +1,28 @@
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { z } from "zod";
-import PDFDocument from "pdfkit";
-import { collectPdf, resolveFont, formatKzt } from "../contractPdf.ts";
+import { loadImage } from "@napi-rs/canvas";
+import { renderSubscriptionInvoice } from "./invoicePdf.ts";
 import { billingError } from "./config.ts";
 import { writeAudit } from "../../lib/audit.ts";
 import { requirePlatformAdmin } from "../../lib/access.ts";
 import type { AuthContext } from "../../lib/types.ts";
 
 type DB = PrismaClient | Prisma.TransactionClient;
+// BasQar subscription is a computer service (NB RK payment classifier, code 851).
+// https://adilet.zan.kz/rus/docs/V1600014365
+// Apply on seller configuration / new invoice issuance, never to an old snapshot.
+const SUBSCRIPTION_KNP = "851";
+// Assets are stored in the invoice snapshot, so later seller edits cannot alter it.
+const pngDataUrl = z.string().max(350000).refine((value) => {
+  if (!value) return true;
+  if (!/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(value)) return false;
+  const bytes = Buffer.from(value.slice(22), "base64");
+  return bytes.length >= 33 && bytes.length <= 256 * 1024 &&
+    bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) &&
+    bytes.toString("ascii", 12, 16) === "IHDR" &&
+    bytes.readUInt32BE(16) > 0 && bytes.readUInt32BE(16) <= 2048 &&
+    bytes.readUInt32BE(20) > 0 && bytes.readUInt32BE(20) <= 2048;
+}, "Загрузите PNG до 256 КБ и до 2048 × 2048 пикселей").optional();
 export const sellerSchema = z.object({
   legalName: z.string().trim().min(2).max(200),
   bin: z.string().regex(/^\d{12}$/),
@@ -16,11 +31,18 @@ export const sellerSchema = z.object({
   bankName: z.string().trim().min(2).max(200),
   bik: z.string().regex(/^[A-Z0-9]{8,11}$/),
   kbe: z.string().regex(/^\d{2}$/),
+  knp: z.string().trim().regex(/^(?:\d{3})?$/).optional(),
+  signerName: z.string().trim().max(200).optional(),
+  signerPosition: z.string().trim().max(120).optional(),
+  signatureDataUrl: pngDataUrl,
+  stampDataUrl: pngDataUrl,
   vatEnabled: z.boolean(),
   vatRate: z.number().min(0).max(100),
   supportEmail: z.email(),
   supportPhone: z.string().max(40),
   invoicePrefix: z.string().regex(/^[A-Z0-9-]{2,16}$/),
+}).refine((s) => !s.signatureDataUrl || Boolean(s.signerName), {
+  message: "Укажите ФИО подписанта для загруженной подписи", path: ["signerName"],
 });
 export const buyerSchema = z.object({
   legalName: z.string().trim().min(2).max(200),
@@ -29,12 +51,18 @@ export const buyerSchema = z.object({
   email: z.email(),
   phone: z.string().trim().min(5).max(40),
 });
+// Invoice images are only needed by the admin editor and PDF download, not polling.
+export function sellerDetailsWithoutImages(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const { signatureDataUrl: _signature, stampDataUrl: _stamp, ...details } = value as Record<string, unknown>;
+  return details;
+}
 export async function sellerProfile(db: DB) {
   const row = await db.platformSetting.findUnique({
     where: { key: "billing.seller" },
   });
   const result = sellerSchema.safeParse(row?.valueJson);
-  return result.success ? result.data : null;
+  return result.success ? { ...result.data, knp: result.data.knp || SUBSCRIPTION_KNP } : null;
 }
 export async function saveSeller(
   db: PrismaClient,
@@ -43,6 +71,12 @@ export async function saveSeller(
 ) {
   requirePlatformAdmin(auth);
   const seller = sellerSchema.parse(input);
+  seller.knp ||= SUBSCRIPTION_KNP;
+  for (const value of [seller.signatureDataUrl, seller.stampDataUrl]) {
+    if (!value) continue;
+    try { await loadImage(Buffer.from(value.slice(22), "base64")); }
+    catch { billingError("invalid_invoice_image", "Не удалось прочитать PNG подписи или печати"); }
+  }
   return db.$transaction(async (tx) => {
     await tx.platformSetting.upsert({
       where: { key: "billing.seller" },
@@ -76,6 +110,8 @@ export async function issueInvoice(
     currency: string;
     description: string;
     expiresAt: Date;
+    orderNumber?: string;
+    createdAt?: Date;
   },
   paymentId: string,
   buyerInput?: unknown,
@@ -108,7 +144,12 @@ export async function issueInvoice(
       tenantId: order.tenantId,
       orderId: order.id,
       paymentId,
-      sellerJson: seller,
+      sellerJson: {
+        ...seller,
+        ...(order.orderNumber && order.createdAt ? {
+          orderBasis: { number: order.orderNumber, date: order.createdAt.toISOString() },
+        } : {}),
+      },
       buyerJson: buyer,
       amountMinor: order.amountMinor,
       currency: order.currency,
@@ -127,90 +168,10 @@ export async function renderBillingInvoice(invoice: {
   buyerJson: unknown;
   status: string;
 }) {
-  const s = sellerSchema.parse(invoice.sellerJson),
-    b = buyerSchema.parse(invoice.buyerJson);
-  const doc = new PDFDocument({
-    size: "A4",
-    margin: 48,
-    info: { Title: `BasQar · ${invoice.invoiceNumber}` },
-  });
-  const done = collectPdf(doc);
-  doc
-    .registerFont("regular", resolveFont("NotoSans-Regular.ttf"))
-    .registerFont("bold", resolveFont("NotoSans-Bold.ttf"));
-  doc.fillColor("#0866c6").font("bold").fontSize(28).text("BasQar");
-  doc.moveDown().fillColor("#17243c").fontSize(18).text("СЧЁТ НА ОПЛАТУ");
-  doc
-    .font("regular")
-    .fontSize(10)
-    .text(
-      `${invoice.invoiceNumber} · ${invoice.issueDate.toLocaleDateString("ru-RU", { timeZone: "Asia/Almaty" })}`,
-    );
-  doc.text(
-    (
-      {
-        PAID: "Оплачено",
-        CANCELLED: "Отменён — не оплачивать",
-        EXPIRED: "Срок оплаты истёк — не оплачивать",
-      } as Record<string, string>
-    )[invoice.status] || "Ожидает оплаты",
-  );
-  doc
-    .moveDown()
-    .font("bold")
-    .text("Поставщик")
-    .font("regular")
-    .text(
-      `${s.legalName}\nБИН: ${s.bin}\n${s.legalAddress}\nИИК: ${s.iban}\n${s.bankName}\nБИК: ${s.bik} · КБе: ${s.kbe}`,
-    );
-  doc
-    .moveDown()
-    .font("bold")
-    .text("Покупатель")
-    .font("regular")
-    .text(`${b.legalName}\nБИН / ИИН: ${b.bin}\n${b.legalAddress}`);
-  doc.moveDown();
-  const y = doc.y;
-  doc.moveTo(48, y).lineTo(548, y).strokeColor("#d9e1eb").stroke();
-  doc.moveDown().font("bold").text("Наименование", 48, doc.y, { width: 350 });
-  doc.text("Сумма", 425, doc.y - 14, { width: 123, align: "right" });
-  const rowY = doc.y + 12;
-  doc
-    .font("regular")
-    .text(`1. ${invoice.description}`, 48, rowY, { width: 340 });
-  const rowBottom = doc.y;
-  doc.text(formatKzt(invoice.amountMinor), 410, rowY, {
-    width: 138,
-    align: "right",
-  });
-  doc.y = Math.max(rowBottom, doc.y) + 20;
-  doc.font("bold").text(`Итого: ${formatKzt(invoice.amountMinor)}`, 48, doc.y, {
-    align: "right",
-  });
-  doc
-    .font("regular")
-    .fontSize(10)
-    .text(
-      s.vatEnabled
-        ? `В том числе НДС ${s.vatRate}%: ${formatKzt((invoice.amountMinor * s.vatRate) / (100 + s.vatRate))}`
-        : "Без НДС",
-      { align: "right" },
-    );
-  doc
-    .moveDown(2)
-    .text(
-      `Назначение платежа: Оплата подписки BasQar по счёту ${invoice.invoiceNumber}.`,
-    );
-  doc
-    .moveDown()
-    .text(
-      `Оплатить до ${invoice.dueDate.toLocaleDateString("ru-RU", { timeZone: "Asia/Almaty" })}.`,
-    );
-  doc.moveDown().text(`${s.supportEmail} · ${s.supportPhone}`);
-  doc
-    .moveDown()
-    .fillColor("#63738a")
-    .text("Счёт на оплату не является фискальным чеком.");
-  doc.end();
-  return done;
+  const seller = sellerSchema.parse(invoice.sellerJson);
+  const buyer = buyerSchema.parse(invoice.buyerJson);
+  const { orderBasis } = z.object({
+    orderBasis: z.object({ number: z.string().max(100), date: z.iso.datetime() }).optional(),
+  }).parse(invoice.sellerJson);
+  return renderSubscriptionInvoice({ ...invoice, seller, buyer, orderBasis });
 }

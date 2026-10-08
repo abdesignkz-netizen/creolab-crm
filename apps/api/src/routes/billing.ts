@@ -232,7 +232,10 @@ export function registerBillingRoutes(
         ),
       ),
   );
-  app.put("/api/v1/admin/billing/seller", json, async (req, res) =>
+  app.put("/api/v1/admin/billing/seller", async (req, _res, next) => {
+    try { requirePlatformAdmin(await auth(req)); next(); }
+    catch (error) { next(error); }
+  }, express.json({ limit: "1mb" }), async (req, res) =>
     res.json(await saveSeller(db, await auth(req), req.body)),
   );
   app.put("/api/v1/admin/billing/plans/:id", json, async (req, res) =>

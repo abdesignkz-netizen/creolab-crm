@@ -19,6 +19,7 @@ export function BillingLedgerPanel() {
     [page, setPage] = useState(1),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
+    [readingAsset, setReadingAsset] = useState(false),
     [selected, setSelected] = useState<any>(null),
     [modal, setModal] = useState(""),
     [form, setForm] = useState<Record<string, any>>({}),
@@ -33,7 +34,7 @@ export function BillingLedgerPanel() {
       const d = await api.adminBillingLedger(status, page);
       setData(d);
       setSeller(
-        d.seller || { invoicePrefix: "BSQ-INV", vatEnabled: false, vatRate: 0 },
+        { ...(d.seller || { invoicePrefix: "BSQ-INV", vatEnabled: false, vatRate: 0 }), knp: d.seller?.knp || "851" },
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error");
@@ -56,6 +57,26 @@ export function BillingLedgerPanel() {
     } finally {
       setBusy(false);
     }
+  }
+  async function readInvoiceAsset(key: string, file?: File) {
+    if (!file) return;
+    setError("");
+    if (file.type !== "image/png" || file.size > 256 * 1024) {
+      setError(t("Загрузите PNG до 256 КБ.", "256 КБ-қа дейінгі PNG жүктеңіз.", "Upload a PNG up to 256 KB."));
+      return;
+    }
+    setReadingAsset(true);
+    try {
+      const value = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(new Error("read"));
+        reader.readAsDataURL(file);
+      });
+      setSeller(current => ({ ...current, [key]: value }));
+    } catch {
+      setError(t("Не удалось прочитать файл. Выберите его ещё раз.", "Файлды оқу мүмкін болмады. Қайта таңдаңыз.", "Could not read the file. Select it again."));
+    } finally { setReadingAsset(false); }
   }
   function open(p: any, kind: string) {
     setSelected(p);
@@ -551,7 +572,49 @@ export function BillingLedgerPanel() {
                 />
                 {t("Плательщик НДС", "ҚҚС төлеуші", "VAT registered")}
               </label>
-              <button className="btn" disabled={busy}>
+              <h3>{t("Оформление счёта", "Шотты рәсімдеу", "Invoice appearance")}</h3>
+              <div className="billing-form-grid">
+                {[
+                  ["knp", t("КНП", "ТМК", "Payment purpose code")],
+                  ["signerPosition", t("Должность подписанта", "Қол қоюшының лауазымы", "Signatory position")],
+                  ["signerName", t("ФИО подписанта", "Қол қоюшының аты-жөні", "Signatory name")],
+                ].map(([key, label]) => (
+                  <BillingField key={key} label={label}>
+                    <input value={seller[key] ?? ""}
+                      maxLength={key === "knp" ? 3 : key === "signerName" ? 200 : 120}
+                      pattern={key === "knp" ? "[0-9]{3}" : undefined}
+                      inputMode={key === "knp" ? "numeric" : undefined}
+                      required={key === "knp" || (key === "signerName" && Boolean(seller.signatureDataUrl))}
+                      onChange={e => setSeller({ ...seller, [key]: e.target.value })} />
+                  </BillingField>
+                ))}
+              </div>
+              <p className="muted">{t(
+                "Загрузите подпись уполномоченного лица и печать вашей компании, если используете её. PNG до 256 КБ, не более 2048 × 2048 пикселей; желательно с прозрачным фоном. Изображения будут включены только в новые счета. Это изображение подписи, а не ЭЦП.",
+                "Уәкілетті тұлғаның қолтаңбасын және қолданылатын болса, компанияңыздың мөрін жүктеңіз. PNG, 256 КБ-қа дейін, 2048 × 2048 пиксельден аспайды; мөлдір фон ұсынылады. Суреттер тек жаңа шоттарға қосылады. Бұл ЭЦҚ емес, қолтаңба суреті.",
+                "Upload an authorized signature and your company seal, if used. PNG up to 256 KB and 2048 × 2048 pixels; transparent background recommended. Images apply only to new invoices. This is a signature image, not a digital signature.",
+              )}</p>
+              <div className="billing-form-grid">
+                {[
+                  ["signatureDataUrl", t("Подпись", "Қолтаңба", "Signature")],
+                  ["stampDataUrl", t("Печать (необязательно)", "Мөр (міндетті емес)", "Seal (optional)")],
+                ].map(([key, label]) => (
+                  <div key={key} className="stack">
+                    <BillingField label={label}>
+                      <input type="file" accept="image/png" disabled={busy || readingAsset}
+                        onChange={e => { void readInvoiceAsset(key, e.target.files?.[0]); e.target.value = ""; }} />
+                    </BillingField>
+                    {seller[key] && <>
+                      <img src={seller[key]} alt={label} style={{ maxWidth: 220, maxHeight: 100, objectFit: "contain" }} />
+                      <button type="button" className="btn secondary" disabled={busy || readingAsset}
+                        onClick={() => setSeller({ ...seller, [key]: "" })}>
+                        {t("Убрать изображение", "Суретті алып тастау", "Remove image")}
+                      </button>
+                    </>}
+                  </div>
+                ))}
+              </div>
+              <button className="btn" disabled={busy || readingAsset}>
                 {t(
                   "Сохранить реквизиты",
                   "Деректемелерді сақтау",
