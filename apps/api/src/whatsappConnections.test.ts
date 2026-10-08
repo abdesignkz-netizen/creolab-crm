@@ -363,6 +363,49 @@ describe("WhatsApp provider connections", () => {
     }
   });
   let voiceSequence = 0;
+  it("answers a presentation discussion in QR and Cloud with conflict handoff enabled", async () => {
+    const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
+    await prisma.tenant.update({ where: { id: tenantId }, data: { settingsJson: {
+      aiAutomation: { defaultMode: "AUTO", handoff: { afterMode: "assist", triggers: { COMPLAINT: true } } },
+    } } });
+    try {
+      for (const integrationId of [qrId, cloudId]) {
+        await post(`/api/v1/integrations/whatsapp/${integrationId}/ai`, { enabled: true });
+        const id = `presentation-discussion-${integrationId}`;
+        const recipient = integrationId === qrId ? "123456789012345@lid" : "77015550012";
+        const text = "Здравствуйте, хочу обсудить разработку презентации";
+        const result = await recordExternalMessage(prisma, integrationId, {
+          eventId: id, channel: "whatsapp", externalUserId: recipient, threadId: recipient,
+          messageId: id, name: "Presentation client", text, at: new Date(), raw: {},
+        });
+        const event = await prisma.outboxEvent.findFirstOrThrow({ where: { entityId: result.conversationId, type: "whatsapp.ai_reply" } });
+        let generated = 0;
+        const generate = async (input: any) => {
+          generated++;
+          assert.equal(input.history.at(-1).content, text);
+          return { reply: "Здравствуйте! Какая тема и объём презентации?", handoff: false };
+        };
+        await processWhatsAppAiReply(prisma, event, generate);
+        await processWhatsAppAiReply(prisma, event, generate);
+        assert.equal(generated, 1);
+        assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id: event.entityId } })).mode, "ai");
+        const reply = await prisma.message.findUniqueOrThrow({ where: { connectionScopedId: event.id } });
+        assert.equal(reply.senderKind, "ai");
+        assert.equal(reply.text, "Здравствуйте! Какая тема и объём презентации?");
+        if (integrationId === qrId) {
+          await until(async () => {
+            await runtime!.tick();
+            return (await prisma.message.findUniqueOrThrow({ where: { id: reply.id } })).operationState === "accepted";
+          });
+        } else {
+          await deliverCloudMessage(prisma, tenantId, integrationId, reply.id);
+          assert.equal((await prisma.message.findUniqueOrThrow({ where: { id: reply.id } })).operationState, "accepted");
+        }
+      }
+    } finally {
+      await prisma.tenant.update({ where: { id: tenantId }, data: { settingsJson: tenant.settingsJson as never } });
+    }
+  });
   async function voiceEvent(integrationId: string, options: { text?: string; mime?: string } = {}) {
     const id = `voice-test-${++voiceSequence}`;
     await post(`/api/v1/integrations/whatsapp/${integrationId}/ai`, { enabled: true });

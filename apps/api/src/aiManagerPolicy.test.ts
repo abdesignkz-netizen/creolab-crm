@@ -72,6 +72,20 @@ describe("AI manager policy settings", () => {
     settings.conversationHours.offHoursBehavior = "no_reply";
     assert.equal(offHoursBlocksAnalysis(settings), true);
   });
+
+  it("does not treat discussion or product words as a legal conflict", () => {
+    for (const text of [
+      "Здравствуйте, хочу обсудить разработку презентации",
+      "Обсудим проект завтра", "Предлагаю обсуждение", "Мы уже обсуждали задачу",
+      "Нужен каталог посуды", "Рассудительный подход", "Хочу купить судно",
+    ]) assert.equal(detectHandoffReason(text), null, text);
+    for (const text of [
+      "СУД!", "Подам в суд.", "До суда доводить не хочу", "Обращусь к суду",
+      "Это решается судом", "Встретимся в суде", "Пойдут по судам",
+      "Начнём судебное разбирательство", "Будем судиться", "Свяжется мой адвокат",
+      "Обращусь в прокуратуру", "У нас конфликт",
+    ]) assert.equal(detectHandoffReason(text)?.code, "CONFLICT", text);
+  });
 });
 
 describe("AI manager policy runtime", { concurrency: false }, () => {
@@ -199,6 +213,31 @@ describe("AI manager policy runtime", { concurrency: false }, () => {
     assert.equal(result, null);
     const updated = await prisma.conversation.findUniqueOrThrow({ where: { id: conversation.id } });
     assert.equal(updated.mode, "ai");
+  });
+
+  it("keeps a presentation inquiry in AI mode with conflict handoff enabled", async () => {
+    const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
+    const current = parseAIAutomationSettings(tenant.settingsJson);
+    current.handoff.triggers.COMPLAINT = true;
+    current.handoff.afterMode = "assist";
+    await prisma.tenant.update({ where: { id: tenantId }, data: {
+      settingsJson: mergeAIAutomationIntoSettingsJson(tenant.settingsJson, current) as never,
+    } });
+    try {
+      const conversation = await prisma.conversation.create({ data: { tenantId, mode: "ai", status: "open" } });
+      assert.equal(await applyConfiguredHandoff(prisma, tenantId, conversation.id, {
+        text: "Здравствуйте, хочу обсудить разработку презентации",
+      }), null);
+      const unchanged = await prisma.conversation.findUniqueOrThrow({ where: { id: conversation.id } });
+      assert.equal(unchanged.mode, "ai");
+      assert.equal(unchanged.attentionReason, null);
+      assert.equal(unchanged.controlVersion, conversation.controlVersion);
+      assert.equal((await applyConfiguredHandoff(prisma, tenantId, conversation.id, {
+        text: "Я обращусь в суд",
+      }))?.mode, "paused");
+    } finally {
+      await prisma.tenant.update({ where: { id: tenantId }, data: { settingsJson: tenant.settingsJson as never } });
+    }
   });
 
   it("switches to assist (paused) after handoff when that option is chosen", async () => {

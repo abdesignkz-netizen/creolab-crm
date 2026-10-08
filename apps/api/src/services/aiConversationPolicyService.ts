@@ -17,10 +17,13 @@ import { resolveSellerBridge } from "./sellerLink.ts";
 export const CLIENT_FOLLOWUP_TYPE = "client_followup";
 
 const REFUSAL_RE = /не интересн|не надо|не нужно|отказ|отказываюсь|сам напишу|больше не пишите|стоп|stop\b|unsubscribe/i;
+// Match Russian legal words, not fragments inside «обсудить» or «посуда».
+// JS \b is ASCII-based, so Cyrillic needs Unicode letter boundaries.
+const CONFLICT_RE = /(?<![\p{L}\p{N}_])(?:конфликт\p{L}*|суд(?:а|у|ом|е|ы|ов|ам|ами|ах)?|судебн\p{L}*|судиться|адвокат\p{L}*|прокуратур\p{L}*)(?![\p{L}\p{N}_])/iu;
 const REASON_PATTERNS: Array<{ code: string; trigger: HandoffTriggerKey; re: RegExp }> = [
   { code: "CLIENT_REQUESTED_HUMAN", trigger: "CLIENT_REQUESTED_HUMAN", re: /менеджер|оператор|живой человек|человека|переведите|свяжите.{0,20}человек|позовите.{0,12}человек|хочу (с )?менеджер|human please|talk to (a )?person/i },
   { code: "COMPLAINT", trigger: "COMPLAINT", re: /жалоб|возмущ|хамств|обман|претензи/i },
-  { code: "CONFLICT", trigger: "COMPLAINT", re: /конфликт|суд|адвокат|прокуратур/i },
+  { code: "CONFLICT", trigger: "COMPLAINT", re: CONFLICT_RE },
   { code: "CONTRACT", trigger: "CONTRACT", re: /договор|контракт|оферт/i },
   { code: "PAYMENT", trigger: "PAYMENT", re: /оплат|сч[её]т\b|платеж|каспи|iban/i },
   { code: "CUSTOM_PRICING", trigger: "CUSTOM_PRICING", re: /индивидуальн.{0,12}цен|скидк|нестандартн.{0,16}услов|спеццен/i },
