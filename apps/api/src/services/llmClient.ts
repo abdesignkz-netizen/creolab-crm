@@ -47,6 +47,7 @@ async function completeChat(input: {
   messages: Array<{ role: string; content: string }>;
   temperature?: number;
   json?: boolean;
+  responseSchema?: { name: string; schema: Record<string, unknown> };
   timeoutMs?: number;
   maxOutputTokens?: number;
   validateContent?: (content: string) => string | null;
@@ -91,7 +92,8 @@ async function completeChat(input: {
         stream: false,
         temperature: input.temperature ?? 0,
         ...(input.maxOutputTokens ? { max_completion_tokens: input.maxOutputTokens } : {}),
-        ...(input.json ? { response_format: { type: "json_object" } } : {}),
+        ...(input.responseSchema ? { response_format: { type: "json_schema", json_schema: { ...input.responseSchema, strict: true } } }
+          : input.json ? { response_format: { type: "json_object" } } : {}),
         messages: input.messages,
       }),
       signal,
@@ -210,6 +212,13 @@ export async function answerWhatsAppWithLlm(input: {
   const voiceMessage = Boolean(lastUser?.content.includes("[Расшифровка голосового сообщения]"));
   const { content, errorCode, responsePreview } = await completeChat({ runtime: { ...input, feature: "AI_MANAGER_REPLY" }, feature: "AI_MANAGER_REPLY",
     json: true, timeoutMs: getWhatsAppReplyTimeoutMs(), temperature: context.temperature ?? 0.2,
+    responseSchema: { name: "whatsapp_reply", schema: {
+      type: "object", additionalProperties: false,
+      properties: {
+        reply: { type: "string" }, handoff: { type: "boolean" },
+        reason: { type: ["string", "null"], enum: [null, "unclear_message", "human_requested", "staff_action", "knowledge_missing"] },
+      }, required: ["reply", "handoff", "reason"],
+    } },
     validateContent: content => parseWhatsAppReply(content, voiceMessage).errorCode,
     inspectResponse: input.inspectResponse,
     maxOutputTokens: Math.min(context.maxOutputTokens || 1000, 2000),

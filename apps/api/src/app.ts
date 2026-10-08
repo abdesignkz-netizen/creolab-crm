@@ -2669,10 +2669,12 @@ export function createApp(prisma: PrismaClient) {
     res.json(await previewTenantAi(prisma, await requireAuth(req), req.params.id, String(req.body?.message || "")));
   });
 
-  app.post("/api/v1/admin/tenants/:id/ai-manager/test", async (req, res) => {
+  app.post("/api/v1/admin/tenants/:id/ai-manager/test", json, async (req, res) => {
     const auth = await requireAuth(req);
     if (!auth.user.platformAdmin) throw new ApiError(403, "forbidden", "Доступно только администратору сервиса");
     rateLimit(`ai-model-test:${auth.user.id}:${req.params.id}`, 5, 60000);
+    const message = req.body?.message === undefined ? "Здравствуйте" : req.body.message;
+    if (typeof message !== "string" || !message.trim() || message.length > 2000) throw new ApiError(400, "validation_error", "Введите тестовое сообщение до 2000 символов");
     const { directAiReadiness, whatsAppAiFailureReason } = await import("./services/whatsappAiService.ts");
     const { attentionReasonLabel } = await import("./services/attentionReasons.ts");
     const reason = await directAiReadiness(prisma, req.params.id);
@@ -2680,8 +2682,9 @@ export function createApp(prisma: PrismaClient) {
     const started = Date.now();
     try {
       const { answerWhatsAppWithLlm } = await import("./services/llmClient.ts");
-      const answer = await answerWhatsAppWithLlm({ prisma, tenantId: req.params.id, inspectResponse: true, history: [{ role: "user", content: "Здравствуйте" }] });
-      res.json({ ok: Boolean(answer), latencyMs: Date.now() - started, message: answer ? "Модель ИИ отвечает. Сообщение клиенту не отправлялось." : "Не удалось проверить модель ИИ." });
+      const answer = await answerWhatsAppWithLlm({ prisma, tenantId: req.params.id, inspectResponse: true, history: [{ role: "user", content: message.trim() }] });
+      res.json({ ok: Boolean(answer), latencyMs: Date.now() - started, message: answer ? "Модель ИИ отвечает. Сообщение клиенту не отправлялось." : "Не удалось проверить модель ИИ.",
+        responsePreview: answer ? JSON.stringify(answer, null, 2) : undefined });
     } catch (error) {
       const reason = whatsAppAiFailureReason(error instanceof ApiError ? error.code : null);
       const code = error instanceof ApiError && /^[a-zA-Z0-9_:-]{1,100}$/.test(error.code) ? error.code : "llm_request_failed";

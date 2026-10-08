@@ -84,6 +84,10 @@ it("allows a 90-second WhatsApp deadline and retains tenant provider settings", 
   assert.deepEqual(timeouts, [90_000]);
   assert.equal(JSON.parse(String(request?.body)).model, "cx/gpt-5.6-sol");
   assert.equal(JSON.parse(String(request?.body)).stream, false);
+  const format = JSON.parse(String(request?.body)).response_format;
+  assert.equal(format.type, "json_schema");
+  assert.equal(format.json_schema.strict, true);
+  assert.deepEqual(format.json_schema.schema.required, ["reply", "handoff", "reason"]);
   assert.equal(usage[0].status, "ok");
   assert.equal(charged, 1);
 });

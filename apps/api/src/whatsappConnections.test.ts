@@ -909,9 +909,15 @@ describe("WhatsApp provider connections", () => {
     assert.doesNotMatch(JSON.stringify(data), /mock-key-not-real|test-whatsapp-access-token/);
     const beforeSends = sends + qrSends;
     const beforeMessages = await prisma.message.count({ where: { tenantId } });
-    const result = await post(path, {}, { cookie: adminCookie });
+    const beforeCalls = llmCalls;
+    for (const message of ["  ", "а".repeat(2001)]) assert.equal((await post(path, { message }, { cookie: adminCookie })).status, 400);
+    assert.equal(llmCalls, beforeCalls);
+    const testMessage = "Здравствуйте, хочу обсудить разработку презентации";
+    const result = await post(path, { message: testMessage }, { cookie: adminCookie });
     const probe = await result.json();
     assert.equal(result.status, 200); assert.equal(probe.ok, true); assert.equal(typeof probe.latencyMs, "number");
+    assert.equal(llmInput.messages.at(-1).content, testMessage);
+    assert.equal(JSON.parse(probe.responsePreview).reply, llmReply);
     try {
       llmStatus = 401;
       const failed = await post(path, {}, { cookie: adminCookie });

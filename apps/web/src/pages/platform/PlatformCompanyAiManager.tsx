@@ -319,6 +319,7 @@ function ModelSettings({ tenantId, runtime, onSaved }: { tenantId: string; runti
   const [error, setError] = useState("");
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string; errorCode?: string; latencyMs?: number; responsePreview?: string } | null>(null);
   const [testing, setTesting] = useState(false);
+  const [testMessage, setTestMessage] = useState("Здравствуйте");
   return <form className="panel stack" key={`${tenantId}-${runtime.provider}-${runtime.model}-${runtime.enabled}`} onSubmit={async event => {
     event.preventDefault();
     const element = event.currentTarget;
@@ -348,10 +349,11 @@ function ModelSettings({ tenantId, runtime, onSaved }: { tenantId: string; runti
     {error && <InlineFeedback kind="error" className="error">{error}</InlineFeedback>}
     <button className="btn" disabled={busy}>{busy && !testing ? uiText("Сохраняем…") : uiText("Сохранить настройки ИИ")}</button>
     <p className="muted">{uiText("Проверка использует сохранённые настройки и AI-кредиты. Сообщения клиентам не отправляются.")}</p>
-    <button type="button" className="btn secondary" disabled={busy} onClick={async () => {
+    <label>{uiText("Тестовое сообщение")}<textarea value={testMessage} maxLength={2000} disabled={busy} onChange={event => setTestMessage(event.target.value)} /></label>
+    <button type="button" className="btn secondary" disabled={busy || !testMessage.trim()} onClick={async () => {
       setBusy(true); setTesting(true); setError(""); setTestResult(null);
       try {
-        const result = await api.adminTestCompanyAiModel(tenantId) as { ok: boolean; message: string; errorCode?: string; latencyMs?: number; responsePreview?: string };
+        const result = await api.adminTestCompanyAiModel(tenantId, testMessage) as { ok: boolean; message: string; errorCode?: string; latencyMs?: number; responsePreview?: string };
         setTestResult(result);
       } catch (error) { setError(error instanceof Error ? error.message : uiText("Ошибка")); }
       finally { setBusy(false); setTesting(false); }
