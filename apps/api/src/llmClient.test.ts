@@ -83,6 +83,7 @@ it("allows a 90-second WhatsApp deadline and retains tenant provider settings", 
   assert.equal((await answer())?.reply, "Здравствуйте! Расскажите о презентации.");
   assert.deepEqual(timeouts, [90_000]);
   assert.equal(JSON.parse(String(request?.body)).model, "cx/gpt-5.6-sol");
+  assert.equal(JSON.parse(String(request?.body)).stream, false);
   assert.equal(usage[0].status, "ok");
   assert.equal(charged, 1);
 });
@@ -107,7 +108,7 @@ it("classifies a timeout before response headers without exposing the error", as
 });
 
 it("does not swallow a timeout while reading a successful response body", async () => {
-  globalThis.fetch = async () => ({ ok: true, json: async () => {
+  globalThis.fetch = async () => ({ ok: true, headers: new Headers(), text: async () => {
     deadlines.at(-1)!.abort(new DOMException(privateText, "TimeoutError"));
     throw new DOMException(privateText, "AbortError");
   } }) as Response;
@@ -117,7 +118,7 @@ it("does not swallow a timeout while reading a successful response body", async 
 it("distinguishes network failures during fetch and body reading", async () => {
   globalThis.fetch = async () => { throw new TypeError(privateText); };
   await expectFailure("llm_network_error");
-  globalThis.fetch = async () => ({ ok: true, json: async () => { throw new TypeError(privateText); } }) as Response;
+  globalThis.fetch = async () => ({ ok: true, headers: new Headers(), text: async () => { throw new TypeError(privateText); } }) as Response;
   await expectFailure("llm_network_error");
 });
 
@@ -128,12 +129,48 @@ it("preserves HTTP error codes even when the error body is not JSON", async () =
   }
 });
 
-it("rejects malformed response envelopes and invalid WhatsApp JSON before charging", async () => {
+it("distinguishes HTML, unexpected streams and malformed JSON without retaining response bodies", async () => {
+  for (const [response, code] of [
+    [() => new Response(privateText, { headers: { "content-type": "text/html; charset=utf-8" } }), "llm_html_response"],
+    [() => new Response(privateText, { headers: { "content-type": "application/xhtml+xml" } }), "llm_html_response"],
+    [() => new Response(`<!doctype html><html>${privateText}</html>`), "llm_html_response"],
+    [() => new Response(`data: ${privateText}\n\n`, { headers: { "content-type": "text/event-stream" } }), "llm_stream_response"],
+    [() => new Response(privateText), "llm_invalid_json"],
+    [() => new Response(""), "llm_invalid_json"],
+  ] as const) {
+    globalThis.fetch = async () => response();
+    await expectFailure(code);
+  }
+});
+
+it("cancels an unexpected event stream without waiting for it to finish", async () => {
+  let canceled = false;
+  globalThis.fetch = async () => new Response(new ReadableStream({ cancel() { canceled = true; } }), { headers: { "content-type": "text/event-stream" } });
+  await expectFailure("llm_stream_response");
+  assert.equal(canceled, true);
+});
+
+it("distinguishes malformed completion envelopes and HTTP 200 provider errors", async () => {
   for (const response of [
-    () => new Response(privateText),
     () => Response.json(null),
     () => Response.json([]),
+    () => Response.json({}),
+    () => Response.json({ choices: {} }),
+    () => Response.json({ choices: null }),
+    () => Response.json({ choices: [{ delta: { content: privateText } }] }),
     () => success({ reply: privateText }),
+  ]) {
+    globalThis.fetch = async () => response();
+    await expectFailure("llm_invalid_envelope");
+  }
+  for (const error of [privateText, { message: privateText, code: privateText }]) {
+    globalThis.fetch = async () => Response.json({ error });
+    await expectFailure("llm_provider_error");
+  }
+});
+
+it("rejects invalid WhatsApp JSON before charging", async () => {
+  for (const response of [
     () => success(privateText),
     () => success(JSON.stringify({ reply: "", handoff: false })),
     () => success(JSON.stringify({ reply: "   ", handoff: false })),

@@ -86,6 +86,7 @@ async function completeChat(input: {
       },
       body: JSON.stringify({
         model,
+        stream: false,
         temperature: input.temperature ?? 0,
         ...(input.maxOutputTokens ? { max_completion_tokens: input.maxOutputTokens } : {}),
         ...(input.json ? { response_format: { type: "json_object" } } : {}),
@@ -93,30 +94,49 @@ async function completeChat(input: {
       }),
       signal,
     });
+    const contentType = response.headers.get("content-type")?.toLowerCase().split(";")[0].trim();
+    const formatError = response.ok && (contentType === "text/event-stream" ? "llm_stream_response"
+      : contentType === "text/html" || contentType === "application/xhtml+xml" ? "llm_html_response" : null);
     let data: {
       id?: string;
       usage?: ChatUsage;
+      error?: unknown;
       choices?: Array<{ message?: { content?: unknown }; finish_reason?: string }>;
     } | null = null;
-    try {
-      data = await response.json();
-    } catch (error) {
-      // A malformed body is different from a deadline or dropped connection
-      // while reading it. Keep transport failures available to retry callers.
-      if (signal.aborted || !(error instanceof SyntaxError)) throw error;
+    let bodyFormatError: string | null = null;
+    if (formatError) {
+      // A stream may never close; stop reading an incompatible response as soon
+      // as its type is known. Diagnostics contain no provider content.
+      await response.body?.cancel().catch(() => {});
+    } else {
+      const body = await response.text();
+      try {
+        data = JSON.parse(body);
+      } catch (error) {
+        if (signal.aborted || !(error instanceof SyntaxError)) throw error;
+        bodyFormatError = /^\s*(?:<!doctype\s+html\b|<html\b)/i.test(body) ? "llm_html_response" : "llm_invalid_json";
+      }
     }
     requestId = typeof data?.id === "string" ? data.id : null;
     usage = data?.usage || null;
     if (!response.ok) {
       errorCode = `http_${response.status}`;
+    } else if (formatError || bodyFormatError) {
+      errorCode = formatError || bodyFormatError;
     } else if (!data || typeof data !== "object" || Array.isArray(data)) {
-      errorCode = "ai_invalid_response";
+      errorCode = "llm_invalid_envelope";
+    } else if (data.error != null) {
+      errorCode = "llm_provider_error";
+    } else if (!Array.isArray(data.choices)) {
+      errorCode = "llm_invalid_envelope";
     } else if (data.choices?.[0]?.finish_reason === "length") {
       errorCode = "llm_output_limit";
+    } else if (data.choices.length && (!data.choices[0]?.message || typeof data.choices[0].message !== "object" || Array.isArray(data.choices[0].message))) {
+      errorCode = "llm_invalid_envelope";
     } else {
       const rawContent = data.choices?.[0]?.message?.content;
       content = typeof rawContent === "string" ? rawContent.trim() || null : null;
-      if (rawContent != null && typeof rawContent !== "string") errorCode = "ai_invalid_response";
+      if (rawContent != null && typeof rawContent !== "string") errorCode = "llm_invalid_envelope";
       else if (!content) errorCode = "empty_completion";
       else if ((input.json && parseJson<unknown>(content) === null) || (input.validateContent && !input.validateContent(content))) errorCode = "ai_invalid_response";
       else { status = "ok"; errorCode = null; }

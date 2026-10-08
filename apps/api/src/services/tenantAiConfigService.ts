@@ -262,7 +262,9 @@ export async function getTenantAiManagerAdmin(prisma: PrismaClient, auth: AuthCo
     }),
   })));
   return {
-    runtime: { ...runtime.ai, hasCredential: Boolean(llm.apiKey) },
+    runtime: { ...runtime.ai, hasCredential: Boolean(llm.apiKey), endpointHost: (() => {
+      try { return new URL(llm.baseUrl).host; } catch { return null; }
+    })() },
     connections: connectionStates,
     tenant: { id: tenant.id, name: tenant.name, slug: tenant.slug, status: tenant.status },
     status: integration?.status === "active" ? "active" : integration ? integration.status : "not_connected",

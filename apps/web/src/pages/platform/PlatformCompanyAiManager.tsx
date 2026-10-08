@@ -317,11 +317,13 @@ function ModelSettings({ tenantId, runtime, onSaved }: { tenantId: string; runti
   const uiText = useUiText();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string; errorCode?: string; latencyMs?: number } | null>(null);
+  const [testing, setTesting] = useState(false);
   return <form className="panel stack" key={`${tenantId}-${runtime.provider}-${runtime.model}-${runtime.enabled}`} onSubmit={async event => {
     event.preventDefault();
     const element = event.currentTarget;
     const form = new FormData(element);
-    setBusy(true); setError("");
+    setBusy(true); setError(""); setTestResult(null);
     try {
       await api.adminUpdateCompanyAi(tenantId, { provider: String(form.get("provider")), model: String(form.get("model")),
         enabled: form.get("enabled") === "on", apiKey: String(form.get("apiKey") || "") });
@@ -339,19 +341,25 @@ function ModelSettings({ tenantId, runtime, onSaved }: { tenantId: string; runti
       {runtime.provider && !["openai", "anymodel"].includes(runtime.provider) && <option value={runtime.provider}>{runtime.provider}</option>}
     </select></label>
     <label>{uiText("Модель")}<input name="model" defaultValue={runtime.model || ""} required /></label>
+    {runtime.endpointHost && <p className="muted">{uiText("Сервер ИИ")}: {runtime.endpointHost}</p>}
     <label>{uiText("Ключ API (не показывается, замена)")}<input type="password" name="apiKey" autoComplete="new-password" /></label>
     <p>{runtime.enabled === false ? uiText("ИИ отключён в настройках компании или сервиса.") : runtime.hasCredential ? uiText("Ключ модели настроен") : uiText("Ключ модели отсутствует или не читается. Укажите действующий ключ.")}</p>
     <label className="check"><input type="checkbox" name="enabled" defaultChecked={runtime.enabled !== false} />{uiText("Разрешить ИИ-ответы компании")}</label>
     {error && <InlineFeedback kind="error" className="error">{error}</InlineFeedback>}
-    <button className="btn" disabled={busy}>{busy ? uiText("Сохраняем…") : uiText("Сохранить настройки ИИ")}</button>
+    <button className="btn" disabled={busy}>{busy && !testing ? uiText("Сохраняем…") : uiText("Сохранить настройки ИИ")}</button>
     <p className="muted">{uiText("Проверка использует сохранённые настройки и AI-кредиты. Сообщения клиентам не отправляются.")}</p>
     <button type="button" className="btn secondary" disabled={busy} onClick={async () => {
-      setBusy(true); setError("");
+      setBusy(true); setTesting(true); setError(""); setTestResult(null);
       try {
-        const result = await api.adminTestCompanyAiModel(tenantId) as { ok: boolean; message: string };
-        if (result.ok) notifySaved(uiMessage(result.message)); else setError(uiMessage(result.message));
+        const result = await api.adminTestCompanyAiModel(tenantId) as { ok: boolean; message: string; errorCode?: string; latencyMs?: number };
+        setTestResult(result);
       } catch (error) { setError(error instanceof Error ? error.message : uiText("Ошибка")); }
-      finally { setBusy(false); }
-    }}>{uiText("Проверить модель ИИ")}</button>
+      finally { setBusy(false); setTesting(false); }
+    }}>{testing ? uiText("Проверяем модель ИИ…") : uiText("Проверить модель ИИ")}</button>
+    {testResult && <div role="status" className={testResult.ok ? "banner success" : "banner warn"}>
+      <p>{uiMessage(testResult.message)}</p>
+      {testResult.errorCode && <p>{uiText("Код ошибки")}: <code>{testResult.errorCode}</code></p>}
+      {typeof testResult.latencyMs === "number" && <p>{uiText("Время запроса, с")}: {(testResult.latencyMs / 1000).toFixed(1)}</p>}
+    </div>}
   </form>;
 }

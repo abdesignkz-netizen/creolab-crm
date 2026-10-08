@@ -2677,13 +2677,15 @@ export function createApp(prisma: PrismaClient) {
     const { attentionReasonLabel } = await import("./services/attentionReasons.ts");
     const reason = await directAiReadiness(prisma, req.params.id);
     if (reason) { res.json({ ok: false, reason: whatsAppAiFailureReason(reason), message: attentionReasonLabel(whatsAppAiFailureReason(reason)) }); return; }
+    const started = Date.now();
     try {
       const { answerWhatsAppWithLlm } = await import("./services/llmClient.ts");
       const answer = await answerWhatsAppWithLlm({ prisma, tenantId: req.params.id, history: [{ role: "user", content: "Здравствуйте" }] });
-      res.json({ ok: Boolean(answer), message: answer ? "Модель ИИ отвечает. Сообщение клиенту не отправлялось." : "Не удалось проверить модель ИИ." });
+      res.json({ ok: Boolean(answer), latencyMs: Date.now() - started, message: answer ? "Модель ИИ отвечает. Сообщение клиенту не отправлялось." : "Не удалось проверить модель ИИ." });
     } catch (error) {
       const reason = whatsAppAiFailureReason(error instanceof ApiError ? error.code : null);
-      res.json({ ok: false, reason, message: attentionReasonLabel(reason) });
+      const code = error instanceof ApiError && /^[a-zA-Z0-9_:-]{1,100}$/.test(error.code) ? error.code : "llm_request_failed";
+      res.json({ ok: false, reason, errorCode: code, latencyMs: Date.now() - started, message: attentionReasonLabel(reason) });
     }
   });
 

@@ -910,11 +910,13 @@ describe("WhatsApp provider connections", () => {
     const beforeSends = sends + qrSends;
     const beforeMessages = await prisma.message.count({ where: { tenantId } });
     const result = await post(path, {}, { cookie: adminCookie });
-    assert.equal(result.status, 200); assert.equal((await result.json()).ok, true);
+    const probe = await result.json();
+    assert.equal(result.status, 200); assert.equal(probe.ok, true); assert.equal(typeof probe.latencyMs, "number");
     try {
       llmStatus = 401;
       const failed = await post(path, {}, { cookie: adminCookie });
       const failure = await failed.json(); assert.equal(failure.ok, false); assert.equal(failure.reason, "AI_PROVIDER_AUTH");
+      assert.equal(failure.errorCode, "http_401"); assert.equal(typeof failure.latencyMs, "number");
       assert.doesNotMatch(JSON.stringify(failure), /PRIVATE-PROVIDER-ERROR/);
     } finally { llmStatus = 200; }
     assert.equal(sends + qrSends, beforeSends);
