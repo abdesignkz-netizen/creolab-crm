@@ -39,7 +39,7 @@ export function whatsAppAiFailureReason(code: string | null | undefined) {
     voice_http_401: "AI_PROVIDER_AUTH", voice_http_403: "AI_PROVIDER_AUTH", voice_http_402: "AI_PROVIDER_LIMIT", voice_http_429: "AI_PROVIDER_LIMIT",
     voice_http_413: "AI_VOICE_UNSUPPORTED", voice_http_415: "AI_VOICE_UNSUPPORTED", voice_http_408: "AI_VOICE_TIMEOUT", voice_http_504: "AI_VOICE_TIMEOUT",
   };
-  return reasons[code || ""] || (code?.startsWith("voice_http_") ? "AI_VOICE_PROVIDER_UNAVAILABLE" : "AI_PROVIDER_UNAVAILABLE");
+  return reasons[code || ""] || (code?.startsWith("llm_reply_") ? "AI_INVALID_RESPONSE" : code?.startsWith("voice_http_") ? "AI_VOICE_PROVIDER_UNAVAILABLE" : "AI_PROVIDER_UNAVAILABLE");
 }
 const record = (value: unknown) => value && typeof value === "object" ? value as Record<string, any> : {};
 const REPLY_ATTEMPTS = 2;

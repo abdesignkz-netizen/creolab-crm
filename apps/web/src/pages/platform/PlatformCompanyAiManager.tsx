@@ -317,7 +317,7 @@ function ModelSettings({ tenantId, runtime, onSaved }: { tenantId: string; runti
   const uiText = useUiText();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [testResult, setTestResult] = useState<{ ok: boolean; message: string; errorCode?: string; latencyMs?: number } | null>(null);
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string; errorCode?: string; latencyMs?: number; responsePreview?: string } | null>(null);
   const [testing, setTesting] = useState(false);
   return <form className="panel stack" key={`${tenantId}-${runtime.provider}-${runtime.model}-${runtime.enabled}`} onSubmit={async event => {
     event.preventDefault();
@@ -351,7 +351,7 @@ function ModelSettings({ tenantId, runtime, onSaved }: { tenantId: string; runti
     <button type="button" className="btn secondary" disabled={busy} onClick={async () => {
       setBusy(true); setTesting(true); setError(""); setTestResult(null);
       try {
-        const result = await api.adminTestCompanyAiModel(tenantId) as { ok: boolean; message: string; errorCode?: string; latencyMs?: number };
+        const result = await api.adminTestCompanyAiModel(tenantId) as { ok: boolean; message: string; errorCode?: string; latencyMs?: number; responsePreview?: string };
         setTestResult(result);
       } catch (error) { setError(error instanceof Error ? error.message : uiText("Ошибка")); }
       finally { setBusy(false); setTesting(false); }
@@ -360,6 +360,7 @@ function ModelSettings({ tenantId, runtime, onSaved }: { tenantId: string; runti
       <p>{uiMessage(testResult.message)}</p>
       {testResult.errorCode && <p>{uiText("Код ошибки")}: <code>{testResult.errorCode}</code></p>}
       {typeof testResult.latencyMs === "number" && <p>{uiText("Время запроса, с")}: {(testResult.latencyMs / 1000).toFixed(1)}</p>}
+      {testResult.responsePreview && <details><summary>{uiText("Ответ модели для диагностики")}</summary><pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{testResult.responsePreview}</pre></details>}
     </div>}
   </form>;
 }

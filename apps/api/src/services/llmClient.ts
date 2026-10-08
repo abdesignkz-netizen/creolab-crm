@@ -49,8 +49,9 @@ async function completeChat(input: {
   json?: boolean;
   timeoutMs?: number;
   maxOutputTokens?: number;
-  validateContent?: (content: string) => boolean;
-}) {
+  validateContent?: (content: string) => string | null;
+  inspectResponse?: boolean;
+}): Promise<{ content: string | null; errorCode: string | null; responsePreview?: string }> {
   const runtime = input.runtime || {};
   const { apiKey, baseUrl, model, provider } = await resolveLlm(runtime);
   if (!apiKey) return { content: null as string | null, errorCode: "ai_model_missing" };
@@ -76,6 +77,7 @@ async function completeChat(input: {
   let content: string | null = null;
   let usage: ChatUsage | null = null;
   let requestId: string | null = null;
+  let responsePreview: string | undefined;
   const signal = AbortSignal.timeout(input.timeoutMs ?? 15000);
   try {
     const response = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
@@ -138,8 +140,12 @@ async function completeChat(input: {
       content = typeof rawContent === "string" ? rawContent.trim() || null : null;
       if (rawContent != null && typeof rawContent !== "string") errorCode = "llm_invalid_envelope";
       else if (!content) errorCode = "empty_completion";
-      else if ((input.json && parseJson<unknown>(content) === null) || (input.validateContent && !input.validateContent(content))) errorCode = "ai_invalid_response";
-      else { status = "ok"; errorCode = null; }
+      else {
+        errorCode = input.validateContent ? input.validateContent(content)
+          : input.json && parseJson<unknown>(content) === null ? "ai_invalid_response" : null;
+        if (!errorCode) status = "ok";
+        else if (input.inspectResponse) responsePreview = content.split(apiKey).join("[redacted]").slice(0, 4000);
+      }
     }
   } catch (error) {
     errorCode = signal.aborted || error instanceof Error && error.name === "TimeoutError" ? "llm_timeout" : "llm_network_error";
@@ -163,7 +169,7 @@ async function completeChat(input: {
     errorCode,
   });
   await releaseReservation?.().catch(() => {});
-  return { content: status === "ok" ? content : null, errorCode };
+  return { content: status === "ok" ? content : null, errorCode, ...(responsePreview ? { responsePreview } : {}) };
 }
 
 function parseJson<T>(content: string | null): T | null {
@@ -175,26 +181,37 @@ function parseJson<T>(content: string | null): T | null {
   }
 }
 
-function parseWhatsAppReply(content: string, voiceMessage: boolean) {
-  const value = parseJson<{ reply?: unknown; handoff?: unknown; reason?: unknown }>(content);
-  if (!value || typeof value.handoff !== "boolean" || typeof value.reply !== "string" || value.reply.length > 4000) return null;
-  if (!value.handoff && !value.reply.trim() && !(voiceMessage && value.reason === "unclear_message")) return null;
-  return { reply: value.reply, handoff: value.handoff, reason: value.reason };
+function parseWhatsAppReply(content: string, voiceMessage: boolean): {
+  value: { reply: string; handoff: boolean; reason?: unknown } | null; errorCode: string | null;
+} {
+  // Some compatible providers wrap JSON in a single Markdown block. Only
+  // unwrap the whole response; never extract JSON from surrounding prose.
+  const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n```$/i.exec(content.trim());
+  const value = parseJson<{ reply?: unknown; handoff?: unknown; reason?: unknown }>(fenced ? fenced[1] : content);
+  const invalid = (errorCode: string) => ({ value: null, errorCode });
+  if (!value || typeof value !== "object" || Array.isArray(value)) return invalid("llm_reply_invalid_json");
+  if (typeof value.handoff !== "boolean") return invalid("llm_reply_handoff_type");
+  if (typeof value.reply !== "string") return invalid("llm_reply_text_missing");
+  if (value.reply.length > 4000) return invalid("llm_reply_too_long");
+  if (!value.handoff && !value.reply.trim() && !(voiceMessage && value.reason === "unclear_message")) return invalid("llm_reply_empty");
+  return { value: { reply: value.reply, handoff: value.handoff, reason: value.reason }, errorCode: null };
 }
 
 /** Direct-channel replies use the same tenant model, published knowledge and credit ledger. */
 export async function answerWhatsAppWithLlm(input: {
   prisma: PrismaClient; tenantId: string; integrationId?: string; conversationId?: string;
   history: Array<{ role: "user" | "assistant"; content: string }>;
+  inspectResponse?: boolean;
 }) {
   const { getPublishedTenantAiContext, buildTenantAiSystemPreamble } = await import("./tenantAiConfigService.ts");
   const context = await getPublishedTenantAiContext(input.prisma, input.tenantId);
   if (!context.tenantPrompt) throw new ApiError(409, "ai_not_configured", "Опубликуйте промпт компании");
   const lastUser = [...input.history].reverse().find(message => message.role === "user");
   const voiceMessage = Boolean(lastUser?.content.includes("[Расшифровка голосового сообщения]"));
-  const { content, errorCode } = await completeChat({ runtime: { ...input, feature: "AI_MANAGER_REPLY" }, feature: "AI_MANAGER_REPLY",
+  const { content, errorCode, responsePreview } = await completeChat({ runtime: { ...input, feature: "AI_MANAGER_REPLY" }, feature: "AI_MANAGER_REPLY",
     json: true, timeoutMs: getWhatsAppReplyTimeoutMs(), temperature: context.temperature ?? 0.2,
-    validateContent: content => Boolean(parseWhatsAppReply(content, voiceMessage)),
+    validateContent: content => parseWhatsAppReply(content, voiceMessage).errorCode,
+    inspectResponse: input.inspectResponse,
     maxOutputTokens: Math.min(context.maxOutputTokens || 1000, 2000),
     messages: [{ role: "system", content: [buildTenantAiSystemPreamble(context).slice(0, 80000),
       "Ответь на последнее сообщение клиента от имени этой компании. Пиши кратко и естественно.", AI_LANGUAGE_POLICY,
@@ -204,8 +221,8 @@ export async function answerWhatsAppWithLlm(input: {
       'Верни JSON: {"reply":"текст ответа до 4000 символов", "handoff":false}. Если голосовое сообщение не удалось понять, верни {"reply":"", "handoff":false, "reason":"unclear_message"}. При передаче сотруднику верни {"reply":"", "handoff":true, "reason":"human_requested|staff_action|knowledge_missing"}, выбрав одну причину.',
     ].join("\n") }, ...input.history],
   });
-  if (!content) throw new ApiError(502, errorCode || "llm_request_failed", "Не удалось получить ответ модели ИИ");
-  const value = parseWhatsAppReply(content, voiceMessage);
+  if (!content) throw new ApiError(502, errorCode || "llm_request_failed", "Не удалось получить ответ модели ИИ", undefined, responsePreview ? { responsePreview } : undefined);
+  const { value } = parseWhatsAppReply(content, voiceMessage);
   if (!value) throw new ApiError(502, "ai_invalid_response", "Модель вернула некорректный ответ");
   if (value.reason === "unclear_message" && voiceMessage) return { reply: VOICE_CLARIFICATION, handoff: false };
   if (value.handoff) return { reply: "", handoff: true };

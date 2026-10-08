@@ -170,16 +170,48 @@ it("distinguishes malformed completion envelopes and HTTP 200 provider errors", 
 });
 
 it("rejects invalid WhatsApp JSON before charging", async () => {
-  for (const response of [
-    () => success(privateText),
-    () => success(JSON.stringify({ reply: "", handoff: false })),
-    () => success(JSON.stringify({ reply: "   ", handoff: false })),
-    () => success(JSON.stringify({ reply: "Здравствуйте", handoff: "false" })),
-    () => success(JSON.stringify({ reply: "а".repeat(4001), handoff: false })),
-  ]) {
+  for (const [response, code] of [
+    [() => success(privateText), "llm_reply_invalid_json"],
+    [() => success("[]"), "llm_reply_invalid_json"],
+    [() => success(JSON.stringify({ reply: "", handoff: false })), "llm_reply_empty"],
+    [() => success(JSON.stringify({ reply: "   ", handoff: false })), "llm_reply_empty"],
+    [() => success(JSON.stringify({ reply: "Здравствуйте", handoff: "false" })), "llm_reply_handoff_type"],
+    [() => success(JSON.stringify({ handoff: false })), "llm_reply_text_missing"],
+    [() => success(JSON.stringify({ reply: "а".repeat(4001), handoff: false })), "llm_reply_too_long"],
+  ] as const) {
     globalThis.fetch = async () => response();
-    await expectFailure("ai_invalid_response");
+    await expectFailure(code);
   }
+});
+
+it("accepts one complete JSON code block but never JSON extracted from prose", async () => {
+  const content = JSON.stringify({ reply: "Здравствуйте!", handoff: false });
+  for (const language of ["json", ""]) {
+    globalThis.fetch = async () => success(`\u0060\u0060\u0060${language}\n${content}\n\u0060\u0060\u0060`);
+    assert.deepEqual(await answer(), { reply: "Здравствуйте!", handoff: false });
+  }
+  charged = 0;
+  for (const contentWithProse of [`Ответ: ${content}`, `\u0060\u0060\u0060json\n${content}\n\u0060\u0060\u0060\nДругой ответ`, `\u0060\u0060\u0060json\n${content}\n\u0060\u0060\u0060\n\u0060\u0060\u0060json\n${content}\n\u0060\u0060\u0060`]) {
+    globalThis.fetch = async () => success(contentWithProse);
+    await expectFailure("llm_reply_invalid_json");
+  }
+});
+
+it("only exposes a bounded redacted completion preview for an explicit admin diagnostic", async () => {
+  globalThis.fetch = async () => success(`${privateText} unit-test-key ${"x".repeat(5000)}`);
+  await assert.rejects(answer, (error: unknown) => error instanceof ApiError && error.details === undefined);
+  await assert.rejects(() => answerWhatsAppWithLlm({ prisma, tenantId: "tenant-test", inspectResponse: true, history: [{ role: "user", content: "Здравствуйте" }] }), (error: unknown) => {
+    assert(error instanceof ApiError);
+    const preview = (error.details as { responsePreview: string }).responsePreview;
+    assert.equal(preview.length, 4000);
+    assert.match(preview, /\[redacted\]/);
+    assert.doesNotMatch(preview, /unit-test-key/);
+    return true;
+  });
+  assert.doesNotMatch(JSON.stringify(usage), /PRIVATE|redacted|responsePreview/);
+  assert.equal(charged, 0);
+  globalThis.fetch = async () => new Response(privateText, { status: 401 });
+  await assert.rejects(() => answerWhatsAppWithLlm({ prisma, tenantId: "tenant-test", inspectResponse: true, history: [{ role: "user", content: "Здравствуйте" }] }), (error: unknown) => error instanceof ApiError && error.details === undefined);
 });
 
 it("distinguishes empty completions from output-budget exhaustion", async () => {
