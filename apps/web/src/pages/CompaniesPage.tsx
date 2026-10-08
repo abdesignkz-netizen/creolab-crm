@@ -44,6 +44,7 @@ export function CompaniesPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [scope, setScope] = useUrlState<Scope>("scope", "all", ["all", "mine", "unassigned"]);
   const [q, setQ] = useUrlState<string>("q", "");
+  const [searchDraft, setSearchDraft] = useState(q);
   const [lifecycleStatus, setLifecycleStatus] = useUrlState<string>("status", "");
   const [items, setItems] = useState<any[]>([]);
   const [error, setError] = useState("");
@@ -93,11 +94,13 @@ export function CompaniesPage() {
 
   useEffect(() => {
     void load();
-  }, [scope, lifecycleStatus]);
+  }, [scope, lifecycleStatus, q]);
+  useEffect(() => { setSearchDraft(q); }, [q]);
 
   async function onSearch(e: FormEvent) {
     e.preventDefault();
-    await load();
+    if (searchDraft.trim() === q) await load();
+    else setQ(searchDraft.trim());
   }
 
   async function parseRequisites(file = requisitesFile, text = requisitesText) {
@@ -226,8 +229,8 @@ export function CompaniesPage() {
         </div>
         <form className="companies-search" onSubmit={onSearch}>
           <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
+            value={searchDraft}
+            onChange={(e) => setSearchDraft(e.target.value)}
             placeholder={uiText("Название, БИН, контакт, телефон…")}
           />
           <select value={lifecycleStatus} onChange={(e) => setLifecycleStatus(e.target.value)}>

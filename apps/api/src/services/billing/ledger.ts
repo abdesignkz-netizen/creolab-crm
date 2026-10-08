@@ -388,6 +388,7 @@ export async function payOrder(
               "provider_signature",
               "provider_response",
               "provider_unavailable",
+              "provider_internal",
             ].includes(code)
               ? code
               : "provider_uncertain",

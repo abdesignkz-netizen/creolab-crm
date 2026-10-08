@@ -24,7 +24,7 @@
 }
 .requests-page .request-status-tabs .chip {
   border: 1px solid var(--line);
-  background: #fff;
+  background: var(--card);
   border-radius: 10px;
   padding: 9px 12px;
   font-size: 13px;
@@ -32,7 +32,7 @@
   min-height: 38px;
 }
 .requests-page .request-status-tabs .chip.active {
-  background: #e8f1ff;
+  background: var(--accent-soft);
   color: #0066cc;
   border-color: #bdd5f5;
   font-weight: 600;
@@ -42,7 +42,7 @@
   margin-top: 14px;
   border: 1px solid var(--line);
   border-radius: 14px;
-  background: #fff;
+  background: var(--card);
 }
 #request-extra-filters .request-toolbar {
   display: flex;
@@ -65,9 +65,9 @@
 }
 .request-filter-active .chip {
   border-radius: 20px;
-  background: #edf3fb;
+  background: var(--bg-elevated);
   border: 1px solid #dce7f5;
-  color: #43607f;
+  color: var(--muted);
   font: inherit;
   font-size: 12px;
   cursor: pointer;

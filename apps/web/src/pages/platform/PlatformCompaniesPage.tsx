@@ -3,13 +3,28 @@ import { uiText, useUiText, localizeUiOptions } from "../../lib/uiText";
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../../lib/api";
-import { formatDateTime } from "../../lib/datetime";
+import { Pagination } from "../../components/Pagination";
+import { useRequestVersion } from "../../lib/useUrlState";
+import "../../platform-workspace.css";
 import { notifySaved } from "../../components/SaveNotice";
 import { statusBadgeClass } from "../../lib/statusBadge";
 
 const STATUS_LABEL: Record<string, string> = {
   active: "Активна",
   suspended: "Приостановлена",
+};
+
+const CONNECTION_LABEL: Record<string, string> = {
+  not_configured: "Не настроено",
+  needs_assignment: "Требуется назначение",
+  pending_auth: "Ожидает авторизации",
+  checking: "Проверяется",
+  created: "Создано",
+  working: "Работает",
+  connected: "Подключено",
+  reauth: "Нужна повторная авторизация",
+  error: "Ошибка",
+  disabled: "Отключено",
 };
 
 export function PlatformCompaniesPage({ mode }: { mode: "list" | "new" }) {
@@ -21,26 +36,27 @@ function CompanyList() {
   const uiText = useUiText();
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("");
-  const [page, setPage] = useState(1);
+  const [query, setQuery] = useState({ q: "", status: "", page: 1 });
+  const version = useRequestVersion();
+  const [loading, setLoading] = useState(true);
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState("");
 
-  async function load(nextPage = page) {
-    setError("");
+  async function load() {
+    const request = ++version.current;
+    setError(""); setLoading(true);
     try {
-      setData(await api.adminTenants({ q, status, page: nextPage, limit: 20 }));
+      const result = await api.adminTenants({ ...query, limit: 20 });
+      if (request === version.current) setData(result);
     } catch (err) {
-      setError(err instanceof Error ? err.message : uiText("Ошибка"));
-    }
+      if (request === version.current) setError(err instanceof Error ? err.message : uiText("Ошибка"));
+    } finally { if (request === version.current) setLoading(false); }
   }
 
-  useEffect(() => {
-    void load(1);
-    setPage(1);
-  }, [status]);
+  useEffect(() => { void load(); }, [query]);
 
   return (
-    <div className="stack">
+    <div className="stack platform-workspace">
       <div className="page-head">
         <h2>{uiText("Компании")}</h2>
         <Link className="btn" to="/admin/companies/new">{uiText("Добавить компанию")}</Link>
@@ -49,72 +65,36 @@ function CompanyList() {
         className="filters"
         onSubmit={(event) => {
           event.preventDefault();
-          setPage(1);
-          void load(1);
+          setQuery({ q: q.trim(), status, page: 1 });
         }}
       >
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={uiText("Поиск по названию")} />
-        <select value={status} onChange={(e) => setStatus(e.target.value)}>
+        <input aria-label={uiText("Поиск по названию")} value={q} onChange={(e) => setQ(e.target.value)} placeholder={uiText("Поиск по названию")} />
+        <select value={status} aria-label={uiText("Статус")} onChange={(e) => { setStatus(e.target.value); setQuery({ q: q.trim(), status: e.target.value, page: 1 }); }}>
           <option value="">{uiText("Все статусы")}</option>
           <option value="active">{uiText("Активные")}</option>
           <option value="suspended">{uiText("Приостановленные")}</option>
         </select>
-        <button className="btn secondary" type="submit">{uiText("Найти")}</button>
+        <button className="btn secondary" type="submit" disabled={loading}>{uiText("Найти")}</button>
       </form>
-      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
-      {!data ? <div className="state">{uiText("Загрузка…")}</div> : (
+      {error ? <InlineFeedback kind="error" className="error" message={error}>{error}<button type="button" className="btn secondary" onClick={() => void load()}>{uiText("Повторить")}</button></InlineFeedback> : null}
+      {!data && loading ? <div className="state">{uiText("Загрузка…")}</div> : data ? (
         <>
-          <div className="stats-table-wrap">
+          <Pagination total={data.total} offset={(data.page - 1) * data.pageSize} limit={data.pageSize} loading={loading} onChange={offset => setQuery(current => ({ ...current, page: offset / data.pageSize + 1 }))} />
+          {!data.items.length ? <div className="empty"><b>{uiText("Компании не найдены")}</b><p>{uiText("Измените запрос или сбросьте фильтры.")}</p><button className="btn secondary" type="button" onClick={() => { setQ(""); setStatus(""); setQuery({ q: "", status: "", page: 1 }); }}>{uiText("Сбросить фильтры")}</button></div> : <div className="stats-table-wrap platform-directory" aria-busy={loading}>
             <table className="stats-table">
-              <thead>
-                <tr>
-                  <th>{uiText("Название")}</th>
-                  <th>{uiText("Владелец")}</th>
-                  <th>{uiText("Тариф")}</th>
-                  <th>{uiText("БИН/ИИН")}</th>
-                  <th>{uiText("Администратор")}</th>
-                  <th>{uiText("Контакт")}</th>
-                  <th>{uiText("Участники")}</th>
-                  <th>{uiText("Подключения")}</th>
-                  <th>WhatsApp AI</th>
-                  <th>{uiText("Статус")}</th>
-                  <th>{uiText("Создана")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(data.items || []).map((item: any) => (
-                  <tr key={item.id}>
-                    <td><Link to={`/admin/companies/${item.id}`}>{item.name}</Link></td>
-                    <td>{item.owner?.email || item.admin?.email || "—"}</td>
-                    <td>
-                      {item.subscriptionStatus === "none" || item.previewMode
-                        ? uiText("Просмотр")
-                        : item.planName || item.subscriptionStatus || "—"}
-                    </td>
-                    <td>{item.bin || "—"}</td>
-                    <td>{item.admin ? `${item.admin.name} (${item.admin.email})` : "—"}</td>
-                    <td>{[item.contactEmail, item.contactPhone].filter(Boolean).join(" · ") || "—"}</td>
-                    <td>{item.memberCount}</td>
-                    <td>{item.connectionsLabel}</td>
-                    <td><Link to={`/admin/ai-managers/${item.id}`}>{uiText("Промт и база")}</Link></td>
-                    <td>
-                      <span className={statusBadgeClass(STATUS_LABEL[item.status] || item.status)}>
-                        {localizeUiOptions(STATUS_LABEL, uiText)[item.status] || item.status}
-                      </span>
-                    </td>
-                    <td>{formatDateTime(item.createdAt)}</td>
-                  </tr>
-                ))}
-              </tbody>
+              <thead><tr><th>{uiText("Компания")}</th><th>{uiText("Тариф")}</th><th>{uiText("Подключения")}</th><th>{uiText("Статус")}</th><th>{uiText("Действия")}</th></tr></thead>
+              <tbody>{data.items.map((item: any) => <tr key={item.id}>
+                <td data-label={uiText("Компания")}><Link to={`/admin/companies/${item.id}`}><strong>{item.name}</strong></Link><div className="muted">{item.owner?.email || item.admin?.email || item.contactEmail || "—"}</div>{item.contactPhone ? <div className="muted">{item.contactPhone}</div> : null}</td>
+                <td data-label={uiText("Тариф")}>{item.subscriptionStatus === "none" || item.previewMode ? uiText("Просмотр") : item.planName || item.subscriptionStatus || "—"}<div className="muted">{uiText("Участники")}: {item.memberCount}</div></td>
+                <td data-label={uiText("Подключения")}>{item.connectionSummary?.length ? [...new Set<string>(item.connectionSummary)].map(status => uiText(CONNECTION_LABEL[status] || status)).join(" · ") : uiText("нет")}</td>
+                <td data-label={uiText("Статус")}><span className={statusBadgeClass(STATUS_LABEL[item.status] || item.status)}>{localizeUiOptions(STATUS_LABEL, uiText)[item.status] || item.status}</span></td>
+                <td data-label={uiText("Действия")}><div className="platform-row-actions"><Link className="btn secondary" to={`/admin/companies/${item.id}`}>{uiText("Открыть")}</Link><Link to={`/admin/ai-managers/${item.id}`}>{uiText("Промт и база")}</Link></div></td>
+              </tr>)}</tbody>
             </table>
-          </div>
-          <div className="actions">
-            <button className="btn secondary" disabled={page <= 1} onClick={() => { const next = page - 1; setPage(next); void load(next); }}>{uiText("Назад")}</button>
-            <span className="muted">{uiText("Стр.")}{" "}{data.page} · {data.total}</span>
-            <button className="btn secondary" disabled={page * data.pageSize >= data.total} onClick={() => { const next = page + 1; setPage(next); void load(next); }}>{uiText("Дальше")}</button>
-          </div>
+          </div>}
+
         </>
-      )}
+      ) : null}
     </div>
   );
 }

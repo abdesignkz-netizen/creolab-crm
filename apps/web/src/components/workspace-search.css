@@ -8,7 +8,7 @@
   padding: 10px 13px;
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: #fff;
+  background: var(--card);
   color: var(--muted);
   font: inherit;
   font-size: 13px;
@@ -61,7 +61,7 @@
   border-radius: 20px;
   box-shadow: 0 30px 100px #17243d33;
   color: var(--ink);
-  background: #fff;
+  background: var(--card);
   overflow: hidden;
 }
 .search-dialog::backdrop {
@@ -99,7 +99,7 @@
   gap: 10px;
   margin: 0 20px 16px;
   padding: 0 12px;
-  background: #f5f7fb;
+  background: var(--bg-elevated);
   border: 1px solid #dce5f2;
   border-radius: 12px;
   color: var(--muted);
@@ -163,7 +163,7 @@
 .search-result:hover,
 .search-result[aria-selected="true"],
 .search-result:focus-visible {
-  background: #edf4ff;
+  background: var(--accent-soft);
   outline: none;
 }
 .search-result-avatar {
@@ -200,7 +200,7 @@
   padding: 12px 20px;
   font-size: 12px;
   color: var(--muted);
-  background: #fafbfd;
+  background: var(--bg-elevated);
 }
 @media (max-width: 767px) {
   .search-dialog {

@@ -67,7 +67,7 @@ export function parseFreedomResponse(xml: string) {
     stack.length !== 1 ||
     root.text.trim() ||
     root.children.length !== 1 ||
-    root.children[0].name !== "response"
+    !["response", "root"].includes(root.children[0].name)
   )
     invalid();
   const response = root.children[0];

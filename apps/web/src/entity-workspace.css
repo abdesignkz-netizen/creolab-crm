@@ -2,8 +2,8 @@
 .contact-page details[hidden] {
   display: none !important;
 }
-.entity-form-disclosure { margin: 16px 0; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: #f8faff; }
-.entity-form-disclosure > summary { cursor: pointer; font-size: 14px; font-weight: 600; color: #43607f; }
+.entity-form-disclosure { margin: 16px 0; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg-elevated); }
+.entity-form-disclosure > summary { cursor: pointer; font-size: 14px; font-weight: 600; color: var(--muted); }
 .entity-form-disclosure[open] > summary { margin-bottom: 16px; }
 .company-page button.entity-metric { text-align: left; cursor: pointer; font: inherit; color: inherit; }
 .company-page button.entity-metric:hover { background: #eaf2ff; }
@@ -22,7 +22,7 @@
 .contact-page .summary-card {
   padding: 18px 20px;
   margin-bottom: 16px;
-  background: #fff;
+  background: var(--card);
   border: 1px solid var(--line);
   border-radius: 14px;
 }
@@ -56,7 +56,7 @@
 }
 .entity-record-link {
   padding: 16px 18px !important;
-  background: #fff;
+  background: var(--card);
   border: 1px solid var(--line);
   border-radius: 12px;
   text-decoration: none;
@@ -76,7 +76,7 @@
   margin-top: 16px;
   border: 1px solid var(--line);
   border-radius: 14px;
-  background: #fff;
+  background: var(--card);
 }
 .company-page .sit-head {
   align-items: flex-start;
@@ -107,7 +107,7 @@
   border: 0;
   box-shadow: none;
   border-radius: 12px;
-  background: #f5f7fb;
+  background: var(--bg-elevated);
   padding: 14px 16px;
   min-width: 0;
 }
@@ -143,7 +143,7 @@
   z-index: 5;
   min-width: 180px;
   box-shadow: 0 8px 25px #17243d20;
-  background: white;
+  background: var(--card);
   white-space: nowrap;
 }
 @media (max-width: 767px) {

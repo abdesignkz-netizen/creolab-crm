@@ -26,14 +26,18 @@ it("nested status response signature covers refund fields and rejects tampering"
       "test-secret",
     ),
   );
-  for (const bad of [
-    "<response><x>one</x><x>two</x></response>",
-    "<!DOCTYPE x><response/>",
-    "<response><x>&external;</x></response>",
-    '<response key="bad"/>',
-    "<response><x></response>",
-  ])
-    assert.throws(() => parseFreedomResponse(bad));
+  for (const wrapper of ["response", "root"])
+    for (const bad of [
+      `<${wrapper}><x>one</x><x>two</x></${wrapper}>`,
+      `<!DOCTYPE x><${wrapper}/>`,
+      `<${wrapper}><x>&external;</x></${wrapper}>`,
+      `<${wrapper} key="bad"/>`,
+      `<${wrapper}><x></${wrapper}>`,
+      `<${wrapper}>mixed<x>text</x></${wrapper}>`,
+      `<${wrapper}/><${wrapper}/>`,
+    ])
+      assert.throws(() => parseFreedomResponse(bad));
+  assert.throws(() => parseFreedomResponse("<unexpected/>"));
 });
 it("provider responses are bounded before XML parsing", async () => {
   await assert.rejects(() => readProviderXml(new Response("x".repeat(100001))));
@@ -47,7 +51,8 @@ it("card creation signs request, verifies response and rejects external redirect
   process.env.FREEDOM_PAY_MERCHANT_ID = "fixture";
   process.env.FREEDOM_PAY_SECRET_KEY = "fixture-secret";
   process.env.FREEDOM_PAY_TESTING_MODE = "1";
-  let redirect = "https://api.freedompay.kz/pay/fixture",
+  let wrapper = "root",
+    redirect = "https://api.freedompay.kz/pay/fixture",
     badSignature = false;
   globalThis.fetch = async (url, init) => {
     assert.equal(String(url), "https://api.freedompay.kz/init_payment");
@@ -68,11 +73,11 @@ it("card creation signs request, verifies response and rejects external redirect
       ? "0".repeat(32)
       : freedomSignature("init_payment", fields, "fixture-secret");
     return new Response(
-      "<response>" +
+      `<${wrapper}>` +
         Object.entries({ ...fields, pg_sig: sig })
           .map(([k, v]) => `<${k}>${v}</${k}>`)
           .join("") +
-        "</response>",
+        `</${wrapper}>`,
     );
   };
   const input = {
@@ -85,6 +90,11 @@ it("card creation signs request, verifies response and rejects external redirect
     returnUrl: "https://bsqr.kz/billing",
     autoRenew: false,
   };
+  assert.equal(
+    (await freedomPay.createPayment(input)).providerPaymentId,
+    "123",
+  );
+  wrapper = "response";
   assert.equal(
     (await freedomPay.createPayment(input)).providerPaymentId,
     "123",
@@ -145,4 +155,35 @@ it("not-found is diagnostic only and restricted to the status endpoint", async (
   await assert.rejects(() => freedomPay.getPaymentStatus("", "orphan"), {
     code: "provider_signature",
   });
+});
+it("unsigned gateway internal errors are sanitized diagnostics, not verified outcomes", async () => {
+  process.env.BILLING_PROVIDER = "freedompay";
+  process.env.FREEDOM_PAY_MERCHANT_ID = "fixture";
+  process.env.FREEDOM_PAY_SECRET_KEY = "fixture-secret";
+  const fields = {
+    pg_status: "error",
+    pg_error_code: "0",
+    pg_error_description: 'Attempt to read property "payments_order_unique" on null',
+  };
+  const xml = (values: Record<string, string>) =>
+    "<response>" + Object.entries(values)
+      .map(([key, value]) => `<${key}>${value}</${key}>`).join("") + "</response>";
+  let body = xml(fields);
+  globalThis.fetch = async () => new Response(body);
+  await assert.rejects(() => freedomPay.call("init_payment", {}), (error: any) => {
+    assert.equal(error.code, "provider_internal");
+    assert.doesNotMatch(error.message, /payments_order_unique|null/);
+    return true;
+  });
+  for (const override of [
+    { pg_status: "ok" },
+    { pg_payment_id: "123" },
+    { pg_redirect_url: "https://api.freedompay.kz/pay/fixture" },
+    { pg_sig: "0".repeat(32) },
+  ]) {
+    body = xml({ ...fields, ...override });
+    await assert.rejects(() => freedomPay.call("init_payment", {}), {
+      code: "provider_signature",
+    });
+  }
 });

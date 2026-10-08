@@ -3,6 +3,7 @@ import { InlineFeedback } from "../components/InlineFeedback";
 import { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api } from "../lib/api";
+import { billingCheckoutState } from "../lib/billingCheckoutState";
 import {
   useBillingText,
   BillingStatus,
@@ -61,22 +62,12 @@ export function BillingCheckoutPage() {
       stopped = true;
     };
   }, [orderId]);
+  const checkoutState = billingCheckoutState(data, search.has("return"));
   useEffect(() => {
-    if (
-      !data ||
-      data.order.status !== "PENDING_PAYMENT" ||
-      (!search.has("return") &&
-        !data.payments.some((p: any) => p.status === "PROCESSING"))
-    )
-      return;
+    if (!checkoutState.shouldRefresh) return;
     const timer = setInterval(() => void load(), 5000);
     return () => clearInterval(timer);
-  }, [
-    data?.order.status,
-    data?.payments.some((p: any) => p.status === "PROCESSING"),
-    orderId,
-    search.toString(),
-  ]);
+  }, [checkoutState.shouldRefresh, orderId, search.toString()]);
   const kaspiLink = data?.payments.find(
     (p: any) => p.method === "KASPI" && p.status === "PENDING",
   )?.checkoutUrl;
@@ -200,9 +191,7 @@ export function BillingCheckoutPage() {
     );
   const { order, invoice, methods } = data,
     paid = order.status === "PAID",
-    open =
-      order.status === "PENDING_PAYMENT" &&
-      new Date(order.expiresAt) > new Date(),
+    open = checkoutState.canStartPayment,
     payment = data.payments.find((p: any) =>
       ["PENDING", "PROCESSING"].includes(p.status),
     );
@@ -291,7 +280,7 @@ export function BillingCheckoutPage() {
             {t("Вернуться в BasQar", "BasQar-ға оралу", "Return to BasQar")}
           </a>
         </div>
-      ) : !open ? (
+      ) : !checkoutState.showPaymentFlow ? (
         <p role="status">
           {t(
             "Этот заказ закрыт или срок оплаты истёк. Создайте новый заказ в разделе тарифов.",
@@ -447,11 +436,13 @@ export function BillingCheckoutPage() {
             <div className="panel stack">
               {payment.method === "CARD" && !payment.checkoutUrl ? (
                 <p className="billing-warning" role="status">
-                  {t(
-                    "Не удалось получить ссылку на оплату. Требуется проверка платёжного сервиса администратором. Если вы уже платили, не повторяйте оплату до сверки.",
-                    "Төлем сілтемесін алу мүмкін болмады. Әкімші төлем сервисін тексеруі керек. Төлеп қойған болсаңыз, тексеру аяқталғанша қайта төлемеңіз.",
-                    "The payment link is unavailable. An administrator needs to check the payment service. If you have paid, wait for verification before paying again.",
-                  )}
+                  {payment.failureReason === "provider_internal"
+                    ? errorText({ code: "provider_internal" })
+                    : t(
+                        "Не удалось получить ссылку на оплату. Требуется проверка платёжного сервиса администратором. Если вы уже платили, не повторяйте оплату до сверки.",
+                        "Төлем сілтемесін алу мүмкін болмады. Әкімші төлем сервисін тексеруі керек. Төлеп қойған болсаңыз, тексеру аяқталғанша қайта төлемеңіз.",
+                        "The payment link is unavailable. An administrator needs to check the payment service. If you have paid, wait for verification before paying again.",
+                      )}
                 </p>
               ) : (
                 <BillingStatus status={payment.status} />
@@ -490,7 +481,7 @@ export function BillingCheckoutPage() {
                   height={256}
                 />
               )}{" "}
-              {payment.checkoutUrl && (
+              {open && payment.checkoutUrl && (
                 <a className="btn" href={payment.checkoutUrl} rel="noreferrer">
                   {payment.method === "KASPI"
                     ? t("Открыть Kaspi", "Kaspi ашу", "Open Kaspi")

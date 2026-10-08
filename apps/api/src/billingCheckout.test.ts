@@ -665,6 +665,50 @@ it("rejected merchant settings release a new checkout; uncertain outcomes stay l
   assert.equal(pending.payments[0].failureReason, "provider_signature");
   await assert.rejects(() => cancelOrder(db, b, other.id));
 });
+it("an unsigned gateway internal error keeps the checkout locked without creating another charge", async () => {
+  const a = await tenant(),
+    o = await order(a),
+    originalFetch = globalThis.fetch;
+  const settings = {
+    BILLING_PROVIDER: "freedompay",
+    FREEDOM_PAY_MERCHANT_ID: "fixture",
+    FREEDOM_PAY_SECRET_KEY: "fixture-secret",
+  };
+  const previous = Object.fromEntries(
+    Object.keys(settings).map((key) => [key, process.env[key]]),
+  );
+  let calls = 0;
+  Object.assign(process.env, settings);
+  globalThis.fetch = async () => {
+    calls++;
+    return new Response(
+      "<response><pg_status>error</pg_status><pg_error_code>0</pg_error_code><pg_error_description>Internal gateway error</pg_error_description></response>",
+    );
+  };
+  try {
+    await assert.rejects(
+      () => payOrder(db, a, { orderId: o.id, method: "CARD" }),
+      { code: "provider_internal" },
+    );
+    const pending = await payOrder(db, a, { orderId: o.id, method: "CARD" });
+    assert.equal(calls, 1);
+    assert.equal(pending.order.status, "PENDING_PAYMENT");
+    assert.equal(pending.payments.length, 1);
+    assert.equal(pending.payments[0].status, "PROCESSING");
+    assert.equal(pending.payments[0].failureReason, "provider_internal");
+    await assert.rejects(() => cancelOrder(db, a, o.id));
+    await assert.rejects(
+      () => payOrder(db, a, { orderId: o.id, method: "BANK_TRANSFER", buyer }),
+      { code: "payment_exists" },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
 it("real status checks preserve uncertain payments; admin recovery requires reconciliation and no provider payment", async () => {
   const { checkOrderPayment, releaseUncreatedPayment } =
     await import("./services/billing/paymentCheck.ts");

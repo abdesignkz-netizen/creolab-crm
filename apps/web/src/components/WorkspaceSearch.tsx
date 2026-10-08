@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
-import { useUiText } from "../lib/uiText";
+import { useUiText, uiMessage, uiTaskStatus } from "../lib/uiText";
+import { dealOutcomeLabel } from "../lib/labels";
 import { useLocale } from "../lib/session";
 import { t } from "../i18n";
 import "./workspace-search.css";
@@ -151,6 +152,14 @@ export function WorkspaceSearchDialog({
     onClose();
     navigate(item.href);
   };
+  const subtitle = (item: SearchItem) => {
+    if (item.type === "task") return uiTaskStatus(item.subtitle || "");
+    if (item.type === "inquiry") return uiMessage(item.subtitle, locale);
+    if (item.type === "deal") return item.subtitle === "Сделка" ? "" : dealOutcomeLabel(item.subtitle);
+    if (item.type === "conversation") return item.subtitle === "AI" ? "AI" : uiText("Менеджер");
+    if ((item.type === "contact" && item.subtitle === "Клиент") || (item.type === "company" && item.subtitle === "Компания")) return "";
+    return item.subtitle;
+  };
 
   return (
     <dialog
@@ -288,7 +297,7 @@ export function WorkspaceSearchDialog({
               <span className="search-result-copy">
                 <strong>{item.title}</strong>
                 <span>
-                  {[types[item.type] || item.type, item.subtitle]
+                  {[types[item.type] || item.type, subtitle(item)]
                     .filter(Boolean)
                     .join(" · ")}
                 </span>

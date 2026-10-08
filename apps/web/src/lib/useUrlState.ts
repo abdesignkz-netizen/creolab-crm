@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, type SetStateAction } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useLocation, useSearchParams } from "react-router-dom";
 
 /** Filters survive reload/back and can be linked from dashboard metrics. */
 export function useUrlState<T extends string>(key: string, fallback: T, allowed?: readonly T[]) {
   const [params, setParams] = useSearchParams();
+  const location = useLocation();
   const raw = params.get(key);
   const value = raw !== null && (!allowed || allowed.includes(raw as T)) ? raw as T : fallback;
   const setValue = useCallback((next: SetStateAction<T>) => {
@@ -15,8 +16,8 @@ export function useUrlState<T extends string>(key: string, fallback: T, allowed?
       if (resolved === fallback) result.delete(key);
       else result.set(key, resolved);
       return result;
-    }, { replace: true });
-  }, [key, fallback, setParams]);
+    }, { replace: true, state: location.state });
+  }, [key, fallback, setParams, location.state]);
   return [value, setValue] as const;
 }
 

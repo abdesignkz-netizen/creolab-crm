@@ -130,6 +130,20 @@ export class FreedomPayProvider implements PaymentProvider {
         "Freedom Pay не принял настройки магазина. Администратору нужно проверить ID мерчанта и ключ приёма платежей.",
         503,
       );
+    // The gateway can fail internally before signing a response. Keep this
+    // distinct from a bad signature, but never treat it as a verified decline.
+    if (
+      out.pg_status === "error" &&
+      out.pg_error_code === "0" &&
+      !out.pg_sig &&
+      !out.pg_payment_id &&
+      !out.pg_redirect_url
+    )
+      billingError(
+        "provider_internal",
+        "Внутренняя ошибка Freedom Pay. Администратору нужно проверить настройки магазина и состояние платежа.",
+        502,
+      );
     // A narrowly classified diagnostic, not authorization to settle or retry.
     if (
       script === "get_status3.php" &&

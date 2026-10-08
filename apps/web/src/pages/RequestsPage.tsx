@@ -232,6 +232,7 @@ export function RequestsPage() {
   }
 
   function clearExtraFilters() {
+    setQuery("");
     patchParams({
       source: null,
       category: null,
@@ -251,6 +252,8 @@ export function RequestsPage() {
   }
 
   const activeExtras = [
+    params.get("scope") === "mine" ? { key: "scope", label: uiText("Назначены мне") } : params.get("scope") === "unassigned" ? { key: "scope", label: uiText("Без ответственного") } : null,
+    params.get("test") === "false" ? { key: "test", label: uiText("Без тестовых заявок") } : params.get("test") === "true" ? { key: "test", label: uiText("Только тестовые заявки") } : null,
     filter !== "all" ? { key: "filter", label: localizeUiOptions(FILTER_LABELS, uiText)[filter] || filter } : null,
     period !== "all"
       ? { key: "period", label: uiText("Период: {p0}", {p0: data?.period?.label || period}) }
@@ -464,6 +467,7 @@ export function RequestsPage() {
                   else if (item.key === "source") setSource("");
                   else if (item.key === "category") setCategory("");
                   else if (item.key === "period") patchParams({ period: null, from: null, to: null });
+                  else if (item.key === "scope" || item.key === "test") patchParams({ [item.key]: null });
                   else if (item.key === "q") {
                     setQuery("");
                     patchParams({ q: null });
@@ -474,7 +478,7 @@ export function RequestsPage() {
                 {item.label} ×
               </button>
             ))}
-            {(sourceChannel || serviceCategory || filter !== "all" || period !== "all") && (
+            {activeExtras.length > 0 && (
               <button type="button" className="linkish" onClick={clearExtraFilters}>
                 {uiText("Сбросить фильтры")}</button>
             )}

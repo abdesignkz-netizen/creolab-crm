@@ -165,6 +165,11 @@ export function useBillingError() {
       "Freedom Pay жауабының түпнұсқалығын тексеру мүмкін болмады. Төлем мәртебесі сақталды. Әкімші төлемді банк кабинетінде тексеруі керек.",
       "Freedom Pay's response could not be verified. Payment status is unchanged. An administrator must reconcile it in the bank dashboard.",
     ],
+    provider_internal: [
+      "Freedom Pay вернул внутреннюю ошибку вместо ссылки на оплату. Администратору нужно проверить магазин в Freedom Pay. Результат этой попытки пока не подтверждён.",
+      "Freedom Pay төлем сілтемесінің орнына ішкі қате қайтарды. Әкімші Freedom Pay дүкенін тексеруі керек. Бұл төлем әрекетінің нәтижесі әлі расталмады.",
+      "Freedom Pay returned an internal error instead of a payment link. An administrator must check the Freedom Pay merchant. The outcome of this attempt is still unconfirmed.",
+    ],
     provider_mismatch: [
       "Ответ банка не соответствует этому заказу. Администратору нужно проверить подключённый магазин Freedom Pay.",
       "Банк жауабы осы тапсырысқа сәйкес келмейді. Әкімші қосылған Freedom Pay дүкенін тексеруі керек.",
