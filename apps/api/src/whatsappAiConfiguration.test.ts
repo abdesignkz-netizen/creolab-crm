@@ -25,7 +25,8 @@ it("keeps each model provider's key, endpoint and model together when both are c
 
 it("distinguishes safe failure reasons without exposing provider responses", () => {
   const expected = { http_401: "AI_PROVIDER_AUTH", http_429: "AI_PROVIDER_LIMIT", http_400: "AI_PROVIDER_CONFIG",
-    ai_model_missing: "AI_MODEL_MISSING", ai_not_configured: "AI_PROMPT_MISSING", ai_credits_exhausted: "AI_CREDITS_EXHAUSTED" };
+    ai_model_missing: "AI_MODEL_MISSING", ai_not_configured: "AI_PROMPT_MISSING", ai_credits_exhausted: "AI_CREDITS_EXHAUSTED",
+    llm_timeout: "AI_PROVIDER_TIMEOUT", llm_network_error: "AI_PROVIDER_NETWORK", llm_output_limit: "AI_PROVIDER_OUTPUT_LIMIT" };
   for (const [code, reason] of Object.entries(expected)) {
     assert.equal(whatsAppAiFailureReason(code), reason);
     assert.notEqual(attentionReasonLabel(reason), "Ошибка AI");

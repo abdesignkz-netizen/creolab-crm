@@ -6,6 +6,7 @@ import { after, before, describe, it } from "node:test";
 import { createPrismaClient } from "@creolab/db";
 import { createApp } from "./app.ts";
 import { config } from "./config.ts";
+import { ApiError } from "./errors.ts";
 import { startWhatsAppQrRuntime, claimQrLease, databaseQrAuth, downloadQrMedia } from "./services/whatsappQrRuntime.ts";
 import { getUsage, consumeResource } from "./services/billingResourceService.ts";
 import { activateSubscription } from "./services/subscriptionActivationService.ts";
@@ -780,6 +781,87 @@ describe("WhatsApp provider connections", () => {
     assert.equal(await prisma.message.count({ where: { connectionScopedId: event.id } }), 0);
     assert.equal(await prisma.message.count({ where: { connectionScopedId: nextEvent.id } }), 1);
   });
+  let textSequence = 800;
+  async function textAiEvent() {
+    const channel = await prisma.channelConnection.findFirstOrThrow({ where: { integrationId: cloudId } });
+    const contact = await prisma.contact.create({ data: { tenantId, name: "Reply retry test" } });
+    const conversation = await prisma.conversation.create({ data: { tenantId, contactId: contact.id, connectionId: channel.id, externalThreadId: `77015550${++textSequence}`, mode: "ai", waitingFor: "MANAGER" } });
+    const message = await prisma.message.create({ data: { tenantId, conversationId: conversation.id, direction: "inbound", senderKind: "client", text: "Хочу обсудить разработку презентации" } });
+    await enqueueWhatsAppAi(prisma, tenantId, conversation.id, message.id);
+    return prisma.outboxEvent.findFirstOrThrow({ where: { entityId: conversation.id, type: "whatsapp.ai_reply" } });
+  }
+  it("retries a temporary provider failure within the same claim and delivers only one answer", async () => {
+    const event = await textAiEvent();
+    let attempts = 0;
+    const generate = async () => {
+      attempts++;
+      if (attempts === 1) {
+        await prisma.outboundOperation.updateMany({ where: { tenantId, idempotencyKey: event.id }, data: { createdAt: new Date(Date.now() - 450000) } });
+        await assert.rejects(() => processWhatsAppAiReply(prisma, event, generate), (error: any) => error.code === "ai_generating");
+        throw new ApiError(502, "http_503", "temporary failure");
+      }
+      return { reply: "Здравствуйте! Для какой компании нужна презентация?", handoff: false };
+    };
+    await processWhatsAppAiReply(prisma, event, generate);
+    await processWhatsAppAiReply(prisma, event, generate);
+    assert.equal(attempts, 2);
+    assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id: event.entityId } })).mode, "ai");
+    const replies = await prisma.message.findMany({ where: { connectionScopedId: event.id } });
+    assert.equal(replies.length, 1);
+    const before = sends;
+    await deliverCloudMessage(prisma, tenantId, cloudId, replies[0].id);
+    await deliverCloudMessage(prisma, tenantId, cloudId, replies[0].id);
+    assert.equal(sends, before + 1);
+  });
+  it("bounds timeout retries and never treats a text model failure as a speech failure", async () => {
+    const event = await textAiEvent();
+    let attempts = 0;
+    const timeout = AbortSignal.timeout;
+    AbortSignal.timeout = milliseconds => milliseconds === 55000 ? AbortSignal.abort() : timeout(milliseconds);
+    try {
+      await processWhatsAppAiReply(prisma, event, async () => { attempts++; throw new ApiError(502, "llm_timeout", "Timed out"); });
+    } finally { AbortSignal.timeout = timeout; }
+    assert.equal(attempts, 2);
+    const conversation = await prisma.conversation.findUniqueOrThrow({ where: { id: event.entityId } });
+    assert.equal(conversation.mode, "human");
+    assert.equal(conversation.attentionReason, "AI_PROVIDER_TIMEOUT");
+    assert.equal(await prisma.message.count({ where: { conversationId: event.entityId, direction: "outbound" } }), 0);
+  });
+  it("does not repeat speech recognition or misclassify a model timeout after the speech deadline", async () => {
+    const { event } = await voiceEvent(cloudId);
+    const timeout = AbortSignal.timeout, speech = new AbortController();
+    const before = voiceCalls;
+    let attempts = 0;
+    AbortSignal.timeout = milliseconds => milliseconds === 55000 ? speech.signal : timeout(milliseconds);
+    try {
+      await processWhatsAppAiReply(prisma, event, async () => {
+        attempts++;
+        speech.abort();
+        throw new ApiError(502, "llm_timeout", "Timed out");
+      });
+    } finally { AbortSignal.timeout = timeout; }
+    assert.equal(attempts, 2); assert.equal(voiceCalls, before + 1);
+    assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id: event.entityId } })).attentionReason, "AI_PROVIDER_TIMEOUT");
+    assert.equal(await prisma.message.count({ where: { connectionScopedId: event.id } }), 0);
+  });
+  it("stops a provider retry after a human takeover or a newer inbound message", async () => {
+    for (const change of ["takeover", "new-message"]) {
+      const event = await textAiEvent();
+      let attempts = 0;
+      await processWhatsAppAiReply(prisma, event, async () => {
+        attempts++;
+        if (change === "takeover") assert.equal((await post(`/api/v1/conversations/${event.entityId}/take`)).status, 200);
+        else {
+          await prisma.message.create({ data: { tenantId, conversationId: event.entityId, direction: "inbound", senderKind: "client", text: "Уточню вопрос" } });
+          await prisma.conversation.update({ where: { id: event.entityId }, data: { messageRevision: { increment: 1 } } });
+        }
+        throw new ApiError(502, "llm_network_error", "Network unavailable");
+      });
+      assert.equal(attempts, 1);
+      assert.equal(await prisma.message.count({ where: { connectionScopedId: event.id } }), 0);
+      assert.equal((await prisma.outboundOperation.findUniqueOrThrow({ where: { tenantId_idempotencyKey: { tenantId, idempotencyKey: event.id } } })).state, "canceled");
+    }
+  });
   it("reports model failures safely for direct channels without sending a customer message", async () => {
     const channel = await prisma.channelConnection.findFirstOrThrow({ where: { integrationId: qrId } });
     const contact = await prisma.contact.create({ data: { tenantId, name: "Model error test" } });
@@ -790,7 +872,9 @@ describe("WhatsApp provider connections", () => {
         const message = await prisma.message.create({ data: { tenantId, conversationId: conversation.id, direction: "inbound", senderKind: "client", text: "Здравствуйте" } });
         await enqueueWhatsAppAi(prisma, tenantId, conversation.id, message.id);
         const event = await prisma.outboxEvent.findFirstOrThrow({ where: { entityId: conversation.id, type: "whatsapp.ai_reply" } });
+        const before = llmCalls;
         await processWhatsAppAiReply(prisma, event);
+        assert.equal(llmCalls, before + (status === 429 ? 2 : 1));
         const result = await prisma.conversation.findUniqueOrThrow({ where: { id: conversation.id } });
         assert.equal(result.mode, "human"); assert.equal(result.attentionReason, reason);
         assert.equal(await prisma.message.count({ where: { conversationId: result.id, direction: "outbound" } }), 0);

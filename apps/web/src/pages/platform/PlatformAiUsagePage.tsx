@@ -105,12 +105,14 @@ export function PlatformAiUsagePage({ lockedTenantId }: { lockedTenantId?: strin
               <thead><tr>
                 <th>{uiText("Дата")}</th><th>{uiText("Компания")}</th><th>{uiText("Провайдер")}</th>
                 <th>{uiText("Модель")}</th><th>{uiText("Операция")}</th><th>{uiText("Код ошибки")}</th>
+                <th>{uiText("Время запроса, с")}</th>
               </tr></thead>
               <tbody>{data.failedRequests.map((row: any) => <tr key={row.id}>
                 <td>{formatDateTime(row.createdAt)}</td><td>{row.companyName || "—"}</td>
                 <td>{row.provider}</td><td>{row.model}</td>
                 <td>{row.feature === "AI_VOICE_TRANSCRIPTION" ? uiText("Распознавание голосового сообщения") : row.feature}</td>
                 <td><code>{row.errorCode}</code></td>
+                <td>{typeof row.latencyMs === "number" ? (row.latencyMs / 1000).toFixed(1) : "—"}</td>
               </tr>)}</tbody>
             </table>
           </div>

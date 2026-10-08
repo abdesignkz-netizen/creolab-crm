@@ -24,6 +24,12 @@ type ChatUsage = {
 
 function llmConfig() { return envLlm(); }
 
+export function getWhatsAppReplyTimeoutMs() {
+  const configured = Number(process.env.WHATSAPP_AI_REPLY_TIMEOUT_MS);
+  if (!Number.isFinite(configured) || configured <= 0) return 90_000;
+  return Math.min(120_000, Math.max(10_000, Math.floor(configured)));
+}
+
 async function resolveLlm(runtime?: LlmRuntime) {
   if (runtime?.prisma && runtime.tenantId) {
     const resolved = await getEffectiveLlmConfig(runtime.prisma, runtime.tenantId);
@@ -43,6 +49,7 @@ async function completeChat(input: {
   json?: boolean;
   timeoutMs?: number;
   maxOutputTokens?: number;
+  validateContent?: (content: string) => boolean;
 }) {
   const runtime = input.runtime || {};
   const { apiKey, baseUrl, model, provider } = await resolveLlm(runtime);
@@ -69,6 +76,7 @@ async function completeChat(input: {
   let content: string | null = null;
   let usage: ChatUsage | null = null;
   let requestId: string | null = null;
+  const signal = AbortSignal.timeout(input.timeoutMs ?? 15000);
   try {
     const response = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
       method: "POST",
@@ -83,24 +91,38 @@ async function completeChat(input: {
         ...(input.json ? { response_format: { type: "json_object" } } : {}),
         messages: input.messages,
       }),
-      signal: AbortSignal.timeout(input.timeoutMs ?? 15000),
+      signal,
     });
-    const data = (await response.json().catch(() => ({}))) as {
+    let data: {
       id?: string;
       usage?: ChatUsage;
-      choices?: Array<{ message?: { content?: string } }>;
-    };
-    requestId = data.id || null;
-    usage = data.usage || null;
+      choices?: Array<{ message?: { content?: unknown }; finish_reason?: string }>;
+    } | null = null;
+    try {
+      data = await response.json();
+    } catch (error) {
+      // A malformed body is different from a deadline or dropped connection
+      // while reading it. Keep transport failures available to retry callers.
+      if (signal.aborted || !(error instanceof SyntaxError)) throw error;
+    }
+    requestId = typeof data?.id === "string" ? data.id : null;
+    usage = data?.usage || null;
     if (!response.ok) {
       errorCode = `http_${response.status}`;
+    } else if (!data || typeof data !== "object" || Array.isArray(data)) {
+      errorCode = "ai_invalid_response";
+    } else if (data.choices?.[0]?.finish_reason === "length") {
+      errorCode = "llm_output_limit";
     } else {
-      content = String(data.choices?.[0]?.message?.content || "").trim() || null;
-      status = content ? "ok" : "failed";
-      errorCode = content ? null : "empty_completion";
+      const rawContent = data.choices?.[0]?.message?.content;
+      content = typeof rawContent === "string" ? rawContent.trim() || null : null;
+      if (rawContent != null && typeof rawContent !== "string") errorCode = "ai_invalid_response";
+      else if (!content) errorCode = "empty_completion";
+      else if ((input.json && parseJson<unknown>(content) === null) || (input.validateContent && !input.validateContent(content))) errorCode = "ai_invalid_response";
+      else { status = "ok"; errorCode = null; }
     }
-  } catch {
-    errorCode = "llm_request_failed";
+  } catch (error) {
+    errorCode = signal.aborted || error instanceof Error && error.name === "TimeoutError" ? "llm_timeout" : "llm_network_error";
   }
   await recordAiUsage(runtime.prisma, {
     tenantId: runtime.tenantId || null,
@@ -133,6 +155,13 @@ function parseJson<T>(content: string | null): T | null {
   }
 }
 
+function parseWhatsAppReply(content: string, voiceMessage: boolean) {
+  const value = parseJson<{ reply?: unknown; handoff?: unknown; reason?: unknown }>(content);
+  if (!value || typeof value.handoff !== "boolean" || typeof value.reply !== "string" || value.reply.length > 4000) return null;
+  if (!value.handoff && !value.reply.trim() && !(voiceMessage && value.reason === "unclear_message")) return null;
+  return { reply: value.reply, handoff: value.handoff, reason: value.reason };
+}
+
 /** Direct-channel replies use the same tenant model, published knowledge and credit ledger. */
 export async function answerWhatsAppWithLlm(input: {
   prisma: PrismaClient; tenantId: string; integrationId?: string; conversationId?: string;
@@ -141,8 +170,11 @@ export async function answerWhatsAppWithLlm(input: {
   const { getPublishedTenantAiContext, buildTenantAiSystemPreamble } = await import("./tenantAiConfigService.ts");
   const context = await getPublishedTenantAiContext(input.prisma, input.tenantId);
   if (!context.tenantPrompt) throw new ApiError(409, "ai_not_configured", "Опубликуйте промпт компании");
+  const lastUser = [...input.history].reverse().find(message => message.role === "user");
+  const voiceMessage = Boolean(lastUser?.content.includes("[Расшифровка голосового сообщения]"));
   const { content, errorCode } = await completeChat({ runtime: { ...input, feature: "AI_MANAGER_REPLY" }, feature: "AI_MANAGER_REPLY",
-    json: true, timeoutMs: 20000, temperature: context.temperature ?? 0.2,
+    json: true, timeoutMs: getWhatsAppReplyTimeoutMs(), temperature: context.temperature ?? 0.2,
+    validateContent: content => Boolean(parseWhatsAppReply(content, voiceMessage)),
     maxOutputTokens: Math.min(context.maxOutputTokens || 1000, 2000),
     messages: [{ role: "system", content: [buildTenantAiSystemPreamble(context).slice(0, 80000),
       "Ответь на последнее сообщение клиента от имени этой компании. Пиши кратко и естественно.", AI_LANGUAGE_POLICY,
@@ -153,10 +185,8 @@ export async function answerWhatsAppWithLlm(input: {
     ].join("\n") }, ...input.history],
   });
   if (!content) throw new ApiError(502, errorCode || "llm_request_failed", "Не удалось получить ответ модели ИИ");
-  const value = parseJson<{ reply?: unknown; handoff?: unknown; reason?: unknown }>(content);
-  if (!value || typeof value.handoff !== "boolean" || typeof value.reply !== "string" || value.reply.length > 4000) throw new ApiError(502, "ai_invalid_response", "Модель вернула некорректный ответ");
-  const lastUser = [...input.history].reverse().find(message => message.role === "user");
-  const voiceMessage = lastUser?.content.includes("[Расшифровка голосового сообщения]");
+  const value = parseWhatsAppReply(content, voiceMessage);
+  if (!value) throw new ApiError(502, "ai_invalid_response", "Модель вернула некорректный ответ");
   if (value.reason === "unclear_message" && voiceMessage) return { reply: VOICE_CLARIFICATION, handoff: false };
   if (value.handoff) return { reply: "", handoff: true };
   const reply = value.reply.trim();

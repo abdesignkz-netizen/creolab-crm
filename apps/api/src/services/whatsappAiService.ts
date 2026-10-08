@@ -1,4 +1,5 @@
 import type { PrismaClient, Prisma } from "@creolab/db";
+import { setTimeout as delay } from "node:timers/promises";
 import { FEATURES } from "@creolab/contracts";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
@@ -11,7 +12,7 @@ import { getEffectiveTenantSettings, getEffectiveLlmConfig } from "./runtimeSett
 import { decideAutomationPolicy } from "./aiAutomationPolicyService.ts";
 import { parseAIAutomationSettings, isWithinAiSchedule } from "./aiAutomationSettings.ts";
 import { detectHandoffReason, isClientRefusalText } from "./aiConversationPolicyService.ts";
-import { answerWhatsAppWithLlm } from "./llmClient.ts";
+import { answerWhatsAppWithLlm, getWhatsAppReplyTimeoutMs } from "./llmClient.ts";
 import { isVoiceAttachment, transcribeVoiceAttachment, voiceTranscript } from "./voiceTranscriptionService.ts";
 import { getTranscriptionConfig } from "./transcriptionConfig.ts";
 import { VOICE_CLARIFICATION, VOICE_SERVICE_FAILURE } from "./aiLanguagePolicy.ts";
@@ -25,6 +26,7 @@ export function whatsAppAiFailureReason(code: string | null | undefined) {
     ai_credits_exhausted: "AI_CREDITS_EXHAUSTED", http_401: "AI_PROVIDER_AUTH", http_403: "AI_PROVIDER_AUTH",
     http_429: "AI_PROVIDER_LIMIT", http_400: "AI_PROVIDER_CONFIG", http_404: "AI_PROVIDER_CONFIG",
     ai_invalid_response: "AI_INVALID_RESPONSE", empty_completion: "AI_INVALID_RESPONSE",
+    llm_timeout: "AI_PROVIDER_TIMEOUT", llm_network_error: "AI_PROVIDER_NETWORK", llm_output_limit: "AI_PROVIDER_OUTPUT_LIMIT",
     voice_unavailable: "AI_VOICE_UNAVAILABLE", voice_empty: "AI_VOICE_EMPTY", voice_interrupted: "AI_VOICE_UNAVAILABLE",
     voice_unsupported: "AI_VOICE_UNSUPPORTED", voice_too_large: "AI_VOICE_UNSUPPORTED", voice_provider_error: "AI_VOICE_UNAVAILABLE",
     voice_timeout: "AI_VOICE_TIMEOUT", voice_network_error: "AI_VOICE_PROVIDER_UNAVAILABLE", voice_invalid_response: "AI_VOICE_INVALID_RESPONSE",
@@ -38,6 +40,9 @@ export function whatsAppAiFailureReason(code: string | null | undefined) {
   return reasons[code || ""] || (code?.startsWith("voice_http_") ? "AI_VOICE_PROVIDER_UNAVAILABLE" : "AI_PROVIDER_UNAVAILABLE");
 }
 const record = (value: unknown) => value && typeof value === "object" ? value as Record<string, any> : {};
+const REPLY_ATTEMPTS = 2;
+const RETRY_DELAY_MS = 2000;
+const retryableModelErrors = new Set(["llm_timeout", "llm_network_error", "http_408", "http_429", "http_500", "http_502", "http_503", "http_504"]);
 const clientAiMode = (value: unknown) => { const setting = record(value).aiAutomation; return typeof setting === "string" ? setting : record(setting).mode; };
 export function automaticWhatsAppMode(settingsJson: unknown, integration: { id: string; type: string; automationMode?: string | null }, contact: { doNotContact?: boolean; attributionJson?: unknown }) {
   const decision = decideAutomationPolicy({ settingsJson, sourceChannel: "whatsapp", sourceType: integration.type,
@@ -143,7 +148,8 @@ export async function processWhatsAppAiReply(prisma: PrismaClient, event: { id: 
     const existing = await tx.outboundOperation.findUnique({ where: { tenantId_idempotencyKey: { tenantId, idempotencyKey: event.id } } });
     if (existing) {
       if (existing.state === "generating") {
-        if (Date.now() - existing.createdAt.getTime() < SPEECH_CLAIM_TTL_MS) throw new ApiError(409, "ai_generating", "ИИ готовит ответ");
+        const claimTtl = Math.max(SPEECH_CLAIM_TTL_MS, LOCAL_SPEECH_BATCH_MS + REPLY_ATTEMPTS * getWhatsAppReplyTimeoutMs() + 60000);
+        if (Date.now() - existing.createdAt.getTime() < claimTtl) throw new ApiError(409, "ai_generating", "ИИ готовит ответ");
         await tx.outboundOperation.update({ where: { id: existing.id }, data: { state: "failed", error: "generation_interrupted" } });
         await tx.conversation.update({ where: { id: conversationId }, data: { mode: "human", controlVersion: { increment: 1 }, needsAttention: true, attentionReason: "AI_ERROR" } });
       }
@@ -164,7 +170,8 @@ export async function processWhatsAppAiReply(prisma: PrismaClient, event: { id: 
   const voices = pending.flatMap(message => message.attachments.filter(file => isVoiceAttachment(file) && !voiceTranscript(file.transcriptionJson)
     // An earlier failed recording must not block a new text message or voice note.
     && (message.id === latest.id || !["failed", "done"].includes(record(file.transcriptionJson).status))));
-  const voiceDeadline = AbortSignal.timeout(getTranscriptionConfig().engine === "local" ? LOCAL_SPEECH_BATCH_MS : 55000);
+  const voiceDeadline = voices.length ? AbortSignal.timeout(getTranscriptionConfig().engine === "local" ? LOCAL_SPEECH_BATCH_MS : 55000) : undefined;
+  let transcribing = false;
   let answer: Awaited<ReturnType<typeof answerWhatsAppWithLlm>> = null;
   let failureReason = "AI_PROVIDER_UNAVAILABLE";
   let voiceFailure: string | null = null;
@@ -173,11 +180,13 @@ export async function processWhatsAppAiReply(prisma: PrismaClient, event: { id: 
     if (voices.length && !(await canConsume(prisma, tenantId, "AI_CREDITS", voices.length * aiCreditCost("AI_VOICE_TRANSCRIPTION") + aiCreditCost("AI_MANAGER_REPLY"))).allowed) {
       throw new ApiError(403, "ai_credits_exhausted", "Недостаточно AI-кредитов");
     }
+    transcribing = voices.length > 0;
     for (const file of voices.reverse()) {
       if (!await directAiSendAllowed(prisma, tenantId, conversationId, version, revision)) { await cancel(); return; }
       const text = await transcribeVoiceAttachment({ prisma, tenantId, conversationId, integrationId: conversation.connection!.integrationId, attachmentId: file.id, signal: voiceDeadline });
       file.transcriptionJson = { status: "done", text };
     }
+    transcribing = false;
     if (!await directAiSendAllowed(prisma, tenantId, conversationId, version, revision)) { await cancel(); return; }
     for (const message of pending) {
       if (message.id !== latest.id && !message.attachments.some(isVoiceAttachment)) continue;
@@ -187,16 +196,31 @@ export async function processWhatsAppAiReply(prisma: PrismaClient, event: { id: 
         await handoff(prisma, tenantId, conversationId, version, revision, reason?.code || "CLIENT_REQUESTED_HUMAN", settings.handoff.afterMode === "assist" ? "paused" : "human"); return;
       }
     }
-    answer = await generate({ prisma, tenantId, integrationId: conversation.connection!.integrationId, conversationId,
-      history: [...[...history].reverse().filter(message => message.id !== latest.id), latest].map(message => ({ role: message.direction === "inbound" ? "user" : "assistant", content: messageContent(message).slice(0, 18000) })) });
+    for (let attempt = 0; attempt < REPLY_ATTEMPTS; attempt++) {
+      if (attempt) {
+        // Keep the same claim: overlapping outbox ticks must not generate or send twice.
+        // Recheck after the delay so a takeover or newer message stops the retry.
+        await delay(RETRY_DELAY_MS);
+        if (!await directAiSendAllowed(prisma, tenantId, conversationId, version, revision)
+          || !await prisma.outboundOperation.count({ where: { id: claim.id, state: "generating" } })) { await cancel(); return; }
+      }
+      try {
+        answer = await generate({ prisma, tenantId, integrationId: conversation.connection!.integrationId, conversationId,
+          history: [...[...history].reverse().filter(message => message.id !== latest.id), latest].map(message => ({ role: message.direction === "inbound" ? "user" : "assistant", content: messageContent(message).slice(0, 18000) })) });
+        break;
+      } catch (error) {
+        if (attempt + 1 === REPLY_ATTEMPTS || !(error instanceof ApiError) || !retryableModelErrors.has(error.code)) throw error;
+      }
+    }
   } catch (error) {
     if (error instanceof ApiError && error.code === "voice_pending") {
       // A newer revision can overlap an earlier transcription. Retry using its durable cache.
       await prisma.outboundOperation.deleteMany({ where: { id: claim.id, state: "generating" } });
       throw new ApiError(409, "ai_generating", "ИИ распознаёт голосовое сообщение");
     }
-    failureReason = voiceDeadline.aborted ? "AI_VOICE_TIMEOUT" : whatsAppAiFailureReason(error instanceof ApiError ? error.code : null);
-    if (error instanceof ApiError && error.code.startsWith("voice_") || voiceDeadline.aborted) {
+    const speechTimedOut = transcribing && Boolean(voiceDeadline?.aborted);
+    failureReason = speechTimedOut ? "AI_VOICE_TIMEOUT" : whatsAppAiFailureReason(error instanceof ApiError ? error.code : null);
+    if (error instanceof ApiError && error.code.startsWith("voice_") || speechTimedOut) {
       // A speech failure asks for clarification through the normal, idempotent
       // delivery path. It must not disable AI for the next customer message.
       voiceFailure = failureReason;
