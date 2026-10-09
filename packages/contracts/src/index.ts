@@ -10,6 +10,7 @@ export * from "./roles.ts";
 export * from "./schemas.ts";
 export * from "./control.ts";
 export * from "./taskBoard.ts";
+export * from "./aiManagerSetup.ts";
 
 export const PAGE_SIZE_DEFAULT = 30;
 export const PAGE_SIZE_MAX = 100;

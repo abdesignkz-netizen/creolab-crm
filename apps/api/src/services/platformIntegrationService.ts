@@ -613,47 +613,57 @@ export async function saveTenantAiSettings(
   tenantId: string,
   input: Record<string, unknown>,
 ) {
-  const existing = await prisma.aIConfiguration.findFirst({ where: { tenantId } });
-  const nextProvider = String(input.provider || existing?.provider || "").trim().toLowerCase();
-  if (existing?.credentialId && nextProvider !== String(existing.provider || "").toLowerCase() && !String(input.apiKey || "").trim()) {
-    throw new ApiError(422, "ai_provider_key_required", "При смене провайдера укажите ключ новой модели ИИ.");
-  }
-  let credentialId = existing?.credentialId || null;
-  if (typeof input.apiKey === "string" && input.apiKey.trim()) {
-    const encrypted = encryptSecret(input.apiKey.trim());
-    if (credentialId) {
-      await prisma.credential.update({
-        where: { id: credentialId },
-        data: { encryptedValue: encrypted, rotatedAt: new Date() },
-      });
-    } else {
-      const cred = await prisma.credential.create({
-        data: {
-          tenantId,
-          scope: "tenant",
-          kind: "llm_api_key",
-          encryptedValue: encrypted,
-          keyVersion: encryptionKeyVersion(),
-        },
-      });
-      credentialId = cred.id;
+  const { data, credentialId } = await prisma.$transaction(async tx => {
+    await tx.$queryRaw`SELECT id FROM "Tenant" WHERE id = ${tenantId} FOR UPDATE`;
+    const existing = await tx.aIConfiguration.findFirst({ where: { tenantId } });
+    const nextProvider = String(input.provider || existing?.provider || "").trim().toLowerCase();
+    if (existing?.credentialId && nextProvider !== String(existing.provider || "").toLowerCase() && !String(input.apiKey || "").trim()) {
+      throw new ApiError(422, "ai_provider_key_required", "При смене провайдера укажите ключ новой модели ИИ.");
     }
-  }
-  const data = {
-    provider: nextProvider || null,
-    model: input.model ? String(input.model) : existing?.model || null,
-    enabled: "enabled" in input ? Boolean(input.enabled) : existing?.enabled ?? true,
-    credentialId,
-    temperature: input.temperature != null && input.temperature !== "" ? Number(input.temperature) : existing?.temperature ?? null,
-    maxOutputTokens:
-      input.maxOutputTokens != null && input.maxOutputTokens !== "" ? Number(input.maxOutputTokens) : existing?.maxOutputTokens ?? null,
-    limitsJson: (input.limits && typeof input.limits === "object" ? input.limits : existing?.limitsJson || {}) as Prisma.InputJsonValue,
-  };
-  if (existing) {
-    await prisma.aIConfiguration.update({ where: { id: existing.id }, data });
-  } else {
-    await prisma.aIConfiguration.create({ data: { tenantId, ...data } });
-  }
+    let credentialId = existing?.credentialId || null;
+    if (typeof input.apiKey === "string" && input.apiKey.trim()) {
+      const encrypted = encryptSecret(input.apiKey.trim());
+      if (credentialId) {
+        await tx.credential.update({
+          where: { id: credentialId },
+          data: { encryptedValue: encrypted, rotatedAt: new Date() },
+        });
+      } else {
+        const cred = await tx.credential.create({
+          data: {
+            tenantId,
+            scope: "tenant",
+            kind: "llm_api_key",
+            encryptedValue: encrypted,
+            keyVersion: encryptionKeyVersion(),
+          },
+        });
+        credentialId = cred.id;
+      }
+    }
+    const data = {
+      provider: nextProvider || null,
+      model: input.model ? String(input.model) : existing?.model || null,
+      enabled: "enabled" in input ? Boolean(input.enabled) : existing?.enabled ?? true,
+      credentialId,
+      temperature: input.temperature != null && input.temperature !== "" ? Number(input.temperature) : existing?.temperature ?? null,
+      maxOutputTokens:
+        input.maxOutputTokens != null && input.maxOutputTokens !== "" ? Number(input.maxOutputTokens) : existing?.maxOutputTokens ?? null,
+      limitsJson: (() => {
+        const oldLimits = asRecord(existing?.limitsJson);
+        const limits = { ...(input.limits && typeof input.limits === "object" ? asRecord(input.limits) : oldLimits) };
+        delete limits.aiSetup;
+        if (oldLimits.aiSetup) limits.aiSetup = oldLimits.aiSetup;
+        return limits as Prisma.InputJsonValue;
+      })(),
+    };
+    if (existing) {
+      await tx.aIConfiguration.update({ where: { id: existing.id }, data });
+    } else {
+      await tx.aIConfiguration.create({ data: { tenantId, ...data } });
+    }
+    return { data, credentialId };
+  });
   invalidateRuntimeConfig(tenantId);
   await writeAudit(prisma, {
     tenantId,

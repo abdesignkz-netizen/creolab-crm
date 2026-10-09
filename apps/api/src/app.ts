@@ -934,6 +934,33 @@ export function createApp(prisma: PrismaClient) {
     res.json(deal);
   });
 
+  app.get("/api/v1/settings/ai-manager", async (req, res) => {
+    const { getAiManagerSetup } = await import("./services/aiManagerSetupService.ts");
+    res.json(await getAiManagerSetup(prisma, await requireAuth(req)));
+  });
+  app.patch("/api/v1/settings/ai-manager", json, async (req, res) => {
+    const { saveAiManagerSetupDraft } = await import("./services/aiManagerSetupService.ts");
+    res.json(await saveAiManagerSetupDraft(prisma, await requireAuth(req), req.body));
+  });
+  app.post("/api/v1/settings/ai-manager/publish", json, async (req, res) => {
+    const { publishAiManagerSetup } = await import("./services/aiManagerSetupService.ts");
+    res.json(await publishAiManagerSetup(prisma, await requireAuth(req), req.body));
+  });
+  app.post("/api/v1/settings/ai-manager/restore", json, async (req, res) => {
+    const { restoreAiManagerSetup } = await import("./services/aiManagerSetupService.ts");
+    res.json(await restoreAiManagerSetup(prisma, await requireAuth(req), req.body));
+  });
+  app.post("/api/v1/settings/ai-manager/reload", json, async (req, res) => {
+    const { reloadAiManagerSetupFromLive } = await import("./services/aiManagerSetupService.ts");
+    res.json(await reloadAiManagerSetupFromLive(prisma, await requireAuth(req), req.body));
+  });
+  app.post("/api/v1/settings/ai-manager/preview", json, async (req, res) => {
+    const auth = await requireAuth(req);
+    rateLimit(`ai-setup-preview:${auth.activeMembership?.tenantId}:${auth.user.id}`, 10, 60000);
+    const { previewAiManagerSetup } = await import("./services/aiManagerSetupService.ts");
+    res.json(await previewAiManagerSetup(prisma, auth, req.body));
+  });
+
   app.get("/api/v1/settings/ai-automation", async (req, res) => {
     const { getAIAutomationSettings } = await import("./services/aiAutomationSettingsService.ts");
     res.json(await getAIAutomationSettings(prisma, await requireAuth(req)));

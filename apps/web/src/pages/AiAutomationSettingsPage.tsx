@@ -8,6 +8,7 @@ import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import { NavIcon } from "../components/NavIcon";
 import "../ai-manager-settings.css";
+import "../ai-manager-setup.css";
 
 type SettingsSection = "replies" | "requests" | "crm" | "prompt" | "knowledge" | "handoff" | "hours";
 
@@ -279,6 +280,7 @@ export function AiAutomationSettingsPage() {
       {hint ? <InlineFeedback kind="success" className="ok">{hint}</InlineFeedback> : null}
       {data.runtimePaused && <p className="banner">{text("ИИ приостановлен в управлении компанией. Эти правила начнут действовать после снятия паузы.", "Компанияны басқаруда ЖИ кідіртілген. Ережелер кідіріс алынғаннан кейін іске қосылады.", "AI is paused in company management. These rules apply after the pause is lifted.")}</p>}
 
+      <div className="ai-setup-entry"><div><h3>{text("Чему обучить ИИ?", "ЖИ-ге нені үйрету керек?", "What should your AI know?")}</h3><p>{text("Функции, услуги, цены, сценарии и база знаний — настройте самостоятельно через вопросы.", "Міндеттерді, қызметтерді, бағаны, сценарийді және білімді сұрақтар арқылы баптаңыз.", "Set functions, services, pricing, conversation flow and knowledge through guided questions.")}</p></div><Link className="btn secondary" to="/settings/ai-manager">{text("Открыть мастер", "Шеберді ашу", "Open setup wizard")}</Link></div>
       <div className="ai-manager-overview">
         <div className="ai-manager-heading"><span className="ai-manager-mark"><NavIcon to="/admin/ai-managers" /></span><div><b>{text("Правила работы", "Жұмыс ережелері", "Reply rules")}</b><p>{dirty ? text("Предпросмотр · есть несохранённые изменения", "Алдын ала көрініс · сақталмаған өзгерістер бар", "Preview · unsaved changes") : text("Текущие настройки", "Ағымдағы баптаулар", "Current settings")}</p></div><span className={`badge ${mode === "AUTO" ? "ok" : ""}`}>{data.runtimePaused ? text("На паузе", "Кідірісте", "Paused") : mode === "AUTO" ? text("Автоматически", "Автоматты түрде", "Automatic") : mode === "MANUAL" ? text("Выключен", "Өшірулі", "Off") : text("С участием сотрудника", "Қызметкердің қатысуымен", "Staff assisted")}</span></div>
         <div className="ai-manager-facts">
@@ -362,23 +364,7 @@ export function AiAutomationSettingsPage() {
         <p className="muted">{uiText("AI не подтверждает оплату, не закрывает сделки и не отправляет документы по этим настройкам. Неоднозначные суммы и время требуют уточнения. Сумма по позициям сделки сохраняется.")}</p>
       </div> : null}
 
-      {section === "prompt" ? (
-        <div className="panel">
-          <b>{uiText("Промпт")}</b>
-          <p className="muted">
-            {uiText("Промпт задаёт стиль общения и правила ответов AI. Чтобы изменить его, передайте администратору пожелания и примеры ответов.")}</p>
-          {me?.billing?.entitlements?.SUPPORT ? <Link className="btn secondary" to="/settings/ai-automation?support=1">{uiText("Обратиться в поддержку")}</Link> : <p className="muted">{uiText("Обратитесь к администратору вашей компании.")}</p>}
-        </div>
-      ) : null}
-
-      {section === "knowledge" ? (
-        <div className="panel">
-          <b>{uiText("База знаний")}</b>
-          <p className="muted">
-            {uiText("База знаний содержит сведения о компании, услугах и ценах. Для обновления подготовьте материалы и передайте их администратору.")}</p>
-          {me?.billing?.entitlements?.SUPPORT ? <Link className="btn secondary" to="/settings/ai-automation?support=1">{uiText("Обратиться в поддержку")}</Link> : <p className="muted">{uiText("Обратитесь к администратору вашей компании.")}</p>}
-        </div>
-      ) : null}
+      {section === "prompt" || section === "knowledge" ? <div className="ai-setup-entry"><div><h3>{text("Инструкции и знания вашей компании", "Компания нұсқаулығы мен білімі", "Your company instructions and knowledge")}</h3><p>{text("Выберите функции ИИ и ответьте на вопросы. Мастер соберёт промпт и базу знаний, которые можно проверить перед публикацией.", "ЖИ міндеттерін таңдап, сұрақтарға жауап беріңіз. Шебер жариялау алдында тексерілетін промпт пен білім базасын құрастырады.", "Choose AI functions and answer guided questions. Review the generated instructions and knowledge before publishing.")}</p></div><Link className="btn" to="/settings/ai-manager">{text("Настроить ИИ", "ЖИ баптау", "Set up AI")}</Link></div> : null}
 
       {section === "handoff" ? (
         <div className="panel">

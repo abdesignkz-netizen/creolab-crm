@@ -204,9 +204,12 @@ export async function answerWhatsAppWithLlm(input: {
   prisma: PrismaClient; tenantId: string; integrationId?: string; conversationId?: string;
   history: Array<{ role: "user" | "assistant"; content: string }>;
   inspectResponse?: boolean;
+  /** Server-compiled saved draft for the isolated setup preview. Never accept raw request context. */
+  contextOverride?: import("./tenantAiConfigService.ts").TenantAiContext;
+  userId?: string;
 }) {
   const { getPublishedTenantAiContext, buildTenantAiSystemPreamble } = await import("./tenantAiConfigService.ts");
-  const context = await getPublishedTenantAiContext(input.prisma, input.tenantId);
+  const context = input.contextOverride || await getPublishedTenantAiContext(input.prisma, input.tenantId);
   if (!context.tenantPrompt) throw new ApiError(409, "ai_not_configured", "Опубликуйте промпт компании");
   const lastUser = [...input.history].reverse().find(message => message.role === "user");
   const voiceMessage = Boolean(lastUser?.content.includes("[Расшифровка голосового сообщения]"));

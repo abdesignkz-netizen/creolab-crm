@@ -43,6 +43,7 @@ const EsfIntegrationPage = lazy(() => import("./pages/EsfIntegrationPage").then(
 const RequestDetailPage = lazy(() => import("./pages/RequestDetailPage").then(m => ({ default: m.RequestDetailPage })));
 const RequestsPage = lazy(() => import("./pages/RequestsPage").then(m => ({ default: m.RequestsPage })));
 const AiAutomationSettingsPage = lazy(() => import("./pages/AiAutomationSettingsPage").then(m => ({ default: m.AiAutomationSettingsPage })));
+const AiManagerSetupPage = lazy(() => import("./pages/AiManagerSetupPage").then(m => ({ default: m.AiManagerSetupPage })));
 const SituationPage = lazy(() => import("./pages/SituationPage").then(m => ({ default: m.SituationPage })));
 const BillingCheckoutPage = lazy(() => import("./pages/BillingCheckoutPage").then(m => ({ default: m.BillingCheckoutPage })));
 const BillingPage = lazy(() => import("./pages/BillingPage").then(m => ({ default: m.BillingPage })));
@@ -1191,6 +1192,7 @@ export function App() {
                 <Route path="/stats" element={me?.capabilities?.analytics ? <StatsPage /> : <Navigate to="/today" replace />} />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/settings/ai-automation" element={me?.capabilities?.aiSettings ? <AiAutomationSettingsPage /> : <Navigate to="/settings" replace />} />
+                <Route path="/settings/ai-manager" element={me?.capabilities?.aiSettings ? <AiManagerSetupPage /> : <Navigate to="/settings" replace />} />
                 <Route path="/admin/*" element={me?.user?.platformAdmin ? <PlatformAdminPage /> : <Navigate to="/today" replace />} />
                 <Route path="*" element={<Navigate to={me?.user?.platformAdmin && !me?.activeTenant ? "/admin" : "/today"} />} />
               </Routes>
