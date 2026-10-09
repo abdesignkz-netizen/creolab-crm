@@ -64,6 +64,7 @@
   font-size: 25px;
   font-weight: 700;
 }
+.billing-method-icon .nav-icon { width: 26px; height: 26px; opacity: 1; }
 .billing-field {
   display: flex;
   flex-direction: column;

@@ -1,5 +1,6 @@
 import { CancelBillingOrder } from "../components/CancelBillingOrder";
 import { InlineFeedback } from "../components/InlineFeedback";
+import { NavIcon } from "../components/NavIcon";
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api } from "../lib/api";
@@ -332,7 +333,7 @@ export function BillingCheckoutPage() {
                 {[
                   {
                     id: "CARD",
-                    icon: "▣",
+                    icon: <NavIcon to="/billing" />,
                     name: t("Банковская карта", "Банк картасы", "Bank card"),
                     text: "Visa / Mastercard",
                     help: t(
@@ -360,7 +361,7 @@ export function BillingCheckoutPage() {
                   },
                   {
                     id: "BANK_TRANSFER",
-                    icon: "▤",
+                    icon: <NavIcon to="/documents" />,
                     name: t(
                       "Счёт на компанию",
                       "Компанияға шот",

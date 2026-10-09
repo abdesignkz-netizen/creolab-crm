@@ -127,12 +127,12 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
     : platformAdmin
       ? [
           { to: "/admin", label: t(locale, "nav.platformOverview"), icon: "home" },
-          { to: "/admin/companies", label: t(locale, "nav.platformCompanies"), icon: "inquiries" },
-          { to: "/admin/members", label: t(locale, "nav.platformMembers"), icon: "tasks" },
+          { to: "/admin/companies", label: t(locale, "nav.platformCompanies"), icon: "companies" },
+          { to: "/admin/members", label: t(locale, "nav.platformMembers"), icon: "people" },
         ]
       : [
           { to: "/today", label: t(locale, "nav.home"), icon: "home" },
-          { to: "/settings", label: t(locale, "nav.settings"), icon: "tasks" },
+          { to: "/settings", label: t(locale, "nav.settings"), icon: "settings" },
         ]) as Array<{ to: string; label: string; icon: string }>;
 
   const workLinks = hasCompany ? [
@@ -695,7 +695,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
               onClick={(event) => onNavClick(tab.to, event)}
             >
               <span className="tab-icon-wrap">
-                <span className={`tab-icon icon-${tab.icon}`} aria-hidden />
+                <NavIcon to={tab.to} className="tab-icon" />
                 {count > 0 ? <span className="tab-badge" {...tip(hint)}>{formatBadge(count)}</span> : null}
               </span>
               <span className="tab-label">{tab.label}</span>
@@ -710,7 +710,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
           onClick={() => setMoreOpen((v) => !v)}
         >
           <span className="tab-icon-wrap">
-            <span className="tab-icon icon-more" aria-hidden />
+            <NavIcon to="/more" className="tab-icon" />
             {moreBadgeTotal > 0 ? <span className="tab-badge">{formatBadge(moreBadgeTotal)}</span> : null}
           </span>
           <span className="tab-label">{t(locale, "nav.more")}</span>

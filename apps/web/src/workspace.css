@@ -62,7 +62,8 @@ p { line-height: 1.55; }
 .nav a { margin: 0; min-height: 42px; padding: 10px 12px; border-radius: 11px; font-size: 13px; }
 .nav a.active { background: var(--card); color: var(--accent); box-shadow: 0 1px 5px #1e294410; }
 .nav-link-label { display: inline-flex; align-items: center; gap: 11px; min-width: 0; }
-.nav-icon { width: 19px; height: 19px; flex: 0 0 19px; opacity: .85; }
+.nav-icon { display: block; width: 19px; height: 19px; flex: 0 0 19px; opacity: .85; }
+.mobile-tabbar .nav-icon { width: 22px; height: 22px; flex-basis: 22px; opacity: 1; }
 .nav-badge { background: #e8eaf0; color: #5a5f6a; font-size: 10px; min-width: 19px; border-radius: 6px; }
 .nav a.active .nav-badge { background: var(--accent-soft); color: var(--accent); }
 .nav-logout { background: transparent !important; border-color: transparent !important; color: var(--muted) !important; font-weight: 500; }
@@ -461,6 +462,7 @@ select:disabled { cursor: not-allowed; opacity: .65; }
 .conversations-layout:has(> .error) { grid-template-rows: auto minmax(0, 1fr); }
 .conversation-channels { display: flex; flex-direction: column; gap: 8px; padding: 10px 2px; overflow-y: auto; min-height: 0; }
 .conversation-channel { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 11px 2px; border: 1px solid transparent; border-radius: 13px; background: transparent; color: var(--muted); cursor: pointer; font-size: 10px; min-height: 62px; flex-shrink: 0; }
+.channel-icon { display: block; flex-shrink: 0; aspect-ratio: 1; }
 .conversation-channel svg { width: 25px; height: 25px; }
 .conversation-channel:hover { background: var(--card); }
 .conversation-channel.active { background: var(--accent-soft); border-color: var(--line); color: var(--accent); }
@@ -498,8 +500,8 @@ select:disabled { cursor: not-allowed; opacity: .65; }
 .avatar-tone-2 { background: #d5f1eb; color: #237967; }
 .avatar-tone-3 { background: #ffecd4; color: #9a641d; }
 .avatar-tone-4 { background: #fce0e9; color: #a14366; }
-.avatar-channel { width: 18px; height: 18px; position: absolute; right: -3px; bottom: -3px; background: var(--card); border: 2px solid var(--card); border-radius: 50%; display: flex; }
-.avatar-channel svg { width: 14px; height: 14px; }
+.avatar-channel { width: 20px; height: 20px; position: absolute; right: -3px; bottom: -3px; background: var(--card); border: 2px solid var(--card); border-radius: 50%; display: grid; place-items: center; }
+.avatar-channel svg { width: 16px; height: 16px; }
 .conv-person { display: flex; align-items: flex-start; gap: 12px; min-width: 0; flex: 1 1 200px; }
 .conv-person-copy > b { font-size: 14px; overflow-wrap: anywhere; }
 .conv-channel-label { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; }

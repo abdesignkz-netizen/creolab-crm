@@ -1,14 +1,11 @@
 import { useState, type ReactNode } from "react";
+import { ChannelIcon } from "./ChannelIcon";
 import { useUiText } from "../lib/uiText";
 
 const icons: Record<string, string> = {
-  whatsapp: "M20 11.5a8 8 0 0 1-12 7L3 20l1.5-5A8 8 0 1 1 20 11.5ZM8 7c0 5 4 9 9 9l1-3-3-1-1 1c-2-1-3-2-4-4l1-1-1-2Z",
-  instagram: "M7 3h10a4 4 0 0 1 4 4v10a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V7a4 4 0 0 1 4-4Zm9 9a4 4 0 1 1-8 0 4 4 0 0 1 8 0Zm1-5h.01",
-  telegram: "m3 11 18-7-4 17-6-5-4 3v-6l10-6-8 8",
   form: "M5 3h14v18H5Zm4 5h6m-6 4h6m-6 4h3",
   webhook: "m8 7-5 5 5 5m8-10 5 5-5 5m-3-13-2 16",
   calendar: "M5 5h14v16H5ZM8 3v4m8-4v4M5 10h14m-10 4h2m2 0h2m-6 3h2",
-  email: "M3 5h18v14H3Zm0 0 9 8 9-8",
   meta: "M3 15C3 3 8 3 12 12s9 9 9 1C21 3 16 3 12 12s-9 9-9 3Z",
   tiktok: "M14 3v12a4 4 0 1 1-4-4m4-8c1 4 3 5 7 5",
   esf: "M6 3h9l4 4v14H6Zm9 0v5h4M9 12h7m-7 4h4",
@@ -27,7 +24,7 @@ export function IntegrationDisclosure({ id, title, description, status, tone = "
   }}>
     <summary>
       <span className={`integration-tile-icon integration-icon-${icon}`}>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={icons[icon] || icons.form} /></svg>
+        {["whatsapp", "telegram", "instagram", "email"].includes(icon) ? <ChannelIcon channel={icon} /> : <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false"><path d={icons[icon] || icons.form} /></svg>}
       </span>
       <span className="integration-tile-copy"><strong>{title}</strong><span>{description}</span></span>
       <span className={`integration-tile-status ${tone}`}><i aria-hidden="true" />{status}</span>
