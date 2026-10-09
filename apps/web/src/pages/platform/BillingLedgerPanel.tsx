@@ -254,8 +254,10 @@ export function BillingLedgerPanel() {
                                 onClick={async () => {
                                   setBusy(true);
                                   setError("");
+                                  setNotice("");
                                   try {
                                     const r = await api.adminBillingCheck(p.id);
+                                    await load();
                                     setNotice(
                                       t(
                                         "Статус в Freedom Pay: ",
@@ -263,6 +265,7 @@ export function BillingLedgerPanel() {
                                         "Freedom Pay status: ",
                                       ) +
                                         r.status +
+                                        (r.providerFailureCode ? ` (${r.providerFailureCode})` : "") +
                                         (r.requiresCallback
                                           ? t(
                                               ". Для подтверждения в BasQar запросите повторное уведомление в кабинете Freedom Pay.",

@@ -47,7 +47,10 @@ export async function checkProviderPayment(
   if (
     !result.pg_payment_id ||
     (p.providerPaymentId && result.pg_payment_id !== p.providerPaymentId) ||
-    result.pg_order_id !== p.id ||
+    // get_status3.php can omit the merchant reference. A stored provider ID
+    // still identifies the payment; an orphan queried by order ID needs it.
+    ((!p.providerPaymentId || Object.hasOwn(result, "pg_order_id")) &&
+      result.pg_order_id !== p.id) ||
     amountKzt(result.pg_amount) !== p.amountMinor ||
     result.pg_currency !== p.currency
   )
@@ -56,18 +59,32 @@ export async function checkProviderPayment(
       "Ответ банка не соответствует платежу",
       409,
     );
-  const status = [
+  const providerStatus = String(result.pg_payment_status);
+  // Freedom also returns `error` for a declined payment. Release only an
+  // explicitly uncaptured attempt with no contradictory settlement evidence.
+  const uncapturedError =
+    providerStatus === "error" &&
+    result.pg_captured === "0" &&
+    (!Object.hasOwn(result, "pg_result") || result.pg_result === "0") &&
+    ["pg_clearing_amount", "pg_refund_amount", "pg_revoked_amount"].every(
+      (key) => !Object.hasOwn(result, key) || /^0(?:\.0+)?$/.test(result[key]),
+    );
+  const status = uncapturedError ? "failed" : [
     "success",
     "failed",
     "pending",
     "incomplete",
     "refunded",
     "revoked",
-  ].includes(String(result.pg_payment_status))
-    ? String(result.pg_payment_status)
+  ].includes(providerStatus)
+    ? providerStatus
     : "unknown";
+  const providerFailureCode = /^\d{1,12}$/.test(result.pg_failure_code || "")
+    ? result.pg_failure_code
+    : undefined;
   await billingAudit(db, p.tenantId, "PAYMENT_STATUS_CHECKED", p.id, userId, {
     providerStatus: status,
+    ...(providerFailureCode ? { providerFailureCode } : {}),
   });
   // getPaymentStatus verifies the provider signature before returning fields.
   // A failed or expired attempt cannot keep an unpaid order locked forever
@@ -94,6 +111,7 @@ export async function checkProviderPayment(
   const current = await db.billingPayment.findUniqueOrThrow({ where: { id } });
   return {
     status,
+    ...(providerFailureCode ? { providerFailureCode } : {}),
     localStatus: current.status,
     requiresCallback: status === "success" && current.status !== "PAID",
     checkedAt: new Date(),

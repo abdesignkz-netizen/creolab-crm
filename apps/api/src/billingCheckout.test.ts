@@ -883,6 +883,84 @@ it("a callback arriving during recovery wins; the successful payment cannot be r
     freedomPay.getPaymentStatus = original;
   }
 });
+it("signed Freedom status without an order reference releases only a matched uncaptured error", async () => {
+  const { checkOrderPayment, checkProviderPayment } = await import("./services/billing/paymentCheck.ts");
+  const originalFetch = globalThis.fetch;
+  const settings = {
+    BILLING_PROVIDER: "freedompay",
+    FREEDOM_PAY_MERCHANT_ID: "fixture",
+    FREEDOM_PAY_SECRET_KEY: "fixture-secret",
+    FREEDOM_PAY_TESTING_MODE: "1",
+  };
+  const previous = Object.fromEntries(Object.keys(settings).map(key => [key, process.env[key]]));
+  Object.assign(process.env, settings);
+  try {
+    const cases: { name: string; fields?: Record<string, string>; remove?: string[]; orphan?: boolean; tampered?: boolean; rejected?: string; expected?: string }[] = [
+      { name: "uncaptured error", expected: "failed" },
+      { name: "captured", fields: { pg_captured: "1" } },
+      { name: "capture missing", remove: ["pg_captured"] },
+      { name: "success evidence", fields: { pg_result: "1" } },
+      { name: "cleared", fields: { pg_clearing_amount: "1.00" } },
+      { name: "refunded", fields: { pg_refund_amount: "1" } },
+      { name: "unknown clearing", fields: { pg_clearing_amount: "unknown" } },
+      { name: "unknown provider status", fields: { pg_payment_status: "new_status" } },
+      { name: "pending", fields: { pg_payment_status: "pending" }, expected: "pending" },
+      { name: "success still requires callback", fields: { pg_payment_status: "success", pg_captured: "1" }, expected: "success" },
+      { name: "wrong ID", fields: { pg_payment_id: "other" }, rejected: "provider_mismatch" },
+      { name: "wrong reference", fields: { pg_order_id: "other" }, rejected: "provider_mismatch" },
+      { name: "empty reference", fields: { pg_order_id: "" }, rejected: "provider_mismatch" },
+      { name: "wrong amount", fields: { pg_amount: "1" }, rejected: "provider_mismatch" },
+      { name: "wrong currency", fields: { pg_currency: "USD" }, rejected: "provider_mismatch" },
+      { name: "unidentified orphan", orphan: true, rejected: "provider_mismatch" },
+      { name: "bad signature", tampered: true, rejected: "provider_signature" },
+    ];
+    for (const c of cases) {
+      const a = await tenant(), o = await order(a);
+      const d = await payOrder(db, a, { orderId: o.id, method: "CARD" }, fake);
+      const p = await db.billingPayment.findUniqueOrThrow({ where: { id: d.payments[0].id } });
+      if (c.orphan) await db.billingPayment.update({ where: { id: p.id }, data: { providerPaymentId: null } });
+      const fields: Record<string, string> = {
+        pg_status: "ok", pg_payment_id: p.providerPaymentId!, pg_payment_status: "error",
+        pg_amount: `${p.amountMinor}.00`, pg_currency: p.currency, pg_testing_mode: "1",
+        pg_captured: "0", pg_clearing_amount: "0.00", pg_failure_code: "99999", pg_salt: "fixture",
+        ...c.fields,
+      };
+      for (const key of c.remove || []) delete fields[key];
+      globalThis.fetch = async (url, input) => {
+        assert.equal(String(url), "https://api.freedompay.kz/get_status3.php");
+        const request = Object.fromEntries(new URLSearchParams(String(input?.body)));
+        assert.equal(c.orphan ? request.pg_order_id : request.pg_payment_id, c.orphan ? p.id : p.providerPaymentId);
+        const pg_sig = c.tampered ? "0".repeat(32) : freedomSignature("get_status3.php", fields, "fixture-secret");
+        return new Response(`<response>${Object.entries({ ...fields, pg_sig }).map(([k, v]) => `<${k}>${v}</${k}>`).join("")}</response>`);
+      };
+      if (c.rejected) {
+        await assert.rejects(() => checkOrderPayment(db, a, o.id), { code: c.rejected }, c.name);
+      } else {
+        const result = await checkOrderPayment(db, a, o.id);
+        assert.equal(result.status, c.expected || "unknown", c.name);
+        assert.equal((result as any).providerFailureCode, "99999");
+        assert.equal((result as any).requiresCallback, c.expected === "success");
+      }
+      const fresh = await checkoutDetail(db, a, o.id);
+      assert.equal(fresh.payments[0].status, c.expected === "failed" ? "FAILED" : "PROCESSING", c.name);
+      assert.equal(fresh.order.status, "PENDING_PAYMENT", c.name);
+      assert.equal((await getEntitlements(db, o.tenantId)).snapshot.planCode, "BASQAR_FREE", c.name);
+      if (c.expected === "failed") {
+        assert.equal((await checkProviderPayment(db, p.id, a.user.id)).localStatus, "FAILED");
+        const audits = await db.auditEvent.findMany({ where: { entityId: p.id, action: "PAYMENT_STATUS_CHECKED" } });
+        assert(JSON.stringify(audits).includes("99999"));
+        assert(!JSON.stringify(audits).includes("fixture-secret"));
+        assert.equal((await cancelOrder(db, a, o.id)).status, "CANCELLED");
+      }
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
 it("cancellation reconciles declined and expired attempts, but keeps uncertain or successful payments locked", async () => {
   const original = freedomPay.getPaymentStatus;
   try {

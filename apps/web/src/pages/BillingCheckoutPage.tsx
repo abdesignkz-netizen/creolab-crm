@@ -1,6 +1,6 @@
 import { CancelBillingOrder } from "../components/CancelBillingOrder";
 import { InlineFeedback } from "../components/InlineFeedback";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api } from "../lib/api";
 import { billingCheckoutState } from "../lib/billingCheckoutState";
@@ -27,12 +27,16 @@ export function BillingCheckoutPage() {
     [buyer, setBuyer] = useState<Record<string, string>>({}),
     [notice, setNotice] = useState(""),
     [qr, setQr] = useState("");
+  const redirecting = useRef(false);
   async function load() {
+    if (redirecting.current) return;
     try {
       const d = await api.billingOrder(orderId);
+      if (redirecting.current) return;
       setData(d);
       return d;
     } catch {
+      if (redirecting.current) return;
       setError(
         t(
           "Не удалось загрузить оплату. Повторите попытку.",
@@ -44,22 +48,31 @@ export function BillingCheckoutPage() {
   }
   useEffect(() => {
     let stopped = false;
+    const resume = (event: PageTransitionEvent) => {
+      if (event.persisted && redirecting.current) {
+        redirecting.current = false;
+        setBusy(false);
+        void load();
+      }
+    };
+    window.addEventListener("pageshow", resume);
     api
       .billingOrder(orderId)
       .then((d) => {
-        if (!stopped) {
+        if (!stopped && !redirecting.current) {
           setData(d);
           setBuyer({ ...d.buyer, bin: d.buyer?.bin || d.buyer?.iin || "" });
         }
       })
       .catch(() => {
-        if (!stopped)
+        if (!stopped && !redirecting.current)
           setError(
             t("Заказ недоступен", "Тапсырыс қолжетімсіз", "Order unavailable"),
           );
       });
     return () => {
       stopped = true;
+      window.removeEventListener("pageshow", resume);
     };
   }, [orderId]);
   const checkoutState = billingCheckoutState(data, search.has("return"));
@@ -95,12 +108,12 @@ export function BillingCheckoutPage() {
     setNotice("");
     try {
       await fn();
-      await load();
+      if (!redirecting.current) await load();
     } catch (e) {
       await load();
       setError(errorText(e));
     } finally {
-      setBusy(false);
+      if (!redirecting.current) setBusy(false);
     }
   }
   async function checkPayment() {
@@ -119,9 +132,9 @@ export function BillingCheckoutPage() {
           "Payment was not found in the current Freedom Pay merchant. An administrator must reconcile the old attempt and release the order in Payments.",
         ],
         failed: [
-          "Банк отклонил платёж. Теперь можно отменить заказ или выбрать способ оплаты.",
-          "Банк төлемді қабылдамады. Енді тапсырыстан бас тартуға немесе төлем тәсілін таңдауға болады.",
-          "The bank declined the payment. You can now cancel the order or choose a payment method.",
+          "Платёж не завершён. Теперь можно отменить заказ или выбрать способ оплаты.",
+          "Төлем аяқталмады. Енді тапсырыстан бас тартуға немесе төлем тәсілін таңдауға болады.",
+          "Payment was not completed. You can now cancel the order or choose a payment method.",
         ],
         pending: [
           "Проверено: банк ещё обрабатывает платёж. Повторно платить не нужно.",
@@ -144,6 +157,14 @@ export function BillingCheckoutPage() {
           "No active attempt. Choose a payment method.",
         ],
       };
+      if (r.status === "failed" && r.providerFailureCode === "99999") {
+        setNotice(t(
+          "Freedom Pay завершил платёж с ошибкой платёжной системы (99999). Теперь можно отменить заказ или выбрать способ оплаты. Если ошибка повторяется, обратитесь в поддержку.",
+          "Freedom Pay төлемді төлем жүйесінің қатесімен аяқтады (99999). Енді тапсырыстан бас тартуға немесе төлем тәсілін таңдауға болады. Қате қайталанса, қолдау қызметіне хабарласыңыз.",
+          "Freedom Pay ended the payment with a payment system error (99999). You can now cancel the order or choose a payment method. Contact support if this happens again.",
+        ));
+        return;
+      }
       setNotice(
         t(
           ...(messages[r.status] || [
@@ -167,8 +188,16 @@ export function BillingCheckoutPage() {
       const p = d.payments.find((x: any) =>
         ["PROCESSING", "PENDING"].includes(x.status),
       );
-      if (chosen === "CARD" && p?.checkoutUrl)
-        window.location.assign(p.checkoutUrl);
+      if (chosen === "CARD" && p?.checkoutUrl) {
+        // Navigation can abort reads; no refresh or late read may undo this success.
+        redirecting.current = true;
+        try {
+          window.location.assign(p.checkoutUrl);
+        } catch (e) {
+          redirecting.current = false;
+          throw e;
+        }
+      }
     });
   }
   if (!data)
