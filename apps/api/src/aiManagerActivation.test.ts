@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { describe, it } from "node:test";
 import { describeWhatsAppAiActivation, publishedAiFingerprints } from "./services/tenantAiConfigService.ts";
 
@@ -69,5 +70,24 @@ describe("WhatsApp AI activation labels", () => {
     assert.equal(result.prompt.live, false);
     assert.equal(result.knowledge.live, true);
     assert.match(result.prompt.reason, /более новая версия/);
+  });
+
+  it("requires legacy seller synchronization when its fingerprint predates the common policy", () => {
+    const oldPromptFp = createHash("sha256").update(prompt).digest("hex").slice(0, 16);
+    assert.notEqual(fps.promptFp, oldPromptFp);
+    const integration = {
+      type: "whatsapp_seller", status: "active",
+      schemaJson: { aiSync: { livePromptFp: oldPromptFp, liveKnowledgeFp: fps.knowledgeFp } },
+    };
+    const stale = describeWhatsAppAiActivation({ prompt, knowledge, integration });
+    assert.equal(stale.prompt.ready, true);
+    assert.equal(stale.prompt.live, false);
+    assert.match(stale.prompt.reason, /более новая версия/);
+    assert.equal(stale.knowledge.live, true);
+
+    integration.schemaJson.aiSync.livePromptFp = fps.promptFp;
+    const synced = describeWhatsAppAiActivation({ prompt, knowledge, integration });
+    assert.equal(synced.prompt.live, true);
+    assert.equal(synced.knowledge.live, true);
   });
 });

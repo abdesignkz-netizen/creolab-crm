@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { after, before, describe, it, mock } from "node:test";
 import { createPrismaClient } from "@creolab/db";
 import { WhatsAppSellerBridge } from "@creolab/integrations";
@@ -371,6 +372,26 @@ describe("shared AI Manager SaaS", () => {
     for (let index = 0; index < 41; index++) assert.ok(payload.knowledge.includes(`UNIQUE_FACT_${index}`));
     assert.ok(buildTenantAiSystemPreamble(context).includes(content));
     assert.ok(!payload.knowledge.includes("Секретная цена 999"));
+  });
+
+  it("registers the common business-scope policy with legacy sellers and fingerprints that policy", async () => {
+    const context = await getPublishedTenantAiContext(prisma, tenantA);
+    const { tenantAiManagerRegisterPayload } = await import("./services/aiManagerRegistration.ts");
+    const payload = await tenantAiManagerRegisterPayload(prisma, tenantA);
+    for (const rule of ["Отвечай только в рамках задач компании", "Не используй общие знания модели", "Посторонние вопросы"]) {
+      assert.ok(payload.prompt.includes(rule), `Missing common rule: ${rule}`);
+    }
+    assert.ok(payload.prompt.includes(context.tenantPrompt));
+    const oldPromptFp = createHash("sha256").update(context.tenantPrompt.trim()).digest("hex").slice(0, 16);
+    assert.notEqual(payload.fingerprints.promptFp, oldPromptFp);
+    assert.equal(payload.fingerprints.promptFp, createHash("sha256").update(payload.prompt).digest("hex").slice(0, 16));
+
+    const countBefore = registerCalls.length;
+    const result = await syncTenantAiToWhatsApp(prisma, platformAuth, tenantA);
+    assert.equal(registerCalls.length, countBefore + 1);
+    assert.equal(registerCalls.at(-1)?.input.prompt, payload.prompt);
+    assert.equal(result.activation.prompt.live, true);
+    assert.equal(result.activation.knowledge.live, true);
   });
 
   it("records the sent version when the prompt changes during registration", async () => {
