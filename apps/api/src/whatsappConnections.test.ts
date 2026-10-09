@@ -242,6 +242,24 @@ describe("WhatsApp provider connections", () => {
     const qrConv = await prisma.conversation.findUniqueOrThrow({ where: { id: qrEvent.entityId } }); assert.equal(qrConv.mode, "ai");
     await processWhatsAppAiReply(prisma, qrEvent); const beforeQrSends = qrSends; await runtime!.tick(); assert.equal(qrSends, beforeQrSends + 1);
   });
+  it("keeps inbound replies with outreach disabled and cancels dispatch after audience changes", async () => {
+    const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
+    try {
+      await prisma.tenant.update({ where: { id: tenantId }, data: { settingsJson: { aiAutomation: { defaultMode: "AUTO", allowProactiveOutbound: false } } } });
+      await webhook(inbound("audience-change"));
+      const event = await prisma.outboxEvent.findFirstOrThrow({ where: { entityId: cloudConversation, type: "whatsapp.ai_reply" }, orderBy: { availableAt: "desc" } });
+      await processWhatsAppAiReply(prisma, event, async () => ({ reply: "Draft before changing rules", handoff: false }));
+      const message = await prisma.message.findUniqueOrThrow({ where: { connectionScopedId: event.id } });
+      await prisma.tenant.update({ where: { id: tenantId }, data: { settingsJson: { aiAutomation: { defaultMode: "AUTO", replyAudience: { audience: "new", since: new Date(Date.now() + 60000).toISOString() } } } } });
+      const beforeSends = sends;
+      await deliverCloudMessage(prisma, tenantId, cloudId, message.id);
+      assert.equal(sends, beforeSends);
+      assert.equal((await prisma.message.findUniqueOrThrow({ where: { id: message.id } })).operationState, "canceled");
+    } finally {
+      await prisma.tenant.update({ where: { id: tenantId }, data: { settingsJson: tenant.settingsJson as never } });
+    }
+  });
+
   it("cancels an AI answer when a staff member takes over during generation", async () => {
     await webhook(inbound("ai-takeover-in"));
     const event = await prisma.outboxEvent.findFirstOrThrow({ where: { entityId: cloudConversation, type: "whatsapp.ai_reply" }, orderBy: { availableAt: "desc" } });

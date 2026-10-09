@@ -442,10 +442,6 @@ export async function getSituationOverview(
   const tenantRow = await prisma.tenant.findUnique({ where: { id: tid } });
   const ops = parseOpsSettings(tenantRow?.settingsJson);
   await ensureDealPipelineStages(prisma, tid);
-  const { enqueuePendingAutoStarts } = await import("./inquiryAutomationQueue.ts");
-  void enqueuePendingAutoStarts(prisma, tid).catch((err) => {
-    console.error("enqueuePendingAutoStarts", err);
-  });
 
   const presetRaw = String(query.period || query.periodPreset || "today");
   const allowed: PeriodPreset[] = [

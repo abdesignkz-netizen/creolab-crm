@@ -9,6 +9,7 @@ import {
   MODE_LABEL,
   parseAIAutomationSettings,
   parseCrmAutomation,
+  parseReplyAudience,
   parseScheduleWindow,
   normalizeCompanyTimezone,
   DEFAULT_CUSTOM_SCHEDULE,
@@ -36,7 +37,14 @@ export async function getAIAutomationSettings(prisma: PrismaClient, auth: AuthCo
     const keys = Object.keys(tenant.workingHoursJson as object);
     if (keys.length) settings.workingHours = fromTenant;
   }
+  const channels = await prisma.channelConnection.findMany({ where: { tenantId: membership.tenantId, channelType: "whatsapp" },
+    select: { integrationId: true, status: true, autoReply: true, integration: { select: { name: true, type: true } } } });
+  const legacyChannels = await prisma.integration.findMany({ where: { tenantId: membership.tenantId, type: "whatsapp_seller" },
+    select: { id: true, name: true, status: true, connectionStatus: true } });
   return {
+    runtimePaused: Boolean((tenant?.settingsJson as any)?.runtime?.aiPaused),
+    legacyChannels: legacyChannels.map(channel => ({ id: channel.id, name: channel.name, connected: channel.status !== "disabled" && channel.connectionStatus === "CONNECTED" })),
+    channels: channels.map(channel => ({ id: channel.integrationId, name: channel.integration.name, type: channel.integration.type, connected: channel.status === "active", enabled: channel.autoReply })),
     ...settings,
     timezone: tenant?.timezone || "Asia/Almaty",
     modeLabel: MODE_LABEL[settings.defaultMode],
@@ -64,6 +72,12 @@ export async function updateAIAutomationSettings(
     await requireFeature(prisma, auth, "ADVANCED_AUTOMATION");
   }
   let next = parseAIAutomationSettings(tenant.settingsJson);
+  if (input.replyAudience) {
+    if (!["all", "new", "existing"].includes(input.replyAudience.audience)) throw new ApiError(422, "invalid", "Выберите аудиторию ИИ");
+    // The server owns the cohort boundary. Ordinary edits never move existing clients into a new cohort.
+    next.replyAudience = parseReplyAudience({ audience: input.replyAudience.audience,
+      since: previous.replyAudience.since || (input.replyAudience.audience !== "all" ? new Date().toISOString() : null) });
+  }
   if (input.crm) next.crm = parseCrmAutomation({ ...next.crm, ...input.crm });
   if (input.defaultMode) {
     next = applyModeToSettings(next, input.defaultMode);
@@ -126,18 +140,11 @@ export async function updateAIAutomationSettings(
     },
   });
 
-  if (next.autoStartAiManager) {
-    const { enqueuePendingAutoStarts } = await import("./inquiryAutomationQueue.ts");
-    void enqueuePendingAutoStarts(prisma, tenant.id).catch((err) => {
-      console.error("enqueuePendingAutoStarts", err);
-    });
-  }
-
   return {
     ...next,
     timezone,
     modeLabel: MODE_LABEL[next.defaultMode],
-    message: `Режим обработки новых заявок изменён на «${MODE_LABEL[next.defaultMode]}». Новые заявки будут обрабатываться по новым правилам. Уже запущенные AI-задачи не меняются.`,
+    message: "Настройки ИИ-менеджера сохранены",
   };
 }
 

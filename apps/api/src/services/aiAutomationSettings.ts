@@ -56,7 +56,23 @@ export type FollowUpSettings = {
   respectWorkingHours: boolean;
 };
 
+export type ReplyAudience = { audience: "all" | "new" | "existing"; since: string | null };
+export function parseReplyAudience(raw: unknown): ReplyAudience {
+  const row = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+  return { audience: row.audience === "new" || row.audience === "existing" ? row.audience : "all",
+    since: typeof row.since === "string" && Number.isFinite(Date.parse(row.since)) ? new Date(row.since).toISOString() : null };
+}
+/** A fixed cohort: continuing a new client's conversation does not turn them into an excluded old client. */
+export function replyAudienceAllows(rule: ReplyAudience, firstSeenAt?: Date | string | null): boolean {
+  if (rule.audience === "all") return true;
+  const joined = firstSeenAt ? new Date(firstSeenAt).getTime() : NaN;
+  const cutoff = rule.since ? Date.parse(rule.since) : NaN;
+  if (!Number.isFinite(joined) || !Number.isFinite(cutoff)) return false;
+  return rule.audience === "new" ? joined >= cutoff : joined < cutoff;
+}
+
 export type AIAutomationSettings = {
+  replyAudience: ReplyAudience;
   /** Conversation intelligence permissions, independent of permission to send replies. */
   crm: CrmAutomationSettings;
   defaultMode: AutomationMode;
@@ -196,6 +212,7 @@ export function cloneDayHours(source: Record<number, DayHours> = DEFAULT_DAY_HOU
 
 /** Safe default: analyze + prepare task, no proactive outbound */
 export const DEFAULT_AI_AUTOMATION: AIAutomationSettings = {
+  replyAudience: { audience: "all", since: null },
   crm: { ...DEFAULT_CRM_AUTOMATION },
   defaultMode: "CONFIRM",
   ...MODE_FLAGS.CONFIRM,
@@ -366,6 +383,7 @@ export function modeFromFlags(flags: {
 export function parseAIAutomationSettings(raw: unknown): AIAutomationSettings {
   const base: AIAutomationSettings = {
     ...DEFAULT_AI_AUTOMATION,
+    replyAudience: { audience: "all", since: null },
     crm: { ...DEFAULT_CRM_AUTOMATION },
     workingHours: { ...DEFAULT_WORKING_HOURS, days: [...DEFAULT_WORKING_HOURS.days] },
     customSchedule: { ...DEFAULT_CUSTOM_SCHEDULE, days: [...DEFAULT_CUSTOM_SCHEDULE.days] },
@@ -407,6 +425,7 @@ export function parseAIAutomationSettings(raw: unknown): AIAutomationSettings {
   base.sourceModes = { ...base.sourceModes, ...parseModeMap(block.sourceModes) };
   base.serviceModes = { ...base.serviceModes, ...parseModeMap(block.serviceModes) };
   base.integrationModes = { ...base.integrationModes, ...parseModeMap(block.integrationModes) };
+  base.replyAudience = parseReplyAudience(block.replyAudience);
   base.handoff = parseHandoffSettings(block.handoff);
   base.crm = parseCrmAutomation(block.crm);
   base.followUp = parseFollowUpSettings(block.followUp);
@@ -437,6 +456,7 @@ export function mergeAIAutomationIntoSettingsJson(
   const base =
     current && typeof current === "object" ? { ...(current as Record<string, unknown>) } : {};
   base.aiAutomation = {
+    replyAudience: next.replyAudience,
     crm: next.crm,
     defaultMode: next.defaultMode,
     analyzeNewRequests: next.analyzeNewRequests,
@@ -498,14 +518,14 @@ function hmToMinutes(hm: string) {
 
 export function isWithinScheduleWindow(now: Date, timeZone: string, window: ScheduleWindow): boolean {
   const { weekday, minutes } = localPartsInTimezone(now, timeZone);
-  if (!window.days.includes(weekday)) return false;
   const start = hmToMinutes(window.start);
   const end = hmToMinutes(window.end);
   if (end <= start) {
-    // overnight window e.g. 22:00–06:00
-    return minutes >= start || minutes < end;
+    // The early-morning part belongs to the previous day's overnight shift.
+    return (window.days.includes(weekday) && minutes >= start)
+      || (window.days.includes((weekday + 6) % 7) && minutes < end);
   }
-  return minutes >= start && minutes < end;
+  return window.days.includes(weekday) && minutes >= start && minutes < end;
 }
 
 export function isWithinAiSchedule(
@@ -534,11 +554,13 @@ export function isWithinConversationHours(
   if (hours.mode !== "schedule") return true;
   const { weekday, minutes } = localPartsInTimezone(now, timeZone);
   const day = hours.days[weekday] || DEFAULT_DAY_HOURS[weekday];
-  if (!day?.enabled) return false;
-  const start = hmToMinutes(day.start);
-  const end = hmToMinutes(day.end);
-  if (end <= start) return minutes >= start || minutes < end;
-  return minutes >= start && minutes < end;
+  if (day?.enabled) {
+    const start = hmToMinutes(day.start);
+    const end = hmToMinutes(day.end);
+    if (minutes >= start && (end <= start || minutes < end)) return true;
+  }
+  const previous = hours.days[(weekday + 6) % 7] || DEFAULT_DAY_HOURS[(weekday + 6) % 7];
+  return Boolean(previous?.enabled && hmToMinutes(previous.end) <= hmToMinutes(previous.start) && minutes < hmToMinutes(previous.end));
 }
 
 export function nextWorkingInstant(now: Date, timeZone: string, hours: ConversationHoursSettings): Date {
@@ -557,12 +579,26 @@ export function nextWorkingInstant(now: Date, timeZone: string, hours: Conversat
 }
 
 function dateAtTimezoneMinutes(day: Date, timeZone: string, minutes: number) {
-  const hour = Math.floor(minutes / 60);
-  const minute = minutes % 60;
-  const utcGuess = new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), hour, minute, 0, 0));
-  const { minutes: localMinutes } = localPartsInTimezone(utcGuess, timeZone);
-  const delta = localMinutes - minutes;
-  return new Date(utcGuess.getTime() - delta * 60_000);
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: normalizeCompanyTimezone(timeZone), year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  });
+  const local = (date: Date) => Object.fromEntries(fmt.formatToParts(date).map(part => [part.type, part.value]));
+  const parts = local(day);
+  const target = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), Math.floor(minutes / 60), minutes % 60);
+  let guess = target;
+  let previous = guess;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const value = local(new Date(guess));
+    const actual = Date.UTC(Number(value.year), Number(value.month) - 1, Number(value.day), Number(value.hour), Number(value.minute));
+    const next = guess + target - actual;
+    if (next === guess) return new Date(guess);
+    // For a nonexistent local time during a DST jump, use the later instant.
+    if (next === previous) return new Date(Math.max(guess, next));
+    previous = guess;
+    guess = next;
+  }
+  return new Date(guess);
 }
 
 export function offHoursBlocksOutbound(settings: Pick<AIAutomationSettings, "conversationHours">): boolean {

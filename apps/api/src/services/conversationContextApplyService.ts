@@ -165,7 +165,7 @@ export async function applyAnalyzedConversation(prisma: PrismaClient, tid: strin
       ...deliveredConversationMessage }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 80 });
     const attr = asObject(conversation.contact?.attributionJson);
     const fieldMeta = asObject(inquiry?.fieldMetaJson);
-    const policy = decideAutomationPolicy({ settingsJson: tenant.settingsJson,
+    const policy = decideAutomationPolicy({ settingsJson: tenant.settingsJson, interaction: "crm",
       sourceChannel: conversation.connection?.channelType || inquiry?.sourceChannel,
       source: inquiry?.source, serviceCategory: inquiry?.serviceCategory,
       integrationId: integration?.id, integrationAutomationMode: integration?.automationMode,

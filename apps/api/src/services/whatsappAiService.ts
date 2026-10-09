@@ -46,8 +46,8 @@ const REPLY_ATTEMPTS = 2;
 const RETRY_DELAY_MS = 2000;
 const retryableModelErrors = new Set(["llm_timeout", "llm_network_error", "http_408", "http_429", "http_500", "http_502", "http_503", "http_504"]);
 const clientAiMode = (value: unknown) => { const setting = record(value).aiAutomation; return typeof setting === "string" ? setting : record(setting).mode; };
-export function automaticWhatsAppMode(settingsJson: unknown, integration: { id: string; type: string; automationMode?: string | null }, contact: { doNotContact?: boolean; attributionJson?: unknown }) {
-  const decision = decideAutomationPolicy({ settingsJson, sourceChannel: "whatsapp", sourceType: integration.type,
+export function automaticWhatsAppMode(settingsJson: unknown, integration: { id: string; type: string; automationMode?: string | null }, contact: { doNotContact?: boolean; attributionJson?: unknown; firstSeenAt?: Date }) {
+  const decision = decideAutomationPolicy({ settingsJson, interaction: "reply", contactFirstSeenAt: contact.firstSeenAt, sourceChannel: "whatsapp", sourceType: integration.type,
     integrationId: integration.id, integrationAutomationMode: integration.automationMode,
     doNotContact: Boolean(record(contact.attributionJson).doNotContact), clientAiMode: clientAiMode(contact.attributionJson) });
   return decision.autoStart && !decision.hardBlocked && !record(settingsJson).runtime?.aiPaused;
@@ -113,7 +113,7 @@ export async function directAiSendAllowed(prisma: PrismaClient, tenantId: string
   const settings = parseAIAutomationSettings(conversation.tenant.settingsJson);
   const clientMode = String(clientAiMode(conversation.contact?.attributionJson) || "").toUpperCase();
   if (["OFF", "HUMAN", "MANUAL", "ASSIST"].includes(clientMode) || !settings.analyzeNewRequests || record(conversation.tenant.settingsJson).runtime?.aiPaused) return false;
-  const policy = decideAutomationPolicy({ settingsJson: conversation.tenant.settingsJson, sourceChannel: "whatsapp", sourceType: channel.integration.type, integrationId: channel.integrationId, integrationAutomationMode: channel.integration.automationMode, clientAiMode: clientMode });
+  const policy = decideAutomationPolicy({ settingsJson: conversation.tenant.settingsJson, interaction: "reply", contactFirstSeenAt: conversation.contact?.firstSeenAt, sourceChannel: "whatsapp", sourceType: channel.integration.type, integrationId: channel.integrationId, integrationAutomationMode: channel.integration.automationMode, clientAiMode: clientMode });
   if (policy.mode === "MANUAL" || policy.mode === "ASSIST") return false;
   if (!isWithinAiSchedule(new Date(), conversation.tenant.timezone, settings)) return false;
   if (await directAiReadiness(prisma, tenantId)) return false;

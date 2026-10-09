@@ -1,30 +1,26 @@
 import { WorkspaceSectionNav } from "../components/WorkspaceSectionNav";
 import { InlineFeedback } from "../components/InlineFeedback";
-import { uiText, useUiText, localizeUiOptions } from "../lib/uiText";
-import { useSession } from "../lib/session";
+import { useUiText, localizeUiOptions } from "../lib/uiText";
+import { useLocale, useSession } from "../lib/session";
 import { notifySaved } from "../components/SaveNotice";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
+import { NavIcon } from "../components/NavIcon";
+import "../ai-manager-settings.css";
 
-const MODE_HELP: Record<string, string> = {
-  MANUAL: "Заявка сохраняется. AI её не разбирает и клиенту не пишет.",
-  ASSIST: "AI разбирает заявку и показывает подсказку. Клиенту не пишет.",
-  CONFIRM: "AI готовит задачу и ждёт, пока вы нажмёте «Начать обработку».",
-  AUTO: "AI разбирает заявку и сам пишет клиенту, если WhatsApp подключён.",
-};
-
-type SettingsSection = "requests" | "crm" | "prompt" | "knowledge" | "handoff" | "followup" | "hours";
+type SettingsSection = "replies" | "requests" | "crm" | "prompt" | "knowledge" | "handoff" | "hours";
 
 const SECTION_ITEMS: Array<{ id: SettingsSection; label: string }> = [
-  { id: "requests", label: "Новые заявки" },
-  { id: "crm", label: "CRM по переписке" },
-  { id: "prompt", label: "Промпт" },
-  { id: "knowledge", label: "База знаний" },
+  { id: "replies", label: "Кому отвечать" },
+  { id: "hours", label: "Когда отвечать" },
+  { id: "requests", label: "Писать первым" },
   { id: "handoff", label: "Передача менеджеру" },
-  { id: "followup", label: "Повторный контакт" },
-  { id: "hours", label: "Рабочее время" },
 ];
+const EXTRA_SECTIONS: Array<{ id: SettingsSection; label: string }> = [
+  { id: "crm", label: "CRM по переписке" }, { id: "prompt", label: "Промпт" }, { id: "knowledge", label: "База знаний" },
+];
+type Audience = { audience: "all" | "new" | "existing"; since: string | null };
 
 const CRM_OPTIONS = [
   ["enabled", "Автоматически обновлять CRM по переписке"],
@@ -128,93 +124,25 @@ function delayMinutes(value: number, unit: "hours" | "days") {
   return unit === "days" ? Math.min(30, Math.round(n)) * 1440 : Math.min(72, Math.round(n)) * 60;
 }
 
-const DAY_OPTIONS = [
-  { value: 1, label: "Пн" },
-  { value: 2, label: "Вт" },
-  { value: 3, label: "Ср" },
-  { value: 4, label: "Чт" },
-  { value: 5, label: "Пт" },
-  { value: 6, label: "Сб" },
-  { value: 0, label: "Вс" },
-];
-
-type ScheduleWindow = { days: number[]; start: string; end: string };
-
-const DEFAULT_WORKING: ScheduleWindow = { days: [1, 2, 3, 4, 5], start: "09:00", end: "18:00" };
-const DEFAULT_CUSTOM: ScheduleWindow = { days: [1, 2, 3, 4, 5, 6], start: "10:00", end: "20:00" };
-
-function ScheduleEditor({
-  value,
-  onChange,
-  timezone,
-}: {
-  value: ScheduleWindow;
-  onChange: (next: ScheduleWindow) => void;
-  timezone: string;
-}) {
-  const uiText = useUiText();
-  function toggleDay(day: number) {
-    const has = value.days.includes(day);
-    const days = has ? value.days.filter((d) => d !== day) : [...value.days, day].sort((a, b) => a - b);
-    onChange({ ...value, days: days.length ? days : value.days });
-  }
-
-  return (
-    <div className="stack" style={{ marginTop: 10, gap: 10 }}>
-      <div className="muted">{uiText("Часовой пояс:")}{" "}{timezone}</div>
-      <div className="actions" style={{ flexWrap: "wrap" }}>
-        {localizeUiOptions(DAY_OPTIONS, uiText).map((d) => (
-          <button
-            key={d.value}
-            type="button"
-            className={value.days.includes(d.value) ? "btn" : "btn secondary"}
-            onClick={() => toggleDay(d.value)}
-          >
-            {d.label}
-          </button>
-        ))}
-      </div>
-      <div className="row" style={{ gap: 12, alignItems: "end" }}>
-        <label>
-          {uiText("С")}<input
-            type="time"
-            value={value.start}
-            onChange={(e) => onChange({ ...value, start: e.target.value || value.start })}
-          />
-        </label>
-        <label>
-          {uiText("До")}<input
-            type="time"
-            value={value.end}
-            onChange={(e) => onChange({ ...value, end: e.target.value || value.end })}
-          />
-        </label>
-      </div>
-      <p className="muted">
-        {uiText("Вне окна AI всё ещё анализирует и готовит задачу, но не пишет клиенту сам — дождётся рабочего времени или кнопки менеджера.")}</p>
-    </div>
-  );
-}
-
 export function AiAutomationSettingsPage() {
   const uiText = useUiText();
   const { me } = useSession();
+  const locale = useLocale();
+  const text = (ru: string, kk: string, en: string) => locale === "kk" ? kk : locale === "en" ? en : ru;
   const aiManagerAllowed = Boolean(me?.billing?.entitlements?.AI_MANAGER);
   const aiManagerTrial = aiManagerAllowed && me?.billing?.planCode === "BASQAR_FREE";
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState("");
   const [hint, setHint] = useState("");
   const [busy, setBusy] = useState(false);
-  const [editing, setEditing] = useState(true);
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [section, setSection] = useState<SettingsSection>("requests");
+  const [section, setSection] = useState<SettingsSection>("replies");
+  const [replyAudience, setReplyAudience] = useState<Audience>({ audience: "all", since: null });
+  const [proactive, setProactive] = useState(true);
+  const [savedSnapshot, setSavedSnapshot] = useState("");
   const [crm, setCrm] = useState<CrmState>(DEFAULT_CRM);
   const [mode, setMode] = useState("CONFIRM");
   const [processRepeat, setProcessRepeat] = useState(true);
   const [sla, setSla] = useState(15);
-  const [scheduleMode, setScheduleMode] = useState("always");
-  const [workingHours, setWorkingHours] = useState<ScheduleWindow>(DEFAULT_WORKING);
-  const [customSchedule, setCustomSchedule] = useState<ScheduleWindow>(DEFAULT_CUSTOM);
   const [timezone, setTimezone] = useState("Asia/Almaty");
   const [handoff, setHandoff] = useState<HandoffState>(DEFAULT_HANDOFF);
   const [followUp, setFollowUp] = useState<FollowUpState>(DEFAULT_FOLLOWUP);
@@ -223,13 +151,14 @@ export function AiAutomationSettingsPage() {
   async function load() {
     try {
       const next = (await api.aiAutomationSettings()) as {
+        replyAudience?: Audience;
         crm?: CrmState;
         defaultMode: string;
         processRepeatRequests: boolean;
         firstContactSlaMinutes: number;
         scheduleMode: string;
-        workingHours?: ScheduleWindow;
-        customSchedule?: ScheduleWindow;
+        workingHours?: { days: number[]; start: string; end: string };
+        customSchedule?: { days: number[]; start: string; end: string };
         timezone?: string;
         modes?: Array<{ mode: string; label: string }>;
         sourceModes?: Record<string, string>;
@@ -239,14 +168,13 @@ export function AiAutomationSettingsPage() {
         followUp?: FollowUpState;
         conversationHours?: ConversationHoursState;
       };
+      setReplyAudience(next.replyAudience || { audience: "all", since: null });
+      setProactive(next.allowProactiveOutbound !== false);
       setCrm({ ...DEFAULT_CRM, ...next.crm });
       setData(next);
       setMode(next.defaultMode);
       setProcessRepeat(Boolean(next.processRepeatRequests));
       setSla(Number(next.firstContactSlaMinutes) || 15);
-      setScheduleMode(next.scheduleMode || "always");
-      if (next.workingHours) setWorkingHours(next.workingHours);
-      if (next.customSchedule) setCustomSchedule(next.customSchedule);
       setTimezone(next.timezone || "Asia/Almaty");
       if (next.handoff) {
         setHandoff({
@@ -274,6 +202,12 @@ export function AiAutomationSettingsPage() {
           days,
         });
       }
+      // Surface the effective legacy schedule in the single schedule editor.
+      if (next.conversationHours?.mode !== "schedule" && next.scheduleMode !== "always") {
+        const legacy = next.scheduleMode === "custom" ? next.customSchedule : next.workingHours;
+        if (legacy) setConversationHours({ mode: "schedule", offHoursBehavior: "accept_no_process",
+          days: Object.fromEntries(WEEK_DAYS.map(day => [day.value, { enabled: legacy.days.includes(day.value), start: legacy.start, end: legacy.end }])) });
+      }
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : uiText("Не удалось загрузить"));
@@ -284,6 +218,17 @@ export function AiAutomationSettingsPage() {
     if (aiManagerAllowed) void load();
   }, [aiManagerAllowed]);
 
+  const draftSnapshot = JSON.stringify({ crm, mode, processRepeat, sla, timezone, handoff, followUp, conversationHours, replyAudience, proactive });
+  useEffect(() => { if (data) setSavedSnapshot(draftSnapshot); }, [data]);
+  const dirty = Boolean(savedSnapshot && savedSnapshot !== draftSnapshot);
+  useEffect(() => { if (dirty) setHint(""); }, [dirty]);
+  useEffect(() => {
+    if (!dirty) return;
+    const preventLoss = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", preventLoss);
+    return () => window.removeEventListener("beforeunload", preventLoss);
+  }, [dirty]);
+
   async function save() {
     if (busy) return;
     setBusy(true);
@@ -292,19 +237,18 @@ export function AiAutomationSettingsPage() {
     try {
       const result = (await api.updateAiAutomationSettings({
         crm,
+        replyAudience,
+        allowProactiveOutbound: proactive,
         defaultMode: mode,
         processRepeatRequests: processRepeat,
         firstContactSlaMinutes: sla,
-        scheduleMode,
-        workingHours,
-        customSchedule,
+        scheduleMode: "always",
         timezone,
         handoff,
         followUp,
         conversationHours,
       })) as { message?: string };
       setHint(result.message || uiText("Сохранено"));
-      setEditing(false);
       notifySaved(uiText("Настройки AI сохранены"));
       await load();
     } catch (err) {
@@ -327,32 +271,31 @@ export function AiAutomationSettingsPage() {
             <Link to="/settings">{uiText("Настройки")}</Link> {" "}{uiText("· AI-менеджер")}</p>
           <h2>{uiText("AI-менеджер")}</h2>
           <p className="muted">
-            {uiText("Как компания обрабатывает заявки и диалоги. Текст ответов и база знаний задаёт администратор сервиса.")}</p>
+            {text("Выберите, кому и когда отвечает ИИ. Отдельно настройте первый контакт и передачу сотруднику.", "ЖИ кімге және қашан жауап беретінін таңдаңыз. Алғашқы байланысты және қызметкерге беруді бөлек баптаңыз.", "Choose who AI replies to and when. Set first contact and staff handoff separately.")}</p>
         </div>
       </div>
 
       {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
       {hint ? <InlineFeedback kind="success" className="ok">{hint}</InlineFeedback> : null}
+      {data.runtimePaused && <p className="banner">{text("ИИ приостановлен в управлении компанией. Эти правила начнут действовать после снятия паузы.", "Компанияны басқаруда ЖИ кідіртілген. Ережелер кідіріс алынғаннан кейін іске қосылады.", "AI is paused in company management. These rules apply after the pause is lifted.")}</p>}
 
-      <div className="panel ai-current-summary">
-        <b>{uiText("Сейчас сохранено")}</b>
-        <p>{uiText("Новые заявки")}: {localizeUiOptions(MODE_HELP, uiText)[data?.defaultMode] || "—"}</p>
-        <p className="muted">{uiText("Обработка заявок")}: {data?.scheduleMode === "always" ? uiText("Круглосуточно") : `${uiText("По расписанию")} · ${(data?.scheduleMode === "custom" ? data?.customSchedule : data?.workingHours)?.start || "—"}–${(data?.scheduleMode === "custom" ? data?.customSchedule : data?.workingHours)?.end || "—"}`} · {data?.timezone || "Asia/Almaty"}</p>
-        <p className="muted">{uiText("Ответы в диалогах")}: {data?.conversationHours?.mode === "schedule" ? uiText("По расписанию") : uiText("Круглосуточно")}</p>
+      <div className="ai-manager-overview">
+        <div className="ai-manager-heading"><span className="ai-manager-mark"><NavIcon to="/admin/ai-managers" /></span><div><b>{text("Правила работы", "Жұмыс ережелері", "Reply rules")}</b><p>{dirty ? text("Предпросмотр · есть несохранённые изменения", "Алдын ала көрініс · сақталмаған өзгерістер бар", "Preview · unsaved changes") : text("Текущие настройки", "Ағымдағы баптаулар", "Current settings")}</p></div><span className={`badge ${mode === "AUTO" ? "ok" : ""}`}>{data.runtimePaused ? text("На паузе", "Кідірісте", "Paused") : mode === "AUTO" ? text("Автоматически", "Автоматты түрде", "Automatic") : mode === "MANUAL" ? text("Выключен", "Өшірулі", "Off") : text("С участием сотрудника", "Қызметкердің қатысуымен", "Staff assisted")}</span></div>
+        <div className="ai-manager-facts">
+          <button type="button" onClick={() => setSection("replies")}><small>{text("Кому", "Кімге", "Who")}</small><b>{replyAudience.audience === "all" ? text("Всем клиентам", "Барлық клиентке", "All clients") : replyAudience.audience === "new" ? text("Только новым", "Тек жаңа клиенттерге", "New clients only") : text("Текущей базе", "Қазіргі клиенттерге", "Existing clients only")}</b></button>
+          <button type="button" onClick={() => setSection("hours")}><small>{text("Когда", "Қашан", "When")}</small><b>{conversationHours.mode === "always" || conversationHours.mode === "schedule" && conversationHours.offHoursBehavior === "continue" ? uiText("Круглосуточно") : uiText("По расписанию")}</b></button>
+          <button type="button" onClick={() => setSection("requests")}><small>{text("Первый контакт", "Алғашқы байланыс", "First contact")}</small><b>{proactive && mode === "AUTO" ? text("По входящим заявкам", "Кіріс өтінімдер бойынша", "For incoming requests") : text("Без сообщений первым", "Бірінші болып жазбайды", "No first messages")}</b></button>
+        </div>
       </div>
-      <WorkspaceSectionNav label={uiText("Настройки AI")} value={section} options={localizeUiOptions(SECTION_ITEMS, uiText)} onChange={value => { setSection(value); setEditing(true); }} />
+      <WorkspaceSectionNav label={uiText("Настройки AI")} value={section} options={[...SECTION_ITEMS, ...(EXTRA_SECTIONS.some(item => item.id === section) ? EXTRA_SECTIONS : [])].map(item => ({ ...item, label: item.id === "replies" ? text("Кому отвечать", "Кімге жауап беру", "Who to reply to") : item.id === "hours" ? text("Когда отвечать", "Қашан жауап беру", "When to reply") : item.id === "requests" ? text("Писать первым", "Бірінші болып жазу", "First contact") : uiText(item.label) }))} onChange={setSection} />
+      <details className="ai-manager-extra"><summary>{uiText("Дополнительные настройки")}</summary><div className="actions">{EXTRA_SECTIONS.map(item => <button key={item.id} className={`btn ${section === item.id ? "" : "secondary"}`} onClick={() => setSection(item.id)}>{uiText(item.label)}</button>)}</div></details>
 
-      {!editing ? <div className="panel saved-editor-summary">
-        <b>{uiText("Настройки AI-менеджера сохранены")}</b>
-        <button type="button" className="btn secondary" autoFocus onClick={() => { setEditing(true); setHint(""); }}>{uiText("Изменить настройки")}</button>
-      </div> : <>
-      {section === "requests" ? (
-        <>
-      <p className="muted">{uiText("Как обрабатывать новые заявки. Уже запущенные задачи не меняются.")}</p>
+      <fieldset className="ai-manager-editor" disabled={busy}>
+      {section === "replies" ? <>
       <div className="panel">
-        <b>{uiText("Режим по умолчанию")}</b>
-        <div className="ai-mode-grid" role="group" aria-label={uiText("Режим обработки новых заявок")}>
-          {(data?.modes || []).map((item: { mode: string; label: string }) => (
+        <b>{text("Как работает ИИ", "ЖИ қалай жұмыс істейді", "How AI works")}</b>
+        <div className="ai-mode-grid" role="group" aria-label={text("Как работает ИИ", "ЖИ қалай жұмыс істейді", "How AI works")}>
+          {([...data.modes].sort((a: { mode: string }, b: { mode: string }) => ["AUTO", "CONFIRM", "ASSIST", "MANUAL"].indexOf(a.mode) - ["AUTO", "CONFIRM", "ASSIST", "MANUAL"].indexOf(b.mode))).map((item: { mode: string; label: string }) => (
             <label key={item.mode} className={`ai-mode-card${mode === item.mode ? " is-selected" : ""}`}>
               <input
                 type="radio"
@@ -361,13 +304,32 @@ export function AiAutomationSettingsPage() {
                 onChange={() => setMode(item.mode)}
               />
               <span>
-                <b>{uiText(item.label)}</b>
-                <span className="ai-mode-help">{localizeUiOptions(MODE_HELP, uiText)[item.mode]}</span>
+                <b>{item.mode === "AUTO" ? text("Отвечает автоматически", "Автоматты жауап береді", "Automatic replies") : item.mode === "CONFIRM" ? text("Включаю в нужном диалоге", "Қажетті диалогта қосамын", "I enable AI per conversation") : item.mode === "MANUAL" ? text("Выключен", "Өшірулі", "Off") : text("Только помогает сотруднику", "Қызметкерге ғана көмектеседі", "Staff assistance only")}</b>
+                <span className="ai-mode-help">{item.mode === "AUTO" ? text("Берёт новые диалоги по правилам ниже. Диалоги сотрудников остаются у сотрудников.", "Төмендегі ережелерге сай жаңа диалогтарды алады. Қызметкер диалогтары қызметкерде қалады.", "Starts new conversations under these rules. Staff conversations stay with staff.") : item.mode === "CONFIRM" ? text("Для ответа нажмите «Вернуть AI» в диалоге или запустите подготовленную задачу.", "Жауап алу үшін диалогта «ЖИ-ге қайтару» түймесін басыңыз немесе дайын тапсырманы іске қосыңыз.", "Select Return to AI in a conversation or start a prepared task.") : item.mode === "MANUAL" ? text("Не анализирует обращения и не пишет клиентам.", "Өтініштерді талдамайды және клиенттерге жазбайды.", "Does not analyze requests or message clients.") : text("Анализирует обращения для сотрудника. Сам клиентам не отвечает.", "Қызметкер үшін өтініштерді талдайды. Клиенттерге өзі жауап бермейді.", "Analyzes requests for staff without replying to clients.")}</span>
               </span>
             </label>
           ))}
         </div>
       </div>
+      <div className="panel ai-audience-panel"><h3>{text("Кому можно отвечать", "Кімге жауап беруге болады", "Who can receive replies")}</h3>
+        <div className="ai-audience-grid">{([
+          ["all", text("Всем клиентам", "Барлық клиентке", "All clients"), text("Новым и тем, кто уже есть в CRM.", "Жаңа және CRM-дегі клиенттерге.", "New clients and clients already in the CRM.")],
+          ["new", text("Только новым клиентам", "Тек жаңа клиенттерге", "New clients only"), text("Клиентам, появившимся в CRM после включения этого правила.", "Ереже қосылғаннан кейін CRM-де пайда болған клиенттерге.", "Clients added to the CRM after this rule was enabled.")],
+          ["existing", text("Только текущей базе", "Тек қазіргі клиенттерге", "Existing clients only"), text("Клиентам, которые были в CRM до включения правила.", "Ереже қосылғанға дейін CRM-де болған клиенттерге.", "Clients already in the CRM when the rule was enabled.")],
+        ] as const).map(([value, title, description]) => <label className={`ai-mode-card${replyAudience.audience === value ? " is-selected" : ""}`} key={value}><input type="radio" name="replyAudience" value={value} checked={replyAudience.audience === value} onChange={() => setReplyAudience(previous => ({ ...previous, audience: value }))}/><span><b>{title}</b><span className="ai-mode-help">{description}</span></span></label>)}</div>
+        {replyAudience.audience !== "all" && <p className="muted">{replyAudience.since ? <>{text("Граница новой и текущей базы:", "Жаңа және қазіргі клиенттер шекарасы:", "New/existing client boundary:")} {new Date(replyAudience.since).toLocaleString(locale === "kk" ? "kk-KZ" : locale === "en" ? "en-GB" : "ru-RU", { timeZone: timezone })} · {timezone}</> : text("Отсчёт начнётся после сохранения. Последующие изменения расписания не сдвигают эту дату.", "Есептеу сақтағаннан кейін басталады. Кестені өзгерту бұл күнді өзгертпейді.", "The boundary is set when you save. Later schedule changes do not move it.")}</p>}
+        <p className="ai-manager-note">{text("ИИ отвечает только в подключённых каналах с включёнными ИИ-ответами. Передача диалога человеку и запрет контакта имеют приоритет. Выбор «Всем» не запускает рассылку и не забирает диалоги у сотрудников.", "ЖИ тек қосылған және ЖИ жауаптары қосулы арналарда жауап береді. Адамға берілген диалог пен байланысуға тыйым басым. «Барлығына» тарату бастамайды және қызметкерлерден диалогтарды алмайды.", "AI replies only in connected channels with AI replies enabled. Staff handoff and contact restrictions take priority. All clients does not start a campaign or take conversations from staff.")}</p>
+      </div>
+      <div className="panel"><div className="ai-manager-heading"><div><h3>{text("Где работает ИИ", "ЖИ қайда жұмыс істейді", "Connected channels")}</h3><p className="muted">{text("ИИ-ответы включаются отдельно для каждого номера WhatsApp.", "ЖИ жауаптары әр WhatsApp нөміріне бөлек қосылады.", "AI replies are enabled separately for each WhatsApp number.")}</p></div><Link className="btn secondary" to="/integrations">{uiText("Интеграции")}</Link></div>
+        {data.channels?.length ? data.channels.map((channel: any) => <div className="ai-channel-row" key={channel.id}><b>{channel.name}</b><span className={`badge ${channel.connected && channel.enabled ? "ok" : ""}`}>{!channel.connected ? text("Не подключён", "Қосылмаған", "Disconnected") : channel.enabled ? text("ИИ-ответы включены", "ЖИ жауаптары қосулы", "AI replies enabled") : text("ИИ-ответы выключены", "ЖИ жауаптары өшірулі", "AI replies disabled")}</span></div>) : <p className="muted">{text("Подключите WhatsApp, чтобы ИИ мог отвечать клиентам.", "ЖИ клиенттерге жауап беруі үшін WhatsApp қосыңыз.", "Connect WhatsApp to enable client replies.")}</p>}
+        {data.legacyChannels?.length > 0 && <div className="ai-manager-note"><b>{text("Отдельный AI-продавец", "Жеке ЖИ-сатушы", "Standalone AI seller")}</b><p>{data.legacyChannels.map((channel: { name: string }) => channel.name).join(", ")}</p><p>{text("В этом подключении выбор аудитории может потребовать обновления у администратора. Если определить клиента не удастся, ИИ пропустит его сообщение. WhatsApp через QR и Cloud API поддерживают правила сразу.", "Бұл қосылымда аудиторияны таңдау үшін әкімші жаңартуы қажет болуы мүмкін. Клиент анықталмаса, ЖИ жауап бермейді. QR және Cloud API бұл ережелерді бірден қолдайды.", "Audience filtering may require an administrator to update this connection. If the client cannot be identified, AI skips the reply. WhatsApp QR and Cloud API support these rules directly.")}</p></div>}
+      </div>
+      </> : null}
+      {section === "requests" ? (
+        <>
+      <p className="ai-manager-note">{text("Первый контакт по заявке доступен через отдельную интеграцию AI-продавца. Для WhatsApp через QR и Cloud API сейчас доступны ответы на входящие сообщения.", "Өтінім бойынша алғашқы байланыс жеке ЖИ-сатушы интеграциясында қолжетімді. QR және Cloud API арқылы WhatsApp-та кіріс хабарламаларына жауап беру қолжетімді.", "First contact from requests requires the standalone AI seller integration. WhatsApp QR and Cloud API currently support inbound replies.")}</p>
+      <div className="panel"><h3>{text("Писать первым по заявке", "Өтінім бойынша бірінші жазу", "Start contact from a request")}</h3><label className="check-row"><input type="checkbox" checked={proactive} onChange={event => setProactive(event.target.checked)}/><span>{text("Разрешить первое сообщение по входящей заявке", "Кіріс өтінім бойынша алғашқы хабарламаға рұқсат беру", "Allow the first message for an incoming request")}</span></label><p className="muted">{text("Например, клиент оставил номер на сайте. В автоматическом режиме ИИ начнёт общение. Если выключить, ответы на входящие сообщения продолжат работать. Массовая рассылка по базе не запускается.", "Мысалы, клиент сайтта нөмірін қалдырды. Автоматты режимде ЖИ сөйлесуді бастайды. Өшірсеңіз, кіріс хабарламаларға жауап жалғасады. Клиенттерге жаппай тарату басталмайды.", "For example, a client leaves their number on your website. In automatic mode, AI starts the conversation. Switching this off keeps inbound replies working and never starts a campaign.")}</p></div>
+
 
       <div className="panel">
         <label className="check-row">
@@ -382,31 +344,8 @@ export function AiAutomationSettingsPage() {
             ))}
           </select>
         </label>
-        <label>
-          {uiText("Автообработка")}<select value={scheduleMode} onChange={(e) => setScheduleMode(e.target.value)}>
-            <option value="always">{uiText("Всегда")}</option>
-            <option value="working_hours">{uiText("Только рабочее время")}</option>
-            <option value="custom">{uiText("По расписанию")}</option>
-          </select>
-        </label>
-        {scheduleMode === "working_hours" ? (
-          <ScheduleEditor value={workingHours} onChange={setWorkingHours} timezone={timezone} />
-        ) : null}
-        {scheduleMode === "custom" ? (
-          <ScheduleEditor value={customSchedule} onChange={setCustomSchedule} timezone={timezone} />
-        ) : null}
+        <p className="muted">{text("Повторная заявка — новое обращение уже знакомого клиента. Правило аудитории из раздела «Кому отвечать» продолжает действовать. Время ответа задаётся в разделе «Когда отвечать».", "Қайталанған өтінім — бұрыннан таныс клиенттің жаңа өтініші. Аудитория ережесі сақталады. Жауап уақыты «Қашан жауап беру» бөлімінде орнатылады.", "A repeat request is a new request from a known client. Audience restrictions still apply. Set reply times in When to reply.")}</p>
       </div>
-
-      <button type="button" className="linkish" onClick={() => setShowAdvanced((v) => !v)}>
-        {showAdvanced ? uiText("Скрыть дополнительные настройки") : uiText("Дополнительные настройки")}
-      </button>
-
-      {showAdvanced ? (
-        <div className="panel soft">
-          <p className="muted">
-            {uiText("При режиме «Сам пишет клиенту» заявки с формы сайта тоже обрабатываются сразу: AI пишет приветствие на номер из заявки. Если номера нет в WhatsApp, это появится на Главной. Заявки, созданные вручную, AI сам не берёт.")}</p>
-        </div>
-      ) : null}
         </>
       ) : null}
 
@@ -495,9 +434,10 @@ export function AiAutomationSettingsPage() {
         </div>
       ) : null}
 
-      {section === "followup" ? (
+      {section === "requests" ? (
         <div className="panel">
           <b>{uiText("Повторный контакт")}</b>
+          <p className="ai-manager-note">{text("Автоматические напоминания доступны через отдельную интеграцию AI-продавца. Для WhatsApp через QR и Cloud API эта функция пока не поддерживается.", "Автоматты еске салулар жеке ЖИ-сатушы интеграциясында қолжетімді. QR және Cloud API арқылы WhatsApp-та бұл функция әзірге жоқ.", "Automatic follow-ups require the standalone AI seller integration. WhatsApp QR and Cloud API do not support them yet.")}</p>
           <p className="muted">{uiText("AI может повторно написать клиенту, если клиент перестал отвечать. Текст берётся из последнего разговора, не из шаблона.")}</p>
           <label className="check-row">
             <input
@@ -589,8 +529,8 @@ export function AiAutomationSettingsPage() {
 
       {section === "hours" ? (
         <div className="panel">
-          <b>{uiText("Рабочее время")}</b>
-          <p className="muted">{uiText("Когда AI отвечает сам. Часовой пояс компании, не сервера. Пока включено «Круглосуточно», расписание новых заявок из вкладки «Новые заявки» не меняется.")}</p>
+          <b>{text("Когда отвечать", "Қашан жауап беру", "When to reply")}</b>
+          <p className="muted">{text("Укажите дни и часы для автоматических ответов. Используется часовой пояс компании.", "Автоматты жауаптардың күндері мен уақытын көрсетіңіз. Компанияның уақыт белдеуі қолданылады.", "Choose days and hours for automatic replies in your company’s time zone.")}</p>
           <div className="stack" style={{ gap: 10 }}>
             <label className="radio-row">
               <input
@@ -695,19 +635,19 @@ export function AiAutomationSettingsPage() {
                   <input
                     type="radio"
                     name="offHours"
-                    checked={conversationHours.offHoursBehavior === "accept_no_process"}
-                    onChange={() => setConversationHours((prev) => ({ ...prev, offHoursBehavior: "accept_no_process" }))}
+                    checked={conversationHours.offHoursBehavior === "no_reply"}
+                    onChange={() => setConversationHours((prev) => ({ ...prev, offHoursBehavior: "no_reply" }))}
                   />
-                  <span>{uiText("AI принимает обращение, но не начинает полноценную обработку")}</span>
+                  <span>{text("Сохранить сообщение и ответить в рабочее время", "Хабарламаны сақтап, жұмыс уақытында жауап беру", "Save the message and reply during working hours")}</span>
                 </label>
                 <label className="radio-row">
                   <input
                     type="radio"
                     name="offHours"
-                    checked={conversationHours.offHoursBehavior === "no_reply"}
-                    onChange={() => setConversationHours((prev) => ({ ...prev, offHoursBehavior: "no_reply" }))}
+                    checked={conversationHours.offHoursBehavior === "accept_no_process"}
+                    onChange={() => setConversationHours((prev) => ({ ...prev, offHoursBehavior: "accept_no_process" }))}
                   />
-                  <span>{uiText("AI не отвечает")}</span>
+                  <span>{text("Анализировать без ответа, ответить в рабочее время", "Жауапсыз талдап, жұмыс уақытында жауап беру", "Analyze without replying, reply during working hours")}</span>
                 </label>
               </div>
             </>
@@ -715,14 +655,13 @@ export function AiAutomationSettingsPage() {
         </div>
       ) : null}
 
-      {section !== "prompt" && section !== "knowledge" ? <div className="actions workspace-save-bar">
-        <span className="muted">{uiText("Изменения применятся после сохранения")}</span>
-        <button className="btn" disabled={busy} onClick={() => void save()}>
-          {uiText("Сохранить")}</button>
-        <Link className="btn secondary" to="/settings">
-          {uiText("Назад")}</Link>
-      </div> : null}
-      </>}
+      <div className={`actions workspace-save-bar${dirty ? " has-changes" : ""}`}>
+        <span className="muted">{dirty ? text("Есть несохранённые изменения", "Сақталмаған өзгерістер бар", "Unsaved changes") : text("Все изменения сохранены", "Барлық өзгерістер сақталған", "All changes saved")}</span>
+        <button className="btn" disabled={busy || !dirty} onClick={() => void save()}>
+          {busy ? text("Сохраняю…", "Сақталуда…", "Saving…") : uiText("Сохранить")}</button>
+        {dirty && <button type="button" className="btn secondary" disabled={busy} onClick={async () => { setBusy(true); await load(); setBusy(false); }}>{text("Отменить изменения", "Өзгерістерді болдырмау", "Discard changes")}</button>}
+      </div>
+      </fieldset>
     </section>
   );
 }

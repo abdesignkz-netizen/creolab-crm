@@ -92,6 +92,7 @@ function checkoutPage({ billingOrder = async () => pageData(), billingPay = asyn
       if (name === '../lib/billingCheckoutState') return { billingCheckoutState };
       if (name === '../components/CancelBillingOrder') return { CancelBillingOrder: 'CancelBillingOrder' };
       if (name === '../components/InlineFeedback') return { InlineFeedback: 'InlineFeedback' };
+      if (name === '../components/NavIcon') return { NavIcon: 'NavIcon' };
       if (name === '../components/BillingCheckoutUi') return {
         useBillingText: () => (...values) => values[0], useBillingError: () => error => error.message,
         BillingStatus: 'BillingStatus', BuyerForm: 'BuyerForm', billingMoney: String, billingDate: String,

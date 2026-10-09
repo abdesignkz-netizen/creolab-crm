@@ -5,6 +5,9 @@ import { analyzeRequestHeuristic, applyRefinedRequestAnalysis, sanitizeClientMes
 import {
   DEFAULT_AI_AUTOMATION,
   MODE_FLAGS,
+  replyAudienceAllows,
+  nextWorkingInstant,
+  isWithinConversationHours,
   applyModeToSettings,
   isWithinAiSchedule,
   mergeAIAutomationIntoSettingsJson,
@@ -14,6 +17,46 @@ import { classifyWhatsAppDeliveryError, WHATSAPP_NOT_REGISTERED } from "./servic
 import { shouldSkipInquiryWelcome } from "./services/requestAutomationService.ts";
 
 describe("AI automation policy", () => {
+  it("keeps fixed new/existing cohorts and denies unknown clients for selective rules", () => {
+    const since = "2026-10-09T08:00:00.000Z";
+    const fresh = { audience: "new" as const, since };
+    assert.equal(replyAudienceAllows(fresh, since), true);
+    assert.equal(replyAudienceAllows(fresh, "2026-10-10T00:00:00Z"), true);
+    assert.equal(replyAudienceAllows(fresh, "2026-10-08T00:00:00Z"), false);
+    assert.equal(replyAudienceAllows({ ...fresh, audience: "existing" }, "2026-10-08T00:00:00Z"), true);
+    assert.equal(replyAudienceAllows({ ...fresh, audience: "existing" }, since), false);
+    assert.equal(replyAudienceAllows(fresh), false);
+    assert.equal(replyAudienceAllows({ ...fresh, since: null }, since), false);
+    const defaults = parseAIAutomationSettings({});
+    assert.equal(replyAudienceAllows(defaults.replyAudience), true);
+    defaults.replyAudience = fresh;
+    assert.deepEqual(parseAIAutomationSettings(mergeAIAutomationIntoSettingsJson({}, defaults)).replyAudience, fresh);
+  });
+
+  it("separates inbound replies from proactive outreach and honors hard restrictions", () => {
+    const settingsJson = { aiAutomation: { defaultMode: "AUTO", allowProactiveOutbound: false,
+      replyAudience: { audience: "new", since: "2026-10-09T08:00:00Z" } } };
+    const input = { settingsJson, sourceChannel: "whatsapp", contactFirstSeenAt: "2026-10-09T09:00:00Z" };
+    assert.equal(decideAutomationPolicy({ ...input, interaction: "reply" }).allowOutbound, true);
+    assert.equal(decideAutomationPolicy({ ...input, interaction: "proactive" }).allowOutbound, false);
+    assert.equal(decideAutomationPolicy({ ...input, interaction: "reply", contactFirstSeenAt: "2026-10-08T00:00:00Z", requestOverrideMode: "AUTO" }).hardBlocked, true);
+    for (const clientAiMode of ["OFF", "HUMAN", "MANUAL", "ASSIST"]) {
+      assert.equal(decideAutomationPolicy({ ...input, interaction: "reply", requestOverrideMode: "AUTO", clientAiMode }).allowOutbound, false);
+    }
+    assert.equal(decideAutomationPolicy({ ...input, interaction: "reply", doNotContact: true }).allowOutbound, false);
+    assert.equal(decideAutomationPolicy({ ...input, settingsJson: { ...settingsJson, runtime: { aiPaused: true } }, interaction: "reply" }).allowOutbound, false);
+  });
+
+  it("uses previous-day overnight hours and finds the next shift across local midnight", () => {
+    const settings = parseAIAutomationSettings({ aiAutomation: { conversationHours: { mode: "schedule", days:
+      Object.fromEntries([0,1,2,3,4,5,6].map(day => [day, { enabled: day === 1, start: "22:00", end: "06:00" }])) } } });
+    assert.equal(isWithinConversationHours(new Date("2026-10-12T00:00:00Z"), "Asia/Almaty", settings.conversationHours), false);
+    assert.equal(isWithinConversationHours(new Date("2026-10-13T00:00:00Z"), "Asia/Almaty", settings.conversationHours), true);
+    assert.equal(isWithinConversationHours(new Date("2026-10-13T01:00:00Z"), "Asia/Almaty", settings.conversationHours), false);
+    settings.conversationHours.days[2] = { enabled: true, start: "09:00", end: "18:00" };
+    assert.equal(nextWorkingInstant(new Date("2026-10-12T19:30:00Z"), "Asia/Almaty", { ...settings.conversationHours, days: { ...settings.conversationHours.days, 1: { enabled: false, start: "22:00", end: "06:00" } } }).toISOString(), "2026-10-13T04:00:00.000Z");
+  });
+
   it("maps UI modes to flags", () => {
     assert.deepEqual(MODE_FLAGS.MANUAL, {
       analyzeNewRequests: false,

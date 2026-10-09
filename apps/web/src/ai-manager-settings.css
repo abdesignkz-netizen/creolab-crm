@@ -1,0 +1,31 @@
+.ai-settings-workspace { max-width: 1120px; margin-inline: auto; }
+.ai-manager-overview { border: 1px solid var(--line); border-radius: 18px; padding: 22px; background: linear-gradient(110deg, #f0f6ff, #fff 70%); margin-bottom: 22px; }
+.ai-manager-heading { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.ai-manager-heading > div { flex: 1; min-width: 160px; }
+.ai-manager-heading h3, .ai-manager-heading p { margin: 0; }
+.ai-manager-heading p { font-size: 12px; color: var(--muted); margin-top: 4px; }
+.ai-manager-mark { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 13px; color: var(--accent); background: #fff; }
+.ai-manager-mark svg { width: 26px; height: 26px; }
+.ai-manager-facts { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 12px; margin-top: 20px; }
+.ai-manager-facts button { border: 1px solid var(--line); border-radius: 12px; background: #fff; padding: 14px; text-align: left; display: grid; gap: 6px; color: var(--ink); cursor: pointer; font: inherit; }
+.ai-manager-facts button:hover { border-color: var(--accent); }
+.ai-manager-facts small { color: var(--muted); }
+.ai-manager-editor { border: 0; margin: 0; padding: 0; min-width: 0; }
+.ai-manager-editor > .panel { margin-block: 16px; }
+.ai-manager-extra { margin: 12px 0 20px; color: var(--muted); font-size: 13px; }
+.ai-manager-extra summary { cursor: pointer; padding: 6px 0; }
+.ai-manager-extra .actions { margin-top: 10px; }
+.ai-settings-workspace .ai-mode-grid { grid-template-columns: repeat(2, minmax(0,1fr)); margin-top: 14px; }
+.ai-audience-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; margin-top: 16px; }
+.ai-audience-panel h3 { margin: 0; }
+.ai-manager-note { background: var(--bg); border-radius: 10px; padding: 14px; color: var(--muted); font-size: 13px; margin-bottom: 0; }
+.ai-channel-row { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 14px; margin-top: 14px; font-size: 13px; }
+.ai-settings-workspace .workspace-save-bar:not(.has-changes) { position: static; background: transparent; border: 0; box-shadow: none; padding: 8px 0; }
+.ai-settings-workspace .workspace-save-bar:not(.has-changes) button { display: none; }
+@media (max-width: 767px) {
+  .ai-manager-overview { padding: 16px; }
+  .ai-manager-facts { gap: 6px; }
+  .ai-manager-facts button { padding: 10px; font-size: 11px; }
+  .ai-settings-workspace .ai-mode-grid, .ai-audience-grid { grid-template-columns: 1fr; }
+  .ai-manager-heading > .badge { margin-left: 56px; }
+}

@@ -53,8 +53,13 @@ test('Static translation calls refer to existing dictionary keys', () => {
       if (entry.isDirectory()) { visitDirectory(file); continue; }
       if (!/\.tsx?$/.test(file)) continue;
       const fileAst = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
+      // Billing uses a local t(ru, kk, en); only the imported i18n helper accepts dictionary keys.
+      const usesDictionary = fileAst.statements.some(statement => ts.isImportDeclaration(statement)
+        && /(?:^|\/)i18n$/.test(statement.moduleSpecifier.text)
+        && statement.importClause?.namedBindings?.elements?.some(item => item.name.text === 't'));
+      if (!usesDictionary) continue;
       function visit(node) {
-        if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 't' && ts.isStringLiteral(node.arguments[1])) {
+        if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 't' && node.arguments[1] && ts.isStringLiteral(node.arguments[1])) {
           assert.ok(known.has(node.arguments[1].text), `${file}: unknown key ${node.arguments[1].text}`);
         }
         ts.forEachChild(node, visit);

@@ -1,8 +1,8 @@
 import type { PrismaClient } from "@creolab/db";
-import { parseAIAutomationSettings } from "./aiAutomationSettings.ts";
 import { processNewRequestAutomation } from "./requestAutomationService.ts";
 
-const REPROCESSABLE_STATUSES = new Set(["none", "failed", "awaiting_confirm"]);
+// A later switch to AUTO must not replay requests already assigned to staff.
+const REPROCESSABLE_STATUSES = new Set(["failed"]);
 
 function automationStatus(fieldMetaJson: unknown): string | undefined {
   if (!fieldMetaJson || typeof fieldMetaJson !== "object") return undefined;
@@ -59,46 +59,4 @@ export async function enqueueInquiryAutomation(
       console.error("inquiry.automation inline", err);
     });
   }
-}
-
-/** When AUTO is on, pick up form inquiries that were left waiting for a confirm button. */
-export async function enqueuePendingAutoStarts(prisma: PrismaClient, tenantId: string) {
-  const tenant = await prisma.tenant.findUnique({
-    where: { id: tenantId },
-    select: { settingsJson: true },
-  });
-  const settings = parseAIAutomationSettings(tenant?.settingsJson);
-  if (!settings.autoStartAiManager) return { enqueued: 0 };
-
-  const inquiries = await prisma.inquiry.findMany({
-    where: {
-      tenantId,
-      archived: false,
-      test: false,
-      status: { notIn: ["lost", "converted", "cancelled"] },
-    },
-    select: { id: true, fieldMetaJson: true },
-    orderBy: { receivedAt: "desc" },
-    take: 40,
-  });
-  const pending = inquiries.filter((row) => automationStatus(row.fieldMetaJson) === "awaiting_confirm").slice(0, 8);
-  if (!pending.length) return { enqueued: 0 };
-
-  const already = await prisma.outboxEvent.findMany({
-    where: {
-      tenantId,
-      type: "inquiry.automation",
-      entityId: { in: pending.map((row) => row.id) },
-      processedAt: null,
-    },
-    select: { entityId: true },
-  });
-  const pendingIds = new Set(already.map((row) => row.entityId));
-  let enqueued = 0;
-  for (const row of pending) {
-    if (pendingIds.has(row.id)) continue;
-    await enqueueInquiryAutomation(prisma, tenantId, row.id, { inline: false });
-    enqueued += 1;
-  }
-  return { enqueued };
 }

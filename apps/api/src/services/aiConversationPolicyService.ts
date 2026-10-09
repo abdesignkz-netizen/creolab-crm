@@ -7,12 +7,14 @@ import {
   nextWorkingInstant,
   offHoursBlocksAnalysis,
   parseAIAutomationSettings,
+  replyAudienceAllows,
   type AIAutomationSettings,
   type HandoffTriggerKey,
 } from "./aiAutomationSettings.ts";
 import { composeClientMessageWithLlm } from "./llmClient.ts";
 import { sendViaProvider } from "./messagingProvider.ts";
 import { resolveSellerBridge } from "./sellerLink.ts";
+import { decideAutomationPolicy } from "./aiAutomationPolicyService.ts";
 
 export const CLIENT_FOLLOWUP_TYPE = "client_followup";
 
@@ -80,6 +82,7 @@ async function loadTenantSettings(prisma: PrismaClient, tenantId: string) {
   return {
     settings: asSettings(tenant?.settingsJson),
     timeZone: tenant?.timezone || "Asia/Almaty",
+    paused: Boolean((tenant?.settingsJson as { runtime?: { aiPaused?: boolean } } | null)?.runtime?.aiPaused),
   };
 }
 
@@ -195,16 +198,36 @@ async function conversationGuards(
   tenantId: string,
   conversationId: string,
   settings: AIAutomationSettings,
+  paused = false,
 ) {
   const conversation = await prisma.conversation.findFirst({
     where: { id: conversationId, tenantId },
     include: {
       messages: { where: deliveredConversationMessage, orderBy: { createdAt: "desc" }, take: 30 },
       contact: true,
+      connection: { include: { integration: true } },
     },
   });
   if (!conversation) return { ok: false as const, reason: "missing" };
+  const attr = conversation.contact?.attributionJson as Record<string, any> | null;
+  const clientMode = typeof attr?.aiAutomation === "string" ? attr.aiAutomation : attr?.aiAutomation?.mode;
+  if (paused || !settings.analyzeNewRequests || !settings.followUp.enabled || !replyAudienceAllows(settings.replyAudience, conversation.contact?.firstSeenAt)
+    || attr?.doNotContact || ["OFF", "HUMAN", "MANUAL", "ASSIST"].includes(String(clientMode || "").toUpperCase())) {
+    return { ok: false as const, reason: "ai_policy_restricted", conversation, last: null };
+  }
   const last = lastNonInternal(conversation.messages);
+  if (conversation.status !== "open" || conversation.waitingFor === "MANAGER" || last?.senderKind === "staff" || last?.senderKind === "user") {
+    return { ok: false as const, reason: "handed_to_human", conversation, last };
+  }
+  const integration = conversation.connection?.integration;
+  const policy = decideAutomationPolicy({
+    settingsJson: { aiAutomation: settings }, interaction: "reply", contactFirstSeenAt: conversation.contact?.firstSeenAt,
+    sourceChannel: "whatsapp", sourceType: integration?.type, integrationId: integration?.id,
+    integrationAutomationMode: integration?.automationMode, clientAiMode: clientMode,
+  });
+  if (policy.mode === "MANUAL" || policy.mode === "ASSIST" || integration?.status === "disabled" || conversation.connection?.status === "disabled") {
+    return { ok: false as const, reason: "ai_policy_restricted", conversation, last };
+  }
   const clientReplied = Boolean(last && isInboundClient(last));
   const refused = conversation.messages.some((item) => isInboundClient(item) && isClientRefusalText(item.text || ""));
   const inquiry = await prisma.inquiry.findFirst({
@@ -237,12 +260,12 @@ export async function refreshConversationFollowUp(prisma: PrismaClient, tenantId
     await cancelConversationFollowUps(prisma, tenantId, conversationId, "feature_required");
     return;
   }
-  const { settings, timeZone } = await loadTenantSettings(prisma, tenantId);
+  const { settings, timeZone, paused } = await loadTenantSettings(prisma, tenantId);
   if (!settings.analyzeNewRequests || !settings.followUp.enabled) {
     await cancelConversationFollowUps(prisma, tenantId, conversationId, "followup_disabled");
     return;
   }
-  const guards = await conversationGuards(prisma, tenantId, conversationId, settings);
+  const guards = await conversationGuards(prisma, tenantId, conversationId, settings, paused);
   if (!guards.ok) {
     await cancelConversationFollowUps(prisma, tenantId, conversationId, guards.reason);
     return;
@@ -321,7 +344,7 @@ export async function processClientFollowUp(
     await prisma.scheduledAction.update({ where: { id: item.id }, data: { state: "canceled", cancelReason: "feature_required" } });
     return { skipped: "feature_required" as const };
   }
-  const { settings, timeZone } = await loadTenantSettings(prisma, item.tenantId);
+  const { settings, timeZone, paused } = await loadTenantSettings(prisma, item.tenantId);
   if (!settings.analyzeNewRequests || !settings.followUp.enabled) {
     await prisma.scheduledAction.update({
       where: { id: item.id },
@@ -334,7 +357,7 @@ export async function processClientFollowUp(
     lastOutboundMessageId?: string;
   };
   const attempt = Math.max(1, Number(payload.attempt) || 1);
-  const guards = await conversationGuards(prisma, item.tenantId, item.parentId, settings);
+  const guards = await conversationGuards(prisma, item.tenantId, item.parentId, settings, paused);
   if (!guards.ok) {
     await prisma.scheduledAction.update({
       where: { id: item.id },
@@ -380,13 +403,25 @@ export async function processClientFollowUp(
     tenantId: item.tenantId,
     feature: "AI_FOLLOW_UP",
   });
-  const guardsAgain = await conversationGuards(prisma, item.tenantId, item.parentId, settings);
+  const current = await loadTenantSettings(prisma, item.tenantId);
+  const guardsAgain = await conversationGuards(prisma, item.tenantId, item.parentId, current.settings, current.paused);
   if (!guardsAgain.ok) {
     await prisma.scheduledAction.update({
       where: { id: item.id },
       data: { state: "canceled", cancelReason: guardsAgain.reason },
     });
     return { skipped: guardsAgain.reason };
+  }
+  if (guardsAgain.conversation.controlVersion !== conversation.controlVersion || guardsAgain.last?.id !== guards.last?.id || attempt > current.settings.followUp.maxAttempts) {
+    await prisma.scheduledAction.update({ where: { id: item.id }, data: { state: "canceled", cancelReason: "conversation_changed" } });
+    return { skipped: "conversation_changed" as const };
+  }
+  if (current.settings.followUp.respectWorkingHours) {
+    const when = nextWorkingInstant(new Date(), current.timeZone, current.settings.conversationHours);
+    if (when.getTime() > Date.now() + 30_000) {
+      await prisma.scheduledAction.update({ where: { id: item.id }, data: { state: "scheduled", dueAt: when, version: { increment: 1 } } });
+      return { skipped: "outside_hours" as const };
+    }
   }
   if (!text) {
     await prisma.scheduledAction.update({
@@ -427,11 +462,11 @@ export async function processClientFollowUp(
 
   await prisma.scheduledAction.update({ where: { id: item.id }, data: { state: "done" } });
   const nextAttempt = attempt + 1;
-  if (nextAttempt <= settings.followUp.maxAttempts) {
-    const delay = settings.followUp.delaysMinutes[nextAttempt - 1] || settings.followUp.delaysMinutes.at(-1) || 1440;
+  if (nextAttempt <= current.settings.followUp.maxAttempts) {
+    const delay = current.settings.followUp.delaysMinutes[nextAttempt - 1] || current.settings.followUp.delaysMinutes.at(-1) || 1440;
     let dueAt = new Date(Date.now() + delay * 60_000);
-    if (settings.followUp.respectWorkingHours) {
-      dueAt = nextWorkingInstant(dueAt, timeZone, settings.conversationHours);
+    if (current.settings.followUp.respectWorkingHours) {
+      dueAt = nextWorkingInstant(dueAt, current.timeZone, current.settings.conversationHours);
     }
     await prisma.scheduledAction.create({
       data: {

@@ -1,3 +1,5 @@
+import { parseAIAutomationSettings, replyAudienceAllows, isWithinAiSchedule } from "./aiAutomationSettings.ts";
+import { decideAutomationPolicy } from "./aiAutomationPolicyService.ts";
 import { publicFormKey } from "@creolab/contracts";
 import { createHash, randomBytes } from "node:crypto";
 import type { PrismaClient } from "@creolab/db";
@@ -1549,13 +1551,33 @@ export async function controlBoard(prisma: PrismaClient, auth: AuthContext) {
 export { crmModeToSeller };
 
 /** The standalone seller must check this before each AI reply, not just on connection. */
-export async function sellerAiAccess(prisma: PrismaClient, input: { secret: string; integrationId: string }) {
+export async function sellerAiAccess(prisma: PrismaClient, input: { secret: string; integrationId: string; sellerLeadId?: string }) {
   const integration = await resolveSellerIntegrationForEvent(prisma, input);
   const { getEntitlements } = await import("./entitlementService.ts");
   const { canConsume } = await import("./billingResourceService.ts");
   const access = await getEntitlements(prisma, integration.tenantId);
   const enabled = integration.status !== "disabled" && integration.connectionStatus !== "DISCONNECTED";
   if (!enabled || !access.entitlements.AI_MANAGER) return { allowed: false, reason: enabled ? "feature_required" : "integration_disabled", trial: false };
+  const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: integration.tenantId } });
+  const settings = parseAIAutomationSettings(tenant.settingsJson);
+  if (tenant.status !== "active" || !settings.analyzeNewRequests || (tenant.settingsJson as { runtime?: { aiPaused?: boolean } } | null)?.runtime?.aiPaused) return { allowed: false, reason: "ai_paused", trial: false };
+  if (!isWithinAiSchedule(new Date(), tenant.timezone, settings)) return { allowed: false, reason: "outside_hours", trial: false };
+  const conversation = input.sellerLeadId ? await prisma.conversation.findFirst({
+    where: { tenantId: integration.tenantId, sellerLeadId: input.sellerLeadId, connection: { integrationId: integration.id } },
+    include: { contact: true, messages: { where: { internal: false, operationState: { notIn: ["failed", "canceled", "queued", "sending"] } }, orderBy: { createdAt: "desc" }, take: 1 } },
+  }) : null;
+  if (input.sellerLeadId && !conversation) return { allowed: false, reason: "conversation_not_found", trial: false };
+  if (!replyAudienceAllows(settings.replyAudience, conversation?.contact?.firstSeenAt)) return { allowed: false, reason: "audience_restricted", trial: false };
+  if (conversation) {
+    if (conversation.mode !== "ai" || conversation.status !== "open" || conversation.waitingFor === "MANAGER"
+      || ["staff", "user"].includes(conversation.messages[0]?.senderKind || "")) return { allowed: false, reason: "handed_to_human", trial: false };
+    const attributes = (conversation.contact?.attributionJson || {}) as Record<string, unknown>;
+    const mode = typeof attributes.aiAutomation === "string" ? attributes.aiAutomation : (attributes.aiAutomation as { mode?: string } | null)?.mode;
+    const decision = decideAutomationPolicy({ settingsJson: tenant.settingsJson, interaction: "reply", contactFirstSeenAt: conversation.contact?.firstSeenAt,
+      sourceChannel: "whatsapp", sourceType: integration.type, integrationId: integration.id, integrationAutomationMode: integration.automationMode,
+      clientAiMode: mode, doNotContact: Boolean(attributes.doNotContact) });
+    if (decision.hardBlocked || decision.mode === "MANUAL" || decision.mode === "ASSIST") return { allowed: false, reason: "ai_policy_restricted", trial: false };
+  }
   const credits = await canConsume(prisma, integration.tenantId, "AI_CREDITS", 1);
   return { allowed: credits.allowed, reason: credits.allowed ? null : "ai_credits_exhausted", trial: access.snapshot.planCode === "BASQAR_FREE" };
 }

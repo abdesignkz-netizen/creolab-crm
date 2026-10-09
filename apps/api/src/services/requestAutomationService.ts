@@ -59,6 +59,11 @@ function asMeta(raw: unknown): Record<string, unknown> {
   return raw && typeof raw === "object" ? { ...(raw as Record<string, unknown>) } : {};
 }
 
+function clientAiMode(attributes: Record<string, unknown>): string | null {
+  const setting = attributes.aiAutomation;
+  return typeof setting === "string" ? setting : typeof asMeta(setting).mode === "string" ? asMeta(setting).mode as string : null;
+}
+
 function readAutomation(meta: Record<string, unknown>): InquiryAutomationMeta | null {
   const a = meta.automation;
   if (!a || typeof a !== "object") return null;
@@ -172,46 +177,47 @@ export async function processNewRequestAutomation(
     where: { tenantId, contactId: inquiry.contactId, id: { not: inquiry.id } },
   });
 
-  const decision: AutomationDecision = options.forceMode
-    ? {
-        mode: options.forceMode,
-        analyze: options.forceMode !== "MANUAL",
-        createTask: options.forceMode === "CONFIRM" || options.forceMode === "AUTO" || Boolean(options.forceStart),
-        autoStart: options.forceMode === "AUTO" || Boolean(options.forceStart),
-        allowOutbound: options.forceMode === "AUTO" || Boolean(options.forceStart),
-        reason: "Ручная передача AI",
-      }
-    : decideAutomationPolicy({
+  const decision: AutomationDecision = decideAutomationPolicy({
         settingsJson: tenant?.settingsJson,
+        interaction: options.forceStart ? "reply" : "proactive",
+        contactFirstSeenAt: inquiry.contact?.firstSeenAt,
+        doNotContact: Boolean(contactAttr.doNotContact),
         sourceChannel: inquiry.sourceChannel,
         sourceType: inquiry.sourceType,
         source: inquiry.source,
         serviceCategory: inquiry.serviceCategory,
         integrationId: inquiry.integrationId,
         integrationAutomationMode: integrationRow?.automationMode || null,
-        clientAiMode: typeof contactAttr.aiAutomation === "string" ? contactAttr.aiAutomation : null,
+        clientAiMode: clientAiMode(contactAttr),
         requestOverrideMode:
-          typeof fieldMeta.automationOverride === "string" ? fieldMeta.automationOverride : null,
+          options.forceStart ? "AUTO" : options.forceMode || (typeof fieldMeta.automationOverride === "string" ? fieldMeta.automationOverride : null),
         isRepeatRequest: priorCount > 0,
       });
 
-  const withinSchedule =
-    options.forceStart ||
-    isWithinAiSchedule(new Date(), tenant?.timezone || "Asia/Almaty", settings);
-  if (!withinSchedule && offHoursBlocksAnalysis(settings) && !options.forceStart) {
+  const existingConversation = inquiry.conversationId
+    ? await prisma.conversation.findFirst({ where: { id: inquiry.conversationId, tenantId }, select: { mode: true } })
+    : null;
+  if (readAutomation(fieldMeta)?.status === "paused" || (!options.forceStart && existingConversation && existingConversation.mode !== "ai")) {
+    decision.autoStart = false;
+    decision.allowOutbound = false;
+    decision.reason = `${decision.reason}; диалог передан менеджеру`;
+    return { inquiryId, decision, analysis: null, status: "paused" as const };
+  }
+  const withinSchedule = isWithinAiSchedule(new Date(), tenant?.timezone || "Asia/Almaty", settings);
+  if (!withinSchedule && offHoursBlocksAnalysis(settings)) {
     decision.analyze = false;
     decision.createTask = false;
     decision.autoStart = false;
     decision.allowOutbound = false;
     decision.reason = `${decision.reason}; вне рабочего времени AI не отвечает`;
   }
-  if (decision.analyze || decision.createTask || decision.autoStart) {
-    await consumeResource(prisma, tenantId, 'AUTOMATION_RUNS', 1, `inquiry:${inquiryId}`);
-  }
- else if (!withinSchedule && (decision.autoStart || decision.allowOutbound)) {
+  else if (!withinSchedule && (decision.autoStart || decision.allowOutbound)) {
     decision.autoStart = false;
     decision.allowOutbound = false;
     decision.reason = `${decision.reason}; вне окна автообработки`;
+  }
+  if (decision.analyze || decision.createTask || decision.autoStart) {
+    await consumeResource(prisma, tenantId, 'AUTOMATION_RUNS', 1, `inquiry:${inquiryId}`);
   }
 
   const decidedAt = new Date().toISOString();
@@ -321,7 +327,7 @@ export async function processNewRequestAutomation(
       const executorAi = decision.createTask;
       const nextExec: AiProcessStatus = !decision.createTask
         ? "analyzed"
-        : decision.autoStart || options.forceStart
+        : decision.autoStart
           ? "queued"
           : "awaiting_confirm";
 
@@ -428,7 +434,7 @@ export async function processNewRequestAutomation(
         inquiryId: inquiry.id,
         type: "inquiry.ai_task_ready",
         title:
-          decision.autoStart || options.forceStart
+          decision.autoStart
             ? "Создана задача AI"
             : "AI готов обработать заявку",
         description: analysis.taskTitle,
@@ -446,13 +452,13 @@ export async function processNewRequestAutomation(
   );
 
   if (shouldStart) {
-    return startAiManagerForInquiry(prisma, tenantId, inquiryId);
+    return startAiManagerForInquiry(prisma, tenantId, inquiryId, { manualStart: Boolean(options.forceStart) });
   }
 
   return { inquiryId, decision, analysis, status };
 }
 
-export async function startAiManagerForInquiry(prisma: PrismaClient, tenantId: string, inquiryId: string): Promise<{
+export async function startAiManagerForInquiry(prisma: PrismaClient, tenantId: string, inquiryId: string, options: { manualStart?: boolean } = {}): Promise<{
   inquiryId: string; status: AiProcessStatus; decision?: AutomationDecision; analysis?: RequestAnalysis | null;
   reason?: string | null; conversationId?: string;
 } | null> {
@@ -472,6 +478,45 @@ export async function startAiManagerForInquiry(prisma: PrismaClient, tenantId: s
   const analysis = (auto?.analysis || null) as RequestAnalysis | null;
   const task = inquiry.tasks[0];
 
+  // Settings and contact controls can change while a request waits in the queue or AI generates its draft.
+  const observedThreadVersions = new Map<string, number>();
+  const checkCurrentAccess = async (conversationId?: string) => {
+    const currentInquiry = await prisma.inquiry.findFirst({ where: { id: inquiryId, tenantId }, include: { contact: true } });
+    if (!currentInquiry) return "Заявка не найдена";
+    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+    if (!tenant || tenant.status !== "active") return "Компания недоступна";
+    const settings = parseAIAutomationSettings(tenant.settingsJson);
+    const attributes = asMeta(currentInquiry.contact?.attributionJson);
+    const metadata = asMeta(currentInquiry.fieldMetaJson);
+    const integration = currentInquiry.integrationId ? await prisma.integration.findFirst({ where: { id: currentInquiry.integrationId, tenantId } }) : null;
+    const decision = decideAutomationPolicy({
+      settingsJson: tenant.settingsJson,
+      interaction: options.manualStart ? "reply" : "proactive",
+      contactFirstSeenAt: currentInquiry.contact?.firstSeenAt,
+      doNotContact: Boolean(attributes.doNotContact), clientAiMode: clientAiMode(attributes),
+      sourceChannel: currentInquiry.sourceChannel, sourceType: currentInquiry.sourceType, source: currentInquiry.source,
+      serviceCategory: currentInquiry.serviceCategory, integrationId: currentInquiry.integrationId,
+      integrationAutomationMode: integration?.automationMode,
+      requestOverrideMode: options.manualStart ? "AUTO" : typeof metadata.automationOverride === "string" ? metadata.automationOverride : null,
+    });
+    if (!decision.allowOutbound) return decision.reason;
+    if (readAutomation(metadata)?.status === "paused") return "Заявка передана менеджеру";
+    if (!isWithinAiSchedule(new Date(), tenant.timezone, settings)) return "Вне рабочего времени AI";
+    const threadId = conversationId || currentInquiry.conversationId;
+    const thread = threadId
+      ? await prisma.conversation.findFirst({ where: { id: threadId, tenantId }, include: { contact: true } })
+      : await prisma.conversation.findFirst({ where: { tenantId, contactId: currentInquiry.contactId, sellerLeadId: { not: null } }, include: { contact: true }, orderBy: { updatedAt: "desc" } });
+    if (thread) {
+      const observedVersion = observedThreadVersions.get(thread.id);
+      if (observedVersion !== undefined && observedVersion !== thread.controlVersion) return "Управление диалогом изменилось";
+      observedThreadVersions.set(thread.id, thread.controlVersion);
+      if (thread.status !== "open" || (!options.manualStart && (thread.mode !== "ai" || thread.waitingFor === "MANAGER"))) return "Диалог передан менеджеру";
+    }
+    return null;
+  };
+  const blockedReason = await checkCurrentAccess();
+  if (blockedReason) return { inquiryId, status: "needs_human", reason: blockedReason };
+
   if (auto?.status === "paused") {
     return {
       inquiryId,
@@ -489,8 +534,7 @@ export async function startAiManagerForInquiry(prisma: PrismaClient, tenantId: s
 
   if (!analysis) {
     return processNewRequestAutomation(prisma, tenantId, inquiryId, {
-      forceMode: "AUTO",
-      forceStart: true,
+      ...(options.manualStart ? { forceMode: "AUTO" as const, forceStart: true } : {}),
     });
   }
 
@@ -593,9 +637,13 @@ export async function startAiManagerForInquiry(prisma: PrismaClient, tenantId: s
     if (!resolved.bridge) {
       sellerError = "WhatsApp не подключён";
     } else {
+      const blocked = await checkCurrentAccess(conversation.id);
+      if (blocked) return markBlocked("AI_POLICY_RESTRICTED", blocked);
       await resolved.bridge.setMode(conversation.sellerLeadId, "AUTO");
       await resolved.bridge.addInstruction(conversation.sellerLeadId, instruction);
       if (!skipGreetingNote && greeting) {
+        const blockedBeforeSend = await checkCurrentAccess(conversation.id);
+        if (blockedBeforeSend) return markBlocked("AI_POLICY_RESTRICTED", blockedBeforeSend);
         const key = `ai-welcome:${inquiry.id}`;
         await resolved.bridge.sendText(conversation.sellerLeadId, greeting, key);
         await prisma.message.create({
@@ -762,7 +810,7 @@ export async function handoffInquiryToHuman(
 }
 
 export async function returnInquiryToAi(prisma: PrismaClient, tenantId: string, inquiryId: string) {
-  return startAiManagerForInquiry(prisma, tenantId, inquiryId);
+  return startAiManagerForInquiry(prisma, tenantId, inquiryId, { manualStart: true });
 }
 
 export async function getInquiryAutomationPreview(prisma: PrismaClient, tenantId: string, inquiryId: string) {

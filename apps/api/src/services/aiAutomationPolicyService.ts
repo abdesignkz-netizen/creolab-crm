@@ -3,6 +3,7 @@ import {
   type AutomationMode,
   MODE_FLAGS,
   parseAIAutomationSettings,
+  replyAudienceAllows,
 } from "./aiAutomationSettings.ts";
 
 export type AutomationDecision = {
@@ -21,6 +22,8 @@ export type AutomationDecision = {
 
 export type PolicyInput = {
   settingsJson: unknown;
+  contactFirstSeenAt?: Date | string | null;
+  interaction?: "reply" | "proactive" | "crm";
   sourceChannel?: string | null;
   sourceType?: string | null;
   source?: string | null;
@@ -40,6 +43,10 @@ function resolveMode(
   settings: AIAutomationSettings,
   input: PolicyInput,
 ): { mode: AutomationMode; reason: string; meta: Partial<AutomationDecision> } {
+  const runtime = (input.settingsJson as { runtime?: { aiPaused?: boolean } } | null)?.runtime;
+  if (runtime?.aiPaused) {
+    return { mode: "MANUAL", reason: "AI приостановлен", meta: { hardBlocked: true } };
+  }
   if (!settings.analyzeNewRequests) {
     return { mode: "MANUAL", reason: "Глобальная AI-автоматизация выключена", meta: { hardBlocked: true } };
   }
@@ -51,6 +58,16 @@ function resolveMode(
     };
   }
 
+  if (input.interaction !== "crm" && !replyAudienceAllows(settings.replyAudience, input.contactFirstSeenAt)) {
+    return { mode: "MANUAL", reason: "Клиент не входит в выбранную аудиторию ИИ", meta: { hardBlocked: true } };
+  }
+  // A request override must not bypass a customer's opt-out.
+  if (["OFF", "HUMAN", "MANUAL"].includes(String(input.clientAiMode || "").toUpperCase())) {
+    return { mode: "MANUAL", reason: "Исключение для клиента: AI automation OFF", meta: { hardBlocked: true, clientOverride: input.clientAiMode } };
+  }
+  if (String(input.clientAiMode || "").toUpperCase() === "ASSIST") {
+    return { mode: "ASSIST", reason: "Исключение для клиента: ASSIST", meta: { clientOverride: "ASSIST" } };
+  }
   const req = String(input.requestOverrideMode || "").toUpperCase();
   if (req === "MANUAL" || req === "ASSIST" || req === "CONFIRM" || req === "AUTO" || req === "OFF") {
     const mode = req === "OFF" ? "MANUAL" : (req as AutomationMode);
@@ -62,13 +79,6 @@ function resolveMode(
   }
 
   const client = String(input.clientAiMode || "").toUpperCase();
-  if (client === "OFF" || client === "HUMAN" || client === "MANUAL") {
-    return {
-      mode: "MANUAL",
-      reason: "Исключение для клиента: AI automation OFF",
-      meta: { clientOverride: client },
-    };
-  }
   if (client === "ASSIST" || client === "CONFIRM" || client === "AUTO") {
     return {
       mode: client,
@@ -141,7 +151,7 @@ export function decideAutomationPolicy(input: PolicyInput): AutomationDecision {
   const { mode, reason, meta } = resolveMode(settings, input);
   const flags = MODE_FLAGS[mode];
   const allowOutbound =
-    Boolean(settings.allowProactiveOutbound) && flags.autoStartAiManager && !meta.hardBlocked;
+    input.interaction !== "crm" && (input.interaction === "reply" || Boolean(settings.allowProactiveOutbound)) && flags.autoStartAiManager && !meta.hardBlocked;
 
   return {
     mode,

@@ -1084,7 +1084,7 @@ export function createApp(prisma: PrismaClient) {
         forceStart: true,
       });
     } else {
-      await startAiManagerForInquiry(prisma, membership.tenantId, inquiry.id);
+      await startAiManagerForInquiry(prisma, membership.tenantId, inquiry.id, { manualStart: true });
     }
     res.json(await getInquiry(prisma, auth, inquiry.id));
   });
@@ -2841,7 +2841,7 @@ export function createApp(prisma: PrismaClient) {
     const { sellerAiAccess } = await import("./services/sellerLink.ts");
     const secret = String(req.header("authorization") || "").replace(/^Bearer\s+/i, "");
     res.setHeader("Cache-Control", "no-store");
-    res.json(await sellerAiAccess(prisma, { secret, integrationId: req.params.integrationId }));
+    res.json(await sellerAiAccess(prisma, { secret, integrationId: req.params.integrationId, sellerLeadId: typeof req.query.sellerLeadId === "string" ? req.query.sellerLeadId : undefined }));
   });
 
   app.post("/api/v1/integrations/seller-events/:integrationId", jsonLarge, async (req, res) => {

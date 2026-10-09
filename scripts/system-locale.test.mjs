@@ -30,10 +30,10 @@ test('All explicit product text calls have a Kazakh translation', () => {
       if (!/\.tsx?$/.test(full)) continue;
       const source = ts.createSourceFile(full, readFileSync(full, 'utf8'), ts.ScriptTarget.Latest, true);
       function visit(n) {
-        if (ts.isCallExpression(n) && n.expression.getText(source) === 'systemText' && ts.isStringLiteral(n.arguments[1])) {
+        if (ts.isCallExpression(n) && n.expression.getText(source) === 'systemText' && n.arguments[1] && ts.isStringLiteral(n.arguments[1])) {
           assert.ok(known.has(n.arguments[1].text), `${full}: ${n.arguments[1].text}`);
         }
-        if (ts.isCallExpression(n) && n.expression.getText(source) === 'uiText' && ts.isStringLiteral(n.arguments[0])) {
+        if (ts.isCallExpression(n) && n.expression.getText(source) === 'uiText' && n.arguments[0] && ts.isStringLiteral(n.arguments[0])) {
           assert.ok(known.has(n.arguments[0].text), `${full}: ${n.arguments[0].text}`);
         }
         ts.forEachChild(n, visit);
@@ -45,7 +45,7 @@ test('All explicit product text calls have a Kazakh translation', () => {
 });
 
 async function bundle(contents, plugins = []) {
-  const result = await build({ stdin: { contents, loader: 'tsx', resolveDir: path.join(root, 'apps/web/src') }, jsx: 'automatic', bundle: true, platform: 'node', format: 'cjs', write: false, logLevel: 'silent', plugins });
+  const result = await build({ stdin: { contents, loader: 'tsx', resolveDir: path.join(root, 'apps/web/src') }, loader: { '.css': 'empty' }, jsx: 'automatic', bundle: true, platform: 'node', format: 'cjs', write: false, logLevel: 'silent', plugins });
   const module = { exports: {} };
   new Function('exports', 'module', 'require', result.outputFiles[0].text)(module.exports, module, createRequire(import.meta.url));
   return module.exports;
@@ -154,8 +154,9 @@ test('Kazakh billing renders plan cards, comparison, resource warnings and onboa
     import { SessionContext, emptyCaps } from './lib/session';
     export const render = (locale, yearly=false) => renderToStaticMarkup(<SessionContext.Provider value={{me:{user:{locale},billing:{planCode:'BASQAR_FREE',planName:'BasQar Free',subscriptionStatus:'active',entitlements:{AI_MANAGER:true,TEAM:true},usage:[{key:'AI_CREDITS',label:'AI-кредиты · пробный пакет один раз',used:100,cap:100}],warnings:[{code:'AI_CREDITS_exhausted',message:'AI-кредиты: использовано 100 из 100.'}],onboarding:{needed:true,steps:{}}}},caps:emptyCaps}}><MemoryRouter initialEntries={['/billing']}>{yearly ? <BillingCatalog items={Object.values(CATALOG_BY_CODE)} period="YEARLY" selected="" disabled={false} onSelect={()=>{}}/> : <BillingPage/>}</MemoryRouter></SessionContext.Provider>);
   `);
-  const kk = render('kk');
-  for (const text of ['Тарифтер және төлем','ЖИ кредиттері','Пайдаланушылар','Байланыс арналарының қосылымдары','Қосымша ресурстар','Жұмыс кабинетін баптаңыз','100 лимитінен 100 пайдаланылды','Сынақ режимі · 100 ЖИ кредиті бір рет']) assert.ok(kk.includes(text), text);
+  // Plan cards live in their own section now; verify both the overview and the catalog.
+  const kk = render('kk') + render('kk', true);
+  for (const text of ['Тарифтер және төлем','ЖИ кредиттері','Пайдаланушылар','Байланыс арналарының қосылымдары','Жұмыс кабинетін баптаңыз','100 лимитінен 100 пайдаланылды','Сынақ режимі · 100 ЖИ кредиті бір рет']) assert.ok(kk.includes(text), text);
   assert.doesNotMatch(kk, /Для ежедневной|Ваш тариф|Настройте|Укажите Instance|Запуски автоматизации|Стоимость услуг|Дополнительный пользователь|Хранилище, ГБ|Черновик|Подробное сравнение|Приглашение команды/);
   assert.match(render('kk', true), /стандартты бағамен салыстырғандағы үнем/);
   assert.match(render('ru'), /Тарифы и оплата/);

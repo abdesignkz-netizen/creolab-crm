@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import { createPrismaClient } from "@creolab/db";
 import { createApp } from "./app.ts";
+import { processInquiryAutomationJob } from "./services/inquiryAutomationQueue.ts";
+import { startAiManagerForInquiry } from "./services/requestAutomationService.ts";
 
 describe("inquiry AI automation modes", () => {
   let prisma: Awaited<ReturnType<typeof createPrismaClient>>;
@@ -53,6 +55,25 @@ describe("inquiry AI automation modes", () => {
     });
     assert.equal(res.status, 200);
   }
+
+  it("never replays staff requests on a later AUTO switch and rechecks queued audience", async () => {
+    const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
+    const contact = await prisma.contact.create({ data: { tenantId, name: "Existing audience client", firstSeenAt: new Date("2026-01-01") } });
+    const inquiry = await prisma.inquiry.create({ data: { tenantId, contactId: contact.id, source: "website_form", sourceChannel: "website_form", fieldMetaJson: { automation: { status: "awaiting_confirm" } } } });
+    try {
+      await prisma.tenant.update({ where: { id: tenantId }, data: { settingsJson: { aiAutomation: { defaultMode: "AUTO" } } } });
+      assert.equal((await processInquiryAutomationJob(prisma, { tenantId, inquiryId: inquiry.id })).reason, "already_processed");
+      await prisma.tenant.update({ where: { id: tenantId }, data: { settingsJson: { aiAutomation: { defaultMode: "AUTO", replyAudience: { audience: "new", since: "2026-10-09T00:00:00Z" } } } } });
+      const blocked = await startAiManagerForInquiry(prisma, tenantId, inquiry.id, { manualStart: true });
+      assert.equal(blocked?.status, "needs_human");
+      assert.match(blocked?.reason || "", /аудиторию/);
+      assert.equal(await prisma.message.count({ where: { tenantId, conversation: { contactId: contact.id } } }), 0);
+      await prisma.tenant.update({ where: { id: tenantId }, data: { settingsJson: { aiAutomation: { defaultMode: "AUTO", allowProactiveOutbound: false } } } });
+      assert.equal((await startAiManagerForInquiry(prisma, tenantId, inquiry.id))?.status, "needs_human");
+    } finally {
+      await prisma.tenant.update({ where: { id: tenantId }, data: { settingsJson: tenant.settingsJson as never } });
+    }
+  });
 
   it("MANUAL: creates request without AI analysis task state", async () => {
     await setMode("MANUAL");

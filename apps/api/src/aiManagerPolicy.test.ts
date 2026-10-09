@@ -161,6 +161,22 @@ describe("AI manager policy runtime", { concurrency: false }, () => {
     assert.equal(other.body.conversationHours.mode, "always");
   });
 
+  it("sets a server-owned cohort once, preserves it on edits and isolates companies", async () => {
+    const before = Date.now();
+    const saved = await json("/api/v1/settings/ai-automation", { method: "PATCH", body: JSON.stringify({ replyAudience: { audience: "new", since: "2000-01-01T00:00:00Z" } }) });
+    assert.equal(saved.response.status, 200);
+    const since = saved.body.replyAudience.since;
+    assert.ok(Date.parse(since) >= before && Date.parse(since) <= Date.now());
+    const edited = await json("/api/v1/settings/ai-automation", { method: "PATCH", body: JSON.stringify({ replyAudience: { audience: "existing", since: "2099-01-01T00:00:00Z" }, firstContactSlaMinutes: 30 }) });
+    assert.equal(edited.body.replyAudience.since, since);
+    const other = await json("/api/v1/settings/ai-automation", {}, otherCookie);
+    assert.deepEqual(other.body.replyAudience, { audience: "all", since: null });
+    const invalid = await json("/api/v1/settings/ai-automation", { method: "PATCH", body: JSON.stringify({ replyAudience: { audience: "typo" } }) });
+    assert.equal(invalid.response.status, 422);
+    const cleared = await json("/api/v1/settings/ai-automation", { method: "PATCH", body: JSON.stringify({ replyAudience: { audience: "all" } }) });
+    assert.equal(cleared.body.replyAudience.since, since);
+  });
+
   it("hands conversation to a person when the configured reason fires", async () => {
     const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
     const current = parseAIAutomationSettings(tenant.settingsJson);
