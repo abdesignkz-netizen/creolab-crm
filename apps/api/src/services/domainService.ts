@@ -1125,10 +1125,14 @@ export async function setConversationMode(
     }
 
     const modeChanged = current.mode !== mode;
+    const handoffSummary = current.aiHandoffSummaryJson as Record<string, any> | null;
+    const retainedHandoff = mode !== "ai" && current.mode !== "ai" && handoffSummary?.controlVersion === current.controlVersion
+      ? { ...handoffSummary, controlVersion: current.controlVersion + (modeChanged || assigneeChanged ? 1 : 0) } : {};
     const updated = await tx.conversation.update({
       where: { id },
       data: {
         mode,
+        aiHandoffSummaryJson: retainedHandoff,
         controlVersion: modeChanged || assigneeChanged ? { increment: 1 } : undefined,
         assigneeMembershipId: mode === "human" ? nextAssignee : current.assigneeMembershipId,
         needsAttention: mode === "ai" ? false : mode === "human" ? false : current.needsAttention,

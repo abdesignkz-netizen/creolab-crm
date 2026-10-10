@@ -808,6 +808,44 @@ describe("WhatsApp provider connections", () => {
     await enqueueWhatsAppAi(prisma, tenantId, conversation.id, message.id);
     return prisma.outboxEvent.findFirstOrThrow({ where: { entityId: conversation.id, type: "whatsapp.ai_reply" } });
   }
+  it("stores a private handoff summary once and hides it after returning to AI", async () => {
+    const event = await textAiEvent();
+    const summary = { request: "Рассчитать презентацию", collected: ["10 слайдов"], nextStep: "Подготовить расчёт" };
+    let generated = 0;
+    const generate = async () => { generated++; return { reply: "PRIVATE SUMMARY MUST NOT BE SENT", handoff: true, reason: "knowledge_missing", handoffSummary: summary }; };
+    await processWhatsAppAiReply(prisma, event, generate);
+    const first = await prisma.conversation.findUniqueOrThrow({ where: { id: event.entityId } });
+    assert.equal(first.attentionReason, "AI_KNOWLEDGE_MISSING");
+    assert.equal((first.aiHandoffSummaryJson as any).request, summary.request);
+    assert.equal((first.aiHandoffSummaryJson as any).sourceMessageId, (event.payloadJson as any).messageId);
+    assert.equal((first.aiHandoffSummaryJson as any).controlVersion, first.controlVersion);
+    await processWhatsAppAiReply(prisma, event, generate);
+    assert.equal(generated, 1);
+    assert.deepEqual((await prisma.conversation.findUniqueOrThrow({ where: { id: first.id } })).aiHandoffSummaryJson, first.aiHandoffSummaryJson);
+    assert.equal(await prisma.message.count({ where: { conversationId: first.id, direction: "outbound" } }), 0);
+    const workspace = await (await nativeFetch(`${base}/api/v1/conversations/${first.id}`, { headers: { cookie } })).json();
+    assert.equal(workspace.conversation.aiHandoffSummary.request, summary.request);
+    assert.equal((await post(`/api/v1/conversations/${first.id}/take`)).status, 200);
+    const assigned = await (await get(`/api/v1/conversations/${first.id}`)).json();
+    assert.equal(assigned.conversation.aiHandoffSummary.request, summary.request);
+    const returned = await post(`/api/v1/conversations/${first.id}/return-to-ai`);
+    assert.equal(returned.status, 200);
+    const resumed = await (await nativeFetch(`${base}/api/v1/conversations/${first.id}`, { headers: { cookie } })).json();
+    assert.equal(resumed.conversation.aiHandoffSummary, null);
+  });
+  it("discards a generated handoff summary if control or incoming messages change", async () => {
+    for (const change of ["takeover", "new-message"]) {
+      const event = await textAiEvent();
+      await processWhatsAppAiReply(prisma, event, async () => {
+        if (change === "takeover") await post(`/api/v1/conversations/${event.entityId}/take`);
+        else await prisma.conversation.update({ where: { id: event.entityId }, data: { messageRevision: { increment: 1 } } });
+        return { reply: "", handoff: true, reason: "staff_action", handoffSummary: { request: "STALE", collected: [], nextStep: "STALE" } };
+      });
+      const conversation = await prisma.conversation.findUniqueOrThrow({ where: { id: event.entityId } });
+      assert.deepEqual(conversation.aiHandoffSummaryJson, {});
+      assert.equal(await prisma.message.count({ where: { conversationId: event.entityId, direction: "outbound" } }), 0);
+    }
+  });
   it("retries a temporary provider failure within the same claim and delivers only one answer", async () => {
     const event = await textAiEvent();
     let attempts = 0;

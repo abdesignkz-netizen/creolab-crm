@@ -27,6 +27,7 @@ function isLivePostgresUrl(url: string | undefined): boolean {
 
 async function applyLivePostgresPatches(prisma: PrismaClient) {
   const statements = [
+    `ALTER TABLE "Conversation" ADD COLUMN IF NOT EXISTS "aiHandoffSummaryJson" JSONB NOT NULL DEFAULT '{}'`,
     ...TENANT_SERVICES_SQL.split(";").map((s) => s.trim()).filter(Boolean),
     ...DEAL_NUMBER_SQL.split(";").map((s) => s.trim()).filter(Boolean),
     `ALTER TABLE "Campaign" ADD COLUMN IF NOT EXISTS "personalizeEach" BOOLEAN DEFAULT false`,
@@ -357,6 +358,7 @@ async function applyAdditiveSchema(pglite: PGlite) {
 
     ALTER TABLE "Conversation" ADD COLUMN IF NOT EXISTS "waitingFor" TEXT DEFAULT 'NONE';
     ALTER TABLE "Conversation" ADD COLUMN IF NOT EXISTS "contextSummary" TEXT;
+    ALTER TABLE "Conversation" ADD COLUMN IF NOT EXISTS "aiHandoffSummaryJson" JSONB NOT NULL DEFAULT '{}';
     ALTER TABLE "Conversation" ADD COLUMN IF NOT EXISTS "lastContextAnalyzedAt" TIMESTAMP(3);
     ALTER TABLE "Conversation" ADD COLUMN IF NOT EXISTS "lastAnalyzedMessageId" TEXT;
 

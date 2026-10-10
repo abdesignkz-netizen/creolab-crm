@@ -716,6 +716,7 @@ model Conversation {
   sellerLeadId       String?
   waitingFor         String   @default("NONE")
   contextSummary     String?
+  aiHandoffSummaryJson Json @default("{}")
   lastContextAnalyzedAt DateTime?
   lastAnalyzedMessageId String?
   createdAt          DateTime @default(now())

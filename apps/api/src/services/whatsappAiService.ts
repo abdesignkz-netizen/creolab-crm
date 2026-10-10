@@ -1,6 +1,6 @@
 import type { PrismaClient, Prisma } from "@creolab/db";
 import { setTimeout as delay } from "node:timers/promises";
-import { FEATURES } from "@creolab/contracts";
+import { FEATURES, type AiSetupHandoffSummary } from "@creolab/contracts";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { writeAudit } from "../lib/audit.ts";
@@ -12,7 +12,7 @@ import { getEffectiveTenantSettings, getEffectiveLlmConfig } from "./runtimeSett
 import { decideAutomationPolicy } from "./aiAutomationPolicyService.ts";
 import { parseAIAutomationSettings, isWithinAiSchedule } from "./aiAutomationSettings.ts";
 import { detectHandoffReason, isClientRefusalText } from "./aiConversationPolicyService.ts";
-import { answerWhatsAppWithLlm, getWhatsAppReplyTimeoutMs } from "./llmClient.ts";
+import { answerWhatsAppWithLlm, getWhatsAppReplyTimeoutMs, normalizeAiHandoffSummary } from "./llmClient.ts";
 import { isVoiceAttachment, transcribeVoiceAttachment, voiceTranscript } from "./voiceTranscriptionService.ts";
 import { getTranscriptionConfig } from "./transcriptionConfig.ts";
 import { VOICE_CLARIFICATION, VOICE_SERVICE_FAILURE } from "./aiLanguagePolicy.ts";
@@ -100,8 +100,14 @@ export async function enqueueWhatsAppAi(tx: Db, tenantId: string, conversationId
     payloadJson: { messageId: last.id, controlVersion: conversation.controlVersion, messageRevision: conversation.messageRevision }, availableAt: new Date(Date.now() + 1500) } });
 }
 
-async function handoff(prisma: PrismaClient, tenantId: string, conversationId: string, version: number, revision: number, reason: string, mode = "human") {
-  await prisma.conversation.updateMany({ where: { id: conversationId, tenantId, mode: "ai", controlVersion: version, messageRevision: revision }, data: { mode, controlVersion: { increment: 1 }, needsAttention: true, waitingFor: "MANAGER", attentionReason: reason } });
+async function handoff(prisma: PrismaClient, tenantId: string, conversationId: string, version: number, revision: number, reason: string, mode = "human", summary?: AiSetupHandoffSummary, sourceMessageId?: string) {
+  await prisma.$transaction(async tx => {
+    await tx.$queryRaw`SELECT id FROM "Conversation" WHERE id = ${conversationId} AND "tenantId" = ${tenantId} FOR UPDATE`;
+    const current = await tx.conversation.findFirst({ where: { id: conversationId, tenantId, mode: "ai", controlVersion: version, messageRevision: revision } });
+    if (!current) return;
+    const context = summary && sourceMessageId ? { ...summary, sourceMessageId, createdAt: new Date().toISOString(), controlVersion: version + 1 } : {};
+    await tx.conversation.update({ where: { id: current.id }, data: { mode, controlVersion: { increment: 1 }, needsAttention: true, waitingFor: "MANAGER", attentionReason: reason, aiHandoffSummaryJson: context as Prisma.InputJsonValue } });
+  });
 }
 
 /** Check immediately before dispatch as well as before generation; credits are charged by the LLM, not twice. */
@@ -140,7 +146,7 @@ export async function processWhatsAppAiReply(prisma: PrismaClient, event: { id: 
   if (!latest || latest.direction !== "inbound") return;
   const detected = detectHandoffReason(latest.text || "");
   if (isClientRefusalText(latest.text || "") || /адаммен|оператормен|менеджермен|адамға|менеджерге|talk to.*human|speak to.*human/i.test(latest.text || "") || detected && (detected.code === "CLIENT_REQUESTED_HUMAN" || settings.handoff.triggers[detected.trigger]) || latest.attachments.length && !latest.text?.trim() && !latest.attachments.some(isVoiceAttachment)) {
-    await handoff(prisma, tenantId, conversationId, version, revision, detected?.code || "CLIENT_REQUESTED_HUMAN", settings.handoff.afterMode === "assist" ? "paused" : "human"); return;
+    await handoff(prisma, tenantId, conversationId, version, revision, detected?.code || "CLIENT_REQUESTED_HUMAN", settings.handoff.afterMode === "assist" ? "paused" : "human", normalizeAiHandoffSummary(null, latest.text || ""), latest.id); return;
   }
   if (!(await canConsume(prisma, tenantId, "AI_CREDITS", 1)).allowed) { await handoff(prisma, tenantId, conversationId, version, revision, "AI_CREDITS_EXHAUSTED"); return; }
   const claim = await prisma.$transaction(async tx => {
@@ -195,7 +201,7 @@ export async function processWhatsAppAiReply(prisma: PrismaClient, event: { id: 
       const text = messageContent(message), reason = detectHandoffReason(text);
       if (isClientRefusalText(text) || /адаммен|оператормен|менеджермен|адамға|менеджерге|talk to.*human|speak to.*human/i.test(text) || reason && (reason.code === "CLIENT_REQUESTED_HUMAN" || settings.handoff.triggers[reason.trigger])) {
         await cancel();
-        await handoff(prisma, tenantId, conversationId, version, revision, reason?.code || "CLIENT_REQUESTED_HUMAN", settings.handoff.afterMode === "assist" ? "paused" : "human"); return;
+        await handoff(prisma, tenantId, conversationId, version, revision, reason?.code || "CLIENT_REQUESTED_HUMAN", settings.handoff.afterMode === "assist" ? "paused" : "human", normalizeAiHandoffSummary(null, text), latest.id); return;
       }
     }
     for (let attempt = 0; attempt < REPLY_ATTEMPTS; attempt++) {
@@ -241,7 +247,7 @@ export async function processWhatsAppAiReply(prisma: PrismaClient, event: { id: 
   }
   if (!answer || answer.handoff) {
     await prisma.outboundOperation.updateMany({ where: { id: claim.id, state: "generating" }, data: { state: "failed", error: answer?.handoff ? "needs_human" : failureReason } });
-    await handoff(prisma, tenantId, conversationId, version, revision, answer?.handoff ? "LOW_CONFIDENCE" : failureReason, answer?.handoff && settings.handoff.afterMode === "assist" ? "paused" : "human"); return;
+    await handoff(prisma, tenantId, conversationId, version, revision, answer?.handoff ? (({ knowledge_missing: "AI_KNOWLEDGE_MISSING", human_requested: "CLIENT_REQUESTED_HUMAN", staff_action: "AI_STAFF_ACTION" } as Record<string, string>)[String(answer.reason)] || "LOW_CONFIDENCE") : failureReason, answer?.handoff && settings.handoff.afterMode === "assist" ? "paused" : "human", answer?.handoff ? normalizeAiHandoffSummary(answer.handoffSummary, messageContent(latest)) : undefined, latest.id); return;
   }
   if (!await directAiSendAllowed(prisma, tenantId, conversationId, version, revision)) {
     await prisma.outboundOperation.updateMany({ where: { id: claim.id, state: "generating" }, data: { state: "canceled" } }); return;

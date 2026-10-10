@@ -87,7 +87,7 @@ it("allows a 90-second WhatsApp deadline and retains tenant provider settings", 
   const format = JSON.parse(String(request?.body)).response_format;
   assert.equal(format.type, "json_schema");
   assert.equal(format.json_schema.strict, true);
-  assert.deepEqual(format.json_schema.schema.required, ["reply", "handoff", "reason"]);
+  assert.deepEqual(format.json_schema.schema.required, ["reply", "handoff", "reason", "handoffSummary"]);
   assert.equal(usage[0].status, "ok");
   assert.equal(charged, 1);
 });
@@ -229,7 +229,7 @@ it("distinguishes empty completions from output-budget exhaustion", async () => 
 
 it("keeps valid handoff and unclear-voice replies valid", async () => {
   globalThis.fetch = async () => success(JSON.stringify({ reply: "", handoff: true, reason: "staff_action" }));
-  assert.deepEqual(await answer(), { reply: "", handoff: true });
+  const result = await answer(); assert.equal(result?.reply, ""); assert.equal(result?.handoff, true); assert.equal(result?.reason, "staff_action"); assert.ok(result?.handoffSummary?.request);
   globalThis.fetch = async () => success(JSON.stringify({ reply: "", handoff: false, reason: "unclear_message" }));
   assert.deepEqual(await answer("[Расшифровка голосового сообщения]: неясно"), { reply: VOICE_CLARIFICATION, handoff: false });
   assert.equal(usage.every(row => row.status === "ok"), true);
@@ -272,7 +272,7 @@ it("replaces out-of-scope model text with a fixed RU or KK redirect and leaves A
 it("never sends a claimed answer after the model reports missing knowledge or staff action", async () => {
   for (const reason of ["knowledge_missing", "staff_action", "human_requested"]) {
     globalThis.fetch = async () => success(JSON.stringify({ reply: "Ваша цена 1 тенге, услуга гарантирована", handoff: false, reason }));
-    assert.deepEqual(await answer("Какая цена и гарантия?"), { reply: "", handoff: true });
+    const result = await answer("Какая цена и гарантия?"); assert.equal(result?.reply, ""); assert.equal(result?.handoff, true); assert.equal(result?.reason, reason); assert.equal(result?.handoffSummary?.request, "Какая цена и гарантия?");
   }
 });
 
@@ -311,4 +311,16 @@ it("preserves other callers' deadlines and JSON results", async () => {
   globalThis.fetch = async () => success('{"intent":"presentation"}');
   assert.deepEqual(await refineCommandWithLlm("Презентация", {}, { prisma, tenantId: "tenant-test" }), { intent: "presentation" });
   assert.deepEqual(timeouts, [12_000]);
+});
+
+it("keeps handoff summary private, bounded, and falls back without inventing facts", async () => {
+  const summary = { request: "Расчёт презентации", collected: ["10 слайдов", "Срок — пятница"], nextStep: "Рассчитать стоимость" };
+  globalThis.fetch = async () => success(JSON.stringify({ reply: "Не отправлять сводку", handoff: true, reason: "staff_action", handoffSummary: summary }));
+  const result = await answer("Нужен расчёт");
+  assert.equal(result?.reply, ""); assert.deepEqual(result?.handoffSummary, summary);
+  globalThis.fetch = async () => success(JSON.stringify({ reply: "", handoff: true, reason: "knowledge_missing", handoffSummary: { ...summary, collected: [123] } }));
+  const fallback = await answer("Какая гарантия?");
+  assert.equal(fallback?.handoffSummary?.request, "Какая гарантия?"); assert.deepEqual(fallback?.handoffSummary?.collected, []);
+  globalThis.fetch = async () => success(JSON.stringify({ reply: "Здравствуйте!", handoff: false, handoffSummary: summary }));
+  assert.deepEqual(await answer(), { reply: "Здравствуйте!", handoff: false });
 });

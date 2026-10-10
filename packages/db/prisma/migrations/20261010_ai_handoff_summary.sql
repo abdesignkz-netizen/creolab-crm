@@ -1,0 +1,1 @@
+ALTER TABLE "Conversation" ADD COLUMN IF NOT EXISTS "aiHandoffSummaryJson" JSONB NOT NULL DEFAULT '{}';

@@ -443,6 +443,13 @@ export function ConversationsPage() {
         )}
       </div>
 
+      {workspace.conversation.aiHandoffSummary && <section className="conv-handoff-summary" style={{ margin: "16px 20px", padding: 18, background: "#f0f6ff", border: "1px solid #cbdff6", borderRadius: 14, overflowWrap: "anywhere" }}>
+        <b>{uiText("Сводка для сотрудника")}</b>
+        <p>{workspace.conversation.aiHandoffSummary.request}</p>
+        {!!workspace.conversation.aiHandoffSummary.collected.length && <ul>{workspace.conversation.aiHandoffSummary.collected.map((fact: string, i: number) => <li key={i}>{fact}</li>)}</ul>}
+        <p><b>{uiText("Следующий шаг")}: </b>{workspace.conversation.aiHandoffSummary.nextStep}</p>
+        <small className="muted">{uiText("Сводка ИИ по переписке. Проверьте сведения перед ответом клиенту.")}</small>
+      </section>}
       {(workspace.conversation.needsManagerAssign ??
         (workspace.conversation.mode === "human" && !workspace.conversation.assigneeMembershipId)) ? (
         <div className="conv-attention">

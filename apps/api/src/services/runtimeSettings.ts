@@ -217,11 +217,13 @@ export async function getEffectiveTenantSettings(
   return value;
 }
 
-export async function getEffectiveLlmConfig(prisma: PrismaClient, tenantId?: string | null) {
+export async function getEffectiveLlmConfig(prisma: PrismaClient, tenantId?: string | null, options?: { setupPreview?: boolean }) {
   if (!tenantId) return envLlm();
   const settings = await getEffectiveTenantSettings(prisma, tenantId);
   const env = envLlm(settings.ai.provider);
-  if (!settings.ai.enabled) return { ...env, apiKey: "", model: settings.ai.model };
+  // An owner can test a draft while customer automation is off. Platform and plan restrictions still apply.
+  const previewAllowed = options?.setupPreview && settings.features.ai.value && (await getPlatformSettings(prisma)).ai.enabled;
+  if (!settings.ai.enabled && !previewAllowed) return { ...env, apiKey: "", model: settings.ai.model };
   const aiRow = await prisma.aIConfiguration.findFirst({ where: { tenantId } });
   let apiKey = env.apiKey;
   if (aiRow?.credentialId) {

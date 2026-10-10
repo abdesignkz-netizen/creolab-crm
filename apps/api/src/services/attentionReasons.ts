@@ -2,6 +2,8 @@ import { systemText } from "@creolab/contracts";
 /** Staff-facing labels for conversation / inquiry attention codes. Never show the raw key. */
 const ATTENTION_REASON_LABEL: Record<string, string> = {
   CLIENT_REQUESTED_HUMAN: "Клиент попросил менеджера",
+  AI_KNOWLEDGE_MISSING: "В базе знаний нет подтверждённого ответа. Сотруднику нужно уточнить сведения и ответить клиенту.",
+  AI_STAFF_ACTION: "Для следующего шага нужны действия сотрудника.",
   LOW_CONFIDENCE: "AI не уверен в ответе",
   CUSTOM_PRICING: "Нужен индивидуальный расчёт",
   TECHNICAL_QUESTION: "Сложный технический вопрос",

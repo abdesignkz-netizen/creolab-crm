@@ -136,3 +136,27 @@
 
 .ai-setup-section-head h3 { scroll-margin-top: 90px; }
 .ai-setup-role span, .ai-setup-heading > div, .ai-setup-intro > div { min-width: 0; }
+
+.ai-setup-goals { margin-bottom: 24px; }
+.ai-setup-goals h4, .ai-setup-quality h4 { margin: 0 0 8px; }
+.ai-setup-goal-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,220px),1fr)); gap: 10px; margin: 16px 0; }
+.ai-setup-goal-grid button, .ai-setup-scenario-tabs button { background: #fff; border: 1px solid var(--line); border-radius: 12px; color: var(--ink); padding: 14px; text-align: left; font: inherit; cursor: pointer; }
+.ai-setup-goal-grid button[aria-pressed="true"], .ai-setup-scenario-tabs button[aria-pressed="true"] { border-color: var(--accent); background: #eff6ff; box-shadow: inset 0 0 0 1px var(--accent); }
+.ai-setup-goal-grid small { display: block; font-size: 12px; line-height: 1.6; margin-top: 8px; color: var(--muted); }
+.ai-setup-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
+.ai-setup-actions .btn { white-space: normal; }
+.ai-setup-quality { margin: 22px 0; padding: 20px; border: 1px solid #cbdff6; border-radius: 14px; }
+.ai-setup-quality-heading { display: flex; gap: 12px; justify-content: space-between; align-items: flex-start; }
+.ai-setup-quality-heading p { font-size: 13px; color: var(--muted); line-height: 1.6; margin: 0; }
+.ai-setup-quality-heading .badge { flex-shrink: 0; }
+.ai-setup-scenario-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+.ai-setup-scenario-tabs button { font-size: 12px; padding: 10px 12px; }
+.ai-setup-scenario-tabs small { display: block; color: var(--muted); margin-top: 4px; }
+.ai-setup-test-review { display: grid; gap: 10px; border-top: 1px solid var(--line); padding-top: 18px; margin-top: 18px; }
+.ai-setup-test-review .ai-setup-help { margin: 0; }
+.ai-setup-test-review .btn { justify-self: start; }
+.ai-setup-test-compose { display: grid; gap: 12px; margin-top: 20px; }
+.ai-setup-test-compose .btn { justify-self: start; }
+@media (max-width: 600px) { .ai-setup-quality { padding: 14px; } .ai-setup-quality .ai-setup-chat-log { padding: 10px; } .ai-setup-quality .ai-setup-chat-message { max-width: 100%; } .ai-setup-actions { display: grid; } .ai-setup-quality-heading { flex-wrap: wrap; } }
+
+.ai-setup-quality .ai-setup-chat-log { scroll-margin-top: 90px; }

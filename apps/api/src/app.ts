@@ -956,9 +956,14 @@ export function createApp(prisma: PrismaClient) {
   });
   app.post("/api/v1/settings/ai-manager/preview", json, async (req, res) => {
     const auth = await requireAuth(req);
-    rateLimit(`ai-setup-preview:${auth.activeMembership?.tenantId}:${auth.user.id}`, 10, 60000);
+    rateLimit(`ai-setup-preview:${auth.activeMembership?.tenantId}:${auth.user.id}`, 30, 60000);
     const { previewAiManagerSetup } = await import("./services/aiManagerSetupService.ts");
     res.json(await previewAiManagerSetup(prisma, auth, req.body));
+  });
+
+  app.post("/api/v1/settings/ai-manager/review", json, async (req, res) => {
+    const { reviewAiManagerSetup } = await import("./services/aiManagerSetupService.ts");
+    res.json(await reviewAiManagerSetup(prisma, await requireAuth(req), req.body));
   });
 
   app.get("/api/v1/settings/ai-automation", async (req, res) => {

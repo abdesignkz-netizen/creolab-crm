@@ -394,6 +394,7 @@ CREATE TABLE "IncompleteIntake" (
 
 -- CreateTable
 CREATE TABLE "Conversation" (
+    "aiHandoffSummaryJson" JSONB NOT NULL DEFAULT '{}',
     "id" TEXT NOT NULL,
     "tenantId" TEXT NOT NULL,
     "connectionId" TEXT,

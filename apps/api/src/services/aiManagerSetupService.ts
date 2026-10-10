@@ -1,17 +1,18 @@
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
-import { aiManagerDraftSchema, compileAiManagerDraft, emptyAiManagerDraft, type AiManagerDraft, type AiSetupState, type AiSetupKnowledge } from "@creolab/contracts";
+import { aiManagerDraftSchema, compileAiManagerDraft, emptyAiManagerDraft, getAiSetupScenarios, type AiSetupQualityRun, type AiSetupQuality, type AiSetupPreview, type AiManagerDraft, type AiSetupState, type AiSetupKnowledge } from "@creolab/contracts";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import { requireAiSettingsAccess, requireTenant } from "../lib/access.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { writeAudit } from "../lib/audit.ts";
 import { requireFeature } from "./entitlementService.ts";
-import { invalidateRuntimeConfig } from "./runtimeSettings.ts";
-import { pushAiConfigToWhatsApp, readActivation } from "./tenantAiConfigService.ts";
+import { envLlm, invalidateRuntimeConfig } from "./runtimeSettings.ts";
+import { buildTenantAiSystemPreamble, pushAiConfigToWhatsApp, readActivation } from "./tenantAiConfigService.ts";
 
 type Snapshot = { id: string; createdAt: string; label: string; prompt: string; knowledge: AiSetupKnowledge[]; draft: AiManagerDraft | null };
-type Store = { schema: 1; revision: number; draft: AiManagerDraft; savedAt: string | null; publishedAt: string | null; baseFingerprint: string; currentVersionId: string | null; versions: Snapshot[] };
+type QualityRun = AiSetupQualityRun & { contextFingerprint: string };
+type Store = { schema: 1; revision: number; draft: AiManagerDraft; savedAt: string | null; publishedAt: string | null; baseFingerprint: string; currentVersionId: string | null; versions: Snapshot[]; qualityRuns?: QualityRun[] };
 const record = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 const json = (value: unknown) => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 const fingerprint = (prompt: string, docs: AiSetupKnowledge[]) => createHash("sha256").update(JSON.stringify([prompt, docs.map(d => `${d.title}\n${d.content}`).sort()])).digest("hex");
@@ -48,15 +49,33 @@ async function load(tx: Prisma.TransactionClient, tenantId: string) {
     store = { schema: 1, revision: 0, draft, savedAt: null, publishedAt: null, baseFingerprint: liveFingerprint, currentVersionId: null, versions: [] };
     await tx.aIConfiguration.update({ where: { id: config.id }, data: { limitsJson: json({ ...limits, aiSetup: store }) } });
   }
-  return { config, limits, store, prompt, docs, liveFingerprint, tenant };
+  // Defaults for new questionnaire fields without truncating previously imported content.
+  store = { ...store, draft: { ...store.draft, conversation: { ...store.draft.conversation, goalPreset: store.draft.conversation.goalPreset ?? "custom", successCriteria: store.draft.conversation.successCriteria ?? "" } } };
+  const platform = await tx.platformSetting.findUnique({ where: { key: "defaults" } });
+  const platformAi = record(record(platform?.valueJson).ai);
+  const env = envLlm(String(config.provider || platformAi.provider || ""));
+  const modelIdentity = [config.provider, config.model, config.credentialId, config.temperature, config.maxOutputTokens, platformAi, env.provider, env.model, env.baseUrl];
+  return { config, limits, store, prompt, docs, liveFingerprint, tenant, modelIdentity };
 }
 type Loaded = Awaited<ReturnType<typeof load>>;
+function qualityFingerprint(data: Loaded) {
+  const compiled = compileAiManagerDraft(data.store.draft);
+  const context = { tenantPrompt: compiled.prompt, knowledge: compiled.knowledge, temperature: data.config.temperature, maxOutputTokens: data.config.maxOutputTokens };
+  return createHash("sha256").update(JSON.stringify([buildTenantAiSystemPreamble(context), data.modelIdentity])).digest("hex");
+}
+function quality(data: Loaded): AiSetupQuality {
+  const context = qualityFingerprint(data);
+  const runs = (data.store.qualityRuns || []).filter(run => run.revision === data.store.revision && run.contextFingerprint === context);
+  const requiredScenarioIds = getAiSetupScenarios(data.store.draft).filter(item => item.required).map(item => item.id);
+  return { runs: runs.map(({ contextFingerprint: _, ...run }) => run), requiredScenarioIds,
+    ready: requiredScenarioIds.length > 0 && requiredScenarioIds.every(id => { const review = runs.find(run => run.scenarioId === id)?.review; return review?.accurate && review.onGoal && review.appropriate; }) };
+}
 function state(data: Loaded): AiSetupState {
   const generated = compileAiManagerDraft(data.store.draft);
   return { revision: data.store.revision, draft: data.store.draft, savedAt: data.store.savedAt, publishedAt: data.store.publishedAt,
     hasPublished: Boolean(data.prompt), liveChanged: data.liveFingerprint !== data.store.baseFingerprint,
     hasDraftChanges: fingerprint(generated.prompt, generated.knowledge) !== data.liveFingerprint,
-    generated, versions: data.store.versions.map(({ id, createdAt, label }) => ({ id, createdAt, label, current: id === data.store.currentVersionId && data.liveFingerprint === data.store.baseFingerprint })) };
+    generated, quality: quality(data), versions: data.store.versions.map(({ id, createdAt, label }) => ({ id, createdAt, label, current: id === data.store.currentVersionId && data.liveFingerprint === data.store.baseFingerprint })) };
 }
 async function persist(tx: Prisma.TransactionClient, data: Loaded, store: Store) {
   await tx.aIConfiguration.update({ where: { id: data.config.id }, data: { limitsJson: json({ ...data.limits, aiSetup: store }) } });
@@ -72,7 +91,7 @@ export async function saveAiManagerSetupDraft(prisma: PrismaClient, auth: AuthCo
   return locked(prisma, tenantId, async tx => {
     const data = await load(tx, tenantId);
     checkRevision(data.store, body.revision);
-    data.store = { ...data.store, draft: body.draft, savedAt: new Date().toISOString(), revision: data.store.revision + 1 };
+    data.store = { ...data.store, draft: body.draft, qualityRuns: [], savedAt: new Date().toISOString(), revision: data.store.revision + 1 };
     await persist(tx, data, data.store);
     await writeAudit(tx, { tenantId, actorUserId: auth.user.id, action: "AI_SETUP_DRAFT_SAVED", entityType: "ai_configuration", entityId: data.config.id, changes: { revision: data.store.revision } });
     return state(data);
@@ -86,7 +105,7 @@ export async function reloadAiManagerSetupFromLive(prisma: PrismaClient, auth: A
     const draft = emptyAiManagerDraft(data.tenant.name);
     draft.additionalInstructions = data.prompt;
     draft.knowledge = data.docs.map(({ id, title, content }) => ({ id, title, content }));
-    data.store = { ...data.store, draft, revision: revision + 1, savedAt: new Date().toISOString(), baseFingerprint: data.liveFingerprint, currentVersionId: null };
+    data.store = { ...data.store, draft, qualityRuns: [], revision: revision + 1, savedAt: new Date().toISOString(), baseFingerprint: data.liveFingerprint, currentVersionId: null };
     await persist(tx, data, data.store);
     await writeAudit(tx, { tenantId, actorUserId: auth.user.id, action: "AI_SETUP_RELOADED", entityType: "ai_configuration", entityId: data.config.id });
     return state(data);
@@ -109,6 +128,7 @@ async function publish(prisma: PrismaClient, auth: AuthContext, input: unknown, 
     } else {
       const compiled = compileAiManagerDraft(parse(aiManagerDraftSchema, store.draft));
       if (compiled.issues.some(issue => issue.level === "error")) throw new ApiError(422, "ai_setup_incomplete", "Перед публикацией заполните обязательные сведения и исправьте замечания анкеты.");
+      if (!quality(data).ready) throw new ApiError(422, "ai_setup_quality_required", "Проведите обязательные проверочные диалоги и оцените ответы перед публикацией.");
       prompt = compiled.prompt; knowledge = compiled.knowledge;
     }
     const now = new Date();
@@ -116,7 +136,7 @@ async function publish(prisma: PrismaClient, auth: AuthContext, input: unknown, 
     if (!versions.length && (data.prompt || data.docs.length)) versions.push({ id: randomUUID(), createdAt: now.toISOString(), label: "До настройки в мастере", prompt: data.prompt, knowledge: data.docs.map(({ title, content }) => ({ title, content })), draft: null });
     const id = randomUUID();
     versions.unshift({ id, createdAt: now.toISOString(), label: restore ? "Восстановленная версия" : `Публикация ${now.toLocaleDateString("ru-RU", { timeZone: data.tenant.timezone || "Asia/Almaty" })}`, prompt, knowledge, draft });
-    const next: Store = { ...store, revision: store.revision + 1, draft, savedAt: now.toISOString(), publishedAt: now.toISOString(), currentVersionId: id, baseFingerprint: fingerprint(prompt, knowledge), versions: versions.slice(0, 10) };
+    const next: Store = { ...store, qualityRuns: restore ? [] : (store.qualityRuns || []).map(run => ({ ...run, revision: store.revision + 1 })), revision: store.revision + 1, draft, savedAt: now.toISOString(), publishedAt: now.toISOString(), currentVersionId: id, baseFingerprint: fingerprint(prompt, knowledge), versions: versions.slice(0, 10) };
     // Leave unrelated unpublished admin materials untouched. Retire only the old active set.
     await tx.knowledgeDocument.updateMany({ where: { tenantId, status: "published" }, data: { status: "archived" } });
     for (const item of knowledge) await tx.knowledgeDocument.create({ data: { tenantId, ...item, sourceType: "ai_setup", status: "published", publishedAt: now, updatedById: auth.user.id } });
@@ -129,23 +149,49 @@ async function publish(prisma: PrismaClient, auth: AuthContext, input: unknown, 
 }
 export const publishAiManagerSetup = (prisma: PrismaClient, auth: AuthContext, input: unknown) => publish(prisma, auth, input, false);
 export const restoreAiManagerSetup = (prisma: PrismaClient, auth: AuthContext, input: unknown) => publish(prisma, auth, input, true);
-export async function previewAiManagerSetup(prisma: PrismaClient, auth: AuthContext, input: unknown) {
+export async function previewAiManagerSetup(prisma: PrismaClient, auth: AuthContext, input: unknown): Promise<AiSetupPreview> {
   const tenantId = access(auth); await requireFeature(prisma, auth, "AI_MANAGER");
-  const body = parse(z.object({ revision: z.number().int().nonnegative(), messages: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().trim().min(1).max(4000) }).strict()).min(1).max(20) }).strict(), input);
+  const body = parse(z.object({ revision: z.number().int().nonnegative(), scenarioId: z.string().min(1).max(100).optional(), messages: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().trim().min(1).max(4000) }).strict()).min(1).max(20) }).strict(), input);
   if (body.messages[0].role !== "user" || body.messages.at(-1)?.role !== "user" || body.messages.some((message, i) => i > 0 && message.role === body.messages[i - 1].role)) throw new ApiError(422, "invalid_ai_setup", "Тестовый диалог должен чередовать сообщения клиента и ИИ.");
-  const context = await locked(prisma, tenantId, async tx => {
+  const prepared = await locked(prisma, tenantId, async tx => {
     const data = await load(tx, tenantId); checkRevision(data.store, body.revision);
     const compiled = compileAiManagerDraft(parse(aiManagerDraftSchema, data.store.draft));
     if (compiled.issues.some(issue => issue.level === "error")) throw new ApiError(422, "ai_setup_incomplete", "Перед тестом заполните обязательные сведения анкеты.");
-    return { tenantPrompt: compiled.prompt, knowledge: compiled.knowledge, temperature: data.config.temperature, maxOutputTokens: data.config.maxOutputTokens };
+    if (body.scenarioId && !getAiSetupScenarios(data.store.draft).some(item => item.id === body.scenarioId)) throw new ApiError(422, "invalid_ai_setup_scenario", "Выберите проверочный сценарий из списка.");
+    return { fingerprint: qualityFingerprint(data), context: { tenantPrompt: compiled.prompt, knowledge: compiled.knowledge, temperature: data.config.temperature, maxOutputTokens: data.config.maxOutputTokens } };
   });
   const { answerWhatsAppWithLlm } = await import("./llmClient.ts");
+  let result: Awaited<ReturnType<typeof answerWhatsAppWithLlm>>;
   try {
-    const result = await answerWhatsAppWithLlm({ prisma, tenantId, userId: auth.user.id, contextOverride: context, history: body.messages });
+    invalidateRuntimeConfig(tenantId);
+    result = await answerWhatsAppWithLlm({ prisma, tenantId, userId: auth.user.id, contextOverride: prepared.context, history: body.messages });
     if (!result) throw new Error("empty");
-    return { sandbox: true as const, reply: result.reply, handoff: result.handoff };
   } catch (error) {
     if (error instanceof ApiError && [402, 403, 429].includes(error.status)) throw error;
     throw new ApiError(502, "ai_setup_preview_failed", "Не удалось получить тестовый ответ. Проверьте подключение модели ИИ и повторите попытку. Черновик сохранён.");
   }
+  const response: AiSetupPreview = { sandbox: true, ...result };
+  if (!body.scenarioId) return response;
+  return locked(prisma, tenantId, async tx => {
+    const data = await load(tx, tenantId); checkRevision(data.store, body.revision);
+    if (qualityFingerprint(data) !== prepared.fingerprint) throw new ApiError(409, "ai_setup_conflict", "Настройки модели изменились во время теста. Повторите проверку.");
+    const run: QualityRun = { id: randomUUID(), scenarioId: body.scenarioId!, revision: body.revision, createdAt: new Date().toISOString(), messages: body.messages, ...result, review: null, contextFingerprint: prepared.fingerprint };
+    // Only the latest result of a scenario can qualify this draft for publication.
+    data.store.qualityRuns = [run, ...(data.store.qualityRuns || []).filter(old => old.scenarioId !== run.scenarioId && old.revision === body.revision)].slice(0, 8);
+    await persist(tx, data, data.store);
+    return { ...response, runId: run.id };
+  });
+}
+export async function reviewAiManagerSetup(prisma: PrismaClient, auth: AuthContext, input: unknown) {
+  const tenantId = access(auth); await requireFeature(prisma, auth, "AI_MANAGER");
+  const body = parse(z.object({ revision: z.number().int().nonnegative(), runId: z.string().min(1).max(100), accurate: z.boolean(), onGoal: z.boolean(), appropriate: z.boolean(), notes: z.string().trim().max(2000).default("") }).strict(), input);
+  return locked(prisma, tenantId, async tx => {
+    const data = await load(tx, tenantId); checkRevision(data.store, body.revision);
+    const run = data.store.qualityRuns?.find(item => item.id === body.runId && item.revision === body.revision && item.contextFingerprint === qualityFingerprint(data));
+    if (!run) throw new ApiError(409, "ai_setup_test_expired", "Этот результат больше не актуален. Повторите проверочный диалог.");
+    run.review = { accurate: body.accurate, onGoal: body.onGoal, appropriate: body.appropriate, notes: body.notes, reviewedAt: new Date().toISOString() };
+    await persist(tx, data, data.store);
+    await writeAudit(tx, { tenantId, actorUserId: auth.user.id, action: "AI_SETUP_TEST_REVIEWED", entityType: "ai_configuration", entityId: data.config.id, changes: { runId: run.id, scenarioId: run.scenarioId, revision: body.revision, accurate: body.accurate, onGoal: body.onGoal, appropriate: body.appropriate } });
+    return state(data);
+  });
 }

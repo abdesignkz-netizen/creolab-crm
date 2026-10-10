@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import { createPrismaClient } from "@creolab/db";
 import { createApp } from "./app.ts";
-import { invalidateRuntimeConfig } from "./services/runtimeSettings.ts";
+import { getEffectiveLlmConfig, invalidateRuntimeConfig } from "./services/runtimeSettings.ts";
 import { getPublishedTenantAiContext } from "./services/tenantAiConfigService.ts";
 import { saveTenantAiSettings } from "./services/platformIntegrationService.ts";
 import { AI_MANAGER_ROLES, aiManagerDraftSchema, compileAiManagerDraft, emptyAiManagerDraft, type AiManagerDraft } from "@creolab/contracts";
@@ -13,6 +13,7 @@ function completeDraft(): AiManagerDraft {
   draft.company.contacts = "Пишите менеджеру в этом чате";
   draft.conversation.goal = "Выяснить задачу и согласовать следующий шаг";
   draft.conversation.questions = "Задача, срок, бюджет";
+  draft.conversation.successCriteria = "Клиент подтвердил задачу и согласовал следующий шаг";
   draft.conversation.completion = "Передать специалисту для расчёта";
   draft.offerings = [{ id: "one", name: "Презентация", description: "Дизайн слайдов", price: "от 80 000 ₸", includes: "10 слайдов", timing: "5 рабочих дней", restrictions: "Без перевода" }];
   draft.faq = [{ id: "faq", question: "Вы переводите тексты?", answer: "Нет, перевод не входит." }];
@@ -62,6 +63,17 @@ describe("Owner AI manager setup", { concurrency: false }, () => {
     });
     const data = await response.json();
     return { status: response.status, data };
+  }
+  async function approveScenarios(state: any) {
+    for (const scenarioId of state.quality.requiredScenarioIds) {
+      const preview = await request("/preview", "POST", { revision: state.revision, scenarioId, messages: [{ role: "user", content: scenarioId === "goal_kk" ? "Сәлеметсіз бе!" : "Здравствуйте" }] });
+      assert.equal(preview.status, 200, JSON.stringify(preview.data));
+      const reviewed = await request("/review", "POST", { revision: state.revision, runId: preview.data.runId, accurate: true, onGoal: true, appropriate: true, notes: "Проверено владельцем" });
+      assert.equal(reviewed.status, 200, JSON.stringify(reviewed.data));
+      state = reviewed.data;
+    }
+    assert.equal(state.quality.ready, true);
+    return state;
   }
   async function login(email: string) {
     const response = await nativeFetch(`${base}/api/v1/auth/login`, {
@@ -145,6 +157,7 @@ describe("Owner AI manager setup", { concurrency: false }, () => {
       ["", "PATCH", { revision: state.data.revision, draft: state.data.draft }],
       ["/publish", "POST", { revision: state.data.revision }],
       ["/restore", "POST", { revision: state.data.revision, versionId: "not-a-version" }],
+      ["/review", "POST", { revision: state.data.revision, runId: "fake", accurate: true, onGoal: true, appropriate: true, notes: "" }],
       ["/preview", "POST", { revision: state.data.revision, messages: [{ role: "user", content: "Здравствуйте" }] }],
     ] as const) assert.equal((await request(path, method, body, managerCookie)).status, 403, path || method);
   });
@@ -198,6 +211,7 @@ describe("Owner AI manager setup", { concurrency: false }, () => {
 
   it("publishes one consistent snapshot, keeps private drafts and restores the legacy baseline", async () => {
     const state = (await request()).data;
+    await approveScenarios(state);
     const published = await request("/publish", "POST", { revision: state.revision });
     assert.equal(published.status, 200, JSON.stringify(published.data));
     assert.equal(published.data.hasDraftChanges, false);
@@ -250,6 +264,7 @@ describe("Owner AI manager setup", { concurrency: false }, () => {
     let state = (await request()).data;
     const restoreVersion = state.versions[0].id;
     state = (await request("", "PATCH", { revision: state.revision, draft: completeDraft() })).data;
+    await approveScenarios(state);
     const published = await request("/publish", "POST", { revision: state.revision });
     assert.equal(published.status, 200, JSON.stringify(published.data));
     assert.equal((await prisma.aIConfiguration.findUniqueOrThrow({ where: { id: config.id } })).enabled, false);
@@ -259,6 +274,72 @@ describe("Owner AI manager setup", { concurrency: false }, () => {
     const tenantAfter = await prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
     assert.deepEqual(tenantAfter.settingsJson, tenantBefore.settingsJson);
     assert.deepEqual(tenantAfter.workingHoursJson, tenantBefore.workingHoursJson);
+  });
+
+  it("requires actual scenario runs and owner review, expires replaced runs and invalidates edits", async () => {
+    let state = (await request()).data;
+    state = (await request("", "PATCH", { revision: state.revision, draft: completeDraft() })).data;
+    const publish = await request("/publish", "POST", { revision: state.revision });
+    assert.equal(publish.status, 422); assert.equal(publish.data.code, "ai_setup_quality_required");
+    assert.equal((await request("/review", "POST", { revision: state.revision, runId: "fabricated", accurate: true, onGoal: true, appropriate: true, notes: "" })).status, 409);
+    assert.equal((await request("/preview", "POST", { revision: state.revision, scenarioId: "fabricated", messages: [{ role: "user", content: "Привет" }] })).status, 422);
+    const before = await operationalSnapshot();
+    state = await approveScenarios(state);
+    assert.deepEqual(await operationalSnapshot(), before);
+    const oldRun = state.quality.runs.find((run: any) => run.scenarioId === "goal_ru");
+    const again = await request("/preview", "POST", { revision: state.revision, scenarioId: "goal_ru", messages: [{ role: "user", content: "Привет" }] });
+    assert.equal(again.status, 200, JSON.stringify(again.data));
+    state = (await request()).data; assert.equal(state.quality.ready, false);
+    assert.equal((await request("/review", "POST", { revision: state.revision, runId: oldRun.id, accurate: true, onGoal: true, appropriate: true, notes: "" })).status, 409);
+    const currentRun = state.quality.runs.find((run: any) => run.scenarioId === "goal_ru");
+    assert.equal((await request("/review", "POST", { revision: state.revision, runId: currentRun.id, accurate: true, onGoal: true, appropriate: true, notes: "" }, otherCookie)).status, 409);
+    state = (await request("/review", "POST", { revision: state.revision, runId: currentRun.id, accurate: false, onGoal: true, appropriate: true, notes: "Неверная цена" })).data;
+    assert.equal(state.quality.ready, false);
+    state = (await request("/review", "POST", { revision: state.revision, runId: currentRun.id, accurate: true, onGoal: true, appropriate: true, notes: "" })).data;
+    assert.equal(state.quality.ready, true);
+    const config = await prisma.aIConfiguration.findFirstOrThrow({ where: { tenantId } });
+    await prisma.aIConfiguration.update({ where: { id: config.id }, data: { temperature: 0.3 } });
+    assert.equal((await request()).data.quality.ready, false);
+    await prisma.aIConfiguration.update({ where: { id: config.id }, data: { temperature: config.temperature } });
+    state = (await request("", "PATCH", { revision: state.revision, draft: { ...state.draft, company: { ...state.draft.company, name: "Изменённая компания" } } })).data;
+    assert.equal(state.quality.ready, false); assert.equal(state.quality.runs.length, 0);
+  });
+
+  it("rejects results generated against a draft edited while the provider was answering", async () => {
+    let state = (await request()).data;
+    state = (await request("", "PATCH", { revision: state.revision, draft: completeDraft() })).data;
+    const mock = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      const result = await mock(url, init);
+      const saved = await request("", "PATCH", { revision: state.revision, draft: { ...state.draft, conversation: { ...state.draft.conversation, goal: "Другая цель разговора" } } });
+      assert.equal(saved.status, 200);
+      return result;
+    };
+    try {
+      const result = await request("/preview", "POST", { revision: state.revision, scenarioId: "goal_ru", messages: [{ role: "user", content: "Здравствуйте" }] });
+      assert.equal(result.status, 409, JSON.stringify(result.data));
+      assert.equal((await request()).data.quality.runs.length, 0);
+    } finally { globalThis.fetch = mock; }
+  });
+
+  it("allows preview with customer automation off but never bypasses platform disable", async () => {
+    const config = await prisma.aIConfiguration.findFirstOrThrow({ where: { tenantId } });
+    const platform = await prisma.platformSetting.findUnique({ where: { key: "defaults" } });
+    try {
+      await prisma.aIConfiguration.update({ where: { id: config.id }, data: { enabled: false } });
+      invalidateRuntimeConfig();
+      assert.equal((await getEffectiveLlmConfig(prisma, tenantId)).apiKey, "");
+      assert.equal((await getEffectiveLlmConfig(prisma, tenantId, { setupPreview: true })).apiKey, "fake-test-key");
+      const settings = platform?.valueJson as any || {};
+      await prisma.platformSetting.upsert({ where: { key: "defaults" }, create: { key: "defaults", valueJson: { ai: { enabled: false } } }, update: { valueJson: { ...settings, ai: { ...settings.ai, enabled: false } } } });
+      invalidateRuntimeConfig();
+      assert.equal((await getEffectiveLlmConfig(prisma, tenantId, { setupPreview: true })).apiKey, "");
+    } finally {
+      await prisma.aIConfiguration.update({ where: { id: config.id }, data: { enabled: config.enabled } });
+      if (platform) await prisma.platformSetting.update({ where: { key: "defaults" }, data: { valueJson: platform.valueJson as any } });
+      else await prisma.platformSetting.deleteMany({ where: { key: "defaults" } });
+      invalidateRuntimeConfig();
+    }
   });
 
   it("allows only one of two simultaneous saves from the same revision", async () => {

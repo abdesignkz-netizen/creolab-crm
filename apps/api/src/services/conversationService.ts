@@ -531,6 +531,9 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
   };
 
   const waitingFor = (conversation.waitingFor || "NONE") as WaitingFor;
+  const rawHandoff = (conversation.aiHandoffSummaryJson as Record<string, any> | null);
+  const aiHandoffSummary = conversation.mode !== "ai" && rawHandoff?.controlVersion === conversation.controlVersion && typeof rawHandoff.request === "string" && typeof rawHandoff.nextStep === "string" && Array.isArray(rawHandoff.collected)
+    ? { request: rawHandoff.request, collected: rawHandoff.collected.filter((item: unknown) => typeof item === "string"), nextStep: rawHandoff.nextStep, sourceMessageId: rawHandoff.sourceMessageId, createdAt: rawHandoff.createdAt } : null;
 
   return {
     asOf: now.toISOString(),
@@ -562,6 +565,7 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
             : null,
       waitingFor,
       waitingForLabel: WAITING_FOR_LABEL[waitingFor],
+      aiHandoffSummary,
       attentionReason: conversation.attentionReason,
       attentionReasonLabel: attentionReasonLabel(conversation.attentionReason),
       assigneeMembershipId: conversation.assigneeMembershipId || null,
