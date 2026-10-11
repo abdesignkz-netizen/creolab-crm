@@ -1,6 +1,7 @@
 import { deliveredConversationMessage } from "./conversationMessageState.ts";
 import { randomUUID } from "node:crypto";
 import type { Prisma, PrismaClient } from "@creolab/db";
+import { directWhatsAppTypes } from "./whatsappConnectionService.ts";
 import { crmModeToSeller } from "@creolab/contracts";
 import {
   isWithinConversationHours,
@@ -9,28 +10,16 @@ import {
   parseAIAutomationSettings,
   replyAudienceAllows,
   type AIAutomationSettings,
-  type HandoffTriggerKey,
 } from "./aiAutomationSettings.ts";
 import { composeClientMessageWithLlm } from "./llmClient.ts";
 import { sendViaProvider } from "./messagingProvider.ts";
 import { resolveSellerBridge } from "./sellerLink.ts";
 import { decideAutomationPolicy } from "./aiAutomationPolicyService.ts";
 
-export const CLIENT_FOLLOWUP_TYPE = "client_followup";
+import { detectHandoffReason, isClientRefusalText } from "./aiHandoffPolicy.ts";
 
-const REFUSAL_RE = /не интересн|не надо|не нужно|отказ|отказываюсь|сам напишу|больше не пишите|стоп|stop\b|unsubscribe/i;
-// Match Russian legal words, not fragments inside «обсудить» or «посуда».
-// JS \b is ASCII-based, so Cyrillic needs Unicode letter boundaries.
-const CONFLICT_RE = /(?<![\p{L}\p{N}_])(?:конфликт\p{L}*|суд(?:а|у|ом|е|ы|ов|ам|ами|ах)?|судебн\p{L}*|судиться|адвокат\p{L}*|прокуратур\p{L}*)(?![\p{L}\p{N}_])/iu;
-const REASON_PATTERNS: Array<{ code: string; trigger: HandoffTriggerKey; re: RegExp }> = [
-  { code: "CLIENT_REQUESTED_HUMAN", trigger: "CLIENT_REQUESTED_HUMAN", re: /менеджер|оператор|живой человек|человека|переведите|свяжите.{0,20}человек|позовите.{0,12}человек|хочу (с )?менеджер|human please|talk to (a )?person/i },
-  { code: "COMPLAINT", trigger: "COMPLAINT", re: /жалоб|возмущ|хамств|обман|претензи/i },
-  { code: "CONFLICT", trigger: "COMPLAINT", re: CONFLICT_RE },
-  { code: "CONTRACT", trigger: "CONTRACT", re: /договор|контракт|оферт/i },
-  { code: "PAYMENT", trigger: "PAYMENT", re: /оплат|сч[её]т\b|платеж|каспи|iban/i },
-  { code: "CUSTOM_PRICING", trigger: "CUSTOM_PRICING", re: /индивидуальн.{0,12}цен|скидк|нестандартн.{0,16}услов|спеццен/i },
-  { code: "TECHNICAL_QUESTION", trigger: "OTHER", re: /интеграц|api|webhook|кастом|нестандартн.{0,12}запрос/i },
-];
+export const CLIENT_FOLLOWUP_TYPE = "client_followup";
+export { detectHandoffReason, isClientRefusalText } from "./aiHandoffPolicy.ts";
 
 function asSettings(tenantSettingsJson: unknown): AIAutomationSettings {
   return parseAIAutomationSettings(tenantSettingsJson);
@@ -46,35 +35,6 @@ export function isInboundClient(message: { senderKind?: string | null; direction
 
 export function isOutboundAi(message: { senderKind?: string | null; direction?: string | null }) {
   return message.senderKind === "ai" || (message.direction === "outbound" && message.senderKind !== "staff" && message.senderKind !== "user");
-}
-
-export function detectHandoffReason(
-  text: string,
-  analysis?: { humanRequired?: boolean; humanReason?: string | null; confidence?: string | null } | null,
-): { code: string; trigger: HandoffTriggerKey } | null {
-  const hay = String(text || "");
-  for (const row of REASON_PATTERNS) {
-    if (row.re.test(hay)) return { code: row.code, trigger: row.trigger };
-  }
-  const reason = String(analysis?.humanReason || "").trim();
-  if (reason === "CLIENT_REQUESTED_HUMAN" || reason === "COMPLAINT" || reason === "CONFLICT" || reason === "CONTRACT" || reason === "PAYMENT" || reason === "CUSTOM_PRICING" || reason === "LOW_CONFIDENCE" || reason === "OTHER" || reason === "TECHNICAL_QUESTION" || reason === "AI_ERROR") {
-    const trigger: HandoffTriggerKey =
-      reason === "CONFLICT"
-        ? "COMPLAINT"
-        : reason === "TECHNICAL_QUESTION" || reason === "AI_ERROR"
-          ? "OTHER"
-          : (reason as HandoffTriggerKey);
-    return { code: reason, trigger };
-  }
-  if (analysis?.confidence === "LOW" || (analysis?.humanRequired && analysis.confidence === "LOW")) {
-    return { code: "LOW_CONFIDENCE", trigger: "LOW_CONFIDENCE" };
-  }
-  if (analysis?.humanRequired) return { code: analysis.humanReason || "OTHER", trigger: "OTHER" };
-  return null;
-}
-
-export function isClientRefusalText(text: string) {
-  return REFUSAL_RE.test(String(text || ""));
 }
 
 async function loadTenantSettings(prisma: PrismaClient, tenantId: string) {
@@ -161,7 +121,10 @@ export async function applyConfiguredHandoff(
   if (!settings.analyzeNewRequests) return null;
   const detected = detectHandoffReason(input.text || "", input.analysis);
   if (!detected || !settings.handoff.triggers[detected.trigger]) return null;
-  const conversation = await prisma.conversation.findFirst({ where: { id: conversationId, tenantId } });
+  const conversation = await prisma.conversation.findFirst({ where: { id: conversationId, tenantId }, include: { connection: { include: { integration: true } } } });
+  // Direct WhatsApp owns the atomic handoff + customer acknowledgment. Background
+  // CRM analysis must not win the race and cancel that reply before it is queued.
+  if (conversation?.connection?.autoReply && directWhatsAppTypes.includes(conversation.connection.integration.type)) return null;
   if (!conversation || conversation.mode === "human") return null;
   if (settings.handoff.afterMode === "assist" && conversation.mode === "paused") return null;
   const nextMode = settings.handoff.afterMode === "assist" ? "paused" : "human";

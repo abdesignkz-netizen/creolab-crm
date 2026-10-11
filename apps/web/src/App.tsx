@@ -1192,7 +1192,7 @@ export function App() {
                 <Route path="/stats" element={me?.capabilities?.analytics ? <StatsPage /> : <Navigate to="/today" replace />} />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/settings/ai-automation" element={me?.capabilities?.aiSettings ? <AiAutomationSettingsPage /> : <Navigate to="/settings" replace />} />
-                <Route path="/settings/ai-manager" element={me?.capabilities?.aiSettings ? <AiManagerSetupPage /> : <Navigate to="/settings" replace />} />
+                <Route path="/settings/ai-manager" element={me?.capabilities?.aiSettings ? <AiManagerSetupPage key={`${me?.user?.id}:${me?.activeTenant?.tenant?.id}`} /> : <Navigate to="/settings" replace />} />
                 <Route path="/admin/*" element={me?.user?.platformAdmin ? <PlatformAdminPage /> : <Navigate to="/today" replace />} />
                 <Route path="*" element={<Navigate to={me?.user?.platformAdmin && !me?.activeTenant ? "/admin" : "/today"} />} />
               </Routes>

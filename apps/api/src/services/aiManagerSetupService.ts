@@ -1,3 +1,5 @@
+import { directHandoffReason, handoffAcknowledgement } from "./aiHandoffPolicy.ts";
+import { parseAIAutomationSettings } from "./aiAutomationSettings.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { aiManagerDraftSchema, compileAiManagerDraft, emptyAiManagerDraft, getAiSetupScenarios, type AiSetupQualityRun, type AiSetupQuality, type AiSetupPreview, type AiManagerDraft, type AiSetupState, type AiSetupKnowledge } from "@creolab/contracts";
@@ -61,7 +63,7 @@ type Loaded = Awaited<ReturnType<typeof load>>;
 function qualityFingerprint(data: Loaded) {
   const compiled = compileAiManagerDraft(data.store.draft);
   const context = { tenantPrompt: compiled.prompt, knowledge: compiled.knowledge, temperature: data.config.temperature, maxOutputTokens: data.config.maxOutputTokens };
-  return createHash("sha256").update(JSON.stringify([buildTenantAiSystemPreamble(context), data.modelIdentity])).digest("hex");
+  return createHash("sha256").update(JSON.stringify(["reply-policy-v2", buildTenantAiSystemPreamble(context), data.modelIdentity, parseAIAutomationSettings(data.tenant.settingsJson).handoff])).digest("hex");
 }
 function quality(data: Loaded): AiSetupQuality {
   const context = qualityFingerprint(data);
@@ -158,13 +160,15 @@ export async function previewAiManagerSetup(prisma: PrismaClient, auth: AuthCont
     const compiled = compileAiManagerDraft(parse(aiManagerDraftSchema, data.store.draft));
     if (compiled.issues.some(issue => issue.level === "error")) throw new ApiError(422, "ai_setup_incomplete", "Перед тестом заполните обязательные сведения анкеты.");
     if (body.scenarioId && !getAiSetupScenarios(data.store.draft).some(item => item.id === body.scenarioId)) throw new ApiError(422, "invalid_ai_setup_scenario", "Выберите проверочный сценарий из списка.");
-    return { fingerprint: qualityFingerprint(data), context: { tenantPrompt: compiled.prompt, knowledge: compiled.knowledge, temperature: data.config.temperature, maxOutputTokens: data.config.maxOutputTokens } };
+    return { settings: parseAIAutomationSettings(data.tenant.settingsJson), fingerprint: qualityFingerprint(data), context: { tenantPrompt: compiled.prompt, knowledge: compiled.knowledge, temperature: data.config.temperature, maxOutputTokens: data.config.maxOutputTokens } };
   });
-  const { answerWhatsAppWithLlm } = await import("./llmClient.ts");
+  const { answerWhatsAppWithLlm, normalizeAiHandoffSummary } = await import("./llmClient.ts");
   let result: Awaited<ReturnType<typeof answerWhatsAppWithLlm>>;
   try {
     invalidateRuntimeConfig(tenantId);
-    result = await answerWhatsAppWithLlm({ prisma, tenantId, userId: auth.user.id, contextOverride: prepared.context, history: body.messages });
+    const reason = directHandoffReason(body.messages.at(-1)!.content, prepared.settings);
+    result = reason ? { reply: handoffAcknowledgement(reason, body.messages), handoff: true, reason, handoffSummary: normalizeAiHandoffSummary(null, body.messages.at(-1)!.content) }
+      : await answerWhatsAppWithLlm({ prisma, tenantId, userId: auth.user.id, contextOverride: prepared.context, history: body.messages });
     if (!result) throw new Error("empty");
   } catch (error) {
     if (error instanceof ApiError && [402, 403, 429].includes(error.status)) throw error;

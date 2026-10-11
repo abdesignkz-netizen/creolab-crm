@@ -62,6 +62,11 @@ async function deliverMessage(prisma: PrismaClient, integrationId: string, messa
   const validRecipient = socket ? /^\d+@(s\.whatsapp\.net|lid)$/.test(recipient) : /^\d+$/.test(recipient);
   const ai = message.senderKind === "ai";
   const operation = await prisma.outboundOperation.findFirst({ where: { tenantId: row.tenantId, providerRef: message.id } });
+  const summary = conversation.aiHandoffSummaryJson as Record<string, unknown> | null;
+  const handoffSource = ai && operation && typeof summary?.sourceMessageId === "string"
+    && operation.idempotencyKey === `wa-ai-handoff:${conversation.id}:${summary.sourceMessageId}:${operation.controlVersion}`
+    ? summary.sourceMessageId : undefined;
+  const expectedMode = handoffSource ? { in: ["human", "paused"] } : ai ? "ai" : "human";
   const cancel = async () => {
     await prisma.message.updateMany({ where: { id: messageId, operationState: { in: ["queued", "sending"] } }, data: { operationState: "canceled" } });
     if (operation) await prisma.outboundOperation.updateMany({ where: { id: operation.id }, data: { state: "canceled" } });
@@ -69,20 +74,20 @@ async function deliverMessage(prisma: PrismaClient, integrationId: string, messa
   async function dispatchAllowed() {
     if (!operation) return false;
     const current = await prisma.outboundOperation.findFirst({ where: { id: operation.id, tenantId: row.tenantId,
-      state: { in: ["queued", "sending"] }, conversation: { id: conversation.id, status: "open", mode: ai ? "ai" : "human",
+      state: { in: ["queued", "sending"] }, conversation: { id: conversation.id, status: "open", mode: expectedMode,
         controlVersion: operation.controlVersion, tenant: { status: "active" },
         connection: { status: "active", integrationId, integration: { status: "active" } } } }, select: { id: true } });
     if (!current) return false;
     if (!ai) return true;
     const { directAiSendAllowed } = await import("./whatsappAiService.ts");
-    return directAiSendAllowed(prisma, row.tenantId, conversation.id, operation.controlVersion, Number(operation.requestHash));
+    return directAiSendAllowed(prisma, row.tenantId, conversation.id, operation.controlVersion, Number(operation.requestHash), handoffSource);
   }
   // Only one caller can dispatch this message, including concurrent outbox workers.
   const claimed = await prisma.message.updateMany({ where: { id: messageId, operationState: "queued" }, data: { operationState: "sending" } });
   if (!claimed.count) return;
   try {
     if (!await dispatchAllowed()) { await cancel(); return; }
-    if (!validRecipient || row.status !== "active" || conversation.connection!.status !== "active" || conversation.mode !== (ai ? "ai" : "human")) throw new ApiError(409, "whatsapp_unavailable", "Подключение WhatsApp недоступно");
+    if (!validRecipient || row.status !== "active" || conversation.connection!.status !== "active" || (handoffSource ? !["human", "paused"].includes(conversation.mode) : conversation.mode !== (ai ? "ai" : "human"))) throw new ApiError(409, "whatsapp_unavailable", "Подключение WhatsApp недоступно");
     const claimedOperation = await prisma.outboundOperation.updateMany({ where: { id: operation!.id, state: "queued" }, data: { state: "sending" } });
     if (!claimedOperation.count) { await cancel(); return; }
     const settings = row.schemaJson as CloudSettings, secrets = socket ? null : await cloudSecrets(prisma, row);
@@ -122,7 +127,7 @@ async function deliverMessage(prisma: PrismaClient, integrationId: string, messa
     await prisma.$transaction(async tx => {
       await tx.message.update({ where: { id: messageId }, data: { operationState: "accepted", providerMessageId } });
       await tx.outboundOperation.updateMany({ where: { tenantId: row.tenantId, providerRef: messageId }, data: { state: "accepted" } });
-      await tx.conversation.updateMany({ where: { id: conversation.id, messageRevision: conversation.messageRevision, controlVersion: conversation.controlVersion }, data: { waitingFor: "CLIENT", needsAttention: false, attentionReason: null } });
+      if (!handoffSource) await tx.conversation.updateMany({ where: { id: conversation.id, messageRevision: conversation.messageRevision, controlVersion: conversation.controlVersion }, data: { waitingFor: "CLIENT", needsAttention: false, attentionReason: null } });
       await tx.conversation.update({ where: { id: conversation.id }, data: { messageRevision: { increment: 1 } } });
       await enqueueConversationContext(tx, row.tenantId, conversation.id, messageId);
       // An inbound message can arrive while the provider is accepting this send.

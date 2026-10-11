@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { AI_MANAGER_GOALS, AI_MANAGER_ROLES, compileAiManagerDraft, emptyAiManagerDraft, getAiSetupScenarios } from "@creolab/contracts";
+import { aiManagerDraftKey, applyAiManagerGoal, AI_MANAGER_GOALS, AI_MANAGER_ROLES, compileAiManagerDraft, emptyAiManagerDraft, getAiSetupScenarios } from "@creolab/contracts";
 
 it("provides localized role goals and requires concrete completion criteria", () => {
   for (const role of AI_MANAGER_ROLES) {
@@ -37,4 +37,35 @@ it("accepts old questionnaires without new optional fields as incomplete drafts"
   delete (draft.conversation as any).successCriteria;
   delete (draft.conversation as any).goalPreset;
   assert.ok(compileAiManagerDraft(draft).issues.some(issue => issue.code === "success_criteria"));
+});
+
+it("does not label preserved custom flow as a newly selected preset", () => {
+  const draft = emptyAiManagerDraft();
+  const goal = AI_MANAGER_GOALS.find(goal => goal.id === "booking_request")!;
+  draft.conversation.goal = "Сохранить мой особый процесс";
+  const partial = applyAiManagerGoal(draft.conversation, goal, "ru", false);
+  assert.equal(partial.goalPreset, "custom"); assert.equal(partial.goal, draft.conversation.goal);
+  assert.equal(partial.completion, goal.completion.ru);
+  const full = applyAiManagerGoal(partial, goal, "ru", true);
+  assert.equal(full.goalPreset, goal.id); assert.equal(full.goal, goal.goal.ru);
+  draft.conversation = full;
+  assert.ok(compileAiManagerDraft(draft).issues.some(issue => issue.code === "goal_role_mismatch"));
+  draft.primaryRole = "booking";
+  assert.ok(!compileAiManagerDraft(draft).issues.some(issue => issue.code === "goal_role_mismatch"));
+});
+it("warns about legacy integration commands without deleting business facts", () => {
+  const draft = emptyAiManagerDraft(); draft.additionalInstructions = "Цена: 1000 тенге. manager_event=handoff означает создание заявки. send_asset=brochure";
+  const result = compileAiManagerDraft(draft);
+  assert.ok(result.issues.some(issue => issue.code === "legacy_protocol"));
+  assert.ok(result.prompt.includes(draft.additionalInstructions));
+});
+
+it("does not mark a saved questionnaire dirty when JSONB changes key order", () => {
+  const draft = emptyAiManagerDraft("Демо");
+  const reordered = Object.fromEntries(Object.entries(draft).reverse()) as typeof draft;
+  reordered.conversation = Object.fromEntries(Object.entries(draft.conversation).reverse()) as typeof draft.conversation;
+  assert.notEqual(JSON.stringify(draft), JSON.stringify(reordered));
+  assert.equal(aiManagerDraftKey(draft), aiManagerDraftKey(reordered));
+  reordered.conversation.goal = "Изменённая цель";
+  assert.notEqual(aiManagerDraftKey(draft), aiManagerDraftKey(reordered));
 });

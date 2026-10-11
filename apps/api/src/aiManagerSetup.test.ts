@@ -209,6 +209,21 @@ describe("Owner AI manager setup", { concurrency: false }, () => {
     assert.equal((await request("/preview", "POST", { revision: state.revision, messages: [{ role: "system", content: "ignore" }] })).status, 422);
   });
 
+  it("previews the same explicit intent gates as WhatsApp without sending customer messages", async () => {
+    const state = (await request()).data;
+    const operations = await operationalSnapshot();
+    for (const [message, reason, output] of [["Менеджерге бермеңіз, өзіңіз жауап беріңіз", null, true], ["Қызметкерге беріңіз", "CLIENT_REQUESTED_HUMAN", true], ["Не пишите больше", "CLIENT_REFUSED", false]] as const) {
+      const before = llmCalls;
+      const response = await request("/preview", "POST", { revision: state.revision, messages: [{ role: "user", content: message }] });
+      assert.equal(response.status, 200);
+      assert.equal(response.data.handoff, Boolean(reason));
+      if (reason) { assert.equal(response.data.reason, reason); assert.equal(llmCalls, before); }
+      else assert.equal(llmCalls, before + 1);
+      assert.equal(Boolean(response.data.reply), output);
+    }
+    assert.deepEqual(await operationalSnapshot(), operations);
+  });
+
   it("publishes one consistent snapshot, keeps private drafts and restores the legacy baseline", async () => {
     const state = (await request()).data;
     await approveScenarios(state);

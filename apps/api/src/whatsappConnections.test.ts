@@ -15,6 +15,7 @@ import { deliverCloudMessage } from "./services/whatsappSendService.ts";
 import { invalidateRuntimeConfig } from "./services/runtimeSettings.ts";
 import { recordExternalMessage } from "./services/externalMessageService.ts";
 import { transcribeVoiceAttachment, voiceTranscript } from "./services/voiceTranscriptionService.ts";
+import { applyConfiguredHandoff } from "./services/aiConversationPolicyService.ts";
 import { attentionReasonLabel } from "./services/attentionReasons.ts";
 import { getTranscriptionConfig, getTranscriptionStatus } from "./services/transcriptionConfig.ts";
 import { mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
@@ -822,7 +823,16 @@ describe("WhatsApp provider connections", () => {
     await processWhatsAppAiReply(prisma, event, generate);
     assert.equal(generated, 1);
     assert.deepEqual((await prisma.conversation.findUniqueOrThrow({ where: { id: first.id } })).aiHandoffSummaryJson, first.aiHandoffSummaryJson);
-    assert.equal(await prisma.message.count({ where: { conversationId: first.id, direction: "outbound" } }), 0);
+    const acknowledgement = await prisma.message.findFirstOrThrow({ where: { conversationId: first.id, direction: "outbound" } });
+    assert.match(acknowledgement.text || "", /Передал/);
+    assert.ok(!acknowledgement.text?.includes("PRIVATE"));
+    const before = sends;
+    await deliverCloudMessage(prisma, tenantId, cloudId, acknowledgement.id);
+    await deliverCloudMessage(prisma, tenantId, cloudId, acknowledgement.id);
+    assert.equal(sends, before + 1);
+    const handed = await prisma.conversation.findUniqueOrThrow({ where: { id: first.id } });
+    assert.equal(handed.waitingFor, "MANAGER"); assert.equal(handed.needsAttention, true);
+    assert.equal(handed.attentionReason, "AI_KNOWLEDGE_MISSING");
     const workspace = await (await nativeFetch(`${base}/api/v1/conversations/${first.id}`, { headers: { cookie } })).json();
     assert.equal(workspace.conversation.aiHandoffSummary.request, summary.request);
     assert.equal((await post(`/api/v1/conversations/${first.id}/take`)).status, 200);
@@ -832,6 +842,59 @@ describe("WhatsApp provider connections", () => {
     assert.equal(returned.status, 200);
     const resumed = await (await nativeFetch(`${base}/api/v1/conversations/${first.id}`, { headers: { cookie } })).json();
     assert.equal(resumed.conversation.aiHandoffSummary, null);
+  });
+  it("delivers one acknowledgment in assist mode and keeps the question waiting for staff", async () => {
+    const event = await textAiEvent();
+    const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
+    await prisma.tenant.update({ where: { id: tenantId }, data: { settingsJson: { ...(tenant.settingsJson as object), aiAutomation: { defaultMode: "AUTO", handoff: { afterMode: "assist" } } } } });
+    try {
+      await processWhatsAppAiReply(prisma, event, async () => ({ reply: "", handoff: true, reason: "staff_action" }));
+      const message = await prisma.message.findFirstOrThrow({ where: { conversationId: event.entityId, direction: "outbound" } });
+      const before = sends; await deliverCloudMessage(prisma, tenantId, cloudId, message.id);
+      assert.equal(sends, before + 1);
+      const current = await prisma.conversation.findUniqueOrThrow({ where: { id: event.entityId } });
+      assert.equal(current.mode, "paused"); assert.equal(current.waitingFor, "MANAGER"); assert.equal(current.needsAttention, true);
+    } finally { await prisma.tenant.update({ where: { id: tenantId }, data: { settingsJson: tenant.settingsJson as any } }); }
+  });
+  it("cancels the handoff acknowledgment on takeover, new input, return to AI or disabled automation", async () => {
+    for (const change of ["takeover", "new-message", "resume", "disabled"]) {
+      const event = await textAiEvent();
+      await processWhatsAppAiReply(prisma, event, async () => ({ reply: "", handoff: true, reason: "staff_action" }));
+      const message = await prisma.message.findFirstOrThrow({ where: { conversationId: event.entityId, direction: "outbound" } });
+      if (change === "takeover") await post(`/api/v1/conversations/${event.entityId}/take`);
+      if (change === "resume") await post(`/api/v1/conversations/${event.entityId}/return-to-ai`);
+      if (change === "new-message") await prisma.conversation.update({ where: { id: event.entityId }, data: { messageRevision: { increment: 1 } } });
+      if (change === "disabled") await post(`/api/v1/integrations/whatsapp/${cloudId}/ai`, { enabled: false });
+      const before = sends; await deliverCloudMessage(prisma, tenantId, cloudId, message.id);
+      assert.equal(sends, before, change);
+      assert.equal((await prisma.message.findUniqueOrThrow({ where: { id: message.id } })).operationState, "canceled");
+      if (change === "disabled") await post(`/api/v1/integrations/whatsapp/${cloudId}/ai`, { enabled: true });
+    }
+  });
+  it("lets the direct reply worker own handoff instead of racing background analysis", async () => {
+    const event = await textAiEvent();
+    const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
+    await prisma.tenant.update({ where: { id: tenantId }, data: { settingsJson: { ...(tenant.settingsJson as object), aiAutomation: { defaultMode: "AUTO", handoff: { triggers: { CLIENT_REQUESTED_HUMAN: true } } } } } });
+    try {
+      assert.equal(await applyConfiguredHandoff(prisma, tenantId, event.entityId, { text: "Позовите менеджера", analysis: { humanRequired: true, humanReason: "CLIENT_REQUESTED_HUMAN" } }), null);
+      assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id: event.entityId } })).mode, "ai");
+      await prisma.message.update({ where: { id: (event.payloadJson as any).messageId }, data: { text: "Позовите менеджера" } });
+      await processWhatsAppAiReply(prisma, event, async () => { assert.fail("No model call needed"); });
+      assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id: event.entityId } })).mode, "human");
+      assert.equal(await prisma.message.count({ where: { conversationId: event.entityId, direction: "outbound" } }), 1);
+    } finally { await prisma.tenant.update({ where: { id: tenantId }, data: { settingsJson: tenant.settingsJson as any } }); }
+  });
+  it("uses explicit intent gates without silencing ordinary RU/KK questions", async () => {
+    for (const text of ["Бір адамға бағасы қанша?", "Менеджерге бермеңіз, өзіңіз жауап беріңіз", "Мне не нужно 20 слайдов, достаточно 10", "Можно без менеджера, просто скажите цену?", "Не пишите больше", "Қызметкерге беріңіз"]) {
+      const event = await textAiEvent();
+      await prisma.message.update({ where: { id: (event.payloadJson as any).messageId }, data: { text } });
+      let called = false;
+      await processWhatsAppAiReply(prisma, event, async () => { called = true; return { reply: "Уточните тему презентации", handoff: false }; });
+      const messages = await prisma.message.findMany({ where: { conversationId: event.entityId, direction: "outbound" } });
+      if (text === "Не пишите больше") { assert.equal(called, false); assert.equal(messages.length, 0); }
+      else if (text === "Қызметкерге беріңіз") { assert.equal(called, false); assert.match(messages[0].text || "", /қызметкерге/); }
+      else { assert.equal(called, true, text); assert.equal(messages.length, 1); }
+    }
   });
   it("discards a generated handoff summary if control or incoming messages change", async () => {
     for (const change of ["takeover", "new-message"]) {

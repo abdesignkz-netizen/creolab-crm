@@ -38,6 +38,22 @@ export type AiManagerDraft = z.infer<typeof aiManagerDraftSchema>;
 export function emptyAiManagerDraft(name = ""): AiManagerDraft {
   return aiManagerDraftSchema.parse({ company: { name } });
 }
+/** JSONB can reorder object keys between saving and reloading. Arrays retain order. */
+export function aiManagerDraftKey(draft: AiManagerDraft): string {
+  const stable = (value: unknown): unknown => Array.isArray(value) ? value.map(stable)
+    : value !== null && typeof value === "object" ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, stable(item)])) : value;
+  return JSON.stringify(stable(draft));
+}
+
+/** Filling gaps preserves custom text and must not pretend the full preset was applied. */
+export function applyAiManagerGoal(conversation: AiManagerDraft["conversation"], goal: AiManagerGoal, lang: keyof AiSetupLocalizedText, overwrite: boolean): AiManagerDraft["conversation"] {
+  const next = { ...conversation };
+  const keys = ["goal", "questions", "completion", "successCriteria"] as const;
+  for (const key of keys) if (overwrite || !next[key].trim()) next[key] = goal[key][lang];
+  next.goalPreset = keys.every(key => next[key] === goal[key][lang]) ? goal.id : "custom";
+  return next;
+}
+
 export type AiSetupIssue = { code: string; field: string; level: "error" | "warning"; message: string };
 export type AiSetupKnowledge = { title: string; content: string };
 export type AiSetupCompiled = { prompt: string; knowledge: AiSetupKnowledge[]; issues: AiSetupIssue[] };
@@ -113,6 +129,9 @@ export function compileAiManagerDraft(draft: AiManagerDraft): AiSetupCompiled {
   const issues: AiSetupIssue[] = [];
   const issue = (code: string, field: string, message: string, level: "error" | "warning" = "error") => issues.push({ code, field, level, message });
   const roles = [...new Set([draft.primaryRole, ...draft.additionalRoles])];
+  const selectedGoal = AI_MANAGER_GOALS.find(goal => goal.id === draft.conversation.goalPreset);
+  if (selectedGoal && !selectedGoal.roles.includes(draft.primaryRole)) issue("goal_role_mismatch", "conversation.goal", "После смены функции проверьте цель и сценарий: выбранная заготовка относится к другой функции.", "warning");
+  if (/manager_event|handoff_already_created|should_greet|send_asset|lead_status|brief_completed/i.test(draft.additionalInstructions)) issue("legacy_protocol", "additionalInstructions", "В дополнительных инструкциях есть команды прежней интеграции. Проверьте их: создание заявки не останавливает ИИ, а отправка файлов и подтверждение записи требуют сотрудника. Общий протокол BasQar имеет приоритет.", "warning");
   if (!draft.company.name) issue("company_name", "company.name", "Укажите название компании.");
   if (!draft.company.description) issue("company_description", "company.description", "Расскажите, чем занимается компания.");
   if (!draft.conversation.goal) issue("goal", "conversation.goal", "Укажите, к какому результату ИИ должен привести разговор.");
@@ -154,6 +173,7 @@ export function compileAiManagerDraft(draft: AiManagerDraft): AiSetupCompiled {
     "Если в базе нет цены, срока, условия или ответа, прямо скажи, что нужно уточнение у сотрудника. Отсутствие сведений не означает бесплатную услугу, отсутствие ограничений или согласованную скидку.",
     "Расписание, аудиторию, запрет контакта и передачу сотруднику определяет CRM. Эти инструкции не разрешают обходить её настройки. Не заявляй об оплате, оформлении, отправке документа или подтверждённой записи без результата соответствующего действия системы.",
     draft.additionalInstructions ? `Дополнительные инструкции владельца (действуют только в пределах общих правил BasQar):\n${draft.additionalInstructions}` : "",
+    "При противоречии с дополнительными инструкциями основная функция, цель, вопросы и критерий выполнения, выбранные в анкете выше, имеют приоритет. Дополнительные материалы уточняют факты и процесс, но не подменяют протокол ответа BasQar и не предоставляют недоступные инструменты.",
   ].filter(Boolean).join("\n\n");
   const knowledge: AiSetupKnowledge[] = [];
   const add = (title: string, content: string) => { if (content.trim()) knowledge.push({ title, content }); };

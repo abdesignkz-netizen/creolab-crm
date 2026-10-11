@@ -229,7 +229,7 @@ it("distinguishes empty completions from output-budget exhaustion", async () => 
 
 it("keeps valid handoff and unclear-voice replies valid", async () => {
   globalThis.fetch = async () => success(JSON.stringify({ reply: "", handoff: true, reason: "staff_action" }));
-  const result = await answer(); assert.equal(result?.reply, ""); assert.equal(result?.handoff, true); assert.equal(result?.reason, "staff_action"); assert.ok(result?.handoffSummary?.request);
+  const result = await answer(); assert.match(result?.reply || "", /Передал/); assert.equal(result?.handoff, true); assert.equal(result?.reason, "staff_action"); assert.ok(result?.handoffSummary?.request);
   globalThis.fetch = async () => success(JSON.stringify({ reply: "", handoff: false, reason: "unclear_message" }));
   assert.deepEqual(await answer("[Расшифровка голосового сообщения]: неясно"), { reply: VOICE_CLARIFICATION, handoff: false });
   assert.equal(usage.every(row => row.status === "ok"), true);
@@ -272,7 +272,7 @@ it("replaces out-of-scope model text with a fixed RU or KK redirect and leaves A
 it("never sends a claimed answer after the model reports missing knowledge or staff action", async () => {
   for (const reason of ["knowledge_missing", "staff_action", "human_requested"]) {
     globalThis.fetch = async () => success(JSON.stringify({ reply: "Ваша цена 1 тенге, услуга гарантирована", handoff: false, reason }));
-    const result = await answer("Какая цена и гарантия?"); assert.equal(result?.reply, ""); assert.equal(result?.handoff, true); assert.equal(result?.reason, reason); assert.equal(result?.handoffSummary?.request, "Какая цена и гарантия?");
+    const result = await answer("Какая цена и гарантия?"); assert.match(result?.reply || "", /Передал/); assert.equal(result?.handoff, true); assert.equal(result?.reason, reason); assert.equal(result?.handoffSummary?.request, "Какая цена и гарантия?");
   }
 });
 
@@ -317,7 +317,7 @@ it("keeps handoff summary private, bounded, and falls back without inventing fac
   const summary = { request: "Расчёт презентации", collected: ["10 слайдов", "Срок — пятница"], nextStep: "Рассчитать стоимость" };
   globalThis.fetch = async () => success(JSON.stringify({ reply: "Не отправлять сводку", handoff: true, reason: "staff_action", handoffSummary: summary }));
   const result = await answer("Нужен расчёт");
-  assert.equal(result?.reply, ""); assert.deepEqual(result?.handoffSummary, summary);
+  assert.match(result?.reply || "", /Передал/); assert.deepEqual(result?.handoffSummary, summary);
   globalThis.fetch = async () => success(JSON.stringify({ reply: "", handoff: true, reason: "knowledge_missing", handoffSummary: { ...summary, collected: [123] } }));
   const fallback = await answer("Какая гарантия?");
   assert.equal(fallback?.handoffSummary?.request, "Какая гарантия?"); assert.deepEqual(fallback?.handoffSummary?.collected, []);

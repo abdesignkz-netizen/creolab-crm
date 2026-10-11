@@ -128,6 +128,19 @@ describe("CRM conversation integration (real isolated database)", () => {
     await f.run(); assert.equal(await prisma.task.count({ where: { tenantId: f.tenant.id } }), 1);
     assert.equal(await prisma.auditEvent.count({ where: { tenantId: f.tenant.id } }), audits.length);
   });
+  it("keeps a pending staff handoff after analyzing its acknowledgment", async () => {
+    const f = await fixture({ mode: "human", text: "Передал ваш вопрос сотруднику" });
+    await prisma.conversation.update({ where: { id: f.conversation.id }, data: {
+      waitingFor: "MANAGER", needsAttention: true, attentionReason: "AI_STAFF_ACTION",
+      aiHandoffSummaryJson: { sourceMessageId: f.message.id, controlVersion: f.conversation.controlVersion },
+    } });
+    const analysis = await f.analyze();
+    analysis.analysis.waitingFor = "CLIENT"; analysis.analysis.needsReply = true;
+    await applyAnalyzedConversation(prisma, f.tenant.id, f.conversation.id, analysis);
+    const current = await prisma.conversation.findUniqueOrThrow({ where: { id: f.conversation.id } });
+    assert.equal(current.waitingFor, "MANAGER"); assert.equal(current.attentionReason, "AI_STAFF_ACTION");
+    assert.equal(current.needsAttention, true);
+  });
   for (const mode of ["ai", "human"]) it(`keeps CRM current in ${mode} without sending a reply`, async () => {
     const f = await fixture({ mode }); await f.run();
     assert.equal(await prisma.task.count({ where: { tenantId: f.tenant.id } }), 1);

@@ -216,12 +216,18 @@ export async function applyAnalyzedConversation(prisma: PrismaClient, tid: strin
     })) || await tx.auditEvent.findFirst({
       where: { tenantId: tid, entityType, entityId, actorUserId: { not: null }, createdAt: { gte: sourceMessageAt } }, select: { id: true },
     }));
+    // A handoff acknowledgment is not an answer to the customer's question.
+    // Keep the staff obligation until a real staff reply or explicit mode change.
+    const handoff = asObject(conversation.aiHandoffSummaryJson);
+    const pendingHandoff = conversation.mode !== "ai" && conversation.waitingFor === "MANAGER"
+      && handoff.controlVersion === conversation.controlVersion && typeof handoff.sourceMessageId === "string";
+    const waitingFor = pendingHandoff ? "MANAGER" : analysis.waitingFor;
     await tx.conversation.update({ where: { id: conversationId, tenantId: tid }, data: {
-      contextSummary: analysis.summaryUpdate, waitingFor: analysis.waitingFor,
-      ...(analysis.needsReply ? { needsAttention: true, attentionReason: "needs_reply" } : {}),
+      contextSummary: analysis.summaryUpdate, waitingFor,
+      ...(!pendingHandoff && analysis.needsReply ? { needsAttention: true, attentionReason: "needs_reply" } : {}),
     } });
     addChange("conversation", conversationId, { contextSummary: conversation.contextSummary, waitingFor: conversation.waitingFor },
-      { contextSummary: analysis.summaryUpdate, waitingFor: analysis.waitingFor }, "CONTEXT_UPDATED");
+      { contextSummary: analysis.summaryUpdate, waitingFor }, "CONTEXT_UPDATED");
 
     if (settings.crm.updateContact && reliable && contactId && analysis.summaryUpdate && conversation.contact?.summary === result.snapshot.contactSummary && !await manuallyChanged("contact", contactId)) {
       await tx.contact.update({ where: { id: contactId, tenantId: tid, summary: conversation.contact?.summary }, data: { summary: analysis.summaryUpdate, version: { increment: 1 } } });
