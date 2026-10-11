@@ -24,3 +24,27 @@ it("uses only a fixed customer acknowledgment, in the customer's language", () =
   assert.match(handoffAcknowledgement("knowledge_missing", [{ role: "user", content: "Какая гарантия?" }]), /уточнить/);
   assert.match(handoffAcknowledgement("human_requested", [{ role: "user", content: "Позовите менеджера" }]), /Передал/);
 });
+
+it("keeps channel, content and schedule restrictions separate from contact refusal", () => {
+  for (const text of [
+    "Не пишите мне на почту, ответьте здесь",
+    "Не пишите нам стоимость, сначала расскажите об услуге",
+    "Не пишите мне в выходные",
+    "Не пишите мне больше двух предложений за раз",
+  ]) {
+    assert.equal(isClientRefusalText(text), false, text);
+    assert.equal(directHandoffReason(text, parseAIAutomationSettings({})), null, text);
+  }
+  for (const text of ["Не пишите нам в WhatsApp, я сам свяжусь", "Не пишите мне больше!", "Пожалуйста, не пишите нам.", "Не пишите сюда", "Не пишите мне на почту. Больше не связывайтесь со мной."]) {
+    assert.equal(isClientRefusalText(text), true, text);
+  }
+});
+
+it("understands compound requests and Kazakh requests for a staff member", () => {
+  for (const text of ["Не хочу обсуждать цену с ботом, позовите менеджера", "Не нужна консультация, нужен сотрудник", "Маған менеджер керек", "Маған қызметкер қажет", "Маған адам керек"]) {
+    assert.equal(directHandoffReason(text, parseAIAutomationSettings({})), "CLIENT_REQUESTED_HUMAN", text);
+  }
+  for (const text of ["Менеджер керек емес, өзіңіз жауап беріңіз", "Маған қызметкер қажет емес", "Менеджердің қажеті жоқ"]) {
+    assert.equal(isHumanRequested(text), false, text);
+  }
+});

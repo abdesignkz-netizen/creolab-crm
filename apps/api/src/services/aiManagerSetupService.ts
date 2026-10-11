@@ -153,14 +153,17 @@ export const publishAiManagerSetup = (prisma: PrismaClient, auth: AuthContext, i
 export const restoreAiManagerSetup = (prisma: PrismaClient, auth: AuthContext, input: unknown) => publish(prisma, auth, input, true);
 export async function previewAiManagerSetup(prisma: PrismaClient, auth: AuthContext, input: unknown): Promise<AiSetupPreview> {
   const tenantId = access(auth); await requireFeature(prisma, auth, "AI_MANAGER");
-  const body = parse(z.object({ revision: z.number().int().nonnegative(), scenarioId: z.string().min(1).max(100).optional(), messages: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().trim().min(1).max(4000) }).strict()).min(1).max(20) }).strict(), input);
+  const body = parse(z.object({ revision: z.number().int().nonnegative(), source: z.enum(["draft", "published"]).default("draft"), scenarioId: z.string().min(1).max(100).optional(), messages: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().trim().min(1).max(4000) }).strict()).min(1).max(20) }).strict(), input);
+  // Live checks never qualify an unrelated questionnaire for publication.
+  if (body.source === "published" && body.scenarioId) throw new ApiError(422, "invalid_ai_setup_scenario", "Проверка действующей версии не засчитывается как проверка нового черновика.");
   if (body.messages[0].role !== "user" || body.messages.at(-1)?.role !== "user" || body.messages.some((message, i) => i > 0 && message.role === body.messages[i - 1].role)) throw new ApiError(422, "invalid_ai_setup", "Тестовый диалог должен чередовать сообщения клиента и ИИ.");
   const prepared = await locked(prisma, tenantId, async tx => {
     const data = await load(tx, tenantId); checkRevision(data.store, body.revision);
-    const compiled = compileAiManagerDraft(parse(aiManagerDraftSchema, data.store.draft));
-    if (compiled.issues.some(issue => issue.level === "error")) throw new ApiError(422, "ai_setup_incomplete", "Перед тестом заполните обязательные сведения анкеты.");
+    const compiled = body.source === "published" ? null : compileAiManagerDraft(parse(aiManagerDraftSchema, data.store.draft));
+    if (compiled?.issues.some(issue => issue.level === "error")) throw new ApiError(422, "ai_setup_incomplete", "Перед тестом заполните обязательные сведения анкеты.");
+    if (body.source === "published" && !data.prompt) throw new ApiError(422, "ai_setup_not_published", "Действующие инструкции ещё не опубликованы. Сначала заполните и проверьте черновик.");
     if (body.scenarioId && !getAiSetupScenarios(data.store.draft).some(item => item.id === body.scenarioId)) throw new ApiError(422, "invalid_ai_setup_scenario", "Выберите проверочный сценарий из списка.");
-    return { settings: parseAIAutomationSettings(data.tenant.settingsJson), fingerprint: qualityFingerprint(data), context: { tenantPrompt: compiled.prompt, knowledge: compiled.knowledge, temperature: data.config.temperature, maxOutputTokens: data.config.maxOutputTokens } };
+    return { settings: parseAIAutomationSettings(data.tenant.settingsJson), fingerprint: qualityFingerprint(data), context: { tenantPrompt: compiled?.prompt ?? data.prompt.trim(), knowledge: compiled?.knowledge ?? [...data.docs].sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime()), temperature: data.config.temperature, maxOutputTokens: data.config.maxOutputTokens } };
   });
   const { answerWhatsAppWithLlm, normalizeAiHandoffSummary } = await import("./llmClient.ts");
   let result: Awaited<ReturnType<typeof answerWhatsAppWithLlm>>;

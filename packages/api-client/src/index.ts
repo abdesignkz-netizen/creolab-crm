@@ -308,7 +308,7 @@ export function createApiClient(options: ClientOptions) {
     restoreAiManagerSetup: (body: { revision: number; versionId: string }) => request<AiSetupState>("/api/v1/settings/ai-manager/restore", { method: "POST", body: JSON.stringify(body) }),
     reloadAiManagerSetup: (body: { revision: number }) => request<AiSetupState>("/api/v1/settings/ai-manager/reload", { method: "POST", body: JSON.stringify(body) }),
     reviewAiManagerSetup: (body: { revision: number; runId: string; accurate: boolean; onGoal: boolean; appropriate: boolean; notes: string }) => request<AiSetupState>("/api/v1/settings/ai-manager/review", { method: "POST", body: JSON.stringify(body) }),
-    previewAiManagerSetup: (body: { revision: number; scenarioId?: string; messages: Array<{ role: "user" | "assistant"; content: string }> }) => request<AiSetupPreview>("/api/v1/settings/ai-manager/preview", { method: "POST", body: JSON.stringify(body) }),
+    previewAiManagerSetup: (body: { revision: number; source?: "draft" | "published"; scenarioId?: string; messages: Array<{ role: "user" | "assistant"; content: string }> }) => request<AiSetupPreview>("/api/v1/settings/ai-manager/preview", { method: "POST", body: JSON.stringify(body) }),
     updateAiAutomationSettings: (body: unknown) =>
       request("/api/v1/settings/ai-automation", { method: "PATCH", body: JSON.stringify(body) }),
     legalProfile: () => request("/api/v1/settings/legal-profile"),

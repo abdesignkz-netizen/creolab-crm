@@ -3,9 +3,10 @@ import type { AIAutomationSettings, HandoffTriggerKey } from "./aiAutomationSett
 // Only explicit requests. Mentions of a person, a job title or a price per person
 // are not consent to stop automation. Evaluate negation within the same clause.
 export function isHumanRequested(text: string) {
-  return text.split(/[.!?;\n]+|,\s*(?:но|бірақ|but)\s+/iu).some(clause => {
-    if (/без\s+(?:менеджер|оператор|человек)|не\s+(?:нужен|нужна|надо|нужно|хочу|зовите|передавайте|переводите|соединяйте)|(?:менеджер|оператор|қызметкер|адам)[^.!?]{0,35}(?:бермеңіз|қоспаңыз|ауыстырмаңыз|керек емес|қаламаймын|келмейді)|don['’]?t|do not|without/iu.test(clause)) return false;
+  return text.split(/[.!?;,\n]+|\s+(?:но|бірақ|but)\s+/iu).some(clause => {
+    if (/без\s+(?:менеджер|оператор|человек)|не\s+(?:нужен|нужна|надо|нужно|хочу|зовите|передавайте|переводите|соединяйте)|(?:менеджер|оператор|қызметкер|адам)[^.!?]{0,35}(?:бермеңіз|қоспаңыз|ауыстырмаңыз|керек емес|қажет емес|қажеті жоқ|қаламаймын|келмейді)|don['’]?t|do not|without/iu.test(clause)) return false;
     return /(?:позовите|пригласите|подключите|соедините|свяжите|переведите|передайте)[^.!?]{0,45}(?:менеджер|оператор|человек|сотрудник)|(?:нужен|нужна)\s+(?:менеджер|оператор|человек|сотрудник)|(?:хочу|можно)\s+(?:(?:поговорить|общаться|связаться|связь|говорить)\s+)?(?:с\s+)?(?:менеджер|оператор|человек|сотрудник)|(?:менеджер|оператор|сотрудник)[^.!?]{0,20}(?:пожалуйста|позовите|подключите)|(?:менеджермен|оператормен|қызметкермен|адаммен)[^.!?]{0,35}(?:сөйлес|байланыс)|(?:менеджерге|операторға|қызметкерге|адамға)[^.!?]{0,25}(?:беріңіз|қосыңыз|ауыстырыңыз)|(?:talk|speak|connect|transfer)[^.!?]{0,25}(?:human|person|agent)|human please/iu.test(clause.trim())
+      || /(?:менеджер|оператор|қызметкер|адам)\s+(?:керек|қажет)(?![\p{L}\p{N}])/iu.test(clause)
       || /^(?:менеджер|оператор|живой человек|қызметкер|адам керек)[!?.\s]*$/iu.test(clause.trim());
   });
 }
@@ -13,7 +14,10 @@ export function isHumanRequested(text: string) {
 export function isClientRefusalText(text: string) {
   text = text.replace(/\[Расшифровка голосового сообщения\]:\s*/gu, "").trim();
   // Refusing a quantity, option or a handoff is not a refusal of the conversation.
-  return /(?<![\p{L}\p{N}])(?:больше не пишите|не пишите (?:мне|нам|больше)|больше не связывайтесь|отпишите меня|маған (?:енді )?(?:жазбаңыз|хабарласпаңыз)|stop contacting me|stop messaging me|unsubscribe)(?![\p{L}\p{N}])/iu.test(text)
+  return /(?<![\p{L}\p{N}])(?:больше не пишите|больше не связывайтесь|отпишите меня|маған (?:енді )?(?:жазбаңыз|хабарласпаңыз)|stop contacting me|stop messaging me|unsubscribe)(?![\p{L}\p{N}])/iu.test(text)
+    // A channel, content or schedule restriction is not a global opt-out.
+    // Leave ambiguous qualified requests to the model instead of stopping it.
+    || /(?<![\p{L}\p{N}])не пишите(?:\s+(?:мне|нам))?(?:\s+(?:больше|вообще|никогда|пожалуйста)){0,2}(?:\s+(?:сюда|в\s+(?:этот\s+чат|WhatsApp|ватсап|вотсап)))?(?=\s*(?:$|[.!?,;]))/iu.test(text)
     || /^(?:спасибо[,!\s]+)?(?:не интересно|неинтересно|не надо|не нужно|отказываюсь|сам напишу|стоп|stop|не пишите|перестаньте писать|қызықтырмайды|керек емес|жазбаңыз|хабарласпаңыз)[.!\s]*$/iu.test(text.trim());
 }
 

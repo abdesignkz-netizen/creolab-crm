@@ -192,12 +192,50 @@ describe("Owner AI manager setup", { concurrency: false }, () => {
     assert.equal((await request("", "PATCH", { revision: saved.data.revision, tenantId: otherTenantId, draft: completeDraft() })).status, 422);
   });
 
+  it("tests published material despite an incomplete draft without approving or modifying it", async () => {
+    const original = (await request()).data;
+    const state = (await request("", "PATCH", { revision: original.revision, draft: emptyAiManagerDraft("Неопубликованный черновик") })).data;
+    const beforeState = (await request()).data;
+    const live = await liveSnapshot(), operations = await operationalSnapshot();
+    const calls = llmCalls;
+    const messages = [{ role: "user", content: "Здравствуйте! Что вы предлагаете?" }];
+    assert.equal((await request("/preview", "POST", { revision: state.revision, messages })).status, 422);
+    const preview = await request("/preview", "POST", { revision: state.revision, source: "published", messages });
+    assert.equal(preview.status, 200, JSON.stringify(preview.data));
+    assert.equal(preview.data.sandbox, true);
+    assert.equal(preview.data.runId, undefined);
+    assert.equal(llmCalls, calls + 1);
+    assert.match(llmInput.messages[0].content, /LEGACY-LIVE-PROMPT/);
+    assert.match(llmInput.messages[0].content, /LEGACY-LIVE-KNOWLEDGE/);
+    assert.doesNotMatch(llmInput.messages[0].content, /Неопубликованный черновик|LEGACY-ADMIN-DRAFT|LEGACY-PRIVATE-DRAFT/);
+    assert.deepEqual(await liveSnapshot(), live);
+    assert.deepEqual(await operationalSnapshot(), operations);
+    assert.deepEqual((await request()).data, beforeState);
+    assert.equal((await request("/preview", "POST", { revision: state.revision, source: "published", scenarioId: "goal_ru", messages })).status, 422);
+    assert.equal((await request("/preview", "POST", { revision: state.revision, source: "published", messages }, managerCookie)).status, 403);
+    await request("", "PATCH", { revision: state.revision, draft: original.draft });
+  });
+
+  it("rejects a published-version test when no instructions have been published", async () => {
+    const config = await prisma.aIConfiguration.findFirstOrThrow({ where: { tenantId } });
+    await prisma.aIConfiguration.update({ where: { id: config.id }, data: { promptStatus: "draft" } });
+    try {
+      const state = (await request()).data;
+      const response = await request("/preview", "POST", { revision: state.revision, source: "published", messages: [{ role: "user", content: "Здравствуйте" }] });
+      assert.equal(response.status, 422);
+      assert.equal(response.data.code, "ai_setup_not_published");
+    } finally {
+      await prisma.aIConfiguration.update({ where: { id: config.id }, data: { promptStatus: config.promptStatus } });
+    }
+  });
+
   it("tests the saved draft and multi-turn history without publishing or changing CRM", async () => {
     const state = (await request()).data;
     const live = await getPublishedTenantAiContext(prisma, tenantId), operations = await operationalSnapshot();
+    const calls = llmCalls;
     const preview = await request("/preview", "POST", { revision: state.revision, messages: [{ role: "user", content: "Здравствуйте" }, { role: "assistant", content: "Чем помочь?" }, { role: "user", content: "Сколько стоит презентация?" }] });
     assert.equal(preview.status, 200, JSON.stringify(preview.data));
-    assert.equal(preview.data.sandbox, true); assert.equal(llmCalls, 1);
+    assert.equal(preview.data.sandbox, true); assert.equal(llmCalls, calls + 1);
     assert.match(llmInput.messages[0].content, /80 000 ₸/);
     assert.match(llmInput.messages[0].content, /Здоровайся один раз/);
     assert.doesNotMatch(llmInput.messages[0].content, /LEGACY-LIVE-PROMPT/);
