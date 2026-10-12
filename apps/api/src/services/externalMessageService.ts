@@ -12,10 +12,10 @@ export async function recordExternalMessage(prisma: PrismaClient, integrationId:
 }) {
   // Check outside the transaction: readiness uses the shared runtime settings reader.
   // An opt-in awaiting administrator setup must not put new chats under an unavailable AI.
-  const aiIntegration = input.channel === "whatsapp"
+  const aiIntegration = input.channel !== "email"
     ? await prisma.integration.findUnique({ where: { id: integrationId }, select: { tenantId: true, type: true } })
     : null;
-  const aiReady = Boolean(aiIntegration && ["whatsapp_qr", "whatsapp_cloud"].includes(aiIntegration.type)
+  const aiReady = Boolean(aiIntegration && ["whatsapp_qr", "whatsapp_cloud", "instagram_direct"].includes(aiIntegration.type)
     && !await directAiReadiness(prisma, aiIntegration.tenantId));
   return prisma.$transaction(async tx => {
     const integration = await tx.integration.update({ where: { id: integrationId }, data: { lastEventAt: new Date(), lastSuccessAt: new Date(), healthStatus: "HEALTHY", lastError: null, lastErrorCode: null }, include: { tenant: true } });
@@ -39,7 +39,7 @@ export async function recordExternalMessage(prisma: PrismaClient, integrationId:
     }
     let conversation = await tx.conversation.findFirst({ where: { tenantId, connectionId: connection.id, ...(input.channel === "whatsapp" ? {} : { externalThreadId: input.threadId }), contactId: contact.id } });
     if (!conversation) conversation = await tx.conversation.create({ data: { tenantId, connectionId: connection.id, externalThreadId: input.threadId, contactId: contact.id,
-      mode: input.channel === "whatsapp" && aiReady && connection.autoReply && automaticWhatsAppMode(integration.tenant.settingsJson, integration, contact) ? "ai" : "human" } });
+      mode: aiReady && connection.autoReply && automaticWhatsAppMode(integration.tenant.settingsJson, integration, contact) ? "ai" : "human" } });
     else if (input.channel === "whatsapp" && conversation.externalThreadId !== input.threadId) await tx.conversation.update({ where: { id: conversation.id }, data: { externalThreadId: input.threadId } });
     const scopedId = `${input.channel}:${connection.id}:${input.messageId}`;
     const previousMessage = await tx.message.findUnique({ where: { connectionScopedId: scopedId } });
@@ -49,7 +49,7 @@ export async function recordExternalMessage(prisma: PrismaClient, integrationId:
       for (const file of input.attachments || []) await storeMessageAttachment(tx, { tenantId, messageId: message.id, ...file });
       await tx.conversation.update({ where: { id: conversation.id }, data: { lastInboundMessageId: message.id, waitingFor: "MANAGER", needsAttention: true, attentionReason: "client_waiting", messageRevision: { increment: 1 } } });
       await tx.contact.update({ where: { id: contact.id }, data: { lastSeenAt: new Date(), lastInboundMessageAt: input.at } });
-      if (input.channel === "whatsapp") await enqueueWhatsAppAi(tx, tenantId, conversation.id, message.id);
+      if (input.channel !== "email") await enqueueWhatsAppAi(tx, tenantId, conversation.id, message.id);
     }
     await tx.inboundEvent.create({ data: { tenantId, integrationId, externalEventKey: input.eventId, payloadHash: createHash("sha256").update(JSON.stringify(input.raw)).digest("hex"), rawJson: input.raw, eventType: "MESSAGE_RECEIVED", provider: input.channel, status: "PROCESSED", processedAt: new Date(), test: integration.testMode } });
     return { conversationId: conversation.id };

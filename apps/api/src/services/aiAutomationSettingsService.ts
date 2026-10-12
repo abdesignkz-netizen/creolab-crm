@@ -37,7 +37,7 @@ export async function getAIAutomationSettings(prisma: PrismaClient, auth: AuthCo
     const keys = Object.keys(tenant.workingHoursJson as object);
     if (keys.length) settings.workingHours = fromTenant;
   }
-  const channels = await prisma.channelConnection.findMany({ where: { tenantId: membership.tenantId, channelType: "whatsapp" },
+  const channels = await prisma.channelConnection.findMany({ where: { tenantId: membership.tenantId, channelType: { in: ["whatsapp", "telegram", "instagram", "website"] } },
     select: { integrationId: true, status: true, autoReply: true, integration: { select: { name: true, type: true } } } });
   const legacyChannels = await prisma.integration.findMany({ where: { tenantId: membership.tenantId, type: "whatsapp_seller" },
     select: { id: true, name: true, status: true, connectionStatus: true } });

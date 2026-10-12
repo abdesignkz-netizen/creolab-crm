@@ -269,7 +269,7 @@ export function ConversationsPage() {
   }
 
   async function addPendingFiles(list: FileList | File[]) {
-    if (["email", "instagram"].includes(workspace?.conversation?.channelType)) return;
+    if (["email", "instagram", "website"].includes(workspace?.conversation?.channelType)) return;
     try {
       const next = await filesToPending(list);
       setPendingFiles((previous) => {
@@ -358,9 +358,9 @@ export function ConversationsPage() {
   );
 
   const incomingMail = workspace?.conversation?.channelType === "email";
-  const staffOnly = ["telegram", "instagram", "email"].includes(workspace?.conversation?.channelType);
+  const staffOnly = workspace?.conversation?.channelType === "email";
   const canSend = !incomingMail && workspace?.conversation?.channelConnected !== false;
-  const canAttach = canSend && workspace?.conversation?.channelType !== "instagram";
+  const canAttach = canSend && !["instagram", "website"].includes(workspace?.conversation?.channelType);
 
   const chatPane = workspace ? (
     <div className="conv-chat-pane">

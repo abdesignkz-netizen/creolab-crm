@@ -292,7 +292,7 @@ test('Integration catalog prioritizes messaging, shows actual provider status an
       globalThis.localStorage={getItem:()=>locale};
       const html=render(locale);
       const ids=[...html.matchAll(/<details[^>]*id="integration-([^"]+)"/g)].map(match=>match[1]);
-      assert.equal(ids.length,12); assert.deepEqual(ids.slice(0,3),['whatsapp','instagram','telegram']);
+      assert.equal(ids.length,13); assert.ok(ids.includes("website-chat")); assert.deepEqual(ids.slice(0,3),['whatsapp','instagram','telegram']);
       assert.doesNotMatch(html,/<details[^>]*\bopen(?:=|\s|>)/);
       assert.doesNotMatch(html,/secret-form-endpoint|<form|<input|<pre|Page Access Token/);
       const whatsapp=html.split('id="integration-whatsapp"')[1].split('</details>')[0];

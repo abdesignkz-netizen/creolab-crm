@@ -19,6 +19,7 @@ export const INTEGRATION_TYPE_META: Record<
   form: { catalogType: "WEBSITE_FORM", title: "Форма сайта", group: "leads", stage: 1 },
   webhook: { catalogType: "WEBHOOK_API", title: "Webhook / API", group: "leads", stage: 2 },
   whatsapp_seller: { catalogType: "WHATSAPP", title: "WhatsApp", group: "messaging", stage: 0 },
+  website_chat: { catalogType: "WEBSITE_CHAT", title: "Чат на сайте", group: "messaging", stage: 3 },
   telegram_bot: { catalogType: "TELEGRAM", title: "Telegram", group: "messaging", stage: 3 },
   instagram_direct: { catalogType: "INSTAGRAM_DIRECT", title: "Instagram Direct", group: "messaging", stage: 4 },
   meta_lead_forms: { catalogType: "META_LEAD_FORMS", title: "Meta Lead Forms", group: "leads", stage: 5 },
@@ -209,7 +210,7 @@ export async function listIntegrationCatalog(prisma: PrismaClient, auth: AuthCon
     });
   }
 
-  const messagingCards = ["telegram_bot", "instagram_direct"].map(type => {
+  const messagingCards = ["telegram_bot", "instagram_direct", "website_chat"].map(type => {
     const meta = INTEGRATION_TYPE_META[type];
     const row = rows.find(item => item.type === type && item.status === "active") || rows.find(item => item.type === type);
     const available = true;
@@ -223,7 +224,7 @@ export async function listIntegrationCatalog(prisma: PrismaClient, auth: AuthCon
       connected: Boolean(row?.status === "active" && row.connectionStatus === "CONNECTED"),
       healthLabel: row?.status === "active" ? healthLabel(deriveHealthStatus(row)) : "Не подключено",
       available, comingSoon: !available,
-      note: type === "telegram_bot" ? "Личные сообщения клиентов боту и ответы сотрудников из CRM." : "Сообщения Instagram и текстовые ответы сотрудников в пределах 24 часов.",
+      note: type === "website_chat" ? "Чат на сайте с ответами ИИ и сотрудников." : type === "telegram_bot" ? "Личные сообщения боту, ответы ИИ-менеджера и сотрудников." : "Сообщения Instagram и ответы ИИ или сотрудников в пределах 24 часов.",
       username: type === "telegram_bot" ? (row?.schemaJson as { username?: string } | undefined)?.username || null : null,
     };
   });

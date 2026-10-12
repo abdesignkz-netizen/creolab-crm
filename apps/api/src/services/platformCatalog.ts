@@ -92,14 +92,19 @@ export const INTEGRATION_IMPLEMENTATIONS: IntegrationImplementation[] = [
   {
     type: "telegram_bot",
     title: "Telegram компании",
-    purpose: "Отдельный бот компании: входящие личные сообщения, вложения и ответы сотрудников.",
-    functions: ["receive_messages", "send_text", "send_media"],
+    purpose: "Отдельный бот компании: входящие сообщения, ответы ИИ и сотрудников.",
+    functions: ["receive_messages", "send_text", "send_media", "ai_replies"],
     authMethod: "bot_token",
     implementationReady: true,
     multiple: true,
     fields: [],
     connectable: false,
     connectHint: "Подключите бота через раздел «Интеграции» в кабинете компании.",
+  },
+  {
+    type: "website_chat", title: "Чат на сайте", purpose: "Виджет для общения посетителей с ИИ и сотрудниками BasQar.",
+    functions: ["receive_messages", "send_text", "ai_replies"], authMethod: "visitor_session", implementationReady: true,
+    multiple: false, fields: [], connectable: false, connectHint: "Интеграции → Чат на сайте. Укажите сайты, настройте оформление и скопируйте код.",
   },
   {
     type: "telegram_notify",
@@ -130,8 +135,8 @@ export const INTEGRATION_IMPLEMENTATIONS: IntegrationImplementation[] = [
   {
     type: "instagram_direct",
     title: "Instagram Direct",
-    purpose: "Сообщения Instagram и текстовые ответы из CRM.",
-    functions: ["receive_messages", "send_text"],
+    purpose: "Сообщения Instagram, ответы ИИ и сотрудников в пределах 24 часов.",
+    functions: ["receive_messages", "send_text", "ai_replies"],
     authMethod: "token",
     implementationReady: true,
     multiple: true,

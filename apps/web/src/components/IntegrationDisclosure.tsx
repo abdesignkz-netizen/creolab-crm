@@ -18,8 +18,9 @@ export function IntegrationDisclosure({ id, title, description, status, tone = "
   icon: string; children: ReactNode;
 }) {
   const uiText = useUiText();
-  const [visited, setVisited] = useState(false);
-  return <details className="integration-tile" id={`integration-${id}`} onToggle={event => {
+  const initiallyOpen = typeof window !== "undefined" && window.location.hash === `#integration-${id}`;
+  const [visited, setVisited] = useState(initiallyOpen);
+  return <details open={initiallyOpen || undefined} className="integration-tile" id={`integration-${id}`} onToggle={event => {
     if (event.currentTarget.open) setVisited(true);
   }}>
     <summary>

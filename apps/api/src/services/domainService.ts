@@ -1052,8 +1052,8 @@ export async function setConversationMode(
 
     if (mode === "ai" && current.connectionId) {
       const channel = await tx.channelConnection.findFirst({ where: { id: current.connectionId, tenantId: tid }, include: { integration: true } });
-      if (["telegram", "email", "instagram"].includes(channel?.channelType || "")) throw new ApiError(409, "channel_ai_unavailable", "Для этого канала сейчас доступны ответы сотрудников. Автоматические ответы AI не подключены.");
-      if (["whatsapp_qr", "whatsapp_cloud"].includes(channel?.integration.type || "") && !channel?.autoReply) throw new ApiError(409, "whatsapp_ai_disabled", "Сначала включите ИИ-ответы для номера в разделе интеграций");
+      if (channel?.channelType === "email") throw new ApiError(409, "channel_ai_unavailable", "Для этого канала сейчас доступны ответы сотрудников. Автоматические ответы AI не подключены.");
+      if (["whatsapp_qr", "whatsapp_cloud", "telegram_bot", "instagram_direct", "website_chat"].includes(channel?.integration.type || "") && !channel?.autoReply) throw new ApiError(409, "whatsapp_ai_disabled", "Сначала включите ИИ-ответы для этого канала в разделе интеграций");
     }
 
     const selfId = auth.activeMembership?.id;
@@ -1234,6 +1234,10 @@ export async function addConversationMessage(
     if (connection?.channelType === "instagram") {
       const { sendInstagramReply } = await import("./metaConnectionService.ts");
       return sendInstagramReply(prisma, auth, id, input);
+    }
+    if (connection?.channelType === "website") {
+      const { sendWebsiteReply } = await import("./websiteChatService.ts");
+      return sendWebsiteReply(prisma, auth, id, input);
     }
     if (connection?.channelType === "email") {
       throw new ApiError(409, "email_receive_only", "Подключён приём почты. Для ответа откройте письмо в почтовом ящике.");

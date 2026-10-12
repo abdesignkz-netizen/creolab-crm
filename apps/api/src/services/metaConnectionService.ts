@@ -13,19 +13,20 @@ import { recordExternalMessage } from "./externalMessageService.ts";
 import { processTrustedIntegrationLead } from "./inquiryService.ts";
 
 export const metaConnectSchema = z.object({ kind: z.enum(["instagram_direct", "meta_lead_forms"]), appId: z.string().regex(/^\d{1,30}$/), pageId: z.string().regex(/^\d{1,30}$/), accessToken: z.string().trim().min(20).max(4096), appSecret: z.string().trim().min(16).max(256), apiVersion: z.string().regex(/^v\d{2}\.0$/).default("v25.0") });
-type MetaSecrets = { accessToken: string; appSecret: string };
+type MetaSecrets = { accessToken: string; appSecret: string; loginMode?: "instagram" };
 type Integration = Awaited<ReturnType<PrismaClient["integration"]["findUniqueOrThrow"]>>;
 type MetaSettings = { appId: string; pageId: string; accountId: string; apiVersion: string; callbackUrl: string; label: string };
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
-async function credentials(prisma: PrismaClient, row: Integration): Promise<MetaSecrets> {
+async function credentials(prisma: PrismaClient, row: Integration, refresh = false): Promise<MetaSecrets> {
   const credential = row.credentialId ? await prisma.credential.findFirst({ where: { id: row.credentialId, tenantId: row.tenantId, kind: "meta" } }) : null;
   if (!credential) throw new ApiError(409, "meta_disconnected", "Подключите Meta заново");
+  if (refresh) { const { refreshInstagramCredential } = await import("./instagramOAuthService.ts"); return refreshInstagramCredential(prisma, credential); }
   return JSON.parse(decryptSecret(credential.encryptedValue));
 }
 async function metaRequest<T>(secrets: MetaSecrets, version: string, path: string, init: RequestInit = {}): Promise<T> {
   if (!/^v\d{2}\.0$/.test(version) || !path.startsWith("/")) throw new Error("Invalid Graph path");
   try {
-    const response = await fetch(`https://graph.facebook.com/${version}${path}`, { ...init, headers: { "Content-Type": "application/json", Authorization: `Bearer ${secrets.accessToken}` }, signal: AbortSignal.timeout(20000), redirect: "error" });
+    const response = await fetch(`https://${secrets.loginMode === "instagram" ? "graph.instagram.com" : "graph.facebook.com"}/${version}${path}`, { ...init, headers: { "Content-Type": "application/json", Authorization: `Bearer ${secrets.accessToken}` }, signal: AbortSignal.timeout(20000), redirect: "error" });
     const data = await response.json() as T & { error?: { code?: number } };
     if (!response.ok || data.error) throw new ApiError(502, "meta_request_failed", `Meta отклонила запрос (${data.error?.code || response.status}). Проверьте токен и разрешения приложения.`);
     return data;
@@ -94,6 +95,9 @@ export async function activateMeta(prisma: PrismaClient, auth: AuthContext, id: 
   }
   await metaRequest(secrets, settings.apiVersion, `/${settings.pageId}/subscribed_apps`, { method: "POST", body: JSON.stringify({ subscribed_fields: [...fields] }) });
   await prisma.channelConnection.updateMany({ where: { integrationId: id, tenantId }, data: { status: "active" } });
+  if (row.type === "instagram_direct" && !await prisma.channelConnection.findFirst({ where: { tenantId, integrationId: id } })) {
+    await prisma.channelConnection.create({ data: { tenantId, integrationId: id, channelType: "instagram", status: "active", capabilitiesJson: ["receive_messages", "send_text", "ai_replies"] } });
+  }
   await prisma.integration.update({ where: { id }, data: { status: "active", connectionStatus: "CONNECTED", healthStatus: "NO_EVENTS_YET", lastError: null, lastSuccessAt: new Date() } });
   return { connected: true, note: "Подписка Meta включена. Проверьте доставку реального обращения; для внешних пользователей Meta может требовать одобрение приложения." };
 }
@@ -113,7 +117,8 @@ export async function disconnectMeta(prisma: PrismaClient, auth: AuthContext, id
 export async function listMetaConnections(prisma: PrismaClient, auth: AuthContext) {
   requireIntegrationsAccess(auth); const { tenantId } = requireTenant(auth);
   const rows = await prisma.integration.findMany({ where: { tenantId, type: { in: ["instagram_direct", "meta_lead_forms"] } } });
-  return { items: rows.map(row => ({ id: row.id, kind: row.type, connected: row.status === "active", status: row.connectionStatus, lastError: row.lastError, settings: row.schemaJson })) };
+  const { instagramOAuthConfigured } = await import("./instagramOAuthService.ts");
+  return { instagramLoginAvailable: instagramOAuthConfigured(), items: rows.map(row => ({ id: row.id, kind: row.type, connected: row.status === "active", status: row.connectionStatus, lastError: row.lastError, settings: row.schemaJson })) };
 }
 export async function receiveMetaWebhook(prisma: PrismaClient, id: string, raw: Buffer, signature: string) {
   const row = await prisma.integration.findUnique({ where: { id }, include: { tenant: true } });
@@ -169,7 +174,7 @@ export async function sendInstagramReply(prisma: PrismaClient, auth: AuthContext
   if (claimed.existing) return claimed.existing;
   try {
     const row = claimed.integration!, settings = row.schemaJson as MetaSettings;
-    const result = await metaRequest<{ message_id: string }>(await credentials(prisma,row), settings.apiVersion, `/${settings.accountId}/messages`, { method: "POST", body: JSON.stringify({ recipient: { id: claimed.recipientId }, message: { text } }) });
+    const result = await metaRequest<{ message_id: string }>(await credentials(prisma,row, true), settings.apiVersion, `/${settings.accountId}/messages`, { method: "POST", body: JSON.stringify({ recipient: { id: claimed.recipientId }, message: { text } }) });
     if (!result.message_id) throw new ApiError(502,"instagram_send_unknown","Meta не подтвердила отправку сообщения");
     await prisma.$transaction(async tx => {
       await tx.message.update({ where: { id: claimed.message!.id }, data: { operationState: "accepted", providerMessageId: result.message_id } });
@@ -182,4 +187,12 @@ export async function sendInstagramReply(prisma: PrismaClient, auth: AuthContext
     await prisma.outboundOperation.update({ where: { id: claimed.operation!.id }, data: { state: "unknown", error: "Отправка Instagram не подтверждена" } });throw error;
   }
   return prisma.message.findUnique({ where: { id: claimed.message!.id } });
+}
+
+export async function sendInstagramText(prisma: PrismaClient, row: Integration, recipient: string, text: string) {
+  if (!/^\d+$/.test(recipient) || !text || text.length > 1000) throw new ApiError(422, "instagram_text_only", "Ответ Instagram должен быть не длиннее 1000 символов");
+  const settings = row.schemaJson as MetaSettings;
+  const result = await metaRequest<{ message_id: string }>(await credentials(prisma, row, true), settings.apiVersion, `/${settings.accountId}/messages`, { method: "POST", body: JSON.stringify({ recipient: { id: recipient }, message: { text } }) });
+  if (!result.message_id) throw new ApiError(502, "instagram_send_unknown", "Instagram не подтвердил отправку");
+  return result.message_id;
 }

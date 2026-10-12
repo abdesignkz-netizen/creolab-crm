@@ -48,7 +48,7 @@ function primaryPhone(
 }
 
 function channelLabel(conversation: { sellerLeadId?: string | null; connectionId?: string | null; connection?: { channelType: string } | null }) {
-  const labels: Record<string, string> = { telegram: "Telegram", instagram: "Instagram", email: "Gmail" };
+  const labels: Record<string, string> = { website: "Чат сайта", telegram: "Telegram", instagram: "Instagram", email: "Gmail" };
   if (conversation.connection?.channelType && labels[conversation.connection.channelType]) return labels[conversation.connection.channelType];
   if (conversation.sellerLeadId) return "WhatsApp";
   return "Диалог";
@@ -133,7 +133,7 @@ export async function listConversationsBoard(
   const filter = String(query.filter || "all");
   const q = String(query.q || "").trim();
   const channelFilter = String(query.channel || "all");
-  if (!["all", "whatsapp", "telegram", "instagram", "email", "other"].includes(channelFilter)) {
+  if (!["all", "whatsapp", "telegram", "instagram", "email", "website", "other"].includes(channelFilter)) {
     throw new ApiError(400, "invalid_channel", "Неизвестный канал диалогов");
   }
   const digits = digitsOnly(q);
@@ -177,7 +177,7 @@ export async function listConversationsBoard(
   ]);
   const availableChannels = [...new Set([
     ...(whatsappIntegration || whatsappHistory ? ["whatsapp"] : []),
-    ...connections.map((connection) => connection.channelType).filter((channel) => ["whatsapp", "telegram", "instagram", "email"].includes(channel)),
+    ...connections.map((connection) => connection.channelType).filter((channel) => ["whatsapp", "telegram", "instagram", "email", "website"].includes(channel)),
     ...(otherHistory ? ["other"] : []),
   ])];
 
@@ -544,7 +544,7 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
       status: conversation.status,
       channel,
       channelType: conversation.connection?.channelType || (conversation.sellerLeadId ? "whatsapp" : null),
-      aiAvailable: !["telegram", "email", "instagram"].includes(conversation.connection?.channelType || ""),
+      aiAvailable: conversation.connection?.channelType !== "email",
       channelConnected: !conversation.connection || conversation.connection.status === "active",
       acquisition,
       sourceLine: sourceArrow(acquisition, channel),

@@ -1,20 +1,30 @@
+import { ChannelAiControl } from "../components/ChannelAiControl";
 import { InlineFeedback } from "../components/InlineFeedback";
 import { uiText, useUiText, localizeUiOptions } from "../lib/uiText";
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { IntegrationHelp } from "../components/IntegrationHelp";
-type Row = { id:string;kind:string;connected:boolean;status:string;lastError:string|null;settings:{label?:string;callbackUrl?:string} };
+type Row = { id:string;kind:string;connected:boolean;status:string;lastError:string|null;settings:{label?:string;callbackUrl?:string;loginMode?:string} };
 export function MetaConnectionsPanel({ onChange, kind }: { onChange: () => void; kind?: string }){
   const uiText = useUiText();
   const [rows,setRows]=useState<Row[]>([]),[busy,setBusy]=useState(false),[error,setError]=useState(""),[note,setNote]=useState("");
   const [form,setForm]=useState({kind:kind || "instagram_direct",appId:"",pageId:"",accessToken:"",appSecret:"",apiVersion:"v25.0"});
+  const [loginAvailable,setLoginAvailable]=useState(false);
   const [verification,setVerification]=useState<{callbackUrl:string;verifyToken:string}|null>(null);
-  async function load(){setRows((await api.metaConnections()as{items:Row[]}).items);}
+  async function load(){const result=await api.metaConnections()as{items:Row[];instagramLoginAvailable:boolean};setRows(result.items);setLoginAvailable(result.instagramLoginAvailable);}
   useEffect(()=>{void load().catch(err=>setError(err.message));},[]);
   async function run(action:()=>Promise<void>){setBusy(true);setError("");setNote("");try{await action();await load();onChange();}catch(err){setError(err instanceof Error?err.message:uiText("Ошибка подключения"));}finally{setBusy(false);}}
+  const outcome = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search).get("instagram");
   return <div className="panel"><div className="row"><h3>{kind ? (kind === "instagram_direct" ? "Instagram Direct" : "Meta Lead Forms") : uiText("Instagram Direct и Meta Lead Forms")}</h3><IntegrationHelp kind={kind === "meta_lead_forms" ? "meta_leads" : "meta_instagram"} /></div>
-    <p className="muted">{uiText("Подключение через страницу Facebook и токен приложения Meta. Для Instagram нужен привязанный профессиональный аккаунт. Для внешних клиентов приложение должно иметь необходимые разрешения Meta.")}</p>
+    {kind === "instagram_direct" && <div className="panel"><p>{uiText("Подключите профессиональный аккаунт Instagram, разрешите доступ к сообщениям и включите ИИ-ответы. Клиент сначала пишет вам в Direct.")}</p>
+      <button className="btn" disabled={busy || !loginAvailable} onClick={() => void run(async () => { const result = await api.connectInstagram() as {url:string}; window.location.assign(result.url); })}>{uiText("Подключить через Instagram")}</button>
+      {!loginAvailable && <p className="muted">{uiText("Подключение через вход в Instagram готовится администратором BasQar. Действующее подключение через Facebook продолжает работать.")}</p>}
+      {outcome === "connected" && <InlineFeedback kind="success">{uiText("Instagram подключён. Включите ИИ ниже и отправьте пробное сообщение из другого аккаунта.")}</InlineFeedback>}
+      {outcome === "failed" && <InlineFeedback kind="error">{uiText("Не удалось подключить Instagram. Повторите вход и предоставьте доступ к сообщениям. Если ошибка повторится, обратитесь в поддержку.")}</InlineFeedback>}
+    </div>}
     {error?<InlineFeedback kind="error" className="error">{error}</InlineFeedback>:null}{note?<InlineFeedback kind="success" className="ok">{note}</InlineFeedback>:null}
+    <details open={kind === "meta_lead_forms"}><summary>{uiText("Подключение через Facebook — для специалиста")}</summary>
+    <p className="muted">{uiText("Подключение через страницу Facebook и токен приложения Meta. Для Instagram нужен привязанный профессиональный аккаунт. Для внешних клиентов приложение должно иметь необходимые разрешения Meta.")}</p>
     <form onSubmit={event=>{event.preventDefault();void run(async()=>{const result=await api.connectMeta(form)as{callbackUrl:string;verifyToken:string;note:string};if(result.verifyToken)setVerification(result);setForm({...form,accessToken:"",appSecret:""});setNote(result.note);});}}>
       {!kind && <label>{uiText("Подключение")}<select value={form.kind} onChange={event=>setForm({...form,kind:event.target.value})}><option value="instagram_direct">Instagram Direct</option><option value="meta_lead_forms">Meta Lead Forms</option></select></label>}
       <label>{uiText("App ID приложения Meta")}<input required value={form.appId} onChange={event=>setForm({...form,appId:event.target.value})}/></label>
@@ -25,10 +35,11 @@ export function MetaConnectionsPanel({ onChange, kind }: { onChange: () => void;
       <button className="btn" disabled={busy}>{busy?uiText("Подождите…"):uiText("Настроить подключение")}</button>
     </form>
     {verification?<div className="panel"><p>{uiText("В разделе Webhooks приложения Meta укажите:")}</p><label>Callback URL<input readOnly value={verification.callbackUrl}/></label><label>{uiText("Verify Token (показывается сейчас)")}<input readOnly value={verification.verifyToken}/></label><p className="muted">{uiText("Для Instagram выберите объект Instagram и поле messages; для форм — объект Page и leadgen. Сохраните проверку в Meta, затем включите подключение ниже. Не заменяйте callback, который обслуживает другую компанию.")}</p></div>:null}
+    </details>
     {rows.filter(row => !kind || row.kind === kind).map(row=><div className="panel" key={row.id}><b>{row.kind==="instagram_direct"?"Instagram Direct":"Meta Lead Forms"} · {row.settings.label}</b><p>{row.connected?uiText("Подключено"):row.status==="DISCONNECTED"?uiText("Отключено"):uiText("Ожидает настройки в Meta")}</p><IntegrationHelp kind={row.kind === "instagram_direct" ? "meta_instagram" : "meta_leads"} />{row.lastError?<p className="error">{row.lastError}</p>:null}<div className="actions">
-      <button className="btn secondary" disabled={busy||row.status==="DISCONNECTED"} onClick={()=>void run(async()=>{const result=await api.activateMeta(row.id)as{note:string};setNote(result.note);})}>{uiText("Проверить и включить")}</button>
+      {row.settings.loginMode !== "instagram" && <button className="btn secondary" disabled={busy||row.status==="DISCONNECTED"} onClick={()=>void run(async()=>{const result=await api.activateMeta(row.id)as{note:string};setNote(result.note);})}>{uiText("Проверить и включить")}</button>}
       <button className="btn secondary" disabled={busy||row.status==="DISCONNECTED"} onClick={()=>void run(async()=>{await api.disconnectMeta(row.id);setNote(uiText("Приём в CRM отключён. История сохранена. При необходимости удалите подписку и в приложении Meta."));})}>{uiText("Отключить")}</button>
-    </div></div>)}
+    </div>{row.kind === "instagram_direct" && row.connected && <ChannelAiControl id={row.id}/>}</div>)}
     <p className="muted">{uiText("Instagram: входящие сообщения и текстовые ответы в пределах 24 часов после сообщения клиента. Вложения открывайте в Instagram. Формы Meta создают заявки; обращения без телефона сохраняются для уточнения.")}</p>
   </div>;
 }

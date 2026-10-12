@@ -4,8 +4,7 @@ import { FEATURES, type AiSetupHandoffSummary } from "@creolab/contracts";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { writeAudit } from "../lib/audit.ts";
-import { encryptSecret } from "../lib/secretBox.ts";
-import { directWhatsAppTypes, ownedWhatsApp } from "./whatsappConnectionService.ts";
+import { directWhatsAppTypes } from "./whatsappConnectionService.ts";
 import { getEntitlements, requireFeature } from "./entitlementService.ts";
 import { canConsume, aiCreditCost } from "./billingResourceService.ts";
 import { getEffectiveTenantSettings, getEffectiveLlmConfig } from "./runtimeSettings.ts";
@@ -18,6 +17,10 @@ import { getTranscriptionConfig } from "./transcriptionConfig.ts";
 import { VOICE_CLARIFICATION, VOICE_SERVICE_FAILURE } from "./aiLanguagePolicy.ts";
 import { LOCAL_SPEECH_BATCH_MS, SPEECH_CLAIM_TTL_MS } from "./speechLimits.ts";
 
+import { requireIntegrationsAccess, requireTenant } from "../lib/access.ts";
+import { aiChannelTypes, aiSourceChannel, enqueueChannelDelivery } from "./channelDeliveryService.ts";
+
+// The legacy exports and event IDs remain compatible with already queued WhatsApp replies.
 type Db = PrismaClient | Prisma.TransactionClient;
 export function whatsAppAiFailureReason(code: string | null | undefined) {
   const reasons: Record<string, string> = {
@@ -47,9 +50,9 @@ const RETRY_DELAY_MS = 2000;
 const retryableModelErrors = new Set(["llm_timeout", "llm_network_error", "http_408", "http_429", "http_500", "http_502", "http_503", "http_504"]);
 const clientAiMode = (value: unknown) => { const setting = record(value).aiAutomation; return typeof setting === "string" ? setting : record(setting).mode; };
 export function automaticWhatsAppMode(settingsJson: unknown, integration: { id: string; type: string; automationMode?: string | null }, contact: { doNotContact?: boolean; attributionJson?: unknown; firstSeenAt?: Date }) {
-  const decision = decideAutomationPolicy({ settingsJson, interaction: "reply", contactFirstSeenAt: contact.firstSeenAt, sourceChannel: "whatsapp", sourceType: integration.type,
+  const decision = decideAutomationPolicy({ settingsJson, interaction: "reply", contactFirstSeenAt: contact.firstSeenAt, sourceChannel: aiSourceChannel(integration.type), sourceType: integration.type,
     integrationId: integration.id, integrationAutomationMode: integration.automationMode,
-    doNotContact: Boolean(record(contact.attributionJson).doNotContact), clientAiMode: clientAiMode(contact.attributionJson) });
+    doNotContact: Boolean(contact.doNotContact || record(contact.attributionJson).doNotContact), clientAiMode: clientAiMode(contact.attributionJson) });
   return decision.autoStart && !decision.hardBlocked && !record(settingsJson).runtime?.aiPaused;
 }
 export async function directAiReadiness(prisma: PrismaClient, tenantId: string) {
@@ -65,38 +68,43 @@ export async function directAiReadiness(prisma: PrismaClient, tenantId: string) 
 }
 
 export async function setDirectWhatsAppAi(prisma: PrismaClient, auth: AuthContext, id: string, enabled: boolean) {
-  const row = await ownedWhatsApp(prisma, auth, id);
-  if (enabled && row.status !== "active") throw new ApiError(409, "whatsapp_unavailable", "Сначала подключите WhatsApp");
+  requireIntegrationsAccess(auth); const { tenantId } = requireTenant(auth);
+  const row = await prisma.integration.findFirst({ where: { id, tenantId, type: { in: aiChannelTypes } } });
+  if (!row) throw new ApiError(404, "not_found", "Подключение не найдено");
+  if (enabled && row.status !== "active") throw new ApiError(409, "whatsapp_unavailable", "Сначала подключите канал");
   if (enabled) {
     await requireFeature(prisma, auth, FEATURES.AI_MANAGER);
     const reason = await directAiReadiness(prisma, row.tenantId);
     // Save the customer's opt-in while service administration finishes setup.
     // Readiness is still enforced before generation and immediately before delivery.
     if (reason && !["ai_not_configured", "ai_disabled", "ai_model_missing"].includes(reason)) {
-      throw new ApiError(409, reason, "Подключение WhatsApp недоступно");
+      throw new ApiError(409, reason, "Подключение ИИ недоступно");
     }
   }
   await prisma.$transaction(async tx => {
-    await tx.channelConnection.updateMany({ where: { tenantId: row.tenantId, integrationId: id }, data: { autoReply: enabled } });
+    await tx.$queryRaw`SELECT id FROM "Integration" WHERE id = ${id} AND "tenantId" = ${row.tenantId} FOR UPDATE`;
+    const connections = await tx.channelConnection.updateMany({ where: { tenantId: row.tenantId, integrationId: id }, data: { autoReply: enabled } });
+    if (!connections.count && row.type === "instagram_direct") await tx.channelConnection.create({ data: { tenantId: row.tenantId, integrationId: id, channelType: "instagram", status: row.status, autoReply: enabled, capabilitiesJson: ["receive_messages", "send_text", "ai_replies"] } });
     if (!enabled) {
       await tx.conversation.updateMany({ where: { tenantId: row.tenantId, connection: { integrationId: id }, mode: "ai" }, data: { mode: "human", controlVersion: { increment: 1 }, needsAttention: true, attentionReason: "taken_by_human" } });
       await tx.outboundOperation.updateMany({ where: { tenantId: row.tenantId, conversation: { connection: { integrationId: id } }, idempotencyKey: { startsWith: "wa-ai:" }, state: { in: ["generating", "queued"] } }, data: { state: "canceled" } });
     }
-    await writeAudit(tx, { tenantId: row.tenantId, actorUserId: auth.user.id, action: enabled ? "integration.whatsapp_ai_enabled" : "integration.whatsapp_ai_disabled", entityType: "integration", entityId: id });
+    const auditChannel = directWhatsAppTypes.includes(row.type) ? "whatsapp" : "channel";
+    await writeAudit(tx, { tenantId: row.tenantId, actorUserId: auth.user.id, action: `integration.${auditChannel}_ai_${enabled ? "enabled" : "disabled"}`, entityType: "integration", entityId: id });
   });
   return { aiEnabled: enabled };
 }
 
 export async function enqueueWhatsAppAi(tx: Db, tenantId: string, conversationId: string, sourceMessageId?: string) {
   const conversation = await tx.conversation.findFirst({ where: { id: conversationId, tenantId, mode: "ai", status: "open" }, include: { connection: { include: { integration: true } } } });
-  if (!conversation?.connection?.autoReply || !directWhatsAppTypes.includes(conversation.connection.integration.type)) return;
+  if (!conversation?.connection?.autoReply || !aiChannelTypes.includes(conversation.connection.integration.type)) return;
   if (conversation.waitingFor === "CLIENT") return;
   // Provider timestamps may have only second precision; retain the actual received message.
   const sourceId = sourceMessageId || conversation.lastInboundMessageId;
   const last = await tx.message.findFirst({ where: { tenantId, conversationId, ...(sourceId ? { id: sourceId } : {}), internal: false, operationState: { notIn: ["failed", "canceled"] } }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] });
   if (!last || last.direction !== "inbound") return;
   const id = `wa-ai:${conversationId}:${last.id}:${conversation.controlVersion}:${conversation.messageRevision}`;
-  await tx.outboxEvent.upsert({ where: { id }, update: {}, create: { id, tenantId, type: "whatsapp.ai_reply", entityType: "conversation", entityId: conversationId,
+  await tx.outboxEvent.upsert({ where: { id }, update: {}, create: { id, tenantId, type: directWhatsAppTypes.includes(conversation.connection.integration.type) ? "whatsapp.ai_reply" : "channel.ai_reply", entityType: "conversation", entityId: conversationId,
     payloadJson: { messageId: last.id, controlVersion: conversation.controlVersion, messageRevision: conversation.messageRevision }, availableAt: new Date(Date.now() + 1500) } });
 }
 
@@ -111,8 +119,7 @@ async function handoff(prisma: PrismaClient, tenantId: string, conversationId: s
       const key = `wa-ai-handoff:${conversationId}:${sourceMessageId}:${version + 1}`;
       const message = await tx.message.create({ data: { tenantId, conversationId, direction: "outbound", senderKind: "ai", text: acknowledgement, operationState: "queued", connectionScopedId: key } });
       await tx.outboundOperation.create({ data: { tenantId, conversationId, idempotencyKey: key, controlVersion: version + 1, requestHash: String(revision), state: "queued", providerRef: message.id } });
-      if (current.connection.integration.type === "whatsapp_qr") await tx.$executeRaw`INSERT INTO "WhatsAppQrJob" (id, "integrationId", kind, "encryptedPayload") VALUES (${message.id}, ${current.connection.integrationId}, 'outbound', ${encryptSecret(JSON.stringify({ messageId: message.id }))})`;
-      else await tx.outboxEvent.create({ data: { id: `wa-send:${message.id}`, tenantId, type: "whatsapp.cloud_send", entityType: "message", entityId: message.id, payloadJson: { integrationId: current.connection.integrationId } } });
+      await enqueueChannelDelivery(tx, tenantId, current.connection.integration, message.id);
     }
   });
 }
@@ -126,16 +133,16 @@ export async function directAiSendAllowed(prisma: PrismaClient, tenantId: string
     if (!["human", "paused"].includes(conversation.mode) || conversation.waitingFor !== "MANAGER" || summary.controlVersion !== version || summary.sourceMessageId !== handoffSourceMessageId) return false;
   } else if (conversation.mode !== "ai") return false;
   const channel = conversation.connection;
-  if (!channel?.autoReply || channel.status !== "active" || channel.integration.status !== "active" || !directWhatsAppTypes.includes(channel.integration.type) || record(conversation.contact?.attributionJson).doNotContact) return false;
+  if (!channel?.autoReply || channel.status !== "active" || channel.integration.status !== "active" || !aiChannelTypes.includes(channel.integration.type) || record(conversation.contact?.attributionJson).doNotContact) return false;
   const settings = parseAIAutomationSettings(conversation.tenant.settingsJson);
   const clientMode = String(clientAiMode(conversation.contact?.attributionJson) || "").toUpperCase();
   if (["OFF", "HUMAN", "MANUAL", "ASSIST"].includes(clientMode) || !settings.analyzeNewRequests || record(conversation.tenant.settingsJson).runtime?.aiPaused) return false;
-  const policy = decideAutomationPolicy({ settingsJson: conversation.tenant.settingsJson, interaction: "reply", contactFirstSeenAt: conversation.contact?.firstSeenAt, sourceChannel: "whatsapp", sourceType: channel.integration.type, integrationId: channel.integrationId, integrationAutomationMode: channel.integration.automationMode, clientAiMode: clientMode });
+  const policy = decideAutomationPolicy({ settingsJson: conversation.tenant.settingsJson, interaction: "reply", contactFirstSeenAt: conversation.contact?.firstSeenAt, sourceChannel: aiSourceChannel(channel.integration.type), sourceType: channel.integration.type, integrationId: channel.integrationId, integrationAutomationMode: channel.integration.automationMode, clientAiMode: clientMode });
   if (policy.mode === "MANUAL" || policy.mode === "ASSIST") return false;
   if (!isWithinAiSchedule(new Date(), conversation.tenant.timezone, settings)) return false;
   if (await directAiReadiness(prisma, tenantId)) return false;
   const last = await prisma.message.findFirst({ where: { tenantId, conversationId, direction: "inbound", internal: false }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] });
-  return Boolean(last && (channel.integration.type !== "whatsapp_cloud" || Date.now() - last.createdAt.getTime() < 86400000));
+  return Boolean(last && (!["whatsapp_cloud", "instagram_direct"].includes(channel.integration.type) || Date.now() - last.createdAt.getTime() < 86400000));
 }
 
 export async function processWhatsAppAiReply(prisma: PrismaClient, event: { id: string; tenantId: string; entityId: string; payloadJson: unknown }, generate = answerWhatsAppWithLlm) {
@@ -156,6 +163,7 @@ export async function processWhatsAppAiReply(prisma: PrismaClient, event: { id: 
   const latest = history.find(message => message.id === payload.messageId);
   if (!latest || latest.direction !== "inbound") return;
   const detected = directHandoffReason(latest.text || "", settings)
+    || (conversation.connection?.integration.type === "instagram_direct" && /^\[(?:Вложение Instagram:|Сообщение Instagram\])/.test(latest.text || "") ? "AI_STAFF_ACTION" : null)
     || (latest.attachments.length && !latest.text?.trim() && !latest.attachments.some(isVoiceAttachment) ? "AI_STAFF_ACTION" : null);
   if (detected) {
     await handoff(prisma, tenantId, conversationId, version, revision, detected, settings.handoff.afterMode === "assist" ? "paused" : "human", normalizeAiHandoffSummary(null, latest.text || ""), latest.id,
@@ -227,7 +235,7 @@ export async function processWhatsAppAiReply(prisma: PrismaClient, event: { id: 
           || !await prisma.outboundOperation.count({ where: { id: claim.id, state: "generating" } })) { await cancel(); return; }
       }
       try {
-        answer = await generate({ prisma, tenantId, integrationId: conversation.connection!.integrationId, conversationId,
+        answer = await generate({ prisma, tenantId, integrationId: conversation.connection!.integrationId, conversationId, maxReplyChars: conversation.connection!.integration.type === "instagram_direct" ? 1000 : 4000,
           history: [...[...history].reverse().filter(message => message.id !== latest.id), latest].map(message => ({ role: message.direction === "inbound" ? "user" : "assistant", content: messageContent(message).slice(0, 18000) })) });
         break;
       } catch (error) {
@@ -259,6 +267,9 @@ export async function processWhatsAppAiReply(prisma: PrismaClient, event: { id: 
       }
     }
   }
+  if (answer && !answer.handoff && answer.reply.length > (conversation.connection!.integration.type === "instagram_direct" ? 1000 : 4000)) {
+    answer = null; failureReason = "AI_INVALID_RESPONSE";
+  }
   if (!answer || answer.handoff) {
     await prisma.outboundOperation.updateMany({ where: { id: claim.id, state: "generating" }, data: { state: "failed", error: answer?.handoff ? "needs_human" : failureReason } });
     await handoff(prisma, tenantId, conversationId, version, revision, answer?.handoff ? (({ knowledge_missing: "AI_KNOWLEDGE_MISSING", human_requested: "CLIENT_REQUESTED_HUMAN", staff_action: "AI_STAFF_ACTION" } as Record<string, string>)[String(answer.reason)] || "LOW_CONFIDENCE") : failureReason, answer?.handoff && settings.handoff.afterMode === "assist" ? "paused" : "human", answer?.handoff ? normalizeAiHandoffSummary(answer.handoffSummary, messageContent(latest)) : undefined, latest.id, answer?.handoff ? handoffAcknowledgement(answer.reason, [...history].reverse().map(message => ({ role: message.direction === "inbound" ? "user" : "assistant", content: messageContent(message) }))) : ""); return;
@@ -273,7 +284,6 @@ export async function processWhatsAppAiReply(prisma: PrismaClient, event: { id: 
     if (!current || !operation.count) return;
     const message = await tx.message.create({ data: { tenantId, conversationId, direction: "outbound", senderKind: "ai", text: answer!.reply, operationState: "queued", connectionScopedId: event.id } });
     await tx.outboundOperation.update({ where: { id: claim.id }, data: { providerRef: message.id } });
-    if (conversation.connection!.integration.type === "whatsapp_qr") await tx.$executeRaw`INSERT INTO "WhatsAppQrJob" (id, "integrationId", kind, "encryptedPayload") VALUES (${message.id}, ${conversation.connection!.integrationId}, 'outbound', ${encryptSecret(JSON.stringify({ messageId: message.id }))})`;
-    else await tx.outboxEvent.create({ data: { id: `wa-send:${message.id}`, tenantId, type: "whatsapp.cloud_send", entityType: "message", entityId: message.id, payloadJson: { integrationId: conversation.connection!.integrationId } } });
+    await enqueueChannelDelivery(tx, tenantId, conversation.connection!.integration, message.id);
   });
 }

@@ -28,13 +28,16 @@ export async function processOutbox(prisma: PrismaClient) {
         const payload = event.payloadJson as {to:string;subject:string;text:string};
         const result = await sendMail({...payload, idempotencyKey:`billing/${event.id}`});
         if (!result.delivered) throw new Error("Billing email not delivered");
-      } else if (event.type === "whatsapp.ai_reply") {
+      } else if (["whatsapp.ai_reply", "channel.ai_reply"].includes(event.type)) {
         const { processWhatsAppAiReply } = await import("./whatsappAiService.ts");
         await processWhatsAppAiReply(prisma, event);
       } else if (event.type === "whatsapp.cloud_send") {
         const { deliverCloudMessage } = await import("./whatsappSendService.ts");
         const integrationId = (event.payloadJson as { integrationId?: string }).integrationId;
         if (integrationId) await deliverCloudMessage(prisma, event.tenantId, integrationId, event.entityId);
+      } else if (event.type === "channel.send") {
+        const { deliverChannelMessage } = await import("./channelDeliveryService.ts");
+        await deliverChannelMessage(prisma, event.tenantId, event.entityId);
       } else if (event.type === "campaign.run") {
         const payload = (event.payloadJson || {}) as { campaignId?: string };
         if (payload.campaignId) await processCampaignQueue(prisma, payload.campaignId);
@@ -264,6 +267,7 @@ export function startBackgroundJobs(prisma: PrismaClient) {
   let lastBillingRun = 0;
   const tick = () => {
     import("./billingResourceService.ts").then(({ reconcileBillingUsage }) => reconcileBillingUsage(prisma)).catch(error => logServerError(error, "background:billing usage"));
+    void import("./instagramOAuthService.ts").then(({ refreshInstagramConnections }) => refreshInstagramConnections(prisma)).catch(error => logServerError(error, "background:instagram"));
     processOutbox(prisma).catch((error) => logServerError(error, "background:outbox"));
     import("./esfStatusSyncService.ts")
       .then(({ ensureEsfStatusPolls }) => ensureEsfStatusPolls(prisma))

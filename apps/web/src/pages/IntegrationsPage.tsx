@@ -1,3 +1,5 @@
+import { WebsiteChatPanel } from "./WebsiteChatPanel";
+import { ChannelAiControl } from "../components/ChannelAiControl";
 import { InlineFeedback } from "../components/InlineFeedback";
 import { IntegrationDisclosure } from "../components/IntegrationDisclosure";
 import { WhatsAppConnectionsPanel } from "./WhatsAppConnectionsPanel";
@@ -294,7 +296,7 @@ export function IntegrationsPage() {
       <div className="panel">
         <h3>{uiText("Telegram-бот компании")}</h3>
         <IntegrationHelp kind="telegram_bot" />
-        <p className="muted">{uiText("Клиенты пишут вашему боту, сотрудники отвечают в разделе «Диалоги». Сообщения не создают заявки автоматически.")}</p>
+        <p className="muted">{uiText("Клиенты пишут вашему боту. Отвечать может ИИ-менеджер или сотрудник из раздела «Диалоги».")}</p>
         <p><span className="badge">{uiMessage(companyTelegram?.healthLabel) || uiText("Не подключено")}</span> {companyTelegram?.username ? `@${companyTelegram.username}` : ""}</p>
         <form onSubmit={async event => {
           event.preventDefault(); setSavingBot(true); setError(""); setNote("");
@@ -319,10 +321,11 @@ export function IntegrationsPage() {
             catch (err) { setError(err instanceof Error ? err.message : uiText("Не удалось отключить бота")); }
             finally { setSavingBot(false); }
           }}>{uiText("Отключить бота")}</button> : null}
-        </div></div>)}
+        </div>{bot.connected && <><p><a href={`https://t.me/${bot.username}`} target="_blank" rel="noopener noreferrer">{uiText("Открыть бота и отправить пробное сообщение")}</a></p><ChannelAiControl id={bot.integrationId}/></>}</div>)}
       </div>
 
         </IntegrationDisclosure>
+        <IntegrationDisclosure id="website-chat" icon="form" title={uiText("Чат на сайте")} description={uiText("ИИ-консультант и сотрудники прямо на вашем сайте")} {...catalogSummary("WEBSITE_CHAT")}><WebsiteChatPanel onChange={refresh} /></IntegrationDisclosure>
         <IntegrationDisclosure id="website" icon="form" title={uiText("Форма сайта")} description={uiText("Заявки с вашего сайта в одном месте")} {...catalogSummary("WEBSITE_FORM")}>
           {leadDetails("WEBSITE_FORM")}
       {setup?.form?.connected && submitUrl ? (

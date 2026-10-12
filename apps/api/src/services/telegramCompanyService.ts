@@ -1,3 +1,4 @@
+import { automaticWhatsAppMode, directAiReadiness, enqueueWhatsAppAi } from "./whatsappAiService.ts";
 import { enqueueConversationContext } from "./conversationContextQueue.ts";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
@@ -171,6 +172,7 @@ export async function receiveCompanyTelegram(prisma: PrismaClient, id: string, s
   const downloaded = media ? await downloadTelegramMedia(await tokenFor(prisma, tenantId, integration.credentialId), media,
     incoming.photo ? "photo.jpg" : incoming.voice ? "voice.ogg" : incoming.video ? "video.mp4" : "attachment.bin",
     incoming.photo ? "image/jpeg" : incoming.voice ? "audio/ogg" : incoming.video ? "video/mp4" : "application/octet-stream") : null;
+  const aiReady = !await directAiReadiness(prisma, tenantId);
   return prisma.$transaction(async (tx) => {
     // Serialize deliveries for this bot; there is no unique conversation/thread constraint in the existing schema.
     const locked = await tx.integration.update({ where: { id }, data: { lastEventAt: new Date() } });
@@ -185,7 +187,7 @@ export async function receiveCompanyTelegram(prisma: PrismaClient, id: string, s
     const contact = identity ? await tx.contact.findFirstOrThrow({ where: { id: identity.contactId, tenantId } }) : await tx.contact.create({ data: { tenantId, name: [incoming.from!.first_name, incoming.from!.last_name].filter(Boolean).join(" ") || incoming.from!.username || "Клиент Telegram" } });
     if (!identity) await tx.externalIdentity.create({ data: { tenantId, contactId: contact.id, integrationId: id, connectionId: connection.id, type: "telegram", externalId: String(incoming.from!.id), confirmed: true } });
     let conversation = await tx.conversation.findFirst({ where: { tenantId, connectionId: connection.id, externalThreadId } });
-    if (!conversation) conversation = await tx.conversation.create({ data: { tenantId, connectionId: connection.id, externalThreadId, contactId: contact.id, mode: "human" } });
+    if (!conversation) conversation = await tx.conversation.create({ data: { tenantId, connectionId: connection.id, externalThreadId, contactId: contact.id, mode: aiReady && connection.autoReply && automaticWhatsAppMode(integration.tenant.settingsJson, locked, contact) ? "ai" : "human" } });
     const sharedContact = incoming.contact;
     let text = incoming.text || incoming.caption || "";
     if (sharedContact) text = [text, `Контакт: ${sharedContact.first_name || ""} ${sharedContact.phone_number}`].filter(Boolean).join("\n");
@@ -194,8 +196,10 @@ export async function receiveCompanyTelegram(prisma: PrismaClient, id: string, s
     const providerMessageId = String(incoming.message_id);
     const scoped = `telegram:${connection.id}:${externalThreadId}:${providerMessageId}`;
     const duplicateMessage = await tx.message.findUnique({ where: { connectionScopedId: scoped } });
+    let sourceMessageId = duplicateMessage?.id;
     if (!duplicateMessage) {
       const message = await tx.message.create({ data: { tenantId, conversationId: conversation.id, senderKind: "client", direction: "inbound", type: downloaded ? "document" : "text", text: text || null, providerMessageId, connectionScopedId: scoped, createdAt: new Date(incoming.date * 1000) } });
+      sourceMessageId = message.id;
       await enqueueConversationContext(tx, tenantId, conversation.id, message.id);
       if (downloaded) await storeMessageAttachment(tx, { tenantId, messageId: message.id, ...downloaded, providerMessageId });
     }
@@ -207,7 +211,8 @@ export async function receiveCompanyTelegram(prisma: PrismaClient, id: string, s
       }
     }
     await tx.contact.update({ where: { id: contact.id }, data: { lastSeenAt: new Date(), lastInboundMessageAt: new Date() } });
-    await tx.conversation.update({ where: { id: conversation.id }, data: { needsAttention: true, attentionReason: "client_waiting", waitingFor: "MANAGER", messageRevision: { increment: duplicateMessage ? 0 : 1 } } });
+    await tx.conversation.update({ where: { id: conversation.id }, data: { lastInboundMessageId: sourceMessageId, needsAttention: true, attentionReason: "client_waiting", waitingFor: "MANAGER", messageRevision: { increment: duplicateMessage ? 0 : 1 } } });
+    if (!duplicateMessage) await enqueueWhatsAppAi(tx, tenantId, conversation.id, sourceMessageId);
     await tx.inboundEvent.create({ data: { tenantId, integrationId: id, externalEventKey, payloadHash: hash(JSON.stringify(update)), rawJson: update as Prisma.InputJsonValue, provider: "telegram", eventType: "MESSAGE_RECEIVED", status: "PROCESSED", processedAt: new Date(), test: integration.testMode } });
     await tx.integration.update({ where: { id }, data: { healthStatus: "HEALTHY", lastSuccessAt: new Date(), lastError: null } });
     return { ok: true, conversationId: conversation.id };
@@ -278,4 +283,12 @@ export async function sendCompanyTelegram(prisma: PrismaClient, auth: AuthContex
     throw error;
   }
   return prisma.message.findUnique({ where: { id: message!.id }, include: { attachments: true } });
+}
+
+/** Internal transport; the durable dispatcher owns policy checks and idempotency. */
+export async function sendTelegramText(prisma: PrismaClient, row: { tenantId: string; credentialId: string | null }, recipient: string, text: string) {
+  if (!/^\d+$/.test(recipient) || !text || text.length > 4096) throw new ApiError(422, "telegram_invalid_message", "Некорректное сообщение Telegram");
+  const sent = await telegramCall<{ message_id: number }>(await tokenFor(prisma, row.tenantId, row.credentialId), "sendMessage", { chat_id: recipient, text });
+  if (!Number.isSafeInteger(sent.message_id)) throw new ApiError(502, "telegram_send_unknown", "Telegram не подтвердил отправку");
+  return String(sent.message_id);
 }

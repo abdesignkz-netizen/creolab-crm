@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { websiteChatRouter } from "./routes/websiteChat.ts";
 import { registerBillingRoutes } from "./routes/billing.ts";
 import { publicFormKey } from "@creolab/contracts";
 import { protectBrowserMutation, securityHeaders } from "./lib/httpSecurity.ts";
@@ -362,6 +364,7 @@ export function createApp(prisma: PrismaClient) {
   }
   app.use(securityHeaders);
   app.use(createLegacyDomainRedirect(config));
+  app.use("/public/chat", websiteChatRouter(prisma));
   app.use(
     cors({
       origin: config.allowedOrigins,
@@ -2345,6 +2348,50 @@ export function createApp(prisma: PrismaClient) {
   });
   app.post("/public/integrations/whatsapp-cloud/:id", rawJson, async (req, res) => {
     res.json(await receiveWhatsAppCloud(prisma, req.params.id, Buffer.isBuffer(req.body) ? req.body : Buffer.from("{}"), req.header("x-hub-signature-256") || ""));
+  });
+
+  app.get("/api/v1/integrations/website-chat", async (req, res) => {
+    const { getWebsiteChat } = await import("./services/websiteChatService.ts");
+    res.json(await getWebsiteChat(prisma, await requireAuth(req)));
+  });
+  app.put("/api/v1/integrations/website-chat", json, async (req, res) => {
+    const { saveWebsiteChat, websiteChatSchema } = await import("./services/websiteChatService.ts");
+    res.json(await saveWebsiteChat(prisma, await requireAuth(req), websiteChatSchema.parse(req.body)));
+  });
+  app.get("/api/v1/integrations/channels/ai", async (req, res) => {
+    const { requireIntegrationsAccess, requireTenant } = await import("./lib/access.ts");
+    const auth = await requireAuth(req); requireIntegrationsAccess(auth); const { tenantId } = requireTenant(auth);
+    const { aiChannelTypes } = await import("./services/channelDeliveryService.ts");
+    const { directAiReadiness } = await import("./services/whatsappAiService.ts");
+    const rows = await prisma.integration.findMany({ where: { tenantId, type: { in: aiChannelTypes } }, include: { channelConnections: true } });
+    res.json({ readiness: await directAiReadiness(prisma, tenantId), items: rows.map(row => ({ id: row.id, type: row.type, name: row.name, connected: row.status === "active", aiEnabled: row.channelConnections.some(c => c.autoReply), lastMessageAt: row.lastEventAt })) });
+  });
+  app.post("/api/v1/integrations/channels/:id/ai", json, async (req, res) => {
+    const { setDirectWhatsAppAi } = await import("./services/whatsappAiService.ts");
+    const input = z.object({ enabled: z.boolean() }).parse(req.body);
+    res.json(await setDirectWhatsAppAi(prisma, await requireAuth(req), req.params.id, input.enabled));
+  });
+
+  app.post("/api/v1/integrations/instagram/connect", async (req, res) => {
+    const auth = await requireAuth(req); await requireFeature(prisma, auth, FEATURES.CHANNELS);
+    const { beginInstagramConnection } = await import("./services/instagramOAuthService.ts");
+    res.json(await beginInstagramConnection(prisma, auth));
+  });
+  app.get("/api/v1/integrations/instagram/callback", async (req, res) => {
+    const { finishInstagramConnection } = await import("./services/instagramOAuthService.ts");
+    try {
+      const auth = await requireAuth(req); await requireFeature(prisma, auth, FEATURES.CHANNELS);
+      await finishInstagramConnection(prisma, auth, { state: String(req.query.state || ""), code: String(req.query.code || ""), error: req.query.error ? String(req.query.error) : undefined });
+      res.redirect(`${config.appBaseUrl}/integrations?instagram=connected#integration-instagram`);
+    } catch { res.redirect(`${config.appBaseUrl}/integrations?instagram=failed#integration-instagram`); }
+  });
+  app.get("/public/integrations/instagram", async (req, res) => {
+    const { verifyInstagramWebhook } = await import("./services/instagramOAuthService.ts");
+    res.type("text/plain").send(verifyInstagramWebhook(String(req.query["hub.mode"] || ""), String(req.query["hub.verify_token"] || ""), String(req.query["hub.challenge"] || "")));
+  });
+  app.post("/public/integrations/instagram", rawJson, async (req, res) => {
+    const { receiveInstagramWebhook } = await import("./services/instagramOAuthService.ts");
+    res.json(await receiveInstagramWebhook(prisma, Buffer.isBuffer(req.body) ? req.body : Buffer.from("{}"), req.get("x-hub-signature-256") || ""));
   });
 
   app.get("/api/v1/integrations/meta", async (req, res) => { res.json(await listMetaConnections(prisma, await requireAuth(req))); });

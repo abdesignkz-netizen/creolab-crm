@@ -5,7 +5,7 @@ export { ChannelIcon } from "./ChannelIcon";
 
 export const CONVERSATION_CHANNELS = [
   ["all", "Все"], ["whatsapp", "WhatsApp"], ["telegram", "Telegram"],
-  ["instagram", "Instagram"], ["email", "Почта"], ["other", "Другие"],
+  ["instagram", "Instagram"], ["email", "Почта"], ["website", "Чат сайта"], ["other", "Другие"],
 ] as const;
 
 // Initials remain visible while a channel photo loads or when it is private/unavailable.
