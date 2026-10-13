@@ -1,4 +1,4 @@
-import { uiText, useUiText, localizeUiOptions } from "../uiText";
+import { uiText, useUiText, localizeUiOptions } from "../uiText.ts";
 import {
   ESF_MODULE_REQUIRED_MESSAGE,
   ESF_NCALAYER_SERVICE,

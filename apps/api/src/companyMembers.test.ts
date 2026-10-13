@@ -84,7 +84,8 @@ describe("company employee invitations and readable audit", () => {
     const { createTenantInvitation, getInvitationCapacity } = await import("./services/invitationService.ts");
     const cap = await getInvitationCapacity(db, tenant.id);
     assert.equal(cap.limit, 1); assert.equal(cap.canInvite, false);
-    await assert.rejects(createTenantInvitation(db, { tenantId: tenant.id, name: "No seat", email: "free@invite.test", role: "manager" }), /Добавление сотрудников недоступно/);
+    await assert.rejects(createTenantInvitation(db, { tenantId: tenant.id, name: "No seat", email: "free@invite.test", role: "manager" }), (error: any) => error.code === "member_limit" && /Все места для сотрудников заняты/.test(error.message));
+    assert.equal(await db.invitation.count({ where: { tenantId: tenant.id } }), 0);
   });
   it("returns Russian journal descriptions, searches them and isolates company events", async () => {
     for (const id of [tenantId, otherTenantId]) await db.auditEvent.create({ data: { tenantId: id, action: "payment.confirmed", entityType: "billing_payment", changesJson: { amountMinor: 69900, requestId: "internal-identifier" } } });

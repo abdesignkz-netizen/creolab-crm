@@ -16,6 +16,7 @@ describe("AI manager across messaging channels", () => {
   let prisma: Awaited<ReturnType<typeof createPrismaClient>>, server: ReturnType<ReturnType<typeof createApp>["listen"]>;
   let base = "", cookie = "", tenantId = "", telegram = "", instagram = "", website = "", widgetKey = "";
   let sends = 0, failSend = false;
+  let sendBarrier: Promise<void> | undefined, onSend: (() => void) | undefined;
   const token = randomBytes(32).toString("hex"), nativeFetch = globalThis.fetch;
   const oldKey = process.env.OPENAI_API_KEY, oldBase = config.apiBaseUrl;
   const origin = "https://shop.example.test";
@@ -24,7 +25,8 @@ describe("AI manager across messaging channels", () => {
     globalThis.fetch = async (url, init) => {
       if (String(url).startsWith("http://127.0.0.1:")) return nativeFetch(url, init);
       if (String(url).startsWith("https://api.telegram.org/") || String(url).startsWith("https://graph.facebook.com/")) {
-        sends++; if (failSend) throw new Error("network ambiguous");
+        sends++; onSend?.(); await sendBarrier;
+        if (failSend) throw new Error("network ambiguous");
         return new Response(JSON.stringify(String(url).includes("telegram.org") ? { ok: true, result: { message_id: sends } } : { message_id: `ig-${sends}` }));
       }
       throw new Error("Unexpected external request in isolated test");
@@ -67,7 +69,9 @@ describe("AI manager across messaging channels", () => {
     await inbound("telegram", "1001"); assert.equal(await prisma.outboxEvent.count({ where: { entityId: old, type: "channel.ai_reply" } }), 0);
     const id = await inbound("telegram", "1002"); assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id } })).mode, "ai");
     const message = await generate(id); const count = sends;
-    await Promise.all([deliverChannelMessage(prisma, tenantId, message.id), deliverChannelMessage(prisma, tenantId, message.id)]);
+    const deliveries = await Promise.allSettled([deliverChannelMessage(prisma, tenantId, message.id), deliverChannelMessage(prisma, tenantId, message.id)]);
+    assert.ok(deliveries.some(result => result.status === "fulfilled"));
+    for (const result of deliveries) if (result.status === "rejected") assert.equal(result.reason.code, "channel_sending");
     assert.equal(sends, count + 1); assert.equal((await prisma.message.findUniqueOrThrow({ where: { id: message.id } })).operationState, "accepted");
     const workspace = await (await call(`/api/v1/conversations/${id}`)).json(); assert.equal(workspace.conversation.aiAvailable, true);
   });
@@ -88,6 +92,48 @@ describe("AI manager across messaging channels", () => {
     const uncertain = await inbound("telegram", "1004"), pending = await generate(uncertain); failSend = true;
     await assert.rejects(() => deliverChannelMessage(prisma, tenantId, pending.id)); failSend = false;
     await deliverChannelMessage(prisma, tenantId, pending.id); assert.equal(sends, count + 1); assert.equal((await prisma.message.findUniqueOrThrow({ where: { id: pending.id } })).operationState, "unknown");
+  });
+  async function simulateInterruptedSend(messageId: string, expiresAt: Date) {
+    await prisma.message.update({ where: { id: messageId }, data: { operationState: "sending" } });
+    await prisma.outboundOperation.updateMany({ where: { providerRef: messageId, tenantId }, data: { state: "sending" } });
+    await prisma.idempotencyRecord.create({ data: { scope: "channel.delivery", actorKey: tenantId, key: messageId, requestHash: "previous-worker", resultJson: {}, expiresAt } });
+  }
+  it("keeps active sends pending and flags interrupted external deliveries without sending twice", async () => {
+    for (const [type, sender] of [["telegram", "1090"], ["instagram", "2090"]] as const) {
+      const id = await inbound(type, sender), message = await generate(id), count = sends;
+      await simulateInterruptedSend(message.id, new Date(Date.now() + 120_000));
+      await assert.rejects(() => deliverChannelMessage(prisma, tenantId, message.id), (error: any) => error.code === "channel_sending");
+      assert.equal((await prisma.message.findUniqueOrThrow({ where: { id: message.id } })).operationState, "sending");
+      await prisma.idempotencyRecord.updateMany({ where: { scope: "channel.delivery", key: message.id }, data: { expiresAt: new Date(0) } });
+      await deliverChannelMessage(prisma, tenantId, message.id);
+      await deliverChannelMessage(prisma, tenantId, message.id);
+      assert.equal(sends, count);
+      assert.equal((await prisma.message.findUniqueOrThrow({ where: { id: message.id } })).operationState, "unknown");
+      assert.equal((await prisma.outboundOperation.findFirstOrThrow({ where: { providerRef: message.id } })).state, "unknown");
+      assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id } })).attentionReason, "AI_DELIVERY_UNKNOWN");
+    }
+    const legacy = await inbound("telegram", "1091"), message = await generate(legacy), count = sends;
+    await prisma.message.update({ where: { id: message.id }, data: { operationState: "sending" } });
+    await deliverChannelMessage(prisma, tenantId, message.id);
+    assert.equal(sends, count);
+    assert.equal((await prisma.message.findUniqueOrThrow({ where: { id: message.id } })).operationState, "unknown");
+  });
+  it("an expired worker cannot overwrite the recovery result with a late provider response", async () => {
+    const id = await inbound("telegram", "1092"), message = await generate(id), count = sends;
+    let release!: () => void;
+    sendBarrier = new Promise<void>(resolve => { release = resolve; });
+    const entered = new Promise<void>(resolve => { onSend = resolve; });
+    const delivery = deliverChannelMessage(prisma, tenantId, message.id);
+    const failed = assert.rejects(delivery, (error: any) => error.code === "channel_send_unknown");
+    try {
+      await entered;
+      await prisma.idempotencyRecord.updateMany({ where: { scope: "channel.delivery", key: message.id }, data: { expiresAt: new Date(0) } });
+      await deliverChannelMessage(prisma, tenantId, message.id);
+    } finally { release(); sendBarrier = undefined; onSend = undefined; }
+    await failed;
+    assert.equal(sends, count + 1);
+    assert.equal((await prisma.message.findUniqueOrThrow({ where: { id: message.id } })).operationState, "unknown");
+    assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id } })).attentionReason, "AI_DELIVERY_UNKNOWN");
   });
   it("channel worker owns handoff and sends one acknowledgement without exposing its private summary", async () => {
     await prisma.tenant.update({ where: { id: tenantId }, data: { settingsJson: { aiAutomation: { defaultMode: "AUTO", handoff: { triggers: { CLIENT_REQUESTED_HUMAN: true } } } } } });
@@ -152,7 +198,12 @@ describe("AI manager across messaging channels", () => {
     await prisma.message.create({ data: { tenantId, conversationId: id, direction: "internal", senderKind: "staff", internal: true, text: "PRIVATE STAFF NOTE" } });
     const message = await generate(id, "Консультируем по услугам компании.");
     assert.ok(!(await (await publicCall("/messages")).text()).includes("Консультируем"));
+    await simulateInterruptedSend(message.id, new Date(0));
     await deliverChannelMessage(prisma, tenantId, message.id);
+    const revision = (await prisma.conversation.findUniqueOrThrow({ where: { id } })).messageRevision;
+    await deliverChannelMessage(prisma, tenantId, message.id);
+    assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id } })).messageRevision, revision);
+    assert.equal(await prisma.idempotencyRecord.count({ where: { scope: "channel.delivery", key: message.id } }), 0);
     const visible = await (await publicCall("/messages")).text(); assert.ok(visible.includes("Консультируем")); assert.ok(!visible.includes("PRIVATE")); assert.ok(!visible.includes("tenantId"));
     await prisma.conversation.update({ where: { id }, data: { mode: "human", controlVersion: { increment: 1 } } });
     const reply = await call(`/api/v1/conversations/${id}/messages`, "POST", { text: "Здравствуйте, я менеджер", idempotencyKey: randomUUID() }); assert.equal(reply.status, 201, await reply.clone().text());

@@ -156,16 +156,24 @@ describe("Documents phase 3", () => {
   });
 
   it("не раскрывает raw token в базе и не пускает заказчика раньше исполнителя", async () => {
-    const command = await json("/api/v1/documents/from-command", {
+    const untrusted = await json("/api/v1/documents/from-command", {
       method: "POST",
       headers: { Origin: "https://untrusted.example" },
+      body: JSON.stringify({ text: "Отправь договор на подпись", dealId }),
+    });
+    assert.equal(untrusted.response.status, 403);
+    assert.equal(untrusted.body.code, "untrusted_origin");
+    assert.equal(await prisma.signatureRequest.count({ where: { contractId, signerType: "BUYER" } }), 0);
+    const command = await json("/api/v1/documents/from-command", {
+      method: "POST",
+      headers: { Origin: "https://bsqr.kz" },
       body: JSON.stringify({ text: "Отправь договор на подпись", dealId }),
     });
     assert.equal(command.response.status, 200, JSON.stringify(command.body));
     assert.match(command.body.result.requests.find((row: { signerType: string }) => row.signerType === "BUYER").signUrl, /^https:\/\/bsqr\.kz\/sign\//);
     const sent = await json(`/api/v1/contracts/${contractId}/send-for-sign`, {
       method: "POST",
-      headers: { Origin: "https://crm.creolab.kz" },
+      headers: { Origin: "https://bsqr.kz" },
       body: JSON.stringify({}),
     });
     assert.equal(sent.response.status, 200, JSON.stringify(sent.body));

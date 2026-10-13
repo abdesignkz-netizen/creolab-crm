@@ -231,20 +231,20 @@ describe("Document field fill", () => {
     assert.equal(generated.body.invoice.contractId, contractId);
   });
 
-  it("АВР заполняет стороны, договор и позиции, а счёт связывается только явно", async () => {
+  it("АВР с выбранным договором заполняет стороны и позиции, а счёт связывается явно", async () => {
     const draft = await json(`/api/v1/deals/${dealId}/electronic-documents`, {
       method: "POST",
-      body: JSON.stringify({ type: "AVR" }),
+      body: JSON.stringify({ type: "AVR", contractId }),
     });
     assert.equal(draft.response.status, 201, JSON.stringify(draft.body));
     const source = draft.body.document.source;
-    assert.equal(source.seller.legalName, "ТОО Fill Seller");
+    assert.equal(source.seller.legalName, "Товарищество с ограниченной ответственностью Fill Seller");
     assert.equal(source.seller.bin, "123456789013");
     assert.equal(source.seller.iin, "");
     assert.equal(source.seller.legalAddress, "Алматы, Абая 1");
     assert.equal(source.seller.directorName, "Селлер Семенович");
     assert.equal(source.seller.directorPosition, "Генеральный директор");
-    assert.equal(source.buyer.legalName, "ТОО Fill Buyer Legal");
+    assert.equal(source.buyer.legalName, "Товарищество с ограниченной ответственностью Fill Buyer Legal");
     assert.equal(source.buyer.bin, "222222222220");
     assert.equal(source.buyer.iin, "");
     assert.equal(source.buyer.legalAddress, "Астана, Кабанбай 10");
@@ -295,7 +295,7 @@ describe("Document field fill", () => {
     assert.equal(refreshed.body.document.source.invoice.id,invoiceId);
   });
 
-  it("черновики договора и счёта обновляют суммы после новой позиции", async () => {
+  it("договор обновляет суммы, а повторное открытие счёта сохраняет его позиции", async () => {
     const freshDeal = await json("/api/v1/deals", {
       method: "POST",
       body: JSON.stringify({
@@ -331,9 +331,10 @@ describe("Document field fill", () => {
       body: JSON.stringify({}),
     });
     assert.equal(second.body.reused, true);
-    assert.equal(second.body.invoice.items.length, 2);
-    assert.equal(second.body.invoice.items[1].name, "Вторая");
-    assert.equal(second.body.invoice.totalAmount, 120000);
+    assert.equal(second.body.invoice.id, first.body.invoice.id);
+    assert.equal(second.body.invoice.items.length, 1);
+    assert.equal(second.body.invoice.items[0].name, "Аудит");
+    assert.equal(second.body.invoice.totalAmount, 100000);
   });
 
   it("покупатель только с ИИН попадает в договор и АВР, БИН не подменяется", async () => {
@@ -381,7 +382,7 @@ describe("Document field fill", () => {
     });
     assert.equal(avr.body.document.source.buyer.bin, "");
     assert.equal(avr.body.document.source.buyer.iin, "222222222220");
-    assert.equal(avr.body.document.source.buyer.legalName, "ИП Fill IIN");
+    assert.equal(avr.body.document.source.buyer.legalName, "Индивидуальный предприниматель Fill IIN");
     assert.equal(avr.body.document.source.buyer.legalAddress, "Шымкент");
   });
 });

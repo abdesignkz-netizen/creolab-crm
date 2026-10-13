@@ -1,4 +1,4 @@
-import { uiText, uiMessage, localizeUiOptions } from "./uiText";
+import { uiText, uiMessage, localizeUiOptions } from "./uiText.ts";
 const names: Record<string, string> = {
   number: "Номер документа", documentDate: "Дата документа", name: "Название", quantity: "Количество", unit: "Единица измерения",
   unitPrice: "Цена без НДС", vatRate: "НДС", paymentPercent: "Процент оплаты", legalName: "Юридическое название", bin: "БИН / ИИН",

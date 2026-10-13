@@ -1,4 +1,4 @@
-import { uiText, useUiText, localizeUiOptions } from "../uiText";
+import { uiText, useUiText, localizeUiOptions } from "../uiText.ts";
 /** Official NCALayer Basics: https://github.com/pkigovkz/sdkinfo/wiki/KNCA-Basics-Module */
 export const NCALAYER_MODULE = "kz.gov.pki.knca.basics";
 export const NCALAYER_SIGN = "sign";

@@ -1,5 +1,5 @@
 import { createContext, useContext } from "react";
-import { applyDocumentLocale, normalizeLocale, rememberLocale, getPublicLocale } from "../i18n";
+import { applyDocumentLocale, normalizeLocale, rememberLocale, getPublicLocale } from "../i18n.ts";
 
 export type Capabilities = {
   role: string | null;

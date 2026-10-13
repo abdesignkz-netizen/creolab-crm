@@ -1,6 +1,6 @@
 import { systemText, systemMessage, localizedTaskTitle, displayTaskStatus } from "@creolab/contracts";
-import { getPublicLocale } from "../i18n";
-import { useLocale } from "./session";
+import { getPublicLocale } from "../i18n.ts";
+import { useLocale } from "./session.ts";
 
 type Params = Record<string, string | number | null | undefined>;
 /** Product-owned copy only. Keep record names, messages and document content verbatim. */
