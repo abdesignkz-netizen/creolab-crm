@@ -1,3 +1,4 @@
+import { queueControlNotification } from "./controlNotificationService.ts";
 import { taskTitlePresentation } from "@creolab/contracts";
 import { randomUUID } from "node:crypto";
 import { resolveEsfMeasureUnitCode } from "@creolab/contracts";
@@ -896,6 +897,7 @@ export async function changeDealStage(
         metadataJson: { from: deal.stage.systemKey, to: toStage.systemKey },
       },
     });
+    await queueControlNotification(tx, { tenantId: tid, type: "deal.stage_changed", entityId: dealId, episodeKey: `deal.stage_changed:${dealId}:${deal.version + 1}` });
     await writeAudit(tx, {
       tenantId: tid,
       actorUserId: auth.user.id,

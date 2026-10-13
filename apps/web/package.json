@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && node ../../scripts/check-web-bundle.mjs",
     "preview": "vite preview",
     "typecheck": "tsc -b",
     "test": "node --test ../../scripts/i18n.test.mjs ../../scripts/billing-catalog.test.mjs ../../scripts/billing-checkout-state.test.mjs ../../scripts/system-locale.test.mjs"

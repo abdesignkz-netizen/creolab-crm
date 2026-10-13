@@ -37,10 +37,17 @@ COPY scripts ./scripts
 RUN mkdir -p apps/api/kalkan-verify/build \
     && javac -d apps/api/kalkan-verify/build apps/api/kalkan-verify/VerifyServer.java
 # Prisma's generator is a development dependency needed during installation.
-# The API also serves the built web application on Render.
-RUN npm ci --include=dev \
+# The API also serves the built web application on Render. Install only its
+# workspace graph: Expo/React Native and mobile build tools are not server dependencies.
+# Root dev dependencies generate test fixtures and must stay out of this image.
+RUN npm ci --include=dev --include-workspace-root=false \
+        --workspace=@creolab/api --workspace=@creolab/web \
+        --workspace=@creolab/db --workspace=@creolab/contracts --workspace=@creolab/integrations \
+    && npm run generate --workspace=@creolab/db \
     && npm run build --workspace=@creolab/web \
-    && npm prune --omit=dev --ignore-scripts
+    && npm prune --omit=dev --ignore-scripts --include-workspace-root=false \
+        --workspace=@creolab/api --workspace=@creolab/web \
+        --workspace=@creolab/db --workspace=@creolab/contracts --workspace=@creolab/integrations
 RUN node --experimental-strip-types scripts/check-word-runtime.mjs
 ENV NODE_ENV=production
 CMD ["node", "scripts/start-api-with-kalkan.mjs"]

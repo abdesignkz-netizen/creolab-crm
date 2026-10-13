@@ -7,6 +7,7 @@ import { recordExternalMessage } from "./externalMessageService.ts";
 import { CONVERSATION_MAX_FILE_BYTES } from "./conversationMedia.ts";
 import { qrEnabled, waDigest } from "./whatsappConnectionService.ts";
 import { deliverQrMessage } from "./whatsappSendService.ts";
+import { deliverControlNotifications } from "./controlNotificationService.ts";
 
 const logger = pino({ level: "silent" }); // Never log pairing QR, Signal keys or message bodies.
 const encode = (value: unknown) => encryptSecret(JSON.stringify(value, BufferJSON.replacer));
@@ -220,6 +221,9 @@ export function startWhatsAppQrRuntime(prisma: PrismaClient, socketFactory = mak
             else break; // Keep encrypted inbound event durable for retry, including quota failures.
           }
         }
+      }
+      for (const [id, local] of sessions) if (local.open && !local.stop) {
+        await deliverControlNotifications(prisma, { integrationId: id, socket: local.socket, checkLease: () => guardLease(prisma, id, owner) });
       }
       const rows = await prisma.$queryRaw<Array<{ integrationId: string }>>`SELECT s."integrationId" FROM "WhatsAppQrSession" s JOIN "Integration" i ON i.id = s."integrationId" JOIN "Tenant" t ON t.id = i."tenantId"
         WHERE i.status <> 'disabled' AND i."connectionStatus" <> 'RECONNECT_REQUIRED' AND t.status = 'active'

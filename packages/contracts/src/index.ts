@@ -13,6 +13,7 @@ export * from "./taskBoard.ts";
 export * from "./aiManagerSetup.ts";
 
 export const PAGE_SIZE_DEFAULT = 30;
+export * from "./controlNotifications.ts";
 export const PAGE_SIZE_MAX = 100;
 export { INVOICE_PAYMENT_KIND_LABEL } from "./pdfImport.ts";
 export type { PdfImportParty, PdfImportDraft, PdfImportPreview, InvoiceImportMatches } from "./pdfImport.ts";

@@ -1,3 +1,4 @@
+import { queueControlNotification } from "./controlNotificationService.ts";
 import type { PrismaClient, Prisma } from "@creolab/db";
 import { setTimeout as delay } from "node:timers/promises";
 import { FEATURES, type AiSetupHandoffSummary } from "@creolab/contracts";
@@ -115,6 +116,7 @@ async function handoff(prisma: PrismaClient, tenantId: string, conversationId: s
     if (!current) return;
     const context = summary && sourceMessageId ? { ...summary, sourceMessageId, createdAt: new Date().toISOString(), controlVersion: version + 1 } : {};
     await tx.conversation.update({ where: { id: current.id }, data: { mode, controlVersion: { increment: 1 }, needsAttention: true, waitingFor: "MANAGER", attentionReason: reason, aiHandoffSummaryJson: context as Prisma.InputJsonValue } });
+    await queueControlNotification(tx, { tenantId, type: "ai.needs_human", entityId: conversationId, episodeKey: `ai.needs_human:${conversationId}:${version + 1}`, priority: "high" });
     if (acknowledgement && sourceMessageId && summary && current.connection) {
       const key = `wa-ai-handoff:${conversationId}:${sourceMessageId}:${version + 1}`;
       const message = await tx.message.create({ data: { tenantId, conversationId, direction: "outbound", senderKind: "ai", text: acknowledgement, operationState: "queued", connectionScopedId: key } });

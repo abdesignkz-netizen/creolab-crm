@@ -1,4 +1,5 @@
 import { beginEmployeeTelegramLink, employeeTelegramStatus, disconnectEmployeeTelegram, handleEmployeeTelegramWebhook, EMPLOYEE_TELEGRAM_WEBHOOK, testEmployeeTelegram } from "./services/employeeTelegramService.ts";
+import { controlNotificationSettings, saveControlNotificationSettings, pauseControlNotifications, testControlNotification } from "./services/controlNotificationService.ts";
 import { z } from "zod";
 import { websiteChatRouter } from "./routes/websiteChat.ts";
 import { registerBillingRoutes } from "./routes/billing.ts";
@@ -1263,6 +1264,22 @@ export function createApp(prisma: PrismaClient) {
 
   app.get("/api/v1/workspace/control", async (req, res) => {
     res.json(await getControlSettings(prisma, await requireAuth(req)));
+  });
+
+  app.get("/api/v1/workspace/control/notifications", async (req, res) => {
+    res.set("Cache-Control", "no-store");
+    res.json(await controlNotificationSettings(prisma, await requireAuth(req)));
+  });
+  app.put("/api/v1/workspace/control/notifications", json, async (req, res) => {
+    res.json(await saveControlNotificationSettings(prisma, await requireAuth(req), req.body));
+  });
+  app.post("/api/v1/workspace/control/notifications/:id/pause", async (req, res) => {
+    res.json(await pauseControlNotifications(prisma, await requireAuth(req), req.params.id));
+  });
+  app.post("/api/v1/workspace/control/notifications/:id/test", async (req, res) => {
+    const auth = await requireAuth(req);
+    rateLimit(`control-notice-test:${auth.user.id}`, 3);
+    res.json(await testControlNotification(prisma, auth, req.params.id));
   });
 
   app.patch("/api/v1/workspace/control", json, async (req, res) => {

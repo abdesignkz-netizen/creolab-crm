@@ -72,7 +72,7 @@ export function DocumentsPage() {
   const [disabled, setDisabled] = useState(false);
   const [loading, setLoading] = useState(true);
   const [commandText, setCommandText] = useState(searchParams.get("command") || "");
-  const [documentTool, setDocumentTool] = useState<"" | "templates" | "import" | "ai">(searchParams.get("command") ? "ai" : "");
+  const [documentTool, setDocumentTool] = useState<"" | "create" | "templates" | "import" | "ai">(searchParams.get("command") ? "ai" : "");
   const [commandParse, setCommandParse] = useState<any>(null);
   const [commandDealId, setCommandDealId] = useState("");
   const [commandBusy, setCommandBusy] = useState(false);
@@ -248,13 +248,23 @@ export function DocumentsPage() {
       </div>
 
       {!disabled ? <div className="workspace-tools" role="group" aria-label={uiText("Действия с документами")}>
-        {([["templates", "Создать документ"], ["import", "Загрузить документ"], ["ai", "Помощь AI"]] as const).map(([id, label]) => (
-          <button key={id} type="button" className={documentTool === id ? "btn" : "btn secondary"} aria-expanded={documentTool === id} aria-controls="document-tool" onClick={() => setDocumentTool(documentTool === id ? "" : id)}>{uiText(label)}</button>
-        ))}
+        {([["create", "Создать документ"], ["import", "Загрузить документ"], ["ai", "Помощь AI"]] as const).map(([id, label]) => {
+          const open = documentTool === id || (id === "create" && documentTool === "templates");
+          return <button key={id} type="button" className={open ? "btn" : "btn secondary"} aria-expanded={open} aria-controls="document-tool" onClick={() => setDocumentTool(open ? "" : id)}>{uiText(label)}</button>;
+        })}
       </div> : null}
       <div id="document-tool" hidden={!documentTool || disabled}>
         <div className="workspace-tool-heading"><button type="button" className="btn secondary" onClick={() => setDocumentTool("")}>{uiText("Закрыть")}</button></div>
-        <div hidden={documentTool !== "templates"}><ContractTemplatePanel onSaved={() => void load()} /></div>
+        {documentTool === "create" && <section className="panel document-create-picker" aria-label={uiText("Выберите тип документа")}>
+          <h3>{uiText("Выберите тип документа")}</h3>
+          <div className="document-create-options">
+            <button type="button" className="btn secondary" onClick={() => setDocumentTool("templates")}>{uiText("Договор по шаблону")}</button>
+            <Link className="btn secondary" to="/documents/invoices/new">{uiText("Счёт на оплату")}</Link>
+            <Link className="btn secondary" to="/documents/avr/new">{uiText("Акт выполненных работ")}</Link>
+            <button type="button" className="btn secondary" disabled={esfBusy} onClick={() => { showKind("ESF"); setDocumentTool(""); void openEsfCreate(); }}>{uiText("Электронный счёт-фактура")}</button>
+          </div>
+        </section>}
+        <div hidden={documentTool !== "templates"}><button type="button" className="btn secondary" onClick={() => setDocumentTool("create")}>{uiText("Другой тип документа")}</button><ContractTemplatePanel onSaved={() => void load()} /></div>
         <div hidden={documentTool !== "import"}><ManualPdfImportPanel onSaved={() => void load()} /></div>
         <div hidden={documentTool !== "ai"}>
       <form

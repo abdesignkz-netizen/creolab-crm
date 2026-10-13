@@ -5,6 +5,7 @@ import { api, clearTenant, setTenant } from "./lib/api";
 import { WorkspaceSearchDialog, WorkspaceSearchTrigger } from "./components/WorkspaceSearch";
 import { NavIcon } from "./components/NavIcon";
 import { BrandLogo } from "./components/BrandLogo";
+import { PageErrorBoundary } from "./components/PageErrorBoundary";
 import { PasswordInput } from "./components/PasswordInput";
 import { AuthLanguagePicker, useAuthLocale } from "./components/AuthLanguagePicker";
 import { SupportCenter, SupportHelpButton } from "./components/SupportCenter";
@@ -1163,6 +1164,7 @@ export function App() {
           ) : (
             <SessionContext.Provider value={{ me, caps: me?.capabilities || emptyCaps }}>
             <Shell me={me}>
+              <PageErrorBoundary resetKey={`${me?.activeTenant?.tenant?.id || ""}:${location.pathname}${location.search}`}>
               <Suspense fallback={<div className="state" role="status">{uiText("Загрузка раздела…")}</div>}>
               <Routes>
                 <Route path="/today" element={!me?.activeTenant && me?.user?.platformAdmin ? <Navigate to="/admin" replace /> : <Today />} />
@@ -1197,6 +1199,7 @@ export function App() {
                 <Route path="*" element={<Navigate to={me?.user?.platformAdmin && !me?.activeTenant ? "/admin" : "/today"} />} />
               </Routes>
               </Suspense>
+              </PageErrorBoundary>
             </Shell>
             </SessionContext.Provider>
           )

@@ -629,6 +629,8 @@ select:disabled { cursor: not-allowed; opacity: .65; }
 
 /* Compact workspace controls keep the current task above optional tools. */
 .workspace-tools { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0 20px; }
+.document-create-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 12px; }
+.document-create-options .btn { min-height: 56px; white-space: normal; text-align: left; justify-content: flex-start; }
 .workspace-tool-heading { display: flex; justify-content: flex-end; margin-bottom: 8px; }
 [hidden] { display: none !important; }
 .workspace-metric { display: flex; flex-direction: column; gap: 8px; text-align: left; padding: 14px; border: 1px solid var(--border, #dce4ee); border-radius: 12px; background: white; color: inherit; cursor: pointer; font: inherit; }

@@ -7,6 +7,23 @@
     "apps/*",
     "packages/*"
   ],
+  "devDependencies": {
+    "node-forge": "^1.4.0"
+  },
+  "overrides": {
+    "@expo/metro-config": {
+      "postcss": "^8.5.30"
+    },
+    "@prisma/config": {
+      "deepmerge-ts": "8.0.2"
+    },
+    "exceljs": {
+      "uuid": "11.1.1"
+    },
+    "xcode": {
+      "uuid": "11.1.1"
+    }
+  },
   "scripts": {
     "dev": "npm run dev --workspace=@creolab/api",
     "dev:web": "npm run dev --workspace=@creolab/web",

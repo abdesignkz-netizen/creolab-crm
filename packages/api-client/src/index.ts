@@ -368,6 +368,10 @@ export function createApiClient(options: ClientOptions) {
       return request(`/api/v1/workspace/audit${suffix}`);
     },
     controlSettings: () => request("/api/v1/workspace/control"),
+    controlNotifications: () => request("/api/v1/workspace/control/notifications"),
+    saveControlNotifications: (body: unknown) => request("/api/v1/workspace/control/notifications", { method: "PUT", body: JSON.stringify(body) }),
+    pauseControlNotifications: (id: string) => request(`/api/v1/workspace/control/notifications/${id}/pause`, { method: "POST" }),
+    testControlNotifications: (id: string) => request(`/api/v1/workspace/control/notifications/${id}/test`, { method: "POST" }),
     updateControlSettings: (body: { enabled: boolean }) =>
       request("/api/v1/workspace/control", { method: "PATCH", body: JSON.stringify(body) }),
     upsertControlAccess: (userId: string, body: unknown) =>

@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { queueControlNotification } from "./controlNotificationService.ts";
 import { systemText } from "@creolab/contracts";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import {
@@ -1016,12 +1018,10 @@ export async function assignTask(
   if (!ownerId) throw new ApiError(422, "invalid", "Нет сотрудника для назначения");
   const owner = await prisma.membership.findFirst({ where: { id: ownerId, tenantId: tid, active: true } });
   if (!owner) throw new ApiError(422, "invalid", "Сотрудник не найден");
-  return prisma.task.update({
-    where: { id },
-    data: {
-      ownerMembershipId: owner.id,
-      contextSnapshotJson: mergeTaskContextSnapshot(snap, { executorType: "USER" }) as Prisma.InputJsonValue,
-    },
+  return prisma.$transaction(async tx => {
+    const updated = await tx.task.update({ where: { id }, data: { ownerMembershipId: owner.id, contextSnapshotJson: mergeTaskContextSnapshot(snap, { executorType: "USER" }) as Prisma.InputJsonValue } });
+    if (task.ownerMembershipId !== owner.id) await queueControlNotification(tx, { tenantId: tid, type: "task.assigned", entityId: id, episodeKey: `task.assigned:${id}:${owner.id}:${randomUUID()}` });
+    return updated;
   });
 }
 

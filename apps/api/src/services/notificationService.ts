@@ -1,4 +1,5 @@
 import { queueEmployeeTelegram } from "./employeeTelegramService.ts";
+import { queueControlNotification } from "./controlNotificationService.ts";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { randomUUID } from "node:crypto";
 
@@ -20,6 +21,8 @@ export async function createStaffNotification(
     channels?: Array<"in_app" | "web_push" | "email" | "telegram">;
   },
 ) {
+  // Company alerts also include unassigned work, even when there is no personal recipient.
+  await queueControlNotification(prisma, args);
   if (!args.membershipId) return null;
   const membership = await prisma.membership.findFirst({
     where: { id: args.membershipId, tenantId: args.tenantId, active: true },

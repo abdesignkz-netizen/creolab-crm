@@ -1,7 +1,8 @@
+import { queueControlNotification } from "./controlNotificationService.ts";
 import { publicFormKeyAliases } from "@creolab/contracts";
 import { canUseFeature } from "./entitlementService.ts";
 import { loadTenantServices, matchTenantService, detectTenantService, validateTenantService } from "./tenantServiceCatalog.ts";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { integrationEventSchema, taskCreatorSnapshot, validateClientPhone } from "@creolab/contracts";
 import { ApiError } from "../errors.ts";
@@ -1538,6 +1539,7 @@ export async function takeInquiry(prisma: PrismaClient, auth: AuthContext, inqui
         throw new ApiError(409, "already_taken", "Заявку уже принял другой сотрудник");
       }
     }
+    await queueControlNotification(tx, { tenantId: membership.tenantId, type: "inquiry.taken", entityId: inquiry.id, episodeKey: `inquiry.taken:${inquiry.id}:${membership.id}` });
     const fromStatus = inquiry.status;
     const updated = await tx.inquiry.update({
       where: { id: inquiry.id },
@@ -1659,6 +1661,7 @@ export async function updateInquiry(
       });
     }
     await tx.inquiry.update({ where: { id: inquiry.id }, data });
+    if (data.assigneeMembershipId && data.assigneeMembershipId !== inquiry.assigneeMembershipId) await queueControlNotification(tx, { tenantId: membership.tenantId, type: "inquiry.assigned", entityId: inquiry.id, episodeKey: `inquiry.assigned:${inquiry.id}:${data.assigneeMembershipId}:${randomUUID()}` });
     await writeActivity(tx, {
       tenantId: membership.tenantId,
       contactId: inquiry.contactId,

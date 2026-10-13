@@ -1,4 +1,3 @@
-import forge from "node-forge";
 import { createHash, X509Certificate } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -53,7 +52,7 @@ import { serializeElectronicDocument } from "./documentDraftService.ts";
 import { describeAvrPocReadiness, getEsfConnectionRow, getUsableEsfSession, reopenEsfSessionFromStoredAuth } from "./esfConnectionService.ts";
 import { previewAvrEsf } from "./esfPocService.ts";
 import { requireDocumentsEnabled } from "./legalProfileService.ts";
-import { inspectCertificatePem, normalizeCertificatePem, publicCertificateFingerprint } from "./cmsInspect.ts";
+import { inspectCertificatePem, inspectCertificateUsage, normalizeCertificatePem, publicCertificateFingerprint } from "./cmsInspect.ts";
 
 const FORBIDDEN_KEY_FIELDS = [
   "pin",
@@ -354,13 +353,10 @@ function formatUploadDecline(
 export function pocCertificateSummary(pem: string) {
   const normalized = normalizeCertificatePem(pem);
   const certificate = new X509Certificate(normalized);
-  const der = forge.asn1.fromDer(certificate.raw.toString("binary"));
-  const algorithm = (der.value as forge.asn1.Asn1[])[1];
-  const oid = (algorithm.value as forge.asn1.Asn1[])[0];
   return {
     subject: redactSoapText(certificate.subject),
     serial: certificate.serialNumber,
-    algorithm: forge.asn1.derToOid(oid.value as string),
+    algorithm: inspectCertificateUsage(normalized).signatureAlgorithm,
     validFrom: new Date(certificate.validFrom).toISOString(),
     validTo: new Date(certificate.validTo).toISOString(),
   };

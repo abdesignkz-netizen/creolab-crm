@@ -1,3 +1,4 @@
+import { ControlNotificationsPanel, ControlNoticeDiscardDialog } from "../components/ControlNotificationsPanel";
 import { EmployeeTelegramPanel } from "../components/EmployeeTelegramPanel";
 import { InlineFeedback } from "../components/InlineFeedback";
 import { uiNotificationBody, uiText, useUiText, localizeUiOptions, uiMessage } from "../lib/uiText";
@@ -54,6 +55,8 @@ function useUnsaved(dirty: boolean) {
 
 export function SettingsPage() {
   const navigate = useNavigate();
+  const [controlNoticesDirty, setControlNoticesDirty] = useState(false);
+  const [pendingControlNavigation, setPendingControlNavigation] = useState<{ section: Section } | { href: string } | null>(null);
   const { me, caps } = useSession();
   const locale = normalizeLocale(me?.user?.locale);
   const [params, setParams] = useSearchParams();
@@ -69,6 +72,30 @@ export function SettingsPage() {
   ];
   const personal: Section[] = ["profile", "security", "notifications", "interface"];
   const section = [...personal, ...allowedCompany].includes(requested) ? requested : "profile";
+  function allowSectionChange(next: Section) {
+    if (next === section || section !== "control" || !controlNoticesDirty) return true;
+    setPendingControlNavigation({ section: next }); return false;
+  }
+  useEffect(() => {
+    if (section !== "control" || !controlNoticesDirty) return;
+    const leave = (event: MouseEvent) => {
+      const link = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>("a[href]") : null;
+      if (!link || link.target || link.hasAttribute("download") || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0 || link.href === window.location.href) return;
+      event.preventDefault(); event.stopPropagation(); setPendingControlNavigation({ href: link.href });
+    };
+    document.addEventListener("click", leave, true); return () => document.removeEventListener("click", leave, true);
+  }, [section, controlNoticesDirty]);
+  function discardControlAndNavigate() {
+    const target = pendingControlNavigation; setPendingControlNavigation(null); setControlNoticesDirty(false);
+    if (!target) return;
+    if ("section" in target) {
+      const item = items.find(entry => entry.id === target.section);
+      if (item?.to) navigate(item.to); else setParams({ section: target.section });
+    } else {
+      const url = new URL(target.href);
+      if (url.origin === window.location.origin) navigate(url.pathname + url.search + url.hash); else window.location.assign(url.href);
+    }
+  }
 
   const items: Array<{ id: Section; group: "personal" | "company"; label: string; to?: string }> = [
     { id: "profile", group: "personal", label: t(locale, "settings.profile") },
@@ -97,10 +124,12 @@ export function SettingsPage() {
 
   return (
     <section className="settings-page">
+      {pendingControlNavigation && <ControlNoticeDiscardDialog onStay={() => setPendingControlNavigation(null)} onDiscard={discardControlAndNavigate} />}
       <h2>{t(locale, "settings.title")}</h2>
       <label className="settings-mobile-nav">{t(locale, "settings.title")}
         <select value={section} onChange={event => {
           const item = items.find(entry => entry.id === event.target.value);
+          if (item && !allowSectionChange(item.id)) return;
           if (item?.to) navigate(item.to); else if (item) setParams({ section: item.id });
         }}>
           {(["personal", "company"] as const).map(group => <optgroup key={group} label={t(locale, group === "personal" ? "settings.personal" : "settings.company")}>
@@ -116,7 +145,7 @@ export function SettingsPage() {
               key={item.id}
               type="button"
               className={section === item.id ? "active" : ""}
-              onClick={() => setParams({ section: item.id })}
+              onClick={() => { if (allowSectionChange(item.id)) setParams({ section: item.id }); }}
             >
               {item.label}
             </button>
@@ -134,7 +163,7 @@ export function SettingsPage() {
                     key={item.id}
                     type="button"
                     className={section === item.id ? "active" : ""}
-                    onClick={() => setParams({ section: item.id })}
+                    onClick={() => { if (allowSectionChange(item.id)) setParams({ section: item.id }); }}
                   >
                     {item.label}
                   </button>
@@ -153,7 +182,7 @@ export function SettingsPage() {
           {section === "services" && caps.companyAdmin ? <ServiceCatalogPanel /> : null}
           {section === "ops" && caps.companyAdmin ? <OpsSection locale={locale} /> : null}
           {section === "audit" && caps.companyAdmin ? <AuditSection locale={locale} /> : null}
-          {section === "control" && caps.companyAdmin ? <ControlSection locale={locale} /> : null}
+          {section === "control" && caps.companyAdmin ? <ControlSection key={me?.activeTenant?.tenant?.id} locale={locale} onNoticesDirtyChange={setControlNoticesDirty} /> : null}
         </div>
       </div>
     </section>
@@ -885,7 +914,7 @@ type ControlUser = {
   }>;
 };
 
-function ControlSection({ locale }: { locale: Locale }) {
+function ControlSection({ locale, onNoticesDirtyChange }: { locale: Locale; onNoticesDirtyChange: (dirty: boolean) => void }) {
   const uiText = useUiText();
   const { me } = useSession();
   const [data, setData] = useState<{ enabled: boolean; users: ControlUser[] } | null>(null);
@@ -967,6 +996,7 @@ function ControlSection({ locale }: { locale: Locale }) {
 
   return (
     <>
+      <ControlNotificationsPanel onDirtyChange={onNoticesDirtyChange} />
       <div className="panel">
         <b>{t(locale, "settings.control")}</b>
         <p className="muted">
@@ -974,7 +1004,7 @@ function ControlSection({ locale }: { locale: Locale }) {
         {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
         <label className="row" style={{ alignItems: "center", gap: 8 }}>
           <input type="checkbox" checked={data.enabled} onChange={(e) => void toggleCompany(e.target.checked)} />
-          {uiText("BasQar Control включён для компании")}</label>
+          {uiText("Разрешить команды BasQar Control для компании")}</label>
       </div>
       {data.users.map((user) => (
         <div className="panel" key={user.userId}>

@@ -1,4 +1,5 @@
 import { processEmployeeTelegramQueue } from "./employeeTelegramService.ts";
+import { processControlNotifications } from "./controlNotificationService.ts";
 import { logServerError } from "../lib/redact.ts";
 import type { PrismaClient } from "@creolab/db";
 import { createStaffNotification, deliverPendingPush } from "./notificationService.ts";
@@ -265,9 +266,15 @@ export function startBackgroundJobs(prisma: PrismaClient) {
   if (started || process.env.NODE_ENV === "test") return () => undefined;
   started = true;
   let telegramRunning = false;
+  let controlNoticesRunning = false;
   let billingRunning = false;
   let lastBillingRun = 0;
   const tick = () => {
+    if (!controlNoticesRunning) {
+      controlNoticesRunning = true;
+      void processControlNotifications(prisma).catch(error => logServerError(error, "background:control notifications"))
+        .finally(() => { controlNoticesRunning = false; });
+    }
     if (!telegramRunning) {
       telegramRunning = true;
       void processEmployeeTelegramQueue(prisma).catch(error => logServerError(error, "background:employee telegram"))

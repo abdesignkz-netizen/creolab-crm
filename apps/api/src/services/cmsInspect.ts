@@ -1,5 +1,5 @@
 import { createHash, X509Certificate } from "node:crypto";
-import forge from "node-forge";
+import * as asn1 from "asn1js";
 
 export type InspectedCertificate = {
   serial: string;
@@ -43,17 +43,35 @@ export function decodeCmsDer(cmsBase64: string) {
   return Buffer.from(cleaned, "base64");
 }
 
-const children = (node?: forge.asn1.Asn1): forge.asn1.Asn1[] => Array.isArray(node?.value) ? node.value as forge.asn1.Asn1[] : [];
-const derBytes = (node: forge.asn1.Asn1) => forge.asn1.toDer(node).getBytes();
-const serialHex = (node: forge.asn1.Asn1) => Buffer.from(node.value as string, "binary").toString("hex").replace(/^0+/, "").toLowerCase() || "0";
+// This parser only reads metadata. Kalkan remains the authority for signature
+// and chain verification. Bound work before decoding untrusted CMS containers.
+function decodeAsn1(bytes: Uint8Array): asn1.AsnType {
+  if (!bytes.length || bytes.length > 8 * 1024 * 1024) throw new Error("invalid_asn1_size");
+  const decoded = asn1.fromBER(bytes, { maxDepth: 64, maxNodes: 10_000, maxContentLength: 8 * 1024 * 1024 });
+  if (decoded.offset !== bytes.length || decoded.result.error) throw new Error("invalid_asn1");
+  return decoded.result;
+}
 
-function subjectKeyId(certificate: forge.asn1.Asn1) {
+const children = (node?: asn1.AsnType): asn1.AsnType[] => node instanceof asn1.Constructed ? node.valueBlock.value : [];
+const tagged = (node: asn1.AsnType | undefined, tagClass: number, tagNumber: number) => node?.idBlock.tagClass === tagClass && node.idBlock.tagNumber === tagNumber;
+const derBytes = (node: asn1.AsnType) => Buffer.from(node.toBER(false));
+function valueBytes(node: asn1.AsnType) {
+  if (!("valueHexView" in node.valueBlock)) throw new Error("invalid_asn1_value");
+  return Buffer.from(node.valueBlock.valueHexView as Uint8Array);
+}
+function oid(node: asn1.AsnType) {
+  if (!(node instanceof asn1.ObjectIdentifier)) throw new Error("invalid_asn1_oid");
+  return node.valueBlock.toString();
+}
+const serialHex = (node: asn1.AsnType) => valueBytes(node).toString("hex").replace(/^0+/, "").toLowerCase() || "0";
+
+function subjectKeyId(certificate: asn1.AsnType) {
   const tbs = children(certificate)[0];
-  const extensions = children(tbs).find((node) => node.tagClass === forge.asn1.Class.CONTEXT_SPECIFIC && node.type === 3);
+  const extensions = children(tbs).find((node) => tagged(node, 3, 3));
   for (const extension of children(children(extensions)[0])) {
     const fields = children(extension);
-    if (forge.asn1.derToOid(fields[0].value as string) === "2.5.29.14") {
-      return forge.asn1.fromDer(fields.at(-1)!.value as string).value;
+    if (oid(fields[0]) === "2.5.29.14") {
+      return valueBytes(decodeAsn1(valueBytes(fields.at(-1)!)));
     }
   }
   return null;
@@ -64,24 +82,24 @@ export function inspectCms(cmsBase64: string): CmsInspection {
   if (der.length < 16 || der[0] !== 0x30) {
     throw new Error("invalid_cms");
   }
-  const root = children(forge.asn1.fromDer(der.toString("binary")));
-  if (root[0]?.type !== forge.asn1.Type.OID || forge.asn1.derToOid(root[0].value as string) !== "1.2.840.113549.1.7.2") throw new Error("cms_not_signed_data");
+  const root = children(decodeAsn1(der));
+  if (!(root[0] instanceof asn1.ObjectIdentifier) || oid(root[0]) !== "1.2.840.113549.1.7.2") throw new Error("cms_not_signed_data");
   const signedData = children(children(root[1])[0]);
-  const certSet = signedData.slice(3).find((node) => node.tagClass === forge.asn1.Class.CONTEXT_SPECIFIC && node.type === 0);
+  const certSet = signedData.slice(3).find((node) => tagged(node, 3, 0));
   const signerSet = signedData.at(-1);
-  if (signerSet?.type !== forge.asn1.Type.SET || children(signerSet).length !== 1) throw new Error("cms_requires_one_signer");
+  if (!(signerSet instanceof asn1.Set) || children(signerSet).length !== 1) throw new Error("cms_requires_one_signer");
   const sid = children(children(signerSet)[0])[1];
-  const entries = children(certSet).filter((node) => node.tagClass === forge.asn1.Class.UNIVERSAL && node.type === forge.asn1.Type.SEQUENCE).map((node) => {
-    const pem = normalizeCertificatePem(Buffer.from(derBytes(node), "binary").toString("base64"));
-    // Read X.509 metadata without forge's RSA-only public-key decoder.
+  const entries = children(certSet).filter((node) => node instanceof asn1.Sequence).map((node) => {
+    const pem = normalizeCertificatePem(derBytes(node).toString("base64"));
+    // X.509 metadata does not require RSA/GOST public-key operations.
     const certificate = inspectCertificatePem(pem);
     const tbs = children(children(node)[0]);
-    const offset = tbs[0].tagClass === forge.asn1.Class.CONTEXT_SPECIFIC ? 1 : 0;
-    const matches = sid?.tagClass === forge.asn1.Class.CONTEXT_SPECIFIC && sid.type === 0
-      ? subjectKeyId(node) === sid.value
-      : sid?.type === forge.asn1.Type.SEQUENCE && children(sid).length === 2
+    const offset = tbs[0].idBlock.tagClass === 3 ? 1 : 0;
+    const matches = tagged(sid, 3, 0)
+      ? subjectKeyId(node)?.equals(valueBytes(sid)) === true
+      : sid instanceof asn1.Sequence && children(sid).length === 2
         && serialHex(tbs[offset]) === serialHex(children(sid)[1])
-        && derBytes(tbs[offset + 2]) === derBytes(children(sid)[0]);
+        && derBytes(tbs[offset + 2]).equals(derBytes(children(sid)[0]));
     return { certificate, pem, matches };
   });
   const signers = entries.filter((entry) => entry.matches);
@@ -131,34 +149,35 @@ export function pemFromCms(cmsBase64: string) {
   return inspection.primaryPem;
 }
 
-/** Read extension bits and OIDs without forge's RSA-only public-key decoder.
+/** Read extension bits and OIDs without public-key operations.
  * This is metadata inspection; it does not validate a chain or a signature.
  */
 export function inspectCertificateUsage(pem: string) {
   const certificate = new X509Certificate(normalizeCertificatePem(pem));
-  const root = forge.asn1.fromDer(certificate.raw.toString("binary"));
-  const children = (node: forge.asn1.Asn1) => Array.isArray(node.value) ? node.value as forge.asn1.Asn1[] : [];
+  const root = decodeAsn1(certificate.raw);
   const [tbs, algorithm] = children(root);
   const signatureOid = children(algorithm)[0];
-  const extensions = children(tbs).find(n => n.tagClass === forge.asn1.Class.CONTEXT_SPECIFIC && n.type === 3);
+  const extensions = children(tbs).find(n => tagged(n, 3, 3));
   const eku: string[] = [], keyUsage: string[] = [];
   for (const extension of extensions ? children(children(extensions)[0]) : []) {
     const fields = children(extension);
-    const oid = forge.asn1.derToOid(fields[0].value as string);
-    if (oid !== "2.5.29.15" && oid !== "2.5.29.37") continue;
-    const value = forge.asn1.fromDer(fields[fields.length - 1].value as string);
-    if (oid === "2.5.29.37") {
+    const extensionOid = oid(fields[0]);
+    if (extensionOid !== "2.5.29.15" && extensionOid !== "2.5.29.37") continue;
+    const value = decodeAsn1(valueBytes(fields[fields.length - 1]));
+    if (extensionOid === "2.5.29.37") {
       for (const item of children(value)) {
-        const id = forge.asn1.derToOid(item.value as string);
-        eku.push(forge.pki.oids[id] || id);
+        const id = oid(item);
+        const names: Record<string, string> = { "1.3.6.1.5.5.7.3.1": "serverAuth", "1.3.6.1.5.5.7.3.2": "clientAuth", "1.3.6.1.5.5.7.3.3": "codeSigning", "1.3.6.1.5.5.7.3.4": "emailProtection", "1.3.6.1.5.5.7.3.8": "timeStamping" };
+        eku.push(names[id] || id);
       }
     } else {
-      const bits = value.value as string;
+      if (!(value instanceof asn1.BitString)) throw new Error("invalid_key_usage");
+      const bits = valueBytes(value);
       const names = ["digitalSignature", "nonRepudiation", "keyEncipherment", "dataEncipherment", "keyAgreement", "keyCertSign", "cRLSign", "encipherOnly", "decipherOnly"];
       names.forEach((name, index) => {
-        if ((bits.charCodeAt(1 + Math.floor(index / 8)) || 0) & (0x80 >> (index % 8))) keyUsage.push(name);
+        if ((bits[Math.floor(index / 8)] || 0) & (0x80 >> (index % 8))) keyUsage.push(name);
       });
     }
   }
-  return { eku, keyUsage, signatureAlgorithm: forge.asn1.derToOid(signatureOid.value as string) };
+  return { eku, keyUsage, signatureAlgorithm: oid(signatureOid) };
 }

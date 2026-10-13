@@ -66,6 +66,53 @@ describe("cms inspect", { concurrency: false }, () => {
     }
   });
 
+  it("выбирает сертификат по SubjectKeyIdentifier и отклоняет несовпадающий идентификатор", () => {
+    const children = (node: forge.asn1.Asn1) => node.value as forge.asn1.Asn1[];
+    const cms = forge.asn1.fromDer(Buffer.from(makeTestCms(Buffer.from("SKI metadata"), { subjectKeyIdentifier: true }), "base64").toString("binary"));
+    const data = children(children(children(cms)[1])[0]);
+    const certSet = data.find((node) => node.tagClass === forge.asn1.Class.CONTEXT_SPECIFIC && node.type === 0)!;
+    const cert = forge.pki.certificateFromAsn1(children(certSet)[0]);
+    const extension = cert.getExtension("subjectKeyIdentifier") as { subjectKeyIdentifier: string };
+    const signer = children(children(data.at(-1)!)[0]);
+    data[0].value = "\x03";
+    signer[0].value = "\x03";
+    signer[1] = forge.asn1.create(forge.asn1.Class.CONTEXT_SPECIFIC, 0, false, forge.util.hexToBytes(extension.subjectKeyIdentifier));
+    const encode = () => Buffer.from(forge.asn1.toDer(cms).getBytes(), "binary").toString("base64");
+    // Metadata fixture only: changing the SID does not create a valid signature.
+    assert.equal(inspectCms(encode()).primary?.commonName, "Test Signer");
+    signer[1].value = "different-key-id";
+    assert.equal(inspectCms(encode()).primary, null);
+    assert.throws(() => pemFromCms(encode()), /cms_has_no_signer_certificate/);
+  });
+
+  it("не выбирает сертификат при неоднозначном подписанте", () => {
+    const children = (node: forge.asn1.Asn1) => node.value as forge.asn1.Asn1[];
+    const cms = forge.asn1.fromDer(Buffer.from(makeTestCms(Buffer.from("duplicate certificate")), "base64").toString("binary"));
+    const data = children(children(children(cms)[1])[0]);
+    const certSet = data.find((node) => node.tagClass === forge.asn1.Class.CONTEXT_SPECIFIC && node.type === 0)!;
+    children(certSet).push(children(certSet)[0]);
+    const encode = () => Buffer.from(forge.asn1.toDer(cms).getBytes(), "binary").toString("base64");
+    assert.equal(inspectCms(encode()).primary, null);
+    const signers = children(data.at(-1)!);
+    signers.push(signers[0]);
+    assert.throws(() => inspectCms(encode()), /cms_requires_one_signer/);
+  });
+
+  it("отклоняет лишние байты и ограничивает размер и сложность ASN.1", () => {
+    const der = Buffer.from(makeTestCms(Buffer.from("bounded parser")), "base64");
+    assert.throws(() => inspectCms(Buffer.concat([der, Buffer.from([0])]).toString("base64")), /invalid_asn1/);
+    let nested = forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.OCTETSTRING, false, "payload");
+    for (let depth = 0; depth < 70; depth++) nested = forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.SEQUENCE, true, [nested]);
+    const wide = forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.SEQUENCE, true,
+      Array.from({ length: 10_001 }, () => forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.NULL, false, "")));
+    for (const node of [nested, wide]) {
+      assert.throws(() => inspectCms(Buffer.from(forge.asn1.toDer(node).getBytes(), "binary").toString("base64")), /invalid_asn1/);
+    }
+    const oversized = Buffer.alloc(8 * 1024 * 1024 + 1);
+    oversized[0] = 0x30;
+    assert.throws(() => inspectCms(oversized.toString("base64")), /invalid_asn1_size/);
+  });
+
   it("не принимает контейнер со встроенным другим документом вместо detached-подписи", async () => {
     const children = (node: forge.asn1.Asn1) => node.value as forge.asn1.Asn1[];
     const cms = forge.asn1.fromDer(Buffer.from(makeTestCms(Buffer.from("different")), "base64").toString("binary"));

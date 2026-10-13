@@ -284,6 +284,7 @@ model Membership {
   tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  controlNotificationRules ControlNotificationRule[]
   readStates           ConversationReadState[]
   notificationPrefs    NotificationPreference[]
   assignedInquiries    Inquiry[]               @relation("InquiryAssignee")
@@ -410,6 +411,7 @@ model Integration {
   inboundEvents    InboundEvent[]
   incompleteIntakes IncompleteIntake[]
   whatsappQrSession WhatsAppQrSession?
+  controlNotificationRules ControlNotificationRule[]
 
   @@unique([tenantId, id])
   @@index([tenantId, type, status])
@@ -2330,4 +2332,63 @@ model PaymentWebhookEvent {
 model BillingSequence {
   key   String @id
   value Int    @default(0)
+}
+
+/// Separate employee notifications; never creates client messages or contacts.
+model ControlNotificationRule {
+  id                  String @id @default(uuid())
+  tenantId            String
+  membershipId        String
+  integrationId       String
+  phone               String
+  enabled             Boolean @default(false)
+  version             Int @default(1)
+  settingsJson        Json @default("{}")
+  lastInstantAt       DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  membership          Membership @relation(fields: [tenantId, membershipId], references: [tenantId, id], onDelete: Cascade)
+  integration         Integration @relation(fields: [tenantId, integrationId], references: [tenantId, id], onDelete: Cascade)
+  items               ControlNotificationItem[]
+  batches             ControlNotificationBatch[]
+  @@unique([tenantId, membershipId])
+  @@unique([tenantId, phone])
+}
+
+model ControlNotificationItem {
+  id          String @id @default(uuid())
+  ruleId      String
+  version     Int
+  eventKey    String
+  category    String
+  mode        String
+  urgent      Boolean @default(false)
+  batchId     String?
+  createdAt   DateTime @default(now())
+  rule        ControlNotificationRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  batch       ControlNotificationBatch? @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  @@unique([ruleId, eventKey])
+  @@index([ruleId, version, mode, batchId])
+}
+
+model ControlNotificationBatch {
+  id              String @id @default(uuid())
+  ruleId          String
+  version         Int
+  key             String
+  kind            String
+  countsJson      Json @default("{}")
+  urgent          Boolean @default(false)
+  state           String @default("queued")
+  attempts        Int @default(0)
+  availableAt     DateTime @default(now())
+  claimedAt       DateTime?
+  finishedAt      DateTime?
+  providerRef     String?
+  error           String?
+  createdAt       DateTime @default(now())
+  rule            ControlNotificationRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  items           ControlNotificationItem[]
+  @@unique([ruleId, key])
+  @@index([state, availableAt])
 }
