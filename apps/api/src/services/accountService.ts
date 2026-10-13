@@ -35,6 +35,7 @@ const DEFAULT_EVENTS = {
 const DEFAULT_CHANNELS = {
   in_app: true,
   web_push: true,
+  telegram: false,
 };
 
 const DEFAULT_QUIET = {
@@ -260,13 +261,20 @@ export async function updateNotificationPreferences(
   const channels = {
     in_app: channelsIn.in_app ?? current.channels.in_app,
     web_push: channelsIn.web_push ?? current.channels.web_push,
+    telegram: channelsIn.telegram ?? current.channels.telegram,
   };
+  if (Object.values(channels).some(value => typeof value !== "boolean") || Object.values(events).some(value => typeof value !== "boolean")) {
+    throw new ApiError(422, "invalid", "Настройки уведомлений должны быть включены или выключены.");
+  }
   const quietIn = (input.quietHours as Record<string, unknown> | undefined) || {};
   const quietHours = {
     enabled: Boolean(quietIn.enabled ?? current.quietHours.enabled),
     start: String(quietIn.start || current.quietHours.start || "22:00"),
     end: String(quietIn.end || current.quietHours.end || "08:00"),
   };
+  if (![quietHours.start, quietHours.end].every(value => /^([01]\d|2[0-3]):[0-5]\d$/.test(value))) {
+    throw new ApiError(422, "invalid", "Укажите время в формате ЧЧ:ММ.");
+  }
   const row = await prisma.notificationPreference.upsert({
     where: { tenantId_membershipId: { tenantId: membership.tenantId, membershipId: membership.id } },
     update: { eventsJson: events, channelsJson: channels, quietHoursJson: quietHours },

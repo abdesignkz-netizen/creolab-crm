@@ -112,13 +112,11 @@ export const INTEGRATION_IMPLEMENTATIONS: IntegrationImplementation[] = [
     purpose: "Общий бот сервиса для уведомлений сотрудника. Это не подключение компании.",
     functions: ["employee_notify"],
     authMethod: "service_env",
-    implementationReady: Boolean(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_BOT_USERNAME),
+    implementationReady: true,
     multiple: false,
     fields: [],
     connectable: false,
-    connectHint: process.env.TELEGRAM_BOT_TOKEN
-      ? "Задан серверный бот уведомлений. Сотрудник подключает личный чат в профиле, не через карточку компании."
-      : "Нужны TELEGRAM_BOT_TOKEN и TELEGRAM_BOT_USERNAME в инфраструктуре сервиса.",
+    connectHint: "Настройки → Уведомления → Подключить Telegram. Бот сервиса настраивается администратором платформы.",
   },
   {
     type: "calendar",

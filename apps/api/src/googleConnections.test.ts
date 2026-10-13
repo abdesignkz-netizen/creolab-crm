@@ -13,13 +13,14 @@ describe("Google company connections", () => {
   const nativeFetch=globalThis.fetch; const originalBase=config.apiBaseUrl; const originalAppBase=config.appBaseUrl;
   const oldClient=process.env.GOOGLE_CLIENT_ID,oldSecret=process.env.GOOGLE_CLIENT_SECRET;
   const events=new Map<string,unknown>();const cancelled=new Set<string>(); let inserts=0,refreshes=0; let mailbox="inbox@example.test"; const leadDate=new Date(Date.now()+1000).toISOString();
+  let grantedScopes: string | undefined; let failAuthorization = false;
   before(async()=>{
     process.env.GOOGLE_CLIENT_ID="test-client";process.env.GOOGLE_CLIENT_SECRET="test-secret";config.apiBaseUrl="https://crm.creolab.kz";config.appBaseUrl="https://bsqr.kz";
     globalThis.fetch=async(url,init)=>{
       const u=new URL(String(url));
       if(!["oauth2.googleapis.com","www.googleapis.com","forms.googleapis.com"].includes(u.hostname))return nativeFetch(url,init);
       const reply=(body:unknown,status=200)=>new Response(JSON.stringify(body),{status,headers:{"content-type":"application/json"}});
-      if(u.pathname==="/token") { const form=new URLSearchParams(String(init?.body));if(form.get("grant_type")==="refresh_token")refreshes++;else assert.equal(form.get("redirect_uri"), "https://bsqr.kz/api/v1/integrations/google/callback");return reply({access_token:"google-access",refresh_token:"google-refresh",expires_in:3600}); }
+      if(u.pathname==="/token") { const form=new URLSearchParams(String(init?.body));if(form.get("grant_type")==="refresh_token")refreshes++;else assert.equal(form.get("redirect_uri"), "https://bsqr.kz/api/v1/integrations/google/callback");if(failAuthorization)throw new Error("provider-internal-secret");return reply({access_token:"google-access",refresh_token:"google-refresh",expires_in:3600,scope:grantedScopes}); }
       if(u.pathname.includes("calendarList/"))return reply({id:"calendar-owner",summary:"Календарь компании",accessRole:"owner"});
       if(u.pathname.includes("/events")){
         const id=u.pathname.split("/").at(-1)!;const method=init?.method;
@@ -44,12 +45,14 @@ describe("Google company connections", () => {
     const begin=await post("/api/v1/integrations/google/connect",{kind,resourceId});const body=await begin.json();assert.equal(begin.status,200,JSON.stringify(body));const state=new URL(body.url).searchParams.get("state")!;
     assert.equal(new URL(body.url).searchParams.get("redirect_uri"), "https://bsqr.kz/api/v1/integrations/google/callback");
     const callback=await nativeFetch(`${base}/api/v1/integrations/google/callback?state=${state}&code=test-code`,{headers:{cookie},redirect:"manual"});assert.equal(callback.status,302,await callback.text());
-    assert.equal(callback.headers.get("location"), "https://bsqr.kz/integrations?google=connected");
-    const reused=await nativeFetch(`${base}/api/v1/integrations/google/callback?state=${state}&code=test-code`,{headers:{cookie},redirect:"manual"});assert.equal(reused.status,400);
+    assert.equal(callback.headers.get("location"), `https://bsqr.kz/integrations?google=connected#integration-${kind === "google_forms" ? "google-forms" : kind}`);
+    const reused=await nativeFetch(`${base}/api/v1/integrations/google/callback?state=${state}&code=test-code`,{headers:{cookie},redirect:"manual"});assert.equal(reused.status,302);assert.equal(reused.headers.get("location"),"https://bsqr.kz/integrations?google=expired");
     const list=await(await nativeFetch(`${base}/api/v1/integrations/google`,{headers:{cookie}})).json();assert.ok(!JSON.stringify(list).includes("google-access"));return list.items.find((r:{kind:string})=>r.kind===kind).id;
   }
   it("OAuth binds one-time state to the session and rejects fabricated state",async()=>{
-    const bad=await nativeFetch(`${base}/api/v1/integrations/google/callback?state=${"a".repeat(64)}&code=test`,{headers:{cookie}});assert.equal(bad.status,400);
+    const before = await prisma.integration.count({where:{publicKey:{startsWith:"google:"}}});
+    const bad=await nativeFetch(`${base}/api/v1/integrations/google/callback?state=${"a".repeat(64)}&code=test`,{headers:{cookie},redirect:"manual"});assert.equal(bad.status,302);assert.equal(bad.headers.get("location"),"https://bsqr.kz/integrations?google=expired");
+    assert.equal(await prisma.integration.count({where:{publicKey:{startsWith:"google:"}}}),before);
     calendarId=await connect("calendar");const row=await prisma.integration.findUniqueOrThrow({where:{id:calendarId}});const credential=await prisma.credential.findUniqueOrThrow({where:{id:row.credentialId!}});assert.ok(!credential.encryptedValue.includes("google-access"));
   });
   it("keeps legacy calendar settings separate from company OAuth connections",async()=>{
@@ -80,6 +83,17 @@ describe("Google company connections", () => {
     formsId=await connect("google_forms","test-form-12345");const result=await post(`/api/v1/integrations/google/${formsId}/sync`);assert.equal(result.status,200,await result.text());
     assert.equal(await prisma.inquiry.count({where:{integrationId:formsId}}),1);assert.equal(await prisma.incompleteIntake.count({where:{integrationId:formsId}}),1);
     assert.equal((await post(`/api/v1/integrations/google/${formsId}/sync`)).status,200);assert.equal(await prisma.inquiry.count({where:{integrationId:formsId}}),1);
+  });
+  it("returns resource IDs separately from display names for reconnecting the same calendar and form", async () => {
+    const result = await nativeFetch(`${base}/api/v1/integrations/google`, { headers: { cookie } });
+    assert.equal(result.status, 200);
+    const { items } = await result.json();
+    const calendar = items.find((item: { kind: string }) => item.kind === "calendar");
+    const form = items.find((item: { kind: string }) => item.kind === "google_forms");
+    assert.equal(calendar.resourceId, "calendar-owner");
+    assert.equal(calendar.resource, "Календарь компании");
+    assert.equal(form.resourceId, "test-form-12345");
+    assert.equal(form.resource, "Форма заявок");
   });
   it("Gmail imports new letters into dialogues without generating fake phone leads",async()=>{
     emailId=await connect("email");let result=await post(`/api/v1/integrations/google/${emailId}/sync`);assert.equal(result.status,200,await result.text());
@@ -116,8 +130,36 @@ describe("Google company connections", () => {
     try {
       const callback = await nativeFetch(`${base}/api/v1/integrations/google/callback?state=${state}&code=test-code`, { headers: { cookie }, redirect: "manual" });
       assert.equal(callback.status, 302, await callback.text());
-      assert.equal(callback.headers.get("location"), "https://next.example.test/integrations?google=connected");
+      assert.equal(callback.headers.get("location"), "https://next.example.test/integrations?google=connected#integration-email");
     } finally { config.appBaseUrl = "https://bsqr.kz"; }
+  });
+  it("returns cancellation, expiry and permission failures to the UI without changing connections", async () => {
+    const before = await prisma.integration.findMany({where:{publicKey:{startsWith:"google:"}},orderBy:{id:"asc"}});
+    for (const outcome of ["cancelled", "expired", "permissions", "failed"] as const) {
+      const begin = await post("/api/v1/integrations/google/connect", {kind:"email"});
+      assert.equal(begin.status,200);
+      const state = new URL((await begin.json()).url).searchParams.get("state")!;
+      if (outcome === "expired") await prisma.idempotencyRecord.updateMany({where:{scope:"google.oauth"},data:{expiresAt:new Date(0)}});
+      grantedScopes = outcome === "permissions" ? "unrelated-scope" : undefined;
+      failAuthorization = outcome === "failed";
+      try {
+        const response = await nativeFetch(`${base}/api/v1/integrations/google/callback?state=${state}&${outcome === "cancelled" ? "error=access_denied" : "code=private-code"}`,{headers:{cookie},redirect:"manual"});
+        assert.equal(response.status,302);
+        assert.equal(response.headers.get("location"),`https://bsqr.kz/integrations?google=${outcome}`);
+        assert.equal(response.headers.get("cache-control"),"no-store");
+        assert.doesNotMatch(await response.text(),/private-code|provider-internal-secret|google-access|google-refresh/);
+      } finally { grantedScopes=undefined;failAuthorization=false; }
+    }
+    assert.deepEqual(await prisma.integration.findMany({where:{publicKey:{startsWith:"google:"}},orderBy:{id:"asc"}}),before);
+  });
+  it("does not use an OAuth callback without its authenticated session", async () => {
+    const begin = await post("/api/v1/integrations/google/connect", {kind:"email"});
+    const state = new URL((await begin.json()).url).searchParams.get("state")!;
+    const before = await prisma.credential.count();
+    const response = await nativeFetch(`${base}/api/v1/integrations/google/callback?state=${state}&code=private-code`,{redirect:"manual"});
+    assert.equal(response.status,302);
+    assert.equal(response.headers.get("location"),"https://bsqr.kz/integrations?google=failed");
+    assert.equal(await prisma.credential.count(),before);
   });
   it("mapping is explicit when labels differ and email HTML is not executed",()=>{assert.equal(mapFormAnswers([{id:"custom",title:"Номер для связи"}],{custom:{textAnswers:{answers:[{value:"+77001234567"}]}}},{phone:"custom"}).phone,"+77001234567");assert.equal(gmailPlainText({mimeType:"text/html",body:{data:Buffer.from("<script>bad()</script>").toString("base64url")}},"Безопасное превью"),"Безопасное превью");});
 });

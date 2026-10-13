@@ -13,7 +13,7 @@ import { inferClientInterest } from "./contactInterestService.ts";
 import { periodLabel, resolvePeriodRange, type PeriodPreset } from "./periodRange.ts";
 import { pagination } from "./pagination.ts";
 import { inquiryNeedsActionWhere, openIntakeWhere } from "./inquiryAttention.ts";
-import { markRelatedStaffNotifications } from "./notificationService.ts";
+import { createStaffNotification, markRelatedStaffNotifications } from "./notificationService.ts";
 
 const ACTIVE_WHATSAPP_INQUIRY = ["new", "accepted", "in_progress", "waiting_client", "waiting_manager", "qualification"];
 
@@ -88,27 +88,8 @@ async function notify(
   body: string,
   priority = "normal",
 ) {
-  if (!membershipId) return;
-  await tx.notification.upsert({
-    where: {
-      tenantId_episodeKey_recipientMembershipId: {
-        tenantId,
-        episodeKey: `${type}:${entityId}`,
-        recipientMembershipId: membershipId,
-      },
-    },
-    update: { title, body },
-    create: {
-      tenantId,
-      episodeKey: `${type}:${entityId}`,
-      recipientMembershipId: membershipId,
-      type,
-      priority,
-      entityType,
-      entityId,
-      title,
-      body,
-    },
+  await createStaffNotification(tx, {
+    tenantId, membershipId, type, entityType, entityId, title, body, priority,
   });
 }
 

@@ -1,3 +1,4 @@
+import { beginEmployeeTelegramLink, employeeTelegramStatus, disconnectEmployeeTelegram, handleEmployeeTelegramWebhook, EMPLOYEE_TELEGRAM_WEBHOOK, testEmployeeTelegram } from "./services/employeeTelegramService.ts";
 import { z } from "zod";
 import { websiteChatRouter } from "./routes/websiteChat.ts";
 import { registerBillingRoutes } from "./routes/billing.ts";
@@ -249,7 +250,6 @@ import {
 } from "./services/managementOverviewService.ts";
 import {
   addSellerInstruction,
-  beginTelegramLink,
   connectWhatsAppSeller,
   controlBoard,
   disconnectWhatsAppSeller,
@@ -2425,8 +2425,23 @@ export function createApp(prisma: PrismaClient) {
     res.json(await beginGoogleConnection(prisma, auth, googleConnectSchema.parse(req.body)));
   });
   app.get("/api/v1/integrations/google/callback", async (req, res) => {
-    await finishGoogleConnection(prisma, await requireAuth(req), { state: String(req.query.state || ""), code: String(req.query.code || ""), error: String(req.query.error || "") });
-    res.redirect(`${config.appBaseUrl.replace(/\/$/, "")}/integrations?google=connected`);
+    const returnUrl = `${config.appBaseUrl.replace(/\/$/, "")}/integrations`;
+    res.set("Cache-Control", "no-store");
+    try {
+      const auth = await requireAuth(req);
+      await requireFeature(prisma, auth, FEATURES.CHANNELS);
+      const connection = await finishGoogleConnection(prisma, auth, { state: String(req.query.state || ""), code: String(req.query.code || ""), error: String(req.query.error || "") });
+      const section = { calendar: "calendar", email: "email", google_forms: "google-forms" }[connection.kind];
+      res.redirect(`${returnUrl}?google=connected#integration-${section}`);
+    } catch (error) {
+      // Only expose known outcomes, never provider responses, OAuth codes or tokens.
+      const code = error instanceof ApiError ? error.code : "";
+      const outcome = code === "oauth_declined" ? "cancelled"
+        : ["oauth_state", "oauth_replayed"].includes(code) ? "expired"
+        : ["google_scope_missing", "google_resource_unavailable", "calendar_readonly"].includes(code) ? "permissions"
+        : "failed";
+      res.redirect(`${returnUrl}?google=${outcome}`);
+    }
   });
   app.post("/api/v1/integrations/google/:id/disconnect", async (req, res) => {
     res.json(await disconnectGoogleConnection(prisma, await requireAuth(req), req.params.id));
@@ -2532,8 +2547,25 @@ export function createApp(prisma: PrismaClient) {
     res.json(await rotateWebhookSecret(prisma, await requireAuth(req), req.params.id));
   });
 
+  app.post(EMPLOYEE_TELEGRAM_WEBHOOK, json, async (req, res) => {
+    res.json(await handleEmployeeTelegramWebhook(prisma, req.get("X-Telegram-Bot-Api-Secret-Token") || "", req.body));
+  });
+  app.get("/api/v1/telegram/status", async (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.json(await employeeTelegramStatus(prisma, await requireAuth(req)));
+  });
+  app.delete("/api/v1/telegram/link", async (req, res) => {
+    res.json(await disconnectEmployeeTelegram(prisma, await requireAuth(req)));
+  });
+  app.post("/api/v1/telegram/test", async (req, res) => {
+    const auth = await requireAuth(req);
+    rateLimit(`employee-telegram-test:${auth.user.id}`, 3);
+    res.json(await testEmployeeTelegram(prisma, auth));
+  });
   app.post("/api/v1/telegram/begin-link", async (req, res) => {
-    res.json(await beginTelegramLink(prisma, await requireAuth(req)));
+    const auth = await requireAuth(req);
+    rateLimit(`employee-telegram-link:${auth.user.id}`, 5);
+    res.json(await beginEmployeeTelegramLink(prisma, auth));
   });
 
   app.get("/api/v1/knowledge/current", async (req, res) => {

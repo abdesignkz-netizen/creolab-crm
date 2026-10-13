@@ -109,7 +109,8 @@ export async function listGoogleConnections(prisma: PrismaClient, auth: AuthCont
   const rows = await prisma.integration.findMany({ where: { tenantId, type: { in: [...googleKinds] }, publicKey: { startsWith: "google:" } } });
   return { configured: googleOAuthConfigured(), callbackUrl: callbackUrl(), items: googleKinds.map(kind => {
     const row = rows.find(r => r.type === kind && r.status === "active") || rows.find(r => r.type === kind);
-    return { kind, title: names[kind], id: row?.id || null, connected: row?.status === "active", healthStatus: row?.healthStatus || "UNKNOWN", lastError: row?.lastError || null, resource: (row?.schemaJson as { resourceLabel?: string } | undefined)?.resourceLabel || null };
+    const resource = row?.schemaJson as { resourceId?: string; resourceLabel?: string } | undefined;
+    return { kind, title: names[kind], id: row?.id || null, connected: row?.status === "active", healthStatus: row?.healthStatus || "UNKNOWN", lastError: row?.lastError || null, resource: resource?.resourceLabel || null, resourceId: resource?.resourceId || null };
   }) };
 }
 export async function disconnectGoogleConnection(prisma: PrismaClient, auth: AuthContext, id: string) {

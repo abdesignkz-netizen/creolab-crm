@@ -840,6 +840,10 @@ const DOCUMENT_DOMAIN_SQL = `
 `;
 
 const ACCOUNT_DOMAIN_SQL = `
+ALTER TABLE "TelegramBinding" ADD COLUMN IF NOT EXISTS "botId" TEXT;
+ALTER TABLE "NotificationDelivery" ADD COLUMN IF NOT EXISTS "nextAttemptAt" TIMESTAMP(3);
+ALTER TABLE "NotificationDelivery" ADD COLUMN IF NOT EXISTS "claimedAt" TIMESTAMP(3);
+CREATE INDEX IF NOT EXISTS "NotificationDelivery_telegram_queue_idx" ON "NotificationDelivery"("channel", "state", "nextAttemptAt");
     ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "firstName" TEXT;
     ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "lastName" TEXT;
     ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "middleName" TEXT;

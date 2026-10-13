@@ -1,3 +1,4 @@
+import { employeeTelegramStatus } from "./employeeTelegramService.ts";
 import { parseAIAutomationSettings, replyAudienceAllows, isWithinAiSchedule } from "./aiAutomationSettings.ts";
 import { decideAutomationPolicy } from "./aiAutomationPolicyService.ts";
 import { publicFormKey } from "@creolab/contracts";
@@ -1431,13 +1432,12 @@ export async function addSellerInstruction(
 export async function integrationSetup(prisma: PrismaClient, auth: AuthContext) {
   requireIntegrationAdmin(auth);
   const membership = requireTenant(auth);
-  const [form, seller, telegram] = await Promise.all([
+  const [form, seller] = await Promise.all([
     prisma.formDefinition.findFirst({
       where: { tenantId: membership.tenantId, active: true },
       include: { integration: true },
     }),
     sellerHealthFor(prisma, auth),
-    prisma.telegramBinding.findFirst({ where: { userId: auth.user.id, revokedAt: null } }),
   ]);
   const apiBase = config.apiBaseUrl;
   const formHealth = form
@@ -1468,13 +1468,7 @@ export async function integrationSetup(prisma: PrismaClient, auth: AuthContext) 
         }
       : { connected: false },
     telegram: {
-      employee: {
-        connected: Boolean(telegram),
-        botConfigured: Boolean(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_BOT_USERNAME),
-        note: process.env.TELEGRAM_BOT_TOKEN
-          ? "Нажмите «Подключить Telegram», затем откройте бота и отправьте /start."
-          : "Уведомления в Telegram пока недоступны.",
-      },
+      employee: await employeeTelegramStatus(prisma, auth),
     },
   };
 }
@@ -1516,26 +1510,6 @@ function deriveHealthOrKeep(integration: { lastEventAt: Date | null; lastError: 
   return "HEALTHY";
 }
 
-export async function beginTelegramLink(prisma: PrismaClient, auth: AuthContext) {
-  const token = randomBytes(16).toString("hex");
-  const username = process.env.TELEGRAM_BOT_USERNAME || "";
-  await prisma.telegramBinding.create({
-    data: {
-      userId: auth.user.id,
-      chatRef: "",
-      pendingTokenHash: sha256(token),
-      pendingExpiresAt: new Date(Date.now() + 10 * 60 * 1000),
-    },
-  });
-  return {
-    expiresInMinutes: 10,
-    deepLink: username ? `https://t.me/${username}?start=${token}` : null,
-    token: username ? undefined : token,
-    note: username
-      ? "Откройте бота и нажмите Start."
-      : "Уведомления в Telegram пока недоступны.",
-  };
-}
 
 export async function controlBoard(prisma: PrismaClient, auth: AuthContext) {
   requireNotManager(auth, "Управление доступно администратору и директору");

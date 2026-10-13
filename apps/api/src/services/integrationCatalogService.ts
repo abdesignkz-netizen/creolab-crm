@@ -1,3 +1,4 @@
+import { employeeTelegramStatus } from "./employeeTelegramService.ts";
 import { publicFormKey } from "@creolab/contracts";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
@@ -101,7 +102,7 @@ export async function listIntegrationCatalog(prisma: PrismaClient, auth: AuthCon
   const tid = membership.tenantId;
   const apiBase = config.apiBaseUrl;
 
-  const [rows, eventCounts, recentEvents, form, telegram] = await Promise.all([
+  const [rows, eventCounts, recentEvents, form] = await Promise.all([
     prisma.integration.findMany({
       where: { tenantId: tid },
       include: {
@@ -122,7 +123,6 @@ export async function listIntegrationCatalog(prisma: PrismaClient, auth: AuthCon
       include: { integration: { select: { id: true, name: true, type: true } } },
     }),
     prisma.formDefinition.findFirst({ where: { tenantId: tid, active: true } }),
-    prisma.telegramBinding.findFirst({ where: { userId: auth.user.id, revokedAt: null } }),
   ]);
 
   const countsByIntegration = new Map<string, Record<string, number>>();
@@ -247,20 +247,7 @@ export async function listIntegrationCatalog(prisma: PrismaClient, auth: AuthCon
     leads: leadCards,
     messaging: messagingCards,
     notifications: {
-      employeeTelegram: {
-        connected: Boolean(telegram?.chatRef),
-        connectionStatus: telegram?.chatRef
-          ? "CONNECTED"
-          : telegram?.pendingTokenHash
-            ? "PENDING"
-            : "DISCONNECTED",
-        healthLabel: telegram?.chatRef
-          ? "Подключено"
-          : telegram?.pendingTokenHash
-            ? "Ожидает подтверждения"
-            : "Не подключено",
-        note: "Личные уведомления сотрудника. Это не заявки с сайта.",
-      },
+      employeeTelegram: await employeeTelegramStatus(prisma, auth),
     },
     eventLog,
   };

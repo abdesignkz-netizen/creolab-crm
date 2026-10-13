@@ -498,7 +498,8 @@ describe("role access and account settings", () => {
     });
     const after = await req(ownerCookie, "/api/v1/integrations/catalog");
     assert.equal(after.data.notifications.employeeTelegram.connected, false);
-    assert.equal(after.data.notifications.employeeTelegram.connectionStatus, "PENDING");
+    assert.equal(after.data.notifications.employeeTelegram.available, false);
+    assert.equal(after.data.notifications.employeeTelegram.connectionStatus, "NOT_CONFIGURED");
     assert.ok(telegram);
   });
 

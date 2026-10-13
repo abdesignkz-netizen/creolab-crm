@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { IntegrationHelp } from "../components/IntegrationHelp";
 
-type Connection = { kind: string; title: string; id: string | null; connected: boolean; resource: string | null; lastError: string | null; healthStatus: string };
+type Connection = { kind: string; title: string; id: string | null; connected: boolean; resource: string | null; resourceId: string | null; lastError: string | null; healthStatus: string };
 const descriptions: Record<string,string> = {
   calendar: "Встречи CRM передаются в Google Calendar. Переносы обновляют события, отмены удаляют их. События, созданные вручную в Google, в CRM не импортируются.",
   google_forms: "Новые ответы формы становятся заявками. Если нет телефона, обращение поступает в очередь уточнения. Поля можно сопоставить после подключения.",
@@ -14,7 +14,8 @@ export function GoogleConnectionsPanel({ onChange, kind }: { onChange: () => voi
   const uiText = useUiText();
   const [data,setData] = useState<{ configured: boolean; items: Connection[] } | null>(null);
   const [busy,setBusy] = useState(""); const [error,setError] = useState(""); const [note,setNote] = useState("");
-  const [resource,setResource] = useState<Record<string,string>>({calendar:"primary"});
+  const [resource,setResource] = useState<Record<string,string>>({});
+  const selectedResource = (item: Connection) => resource[item.kind] ?? item.resourceId ?? (item.kind === "calendar" ? "primary" : "");
   const [questions,setQuestions] = useState<{ id: string; items: Array<{ id: string; title: string }> } | null>(null);
   const [mapping,setMapping] = useState<Record<string,string>>({});
   async function load() { setData(await api.googleConnections() as typeof data); }
@@ -26,9 +27,9 @@ export function GoogleConnectionsPanel({ onChange, kind }: { onChange: () => voi
     {(data?.items || []).filter(item => !kind || item.kind === kind).map(item => <div key={item.kind} className="panel">
       <h4>{item.title} · {item.connected ? uiText("Подключено") : uiText("Не подключено")}</h4><p className="muted">{localizeUiOptions(descriptions, uiText)[item.kind]}</p><IntegrationHelp kind={item.kind === "calendar" ? "google_calendar" : item.kind === "google_forms" ? "google_forms" : "google_email"} />
       {item.resource ? <p>{item.resource}</p> : null}{item.lastError ? <p className="error">{item.lastError}</p> : null}
-      {item.kind !== "email" ? <label>{item.kind === "calendar" ? uiText("ID календаря (primary — основной)") : uiText("ID Google Forms из адреса редактора")}<input value={resource[item.kind] || ""} onChange={event => setResource({...resource,[item.kind]:event.target.value})} /></label> : null}
+      {item.kind !== "email" ? <label>{item.kind === "calendar" ? uiText("ID календаря (primary — основной)") : uiText("ID Google Forms из адреса редактора")}<input value={selectedResource(item)} onChange={event => setResource({...resource,[item.kind]:event.target.value})} /></label> : null}
       <div className="actions"><button className="btn" disabled={Boolean(busy) || !data?.configured} onClick={() => void run(item.kind, async () => {
-        const result = await api.connectGoogle(item.kind, resource[item.kind]) as { url: string }; window.location.assign(result.url);
+        const result = await api.connectGoogle(item.kind, selectedResource(item)) as { url: string }; window.location.assign(result.url);
       })}>{busy === item.kind ? uiText("Подождите…") : item.connected ? uiText("Подключить заново") : uiText("Подключить через Google")}</button>
       {item.connected && item.id ? <>
         <button className="btn secondary" disabled={Boolean(busy)} onClick={() => void run(item.kind, async () => { await api.syncGoogle(item.id!);setNote(uiText("Синхронизация выполнена")); })}>{uiText("Синхронизировать")}</button>

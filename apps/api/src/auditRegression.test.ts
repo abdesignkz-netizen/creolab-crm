@@ -54,6 +54,19 @@ describe("CRM audit regressions", () => {
     assert.ok(trend.points.some(point => point.inquiries === 1 && point.value === 0));
   });
 
+  it("dashboard contains every chart metric for instant switching, including comparison and missing conversion", async () => {
+    const query = { period: "custom", dateFrom: "2026-09-01", dateTo: "2026-09-07", source: "audit-source-a", compare: "previous" };
+    const dashboard = await getAnalyticsDashboard(prisma, auth, query);
+    for (const metric of ["inquiries", "clients", "deals", "won", "revenue", "conversion"] as const) {
+      const trend = await getAnalyticsTrend(prisma, auth, { ...query, metric });
+      const comparison = await getAnalyticsTrend(prisma, auth, { ...query, dateFrom: "2026-08-25", dateTo: "2026-08-31", metric });
+      assert.deepEqual(dashboard.trend.points.map(p => p[metric]), trend.points.map(p => p.value), metric);
+      assert.deepEqual(dashboard.trendCompare?.points.map(p => p[metric]), comparison.points.map(p => p.value), `${metric} comparison`);
+    }
+    assert.ok(dashboard.trend.points.some(p => p.conversion === null));
+    assert.equal(dashboard.trend.points.reduce((sum, p) => sum + p.revenue, 0), 123000);
+  });
+
   it("sales deep link filters the outcome, period and stage while preserving the phone", async () => {
     const board = await getDealBoard(prisma, auth, { timeMode: "period", period: "custom", dateFrom: "2026-09-01", dateTo: "2026-09-07", basis: "closed", outcome: "won", stage: "proposal_sent" });
     const deal = board.columns.flatMap(column => column.deals).find(deal => deal.id === wonId);

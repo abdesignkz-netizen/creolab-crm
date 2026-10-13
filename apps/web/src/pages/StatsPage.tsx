@@ -2,11 +2,14 @@ import { InlineFeedback } from "../components/InlineFeedback";
 import { uiMessage, uiText, useUiText, localizeUiOptions, uiFormatLocale } from "../lib/uiText";
 import { useSession, useLocale } from "../lib/session";
 import { useUrlState, useRequestVersion } from "../lib/useUrlState";
-import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useState, useRef, useId, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { PeriodSelector, type PeriodPreset } from "../components/PeriodSelector";
 import { tip } from "../lib/tip";
 import { api } from "../lib/api";
+import { NavIcon } from "../components/NavIcon";
+import { PERIOD_OPTIONS } from "../lib/period";
+import "../stats.css";
 import { exportAnalyticsCsv, exportAnalyticsExcel, exportAnalyticsPdf } from "../lib/statsExport";
 
 type TabId =
@@ -57,10 +60,16 @@ const METRIC_HINTS: Record<TrendMetric, string> = {
   conversion: "Доля продаж от обращений за день. Если обращений не было — показатель не считается",
 };
 
-function formatChartValue(value: number | null, metric: TrendMetric) {
+const RECORD_STATUSES: Record<string, string> = {
+  new: "Новая", qualification: "Квалификация", qualified: "Квалифицирована",
+  in_progress: "В работе", waiting_client: "Ждём клиента", proposal: "КП отправлено",
+  open: "В работе", won: "Продано", lost: "Потеряно",
+};
+
+function formatChartValue(value: number | null, metric: TrendMetric, currency?: string) {
   if (value == null) return "—";
   if (metric === "conversion") return `${value}%`;
-  if (metric === "revenue") return value.toLocaleString(uiFormatLocale());
+  if (metric === "revenue") return `${value.toLocaleString(uiFormatLocale())}${currency ? ` ${currency === "KZT" ? "₸" : currency}` : ""}`;
   return String(value);
 }
 
@@ -90,135 +99,100 @@ function formatHours(hours: number | null | undefined) {
   return uiText("{p0} дн.", {p0: Math.round((hours / 24) * 10) / 10});
 }
 
-function LineChart({
-  points,
-  comparePoints,
-  label,
-  metric,
-}: {
+function StatsIcon({ kind }: { kind: "arrow" | "filter" | "download" | "close" | "refresh" }) {
+  const paths = {
+    arrow: "M5 12h14m-5-5 5 5-5 5",
+    filter: "M4 7h16M7 12h10M10 17h4",
+    download: "M12 3v12m-4-4 4 4 4-4M4 16v5h16v-5",
+    close: "m6 6 12 12M6 18 18 6",
+    refresh: "M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-2l2 3M4 16l2 3a7 7 0 0 0 12-2",
+  };
+  return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[kind]} /></svg>;
+}
+
+function StatsDialog({ title, onClose, children, wide = false }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
+  const uiText = useUiText();
+  useEffect(() => {
+    const element = ref.current;
+    element?.showModal();
+    return () => { element?.close(); };
+  }, []);
+  return <dialog ref={ref} className={`stats-dialog${wide ? " stats-dialog-wide" : ""}`} aria-labelledby={titleId} onCancel={onClose}>
+    <div className="stats-dialog-heading"><h3 id={titleId}>{title}</h3><button type="button" className="stats-icon-button" aria-label={uiText("Закрыть")} onClick={onClose}><StatsIcon kind="close" /></button></div>
+    {children}
+  </dialog>;
+}
+
+function LineChart({ points, comparePoints, label, metric, currency }: {
   points: { label: string; value: number | null }[];
   comparePoints?: { value: number | null }[] | null;
   label: string;
   metric: TrendMetric;
+  currency?: string;
 }) {
   const uiText = useUiText();
   const [hover, setHover] = useState<number | null>(null);
-  if (!points.length) {
-    return <p className="empty">{uiText("Пока недостаточно данных для графика.")}</p>;
-  }
-  const w = 720;
-  const h = 260;
-  const padL = 48;
-  const padR = 16;
-  const padT = 20;
-  const padB = 44;
-  const values = [...points.map((p) => p.value), ...(comparePoints || []).map((p) => p.value)];
-  const max = Math.max(...values.filter((v): v is number => v != null), 1);
-  const ticks = yAxisTicks(max);
-  const scaleMax = Math.max(max, ticks[ticks.length - 1] || 1);
-  const innerW = w - padL - padR;
-  const innerH = h - padT - padB;
-  const stepX = points.length > 1 ? innerW / (points.length - 1) : innerW / 2;
-  const toX = (i: number) => padL + (points.length > 1 ? i * stepX : innerW / 2);
+  const [width, setWidth] = useState(720);
+  const ref = useRef<HTMLDivElement>(null);
+  const gradient = useId().replace(/:/g, "");
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const observer = new ResizeObserver(entries => setWidth(Math.max(260, entries[0].contentRect.width)));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [points.length]);
+  if (!points.length) return <p className="empty">{uiText("Пока недостаточно данных для графика.")}</p>;
+  const w = width, h = 260, padL = metric === "revenue" ? 66 : 48, padR = 14, padT = 20, padB = 35;
+  const values = [...points, ...(comparePoints || []).slice(0, points.length)].map(p => p.value).filter((v): v is number => v != null);
+  const ticks = yAxisTicks(Math.max(...values, 1));
+  const scaleMax = ticks.at(-1) || 1;
+  const innerW = w - padL - padR, innerH = h - padT - padB;
+  const toX = (i: number) => padL + (points.length > 1 ? i * innerW / (points.length - 1) : innerW / 2);
   const toY = (v: number | null) => padT + innerH - ((v ?? 0) / scaleMax) * innerH;
-  const path = points.map((p, i) => p.value == null ? "" : `${i === 0 || points[i - 1].value == null ? "M" : "L"} ${toX(i)} ${toY(p.value)}`).join(" ");
+  const hitStart = (i: number) => i === 0 ? padL : (toX(i - 1) + toX(i)) / 2;
+  const hitEnd = (i: number) => i === points.length - 1 ? w - padR : (toX(i) + toX(i + 1)) / 2;
+  const makePath = (rows: {value: number | null}[]) => rows.slice(0, points.length).map((p, i) => p.value == null ? "" : `${i === 0 || rows[i - 1].value == null ? "M" : "L"} ${toX(i)} ${toY(p.value)}`).join(" ");
+  const path = makePath(points);
   const area = points.some(p => p.value == null) ? "" : `${path} L ${toX(points.length - 1)} ${toY(0)} L ${toX(0)} ${toY(0)} Z`;
-  const comparePath =
-    comparePoints && comparePoints.length
-      ? comparePoints
-          .slice(0, points.length)
-          .map((p, i) => p.value == null ? "" : `${i === 0 || comparePoints[i - 1].value == null ? "M" : "L"} ${toX(i)} ${toY(p.value)}`)
-          .join(" ")
-      : null;
-  const labelEvery = Math.max(1, Math.ceil((points.length - 1) / 6));
-
-  return (
-    <div className="stats-chart-wrap">
-      <svg viewBox={`0 0 ${w} ${h}`} className="stats-line-chart" role="img" aria-label={label}>
-        {ticks.map((tick) => (
-          <g key={`tick-${tick}`}>
-            <line x1={padL} y1={toY(tick)} x2={w - padR} y2={toY(tick)} className="stats-grid" />
-            <text x={padL - 8} y={toY(tick) + 4} textAnchor="end" className="stats-tick">
-              {formatChartValue(tick, metric)}
-            </text>
-          </g>
-        ))}
-        <line x1={padL} y1={h - padB} x2={w - padR} y2={h - padB} className="stats-axis" />
-        <line x1={padL} y1={padT} x2={padL} y2={h - padB} className="stats-axis" />
-        <path d={area} className="stats-area" />
-        {comparePath ? <path d={comparePath} className="stats-line-compare" fill="none" /> : null}
-        <path d={path} className="stats-line" fill="none" />
-        {points.map((p, i) => {
-          // Keep the final date without squeezing a neighbouring label against it.
-          const showLabel = i === 0 || i === points.length - 1 || (i % labelEvery === 0 && points.length - 1 - i >= labelEvery);
-          return (
-            <g key={p.label + i}>
-              {p.value != null ? <circle
-                cx={toX(i)}
-                cy={toY(p.value)}
-                r={hover === i ? 5 : 3.5}
-                className="stats-dot"
-                onMouseEnter={() => setHover(i)}
-                onMouseLeave={() => setHover(null)}
-              >
-                <title>
-                  {p.label}: {formatChartValue(p.value, metric)}
-                </title>
-              </circle> : null}
-              {points.length <= 16 && p.value != null ? (
-                <text x={toX(i)} y={toY(p.value) - 8} textAnchor="middle" className="stats-dot-value">
-                  {formatChartValue(p.value, metric)}
-                </text>
-              ) : null}
-              {showLabel ? (
-                <text x={toX(i)} y={h - padB + 16} textAnchor={i === 0 ? "start" : i === points.length - 1 ? "end" : "middle"} className="stats-tick">
-                  {p.label}
-                </text>
-              ) : null}
-            </g>
-          );
-        })}
-      </svg>
-      {metric === "conversion" && points.some(p => p.value == null) ? <p className="muted">{uiText("«—» — нет обращений для расчёта. Продажи могут относиться к обращениям прошлых дат.")}</p> : null}
-      <div className="stats-chart-legend muted">
-        <span>{uiText("● Текущий период")}</span>
-        {comparePath ? <span>{uiText("○ Сравнение")}</span> : null}
-        {hover != null && points[hover] ? (
-          <span>
-            {points[hover].label}: {formatChartValue(points[hover].value, metric)}
-          </span>
-        ) : null}
-      </div>
-      {points.length <= 31 ? (
-        <div className="stats-day-table-wrap">
-          <table className="stats-day-table">
-            <thead>
-              <tr>
-                {points.map((p, i) => (
-                  <th key={`h-${p.label}-${i}`}>{p.label}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                {points.map((p, i) => (
-                  <td key={`v-${p.label}-${i}`}>{formatChartValue(p.value, metric)}</td>
-                ))}
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      ) : null}
+  const comparePath = comparePoints?.length ? makePath(comparePoints) : null;
+  const labelEvery = Math.max(1, Math.ceil((points.length - 1) / (w < 450 ? 3 : 6)));
+  const active = hover != null && points[hover] ? hover : null;
+  const compact = (n: number) => metric === "conversion" ? `${n}%` : new Intl.NumberFormat(uiFormatLocale(), { notation: "compact", maximumFractionDigits: 1 }).format(n);
+  return <div className="stats-chart-wrap" ref={ref}>
+    <div className="stats-chart-legend">
+      <span><i />{uiText("Текущий период")}</span>
+      {comparePath ? <span><i className="is-compare" />{uiText("Сравнение")}</span> : null}
+      <output className="stats-chart-reading">{active != null ? `${points[active].label} · ${formatChartValue(points[active].value, metric, currency)}` : uiText("Выберите точку на графике")}</output>
     </div>
-  );
+    <svg viewBox={`0 0 ${w} ${h}`} className="stats-line-chart" role="img" aria-label={label}>
+      <defs><linearGradient id={gradient} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#2475ee" stopOpacity=".2" /><stop offset="100%" stopColor="#2475ee" stopOpacity=".015" /></linearGradient></defs>
+      {ticks.map(tick => <g key={tick}><line x1={padL} y1={toY(tick)} x2={w-padR} y2={toY(tick)} className="stats-grid" /><text x={padL-10} y={toY(tick)+4} textAnchor="end" className="stats-tick">{compact(tick)}</text></g>)}
+      <path d={area} fill={`url(#${gradient})`} />
+      {comparePath ? <path d={comparePath} className="stats-line-compare" fill="none" /> : null}
+      <path d={path} className="stats-line" fill="none" />
+      {active != null ? <line x1={toX(active)} x2={toX(active)} y1={padT} y2={h-padB} className="stats-crosshair" /> : null}
+      {points.map((p, i) => <g key={`${p.label}-${i}`}>
+        {p.value != null ? <circle cx={toX(i)} cy={toY(p.value)} r={active === i ? 5 : points.length <= 16 ? 3 : 0} className="stats-dot" /> : null}
+        {i === 0 || i === points.length-1 || (i % labelEvery === 0 && points.length-1-i >= labelEvery) ? <text x={toX(i)} y={h-10} textAnchor={i === 0 ? "start" : i === points.length-1 ? "end" : "middle"} className="stats-tick">{p.label}</text> : null}
+        <rect x={hitStart(i)} y={padT} width={hitEnd(i) - hitStart(i)} height={innerH} fill="transparent" onPointerEnter={() => setHover(i)} onPointerDown={() => setHover(i)}><title>{p.label}: {formatChartValue(p.value, metric, currency)}</title></rect>
+      </g>)}
+    </svg>
+    {metric === "conversion" && points.some(p => p.value == null) ? <p className="stats-chart-note">{uiText("«—» — нет обращений для расчёта. Продажи могут относиться к обращениям прошлых дат.")}</p> : null}
+    <details className="stats-chart-data"><summary>{uiText("Данные таблицей")}</summary><div className="stats-table-wrap"><table className="stats-table"><thead><tr><th>{uiText("Дата")}</th><th>{uiText("Текущий период")}</th>{comparePath ? <th>{uiText("Сравнение")}</th> : null}</tr></thead><tbody>{points.map((p,i) => <tr key={`${p.label}-${i}`}><td>{p.label}</td><td>{formatChartValue(p.value,metric,currency)}</td>{comparePath ? <td>{formatChartValue(comparePoints?.[i]?.value ?? null,metric,currency)}</td> : null}</tr>)}</tbody></table></div></details>
+  </div>;
 }
 
 function BarChart({
   items,
   valueKey,
+  currency,
 }: {
   items: { name: string; inquiries?: number; won?: number; revenue?: number; conversion?: number | null }[];
   valueKey: BarMetric;
+  currency?: string;
 }) {
   const uiText = useUiText();
   const rows = items
@@ -234,6 +208,7 @@ function BarChart({
               : item.conversion || 0,
     }))
     .filter((r) => r.value > 0)
+    .sort((a, b) => b.value - a.value)
     .slice(0, 12);
   if (!rows.length) return <p className="empty">{uiText("Нет данных для диаграммы.")}</p>;
   const max = Math.max(...rows.map((r) => r.value), 1);
@@ -245,10 +220,10 @@ function BarChart({
             {r.name}
           </span>
           <div className="stats-bar-track">
-            <div className="stats-bar-fill" style={{ width: `${Math.max(4, (r.value / max) * 100)}%` }} />
+            <div className="stats-bar-fill" style={{ width: `${(r.value / max) * 100}%` }} />
           </div>
           <span className="stats-bar-value">
-            {valueKey === "conversion" ? `${r.value}%` : valueKey === "revenue" ? r.value.toLocaleString(uiFormatLocale()) : r.value}
+            {formatChartValue(r.value, valueKey, currency)}
           </span>
         </div>
       ))}
@@ -256,37 +231,18 @@ function BarChart({
   );
 }
 
-function KpiCard({
-  label,
-  value,
-  delta,
-  deltaUnit = "%",
-  onClick,
-}: {
-  label: string;
-  value: ReactNode;
-  delta?: number | null;
-  deltaUnit?: "%" | "pp";
-  onClick?: () => void;
+function KpiCard({ label, value, delta, deltaUnit = "%", onClick, icon, featured = false, description }: {
+  label: string; value: ReactNode; delta?: number | null; deltaUnit?: "%" | "pp"; onClick?: () => void;
+  icon?: string; featured?: boolean; description?: string;
 }) {
-  const uiText = useUiText();
   const d = deltaLabel(delta, deltaUnit);
-  const inner = (
-    <>
-      <span className="muted">{label}</span>
-      <strong>{value}</strong>
-      {d ? <span className={`kpi-delta ${delta && delta < 0 ? "down" : ""}`}>{d}</span> : null}
-      {onClick ? <span className="kpi-hint">{uiText("Открыть список")}</span> : null}
-    </>
-  );
-  if (onClick) {
-    return (
-      <button type="button" className="sit-kpi stats-kpi-btn" {...tip(uiText("Показать записи показателя «{p0}»", {p0: label}))} onClick={onClick}>
-        {inner}
-      </button>
-    );
-  }
-  return <div className="sit-kpi">{inner}</div>;
+  const content = <>
+    <span className="stats-kpi-heading"><span>{label}</span>{icon ? <NavIcon to={icon} /> : null}</span>
+    <strong>{value ?? "—"}</strong>
+    <span className="stats-kpi-footer">{d ? <span className={`kpi-delta ${delta === 0 ? "neutral" : delta && delta < 0 ? "down" : ""}`}>{d}</span> : null}{description ? <span>{description}</span> : null}{onClick ? <StatsIcon kind="arrow" /> : null}</span>
+  </>;
+  const className = `sit-kpi stats-kpi${featured ? " stats-kpi-featured" : ""}`;
+  return onClick ? <button type="button" className={`${className} stats-kpi-btn`} aria-label={uiText("Показать записи показателя «{p0}»", {p0:label})} onClick={onClick}>{content}</button> : <div className={className}>{content}</div>;
 }
 
 export function StatsPage() {
@@ -296,7 +252,7 @@ export function StatsPage() {
   const exportAllowed = Boolean(me?.billing?.entitlements?.EXPORT);
   const requestVersion = useRequestVersion();
   const [tab, setTab] = useUrlState<TabId>("tab", "overview", localizeUiOptions(TABS, uiText).map(t => t.id));
-  const [period, setPeriod] = useUrlState<PeriodPreset>("period", "this_month");
+  const [period, setPeriod] = useUrlState<PeriodPreset>("period", "this_month", PERIOD_OPTIONS.map(p => p.id));
   const [dateFrom, setDateFrom] = useUrlState<string>("from", "");
   const [dateTo, setDateTo] = useUrlState<string>("to", "");
   const [compare, setCompare] = useState<CompareMode>("previous");
@@ -314,7 +270,8 @@ export function StatsPage() {
   const [campaign, setCampaign] = useState("");
   const [members, setMembers] = useState<{ id: string; name: string }[]>([]);
   const [data, setData] = useState<any>(null);
-  const [trend, setTrend] = useState<any>(null);
+  const drillVersion = useRequestVersion();
+  const [filterDraft, setFilterDraft] = useState({ assignee: "", serviceCategory: "", source: "", channel: "", city: "", campaign: "" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [sections, setSections] = useState({
@@ -346,16 +303,18 @@ export function StatsPage() {
   );
 
   async function openDrill(entity: string, key?: string) {
+    const request = ++drillVersion.current;
     try {
       setDrillLoading(true);
-      setDrill({ title: "Загрузка…", items: [] });
+      setDrill({ title: uiText("Загрузка…"), items: [] });
       const res = await api.analyticsDrilldown({ ...query, entity, key });
-      setDrill(res);
+      if (request === drillVersion.current) setDrill(res);
     } catch (err) {
+      if (request !== drillVersion.current) return;
       setError(err instanceof Error ? err.message : uiText("Не удалось открыть детализацию"));
       setDrill(null);
     } finally {
-      setDrillLoading(false);
+      if (request === drillVersion.current) setDrillLoading(false);
     }
   }
 
@@ -363,28 +322,25 @@ export function StatsPage() {
     const request = ++requestVersion.current;
     try {
       if (period === "custom" && (!dateFrom || !dateTo)) {
-        setError(uiText("Укажите даты С и По"));
+        setData(null);
+        setError("");
+        setLoading(false);
+        return;
+      }
+      if (period === "custom" && dateFrom > dateTo) {
+        setData(null);
+        setError(uiText("Укажите начало и конец периода. Начало не должно быть позже окончания."));
         setLoading(false);
         return;
       }
       setLoading(true);
-      const [dashRes, trRes] = await Promise.allSettled([
-        api.analyticsDashboard(query),
-        api.analyticsTrend({ ...query, metric: trendMetric }),
-      ]);
+      const result = await api.analyticsDashboard(query);
       if (request !== requestVersion.current) return;
-      if (dashRes.status === "fulfilled") {
-        setData(dashRes.value);
-        setTrend(trRes.status === "fulfilled" ? trRes.value : dashRes.value.trend || null);
-        setError("");
-      } else if (trRes.status === "fulfilled") {
-        setTrend(trRes.value);
-        setError(dashRes.reason instanceof Error ? dashRes.reason.message : uiText("Ошибка загрузки"));
-      } else {
-        setError(dashRes.reason instanceof Error ? dashRes.reason.message : uiText("Ошибка загрузки"));
-      }
+      setData(result);
+      setError("");
     } catch (err) {
       if (request !== requestVersion.current) return;
+      setData(null);
       setError(err instanceof Error ? err.message : uiText("Ошибка загрузки"));
     } finally {
       if (request === requestVersion.current) setLoading(false);
@@ -403,76 +359,48 @@ export function StatsPage() {
 
   useEffect(() => {
     void load();
-  }, [query, trendMetric, locale]);
+  }, [query, locale]);
 
-  const trendPoints = (trend?.points || data?.trend?.points || []).map((p: any) => ({
-    label: p.label,
-    value: p.value == null ? null : Number(p.value),
-  }));
-  const comparePoints =
-    compare !== "none" && data?.trendCompare?.points
-      ? data.trendCompare.points.map((p: any) => {
-          const metric = trendMetric;
-          const value =
-            metric === "inquiries"
-              ? p.inquiries
-              : metric === "clients"
-                ? p.clients
-                : metric === "deals"
-                  ? p.deals
-                  : metric === "won"
-                    ? p.won
-                    : metric === "revenue"
-                      ? p.revenue
-                      : p.conversion;
-          return { value: value == null ? null : Number(value) };
-        })
-      : null;
-
-  if (loading && !data) return <div className="state">{uiText("Загрузка статистики…")}</div>;
+  const chartMetric = tab === "sales" && !["won", "revenue"].includes(trendMetric) ? "revenue" : trendMetric;
+  const trendPoints = (data?.trend?.points || []).map((p: any) => ({ label: p.label, value: p[chartMetric] == null ? null : Number(p[chartMetric]) }));
+  const comparePoints = compare !== "none" ? data?.trendCompare?.points?.map((p: any) => ({ value: p[chartMetric] == null ? null : Number(p[chartMetric]) })) : null;
+  const appliedFilters = [
+    { label: uiText("Ответственный"), value: assignee, text: members.find(m => m.id === assignee)?.name || assignee, clear: () => setAssignee("") },
+    { label: uiText("Услуга / товар"), value: serviceCategory, text: serviceCategory, clear: () => setServiceCategory("") },
+    { label: uiText("Источник"), value: source, text: source, clear: () => setSource("") },
+    { label: uiText("Канал"), value: channel, text: channel, clear: () => setChannel("") },
+    { label: uiText("Город"), value: city, text: city, clear: () => setCity("") },
+    { label: uiText("Кампания"), value: campaign, text: campaign, clear: () => setCampaign("") },
+  ].filter(f => f.value);
+  function resetFilters() { setAssignee(""); setServiceCategory(""); setSource(""); setChannel(""); setCity(""); setCampaign(""); setFiltersOpen(false); }
+  function closeDrill() { drillVersion.current++; setDrill(null); }
 
   const o = data?.overview || {};
   const sales = data?.sales || {};
 
   return (
     <section className="stats-page">
-      <div className="row sit-head">
-        <div>
-          <h2>{uiText("Статистика")}</h2>
-          <p className="muted">{uiText("Продажи, заявки и откуда приходят клиенты.")}</p>
+      <header className="stats-heading">
+        <div><span className="stats-eyebrow">{uiText("Аналитика бизнеса")}</span><h1>{uiText("Статистика")}</h1><p>{uiText("От первого обращения до продажи — всё в одном месте.")}</p></div>
+        <div className="stats-heading-actions">
+          <button type="button" className="stats-icon-button" disabled={loading} aria-label={uiText("Обновить статистику")} onClick={() => void load()}><StatsIcon kind="refresh" /></button>
+          <button type="button" className="btn secondary" disabled={!exportAllowed || !data || loading} title={exportAllowed ? undefined : uiText("Экспорт доступен начиная с CRM Start")} onClick={() => setExportOpen(true)}><StatsIcon kind="download" />{uiText("Скачать отчёт")}</button>
         </div>
-        <div className="sit-toolbar-side">
-          <button type="button" className="btn secondary" onClick={() => setFiltersOpen((v) => !v)}>
-            {uiText("Фильтры")}</button>
-          <button type="button" className="btn" disabled={!exportAllowed} title={exportAllowed ? undefined : uiText("Экспорт доступен начиная с CRM Start")} onClick={() => setExportOpen(true)}>
-            {uiText("Скачать отчёт")}</button>
+      </header>
+      <div className="stats-controls">
+        <PeriodSelector period={period} onPeriodChange={setPeriod} dateFrom={dateFrom} dateTo={dateTo} onDateFromChange={setDateFrom} onDateToChange={setDateTo} activeLabel={data?.period?.label} />
+        <div className="stats-control-bottom">
+          <label className="stats-compare">{uiText("Сравнить с")}<select aria-label={uiText("Сравнить с")} value={compare} onChange={e => setCompare(e.target.value as CompareMode)}>
+            <option value="previous">{uiText("Предыдущим периодом")}</option><option value="last_month">{uiText("Прошлым месяцем")}</option><option value="last_year">{uiText("Прошлым годом")}</option><option value="none">{uiText("Не сравнивать")}</option>
+          </select></label>
+          <button type="button" className={`btn secondary stats-filter-toggle${filtersOpen ? " is-open" : ""}`} aria-expanded={filtersOpen} aria-controls="stats-filters" onClick={() => { setFilterDraft({assignee, serviceCategory, source, channel, city, campaign}); setFiltersOpen(v => !v); }}><StatsIcon kind="filter" />{uiText("Фильтры")}{appliedFilters.length ? <span className="stats-count">{appliedFilters.length}</span> : null}</button>
+          <span className="stats-freshness" role="status">{loading ? uiText("Обновляем данные…") : data?.asOf ? uiText("Обновлено в {time}", {time: new Date(data.asOf).toLocaleTimeString(uiFormatLocale(), {hour: "2-digit", minute: "2-digit"})}) : ""}</span>
         </div>
       </div>
-
-      <div className="sit-toolbar">
-        <PeriodSelector
-          period={period}
-          onPeriodChange={setPeriod}
-          dateFrom={dateFrom}
-          dateTo={dateTo}
-          onDateFromChange={setDateFrom}
-          onDateToChange={setDateTo}
-          activeLabel={data?.period?.label}
-        />
-        <label className="stats-compare">
-          {uiText("Сравнить с")}<select value={compare} onChange={(e) => setCompare(e.target.value as CompareMode)}>
-            <option value="previous">{uiText("Предыдущим периодом")}</option>
-            <option value="last_month">{uiText("Прошлым месяцем")}</option>
-            <option value="last_year">{uiText("Прошлым годом")}</option>
-            <option value="none">{uiText("Не сравнивать")}</option>
-          </select>
-        </label>
-      </div>
-
       {filtersOpen ? (
-        <div className="stats-filters">
+        <form id="stats-filters" className="stats-filters" onSubmit={e => { e.preventDefault(); setAssignee(filterDraft.assignee); setServiceCategory(filterDraft.serviceCategory.trim()); setSource(filterDraft.source.trim()); setChannel(filterDraft.channel.trim()); setCity(filterDraft.city.trim()); setCampaign(filterDraft.campaign.trim()); setFiltersOpen(false); }}>
           <label>
-            {uiText("Ответственный")}<select value={assignee} onChange={(e) => setAssignee(e.target.value)}>
+            {uiText("Ответственный")}<select value={filterDraft.assignee} onChange={(e) => setFilterDraft(d => ({...d, assignee: e.target.value}))}>
               <option value="">{uiText("Все")}</option>
               {members.map((m) => (
                 <option key={m.id} value={m.id}>
@@ -482,21 +410,22 @@ export function StatsPage() {
             </select>
           </label>
           <label>
-            {uiText("Услуга / товар")}<input value={serviceCategory} onChange={(e) => setServiceCategory(e.target.value)} placeholder={uiText("Сайты")} />
+            {uiText("Услуга / товар")}<input value={filterDraft.serviceCategory} onChange={(e) => setFilterDraft(d => ({...d, serviceCategory: e.target.value}))} placeholder={uiText("Сайты")} />
           </label>
           <label>
-            {uiText("Источник")}<input value={source} onChange={(e) => setSource(e.target.value)} placeholder="Google Ads" />
+            {uiText("Источник")}<input value={filterDraft.source} onChange={(e) => setFilterDraft(d => ({...d, source: e.target.value}))} placeholder="Google Ads" />
           </label>
           <label>
-            {uiText("Канал")}<input value={channel} onChange={(e) => setChannel(e.target.value)} placeholder="WhatsApp" />
+            {uiText("Канал")}<input value={filterDraft.channel} onChange={(e) => setFilterDraft(d => ({...d, channel: e.target.value}))} placeholder="WhatsApp" />
           </label>
           <label>
-            {uiText("Город")}<input value={city} onChange={(e) => setCity(e.target.value)} placeholder={uiText("Алматы")} />
+            {uiText("Город")}<input value={filterDraft.city} onChange={(e) => setFilterDraft(d => ({...d, city: e.target.value}))} placeholder={uiText("Алматы")} />
           </label>
           <label>
-            {uiText("Кампания")}<input value={campaign} onChange={(e) => setCampaign(e.target.value)} placeholder="utm_campaign" />
+            {uiText("Кампания")}<input value={filterDraft.campaign} onChange={(e) => setFilterDraft(d => ({...d, campaign: e.target.value}))} placeholder="utm_campaign" />
           </label>
-        </div>
+          <div className="stats-filter-actions"><button type="button" className="btn secondary" onClick={resetFilters}>{uiText("Сбросить фильтры")}</button><button type="submit" className="btn">{uiText("Применить")}</button></div>
+        </form>
       ) : null}
 
       {error ? (
@@ -507,113 +436,58 @@ export function StatsPage() {
         </div>
       ) : null}
 
-      <div className="stats-tabs" role="tablist">
-        {localizeUiOptions(TABS, uiText).map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            role="tab"
-            aria-selected={tab === t.id}
-            className={tab === t.id ? "btn sit-chip" : "btn secondary sit-chip"}
-            onClick={() => setTab(t.id)}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      {period === "custom" && (!dateFrom || !dateTo) ? <p className="stats-date-prompt" role="status">{uiText("Выберите начальную и конечную даты, чтобы построить отчёт.")}</p> : null}
 
+      {appliedFilters.length ? <div className="stats-applied-filters" aria-label={uiText("Активные фильтры")}>{appliedFilters.map(f => <button type="button" key={f.label} onClick={f.clear} aria-label={uiText("Убрать фильтр: {filter}", {filter: f.label})}>{f.label}: <b>{f.text}</b><StatsIcon kind="close" /></button>)}<button type="button" className="stats-clear-all" onClick={resetFilters}>{uiText("Сбросить всё")}</button></div> : null}
+      <nav className="stats-navigation" aria-label={uiText("Разделы статистики")}>
+        <div className="stats-tabs">{localizeUiOptions(TABS, uiText).map(t => <button key={t.id} type="button" aria-current={tab === t.id ? "page" : undefined} className={tab === t.id ? "is-active" : ""} onClick={() => setTab(t.id)}>{t.label}</button>)}</div>
+        <label className="stats-mobile-nav">{uiText("Раздел отчёта")}<select aria-label={uiText("Раздел отчёта")} value={tab} onChange={e => setTab(e.target.value as TabId)}>{localizeUiOptions(TABS,uiText).map(t => <option key={t.id} value={t.id}>{t.label}</option>)}</select></label>
+      </nav>
+      {loading && !data ? <div className="stats-skeleton" role="status"><span>{uiText("Загрузка статистики…")}</span><div /><div /><div /><div /></div> : null}
+      <div className={`stats-content${loading && data ? " is-refreshing" : ""}`} aria-busy={loading} inert={loading || undefined}>
       {data?.empty ? (
         <div className="sit-section">
-          <h3>{uiText("Пока недостаточно данных для построения отчёта")}</h3>
+          <h3>{uiText("По выбранным условиям нет данных")}</h3>
           <p className="muted">
-            {uiText("После появления первых сделок здесь будет показана конверсия, динамика продаж и эффективность источников.")}</p>
+            {uiText("Измените период или фильтры. Новые обращения и сделки появятся здесь автоматически.")}</p>
         </div>
       ) : null}
 
       {tab === "overview" && data ? (
         <>
-          <div className="sit-section">
-            <div className="sit-section-head">
-              <h3>{uiText("Обзор ·")}{" "}{uiMessage(data.period?.label)}</h3>
-              {data.compare?.label ? <span className="muted">vs {data.compare.label}</span> : null}
-            </div>
-            <div className="sit-kpi-grid stats-kpi-grid">
-              <KpiCard label={uiText("Обращения")} value={o.inquiries} delta={o.deltas?.inquiries} onClick={() => void openDrill("inquiries")} />
-              <KpiCard label={uiText("Новые клиенты")} value={o.clients} onClick={() => void openDrill("clients")} />
-              <KpiCard label={uiText("Заявки")} value={o.requests} onClick={() => void openDrill("inquiries")} />
-              <KpiCard label={uiText("Создано сделок")} value={o.dealsCreated} onClick={() => void openDrill("deals")} />
-              <KpiCard label={uiText("Договоры")} value={o.contracts} />
-              <KpiCard label={uiText("Продажи")} value={o.won} delta={o.deltas?.won} onClick={() => void openDrill("won")} />
-              <KpiCard label={uiText("Продано")} value={o.revenueLabel || "—"} delta={o.deltas?.revenue} onClick={() => void openDrill("won")} />
-              <KpiCard label={uiText("Конверсия")} value={o.conversion != null ? `${o.conversion}%` : "—"} delta={o.deltas?.conversionPp} deltaUnit="pp" />
-              <KpiCard label={uiText("Средний чек")} value={o.avgCheckLabel || "—"} />
-              <KpiCard label={uiText("Потеряно")} value={o.lost} onClick={() => void openDrill("lost")} />
-            </div>
-            {data.dataQuality ? (
-              <p className="muted stats-quality-hint">
-                {uiText("Качество данных: без телефона")}{" "}{data.dataQuality.noPhone}{uiText(", без источника")}{" "}{data.dataQuality.noSource}{uiText(", без ответственного")}{" "}{data.dataQuality.noOwner}{uiText(", потерь без причины")}{" "}{data.dataQuality.lostNoReason}{uiText(", без next action")}{" "}{data.dataQuality.openNoNextAction}
-              </p>
-            ) : null}
+          <div className="stats-period-caption"><h2>{uiMessage(data.period?.label)}</h2>{data.compare?.label ? <span>{uiText("Сравнение")}: {data.compare.label}</span> : null}</div>
+          <div className="stats-primary-kpis">
+            <KpiCard label={uiText("Выручка")} value={o.revenueLabel || "—"} delta={o.deltas?.revenue} onClick={() => void openDrill("won")} icon="/billing" featured description={uiText("Закрытые продажи")} />
+            <KpiCard label={uiText("Обращения")} value={o.inquiries} delta={o.deltas?.inquiries} onClick={() => void openDrill("inquiries")} icon="/conversations" description={uiText("За выбранный период")} />
+            <KpiCard label={uiText("Продажи")} value={o.won} delta={o.deltas?.won} onClick={() => void openDrill("won")} icon="/deals" description={uiText("Успешные сделки")} />
+            <KpiCard label={uiText("Конверсия")} value={o.conversion != null ? `${o.conversion}%` : "—"} delta={o.deltas?.conversionPp} deltaUnit="pp" icon="/stats" description={uiText("Продажи / обращения")} />
           </div>
-
-          <div className="sit-section">
-            <div className="sit-section-head">
-              <h3>{uiText("Динамика")}</h3>
-              <div className="stats-metric-switch">
-                {localizeUiOptions(TREND_METRICS, uiText).map((m) => (
-                  <button
-                    key={m.id}
-                    type="button"
-                    className={trendMetric === m.id ? "btn sit-chip" : "btn secondary sit-chip"}
-                    {...tip(localizeUiOptions(METRIC_HINTS, uiText)[m.id])}
-                    onClick={() => setTrendMetric(m.id)}
-                  >
-                    {m.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <LineChart
-              points={trendPoints}
-              comparePoints={comparePoints}
-              metric={trendMetric}
-              label={uiText("Динамика: {p0}", {p0: localizeUiOptions(TREND_METRICS, uiText).find((m) => m.id === trendMetric)?.label})}
-            />
+          <div className="stats-secondary-kpis">
+            <KpiCard label={uiText("Новые клиенты")} value={o.clients} onClick={() => void openDrill("clients")} />
+            <KpiCard label={uiText("Создано сделок")} value={o.dealsCreated} onClick={() => void openDrill("deals")} />
+            <KpiCard label={uiText("Договоры")} value={o.contracts} />
+            <KpiCard label={uiText("Средний чек")} value={o.avgCheckLabel || "—"} />
+            <KpiCard label={uiText("Потеряно")} value={o.lost} onClick={() => void openDrill("lost")} />
           </div>
-
+          <div className="stats-analysis-grid">
+            <div className="sit-section stats-trend-card">
+              <div className="sit-section-head"><div><span className="stats-eyebrow">{uiText("Результат во времени")}</span><h3>{uiText("Динамика")}</h3></div><select className="stats-metric-select" aria-label={uiText("Показатель графика")} value={trendMetric} onChange={e => setTrendMetric(e.target.value as TrendMetric)}>{localizeUiOptions(TREND_METRICS,uiText).map(m => <option key={m.id} value={m.id}>{m.label}</option>)}</select></div>
+              <p className="stats-chart-note">{localizeUiOptions(METRIC_HINTS,uiText)[chartMetric]}</p>
+              <LineChart currency={data.currency} points={trendPoints} comparePoints={comparePoints} metric={chartMetric} label={uiText("Динамика: {p0}", {p0:localizeUiOptions(TREND_METRICS,uiText).find(m => m.id === chartMetric)?.label})} />
+            </div>
+            <aside className="sit-section stats-insights">
+              <div><span className="stats-eyebrow">{uiText("Фокус руководителя")}</span><h3>{uiText("На что обратить внимание")}</h3></div>
+              <button type="button" className="stats-insight" onClick={() => setTab("tasks")}><span className="stats-insight-icon"><NavIcon to="/tasks" /></span><span><strong>{data.tasks?.overdue ?? 0}</strong><b>{uiText("Просрочено задач")}</b><small>{uiText("Проверьте сроки и загрузку команды")}</small></span><StatsIcon kind="arrow" /></button>
+              <button type="button" className="stats-insight" onClick={() => setTab("communications")}><span className="stats-insight-icon is-blue"><NavIcon to="/conversations" /></span><span><strong>{data.communications?.waitedOver15 ?? 0}</strong><b>{uiText("Ожидали ответа больше 15 минут")}</b><small>{uiText("Оцените скорость ответа клиентам")}</small></span><StatsIcon kind="arrow" /></button>
+              <button type="button" className="stats-insight" onClick={() => setTab("losses")}><span className="stats-insight-icon is-purple"><NavIcon to="/deals" /></span><span><strong>{o.lost ?? 0}</strong><b>{uiText("Потерянные сделки")}</b><small>{uiText("Разберите причины отказов")}</small></span><StatsIcon kind="arrow" /></button>
+            </aside>
+          </div>
           <div className="stats-overview-split">
-            <div className="sit-section">
-              <div className="sit-section-head">
-                <h3>{uiText("По этапам")}</h3>
-              </div>
-              <p className="stats-funnel-mini">
-                {(data.funnel?.steps || []).map((s: any) => s.count).join(" → ")}
-              </p>
-              {data.biggestLoss?.lost > 0 ? (
-                <p className="muted">
-                  {uiText("Самая большая потеря:")}{" "}{data.biggestLoss.from} → {data.biggestLoss.to} ({data.biggestLoss.lost})
-                </p>
-              ) : null}
-              <button type="button" className="btn secondary" onClick={() => setTab("funnel")}>
-                {uiText("Открыть этапы")}</button>
-            </div>
-            <div className="sit-section">
-              <div className="sit-section-head">
-                <h3>{uiText("Источники")}</h3>
-              </div>
-              <BarChart items={data.sources || []} valueKey="inquiries" />
-              <button type="button" className="btn secondary" onClick={() => setTab("sources")}>
-                {uiText("Подробнее")}</button>
-            </div>
-            <div className="sit-section">
-              <div className="sit-section-head">
-                <h3>{uiText("Услуги и товары")}</h3>
-              </div>
-              <BarChart items={data.services || []} valueKey="revenue" />
-              <button type="button" className="btn secondary" onClick={() => setTab("services")}>
-                {uiText("Подробнее")}</button>
-            </div>
+            <div className="sit-section"><div className="sit-section-head"><h3>{uiText("Путь к продаже")}</h3><button type="button" className="stats-text-button" onClick={() => setTab("funnel")}>{uiText("Подробнее")}<StatsIcon kind="arrow" /></button></div><div className="stats-funnel-visual">{(data.funnel?.steps || []).map((step:any,i:number) => <div key={step.key}><div><span><small>{String(i+1).padStart(2,"0")}</small>{step.name}</span><b>{step.count}</b></div><div className="stats-funnel-track"><span style={{width:`${Math.max(0,Math.min(100,step.count / Math.max(1,...data.funnel.steps.map((s:any)=>s.count)) * 100))}%`,opacity:1-i*.1}} /></div></div>)}</div><p className="stats-chart-note">{funnelMode === "cohort" ? uiText("Кто пришёл за период") : uiText("События выбранного периода. Сделки могут быть из более ранних обращений.")}</p></div>
+            <div className="sit-section"><div className="sit-section-head"><h3>{uiText("Откуда приходят клиенты")}</h3><button type="button" className="stats-text-button" onClick={() => setTab("sources")}>{uiText("Подробнее")}<StatsIcon kind="arrow" /></button></div><p className="stats-chart-note">{uiText("Источники по количеству обращений")}</p><BarChart currency={data.currency} items={data.sources || []} valueKey="inquiries" /></div>
+            <div className="sit-section"><div className="sit-section-head"><h3>{uiText("Что приносит выручку")}</h3><button type="button" className="stats-text-button" onClick={() => setTab("services")}>{uiText("Подробнее")}<StatsIcon kind="arrow" /></button></div><p className="stats-chart-note">{uiText("Услуги и товары по сумме продаж")}</p><BarChart currency={data.currency} items={(data.services || []).map((r:any)=>({...r,name:r.label || r.name}))} valueKey="revenue" /></div>
           </div>
+          {data.dataQuality ? <details className="stats-quality"><summary><NavIcon to="/documents" /><span>{uiText("Качество данных")}<small>{uiText("Полные карточки делают отчёт точнее")}</small></span></summary><div className="stats-quality-grid">{[[uiText("Без телефона"),data.dataQuality.noPhone],[uiText("Без источника"),data.dataQuality.noSource],[uiText("Без ответственного"),data.dataQuality.noOwner],[uiText("Без причины отказа"),data.dataQuality.lostNoReason],[uiText("Без следующего шага"),data.dataQuality.openNoNextAction]].map(([label,count])=><div key={label}><span>{label}</span><b>{count}</b></div>)}</div></details> : null}
         </>
       ) : null}
 
@@ -739,7 +613,7 @@ export function StatsPage() {
               <button
                 key={m}
                 type="button"
-                className={trendMetric === m ? "btn sit-chip" : "btn secondary sit-chip"}
+                className={chartMetric === m ? "btn sit-chip" : "btn secondary sit-chip"}
                 {...tip(localizeUiOptions(METRIC_HINTS, uiText)[m])}
                 onClick={() => setTrendMetric(m)}
               >
@@ -747,7 +621,7 @@ export function StatsPage() {
               </button>
             ))}
           </div>
-          <LineChart points={trendPoints} comparePoints={comparePoints} metric={trendMetric} label={uiText("Продажи по времени")} />
+          <LineChart currency={data.currency} points={trendPoints} comparePoints={comparePoints} metric={chartMetric} label={uiText("Продажи по времени")} />
         </div>
       ) : null}
 
@@ -776,7 +650,7 @@ export function StatsPage() {
               ))}
             </div>
           </div>
-          <BarChart items={data.sources || []} valueKey={sourceBar} />
+          <BarChart currency={data.currency} items={data.sources || []} valueKey={sourceBar} />
           <div className="stats-table-wrap">
             <table className="stats-table">
               <thead>
@@ -843,7 +717,7 @@ export function StatsPage() {
               ))}
             </div>
           </div>
-          <BarChart items={data.services || []} valueKey={serviceBar} />
+          <BarChart currency={data.currency} items={data.services || []} valueKey={serviceBar} />
           <div className="stats-table-wrap">
             <table className="stats-table">
               <thead>
@@ -1074,10 +948,10 @@ export function StatsPage() {
               label={uiText("Среднее время ответа")}
               value={data.communications?.avgResponseMin != null ? uiText("{p0} мин", {p0: data.communications.avgResponseMin}) : "—"}
             />
-            <KpiCard label={uiText("Ждали &gt;15 мин")} value={data.communications?.waitedOver15 ?? 0} />
+            <KpiCard label={uiText("Ожидали ответа больше 15 минут")} value={data.communications?.waitedOver15 ?? 0} />
             <KpiCard label={uiText("AI обработал")} value={data.communications?.aiHandled ?? 0} />
             <KpiCard label={uiText("Менеджер обработал")} value={data.communications?.staffHandled ?? 0} />
-            <KpiCard label="AI → Human" value={data.communications?.handedToHuman ?? 0} />
+            <KpiCard label={uiText("Передано человеку")} value={data.communications?.handedToHuman ?? 0} />
           </div>
           <h4>{uiText("Время ответа")}</h4>
           <BarChart
@@ -1171,14 +1045,9 @@ export function StatsPage() {
         </div>
       ) : null}
 
+      </div>
       {drill ? (
-        <div className="stats-modal-backdrop" onClick={() => setDrill(null)}>
-          <div className="stats-modal stats-drill-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="sit-section-head">
-              <h3>{drill.title || uiText("Детализация")}</h3>
-              <button type="button" className="btn secondary sit-chip" onClick={() => setDrill(null)}>
-                {uiText("Закрыть")}</button>
-            </div>
+        <StatsDialog title={drill.title || uiText("Детализация")} onClose={closeDrill} wide>
             <p className="muted">{drillLoading ? uiText("Загрузка…") : uiText("Всего: {p0}", {p0: drill.total ?? drill.items?.length ?? 0})}</p>
             <div className="stats-table-wrap">
               <table className="stats-table">
@@ -1202,11 +1071,11 @@ export function StatsPage() {
                       <td>{item.phone || uiText("Нет телефона")}</td>
                       <td>{item.title}</td>
                       <td>{item.amountLabel || "—"}</td>
-                      <td>{item.status || item.source || "—"}</td>
+                      <td>{item.status ? uiMessage(RECORD_STATUSES[item.status] || item.status) : item.source || "—"}</td>
                       <td>{item.manager || "—"}</td>
                       <td>
                         {item.href ? (
-                          <Link to={item.href} onClick={() => setDrill(null)}>
+                          <Link to={item.href} onClick={closeDrill}>
                             {uiText("Открыть")}</Link>
                         ) : null}
                       </td>
@@ -1216,14 +1085,11 @@ export function StatsPage() {
               </table>
             </div>
             {!drillLoading && !(drill.items || []).length ? <p className="empty">{uiText("Список пуст.")}</p> : null}
-          </div>
-        </div>
+        </StatsDialog>
       ) : null}
 
       {exportOpen ? (
-        <div className="stats-modal-backdrop" onClick={() => setExportOpen(false)}>
-          <div className="stats-modal" onClick={(e) => e.stopPropagation()}>
-            <h3>{uiText("Скачать отчёт")}</h3>
+        <StatsDialog title={uiText("Скачать отчёт")} onClose={() => setExportOpen(false)}>
             <p className="muted">{uiText("Включить в отчёт")}</p>
             <div className="stats-export-checks">
               {(
@@ -1250,6 +1116,7 @@ export function StatsPage() {
               <button
                 type="button"
                 className="btn"
+                disabled={!Object.values(sections).some(Boolean)}
                 onClick={() => {
                   exportAnalyticsPdf(data, sections);
                   setExportOpen(false);
@@ -1260,6 +1127,7 @@ export function StatsPage() {
               <button
                 type="button"
                 className="btn secondary"
+                disabled={!Object.values(sections).some(Boolean)}
                 onClick={() => {
                   exportAnalyticsExcel(data, sections);
                   setExportOpen(false);
@@ -1279,8 +1147,7 @@ export function StatsPage() {
               <button type="button" className="btn secondary" onClick={() => setExportOpen(false)}>
                 {uiText("Отмена")}</button>
             </div>
-          </div>
-        </div>
+        </StatsDialog>
       ) : null}
     </section>
   );

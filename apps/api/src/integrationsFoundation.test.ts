@@ -58,6 +58,29 @@ describe("integrations foundation", () => {
     assert.ok(body.notifications?.employeeTelegram);
     assert.ok(Array.isArray(body.eventLog));
   });
+  it("does not create Telegram links when service configuration is incomplete", async () => {
+    const previousToken = process.env.TELEGRAM_BOT_TOKEN;
+    const previousUsername = process.env.TELEGRAM_BOT_USERNAME;
+    process.env.TELEGRAM_BOT_TOKEN = "test-only-token";
+    process.env.TELEGRAM_BOT_USERNAME = "test_notifications_bot";
+    try {
+      const catalog = await (await fetch(`${url}/api/v1/integrations/catalog`, { headers: { cookie } })).json();
+      assert.equal(catalog.notifications.employeeTelegram.available, false);
+      const setup = await (await fetch(`${url}/api/v1/integrations/setup`, { headers: { cookie } })).json();
+      assert.equal(setup.telegram.employee.botConfigured, false);
+      assert.equal(setup.telegram.employee.connected, false);
+      const count = await prisma.telegramBinding.count();
+      const response = await fetch(`${url}/api/v1/telegram/begin-link`, { method: "POST", headers: { cookie } });
+      assert.equal(response.status, 503);
+      const body = await response.json();
+      assert.equal(body.code, "telegram_not_configured");
+      assert.ok(!body.deepLink && !body.token);
+      assert.equal(await prisma.telegramBinding.count(), count);
+    } finally {
+      if (previousToken === undefined) delete process.env.TELEGRAM_BOT_TOKEN; else process.env.TELEGRAM_BOT_TOKEN = previousToken;
+      if (previousUsername === undefined) delete process.env.TELEGRAM_BOT_USERNAME; else process.env.TELEGRAM_BOT_USERNAME = previousUsername;
+    }
+  });
 
   it("form submission creates LEAD_SUBMISSION event and is idempotent", async () => {
     const submissionId = `test-lead-${Date.now()}`;

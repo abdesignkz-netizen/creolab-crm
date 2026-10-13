@@ -1,3 +1,4 @@
+import { processEmployeeTelegramQueue } from "./employeeTelegramService.ts";
 import { logServerError } from "../lib/redact.ts";
 import type { PrismaClient } from "@creolab/db";
 import { createStaffNotification, deliverPendingPush } from "./notificationService.ts";
@@ -263,9 +264,15 @@ export async function resumeRunningCampaigns(prisma: PrismaClient) {
 export function startBackgroundJobs(prisma: PrismaClient) {
   if (started || process.env.NODE_ENV === "test") return () => undefined;
   started = true;
+  let telegramRunning = false;
   let billingRunning = false;
   let lastBillingRun = 0;
   const tick = () => {
+    if (!telegramRunning) {
+      telegramRunning = true;
+      void processEmployeeTelegramQueue(prisma).catch(error => logServerError(error, "background:employee telegram"))
+        .finally(() => { telegramRunning = false; });
+    }
     import("./billingResourceService.ts").then(({ reconcileBillingUsage }) => reconcileBillingUsage(prisma)).catch(error => logServerError(error, "background:billing usage"));
     void import("./instagramOAuthService.ts").then(({ refreshInstagramConnections }) => refreshInstagramConnections(prisma)).catch(error => logServerError(error, "background:instagram"));
     processOutbox(prisma).catch((error) => logServerError(error, "background:outbox"));

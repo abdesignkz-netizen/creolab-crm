@@ -1,3 +1,4 @@
+import { EmployeeTelegramPanel } from "../components/EmployeeTelegramPanel";
 import { InlineFeedback } from "../components/InlineFeedback";
 import { uiNotificationBody, uiText, useUiText, localizeUiOptions, uiMessage } from "../lib/uiText";
 import { DocumentNumberingPanel } from "./DocumentNumberingPanel";
@@ -365,8 +366,12 @@ function NotificationsSection({ locale }: { locale: Locale }) {
   const [permission, setPermission] = useState(currentBrowserPermission());
   const [enabled, setEnabled] = useState(getBrowserNotificationPreference());
   const [status, setStatus] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
 
   async function load() {
+    setError("");
+    try {
     const [p, n] = await Promise.all([
       api.notificationPreferences(),
       api.notifications().catch(() => ({ items: [] })),
@@ -374,6 +379,7 @@ function NotificationsSection({ locale }: { locale: Locale }) {
     setPrefs(p);
     const data = n as { items?: any[] } | any[];
     setNotices(Array.isArray(data) ? data : data.items || []);
+    } catch (err) { setError(err instanceof Error ? err.message : uiText("Ошибка загрузки")); }
   }
 
   useEffect(() => {
@@ -381,12 +387,16 @@ function NotificationsSection({ locale }: { locale: Locale }) {
   }, []);
 
   async function save(next: any) {
-    const saved = await api.updateNotificationPreferences(next);
-    setPrefs(saved);
-    setStatus(t(locale, "settings.saved"));
+    setSaving(true); setError(""); setStatus("");
+    try {
+      const saved = await api.updateNotificationPreferences(next);
+      setPrefs(saved);
+      setStatus(t(locale, "settings.saved"));
+    } catch (err) { setError(err instanceof Error ? err.message : uiText("Ошибка загрузки")); }
+    finally { setSaving(false); }
   }
 
-  if (!prefs) return <div className="state">{t(locale, "common.loading")}</div>;
+  if (!prefs) return <div className="state">{error ? <><InlineFeedback kind="error">{uiMessage(error, locale)}</InlineFeedback><button className="btn secondary" onClick={() => void load()}>{t(locale, "common.retry")}</button></> : t(locale, "common.loading")}</div>;
 
   const events: Array<[string, string]> = [
     ["new_inquiries", t(locale, "settings.notice.new_inquiries")],
@@ -400,6 +410,7 @@ function NotificationsSection({ locale }: { locale: Locale }) {
 
   return (
     <>
+      <EmployeeTelegramPanel showPreferencesLink={false} />
       <form
         className="panel"
         onSubmit={(event) => {
@@ -448,8 +459,9 @@ function NotificationsSection({ locale }: { locale: Locale }) {
           {t(locale, "settings.quietEnd")}
           <input name="quietEnd" type="time" defaultValue={prefs.quietHours?.end || "08:00"} />
         </label>
+        {error ? <InlineFeedback kind="error">{uiMessage(error, locale)}</InlineFeedback> : null}
         {status ? <InlineFeedback kind="success" className="ok">{status}</InlineFeedback> : null}
-        <button className="btn">{t(locale, "settings.save")}</button>
+        <button className="btn" disabled={saving}>{saving ? t(locale, "common.loading") : t(locale, "settings.save")}</button>
       </form>
 
       <div className="panel">

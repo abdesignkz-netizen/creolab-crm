@@ -731,6 +731,9 @@ export function createApiClient(options: ClientOptions) {
     disconnectWhatsApp: () => request("/api/v1/integrations/whatsapp-seller/disconnect", { method: "POST" }),
     syncWhatsApp: () => request("/api/v1/integrations/whatsapp-seller/sync", { method: "POST" }),
     rotateWebhook: (id: string) => request(`/api/v1/integrations/${id}/rotate-secret`, { method: "POST" }),
+    employeeTelegramStatus: () => request("/api/v1/telegram/status"),
+    disconnectEmployeeTelegram: () => request("/api/v1/telegram/link", { method: "DELETE" }),
+    testEmployeeTelegram: () => request("/api/v1/telegram/test", { method: "POST" }),
     beginTelegram: () => request("/api/v1/telegram/begin-link", { method: "POST" }),
     sendMessage: (
       id: string,

@@ -56,6 +56,9 @@ export async function connectCompanyTelegram(prisma: PrismaClient, auth: AuthCon
   }
   const me = await telegramCall<{ id: number; is_bot: boolean; username?: string }>(input.token, "getMe");
   if (!me.is_bot || !me.username || !Number.isSafeInteger(me.id)) throw new ApiError(422, "invalid_bot", "Токен не принадлежит боту");
+  if (String(me.id) === (process.env.TELEGRAM_BOT_TOKEN || "").trim().split(":")[0]) {
+    throw new ApiError(409, "bot_in_use", "Этот бот зарезервирован для личных уведомлений сотрудников. Используйте отдельного бота компании.");
+  }
   const publicKey = `telegram-bot:${me.id}`;
   const occupied = await prisma.integration.findUnique({ where: { publicKey } });
   if (occupied && occupied.tenantId !== tenantId) throw new ApiError(409, "bot_in_use", "Этот бот уже подключён к другой компании");

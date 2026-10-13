@@ -1558,6 +1558,8 @@ model NotificationDelivery {
   state          String    @default("created")
   providerRef    String?
   attempts       Int       @default(0)
+  nextAttemptAt  DateTime?
+  claimedAt      DateTime?
   error          String?
   createdAt      DateTime  @default(now())
   tenant         Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -1594,6 +1596,7 @@ model TelegramBinding {
   id            String    @id @default(uuid())
   userId        String
   chatRef       String
+  botId         String?
   connectedAt   DateTime  @default(now())
   revokedAt     DateTime?
   pendingTokenHash String? @unique

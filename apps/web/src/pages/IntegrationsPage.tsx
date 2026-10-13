@@ -1,3 +1,4 @@
+import { EmployeeTelegramPanel } from "../components/EmployeeTelegramPanel";
 import { WebsiteChatPanel } from "./WebsiteChatPanel";
 import { ChannelAiControl } from "../components/ChannelAiControl";
 import { InlineFeedback } from "../components/InlineFeedback";
@@ -9,8 +10,8 @@ import { TikTokConnectionsPanel } from "./TikTokConnectionsPanel";
 import { MetaConnectionsPanel } from "./MetaConnectionsPanel";
 import { GoogleConnectionsPanel } from "./GoogleConnectionsPanel";
 import { notifySaved } from "../components/SaveNotice";
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import { statusBadgeClass } from "../lib/statusBadge";
 import { IntegrationHelp } from "../components/IntegrationHelp";
@@ -30,6 +31,8 @@ function whatsappStatusNote(wa: any) {
 
 export function IntegrationsPage() {
   const uiText = useUiText();
+  const location = useLocation();
+  const navigate = useNavigate();
   const { me } = useSession();
   const aiManagerAllowed = Boolean(me?.billing?.entitlements?.AI_MANAGER);
   const aiManagerTrial = aiManagerAllowed && me?.billing?.planCode === "BASQAR_FREE";
@@ -37,27 +40,42 @@ export function IntegrationsPage() {
   const [savingWhatsApp, setSavingWhatsApp] = useState(false);
   const [catalog, setCatalog] = useState<any>(null);
   const [setup, setSetup] = useState<any>(null);
-  const [error, setError] = useState("");
-  const [note, setNote] = useState("");
+  const [error, setErrorMessage] = useState("");
+  const [notice, setNotice] = useState<{ message: string; kind: "success" | "info" } | null>(null);
+  const [checkingWhatsApp, setCheckingWhatsApp] = useState(false);
+  const loadVersion = useRef(0);
+  const summaryVersion = useRef(0);
+  function setError(message: string) {
+    setErrorMessage(message);
+    if (message) setNotice(null);
+  }
+  function setNote(message: string, kind: "success" | "info" = "success") {
+    setNotice(message ? { message, kind } : null);
+  }
   const [formMethod, setFormMethod] = useState<ConnectMethod>("html");
   const [botToken, setBotToken] = useState("");
   const [savingBot, setSavingBot] = useState(false);
   const [summaries, setSummaries] = useState<Record<string, any>>({});
-  const [telegram, setTelegram] = useState<any>(null);
 
   async function load() {
+    const version = ++loadVersion.current;
     setError("");
     try {
       const [c, s] = await Promise.all([api.integrationCatalog(), api.integrationSetup()]);
+      if (version !== loadVersion.current) return null;
       setCatalog(c);
       setSetup(s);
+      return s;
     } catch (err) {
-      setError(err instanceof Error ? err.message : uiText("Ошибка загрузки"));
+      if (version === loadVersion.current) setError(err instanceof Error ? err.message : uiText("Ошибка загрузки"));
+      return null;
     }
   }
 
   async function loadSummaries() {
+    const version = ++summaryVersion.current;
     const results = await Promise.allSettled([api.whatsAppConnections(), api.googleConnections(), api.esfConnection()]);
+    if (version !== summaryVersion.current) return;
     setSummaries(Object.fromEntries(["whatsapp", "google", "esf"].map((key, index) => [key,
       results[index].status === "fulfilled" ? (results[index] as PromiseFulfilledResult<any>).value : { failed: true }])));
   }
@@ -66,6 +84,20 @@ export function IntegrationsPage() {
   useEffect(() => {
     void load();
     void loadSummaries();
+    const searchParams = new URLSearchParams(location.search);
+    const google = searchParams.get("google");
+    if (google) {
+      if (google === "connected") setNote(uiText("Google подключён. Проверьте выбранный сервис ниже."));
+      else if (google === "cancelled") setNote(uiText("Подключение Google отменено. Когда будете готовы, повторите вход."), "info");
+      else setError(uiText(google === "expired"
+        ? "Подтверждение Google истекло или уже использовано. Начните подключение заново."
+        : google === "permissions"
+          ? "Google не предоставил доступ к выбранному сервису. Проверьте аккаунт и разрешите запрошенные права."
+          : "Не удалось подключить Google. Повторите вход. Если ошибка повторится, обратитесь в поддержку."));
+      // Consume the one-time outcome so it cannot reappear after reconnecting or disconnecting.
+      searchParams.delete("google");
+      navigate({ search: searchParams.toString(), hash: location.hash }, { replace: true });
+    }
   }, []);
 
   if (!catalog && !setup && !error) return <div className="state">{uiText("Загрузка…")}</div>;
@@ -85,13 +117,13 @@ export function IntegrationsPage() {
     (card: any) => card.catalogType === "WEBSITE_FORM" || card.catalogType === "WEBHOOK_API" || card.connected,
   );
   const companyTelegram = catalog?.messaging?.find((card: any) => card.catalogType === "TELEGRAM");
-  const telegramReady = Boolean(setup?.telegram?.employee?.botConfigured);
   const whatsappSender =
     setup?.whatsapp?.sender && !/\.js$/i.test(String(setup.whatsapp.sender)) ? setup.whatsapp.sender : null;
 
   function summary(item: any): { status: string; tone: "neutral" | "ok" | "warn" } {
     if (!item) return { status: uiText("Загрузка…"), tone: "neutral" };
     if (item.failed) return { status: uiText("Не удалось проверить"), tone: "warn" };
+    if (item.available === false) return { status: uiMessage(item.healthLabel) || uiText("Требуется настройка"), tone: "neutral" };
     const problem = item.lastError || ["ERROR", "TOKEN_EXPIRED", "REAUTH_REQUIRED", "RECONNECT_REQUIRED"].some(status => status === item.healthStatus || status === item.connectionStatus);
     return { status: problem ? uiText("Требует внимания") : uiMessage(item.healthLabel) || (item.connected ? uiText("Подключено") : uiText("Не подключено")), tone: problem ? "warn" : item.connected ? "ok" : "neutral" };
   }
@@ -100,7 +132,8 @@ export function IntegrationsPage() {
     return summary(item || (catalog ? { connected: false } : { failed: true }));
   }
   function googleSummary(kind: string) {
-    return summary(summaries.google?.failed ? summaries.google : summaries.google?.items?.find((row: any) => row.kind === kind));
+    return summary(summaries.google?.failed ? summaries.google : summaries.google
+      ? summaries.google.items?.find((row: any) => row.kind === kind) || { connected: false } : undefined);
   }
   const direct = summaries.whatsapp?.items || [];
   const whatsappSummary = summary(direct.some((row: any) => row.status === "RECONNECT_REQUIRED" || row.lastError)
@@ -111,7 +144,7 @@ export function IntegrationsPage() {
   const esfSummary = summary(summaries.esf?.failed ? summaries.esf : esf ? {
     connected: esf.status === "CONNECTED" && esf.sessionActive && !esf.reauthRequired,
     lastError: esf.lastErrorMessage || esf.reauthRequired,
-  } : undefined);
+  } : summaries.esf ? { connected: false } : undefined);
   const leadDetails = (selectedType: string) => <>
         {(leadCards.filter((card: any) => card.catalogType === selectedType)).map((card: any) => (
           <div className="panel integ-card" key={card.catalogType}>
@@ -130,8 +163,9 @@ export function IntegrationsPage() {
                     className="btn secondary"
                     onClick={async () => {
                       try {
-                        const result = await api.integrationHealthCheck(card.integrationId) as { healthLabel: string };
-                        setNote(uiText("Проверка «{p0}»: {p1}", {p0: uiMessage(card.title), p1: uiMessage(result.healthLabel)}));
+                        setError(""); setNote("");
+                        const result = await api.integrationHealthCheck(card.integrationId) as { healthLabel: string; allOk: boolean };
+                        setNote(uiText("Проверка «{p0}»: {p1}", {p0: uiMessage(card.title), p1: uiMessage(result.healthLabel)}), result.allOk ? "success" : "info");
                         await load();
                       } catch (err) {
                         setError(err instanceof Error ? err.message : uiText("Проверка не выполнена"));
@@ -159,7 +193,7 @@ export function IntegrationsPage() {
         </div>
       </div>
       {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
-      {note ? <InlineFeedback kind="success" className="ok">{note}</InlineFeedback> : null}
+      {notice ? <InlineFeedback kind={notice.kind} className={notice.kind === "success" ? "ok" : "muted"}>{notice.message}</InlineFeedback> : null}
 
       <div className="integration-catalog-grid">
         <IntegrationDisclosure id="whatsapp" icon="whatsapp" title="WhatsApp" description={uiText("Переписка и ИИ · QR, Green API, Meta")} {...whatsappSummary}>
@@ -171,7 +205,7 @@ export function IntegrationsPage() {
         <p className="muted">{whatsappStatusNote(setup?.whatsapp)}</p>
         <p className="muted">{aiManagerAllowed ? uiText("Как бот отвечает клиентам, задаёт администратор сервиса: промпт и база знаний компании.") : uiText("WhatsApp доступен для переписки с клиентами. ИИ-менеджер не включён в ваш тариф.")}</p>
         <p className="integ-status-line">
-          {uiText("Статус подключения")}<span className={statusBadgeClass(setup?.whatsapp?.configured ? "Подключён" : "Не подключён")}>
+          {uiText("Статус подключения")}<span className={setup?.whatsapp?.reachable ? "badge ok" : setup?.whatsapp?.configured ? "badge warn" : "badge"}>
             {setup?.whatsapp?.reachable ? uiText("Работает") : setup?.whatsapp?.configured ? uiText("Ошибка проверки") : uiText("Не подключён")}
           </span>
         </p>
@@ -198,7 +232,7 @@ export function IntegrationsPage() {
               if (savingWhatsApp) return;
               const formEl = new FormData(event.currentTarget);
               setSavingWhatsApp(true);
-              setError("");
+              setError(""); setNote("");
               try {
                 const result = (await api.connectWhatsApp({
                   instanceId: String(formEl.get("instanceId") || ""),
@@ -208,9 +242,10 @@ export function IntegrationsPage() {
                   result?.reachable
                     ? uiText("WhatsApp подключён.")
                     : uiText("Сохранено. Подключение пока не подтверждено. Проверьте Instance ID и API Token."),
+                  result?.reachable ? "success" : "info",
                 );
                 setEditingWhatsApp(false);
-                notifySaved(uiText("WhatsApp подключён"));
+                if (result?.reachable) notifySaved(uiText("WhatsApp подключён"));
                 await load();
               } catch (err) {
                 setError(err instanceof Error ? err.message : uiText("Не удалось сохранить"));
@@ -237,16 +272,16 @@ export function IntegrationsPage() {
           <button
             type="button"
             className="btn secondary"
+            disabled={checkingWhatsApp || savingWhatsApp}
             onClick={async () => {
+              setCheckingWhatsApp(true); setNote("");
               try {
-                await load();
-                setNote(uiText("Проверка подключения выполнена."));
-              } catch (err) {
-                setError(err instanceof Error ? err.message : uiText("Проверка не выполнена"));
-              }
+                const result = await load() as { whatsapp?: { reachable?: boolean; configured?: boolean } } | null;
+                if (result) setNote(whatsappStatusNote(result.whatsapp), result.whatsapp?.reachable ? "success" : "info");
+              } finally { setCheckingWhatsApp(false); }
             }}
           >
-            {uiText("Проверить подключение")}</button>
+            {checkingWhatsApp ? uiText("Подождите…") : uiText("Проверить подключение")}</button>
           <button type="button" className="btn secondary" onClick={() => setEditingWhatsApp(true)}>
             {setup?.whatsapp?.configured ? uiText("Переподключить") : uiText("Подключить")}
           </button>
@@ -310,8 +345,8 @@ export function IntegrationsPage() {
         </form>
         {(companyTelegram?.connections || []).map((bot: any) => <div className="panel" key={bot.integrationId}><p><b>{bot.username ? `@${bot.username}` : "Telegram"}</b> · {uiMessage(bot.healthLabel)}</p><div className="actions">
           <button type="button" className="btn secondary" disabled={savingBot} onClick={async () => {
-            setSavingBot(true); setError("");
-            try { const result = await api.checkCompanyTelegram(bot.integrationId) as { healthLabel: string }; setNote(uiMessage(result.healthLabel)); await load(); }
+            setSavingBot(true); setError(""); setNote("");
+            try { const result = await api.checkCompanyTelegram(bot.integrationId) as { healthLabel: string; connected: boolean }; setNote(uiMessage(result.healthLabel), result.connected ? "success" : "info"); await load(); }
             catch (err) { setError(err instanceof Error ? err.message : uiText("Проверка не выполнена")); }
             finally { setSavingBot(false); }
           }}>{uiText("Проверить подключение")}</button>
@@ -453,39 +488,7 @@ export function IntegrationsPage() {
           {leadDetails("WEBHOOK_API")}
         </IntegrationDisclosure>
         <IntegrationDisclosure id="notifications" icon="notification" title={uiText("Telegram сотрудника")} description={uiText("Личные уведомления о работе")} {...summary(catalog?.notifications?.employeeTelegram)}>
-      {
-        <>
-          <h3 className="integ-section-title">{uiText("Уведомления")}</h3>
-          <div className="panel">
-            <b>{uiText("Telegram сотрудника")}</b>
-            <IntegrationHelp kind="employee_telegram" />
-            <p className="muted">{uiText("Личные уведомления. Это не заявки с сайта.")}</p>
-            {!telegramReady ? <p className="muted">{uiText("Администратору сервиса нужно настроить Telegram-бота для уведомлений.")}</p> : null}
-            <button
-              className="btn"
-              disabled={!telegramReady}
-              onClick={async () => {
-                const result = await api.beginTelegram();
-                setTelegram(result);
-              }}
-            >
-              {uiText("Подключить Telegram")}</button>
-            {telegram ? (
-              <p>
-                {telegram.deepLink ? (
-                  <a href={telegram.deepLink} target="_blank" rel="noreferrer">
-                    {uiText("Открыть бота")}</a>
-                ) : (
-                  uiText("Откройте бота и отправьте /start.")
-                )}
-              </p>
-            ) : null}
-            <p className="muted" style={{ marginTop: 8 }}>
-              {uiText("Также:")}{" "}<Link to="/settings">{uiText("Настройки")}</Link>
-            </p>
-          </div>
-        </>
-      }
+          <EmployeeTelegramPanel onChange={refresh} />
         </IntegrationDisclosure>
       </div>
     </section>

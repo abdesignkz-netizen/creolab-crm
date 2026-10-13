@@ -13,8 +13,11 @@ export function TikTokConnectionsPanel({ onChange }: { onChange: () => void }) {
   useEffect(() => { void load().catch(err => setError(err.message)); }, []);
   async function run(action: () => Promise<unknown>) {
     setBusy(true); setError("");
-    try { await action(); } catch (err) { setError(err instanceof Error ? err.message : uiText("Ошибка подключения")); }
-    finally { await load().catch(() => undefined); onChange(); setBusy(false); }
+    let actionFailed = false;
+    try { await action(); } catch (err) { actionFailed = true; setError(err instanceof Error ? err.message : uiText("Ошибка подключения")); }
+    try { await load(); }
+    catch (err) { if (!actionFailed) setError(err instanceof Error ? err.message : uiText("Ошибка загрузки")); }
+    finally { onChange(); setBusy(false); }
   }
   return <div className="panel"><div className="row"><h3>TikTok Leads</h3><IntegrationHelp kind="tiktok" /></div>
     <p className="muted">{uiText("Новые заявки из Instant Form автоматически поступают в CRM. Нужны приложение TikTok for Business с доступом к Lead Generation и права администратора рекламного аккаунта.")}</p>
