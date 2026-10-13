@@ -12,6 +12,7 @@ describe("Instagram login and shared webhook", () => {
   let prisma: Awaited<ReturnType<typeof createPrismaClient>>, server: ReturnType<ReturnType<typeof createApp>["listen"]>;
   let base = "", cookie = "", tenantId = "", integrationId = "", providerCalls = 0, accountId = "178410001", subscribed = 0, lastSendHost = "";
   let granted = ["instagram_business_basic", "instagram_business_manage_messages"];
+  let tokenEnvelope: "flat" | "wrapped" | "ambiguous" = "flat";
   const nativeFetch = globalThis.fetch, oldAppBase = config.appBaseUrl, oldApiBase = config.apiBaseUrl;
   const envNames = ["INSTAGRAM_APP_ID", "INSTAGRAM_APP_SECRET", "INSTAGRAM_VERIFY_TOKEN"];
   const original = Object.fromEntries(envNames.map(key => [key, process.env[key]]));
@@ -23,7 +24,7 @@ describe("Instagram login and shared webhook", () => {
       const u = new URL(String(url)); if(u.hostname === "127.0.0.1") return nativeFetch(url, init);
       assert.ok(["api.instagram.com", "graph.instagram.com"].includes(u.hostname)); providerCalls++;
       const json = (value: unknown) => new Response(JSON.stringify(value), { headers: { "Content-Type": "application/json" } });
-      if(u.pathname === "/oauth/access_token") { assert.ok(init?.body instanceof URLSearchParams); assert.equal(init.body.get("redirect_uri"), "https://crm.example.test/api/v1/integrations/instagram/callback"); return json({ access_token: "test-short", user_id: accountId, permissions: granted }); }
+      if(u.pathname === "/oauth/access_token") { assert.ok(init?.body instanceof URLSearchParams); assert.equal(init.body.get("redirect_uri"), "https://crm.example.test/api/v1/integrations/instagram/callback"); const token = { access_token: "test-short", user_id: accountId, permissions: granted }; return json(tokenEnvelope === "flat" ? token : { data: tokenEnvelope === "wrapped" ? [token] : [token, { ...token, user_id: "other" }] }); }
       if(u.pathname === "/access_token") { assert.equal(u.searchParams.get("grant_type"), "ig_exchange_token"); return json({ access_token: accessToken, expires_in: 5184000 }); }
       if(u.pathname.endsWith("/me")) return json({ id: "APP_SCOPED_ID", user_id: accountId, username: "test_company" });
       if(u.pathname.endsWith("/subscribed_apps")) { assert.equal(init?.method, "POST"); subscribed++; return json({ success: true }); }
@@ -58,6 +59,20 @@ describe("Instagram login and shared webhook", () => {
     const other = await prisma.tenant.findFirstOrThrow({ where: { id: { not: tenantId } } }); accountId = "178419999";
     await prisma.integration.create({ data: { tenantId: other.id, type: "instagram_direct", name: "Other", publicKey: `instagram_direct:${accountId}` } });
     assert.match((await finish(await begin())).headers.get("location") || "", /instagram=failed/); assert.equal(subscribed, count); accountId = "178410001";
+  });
+  it("accepts a single wrapped token but rejects ambiguous account responses before subscription", async () => {
+    const row = await prisma.integration.findUniqueOrThrow({ where: { id: integrationId } });
+    await prisma.channelConnection.updateMany({ where: { integrationId }, data: { autoReply: true } });
+    tokenEnvelope = "wrapped";
+    assert.match((await finish(await begin())).headers.get("location") || "", /instagram=connected/);
+    assert.equal(await prisma.channelConnection.count({ where: { integrationId, autoReply: true } }), 1);
+    const updated = await prisma.integration.findUniqueOrThrow({ where: { id: integrationId } });
+    assert.notEqual(updated.credentialId, row.credentialId);
+    const count = subscribed; tokenEnvelope = "ambiguous";
+    assert.match((await finish(await begin())).headers.get("location") || "", /instagram=failed/);
+    assert.equal(subscribed, count);
+    assert.equal((await prisma.integration.findUniqueOrThrow({ where: { id: integrationId } })).credentialId, updated.credentialId);
+    tokenEnvelope = "flat";
   });
   it("verifies the shared webhook and routes signed deliveries only to the matching account", async () => {
     assert.equal((await call("/public/integrations/instagram?hub.mode=subscribe&hub.verify_token=wrong&hub.challenge=test")).status, 403);

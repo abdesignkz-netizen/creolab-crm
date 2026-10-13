@@ -4,7 +4,7 @@ import { api } from "../lib/api";
 import { InlineFeedback } from "./InlineFeedback";
 import { useUiText } from "../lib/uiText";
 
-type Row = { id: string; aiEnabled: boolean; connected: boolean };
+type Row = { id: string; aiEnabled: boolean; connected: boolean; automaticReplies: boolean };
 export function ChannelAiControl({ id }: { id: string }) {
   const t = useUiText();
   const [row, setRow] = useState<Row | null>(null), [readiness, setReadiness] = useState<string | null>(null);
@@ -19,6 +19,7 @@ export function ChannelAiControl({ id }: { id: string }) {
       catch(err) { setError(err instanceof Error ? err.message : t("Не удалось сохранить")); } finally { setBusy(false); }
     }}/><span>{t(busy ? "Сохраняем…" : "Отвечать с помощью ИИ")}</span></label>
     {row?.aiEnabled && readiness && <p className="warning">{t("ИИ ещё не готов к работе: проверьте публикацию инструкций, модель и включение ИИ в настройках.")}</p>}
+    {row?.aiEnabled && !row.automaticReplies && <p className="warning">{t("Автоматические ответы ограничены общими правилами. В разделе «Кому и когда отвечать» выберите автоматический режим для этого канала и снимите общую паузу.")}</p>}
     <div className="actions"><Link to="/settings/ai-manager">{t("Знания и цель ИИ")}</Link><Link to="/settings/ai-automation">{t("Кому и когда отвечать")}</Link><Link to="/conversations">{t("Открыть диалоги")}</Link></div>
     {error && <InlineFeedback kind="error">{error}</InlineFeedback>}{note && <InlineFeedback kind="success">{note}</InlineFeedback>}
   </div>;

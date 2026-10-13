@@ -2361,10 +2361,17 @@ export function createApp(prisma: PrismaClient) {
   app.get("/api/v1/integrations/channels/ai", async (req, res) => {
     const { requireIntegrationsAccess, requireTenant } = await import("./lib/access.ts");
     const auth = await requireAuth(req); requireIntegrationsAccess(auth); const { tenantId } = requireTenant(auth);
-    const { aiChannelTypes } = await import("./services/channelDeliveryService.ts");
+    const { aiChannelTypes, aiSourceChannel } = await import("./services/channelDeliveryService.ts");
+    const { parseAIAutomationSettings } = await import("./services/aiAutomationSettings.ts");
     const { directAiReadiness } = await import("./services/whatsappAiService.ts");
+    const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
+    const settings = parseAIAutomationSettings(tenant.settingsJson);
+    const paused = Boolean((tenant.settingsJson as { runtime?: { aiPaused?: boolean } })?.runtime?.aiPaused);
     const rows = await prisma.integration.findMany({ where: { tenantId, type: { in: aiChannelTypes } }, include: { channelConnections: true } });
-    res.json({ readiness: await directAiReadiness(prisma, tenantId), items: rows.map(row => ({ id: row.id, type: row.type, name: row.name, connected: row.status === "active", aiEnabled: row.channelConnections.some(c => c.autoReply), lastMessageAt: row.lastEventAt })) });
+    res.json({ readiness: await directAiReadiness(prisma, tenantId), items: rows.map(row => {
+      const mode = settings.integrationModes[row.id] || row.automationMode || settings.sourceModes[aiSourceChannel(row.type)] || settings.sourceModes[row.type] || settings.defaultMode;
+      return { id: row.id, type: row.type, name: row.name, connected: row.status === "active", aiEnabled: row.channelConnections.some(c => c.autoReply), automaticReplies: !paused && settings.analyzeNewRequests && mode === "AUTO", lastMessageAt: row.lastEventAt };
+    }) });
   });
   app.post("/api/v1/integrations/channels/:id/ai", json, async (req, res) => {
     const { setDirectWhatsAppAi } = await import("./services/whatsappAiService.ts");

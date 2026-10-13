@@ -1,7 +1,7 @@
 import { deliveredConversationMessage } from "./conversationMessageState.ts";
 import { randomUUID } from "node:crypto";
 import type { Prisma, PrismaClient } from "@creolab/db";
-import { directWhatsAppTypes } from "./whatsappConnectionService.ts";
+import { aiChannelTypes } from "./channelDeliveryService.ts";
 import { crmModeToSeller } from "@creolab/contracts";
 import {
   isWithinConversationHours,
@@ -122,9 +122,9 @@ export async function applyConfiguredHandoff(
   const detected = detectHandoffReason(input.text || "", input.analysis);
   if (!detected || !settings.handoff.triggers[detected.trigger]) return null;
   const conversation = await prisma.conversation.findFirst({ where: { id: conversationId, tenantId }, include: { connection: { include: { integration: true } } } });
-  // Direct WhatsApp owns the atomic handoff + customer acknowledgment. Background
+  // The channel reply worker owns the atomic handoff + customer acknowledgment. Background
   // CRM analysis must not win the race and cancel that reply before it is queued.
-  if (conversation?.connection?.autoReply && directWhatsAppTypes.includes(conversation.connection.integration.type)) return null;
+  if (conversation?.connection?.autoReply && aiChannelTypes.includes(conversation.connection.integration.type)) return null;
   if (!conversation || conversation.mode === "human") return null;
   if (settings.handoff.afterMode === "assist" && conversation.mode === "paused") return null;
   const nextMode = settings.handoff.afterMode === "assist" ? "paused" : "human";

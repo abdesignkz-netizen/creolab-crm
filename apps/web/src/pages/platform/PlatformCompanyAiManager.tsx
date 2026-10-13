@@ -23,6 +23,7 @@ type ActivationPiece = {
 
 type Activation = {
   whatsappConnected?: boolean;
+  channelConnected?: boolean;
   prompt?: ActivationPiece;
   knowledge?: ActivationPiece;
   syncedAt?: string | null;
@@ -51,7 +52,7 @@ export function PlatformCompanyAiManager({ tenantId }: { tenantId: string }) {
   const activation = (data.activation || {}) as Activation;
   const promptState = activation.prompt || {};
   const knowledgeState = activation.knowledge || {};
-  const whatsappLabel = activation.whatsappConnected ? uiText("Подключён") : uiText("Не подключён");
+  const whatsappLabel = (activation.channelConnected ?? activation.whatsappConnected) ? uiText("Подключён") : uiText("Не подключён");
 
   async function sendToWhatsApp() {
     setSyncBusy(true);
@@ -73,7 +74,7 @@ export function PlatformCompanyAiManager({ tenantId }: { tenantId: string }) {
     <div className="stack">
       <div className="panel stack">
         <p>
-          {uiText("QR-код, Green API и официальный WhatsApp используют промпт и базу знаний выбранной компании. Настройте ИИ отдельно от подключения номера.")}</p>
+          {uiText("WhatsApp, Telegram, Instagram и чат сайта используют общие инструкции и базу знаний компании. Подключение канала и правила ИИ настраиваются отдельно.")}</p>
         <div className="ai-activation">
           <p className="integ-status-line">
             {uiText("Промт")}<span className={statusBadgeClass(promptState.label || "Не задан")}>{uiMessage(promptState.label) || uiText("Не задан")}</span>
@@ -86,7 +87,7 @@ export function PlatformCompanyAiManager({ tenantId }: { tenantId: string }) {
           </p>
           {knowledgeState.reason ? <p className="muted">{uiMessage(knowledgeState.reason)}</p> : null}
           <p className="integ-status-line">
-            WhatsApp
+            {uiText("Канал связи")}
             <span className={statusBadgeClass(whatsappLabel)}>{whatsappLabel}</span>
           </p>
           <p className="muted">
@@ -94,13 +95,13 @@ export function PlatformCompanyAiManager({ tenantId }: { tenantId: string }) {
             {activation.syncedAt ? uiText(" · последняя отправка {p0}", {p0: formatDateTime(activation.syncedAt)}) : ""}
           </p>
         </div>
-        <p className="muted">{uiText("Для QR и Meta ручная синхронизация не нужна: опубликованные промпт и база знаний применяются автоматически при подготовке ответов. Green API для этого не требуется.")}</p>
+        <p className="muted">{uiText("В подключённых каналах опубликованные инструкции и база знаний применяются автоматически. Ручная синхронизация нужна только для Green API.")}</p>
       </div>
       <ModelSettings tenantId={tenantId} runtime={data.runtime || {}} onSaved={load} />
       <section className="panel stack">
-        <h3>{uiText("Подключения WhatsApp и готовность ИИ")}</h3>
+        <h3>{uiText("Каналы связи и готовность ИИ")}</h3>
         {(data.connections || []).map((connection: any) => <div className="card stack" key={connection.id}>
-          <b>{connection.type === "whatsapp_qr" ? "WhatsApp · QR" : connection.type === "whatsapp_cloud" ? "WhatsApp · Meta" : "WhatsApp · Green API"} · {connection.name}</b>
+          <b>{connection.type === "whatsapp_qr" ? "WhatsApp · QR" : connection.type === "whatsapp_cloud" ? "WhatsApp · Meta" : connection.type === "whatsapp_seller" ? "WhatsApp · Green API" : connection.type === "telegram_bot" ? "Telegram" : connection.type === "instagram_direct" ? "Instagram" : uiText("Чат на сайте")} · {connection.name}</b>
           <p>{uiMessage(connection.activation?.prompt?.label)}</p>
           <p className="muted">{uiMessage(connection.activation?.prompt?.reason)}</p>
           {connection.type === "whatsapp_seller" && connection.status === "active" ? <>
@@ -113,7 +114,7 @@ export function PlatformCompanyAiManager({ tenantId }: { tenantId: string }) {
             </div>
           </> : null}
         </div>)}
-        {!data.connections?.length && <p>{uiText("Подключите WhatsApp в кабинете компании любым удобным способом.")}</p>}
+        {!data.connections?.length && <p>{uiText("Подключите канал связи в разделе интеграций компании.")}</p>}
       </section>
       <PromptEditor tenantId={tenantId} initial={promptText} activation={promptState} onSaved={load} />
       <KnowledgeEditor tenantId={tenantId} items={data.knowledge || []} activation={knowledgeState} onSaved={load} />
@@ -148,7 +149,7 @@ function PromptEditor({
         activation?: Activation;
       };
       notifySaved(
-        saved.activation?.prompt?.live ? uiText("Промт активен в WhatsApp") : uiText("Промт сохранён. В WhatsApp пока не активен"),
+        saved.activation?.prompt?.live ? uiText("Инструкции опубликованы и используются в подключённом канале") : uiText("Инструкции сохранены. Проверьте подключение канала и включение ИИ."),
       );
       await onSaved();
     } catch (err) {
@@ -223,8 +224,8 @@ function KnowledgeEditor({
       ) as { activation?: Activation };
       notifySaved(
         saved.activation?.knowledge?.live
-          ? uiText("База знаний активна в WhatsApp")
-          : uiText("Материал сохранён. В WhatsApp пока не активен"),
+          ? uiText("База знаний используется в подключённом канале")
+          : uiText("Материал сохранён. Проверьте подключение канала и включение ИИ."),
       );
       resetForm();
       await onSaved();
@@ -336,7 +337,7 @@ function ModelSettings({ tenantId, runtime, onSaved }: { tenantId: string; runti
     finally { setBusy(false); }
   }}>
     <h3>{uiText("Модель ИИ компании")}</h3>
-    <p className="muted">{uiText("QR и Meta используют этот ключ модели. Green API продолжает работать через подключённый AI Manager, куда передаются промпт, база знаний и название модели. Ключ модели ИИ отличается от API Token Green API.")}</p>
+    <p className="muted">{uiText("WhatsApp QR и Cloud, Telegram, Instagram и чат сайта используют этот ключ модели. Green API продолжает работать через подключённый AI Manager.")}</p>
     <label>{uiText("Провайдер")}<select name="provider" defaultValue={runtime.provider || "openai"}>
       <option value="openai">OpenAI</option><option value="anymodel">AnyModel</option>
       {runtime.provider && !["openai", "anymodel"].includes(runtime.provider) && <option value={runtime.provider}>{runtime.provider}</option>}

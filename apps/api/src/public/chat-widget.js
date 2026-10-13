@@ -54,19 +54,21 @@
     }
     async function poll() {
       if (!opened || !token || busy || document.hidden) return;
-      try { render(await request('/messages')); $('.error').textContent = ''; }
-      catch(error) { showError(error); }
+      const current = token;
+      try { const data = await request('/messages'); if(current !== token) return; render(data); $('.error').textContent = ''; }
+      catch(error) { if(current === token) showError(error); }
     }
     function toggle(value) { opened = value; $('.chat').hidden = !value; $('.launcher').setAttribute('aria-expanded', String(value)); if(value){void poll();$('textarea').focus();}else $('.launcher').focus(); }
     $('.launcher').onclick = () => toggle(!opened); $('.close').onclick = () => toggle(false);
     root.addEventListener('keydown', event => { if(event.key === 'Escape') toggle(false); });
     $('.new').onclick = () => {
+      if (busy) return;
       if (token && !window.confirm('Начать новый диалог? Предыдущая переписка останется у компании.')) return;
       token = ''; ready = false; pending = null; lastVersion = ''; try { localStorage.removeItem(storeKey); } catch {} welcome(); $('.error').textContent=''; $('.status').textContent='Чат с компанией'; $('textarea').focus();
     };
     $('form').onsubmit = async event => {
       event.preventDefault(); const text = $('textarea').value.trim(); if(busy || !text) return;
-      busy = true; $('.send').disabled = true; $('.error').textContent = '';
+      busy = true; $('.send').disabled = true; $('.new').disabled = true; $('.error').textContent = '';
       // Keep the same request key after an ambiguous network failure.
       if (!pending || pending.text !== text) pending = { text, idempotencyKey: crypto.randomUUID() };
       try {
@@ -74,7 +76,7 @@
         if (!ready) { await request('/session', {}); ready = true; }
         render(await request('/messages', pending)); $('textarea').value = ''; pending = null;
       } catch(error) { showError(error); }
-      finally { busy = false; $('.send').disabled = false; $('textarea').focus(); }
+      finally { busy = false; $('.send').disabled = false; $('.new').disabled = false; $('textarea').focus(); }
     };
     $('textarea').addEventListener('keydown', event => { if(event.key === 'Enter' && !event.shiftKey && !event.isComposing){event.preventDefault();$('form').requestSubmit();} });
     setInterval(() => { if(host.isConnected) void poll(); }, 5000);

@@ -10,7 +10,7 @@ import { PlatformCompanyAiManager } from "./PlatformCompanyAiManager";
 const WHATSAPP_LABEL: Record<string, string> = {
   connected: "Подключён",
   active: "Подключён",
-  not_connected: "Нет WhatsApp",
+  not_connected: "Канал не подключён",
 };
 
 export function PlatformAiManagersPage() {
@@ -45,7 +45,7 @@ function AiManagerList() {
         <div>
           <h2>{uiText("AI-менеджеры")}</h2>
           <p className="muted">
-            {uiText("Для каждой компании видно, активны ли промт и база знаний в WhatsApp. Зелёный статус — бот уже отвечает по этим текстам.")}</p>
+            {uiText("Здесь видно, готовы ли инструкции и база знаний к ответам в подключённых каналах компании.")}</p>
         </div>
       </div>
       <form
@@ -63,14 +63,14 @@ function AiManagerList() {
       {!data ? (
         <div className="state">{uiText("Загрузка…")}</div>
       ) : !(data.items || []).length ? (
-        <p className="muted">{uiText("Компаний пока нет. Добавьте компанию — здесь появится её WhatsApp AI.")}</p>
+        <p className="muted">{uiText("Компаний пока нет. Добавьте компанию — здесь появятся настройки её ИИ.")}</p>
       ) : (
         <div className="stats-table-wrap">
           <table className="stats-table">
             <thead>
               <tr>
                 <th>{uiText("Компания")}</th>
-                <th>WhatsApp</th>
+                <th>{uiText("Канал связи")}</th>
                 <th>{uiText("Промт")}</th>
                 <th>{uiText("База знаний")}</th>
                 <th>{uiText("Обновлено")}</th>
@@ -137,7 +137,7 @@ function AiManagerDetail({ tenantId }: { tenantId: string }) {
             {" · "}
             <Link to={`/admin/companies/${tenantId}`}>{uiText("Карточка компании")}</Link>
           </p>
-          <h3>{name || "WhatsApp AI"}</h3>
+          <h3>{name || uiText("ИИ-менеджер")}</h3>
         </div>
       </div>
       <PlatformCompanyAiManager tenantId={tenantId} />

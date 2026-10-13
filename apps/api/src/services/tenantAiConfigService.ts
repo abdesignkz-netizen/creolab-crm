@@ -7,6 +7,7 @@ import type { AuthContext } from "../lib/types.ts";
 import { getEffectiveTenantSettings, getEffectiveLlmConfig, invalidateRuntimeConfig } from "./runtimeSettings.ts";
 import type { WhatsAppSellerSchema } from "./aiManagerConfig.ts";
 import { AI_LANGUAGE_POLICY } from "./aiLanguagePolicy.ts";
+import { aiChannelTypes } from "./channelDeliveryService.ts";
 
 const PLATFORM_BASE_PROMPT = `Базовые правила BasQar:
 - ${AI_LANGUAGE_POLICY}
@@ -61,6 +62,7 @@ export type AiLivePiece = {
 
 export type WhatsAppAiActivation = {
   whatsappConnected: boolean;
+  channelConnected?: boolean;
   prompt: AiLivePiece;
   knowledge: AiLivePiece;
   syncedAt: string | null;
@@ -102,8 +104,9 @@ export function describeWhatsAppAiActivation(input: {
   enabled?: boolean;
   unavailableReason?: string | null;
 }): WhatsAppAiActivation {
-  if (["whatsapp_qr", "whatsapp_cloud"].includes(input.integration?.type || "")) {
+  if (aiChannelTypes.includes(input.integration?.type || "")) {
     const connected = input.integration?.status === "active";
+    const whatsapp = ["whatsapp_qr", "whatsapp_cloud"].includes(input.integration?.type || "");
     const enabled = connected && !input.unavailableReason && input.enabled !== false && input.integration?.channelConnections?.some(channel => channel.status === "active" && channel.autoReply);
     const unavailableMessage = input.unavailableReason === "ai_model_missing" ? "Промпт опубликован. Настройте подключение к модели ИИ."
       : input.unavailableReason === "ai_disabled" ? "ИИ отключён в настройках компании или сервиса."
@@ -111,9 +114,9 @@ export function describeWhatsAppAiActivation(input: {
       : input.unavailableReason === "feature_required" ? "ИИ-менеджер не входит в тариф"
       : input.unavailableReason === "tenant_inactive" ? "Доступ компании приостановлен" : null;
     const piece = (ready: boolean, kind: "prompt" | "knowledge"): AiLivePiece => ({ ready, live: Boolean(ready && enabled),
-      label: !ready ? (kind === "prompt" ? "Не задан" : "Не задана") : enabled ? (kind === "prompt" ? "Активен в WhatsApp" : "Активна в WhatsApp") : (kind === "prompt" ? "Не активен в WhatsApp" : "Не активна в WhatsApp"),
-      reason: unavailableMessage || (enabled ? "ИИ использует опубликованную версию при подготовке каждого ответа." : "Включите ИИ-ответы для подключённого номера в разделе интеграций.") });
-    return { whatsappConnected: connected, prompt: piece(Boolean(input.prompt.trim()), "prompt"), knowledge: piece(input.knowledge.some(item => item.content.trim()), "knowledge"), syncedAt: null, note: "QR и Meta используют опубликованные настройки напрямую.", delivery: null };
+      label: !ready ? (kind === "prompt" ? "Не задан" : "Не задана") : whatsapp ? enabled ? (kind === "prompt" ? "Активен в WhatsApp" : "Активна в WhatsApp") : (kind === "prompt" ? "Не активен в WhatsApp" : "Не активна в WhatsApp") : enabled ? "Используется в канале" : "Не используется в канале",
+      reason: unavailableMessage || (enabled ? "ИИ использует опубликованную версию при подготовке каждого ответа." : "Включите ИИ-ответы для этого канала в разделе интеграций.") });
+    return { whatsappConnected: whatsapp && connected, channelConnected: connected, prompt: piece(Boolean(input.prompt.trim()), "prompt"), knowledge: piece(input.knowledge.some(item => item.content.trim()), "knowledge"), syncedAt: null, note: "Подключённые каналы используют опубликованные настройки ИИ напрямую.", delivery: null };
   }
   const schema = asRecord(input.integration?.schemaJson) as WhatsAppSellerSchema;
   const sync = schema.aiSync;
@@ -140,13 +143,13 @@ export function describeWhatsAppAiActivation(input: {
 }
 
 async function describeTenantWhatsAppAiActivation(prisma: PrismaClient, tenantId: string, input: Parameters<typeof describeWhatsAppAiActivation>[0]) {
-  const unavailableReason = ["whatsapp_qr", "whatsapp_cloud"].includes(input.integration?.type || "")
+  const unavailableReason = aiChannelTypes.includes(input.integration?.type || "")
     ? await (await import("./whatsappAiService.ts")).directAiReadiness(prisma, tenantId)
     : null;
   return describeWhatsAppAiActivation({ ...input, unavailableReason });
 }
 
-const whatsappAiTypes = ["whatsapp_seller", "whatsapp_qr", "whatsapp_cloud"];
+const whatsappAiTypes = ["whatsapp_seller", ...aiChannelTypes]; // Legacy response names remain API-compatible.
 const aiChannels = { channelConnections: { select: { autoReply: true, status: true } } } as const;
 function pickAiConnection<T extends { status: string; type: string; channelConnections: Array<{ autoReply: boolean; status: string }> }>(rows: T[]): T | null {
   const rank = (row: T) => row.status === "active" ? (row.type === "whatsapp_seller" || row.channelConnections.some(channel => channel.autoReply && channel.status === "active") ? 2 : 1) : 0;

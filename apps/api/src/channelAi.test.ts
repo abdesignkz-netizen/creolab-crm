@@ -8,6 +8,8 @@ import { encryptSecret } from "./lib/secretBox.ts";
 import { invalidateRuntimeConfig } from "./services/runtimeSettings.ts";
 import { processWhatsAppAiReply } from "./services/whatsappAiService.ts";
 import { deliverChannelMessage } from "./services/channelDeliveryService.ts";
+import { applyConfiguredHandoff } from "./services/aiConversationPolicyService.ts";
+import { describeWhatsAppAiActivation } from "./services/tenantAiConfigService.ts";
 import { resetRateLimits } from "./lib/rateLimit.ts";
 
 describe("AI manager across messaging channels", () => {
@@ -86,6 +88,24 @@ describe("AI manager across messaging channels", () => {
     const uncertain = await inbound("telegram", "1004"), pending = await generate(uncertain); failSend = true;
     await assert.rejects(() => deliverChannelMessage(prisma, tenantId, pending.id)); failSend = false;
     await deliverChannelMessage(prisma, tenantId, pending.id); assert.equal(sends, count + 1); assert.equal((await prisma.message.findUniqueOrThrow({ where: { id: pending.id } })).operationState, "unknown");
+  });
+  it("channel worker owns handoff and sends one acknowledgement without exposing its private summary", async () => {
+    await prisma.tenant.update({ where: { id: tenantId }, data: { settingsJson: { aiAutomation: { defaultMode: "AUTO", handoff: { triggers: { CLIENT_REQUESTED_HUMAN: true } } } } } });
+    for (const [type, sender] of [["telegram", "1050"], ["instagram", "2050"]] as const) {
+      const id = await inbound(type, sender, "Хочу поговорить с менеджером");
+      assert.equal(await applyConfiguredHandoff(prisma, tenantId, id, { text: "Хочу поговорить с менеджером" }), null);
+      await processWhatsAppAiReply(prisma, await event(id), async () => { throw new Error("Explicit handoff must not call the model"); });
+      const conversation = await prisma.conversation.findUniqueOrThrow({ where: { id } }); assert.equal(conversation.mode, "human");
+      const reply = await prisma.message.findFirstOrThrow({ where: { conversationId: id, senderKind: "ai" } });
+      assert.match(reply.text || "", /Передал ваш вопрос сотруднику/);
+      const count = sends; await deliverChannelMessage(prisma, tenantId, reply.id); await deliverChannelMessage(prisma, tenantId, reply.id); assert.equal(sends, count + 1);
+      assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id } })).waitingFor, "MANAGER");
+    }
+    const media = await inbound("instagram", "2051", "[Вложение Instagram: audio. Откройте оригинал в Instagram.]");
+    await processWhatsAppAiReply(prisma, await event(media), async () => { throw new Error("Unavailable media must not be guessed"); });
+    assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id: media } })).attentionReason, "AI_STAFF_ACTION");
+    const activation = describeWhatsAppAiActivation({ prompt: "Инструкция", knowledge: [{ title: "Услуги", content: "Описание" }], integration: { type: "telegram_bot", status: "active", channelConnections: [{ status: "active", autoReply: true }] } });
+    assert.equal(activation.prompt.live, true); assert.equal(activation.channelConnected, true); assert.equal(activation.whatsappConnected, false);
   });
   it("respects the audience, quiet hours and contact opt-out across channels", async () => {
     await prisma.tenant.update({ where: { id: tenantId }, data: { settingsJson: { aiAutomation: { defaultMode: "AUTO", replyAudience: { audience: "new", since: new Date(Date.now() + 60000).toISOString() } } } } });
