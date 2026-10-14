@@ -1,3 +1,4 @@
+import { requireEsfEnabled } from "./esfAvailability.ts";
 import { documentOrganization } from "./documentOrganization.ts";
 import { findRegisteredEsfAvr } from "./registeredEsfAvr.ts";
 import type { PrismaClient } from "@creolab/db";
@@ -70,6 +71,7 @@ export function esfInvoiceMissingFieldsError(readiness: EsfInvoiceReadiness) {
 }
 
 export async function getEsfInvoiceReadiness(prisma: PrismaClient, auth: AuthContext, dealId: string) {
+  await requireEsfEnabled(prisma);
   requireDocumentsAccess(auth);
   if (!auth.activeMembership) throw new ApiError(403, "no_tenant", "Нет активной компании");
   const tid = auth.activeMembership.tenantId;

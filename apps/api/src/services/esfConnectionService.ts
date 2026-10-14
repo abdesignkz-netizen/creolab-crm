@@ -1,3 +1,4 @@
+import { requireEsfEnabled } from "./esfAvailability.ts";
 import { certificateFromSignedAuthTicket, createEsfAuthTicket, createEsfSessionFromSignedTicket } from "../integrations/esf/EsfTicketAuth.ts";
 import { randomUUID } from "node:crypto";
 import type { PrismaClient } from "@creolab/db";
@@ -172,6 +173,7 @@ export async function getUsableEsfSession(
   tenantId: string,
   config = readEsfConfig(),
 ) {
+  await requireEsfEnabled(prisma);
   const environment = connectionEnvironment(config);
   const row = await getEsfConnectionRow(prisma, tenantId, environment);
   if (!row) return null;
@@ -199,6 +201,7 @@ export async function reopenEsfSessionFromStoredAuth(
   tenantId: string,
   config = readEsfConfig(),
 ) {
+  await requireEsfEnabled(prisma);
   const environment = connectionEnvironment(config);
   const row = await getEsfConnectionRow(prisma, tenantId, environment);
   if (!row?.authCertificatePem || !row.organizationBin) {
@@ -272,6 +275,7 @@ export async function markEsfReauthRequired(
 }
 
 export async function getEsfConnection(prisma: PrismaClient, auth: AuthContext) {
+  await requireEsfEnabled(prisma);
   const membership = requireTenant(auth);
   requireConnectPermission(auth);
   const config = readEsfConfig();
@@ -355,6 +359,7 @@ function resolveAuthCertificate(input: { authCmsBase64?: string; authCertificate
 }
 
 export async function prepareEsfAuthTicket(prisma: PrismaClient, auth: AuthContext, input: Record<string, unknown>) {
+  await requireEsfEnabled(prisma);
   const membership = requireTenant(auth);
   requireConnectPermission(auth);
   rejectPrivateKeyFields(input);
@@ -372,6 +377,7 @@ export async function connectEsf(
   auth: AuthContext,
   raw: Record<string, unknown>,
 ) {
+  await requireEsfEnabled(prisma);
   const membership = requireTenant(auth);
   requireConnectPermission(auth);
   rejectPrivateKeyFields(raw);
@@ -565,6 +571,7 @@ export async function connectEsf(
 }
 
 export async function disconnectEsf(prisma: PrismaClient, auth: AuthContext) {
+  await requireEsfEnabled(prisma);
   const membership = requireTenant(auth);
   requireConnectPermission(auth);
   const config = readEsfConfig();
@@ -610,6 +617,7 @@ export async function refreshEsfConnectionStatus(
   tenantId: string,
   config: EsfConfig = readEsfConfig(),
 ) {
+  await requireEsfEnabled(prisma);
   const environment = connectionEnvironment(config);
   const row = await getEsfConnectionRow(prisma, tenantId, environment);
   if (!row?.sessionId) return row;

@@ -27,7 +27,7 @@ let uploadStatus: number;
 let uploadBody: string;
 let remoteSession: string;
 let transportFailure: boolean;
-const prisma = { esfConnection: { findUnique: async () => row } } as unknown as PrismaClient;
+const prisma = { platformSetting: { findUnique: async () => ({ valueJson: { features: { esf: true } } }) }, esfConnection: { findUnique: async () => row } } as unknown as PrismaClient;
 const auth = { user: { id: "user", platformAdmin: false }, activeMembership: { tenantId: "tenant", role: "owner" } } as AuthContext;
 
 beforeEach(() => {

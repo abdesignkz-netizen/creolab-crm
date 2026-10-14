@@ -1,3 +1,4 @@
+import { isEsfEnabled, requireEsfEnabled } from "./esfAvailability.ts";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
@@ -74,13 +75,14 @@ export function isDocumentAttention(kind: DocumentKind, status: string, errorCod
 
 export async function countDocumentAttention(prisma: PrismaClient, tenantId: string) {
   if (!(await isDocumentsEnabled(prisma, tenantId))) return 0;
+  const esfEnabled = await isEsfEnabled(prisma);
   const [contracts, invoices, edocs] = await Promise.all([
     prisma.contract.count({ where: { tenantId, status: { in: [...CONTRACT_ATTENTION] } } }),
     prisma.invoice.count({ where: { tenantId, status: { in: [...INVOICE_ATTENTION] } } }),
     prisma.electronicDocument.count({
       where: {
         tenantId,
-        type: { in: ["AVR", "ESF"] },
+        type: { in: esfEnabled ? ["AVR", "ESF"] : ["AVR"] },
         OR: [{ status: { in: ["SENT", "PENDING_SIGNATURE", "PARTIALLY_SIGNED"] } }, { errorCode: { not: null } }],
       },
     }),
@@ -111,6 +113,8 @@ export async function listTenantDocuments(
     throw new ApiError(403, "documents_disabled", "Контур документов выключен в настройках");
   }
 
+  const esfEnabled = await isEsfEnabled(prisma);
+  if (String(query.kind).toUpperCase() === "ESF") await requireEsfEnabled(prisma);
   const electronicOnly = query.kind === "EDOC";
   const kindRaw = String(query.kind || "").trim().toUpperCase();
   const kind = DOCUMENT_KINDS.includes(kindRaw as DocumentKind) ? (kindRaw as DocumentKind) : "";
@@ -161,7 +165,7 @@ export async function listTenantDocuments(
         contact: { select: { name: true } },
         assignee: { select: { user: { select: { name: true } } } },
         electronicDocuments: {
-          where: { type: { in: ["AVR", "ESF"] } },
+          where: { type: { in: esfEnabled ? ["AVR", "ESF"] : ["AVR"] } },
           orderBy: { createdAt: "desc" as const },
           take: 50,
           select: { type: true, status: true },
@@ -191,7 +195,7 @@ export async function listTenantDocuments(
             take: 300,
           })
         : [],
-      !kind || kind === "ESF"
+      esfEnabled && (!kind || kind === "ESF")
         ? prisma.electronicDocument.findMany({
             where: edocWhere("ESF"),
             include,
@@ -202,12 +206,12 @@ export async function listTenantDocuments(
       !electronicOnly && (!kind || kind === "CONTRACT") ? prisma.contract.count({ where: contractWhere }) : 0,
       !electronicOnly && (!kind || kind === "INVOICE") ? prisma.invoice.count({ where: invoiceWhere }) : 0,
       !kind || kind === "AVR" ? prisma.electronicDocument.count({ where: edocWhere("AVR") }) : 0,
-      !kind || kind === "ESF" ? prisma.electronicDocument.count({ where: edocWhere("ESF") }) : 0,
+      esfEnabled && (!kind || kind === "ESF") ? prisma.electronicDocument.count({ where: edocWhere("ESF") }) : 0,
       countDocumentAttention(prisma, tid),
       prisma.contract.count({ where: base }),
       prisma.invoice.count({ where: base }),
       prisma.electronicDocument.count({ where: { ...base, type: "AVR" } }),
-      prisma.electronicDocument.count({ where: { ...base, type: "ESF" } }),
+      esfEnabled ? prisma.electronicDocument.count({ where: { ...base, type: "ESF" } }) : 0,
     ]);
 
   const items = [

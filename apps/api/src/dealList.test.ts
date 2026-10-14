@@ -18,6 +18,7 @@ describe("Deal list references and document delivery", () => {
   before(async () => {
     prisma = await createPrismaClient();
     await seedDatabase();
+    await (await import("./services/runtimeSettings.ts")).savePlatformSettings(prisma, { features: { esf: true } });
     const member = await prisma.membership.findFirstOrThrow({ where: { role: "owner" }, include: { tenant: true, user: true } });
     tenantId = member.tenantId;
     auth = { user: member.user, activeMembership: member, memberships: [member], sessionId: "test", client: "web" } as AuthContext;

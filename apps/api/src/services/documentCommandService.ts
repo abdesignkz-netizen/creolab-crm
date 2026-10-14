@@ -1,3 +1,4 @@
+import { requireEsfEnabled } from "./esfAvailability.ts";
 import type { PrismaClient } from "@creolab/db";
 import { config } from "../config.ts";
 import { ApiError } from "../errors.ts";
@@ -166,6 +167,7 @@ export async function executeDocumentCommand(
   const membership = requireTenant(auth);
   const detected = detectDocumentCommand(input.text);
   const action = (input.action || detected?.action || "") as DocumentAction;
+  if (["create_esf", "validate_esf", "send_esf", "send_avr"].includes(action)) await requireEsfEnabled(prisma);
   if (!DOCUMENT_ACTIONS.includes(action)) {
     throw new ApiError(422, "unknown_document_command", "Не понял команду по документам");
   }

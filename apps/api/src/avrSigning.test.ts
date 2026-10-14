@@ -28,6 +28,7 @@ describe("AVR signing in BasQar", () => {
     verifier = await startTestKalkan();
     prisma = await createPrismaClient();
     await (await import("../../../packages/db/src/seed.ts")).seedDatabase();
+    await (await import("./services/runtimeSettings.ts")).savePlatformSettings(prisma, { features: { esf: true } });
     await new Promise<void>(resolve => { server = createApp(prisma).listen(0, "127.0.0.1", resolve); });
     base = `http://127.0.0.1:${(server.address() as {port:number}).port}`;
     for (const email of ["owner@creolab.example", "owner@demo-agency.example"]) {

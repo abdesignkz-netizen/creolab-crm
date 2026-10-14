@@ -1,3 +1,4 @@
+import { isEsfEnabled } from "./esfAvailability.ts";
 import { assertFileCapacity } from "./billingResourceService.ts";
 import type { PrismaClient } from "@creolab/db";
 import { createHash, randomUUID } from "node:crypto";
@@ -79,7 +80,7 @@ export async function getLegalProfile(prisma: PrismaClient, auth: AuthContext) {
   const tenant=await prisma.tenant.findUnique({where:{id:membership.tenantId},select:{settingsJson:true}});
   const settings=tenant?.settingsJson as {documents?:{directorBasis?:string}}|null;
   const marks = row ? await invoiceMarkFlags(prisma, membership.tenantId, row.id) : { hasStamp: false, hasSignature: false };
-  return {...serializeLegalProfile(row),directorBasis:settings?.documents?.directorBasis||null, ...marks};
+  return {...serializeLegalProfile(row), ...(!await isEsfEnabled(prisma) ? { esfIntegrationEnabled: false, defaultCatalogTruId: null } : {}),directorBasis:settings?.documents?.directorBasis||null, ...marks};
 }
 
 export async function getTenantDocumentFlags(prisma: PrismaClient, tenantId: string) {
@@ -97,7 +98,7 @@ export async function getTenantDocumentFlags(prisma: PrismaClient, tenantId: str
     ...DEFAULT_DOCUMENT_FLAGS,
     documentsEnabled: row?.documentsEnabled ?? DEFAULT_DOCUMENT_FLAGS.documentsEnabled,
     contractSigningEnabled: row?.contractSigningEnabled ?? DEFAULT_DOCUMENT_FLAGS.contractSigningEnabled,
-    esfIntegrationEnabled: row?.esfIntegrationEnabled ?? DEFAULT_DOCUMENT_FLAGS.esfIntegrationEnabled,
+    esfIntegrationEnabled: await isEsfEnabled(prisma) && (row?.esfIntegrationEnabled ?? DEFAULT_DOCUMENT_FLAGS.esfIntegrationEnabled),
     defaultVatMode: row?.defaultVatMode ?? null,
     defaultVatRate: row?.defaultVatRate == null ? null : asMoney(row.defaultVatRate),
   };
@@ -140,6 +141,7 @@ export async function updateLegalProfile(
     throw new ApiError(403, "forbidden", "Недостаточно прав для реквизитов");
   }
   const tid = membership.tenantId;
+  if (!await isEsfEnabled(prisma)) { input = { ...input, esfIntegrationEnabled: undefined, defaultCatalogTruId: undefined }; }
   const existing = await prisma.tenantLegalProfile.findUnique({ where: { tenantId: tid } });
   const defaultVatMode =
     input.defaultVatMode === undefined ? existing?.defaultVatMode ?? null : (input.defaultVatMode as string | null);

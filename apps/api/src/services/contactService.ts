@@ -978,7 +978,7 @@ export async function deleteContact(prisma: PrismaClient, auth: AuthContext, con
       throw new ApiError(
         409,
         "contact_has_documents",
-        "Нельзя удалить клиента: есть выставленные счета, подписанные договоры или ЭСФ. Архивируйте карточку.",
+        "Нельзя удалить клиента: есть оформленные документы. Архивируйте карточку.",
       );
     }
   }

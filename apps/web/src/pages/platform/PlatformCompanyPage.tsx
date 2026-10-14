@@ -270,13 +270,11 @@ function CompanySettings({ company, onSaved }: { company: any; onSaved: (row: an
           whatsapp: form.get("whatsapp") === "on",
           documents: form.get("documents") === "on",
           ai: form.get("ai") === "on",
-          esf: form.get("esf") === "on",
         },
         limits: {
           members: Number(form.get("members") || limits.members?.value || 20),
         },
         documentsEnabled: form.get("documents") === "on",
-        esfIntegrationEnabled: form.get("esf") === "on",
       })) as any;
       const ai = (await api.adminUpdateCompanyAi(company.id, {
         provider: String(form.get("aiProvider") || ""),
@@ -294,12 +292,13 @@ function CompanySettings({ company, onSaved }: { company: any; onSaved: (row: an
   return (
     <form className="panel stack" onSubmit={onSubmit}>
       <p className="muted">{uiText("Значения сервиса по умолчанию можно переопределить для этой компании. Секреты других компаний не наследуются.")}</p>
-      {(["forms", "webhook", "whatsapp", "documents", "ai", "esf"] as const).map((key) => (
+      {(["forms", "webhook", "whatsapp", "documents", "ai"] as const).map((key) => (
         <label key={key} className="check">
           <input type="checkbox" name={key} defaultChecked={Boolean(features[key]?.value)} />
           {key} <span className="muted">({sourceLabel(features[key]?.source)})</span>
         </label>
       ))}
+      <p className="muted">{uiText("ИС ЭСФ управляется общим переключателем для всех компаний.")} <Link to="/admin/settings">{uiText("Настройки сервиса")}</Link></p>
       <label>{uiText("Лимит участников")}<input name="members" type="number" defaultValue={limits.members?.value || 20} /></label>
       <p className="muted">{uiText("Сейчас:")}{" "}{limits.members?.value} ({sourceLabel(limits.members?.source)})</p>
       <h4>{uiText("AI компании")}</h4>

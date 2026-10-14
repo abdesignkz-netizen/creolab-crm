@@ -399,5 +399,6 @@ export async function publicAuthWithBilling(prisma: PrismaClient, auth: AuthCont
   return {
     ...publicAuth(auth),
     billing: await getBillingForAuth(prisma, auth),
+    serviceFeatures: { esf: await (await import("./esfAvailability.ts")).isEsfEnabled(prisma) },
   };
 }

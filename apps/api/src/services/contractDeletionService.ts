@@ -19,7 +19,7 @@ export async function deleteContract(prisma: PrismaClient, auth: AuthContext, co
     if (signed) throw new ApiError(409, "contract_signed", "Договор уже имеет электронную подпись. Удаление недоступно.");
     const invoices = await tx.invoice.count({where:{tenantId,contractId}});
     const documents = await tx.electronicDocument.count({where:{tenantId,contractId}});
-    if (invoices || documents) throw new ApiError(409, "contract_has_documents", "С договором связаны счета, АВР или ЭСФ. Удаление нарушит их связи и поэтому недоступно.");
+    if (invoices || documents) throw new ApiError(409, "contract_has_documents", "С договором связаны другие документы. Удаление нарушит их связи и поэтому недоступно.");
     const files = await tx.attachment.findMany({where:{tenantId,parentType:"contract",parentId:contractId}});
     // Keep failed filesystem cleanups identifiable and inaccessible as contract files.
     await tx.attachment.updateMany({where:{id:{in:files.map(f=>f.id)},tenantId},data:{parentType:"deleted_contract",status:"deletion_pending"}});

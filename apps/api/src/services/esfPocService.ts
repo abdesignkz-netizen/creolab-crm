@@ -1,3 +1,4 @@
+import { requireEsfEnabled } from "./esfAvailability.ts";
 import { findRegisteredEsfAvr } from "./registeredEsfAvr.ts";
 import { documentOrganization } from "./documentOrganization.ts";
 import { createHash } from "node:crypto";
@@ -152,6 +153,7 @@ async function storeXml(tenantId: string, documentId: string, fileName: string, 
 }
 
 export async function previewAvrEsf(prisma: PrismaClient, auth: AuthContext, documentId: string) {
+  await requireEsfEnabled(prisma);
   const membership = requireTenant(auth);
   requireManageDocuments(auth);
   const tid = membership.tenantId;
@@ -188,6 +190,7 @@ export async function previewAvrEsf(prisma: PrismaClient, auth: AuthContext, doc
 }
 
 export async function sendAvrEsf(prisma: PrismaClient, auth: AuthContext, documentId: string) {
+  await requireEsfEnabled(prisma);
   const membership = requireTenant(auth);
   requireSendEsf(auth);
   const tid = membership.tenantId;
@@ -214,6 +217,7 @@ export async function sendAvrEsf(prisma: PrismaClient, auth: AuthContext, docume
   }
   const source = await sourceForDocument(prisma, tid, document);
   const extras = await extrasForTenant(prisma, tid, document.number, document.dealId, document.contractId);
+  await requireEsfEnabled(prisma);
   const result = await sendAvrToEsf(source, extras);
   if (!result.ok) {
     await prisma.electronicDocument.update({
@@ -292,6 +296,7 @@ export async function sendAvrEsf(prisma: PrismaClient, auth: AuthContext, docume
 }
 
 export async function refreshAvrEsf(prisma: PrismaClient, auth: AuthContext, documentId: string) {
+  await requireEsfEnabled(prisma);
   const membership = requireTenant(auth);
   requireManageDocuments(auth);
   const tid = membership.tenantId;
@@ -380,6 +385,7 @@ async function sendEsfInvoice(
     throw new ApiError(422, "avr_not_sent", "Сначала отправьте АВР в ИС ЭСФ");
   }
   const source = await invoiceSourceForDocument(prisma, tenantId, document);
+  await requireEsfEnabled(prisma);
   const result = await sendInvoiceToEsf(source);
   if (!result.ok) {
     await prisma.electronicDocument.update({

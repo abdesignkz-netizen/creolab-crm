@@ -1,3 +1,4 @@
+import { requireEsfEnabled } from "./esfAvailability.ts";
 import { findRegisteredEsfAvr } from "./registeredEsfAvr.ts";
 import { createHash, X509Certificate } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
@@ -160,6 +161,7 @@ async function readStoredXml(xmlStorageKey: string | null) {
 }
 
 export async function getEsfPayloadToSign(prisma: PrismaClient, auth: AuthContext, documentId: string) {
+  await requireEsfEnabled(prisma);
   const preview = await previewAvrEsf(prisma, auth, documentId);
   const payload = String(preview.xml || "");
   if (!payload) throw new ApiError(422, "esf_payload_empty", "Не удалось собрать XML для подписи");
@@ -180,6 +182,7 @@ export async function getEsfPayloadToSign(prisma: PrismaClient, auth: AuthContex
 }
 
 export async function getEsfNcaLayerPoc(prisma: PrismaClient, auth: AuthContext) {
+  await requireEsfEnabled(prisma);
   requireDevPoc();
   const membership = requireTenant(auth);
   const config = readEsfConfig();
@@ -256,6 +259,7 @@ async function verifyPocSessionIsOpen(sessionId: string, config: ReturnType<type
 }
 
 export async function prepareAvrPocPayload(prisma: PrismaClient, auth: AuthContext) {
+  await requireEsfEnabled(prisma);
   requireDevPoc();
   const membership = requireTenant(auth);
   requireSendEsf(auth);
@@ -386,6 +390,7 @@ export async function sendAvrPocSigned(
   auth: AuthContext,
   raw: Record<string, unknown>,
 ) {
+  await requireEsfEnabled(prisma);
   requireDevPoc();
   rejectPrivateKeyFields(raw);
   const membership = requireTenant(auth);
@@ -453,6 +458,7 @@ export async function sendAvrPocSigned(
     // The stored UTF-8 string goes directly into awpBody. No trim, XML serialization or auth PEM.
     report.sentAt = new Date().toISOString();
     report.soap.result = "transport_error";
+    await requireEsfEnabled(prisma);
     const response = await postSoap(config.awpUrl, envelope, { testOnly: true });
     report.soap.httpStatus = response.status;
     report.soap.result = "invalid_response";
@@ -501,6 +507,7 @@ export async function runLegacyFixtureSign(auth: AuthContext) {
 }
 
 export async function sendEsfWithNcaLayerSignature(prisma:PrismaClient,auth:AuthContext,documentId:string,raw:Record<string,unknown>) {
+  await requireEsfEnabled(prisma);
   rejectPrivateKeyFields(raw);
   const m=requireTenant(auth);requireSendEsf(auth);
   const doc=await prisma.electronicDocument.findFirst({where:{id:documentId,tenantId:m.tenantId}});
@@ -586,6 +593,7 @@ async function sendEsfWithNcaLayerSignatureInternal(
   const meta = raw.metadata && typeof raw.metadata === "object" ? (raw.metadata as { subjectCn?: string }) : {};
   const analysis = analyzeEsfSignature(signature);
   const config = readEsfConfig();
+  await requireEsfEnabled(prisma);
   const uploaded = await uploadSignedDocument({
     type: document.type,
     payload,

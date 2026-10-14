@@ -1,3 +1,4 @@
+import { isEsfEnabled, requireEsfEnabled } from "./esfAvailability.ts";
 import { allocateDocumentNumber } from "./documentNumberingService.ts";
 import type { PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
@@ -304,6 +305,7 @@ export async function listDealDocuments(prisma: PrismaClient, auth: AuthContext,
   const tid = membership.tenantId;
   const deal = await prisma.deal.findFirst({ where: { id: dealId, tenantId: tid } });
   if (!deal) throw new ApiError(404, "not_found", "Сделка не найдена");
+  const esfEnabled = await isEsfEnabled(prisma);
   const [contracts, invoices, electronicDocuments] = await Promise.all([
     prisma.contract.findMany({ where: { tenantId: tid, dealId }, orderBy: { createdAt: "desc" } }),
     prisma.invoice.findMany({
@@ -311,7 +313,7 @@ export async function listDealDocuments(prisma: PrismaClient, auth: AuthContext,
       include: { items: { orderBy: { sortOrder: "asc" } } },
       orderBy: { createdAt: "desc" },
     }),
-    prisma.electronicDocument.findMany({ where: { tenantId: tid, dealId }, orderBy: { createdAt: "desc" } }),
+    prisma.electronicDocument.findMany({ where: { tenantId: tid, dealId, ...(esfEnabled ? {} : { type: "AVR" }) }, orderBy: { createdAt: "desc" } }),
   ]);
   const importedInvoiceFiles = await prisma.attachment.findMany({ where: { tenantId: tid, parentType: "invoice", status: "imported", id: { in: invoices.flatMap(i => i.pdfFileId ? [i.pdfFileId] : []) } }, select: { id: true } });
   const importedIds = new Set(importedInvoiceFiles.map(f => f.id));
@@ -334,7 +336,7 @@ export async function listDealDocuments(prisma: PrismaClient, auth: AuthContext,
     })),
     invoices: invoices.map(row => ({ ...serializeInvoice(row), importDetails: importDetails.get(row.id) || null, importedPdf: Boolean(row.pdfFileId && importedIds.has(row.pdfFileId)) })),
     electronicDocuments: electronicDocuments.map(serializeElectronicDocument),
-    documentState: (await import("./documentWorkflow.ts")).documentWorkflowState(electronicDocuments),
+    documentState: (await import("./documentWorkflow.ts")).documentWorkflowState(electronicDocuments, esfEnabled),
   };
 }
 
@@ -791,6 +793,7 @@ export async function getElectronicDocument(prisma: PrismaClient, auth: AuthCont
     where: { id, tenantId: membership.tenantId },
   });
   if (!row) throw new ApiError(404, "not_found", "Документ не найден");
+  if (row.type === "ESF") await requireEsfEnabled(prisma);
   if (row.type === "AVR" && ["DRAFT", "VALIDATED"].includes(row.status) && !row.externalId && row.externalSystem !== "BASQAR") {
     const { resolveAvrSource } = await import("./avrExcel.ts");
     const source = await resolveAvrSource(prisma, membership.tenantId, row);

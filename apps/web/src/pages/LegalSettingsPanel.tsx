@@ -1,3 +1,4 @@
+import { useEsfEnabled } from "../lib/session";
 import { InlineFeedback } from "../components/InlineFeedback";
 import { uiText, useUiText, localizeUiOptions } from "../lib/uiText";
 import { notifySaved } from "../components/SaveNotice";
@@ -53,6 +54,7 @@ const EMPTY: Profile = {
 };
 
 export function LegalSettingsPanel() {
+  const esfEnabled = useEsfEnabled();
   const uiText = useUiText();
   const [profile, setProfile] = useState<Profile>(EMPTY);
   const [vatChoice, setVatChoice] = useState<"unset" | "none" | "12" | "custom">("unset");
@@ -95,8 +97,19 @@ export function LegalSettingsPanel() {
         if (location.hash === "#company-requisites") document.getElementById("company-requisites")?.scrollIntoView();
       })
       .catch((err) => setError(err instanceof Error ? err.message : uiText("Не удалось загрузить реквизиты")));
-    void loadPreflight();
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    if (esfEnabled) {
+      void loadPreflight();
+      // Restore only portal preferences; do not replace unsaved requisites.
+      void api.legalProfile().then((data: any) => {
+        if (active) setProfile(current => ({ ...current, esfIntegrationEnabled: data.esfIntegrationEnabled, defaultCatalogTruId: data.defaultCatalogTruId }));
+      }).catch(() => {});
+    } else setPreflight(null);
+    return () => { active = false; };
+  }, [esfEnabled]);
 
   async function save() {
     if (busy || !loaded) return;
@@ -121,8 +134,7 @@ export function LegalSettingsPanel() {
         defaultVatRate,
         documentsEnabled: profile.documentsEnabled,
         contractSigningEnabled: profile.contractSigningEnabled,
-        esfIntegrationEnabled: profile.esfIntegrationEnabled,
-        defaultCatalogTruId: profile.defaultCatalogTruId || null,
+        ...(esfEnabled ? { esfIntegrationEnabled: profile.esfIntegrationEnabled, defaultCatalogTruId: profile.defaultCatalogTruId || null } : {}),
       })) as Profile;
       applyLoaded(next);
       setEditing(false);
@@ -138,7 +150,7 @@ export function LegalSettingsPanel() {
     <div className="panel" id="company-requisites">
       <h3>{uiText("Реквизиты компании")}</h3>
       <p className="muted">
-        {uiText("Реквизиты вашей организации. Они подставляются в договоры, счета, АВР и ЭСФ.")}</p>
+        {uiText(esfEnabled ? "Реквизиты вашей организации. Они подставляются в договоры, счета, АВР и ЭСФ." : "Реквизиты вашей организации. Они подставляются в договоры, счета и АВР.")}</p>
       {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
       {!loaded ? (error ? <button className="btn secondary" onClick={()=>location.reload()}>{uiText("Повторить загрузку")}</button> : <p role="status">{uiText("Загружаем реквизиты…")}</p>) : !editing ? <>
       <dl className="deal-edit">
@@ -201,13 +213,13 @@ export function LegalSettingsPanel() {
           Email
           <input value={profile.email || ""} onChange={(e) => setProfile({ ...profile, email: e.target.value })} />
         </label>
-        <label>
+        {esfEnabled ? <label>
           {uiText("Идентификатор ТРУ (G 18)")}<input
             value={profile.defaultCatalogTruId || ""}
             onChange={(e) => setProfile({ ...profile, defaultCatalogTruId: e.target.value })}
             placeholder={uiText("Из справочника ИС ЭСФ, не выдумывать")}
           />
-        </label>
+        </label> : null}
         <label>
           {uiText("НДС по умолчанию")}<select value={vatChoice} onChange={(e) => setVatChoice(e.target.value as typeof vatChoice)}>
             <option value="unset">{uiText("Не выбрано — не подставлять автоматически")}</option>
@@ -227,7 +239,7 @@ export function LegalSettingsPanel() {
             checked={profile.documentsEnabled}
             onChange={(e) => setProfile({ ...profile, documentsEnabled: e.target.checked })}
           />{" "}
-          {uiText("Черновики договора, счёта, АВР и ЭСФ. Раздел «Документы» в меню")}</label>
+          {uiText(esfEnabled ? "Черновики договора, счёта, АВР и ЭСФ. Раздел «Документы» в меню" : "Черновики договора, счёта и АВР. Раздел «Документы» в меню")}</label>
         {CONTRACT_SIGNING_ENABLED ? (
         <label>
           <input
@@ -237,15 +249,15 @@ export function LegalSettingsPanel() {
           />{" "}
           {uiText("Подписание договора ЭЦП (NCALayer)")}</label>
         ) : null}
-        <label>
+        {esfEnabled ? <label>
           <input
             type="checkbox"
             checked={profile.esfIntegrationEnabled}
             onChange={(e) => setProfile({ ...profile, esfIntegrationEnabled: e.target.checked })}
           />{" "}
           {uiText("Контур ИС ЭСФ включён. Подключение кабинета — в")}{" "}
-          <Link to="/integrations/esf">{uiText("Интеграции → ИС ЭСФ")}</Link>{uiText(", не путь к ЭЦП и не PIN.")}</label>
-        {preflight ? (
+          <Link to="/integrations/esf">{uiText("Интеграции → ИС ЭСФ")}</Link>{uiText(", не путь к ЭЦП и не PIN.")}</label> : null}
+        {esfEnabled && preflight ? (
           <div className={preflight.ready ? "banner" : "banner warn"} style={{ marginTop: 12 }}>
             <b>{preflight.ready ? uiText("ИС ЭСФ готов к отправке") : uiText("ИС ЭСФ ещё не готов")}</b>
             <p className="muted">

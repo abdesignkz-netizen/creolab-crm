@@ -1,3 +1,5 @@
+import { isEsfEnabled } from "./esfAvailability.ts";
+import { ApiError } from "../errors.ts";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { decryptSecret } from "../lib/secretBox.ts";
 
@@ -70,7 +72,7 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 export async function getPlatformSettings(prisma: PrismaClient | Prisma.TransactionClient): Promise<PlatformSettings> {
   const cached = readCache<PlatformSettings>("platform");
-  if (cached) return cached;
+  if (cached) return { ...cached, features: { ...cached.features, esf: await isEsfEnabled(prisma) } };
   const row = await prisma.platformSetting.findUnique({ where: { key: "defaults" } });
   const stored = asRecord(row?.valueJson);
   const storedAi = asRecord(stored.ai);
@@ -103,6 +105,8 @@ export async function savePlatformSettings(
   prisma: PrismaClient,
   patch: Record<string, unknown>,
 ) {
+  if ("esf" in asRecord(patch.features) && typeof asRecord(patch.features).esf !== "boolean") throw new ApiError(422, "validation_error", "Укажите состояние переключателя");
+  invalidateRuntimeConfig();
   const current = await getPlatformSettings(prisma);
   const next = {
     ai: { ...current.ai, ...asRecord(patch.ai) },
@@ -138,7 +142,7 @@ export async function getEffectiveTenantSettings(
 ): Promise<EffectiveTenantSettings> {
   const cacheKey = `tenant:${tenantId}`;
   const cached = readCache<EffectiveTenantSettings>(cacheKey);
-  if (cached) return cached;
+  if (cached) return { ...cached, features: { ...cached.features, esf: { value: await isEsfEnabled(prisma), source: "platform" } } };
 
   const [platform, tenant, planRow, aiRow] = await Promise.all([
     getPlatformSettings(prisma),
@@ -199,7 +203,7 @@ export async function getEffectiveTenantSettings(
       whatsapp: flag("whatsapp"),
       documents: flag("documents"),
       ai: flag("ai"),
-      esf: flag("esf"),
+      esf: { value: await isEsfEnabled(prisma), source: "platform" },
     },
     limits: {
       members: limit("members"),

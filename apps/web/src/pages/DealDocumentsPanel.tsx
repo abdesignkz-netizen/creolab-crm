@@ -1,3 +1,4 @@
+import { useEsfEnabled } from "../lib/session";
 import { uiMessage, uiText, useUiText, localizeUiOptions, uiFormatLocale } from "../lib/uiText";
 import { EsfSubmissionStatus, ESF_SEND_PHASES, type EsfSubmission } from "../components/EsfSubmissionStatus";
 import { notifySaved } from "../components/SaveNotice";
@@ -142,6 +143,7 @@ export function DealDocumentsPanel(props: {
   esfInvoicePreview: any;
   setEsfInvoicePreview: (value: any) => void;
 }) {
+  const esfEnabled = useEsfEnabled();
   const uiText = useUiText();
   const {
     deal: d,
@@ -150,7 +152,7 @@ export function DealDocumentsPanel(props: {
     invoiceReadiness,
     avrReadiness,
     esfInvoiceReadiness,
-    closeReadiness,
+    closeReadiness: portalCloseReadiness,
     setReadiness,
     setInvoiceReadiness,
     setAvrReadiness,
@@ -168,6 +170,7 @@ export function DealDocumentsPanel(props: {
     setEsfInvoicePreview,
   } = props;
 
+  const closeReadiness = esfEnabled ? portalCloseReadiness : { ready: true, alreadyClosed: d.outcome === "won" };
   const navigate = useNavigate();
   const contracts = docs?.contracts || [];
   const invoices = docs?.invoices || [];
@@ -281,6 +284,7 @@ export function DealDocumentsPanel(props: {
   }
   const [legacyPocEnabled, setLegacyPocEnabled] = useState(false);
   useEffect(() => {
+    if (!esfEnabled) return;
     void api
       .esfConnection()
       .then((row: any) => {
@@ -290,7 +294,7 @@ export function DealDocumentsPanel(props: {
         setAskCabinet(Boolean(row?.wsseRequired && !row?.connection?.sessionActive));
       })
       .catch(() => setLegacyPocEnabled(false));
-  }, []);
+  }, [esfEnabled]);
   const contract = contracts[0];
   const invoice = invoices[0];
   const importedContract = Boolean(contract?.importedPdf);
@@ -410,7 +414,7 @@ export function DealDocumentsPanel(props: {
     { id: "contract", label: uiText("Договор"), tone: stepTone(contract?.status === "SIGNED", Boolean(contract)) },
     { id: "invoice", label: uiText("Счёт — по необходимости"), tone: stepTone(["ISSUED", "PARTIALLY_PAID", "PAID"].includes(invoice?.status), Boolean(invoice)) },
     { id: "avr", label: uiText("АВР"), tone: stepTone(avr?.status === "ACCEPTED", Boolean(avr)) },
-    { id: "esf", label: uiText("ЭСФ"), tone: stepTone(esf?.status === "ACCEPTED", Boolean(esf)) },
+    ...(esfEnabled ? [{ id: "esf", label: uiText("ЭСФ"), tone: stepTone(esf?.status === "ACCEPTED", Boolean(esf)) }] : []),
     {
       id: "close",
       label: uiText("Закрытие"),
@@ -424,8 +428,8 @@ export function DealDocumentsPanel(props: {
         <div className="row sit-head">
           <div>
             <b>{uiText("Документы")}</b>
-            {docs?.documentState?<p className="deal-flag">{uiMessage(docs.documentState.label)}</p>:null}
-            <p className="muted">{uiText("АВР и ЭСФ формируются из договора, позиций сделки и реквизитов сторон. Счёт на оплату — отдельный документ, его загрузка или создание не обязательны.")}</p>
+            {esfEnabled && docs?.documentState?<p className="deal-flag">{uiMessage(docs.documentState.label)}</p>:null}
+            <p className="muted">{uiText("Документы формируются из договора, позиций сделки и реквизитов сторон. Счёт на оплату — отдельный документ, его загрузка или создание не обязательны.")}</p>
           </div>
           <Link className="btn secondary" to="/documents">
             {uiText("Все документы")}</Link>
@@ -775,7 +779,7 @@ export function DealDocumentsPanel(props: {
           <div className="doc-step-title">
             <b>{uiText("АВР")}</b>
           </div>
-          <p className="muted">{uiText("Счёт на оплату не требуется. АВР можно сформировать и проверить до подписания договора. Excel и PDF (форма Р-1) скачиваются локально, без входа в ИС ЭСФ.")}</p>
+          <p className="muted">{uiText("Счёт на оплату не требуется. АВР можно сформировать и проверить до подписания договора. Excel и PDF (форма Р-1) скачиваются из BasQar.")}</p>
           {avrReadiness?.warnings?.map((warning:string)=><p className="pdf-import-warnings" role="status" key={warning}>{uiMessage(warning)}</p>)}
           <p className="muted">{uiText("Подпись и отправка подтверждаются на странице заполненного АВР.")}</p>
           <MissingList
@@ -793,9 +797,9 @@ export function DealDocumentsPanel(props: {
                   <Link to={`/documents/avr/${doc.id}`}><b>{uiText("АВР")}{" "}{doc.number}</b> {" "}{uiText("· Открыть")}</Link>
                   <div className="muted">
                     {localizeUiOptions(EDOC_STATUS_LABEL, uiText)[doc.status] || doc.status}
-                    {doc.xmlPrepared ? " · XML AwpV1" : ""}
-                    {doc.externalStatus ? ` · ${esfStatusLabel(doc.type, doc.externalStatus)}` : ""}
-                    {doc.externalId ? ` · ${doc.externalId}` : ""}
+                    {esfEnabled && doc.xmlPrepared ? " · XML AwpV1" : ""}
+                    {esfEnabled && doc.externalStatus ? ` · ${esfStatusLabel(doc.type, doc.externalStatus)}` : ""}
+                    {esfEnabled && doc.externalId ? ` · ${doc.externalId}` : ""}
                   </div>
                 </div>
               </div>
@@ -882,6 +886,7 @@ export function DealDocumentsPanel(props: {
               }}
             >
               {uiText("Проверить АВР")}</button>
+            {esfEnabled ? <>
             <button
               type="button"
               className="btn secondary"
@@ -958,12 +963,13 @@ export function DealDocumentsPanel(props: {
               onClick={() => void refreshSubmission("AVR", currentDocument("AVR", avr))}
             >
               {uiText("Обновить статус ИС ЭСФ")}</button>
+            </> : null}
           </div>
-          {(avr || submissions.AVR) ? <EsfSubmissionStatus document={currentDocument("AVR", avr)} submission={submissions.AVR} system={esfSystem} statusLabel={esfStatusLabel("AVR", currentDocument("AVR", avr)?.externalStatus)} /> : null}
-          {currentDocument("AVR", avr)?.errorMessage && !currentDocument("AVR", avr)?.externalId ? (
+          {esfEnabled && (avr || submissions.AVR) ? <EsfSubmissionStatus document={currentDocument("AVR", avr)} submission={submissions.AVR} system={esfSystem} statusLabel={esfStatusLabel("AVR", currentDocument("AVR", avr)?.externalStatus)} /> : null}
+          {esfEnabled && currentDocument("AVR", avr)?.errorMessage && !currentDocument("AVR", avr)?.externalId ? (
             <p className="muted">{uiText("Это результат прошлой отправки с карточки сделки. Откройте заполненный АВР, проверьте данные и подтвердите отправку там.")}</p>
           ) : null}
-          {esfPreview?.validation || esfPreview?.externalStatus ? (
+          {esfEnabled && (esfPreview?.validation || esfPreview?.externalStatus) ? (
             <div style={{ marginTop: 12 }}>
               <p className="muted">
                 {esfPreview.validation ? `AwpV1 XSD: ${esfPreview.validation.valid ? uiText("ок") : uiText("ошибки")}` : ""}
@@ -982,6 +988,7 @@ export function DealDocumentsPanel(props: {
           ) : null}
         </div>
 
+        {esfEnabled ? <>
         <div className="doc-step" id="esf" style={{ scrollMarginTop: 24 }}>
           <div className="doc-step-title">
             <b>{uiText("ЭСФ")}</b>
@@ -1007,9 +1014,9 @@ export function DealDocumentsPanel(props: {
                   <b>{uiText("ЭСФ")}{" "}{doc.number}</b>
                   <div className="muted">
                     {localizeUiOptions(EDOC_STATUS_LABEL, uiText)[doc.status] || doc.status}
-                    {doc.xmlPrepared ? " · XML InvoiceV2" : ""}
-                    {doc.externalStatus ? ` · ${esfStatusLabel(doc.type, doc.externalStatus)}` : ""}
-                    {doc.externalId ? ` · ${doc.externalId}` : ""}
+                    {esfEnabled && doc.xmlPrepared ? " · XML InvoiceV2" : ""}
+                    {esfEnabled && doc.externalStatus ? ` · ${esfStatusLabel(doc.type, doc.externalStatus)}` : ""}
+                    {esfEnabled && doc.externalId ? ` · ${doc.externalId}` : ""}
                   </div>
                 </div>
               </div>
@@ -1144,6 +1151,7 @@ export function DealDocumentsPanel(props: {
           ) : null}
         </div>
 
+        </> : null}
         <div className="doc-step">
           <div className="doc-step-title">
             <b>{uiText("Закрытие")}</b>
@@ -1152,7 +1160,7 @@ export function DealDocumentsPanel(props: {
             closeReadiness.alreadyClosed ? (
               <p className="muted">{uiText("Сделка уже закрыта.")}</p>
             ) : closeReadiness.ready ? (
-              <p className="muted">{uiText("ЭСФ доставлен в ИС ЭСФ — сделку можно закрыть.")}</p>
+              <p className="muted">{uiText(esfEnabled ? "ЭСФ доставлен в ИС ЭСФ — сделку можно закрыть." : "Сделку можно закрыть.")}</p>
             ) : (
               <div>
                 <p className="error">{uiText("Ещё рано закрывать сделку:")}</p>
@@ -1165,7 +1173,7 @@ export function DealDocumentsPanel(props: {
             )
           ) : null}
           <div className="actions" style={{ marginTop: 8 }}>
-            <button
+            {esfEnabled ? <button
               type="button"
               className="btn secondary"
               disabled={busy || !edocs.some((row: any) => row.externalId)}
@@ -1178,7 +1186,7 @@ export function DealDocumentsPanel(props: {
                   .finally(() => setBusy(false));
               }}
             >
-              {uiText("Синхронизировать ИС ЭСФ")}</button>
+              {uiText("Синхронизировать ИС ЭСФ")}</button> : null}
             <button
               type="button"
               className="btn"

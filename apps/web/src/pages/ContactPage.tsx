@@ -257,7 +257,7 @@ export function ContactPage() {
       {deleteConfirm && caps.companyAdmin ? (
         <div className="panel contact-delete-confirm" role="alertdialog" aria-labelledby="contact-delete-title">
           <p id="contact-delete-title">
-            {uiText("Удалить клиента безвозвратно вместе с заявками и диалогами? Сделки с выставленными счетами, подписанными договорами или ЭСФ удалить нельзя — тогда архивируйте карточку. Отменить удаление нельзя.")}</p>
+            {uiText("Удалить клиента безвозвратно вместе с заявками и диалогами? Сделки с выставленными счетами или оформленными документами удалить нельзя — тогда архивируйте карточку. Отменить удаление нельзя.")}</p>
           {deleteError ? <InlineFeedback kind="error" className="error">{deleteError}</InlineFeedback> : null}
           <div className="actions">
             <button

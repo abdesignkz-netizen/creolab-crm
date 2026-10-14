@@ -1065,6 +1065,26 @@ export function App() {
     });
     return () => { cancelled = true; };
   }, [bootRevision, publicSigningPage]);
+  useEffect(() => {
+    if (boot !== "ready") return;
+    let active = true;
+    let inFlight = false;
+    const refreshFeatures = async () => {
+      if (inFlight || document.visibilityState === "hidden") return;
+      inFlight = true;
+      try {
+        const serviceFeatures = await api.request<{ esf: boolean }>("/api/v1/service-features");
+        if (active) setMe((current: any) => current ? { ...current, serviceFeatures } : current);
+      } catch {
+        if (active) setMe((current: any) => current ? { ...current, serviceFeatures: { esf: false } } : current);
+      } finally { inFlight = false; }
+    };
+    void refreshFeatures();
+    const timer = window.setInterval(refreshFeatures, 15_000);
+    window.addEventListener("focus", refreshFeatures);
+    document.addEventListener("visibilitychange", refreshFeatures);
+    return () => { active = false; window.clearInterval(timer); window.removeEventListener("focus", refreshFeatures); document.removeEventListener("visibilitychange", refreshFeatures); };
+  }, [boot]);
   if (boot === "loading") return <div className="state">{t(getPublicLocale(), "common.loading")}</div>;
   if (boot === "error") return <div className="state"><p>{bootError}</p><button className="btn" onClick={() => setBootRevision(value => value + 1)}>{uiText("Повторить")}</button></div>;
   if (boot === "tenant-blocked" && tenantBlock) {
@@ -1172,7 +1192,7 @@ export function App() {
                 <Route path="/billing/checkout/:orderId" element={<BillingCheckoutPage />} />
                 <Route path="/control" element={me?.capabilities?.manager ? <Navigate to="/today" replace /> : <ControlPage />} />
                 <Route path="/integrations" element={me?.capabilities?.integrations ? <IntegrationsPage /> : <Navigate to="/today" replace />} />
-                <Route path="/integrations/esf" element={me?.capabilities?.documents ? <EsfIntegrationPage /> : <Navigate to="/today" replace />} />
+                <Route path="/integrations/esf" element={me?.capabilities?.documents && me?.serviceFeatures?.esf === true ? <EsfIntegrationPage /> : <Navigate to="/today" replace />} />
                 <Route path="/inquiries" element={<RequestsPage />} />
                 <Route path="/requests" element={<Navigate to="/inquiries" replace />} />
                 <Route path="/requests/:requestId" element={<RequestDetailPage key={location.pathname} />} />

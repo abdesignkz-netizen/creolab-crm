@@ -1,3 +1,4 @@
+import { useEsfEnabled } from "../lib/session";
 import { uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale } from "../lib/uiText";
 import { Link } from "react-router-dom";
 import { useUrlState } from "../lib/useUrlState";
@@ -10,10 +11,11 @@ const PAYMENT: Record<string, string> = { NOT_REQUIRED: "Оплата не тр�
 const DOCUMENT_FILTERS = ["all", "no_contract", "no_invoice", "avr_unsent", "esf_unsent", "errors"] as const;
 
 export function DealList({ items, documentsAllowed, onOpenContract }: { items: any[]; documentsAllowed: boolean; onOpenContract: (id: string) => void }) {
+  const esfEnabled = useEsfEnabled();
   const uiText = useUiText();
   const [q, setQ] = useUrlState<string>("q", "");
   const [sort, setSort] = useUrlState<string>("sort", "newest", ["newest", "oldest", "amount_desc", "amount_asc"]);
-  const [docFilter, setDocFilter] = useUrlState<string>("document", "all", DOCUMENT_FILTERS);
+  const [docFilter, setDocFilter] = useUrlState<string>("document", "all", DOCUMENT_FILTERS.filter(value => esfEnabled || value !== "esf_unsent"));
   const [offset, setOffset] = useUrlState<string>("offset", "0");
   const needle = q.trim().toLocaleLowerCase("ru");
   const digits = needle.replace(/\D/g, "");
@@ -52,7 +54,7 @@ export function DealList({ items, documentsAllowed, onOpenContract }: { items: a
     <div className="deal-list-tools">
       <label className="deal-list-search">{uiText("Поиск")}<input value={q} onChange={(event) => setQ(event.target.value)} placeholder={uiText("Номер сделки, компания, телефон или заказ")} /></label>
       {documentsAllowed ? <label>{uiText("Документы")}<select aria-label={uiText("Документы")} value={docFilter} onChange={(event) => setDocFilter(event.target.value)}>
-        <option value="all">{uiText("Все документы")}</option><option value="no_contract">{uiText("Без договора")}</option><option value="no_invoice">{uiText("Без счёта")}</option><option value="avr_unsent">{uiText("АВР не создан / не отправлен")}</option><option value="esf_unsent">{uiText("ЭСФ не создан / не отправлен")}</option><option value="errors">{uiText("Ошибки документов")}</option>
+        <option value="all">{uiText("Все документы")}</option><option value="no_contract">{uiText("Без договора")}</option><option value="no_invoice">{uiText("Без счёта")}</option><option value="avr_unsent">{uiText("АВР не создан / не отправлен")}</option>{esfEnabled ? <option value="esf_unsent">{uiText("ЭСФ не создан / не отправлен")}</option> : null}<option value="errors">{uiText("Ошибки документов")}</option>
       </select></label> : null}
       <label>{uiText("Порядок")}<select aria-label={uiText("Порядок")} value={sort} onChange={(event) => setSort(event.target.value)}><option value="newest">{uiText("Сначала новые")}</option><option value="oldest">{uiText("Сначала старые")}</option><option value="amount_desc">{uiText("Сумма: по убыванию")}</option><option value="amount_asc">{uiText("Сумма: по возрастанию")}</option></select></label>
     </div>
@@ -60,7 +62,7 @@ export function DealList({ items, documentsAllowed, onOpenContract }: { items: a
     <Pagination total={filtered.length} offset={start} limit={limit} onChange={(value) => setOffset(String(value))} />
     <div className="panel deal-list-scroll">
       <table className="deal-list-table">
-        <thead><tr><th scope="col">{uiText("№ сделки")}</th><th scope="col">{uiText("Компания / клиент")}</th><th scope="col">{uiText("Телефон")}</th><th scope="col">{uiText("Заказ")}</th><th scope="col">{uiText("Сумма заказа")}</th><th scope="col">{uiText("Статус сделки")}</th>{documentsAllowed ? localizeUiOptions(KINDS, uiText).map(([kind, label]) => <th scope="col" key={kind}>{label}</th>) : null}</tr></thead>
+        <thead><tr><th scope="col">{uiText("№ сделки")}</th><th scope="col">{uiText("Компания / клиент")}</th><th scope="col">{uiText("Телефон")}</th><th scope="col">{uiText("Заказ")}</th><th scope="col">{uiText("Сумма заказа")}</th><th scope="col">{uiText("Статус сделки")}</th>{documentsAllowed ? localizeUiOptions(KINDS.filter(([kind]) => esfEnabled || kind !== "ESF"), uiText).map(([kind, label]) => <th scope="col" key={kind}>{label}</th>) : null}</tr></thead>
         <tbody>{filtered.slice(start, start + limit).map((deal) => <tr key={deal.id}>
           <td data-label={uiText("№ сделки")}><Link className="deal-number-link" to={`/deals/${deal.id}`}>{deal.number || uiText("Открыть сделку")}</Link><small className="muted">{deal.createdAt ? new Date(deal.createdAt).toLocaleDateString(uiFormatLocale()) : ""}</small></td>
           <td data-label={uiText("Компания / клиент")}>{deal.company ? <Link to={`/companies/${deal.company.id}`}>{deal.company.name}</Link> : <span>{deal.contact?.name || uiText("Клиент не указан")}</span>}{deal.company && deal.contact?.name ? <small className="muted">{deal.contact.name}</small> : null}{!deal.company ? <small className="muted">{uiText("Без компании")}</small> : null}</td>
@@ -68,7 +70,7 @@ export function DealList({ items, documentsAllowed, onOpenContract }: { items: a
           <td data-label={uiText("Заказ")}><Link to={`/deals/${deal.id}`}><b>{deal.title}</b></Link>{deal.items?.length ? <small className="muted">{deal.items.slice(0, 2).map((item: any) => item.name).join(" · ")}{deal.items.length > 2 ? uiText(" · ещё {p0}", {p0: deal.items.length - 2}) : ""}</small> : null}</td>
           <td data-label={uiText("Сумма заказа")}><strong className="deal-list-amount">{deal.amountLabel || uiText("Не указана")}</strong><small className={deal.paymentStatus === "OVERDUE" ? "error" : "muted"}>{localizeUiOptions(PAYMENT, uiText)[deal.paymentStatus] || deal.paymentStatus}</small></td>
           <td data-label={uiText("Статус сделки")}><span className={`deal-outcome ${deal.outcome}`}>{localizeUiOptions(OUTCOME, uiText)[deal.outcome] || deal.outcome}</span><small>{deal.stage?.name || uiText("Этап не указан")}</small>{deal.assigneeName ? <small className="muted">{deal.assigneeName}</small> : null}</td>
-          {documentsAllowed ? localizeUiOptions(KINDS, uiText).map(([kind, label]) => <td data-label={label} key={kind}>{documentCell(deal, kind, label)}</td>) : null}
+          {documentsAllowed ? localizeUiOptions(KINDS.filter(([kind]) => esfEnabled || kind !== "ESF"), uiText).map(([kind, label]) => <td data-label={label} key={kind}>{documentCell(deal, kind, label)}</td>) : null}
         </tr>)}</tbody>
       </table>
       {!filtered.length ? <p className="state">{uiText("Сделок по выбранным условиям нет.")}</p> : null}

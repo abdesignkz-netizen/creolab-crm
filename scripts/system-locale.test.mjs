@@ -51,6 +51,35 @@ async function bundle(contents, plugins = []) {
   return module.exports;
 }
 
+test('Global ESF switch hides tenant document controls, including stale loaded data and old URLs', async () => {
+  const plugin = { name:'esf-visibility-fixture', setup(build) { build.onLoad({filter:/(LegalSettingsPanel|DocumentNumberingPanel|AvrEditorPage)\.tsx$/}, args => {
+    let source = readFileSync(args.path, 'utf8');
+    if (args.path.endsWith('LegalSettingsPanel.tsx')) source = source.replace('[loaded, setLoaded] = useState(false)', '[loaded, setLoaded] = useState(true)');
+    if (args.path.endsWith('DocumentNumberingPanel.tsx')) source = source.replace('useState<Settings | null>(null)', 'useState<Settings | null>({DOG:{example:"1"},INV:{example:"2"},AVR:{example:"3"},ESF:{example:"4"}})');
+    if (args.path.endsWith('AvrEditorPage.tsx')) source = source.replace('[context,setContext]=useState<any>(null)', '[context,setContext]=useState<any>({deal:{id:"d",title:"Test"},organization:{},company:{},items:[]})');
+    return { contents: source, loader:'tsx', resolveDir:path.dirname(args.path) };
+  }); } };
+  const { render } = await bundle(`
+    import {renderToStaticMarkup} from 'react-dom/server'; import {MemoryRouter} from 'react-router-dom';
+    import {SessionContext,emptyCaps} from './lib/session';
+    import {DocumentsPage} from './pages/DocumentsPage'; import {LegalSettingsPanel} from './pages/LegalSettingsPanel';
+    import {DocumentNumberingPanel} from './pages/DocumentNumberingPanel'; import {AvrEditorPage} from './pages/AvrEditorPage';
+    import {DealList} from './components/DealList'; import {DealDocumentsPanel} from './pages/DealDocumentsPanel';
+    const noop=()=>{};
+    const props={deal:{id:'d',outcome:'open'},docs:{contracts:[],invoices:[],electronicDocuments:[],documentState:{label:'АВР принят · требуется ЭСФ'}},closeReadiness:{ready:false,missingFields:['esf.sent'],missingFieldLabels:{'esf.sent':'ЭСФ, отправленный в ИС ЭСФ'}},setBusy:noop,setError:noop,load:noop,setReadiness:noop,setInvoiceReadiness:noop,setAvrReadiness:noop,setEsfInvoiceReadiness:noop,setBuyerLink:noop,setEsfPreview:noop,setEsfInvoicePreview:noop};
+    export const render=esf=>renderToStaticMarkup(<SessionContext.Provider value={{me:{user:{locale:'ru'},serviceFeatures:{esf}},caps:{...emptyCaps,documents:true}}}><MemoryRouter initialEntries={['/documents?kind=ESF&docFilter=esf_unsent']}><DocumentsPage/><LegalSettingsPanel/><DocumentNumberingPanel/><AvrEditorPage/><DealList items={[]} documentsAllowed/><DealDocumentsPanel {...props}/></MemoryRouter></SessionContext.Provider>);
+  `, [plugin]);
+  const previous = globalThis.localStorage;
+  globalThis.localStorage = { getItem: () => null, setItem: () => {} };
+  try {
+    const off = render(false);
+    assert.deepEqual([...off.matchAll(/.{0,80}(?:ЭСФ|\/integrations\/esf|href="#esf"|XML AwpV1).{0,80}/g)].map(m => m[0]), []);
+    assert.match(off, /Создать АВР/); assert.match(off, /Скачать PDF/); assert.match(off, /Закрыть сделку/);
+    const on = render(true);
+    assert.match(on, /ИС ЭСФ/); assert.match(on, /Создать ЭСФ/); assert.match(on, /Подписать и отправить АВР/);
+  } finally { globalThis.localStorage = previous; }
+});
+
 test('WhatsApp connection choices and setup instructions render in Russian, Kazakh and English', async () => {
   for (const method of ['green', 'qr', 'cloud']) {
     const plugins = [{ name: 'whatsapp-selected-method', setup(build) { build.onLoad({ filter: /WhatsAppConnectionsPanel\.tsx$/ }, args => ({
@@ -284,7 +313,7 @@ test('Integration catalog prioritizes messaging, shows actual provider status an
   const {render} = await bundle(`
     import {renderToStaticMarkup} from 'react-dom/server'; import {MemoryRouter} from 'react-router-dom';
     import {SessionContext,emptyCaps} from './lib/session'; import {IntegrationsPage} from './pages/IntegrationsPage';
-    export const render=locale=>renderToStaticMarkup(<SessionContext.Provider value={{me:{user:{locale}},caps:emptyCaps}}><MemoryRouter><IntegrationsPage /></MemoryRouter></SessionContext.Provider>);
+    export const render=(locale,esf=false)=>renderToStaticMarkup(<SessionContext.Provider value={{me:{user:{locale},serviceFeatures:{esf}},caps:emptyCaps}}><MemoryRouter><IntegrationsPage /></MemoryRouter></SessionContext.Provider>);
   `,[plugin]);
   const prior = globalThis.localStorage;
   try {
@@ -292,7 +321,8 @@ test('Integration catalog prioritizes messaging, shows actual provider status an
       globalThis.localStorage={getItem:()=>locale};
       const html=render(locale);
       const ids=[...html.matchAll(/<details[^>]*id="integration-([^"]+)"/g)].map(match=>match[1]);
-      assert.equal(ids.length,13); assert.ok(ids.includes("website-chat")); assert.deepEqual(ids.slice(0,3),['whatsapp','instagram','telegram']);
+      assert.equal(ids.length,12); assert.ok(!ids.includes("esf")); assert.doesNotMatch(html, /ИС ЭСФ|ЭШФ АЖ/);
+      assert.match(render(locale,true), /id="integration-esf"/); assert.ok(ids.includes("website-chat")); assert.deepEqual(ids.slice(0,3),['whatsapp','instagram','telegram']);
       assert.doesNotMatch(html,/<details[^>]*\bopen(?:=|\s|>)/);
       assert.doesNotMatch(html,/secret-form-endpoint|<form|<input|<pre|Page Access Token/);
       const whatsapp=html.split('id="integration-whatsapp"')[1].split('</details>')[0];

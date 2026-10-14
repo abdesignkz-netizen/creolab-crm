@@ -51,6 +51,10 @@ export function useCapabilities() {
   return useSession().caps;
 }
 
+export function useEsfEnabled() {
+  return useSession().me?.serviceFeatures?.esf === true;
+}
+
 export function applyAppearance(user?: { locale?: string; theme?: string } | null) {
   const theme = user?.theme || "system";
   document.documentElement.dataset.theme = theme;

@@ -56,6 +56,9 @@ export async function getDealCloseReadiness(prisma: PrismaClient, auth: AuthCont
     },
   });
   if (!deal) throw new ApiError(404, "not_found", "Сделка не найдена");
+  if (!await (await import("./esfAvailability.ts")).isEsfEnabled(prisma)) {
+    return { ready: true, alreadyClosed: deal.outcome === "won", missingFields: [], missingFieldLabels: {}, dealId };
+  }
   const esf = deal.electronicDocuments[0] || null;
   return assessDealCloseReadiness({
     dealId,

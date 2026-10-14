@@ -1,3 +1,4 @@
+import { isEsfEnabled } from "./esfAvailability.ts";
 import { systemText } from "@creolab/contracts";
 import { supportArticleLocale } from "./supportKnowledgeLocale.ts";
 import type { PrismaClient } from "@creolab/db";
@@ -95,6 +96,10 @@ function publicArticle(row: {
   };
 }
 
+function mentionsEsf(article: { category: string; title: string; content: string; relatedRoute?: string | null }) {
+  return article.category === "esf" || /ЭСФ|\besf\b/i.test(`${article.title} ${article.content} ${article.relatedRoute || ""}`);
+}
+
 export async function ensureSupportCatalog(prisma: PrismaClient) {
   const count = await prisma.supportArticle.count();
   if (count > 0) return { seeded: false };
@@ -114,7 +119,8 @@ export async function searchSupportArticles(
     where: { isPublished: true },
     orderBy: [{ sortOrder: "asc" }, { title: "asc" }],
   });
-  const published = publishedRows.map(row => supportArticleLocale(row, auth.user.locale || "ru"));
+  const esfEnabled = await isEsfEnabled(prisma);
+  const published = publishedRows.filter(row => esfEnabled || !mentionsEsf(row)).map(row => supportArticleLocale(row, auth.user.locale || "ru"));
   const q = String(query.q || "").trim();
   const ranked = published
     .map((article) => ({ article, score: scoreArticle(article, q, module) }))
@@ -133,7 +139,7 @@ export async function searchSupportArticles(
   const limit = Math.min(30, Math.max(5, Number(query.limit) || 12));
   return {
     module,
-    categories: SUPPORT_CATEGORIES.map((item) => ({ id: item.id, title: systemText(auth.user.locale || "ru", item.title) })),
+    categories: SUPPORT_CATEGORIES.filter(item => esfEnabled || item.id !== "esf").map((item) => ({ id: item.id, title: systemText(auth.user.locale || "ru", item.title) })),
     popular: popular.map(row => publicArticle(row, auth.user.locale || "ru")),
     contextual: contextual.map(row => publicArticle(row, auth.user.locale || "ru")),
     items: ranked.slice(0, limit).map((row) => publicArticle(row.article, auth.user.locale || "ru")),
@@ -148,7 +154,7 @@ export async function getSupportArticle(prisma: PrismaClient, auth: AuthContext,
       OR: [{ id: idOrSlug }, { slug: idOrSlug }],
     },
   });
-  if (!article) throw new ApiError(404, "not_found", "Статья не найдена");
+  if (!article || (!await isEsfEnabled(prisma) && mentionsEsf(article))) throw new ApiError(404, "not_found", "Статья не найдена");
   let myFeedback: boolean | null = null;
   if (auth.activeMembership) {
     const row = await prisma.supportArticleFeedback.findUnique({
@@ -167,7 +173,7 @@ export async function submitSupportArticleFeedback(
 ) {
   const membership = requireTenant(auth);
   const article = await prisma.supportArticle.findFirst({ where: { id: articleId, isPublished: true } });
-  if (!article) throw new ApiError(404, "not_found", "Статья не найдена");
+  if (!article || (!await isEsfEnabled(prisma) && mentionsEsf(article))) throw new ApiError(404, "not_found", "Статья не найдена");
   await prisma.supportArticleFeedback.upsert({
     where: { articleId_userId: { articleId, userId: auth.user.id } },
     update: { helpful, tenantId: membership.tenantId },

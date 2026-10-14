@@ -40,7 +40,7 @@ export function EsfMeasureUnitSelect({
       disabled={disabled}
       aria-invalid={invalid || undefined}
       aria-label={ariaLabel || uiText("Единица измерения")}
-      title={uiText("Код единицы измерения из классификатора ИС ЭСФ (ОКЕИ)")}
+      title={uiText("Код единицы измерения (ОКЕИ)")}
       value={selected}
       onChange={(event) => onChange(event.target.value)}
     >

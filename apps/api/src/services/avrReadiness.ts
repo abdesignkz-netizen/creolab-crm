@@ -68,8 +68,8 @@ export function assessAvrReadiness(input: {
   if (sellerId && sellerId === buyerId) missingFields.push("parties.taxIds");
   const contractId = input.contractId || input.signedContractId;
   const warnings = input.signedContractId ? [] : [contractId
-    ? "Договор не подписан. Это не препятствует формированию, проверке и отправке АВР и ЭСФ."
-    : "Договор не загружен. АВР и ЭСФ можно сформировать из данных сделки."];
+    ? "Договор не подписан. Это не препятствует формированию и проверке АВР."
+    : "Договор не загружен. АВР можно сформировать из данных сделки."];
   if (contractId && !filled(input.contractNumber)) missingFields.push("contract.number");
   if (contractId && !input.contractDate) missingFields.push("contract.date");
 

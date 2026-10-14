@@ -1,3 +1,4 @@
+import { useEsfEnabled } from "../lib/session";
 import { WorkspaceSectionNav } from "../components/WorkspaceSectionNav";
 import { InlineFeedback } from "../components/InlineFeedback";
 import { uiTaskTitle, uiMessage, uiText, useUiText, localizeUiOptions, uiFormatLocale , uiDurationLabel } from "../lib/uiText";
@@ -174,6 +175,7 @@ function DealBoardCard({
 export function DealsPage() {
   const uiText = useUiText();
   const caps = useCapabilities();
+  const esfEnabled = useEsfEnabled();
   const [view, setView] = useUrlState("view", "list", ["list", "board"]);
   const [selectedContractId, setSelectedContractId] = useState<string | null>(null);
   const requestVersion = useRequestVersion();
@@ -629,6 +631,7 @@ export function DealsPage() {
 export function DealDetailPage() {
   const uiText = useUiText();
   const caps = useCapabilities();
+  const esfEnabled = useEsfEnabled();
   const location = useLocation();
   const [detailSection, setDetailSection] = useState("overview");
   useEffect(() => {
@@ -710,7 +713,7 @@ export function DealDetailPage() {
         caps.documents ? api.contractReadiness(dealId).catch(() => null) : Promise.resolve(null),
         caps.documents ? api.invoiceReadiness(dealId).catch(() => null) : Promise.resolve(null),
         caps.documents ? api.avrReadiness(dealId).catch(() => null) : Promise.resolve(null),
-        caps.documents ? api.esfInvoiceReadiness(dealId).catch(() => null) : Promise.resolve(null),
+        caps.documents && esfEnabled ? api.esfInvoiceReadiness(dealId).catch(() => null) : Promise.resolve(null),
         caps.documents ? api.dealCloseReadiness(dealId).catch(() => null) : Promise.resolve(null),
       ]);
       setData(detail);
@@ -863,10 +866,10 @@ export function DealDetailPage() {
               <span className="muted">{uiText("АВР")}</span>
               <strong>{electronicDocKpi(docs, "AVR")}</strong>
             </a>
-            <a className="sit-kpi" href="#esf" onClick={() => setDetailSection("documents")}>
+            {esfEnabled ? <a className="sit-kpi" href="#esf" onClick={() => setDetailSection("documents")}>
               <span className="muted">{uiText("ЭСФ")}</span>
               <strong>{electronicDocKpi(docs, "ESF")}</strong>
-            </a>
+            </a> : null}
           </>
         ) : null}
       </div>
@@ -1054,7 +1057,7 @@ export function DealDetailPage() {
       <div hidden={detailSection !== "documents"}>
       <div className="panel">
         <div className="row"><b>{uiText("Позиции")}</b><button type="button" className="btn secondary" disabled={busy} onClick={newItem}>{uiText("Добавить новую позицию")}</button></div>
-        <p className="muted">{uiText("Они же попадут в договор, счёт, АВР и ЭСФ.")}</p>
+        <p className="muted">{uiText(esfEnabled ? "Они же попадут в договор, счёт, АВР и ЭСФ." : "Они же попадут в договор, счёт и АВР.")}</p>
         {(d.items || []).length === 0 ? <p className="empty">{uiText("Позиций пока нет")}</p> : null}
         {(d.items || []).map((item: any) => (
           <div className="row" key={item.id}>

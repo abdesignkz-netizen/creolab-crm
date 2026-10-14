@@ -1,3 +1,4 @@
+import { isEsfEnabled, requireEsfEnabled } from "./esfAvailability.ts";
 import { z } from "zod";
 import type { PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
@@ -6,10 +7,10 @@ import { requireDocumentsAccess } from "../lib/access.ts";
 
 export const DOCUMENT_TYPES = ["DOG", "INV", "AVR", "ESF"] as const;
 type DocumentType = typeof DOCUMENT_TYPES[number];
-type Db = Pick<PrismaClient, "tenant" | "contract" | "invoice" | "electronicDocument" | "auditEvent" | "$queryRaw">;
+type Db = Pick<PrismaClient, "tenant" | "contract" | "invoice" | "electronicDocument" | "auditEvent" | "$queryRaw" | "platformSetting">;
 type Numbering = Partial<Record<DocumentType, { start: number; last?: number }>>;
 const startSchema = z.number().int().min(1).max(999999999);
-const settingsSchema = z.object({ DOG: startSchema, INV: startSchema, AVR: startSchema, ESF: startSchema }).strict();
+const settingsSchema = z.object({ DOG: startSchema, INV: startSchema, AVR: startSchema, ESF: startSchema.optional() }).strict();
 
 async function state(db: Db, tenantId: string) {
   const tenant = await db.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { settingsJson: true } });
@@ -75,7 +76,8 @@ export async function getDocumentNumbering(db: Db, auth: AuthContext) {
   if (!tenantId) throw new ApiError(403, "no_tenant", "Нет активной компании");
   const { numbering } = await state(db, tenantId);
   const result: Record<string, { start: number; next: number; example: string }> = {};
-  for (const type of DOCUMENT_TYPES) {
+  const esfEnabled = await isEsfEnabled(db);
+  for (const type of DOCUMENT_TYPES.filter(type => esfEnabled || type !== "ESF")) {
     const next = await nextValue(db, tenantId, type, numbering, await documentNumbers(db, tenantId, type));
     result[type] = { start: numbering[type]?.start || 1, next, example: `${type}-${new Date().getFullYear()}-${String(next).padStart(4, "0")}` };
   }
@@ -85,12 +87,13 @@ export async function getDocumentNumbering(db: Db, auth: AuthContext) {
 export async function updateDocumentNumbering(prisma: PrismaClient, auth: AuthContext, raw: unknown) {
   if (!auth.activeMembership || !can(auth, "manage_documents")) throw new ApiError(403, "forbidden", "Недостаточно прав для настройки документов");
   const input = settingsSchema.parse(raw);
+  if (input.ESF !== undefined) await requireEsfEnabled(prisma);
   const tenantId = auth.activeMembership.tenantId;
   return prisma.$transaction(async tx => {
     await tx.$queryRaw`SELECT id FROM "Tenant" WHERE id = ${tenantId} FOR UPDATE`;
     const { settings, numbering } = await state(tx, tenantId);
     const updated: Numbering = { ...numbering };
-    for (const type of DOCUMENT_TYPES) updated[type] = { ...numbering[type], start: input[type] };
+    for (const type of DOCUMENT_TYPES) if (input[type] !== undefined) updated[type] = { ...numbering[type], start: input[type]! };
     await tx.tenant.update({ where: { id: tenantId }, data: { settingsJson: { ...settings, documentNumbering: updated } } });
     await tx.auditEvent.create({ data: { tenantId, actorUserId: auth.user.id, action: "document_numbering.update", entityType: "tenant", entityId: tenantId, changesJson: input } });
     return getDocumentNumbering(tx, auth);

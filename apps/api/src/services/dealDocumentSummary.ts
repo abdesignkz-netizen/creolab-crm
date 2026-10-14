@@ -1,3 +1,4 @@
+import { isEsfEnabled } from "./esfAvailability.ts";
 import type { PrismaClient } from "@creolab/db";
 import { documentStatusLabel, type DocumentKind } from "./documentInboxService.ts";
 
@@ -13,6 +14,7 @@ const empty = (): DealDocumentSummary => ({ CONTRACT: null, INVOICE: null, AVR: 
 export async function loadDealDocumentSummaries(prisma: PrismaClient, tenantId: string, dealIds: string[]) {
   const result = new Map(dealIds.map((id) => [id, empty()]));
   if (!dealIds.length) return result;
+  const esfEnabled = await isEsfEnabled(prisma);
   const where = { tenantId, dealId: { in: dealIds } };
   const orderBy = [{ createdAt: "desc" as const }, { id: "desc" as const }];
   const [contracts, invoices, electronic] = await Promise.all([
@@ -22,7 +24,7 @@ export async function loadDealDocumentSummaries(prisma: PrismaClient, tenantId: 
       signatureRequests: { where: { tenantId, signerType: "BUYER" }, select: { contractVersionId: true, openedAt: true, signedAt: true, status: true } },
     } }),
     prisma.invoice.findMany({ where, orderBy, select: { id: true, dealId: true, number: true, status: true } }),
-    prisma.electronicDocument.findMany({ where: { ...where, type: { in: ["AVR", "ESF"] } }, orderBy,
+    prisma.electronicDocument.findMany({ where: { ...where, type: { in: esfEnabled ? ["AVR", "ESF"] : ["AVR"] } }, orderBy,
       select: { id: true, dealId: true, number: true, type: true, status: true, sentAt: true, errorCode: true } }),
   ]);
   function add(dealId: string, kind: DocumentKind, row: Omit<DocumentSummary, "count">) {
@@ -52,7 +54,7 @@ export async function loadDealDocumentSummaries(prisma: PrismaClient, tenantId: 
       id: row.id, number: row.number, status: row.errorCode ? "ERROR" : row.status,
       statusLabel: documentStatusLabel(kind, row.errorCode ? "ERROR" : row.status),
       delivery: row.status === "SENDING" ? "sending" : sent ? "sent" : "not_sent",
-      deliveryLabel: row.status === "SENDING" ? "Отправляется в ИС ЭСФ" : sent ? "Отправлен в ИС ЭСФ" : "Не отправлен",
+      deliveryLabel: !esfEnabled ? "Отправка не отслеживается" : row.status === "SENDING" ? "Отправляется в ИС ЭСФ" : sent ? "Отправлен в ИС ЭСФ" : "Не отправлен",
       href: `/documents?kind=${kind}&dealId=${row.dealId}`,
     });
   }

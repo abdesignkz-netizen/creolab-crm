@@ -1,3 +1,4 @@
+import { requireEsfEnabled, isEsfEnabled } from "./esfAvailability.ts";
 import type { PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import { readEsfConfig } from "../integrations/esf/EsfConfig.ts";
@@ -170,6 +171,7 @@ export async function applyOfficialEsfStatus(
 }
 
 export async function syncElectronicDocumentById(prisma: PrismaClient, tenantId: string, documentId: string) {
+  await requireEsfEnabled(prisma);
   const document = await prisma.electronicDocument.findFirst({
     where: { id: documentId, tenantId },
   });
@@ -223,6 +225,10 @@ export async function processEsfStatusPollAction(
   prisma: PrismaClient,
   item: { id: string; tenantId: string; parentId: string; payloadJson: unknown },
 ) {
+  if (!await isEsfEnabled(prisma)) {
+    await prisma.scheduledAction.update({ where: { id: item.id }, data: { state: "scheduled", dueAt: new Date(Date.now() + 60_000) } });
+    return { skipped: true };
+  }
   const payload = (item.payloadJson || {}) as { documentId?: string; attempt?: number };
   const documentId = payload.documentId || item.parentId;
   const attempt = Number(payload.attempt || 0);
@@ -266,6 +272,7 @@ export async function processEsfStatusPollAction(
 }
 
 export async function ensureEsfStatusPolls(prisma: PrismaClient) {
+  if (!await isEsfEnabled(prisma)) return 0;
   const pending = await prisma.electronicDocument.findMany({
     where: {
       externalId: { not: null },
@@ -290,6 +297,7 @@ export async function ensureEsfStatusPolls(prisma: PrismaClient) {
 }
 
 export async function syncDealEsfDocuments(prisma: PrismaClient, auth: AuthContext, dealId: string) {
+  await requireEsfEnabled(prisma);
   const membership = requireTenant(auth);
   if (!can(auth, "manage_documents")) {
     throw new ApiError(403, "forbidden", "Недостаточно прав для документов");

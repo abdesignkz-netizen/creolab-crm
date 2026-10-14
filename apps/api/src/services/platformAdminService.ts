@@ -746,7 +746,7 @@ export async function updatePlatformServiceSettings(
     action: "settings.platform_updated",
     entityType: "platform_setting",
     entityId: "defaults",
-    changes: { keys: Object.keys(input) },
+    changes: { keys: Object.keys(input), ...(Object.prototype.hasOwnProperty.call((input.features || {}), "esf") ? { esfEnabled: saved.features.esf } : {}) },
   });
   return { ...saved, transcription: getTranscriptionStatus() };
 }

@@ -36,6 +36,7 @@ describe("Documents phase 6 ESF POC", () => {
     prisma = await createPrismaClient();
     const { seedDatabase } = await import("../../../packages/db/src/seed.ts");
     await seedDatabase();
+    await (await import("./services/runtimeSettings.ts")).savePlatformSettings(prisma, { features: { esf: true } });
     app = createApp(prisma);
     await new Promise<void>((resolve) => {
       server = app.listen(0, "127.0.0.1", () => resolve());

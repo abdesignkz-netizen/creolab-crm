@@ -1,3 +1,4 @@
+import { requireEsfEnabled } from "./esfAvailability.ts";
 import { allocateDocumentNumber } from "./documentNumberingService.ts";
 import { documentOrganization } from "./documentOrganization.ts";
 import type { PrismaClient } from "@creolab/db";
@@ -72,6 +73,7 @@ async function resolveLinks(
 }
 
 export async function createEsfDraft(prisma: PrismaClient, auth: AuthContext, dealId: string, input: { contractId?: string; invoiceId?: string } = {}) {
+  await requireEsfEnabled(prisma);
   const membership = requireTenant(auth); requireManageDocuments(auth);
   return prisma.$transaction(async tx => {
     await tx.$queryRaw`SELECT id FROM "Tenant" WHERE id = ${membership.tenantId} FOR UPDATE`;
@@ -177,6 +179,7 @@ async function createEsfDraftLocked(
 }
 
 export async function validateEsfInvoice(prisma: PrismaClient, auth: AuthContext, documentId: string) {
+  await requireEsfEnabled(prisma);
   const membership = requireTenant(auth);
   requireManageDocuments(auth);
   return prisma.$transaction(async tx => {

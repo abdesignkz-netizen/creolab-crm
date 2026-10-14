@@ -1,3 +1,4 @@
+import { isEsfEnabled, isEsfRoute, requireEsfEnabled } from "./services/esfAvailability.ts";
 import { beginEmployeeTelegramLink, employeeTelegramStatus, disconnectEmployeeTelegram, handleEmployeeTelegramWebhook, EMPLOYEE_TELEGRAM_WEBHOOK, testEmployeeTelegram } from "./services/employeeTelegramService.ts";
 import { controlNotificationSettings, saveControlNotificationSettings, pauseControlNotifications, testControlNotification } from "./services/controlNotificationService.ts";
 import { z } from "zod";
@@ -439,6 +440,31 @@ export function createApp(prisma: PrismaClient) {
       parseLargeJson(req, res, next);
     } catch (error) { next(error); }
   };
+
+  app.get("/api/v1/service-features", async (req, res) => {
+    await requireAuth(req);
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ esf: await isEsfEnabled(prisma) });
+  });
+
+  app.use(async (req, _res, next) => {
+    try {
+      if (isEsfRoute(req.path)) {
+        await requireAuth(req);
+        await requireEsfEnabled(prisma);
+      } else {
+        const match = req.path.match(/^\/api\/v1\/electronic-documents\/([^/]+)(?:\/|$)/);
+        if (match) {
+          const auth = await requireAuth(req);
+          if (auth.activeMembership) {
+            const document = await prisma.electronicDocument.findFirst({ where: { id: match[1], tenantId: auth.activeMembership.tenantId }, select: { type: true } });
+            if (document?.type === "ESF") await requireEsfEnabled(prisma);
+          }
+        }
+      }
+      next();
+    } catch (error) { next(error); }
+  });
 
   app.use(async (req, res, next) => {
     try {
@@ -1493,6 +1519,7 @@ export function createApp(prisma: PrismaClient) {
   app.post("/api/v1/deals/:id/electronic-documents", json, async (req, res) => {
     const input = createElectronicDocumentDraftSchema.parse(req.body || {});
     const auth = await requireAuth(req);
+    if (input.type === "ESF") await requireEsfEnabled(prisma);
     const { withIdempotency } = await import("./services/idempotency.ts");
     const { createElectronicDocumentDraft } = await import("./services/documentDraftService.ts");
     const result = await withIdempotency(prisma, {

@@ -1,3 +1,4 @@
+import { requireEsfEnabled } from "./esfAvailability.ts";
 import type { PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import { CALLS_ENABLED } from "../lib/featureFlags.ts";
@@ -335,6 +336,7 @@ export async function parseTaskCommand(
     tenantId: auth.activeMembership.tenantId,
   });
   command = mergeLlm(command, llm);
+  if (["create_esf", "validate_esf", "send_esf", "send_avr"].includes(command.documentAction || "")) await requireEsfEnabled(prisma);
 
   let clients: Array<Record<string, unknown>> = [];
   let total = 0;

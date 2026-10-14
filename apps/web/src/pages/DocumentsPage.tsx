@@ -1,3 +1,4 @@
+import { useEsfEnabled } from "../lib/session";
 import { InlineFeedback } from "../components/InlineFeedback";
 import { uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale } from "../lib/uiText";
 import { NavIcon } from "../components/NavIcon";
@@ -56,10 +57,11 @@ const STATUS_FILTERS: Record<string, Array<[string, string]>> = {
 };
 
 export function DocumentsPage() {
+  const esfEnabled = useEsfEnabled();
   const uiText = useUiText();
   const requestVersion = useRequestVersion();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [kind] = useUrlState<(typeof KINDS)[number][0]>("kind", "", localizeUiOptions(KINDS, uiText).map(([value]) => value));
+  const [kind] = useUrlState<(typeof KINDS)[number][0]>("kind", "", localizeUiOptions(KINDS.filter(([id]) => esfEnabled || id !== "ESF"), uiText).map(([value]) => value));
   const statusAllowed = ["", ...(localizeUiOptions(STATUS_FILTERS, uiText)[kind] || []).map(([value]) => value)] as const;
   const [status, setStatus] = useUrlState<string>("status", "", statusAllowed);
   const [attention] = useUrlState<"" | "1">("attention", "", ["", "1"]);
@@ -241,7 +243,7 @@ export function DocumentsPage() {
       <div className="row sit-head">
         <div>
           <h2>{uiText("Документы")}</h2>
-          <p className="muted">{uiText("Договоры, счета, АВР и ЭСФ по всем сделкам")}</p>
+          <p className="muted">{uiText(esfEnabled ? "Договоры, счета, АВР и ЭСФ по всем сделкам" : "Договоры, счета и АВР по всем сделкам")}</p>
         </div>
         <Link className="btn secondary" to="/settings?section=company">
           {uiText("Реквизиты")}</Link>
@@ -261,7 +263,7 @@ export function DocumentsPage() {
             <button type="button" className="btn secondary" onClick={() => setDocumentTool("templates")}>{uiText("Договор по шаблону")}</button>
             <Link className="btn secondary" to="/documents/invoices/new">{uiText("Счёт на оплату")}</Link>
             <Link className="btn secondary" to="/documents/avr/new">{uiText("Акт выполненных работ")}</Link>
-            <button type="button" className="btn secondary" disabled={esfBusy} onClick={() => { showKind("ESF"); setDocumentTool(""); void openEsfCreate(); }}>{uiText("Электронный счёт-фактура")}</button>
+            {esfEnabled ? <button type="button" className="btn secondary" disabled={esfBusy} onClick={() => { showKind("ESF"); setDocumentTool(""); void openEsfCreate(); }}>{uiText("Электронный счёт-фактура")}</button> : null}
           </div>
         </section>}
         <div hidden={documentTool !== "templates"}><button type="button" className="btn secondary" onClick={() => setDocumentTool("create")}>{uiText("Другой тип документа")}</button><ContractTemplatePanel onSaved={() => void load()} /></div>
@@ -276,7 +278,7 @@ export function DocumentsPage() {
       >
         <div className="command-compose-head">
           <b>{uiText("Что сделать")}</b>
-          <p className="muted">{uiText("Например: сформировать договор, проверить АВР, отправить ЭСФ.")}</p>
+          <p className="muted">{uiText("Например: сформировать договор, проверить АВР.")}</p>
         </div>
         <textarea
           value={commandText}
@@ -347,7 +349,7 @@ export function DocumentsPage() {
 
       <div className="sit-toolbar documents-toolbar">
         <div className="sit-periods document-kind-filters" role="group" aria-label={uiText("Тип документа")}>
-          {localizeUiOptions(KINDS, uiText).map(([id, label]) => (
+          {localizeUiOptions(KINDS.filter(([id]) => esfEnabled || id !== "ESF"), uiText).map(([id, label]) => (
             <button
               key={id || "all"}
               type="button"
@@ -447,7 +449,7 @@ export function DocumentsPage() {
                 {kind ? null : <col className="documents-col-kind" />}
                 <col className="documents-col-status" />
                 {kind === "AVR" ? null : <col className="documents-col-avr" />}
-                {kind === "ESF" ? null : <col className="documents-col-esf" />}
+                {!esfEnabled || kind === "ESF" ? null : <col className="documents-col-esf" />}
                 <col className="documents-col-owner" />
                 <col className="documents-col-actions" />
               </colgroup>
@@ -461,13 +463,13 @@ export function DocumentsPage() {
                   {kind ? null : <th>{uiText("Тип")}</th>}
                   <th>{uiText("Статус")}</th>
                   {kind === "AVR" ? null : <th>{uiText("АВР")}</th>}
-                  {kind === "ESF" ? null : <th>{uiText("ЭСФ")}</th>}
+                  {!esfEnabled || kind === "ESF" ? null : <th>{uiText("ЭСФ")}</th>}
                   <th>{uiText("Ответственный")}</th>
                   <th>{uiText("Действия")}</th>
                 </tr>
               </thead>
               <tbody>
-                {items.map((item) => (
+                {items.filter(item => esfEnabled || item.kind !== "ESF").map((item) => (
                   <tr key={`${item.kind}-${item.id}`}>
                     <td className="documents-cell-number">
                       <Link to={item.kind === "CONTRACT" ? contractHref(item.id) : item.href}>{item.number}</Link>
@@ -483,7 +485,7 @@ export function DocumentsPage() {
                       <span className={`document-status status-${item.errorCode ? "ERROR" : item.status}`}>{uiMessage(item.statusLabel)}</span>
                     </td>
                     {kind === "AVR" ? null : <td className="documents-cell-avr">{item.avrStatus || uiText("Требуется")}</td>}
-                    {kind === "ESF" ? null : <td className="documents-cell-esf">{item.esfStatus}</td>}
+                    {!esfEnabled || kind === "ESF" ? null : <td className="documents-cell-esf">{item.esfStatus}</td>}
                     <td className="documents-cell-owner">{item.responsible || uiText("Не назначен")}</td>
                     <td className="documents-cell-actions">
                       <Link to={item.kind === "CONTRACT" ? contractHref(item.id) : item.href}>{uiText("Открыть")}</Link>

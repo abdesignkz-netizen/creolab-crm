@@ -1,3 +1,4 @@
+import { useEsfEnabled } from "../lib/session";
 import { EmployeeTelegramPanel } from "../components/EmployeeTelegramPanel";
 import { WebsiteChatPanel } from "./WebsiteChatPanel";
 import { ChannelAiControl } from "../components/ChannelAiControl";
@@ -30,6 +31,7 @@ function whatsappStatusNote(wa: any) {
 }
 
 export function IntegrationsPage() {
+  const esfEnabled = useEsfEnabled();
   const uiText = useUiText();
   const location = useLocation();
   const navigate = useNavigate();
@@ -74,7 +76,7 @@ export function IntegrationsPage() {
 
   async function loadSummaries() {
     const version = ++summaryVersion.current;
-    const results = await Promise.allSettled([api.whatsAppConnections(), api.googleConnections(), api.esfConnection()]);
+    const results = await Promise.allSettled([api.whatsAppConnections(), api.googleConnections(), esfEnabled ? api.esfConnection() : Promise.resolve(null)]);
     if (version !== summaryVersion.current) return;
     setSummaries(Object.fromEntries(["whatsapp", "google", "esf"].map((key, index) => [key,
       results[index].status === "fulfilled" ? (results[index] as PromiseFulfilledResult<any>).value : { failed: true }])));
@@ -83,7 +85,6 @@ export function IntegrationsPage() {
 
   useEffect(() => {
     void load();
-    void loadSummaries();
     const searchParams = new URLSearchParams(location.search);
     const google = searchParams.get("google");
     if (google) {
@@ -99,6 +100,8 @@ export function IntegrationsPage() {
       navigate({ search: searchParams.toString(), hash: location.hash }, { replace: true });
     }
   }, []);
+
+  useEffect(() => { void loadSummaries(); }, [esfEnabled]);
 
   if (!catalog && !setup && !error) return <div className="state">{uiText("Загрузка…")}</div>;
   if (!catalog && !setup) {
@@ -453,7 +456,7 @@ export function IntegrationsPage() {
       ) : null}
 
         </IntegrationDisclosure>
-        <IntegrationDisclosure id="esf" icon="esf" title={uiText("ИС ЭСФ")} description={uiText("Электронные счета-фактуры и ЭЦП")} {...esfSummary}>
+        {esfEnabled ? <IntegrationDisclosure id="esf" icon="esf" title={uiText("ИС ЭСФ")} description={uiText("Электронные счета-фактуры и ЭЦП")} {...esfSummary}>
       <h3 className="integ-section-title">{uiText("Документы и ИС ЭСФ")}</h3>
       <div className="integ-grid">
         <div className="panel integ-card">
@@ -468,7 +471,7 @@ export function IntegrationsPage() {
         </div>
       </div>
 
-        </IntegrationDisclosure>
+        </IntegrationDisclosure> : null}
         <IntegrationDisclosure id="calendar" icon="calendar" title="Google Calendar" description={uiText("Встречи и события вашего бизнеса")} {...googleSummary("calendar")}>
           <GoogleConnectionsPanel kind="calendar" onChange={refresh} />
         </IntegrationDisclosure>

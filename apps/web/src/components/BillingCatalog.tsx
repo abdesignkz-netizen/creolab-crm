@@ -1,3 +1,4 @@
+import { useEsfEnabled } from "../lib/session";
 import { systemText } from "@creolab/contracts";
 import { useLocale } from "../lib/session";
 import { FEATURE_LABEL, LIMIT_LABEL, type CatalogItem, type Feature } from "@creolab/contracts";
@@ -53,10 +54,10 @@ const FEATURE_GROUPS: Array<{ title: string; requires?: Feature; rows: Array<{ k
   { title: "Системные возможности", rows: [{key:"CRM_CORE",label:"Профиль и базовые настройки CRM"},{key:"FILE_STORAGE",label:"Файлы в пределах лимита"}] },
 ];
 
-function highlights(item: BillingCatalogItem, locale: string) {
+function highlights(item: BillingCatalogItem, locale: string, esfEnabled: boolean) {
   const f = item.features;
   const rows = [f.CRM_CORE ? systemText(locale, "Полная CRM: клиенты, компании, заявки, сделки и задачи") : systemText(locale, "CRM Lite: клиенты, заявки, сделки и задачи")];
-  if (f.DOCUMENTS) rows.push(systemText(locale, "Договоры, счета, АВР и работа с ИС ЭСФ"));
+  if (f.DOCUMENTS) rows.push(systemText(locale, esfEnabled ? "Договоры, счета, АВР и работа с ИС ЭСФ" : "Договоры, счета и АВР"));
   if (f.WORKFLOWS) rows.push(systemText(locale, "Сценарии работы со сделками и расширенная аналитика"));
   if (f.MASS_MESSAGING) rows.push(systemText(locale, "Массовые кампании с подтверждением запуска")); else rows.push(systemText(locale, "Массовые рассылки — с тарифа Start"));
   if (f.CONTROL_BULK) rows.push(systemText(locale, "Массовые действия Control и расширенные правила AI"));
@@ -77,6 +78,7 @@ export function BillingCatalog({ items, period, selected, current, disabled, onS
   disabled: boolean; onSelect: (code: string) => void;
 }) {
   const locale = useLocale();
+  const esfEnabled = useEsfEnabled();
   const bt = (ru: string, kk: string, en: string) => locale === "kk" ? kk : locale === "en" ? en : ru;
   const available = items.filter((item) => item.kind !== "addon" && item.catalogStatus === "AVAILABLE");
   const enterprise = available.find((item) => item.code === "CRM_ENTERPRISE");
@@ -110,7 +112,7 @@ export function BillingCatalog({ items, period, selected, current, disabled, onS
       <details className="billing-details"><summary>{bt("Что входит в тариф", "Тарифке не кіреді", "What’s included")}</summary>
       <p className="muted billing-price-note">{free ? systemText(locale, "Ручная работа с клиентами, сделками и задачами. Без оплаты и подтверждения администратора.") : systemText(locale, "Указана стоимость базовой конфигурации. Дополнительные подключения и ресурсы оплачиваются отдельно.")}</p>
       {item.code === "CRM_START" ? <p className="muted">{systemText(locale, "По сравнению с Free: ×10 автоматизаций и документов, до 3 пользователей, 5 ГБ хранилища, ежемесячные AI-кредиты и рассылки до 300 получателей.")}</p> : null}
-      <ul className="billing-feature-list">{highlights(item, locale).map((text) => <li key={text}>{text}</li>)}</ul>
+      <ul className="billing-feature-list">{highlights(item, locale, esfEnabled).map((text) => <li key={text}>{text}</li>)}</ul>
       </details>
     </article>;
   }
@@ -129,13 +131,13 @@ export function BillingCatalog({ items, period, selected, current, disabled, onS
     </details>
     <details id="billing-comparison" className="panel billing-comparison">
       <summary>{systemText(locale, "Подробное сравнение всех тарифов")}</summary>
-      <p className="muted">{systemText(locale, "«Включено» означает доступ по тарифу. Каналы связи и ИС ЭСФ требуют настройки подключения. Количество подключений коммуникационных каналов указано в лимитах.")}</p>
+      <p className="muted">{systemText(locale, "«Включено» означает доступ по тарифу. Интеграции требуют настройки подключения. Количество подключений коммуникационных каналов указано в лимитах.")}</p>
       <div className="billing-table-scroll" tabIndex={0} role="region" aria-label={systemText(locale, "Сравнение тарифов")}>
         <table><caption className="muted">{systemText(locale, "Возможности базовых тарифов без дополнительных модулей")}</caption><thead><tr><th scope="col">{systemText(locale, "Возможность")}</th>{comparison.map((item) => <th scope="col" key={item.code}>{item.name}</th>)}</tr></thead>
           <tbody>
             <tr><th scope="row">{systemText(locale, "Цена /")}{" "}{periodLabel}</th>{comparison.map((item) => <td key={item.code}>{formatKzt(catalogPrice(item, period))}</td>)}</tr>
             {DISPLAY_LIMITS.map((key) => <tr key={key}><th scope="row">{systemText(locale, LIMIT_LABEL[key])}</th>{comparison.map((item) => <td key={item.code}>{item.limits[key] === -1 ? systemText(locale, "Без квоты") : item.limits[key] === 0 && key === "CAMPAIGN_RECIPIENTS" ? systemText(locale, "С тарифа Start") : item.limits[key] == null ? systemText(locale, "По условиям тарифа") : resourceText(item, key, locale)}</td>)}</tr>)}
-            {FEATURE_GROUPS.flatMap(group => [<tr key={systemText(locale, group.title)}><th colSpan={comparison.length + 1}>{systemText(locale, group.title)}</th></tr>, ...group.rows.map(({ key, label }) => <tr key={`${systemText(locale, group.title)}-${label}`}><th scope="row">{systemText(locale, label || FEATURE_LABEL[key])}</th>{comparison.map((item) => <td key={item.code} className={item.features[key] && (!group.requires || item.features[group.requires]) ? "billing-included" : "muted"}>{item.features[key] && (!group.requires || item.features[group.requires]) ? (key === "AI_MANAGER" && item.code === "BASQAR_FREE" ? systemText(locale, "Пробный режим · 100 AI-кредитов один раз") : systemText(locale, "Включено")) : "—"}</td>)}</tr>)])}
+            {FEATURE_GROUPS.flatMap(group => [<tr key={systemText(locale, group.title)}><th colSpan={comparison.length + 1}>{systemText(locale, group.title)}</th></tr>, ...group.rows.filter(row => esfEnabled || row.key !== "ESF").map(({ key, label }) => <tr key={`${systemText(locale, group.title)}-${label}`}><th scope="row">{systemText(locale, !esfEnabled && label === "Счета, АВР и ЭСФ" ? "Счета и АВР" : label || FEATURE_LABEL[key])}</th>{comparison.map((item) => <td key={item.code} className={item.features[key] && (!group.requires || item.features[group.requires]) ? "billing-included" : "muted"}>{item.features[key] && (!group.requires || item.features[group.requires]) ? (key === "AI_MANAGER" && item.code === "BASQAR_FREE" ? systemText(locale, "Пробный режим · 100 AI-кредитов один раз") : systemText(locale, "Включено")) : "—"}</td>)}</tr>)])}
           </tbody>
         </table>
       </div>
