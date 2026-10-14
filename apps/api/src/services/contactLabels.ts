@@ -181,8 +181,12 @@ export function phoneFromContact(
   if (extras?.phoneRaw) return extras.phoneRaw;
   if (extras?.phoneNormalized) return formatPhoneDisplay(extras.phoneNormalized);
   if (extras?.externalThreadId) {
-    const digits = digitsOnly(extras.externalThreadId);
-    if (digits.length >= 10 && digits.length <= 15) return formatPhoneDisplay(digits);
+    // A WhatsApp LID is an opaque user ID, not a phone number. Never strip
+    // arbitrary suffixes (or device IDs) and present the remaining digits as a phone.
+    const thread = extras.externalThreadId.trim();
+    const phone = thread.match(/^(\+?\d{10,15})(?::\d+)?@(?:s\.whatsapp\.net|c\.us)$/)?.[1]
+      || thread.match(/^\+?\d{10,15}$/)?.[0];
+    if (phone) return formatPhoneDisplay(phone);
   }
   return null;
 }

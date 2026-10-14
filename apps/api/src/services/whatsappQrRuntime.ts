@@ -97,9 +97,17 @@ async function receiveQrMessage(prisma: PrismaClient, id: string, socket: WASock
     } catch { text += "\n[Вложение WhatsApp недоступно. Откройте оригинал в WhatsApp.]"; }
   }
   const at = new Date(Number(message.messageTimestamp || Math.floor(Date.now() / 1000)) * 1000);
-  const phoneJid = jid.endsWith("@s.whatsapp.net") ? jid : message.key.remoteJidAlt?.endsWith("@s.whatsapp.net") ? message.key.remoteJidAlt : null;
+  const alternate = jidNormalizedUser(message.key.remoteJidAlt || "");
+  let phoneJid = jid.endsWith("@s.whatsapp.net") ? jid : alternate.endsWith("@s.whatsapp.net") ? alternate : null;
+  if (!phoneJid && jid.endsWith("@lid")) {
+    // Only a mapping supplied by WhatsApp may turn a LID into a phone JID.
+    const mapped = await socket.signalRepository?.lidMapping?.getPNForLID(jid).catch(() => null);
+    const normalized = jidNormalizedUser(mapped || "");
+    if (/^\d{7,15}@s\.whatsapp\.net$/.test(normalized)) phoneJid = normalized;
+  }
+  const aliases = [alternate, phoneJid].filter((value): value is string => Boolean(value && value !== jid && /^\d+@(s\.whatsapp\.net|lid)$/.test(value)));
   await recordExternalMessage(prisma, id, { eventId: `wa:${waDigest(`${jid}:${message.key.id}`)}`, channel: "whatsapp", externalUserId: jid, threadId: jid, messageId: message.key.id,
-    name: message.pushName || (phoneJid ? `+${phoneJid.split("@")[0]}` : "WhatsApp"), phone: phoneJid?.split("@")[0], aliases: message.key.remoteJidAlt && /^\d+@(s\.whatsapp\.net|lid)$/.test(jidNormalizedUser(message.key.remoteJidAlt)) ? [jidNormalizedUser(message.key.remoteJidAlt)] : [], text: text || (attachments.length ? "" : "[Сообщение WhatsApp]"),
+    name: message.pushName || (phoneJid ? `+${phoneJid.split("@")[0]}` : "WhatsApp"), phone: phoneJid?.split("@")[0], aliases, text: text || (attachments.length ? "" : "[Сообщение WhatsApp]"),
     at: Number.isFinite(at.getTime()) && at.getTime() <= Date.now() + 60000 ? at : new Date(), attachments, raw: { id: message.key.id } });
 }
 

@@ -569,6 +569,18 @@ select:disabled { cursor: not-allowed; opacity: .65; }
 
 .conversation-avatar > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
 
+/* Summaries and assignment notices share the message scroller. A long AI
+   handoff must never push the reply composer out of the chat's fixed height. */
+.conv-chat-pane > .conv-thread-scroll { flex: 1 1 0; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; background: var(--bg-elevated); }
+.conv-thread-scroll > .conv-messages { overflow: visible; }
+.bubble-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.conv-handoff-summary { margin: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--accent-soft); font-size: 13px; overflow-wrap: anywhere; }
+.conv-handoff-summary > summary { cursor: pointer; font-weight: 600; min-height: 24px; }
+.conv-handoff-summary > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
+.conv-handoff-summary p, .conv-handoff-summary li { white-space: pre-wrap; }
+.conv-handoff-summary ul { padding-left: 20px; }
+.conv-pending-files { max-height: 140px; overflow-y: auto; }
+
 @media (min-width: 768px) and (max-width: 1000px) {
   .conversations-layout { grid-template-columns: 60px minmax(0, 1fr); }
   .conversations-layout:not(.has-selection) .conv-chat-pane { display: none; }
@@ -579,9 +591,14 @@ select:disabled { cursor: not-allowed; opacity: .65; }
 }
 @media (max-width: 1000px) { .conv-person-copy .conversation-back { display: flex; width: fit-content; margin-bottom: 8px; } }
 @media (max-width: 767px) {
-  .main:has(.conversations-layout) { height: calc(100dvh - 64px); min-height: 0; overflow: hidden; padding-top: 12px; padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px)); }
+  .app-shell:has(.conversations-layout) { display: flex; flex-direction: column; height: var(--conversation-viewport-height, 100dvh); min-height: 0; padding-bottom: 0; overflow: hidden; }
+  .app-shell:has(.conversations-layout) > .mobile-topbar, .app-shell:has(.conversations-layout) > .preview-banner { flex-shrink: 0; }
+  .main:has(.conversations-layout) { flex: 1 1 0; height: auto; min-height: 0; overflow: hidden; padding-top: 12px; padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px)); }
   .conversations-layout { flex: 1 1 0; height: auto; min-height: 0; }
   .main:has(.conversations-layout) > :not(.conversations-layout) { flex-shrink: 0; }
+  .conv-chat-pane > .conv-header { max-height: 42%; overflow-y: auto; }
+  .main:has(.conv-composer:focus-within) { padding-bottom: 12px; }
+  body:has(.conv-composer:focus-within) .mobile-tabbar { display: none; }
 }
 
 /* Team settings keep invitation, capacity and member editing in one workspace. */

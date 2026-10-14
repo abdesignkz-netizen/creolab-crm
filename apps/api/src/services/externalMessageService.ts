@@ -35,7 +35,12 @@ export async function recordExternalMessage(prisma: PrismaClient, integrationId:
     }
     if (!identity) {
       if (input.email) await tx.contactMethod.create({ data: { tenantId, contactId: contact.id, type: "email", rawValue: input.email, normalizedValue: input.email.toLowerCase(), source: "email", confirmed: false } });
-      if (!phoneMatch && input.phone && /^\d{7,15}$/.test(input.phone)) await tx.contactMethod.create({ data: { tenantId, contactId: contact.id, type: "phone", rawValue: `+${input.phone}`, normalizedValue: input.phone, source: "whatsapp", confirmed: false } });
+    }
+    // A first delivery can contain only a LID. Enrich the existing contact when
+    // WhatsApp later supplies its phone, without replacing manually entered data.
+    if (input.channel === "whatsapp" && input.phone && /^\d{7,15}$/.test(input.phone)) {
+      const knownPhone = await tx.contactMethod.findFirst({ where: { tenantId, contactId: contact.id, type: { in: ["phone", "whatsapp"] }, normalizedValue: { in: [input.phone, `+${input.phone}`] } } });
+      if (!knownPhone) await tx.contactMethod.create({ data: { tenantId, contactId: contact.id, type: "phone", rawValue: `+${input.phone}`, normalizedValue: input.phone, source: "whatsapp", confirmed: false } });
     }
     let conversation = await tx.conversation.findFirst({ where: { tenantId, connectionId: connection.id, ...(input.channel === "whatsapp" ? {} : { externalThreadId: input.threadId }), contactId: contact.id } });
     if (!conversation) conversation = await tx.conversation.create({ data: { tenantId, connectionId: connection.id, externalThreadId: input.threadId, contactId: contact.id,

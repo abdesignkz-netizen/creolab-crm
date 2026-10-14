@@ -45,11 +45,13 @@ describe("WhatsApp provider connections", () => {
   const oldSpeechEnv = Object.fromEntries(speechEnvNames.map(key => [key, process.env[key]]));
   const speechKey = "speech-test-key-separate-from-chat";
   const authSnapshots: any[] = [];
+  const lidPhones = new Map<string, string>();
+  const qrRecipients: string[] = [];
   const sockets: Array<{ ev: EventEmitter; end: (error?: Error) => void }> = [];
   const fakeSocket = (options: any) => {
     authSnapshots.push(options.auth.creds);
     const ev = new EventEmitter();
-    const socket = { ev, user: { id: "77010000001:1@s.whatsapp.net" }, end() {}, logout: async () => { logoutCount++; }, sendMessage: async () => { qrSends++; if (failQrSend) throw new Error("uncertain network result"); return { key: { id: `qr-sent-${qrSends}` } }; }, updateMediaMessage: async () => {} };
+    const socket = { ev, user: { id: "77010000001:1@s.whatsapp.net" }, signalRepository: { lidMapping: { getPNForLID: async (lid: string) => lidPhones.get(lid) || null } }, end() {}, logout: async () => { logoutCount++; }, sendMessage: async (recipient: string) => { qrRecipients.push(recipient); qrSends++; if (failQrSend) throw new Error("uncertain network result"); return { key: { id: `qr-sent-${qrSends}` } }; }, updateMediaMessage: async () => {} };
     sockets.push(socket); return socket as any;
   };
   before(async () => {
@@ -1047,6 +1049,40 @@ describe("WhatsApp provider connections", () => {
     assert.equal(sends + qrSends, beforeSends);
     assert.equal(await prisma.message.count({ where: { tenantId } }), beforeMessages);
   });
+  it("keeps a LID private, preserves the full message and replies without needing a phone number", async () => {
+    const lid = "36322639085811@lid";
+    const text = "Здравствуйте! Нужна презентация.\n".repeat(45) + "Конец сообщения: можно отправить документ?";
+    const receive = async (messageId: string, remoteJidAlt?: string) => {
+      sockets.at(-1)!.ev.emit("messages.upsert", { type: "notify", messages: [{ key: { id: messageId, remoteJid: lid, remoteJidAlt, fromMe: false }, messageTimestamp: Math.floor(Date.now() / 1000), pushName: "Тестовый клиент", message: { conversation: text } }] });
+      await until(async () => { await runtime!.tick(); return Boolean(await prisma.message.findFirst({ where: { providerMessageId: messageId, tenantId } })); });
+      return prisma.message.findFirstOrThrow({ where: { providerMessageId: messageId, tenantId } });
+    };
+    const first = await receive("lid-display-first");
+    const detail = await (await get(`/api/v1/conversations/${first.conversationId}`)).json();
+    assert.equal(detail.client.phone, null);
+    assert.equal(detail.messages.at(-1).text, text);
+    const board = await (await get("/api/v1/conversations?channel=whatsapp")).json();
+    assert.equal(board.items.find((item: any) => item.id === first.conversationId).phone, null);
+    // The transport address is retained. Hiding the LID must not block replies.
+    await prisma.conversation.update({ where: { id: first.conversationId }, data: { mode: "human" } });
+    const response = await post(`/api/v1/conversations/${first.conversationId}/messages`, { text: "Да, отправьте документ для ознакомления." }, { "idempotency-key": "lid-manual-reply" });
+    assert.equal(response.status, 201);
+    const sent = await response.json();
+    await until(async () => { await runtime!.tick(); return (await prisma.message.findUniqueOrThrow({ where: { id: sent.id } })).operationState === "accepted"; });
+    assert.equal(qrRecipients.at(-1), lid);
+
+    lidPhones.set(lid, "77015556677:8@s.whatsapp.net");
+    const second = await receive("lid-display-mapped");
+    assert.equal(second.conversationId, first.conversationId);
+    const enriched = await (await get(`/api/v1/conversations/${first.conversationId}`)).json();
+    assert.equal(enriched.client.id, detail.client.id);
+    assert.equal(enriched.client.phone, "+77015556677");
+    assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id: first.conversationId } })).externalThreadId, lid);
+    await receive("lid-display-alt", "77015556677:9@s.whatsapp.net");
+    assert.equal(await prisma.contactMethod.count({ where: { contactId: detail.client.id, type: "phone" } }), 1);
+    assert.equal(await prisma.externalIdentity.count({ where: { contactId: detail.client.id, externalId: "77015556677@s.whatsapp.net" } }), 1);
+  });
+
   it("denies access to another company's QR and disconnects without deleting conversation history", async () => {
     const other = await prisma.tenant.create({ data: { name: "Other company", slug: "other-company-wa", status: "active" } });
     const foreign = await prisma.integration.create({ data: { tenantId: other.id, name: "QR", type: "whatsapp_qr", status: "pending" } });

@@ -93,7 +93,7 @@ function MessageBody({ message }: { message: any }) {
       {!attachments.length && type !== "text" ? (
         <div className="bubble-media-placeholder">{message.previewLabel || uiText("Вложение")}</div>
       ) : null}
-      {message.text ? <div>{message.text}</div> : null}
+      {message.text ? <div className="bubble-text">{message.text}</div> : null}
     </>
   );
 }
@@ -134,6 +134,23 @@ export function ConversationsPage() {
   }, [workspace?.conversation?.id, lastVisibleMessageId]);
   const replyRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    // iOS's on-screen keyboard resizes the visual viewport, not always 100dvh.
+    const viewport = window.visualViewport;
+    const root = document.documentElement;
+    const previous = root.style.getPropertyValue("--conversation-viewport-height");
+    const resize = () => root.style.setProperty("--conversation-viewport-height", `${viewport?.height || window.innerHeight}px`);
+    resize();
+    viewport?.addEventListener("resize", resize);
+    window.addEventListener("resize", resize);
+    return () => {
+      viewport?.removeEventListener("resize", resize);
+      window.removeEventListener("resize", resize);
+      if (previous) root.style.setProperty("--conversation-viewport-height", previous);
+      else root.style.removeProperty("--conversation-viewport-height");
+    };
+  }, []);
 
   async function loadList() {
     const request = ++listVersion.current;
@@ -430,6 +447,7 @@ export function ConversationsPage() {
         </div>
       </div>
 
+      <div className="conv-thread-scroll" ref={messagesRef}>
       <div className="conv-context-strip">
         <details className="conv-contact-history"><summary>{uiText("История контакта")}</summary>
           <div>{uiText("Первое обращение:")}{" "}{workspace.client?.firstContactLabel || "—"}</div>
@@ -443,13 +461,13 @@ export function ConversationsPage() {
         )}
       </div>
 
-      {workspace.conversation.aiHandoffSummary && <section className="conv-handoff-summary" style={{ margin: "16px 20px", padding: 18, background: "#f0f6ff", border: "1px solid #cbdff6", borderRadius: 14, overflowWrap: "anywhere" }}>
-        <b>{uiText("Сводка для сотрудника")}</b>
+      {workspace.conversation.aiHandoffSummary && <details className="conv-handoff-summary" key={workspace.conversation.id}>
+        <summary>{uiText("Сводка для сотрудника")}</summary>
         <p>{workspace.conversation.aiHandoffSummary.request}</p>
         {!!workspace.conversation.aiHandoffSummary.collected.length && <ul>{workspace.conversation.aiHandoffSummary.collected.map((fact: string, i: number) => <li key={i}>{fact}</li>)}</ul>}
         <p><b>{uiText("Следующий шаг")}: </b>{workspace.conversation.aiHandoffSummary.nextStep}</p>
         <small className="muted">{uiText("Сводка ИИ по переписке. Проверьте сведения перед ответом клиенту.")}</small>
-      </section>}
+      </details>}
       {(workspace.conversation.needsManagerAssign ??
         (workspace.conversation.mode === "human" && !workspace.conversation.assigneeMembershipId)) ? (
         <div className="conv-attention">
@@ -487,7 +505,7 @@ export function ConversationsPage() {
         </div>
       ) : null}
 
-      <div className="conv-messages" ref={messagesRef}>
+      <div className="conv-messages">
         {workspace.hasEarlierMessages ? <button type="button" className="btn secondary history-button" disabled={historyLoading} onClick={async () => {
           const id = workspace.conversation.id;
           setHistoryLoading(true);
@@ -511,6 +529,7 @@ export function ConversationsPage() {
             {uiMessage(message.deliveryLabel) ? <div className="muted tiny">{uiMessage(message.deliveryLabel)}</div> : null}
           </div>
         ))}
+      </div>
       </div>
 
       <form
@@ -591,6 +610,7 @@ export function ConversationsPage() {
         </button>
         <textarea
           ref={replyRef}
+          aria-label={uiText("Написать сообщение...")}
           value={text}
           rows={2}
           onChange={(event) => setText(event.target.value)}
