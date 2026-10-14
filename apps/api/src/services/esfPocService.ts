@@ -1,3 +1,4 @@
+import { findRegisteredEsfAvr } from "./registeredEsfAvr.ts";
 import { documentOrganization } from "./documentOrganization.ts";
 import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -199,7 +200,7 @@ export async function sendAvrEsf(prisma: PrismaClient, auth: AuthContext, docume
   if (document.status === "DRAFT") {
     throw new ApiError(422, "avr_not_validated", "Сначала проверьте АВР");
   }
-  if (document.status === "SENT" || document.status === "ACCEPTED") {
+  if (document.externalId || document.status === "SENT" || document.status === "ACCEPTED") {
     if (document.externalId) {
       return {
         document: serializeElectronicDocument(document),
@@ -302,19 +303,26 @@ export async function refreshAvrEsf(prisma: PrismaClient, auth: AuthContext, doc
 async function previewEsfInvoice(
   prisma: PrismaClient,
   tenantId: string,
-  document: { id: string; dealId: string; number: string; documentDate: Date; sourceDataJson: unknown; contractId: string | null; invoiceId: string | null },
+  document: Awaited<ReturnType<typeof loadDocument>>,
 ) {
+  if (document.status === "SENDING") throw new ApiError(409, "document_sending", "Документ уже отправляется");
   const source = await invoiceSourceForDocument(prisma, tenantId, document);
   const preview = previewInvoiceForEsf(source);
-  const xmlStorageKey = await storeXml(tenantId, document.id, "invoice-v2.xml", preview.xml);
-  const updated = await prisma.electronicDocument.update({
-    where: { id: document.id },
-    data: {
-      xmlStorageKey,
-      errorCode: preview.validation.valid ? null : "esf_xsd_invalid",
-      errorMessage: preview.validation.valid ? null : preview.validation.issues[0]?.message || "XSD",
-    },
-  });
+  let updated = document;
+  if (["DRAFT", "VALIDATED"].includes(document.status) && !document.externalId) {
+    const hash = createHash("sha256").update(preview.xml, "utf8").digest("hex");
+    const xmlStorageKey = await storeXml(tenantId, document.id, `invoice-v2-${hash}.xml`, preview.xml);
+    const changed = await prisma.electronicDocument.updateMany({
+      where: { id: document.id, tenantId, updatedAt: document.updatedAt, status: document.status, externalId: null },
+      data: {
+        xmlStorageKey,
+        errorCode: preview.validation.valid ? null : "esf_xsd_invalid",
+        errorMessage: preview.validation.valid ? null : preview.validation.issues[0]?.message || "XSD",
+      },
+    });
+    if (!changed.count) throw new ApiError(409, "document_changed", "Документ изменён. Проверьте его и получите подпись заново.");
+    updated = await loadDocument(prisma, tenantId, document.id);
+  }
   return {
     document: serializeElectronicDocument(updated),
     xml: preview.xml,
@@ -355,7 +363,7 @@ async function sendEsfInvoice(
   if (document.status === "DRAFT") {
     throw new ApiError(422, "esf_not_validated", "Сначала проверьте ЭСФ");
   }
-  if (document.status === "SENT" || document.status === "ACCEPTED") {
+  if (document.externalId || document.status === "SENT" || document.status === "ACCEPTED") {
     if (document.externalId) {
       return {
         document: serializeElectronicDocument(document as never),
@@ -367,9 +375,7 @@ async function sendEsfInvoice(
     }
     throw new ApiError(422, "esf_immutable", "ЭСФ уже отправлен в ИС ЭСФ");
   }
-  const avr = await prisma.electronicDocument.findFirst({
-    where: { tenantId, dealId: document.dealId, type: "AVR", externalId: { not: null } },
-  });
+  const avr = await findRegisteredEsfAvr(prisma, tenantId, document.dealId);
   if (!avr?.externalId) {
     throw new ApiError(422, "avr_not_sent", "Сначала отправьте АВР в ИС ЭСФ");
   }

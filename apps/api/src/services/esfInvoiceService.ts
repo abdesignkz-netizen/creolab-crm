@@ -90,10 +90,18 @@ async function createEsfDraftLocked(
   const tid = membership.tenantId;
   await requireDocumentsEnabled(prisma, tid);
 
-  const existing = await prisma.electronicDocument.findFirst({
-    where: { tenantId: tid, dealId, type: "ESF", status: { in: ["DRAFT", "VALIDATED", "SIGNED", "SENT"] } },
+  // An ordinary invoice must not be recreated while sending or after registration.
+  const sent = await prisma.electronicDocument.findFirst({
+    where: { tenantId: tid, dealId, type: "ESF", OR: [
+      { externalId: { not: null } }, { status: { in: ["SENDING", "SENT", "ACCEPTED"] } },
+    ] },
+    orderBy: { createdAt: "desc" },
   });
-  if (existing && existing.status !== "DRAFT") {
+  const existing = sent || await prisma.electronicDocument.findFirst({
+    where: { tenantId: tid, dealId, type: "ESF", status: { in: ["DRAFT", "VALIDATED", "SIGNED"] } },
+    orderBy: { createdAt: "desc" },
+  });
+  if (existing && (existing.status !== "DRAFT" || existing.externalId)) {
     return { document: serializeElectronicDocument(existing), reused: true };
   }
   const { contract, invoice } = await resolveLinks(prisma, tid, dealId, {...input, contractId: input.contractId || existing?.contractId, invoiceId: input.invoiceId || existing?.invoiceId});
@@ -129,6 +137,7 @@ async function createEsfDraftLocked(
         totalAmount: source.totals.totalAmount,
         currency: source.totals.currency,
         sourceDataJson: source,
+        xmlStorageKey: null,
         errorCode: null,
         errorMessage: null,
       },
@@ -170,6 +179,15 @@ async function createEsfDraftLocked(
 export async function validateEsfInvoice(prisma: PrismaClient, auth: AuthContext, documentId: string) {
   const membership = requireTenant(auth);
   requireManageDocuments(auth);
+  return prisma.$transaction(async tx => {
+    await tx.$queryRaw`SELECT id FROM "ElectronicDocument" WHERE id = ${documentId} AND "tenantId" = ${membership.tenantId} FOR UPDATE`;
+    return validateEsfInvoiceLocked(tx as PrismaClient, auth, documentId);
+  });
+}
+
+async function validateEsfInvoiceLocked(prisma: PrismaClient, auth: AuthContext, documentId: string) {
+  const membership = requireTenant(auth);
+  requireManageDocuments(auth);
   const tid = membership.tenantId;
   await requireDocumentsEnabled(prisma, tid);
 
@@ -180,7 +198,7 @@ export async function validateEsfInvoice(prisma: PrismaClient, auth: AuthContext
   if (document.type !== "ESF") {
     throw new ApiError(422, "not_esf", "Эта проверка только для ЭСФ");
   }
-  if (!MUTABLE.has(document.status)) {
+  if (!MUTABLE.has(document.status) || document.externalId) {
     throw new ApiError(422, "esf_immutable", "ЭСФ уже отправлен — проверку менять нельзя");
   }
 
@@ -190,10 +208,6 @@ export async function validateEsfInvoice(prisma: PrismaClient, auth: AuthContext
   });
   const { deal, items, profile, tenantName } = await loadBundle(prisma, tid, document.dealId, contract?.id);
 
-  const catalogTruId =
-    items.map((item) => resolveCatalogTruId(item, profile?.defaultCatalogTruId)).find(Boolean) ||
-    profile?.defaultCatalogTruId ||
-    "";
   const readiness = assessEsfInvoiceReadiness({
     dealId: deal.id,
     contractId: contract?.id || null,
@@ -205,7 +219,7 @@ export async function validateEsfInvoice(prisma: PrismaClient, auth: AuthContext
     itemCount: items.length,
     profile,
     company: deal.company,
-    catalogTruId,
+    catalogTruIds: items.map((item) => resolveCatalogTruId(item, profile?.defaultCatalogTruId)),
     outgoingNum: document.number,
     avrExternalId: "skip",
   });
@@ -237,6 +251,7 @@ export async function validateEsfInvoice(prisma: PrismaClient, auth: AuthContext
       currency: source.totals.currency,
       status: "VALIDATED",
       sourceDataJson: source,
+      xmlStorageKey: null,
       validatedAt: new Date(),
       errorCode: null,
       errorMessage: null,

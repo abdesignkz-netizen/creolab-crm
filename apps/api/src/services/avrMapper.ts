@@ -5,6 +5,19 @@ type DealItem = ReturnType<typeof serializeDealItem>;
 
 export const AVR_SOURCE_KIND = "avr_internal_v1";
 
+type PartyDetails = {
+  iban?: string | null;
+  bik?: string | null;
+  bankName?: string | null;
+  directorBasis?: string | null;
+  vatPayer?: boolean | null;
+};
+
+function partyDetails(party: PartyDetails | null) {
+  return { iban: party?.iban || "", bik: party?.bik || "", bankName: party?.bankName || "",
+    directorBasis: party?.directorBasis || "", vatPayer: party?.vatPayer ?? null };
+}
+
 export function expandLegalFormName(value: string | null | undefined) {
   const text = String(value || "").trim();
   if (!text) return "";
@@ -20,7 +33,7 @@ export function expandLegalFormName(value: string | null | undefined) {
 
 export type AvrSourceSnapshot = {
   kind: typeof AVR_SOURCE_KIND;
-  seller: {
+  seller: PartyDetails & {
     legalName: string;
     bin: string;
     iin: string;
@@ -28,7 +41,7 @@ export type AvrSourceSnapshot = {
     directorName: string;
     directorPosition: string;
   };
-  buyer: {
+  buyer: PartyDetails & {
     name: string;
     legalName: string;
     bin: string;
@@ -67,7 +80,7 @@ export function mapAvrSource(input: {
   currency: string;
   deal: { id: string; title: string };
   items: DealItem[];
-  profile: {
+  profile: PartyDetails & {
     legalName: string | null;
     shortName?: string | null;
     bin: string | null;
@@ -77,7 +90,7 @@ export function mapAvrSource(input: {
     directorPosition: string | null;
   } | null;
   tenantName?: string | null;
-  company: {
+  company: PartyDetails & {
     name: string;
     legalName: string | null;
     bin: string | null;
@@ -97,6 +110,7 @@ export function mapAvrSource(input: {
   return {
     kind: AVR_SOURCE_KIND,
     seller: {
+      ...partyDetails(input.profile),
       legalName: expandLegalFormName(input.profile?.legalName || input.profile?.shortName || input.tenantName),
       bin: input.profile?.bin || "",
       iin: input.profile?.iin || "",
@@ -105,6 +119,7 @@ export function mapAvrSource(input: {
       directorPosition: input.profile?.directorPosition || "Директор",
     },
     buyer: {
+      ...partyDetails(input.company),
       name: input.company?.name || "",
       legalName: expandLegalFormName(input.company?.legalName || input.company?.name),
       bin: input.company?.bin || "",

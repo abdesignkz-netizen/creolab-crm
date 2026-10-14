@@ -186,7 +186,7 @@ export function startWhatsAppQrRuntime(prisma: PrismaClient, socketFactory = mak
       }
     }));
   }
-  async function tick() {
+  async function processTick() {
     if (stopped || ticking || !qrEnabled()) return;
     ticking = true;
     try {
@@ -237,19 +237,27 @@ export function startWhatsAppQrRuntime(prisma: PrismaClient, socketFactory = mak
         WHERE i.status <> 'disabled' AND i."connectionStatus" <> 'RECONNECT_REQUIRED' AND t.status = 'active'
           AND (s."reconnectAt" IS NULL OR s."reconnectAt" <= CURRENT_TIMESTAMP) AND (s."leaseUntil" IS NULL OR s."leaseUntil" < CURRENT_TIMESTAMP) LIMIT 100`;
       for (const row of rows) if (!sessions.has(row.integrationId)) {
+        if (stopped) break;
         try { await connect(row.integrationId); }
         catch { await release(row.integrationId); }
       }
     } catch { console.warn("[whatsapp-qr] Session processing unavailable; retrying"); }
     finally { ticking = false; }
   }
+  let tickPending: Promise<void> | null = null;
+  function tick() {
+    if (tickPending) return tickPending;
+    tickPending = processTick().finally(() => { tickPending = null; });
+    return tickPending;
+  }
   // Renew independently of media downloads/job processing. Losing the lease closes
   // this process's socket before a second worker can send with the same session.
   let renewing = false;
+  let heartbeatPending: Promise<void> | undefined;
   const heartbeat = setInterval(() => {
     if (stopped || renewing) return;
     renewing = true;
-    void (async () => {
+    heartbeatPending = (async () => {
       for (const [id, local] of sessions) {
         try { if (await claimQrLease(prisma, id, owner)) continue; }
         catch { /* Fail closed on database outages. */ }
@@ -260,5 +268,16 @@ export function startWhatsAppQrRuntime(prisma: PrismaClient, socketFactory = mak
     })().finally(() => { renewing = false; });
   }, 10000); heartbeat.unref();
   const timer = setInterval(() => void tick(), 3000); timer.unref(); void tick();
-  return { tick, async stop() { stopped = true; clearInterval(timer); clearInterval(heartbeat); for (const [id, local] of sessions) { local.stop = true; local.socket.end(undefined); await local.tasks; await release(id); } } };
+  return { tick, async stop() {
+    stopped = true;
+    clearInterval(timer); clearInterval(heartbeat);
+    for (const local of sessions.values()) { local.stop = true; local.socket.end(undefined); }
+    // An already running tick/heartbeat can still finish acquiring a lease or a
+    // socket. Drain it before releasing ownership to the replacement runtime.
+    await Promise.allSettled([tickPending, heartbeatPending]);
+    for (const [id, local] of sessions) {
+      local.stop = true; local.socket.end(undefined);
+      await local.tasks; await release(id);
+    }
+  } };
 }

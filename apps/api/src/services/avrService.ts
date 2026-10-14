@@ -8,6 +8,7 @@ import { serializeDealItem } from "./dealItemService.ts";
 import { requireDocumentsEnabled } from "./legalProfileService.ts";
 import { serializeElectronicDocument } from "./documentDraftService.ts";
 import { mapAvrSource } from "./avrMapper.ts";
+import { resolveAvrSource } from "./avrExcel.ts";
 import { assessAvrReadiness, avrMissingFieldsError } from "./avrReadiness.ts";
 
 import { resolveAvrLinks } from "./avrContractBasis.ts";
@@ -78,7 +79,7 @@ async function createAvrDraftLocked(
   }) || await prisma.electronicDocument.findFirst({
     where: { tenantId: tid, dealId, type: "AVR", status: { in: ["DRAFT", "VALIDATED", "SIGNED", "PENDING_SIGNATURE", "PARTIALLY_SIGNED"] } },orderBy:{createdAt:"desc"},
   });
-  if (existing && existing.status !== "DRAFT") {
+  if (existing && (existing.externalId || existing.status !== "DRAFT")) {
     return { document: serializeElectronicDocument(existing), reused: true };
   }
   const { contract, invoice, basis } = await resolveAvrLinks(prisma, tid, dealId, {...input, contractId: input.contractId || (input.invoiceId ? undefined : existing?.contractId), invoiceId: input.invoiceId || existing?.invoiceId});
@@ -100,6 +101,12 @@ async function createAvrDraftLocked(
     invoice,
   });
 
+  if (existing) {
+    const stored = await resolveAvrSource(prisma, tid, existing);
+    source.seller = stored.seller;
+    source.buyer = stored.buyer;
+  }
+
   const editor=input.editor?avrEditorSchema.parse(input.editor):existing?savedEditor(existing):null;
   if(editor)source=applyEditor(source,editor);
   if (existing) {
@@ -109,7 +116,7 @@ async function createAvrDraftLocked(
         ...(editor?.number?.trim() ? { number: await allocateDocumentNumber(prisma, tid, "AVR", editor.number, existing.id) } : {}),
         contractId: contract?.id || null,
         invoiceId: invoice?.id || existing.invoiceId,
-        companyId: deal.companyId,
+        companyId: existing.companyId,
         amountWithoutVat: source.totals.amountWithoutVat,
         vatAmount: source.totals.vatAmount,
         totalAmount: source.totals.totalAmount,
@@ -118,6 +125,7 @@ async function createAvrDraftLocked(
         documentDate: new Date(source.documentDate),
         errorCode: null,
         errorMessage: null,
+        xmlStorageKey: null,
       },
     });
     return { document: serializeElectronicDocument(updated), reused: true };
@@ -175,7 +183,7 @@ async function validateAvrLocked(prisma: PrismaClient, auth: AuthContext, docume
   if (document.type !== "AVR") {
     throw new ApiError(422, "not_avr", "Проверка доступна только для АВР");
   }
-  if (!MUTABLE.has(document.status)) {
+  if (document.externalId || !MUTABLE.has(document.status)) {
     throw new ApiError(422, "avr_immutable", "АВР уже подписан или отправлен — проверку менять нельзя");
   }
 
@@ -184,6 +192,9 @@ async function validateAvrLocked(prisma: PrismaClient, auth: AuthContext, docume
     invoiceId: document.invoiceId,
   });
   const { deal, items, profile, tenantName } = await loadAvrBundle(prisma, tid, document.dealId, contract?.id);
+  // Validation checks the parties shown in the editor and printed in the PDF.
+  // Master records are copied only by an explicit requisites refresh.
+  const stored = await resolveAvrSource(prisma, tid, document);
 
   const readiness = assessAvrReadiness({
     dealId: deal.id,
@@ -194,8 +205,8 @@ async function validateAvrLocked(prisma: PrismaClient, auth: AuthContext, docume
     contractNumber: basis?.number || null,
     contractDate: basis?.date || null,
     itemCount: savedEditor(document)?.items.length ?? items.length,
-    profile,
-    company: deal.company,
+    profile: stored.seller,
+    company: { ...stored.buyer, address: stored.buyer.legalAddress },
   });
   if (!readiness.ready) throw avrMissingFieldsError(readiness);
 
@@ -212,6 +223,8 @@ async function validateAvrLocked(prisma: PrismaClient, auth: AuthContext, docume
     invoice,
   });
 
+  source.seller = stored.seller;
+  source.buyer = stored.buyer;
   const editor=savedEditor(document);
   if(editor)source=applyEditor(source,editor);
   if(source.totals.totalAmount<=0)throw new ApiError(422,"missing_fields","Укажите положительную сумму АВР",undefined,{missingFields:["deal.amount"],missingFieldLabels:{"deal.amount":"Сумма АВР"}});
@@ -220,7 +233,7 @@ async function validateAvrLocked(prisma: PrismaClient, auth: AuthContext, docume
     data: {
       contractId: contract?.id || null,
       invoiceId: invoice?.id || document.invoiceId,
-      companyId: deal.companyId,
+      companyId: document.companyId,
       amountWithoutVat: source.totals.amountWithoutVat,
       vatAmount: source.totals.vatAmount,
       totalAmount: source.totals.totalAmount,
@@ -262,10 +275,17 @@ export async function updateAvrDraft(prisma:PrismaClient,auth:AuthContext,id:str
     if(!doc)throw new ApiError(404,"not_found","АВР не найден");
     if(!MUTABLE.has(doc.status)||doc.externalId)throw new ApiError(409,"avr_immutable","Отправленный или подписываемый АВР нельзя редактировать");
     if(expected&&doc.updatedAt.toISOString()!==expected)throw new ApiError(409,"document_changed","Документ изменён. Откройте его заново.");
-    const { resolveAvrSource } = await import("./avrExcel.ts");
     const source=applyEditor(await resolveAvrSource(tx as PrismaClient,m.tenantId,doc),editor);
-    const updated=await tx.electronicDocument.update({where:{id},data:{...(editor.number?.trim()?{number:await allocateDocumentNumber(tx,m.tenantId,"AVR",editor.number,doc.id)}:{}),contractId:source.contract?.id||null,invoiceId:source.invoice?.id||doc.invoiceId,documentDate:new Date(editor.documentDate),sourceDataJson:source,...source.totals,status:"DRAFT",validatedAt:null,xmlStorageKey:null,errorCode:null,errorMessage:null}});
-    await tx.auditEvent.create({data:{tenantId:m.tenantId,actorUserId:auth.user.id,action:"electronic_document.edit_draft",entityType:"electronic_document",entityId:id,changesJson:{dealId:doc.dealId,itemCount:editor.items.length}}});
+    let companyId=doc.companyId;
+    if (editor.refreshRequisites) {
+      const { contract, invoice, basis } = await resolveAvrLinks(tx as PrismaClient, m.tenantId, doc.dealId, doc);
+      const { deal, items, profile, tenantName } = await loadAvrBundle(tx as PrismaClient, m.tenantId, doc.dealId, contract?.id);
+      const fresh = mapAvrSource({ documentDate: doc.documentDate, currency: doc.currency, deal, items, profile, tenantName, company: deal.company, contract, contractBasis: basis, invoice });
+      if (editor.refreshRequisites !== "buyer") source.seller = fresh.seller;
+      if (editor.refreshRequisites !== "seller") {source.buyer = fresh.buyer;companyId=deal.companyId;}
+    }
+    const updated=await tx.electronicDocument.update({where:{id},data:{companyId,...(editor.number?.trim()?{number:await allocateDocumentNumber(tx,m.tenantId,"AVR",editor.number,doc.id)}:{}),contractId:source.contract?.id||null,invoiceId:source.invoice?.id||doc.invoiceId,documentDate:new Date(editor.documentDate),sourceDataJson:source,...source.totals,status:"DRAFT",validatedAt:null,xmlStorageKey:null,errorCode:null,errorMessage:null}});
+    await tx.auditEvent.create({data:{tenantId:m.tenantId,actorUserId:auth.user.id,action:"electronic_document.edit_draft",entityType:"electronic_document",entityId:id,changesJson:{dealId:doc.dealId,itemCount:editor.items.length,refreshRequisites:editor.refreshRequisites||null}}});
     return {document:serializeElectronicDocument(updated)};
   });
 }

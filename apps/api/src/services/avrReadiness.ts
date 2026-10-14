@@ -1,4 +1,5 @@
 import { resolveAvrLinks } from "./avrContractBasis.ts";
+import { AVR_SOURCE_KIND, type AvrSourceSnapshot } from "./avrMapper.ts";
 import { documentOrganization } from "./documentOrganization.ts";
 import type { PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
@@ -15,6 +16,7 @@ export const AVR_FIELD_LABELS: Record<string, string> = {
   "contract.signed": "Подписанный договор",
   "contract.date": "Договор: дата",
   "contract.number": "Договор: номер",
+  "parties.taxIds": "БИН / ИИН исполнителя и заказчика совпадают — проверьте реквизиты сторон",
 };
 
 export type AvrReadiness = ContractReadiness & {
@@ -61,6 +63,9 @@ export function assessAvrReadiness(input: {
     company: input.company,
   });
   const missingFields = [...base.missingFields];
+  const sellerId=(input.profile?.bin||input.profile?.iin||"").replace(/\D/g,"");
+  const buyerId=(input.company?.bin||input.company?.iin||"").replace(/\D/g,"");
+  if (sellerId && sellerId === buyerId) missingFields.push("parties.taxIds");
   const contractId = input.contractId || input.signedContractId;
   const warnings = input.signedContractId ? [] : [contractId
     ? "Договор не подписан. Это не препятствует формированию, проверке и отправке АВР и ЭСФ."
@@ -134,7 +139,8 @@ export async function getAvrReadiness(prisma: PrismaClient, auth: AuthContext, d
   if (!deal) throw new ApiError(404, "not_found", "Сделка не найдена");
   const { contract, invoice, basis } = await resolveAvrLinks(prisma, tid, dealId, deal.electronicDocuments[0] || {});
   const profile = await documentOrganization(prisma, tid, dealId, contract?.id);
-  const source=deal.electronicDocuments[0]?.sourceDataJson as {editorVersion?:number;items?:unknown[]}|undefined;
+  const source=deal.electronicDocuments[0]?.sourceDataJson as (AvrSourceSnapshot & {editorVersion?:number})|undefined;
+  const savedParties=source?.kind===AVR_SOURCE_KIND && source.seller && source.buyer;
   return assessAvrReadiness({
     dealId,
     contractId: contract?.id || null,
@@ -144,7 +150,7 @@ export async function getAvrReadiness(prisma: PrismaClient, auth: AuthContext, d
     contractNumber: basis?.number || null,
     contractDate: basis?.date || null,
     itemCount: source?.editorVersion===1 ? source.items?.length||0 : deal.items.length,
-    profile,
-    company: deal.company,
+    profile: savedParties ? source.seller : profile,
+    company: savedParties ? {...source.buyer,address:source.buyer.legalAddress} : deal.company,
   });
 }

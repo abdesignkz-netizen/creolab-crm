@@ -1,4 +1,5 @@
 import { documentOrganization } from "./documentOrganization.ts";
+import { findRegisteredEsfAvr } from "./registeredEsfAvr.ts";
 import type { PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
@@ -20,17 +21,26 @@ export type EsfInvoiceReadiness = AvrReadiness & {
 
 export function assessEsfInvoiceReadiness(input: Parameters<typeof assessAvrReadiness>[0] & {
   catalogTruId?: string | null;
+  catalogTruIds?: Array<string | null>;
   outgoingNum?: string | null;
   avrExternalId?: string | null;
 }): EsfInvoiceReadiness {
   const base = assessAvrReadiness(input);
   const missingFields = [...base.missingFields];
-  if (!String(input.catalogTruId || "").trim()) missingFields.push("catalogTruId");
+  const itemLabels: Record<string, string> = {};
+  if (input.catalogTruIds) {
+    input.catalogTruIds.forEach((id, index) => {
+      if (String(id || "").trim()) return;
+      const code = `items.${index}.catalogTruId`;
+      missingFields.push(code);
+      itemLabels[code] = `Позиция ${index + 1}: идентификатор ТРУ из справочника ИС ЭСФ (G 18)`;
+    });
+  } else if (!String(input.catalogTruId || "").trim()) missingFields.push("catalogTruId");
   if (!esfOutgoingNum(input.outgoingNum || "1")) missingFields.push("esf.outgoingNum");
   const sendMissing = [...missingFields];
   if (!input.avrExternalId) sendMissing.push("avr.sent");
   const missingFieldLabels = Object.fromEntries(
-    sendMissing.map((code) => [code, ESF_INVOICE_FIELD_LABELS[code] || code]),
+    sendMissing.map((code) => [code, itemLabels[code] || ESF_INVOICE_FIELD_LABELS[code] || code]),
   );
   return {
     ...base,
@@ -93,11 +103,7 @@ export async function getEsfInvoiceReadiness(prisma: PrismaClient, auth: AuthCon
   const profile = await documentOrganization(prisma, tid, dealId, deal.electronicDocuments.find(row => row.type === "ESF")?.contractId || deal.contracts[0]?.id);
   const esf = deal.electronicDocuments.find((row) => row.type === "ESF") || null;
   const contract = esf?.contractId ? await prisma.contract.findFirst({where:{id:esf.contractId,tenantId:tid,dealId}}) : deal.contracts[0] || null;
-  const avr = deal.electronicDocuments.find((row) => row.type === "AVR" && row.externalId) || null;
-  const catalogTruId =
-    deal.items.map((item) => resolveCatalogTruId(item, profile?.defaultCatalogTruId)).find(Boolean) ||
-    profile?.defaultCatalogTruId ||
-    "";
+  const avr = await findRegisteredEsfAvr(prisma, tid, dealId);
   return assessEsfInvoiceReadiness({
     dealId,
     contractId: contract?.id || null,
@@ -109,7 +115,7 @@ export async function getEsfInvoiceReadiness(prisma: PrismaClient, auth: AuthCon
     itemCount: deal.items.length,
     profile,
     company: deal.company,
-    catalogTruId,
+    catalogTruIds: deal.items.map((item) => resolveCatalogTruId(item, profile?.defaultCatalogTruId)),
     outgoingNum: esf?.number || "1",
     avrExternalId: avr?.externalId || null,
   });

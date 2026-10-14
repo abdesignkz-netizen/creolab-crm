@@ -158,7 +158,7 @@ export function avrExcelLayout(itemCount: number) {
   const lastItemRow = firstItemRow + items - 1;
   const lastSlotRow = lastItemRow;
   const totalsRow = lastSlotRow + 1;
-  const wordsRow = totalsRow + 2;
+  const wordsRow = totalsRow + 1;
   const captionRow = totalsRow + 3;
   const appendixRow = totalsRow + 4;
   const signRow = totalsRow + 7;
@@ -398,11 +398,14 @@ function fillWorksheet(ws: ExcelJS.Worksheet, input: { localNumber: string; sour
     result: source.totals.vatAmount,
   };
   ws.getCell(`AS${layout.totalsRow}`).numFmt = MONEY_FMT;
-  setValue(
-    ws,
-    `T${layout.wordsRow}`,
-    capitalizeRu(amountToKztWords(source.totals.amountWithoutVat || source.totals.totalAmount)),
-  );
+  // The next template row is reserved for the customer's materials, not the act total.
+  setValue(ws, `T${layout.totalsRow + 2}`, null);
+  mergeSafe(ws, `A${layout.wordsRow}:AW${layout.wordsRow}`);
+  const words = ws.getCell(`A${layout.wordsRow}`);
+  words.value = `Всего без НДС: ${capitalizeRu(amountToKztWords(source.totals.amountWithoutVat))}`;
+  words.font = { name: "Arial", size: 9 };
+  words.alignment = { vertical: "middle", wrapText: true };
+  ws.getRow(layout.wordsRow).height = 28;
   setValue(ws, `F${layout.signRow}`, source.seller.directorPosition || "Директор");
   setValue(ws, `R${layout.signRow}`, directorShortName(source.seller.directorName));
 }
@@ -595,6 +598,13 @@ export async function renderAvrExcel(input: { number: string; source: AvrSourceS
   insertExtraItemRows(ws, layout.extra);
   deleteUnusedItemRows(ws, layout.unused);
   fillWorksheet(ws, { localNumber, source: input.source });
+  // Keep the amounts and tax IDs on the same printed sheet as their labels.
+  // The archived template fitted height and split the right-hand columns off.
+  ws.pageSetup.fitToPage = true;
+  ws.pageSetup.fitToWidth = 1;
+  ws.pageSetup.fitToHeight = 0;
+  ws.pageSetup.printArea = `A1:BC${layout.stampRow}`;
+  ws.pageSetup.printTitlesRow = "17:19";
   const data = await wb.xlsx.writeBuffer();
   return { buffer: await sanitizeAvrXlsx(Buffer.from(data), layout.totalsRow), filename, localNumber, layout };
 }

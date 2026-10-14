@@ -19,6 +19,11 @@ const company = {
 };
 
 describe("avr readiness", () => {
+  it("не пропускает перенесённый к заказчику БИН исполнителя", () => {
+    const result=assessAvrReadiness({dealId:"deal-1",itemCount:1,profile,company:{...company,bin:profile.bin,iin:null}});
+    assert.equal(result.ready,false);
+    assert.ok(result.missingFields.includes("parties.taxIds"));
+  });
   it("предупреждает об отсутствии договора без блокировки", () => {
     const result = assessAvrReadiness({
       dealId: "deal-1",

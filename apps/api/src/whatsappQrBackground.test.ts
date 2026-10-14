@@ -79,3 +79,26 @@ test("QR receives without a browser, renews ownership and reconnects with saved 
     assert.equal(sockets.length, 3);
   } finally { await runtime?.stop(); await prisma.$disconnect(); }
 });
+
+test("shutdown drains a connection being created before releasing the lease", async () => {
+  const prisma = await createPrismaClient();
+  let runtime: ReturnType<typeof startWhatsAppQrRuntime> | undefined;
+  let shutdown: Promise<void> | undefined;
+  let closes = 0;
+  try {
+    const tenant = await prisma.tenant.findUniqueOrThrow({ where: { slug: "creolab" } });
+    const id = randomUUID();
+    await prisma.integration.create({ data: { id, tenantId: tenant.id, type: "whatsapp_qr", name: "Stop race", status: "pending", connectionStatus: "CONNECTING", testMode: false } });
+    await prisma.$executeRaw`INSERT INTO "WhatsAppQrSession" ("integrationId") VALUES (${id})`;
+    runtime = startWhatsAppQrRuntime(prisma, () => {
+      // Stop exactly while connect() has a lease but has not registered its socket.
+      shutdown = runtime!.stop();
+      return { ev: new EventEmitter(), end() { closes++; } } as any;
+    });
+    await until(async () => Boolean(shutdown));
+    await shutdown;
+    assert.ok(closes > 0, "A socket created during shutdown must be closed");
+    const sessions = await prisma.$queryRaw<Array<{ owner: string | null }>>`SELECT owner FROM "WhatsAppQrSession" WHERE "integrationId" = ${id}`;
+    assert.equal(sessions[0].owner, null);
+  } finally { await runtime?.stop(); await prisma.$disconnect(); }
+});

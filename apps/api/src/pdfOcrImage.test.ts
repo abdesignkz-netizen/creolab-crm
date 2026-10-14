@@ -53,6 +53,23 @@ describe("Memory-bounded OCR images", () => {
     assert.equal(draft.buyer.bin, "111111111111");
     assert.equal(draft.seller.bin, "222222222222");
   });
+  it("keeps seller requisites out of the buyer column when role headings are centred", () => {
+    const words = [
+      {text:"РЕКВИЗИТЫ СТОРОН",x:180,y:300},
+      {text:"Заказчик",x:130,y:330},{text:"Исполнитель",x:410,y:330},
+      {text:"ТОО «Заказчик»",x:60,y:350},{text:"ТОО «Исполнитель»",x:310,y:350},
+      {text:"РК, город Астана,",x:60,y:370},{text:"РК, г. Алматы, ул. Монгольская, 44",x:310,y:370},
+      {text:"улица Сығанақ, д. 4",x:60,y:385},{text:"БИН 222222222222",x:310,y:385},
+      {text:"БИН 111111111111",x:60,y:400},{text:"АО «Банк ЦентрКредит»",x:310,y:400},
+      {text:"АО «ForteBank»",x:60,y:415},
+    ].map(w=>({...w,width:180,height:12}));
+    const {draft}=parsePdfDocument([{page:1,width:600,height:840,ocr:false,words,text:words.map(w=>w.text).join("\n")}],"CONTRACT","222222222222");
+    assert.equal(draft.buyer.bin,"111111111111");
+    assert.equal(draft.buyer.legalAddress,"РК, город Астана, улица Сығанақ, д. 4");
+    assert.equal(draft.buyer.bankName,"АО «ForteBank»");
+    assert.equal(draft.seller.bin,"222222222222");
+    assert.match(draft.seller.legalAddress,/Монгольская/);
+  });
   it("preserves faint shades and composites transparency onto white in an 8-bit image", () => {
     const canvas = createCanvas(4, 1);
     try {

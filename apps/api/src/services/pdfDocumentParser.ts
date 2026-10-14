@@ -82,7 +82,10 @@ export function parsePdfDocument(pages: PdfPageText[], kind: "CONTRACT" | "INVOI
     const names = words.filter(w => /^(?:ТОО|TOO|ИП|АО|ЖШС)(?:\s|$)/i.test(w.text.trim()));
     const firstNameY = Math.min(...names.map(w => w.y));
     const nameHeaders = names.filter(w => Math.abs(w.y - firstNameY) < Math.max(w.height, 6));
-    const anchors = roleHeaders.length >= 2 ? roleHeaders : nameHeaders;
+    // Role headings can be centred within cells; using their x coordinate as
+    // the divider puts the start of the seller's address in the buyer column.
+    const hasNameColumns = nameHeaders.length >= 2 && Math.max(...nameHeaders.map(w=>w.x)) - Math.min(...nameHeaders.map(w=>w.x)) > requisites.width * 0.2;
+    const anchors = hasNameColumns ? nameHeaders : roleHeaders;
     const columns = anchors.length >= 2 && Math.max(...anchors.map(w=>w.x)) - Math.min(...anchors.map(w=>w.x)) > requisites.width * 0.2
       ? Math.max(...anchors.map(w=>w.x)) - 2 : requisites.width * 0.55;
     const left = party(wordsToLines(words.filter(w => w.x < columns)).map(l => l.text).join("\n"));

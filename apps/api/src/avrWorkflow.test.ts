@@ -179,11 +179,18 @@ describe("AVR editor workflow", () => {
     const reopened=(await json(`/api/v1/electronic-documents/${documentId}`)).body.document;
     assert.equal(reopened.source.items[0].quantity,2);assert.equal(reopened.status,"DRAFT");
   });
-  it("сохраняет реквизиты в компании и обновляет их при проверке без потери позиций",async()=>{
+  it("обновляет реквизиты явно, а проверка сохраняет стороны документа и позиции",async()=>{
     const deal=await prisma.deal.findUniqueOrThrow({where:{id:dealId}});
+    const original=(await json(`/api/v1/electronic-documents/${documentId}`)).body.document;
     assert.equal((await json(`/api/v1/companies/${deal.companyId}`,patch({legalAddress:"г. Алматы, новый адрес 15"}))).response.status,200);
     const basis=await json("/api/v1/settings/legal-profile",patch({directorBasis:"Устав"}));
     assert.equal(basis.response.status,200,JSON.stringify(basis.body));assert.equal(basis.body.directorBasis,"Устав");
+    const unchanged=await json(`/api/v1/electronic-documents/${documentId}/validate`,post({}));
+    assert.equal(unchanged.response.status,200,JSON.stringify(unchanged.body));
+    assert.deepEqual(unchanged.body.document.source.buyer,original.source.buyer);
+    const refresh=await json(`/api/v1/electronic-documents/${documentId}`,patch({...editor,items:original.source.items,refreshRequisites:"buyer"}));
+    assert.equal(refresh.response.status,200,JSON.stringify(refresh.body));
+    assert.deepEqual(refresh.body.document.source.seller,original.source.seller);
     const checked=await json(`/api/v1/electronic-documents/${documentId}/validate`,post({}));
     assert.equal(checked.response.status,200,JSON.stringify(checked.body));
     assert.equal(checked.body.document.status,"VALIDATED");assert.equal(checked.body.document.source.items[0].quantity,2);
@@ -191,6 +198,44 @@ describe("AVR editor workflow", () => {
     assert.equal(checked.body.document.source.buyer.legalAddress,"г. Алматы, новый адрес 15");
     assert.match(checked.body.warnings[0],/не подписан/);
     assert.equal((await json(`/api/v1/deals/${dealId}/avr-context`)).body.organization.directorBasis,"Устав");
+  });
+  it("смена организации в настройках не подменяет исполнителя при сохранении и проверке АВР",async()=>{
+    const original=(await json(`/api/v1/electronic-documents/${documentId}`)).body.document;
+    const {tenantId}=await prisma.deal.findUniqueOrThrow({where:{id:dealId}});
+    const profile=await prisma.tenantLegalProfile.findUniqueOrThrow({where:{tenantId}});
+    try {
+      await prisma.tenantLegalProfile.update({where:{tenantId},data:{legalName:"Другой исполнитель",bin:"999999999999"}});
+      const updated=await json(`/api/v1/electronic-documents/${documentId}`,patch({...editor,items:original.source.items}));
+      assert.equal(updated.response.status,200,JSON.stringify(updated.body));
+      const checked=await json(`/api/v1/electronic-documents/${documentId}/validate`,post({}));
+      assert.equal(checked.response.status,200,JSON.stringify(checked.body));
+      assert.deepEqual(checked.body.document.source.seller,original.source.seller);
+    } finally {
+      await prisma.tenantLegalProfile.update({where:{tenantId},data:{legalName:profile.legalName,bin:profile.bin}});
+    }
+  });
+  it("смена заказчика сделки не меняет заказчика сохранённого АВР без явного обновления", async () => {
+    const original = (await json(`/api/v1/electronic-documents/${documentId}`)).body.document;
+    const deal = await prisma.deal.findUniqueOrThrow({ where: { id: dealId } });
+    const other = await prisma.company.create({ data: { tenantId: deal.tenantId, name: "Другой заказчик", bin: "987654321012", legalAddress: "Другой адрес" } });
+    try {
+      await prisma.deal.update({ where: { id: dealId }, data: { companyId: other.id } });
+      const edited = await json(`/api/v1/electronic-documents/${documentId}`, patch({ ...editor, items: original.source.items }));
+      assert.equal(edited.response.status, 200, JSON.stringify(edited.body));
+      const checked = await json(`/api/v1/electronic-documents/${documentId}/validate`, post({}));
+      assert.equal(checked.response.status, 200, JSON.stringify(checked.body));
+      assert.equal(checked.body.document.companyId, original.companyId);
+      assert.deepEqual(checked.body.document.source.buyer, original.source.buyer);
+      const refreshed = await json(`/api/v1/electronic-documents/${documentId}`, patch({ ...editor, items: original.source.items, refreshRequisites: "buyer" }));
+      assert.equal(refreshed.response.status, 200, JSON.stringify(refreshed.body));
+      assert.equal(refreshed.body.document.companyId, other.id);
+      assert.equal(refreshed.body.document.source.buyer.bin, other.bin);
+      assert.deepEqual(refreshed.body.document.source.seller, original.source.seller);
+    } finally {
+      await prisma.deal.update({ where: { id: dealId }, data: { companyId: deal.companyId } });
+      await json(`/api/v1/electronic-documents/${documentId}`, patch({ ...editor, items: original.source.items, refreshRequisites: "buyer" }));
+      await prisma.company.delete({ where: { id: other.id } });
+    }
   });
   it("пустой черновик сохраняется, но не проходит проверку; сумму проверяет сервер",async()=>{
     assert.equal((await json(`/api/v1/electronic-documents/${documentId}`,patch({...editor,items:[]}))).response.status,200);

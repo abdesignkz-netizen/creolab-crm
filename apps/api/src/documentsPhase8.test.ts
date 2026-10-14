@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
-import { after, before, describe, it } from "node:test";
+import { after, before, describe, it, mock } from "node:test";
 import { createPrismaClient } from "@creolab/db";
+import { readFile } from "node:fs/promises";
+import { makeTestCms } from "./testCms.ts";
+import { pemFromCms } from "./services/cmsInspect.ts";
+import { resolveUploadPath } from "./lib/storage.ts";
 import { createApp } from "./app.ts";
 import { mockSetInvoiceStatus, resetEsfMock } from "./integrations/esf/EsfMock.ts";
 
@@ -268,4 +272,184 @@ describe("Documents phase 8 ЭСФ → syncInvoice", () => {
     assert.equal(blocked.response.status, 422);
     assert.equal(blocked.body.code, "avr_not_sent");
   });
+  async function freshEsf() {
+    const original = await prisma.deal.findUniqueOrThrow({ where: { id: dealId } });
+    const deal = await json("/api/v1/deals", { method: "POST", body: JSON.stringify({
+      title: "ЭСФ: регрессия", contactId: original.contactId,
+      items: [
+        { name: "Услуга первая", quantity: 1, unitPrice: 10000 },
+        { name: "Услуга вторая", quantity: 1, unitPrice: 20000 },
+      ],
+    }) });
+    assert.equal(deal.response.status, 201, JSON.stringify(deal.body));
+    await prisma.deal.update({ where: { id: deal.body.deal.id }, data: { companyId: original.companyId } });
+    const created = await json(`/api/v1/deals/${deal.body.deal.id}/electronic-documents`, {
+      method: "POST", body: JSON.stringify({ type: "ESF" }),
+    });
+    assert.equal(created.response.status, 201, JSON.stringify(created.body));
+    return { id: created.body.document.id as string, dealId: deal.body.deal.id as string, tenantId: original.tenantId };
+  }
+
+  const post = { method: "POST", body: "{}" };
+
+  it("не считает локально подписанный или отклонённый АВР основанием готовности к отправке ЭСФ", async () => {
+    const doc = await freshEsf();
+    await json(`/api/v1/electronic-documents/${doc.id}/validate`, post);
+    const avr = await json(`/api/v1/deals/${doc.dealId}/electronic-documents`, {
+      method: "POST", body: JSON.stringify({ type: "AVR" }),
+    });
+    for (const data of [
+      { externalSystem: "BASQAR", status: "ACCEPTED" as const },
+      { externalSystem: "ESF_AWP", status: "REJECTED" as const },
+    ]) {
+      await prisma.electronicDocument.update({ where: { id: avr.body.document.id }, data: { ...data, externalId: "not-an-active-portal-act" } });
+      const readiness = await json(`/api/v1/deals/${doc.dealId}/esf-invoice-readiness`);
+      assert.equal(readiness.body.sendReady, false);
+      assert.ok(readiness.body.missingFields.includes("avr.sent"));
+      for (const endpoint of ["esf-send", "esf-send-signed"]) {
+        const sent = await json(`/api/v1/electronic-documents/${doc.id}/${endpoint}`, endpoint === "esf-send" ? post : {
+          method: "POST", body: JSON.stringify({ signature: Buffer.alloc(64, 7).toString("base64"), publicCertificate: pemFromCms(makeTestCms(Buffer.from("SIGN"))) }),
+        });
+        assert.equal(sent.response.status, 422, JSON.stringify(sent.body));
+        assert.equal(sent.body.code, "avr_not_sent");
+      }
+    }
+  });
+
+  it("повторное создание возвращает принятый ЭСФ, даже если остался старый черновик", async () => {
+    const accepted = await prisma.electronicDocument.findUniqueOrThrow({ where: { id: esfId } });
+    assert.equal(accepted.status, "ACCEPTED");
+    await prisma.electronicDocument.create({ data: {
+      tenantId: accepted.tenantId, dealId, type: "ESF", number: "999999", status: "DRAFT", amountWithoutVat: 1, vatAmount: 0, totalAmount: 1,
+    } });
+    const result = await json(`/api/v1/deals/${dealId}/electronic-documents`, {
+      method: "POST", body: JSON.stringify({ type: "ESF" }),
+    });
+    assert.equal(result.body.document.id, esfId);
+    assert.equal(result.body.reused, true);
+  });
+
+  it("не создаёт второй ЭСФ во время отправки и не меняет XML отправляемого документа", async () => {
+    const doc = await freshEsf();
+    await json(`/api/v1/electronic-documents/${doc.id}/validate`, post);
+    await json(`/api/v1/electronic-documents/${doc.id}/esf-preview`, post);
+    const sending = await prisma.electronicDocument.update({ where: { id: doc.id }, data: { status: "SENDING" } });
+    const create = await json(`/api/v1/deals/${doc.dealId}/electronic-documents`, {
+      method: "POST", body: JSON.stringify({ type: "ESF" }),
+    });
+    assert.equal(create.body.document.id, doc.id);
+    const preview = await json(`/api/v1/electronic-documents/${doc.id}/esf-preview`, post);
+    assert.equal(preview.response.status, 409);
+    const stored = await prisma.electronicDocument.findUniqueOrThrow({ where: { id: doc.id } });
+    assert.equal(stored.xmlStorageKey, sending.xmlStorageKey);
+    assert.equal(stored.updatedAt.getTime(), sending.updatedAt.getTime());
+  });
+
+  it("повторная проверка сбрасывает XML, сохраняя байты предыдущей подписываемой версии", async () => {
+    const doc = await freshEsf();
+    await json(`/api/v1/electronic-documents/${doc.id}/validate`, post);
+    const first = await json(`/api/v1/electronic-documents/${doc.id}/esf-preview`, post);
+    const original = await prisma.electronicDocument.findUniqueOrThrow({ where: { id: doc.id } });
+    assert.ok(original.xmlStorageKey);
+    await prisma.dealItem.updateMany({ where: { dealId: doc.dealId }, data: { name: "Обновлённая услуга" } });
+    const validation = await json(`/api/v1/electronic-documents/${doc.id}/validate`, post);
+    assert.equal(validation.response.status, 200, JSON.stringify(validation.body));
+    assert.equal((await prisma.electronicDocument.findUniqueOrThrow({ where: { id: doc.id } })).xmlStorageKey, null);
+    const second = await json(`/api/v1/electronic-documents/${doc.id}/esf-preview`, post);
+    assert.match(second.body.xml, /Обновлённая услуга/);
+    const revised = await prisma.electronicDocument.findUniqueOrThrow({ where: { id: doc.id } });
+    assert.notEqual(revised.xmlStorageKey, original.xmlStorageKey);
+    assert.equal(await readFile(resolveUploadPath(original.xmlStorageKey!), "utf8"), first.body.xml);
+  });
+
+  it("проверяет ТРУ у каждой позиции, а не только у первой заполненной", async () => {
+    const doc = await freshEsf();
+    const profile = await prisma.tenantLegalProfile.findUniqueOrThrow({ where: { tenantId: doc.tenantId } });
+    try {
+      await prisma.tenantLegalProfile.update({ where: { tenantId: doc.tenantId }, data: { defaultCatalogTruId: null } });
+      const items = await prisma.dealItem.findMany({ where: { dealId: doc.dealId }, orderBy: { sortOrder: "asc" } });
+      await prisma.dealItem.update({ where: { id: items[0].id }, data: { catalogTruId: "1" } });
+      const readiness = await json(`/api/v1/deals/${doc.dealId}/esf-invoice-readiness`);
+      assert.equal(readiness.body.ready, false);
+      const validation = await json(`/api/v1/electronic-documents/${doc.id}/validate`, post);
+      assert.equal(validation.response.status, 422);
+      assert.match(validation.body.message, /ТРУ/);
+      assert.match(validation.body.message, /2/);
+      await prisma.dealItem.update({ where: { id: items[1].id }, data: { catalogTruId: "2" } });
+      assert.equal((await json(`/api/v1/electronic-documents/${doc.id}/validate`, post)).response.status, 200);
+    } finally {
+      await prisma.tenantLegalProfile.update({ where: { tenantId: doc.tenantId }, data: { defaultCatalogTruId: profile.defaultCatalogTruId } });
+    }
+  });
+
+  it("предпросмотр принятого ЭСФ не перезаписывает XML и служебные поля", async () => {
+    const original = await prisma.electronicDocument.findUniqueOrThrow({ where: { id: esfId } });
+    const preview = await json(`/api/v1/electronic-documents/${esfId}/esf-preview`, post);
+    assert.equal(preview.response.status, 200);
+    const after = await prisma.electronicDocument.findUniqueOrThrow({ where: { id: esfId } });
+    assert.equal(after.xmlStorageKey, original.xmlStorageKey);
+    assert.equal(after.updatedAt.getTime(), original.updatedAt.getTime());
+  });
+
+  for (const type of ["AVR", "ESF"]) {
+    it(`${type}: сохраняет номер принятого документа, даже если следующий запрос статуса оборвался`, async () => {
+      const doc = await freshEsf();
+      const avr = await json(`/api/v1/deals/${doc.dealId}/electronic-documents`, {
+        method: "POST", body: JSON.stringify({ type: "AVR" }),
+      });
+      const id = type === "AVR" ? avr.body.document.id : doc.id;
+      if (type === "ESF") await prisma.electronicDocument.update({ where: { id: avr.body.document.id }, data: {
+        status: "SENT", externalSystem: "ESF_AWP", externalId: `awp-${doc.id}`,
+      } });
+      await json(`/api/v1/electronic-documents/${id}/validate`, post);
+      const prepared = await json(`/api/v1/electronic-documents/${id}/esf-payload`, post);
+      assert.equal(prepared.response.status, 200, JSON.stringify(prepared.body));
+      await prisma.esfConnection.upsert({ where: { tenantId_environment: { tenantId: doc.tenantId, environment: "test" } },
+        create: { tenantId: doc.tenantId, environment: "test", status: "CONNECTED", sessionId: "isolated-test-session" },
+        update: { status: "CONNECTED", sessionId: "isolated-test-session" },
+      });
+      const originalFetch = globalThis.fetch;
+      const previousEnv = { ...process.env };
+      let uploads = 0;
+      const remoteId = `registered-${type}-${doc.id}`;
+      const intercepted = mock.method(globalThis, "fetch", async (url: string | URL | Request, init?: RequestInit) => {
+        if (String(url).startsWith(base)) return originalFetch(url, init);
+        assert.equal(new URL(String(url)).hostname, "test3.esf.kgd.gov.kz");
+        const body = String(init?.body);
+        if (body.includes("currentSessionStatusRequest")) return new Response("<Envelope><status>OK</status></Envelope>");
+        if (body.includes("syncInvoiceRequest") || body.includes("awpUploadRequest")) {
+          uploads++;
+          return new Response(type === "ESF"
+            ? `<Envelope><Body><syncInvoiceResponse><acceptedSet><standardResponse><id>${remoteId}</id></standardResponse></acceptedSet></syncInvoiceResponse></Body></Envelope>`
+            : `<Envelope><Body><awpUploadResponse><acceptedList><awpUploadResult><awpId>${remoteId}</awpId></awpUploadResult></acceptedList></awpUploadResponse></Body></Envelope>`);
+        }
+        throw new Error("Simulated status connection failure after acceptance");
+      });
+      try {
+        Object.assign(process.env, { ESF_ENV: "test", ESF_PROVIDER: "live", ESF_ALLOW_LIVE_SEND: "1", ESF_TLS_INSECURE: "0" });
+        const raw = { signature: Buffer.alloc(64, 7).toString("base64"),
+          publicCertificate: pemFromCms(makeTestCms(Buffer.from("SIGN"))), payloadSha256: prepared.body.payloadSha256 };
+        const sent = await json(`/api/v1/electronic-documents/${id}/esf-send-signed`, { method: "POST", body: JSON.stringify(raw) });
+        assert.equal(sent.response.status, 200, JSON.stringify(sent.body));
+        const stored = await prisma.electronicDocument.findUniqueOrThrow({ where: { id } });
+        assert.equal(stored.externalId, remoteId);
+        assert.equal(stored.status, "SENT");
+        const repeat = await json(`/api/v1/electronic-documents/${id}/esf-send-signed`, { method: "POST", body: JSON.stringify(raw) });
+        assert.equal(repeat.response.status, 200, JSON.stringify(repeat.body));
+        assert.equal(repeat.body.reused, true);
+        await prisma.electronicDocument.update({ where: { id }, data: { status: "REJECTED" } });
+        const rejected = await json(`/api/v1/electronic-documents/${id}/esf-send-signed`, { method: "POST", body: JSON.stringify(raw) });
+        assert.equal(rejected.response.status, 200, JSON.stringify(rejected.body));
+        assert.equal(rejected.body.reused, true);
+        assert.equal(rejected.body.document.status, "REJECTED");
+        assert.equal(uploads, 1);
+        assert.equal(await prisma.outboxEvent.count({ where: { entityId: id, type: type === "ESF" ? "esf.sent" : "avr.sent" } }), 1);
+      } finally {
+        intercepted.mock.restore();
+        for (const key of Object.keys(process.env)) if (!(key in previousEnv)) delete process.env[key];
+        Object.assign(process.env, previousEnv);
+      }
+    });
+  }
+
 });

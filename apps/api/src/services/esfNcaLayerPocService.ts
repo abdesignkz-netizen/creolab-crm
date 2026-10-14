@@ -1,3 +1,4 @@
+import { findRegisteredEsfAvr } from "./registeredEsfAvr.ts";
 import { createHash, X509Certificate } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -551,7 +552,7 @@ async function sendEsfWithNcaLayerSignatureInternal(
   if (document.status === "DRAFT") {
     throw new ApiError(422, document.type === "ESF" ? "esf_not_validated" : "avr_not_validated", "Сначала проверьте документ");
   }
-  if ((document.status === "SENT" || document.status === "ACCEPTED") && document.externalId) {
+  if (document.externalId) {
     return {
       document: serializeElectronicDocument(document),
       externalId: document.externalId,
@@ -561,9 +562,7 @@ async function sendEsfWithNcaLayerSignatureInternal(
     };
   }
   if (document.type === "ESF") {
-    const avr = await prisma.electronicDocument.findFirst({
-      where: { tenantId: tid, dealId: document.dealId, type: "AVR", externalId: { not: null } },
-    });
+    const avr = await findRegisteredEsfAvr(prisma, tid, document.dealId);
     if (!avr?.externalId) throw new ApiError(422, "avr_not_sent", "Сначала отправьте АВР в ИС ЭСФ");
   }
 
@@ -612,37 +611,47 @@ async function sendEsfWithNcaLayerSignatureInternal(
 
   const officialStatus = uploaded.externalStatus;
   const accepted = document.type === "ESF" ? officialStatus === "DELIVERED" : officialStatus === "CONFIRMED";
-  const updated = await prisma.electronicDocument.update({
-    where: { id: document.id },
-    data: {
-      status: accepted ? "ACCEPTED" : "SENT",
-      signedAt: document.signedAt || new Date(),
-      sentAt: new Date(),
-      acceptedAt: accepted ? new Date() : document.acceptedAt,
-      signedXmlStorageKey: document.xmlStorageKey,
-      externalSystem: document.type === "ESF" ? "ESF_INVOICE" : "ESF_AWP",
-      externalId: uploaded.externalId,
-      externalNumber: uploaded.externalNumber || null,
-      externalStatus: officialStatus,
-      errorCode: null,
-      errorMessage: null,
-    },
-  });
-  await prisma.auditEvent.create({
-    data: {
+  const updated = await prisma.$transaction(async tx => {
+    const updated = await tx.electronicDocument.update({
+      where: { id: document.id },
+      data: {
+        status: accepted ? "ACCEPTED" : "SENT",
+        signedAt: document.signedAt || new Date(),
+        sentAt: new Date(),
+        acceptedAt: accepted ? new Date() : document.acceptedAt,
+        signedXmlStorageKey: document.xmlStorageKey,
+        externalSystem: document.type === "ESF" ? "ESF_INVOICE" : "ESF_AWP",
+        externalId: uploaded.externalId,
+        externalNumber: uploaded.externalNumber || null,
+        externalStatus: officialStatus,
+        errorCode: null,
+        errorMessage: null,
+      },
+    });
+    await tx.auditEvent.create({
+      data: {
+        tenantId: tid,
+        actorUserId: auth.user.id,
+        action: "electronic_document.esf_send_ncalayer",
+        entityType: "electronic_document",
+        entityId: updated.id,
+        changesJson: {
+          externalId: uploaded.externalId,
+          externalStatus: officialStatus,
+          signer: "ncalayer_esf_module",
+          signatureFormat: analysis.format,
+          signatureBytes: analysis.length,
+        },
+      },
+    });
+    await tx.outboxEvent.create({ data: {
       tenantId: tid,
-      actorUserId: auth.user.id,
-      action: "electronic_document.esf_send_ncalayer",
+      type: document.type === "ESF" ? "esf.sent" : "avr.sent",
       entityType: "electronic_document",
       entityId: updated.id,
-      changesJson: {
-        externalId: uploaded.externalId,
-        externalStatus: officialStatus,
-        signer: "ncalayer_esf_module",
-        signatureFormat: analysis.format,
-        signatureBytes: analysis.length,
-      },
-    },
+      payloadJson: { documentId: updated.id, dealId: updated.dealId, externalId: uploaded.externalId, externalStatus: officialStatus },
+    } });
+    return updated;
   });
   return {
     document: serializeElectronicDocument(updated),
@@ -822,6 +831,10 @@ async function uploadSignedDocument(input: {
     }
   }
   if (last.kind === "ESF") {
+    if (!last.uploaded.invoiceId && !last.uploaded.declined && !last.fault) {
+      // An empty/HTML response does not prove rejection. Do not release the send lock.
+      throw new Error("Unknown ESF upload result");
+    }
     if (last.uploaded.declined || !last.uploaded.invoiceId) {
       return {
         ok: false as const,
@@ -835,7 +848,8 @@ async function uploadSignedDocument(input: {
         httpStatus: last.response.status,
       };
     }
-    const status = await queryInvoiceById(sessionId, last.uploaded.invoiceId, config);
+    // Registration is already confirmed. A separate status lookup must never lose its ID.
+    const status = await queryInvoiceById(sessionId, last.uploaded.invoiceId, config).catch(() => null);
     return {
       ok: true as const,
       code: "sent",
@@ -843,10 +857,13 @@ async function uploadSignedDocument(input: {
       errors: [],
       provider: "live" as const,
       externalId: last.uploaded.invoiceId,
-      externalStatus: status.status || "CREATED",
-      externalNumber: status.registrationNumber || last.uploaded.num,
+      externalStatus: status?.ok ? status.status || "CREATED" : "CREATED",
+      externalNumber: (status?.ok ? status.registrationNumber : "") || last.uploaded.num,
       httpStatus: last.response.status,
     };
+  }
+  if (!last.uploaded.awpId && !last.uploaded.declined && !last.fault) {
+    throw new Error("Unknown AWP upload result");
   }
   if (last.uploaded.declined || !last.uploaded.awpId) {
     return {
@@ -861,7 +878,7 @@ async function uploadSignedDocument(input: {
       httpStatus: last.response.status,
     };
   }
-  const status = await queryAwpStatusById(sessionId, last.uploaded.awpId, config);
+  const status = await queryAwpStatusById(sessionId, last.uploaded.awpId, config).catch(() => null);
   return {
     ok: true as const,
     code: "sent",
@@ -869,8 +886,8 @@ async function uploadSignedDocument(input: {
     errors: [],
     provider: "live" as const,
     externalId: last.uploaded.awpId,
-    externalStatus: status.status || "NOT_VIEWED",
-    externalNumber: status.registrationNumber || last.uploaded.number,
+    externalStatus: status?.ok ? status.status || "NOT_VIEWED" : "NOT_VIEWED",
+    externalNumber: (status?.ok ? status.registrationNumber : "") || last.uploaded.number,
     httpStatus: last.response.status,
   };
 }

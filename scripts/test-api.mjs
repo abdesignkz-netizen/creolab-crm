@@ -15,6 +15,7 @@ const files = ["apps/api/src", "packages/contracts/src"].flatMap(testFiles)
   .filter(file => !requested.size || requested.has(file.split("/").at(-1).replace(/\.test\.ts$/, "")));
 if (!files.length) throw new Error("No matching test files");
 let failures = 0;
+const failedFiles = [];
 try {
   for (const [index, file] of files.entries()) {
     const result = spawnSync(process.execPath, ["--experimental-strip-types", "--test", file], {
@@ -55,10 +56,11 @@ try {
         TRANSCRIPTION_MODEL_PATH: "/nonexistent/basqar-test-speech-model",
       },
     });
-    if (result.status !== 0) failures += 1;
+    if (result.status !== 0) { failures += 1; failedFiles.push(file); }
   }
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }
 console.log(`\n${files.length - failures}/${files.length} test files passed (isolated databases; external providers disabled).`);
+if (failedFiles.length) console.error(`Failed files:\n${failedFiles.join("\n")}`);
 process.exitCode = failures ? 1 : 0;

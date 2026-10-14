@@ -4,7 +4,7 @@ import { createCanvas, DOMMatrix, ImageData, Path2D } from "@napi-rs/canvas";
 import type { PrismaClient } from "@creolab/db";
 import { amountToKztWords } from "@creolab/contracts";
 import type { Response } from "express";
-import { PDFDocument, rgb, type PDFFont, type PDFImage, type PDFPage } from "pdf-lib";
+import { PDFDocument, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
@@ -24,7 +24,6 @@ import { expandLegalFormName, type AvrSourceSnapshot } from "./avrMapper.ts";
 
 const BLACK = rgb(0, 0, 0);
 const WHITE = rgb(1, 1, 1);
-const PAD = 1.35;
 const BODY = 6.9;
 const PARTY = 7.45;
 const COL = {
@@ -39,19 +38,13 @@ const COL = {
   vat: { l: 557.5, r: 617.5 },
 };
 const VLINES = [78.5, 205, 277, 373.5, 413, 449, 497.5, 557.5];
-const ITEM_BANDS = [
-  { bottom: 241.78, top: 276.28, valuesY: 256.44, nameY1: 261.6, nameY2: 252.14, indexY: 243.54 },
-  { bottom: 207.28, top: 241.78, valuesY: 222.04, nameY1: 227.2, nameY2: 217.74, indexY: 209.14 },
-  { bottom: 172.78, top: 207.28, valuesY: 187.64, nameY1: 192.8, nameY2: 183.34, indexY: 174.74 },
-] as const;
 const BODY_TOP = 276.28;
 const BODY_BOTTOM = 163.28;
 const TOTALS_TOP = 172.78;
 const TOTALS_H = TOTALS_TOP - BODY_BOTTOM;
-const ITEM_ROW_H = ITEM_BANDS[0].top - ITEM_BANDS[0].bottom;
+const ITEM_ROW_H = 34.5;
 const TOTALS_VALUES_OFFSET = 2;
 const STROKE = 0.4;
-const TEMPLATE_ITEMS = ITEM_BANDS.length;
 
 function requireTenant(auth: AuthContext) {
   if (!auth.activeMembership) throw new ApiError(403, "no_tenant", "Нет активной компании");
@@ -69,18 +62,15 @@ function avrPdfTemplatePath() {
   return found;
 }
 
-let templateCache: { png: Buffer; footerPng: Buffer; width: number; height: number } | null = null;
-
-function unusedRowShift(itemCount: number) {
-  return Math.max(0, TEMPLATE_ITEMS - Math.max(itemCount, 1)) * ITEM_ROW_H;
-}
+let templateCache: { png: Buffer; width: number; height: number } | null = null;
 
 async function avrTemplatePng() {
   if (templateCache) return templateCache;
   Object.assign(globalThis, { DOMMatrix, ImageData, Path2D });
   const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
   const bytes = new Uint8Array(readFileSync(avrPdfTemplatePath()));
-  const pdf = await getDocument({ data: bytes, useSystemFonts: true }).promise;
+  const task = getDocument({ data: bytes, useSystemFonts: true });
+  const pdf = await task.promise;
   const page = await pdf.getPage(1);
   try {
     const scale = 3;
@@ -95,19 +85,15 @@ async function avrTemplatePng() {
     }).promise;
     const width = viewport.width / scale;
     const height = viewport.height / scale;
-    const srcY = Math.max(0, Math.round(canvas.height - (BODY_BOTTOM / height) * canvas.height));
-    const srcH = Math.max(1, canvas.height - srcY);
-    const footer = createCanvas(canvas.width, srcH);
-    footer.getContext("2d").drawImage(canvas, 0, srcY, canvas.width, srcH, 0, 0, canvas.width, srcH);
     templateCache = {
       png: canvas.toBuffer("image/png"),
-      footerPng: footer.toBuffer("image/png"),
       width,
       height,
     };
     return templateCache;
   } finally {
     page.cleanup();
+    await task.destroy();
   }
 }
 
@@ -132,7 +118,15 @@ function money(value: number) {
 }
 
 function wrapLines(text: string, font: PDFFont, size: number, maxWidth: number) {
-  const words = String(text || "").trim().split(/\s+/).filter(Boolean);
+  const words = String(text || "").trim().split(/\s+/).filter(Boolean).flatMap(word => {
+    const chunks:string[]=[];let part="";
+    for (const char of word) {
+      if(part && font.widthOfTextAtSize(part+char,size)>maxWidth){chunks.push(part);part="";}
+      part+=char;
+    }
+    if(part)chunks.push(part);
+    return chunks;
+  });
   if (!words.length) return [] as string[];
   const lines: string[] = [];
   let current = "";
@@ -151,15 +145,6 @@ function wrapLines(text: string, font: PDFFont, size: number, maxWidth: number) 
 function white(page: PDFPage, x: number, y: number, w: number, h: number) {
   if (w <= 0 || h <= 0) return;
   page.drawRectangle({ x, y, width: w, height: h, color: WHITE, borderWidth: 0 });
-}
-
-function cell(col: { l: number; r: number }, bottom: number, top: number) {
-  return { x: col.l + PAD, y: bottom + PAD, w: col.r - col.l - PAD * 2, h: top - bottom - PAD * 2 };
-}
-
-function coverCell(page: PDFPage, col: { l: number; r: number }, bottom: number, top: number) {
-  const box = cell(col, bottom, top);
-  white(page, box.x, box.y, box.w, box.h);
 }
 
 function drawCentered(page: PDFPage, text: string, cx: number, y: number, font: PDFFont, size: number) {
@@ -190,7 +175,9 @@ function drawWrappedCenter(
   maxWidth: number,
   maxLines = 3,
 ) {
-  const lines = wrapLines(text, font, size, maxWidth).slice(0, maxLines);
+  let lines = wrapLines(text, font, size, maxWidth);
+  while (lines.length > maxLines && size > 5) {size-=0.25;lines=wrapLines(text,font,size,maxWidth);}
+  if (lines.length > maxLines) throw new ApiError(422,"avr_pdf_text_too_long","Текст реквизитов слишком длинный для бланка АВР. Сократите его без потери реквизитов.");
   if (!lines.length) return;
   if (lines.length === 1) {
     drawCentered(page, lines[0], cx, (y1 + y2) / 2, font, size);
@@ -200,16 +187,10 @@ function drawWrappedCenter(
   lines.forEach((line, index) => drawCentered(page, line, cx, y1 - step * index, font, size));
 }
 
-function coverItemBand(page: PDFPage, bottom: number, top: number, includeDate = true) {
-  coverCell(page, COL.num, bottom, top);
-  coverCell(page, COL.name, bottom, top);
-  if (includeDate) coverCell(page, COL.date, bottom, top);
-  coverCell(page, COL.report, bottom, top);
-  coverCell(page, COL.unit, bottom, top);
-  coverCell(page, COL.qty, bottom, top);
-  coverCell(page, COL.price, bottom, top);
-  coverCell(page, COL.amount, bottom, top);
-  coverCell(page, COL.vat, bottom, top);
+function coverItemBand(page: PDFPage, bottom: number, top: number) {
+  white(page, COL.num.l - 0.3, bottom - 0.3, COL.vat.r - COL.num.l + 0.6, top - bottom + 0.6);
+  strokeH(page, bottom);strokeH(page, top);
+  for (const x of [COL.num.l, ...VLINES, COL.vat.r]) strokeV(page, x, bottom, top);
 }
 
 function fillItem(
@@ -218,11 +199,11 @@ function fillItem(
   index: number,
   item: AvrSourceSnapshot["items"][number],
   font: PDFFont,
-  options: { size?: number; maxNameLines?: number } = {},
+  options: { size?: number; maxNameLines?: number; continuation?: boolean; omitAmounts?: boolean } = {},
 ) {
   const size = options.size ?? BODY;
   const amount = Number(item.amountWithoutVat ?? Number(item.quantity || 0) * Number(item.unitPrice || 0));
-  drawCentered(page, String(index + 1), (COL.num.l + COL.num.r) / 2, band.indexY, font, size);
+  drawCentered(page, options.continuation ? "прод." : String(index + 1), (COL.num.l + COL.num.r) / 2, band.valuesY, font, size);
   drawWrappedCenter(
     page,
     item.name || "",
@@ -234,8 +215,9 @@ function fillItem(
     COL.name.r - COL.name.l - 4,
     options.maxNameLines ?? 3,
   );
+  if (options.omitAmounts) return;
   drawCentered(page, paperAvrMeasureUnit(item.unit), (COL.unit.l + COL.unit.r) / 2, band.valuesY, font, size);
-  drawRight(page, String(item.quantity), COL.qty.r - 2.2, band.indexY, font, size);
+  drawRight(page, String(item.quantity), COL.qty.r - 2.2, band.valuesY, font, size);
   drawRight(page, money(Number(item.unitPrice || 0)), COL.price.r - 2.2, band.valuesY, font, size);
   drawRight(page, money(amount), COL.amount.r - 2.2, band.valuesY, font, size);
   drawRight(page, money(Number(item.vatAmount || 0)), COL.vat.r - 2.2, band.valuesY, font, size);
@@ -259,81 +241,36 @@ function fillTotals(
   top = TOTALS_TOP,
 ) {
   const qty = items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
-  coverCell(page, COL.qty, bottom, top);
-  coverCell(page, COL.price, bottom, top);
-  coverCell(page, COL.amount, bottom, top);
-  coverCell(page, COL.vat, bottom, top);
+  coverItemBand(page, bottom, top);
+  drawRight(page, "Итого", COL.qty.l - 3.2, valuesY, font, BODY);
   drawRight(page, String(qty), COL.qty.r - 2.2, valuesY, font, BODY);
   drawCentered(page, "x", (COL.price.l + COL.price.r) / 2, valuesY, font, BODY);
   drawRight(page, money(Number(totals.amountWithoutVat || 0)), COL.amount.r - 2.2, valuesY, font, BODY);
   drawRight(page, money(Number(totals.vatAmount || 0)), COL.vat.r - 2.2, valuesY, font, BODY);
 }
 
-function removeUnusedItemRows(
-  page: PDFPage,
-  items: AvrSourceSnapshot["items"],
-  totals: AvrSourceSnapshot["totals"],
-  font: PDFFont,
-  footerImage: PDFImage,
-  pageWidth: number,
-  shift: number,
-) {
-  const lastBand = ITEM_BANDS[Math.max(items.length, 1) - 1];
-  const totalsTop = lastBand.bottom;
-  const totalsBottom = totalsTop - TOTALS_H;
-  const valuesY = totalsBottom + TOTALS_VALUES_OFFSET;
-  white(page, 0, 0, pageWidth, lastBand.bottom - 0.35);
-  page.drawImage(footerImage, { x: 0, y: shift, width: pageWidth, height: BODY_BOTTOM });
-  strokeH(page, totalsTop);
-  strokeH(page, totalsBottom);
-  strokeV(page, COL.num.l, totalsBottom, totalsTop);
-  strokeV(page, COL.vat.r, totalsBottom, totalsTop);
-  for (const x of VLINES) strokeV(page, x, totalsBottom, totalsTop);
-  drawRight(page, "Итого", COL.qty.l - 3.2, valuesY, font, BODY);
-  fillTotals(page, items, totals, font, valuesY, totalsBottom, totalsTop);
-}
-
-function fillExtraItems(
-  page: PDFPage,
-  items: AvrSourceSnapshot["items"],
-  totals: AvrSourceSnapshot["totals"],
-  font: PDFFont,
-) {
-  white(page, COL.num.l + PAD, TOTALS_TOP + PAD, COL.vat.r - COL.num.l - PAD * 2, BODY_TOP - TOTALS_TOP - PAD * 2);
-  const rowH = (BODY_TOP - TOTALS_TOP) / items.length;
-  for (let i = 1; i < items.length; i += 1) {
-    const y = BODY_TOP - rowH * i;
-    page.drawLine({
-      start: { x: COL.num.l, y },
-      end: { x: COL.vat.r, y },
-      thickness: 0.4,
-      color: BLACK,
-    });
+function drawFooter(page: PDFPage, source: AvrSourceSnapshot, bottom: number, font: PDFFont) {
+  const words = capitalizeRu(amountToKztWords(source.totals.amountWithoutVat));
+  const wordsSize = Math.min(BODY, 565 / Math.max(font.widthOfTextAtSize(`Всего без НДС: ${words}`, 1), 1));
+  drawLeft(page, `Всего без НДС: ${words}`, 53, bottom - 12, font, wordsSize);
+  drawLeft(page, "Сведения об использовании запасов, полученных от заказчика", 53, bottom - 29, font, BODY);
+  strokeH(page, bottom - 31, 365, 617.5);
+  drawCentered(page, "наименование, количество, стоимость", 490, bottom - 40, font, 5.8);
+  drawLeft(page, "Приложение: перечень документации, в том числе отчётов о научных, маркетинговых, консультационных и прочих услугах", 53, bottom - 54, font, BODY);
+  drawLeft(page, "(при их наличии) на ______ страницах", 53, bottom - 65, font, BODY);
+  for (const [label, party, x] of [["Сдал (Исполнитель)", source.seller, 53], ["Принял (Заказчик)", source.buyer, 354]] as const) {
+    drawLeft(page, label, x, bottom - 83, font, BODY);
+    const y = bottom - 99;
+    for (const [start, end, caption] of [[x,x+68,"должность"],[x+77,x+135,"подпись"],[x+144,x+263,"расшифровка подписи"]] as const) {
+      strokeH(page, y, start, end);drawCentered(page, caption, (start+end)/2, y-9, font, 5.8);
+    }
+    const position=party.directorPosition||"";
+    const name=directorShortName(party.directorName);
+    drawCentered(page, position, x+34, y+3, font, Math.min(BODY,66/Math.max(font.widthOfTextAtSize(position,1),1)));
+    drawCentered(page, name, x+203.5, y+3, font, Math.min(BODY,117/Math.max(font.widthOfTextAtSize(name,1),1)));
+    drawLeft(page, "М.П.", x, y-29, font, BODY);
   }
-  for (const x of VLINES) {
-    page.drawLine({
-      start: { x, y: TOTALS_TOP },
-      end: { x, y: BODY_TOP },
-      thickness: 0.4,
-      color: BLACK,
-    });
-  }
-  const size = rowH < 26 ? 6.05 : BODY;
-  const nameShift = Math.min(4.2, Math.max(3.2, rowH / 6));
-  items.forEach((item, index) => {
-    const top = BODY_TOP - rowH * index;
-    const bottom = top - rowH;
-    const mid = (top + bottom) / 2 - 1.5;
-    fillItem(
-      page,
-      { bottom, top, valuesY: mid, nameY1: mid + nameShift, nameY2: mid - nameShift, indexY: mid },
-      index,
-      item,
-      font,
-      { size, maxNameLines: 2 },
-    );
-  });
-  fillTotals(page, items, totals, font);
+  drawLeft(page, "Дата подписания (принятия) работ ____________________", 415, bottom-134, font, BODY);
 }
 
 export function avrPdfFileName(input: { number: string; source: AvrSourceSnapshot }) {
@@ -346,9 +283,7 @@ export async function renderAvrPdf(input: { number: string; source: AvrSourceSna
   const background = await avrTemplatePng();
   const pdf = await PDFDocument.create();
   pdf.registerFontkit(fontkit);
-  const page = pdf.addPage([background.width, background.height]);
   const image = await pdf.embedPng(background.png);
-  page.drawImage(image, { x: 0, y: 0, width: background.width, height: background.height });
   const font = await pdf.embedFont(readFileSync(resolveFont("NotoSans-Regular.ttf")), { subset: true });
   const bold = await pdf.embedFont(readFileSync(resolveFont("NotoSans-Bold.ttf")), { subset: true });
   const { source } = input;
@@ -356,11 +291,25 @@ export async function renderAvrPdf(input: { number: string; source: AvrSourceSna
   const seller = partyLine(source.seller.legalName, source.seller.legalAddress);
   const buyerId = taxId(source.buyer);
   const sellerId = taxId(source.seller);
-  const shift = source.items.length > TEMPLATE_ITEMS ? 0 : unusedRowShift(source.items.length);
-
-  white(page, 103.2, 445.9, 362.5, 18.2);
+  type PrintRow = { item: AvrSourceSnapshot["items"][number]; index: number; height: number; lines: number; continuation: boolean; omitAmounts: boolean };
+  const pages: PrintRow[][] = [[]];
+  let used = 0;
+  for (const [index, item] of source.items.entries()) {
+    const lines = wrapLines(item.name, font, BODY, COL.name.r-COL.name.l-4);
+    for (let offset=0; offset<Math.max(lines.length,1); offset+=12) {
+      const part=lines.slice(offset,offset+12);
+      const height=Math.max(ITEM_ROW_H,part.length*8.5+8);
+      if (used+height>BODY_TOP-TOTALS_TOP+0.01 && used) { pages.push([]);used=0; }
+      pages.at(-1)!.push({item:{...item,name:part.join(" ")},index,height,lines:part.length,continuation:offset>0,omitAmounts:offset+12<lines.length});
+      used+=height;
+    }
+  }
+  for (const [pageIndex, rows] of pages.entries()) {
+    const page=pdf.addPage([background.width,background.height]);
+    page.drawImage(image,{x:0,y:0,width:background.width,height:background.height});
+  white(page, 103.2, 445.9, 365, 20);
   white(page, 534.9, 446.2, 81.2, 17.6);
-  white(page, 103.2, 415.6, 362.5, 18.2);
+  white(page, 103.2, 415.6, 365, 20);
   white(page, 534.9, 415.7, 81.2, 17.6);
   white(page, 115.9, 396.2, 272, 9.8);
   white(page, 522.9, 366.7, 45.2, 18.2);
@@ -377,33 +326,25 @@ export async function renderAvrPdf(input: { number: string; source: AvrSourceSna
   drawCentered(page, localNumber, 545.5, 376.84, bold, numberSize);
   drawCentered(page, formatDotDate(source.documentDate), 593.5, 376.84, bold, BODY);
 
-  if (source.items.length > TEMPLATE_ITEMS) {
-    fillExtraItems(page, source.items, source.totals, font);
-  } else {
-    const used = Math.max(source.items.length, 1);
-    for (const band of ITEM_BANDS.slice(0, used)) coverItemBand(page, band.bottom, band.top);
-    source.items.forEach((item, index) => fillItem(page, ITEM_BANDS[index], index, item, font));
-    if (shift > 0) {
-      const footerImage = await pdf.embedPng(background.footerPng);
-      removeUnusedItemRows(page, source.items, source.totals, font, footerImage, background.width, shift);
-    } else {
-      fillTotals(page, source.items, source.totals, font);
-    }
+  // The template contains sample values: clear the entire body and footer,
+  // including glyphs touching a grid line, before drawing the document data.
+  white(page,0,0,background.width,BODY_TOP+0.1);
+  let top=BODY_TOP;
+  if (!rows.length) {coverItemBand(page,top-ITEM_ROW_H,top);top-=ITEM_ROW_H;}
+  for (const row of rows) {
+    const bottom=top-row.height;
+    coverItemBand(page,bottom,top);
+    const mid=(top+bottom)/2-2;
+    const textHeight=Math.max(0,row.lines-1)*8.5;
+    fillItem(page,{bottom,top,valuesY:mid,nameY1:mid+textHeight/2,nameY2:mid-textHeight/2,indexY:mid},row.index,row.item,font,{maxNameLines:12,continuation:row.continuation,omitAmounts:row.omitAmounts});
+    top=bottom;
   }
-
-  white(page, 365, 139.6 + shift, 253.5, 14.2);
-  white(page, 118, 86.6 + shift, 52, 10.2);
-  white(page, 247.4, 86.6 + shift, 78, 10.2);
-  drawCentered(
-    page,
-    capitalizeRu(amountToKztWords(source.totals.amountWithoutVat || source.totals.totalAmount)),
-    441.8,
-    146.36 + shift,
-    font,
-    BODY,
-  );
-  drawCentered(page, source.seller.directorPosition || "Директор", 145.1, 90.46 + shift, font, BODY);
-  drawCentered(page, directorShortName(source.seller.directorName), 286.5, 90.46 + shift, font, BODY);
+  if(pageIndex===pages.length-1) {
+    fillTotals(page,source.items,source.totals,font,top-TOTALS_H+TOTALS_VALUES_OFFSET,top-TOTALS_H,top);
+    drawFooter(page,source,top-TOTALS_H,font);
+  } else drawLeft(page,"Продолжение акта на следующей странице",53,top-14,font,BODY);
+  drawRight(page,`${localNumber} · ${pageIndex+1} / ${pages.length}`,617.5,18,font,BODY);
+  }
 
   return { buffer: Buffer.from(await pdf.save()), filename, localNumber };
 }

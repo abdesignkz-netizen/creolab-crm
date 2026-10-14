@@ -42,11 +42,20 @@ async function pdfText(buffer: Buffer) {
   const { DOMMatrix, ImageData, Path2D } = await import("@napi-rs/canvas");
   Object.assign(globalThis, { DOMMatrix, ImageData, Path2D });
   const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  const pdf = await getDocument({ data: new Uint8Array(buffer), useSystemFonts: true }).promise;
-  const page = await pdf.getPage(1);
-  const content = await page.getTextContent();
-  page.cleanup();
-  return content.items.map((item) => ("str" in item ? item.str : "")).join(" ");
+  const task = getDocument({ data: new Uint8Array(buffer), useSystemFonts: true });
+  try {
+    const pdf = await task.promise;
+    const texts: string[] = [];
+    for (let n = 1; n <= pdf.numPages; n++) {
+      const page = await pdf.getPage(n);
+      const content = await page.getTextContent();
+      texts.push(content.items.map(item => "str" in item ? item.str : "").join(" "));
+      page.cleanup();
+    }
+    return texts.join(" ");
+  } finally {
+    await task.destroy();
+  }
 }
 
 const gold: AvrSourceSnapshot = {
@@ -159,18 +168,21 @@ describe("AVR Excel Form R-1", () => {
     const { buffer, layout } = await renderAvrExcel({ number: "AVR-2026-0035", source: gold });
     assert.equal(buffer.subarray(0, 2).toString("utf8"), "PK");
     assert.equal(layout.totalsRow, 23);
-    assert.equal(layout.wordsRow, 25);
+    assert.equal(layout.wordsRow, 24);
     assert.equal(layout.signRow, 30);
 
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(buffer);
     const ws = wb.getWorksheet(AVR_EXCEL_SHEET_NAME);
     assert.ok(ws);
-    assert.equal((ws.model.merges || []).length, 82);
+    assert.equal((ws.model.merges || []).length, 83);
     assert.equal(ws.getColumn(1).width, 4.5);
     assert.equal(ws.getColumn(11).width, 1.75);
     assert.equal(ws.getRow(17).height, 66);
     assert.equal(ws.getRow(20).height, 40.5);
+    assert.equal(ws.pageSetup.fitToWidth, 1);
+    assert.equal(ws.pageSetup.fitToHeight, 0);
+    assert.equal(ws.pageSetup.printArea, "A1:BC33");
     assert.equal(cellValue(ws, "A17"), "Номер по порядку");
     assert.equal(cellValue(ws, "AN1"), "Приложение 50");
     assert.equal(cellValue(ws, "AW6"), "Форма Р-1");
@@ -192,7 +204,9 @@ describe("AVR Excel Form R-1", () => {
     assert.equal(cellValue(ws, "AE23"), "Итого");
     assert.equal(cellValue(ws, "AI23"), "x");
     assert.equal(cellValue(ws, "AN23"), 325000);
-    assert.equal(cellValue(ws, "T25"), "Триста двадцать пять тысяч тенге");
+    assert.equal(cellValue(ws, "A24"), "Всего без НДС: Триста двадцать пять тысяч тенге");
+    assert.equal(cellValue(ws, "T25"), "");
+    assert.match(String(cellValue(ws, "A25")), /Сведения об использовании запасов/);
     assert.equal(cellValue(ws, "A30"), "Сдал (Исполнитель)");
     assert.equal(cellValue(ws, "F30"), "Директор");
     assert.equal(cellValue(ws, "R30"), "Булан А. Б.");
@@ -226,7 +240,7 @@ describe("AVR Excel Form R-1", () => {
     assert.match(sheet, /<c r="AO1"/);
     assert.equal(/<c r="AO1"[^>/]*><v>/.test(sheet), false);
     const merges = [...sheet.matchAll(/<mergeCell ref="([^"]+)"/g)].map((match) => match[1]);
-    assert.equal(merges.length, 82);
+    assert.equal(merges.length, 83);
     for (const ref of merges) {
       const master = ref.split(":")[0];
       assert.match(sheet, new RegExp(`<c r="${master}"`), `нет ячейки объединения ${master}`);
@@ -256,7 +270,7 @@ describe("AVR Excel Form R-1", () => {
     };
     const { buffer, layout } = await renderAvrExcel({ number: "AVR-2026-0035", source });
     assert.equal(layout.totalsRow, 24);
-    assert.equal(layout.wordsRow, 26);
+    assert.equal(layout.wordsRow, 25);
     assert.equal(layout.signRow, 31);
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(buffer);
@@ -266,7 +280,8 @@ describe("AVR Excel Form R-1", () => {
     assert.equal(cellValue(ws, "AC23"), "ч");
     assert.equal(cellValue(ws, "AE24"), "Итого");
     assert.equal(cellValue(ws, "AS23"), 2400);
-    assert.equal(cellValue(ws, "T26"), "Триста сорок пять тысяч тенге");
+    assert.equal(cellValue(ws, "A25"), "Всего без НДС: Триста сорок пять тысяч тенге");
+    assert.equal(cellValue(ws, "T26"), "");
     assert.equal(cellValue(ws, "R31"), "Булан А. Б.");
     assert.equal(avrExcelLayout(4).stampRow, 34);
     assert.ok((ws.model.merges || []).includes("A23:B23"));
@@ -282,22 +297,23 @@ describe("AVR Excel Form R-1", () => {
     const { buffer, layout } = await renderAvrExcel({ number: "AVR-2026-0002", source });
     assert.equal(layout.unused, 2);
     assert.equal(layout.totalsRow, 21);
-    assert.equal(layout.wordsRow, 23);
+    assert.equal(layout.wordsRow, 22);
     assert.equal(layout.signRow, 28);
     assert.equal(layout.stampRow, 31);
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(buffer);
     const ws = wb.getWorksheet(AVR_EXCEL_SHEET_NAME);
     assert.ok(ws);
-    assert.equal((ws.model.merges || []).length, 64);
+    assert.equal((ws.model.merges || []).length, 65);
     assert.equal(ws.getRow(20).height, 40.5);
     assert.equal(ws.getRow(21).height, 11);
     assert.equal(cellValue(ws, "C20"), gold.items[0].name);
     assert.equal(cellValue(ws, "AE21"), "Итого");
     assert.equal(cellValue(ws, "AN21"), 150000);
     assert.equal(cellValue(ws, "C21"), "");
-    assert.equal(cellValue(ws, "C22"), "");
-    assert.equal(cellValue(ws, "T23"), "Сто пятьдесят тысяч тенге");
+    assert.equal(ws.getCell("C22").master.address, "A22");
+    assert.equal(cellValue(ws, "A22"), "Всего без НДС: Сто пятьдесят тысяч тенге");
+    assert.equal(cellValue(ws, "T23"), "");
     assert.equal(cellValue(ws, "A28"), "Сдал (Исполнитель)");
     assert.equal(cellValue(ws, "AA28"), "Принял (Заказчик)");
     assert.equal(cellValue(ws, "A31"), "М.П.");
@@ -374,6 +390,17 @@ describe("AVR Excel Form R-1", () => {
     assert.match(extraText, /фотосъемка/);
     assert.match(extraText, /345 000,00/);
     assert.match(extraText, /Триста сорок пять тысяч тенге/);
+  });
+  it("переносит большие списки и длинные названия на страницы без обрезания",async()=>{
+    const source:AvrSourceSnapshot={...gold,items:Array.from({length:20},(_,i)=>({...gold.items[0],name:`Уникальная услуга ${i+1}`,sortOrder:i})),totals:{...gold.totals,amountWithoutVat:3000000,totalAmount:3000000}};
+    source.items[0].name="Длинное описание услуги для заказчика. ".repeat(20)+"Конец длинной позиции";
+    const {buffer}=await renderAvrPdf({number:"AVR-2026-0060",source});
+    const text=await pdfText(buffer);
+    assert.match(text,/Конец длинной позиции/);
+    for(let n=2;n<=20;n++)assert.match(text,new RegExp(`Уникальная услуга ${n}(?: |$)`));
+    assert.equal(text.match(/Всего без НДС:/g)?.length,1);
+    assert.match(text,/3 000 000,00/);
+    assert.match(text,/Продолжение акта/);
   });
 });
 
