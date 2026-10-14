@@ -307,9 +307,12 @@ export async function renderAvrPdf(input: { number: string; source: AvrSourceSna
   for (const [pageIndex, rows] of pages.entries()) {
     const page=pdf.addPage([background.width,background.height]);
     page.drawImage(image,{x:0,y:0,width:background.width,height:background.height});
-  white(page, 103.2, 445.9, 365, 20);
+  // Clear descenders of the template's second address line as well as its underline.
+  white(page, 102.2, 443.8, 366, 22.1);
+  strokeH(page, 444.35, 102.34, 467.84);
   white(page, 534.9, 446.2, 81.2, 17.6);
-  white(page, 103.2, 415.6, 365, 20);
+  white(page, 102.2, 413.7, 366, 21.9);
+  strokeH(page, 414.25, 102.34, 467.84);
   white(page, 534.9, 415.7, 81.2, 17.6);
   white(page, 115.9, 396.2, 272, 9.8);
   white(page, 522.9, 366.7, 45.2, 18.2);
