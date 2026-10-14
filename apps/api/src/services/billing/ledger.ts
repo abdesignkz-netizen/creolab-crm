@@ -251,6 +251,7 @@ export async function checkoutDetail(
     subscription,
     methods: {
       card: freedomPay.configured,
+      cardTesting: freedomPay.configured && billingConfig().testing,
       recurring: freedomPay.configured && billingConfig().recurring,
       kaspi: billingConfig().kaspi,
       bankTransfer: Boolean(seller),
@@ -680,7 +681,14 @@ export async function processPaymentNotice(db: PrismaClient, n: PaymentNotice) {
         },
       });
       if (old?.status === "processed") return;
-      if (!n.paid)
+      // pg_result=2 is an unfinished payment, not a decline. Keep its lock and
+      // remember the verified provider ID even if initialization timed out.
+      if (n.pending)
+        await tx.billingPayment.updateMany({
+          where: { id: p.id, status: { in: openPayments } },
+          data: { providerPaymentId: n.providerPaymentId },
+        });
+      if (!n.paid && !n.pending)
         await failPaymentInTransaction(tx, p.id, "provider_declined");
       if (n.paid)
         await settlePayment(tx, p.id, {
@@ -698,7 +706,7 @@ export async function processPaymentNotice(db: PrismaClient, n: PaymentNotice) {
         create: {
           provider: "FREEDOM_PAY",
           eventId: n.eventId,
-          eventType: n.paid ? "paid" : "failed",
+          eventType: n.pending ? "pending" : n.paid ? "paid" : "failed",
           paymentId: p.id,
           status: "processed",
           processedAt: new Date(),

@@ -73,6 +73,7 @@ it("checkout endpoint ignores frontend prices and requires authentication", asyn
   assert.equal(r.status, 201, JSON.stringify(r.body));
   assert(r.body.amountMinor > 1);
   assert.equal(r.body.status, "PENDING_PAYMENT");
+  assert.equal((await request("/api/v1/billing/orders/" + r.body.id, owner)).body.methods.cardTesting, true);
   assert.equal(
     (await request("/api/v1/billing/orders/" + r.body.id, owner)).headers.get(
       "cache-control",
@@ -162,6 +163,48 @@ it("customer cannot use admin confirmation and outsider cannot obtain invoice PD
     (await request("/api/v1/admin/billing/ledger", admin)).status,
     200,
   );
+});
+
+it("unfinished provider notices are acknowledged without failing or activating the payment", async () => {
+  const o = await db.billingOrder.create({ data: {
+    tenantId, orderNumber: "BSQ-PENDING-NOTICE", planCode: "CONTROL",
+    planId: (await db.plan.findFirstOrThrow({ where: { code: "CONTROL" } })).id,
+    snapshotJson: {}, description: "Pending notification fixture", amountMinor: 34990,
+    currency: "KZT", billingPeriod: "MONTHLY", status: "PENDING_PAYMENT",
+    expiresAt: new Date(Date.now() + 86400000),
+  } });
+  const p = await db.billingPayment.create({ data: {
+    tenantId, orderId: o.id, amountMinor: o.amountMinor, currency: o.currency,
+    provider: "FREEDOM_PAY", method: "CARD", status: "PROCESSING",
+  } });
+  const send = async (result: string, overrides: Record<string, string> = {}) => {
+    const fields = {
+      pg_order_id: p.id, pg_payment_id: "pending-http-fixture", pg_amount: String(p.amountMinor),
+      pg_currency: p.currency, pg_result: result, pg_testing_mode: "1",
+      basqar_tenant: tenantId, basqar_order: o.id, basqar_merchant: "fixture", pg_salt: "pending",
+      ...overrides,
+    };
+    return fetch(url + "/api/v1/billing/providers/freedompay/webhook", {
+      method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ ...fields, pg_sig: freedomSignature("webhook", fields, "fixture-key") }),
+    });
+  };
+  assert.equal((await send("2", { pg_amount: "1" })).status, 400);
+  for (let i = 0; i < 2; i++) {
+    const result = await send("2");
+    assert.equal(result.status, 200, await result.clone().text());
+  }
+  const waiting = await db.billingPayment.findUniqueOrThrow({ where: { id: p.id } });
+  assert.equal(waiting.status, "PROCESSING");
+  assert.equal(waiting.providerPaymentId, "pending-http-fixture");
+  assert.equal((await db.billingOrder.findUniqueOrThrow({ where: { id: o.id } })).status, "PENDING_PAYMENT");
+  assert.equal(await db.paymentWebhookEvent.count({ where: { paymentId: p.id, eventType: "pending" } }), 1);
+  assert.equal((await send("0")).status, 200);
+  assert.equal((await db.billingPayment.findUniqueOrThrow({ where: { id: p.id } })).status, "FAILED");
+  // A repeated non-terminal notice must not reopen a final result.
+  assert.equal((await send("2")).status, 200);
+  assert.equal((await db.billingPayment.findUniqueOrThrow({ where: { id: p.id } })).status, "FAILED");
+  await db.billingOrder.update({ where: { id: o.id }, data: { status: "CANCELLED" } });
 });
 it("duplicate callback fields fail before processing and success query never changes state", async () => {
   const f = new URLSearchParams([

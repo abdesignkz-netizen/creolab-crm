@@ -187,6 +187,45 @@ test('a real card initialization error still refreshes the order and appears to 
   assert.equal(page.error, 'Платёж отклонён');
 });
 
+test('a recovered checkout refresh clears its old network error', async () => {
+  let fail = false;
+  const page = checkoutPage({ returning: true, billingOrder: async () => {
+    if (fail) throw new Error('Network unavailable');
+    return cardPayment();
+  } });
+  await page.settle();
+  fail = true;
+  page.poll();
+  await page.settle();
+  assert.match(page.error, /Не удалось загрузить оплату/);
+  fail = false;
+  page.poll();
+  await page.settle();
+  assert.equal(page.error, '');
+});
+
+test('an older refresh cannot overwrite a newer confirmed payment or add a stale error', async () => {
+  for (const fail of [false, true]) {
+    let reads = 0, finishOld;
+    const page = checkoutPage({ returning: true, billingOrder: () => {
+      if (++reads === 1) return Promise.resolve(cardPayment());
+      if (reads === 2) return new Promise((resolve, reject) => {
+        finishOld = () => fail ? reject(new Error('Old request failed')) : resolve(cardPayment());
+      });
+      return Promise.resolve({ ...cardPayment(), order: { ...pageData().order, status: 'PAID' } });
+    } });
+    await page.settle();
+    page.poll();
+    page.poll();
+    await page.settle();
+    assert.match(page.text, /Оплата подтверждена/);
+    finishOld();
+    await page.settle();
+    assert.match(page.text, /Оплата подтверждена/);
+    assert.equal(page.error, '');
+  }
+});
+
 test('a failed browser navigation restores normal error handling', async () => {
   const page = checkoutPage({ navigate: () => { throw new Error('Navigation blocked'); } });
   await page.settle();

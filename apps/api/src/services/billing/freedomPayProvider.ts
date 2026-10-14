@@ -280,7 +280,7 @@ export class FreedomPayProvider implements PaymentProvider {
     )
       billingError("webhook_merchant", "Несоответствие настроек платежа", 400);
     if (
-      !["0", "1"].includes(fields.pg_result) ||
+      !["0", "1", "2"].includes(fields.pg_result) ||
       !fields.pg_order_id ||
       !fields.pg_payment_id ||
       !fields.basqar_tenant ||
@@ -302,6 +302,7 @@ export class FreedomPayProvider implements PaymentProvider {
       amount: amountKzt(fields.pg_amount),
       currency: fields.pg_currency,
       paid: fields.pg_result === "1",
+      pending: fields.pg_result === "2",
       recurringProfile: fields.pg_recurring_profile,
     };
   }

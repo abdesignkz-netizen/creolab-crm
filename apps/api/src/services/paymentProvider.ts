@@ -7,6 +7,7 @@ export type ProviderResult = { providerPaymentId: string; redirectUrl?: string }
 export type PaymentNotice = {
   eventId: string; paymentId: string; tenantId: string; orderId: string;
   providerPaymentId: string; amount: number; currency: string; paid: boolean;
+  pending?: boolean;
   recurringProfile?: string;
 };
 export interface PaymentProvider {

@@ -3034,8 +3034,20 @@ export function createApp(prisma: PrismaClient) {
         res.type('html').send(renderPublicSignHtml(await signHtml, meta, config.appBaseUrl));
       });
     }
-    app.use(express.static(webDist, { index: false, maxAge: "1h" }));
+    app.use(express.static(webDist, {
+      index: false,
+      maxAge: "1h",
+      setHeaders(res, file) {
+        if (file.endsWith(".html")) res.setHeader("Cache-Control", "no-store");
+      },
+    }));
+    // A pre-deploy tab may request a chunk that no longer exists. Returning the
+    // SPA HTML as JavaScript hides the 404 and breaks recovery after bank return.
+    app.use("/assets", (_req, res) => {
+      res.set("Cache-Control", "no-store").status(404).type("text").send("Asset not found");
+    });
     app.get(/^(?!\/api\/|\/public\/|\/health$|\/ready$).*/, (_req, res) => {
+      res.set("Cache-Control", "no-store");
       res.sendFile(path.join(webDist, "index.html"));
     });
   } else {

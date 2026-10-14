@@ -272,6 +272,8 @@ it("successful card webhook is idempotent and never trusts return URL", async ()
   const p = await db.billingPayment.findUniqueOrThrow({
     where: { id: d.payments[0].id },
   });
+  await processPaymentNotice(db, notice(p, { eventId: "before-paid", paid: false, pending: true }));
+  assert.equal((await checkoutDetail(db, a, o.id)).order.status, "PENDING_PAYMENT");
   await processPaymentNotice(
     db,
     notice(p, { recurringProfile: "profile-secret" }),
@@ -280,6 +282,7 @@ it("successful card webhook is idempotent and never trusts return URL", async ()
     where: { id: o.subscriptionId! },
   });
   await processPaymentNotice(db, notice(p, { eventId: "different-retry-id" }));
+  await processPaymentNotice(db, notice(p, { eventId: "after-paid", paid: false, pending: true }));
   const sub = await db.tenantPlan.findUniqueOrThrow({
     where: { id: o.subscriptionId! },
   });
@@ -898,6 +901,11 @@ it("signed Freedom status without an order reference releases only a matched unc
     const cases: { name: string; fields?: Record<string, string>; remove?: string[]; orphan?: boolean; tampered?: boolean; rejected?: string; expected?: string }[] = [
       { name: "uncaptured error", expected: "failed" },
       { name: "captured", fields: { pg_captured: "1" } },
+      { name: "failed but captured", fields: { pg_payment_status: "failed", pg_captured: "1" } },
+      { name: "expired but cleared", fields: { pg_payment_status: "incomplete", pg_clearing_amount: "34990.00" } },
+      { name: "failed but successful result", fields: { pg_payment_status: "failed", pg_result: "1" } },
+      { name: "wrong test mode", fields: { pg_testing_mode: "0" }, rejected: "provider_mismatch" },
+      { name: "wrong merchant", fields: { pg_merchant_id: "other" }, rejected: "provider_mismatch" },
       { name: "capture missing", remove: ["pg_captured"] },
       { name: "success evidence", fields: { pg_result: "1" } },
       { name: "cleared", fields: { pg_clearing_amount: "1.00" } },
@@ -905,6 +913,8 @@ it("signed Freedom status without an order reference releases only a matched unc
       { name: "unknown clearing", fields: { pg_clearing_amount: "unknown" } },
       { name: "unknown provider status", fields: { pg_payment_status: "new_status" } },
       { name: "pending", fields: { pg_payment_status: "pending" }, expected: "pending" },
+      { name: "waiting for card entry", fields: { pg_payment_status: "waiting" }, expected: "pending" },
+      { name: "new payment", fields: { pg_payment_status: "partial" }, expected: "pending" },
       { name: "success still requires callback", fields: { pg_payment_status: "success", pg_captured: "1" }, expected: "success" },
       { name: "wrong ID", fields: { pg_payment_id: "other" }, rejected: "provider_mismatch" },
       { name: "wrong reference", fields: { pg_order_id: "other" }, rejected: "provider_mismatch" },

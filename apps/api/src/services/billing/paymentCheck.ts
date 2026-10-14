@@ -9,7 +9,7 @@ import {
   failPaymentInTransaction,
 } from "./ledger.ts";
 import { freedomPay } from "./freedomPayProvider.ts";
-import { amountKzt, billingError } from "./config.ts";
+import { amountKzt, billingConfig, billingError } from "./config.ts";
 
 /** Verified terminal failures release checkout; activation still requires the signed callback. */
 export async function checkProviderPayment(
@@ -52,7 +52,9 @@ export async function checkProviderPayment(
     ((!p.providerPaymentId || Object.hasOwn(result, "pg_order_id")) &&
       result.pg_order_id !== p.id) ||
     amountKzt(result.pg_amount) !== p.amountMinor ||
-    result.pg_currency !== p.currency
+    result.pg_currency !== p.currency ||
+    (Object.hasOwn(result, "pg_merchant_id") && result.pg_merchant_id !== billingConfig().merchantId) ||
+    (Object.hasOwn(result, "pg_testing_mode") && result.pg_testing_mode !== (billingConfig().testing ? "1" : "0"))
   )
     billingError(
       "provider_mismatch",
@@ -60,16 +62,22 @@ export async function checkProviderPayment(
       409,
     );
   const providerStatus = String(result.pg_payment_status);
+  const contradictsFailure =
+    (Object.hasOwn(result, "pg_captured") && result.pg_captured !== "0") ||
+    (Object.hasOwn(result, "pg_result") && result.pg_result !== "0") ||
+    ["pg_clearing_amount", "pg_refund_amount", "pg_revoked_amount"].some(
+      (key) => Object.hasOwn(result, key) && !/^0(?:\.0+)?$/.test(result[key]),
+    );
   // Freedom also returns `error` for a declined payment. Release only an
   // explicitly uncaptured attempt with no contradictory settlement evidence.
   const uncapturedError =
     providerStatus === "error" &&
     result.pg_captured === "0" &&
-    (!Object.hasOwn(result, "pg_result") || result.pg_result === "0") &&
-    ["pg_clearing_amount", "pg_refund_amount", "pg_revoked_amount"].every(
-      (key) => !Object.hasOwn(result, key) || /^0(?:\.0+)?$/.test(result[key]),
-    );
-  const status = uncapturedError ? "failed" : [
+    !contradictsFailure;
+  const status = ["failed", "incomplete"].includes(providerStatus) && contradictsFailure
+    ? "unknown"
+    : ["waiting", "partial"].includes(providerStatus) ? "pending"
+    : uncapturedError ? "failed" : [
     "success",
     "failed",
     "pending",

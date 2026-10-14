@@ -22,6 +22,7 @@ export function BillingCheckoutPage() {
     errorText = useBillingError();
   const [data, setData] = useState<any>(null),
     [error, setError] = useState(""),
+    [loadError, setLoadError] = useState(""),
     [busy, setBusy] = useState(false),
     [method, setMethod] = useState(""),
     [autoRenew, setAutoRenew] = useState(false),
@@ -29,16 +30,19 @@ export function BillingCheckoutPage() {
     [notice, setNotice] = useState(""),
     [qr, setQr] = useState("");
   const redirecting = useRef(false);
+  const readVersion = useRef(0);
   async function load() {
     if (redirecting.current) return;
+    const version = ++readVersion.current;
     try {
       const d = await api.billingOrder(orderId);
-      if (redirecting.current) return;
+      if (redirecting.current || version !== readVersion.current) return;
       setData(d);
+      setLoadError("");
       return d;
     } catch {
-      if (redirecting.current) return;
-      setError(
+      if (redirecting.current || version !== readVersion.current) return;
+      setLoadError(
         t(
           "Не удалось загрузить оплату. Повторите попытку.",
           "Төлемді жүктеу мүмкін болмады. Қайталап көріңіз.",
@@ -49,6 +53,7 @@ export function BillingCheckoutPage() {
   }
   useEffect(() => {
     let stopped = false;
+    const version = ++readVersion.current;
     const resume = (event: PageTransitionEvent) => {
       if (event.persisted && redirecting.current) {
         redirecting.current = false;
@@ -60,19 +65,21 @@ export function BillingCheckoutPage() {
     api
       .billingOrder(orderId)
       .then((d) => {
-        if (!stopped && !redirecting.current) {
+        if (!stopped && !redirecting.current && version === readVersion.current) {
           setData(d);
+          setLoadError("");
           setBuyer({ ...d.buyer, bin: d.buyer?.bin || d.buyer?.iin || "" });
         }
       })
       .catch(() => {
-        if (!stopped && !redirecting.current)
-          setError(
+        if (!stopped && !redirecting.current && version === readVersion.current)
+          setLoadError(
             t("Заказ недоступен", "Тапсырыс қолжетімсіз", "Order unavailable"),
           );
       });
     return () => {
       stopped = true;
+      readVersion.current++;
       window.removeEventListener("pageshow", resume);
     };
   }, [orderId]);
@@ -105,7 +112,9 @@ export function BillingCheckoutPage() {
   }, [kaspiLink, orderId]);
   async function action(fn: () => Promise<unknown>) {
     setBusy(true);
+    readVersion.current++;
     setError("");
+    setLoadError("");
     setNotice("");
     try {
       await fn();
@@ -138,9 +147,9 @@ export function BillingCheckoutPage() {
           "Payment was not completed. You can now cancel the order or choose a payment method.",
         ],
         pending: [
-          "Проверено: банк ещё обрабатывает платёж. Повторно платить не нужно.",
-          "Тексерілді: банк төлемді әлі өңдеп жатыр. Қайта төлемеңіз.",
-          "Checked: the bank is still processing the payment. Do not pay again.",
+          "Оплата ещё не завершена. Если вы уже оплатили, дождитесь подтверждения банка. Если нет — откройте страницу оплаты.",
+          "Төлем әлі аяқталмады. Төлеп қойған болсаңыз, банктің растауын күтіңіз. Төлемеген болсаңыз, төлем бетін ашыңыз.",
+          "Payment is not complete yet. If you have paid, wait for bank confirmation. Otherwise, open the payment page.",
         ],
         incomplete: [
           "Срок оплаты истёк. Теперь можно отменить заказ или выбрать способ оплаты.",
@@ -211,8 +220,8 @@ export function BillingCheckoutPage() {
             "Subscription checkout",
           )}
         </h2>
-        <p role="status">{error || t("Загрузка…", "Жүктелуде…", "Loading…")}</p>
-        {error && (
+        <p role="status">{error || loadError || t("Загрузка…", "Жүктелуде…", "Loading…")}</p>
+        {(error || loadError) && (
           <button className="btn" onClick={() => void load()}>
             {t("Повторить", "Қайталау", "Retry")}
           </button>
@@ -258,15 +267,24 @@ export function BillingCheckoutPage() {
           <BillingStatus status={order.status} />
         </div>
       </div>
-      {error && (
+      {(error || loadError) && (
         <InlineFeedback kind="error" className="error">
-          {error}
+          {error || loadError}
         </InlineFeedback>
       )}
       {notice && (
         <InlineFeedback kind="info" className="billing-notice">
           {notice}
         </InlineFeedback>
+      )}
+      {!paid && methods.cardTesting && (method === "CARD" || payment?.method === "CARD") && (
+        <p className="billing-warning" role="status">
+          {t(
+            "Тестовая оплата Freedom Pay. Используйте только тестовую карту банка. Для приёма настоящих платежей магазин должен быть переведён в рабочий режим.",
+            "Freedom Pay сынақ төлемі. Банктің сынақ картасын ғана пайдаланыңыз. Нақты төлемдерді қабылдау үшін дүкен жұмыс режиміне ауыстырылуы керек.",
+            "Freedom Pay test payment. Use only the provider’s test card. The merchant must be switched to live mode before accepting real payments.",
+          )}
+        </p>
       )}
       {open &&
         !payment &&
