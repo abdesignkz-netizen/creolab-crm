@@ -5,7 +5,7 @@ import { ChannelIcon, ConversationAvatar, CONVERSATION_CHANNELS } from "../compo
 import { useUrlState, useRequestVersion } from "../lib/useUrlState";
 import { useEffect, useLayoutEffect, useRef, useState, type DragEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { nameWithPhone, phoneText } from "../lib/contactDisplay";
+import { nameWithPhone, channelPhoneText } from "../lib/contactDisplay";
 import { api } from "../lib/api";
 import { tip } from "../lib/tip";
 import { dealOutcomeLabel } from "../lib/labels";
@@ -360,7 +360,7 @@ export function ConversationsPage() {
               </div>
               <div className="conv-preview">{item.lastMessagePreview || uiText("Пока нет сообщений")}</div>
               <div className="conv-row-detail" title={[item.phone, item.topic, item.sourceLine].filter(Boolean).join(" · ")}>
-                {item.topic || phoneText(item.phone)}
+                {item.topic || channelPhoneText(item.phone, item.channelType)}
               </div>
               <div className="conv-meta">
                 <span className={item.needsReply ? "conv-reply-badge" : ""}>{item.needsReply ? uiText("Ждёт ответа") : item.businessStatus}</span>
@@ -386,11 +386,16 @@ export function ConversationsPage() {
           <ConversationAvatar conversationId={workspace.conversation.id} name={workspace.client?.name || uiText("Диалог")} channel={workspace.conversation.channelType || "other"} />
           <div className="conv-person-copy">
           <Link className="btn secondary conversation-back" to={`/conversations?${searchParams}`}>{uiText("← Диалоги")}</Link>
-          <b>{nameWithPhone(workspace.client?.name || uiText("Диалог"), workspace.client?.phone)}</b>
+          <b>{workspace.conversation.channelType === "whatsapp" && !workspace.client?.phone
+            ? workspace.client?.name || uiText("Диалог")
+            : nameWithPhone(workspace.client?.name || uiText("Диалог"), workspace.client?.phone)}</b>
           <div className="muted">
             <span className={`conv-channel-label channel-${workspace.conversation.channelType || "other"}`}><ChannelIcon channel={workspace.conversation.channelType || "other"} />{workspace.conversation.channel}</span>
             {workspace.conversation.channelConnected === false ? uiText(" · Канал отключён") : ""}
           </div>
+          {workspace.conversation.channelType === "whatsapp" && !workspace.client?.phone ? (
+            <div className="muted" title={uiText("Можно отвечать в этом диалоге без номера телефона.")}>{channelPhoneText(null, "whatsapp")}</div>
+          ) : null}
           <div className="conv-topic">{workspace.conversation.topic}</div>
           {workspace.currentRequest ? (
             <div className="muted">
@@ -650,7 +655,7 @@ export function ConversationsPage() {
     <aside className={`conv-context-pane ${showContext ? "open" : ""}`} aria-label={uiText("Информация о клиенте и диалоге")}>
       <div className="conv-context-identity">
         <ConversationAvatar conversationId={workspace.conversation.id} name={workspace.client?.name || uiText("Клиент")} channel={workspace.conversation.channelType || "other"} />
-        <div><b>{workspace.client?.name || uiText("Клиент")}</b><div className="muted">{workspace.client?.companyName || phoneText(workspace.client?.phone)}</div></div>
+        <div><b>{workspace.client?.name || uiText("Клиент")}</b><div className="muted">{workspace.client?.companyName || channelPhoneText(workspace.client?.phone, workspace.conversation.channelType)}</div></div>
       </div>
         {workspace.client?.id ? <Link to={`/contacts/${workspace.client.id}`}>{uiText("Открыть карточку")}</Link> : null}
       <div className="page-head mobile-only">

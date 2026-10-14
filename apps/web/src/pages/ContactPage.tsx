@@ -6,7 +6,7 @@ import { uiTaskStatus, uiTaskTitle, uiText, useUiText, localizeUiOptions, uiMess
 import { notifySaved } from "../components/SaveNotice";
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
-import { nameWithPhone, phoneText } from "../lib/contactDisplay";
+import { nameWithPhone, channelPhoneText } from "../lib/contactDisplay";
 import { formatWaitSince } from "../lib/duration";
 import { api } from "../lib/api";
 import { statusBadgeClass } from "../lib/statusBadge";
@@ -89,7 +89,7 @@ export function ContactPage() {
 
   const { client, currentRequest, control, attribution, tags, notes, requests, conversations, deals, tasks, timeline, gaps, members } = data;
   const tel = client.phoneNormalized || client.phone?.replace(/\D+/g, "");
-  const whatsapp = conversations.find((item: { sellerLeadId?: string | null }) => item.sellerLeadId) || null;
+  const whatsapp = conversations.find((item: { sellerLeadId?: string | null; channelType?: string }) => item.sellerLeadId || item.channelType === "whatsapp") || null;
 
   async function openWhatsAppChat() {
     if (writeBusy || writeBlocked) return;
@@ -117,7 +117,7 @@ export function ContactPage() {
           <Link className="muted" to={returnTo}>{uiText("← Клиенты")}</Link>
           <h2>{client.name || uiText("Без имени")}</h2>
           <div className="muted">
-            {phoneText(client.phone)}
+            {channelPhoneText(client.phone, whatsapp ? "whatsapp" : null)}
             {client.companyName ? ` · ${client.companyName}` : ""}
           </div>
           <div className="client-meta">

@@ -475,6 +475,7 @@ export async function getContactOverview(prisma: PrismaClient, auth: AuthContext
         orderBy: { updatedAt: "desc" },
         take: 20,
         include: {
+          connection: { select: { channelType: true } },
           messages: { orderBy: { createdAt: "desc" }, take: 40 },
         },
       },
@@ -719,7 +720,8 @@ export async function getContactOverview(prisma: PrismaClient, auth: AuthContext
         .map((item) => ({
           id: item.id,
           mode: item.mode,
-          channel: item.sellerLeadId ? "WhatsApp" : "Диалог",
+          channel: item.sellerLeadId || item.connection?.channelType === "whatsapp" ? "WhatsApp" : "Диалог",
+          channelType: item.sellerLeadId ? "whatsapp" : item.connection?.channelType || "other",
           updatedLabel: formatWhen(item.updatedAt, timeZone),
           lastMessage: item.messages[0]?.text || threadLast?.text || null,
           needsAttention: item.needsAttention,

@@ -48,7 +48,7 @@ function primaryPhone(
 }
 
 function channelLabel(conversation: { sellerLeadId?: string | null; connectionId?: string | null; connection?: { channelType: string } | null }) {
-  const labels: Record<string, string> = { website: "Чат сайта", telegram: "Telegram", instagram: "Instagram", email: "Gmail" };
+  const labels: Record<string, string> = { whatsapp: "WhatsApp", website: "Чат сайта", telegram: "Telegram", instagram: "Instagram", email: "Gmail" };
   if (conversation.connection?.channelType && labels[conversation.connection.channelType]) return labels[conversation.connection.channelType];
   if (conversation.sellerLeadId) return "WhatsApp";
   return "Диалог";

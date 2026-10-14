@@ -4,6 +4,7 @@ import type { PrismaClient, Prisma } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import { storeMessageAttachment } from "./conversationMedia.ts";
 import { automaticWhatsAppMode, directAiReadiness, enqueueWhatsAppAi } from "./whatsappAiService.ts";
+import { storeWhatsAppPhone } from "./whatsappContactIdentity.ts";
 
 export async function recordExternalMessage(prisma: PrismaClient, integrationId: string, input: {
   eventId: string; channel: "email" | "instagram" | "whatsapp"; externalUserId: string; threadId: string; messageId: string;
@@ -39,8 +40,7 @@ export async function recordExternalMessage(prisma: PrismaClient, integrationId:
     // A first delivery can contain only a LID. Enrich the existing contact when
     // WhatsApp later supplies its phone, without replacing manually entered data.
     if (input.channel === "whatsapp" && input.phone && /^\d{7,15}$/.test(input.phone)) {
-      const knownPhone = await tx.contactMethod.findFirst({ where: { tenantId, contactId: contact.id, type: { in: ["phone", "whatsapp"] }, normalizedValue: { in: [input.phone, `+${input.phone}`] } } });
-      if (!knownPhone) await tx.contactMethod.create({ data: { tenantId, contactId: contact.id, type: "phone", rawValue: `+${input.phone}`, normalizedValue: input.phone, source: "whatsapp", confirmed: false } });
+      await storeWhatsAppPhone(tx, tenantId, contact.id, input.phone);
     }
     let conversation = await tx.conversation.findFirst({ where: { tenantId, connectionId: connection.id, ...(input.channel === "whatsapp" ? {} : { externalThreadId: input.threadId }), contactId: contact.id } });
     if (!conversation) conversation = await tx.conversation.create({ data: { tenantId, connectionId: connection.id, externalThreadId: input.threadId, contactId: contact.id,

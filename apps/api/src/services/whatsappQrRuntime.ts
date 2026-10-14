@@ -1,6 +1,6 @@
 import { randomUUID, createHash, createHmac, createDecipheriv, timingSafeEqual } from "node:crypto";
 import type { PrismaClient, Prisma } from "@creolab/db";
-import makeWASocket, { BufferJSON, DisconnectReason, initAuthCreds, proto, jidNormalizedUser, normalizeMessageContent, getMediaKeys, type AuthenticationState, type WASocket, type WAMessage } from "@whiskeysockets/baileys";
+import makeWASocket, { BufferJSON, DisconnectReason, initAuthCreds, proto, jidNormalizedUser, normalizeMessageContent, getMediaKeys, type AuthenticationState, type WASocket, type WAMessage, type Contact } from "@whiskeysockets/baileys";
 import pino from "pino";
 import { encryptSecret, decryptSecret } from "../lib/secretBox.ts";
 import { recordExternalMessage } from "./externalMessageService.ts";
@@ -8,6 +8,7 @@ import { CONVERSATION_MAX_FILE_BYTES } from "./conversationMedia.ts";
 import { qrEnabled, waDigest } from "./whatsappConnectionService.ts";
 import { deliverQrMessage } from "./whatsappSendService.ts";
 import { deliverControlNotifications } from "./controlNotificationService.ts";
+import { syncWhatsAppContactPhone, whatsappLid, whatsappPhoneJid } from "./whatsappContactIdentity.ts";
 
 const logger = pino({ level: "silent" }); // Never log pairing QR, Signal keys or message bodies.
 const encode = (value: unknown) => encryptSecret(JSON.stringify(value, BufferJSON.replacer));
@@ -113,7 +114,7 @@ async function receiveQrMessage(prisma: PrismaClient, id: string, socket: WASock
 
 export function startWhatsAppQrRuntime(prisma: PrismaClient, socketFactory = makeWASocket) {
   const owner = randomUUID();
-  const sessions = new Map<string, { socket: WASocket; open: boolean; tasks: Promise<void>; stop: boolean }>();
+  const sessions = new Map<string, { socket: WASocket; open: boolean; tasks: Promise<void>; stop: boolean; contactCursor: string | null; contactsCheckAt: number }>();
   let stopped = false, ticking = false;
   async function release(id: string) {
     const local = sessions.get(id); if (local) { local.stop = true; local.socket.end(undefined); sessions.delete(id); }
@@ -131,7 +132,7 @@ export function startWhatsAppQrRuntime(prisma: PrismaClient, socketFactory = mak
     const auth = await databaseQrAuth(prisma, id, owner);
     await auth.saveCreds();
     const socket = socketFactory({ auth: auth.state, logger, browser: ["BasQar", "Chrome", "1.0.0"], markOnlineOnConnect: false, syncFullHistory: false, shouldSyncHistoryMessage: () => false, connectTimeoutMs: 20000, defaultQueryTimeoutMs: 20000 });
-    const local = { socket, open: false, tasks: Promise.resolve(), stop: false }; sessions.set(id, local);
+    const local = { socket, open: false, tasks: Promise.resolve(), stop: false, contactCursor: null, contactsCheckAt: 0 }; sessions.set(id, local);
     const enqueue = (work: () => Promise<void>) => {
       local.tasks = local.tasks.then(async () => { if (!local.stop) await work(); }).catch(async () => {
         // No raw provider errors: those may contain keys, JIDs or message content.
@@ -139,6 +140,21 @@ export function startWhatsAppQrRuntime(prisma: PrismaClient, socketFactory = mak
       });
     };
     socket.ev.on("creds.update", () => enqueue(auth.saveCreds));
+    const syncPhone = (mapping: { lid?: string | null; pn?: string | null }) => prisma.$transaction(async tx => {
+      await guardLease(tx, id, owner);
+      await syncWhatsAppContactPhone(tx, id, mapping);
+    });
+    socket.ev.on("lid-mapping.update", mapping => enqueue(() => syncPhone(mapping)));
+    const syncContacts = (contacts: Partial<Contact>[]) => enqueue(async () => {
+      for (const contact of contacts) {
+        const lid = whatsappLid(contact.lid) || whatsappLid(contact.id);
+        let pn = whatsappPhoneJid(contact.phoneNumber) || whatsappPhoneJid(contact.id);
+        if (!pn && lid) pn = whatsappPhoneJid(await socket.signalRepository.lidMapping.getPNForLID(lid).catch(() => null));
+        if (pn) await syncPhone({ lid, pn });
+      }
+    });
+    socket.ev.on("contacts.upsert", syncContacts);
+    socket.ev.on("contacts.update", syncContacts);
     socket.ev.on("connection.update", update => enqueue(async () => {
       await guardLease(prisma, id, owner);
       if (update.qr) {
@@ -198,6 +214,27 @@ export function startWhatsAppQrRuntime(prisma: PrismaClient, socketFactory = mak
         }
         if (!local.open) continue;
         await local.tasks;
+        if (local.stop || !local.open) continue;
+        // Recover existing chats after deployment/reconnect and late history
+        // sync. This only reads the local Signal mapping store, without sending
+        // messages or querying arbitrary phone numbers on WhatsApp.
+        if (Date.now() >= local.contactsCheckAt) {
+          const identities = await prisma.externalIdentity.findMany({ where: {
+            connection: { integrationId: id, channelType: "whatsapp" }, type: "whatsapp",
+            contact: { methods: { none: { type: { in: ["phone", "whatsapp"] } } } },
+            ...(local.contactCursor ? { id: { gt: local.contactCursor } } : {}),
+          }, orderBy: { id: "asc" }, take: 50 });
+          for (const identity of identities) {
+            const lid = whatsappLid(identity.externalId);
+            const pn = whatsappPhoneJid(identity.externalId) || (lid ? whatsappPhoneJid(await local.socket.signalRepository.lidMapping.getPNForLID(lid).catch(() => null)) : null);
+            if (pn) await prisma.$transaction(async tx => {
+              await guardLease(tx, id, owner);
+              await syncWhatsAppContactPhone(tx, id, { lid, pn });
+            });
+          }
+          local.contactCursor = identities.length === 50 ? identities.at(-1)!.id : null;
+          local.contactsCheckAt = local.contactCursor ? 0 : Date.now() + 5 * 60_000;
+        }
         const jobs = await prisma.$queryRaw<Array<{ id: string; kind: string; encryptedPayload: string }>>`SELECT id, kind, "encryptedPayload" FROM "WhatsAppQrJob" WHERE "integrationId" = ${id} AND state = 'queued' ORDER BY "createdAt" LIMIT 10`;
         for (const job of jobs) {
           if (!await claimQrLease(prisma, id, owner)) break;
