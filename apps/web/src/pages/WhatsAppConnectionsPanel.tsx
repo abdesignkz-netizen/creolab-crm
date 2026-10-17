@@ -1,6 +1,6 @@
 import { InlineFeedback } from "../components/InlineFeedback";
 import { useEffect, useState, type ReactNode } from "react";
-import { api } from "../lib/api";
+import { useCompanyConfiguration } from "../lib/companyConfiguration";
 import { useLocale } from "../lib/session";
 import { WhatsAppAiControls } from "../components/WhatsAppAiControls";
 
@@ -8,6 +8,7 @@ type Connection = { id: string; provider: "qr" | "cloud"; status: string; phone:
 type Qr = { qr: string | null; expiresAt: string | null; status: string };
 
 export function WhatsAppConnectionsPanel({ children, onChange }: { children?: ReactNode; onChange?: () => void } = {}) {
+  const { api } = useCompanyConfiguration();
   const locale = useLocale();
   const translate = (ru: string, kk: string, en: string) => locale === "kk" ? kk : locale === "en" ? en : ru;
   const [method, setMethod] = useState<"green" | "qr" | "cloud">("green");

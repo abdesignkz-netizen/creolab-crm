@@ -1,11 +1,11 @@
 import { WorkspaceSectionNav } from "../components/WorkspaceSectionNav";
 import { InlineFeedback } from "../components/InlineFeedback";
 import { useUiText, localizeUiOptions } from "../lib/uiText";
-import { useLocale, useSession } from "../lib/session";
+import { useLocale } from "../lib/session";
 import { notifySaved } from "../components/SaveNotice";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api } from "../lib/api";
+import { useCompanyConfiguration } from "../lib/companyConfiguration";
 import { NavIcon } from "../components/NavIcon";
 import "../ai-manager-settings.css";
 import "../ai-manager-setup.css";
@@ -126,8 +126,9 @@ function delayMinutes(value: number, unit: "hours" | "days") {
 }
 
 export function AiAutomationSettingsPage() {
+  const { api, href, me: configurationMe } = useCompanyConfiguration();
   const uiText = useUiText();
-  const { me } = useSession();
+  const me = configurationMe;
   const locale = useLocale();
   const text = (ru: string, kk: string, en: string) => locale === "kk" ? kk : locale === "en" ? en : ru;
   const aiManagerAllowed = Boolean(me?.billing?.entitlements?.AI_MANAGER);
@@ -226,9 +227,14 @@ export function AiAutomationSettingsPage() {
   useEffect(() => {
     if (!dirty) return;
     const preventLoss = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    const leave = (event: MouseEvent) => {
+      const link = (event.target as Element).closest?.("a[href]");
+      if (link && !link.getAttribute("target") && !window.confirm(text("Есть несохранённые настройки. Покинуть страницу?", "Сақталмаған баптаулар бар. Беттен шығу керек пе?", "You have unsaved settings. Leave this page?"))) { event.preventDefault(); event.stopPropagation(); }
+    };
     window.addEventListener("beforeunload", preventLoss);
-    return () => window.removeEventListener("beforeunload", preventLoss);
-  }, [dirty]);
+    document.addEventListener("click", leave, true);
+    return () => { window.removeEventListener("beforeunload", preventLoss); document.removeEventListener("click", leave, true); };
+  }, [dirty, locale]);
 
   async function save() {
     if (busy) return;
@@ -259,7 +265,7 @@ export function AiAutomationSettingsPage() {
     }
   }
 
-  if (!aiManagerAllowed) return <section className="panel"><h2>{uiText("ИИ-менеджер")}</h2><p>{uiText("ИИ-менеджер не входит в ваш тариф. Пробный режим доступен в Free; работа с клиентами — в Business и Pro.")}</p><Link to="/billing">{uiText("Посмотреть тарифы")}</Link></section>;
+  if (!aiManagerAllowed) return <section className="panel"><h2>{uiText("ИИ-менеджер")}</h2><p>{uiText("ИИ-менеджер не входит в ваш тариф. Пробный режим доступен в Free; работа с клиентами — в Business и Pro.")}</p><Link to={href("/billing")}>{uiText("Посмотреть тарифы")}</Link></section>;
   if (!data && !error) return <div className="state">{uiText("Загрузка настроек…")}</div>;
   if (!data) return <section><InlineFeedback kind="error">{error}</InlineFeedback><button type="button" className="btn" onClick={() => void load()}>{uiText("Повторить")}</button></section>;
 
@@ -269,7 +275,7 @@ export function AiAutomationSettingsPage() {
       <div className="page-head">
         <div>
           <p className="page-kicker">
-            <Link to="/settings">{uiText("Настройки")}</Link> {" "}{uiText("· AI-менеджер")}</p>
+            <Link to={href("/settings")}>{uiText("Настройки")}</Link> {" "}{uiText("· AI-менеджер")}</p>
           <h2>{uiText("AI-менеджер")}</h2>
           <p className="muted">
             {text("Выберите, кому и когда отвечает ИИ. Отдельно настройте первый контакт и передачу сотруднику.", "ЖИ кімге және қашан жауап беретінін таңдаңыз. Алғашқы байланысты және қызметкерге беруді бөлек баптаңыз.", "Choose who AI replies to and when. Set first contact and staff handoff separately.")}</p>
@@ -280,7 +286,7 @@ export function AiAutomationSettingsPage() {
       {hint ? <InlineFeedback kind="success" className="ok">{hint}</InlineFeedback> : null}
       {data.runtimePaused && <p className="banner">{text("ИИ приостановлен в управлении компанией. Эти правила начнут действовать после снятия паузы.", "Компанияны басқаруда ЖИ кідіртілген. Ережелер кідіріс алынғаннан кейін іске қосылады.", "AI is paused in company management. These rules apply after the pause is lifted.")}</p>}
 
-      <div className="ai-setup-entry"><div><h3>{text("Чему обучить ИИ?", "ЖИ-ге нені үйрету керек?", "What should your AI know?")}</h3><p>{text("Функции, услуги, цены, сценарии и база знаний — настройте самостоятельно через вопросы.", "Міндеттерді, қызметтерді, бағаны, сценарийді және білімді сұрақтар арқылы баптаңыз.", "Set functions, services, pricing, conversation flow and knowledge through guided questions.")}</p></div><Link className="btn secondary" to="/settings/ai-manager">{text("Открыть мастер", "Шеберді ашу", "Open setup wizard")}</Link></div>
+      <div className="ai-setup-entry"><div><h3>{text("Чему обучить ИИ?", "ЖИ-ге нені үйрету керек?", "What should your AI know?")}</h3><p>{text("Функции, услуги, цены, сценарии и база знаний — настройте самостоятельно через вопросы.", "Міндеттерді, қызметтерді, бағаны, сценарийді және білімді сұрақтар арқылы баптаңыз.", "Set functions, services, pricing, conversation flow and knowledge through guided questions.")}</p></div><Link className="btn secondary" to={href("/settings/ai-manager")}>{text("Открыть мастер", "Шеберді ашу", "Open setup wizard")}</Link></div>
       <div className="ai-manager-overview">
         <div className="ai-manager-heading"><span className="ai-manager-mark"><NavIcon to="/admin/ai-managers" /></span><div><b>{text("Правила работы", "Жұмыс ережелері", "Reply rules")}</b><p>{dirty ? text("Предпросмотр · есть несохранённые изменения", "Алдын ала көрініс · сақталмаған өзгерістер бар", "Preview · unsaved changes") : text("Текущие настройки", "Ағымдағы баптаулар", "Current settings")}</p></div><span className={`badge ${mode === "AUTO" ? "ok" : ""}`}>{data.runtimePaused ? text("На паузе", "Кідірісте", "Paused") : mode === "AUTO" ? text("Автоматически", "Автоматты түрде", "Automatic") : mode === "MANUAL" ? text("Выключен", "Өшірулі", "Off") : text("С участием сотрудника", "Қызметкердің қатысуымен", "Staff assisted")}</span></div>
         <div className="ai-manager-facts">
@@ -322,7 +328,7 @@ export function AiAutomationSettingsPage() {
         {replyAudience.audience !== "all" && <p className="muted">{replyAudience.since ? <>{text("Граница новой и текущей базы:", "Жаңа және қазіргі клиенттер шекарасы:", "New/existing client boundary:")} {new Date(replyAudience.since).toLocaleString(locale === "kk" ? "kk-KZ" : locale === "en" ? "en-GB" : "ru-RU", { timeZone: timezone })} · {timezone}</> : text("Отсчёт начнётся после сохранения. Последующие изменения расписания не сдвигают эту дату.", "Есептеу сақтағаннан кейін басталады. Кестені өзгерту бұл күнді өзгертпейді.", "The boundary is set when you save. Later schedule changes do not move it.")}</p>}
         <p className="ai-manager-note">{text("ИИ отвечает только в подключённых каналах с включёнными ИИ-ответами. Передача диалога человеку и запрет контакта имеют приоритет. Выбор «Всем» не запускает рассылку и не забирает диалоги у сотрудников.", "ЖИ тек қосылған және ЖИ жауаптары қосулы арналарда жауап береді. Адамға берілген диалог пен байланысуға тыйым басым. «Барлығына» тарату бастамайды және қызметкерлерден диалогтарды алмайды.", "AI replies only in connected channels with AI replies enabled. Staff handoff and contact restrictions take priority. All clients does not start a campaign or take conversations from staff.")}</p>
       </div>
-      <div className="panel"><div className="ai-manager-heading"><div><h3>{text("Где работает ИИ", "ЖИ қайда жұмыс істейді", "Connected channels")}</h3><p className="muted">{text("ИИ-ответы включаются отдельно для каждого подключения: WhatsApp, Telegram, Instagram и чат сайта.", "ЖИ жауаптары әр WhatsApp, Telegram, Instagram және сайт чаты үшін бөлек қосылады.", "AI replies are enabled separately for each WhatsApp, Telegram, Instagram and website chat connection.")}</p></div><Link className="btn secondary" to="/integrations">{uiText("Интеграции")}</Link></div>
+      <div className="panel"><div className="ai-manager-heading"><div><h3>{text("Где работает ИИ", "ЖИ қайда жұмыс істейді", "Connected channels")}</h3><p className="muted">{text("ИИ-ответы включаются отдельно для каждого подключения: WhatsApp, Telegram, Instagram и чат сайта.", "ЖИ жауаптары әр WhatsApp, Telegram, Instagram және сайт чаты үшін бөлек қосылады.", "AI replies are enabled separately for each WhatsApp, Telegram, Instagram and website chat connection.")}</p></div><Link className="btn secondary" to={href("/integrations")}>{uiText("Интеграции")}</Link></div>
         {data.channels?.length ? data.channels.map((channel: any) => <div className="ai-channel-row" key={channel.id}><b>{channel.name}</b><span className={`badge ${channel.connected && channel.enabled ? "ok" : ""}`}>{!channel.connected ? text("Не подключён", "Қосылмаған", "Disconnected") : channel.enabled ? text("ИИ-ответы включены", "ЖИ жауаптары қосулы", "AI replies enabled") : text("ИИ-ответы выключены", "ЖИ жауаптары өшірулі", "AI replies disabled")}</span></div>) : <p className="muted">{text("Подключите канал общения, чтобы ИИ мог отвечать клиентам.", "ЖИ клиенттерге жауап беруі үшін байланыс арнасын қосыңыз.", "Connect a messaging channel to enable client replies.")}</p>}
         {data.legacyChannels?.length > 0 && <div className="ai-manager-note"><b>{text("Отдельный AI-продавец", "Жеке ЖИ-сатушы", "Standalone AI seller")}</b><p>{data.legacyChannels.map((channel: { name: string }) => channel.name).join(", ")}</p><p>{text("В этом подключении выбор аудитории может потребовать обновления у администратора. Если определить клиента не удастся, ИИ пропустит его сообщение. WhatsApp через QR и Cloud API поддерживают правила сразу.", "Бұл қосылымда аудиторияны таңдау үшін әкімші жаңартуы қажет болуы мүмкін. Клиент анықталмаса, ЖИ жауап бермейді. QR және Cloud API бұл ережелерді бірден қолдайды.", "Audience filtering may require an administrator to update this connection. If the client cannot be identified, AI skips the reply. WhatsApp QR and Cloud API support these rules directly.")}</p></div>}
       </div>
@@ -364,7 +370,7 @@ export function AiAutomationSettingsPage() {
         <p className="muted">{uiText("AI не подтверждает оплату, не закрывает сделки и не отправляет документы по этим настройкам. Неоднозначные суммы и время требуют уточнения. Сумма по позициям сделки сохраняется.")}</p>
       </div> : null}
 
-      {section === "prompt" || section === "knowledge" ? <div className="ai-setup-entry"><div><h3>{text("Инструкции и знания вашей компании", "Компания нұсқаулығы мен білімі", "Your company instructions and knowledge")}</h3><p>{text("Выберите функции ИИ и ответьте на вопросы. Мастер соберёт промпт и базу знаний, которые можно проверить перед публикацией.", "ЖИ міндеттерін таңдап, сұрақтарға жауап беріңіз. Шебер жариялау алдында тексерілетін промпт пен білім базасын құрастырады.", "Choose AI functions and answer guided questions. Review the generated instructions and knowledge before publishing.")}</p></div><Link className="btn" to="/settings/ai-manager">{text("Настроить ИИ", "ЖИ баптау", "Set up AI")}</Link></div> : null}
+      {section === "prompt" || section === "knowledge" ? <div className="ai-setup-entry"><div><h3>{text("Инструкции и знания вашей компании", "Компания нұсқаулығы мен білімі", "Your company instructions and knowledge")}</h3><p>{text("Выберите функции ИИ и ответьте на вопросы. Мастер соберёт промпт и базу знаний, которые можно проверить перед публикацией.", "ЖИ міндеттерін таңдап, сұрақтарға жауап беріңіз. Шебер жариялау алдында тексерілетін промпт пен білім базасын құрастырады.", "Choose AI functions and answer guided questions. Review the generated instructions and knowledge before publishing.")}</p></div><Link className="btn" to={href("/settings/ai-manager")}>{text("Настроить ИИ", "ЖИ баптау", "Set up AI")}</Link></div> : null}
 
       {section === "handoff" ? (
         <div className="panel">

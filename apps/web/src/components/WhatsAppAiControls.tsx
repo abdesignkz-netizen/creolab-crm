@@ -1,5 +1,6 @@
+import { useCompanyConfiguration } from "../lib/companyConfiguration";
 import { Link } from "react-router-dom";
-import { useLocale, useSession } from "../lib/session";
+import { useLocale } from "../lib/session";
 
 type AiConnection = {
   status: string;
@@ -14,7 +15,7 @@ export function WhatsAppAiControls({ connection, busy, onToggle }: {
   onToggle: () => void;
 }) {
   const locale = useLocale();
-  const { me } = useSession();
+  const { me, managed, href } = useCompanyConfiguration();
   const text = (ru: string, kk: string, en: string) => locale === "kk" ? kk : locale === "en" ? en : ru;
   const { aiEnabled, aiAvailable, aiUnavailableReason: reason } = connection;
   const awaitingSetup = !aiAvailable && ["ai_not_configured", "ai_disabled", "ai_model_missing"].includes(reason || "");
@@ -48,9 +49,9 @@ export function WhatsAppAiControls({ connection, busy, onToggle }: {
         "Your choice is saved. Replies will become available after setup, following your audience and schedule settings.",
       )}</p>
     </div>}
-    {me?.capabilities?.aiSettings && <div className="actions">
-      <Link to="/settings/ai-manager">{text("Знания и цель ИИ", "ЖИ білімі мен мақсаты", "AI knowledge and goal")}</Link>
-      <Link to="/settings/ai-automation">{text("Кому и когда отвечать", "Кімге және қашан жауап беру керек", "Who to reply to and when")}</Link>
+    {(managed || me?.capabilities?.aiSettings) && <div className="actions">
+      <Link to={href("/settings/ai-manager")}>{text("Знания и цель ИИ", "ЖИ білімі мен мақсаты", "AI knowledge and goal")}</Link>
+      <Link to={href("/settings/ai-automation")}>{text("Кому и когда отвечать", "Кімге және қашан жауап беру керек", "Who to reply to and when")}</Link>
     </div>}
     <button type="button" className="btn secondary" disabled={busy || (!aiEnabled && !canEnable)} onClick={onToggle}>
       {aiEnabled ? text("Выключить ИИ-ответы", "ЖИ жауаптарын өшіру", "Disable AI replies") : text("Включить ИИ-ответы", "ЖИ жауаптарын қосу", "Enable AI replies")}

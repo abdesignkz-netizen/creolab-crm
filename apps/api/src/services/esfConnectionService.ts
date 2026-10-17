@@ -1,3 +1,4 @@
+import { requireConfigurationTenant as requireTenant } from "../lib/access.ts";
 import { requireEsfEnabled } from "./esfAvailability.ts";
 import { certificateFromSignedAuthTicket, createEsfAuthTicket, createEsfSessionFromSignedTicket } from "../integrations/esf/EsfTicketAuth.ts";
 import { randomUUID } from "node:crypto";
@@ -42,10 +43,6 @@ const FORBIDDEN_KEY_FIELDS = [
 const REAUTH_MESSAGE =
   "Для продолжения работы с ИС ЭСФ требуется повторная авторизация через NCALayer";
 
-function requireTenant(auth: AuthContext) {
-  if (!auth.activeMembership) throw new ApiError(403, "no_tenant", "Нет активной компании");
-  return auth.activeMembership;
-}
 
 function requireConnectPermission(auth: AuthContext) {
   if (!can(auth, "manage_integrations") && !can(auth, "send_esf")) {

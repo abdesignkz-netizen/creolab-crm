@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { PrismaClient } from "@creolab/db";
 import { LIMITS, FEATURES } from "@creolab/contracts";
 import { ApiError } from "../errors.ts";
-import { requireIntegrationsAccess, requireTenant } from "../lib/access.ts";
+import { requireIntegrationsAccess, requireConfigurationTenant as requireTenant } from "../lib/access.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { decryptSecret } from "../lib/secretBox.ts";
 import { writeAudit } from "../lib/audit.ts";

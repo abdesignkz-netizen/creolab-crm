@@ -158,3 +158,16 @@ export const controlIdentityCreateSchema = z.object({
   phone: z.string().trim().min(5).max(40).optional(),
   verifyNow: z.boolean().optional(),
 });
+
+
+export const controlChatSettingsSchema = z.object({
+  enabled: z.boolean().default(false),
+  integrationId: z.string().uuid(),
+  language: z.enum(["ru", "kk"]).default("ru"),
+  morningEnabled: z.boolean().default(false),
+  morningTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).default("09:00"),
+  eveningEnabled: z.boolean().default(false),
+  eveningTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).default("18:00"),
+  weekdaysOnly: z.boolean().default(true),
+});
+export type ControlChatSettings = z.infer<typeof controlChatSettingsSchema>;

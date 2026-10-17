@@ -88,7 +88,7 @@ function CompanyList() {
                 <td data-label={uiText("Тариф")}>{item.subscriptionStatus === "none" || item.previewMode ? uiText("Просмотр") : item.planName || item.subscriptionStatus || "—"}<div className="muted">{uiText("Участники")}: {item.memberCount}</div></td>
                 <td data-label={uiText("Подключения")}>{item.connectionSummary?.length ? [...new Set<string>(item.connectionSummary)].map(status => uiText(CONNECTION_LABEL[status] || status)).join(" · ") : uiText("нет")}</td>
                 <td data-label={uiText("Статус")}><span className={statusBadgeClass(STATUS_LABEL[item.status] || item.status)}>{localizeUiOptions(STATUS_LABEL, uiText)[item.status] || item.status}</span></td>
-                <td data-label={uiText("Действия")}><div className="platform-row-actions"><Link className="btn secondary" to={`/admin/companies/${item.id}`}>{uiText("Открыть")}</Link><Link to={`/admin/ai-managers/${item.id}`}>{uiText("Промт и база")}</Link></div></td>
+                <td data-label={uiText("Действия")}><div className="platform-row-actions"><Link className="btn secondary" to={`/admin/companies/${item.id}`}>{uiText("Открыть")}</Link><Link to={`/admin/companies/${item.id}?tab=ai-manager`}>{uiText("Настроить ИИ")}</Link></div></td>
               </tr>)}</tbody>
             </table>
           </div>}

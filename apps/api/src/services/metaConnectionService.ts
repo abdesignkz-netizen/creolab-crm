@@ -4,7 +4,7 @@ import type { PrismaClient, Prisma } from "@creolab/db";
 import { verifyHmacSha256 } from "@creolab/integrations";
 import { config } from "../config.ts";
 import { ApiError } from "../errors.ts";
-import { requireIntegrationsAccess, requireTenant, assertConversationReachable } from "../lib/access.ts";
+import { requireIntegrationsAccess, requireConfigurationTenant as requireTenant, assertConversationReachable } from "../lib/access.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { safeEqual } from "../lib/hash.ts";
 import { encryptSecret, decryptSecret, encryptionKeyVersion } from "../lib/secretBox.ts";

@@ -18,7 +18,7 @@ import { getTranscriptionConfig } from "./transcriptionConfig.ts";
 import { VOICE_CLARIFICATION, VOICE_SERVICE_FAILURE } from "./aiLanguagePolicy.ts";
 import { LOCAL_SPEECH_BATCH_MS, SPEECH_CLAIM_TTL_MS } from "./speechLimits.ts";
 
-import { requireIntegrationsAccess, requireTenant } from "../lib/access.ts";
+import { requireIntegrationsAccess, requireConfigurationTenant as requireTenant } from "../lib/access.ts";
 import { aiChannelTypes, aiSourceChannel, enqueueChannelDelivery } from "./channelDeliveryService.ts";
 
 // The legacy exports and event IDs remain compatible with already queued WhatsApp replies.

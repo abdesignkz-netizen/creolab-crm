@@ -1,3 +1,4 @@
+import { requireConfigurationTenant as requireTenant } from "../lib/access.ts";
 import { employeeTelegramStatus } from "./employeeTelegramService.ts";
 import { publicFormKey } from "@creolab/contracts";
 import type { Prisma, PrismaClient } from "@creolab/db";
@@ -8,10 +9,6 @@ import { requireIntegrationsAccess } from "../lib/access.ts";
 import { MODE_LABEL, type AutomationMode } from "./aiAutomationSettings.ts";
 import { config } from "../config.ts";
 
-function requireTenant(auth: AuthContext) {
-  if (!auth.activeMembership) throw new ApiError(403, "no_tenant", "Нет активной компании");
-  return auth.activeMembership;
-}
 
 export const INTEGRATION_TYPE_META: Record<
   string,
@@ -247,7 +244,7 @@ export async function listIntegrationCatalog(prisma: PrismaClient, auth: AuthCon
     leads: leadCards,
     messaging: messagingCards,
     notifications: {
-      employeeTelegram: await employeeTelegramStatus(prisma, auth),
+      employeeTelegram: auth.configurationTenant ? null : await employeeTelegramStatus(prisma, auth),
     },
     eventLog,
   };

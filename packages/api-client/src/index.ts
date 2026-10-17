@@ -9,6 +9,7 @@ export type AnalyticsDashboardResponse = Record<string, unknown> & { trend: Anal
 
 export type ClientOptions = {
   baseUrl: string;
+  configurationTenantId?: string;
   getToken?: () => string | null | Promise<string | null>;
   getTenantId?: () => string | null;
   onUnknownTenant?: () => void;
@@ -34,6 +35,7 @@ export function createApiClient(options: ClientOptions) {
     if (token) headers.set("Authorization", `Bearer ${token}`);
     const tenantId = options.getTenantId?.();
     if (tenantId) headers.set("x-tenant-id", tenantId);
+    if (options.configurationTenantId) headers.set("x-basqar-configuration-tenant", options.configurationTenantId);
     const response = await fetchResponse(`${options.baseUrl}${path}`, {
       ...init,
       headers,
@@ -367,6 +369,7 @@ export function createApiClient(options: ClientOptions) {
       const suffix = params.toString() ? `?${params}` : "";
       return request(`/api/v1/workspace/audit${suffix}`);
     },
+    updateControlChat: (identityId: string, body: unknown) => request(`/api/v1/workspace/control/identities/${encodeURIComponent(identityId)}/chat`, { method: "PUT", body: JSON.stringify(body) }),
     controlSettings: () => request("/api/v1/workspace/control"),
     controlNotifications: () => request("/api/v1/workspace/control/notifications"),
     saveControlNotifications: (body: unknown) => request("/api/v1/workspace/control/notifications", { method: "PUT", body: JSON.stringify(body) }),

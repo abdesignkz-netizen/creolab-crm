@@ -1,7 +1,7 @@
 import { InlineFeedback } from "../components/InlineFeedback";
 import { uiText, useUiText, localizeUiOptions } from "../lib/uiText";
 import { useEffect, useState } from "react";
-import { api } from "../lib/api";
+import { useCompanyConfiguration } from "../lib/companyConfiguration";
 import { IntegrationHelp } from "../components/IntegrationHelp";
 
 type Connection = { kind: string; title: string; id: string | null; connected: boolean; resource: string | null; resourceId: string | null; lastError: string | null; healthStatus: string };
@@ -11,6 +11,7 @@ const descriptions: Record<string,string> = {
   email: "Новые входящие письма Gmail и поддерживаемые вложения появляются в диалогах. Ответы отправляйте из Gmail; автоматические заявки из писем не создаются.",
 };
 export function GoogleConnectionsPanel({ onChange, kind }: { onChange: () => void; kind?: string }) {
+  const { api } = useCompanyConfiguration();
   const uiText = useUiText();
   const [data,setData] = useState<{ configured: boolean; items: Connection[] } | null>(null);
   const [busy,setBusy] = useState(""); const [error,setError] = useState(""); const [note,setNote] = useState("");

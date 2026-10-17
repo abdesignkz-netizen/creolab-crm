@@ -1,4 +1,5 @@
 import { applyBillingMigration } from "./billingMigration.ts";
+import { CONTROL_CHAT_SQL } from "./controlChatSchema.ts";
 import { CONTROL_NOTIFICATION_SQL } from "./controlNotificationSchema.ts";
 import { WHATSAPP_SQL } from "./whatsappSchema.ts";
 import { AVR_SIGNING_SQL } from "./avrSigningSchema.ts";
@@ -66,6 +67,7 @@ async function applyLivePostgresPatches(prisma: PrismaClient) {
   for (const sql of BILLING_QUOTA_SQL) await prisma.$executeRawUnsafe(sql);
   for (const sql of WHATSAPP_SQL) await prisma.$executeRawUnsafe(sql);
   for (const sql of CONTROL_NOTIFICATION_SQL) await prisma.$executeRawUnsafe(sql);
+  for (const sql of CONTROL_CHAT_SQL) await prisma.$executeRawUnsafe(sql);
 }
 
 async function applyInitSql(pglite: PGlite) {
@@ -1327,6 +1329,7 @@ export async function createPrismaClient(): Promise<PrismaClient> {
   for (const sql of BILLING_QUOTA_SQL) await pglite.exec(sql);
   for (const sql of WHATSAPP_SQL) await pglite.exec(sql);
   for (const sql of CONTROL_NOTIFICATION_SQL) await pglite.exec(sql);
+  for (const sql of CONTROL_CHAT_SQL) await pglite.exec(sql);
   const adapter = new PrismaPGlite(pglite);
   const prisma = new PrismaClient({ adapter } as never);
   await applyBillingMigration(prisma);

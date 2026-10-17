@@ -9,7 +9,7 @@ import {
   type LimitKey,
 } from "@creolab/contracts";
 import { ApiError } from "../errors.ts";
-import { requireTenant } from "../lib/access.ts";
+import { requireConfigurationTenant as requireTenant } from "../lib/access.ts";
 import type { AuthContext } from "../lib/types.ts";
 
 const PREVIEW_STATUSES = new Set([

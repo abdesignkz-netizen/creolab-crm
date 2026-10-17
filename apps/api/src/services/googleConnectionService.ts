@@ -3,7 +3,7 @@ import type { PrismaClient, Prisma } from "@creolab/db";
 import { z } from "zod";
 import { ApiError } from "../errors.ts";
 import { config } from "../config.ts";
-import { requireIntegrationsAccess, requireTenant } from "../lib/access.ts";
+import { requireIntegrationsAccess, requireConfigurationTenant as requireTenant } from "../lib/access.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { encryptSecret, decryptSecret, encryptionKeyVersion } from "../lib/secretBox.ts";
 import { writeAudit } from "../lib/audit.ts";
@@ -36,7 +36,7 @@ export async function beginGoogleConnection(prisma: PrismaClient, auth: AuthCont
   if (input.kind === "google_forms" && !/^[A-Za-z0-9_-]{10,250}$/.test(input.resourceId || "")) throw new ApiError(422, "form_id_required", "Укажите ID формы Google из адреса редактора формы");
   const state = randomBytes(32).toString("hex");
   const redirectUri = callbackUrl();
-  await prisma.idempotencyRecord.create({ data: { scope: "google.oauth", actorKey: auth.sessionId, key: createHash("sha256").update(state).digest("hex"), requestHash: auth.user.id, resultJson: { tenantId, kind: input.kind, resourceId: input.resourceId || "primary", redirectUri }, expiresAt: new Date(Date.now() + 600000) } });
+  await prisma.idempotencyRecord.create({ data: { scope: "google.oauth", actorKey: auth.sessionId, key: createHash("sha256").update(state).digest("hex"), requestHash: auth.user.id, resultJson: { tenantId, platformConfiguration: Boolean(auth.configurationTenant), kind: input.kind, resourceId: input.resourceId || "primary", redirectUri }, expiresAt: new Date(Date.now() + 600000) } });
   const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
   url.search = new URLSearchParams({ client_id: process.env.GOOGLE_CLIENT_ID!, redirect_uri: redirectUri, response_type: "code", scope: scopes[input.kind].join(" "), access_type: "offline", prompt: "consent", state }).toString();
   return { url: url.toString() };

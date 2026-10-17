@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { PrismaClient, Prisma } from "@creolab/db";
 import { config } from "../config.ts";
 import { ApiError } from "../errors.ts";
-import { requireIntegrationsAccess, requireTenant } from "../lib/access.ts";
+import { requireIntegrationsAccess, requireConfigurationTenant as requireTenant } from "../lib/access.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { safeEqual } from "../lib/hash.ts";
 import { encryptSecret, decryptSecret, encryptionKeyVersion } from "../lib/secretBox.ts";

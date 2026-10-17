@@ -1,3 +1,5 @@
+import { CONFIGURATION_HEADER, configurationRouteAllowed, scopeCompanyConfiguration, configurationOAuthAuth, configurationReturnPath } from "./services/companyConfigurationAccess.ts";
+import { writeAudit } from "./lib/audit.ts";
 import { isEsfEnabled, isEsfRoute, requireEsfEnabled } from "./services/esfAvailability.ts";
 import { beginEmployeeTelegramLink, employeeTelegramStatus, disconnectEmployeeTelegram, handleEmployeeTelegramWebhook, EMPLOYEE_TELEGRAM_WEBHOOK, testEmployeeTelegram } from "./services/employeeTelegramService.ts";
 import { controlNotificationSettings, saveControlNotificationSettings, pauseControlNotifications, testControlNotification } from "./services/controlNotificationService.ts";
@@ -585,8 +587,18 @@ export function createApp(prisma: PrismaClient) {
     }
   }
 
+  const configurationAuditRequests = new WeakSet<express.Request>();
   async function requireAuth(req: express.Request): Promise<AuthContext> {
-    const auth = await authenticate(req);
+    let auth = await authenticate(req);
+    const configurationTenant = req.header(CONFIGURATION_HEADER);
+    if (configurationTenant) {
+      if (!configurationRouteAllowed(req.method, req.path)) throw new ApiError(403, "configuration_scope", "В этом режиме доступны только настройки ИИ и интеграций компании");
+      auth = await scopeCompanyConfiguration(prisma, auth, configurationTenant);
+      if (!["GET", "HEAD"].includes(req.method) && !configurationAuditRequests.has(req)) {
+        await writeAudit(prisma, { tenantId: configurationTenant, actorUserId: auth.user.id, action: "platform.configuration_requested", entityType: "tenant", entityId: configurationTenant, changes: { method: req.method, path: req.path } });
+        configurationAuditRequests.add(req);
+      }
+    }
     const path = req.path || "";
     if (path.startsWith("/api/v1/admin") || path.startsWith("/api/v1/invitations") || path.startsWith("/api/v1/me") || path.startsWith("/api/v1/auth")) {
       return auth;
@@ -986,7 +998,7 @@ export function createApp(prisma: PrismaClient) {
   });
   app.post("/api/v1/settings/ai-manager/preview", json, async (req, res) => {
     const auth = await requireAuth(req);
-    rateLimit(`ai-setup-preview:${auth.activeMembership?.tenantId}:${auth.user.id}`, 30, 60000);
+    rateLimit(`ai-setup-preview:${auth.configurationTenant?.tenantId || auth.activeMembership?.tenantId}:${auth.user.id}`, 30, 60000);
     const { previewAiManagerSetup } = await import("./services/aiManagerSetupService.ts");
     res.json(await previewAiManagerSetup(prisma, auth, req.body));
   });
@@ -2403,7 +2415,7 @@ export function createApp(prisma: PrismaClient) {
     res.json(await saveWebsiteChat(prisma, await requireAuth(req), websiteChatSchema.parse(req.body)));
   });
   app.get("/api/v1/integrations/channels/ai", async (req, res) => {
-    const { requireIntegrationsAccess, requireTenant } = await import("./lib/access.ts");
+    const { requireIntegrationsAccess, requireConfigurationTenant: requireTenant } = await import("./lib/access.ts");
     const auth = await requireAuth(req); requireIntegrationsAccess(auth); const { tenantId } = requireTenant(auth);
     const { aiChannelTypes, aiSourceChannel } = await import("./services/channelDeliveryService.ts");
     const { parseAIAutomationSettings } = await import("./services/aiAutomationSettings.ts");
@@ -2430,11 +2442,14 @@ export function createApp(prisma: PrismaClient) {
   });
   app.get("/api/v1/integrations/instagram/callback", async (req, res) => {
     const { finishInstagramConnection } = await import("./services/instagramOAuthService.ts");
+    let returnPath = "/integrations";
     try {
-      const auth = await requireAuth(req); await requireFeature(prisma, auth, FEATURES.CHANNELS);
+      const auth = await configurationOAuthAuth(prisma, await requireAuth(req), "instagram", String(req.query.state || ""));
+      returnPath = configurationReturnPath(auth);
+      await requireFeature(prisma, auth, FEATURES.CHANNELS);
       await finishInstagramConnection(prisma, auth, { state: String(req.query.state || ""), code: String(req.query.code || ""), error: req.query.error ? String(req.query.error) : undefined });
-      res.redirect(`${config.appBaseUrl}/integrations?instagram=connected#integration-instagram`);
-    } catch { res.redirect(`${config.appBaseUrl}/integrations?instagram=failed#integration-instagram`); }
+      res.redirect(`${config.appBaseUrl}${returnPath}${returnPath.includes("?") ? "&" : "?"}instagram=connected#integration-instagram`);
+    } catch { res.redirect(`${config.appBaseUrl}${returnPath}${returnPath.includes("?") ? "&" : "?"}instagram=failed#integration-instagram`); }
   });
   app.get("/public/integrations/instagram", async (req, res) => {
     const { verifyInstagramWebhook } = await import("./services/instagramOAuthService.ts");
@@ -2469,14 +2484,15 @@ export function createApp(prisma: PrismaClient) {
     res.json(await beginGoogleConnection(prisma, auth, googleConnectSchema.parse(req.body)));
   });
   app.get("/api/v1/integrations/google/callback", async (req, res) => {
-    const returnUrl = `${config.appBaseUrl.replace(/\/$/, "")}/integrations`;
+    let returnUrl = `${config.appBaseUrl.replace(/\/$/, "")}/integrations`;
     res.set("Cache-Control", "no-store");
     try {
-      const auth = await requireAuth(req);
+      const auth = await configurationOAuthAuth(prisma, await requireAuth(req), "google", String(req.query.state || ""));
+      returnUrl = `${config.appBaseUrl.replace(/\/$/, "")}${configurationReturnPath(auth)}`;
       await requireFeature(prisma, auth, FEATURES.CHANNELS);
       const connection = await finishGoogleConnection(prisma, auth, { state: String(req.query.state || ""), code: String(req.query.code || ""), error: String(req.query.error || "") });
       const section = { calendar: "calendar", email: "email", google_forms: "google-forms" }[connection.kind];
-      res.redirect(`${returnUrl}?google=connected#integration-${section}`);
+      res.redirect(`${returnUrl}${returnUrl.includes("?") ? "&" : "?"}google=connected#integration-${section}`);
     } catch (error) {
       // Only expose known outcomes, never provider responses, OAuth codes or tokens.
       const code = error instanceof ApiError ? error.code : "";
@@ -2484,7 +2500,7 @@ export function createApp(prisma: PrismaClient) {
         : ["oauth_state", "oauth_replayed"].includes(code) ? "expired"
         : ["google_scope_missing", "google_resource_unavailable", "calendar_readonly"].includes(code) ? "permissions"
         : "failed";
-      res.redirect(`${returnUrl}?google=${outcome}`);
+      res.redirect(`${returnUrl}${returnUrl.includes("?") ? "&" : "?"}google=${outcome}`);
     }
   });
   app.post("/api/v1/integrations/google/:id/disconnect", async (req, res) => {
@@ -2495,7 +2511,7 @@ export function createApp(prisma: PrismaClient) {
   });
   app.get("/api/v1/integrations/google/:id/questions", async (req, res) => {
     const auth = await requireAuth(req);
-    const { requireIntegrationsAccess, requireTenant } = await import("./lib/access.ts");
+    const { requireIntegrationsAccess, requireConfigurationTenant: requireTenant } = await import("./lib/access.ts");
     requireIntegrationsAccess(auth); const { tenantId } = requireTenant(auth);
     const row = await prisma.integration.findFirst({ where: { id: req.params.id, tenantId, type: "google_forms", status: "active" } });
     if (!row) throw new ApiError(404, "not_found", "Форма не найдена");
@@ -2504,7 +2520,7 @@ export function createApp(prisma: PrismaClient) {
   });
   app.patch("/api/v1/integrations/google/:id/mapping", json, async (req, res) => {
     const auth = await requireAuth(req);
-    const { requireIntegrationsAccess, requireTenant } = await import("./lib/access.ts");
+    const { requireIntegrationsAccess, requireConfigurationTenant: requireTenant } = await import("./lib/access.ts");
     requireIntegrationsAccess(auth); const { tenantId } = requireTenant(auth);
     const row = await prisma.integration.findFirst({ where: { id: req.params.id, tenantId, type: "google_forms", status: "active" } });
     if (!row) throw new ApiError(404, "not_found", "Форма не найдена");
@@ -2726,6 +2742,12 @@ export function createApp(prisma: PrismaClient) {
 
   app.post("/api/v1/admin/tenants/:id/invitations", json, async (req, res) => {
     res.status(201).json(await invitePlatformMember(prisma, await requireAuth(req), req.params.id, req.body || {}));
+  });
+
+  app.get("/api/v1/admin/tenants/:id/configuration-context", async (req, res) => {
+    const auth = await scopeCompanyConfiguration(prisma, await requireAuth(req), req.params.id);
+    res.set("Cache-Control", "no-store").json({ company: auth.configurationTenant!.tenant,
+      billing: await getBillingState(prisma, req.params.id), serviceFeatures: { esf: await isEsfEnabled(prisma) } });
   });
 
   app.get("/api/v1/admin/tenants/:id/integrations", async (req, res) => {
@@ -3013,6 +3035,11 @@ export function createApp(prisma: PrismaClient) {
       integrationId: req.params.integrationId,
     });
     res.status(202).json(result);
+  });
+
+  app.put("/api/v1/workspace/control/identities/:id/chat", json, async (req, res) => {
+    const { saveControlChatSettings } = await import("./services/controlChatSettings.ts");
+    res.json(await saveControlChatSettings(prisma, await requireAuth(req), req.params.id, req.body));
   });
 
   const controlHeaders = (req: express.Request) => ({

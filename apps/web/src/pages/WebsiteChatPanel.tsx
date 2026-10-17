@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { api } from "../lib/api";
+import { useCompanyConfiguration } from "../lib/companyConfiguration";
 import { InlineFeedback } from "../components/InlineFeedback";
 import { ChannelAiControl } from "../components/ChannelAiControl";
 import { useUiText } from "../lib/uiText";
 type Settings = { enabled: boolean; origins: string[]; title: string; greeting: string; color: string };
 type Item = { id: string; connected: boolean; snippet: string; settings: Settings };
 export function WebsiteChatPanel({ onChange }: { onChange: () => void }) {
+  const { api } = useCompanyConfiguration();
   const t = useUiText();
   const [item, setItem] = useState<Item | null>(null), [loading, setLoading] = useState(true), [busy, setBusy] = useState(false), [error, setError] = useState(""), [note, setNote] = useState("");
   const [form, setForm] = useState<Settings>({ enabled: true, origins: [], title: "Помощник компании", greeting: "Здравствуйте! Чем можем помочь?", color: "#0065ca" });

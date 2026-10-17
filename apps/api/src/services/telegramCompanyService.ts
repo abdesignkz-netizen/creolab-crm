@@ -6,7 +6,7 @@ import { validateClientPhone } from "@creolab/contracts";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import { config } from "../config.ts";
-import { requireIntegrationsAccess, requireTenant, assertConversationReachable } from "../lib/access.ts";
+import { requireIntegrationsAccess, requireConfigurationTenant as requireTenant, assertConversationReachable } from "../lib/access.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { encryptSecret, decryptSecret, encryptionKeyVersion } from "../lib/secretBox.ts";
 import { writeAudit } from "../lib/audit.ts";

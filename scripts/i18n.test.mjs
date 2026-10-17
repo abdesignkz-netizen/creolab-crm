@@ -121,7 +121,7 @@ test('Kazakh personal settings render translated controls and preserve user-ente
       resolveDir: root,
       loader: 'tsx',
     },
-    jsx: 'automatic', bundle: true, platform: 'node', format: 'cjs', write: false,
+    jsx: 'automatic', bundle: true, platform: 'node', format: 'cjs', write: false, loader: { '.css': 'empty' },
     logLevel: 'silent',
   });
   const exports = {};

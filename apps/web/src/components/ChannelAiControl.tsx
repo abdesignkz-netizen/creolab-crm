@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api } from "../lib/api";
+import { useCompanyConfiguration } from "../lib/companyConfiguration";
 import { InlineFeedback } from "./InlineFeedback";
 import { useUiText } from "../lib/uiText";
 
 type Row = { id: string; aiEnabled: boolean; connected: boolean; automaticReplies: boolean };
 export function ChannelAiControl({ id }: { id: string }) {
+  const { api, managed, href } = useCompanyConfiguration();
   const t = useUiText();
   const [row, setRow] = useState<Row | null>(null), [readiness, setReadiness] = useState<string | null>(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState(""), [note, setNote] = useState("");
@@ -20,7 +21,7 @@ export function ChannelAiControl({ id }: { id: string }) {
     }}/><span>{t(busy ? "Сохраняем…" : "Отвечать с помощью ИИ")}</span></label>
     {row?.aiEnabled && readiness && <p className="warning">{t("ИИ ещё не готов к работе: проверьте публикацию инструкций, модель и включение ИИ в настройках.")}</p>}
     {row?.aiEnabled && !row.automaticReplies && <p className="warning">{t("Автоматические ответы ограничены общими правилами. В разделе «Кому и когда отвечать» выберите автоматический режим для этого канала и снимите общую паузу.")}</p>}
-    <div className="actions"><Link to="/settings/ai-manager">{t("Знания и цель ИИ")}</Link><Link to="/settings/ai-automation">{t("Кому и когда отвечать")}</Link><Link to="/conversations">{t("Открыть диалоги")}</Link></div>
+    <div className="actions"><Link to={href("/settings/ai-manager")}>{t("Знания и цель ИИ")}</Link><Link to={href("/settings/ai-automation")}>{t("Кому и когда отвечать")}</Link>{!managed && <Link to="/conversations">{t("Открыть диалоги")}</Link>}</div>
     {error && <InlineFeedback kind="error">{error}</InlineFeedback>}{note && <InlineFeedback kind="success">{note}</InlineFeedback>}
   </div>;
 }

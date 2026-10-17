@@ -5,7 +5,7 @@ import { z } from "zod";
 import { aiManagerDraftSchema, compileAiManagerDraft, emptyAiManagerDraft, getAiSetupScenarios, type AiSetupQualityRun, type AiSetupQuality, type AiSetupPreview, type AiManagerDraft, type AiSetupState, type AiSetupKnowledge } from "@creolab/contracts";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
-import { requireAiSettingsAccess, requireTenant } from "../lib/access.ts";
+import { requireAiSettingsAccess, requireConfigurationTenant as requireTenant } from "../lib/access.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { writeAudit } from "../lib/audit.ts";
 import { requireFeature } from "./entitlementService.ts";

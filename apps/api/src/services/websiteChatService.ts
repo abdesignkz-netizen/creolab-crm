@@ -4,7 +4,7 @@ import type { PrismaClient } from "@creolab/db";
 import { FEATURES } from "@creolab/contracts";
 import { ApiError } from "../errors.ts";
 import { config } from "../config.ts";
-import { assertConversationReachable, requireIntegrationsAccess, requireTenant } from "../lib/access.ts";
+import { assertConversationReachable, requireIntegrationsAccess, requireConfigurationTenant as requireTenant } from "../lib/access.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { writeAudit } from "../lib/audit.ts";
 import { requireFeature, getEntitlements } from "./entitlementService.ts";

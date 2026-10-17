@@ -1,6 +1,6 @@
 import type { PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
-import { requireIntegrationsAccess, requireTenant } from "../lib/access.ts";
+import { requireIntegrationsAccess, requireConfigurationTenant as requireTenant } from "../lib/access.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { googleKinds } from "./googleConnectionService.ts";
 import { syncGoogleCalendar } from "./googleCalendarSyncService.ts";

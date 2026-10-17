@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { AI_MANAGER_GOALS, applyAiManagerGoal, getAiSetupScenarios, type AiManagerDraft, type AiManagerGoal, type AiSetupQualityRun, type AiSetupState } from "@creolab/contracts";
-import { api } from "../lib/api";
+import { useCompanyConfiguration } from "../lib/companyConfiguration";
 import { useLocale } from "../lib/session";
 import { InlineFeedback } from "./InlineFeedback";
 
@@ -17,6 +17,7 @@ export function AiGoalPicker({ draft, onChange }: { draft: AiManagerDraft; onCha
 }
 
 function ScenarioReview({ run, revision, onState, onBusy }: { run: AiSetupQualityRun; revision: number; onState: (state: AiSetupState) => void; onBusy: (busy: boolean) => void }) {
+  const { api } = useCompanyConfiguration();
   const locale = useLocale(); const t = (ru: string, kk: string, en: string) => locale === "kk" ? kk : locale === "en" ? en : ru;
   const [review, setReview] = useState({ accurate: run.review?.accurate ?? false, onGoal: run.review?.onGoal ?? false, appropriate: run.review?.appropriate ?? false, notes: run.review?.notes || "" });
   const [error, setError] = useState("");
@@ -29,6 +30,7 @@ function ScenarioReview({ run, revision, onState, onBusy }: { run: AiSetupQualit
 }
 
 export function AiSetupQualityChecks({ state, disabled, onState, onBusy }: { state: AiSetupState; disabled: boolean; onState: (state: AiSetupState) => void; onBusy: (busy: boolean) => void }) {
+  const { api } = useCompanyConfiguration();
   const locale = useLocale(); const lang = locale === "kk" ? "kk" : locale === "en" ? "en" : "ru";
   const t = (ru: string, kk: string, en: string) => ({ ru, kk, en })[lang];
   const scenarios = getAiSetupScenarios(state.draft);

@@ -52,6 +52,7 @@ export function effectivePermissions(auth: AuthContext | null): Permission[] {
 
 export function can(auth: AuthContext | null, permission: Permission): boolean {
   if (!auth) return false;
+  if (auth.configurationTenant) return isPlatformAdmin(auth) && (permission === PERMISSIONS.manageAi || permission === PERMISSIONS.manageIntegrations);
   const membership = auth.activeMembership;
   if (!membership) return false;
   const role = membership.role;
@@ -81,6 +82,14 @@ export function requireTenant(auth: AuthContext) {
   return auth.activeMembership;
 }
 
+/** Only configuration services opt into this scope; CRM and personal APIs still require membership. */
+export function requireConfigurationTenant(auth: AuthContext) {
+  if (!auth.configurationTenant) return requireTenant(auth);
+  requirePlatformAdmin(auth);
+  if (auth.configurationTenant.tenant.status !== "active") throw new ApiError(403, "tenant_suspended", "Сначала восстановите доступ компании");
+  return auth.configurationTenant;
+}
+
 export const requireOrganization = requireTenant;
 
 export function requirePermission(auth: AuthContext, permission: Permission, message = "Недостаточно прав") {
@@ -103,6 +112,7 @@ export function requireAnalyticsAccess(auth: AuthContext) {
 }
 
 export function requireAiSettingsAccess(auth: AuthContext) {
+  if (auth.configurationTenant) { requireConfigurationTenant(auth); return; }
   requirePermission(auth, PERMISSIONS.manageAi, "Недостаточно прав для настроек AI-менеджера");
 }
 
@@ -188,6 +198,7 @@ export function requireManageTasks(auth: AuthContext) {
 }
 
 export function requireIntegrationsAccess(auth: AuthContext) {
+  if (auth.configurationTenant) { requireConfigurationTenant(auth); return; }
   requirePermission(auth, PERMISSIONS.manageIntegrations, "Настройки интеграций доступны администратору и директору");
 }
 

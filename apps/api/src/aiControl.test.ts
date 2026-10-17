@@ -201,14 +201,17 @@ describe("BasQar Control", () => {
     const title = `Control task ${Date.now()}`;
     const first = await execute("CREATE_TASK", { title, type: "other" }, { requestId });
     assert.equal(first.status, 200, JSON.stringify(first.body));
-    assert.equal(first.body.success, true);
-    const taskId = first.body.data.id;
-    assert.ok(taskId);
+    assert.equal(first.body.status, "CONFIRMATION_REQUIRED");
+    assert.equal(await prisma.task.count({ where: { tenantId: creolabId, title } }), 0);
     const second = await execute("CREATE_TASK", { title, type: "other" }, { requestId });
-    assert.equal(second.status, 200, JSON.stringify(second.body));
-    assert.equal(second.body.data.id, taskId);
-    const count = await prisma.task.count({ where: { tenantId: creolabId, title } });
-    assert.equal(count, 1);
+    assert.equal(second.body.confirmationId, first.body.confirmationId);
+    const confirm = () => json("/api/v1/integrations/ai-control/confirm", {
+      method: "POST", headers: controlHeaders(`cnf_${randomUUID()}`),
+      body: JSON.stringify({ confirmationId: first.body.confirmationId, externalIdentity: "+77011111111", source: "WHATSAPP" }),
+    });
+    const applied = await confirm(); assert.equal(applied.body.success, true, JSON.stringify(applied.body));
+    const duplicate = await confirm(); assert.equal(duplicate.body.data.id, applied.body.data.id);
+    assert.equal(await prisma.task.count({ where: { tenantId: creolabId, title } }), 1);
   });
 
   it("HIGH_RISK action требует confirmation", async () => {

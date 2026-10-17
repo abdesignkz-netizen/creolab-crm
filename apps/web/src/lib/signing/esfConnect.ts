@@ -29,16 +29,16 @@ function isWsseRequired(err: any) {
 }
 
 /** Existing AUTH-ticket flow, shared by integration settings and the document card. */
-export async function connectEsfAuthTicket(iin: string, cabinetPassword?: string) {
+export async function connectEsfAuthTicket(iin: string, cabinetPassword?: string, clientApi = api) {
   if (!/^\d{12}$/.test(iin.trim())) throw new Error(uiText("Укажите ИИН пользователя — 12 цифр"));
   const client = createNcalayerClient();
   try {
     if (!(await client.isAvailable())) {
       throw new NcalayerError("NCALAYER_NOT_RUNNING", uiText("Запустите NCALayer и повторите подключение"));
     }
-    const ticket = (await api.esfAuthTicket(iin.trim())) as { authTicketXml: string };
+    const ticket = (await clientApi.esfAuthTicket(iin.trim())) as { authTicketXml: string };
     const signedAuthTicket = await client.signXml(ticket.authTicketXml, { extKeyUsageOids: [] });
-    return await api.esfConnect({
+    return await clientApi.esfConnect({
       signedAuthTicket,
       cabinetUsername: iin.trim(),
       cabinetPassword: cabinetPassword || undefined,

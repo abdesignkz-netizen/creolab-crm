@@ -1,11 +1,10 @@
 import { InlineFeedback } from "../../components/InlineFeedback";
 import { uiMessage, uiText, useUiText, localizeUiOptions } from "../../lib/uiText";
 import { useEffect, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, Navigate, useLocation } from "react-router-dom";
 import { api } from "../../lib/api";
 import { formatDateTime } from "../../lib/datetime";
 import { statusBadgeClass } from "../../lib/statusBadge";
-import { PlatformCompanyAiManager } from "./PlatformCompanyAiManager";
 
 const WHATSAPP_LABEL: Record<string, string> = {
   connected: "Подключён",
@@ -16,7 +15,7 @@ const WHATSAPP_LABEL: Record<string, string> = {
 export function PlatformAiManagersPage() {
   const { pathname } = useLocation();
   const tenantId = pathname.match(/^\/admin\/ai-managers\/([^/]+)$/)?.[1] || "";
-  if (tenantId) return <AiManagerDetail tenantId={tenantId} />;
+  if (tenantId) return <Navigate replace to={`/admin/companies/${encodeURIComponent(tenantId)}?tab=ai-manager`} />;
   return <AiManagerList />;
 }
 
@@ -80,7 +79,7 @@ function AiManagerList() {
               {(data.items || []).map((item: any) => (
                 <tr key={item.tenantId}>
                   <td>
-                    <Link to={`/admin/ai-managers/${item.tenantId}`}>{item.name}</Link>
+                    <Link to={`/admin/companies/${item.tenantId}?tab=ai-manager`}>{item.name}</Link>
                     <div className="muted">{item.slug}</div>
                   </td>
                   <td>
@@ -114,33 +113,6 @@ function AiManagerList() {
           </table>
         </div>
       )}
-    </div>
-  );
-}
-
-function AiManagerDetail({ tenantId }: { tenantId: string }) {
-  const uiText = useUiText();
-  const [name, setName] = useState("");
-  useEffect(() => {
-    void api
-      .adminCompanyAiManager(tenantId)
-      .then((row: any) => setName(row.tenant?.name || ""))
-      .catch(() => setName(""));
-  }, [tenantId]);
-
-  return (
-    <div className="stack">
-      <div className="page-head">
-        <div>
-          <p className="muted">
-            <Link to="/admin/ai-managers">{uiText("AI-менеджеры")}</Link>
-            {" · "}
-            <Link to={`/admin/companies/${tenantId}`}>{uiText("Карточка компании")}</Link>
-          </p>
-          <h3>{name || uiText("ИИ-менеджер")}</h3>
-        </div>
-      </div>
-      <PlatformCompanyAiManager tenantId={tenantId} />
     </div>
   );
 }

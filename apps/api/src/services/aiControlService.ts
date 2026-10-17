@@ -1,3 +1,5 @@
+import { chatSettings } from "./controlChatSettings.ts";
+import { randomInt } from "node:crypto";
 import { requireFeature as requireBillingFeature } from "./entitlementService.ts";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import {
@@ -362,7 +364,7 @@ function normalizeIdentity(provider: ControlSource, raw: string, region: string)
 }
 
 function sixDigitCode() {
-  return String(100000 + Math.floor(Math.random() * 900000));
+  return String(randomInt(100000, 1000000));
 }
 
 function serializeAccess(row: ControlAccessRow | null, user: { id: string; name: string; email: string; role: string }) {
@@ -399,7 +401,7 @@ function assertControlPermission(access: ControlAccessRow, action: ControlAction
     throw new ApiError(403, "forbidden", "Действие не разрешено в BasQar Control");
   }
   const meta = CONTROL_ACTION_META[action];
-  if (meta.financial && !access.canReadFinancialData && meta.riskLevel === "READ") {
+  if (meta.financial && !access.canReadFinancialData) {
     throw new ApiError(403, "forbidden", "Нет права на финансовые данные");
   }
   if (meta.team && !access.canReadTeamData) {
@@ -408,6 +410,12 @@ function assertControlPermission(access: ControlAccessRow, action: ControlAction
   if (meta.bulk && !access.canPerformBulkActions) {
     throw new ApiError(403, "forbidden", "Нет права на массовые действия");
   }
+  if (["CREATE_TASK", "CREATE_FOLLOW_UP", "UPDATE_TASK", "COMPLETE_TASK", "ASSIGN_TASK", "BULK_CREATE_TASKS"].includes(action) && !access.canCreateTasks) {
+    throw new ApiError(403, "forbidden", "Нет права изменять задачи");
+  }
+  if (["CREATE_DEAL", "UPDATE_DEAL", "MOVE_DEAL_STAGE", "ASSIGN_DEAL", "ADD_DEAL_NOTE", "BULK_ASSIGN_DEALS", "BULK_MOVE_DEALS"].includes(action) && !access.canModifyDeals) {
+    throw new ApiError(403, "forbidden", "Нет права изменять сделки");
+  }
   if (action === "EXPORT_REPORT" ) {
     /* CRM export_all is checked in handler */
   }
@@ -415,7 +423,7 @@ function assertControlPermission(access: ControlAccessRow, action: ControlAction
 
 function needsConfirmation(access: ControlAccessRow, action: ControlAction) {
   const risk = CONTROL_ACTION_META[action].riskLevel;
-  if (risk === "READ" || risk === "LOW_WRITE") return false;
+  if (risk === "READ") return false;
   if (risk === "HIGH_RISK") return true;
   return Boolean(access.requiresConfirmationForWrites);
 }
@@ -531,7 +539,7 @@ export async function getControlSettings(prisma: PrismaClient, auth: AuthContext
   requireCompanyAdmin(auth, "BasQar Control доступен администратору и директору");
   const membership = requireTenant(auth);
   const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: membership.tenantId } });
-  const [members, accesses, identities] = await Promise.all([
+  const [members, accesses, identities, senders, deliveries] = await Promise.all([
     prisma.membership.findMany({
       where: { tenantId: membership.tenantId, active: true },
       include: { user: { select: { id: true, name: true, email: true } } },
@@ -539,10 +547,15 @@ export async function getControlSettings(prisma: PrismaClient, auth: AuthContext
     }),
     prisma.controlAccess.findMany({ where: { tenantId: membership.tenantId } }),
     prisma.controlIdentity.findMany({ where: { tenantId: membership.tenantId } }),
+    prisma.integration.findMany({ where: { tenantId: membership.tenantId, type: { in: ["whatsapp_qr", "whatsapp_cloud"] } }, select: { id: true, name: true, type: true, status: true, connectionStatus: true, schemaJson: true } }),
+    prisma.controlChatMessage.findMany({ where: { tenantId: membership.tenantId }, orderBy: { createdAt: "desc" }, take: 20, select: { id: true, identityId: true, state: true, kind: true, error: true, createdAt: true } }),
   ]);
   const accessByUser = new Map(accesses.map((row) => [row.userId, row]));
   return {
     enabled: controlCompanyEnabled(tenant.settingsJson),
+    timezone: tenant.timezone || "Asia/Almaty",
+    senders: senders.map(row => ({ id: row.id, name: row.name, type: row.type, phone: asString(asRecord(row.schemaJson).phone), ready: row.status === "active" && row.connectionStatus === "CONNECTED" })),
+    deliveries,
     catalog: CONTROL_ACTIONS.map((action) => ({
       action,
       ...CONTROL_ACTION_META[action],
@@ -566,6 +579,7 @@ export async function getControlSettings(prisma: PrismaClient, auth: AuthContext
           verified: Boolean(row.verifiedAt),
           verifiedAt: row.verifiedAt?.toISOString() || null,
           enabled: row.enabled,
+          chat: chatSettings(row.metadata),
         })),
       };
     }),
@@ -660,6 +674,8 @@ export async function createControlIdentity(prisma: PrismaClient, auth: AuthCont
   const raw = parsed.phone || parsed.externalUserId;
   if (!raw) throw new ApiError(422, "invalid", "Укажите номер или внешний идентификатор");
   const ident = normalizeIdentity(parsed.provider, raw, membership.tenant.defaultRegion || "KZ");
+  const existingIdentity = await prisma.controlIdentity.findUnique({ where: { tenantId_provider_externalUserId: { tenantId: membership.tenantId, provider: parsed.provider, externalUserId: ident.externalUserId } } });
+  if (existingIdentity && existingIdentity.userId !== parsed.userId) throw new ApiError(409, "phone_in_use", "Номер уже привязан к другому сотруднику");
   const code = sixDigitCode();
   const verifyNow = Boolean(parsed.verifyNow);
   const row = await prisma.controlIdentity.upsert({
@@ -683,6 +699,7 @@ export async function createControlIdentity(prisma: PrismaClient, auth: AuthCont
     },
     update: {
       userId: parsed.userId,
+      metadata: { ...asRecord(existingIdentity?.metadata), verificationAttempts: 0 },
       phoneNormalized: ident.phoneNormalized,
       enabled: true,
       verifiedAt: verifyNow ? new Date() : null,
@@ -875,10 +892,10 @@ async function dispatchAction(action: ControlAction, ctx: DispatchCtx): Promise<
     case "GET_SITUATION": {
       const sit = await situation(ctx);
       return {
-        result: sit.result,
+        result: financial ? sit.result : { inquiries: sit.result.inquiries, newClients: sit.result.newClients, dealsCreated: sit.result.dealsCreated, wonDeals: sit.result.wonDeals, lostDeals: sit.result.lostDeals },
         current: financial
           ? sit.current
-          : { ...asRecord(sit.current), activePipelineAmount: null, weightedPipeline: null },
+          : { activeDeals: sit.current.activeDeals, needsReply: sit.current.needsReply, overdueTasks: sit.current.overdueTasks },
         attention: asRecord(sit.attention).summary || null,
         todayTasks: sit.todayTasks,
       };
@@ -943,7 +960,9 @@ async function dispatchAction(action: ControlAction, ctx: DispatchCtx): Promise<
     }
     case "GET_TASKS": {
       const tasks = await listTasks(prisma, auth);
-      return { items: (tasks as Array<Record<string, unknown>>).slice(0, 50).map(compactTask) };
+      const query = asString(params.query).toLowerCase();
+      const matched = (tasks as Array<Record<string, unknown>>).filter(item => !query || String(item.title || "").toLowerCase().includes(query));
+      return { items: matched.slice(0, 50).map(compactTask) };
     }
     case "GET_TODAY_TASKS": {
       const sit = await situation(ctx);
@@ -958,14 +977,16 @@ async function dispatchAction(action: ControlAction, ctx: DispatchCtx): Promise<
       const q = asString(params.q || params.query || params.phone || params.name);
       if (!q) throw new ApiError(422, "invalid", "Укажите запрос для поиска клиента");
       const found = await searchContactsForPicker(prisma, auth, q);
-      const items = Array.isArray(found) ? found : asRecord(found).items;
+      const items = Array.isArray(found) ? found : asRecord(found).clients;
       return { items: (Array.isArray(items) ? items : []).slice(0, 20) };
     }
     case "GET_CLIENT_DETAILS": {
       const id = asString(params.clientId || params.contactId || params.id);
       if (!id) throw new ApiError(422, "invalid", "Укажите clientId");
       const overview = await getContactOverview(prisma, auth, id);
-      return overview;
+      if (financial) return overview;
+      return { client: { id: overview.client.id, name: overview.client.name, phone: overview.client.phone, companyName: overview.client.companyName, lifecycleLabel: overview.client.lifecycleLabel },
+        tasks: overview.tasks.map(item => compactTask(asRecord(item))), deals: overview.deals.map(item => compactDeal(asRecord(item), false)) };
     }
     case "GET_DEAL": {
       const id = asString(params.dealId || params.id);
@@ -1290,6 +1311,7 @@ function confirmationSummary(action: ControlAction, params: Record<string, unkno
     asStringList(params.inquiryIds).length ||
     asStringList(params.contactIds).length ||
     asStringList(params.titles).length;
+  if (typeof params._controlPreview === "string") return `${label}\n${params._controlPreview.slice(0, 1500)}`;
   if (count) return `${label}: ${count} объектов`;
   if (title) return `${label}: «${title.slice(0, 80)}»`;
   return label;
@@ -1533,6 +1555,13 @@ export async function confirmAiControlCommand(
     requestId,
     signature: headers.signature,
   });
+  return confirmControlForIntegration(prisma, integration, parsed);
+}
+
+async function confirmControlForIntegration(prisma: PrismaClient,
+  integration: Awaited<ReturnType<typeof resolveControlIntegration>>,
+  parsed: { confirmationId: string; source: ControlSource; externalIdentity: string; tenantId?: string },
+) {
   void parsed.tenantId;
   if (!controlCompanyEnabled(integration.tenant.settingsJson)) {
     throw new ApiError(403, "control_disabled", "BasQar Control выключен для компании");
@@ -1551,6 +1580,24 @@ export async function confirmAiControlCommand(
     where: { id: parsed.confirmationId, tenantId: integration.tenantId },
   });
   if (!confirmation) throw new ApiError(404, "not_found", "Подтверждение не найдено");
+  const identity = await resolveLinkedIdentity(
+    prisma,
+    integration.tenantId,
+    parsed.source,
+    parsed.externalIdentity,
+    integration.tenant.defaultRegion || "KZ",
+  );
+  if (identity.userId !== confirmation.userId || confirmation.source !== parsed.source || confirmation.identityId && confirmation.identityId !== identity.id) {
+    throw new ApiError(403, "forbidden", "Подтверждение принадлежит другому пользователю");
+  }
+  const access = await prisma.controlAccess.findUnique({
+    where: { tenantId_userId: { tenantId: integration.tenantId, userId: identity.userId } },
+  });
+  if (!access) throw new ApiError(403, "control_disabled", "Нет доступа BasQar Control");
+  const action = confirmation.action as ControlAction;
+  assertControlPermission(access, action, parsed.source);
+  const auth = await authForUserInTenant(prisma, identity.userId, integration.tenantId, `control:${confirmation.requestId}`);
+  if (action.startsWith("BULK_")) await requireBillingFeature(prisma, auth, "CONTROL_BULK");
   if (confirmation.status === "executed" && confirmation.resultJson) return confirmation.resultJson;
   if (confirmation.expiresAt.getTime() < Date.now() || confirmation.status === "expired") {
     await prisma.controlConfirmation.updateMany({
@@ -1562,24 +1609,6 @@ export async function confirmAiControlCommand(
   if (confirmation.status !== "pending") {
     throw new ApiError(409, "invalid_state", "Подтверждение уже использовано");
   }
-  const identity = await resolveLinkedIdentity(
-    prisma,
-    integration.tenantId,
-    parsed.source,
-    parsed.externalIdentity,
-    integration.tenant.defaultRegion || "KZ",
-  );
-  if (identity.userId !== confirmation.userId) {
-    throw new ApiError(403, "forbidden", "Подтверждение принадлежит другому пользователю");
-  }
-  const access = await prisma.controlAccess.findUnique({
-    where: { tenantId_userId: { tenantId: integration.tenantId, userId: identity.userId } },
-  });
-  if (!access) throw new ApiError(403, "control_disabled", "Нет доступа BasQar Control");
-  const action = confirmation.action as ControlAction;
-  assertControlPermission(access, action, parsed.source);
-  const auth = await authForUserInTenant(prisma, identity.userId, integration.tenantId, `control:${confirmation.requestId}`);
-  if (action.startsWith("BULK_")) await requireBillingFeature(prisma, auth, "CONTROL_BULK");
   const claimed = await prisma.controlConfirmation.updateMany({
     where: { id: confirmation.id, status: "pending" },
     data: { status: "confirmed", confirmedAt: new Date() },
@@ -1624,7 +1653,7 @@ export async function confirmAiControlCommand(
   } catch (error) {
     await prisma.controlConfirmation.update({
       where: { id: confirmation.id },
-      data: { status: "pending", confirmedAt: null },
+      data: { status: "uncertain" },
     }).catch(() => undefined);
     throw error;
   }
@@ -1677,4 +1706,43 @@ export async function verifyAiControlIdentity(
     changes: { provider: parsed.source },
   });
   return { success: true, verified: true, userId: row.userId };
+}
+
+
+/** Internal adapter for provider-authenticated WhatsApp events. Not exposed as an HTTP route. */
+export async function authorizeNativeControl(prisma: PrismaClient, integrationId: string, identityId: string, action?: ControlAction) {
+  const integration = await prisma.integration.findUniqueOrThrow({ where: { id: integrationId }, include: { tenant: true } });
+  const identity = await prisma.controlIdentity.findFirst({ where: { id: identityId, tenantId: integration.tenantId, provider: "WHATSAPP", enabled: true, verifiedAt: { not: null } } });
+  const chat = asRecord(asRecord(identity?.metadata).chat);
+  if (!["whatsapp_qr", "whatsapp_cloud"].includes(integration.type) || integration.status !== "active" || integration.tenant.status !== "active" || !identity || !chat.enabled || chat.integrationId !== integration.id || !controlCompanyEnabled(integration.tenant.settingsJson)) {
+    throw new ApiError(403, "control_disabled", "Доступ к BasQar Control отключён. Проверьте настройки в кабинете.");
+  }
+  const { canUseFeature } = await import("./entitlementService.ts");
+  if (!await canUseFeature(prisma, integration.tenantId, "AI_CONTROL")) throw new ApiError(403, "feature_required", "BasQar Control не подключён к тарифу.");
+  const access = await prisma.controlAccess.findUnique({ where: { tenantId_userId: { tenantId: integration.tenantId, userId: identity.userId } } });
+  if (!access || !access.enabled || access.status !== "active" || asStringList(access.allowedSources).length && !asStringList(access.allowedSources).includes("WHATSAPP")) throw new ApiError(403, "control_disabled", "Доступ сотрудника к WhatsApp Control отключён.");
+  if (action) assertControlPermission(access, action, "WHATSAPP");
+  const auth = await authForUserInTenant(prisma, identity.userId, integration.tenantId, `control-whatsapp:${identity.id}`);
+  return { integration, identity, access, auth };
+}
+
+export async function executeNativeControl(prisma: PrismaClient, integrationId: string, identityId: string,
+  action: ControlAction, params: Record<string, unknown>, requestId: string) {
+  const ctx = await authorizeNativeControl(prisma, integrationId, identityId, action);
+  // Every change requested from chat gets a concrete preview, regardless of API preferences.
+  return executeResolved({ prisma, auth: ctx.auth, access: ctx.access, identityId, source: "WHATSAPP", action, params, requestId,
+    confirm: CONTROL_ACTION_META[action].riskLevel !== "READ" });
+}
+
+export async function confirmNativeControl(prisma: PrismaClient, integrationId: string, identityId: string, confirmationId: string) {
+  const ctx = await authorizeNativeControl(prisma, integrationId, identityId);
+  const own = await prisma.controlConfirmation.findFirst({ where: { id: confirmationId, tenantId: ctx.integration.tenantId, identityId, source: "WHATSAPP" } });
+  if (!own) throw new ApiError(404, "not_found", "Подтверждение не найдено");
+  return confirmControlForIntegration(prisma, ctx.integration, { confirmationId, externalIdentity: ctx.identity.externalUserId, source: "WHATSAPP" });
+}
+
+
+export function controlAuthorizationVersion(ctx: Awaited<ReturnType<typeof authorizeNativeControl>>) {
+  const { lastActivityAt: _last, updatedAt: _updated, createdAt: _created, ...permissions } = ctx.access;
+  return sha256(JSON.stringify({ permissions, membership: ctx.auth.activeMembership, userId: ctx.identity.userId }));
 }

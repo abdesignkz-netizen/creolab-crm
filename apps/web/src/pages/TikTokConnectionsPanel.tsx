@@ -1,11 +1,12 @@
 import { InlineFeedback } from "../components/InlineFeedback";
 import { uiText, useUiText, localizeUiOptions } from "../lib/uiText";
 import { useEffect, useState } from "react";
-import { api } from "../lib/api";
+import { useCompanyConfiguration } from "../lib/companyConfiguration";
 import { IntegrationHelp } from "../components/IntegrationHelp";
 
 type Row = { id: string; connected: boolean; status: string; lastError: string | null; settings: { label?: string; advertiserId?: string } };
 export function TikTokConnectionsPanel({ onChange }: { onChange: () => void }) {
+  const { api } = useCompanyConfiguration();
   const uiText = useUiText();
   const [rows, setRows] = useState<Row[]>([]), [busy, setBusy] = useState(false), [error, setError] = useState("");
   const [form, setForm] = useState({ appId: "", advertiserId: "", pageId: "", accessToken: "", appSecret: "" });

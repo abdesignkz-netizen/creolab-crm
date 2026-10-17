@@ -1,3 +1,8 @@
+import { CompanyConfigurationProvider } from "../../lib/companyConfiguration";
+import { AiManagerSetupPage } from "../AiManagerSetupPage";
+import { AiAutomationSettingsPage } from "../AiAutomationSettingsPage";
+import { IntegrationsPage } from "../IntegrationsPage";
+import { EsfIntegrationPage } from "../EsfIntegrationPage";
 import { InlineFeedback } from "../../components/InlineFeedback";
 import { uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale } from "../../lib/uiText";
 import { useEffect, useState, type FormEvent } from "react";
@@ -29,26 +34,27 @@ export function PlatformCompanyPage() {
   const params = useParams();
   const { pathname, search } = useLocation();
   const id = params.id || pathname.match(/^\/admin\/companies\/([^/]+)$/)?.[1] || "";
-  const [tab, setTab] = useState<(typeof TABS)[number][0]>(() => new URLSearchParams(search).get("tab") === "ai-manager" ? "ai-manager" : "info");
+  const requestedTab = new URLSearchParams(search).get("tab");
+  const tab = TABS.find(([key]) => key === requestedTab)?.[0] || "info";
+  const section = new URLSearchParams(search).get("section") || "setup";
+  const companyPath = `/admin/companies/${encodeURIComponent(id)}`;
   const [company, setCompany] = useState<any>(null);
   const [error, setError] = useState("");
-  useEffect(() => {
-    setTab(new URLSearchParams(search).get("tab") === "ai-manager" ? "ai-manager" : "info");
-  }, [id, search]);
 
-  async function load() {
-    setCompany(await api.adminCompany(id));
-  }
 
   useEffect(() => {
-    load().catch((err) => setError(err instanceof Error ? err.message : uiText("Ошибка")));
+    let active = true;
+    setCompany(null); setError("");
+    void api.adminCompany(id).then(result => { if (active) setCompany(result); })
+      .catch(err => { if (active) setError(err instanceof Error ? err.message : uiText("Ошибка")); });
+    return () => { active = false; };
   }, [id]);
 
   if (error) return <InlineFeedback kind="error" className="error">{error}</InlineFeedback>;
-  if (!company) return <div className="state">{uiText("Загрузка…")}</div>;
+  if (!company || company.id !== id) return <div className="state">{uiText("Загрузка…")}</div>;
 
   return (
-    <div className="stack">
+    <div className="stack platform-company">
       <div className="page-head">
         <div>
           <p className="muted"><Link to="/admin/companies">{uiText("Компании")}</Link></p>
@@ -88,14 +94,25 @@ export function PlatformCompanyPage() {
       </div>
       <nav className="settings-nav horizontal">
         {localizeUiOptions(TABS, uiText).map(([key, label]) => (
-          <button key={key} type="button" className={tab === key ? "active" : ""} onClick={() => setTab(key)}>{label}</button>
+          <Link key={key} className={tab === key ? "active" : ""} aria-current={tab === key ? "page" : undefined} to={`${companyPath}?tab=${key}`}>{label}</Link>
         ))}
       </nav>
       {tab === "info" ? <CompanyInfo company={company} onSaved={setCompany} /> : null}
       {tab === "subscription" ? <CompanySubscription company={company} onSaved={setCompany} /> : null}
       {tab === "members" ? <CompanyMembers tenantId={id} /> : null}
-      {tab === "integrations" ? <CompanyIntegrations tenantId={id} /> : null}
-      {tab === "ai-manager" ? <PlatformCompanyAiManager tenantId={id} /> : null}
+      {tab === "integrations" ? <CompanyConfigurationProvider key={id} tenantId={id}>
+        {section === "esf" ? <EsfIntegrationPage /> : section === "forms" || section === "webhook" ? <>
+          <Link to={`${companyPath}?tab=integrations`}>← {uiText("Интеграции")}</Link>
+          <CompanyIntegrations key={section} tenantId={id} companyName={company.name} type={section === "forms" ? "form" : "webhook"} />
+        </> : <IntegrationsPage />}
+      </CompanyConfigurationProvider> : null}
+      {tab === "ai-manager" ? <CompanyConfigurationProvider key={id} tenantId={id}>
+        <nav className="settings-nav horizontal" aria-label={uiText("Настройка ИИ")}>
+          {([["setup", "Цель и база знаний"], ["rules", "Кому и когда отвечать"], ["model", "Модель и расширенные настройки"]] as const).map(([key, label]) =>
+            <Link key={key} className={section === key ? "active" : ""} to={`${companyPath}?tab=ai-manager&section=${key}`}>{uiText(label)}</Link>)}
+        </nav>
+        {section === "rules" ? <AiAutomationSettingsPage /> : section === "model" ? <PlatformCompanyAiManager tenantId={id} /> : <AiManagerSetupPage />}
+      </CompanyConfigurationProvider> : null}
       {tab === "ai-usage" ? <PlatformAiUsagePage lockedTenantId={id} /> : null}
       {tab === "settings" ? <CompanySettings company={company} onSaved={setCompany} /> : null}
       {tab === "audit" ? <CompanyAudit tenantId={id} /> : null}
@@ -438,26 +455,30 @@ function CompanyMembers({ tenantId }: { tenantId: string }) {
   );
 }
 
-function CompanyIntegrations({ tenantId }: { tenantId: string }) {
+function CompanyIntegrations({ tenantId, companyName, type }: { tenantId: string; companyName: string; type: "form" | "webhook" }) {
   const uiText = useUiText();
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState("");
   const [events, setEvents] = useState<any[] | null>(null);
   const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function run(action: () => Promise<void>) {
+    if (busy) return;
+    setBusy(true); setError(""); setNote("");
+    try { await action(); } catch (err) { setError(err instanceof Error ? err.message : uiText("Ошибка")); }
+    finally { setBusy(false); }
+  }
 
   async function load() {
     setData(await api.adminCompanyIntegrations(tenantId));
   }
   useEffect(() => { void load().catch((err) => setError(err instanceof Error ? err.message : uiText("Ошибка"))); }, [tenantId]);
-  if (!data) return <div className="state">{uiText("Загрузка…")}</div>;
-  const connectable = (data.catalog || []).filter((item: any) => item.connectable);
-  const companies = [{ id: tenantId, name: "Эта компания", integrationTypes: (data.items || []).map((row: any) => row.type) }];
+  if (!data) return <div className="state">{error ? <><InlineFeedback kind="error">{error}</InlineFeedback><button className="btn secondary" onClick={() => void run(load)}>{uiText("Повторить")}</button></> : uiText("Загрузка…")}</div>;
+  const connectable = (data.catalog || []).filter((item: any) => item.connectable && item.type === type);
+  const companies = [{ id: tenantId, name: companyName, integrationTypes: (data.items || []).map((row: any) => row.type) }];
 
   return (
     <div className="stack">
-      {(data.needsAssignment || []).length ? (
-        <p className="error">{uiText("Есть подключения без назначения этой компании. Общие секреты сервера не используются автоматически.")}</p>
-      ) : null}
       {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
       {connectable.map((item: any) => (
         <div className="panel stack" key={item.type}>
@@ -467,10 +488,7 @@ function CompanyIntegrations({ tenantId }: { tenantId: string }) {
               <div className="muted">{item.type}</div>
             </div>
           </div>
-          {(item.steps || []).length ? (
-            item.type === "form" ? (
-              <p className="muted">{(item.steps as string[])[0]}</p>
-            ) : (
+          {(item.steps || []).length && item.type !== "form" ? (
             <div className="notify-steps">
               <b>{uiText("Как подключить")}</b>
               <ol>
@@ -479,12 +497,11 @@ function CompanyIntegrations({ tenantId }: { tenantId: string }) {
                 ))}
               </ol>
             </div>
-            )
           ) : null}
-          <AssignIntegrationForm item={item} companies={companies} lockedTenantId={tenantId} />
+          <AssignIntegrationForm item={item} companies={companies} lockedTenantId={tenantId} onSaved={load} />
         </div>
       ))}
-      {(data.items || []).map((item: any) => (
+      {(data.items || []).filter((item: any) => item.type === type).map((item: any) => (
         <div className="panel stack" key={item.id}>
           <div className="page-head">
             <div>
@@ -492,40 +509,33 @@ function CompanyIntegrations({ tenantId }: { tenantId: string }) {
               <div className="muted">{item.type} · {uiMessage(item.lifecycleLabel)}</div>
             </div>
             <div className="actions">
-              <button className="btn secondary" onClick={async () => {
+              <button className="btn secondary" disabled={busy} onClick={() => void run(async () => {
                 const result = (await api.adminTestCompanyIntegration(tenantId, item.id)) as any;
                 setNote(result.message);
                 await load();
-              }}>{uiText("Проверить")}</button>
+              })}>{uiText("Проверить")}</button>
               {item.type === "webhook" ? (
-                <button className="btn secondary" onClick={async () => {
+                <button className="btn secondary" disabled={busy} onClick={() => void run(async () => {
                   const result = (await api.adminRotateCompanyWebhook(tenantId, item.id)) as any;
                   setNote(`${result.note || uiText("Ключ заменён")} ${result.secret || ""}`);
                   notifySaved(uiText("Ключ заменён. Значение в журнал не записано."));
-                }}>{uiText("Заменить ключ")}</button>
+                })}>{uiText("Заменить ключ")}</button>
               ) : null}
-              <button className="btn secondary" onClick={async () => {
+              <button className="btn secondary" disabled={busy} onClick={() => void run(async () => {
                 await api.adminDisableCompanyIntegration(tenantId, item.id, item.lifecycle !== "disabled");
                 notifySaved(item.lifecycle === "disabled" ? uiText("Включено") : uiText("Отключено"));
                 await load();
-              }}>{item.lifecycle === "disabled" ? uiText("Включить") : uiText("Отключить")}</button>
-              <button className="btn secondary" onClick={async () => {
+              })}>{item.lifecycle === "disabled" ? uiText("Включить") : uiText("Отключить")}</button>
+              <button className="btn secondary" disabled={busy} onClick={() => void run(async () => {
                 const result = (await api.adminCompanyIntegrationEvents(tenantId, item.id)) as any;
                 setEvents(result.items || []);
-              }}>{uiText("События")}</button>
+              })}>{uiText("События")}</button>
             </div>
           </div>
           {item.schema?.instanceId ? <p className="muted">Instance: {item.schema.instanceId}</p> : null}
           {item.forms?.[0]?.submitUrl ? <p className="muted">{uiText("Форма:")}{" "}{item.forms[0].submitUrl}</p> : null}
           {item.eventsUrl ? <p className="muted">Webhook: {item.eventsUrl}</p> : null}
           {item.lastError ? <p className="error">{item.lastError}</p> : null}
-        </div>
-      ))}
-      {(data.esf || []).map((item: any) => (
-        <div className="panel" key={item.id}>
-          <b>{item.name}</b>
-          <p className="muted">{item.lifecycle} · {item.connectHint}</p>
-          {item.lastErrorMessage ? <p className="error">{item.lastErrorMessage}</p> : null}
         </div>
       ))}
       {note ? <InlineFeedback kind="success" className="ok">{note}</InlineFeedback> : null}
@@ -550,7 +560,7 @@ function CompanyAudit({ tenantId }: { tenantId: string }) {
   if (!data) return <div className="state">{uiText("Загрузка…")}</div>;
   return (
     <div className="stack">
-      {(data.items || []).map((item: any) => (
+      {(data.items || []).filter((item: any) => ["form", "webhook"].includes(item.type)).map((item: any) => (
         <div className="row" key={item.id}>
           <div>
             <b>{item.action}</b>

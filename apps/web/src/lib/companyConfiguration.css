@@ -1,0 +1,13 @@
+.platform-company { grid-template-columns: minmax(0, 1fr); min-width: 0; }
+.platform-company > *, .platform-company .stack > * { min-width: 0; }
+.platform-company .ai-setup { width: 100%; }
+.platform-company .settings-nav.horizontal { max-width: 100%; }
+.platform-company .settings-nav.horizontal > * { min-width: 0; white-space: normal; }
+.company-configuration-notice { padding: 16px 20px; border: 1px solid var(--line); border-radius: 14px; background: var(--accent-soft); color: var(--ink); overflow-wrap: anywhere; }
+.company-configuration-notice p { margin: 6px 0 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+@media (max-width: 600px) {
+  .platform-company .settings-nav.horizontal { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 6px; }
+  .platform-company .settings-nav.horizontal > * { flex: 0 0 auto; white-space: nowrap; }
+  .platform-company .ai-setup .btn { white-space: normal; }
+  .platform-company .integ-status-line { flex-wrap: wrap; }
+}

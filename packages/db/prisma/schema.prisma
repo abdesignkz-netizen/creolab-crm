@@ -2392,3 +2392,43 @@ model ControlNotificationBatch {
   @@unique([ruleId, key])
   @@index([state, availableAt])
 }
+
+
+// Private staff WhatsApp requests. Never enter customer conversations or AI queues.
+model ControlChatSession {
+  id            String   @id @default(uuid())
+  tenantId      String
+  identityId    String
+  integrationId String
+  contextJson   Json     @default("{}")
+  expiresAt     DateTime
+  leaseOwner    String?
+  leaseUntil    DateTime?
+  updatedAt     DateTime @updatedAt
+  @@unique([identityId, integrationId])
+  @@index([tenantId])
+}
+
+model ControlChatMessage {
+  id            String   @id @default(uuid())
+  queueOrder    Int      @default(autoincrement())
+  tenantId      String
+  identityId    String
+  integrationId String
+  eventKey      String
+  kind          String   @default("request")
+  text          String
+  state         String   @default("queued")
+  replyText     String?
+  actionsJson   Json     @default("[]")
+  accessVersion String?
+  identityVersion String?
+  claimedAt     DateTime?
+  finishedAt    DateTime?
+  providerRef   String?
+  error         String?
+  createdAt     DateTime @default(now())
+  @@unique([integrationId, eventKey])
+  @@index([state, createdAt])
+  @@index([identityId, integrationId, createdAt])
+}

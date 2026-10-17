@@ -1,8 +1,10 @@
+import { requireConfigurationTenant as requireTenant } from "../lib/access.ts";
 import { requireFeature } from "./entitlementService.ts";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { requireAiSettingsAccess } from "../lib/access.ts";
+import { writeAudit } from "../lib/audit.ts";
 import { aiChannelTypes } from "./channelDeliveryService.ts";
 import {
   applyModeToSettings,
@@ -20,12 +22,6 @@ import {
   type ScheduleWindow,
 } from "./aiAutomationSettings.ts";
 
-function requireTenant(auth: AuthContext) {
-  if (!auth.activeMembership) {
-    throw new ApiError(403, "no_tenant", "Нет активной компании");
-  }
-  return auth.activeMembership;
-}
 
 export async function getAIAutomationSettings(prisma: PrismaClient, auth: AuthContext) {
   requireAiSettingsAccess(auth);
@@ -134,13 +130,14 @@ export async function updateAIAutomationSettings(
     typeof input.timezone === "string" ? input.timezone : tenant.timezone,
     tenant.timezone || "Asia/Almaty",
   );
-  await prisma.tenant.update({
-    where: { id: tenant.id },
-    data: {
-      settingsJson: settingsJson as Prisma.InputJsonObject,
-      workingHoursJson,
-      timezone,
-    },
+  await prisma.$transaction(async tx => {
+    await tx.tenant.update({
+      where: { id: tenant.id },
+      data: { settingsJson: settingsJson as Prisma.InputJsonObject, workingHoursJson, timezone },
+    });
+    await writeAudit(tx, { tenantId: tenant.id, actorUserId: auth.user.id,
+      action: "ai.automation_updated", entityType: "tenant", entityId: tenant.id,
+      changes: { fields: Object.keys(input), defaultMode: next.defaultMode, audience: next.replyAudience.audience, timezone } });
   });
 
   return {

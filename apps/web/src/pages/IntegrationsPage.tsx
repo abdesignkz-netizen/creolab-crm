@@ -6,14 +6,13 @@ import { InlineFeedback } from "../components/InlineFeedback";
 import { IntegrationDisclosure } from "../components/IntegrationDisclosure";
 import { WhatsAppConnectionsPanel } from "./WhatsAppConnectionsPanel";
 import { uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale } from "../lib/uiText";
-import { useSession } from "../lib/session";
 import { TikTokConnectionsPanel } from "./TikTokConnectionsPanel";
 import { MetaConnectionsPanel } from "./MetaConnectionsPanel";
 import { GoogleConnectionsPanel } from "./GoogleConnectionsPanel";
 import { notifySaved } from "../components/SaveNotice";
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { api } from "../lib/api";
+import { useCompanyConfiguration } from "../lib/companyConfiguration";
 import { statusBadgeClass } from "../lib/statusBadge";
 import { IntegrationHelp } from "../components/IntegrationHelp";
 
@@ -31,11 +30,12 @@ function whatsappStatusNote(wa: any) {
 }
 
 export function IntegrationsPage() {
-  const esfEnabled = useEsfEnabled();
+  const { api, managed, href, me: configurationMe } = useCompanyConfiguration();
+  const esfEnabled = configurationMe?.serviceFeatures?.esf === true;
   const uiText = useUiText();
   const location = useLocation();
   const navigate = useNavigate();
-  const { me } = useSession();
+  const me = configurationMe;
   const aiManagerAllowed = Boolean(me?.billing?.entitlements?.AI_MANAGER);
   const aiManagerTrial = aiManagerAllowed && me?.billing?.planCode === "BASQAR_FREE";
   const [editingWhatsApp, setEditingWhatsApp] = useState(false);
@@ -207,7 +207,7 @@ export function IntegrationsPage() {
         {setup?.whatsapp?.warning ? <div className="banner warn">{uiMessage(setup.whatsapp.warning)}</div> : null}
         <p className="muted">{whatsappStatusNote(setup?.whatsapp)}</p>
         <p className="muted">{aiManagerAllowed ? uiText("Задайте цель, базу знаний и правила ответов в настройках ИИ-менеджера.") : uiText("WhatsApp доступен для переписки с клиентами. ИИ-менеджер не включён в ваш тариф.")}</p>
-        {aiManagerAllowed && me?.capabilities?.aiSettings && <div className="actions"><Link to="/settings/ai-manager">{uiText("Знания и цель ИИ")}</Link><Link to="/settings/ai-automation">{uiText("Кому и когда отвечать")}</Link></div>}
+        {aiManagerAllowed && (managed || me?.capabilities?.aiSettings) && <div className="actions"><Link to={href("/settings/ai-manager")}>{uiText("Знания и цель ИИ")}</Link><Link to={href("/settings/ai-automation")}>{uiText("Кому и когда отвечать")}</Link></div>}
         <p className="integ-status-line">
           {uiText("Статус подключения")}<span className={setup?.whatsapp?.reachable ? "badge ok" : setup?.whatsapp?.configured ? "badge warn" : "badge"}>
             {setup?.whatsapp?.reachable ? uiText("Работает") : setup?.whatsapp?.configured ? uiText("Ошибка проверки") : uiText("Не подключён")}
@@ -358,6 +358,7 @@ export function IntegrationsPage() {
         </IntegrationDisclosure>
         <IntegrationDisclosure id="website-chat" icon="form" title={uiText("Чат на сайте")} description={uiText("ИИ-консультант и сотрудники прямо на вашем сайте")} {...catalogSummary("WEBSITE_CHAT")}><WebsiteChatPanel onChange={refresh} /></IntegrationDisclosure>
         <IntegrationDisclosure id="website" icon="form" title={uiText("Форма сайта")} description={uiText("Заявки с вашего сайта в одном месте")} {...catalogSummary("WEBSITE_FORM")}>
+          {managed ? <Link className="btn" to={href("/integrations/forms")}>{uiText("Настроить подключение")}</Link> : <>
           {leadDetails("WEBSITE_FORM")}
       {setup?.form?.connected && submitUrl ? (
         <div className="panel">
@@ -448,6 +449,7 @@ export function IntegrationsPage() {
         </div>
       ) : null}
 
+          </>}
         </IntegrationDisclosure>
         {esfEnabled ? <IntegrationDisclosure id="esf" icon="esf" title={uiText("ИС ЭСФ")} description={uiText("Электронные счета-фактуры и ЭЦП")} {...esfSummary}>
       <h3 className="integ-section-title">{uiText("Документы и ИС ЭСФ")}</h3>
@@ -458,7 +460,7 @@ export function IntegrationsPage() {
             <span className="badge warn">NCALayer</span>
           </div>
           <p className="muted">{uiText("Подключение кабинета через ЭЦП на этом компьютере. PIN ключа на сервер не передаётся.")}</p>
-          <Link className="btn" to="/integrations/esf">
+          <Link className="btn" to={href("/integrations/esf")}>
             {uiText("Открыть ИС ЭСФ")}</Link>
           <IntegrationHelp kind="esf" />
         </div>
@@ -481,11 +483,11 @@ export function IntegrationsPage() {
           <TikTokConnectionsPanel onChange={refresh} />
         </IntegrationDisclosure>
         <IntegrationDisclosure id="webhook" icon="webhook" title="Webhook / API" description={uiText("Приём заявок из других сервисов")} {...catalogSummary("WEBHOOK_API")}>
-          {leadDetails("WEBHOOK_API")}
+          {managed ? <Link className="btn" to={href("/integrations/webhook")}>{uiText("Настроить подключение")}</Link> : leadDetails("WEBHOOK_API")}
         </IntegrationDisclosure>
-        <IntegrationDisclosure id="notifications" icon="notification" title={uiText("Telegram сотрудника")} description={uiText("Личные уведомления о работе")} {...summary(catalog?.notifications?.employeeTelegram)}>
+        {!managed && <IntegrationDisclosure id="notifications" icon="notification" title={uiText("Telegram сотрудника")} description={uiText("Личные уведомления о работе")} {...summary(catalog?.notifications?.employeeTelegram)}>
           <EmployeeTelegramPanel onChange={refresh} />
-        </IntegrationDisclosure>
+        </IntegrationDisclosure>}
       </div>
     </section>
   );

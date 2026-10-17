@@ -102,10 +102,12 @@ export function FormConnectionWizard({
   item,
   companies,
   lockedTenantId,
+  onSaved,
 }: {
   item: CatalogItem;
   companies: CompanyOption[];
   lockedTenantId?: string;
+  onSaved?: () => Promise<void>;
 }) {
   const uiText = useUiText();
   const [tenantId, setTenantId] = useState(lockedTenantId || "");
@@ -204,6 +206,7 @@ export function FormConnectionWizard({
       notifySaved(uiText("Подключение создано"));
       setCreatingNew(false);
       await loadCompany(tenantId, result.id);
+      await onSaved?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : uiText("Не удалось создать подключение"));
     } finally {

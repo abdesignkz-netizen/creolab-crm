@@ -1,3 +1,4 @@
+import { routeControlWhatsApp } from "./controlChatService.ts";
 import { enqueueConversationContext } from "./conversationContextQueue.ts";
 import { createHash } from "node:crypto";
 import type { PrismaClient, Prisma } from "@creolab/db";
@@ -11,6 +12,7 @@ export async function recordExternalMessage(prisma: PrismaClient, integrationId:
   name: string; email?: string; phone?: string; aliases?: string[]; text: string; at: Date; raw: Prisma.InputJsonValue;
   attachments?: Array<{ fileName: string; mimeType: string; buffer: Buffer }>;
 }) {
+  if (input.channel === "whatsapp" && await routeControlWhatsApp(prisma, integrationId, input)) return { control: true };
   // Check outside the transaction: readiness uses the shared runtime settings reader.
   // An opt-in awaiting administrator setup must not put new chats under an unavailable AI.
   const aiIntegration = input.channel !== "email"

@@ -4,7 +4,7 @@ import { connectEsfAuthTicket } from "../lib/signing/esfConnect";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { sanitizeEsfSignerPublicMeta } from "@creolab/contracts";
-import { api } from "../lib/api";
+import { useCompanyConfiguration } from "../lib/companyConfiguration";
 import { createEsfNcaLayerClient, ESF_MODULE_REQUIRED_MESSAGE } from "../lib/signing/esfNcaLayerClient";
 import { signPlainDataPemFingerprint, verifyFrozenAvrPayload } from "../lib/signing/avrPocPreflight";
 import { createNcalayerClient, NcalayerError } from "../lib/signing/ncalayerClient";
@@ -47,6 +47,7 @@ function statusClass(status: string) {
 }
 
 export function EsfIntegrationPage() {
+  const { api, managed, href } = useCompanyConfiguration();
   const uiText = useUiText();
   const [data, setData] = useState<ConnectionPayload | null>(null);
   const [error, setError] = useState("");
@@ -125,7 +126,7 @@ export function EsfIntegrationPage() {
     setError("");
     try {
       if (data?.system.provider === "live") {
-        await connectEsfAuthTicket(cabinetUsername, cabinetPassword);
+        await connectEsfAuthTicket(cabinetUsername, cabinetPassword, api);
       } else {
       const cert = await obtainAuthPublic(reuse);
       await api.esfConnect({
@@ -194,7 +195,7 @@ export function EsfIntegrationPage() {
       <div className="page-head">
         <div>
           <p className="muted">
-            <Link to="/integrations">{uiText("Интеграции")}</Link> {" "}{uiText("→ ИС ЭСФ")}</p>
+            <Link to={href("/integrations")}>{uiText("Интеграции")}</Link> {" "}{uiText("→ ИС ЭСФ")}</p>
           <h2>{uiText("ИС ЭСФ")}</h2>
         </div>
       </div>
@@ -290,10 +291,10 @@ export function EsfIntegrationPage() {
           )}
         </div>
         <p className="muted" style={{ marginTop: 12 }}>
-          {uiText("БИН компании задаётся в")}{" "}<Link to="/settings">{uiText("реквизитах")}</Link>{uiText(". PIN ключа вводится только в NCALayer на этом компьютере.")}</p>
+          {uiText("БИН компании задаётся в")}{" "}<Link to={href("/settings")}>{uiText("реквизитах")}</Link>{uiText(". PIN ключа вводится только в NCALayer на этом компьютере.")}</p>
       </div>
 
-      {import.meta.env.DEV ? (
+      {import.meta.env.DEV && !managed ? (
         <div className="panel" style={{ marginTop: 16 }}>
           <h3>{uiText("DEV: модуль ИС ЭСФ")}</h3>
           <p>Environment: {data?.system.esfEnv.toUpperCase() || "—"}<br />Endpoint host: {data?.system.endpointHost || "—"}</p>

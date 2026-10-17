@@ -3,6 +3,8 @@ import type { Permission, Role } from "@creolab/contracts";
 import { can as canAccess } from "./access.ts";
 
 export type AuthContext = {
+  /** Request-scoped configuration access. Never a company membership or impersonation. */
+  configurationTenant?: { tenantId: string; tenant: NonNullable<AuthContext["activeMembership"]>["tenant"] };
   user: {
     id: string;
     email: string;

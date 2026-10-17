@@ -1,3 +1,5 @@
+import { deliverControlChatReplies } from "./controlChatDelivery.ts";
+import { processControlChatRequests } from "./controlChatService.ts";
 import { randomUUID, createHash, createHmac, createDecipheriv, timingSafeEqual } from "node:crypto";
 import type { PrismaClient, Prisma } from "@creolab/db";
 import makeWASocket, { BufferJSON, DisconnectReason, initAuthCreds, proto, jidNormalizedUser, normalizeMessageContent, getMediaKeys, type AuthenticationState, type WASocket, type WAMessage, type Contact } from "@whiskeysockets/baileys";
@@ -197,7 +199,9 @@ export function startWhatsAppQrRuntime(prisma: PrismaClient, socketFactory = mak
         const jobId = `in:${id}:${waDigest(`${message.key.remoteJid}:${message.key.id}`)}`;
         await prisma.$transaction(async tx => {
           await guardLease(tx, id, owner);
-          await tx.$executeRaw`INSERT INTO "WhatsAppQrJob" (id, "integrationId", kind, "encryptedPayload") VALUES (${jobId}, ${id}, 'inbound', ${encode(message)}) ON CONFLICT (id) DO NOTHING`;
+          // Protobuf toJSON drops Baileys' extra key fields such as remoteJidAlt.
+          // Keep the authenticated transport key while preserving media encoding.
+          await tx.$executeRaw`INSERT INTO "WhatsAppQrJob" (id, "integrationId", kind, "encryptedPayload") VALUES (${jobId}, ${id}, 'inbound', ${encode({ ...message, key: { ...message.key } })}) ON CONFLICT (id) DO NOTHING`;
         });
       }
     }));
@@ -243,8 +247,14 @@ export function startWhatsAppQrRuntime(prisma: PrismaClient, socketFactory = mak
             // keys/hashes into bare base64 strings. Restore the protobuf types,
             // including for jobs saved before this fix, before verifying media.
             if (job.kind === "inbound") {
-              const message = proto.WebMessageInfo.fromObject(decode(job.encryptedPayload));
-              if (message.key) await receiveQrMessage(prisma, id, local.socket, { ...message, key: message.key });
+              const stored = decode(job.encryptedPayload);
+              const message = proto.WebMessageInfo.fromObject(stored);
+              // Baileys adds the verified PN alias outside the protobuf schema.
+              // Preserve it when restoring media types, or LID-only messages lose
+              // the sender's phone and cannot be routed to their private Control.
+              if (message.key) await receiveQrMessage(prisma, id, local.socket, { ...message, key: {
+                ...message.key, remoteJidAlt: typeof stored.key?.remoteJidAlt === "string" ? stored.key.remoteJidAlt : undefined,
+              } });
             }
             else {
               await prisma.$executeRaw`UPDATE "WhatsAppQrJob" SET state = 'sending' WHERE id = ${job.id}`;
@@ -268,6 +278,8 @@ export function startWhatsAppQrRuntime(prisma: PrismaClient, socketFactory = mak
         }
       }
       for (const [id, local] of sessions) if (local.open && !local.stop) {
+        await processControlChatRequests(prisma, id);
+        await deliverControlChatReplies(prisma, { integrationId: id, socket: local.socket, checkLease: () => guardLease(prisma, id, owner) });
         await deliverControlNotifications(prisma, { integrationId: id, socket: local.socket, checkLease: () => guardLease(prisma, id, owner) });
       }
       const rows = await prisma.$queryRaw<Array<{ integrationId: string }>>`SELECT s."integrationId" FROM "WhatsAppQrSession" s JOIN "Integration" i ON i.id = s."integrationId" JOIN "Tenant" t ON t.id = i."tenantId"

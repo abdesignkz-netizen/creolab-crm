@@ -12,7 +12,7 @@ import { sha256, randomToken, safeEqual } from "../lib/hash.ts";
 import { decryptSecret, encryptSecret } from "../lib/secretBox.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { can } from "../lib/types.ts";
-import { requireIntegrationsAccess, requireNotManager, requireTenant } from "../lib/access.ts";
+import { requireIntegrationsAccess, requireNotManager, requireConfigurationTenant as requireTenant } from "../lib/access.ts";
 import { enqueueConversationContext } from "./conversationContextQueue.ts";
 import { analyzeAndApplyConversation } from "./conversationContextApplyService.ts";
 import {
@@ -1468,7 +1468,7 @@ export async function integrationSetup(prisma: PrismaClient, auth: AuthContext) 
         }
       : { connected: false },
     telegram: {
-      employee: await employeeTelegramStatus(prisma, auth),
+      employee: auth.configurationTenant ? null : await employeeTelegramStatus(prisma, auth),
     },
   };
 }

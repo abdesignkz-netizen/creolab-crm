@@ -1,3 +1,4 @@
+import { processControlChat } from "./controlChatDelivery.ts";
 import { processEmployeeTelegramQueue } from "./employeeTelegramService.ts";
 import { processControlNotifications } from "./controlNotificationService.ts";
 import { logServerError } from "../lib/redact.ts";
@@ -271,7 +272,10 @@ export function startBackgroundJobs(prisma: PrismaClient, options: { keepAlive?:
   const tick = () => {
     if (!controlNoticesRunning) {
       controlNoticesRunning = true;
-      void processControlNotifications(prisma).catch(error => logServerError(error, "background:control notifications"))
+      void Promise.all([
+        processControlNotifications(prisma).catch(error => logServerError(error, "background:control notifications")),
+        processControlChat(prisma).catch(error => logServerError(error, "background:control chat")),
+      ])
         .finally(() => { controlNoticesRunning = false; });
     }
     if (!telegramRunning) {

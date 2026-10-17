@@ -2,10 +2,11 @@ import { ChannelAiControl } from "../components/ChannelAiControl";
 import { InlineFeedback } from "../components/InlineFeedback";
 import { uiText, useUiText, localizeUiOptions } from "../lib/uiText";
 import { useEffect, useState } from "react";
-import { api } from "../lib/api";
+import { useCompanyConfiguration } from "../lib/companyConfiguration";
 import { IntegrationHelp } from "../components/IntegrationHelp";
 type Row = { id:string;kind:string;connected:boolean;status:string;lastError:string|null;settings:{label?:string;callbackUrl?:string;loginMode?:string} };
 export function MetaConnectionsPanel({ onChange, kind }: { onChange: () => void; kind?: string }){
+  const { api } = useCompanyConfiguration();
   const uiText = useUiText();
   const [rows,setRows]=useState<Row[]>([]),[busy,setBusy]=useState(false),[error,setError]=useState(""),[note,setNote]=useState("");
   const [form,setForm]=useState({kind:kind || "instagram_direct",appId:"",pageId:"",accessToken:"",appSecret:"",apiVersion:"v25.0"});

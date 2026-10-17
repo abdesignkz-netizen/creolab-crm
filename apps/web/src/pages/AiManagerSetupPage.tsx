@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { AI_MANAGER_ROLES, aiManagerDraftKey, aiManagerDraftSchema, compileAiManagerDraft, type AiManagerDraft, type AiManagerRole, type AiSetupState, type AiSetupIssue } from "@creolab/contracts";
-import { api } from "../lib/api";
-import { useLocale, useSession } from "../lib/session";
+import { useCompanyConfiguration } from "../lib/companyConfiguration";
+import { useLocale } from "../lib/session";
 import { InlineFeedback } from "../components/InlineFeedback";
 import { AiGoalPicker, AiSetupQualityChecks } from "../components/AiManagerSetupChecks";
 import { notifySaved } from "../components/SaveNotice";
@@ -22,7 +22,8 @@ function Question({ field, value, onChange }: { field: Field; value: string; onC
 }
 
 export function AiManagerSetupPage() {
-  const locale = useLocale(); const { me } = useSession();
+  const { api, href, me: configurationMe } = useCompanyConfiguration();
+  const locale = useLocale(); const me = configurationMe;
   const text = (ru: string, kk: string, en: string) => locale === "kk" ? kk : locale === "en" ? en : ru;
   const [state, setState] = useState<AiSetupState | null>(null), [draft, setDraft] = useState<AiManagerDraft | null>(null);
   const [step, setStep] = useState(0), [error, setError] = useState(""), [busy, setBusy] = useState(false), [testing, setTesting] = useState(false);
@@ -136,7 +137,7 @@ export function AiManagerSetupPage() {
   const selectedRoles = [draft.primaryRole, ...draft.additionalRoles];
   const canTest = allowed && (chatSource === "published" ? state.hasPublished : !dirty && !blockers.length) && !busy && !testing && chat.length < 18 && !handedOff;
   return <section className="ai-setup">
-    <header className="ai-setup-heading"><div><Link to="/settings/ai-automation" className="page-kicker">← {text("Управление ИИ", "ЖИ басқару", "AI controls")}</Link><h2>{text("Обучите ИИ вашему бизнесу", "ЖИ-ге бизнесіңізді таныстырыңыз", "Teach AI about your business")}</h2><p>{text("Ответьте на вопросы — BasQar соберёт инструкции и базу знаний. Можно заполнить постепенно.", "Сұрақтарға жауап беріңіз — BasQar нұсқаулық пен білім базасын құрастырады. Біртіндеп толтыруға болады.", "Answer the questions and BasQar will assemble instructions and knowledge. Work at your own pace.")}</p></div><span className="badge">{dirty || state.hasDraftChanges ? text("Черновик", "Жоба", "Draft") : text("Опубликовано", "Жарияланды", "Published")}</span></header>
+    <header className="ai-setup-heading"><div><Link to={href("/settings/ai-automation")} className="page-kicker">← {text("Управление ИИ", "ЖИ басқару", "AI controls")}</Link><h2>{text("Обучите ИИ вашему бизнесу", "ЖИ-ге бизнесіңізді таныстырыңыз", "Teach AI about your business")}</h2><p>{text("Ответьте на вопросы — BasQar соберёт инструкции и базу знаний. Можно заполнить постепенно.", "Сұрақтарға жауап беріңіз — BasQar нұсқаулық пен білім базасын құрастырады. Біртіндеп толтыруға болады.", "Answer the questions and BasQar will assemble instructions and knowledge. Work at your own pace.")}</p></div><span className="badge">{dirty || state.hasDraftChanges ? text("Черновик", "Жоба", "Draft") : text("Опубликовано", "Жарияланды", "Published")}</span></header>
     {error && <InlineFeedback className="error">{error}</InlineFeedback>}
     {state.hasPublished && <div className="ai-setup-guidance"><b>{text("Как ИИ отвечает сейчас?", "ЖИ қазір қалай жауап береді?", "How does AI reply now?")}</b><p>{text("Проверьте действующие инструкции и знания, даже если новая анкета ещё не заполнена. Тест не меняет настройки и не отправляет сообщения клиентам.", "Жаңа анкета толмаса да, қолданыстағы нұсқаулық пен білімді тексеріңіз. Сынақ баптауларды өзгертпейді, клиентке хабар жібермейді.", "Test the live instructions and knowledge, even before completing the new questionnaire. This does not change settings or message customers.")}</p><button className="btn secondary" disabled={busy || testing} onClick={() => { setChatSource("published"); setChat([]); setMessage(""); setHandedOff(false); setTestPanelOpen(true); go(7); requestAnimationFrame(() => chatRef.current?.scrollIntoView({ block: "center" })); }}>{text("Проверить действующего ИИ", "Қолданыстағы ЖИ-ді тексеру", "Test live AI")}</button></div>}
     {recovery && <div className="ai-setup-guidance" role="status"><b>{text("Найдены несохранённые ответы в этой вкладке", "Осы қойындыда сақталмаған жауаптар табылды", "Unsaved answers found in this tab")}</b><p>{recovery.revision !== state.revision ? text("Серверный черновик уже изменился. Восстановите ответы только если хотите заменить его при следующем сохранении.", "Сервердегі жоба өзгерген. Келесі сақтауда ауыстырғыңыз келсе ғана жауаптарды қалпына келтіріңіз.", "The server draft has changed. Restore only if you intend to replace it on your next save.") : text("Можно восстановить заполненную анкету. Ответы клиентам пока не изменятся.", "Толтырылған анкетаны қалпына келтіруге болады. Клиент жауаптары әзірше өзгермейді.", "Recover your questionnaire. Customer replies will stay unchanged until publication.")}</p><div className="actions"><button className="btn" onClick={() => { setDraft(recovery.draft); setRecovery(null); setRecovered(true); }}>{text("Восстановить ответы", "Жауаптарды қалпына келтіру", "Recover answers")}</button><button className="btn secondary" onClick={clearRecovery}>{text("Удалить копию", "Көшірмені жою", "Discard copy")}</button></div></div>}

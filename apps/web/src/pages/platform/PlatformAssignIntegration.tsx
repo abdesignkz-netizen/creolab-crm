@@ -29,26 +29,30 @@ export function AssignIntegrationForm({
   item,
   companies,
   lockedTenantId,
+  onSaved,
 }: {
   item: CatalogItem;
   companies: CompanyOption[];
   lockedTenantId?: string;
+  onSaved?: () => Promise<void>;
 }) {
   if (!item.connectable) return null;
   if (item.type === "form") {
-    return <FormConnectionWizard item={item} companies={companies} lockedTenantId={lockedTenantId} />;
+    return <FormConnectionWizard item={item} companies={companies} lockedTenantId={lockedTenantId} onSaved={onSaved} />;
   }
-  return <ProviderAssignForm item={item} companies={companies} lockedTenantId={lockedTenantId} />;
+  return <ProviderAssignForm item={item} companies={companies} lockedTenantId={lockedTenantId} onSaved={onSaved} />;
 }
 
 function ProviderAssignForm({
   item,
   companies,
   lockedTenantId,
+  onSaved,
 }: {
   item: CatalogItem;
   companies: CompanyOption[];
   lockedTenantId?: string;
+  onSaved?: () => Promise<void>;
 }) {
   const uiText = useUiText();
   const [tenantId, setTenantId] = useState(lockedTenantId || "");
@@ -111,6 +115,7 @@ function ProviderAssignForm({
       setExisting(result.id ? result : existing);
       const refreshed = (await api.adminCompanyIntegrations(tenantId)) as any;
       setExisting((refreshed.items || []).find((row: any) => row.type === item.type) || result);
+      await onSaved?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : uiText("Не удалось подключить"));
     } finally {
