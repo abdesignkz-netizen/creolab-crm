@@ -118,6 +118,10 @@ describe("CRM HTTP domain", () => {
     const a = await first.json();
     const b = await second.json();
     assert.equal(a.receipt, b.receipt);
+    const inquiry = await prisma.inquiry.findFirstOrThrow({ where: { inboundEventId: a.receipt } });
+    const jobs = await prisma.outboxEvent.findMany({ where: { entityId: inquiry.id, type: "inquiry.automation" } });
+    assert.equal(jobs.length, 1, "the first acknowledgement includes a durable job; a retry cannot enqueue another");
+    assert.equal(jobs[0].processedAt, null, "provider callbacks do not wait for AI execution");
   });
 
   it("A07: один номер в двух компаниях не сливается", async () => {
@@ -161,6 +165,8 @@ describe("CRM HTTP domain", () => {
     assert.equal(response.status, 202);
     const result = await response.json();
     assert.equal(result.disposition, "inquiry");
+    const job = await prisma.outboxEvent.findFirstOrThrow({ where: { entityId: result.inquiry_id, type: "inquiry.automation" } });
+    assert.equal(job.processedAt, null);
   });
 
   it("A09: webhook без телефона -> IncompleteIntake", async () => {

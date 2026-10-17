@@ -704,13 +704,12 @@ export async function submitPublicForm(
       data: { processedAt: new Date(), status: "PROCESSED" },
     });
     await touchIntegrationSuccess(tx, form.integrationId);
+    // Persist the job with the lead: acknowledging a webhook must never race
+    // an unawaited enqueue or leave a deduplicated lead without automation.
+    const { enqueueInquiryAutomation } = await import("./inquiryAutomationQueue.ts");
+    await enqueueInquiryAutomation(tx as unknown as PrismaClient, form.tenantId, inquiry.id, { inline: false });
     return { receipt: inbound.id, inquiryId: inquiry.id, duplicate: false };
   });
-
-  if (result.inquiryId && !result.duplicate) {
-    const { enqueueInquiryAutomation } = await import("./inquiryAutomationQueue.ts");
-    void enqueueInquiryAutomation(prisma, form.tenantId, result.inquiryId);
-  }
   return result;
 }
 
@@ -925,13 +924,10 @@ export async function processTrustedIntegrationLead(
       },
     });
     await touchIntegrationSuccess(tx, integrationId);
+    const { enqueueInquiryAutomation } = await import("./inquiryAutomationQueue.ts");
+    await enqueueInquiryAutomation(tx as unknown as PrismaClient, integration.tenantId, inquiry.id, { inline: false });
     return { disposition: "inquiry", inquiry_id: inquiry.id, event_id: inbound.id, tenantId: integration.tenantId };
   });
-
-  if (result.disposition === "inquiry" && "inquiry_id" in result && result.inquiry_id) {
-    const { enqueueInquiryAutomation } = await import("./inquiryAutomationQueue.ts");
-    void enqueueInquiryAutomation(prisma, result.tenantId, result.inquiry_id);
-  }
   return result;
 }
 

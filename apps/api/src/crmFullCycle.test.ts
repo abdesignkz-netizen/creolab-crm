@@ -55,6 +55,7 @@ before(async () => {
   prisma = await createPrismaClient();
   const { seedDatabase } = await import("../../../packages/db/src/seed.ts");
   await seedDatabase();
+  await (await import("./services/runtimeSettings.ts")).savePlatformSettings(prisma, { features: { esf: true } });
   server = createApp(prisma).listen(0, "127.0.0.1");
   await new Promise<void>((resolve) => server.once("listening", resolve));
   const address = server.address();

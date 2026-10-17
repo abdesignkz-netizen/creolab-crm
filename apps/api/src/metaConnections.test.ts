@@ -52,6 +52,9 @@ describe("Meta company channels",()=>{
     const body={object:"page",entry:[{id:"10001",changes:[{field:"leadgen",value:{leadgen_id:"40001",page_id:"10001",form_id:"30001"}}]}]};
     let res=await webhook(leadsId,body);assert.equal(res.status,200,await res.text());res=await webhook(leadsId,body);assert.equal(res.status,200);
     assert.equal(await prisma.inquiry.count({where:{integrationId:leadsId}}),1);assert.equal(await prisma.inquiry.count({where:{integrationId:instagramId}}),0);
+    const inquiry=await prisma.inquiry.findFirstOrThrow({where:{integrationId:leadsId}});
+    const jobs=await prisma.outboxEvent.findMany({where:{entityId:inquiry.id,type:"inquiry.automation"}});
+    assert.equal(jobs.length,1);assert.equal(jobs[0].processedAt,null);
   });
   it("disconnect stops reception without removing customer history",async()=>{const count=await prisma.message.count({where:{conversationId}});assert.equal((await post(`/api/v1/integrations/meta/${instagramId}/disconnect`)).status,200);assert.equal((await webhook(instagramId,dm("after-disconnect"))).status,403);assert.equal(await prisma.message.count({where:{conversationId}}),count);});
 });

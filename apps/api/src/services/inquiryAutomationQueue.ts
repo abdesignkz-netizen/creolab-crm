@@ -1,5 +1,7 @@
 import type { PrismaClient } from "@creolab/db";
 import { processNewRequestAutomation } from "./requestAutomationService.ts";
+import { claimOutboxEvent } from "./outboxLease.ts";
+import { logServerError } from "../lib/redact.ts";
 
 // A later switch to AUTO must not replay requests already assigned to staff.
 const REPROCESSABLE_STATUSES = new Set(["failed"]);
@@ -43,7 +45,7 @@ export async function enqueueInquiryAutomation(
   inquiryId: string,
   options: { inline?: boolean } = {},
 ) {
-  await prisma.outboxEvent.create({
+  const event = await prisma.outboxEvent.create({
     data: {
       tenantId,
       type: "inquiry.automation",
@@ -55,8 +57,15 @@ export async function enqueueInquiryAutomation(
 
   const inline = options.inline ?? process.env.CRM_INLINE_AUTOMATION !== "0";
   if (inline) {
-    await processInquiryAutomationJob(prisma, { inquiryId, tenantId }).catch((err) => {
-      console.error("inquiry.automation inline", err);
-    });
+    const lease = await claimOutboxEvent(prisma, event.id);
+    if (!lease) return;
+    try {
+      await processInquiryAutomationJob(prisma, { inquiryId, tenantId });
+    } catch (error) {
+      logServerError(error, "inquiry.automation inline");
+      await lease.finish({ attempts: { increment: 1 }, availableAt: new Date(Date.now() + 5000) });
+      return;
+    }
+    await lease.finish({ processedAt: new Date(), attempts: { increment: 1 } });
   }
 }

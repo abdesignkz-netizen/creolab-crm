@@ -373,6 +373,7 @@ describe("auth security", () => {
   });
 
   it("rewrites legacy plaintext ESF sessionId to AES-GCM and will not reuse an expired session", async () => {
+    await (await import("./services/runtimeSettings.ts")).savePlatformSettings(prisma, { features: { esf: true } });
     const { getEsfConnectionRow, getUsableEsfSession } = await import("./services/esfConnectionService.ts");
     const { readEsfConfig } = await import("./integrations/esf/EsfConfig.ts");
     const tenant = await prisma.tenant.findFirstOrThrow({ where: { slug: "creolab" } });

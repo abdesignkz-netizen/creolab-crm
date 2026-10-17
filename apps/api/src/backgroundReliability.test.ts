@@ -15,7 +15,13 @@ it("failed outbox work remains pending and does not block the next event", async
   ];
   const prisma = {
     inquiry: { findFirst: async () => { if (fail) throw new Error("transient DB failure"); return null; } },
-    outboxEvent: { findMany: async () => events, update: async (input: any) => { updates.push(input); return input; } },
+    outboxEvent: {
+      findMany: async () => events,
+      updateMany: async (input: any) => {
+        if (input.data.attempts) updates.push(input);
+        return { count: 1 };
+      },
+    },
   } as unknown as PrismaClient;
   mock.method(console, "error", () => {});
   await processOutbox(prisma);

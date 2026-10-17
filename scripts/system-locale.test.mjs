@@ -100,26 +100,29 @@ test('WhatsApp connection choices and setup instructions render in Russian, Kaza
   }
 });
 
-test('WhatsApp AI setup can be requested and shows localized administrator guidance without claiming readiness', async () => {
+test('WhatsApp AI setup links owners to company settings without claiming model readiness', async () => {
   const { render } = await bundle(`
     import { renderToStaticMarkup } from 'react-dom/server';
+    import { MemoryRouter } from 'react-router-dom';
     import { WhatsAppAiControls } from './components/WhatsAppAiControls';
     import { SessionContext, emptyCaps } from './lib/session';
-    export const render = (locale, connection) => renderToStaticMarkup(<SessionContext.Provider value={{me:{user:{locale}},caps:emptyCaps}}><WhatsAppAiControls connection={connection} busy={false} onToggle={()=>{}} /></SessionContext.Provider>);
+    export const render = (locale, connection, canSetup = true) => renderToStaticMarkup(<SessionContext.Provider value={{me:{user:{locale},capabilities:{aiSettings:canSetup}},caps:emptyCaps}}><MemoryRouter><WhatsAppAiControls connection={connection} busy={false} onToggle={()=>{}} /></MemoryRouter></SessionContext.Provider>);
   `);
   const base = { status:'CONNECTED', aiEnabled:false, aiAvailable:false, aiUnavailableReason:'ai_model_missing' };
   for (const locale of ['ru','kk','en']) {
     const before = render(locale, base);
     assert.doesNotMatch(before, /disabled=""/);
     const pending = render(locale, {...base, aiEnabled:true});
-    assert.match(pending, /href="https:\/\/wa.me\/77067301301"/);
-    assert.match(pending, /\+7 706 730 13 01/);
+    assert.match(pending, /href="\/settings\/ai-manager"/);
+    assert.match(pending, /href="\/settings\/ai-automation"/);
     assert.match(pending, /role="status"/);
-    assert.match(pending, locale === 'ru' ? /Ожидают настройки администратором/ : locale === 'kk' ? /Әкімшінің баптауын күтуде/ : /Awaiting administrator setup/);
+    assert.match(pending, locale === 'ru' ? /Ожидают настройки/ : locale === 'kk' ? /Баптауды күтуде/ : /Awaiting setup/);
     const ready = render(locale, {...base, aiEnabled:true, aiAvailable:true, aiUnavailableReason:null});
-    assert.match(ready, /wa.me\/77067301301/);
+    assert.match(ready, /href="\/settings\/ai-manager"/);
+    assert.doesNotMatch(ready, /role="status"/);
     assert.match(ready, locale === 'ru' ? /<strong>Включены/ : locale === 'kk' ? /<strong>Қосылған/ : /<strong>Enabled/);
   }
+  assert.doesNotMatch(render('ru', base, false), /href="\/settings\/ai-manager"/);
   for (const reason of ['feature_required','tenant_inactive']) assert.match(render('ru', {...base, aiUnavailableReason:reason}), /disabled=""/);
   assert.match(render('ru', {...base, status:'RECONNECT_REQUIRED'}), /disabled=""/);
   assert.doesNotMatch(render('ru', {...base, aiEnabled:true, status:'RECONNECT_REQUIRED'}), /disabled=""/);

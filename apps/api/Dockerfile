@@ -17,7 +17,7 @@ RUN pip install --no-cache-dir torch==2.9.1 --index-url https://download.pytorch
     && pip install --no-cache-dir -r /build/speech-build-requirements.txt \
     && python /build/install-speech-model.py /model kaz-rus-turbo-q5
 
-FROM node:24-bookworm-slim
+FROM node:24-bookworm-slim AS runtime
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libreoffice-writer fonts-liberation fonts-dejavu-core openssl ca-certificates default-jdk-headless python3-venv libgomp1 \
     && rm -rf /var/lib/apt/lists/*
@@ -41,13 +41,19 @@ RUN mkdir -p apps/api/kalkan-verify/build \
 # workspace graph: Expo/React Native and mobile build tools are not server dependencies.
 # Root dev dependencies generate test fixtures and must stay out of this image.
 RUN npm ci --include=dev --include-workspace-root=false \
-        --workspace=@creolab/api --workspace=@creolab/web \
+        --workspace=@creolab/api --workspace=@creolab/web --workspace=@creolab/worker \
         --workspace=@creolab/db --workspace=@creolab/contracts --workspace=@creolab/integrations \
     && npm run generate --workspace=@creolab/db \
     && npm run build --workspace=@creolab/web \
     && npm prune --omit=dev --ignore-scripts --include-workspace-root=false \
-        --workspace=@creolab/api --workspace=@creolab/web \
+        --workspace=@creolab/api --workspace=@creolab/web --workspace=@creolab/worker \
         --workspace=@creolab/db --workspace=@creolab/contracts --workspace=@creolab/integrations
 RUN node --experimental-strip-types scripts/check-word-runtime.mjs
 ENV NODE_ENV=production
+
+FROM runtime AS worker
+CMD ["node", "--experimental-strip-types", "apps/worker/src/index.ts"]
+
+# Keep API last: Render uses the default target from this Dockerfile.
+FROM runtime AS api
 CMD ["node", "scripts/start-api-with-kalkan.mjs"]

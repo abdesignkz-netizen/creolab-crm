@@ -210,40 +210,17 @@ type PipelineStageRow = { systemKey: string; name: string; count: number; href: 
 
 function enrichPipelineStages(stages: PipelineStageRow[]) {
   const total = stages.reduce((sum, stage) => sum + stage.count, 0);
-  const enriched = stages.map((stage, index) => {
-    const next = stages[index + 1];
+  const enriched = stages.map((stage) => {
     return {
       ...stage,
       share: total > 0 ? Math.round((stage.count / total) * 100) : 0,
-      toNextRate: next && stage.count > 0 && next.count > 0 ? Math.round((next.count / stage.count) * 100) : null,
-      dropOff: next ? stage.count - next.count : null,
+      // These are current stage occupancies, not transitions of the same cohort.
+      // Their ratio/difference cannot measure conversion or lost customers.
+      toNextRate: null,
+      dropOff: null,
     };
   });
-  let biggestDrop: {
-    fromKey: string;
-    fromName: string;
-    toKey: string;
-    toName: string;
-    fromCount: number;
-    toCount: number;
-    lost: number;
-  } | null = null;
-  for (let i = 0; i < enriched.length - 1; i += 1) {
-    const lost = enriched[i].dropOff;
-    if (lost == null || lost <= 0 || enriched[i].count < 2) continue;
-    if (!biggestDrop || lost > biggestDrop.lost) {
-      biggestDrop = {
-        fromKey: enriched[i].systemKey,
-        fromName: enriched[i].name,
-        toKey: enriched[i + 1].systemKey,
-        toName: enriched[i + 1].name,
-        fromCount: enriched[i].count,
-        toCount: enriched[i + 1].count,
-        lost,
-      };
-    }
-  }
-  return { stages: enriched, biggestDrop };
+  return { stages: enriched, biggestDrop: null };
 }
 
 type SituationInsight = { text: string; href?: string; tone: "critical" | "attention" | "observe" };

@@ -139,6 +139,25 @@ describe("AI manager policy runtime", { concurrency: false }, () => {
     server?.close();
   });
 
+  it("separates legacy seller state from direct channel reply switches", async () => {
+    const legacy = await prisma.integration.create({ data: { tenantId, type: "whatsapp_seller", name: "Legacy status fixture", status: "active", connectionStatus: "CONNECTED",
+      channelConnections: { create: { channelType: "whatsapp", status: "active", autoReply: false } } } });
+    const direct = await prisma.integration.create({ data: { tenantId, type: "whatsapp_qr", name: "QR status fixture", status: "active", connectionStatus: "CONNECTED",
+      channelConnections: { create: { channelType: "whatsapp", status: "active", autoReply: true } } } });
+    try {
+      const { response, body } = await json("/api/v1/settings/ai-automation");
+      assert.equal(response.status, 200);
+      assert.ok(body.legacyChannels.some((row: { id: string }) => row.id === legacy.id));
+      assert.ok(!body.channels.some((row: { id: string }) => row.id === legacy.id));
+      assert.equal(body.channels.find((row: { id: string }) => row.id === direct.id)?.enabled, true);
+      const other = await json("/api/v1/settings/ai-automation", {}, otherCookie);
+      assert.ok(![...other.body.channels, ...other.body.legacyChannels].some((row: { id: string }) => row.id === legacy.id || row.id === direct.id));
+    } finally {
+      await prisma.channelConnection.deleteMany({ where: { integrationId: { in: [legacy.id, direct.id] } } });
+      await prisma.integration.deleteMany({ where: { id: { in: [legacy.id, direct.id] } } });
+    }
+  });
+
   it("saves handoff/follow-up/hours per company and does not touch the other tenant", async () => {
     const saved = await json("/api/v1/settings/ai-automation", {
       method: "PATCH",

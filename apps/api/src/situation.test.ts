@@ -3,6 +3,7 @@ import { after, before, describe, it } from "node:test";
 import { createPrismaClient } from "@creolab/db";
 import { createApp } from "./app.ts";
 import { encryptSecret } from "./lib/secretBox.ts";
+import { randomUUID } from "node:crypto";
 
 describe("Situation API", () => {
   let prisma: Awaited<ReturnType<typeof createPrismaClient>>;
@@ -353,7 +354,7 @@ describe("Situation API", () => {
       brief: string;
       result: { inquiries: number; deltas: { inquiries: number | null; inquiriesPct?: number | null } };
       current: { activeDeals: number; newInquiries?: number; inWorkInquiries?: number };
-      pipeline: { stages: Array<{ count: number }>; note: string };
+      pipeline: { stages: Array<{ count: number; toNextRate: number | null; dropOff: number | null }>; biggestDrop: unknown; note: string };
       insights?: unknown[];
       sources?: unknown[];
       team?: unknown[];
@@ -364,6 +365,8 @@ describe("Situation API", () => {
     assert.equal(typeof data.result.inquiries, "number");
     assert.equal(typeof data.current.activeDeals, "number");
     assert.ok(Array.isArray(data.pipeline.stages));
+    assert.equal(data.pipeline.biggestDrop, null, "Current stage counts cannot measure lost clients");
+    assert.ok(data.pipeline.stages.every(stage => stage.toNextRate === null && stage.dropOff === null));
     assert.ok(Array.isArray(data.insights));
     assert.ok(Array.isArray(data.sources));
     assert.ok(Array.isArray(data.team));
@@ -565,6 +568,15 @@ describe("Situation API", () => {
     assert.match(inquiriesBody.headline, /новых|обращен/i);
     assert.ok(inquiriesBody.links.some((link) => link.href.includes("/inquiries")));
 
+    const funnel = await fetch(`${base}/api/v1/situation/ask`, {
+      method: "POST", headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify({ text: "Где теряются клиенты?" }),
+    });
+    assert.equal(funnel.status, 200);
+    const funnelBody = await funnel.json();
+    assert.match(funnelBody.headline, /нужна история переходов/);
+    assert.ok(funnelBody.links.some((link: { href: string }) => link.href === "/stats"));
+
     const command = await fetch(`${base}/api/v1/situation/ask`, {
       method: "POST",
       headers: { "Content-Type": "application/json", cookie },
@@ -574,6 +586,21 @@ describe("Situation API", () => {
     const commandBody = (await command.json()) as { command: boolean; intent: string };
     assert.equal(commandBody.command, true);
     assert.equal(commandBody.intent, "command");
+  });
+  it("не считает новые открытые сделки потерянными из-за пустой следующей стадии", async () => {
+    const stage = await prisma.dealStage.findFirstOrThrow({ where: { tenantId, systemKey: "new" } });
+    const contact = await prisma.contact.findFirstOrThrow({ where: { tenantId } });
+    const ids = [randomUUID(), randomUUID()];
+    try {
+      await prisma.deal.createMany({ data: ids.map(id => ({ id, tenantId, stageId: stage.id, contactId: contact.id, title: "Synthetic open opportunity" })) });
+      const response = await fetch(`${base}/api/v1/situation/overview?scope=all`, { headers: { cookie } });
+      assert.equal(response.status, 200);
+      const overview = await response.json();
+      assert.ok(overview.pipeline.stages.find((row: { systemKey: string }) => row.systemKey === "new").count >= 2);
+      assert.equal(overview.pipeline.biggestDrop, null);
+      assert.ok(overview.pipeline.stages.every((row: { toNextRate: unknown; dropOff: unknown }) => row.toNextRate === null && row.dropOff === null));
+      assert.doesNotMatch(JSON.stringify(overview.insights), /Наибольшая потеря/);
+    } finally { await prisma.deal.deleteMany({ where: { id: { in: ids } } }); }
   });
   it("Kazakh profile localizes dashboard API, navigation and answers without translating customer data", async () => {
     await resetDemo();

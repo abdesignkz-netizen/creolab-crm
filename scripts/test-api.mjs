@@ -5,15 +5,19 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const scratch = mkdtempSync(join(tmpdir(), "creolab-tests-"));
 const requested = new Set(process.argv.slice(2).map(value => value.replace(/\.test\.ts$/, "")));
 function testFiles(dir) {
   return readdirSync(join(root, dir), { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name)).flatMap(entry =>
     entry.isDirectory() ? testFiles(join(dir, entry.name)) : entry.name.endsWith(".test.ts") ? [join(dir, entry.name)] : []);
 }
-const files = ["apps/api/src", "packages/contracts/src"].flatMap(testFiles)
+const available = ["apps/api/src", "packages/contracts/src"].flatMap(testFiles);
+const names = new Set(available.map(file => file.split("/").at(-1).replace(/\.test\.ts$/, "")));
+const unknown = [...requested].filter(name => !names.has(name));
+if (unknown.length) throw new Error(`Unknown test files: ${unknown.join(", ")}`);
+const files = available
   .filter(file => !requested.size || requested.has(file.split("/").at(-1).replace(/\.test\.ts$/, "")));
 if (!files.length) throw new Error("No matching test files");
+const scratch = mkdtempSync(join(tmpdir(), "creolab-tests-"));
 let failures = 0;
 const failedFiles = [];
 try {

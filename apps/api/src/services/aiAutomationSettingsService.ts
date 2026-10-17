@@ -3,6 +3,7 @@ import type { Prisma, PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { requireAiSettingsAccess } from "../lib/access.ts";
+import { aiChannelTypes } from "./channelDeliveryService.ts";
 import {
   applyModeToSettings,
   mergeAIAutomationIntoSettingsJson,
@@ -37,7 +38,9 @@ export async function getAIAutomationSettings(prisma: PrismaClient, auth: AuthCo
     const keys = Object.keys(tenant.workingHoursJson as object);
     if (keys.length) settings.workingHours = fromTenant;
   }
-  const channels = await prisma.channelConnection.findMany({ where: { tenantId: membership.tenantId, channelType: { in: ["whatsapp", "telegram", "instagram", "website"] } },
+  // Legacy seller connections do not use channel.autoReply; their runtime is
+  // separate. Listing that placeholder flag would falsely show AI as disabled.
+  const channels = await prisma.channelConnection.findMany({ where: { tenantId: membership.tenantId, integration: { type: { in: aiChannelTypes } } },
     select: { integrationId: true, status: true, autoReply: true, integration: { select: { name: true, type: true } } } });
   const legacyChannels = await prisma.integration.findMany({ where: { tenantId: membership.tenantId, type: "whatsapp_seller" },
     select: { id: true, name: true, status: true, connectionStatus: true } });

@@ -30,3 +30,4 @@ prisma/*.db
 
 # Installed offline speech weights (large generated artifacts).
 data/speech/
+__pycache__/

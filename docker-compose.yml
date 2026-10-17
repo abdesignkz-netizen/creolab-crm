@@ -24,6 +24,7 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
+    env_file: .env
     depends_on:
       postgres:
         condition: service_healthy
@@ -32,13 +33,18 @@ services:
       DATABASE_URL: postgresql://crm:crm@postgres:5432/creolab_crm
       REDIS_URL: redis://redis:6379
       API_PORT: 4100
+      STORAGE_DIR: /var/data/files
+    volumes:
+      - crm_files:/var/data/files
     ports:
       - "127.0.0.1:4100:4100"
 
   worker:
     build:
       context: .
-      dockerfile: apps/worker/Dockerfile
+      dockerfile: apps/api/Dockerfile
+      target: worker
+    env_file: .env
     depends_on:
       postgres:
         condition: service_healthy
@@ -46,6 +52,10 @@ services:
       NODE_ENV: production
       DATABASE_URL: postgresql://crm:crm@postgres:5432/creolab_crm
       REDIS_URL: redis://redis:6379
+      STORAGE_DIR: /var/data/files
+    volumes:
+      - crm_files:/var/data/files
 
 volumes:
   crm_pg:
+  crm_files:

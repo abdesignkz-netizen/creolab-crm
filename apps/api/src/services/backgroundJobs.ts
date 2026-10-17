@@ -1,6 +1,7 @@
 import { processEmployeeTelegramQueue } from "./employeeTelegramService.ts";
 import { processControlNotifications } from "./controlNotificationService.ts";
 import { logServerError } from "../lib/redact.ts";
+import { claimOutboxEvent } from "./outboxLease.ts";
 import type { PrismaClient } from "@creolab/db";
 import { createStaffNotification, deliverPendingPush } from "./notificationService.ts";
 import { AGREEMENT_TYPE_LABEL, type AgreementType } from "./conversationContextTypes.ts";
@@ -23,7 +24,11 @@ export async function processOutbox(prisma: PrismaClient) {
     orderBy: { availableAt: "asc" },
     take: 20,
   });
+  let processed = 0;
   for (const event of due) {
+    const lease = await claimOutboxEvent(prisma, event.id);
+    if (!lease) continue;
+    processed += 1;
     try {
       if (event.type === "billing.email") {
         const { sendMail } = await import("../lib/email.ts");
@@ -59,21 +64,15 @@ export async function processOutbox(prisma: PrismaClient) {
       }
     } catch (error) {
       logServerError(error, "background:outbox");
-      await prisma.outboxEvent.update({
-        where: { id: event.id },
-        data: {
-          attempts: { increment: 1 },
-          availableAt: new Date(Date.now() + Math.min(300_000, TICK_MS * 2 ** Math.min(event.attempts, 6))),
-        },
+      await lease.finish({
+        attempts: { increment: 1 },
+        availableAt: new Date(Date.now() + Math.min(300_000, TICK_MS * 2 ** Math.min(event.attempts, 6))),
       });
       continue;
     }
-    await prisma.outboxEvent.update({
-      where: { id: event.id },
-      data: { processedAt: new Date(), attempts: { increment: 1 } },
-    });
+    await lease.finish({ processedAt: new Date(), attempts: { increment: 1 } });
   }
-  return due.length;
+  return processed;
 }
 
 function reminderLabel(offsetMinutes: number, type: string, title: string, extras: string[]) {
@@ -262,7 +261,7 @@ export async function resumeRunningCampaigns(prisma: PrismaClient) {
   }
 }
 
-export function startBackgroundJobs(prisma: PrismaClient) {
+export function startBackgroundJobs(prisma: PrismaClient, options: { keepAlive?: boolean } = {}) {
   if (started || process.env.NODE_ENV === "test") return () => undefined;
   started = true;
   let telegramRunning = false;
@@ -301,7 +300,7 @@ export function startBackgroundJobs(prisma: PrismaClient) {
   };
   tick();
   const timer = setInterval(tick, TICK_MS);
-  timer.unref?.();
+  if (!options.keepAlive) timer.unref?.();
   return () => {
     clearInterval(timer);
     started = false;

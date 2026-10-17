@@ -102,6 +102,7 @@ it("connection service forwards cabinet credentials on the ticket path and never
   const writes: any[] = [];
   const persist = async ({ data }: any) => { writes.push(data); return stored = { ...stored, ...data }; };
   const prisma: any = {
+    platformSetting: { findUnique: async () => ({ valueJson: { features: { esf: true } } }) },
     tenantLegalProfile: { findUnique: async () => ({ bin: "123456789013", legalName: "Synthetic company", esfIntegrationEnabled: true }) },
     esfConnection: { findUnique: async () => stored, create: persist, update: persist },
     auditEvent: { create: async (data: any) => { writes.push(data); } },
@@ -277,7 +278,10 @@ it("getUsableEsfSession reopens a stored session the portal already closed", asy
     authCertificatePem: "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----",
   };
   const persist = async ({ data }: any) => (stored = { ...stored, ...data });
-  const prisma: any = { esfConnection: { findUnique: async () => stored, update: persist } };
+  const prisma: any = {
+    platformSetting: { findUnique: async () => ({ valueJson: { features: { esf: true } } }) },
+    esfConnection: { findUnique: async () => stored, update: persist },
+  };
   const operations: string[] = [];
   globalThis.fetch = async (_url, init) => {
     const xml = String(init?.body);
@@ -333,6 +337,7 @@ it("connectEsf closes a stored portal session before creating a new one", async 
   let stored: any = { id: "row-1", sessionId: "stale-crm-session", status: "ERROR" };
   const persist = async ({ data }: any) => (stored = { ...stored, ...data });
   const prisma: any = {
+    platformSetting: { findUnique: async () => ({ valueJson: { features: { esf: true } } }) },
     tenantLegalProfile: { findUnique: async () => ({ bin: "123456789013", legalName: "Synthetic company", esfIntegrationEnabled: true }) },
     esfConnection: { findUnique: async () => stored, create: persist, update: persist },
     auditEvent: { create: async () => ({}) },

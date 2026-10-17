@@ -142,6 +142,7 @@ function snapshotFromOverview(overview: Awaited<ReturnType<typeof getSituationOv
       overdueTasks: row.overdueTasks,
     })),
     funnel: {
+      basis: "current_stage_occupancy_not_transitions",
       stages: (overview.pipeline?.stages || []).map((stage: any) => ({ name: stage.name, count: stage.count })),
       biggestDrop: overview.pipeline?.biggestDrop || null,
     },
@@ -293,14 +294,11 @@ function fallbackAnswer(
   }
 
   if (intent === "funnel") {
-    const drop = overview.pipeline?.biggestDrop;
     const stages = (overview.pipeline?.stages || []) as Array<{ name?: string; count?: number }>;
     return {
-      headline: drop
-        ? systemText(locale, "Клиенты чаще всего теряются между «{p0}» и «{p1}» ({p2} → {p3}).", { p0: drop.fromName, p1: drop.toName, p2: drop.fromCount, p3: drop.toCount })
-        : systemText(locale, "По открытой воронке сильного провала между стадиями нет."),
+      headline: systemText(locale, "Здесь показано, сколько сделок сейчас на каждой стадии. Для оценки потерь нужна история переходов; разница между стадиями не означает потерю клиентов."),
       bullets: stages.map((stage) => ({ text: `${stage.name}: ${stage.count ?? 0}` })),
-      links: [{ label: systemText(locale, "Воронка сделок"), href: "/today#funnel" }],
+      links: [{ label: systemText(locale, "Статистика"), href: "/stats" }],
     };
   }
 

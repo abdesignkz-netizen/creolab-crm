@@ -29,6 +29,7 @@ describe("Manual PDF import",()=>{
  before(async()=>{
   process.env.ESF_PROVIDER="mock";process.env.ESF_ENV="off";process.env.ESF_ALLOW_LIVE_SEND="0";
   prisma=await createPrismaClient();await (await import("../../../packages/db/src/seed.ts")).seedDatabase();
+  await (await import("./services/runtimeSettings.ts")).savePlatformSettings(prisma,{features:{esf:true}});
   server=createApp(prisma).listen(0,"127.0.0.1");await new Promise<void>(r=>server.once("listening",r));base=`http://127.0.0.1:${(server.address() as {port:number}).port}`;
   for(const email of ["owner@creolab.example","owner@demo-agency.example"]){const r=await fetch(base+"/api/v1/auth/login",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({email,password:process.env.SEED_PASSWORD,client:"web"})});assert.equal(r.status,200);const c=r.headers.get("set-cookie")!.split(";")[0];if(!cookie)cookie=c;else foreign=c;}
   bytes=await makePdf();

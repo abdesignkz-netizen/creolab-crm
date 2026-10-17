@@ -206,21 +206,14 @@ export function IntegrationsPage() {
         <IntegrationHelp kind="whatsapp" />
         {setup?.whatsapp?.warning ? <div className="banner warn">{uiMessage(setup.whatsapp.warning)}</div> : null}
         <p className="muted">{whatsappStatusNote(setup?.whatsapp)}</p>
-        <p className="muted">{aiManagerAllowed ? uiText("Как бот отвечает клиентам, задаёт администратор сервиса: промпт и база знаний компании.") : uiText("WhatsApp доступен для переписки с клиентами. ИИ-менеджер не включён в ваш тариф.")}</p>
+        <p className="muted">{aiManagerAllowed ? uiText("Задайте цель, базу знаний и правила ответов в настройках ИИ-менеджера.") : uiText("WhatsApp доступен для переписки с клиентами. ИИ-менеджер не включён в ваш тариф.")}</p>
+        {aiManagerAllowed && me?.capabilities?.aiSettings && <div className="actions"><Link to="/settings/ai-manager">{uiText("Знания и цель ИИ")}</Link><Link to="/settings/ai-automation">{uiText("Кому и когда отвечать")}</Link></div>}
         <p className="integ-status-line">
           {uiText("Статус подключения")}<span className={setup?.whatsapp?.reachable ? "badge ok" : setup?.whatsapp?.configured ? "badge warn" : "badge"}>
             {setup?.whatsapp?.reachable ? uiText("Работает") : setup?.whatsapp?.configured ? uiText("Ошибка проверки") : uiText("Не подключён")}
           </span>
         </p>
-        <p className="integ-status-line">
-          {uiText("AI-менеджер")}{!aiManagerAllowed ? <span className="badge">{uiText("Не входит в тариф")}</span> : aiManagerTrial ? <span className="badge">{uiText("Пробный режим · 100 AI-кредитов один раз")}</span> : setup?.whatsapp?.reachable ? (
-            <span className="badge ok">{uiText("Активен")}</span>
-          ) : setup?.whatsapp?.configured ? (
-            <span className="badge warn">{uiText("Не отвечает")}</span>
-          ) : (
-            <span className="badge">{uiText("Ожидает подключение")}</span>
-          )}
-        </p>
+        {aiManagerTrial && <p className="muted">{uiText("Пробный режим · 100 AI-кредитов один раз")}</p>}
         {whatsappSender ? <p>WhatsApp · {whatsappSender}</p> : null}
         <p className="muted">{uiText("Диалоги ·")}{" "}{setup?.whatsapp?.conversationCount ?? 0}</p>
         <p className="muted">
