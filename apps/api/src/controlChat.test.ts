@@ -237,6 +237,64 @@ describe("Private WhatsApp Control", () => {
     const reply = presentControlReply("GET_REVENUE_STATS", { data: { revenue: 69990 }, meta: { period: "last_7" } }, "ru", "Asia/Almaty");
     assert.match(reply, /69\s990 ₸/); assert.match(reply, /\/stats$/); assert.match(reply, /Последние 7 дней/);
   });
+  it("identifies task clients by contact, inquiry, deal and WhatsApp without leaking another tenant or LIDs", async () => {
+    const makeContact = (name: string, phone: string, type = "phone") => prisma.contact.create({ data: {
+      tenantId, name, methods: { create: { type, rawValue: phone, normalizedValue: phone.replace(/^\+/, ""), primary: true, source: "manual" } },
+    } });
+    const direct = await makeContact("Айбек Direct", "+77015550101");
+    const whatsapp = await makeContact("Алия WhatsApp", "+77015550102", "whatsapp");
+    const inquiryContact = await prisma.contact.create({ data: { tenantId, name: "Дана Inquiry" } });
+    const inquiry = await prisma.inquiry.create({ data: { tenantId, contactId: inquiryContact.id, source: "whatsapp", phoneRaw: "+77015550103" } });
+    const stage = await prisma.dealStage.findFirstOrThrow({ where: { tenantId } });
+    const dealContact = await makeContact("Данияр Deal", "+77015550104");
+    const deal = await prisma.deal.create({ data: { tenantId, contactId: dealContact.id, stageId: stage.id, title: "Deal client identity" } });
+    const conversationContact = await prisma.contact.create({ data: { tenantId, name: "Сауле Conversation" } });
+    const conversation = await prisma.conversation.create({ data: { tenantId, contactId: conversationContact.id, externalThreadId: "77015550105:2@s.whatsapp.net" } });
+    const lid = await prisma.conversation.create({ data: { tenantId, externalThreadId: "36322639085811@lid" } });
+    const foreign = await prisma.conversation.create({ data: { tenantId: otherTenant, externalThreadId: "77015550999@s.whatsapp.net" } });
+    const links = [{ contactId: direct.id }, { contactId: whatsapp.id }, { inquiryId: inquiry.id }, { dealId: deal.id }, { conversationId: conversation.id }, { conversationId: lid.id }, { conversationId: foreign.id }];
+    const tasks = await Promise.all(links.map(link => prisma.task.create({ data: { tenantId, title: "Связаться с клиентом: Заявка из WhatsApp", type: "call", dueAt: new Date("2000-01-01T00:00:00Z"), ownerMembershipId: auth.activeMembership!.id, ...link } })));
+    try {
+      for (const command of ["Задачи на сегодня", "Задачи", "Просроченные задачи"]) {
+        const reply = (await ask(command)).replyText!;
+        for (const suffix of ["01", "02", "03", "04", "05"]) assert.ok(reply.includes(`+7 701 555 01 ${suffix}`), `${command}: missing client ${suffix}`);
+        for (const name of [direct.name, whatsapp.name, inquiryContact.name, dealContact.name, conversationContact.name]) assert.ok(reply.includes(name));
+        assert.doesNotMatch(reply, /36322639085811|77015550999|555 09 99/);
+        assert.match(reply, /телефон не указан/); assert.match(reply, /\/tasks$/);
+      }
+      assert.equal(modelCalls, 0);
+      await deliver(); assert.equal(sent.length, 3);
+      assert.ok(sent.every(message => message.text.includes("+7 701 555 01 01")));
+    } finally { await prisma.task.deleteMany({ where: { id: { in: tasks.map(task => task.id) }, tenantId } }); }
+  });
+  it("distinguishes identically titled tasks by client phone before choosing a write", async () => {
+    const title = `Связаться с клиентом ${randomUUID()}`;
+    const tasks = await Promise.all(["+77015550201", "+77015550202"].map(async phone => {
+      const contact = await prisma.contact.create({ data: { tenantId, name: "Айбек", methods: { create: { type: "whatsapp", rawValue: phone, normalizedValue: phone.slice(1), source: "manual" } } } });
+      return prisma.task.create({ data: { tenantId, contactId: contact.id, title, type: "call" } });
+    }));
+    try {
+      modelOutput = { action: "COMPLETE_TASK", task: title };
+      const reply = (await ask(`Заверши задачу ${title}`)).replyText!;
+      assert.match(reply, /Уточните выбор/); assert.match(reply, /Клиент: Айбек · \+7 701 555 02 01/); assert.match(reply, /Клиент: Айбек · \+7 701 555 02 02/);
+      assert.equal(await prisma.controlConfirmation.count({ where: { tenantId } }), 0);
+    } finally { await prisma.task.deleteMany({ where: { id: { in: tasks.map(task => task.id) }, tenantId } }); }
+  });
+  it("keeps client phones and the task link in a full long bilingual task summary", () => {
+    for (const lang of ["ru", "kk"] as const) {
+      const rows = Array.from({ length: 8 }, (_, i) => ({ title: "Задача ".repeat(50), contactName: "Имя ".repeat(50), phone: `+7701555030${i}`, ownerName: "Сотрудник ".repeat(30), dueAt: new Date().toISOString(), overdue: true }));
+      const reply = presentControlReply("GET_TODAY_TASKS", { data: { nearest: rows } }, lang, "Asia/Almaty");
+      assert.match(reply, /\+7 701 555 03 07/); assert.match(reply, /\/tasks$/); assert.ok(reply.length <= 3500);
+      const missing = presentControlReply("GET_TASKS", { data: { items: [{ title: "Задача", contactName: "Айбек", phone: "36322639085811@lid" }] } }, lang, "Asia/Almaty");
+      assert.doesNotMatch(missing, /36322639085811/); assert.ok(missing.includes(lang === "ru" ? "телефон не указан" : "телефон көрсетілмеген"));
+    }
+  });
+  it("understands requests for staff attention without relying on the model", async () => {
+    assert.match((await ask("Где нужен сотрудник?")).replyText!, /Нужен сотрудник/);
+    await saveControlChatSettings(prisma, auth, identityId, { ...prefs(), language: "kk" });
+    assert.match((await ask("Кімге қызметкер керек?")).replyText!, /Қызметкер керек/);
+    assert.equal(modelCalls, 0);
+  });
   it("preserves the deadline in a task command containing a colon", async () => {
     const title = `Prepare offer ${randomUUID()}`, dueAt = "2026-11-02T15:00:00+05:00";
     modelOutput = { action: "CREATE_TASK", title, dueAt };

@@ -252,15 +252,6 @@ function contactDisplayName(contact?: {
   return [contact.firstName, contact.lastName].filter(Boolean).join(" ").trim() || contact.name || null;
 }
 
-function primaryPhoneFromMethods(
-  methods?: Array<{ type: string; rawValue: string; normalizedValue: string; primary: boolean }> | null,
-) {
-  if (!methods?.length) return null;
-  const phones = methods.filter((m) => m.type === "phone");
-  const primary = phones.find((m) => m.primary) || phones[0];
-  return primary?.rawValue || primary?.normalizedValue || null;
-}
-
 async function scheduledSendByTaskIds(prisma: PrismaClient, tenantId: string, taskIds: string[]) {
   if (!taskIds.length) return new Map<string, Date>();
   const rows = await prisma.scheduledAction.findMany({
@@ -370,11 +361,7 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
     const childDone = item.childTasks.filter((child) => child.status === "done").length;
     const resolvedContact = item.contact || item.inquiry?.contact || item.deal?.contact || conversation?.contact || null;
     const contactName = contactDisplayName(resolvedContact);
-    const phone =
-      primaryPhoneFromMethods(resolvedContact?.methods) ||
-      item.inquiry?.phoneRaw ||
-      item.inquiry?.phoneNormalized ||
-      null;
+    const phone = phoneFromContact(resolvedContact, item.inquiry) || phoneFromContact(null, conversation);
     const dueLater = Boolean(item.dueAt && item.dueAt.getTime() > now.getTime());
     const sendScheduled =
       dueLater &&

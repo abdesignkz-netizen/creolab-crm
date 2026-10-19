@@ -7,7 +7,7 @@ import { writeAudit } from "../lib/audit.ts";
 import { authorizeNativeControl, executeNativeControl, confirmNativeControl, controlAuthorizationVersion } from "./aiControlService.ts";
 import { CHAT_ACTIONS, chatCommandSchema, cleanText, controlChatMenu, quickControlCommand, words, type ChatCommand, type ChatLanguage } from "./controlChatLanguage.ts";
 import { chatSettings, record } from "./controlChatSettings.ts";
-import { presentControlReply } from "./controlChatPresentation.ts";
+import { controlTaskClientLabel, presentControlReply } from "./controlChatPresentation.ts";
 import { parseControlChatWithLlm } from "./llmClient.ts";
 
 const SESSION_MS = 30 * 60000;
@@ -187,7 +187,7 @@ async function runRequest(prisma: PrismaClient, job: Job, context: Context, lang
     const rows = record(record(await execute("GET_TASKS", { query: c.task })).data).items || [];
     const found = rows.filter((r: any) => String(r.title || "").toLowerCase().includes(c.task!.toLowerCase()));
     if (!found.length) return reply(w("Задача не найдена среди доступных. Уточните название или откройте задачи в кабинете.", "Қолжетімді тапсырмалардан табылмады. Атауын нақтылаңыз немесе кабинеттегі тапсырмаларды ашыңыз."));
-    return choose("taskId", found.map((r: any) => ({ id: r.id, label: `${r.title}${r.ownerName ? ` · ${r.ownerName}` : ""}` })));
+    return choose("taskId", found.map((r: any) => ({ id: r.id, label: `${cleanText(r.title, 80)} · ${controlTaskClientLabel(r, lang)}${r.ownerName ? ` · ${r.ownerName}` : ""}` })));
   }
   if (p.dealId) await execute("GET_DEAL", { dealId: p.dealId });
   if (c.assignee && !p.ownerMembershipId) {

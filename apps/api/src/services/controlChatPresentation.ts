@@ -1,13 +1,23 @@
 import type { ControlAction } from "@creolab/contracts";
-import { CONTROL_ACTION_META } from "@creolab/contracts";
+import { CONTROL_ACTION_META, validateClientPhone } from "@creolab/contracts";
 import { config } from "../config.ts";
+import { formatPhoneDisplay } from "./contactLabels.ts";
 import { cleanText, words, type ChatLanguage } from "./controlChatLanguage.ts";
 import { record } from "./controlChatSettings.ts";
 export const controlLink = (path: string) => `${config.appBaseUrl.replace(/\/$/, "")}${path}`;
+export function controlTaskClientLabel(item: Record<string, unknown>, lang: ChatLanguage) {
+  const name = cleanText(item.contactName, 80).trim();
+  const rawPhone = String(item.phone || "").trim();
+  // WhatsApp LIDs and other channel identifiers are never telephone numbers.
+  const parsed = /^[+\d\s().-]+$/.test(rawPhone) ? validateClientPhone(rawPhone) : null;
+  const phone = parsed?.ok ? formatPhoneDisplay(parsed.e164) : null;
+  if (!name && !phone) return words(lang, "Клиент не привязан или телефон не указан", "Клиент байланыстырылмаған немесе телефон көрсетілмеген");
+  return `${words(lang, "Клиент", "Клиент")}: ${[name, phone || words(lang, "телефон не указан", "телефон көрсетілмеген")].filter(Boolean).join(" · ")}`;
+}
 export function presentControlReply(action: ControlAction, result: unknown, lang: ChatLanguage, timeZone: string) {
   const data = record(record(result).data), w = (ru: string, kk: string) => words(lang, ru, kk);
   const time = (v: unknown) => v && Number.isFinite(new Date(String(v)).getTime()) ? new Date(String(v)).toLocaleString(lang === "kk" ? "kk-KZ" : "ru-RU", { timeZone, dateStyle: "short", timeStyle: "short" }) : w("без срока", "мерзімсіз");
-  const task = (item: any, i: number) => `${i + 1}. ${cleanText(item.title)} · ${time(item.dueAt)}${item.overdue ? w(" · просрочено", " · мерзімі өткен") : ""}${item.ownerName ? ` · ${cleanText(item.ownerName)}` : ""}`;
+  const task = (item: any, i: number) => `${i + 1}. ${cleanText(item.title, 160)}\n${controlTaskClientLabel(item, lang)}\n${time(item.dueAt)}${item.overdue ? w(" · просрочено", " · мерзімі өткен") : ""}${item.ownerName ? ` · ${cleanText(item.ownerName, 50)}` : ""}`;
   const items: any[] = Array.isArray(data.items) ? data.items : [];
   const heading = lang === "ru" ? CONTROL_ACTION_META[action].label : ({GET_BUSINESS_SUMMARY:"Бизнес қорытындысы", GET_SITUATION:"Назар аудару керек", GET_TODAY_TASKS:"Бүгінгі тапсырмалар",GET_TASKS:"Тапсырмалар",GET_OVERDUE_TASKS:"Мерзімі өткен тапсырмалар",GET_CLIENT_DETAILS:"Клиент",GET_DEALS_STATS:"Сатылымдар",GET_LEADS_STATS:"Өтінімдер",GET_REVENUE_STATS:"Түсім",GET_TEAM_STATUS:"Команда"} as Record<string,string>)[action] || "BasQar Control";
   const lines: string[] = [heading];

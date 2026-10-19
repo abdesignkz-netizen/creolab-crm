@@ -603,7 +603,11 @@ export async function getSituationOverview(
     prisma.incompleteIntake.count({ where: openIntakeWhere(tid) }),
     prisma.task.findMany({
       where: { tenantId: tid, status: { in: ["open", "waiting"] }, ...assigneeTask },
-      include: { contact: { select: CONTACT_PHONE_SELECT } },
+      include: {
+        contact: { select: CONTACT_PHONE_SELECT },
+        inquiry: { select: { phoneRaw: true, phoneNormalized: true, contact: { select: CONTACT_PHONE_SELECT } } },
+        deal: { select: { contact: { select: CONTACT_PHONE_SELECT } } },
+      },
       orderBy: [{ dueAt: "asc" }, { createdAt: "asc" }],
       take: 300,
     }),
@@ -662,6 +666,13 @@ export async function getSituationOverview(
       prisma.deal.count({ where: { tenantId: tid, outcome: "won" } }),
     ]),
   ]);
+
+  const taskConversationIds = [...new Set(openTasks.flatMap(task => task.conversationId ? [task.conversationId] : []))];
+  const taskConversations = taskConversationIds.length ? await prisma.conversation.findMany({
+    where: { tenantId: tid, id: { in: taskConversationIds } },
+    select: { id: true, externalThreadId: true, contact: { select: CONTACT_PHONE_SELECT } },
+  }) : [];
+  const taskConversationById = new Map(taskConversations.map(conversation => [conversation.id, conversation]));
 
   const activeAgreements = await prisma.agreement.findMany({
     where: {
@@ -1243,17 +1254,21 @@ export async function getSituationOverview(
       byType: [...typeCounts.entries()].map(([type, count]) => ({ type, count })),
       nearest: [...overdueTasks, ...dueTodayFuture, ...openTasks.filter((t) => !remainingToday.includes(t) && !overdueTasks.includes(t))]
         .slice(0, 10)
-        .map((t) => ({
-          id: t.id,
-          title: t.title, titlePresentation: taskTitlePresentation(t),
-          type: t.type,
-          typeLabel: taskTypeBucket(t.type, t.title, locale),
-          dueAt: t.dueAt?.toISOString() || null,
-          overdue: Boolean(t.dueAt && t.dueAt < now),
-          contactName: t.contact ? displayName(t.contact) : null,
-          phone: phoneFromContact(t.contact),
-          href: "/tasks",
-        })),
+        .map((t) => {
+          const conversation = t.conversationId ? taskConversationById.get(t.conversationId) : null;
+          const contact = t.contact || t.inquiry?.contact || t.deal?.contact || conversation?.contact;
+          return {
+            id: t.id,
+            title: t.title, titlePresentation: taskTitlePresentation(t),
+            type: t.type,
+            typeLabel: taskTypeBucket(t.type, t.title, locale),
+            dueAt: t.dueAt?.toISOString() || null,
+            overdue: Boolean(t.dueAt && t.dueAt < now),
+            contactName: contact ? displayName(contact) : null,
+            phone: phoneFromContact(contact, t.inquiry) || phoneFromContact(null, conversation),
+            href: "/tasks",
+          };
+        }),
     },
     agreements: {
       today: activeAgreements.filter((a) => a.scheduledAt && a.scheduledAt >= startToday && a.scheduledAt < startTomorrow).map((a) => mapAgreementSit(a, locale)),

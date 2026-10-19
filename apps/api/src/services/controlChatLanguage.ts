@@ -41,6 +41,7 @@ export function quickControlCommand(text: string): ChatCommand | null {
   const exact: Record<string, ChatCommand["action"]> = {
     "сводка": "GET_BUSINESS_SUMMARY", "сводка за сегодня": "GET_BUSINESS_SUMMARY", "бүгінгі қорытынды": "GET_BUSINESS_SUMMARY",
     "что требует внимания": "GET_SITUATION", "ситуация": "GET_SITUATION", "назар аудару керек": "GET_SITUATION",
+    "где нужен сотрудник": "GET_SITUATION", "кому нужен сотрудник": "GET_SITUATION", "кому нужен менеджер": "GET_SITUATION", "где нужен менеджер": "GET_SITUATION", "кімге қызметкер керек": "GET_SITUATION",
     "задачи": "GET_TASKS", "тапсырмалар": "GET_TASKS", "задачи на сегодня": "GET_TODAY_TASKS", "бүгінгі тапсырмалар": "GET_TODAY_TASKS",
     "просроченные задачи": "GET_OVERDUE_TASKS", "мерзімі өткен тапсырмалар": "GET_OVERDUE_TASKS", "продажи": "GET_DEALS_STATS", "сатылымдар": "GET_DEALS_STATS",
     "команда": "GET_TEAM_STATUS", "новые заявки": "GET_RECENT_LEADS", "жаңа өтінімдер": "GET_RECENT_LEADS", "клиенты": "GET_CLIENTS", "клиенттер": "GET_CLIENTS",

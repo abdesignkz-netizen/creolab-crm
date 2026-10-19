@@ -436,7 +436,9 @@ function compactTask(item: Record<string, unknown>) {
     status: item.status,
     dueAt: item.dueAt,
     overdue: item.overdue,
-    ownerName: item.ownerName || asRecord(item.owner).name || null,
+    contactName: item.contactName || item.whoName || null,
+    phone: item.phone || item.whoPhone || null,
+    ownerName: item.ownerName || item.assigneeName || asRecord(asRecord(item.owner).user).name || null,
   };
 }
 
