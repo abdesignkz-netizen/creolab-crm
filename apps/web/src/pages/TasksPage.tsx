@@ -1,4 +1,5 @@
 import { WorkspaceSectionNav } from "../components/WorkspaceSectionNav";
+import { TASK_CATEGORIES, TASK_TEMPLATES, taskCategory, matchesTaskSearch, type TaskCategory } from "../lib/taskOrganization";
 import { InlineFeedback } from "../components/InlineFeedback";
 import { uiTaskTitle, uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale } from "../lib/uiText";
 import {
@@ -8,6 +9,7 @@ import {
   taskBoardLane,
   taskCreatedByKind,
   taskCreatedByLabel,
+  validateClientPhone,
   type TaskBoardLane,
 } from "@creolab/contracts";
 import { notifySaved } from "../components/SaveNotice";
@@ -20,6 +22,7 @@ import { useCapabilities } from "../lib/session";
 import { tip } from "../lib/tip";
 import { CALLS_ENABLED } from "../lib/featureFlags";
 import { CampaignMassPanel } from "./CampaignMassPanel";
+import { CampaignHistory } from "./CampaignHistory";
 import { formatDateTimeLocalInput, formatDateTimeRu, parseDateTimeLocalInput, toDateTimeLocalValue } from "../lib/period";
 
 type Filter = "open" | "waiting" | "scheduled" | "overdue" | "mine" | "done" | "all" | "today" | "no_due";
@@ -320,7 +323,15 @@ function TaskCard({ item, children }: { item: any; children: ReactNode }) {
   const overdue = !closed && dueGroup(item, new Date()) === "overdue";
   const client = item.targetType === "group"
     ? item.segmentSnapshotJson?.label || item.contextLabel || uiText("Группа")
-    : item.whoName || item.contact?.name || [item.contact?.firstName, item.contact?.lastName].filter(Boolean).join(" ") || item.contextLabel;
+    : item.whoName || item.contact?.name || [item.contact?.firstName, item.contact?.lastName].filter(Boolean).join(" ");
+  const rawPhone = String(item.whoPhone || "");
+  const parsedPhone = /^[+\d\s()-]+$/.test(rawPhone) ? validateClientPhone(rawPhone) : null;
+  const phone = parsedPhone?.ok ? parsedPhone.e164.replace(/^(\+7)(\d{3})(\d{3})(\d{2})(\d{2})$/, "$1 $2 $3 $4 $5") : "";
+  const category = taskCategory(item);
+  const categoryLabel = TASK_CATEGORIES.find(entry => entry.id === category)!.label;
+  const title = item.source === "rule" && item.dedupeKey?.startsWith("inquiry-process:")
+    && /^Связаться с клиентом: (Заявка из WhatsApp|Заявка с сайта|заявка)$/.test(item.title)
+    ? uiText("Связаться с клиентом") : uiTaskTitle(item);
   return (
     <details className={`task-card${overdue ? " is-overdue" : ""}${closed ? " is-closed" : ""}`}>
       <summary className="task-card-summary">
@@ -330,9 +341,12 @@ function TaskCard({ item, children }: { item: any; children: ReactNode }) {
           </svg>
         </span>
         <span className="task-card-heading">
-          <strong>{uiTaskTitle(item)}</strong>
-          {client ? <span className="task-card-client">{client}</span> : null}
-          {item.campaignId ? <span className="task-card-client">{uiText("Рассылка")}</span> : null}
+          <span className={`task-category-label category-${category}`}>{uiText(categoryLabel)}</span>
+          <strong>{title}</strong>
+          <span className="task-card-client">
+            {client || (category === "internal" ? uiText("Задача команды") : uiText("Клиент не выбран"))}
+            {item.targetType !== "group" && category !== "internal" ? <span className="task-card-phone">{phone || uiText("Телефон не указан")}</span> : null}
+          </span>
           <span className="task-card-alerts">
             {item.needsFileRetry ? <span>{uiText("Текст ушёл · файл не отправлен")}</span>
               : item.executionStatus === "failed" && !isScheduledSend(item) ? <span>{uiText("Отправка не удалась")}</span> : null}
@@ -366,11 +380,14 @@ export function TasksPage() {
   const [items, setItems] = useState<any[]>([]);
   const [error, setError] = useState("");
   const [taskSearch, setTaskSearch] = useUrlState<string>("taskSearch", "");
-  const [filter, setFilter] = useUrlState<Filter>("filter", "all", ["open", "waiting", "scheduled", "overdue", "mine", "done", "all", "today", "no_due"]);
+  const [filter, setFilter] = useUrlState<Filter>("filter", "open", ["open", "waiting", "scheduled", "overdue", "mine", "done", "all", "today", "no_due"]);
+  const [category, setCategory] = useUrlState<TaskCategory>("category", "all", TASK_CATEGORIES.map(item => item.id));
   const [me, setMe] = useState<any>(null);
   const [members, setMembers] = useState<any[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState("");
+  const [creating, setCreating] = useState(false);
   const [messageDraft, setMessageDraft] = useState("");
   const [editDueAt, setEditDueAt] = useState("");
   const [editOwnerId, setEditOwnerId] = useState("");
@@ -648,22 +665,28 @@ export function TasksPage() {
   }, [cmdSearchQ, cmdWhoMode]);
 
   useEffect(() => {
+    let current = true;
+    setOverview(null);
+    setInquiryId("");
+    setDealId("");
+    setConversationId("");
     if (!selectedClient) {
-      setOverview(null);
       return;
     }
     api
       .contactOverview(selectedClient.id)
       .then((data: any) => {
+        if (!current) return;
         setOverview(data);
         const requests = data.requests || [];
         const active = requests.find((item: any) => !item.closed) || requests[0];
         setInquiryId(active?.id || "");
         setDealId(data.deals?.[0]?.id || "");
         setConversationId(data.conversations?.[0]?.id || "");
-        if (!title.trim()) setTitle(suggestedTitle(type, "client", selectedClient));
+        setTitle(currentTitle => currentTitle.trim() ? currentTitle : suggestedTitle(type, "client", selectedClient));
       })
-      .catch((err) => setError(err instanceof Error ? err.message : uiText("Не удалось загрузить клиента")));
+      .catch((err) => { if (current) setError(err instanceof Error ? err.message : uiText("Не удалось загрузить клиента")); });
+    return () => { current = false; };
   }, [selectedClient?.id]);
 
   const segmentBody = useMemo(
@@ -712,11 +735,9 @@ export function TasksPage() {
 
   const membershipId = me?.activeTenant?.membershipId;
   const now = new Date();
-  const boardItems = items;
-  const searchTerms = taskSearch.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+  const boardItems = items.filter(item => category === "all" || taskCategory(item) === category);
   const extraFiltered = boardItems.filter((item) => {
-    const searchable = [item.title, uiTaskTitle(item), item.whoName, item.whoPhone, item.contact?.name, item.contact?.firstName, item.contact?.lastName, item.contextLabel, assigneeText(item)].filter(Boolean).join(" ").toLocaleLowerCase();
-    if (!searchTerms.every((term) => searchable.includes(term))) return false;
+    if (!matchesTaskSearch(item, taskSearch, uiTaskTitle(item), assigneeText(item))) return false;
     if (extraAssignee === AI_ASSIGNEE && (item.assigneeKind || taskAssigneeKind(item)) !== "ai") return false;
     if (extraAssignee && extraAssignee !== AI_ASSIGNEE && item.ownerMembershipId !== extraAssignee) return false;
     if (extraCreatedBy && (item.createdByKind || taskCreatedByKind(item)) !== extraCreatedBy) return false;
@@ -763,7 +784,7 @@ export function TasksPage() {
         ["open", "in_progress", "waiting"].includes(item.status)
       );
     }
-    return item.status === "open" || item.status === "in_progress";
+    return !isClosedTask(item);
   });
   const activeItems = visible.filter((item) => !isClosedTask(item));
   const doneItems = visible.filter((item) => isClosedTask(item));
@@ -777,6 +798,9 @@ export function TasksPage() {
 
   async function submitTask(event: FormEvent) {
     event.preventDefault();
+    if (creating) return;
+    setError("");
+    setCreating(true);
     try {
       if (targetMode === "client" && !selectedClient) {
         setError(uiText("Выберите клиента"));
@@ -807,6 +831,7 @@ export function TasksPage() {
         type: targetMode === "none" && !SENDABLE.has(type) ? (type === "other" ? "note" : type) : type,
         title: finalTitle,
         description: description || undefined,
+        messageDraft: SENDABLE.has(type) && messageDraft.trim() ? messageDraft.trim() : undefined,
         dueAt: dueAt || undefined,
         priority,
         ownerMembershipId: ownerId && ownerId !== AI_ASSIGNEE ? ownerId : undefined,
@@ -826,16 +851,6 @@ export function TasksPage() {
                 totalMatched: segmentTotal,
               }
             : undefined,
-      }).then(async (created: any) => {
-        if (SENDABLE.has(type) && created?.id && messageDraft.trim()) {
-          await api.updateTask(created.id, { messageDraft: messageDraft.trim() });
-        }
-        if (SENDABLE.has(type) && created?.id && targetMode === "client") {
-          setActiveTaskId(created.id);
-          const detail = await api.task(created.id);
-          setTaskDetail(detail);
-        }
-        return created;
       });
 
       setTitle("");
@@ -849,10 +864,25 @@ export function TasksPage() {
       setSelectedIds([]);
       setSegmentTotal(0);
       setShowCreate(false);
+      // Change related URL filters in one navigation; separate setters can overwrite each other.
+      setSearchParams(previous => {
+        const next = new URLSearchParams(previous);
+        for (const key of ["category", "filter", "taskSearch", "offset"]) next.delete(key);
+        return next;
+      }, { replace: true });
+      setExtraAssignee("");
+      setExtraCreatedBy("");
+      setExtraStatus("");
+      setExtraSource("");
+      setExtraLink("");
+      setExtraPeriodFrom("");
+      setExtraPeriodTo("");
       notifySaved(uiText("Задача создана"));
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : uiText("Не удалось создать"));
+    } finally {
+      setCreating(false);
     }
   }
 
@@ -1368,7 +1398,7 @@ export function TasksPage() {
         !isScheduledSend(item),
     ).length,
     done: boardItems.filter((item) => isClosedTask(item)).length,
-    open: boardItems.filter((item) => item.status === "open" || item.status === "in_progress").length,
+    open: boardItems.filter((item) => !isClosedTask(item)).length,
   };
   const extraFilterActive = Boolean(
     extraAssignee || extraCreatedBy || extraStatus || extraSource || extraLink || extraPeriodFrom || extraPeriodTo,
@@ -1380,7 +1410,7 @@ export function TasksPage() {
       <div className="page-head">
         <div>
           <h2>{uiText("Задачи")}</h2>
-          <p className="muted page-head-sub">{uiText("Сроки, ответственные и следующие шаги — всё под рукой.")}</p>
+          <p className="muted page-head-sub">{uiText("Что сделать, для кого и к какому сроку.")}</p>
         </div>
         <div className="actions">
           {caps.manageTasks ? (
@@ -1398,6 +1428,16 @@ export function TasksPage() {
           ) : null}
         </div>
       </div>
+      <div className="task-categories" role="group" aria-label={uiText("Категории задач")}>
+        {TASK_CATEGORIES.filter(entry => entry.id !== "campaigns" || caps.manageTasks).map(entry => (
+          <button key={entry.id} type="button" aria-pressed={category === entry.id}
+            className={category === entry.id ? "task-category active" : "task-category"}
+            onClick={() => setCategory(entry.id)}>
+            {uiText(entry.label)}
+          </button>
+        ))}
+      </div>
+      {category !== "campaigns" ? <>
       <div className="task-toolbar">
         <label className="task-search">
           <svg aria-hidden="true" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 5 5" /></svg>
@@ -1408,19 +1448,22 @@ export function TasksPage() {
         </button>
       </div>
       <WorkspaceSectionNav label={uiText("Показать задачи")} value={filter} onChange={setFilter} options={([
-            ["all", uiText("Все")],
-            ["open", uiText("К выполнению")],
+            ["open", uiText("В работе")],
             ["mine", uiText("Мои")],
             ["today", uiText("Сегодня")],
             ["overdue", uiText("Просроченные")],
-            ["scheduled", uiText("Запланированные")],
-            ["no_due", uiText("Без срока")],
-            ["waiting", uiText("Жду")],
-            ["done", uiText("Завершённые")],
-          ] as const).map(([id, label]) => ({ id, label: `${label} · ${filterCounts[id]}` }))} />
+            ["done", uiText("Архив")],
+          ] as const).map(([id, label]): { id: Filter; label: string } => ({ id, label: `${label} · ${filterCounts[id]}` })).concat(
+            ["all", "scheduled", "no_due", "waiting"].includes(filter)
+              ? [{ id: filter, label: uiText(({ all: "Все", scheduled: "Запланированные", no_due: "Без срока", waiting: "Жду" } as Record<string, string>)[filter]) + ` · ${filterCounts[filter]}` }] : []
+          )} />
       {showExtraFilters ? (
         <div className="panel task-extra-filters" id="task-extra-filters">
           <div className="task-extra-grid">
+            <label>{uiText("Показать задачи")}<select value={filter} onChange={event => setFilter(event.target.value as Filter)}>
+              {([["open", "В работе"], ["mine", "Мои"], ["today", "Сегодня"], ["overdue", "Просроченные"], ["scheduled", "Запланированные"], ["no_due", "Без срока"], ["waiting", "Жду"], ["done", "Архив"], ["all", "Все"]] as const).map(([value, label]) =>
+                <option key={value} value={value}>{uiText(label)} · {filterCounts[value]}</option>)}
+            </select></label>
             <label>
               {uiText("Исполнитель")}<select value={extraAssignee} onChange={(event) => setExtraAssignee(event.target.value)}>
                 <option value="">{uiText("Все")}</option>
@@ -1504,7 +1547,9 @@ export function TasksPage() {
         </div>
       ) : null}
 
-      {whatsappReady === false ? (
+      </> : null}
+
+      {whatsappReady === false && (showCreate || activeTaskId) ? (
         <div className="banner warn">
           <span>
             {uiText("WhatsApp-бот не подключён или недоступен. Создавать и закрывать задачи можно, а отправка сообщений/КП из задачи — только после подключения в")}{" "}
@@ -2122,9 +2167,24 @@ export function TasksPage() {
       ) : null}
 
       {showCreate && composeMode === "manual" && !showCampaignPanel ? (
-      <form className="panel task-form" onSubmit={submitTask}>
-        <b>{uiText("Новая задача")}</b>
-        <p className="muted">{uiText("Что нужно сделать, к чему относится, кто выполнит и когда.")}</p>
+      <form className="panel task-form task-simple-create" onSubmit={submitTask}>
+        <div className="task-create-head"><div><h3>{uiText("Новая задача")}</h3>
+          <p className="muted">{uiText("Выберите действие и уточните, какой результат нужен.")}</p></div>
+          <button type="button" className="btn secondary" onClick={() => setShowCreate(false)}>{uiText("Закрыть")}</button>
+        </div>
+        <div className="task-template-grid" role="group" aria-label={uiText("Что нужно сделать")}>
+          {TASK_TEMPLATES.map(template => <button key={template.id} type="button"
+            aria-pressed={selectedTemplate === template.id} className={`task-template${selectedTemplate === template.id ? " active" : ""}`}
+            onClick={() => {
+              setSelectedTemplate(template.id);
+              setType(template.id);
+              setTargetMode(template.target);
+              if (!title.trim() || TASK_TEMPLATES.some(item => uiText(item.example) === title)) setTitle(uiText(template.example));
+              if (ownerId === AI_ASSIGNEE && !isAiAssignableTaskType(template.id)) setOwnerId(membershipId || "");
+            }}>
+            <strong>{uiText(template.label)}</strong><span>{uiText(template.hint)}</span>
+          </button>)}
+        </div>
         <label>
           {uiText("Что нужно сделать")}<input
             value={title}
@@ -2141,7 +2201,7 @@ export function TasksPage() {
             {(
                 [
                 ["client", uiText("Один клиент")],
-                ["none", uiText("Без привязки")],
+                ["none", uiText("Задача команды")],
               ] as const
             ).map(([value, label]) => (
               <button
@@ -2237,7 +2297,8 @@ export function TasksPage() {
             ) : null}
 
             {overview ? (
-              <>
+              <details className="workspace-disclosure">
+                <summary>{uiText("Заявка, сделка и диалог")}</summary>
                 <label>
                   {uiText("Заявка")}<select value={inquiryId} onChange={(event) => setInquiryId(event.target.value)}>
                     <option value="">{uiText("Без заявки")}</option>
@@ -2269,7 +2330,7 @@ export function TasksPage() {
                     ))}
                   </select>
                 </label>
-              </>
+              </details>
             ) : null}
           </div>
         ) : null}
@@ -2404,14 +2465,19 @@ export function TasksPage() {
           </div>
         ) : null}
 
-        {SENDABLE.has(type) ? (
+        {SENDABLE.has(type) && targetMode !== "none" ? (
+          <details className="workspace-disclosure">
+          <summary>{uiText("Подготовить сообщение клиенту")}</summary>
+          <p className="muted">{uiText("Создание задачи не отправляет сообщение. Текст можно подготовить сейчас или позже.")}</p>
           <label>
             {uiText("Текст сообщения клиенту")}<textarea
               value={messageDraft}
               onChange={(event) => setMessageDraft(event.target.value)}
               placeholder={uiText("Текст, который уйдёт клиенту после подтверждения")}
+              maxLength={4000}
             />
           </label>
+          </details>
         ) : null}
         <label>
           {uiText("Исполнитель")}<select
@@ -2444,6 +2510,17 @@ export function TasksPage() {
         <label>
           {uiText("Срок")}<input type="datetime-local" value={dueAt} onChange={(event) => setDueAt(event.target.value)} />
         </label>
+        <div className="chip-row">
+          {[["today", "Сегодня"], ["tomorrow", "Завтра"], ["none", "Без срока"]].map(([id, label]) =>
+            <button type="button" className="chip" key={id} onClick={() => {
+              if (id === "none") { setDueAt(""); return; }
+              const date = new Date();
+              if (id === "tomorrow") date.setDate(date.getDate() + 1);
+              date.setHours(id === "today" ? 23 : 18, id === "today" ? 59 : 0, 0, 0);
+              setDueAt(toDateTimeLocal(date));
+            }}>{uiText(label)}</button>)}
+        </div>
+        <p className="muted task-create-summary">{uiText("Категория")}: {uiText(TASK_CATEGORIES.find(item => item.id === taskCategory({ type: type === "other" && targetMode === "none" ? "note" : type, targetType: targetMode }))!.label)} · {dueAt ? formatDateTimeRu(parseDateTimeLocalInput(dueAt)) : uiText("Без срока")}</p>
         <details className="workspace-disclosure">
           <summary>{uiText("Дополнительные настройки")}</summary>
         <label>
@@ -2461,6 +2538,7 @@ export function TasksPage() {
             onChange={(event) => {
               const next = event.target.value;
               setType(next);
+              setSelectedTemplate("");
               if (ownerId === AI_ASSIGNEE && !isAiAssignableTaskType(next)) {
                 setOwnerId(membershipId || "");
               }
@@ -2510,7 +2588,7 @@ export function TasksPage() {
 
         </details>
         <div className="actions">
-          <button className="btn">{uiText("Создать")}</button>
+          <button className="btn" disabled={creating}>{creating ? uiText("Создаём…") : uiText("Создать задачу")}</button>
           <button type="button" className="btn secondary" onClick={() => setShowCreate(false)}>
             {uiText("Скрыть")}</button>
         </div>
@@ -2862,9 +2940,14 @@ export function TasksPage() {
         </div>
       ) : null}
 
-      {visible.length === 0 ? (
+      {category === "campaigns" && caps.manageTasks ? <CampaignHistory onCreate={() => {
+        setComposeMode("campaign"); setShowCampaignPanel(true); setShowCreate(true); setCampaignSeed({ whoMode: "phones" });
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }} /> : null}
+
+      {visible.length === 0 && category !== "campaigns" ? (
         <p className="empty">
-          {taskSearch.trim() || extraFilterActive ? uiText("Ничего не найдено. Измените запрос или фильтры.") : filter === "waiting"
+          {taskSearch.trim() || extraFilterActive || category !== "all" ? uiText("Ничего не найдено. Измените запрос или фильтры.") : filter === "waiting"
             ? uiText("Задач в ожидании нет.")
             : filter === "no_due"
               ? uiText("Незавершённых задач без срока нет.")
@@ -2882,7 +2965,7 @@ export function TasksPage() {
         </p>
       ) : null}
 
-      {showActiveGroups
+      {showActiveGroups && category !== "campaigns"
         ? groups.map((group) =>
         group.items.length === 0 ? null : (
           <div className={`task-list-group group-${group.key}`} key={group.key}>
@@ -3195,7 +3278,7 @@ export function TasksPage() {
       )
         : null}
 
-      {showDoneGroups && doneGroups.length ? (
+      {showDoneGroups && category !== "campaigns" && doneGroups.length ? (
         <div className="task-done-log">
           {filter === "all" && activeItems.length ? <h3>{uiText("Уже сделано")}</h3> : null}
           {doneGroups.map((group) => (

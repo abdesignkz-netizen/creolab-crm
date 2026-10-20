@@ -281,7 +281,7 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
       deal: { include: { stage: true, contact: { include: { methods: true } } } },
       contact: { include: { methods: true } },
       company: { select: { id: true, name: true } },
-      owner: { include: { user: true } },
+      owner: { include: { user: { select: { id: true, name: true, email: true } } } },
       childTasks: {
         include: { contact: { include: { methods: true } } },
         orderBy: { createdAt: "asc" },
@@ -574,7 +574,7 @@ export async function getTask(prisma: PrismaClient, auth: AuthContext, id: strin
       deal: { include: { stage: true } },
       contact: { include: { methods: true } },
       company: { select: { id: true, name: true } },
-      owner: { include: { user: true } },
+      owner: { include: { user: { select: { id: true, name: true, email: true } } } },
       agreement: true,
       childTasks: { include: { contact: true }, orderBy: { createdAt: "asc" } },
     },
@@ -709,6 +709,7 @@ export async function createTask(
     type: string;
     title: string;
     description?: string;
+    messageDraft?: string;
     inquiryId?: string;
     conversationId?: string;
     contactId?: string;
@@ -781,6 +782,7 @@ export async function createTask(
           type: input.type,
           title: input.title,
           description: input.description,
+          messageDraft: input.messageDraft,
           dueAt,
           priority: input.priority || "normal",
           ownerMembershipId,
@@ -800,6 +802,7 @@ export async function createTask(
             type: input.type,
             title: input.title,
             description: input.description,
+            messageDraft: input.messageDraft,
             contactId,
             inquiryId: links.inquiryId,
             conversationId: links.conversationId,
@@ -860,6 +863,7 @@ export async function createTask(
       type: input.type,
       title: input.title,
       description: input.description,
+      messageDraft: input.messageDraft,
       inquiryId,
       conversationId,
       contactId,

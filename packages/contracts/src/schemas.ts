@@ -182,6 +182,7 @@ export const sendMessageSchema = z
   });
 
 export const createTaskSchema = z.object({
+  messageDraft: z.string().max(4000).optional(),
   type: z
     .enum([
       "process_inquiry",

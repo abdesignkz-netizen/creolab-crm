@@ -88,6 +88,7 @@ describe("Task targeting", () => {
       headers: { "Content-Type": "application/json", cookie },
       body: JSON.stringify({
         type: "proposal",
+        messageDraft: "Здравствуйте! Предложение подготовлено.",
         title: "Отправить предложение — группа",
         targetType: "group",
         clientIds: ids,
@@ -98,6 +99,11 @@ describe("Task targeting", () => {
     const parent = await created.json();
     assert.equal(parent.targetType, "group");
     assert.equal(parent.childTasks.length, ids.length);
+    assert.equal(parent.messageDraft, "Здравствуйте! Предложение подготовлено.");
+    for (const child of parent.childTasks) {
+      assert.equal(child.messageDraft, parent.messageDraft);
+      assert.equal(child.executionStatus, "none"); // Creating a draft never queues an external send.
+    }
 
     const list = await fetch(`${base}/api/v1/tasks`, { headers: { cookie } });
     const body = await list.json();

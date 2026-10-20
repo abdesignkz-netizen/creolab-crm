@@ -197,14 +197,20 @@ export async function createCampaign(
       include: { methods: true },
     });
     for (const contact of contacts) {
-      const phone = contact.methods.find((m) => m.type === "phone" && m.primary) || contact.methods.find((m) => m.type === "phone");
+      const phone = contact.methods
+        .filter(method => ["phone", "whatsapp"].includes(method.type) && !/@lid\b/.test(method.rawValue || ""))
+        .sort((left, right) => Number(right.primary) - Number(left.primary))
+        .flatMap(method => [method.rawValue, method.normalizedValue ? `+${method.normalizedValue.replace(/^\+/, "")}` : null])
+        .filter((value): value is string => Boolean(value) && /^[+\d\s()-]+$/.test(value!))
+        .map(value => validateClientPhone(value, membership.tenant.defaultRegion || "KZ"))
+        .find(result => result.ok);
       recipients.push({
         contactId: contact.id,
-        phoneRaw: phone?.rawValue || null,
-        phoneNormalized: phone?.normalizedValue || null,
+        phoneRaw: phone?.ok ? phone.raw : null,
+        phoneNormalized: phone?.ok ? phone.normalized : null,
         displayName: contact.name || null,
-        status: phone ? "pending" : "skipped",
-        skipReason: phone ? null : "Нет доступного номера",
+        status: phone?.ok ? "pending" : "skipped",
+        skipReason: phone?.ok ? null : "Нет доступного номера",
       });
     }
   }
@@ -309,6 +315,25 @@ export async function createCampaign(
     phonePreview,
     summary: statsFromRecipients(campaign.recipients),
   };
+}
+
+export async function listCampaigns(prisma: PrismaClient, auth: AuthContext, query: Record<string, string | undefined> = {}) {
+  const membership = requireTenant(auth);
+  const requestedPage = Number(query.page);
+  const page = Number.isFinite(requestedPage) ? Math.max(1, Math.min(10000, Math.floor(requestedPage))) : 1;
+  const take = 25;
+  const where = { tenantId: membership.tenantId };
+  const [total, rows] = await Promise.all([
+    prisma.campaign.count({ where }),
+    prisma.campaign.findMany({
+      where, orderBy: [{ createdAt: "desc" }, { id: "desc" }], skip: (page - 1) * take, take,
+      select: {
+        id: true, title: true, status: true, createdAt: true, scheduledAt: true, completedAt: true,
+        recipients: { select: { status: true } },
+      },
+    }),
+  ]);
+  return { total, page, pageSize: take, items: rows.map(({ recipients, ...row }) => ({ ...row, summary: statsFromRecipients(recipients) })) };
 }
 
 export async function getCampaign(prisma: PrismaClient, auth: AuthContext, id: string) {

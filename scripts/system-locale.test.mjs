@@ -355,7 +355,7 @@ test('Google integration details show only the chosen service while the legacy c
 
 test('Task summaries keep deadlines, ownership and send warnings visible; workflows remain inside closed disclosures', async () => {
   const fixtures = [
-    {id:'task-open',title:'Обсудить макет',status:'open',type:'call',whoName:'Клиент Алия',assigneeName:'Дана',dueAt:'2020-01-01T12:00:00Z',createdAt:'2020-01-01T11:00:00Z',briefingText:'PRIVATE BRIEFING',conversationId:'conversation-1'},
+    {id:'task-open',title:'Обсудить макет',status:'open',type:'call',whoName:'Клиент Алия',whoPhone:'+77015556677',assigneeName:'Дана',dueAt:'2020-01-01T12:00:00Z',createdAt:'2020-01-01T11:00:00Z',briefingText:'PRIVATE BRIEFING',conversationId:'conversation-1'},
     {id:'task-progress',title:'Проверить смету',status:'in_progress',type:'other',assigneeName:'Ерлан',createdAt:'2020-01-01T11:00:00Z'},
     {id:'task-file',title:'Отправить файл',status:'waiting',type:'message',needsFileRetry:true,createdAt:'2020-01-01T11:00:00Z'},
     {id:'task-done',title:'Согласовать договор',status:'done',type:'other',doneAt:'2020-01-02T12:00:00Z',createdAt:'2020-01-01T11:00:00Z'},
@@ -375,7 +375,8 @@ test('Task summaries keep deadlines, ownership and send warnings visible; workfl
       globalThis.localStorage={getItem:()=>locale};
       const html=render(locale);
       const cards=[...html.matchAll(/<details class="task-card[^]*?<\/details>/g)].map(m=>m[0]);
-      assert.equal(cards.length,4);
+      assert.equal(cards.length,3); // Default view includes waiting tasks, but keeps completed tasks in Archive.
+      assert.doesNotMatch(html, /Согласовать договор/);
       for(const card of cards) {
         assert.doesNotMatch(card, /^<details[^>]*\bopen(?:=|\s|>)/);
         const summary=card.split('</summary>')[0];
@@ -383,6 +384,7 @@ test('Task summaries keep deadlines, ownership and send warnings visible; workfl
         assert.match(summary,/task-card-owner/);
       }
       assert.match(cards[0].split('</summary>')[0],/Клиент Алия/);
+      assert.match(cards[0].split('</summary>')[0],/\+7 701 555 66 77/);
       assert.match(cards[0],/PRIVATE BRIEFING/);
       assert.match(cards[0],/href="\/conversations\/conversation-1"/);
       assert.match(cards[2].split('</summary>')[0],/task-card-alerts/);
@@ -404,6 +406,10 @@ test('Task summaries keep deadlines, ownership and send warnings visible; workfl
     const completed=render('ru','/tasks?filter=done');
     assert.equal((completed.match(/<details class="task-card/g)||[]).length,1);
     assert.match(completed,/Согласовать договор/);
+    const internal=render('ru','/tasks?category=internal');
+    assert.match(internal,/Проверить смету/);
+    assert.doesNotMatch(internal,/Обсудить макет|Отправить файл/);
+    assert.equal((render('ru','/tasks?filter=all').match(/<details class="task-card/g)||[]).length,4);
     // Later today belongs to Today, rather than Upcoming; scheduled sends retain their own group.
     const now=new Date('2035-03-15T10:00:00');
     assert.equal(dueGroup({status:'open',dueAt:'2035-03-15T15:00:00'},now),'today');
@@ -439,7 +445,7 @@ test('Kazakh generated task titles translate on client cards and tasks while pre
     assert.match(clients,/Владелец CREOLAB/);
     assert.doesNotMatch(clients,/Связаться с клиентом|Заявка из WhatsApp|Форма сайта/);
     const tasks=render('tasks','kk');
-    assert.match(tasks,/Клиентпен байланысу: WhatsApp арқылы келген өтінім/);
+    assert.match(tasks,/>Клиентпен байланысу<\/strong>/);
     assert.match(tasks,/Связаться с клиентом: Заявка из WhatsApp/); // Identical manual task is still user content.
     assert.equal(localizedTaskTitle('ru',task),task.title);
     assert.equal(localizedTaskTitle('en',task),'Contact the client: Inquiry from WhatsApp');

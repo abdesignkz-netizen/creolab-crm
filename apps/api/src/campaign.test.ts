@@ -218,6 +218,67 @@ describe("campaign API flow", () => {
     await prisma.$disconnect();
   });
 
+  it("uses a WhatsApp-only phone and never treats a LID as a recipient phone", async () => {
+    const tenant = await prisma.tenant.findFirstOrThrow({ where: { slug: "creolab" } });
+    const contacts = [];
+    for (const [name, value] of [["WhatsApp phone only", "+77015556677"], ["Opaque WhatsApp ID", "36322639085811@lid"]]) {
+      contacts.push(await prisma.contact.create({ data: {
+        tenantId: tenant.id, name, methods: { create: {
+          type: "whatsapp", rawValue: value, normalizedValue: value, primary: true, source: "test",
+        } },
+      } }));
+    }
+    await prisma.contactMethod.updateMany({ where: { contactId: contacts[0].id }, data: { primary: false } });
+    await prisma.contactMethod.create({ data: {
+      tenantId: tenant.id, contactId: contacts[0].id, type: "phone", rawValue: "old invalid phone", normalizedValue: "invalid",
+      primary: true, source: "test",
+    } });
+    const response = await fetch(`${url}/api/v1/campaigns`, {
+      method: "POST", headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "WhatsApp recipient regression", contactIds: contacts.map(row => row.id), messageDraft: "Здравствуйте" }),
+    });
+    assert.equal(response.status, 201);
+    const result = await response.json();
+    assert.equal(result.campaign.recipients.find((row: any) => row.contactId === contacts[0].id).status, "pending");
+    assert.equal(result.campaign.recipients.find((row: any) => row.contactId === contacts[0].id).phoneNormalized, "77015556677");
+    assert.equal(result.campaign.recipients.find((row: any) => row.contactId === contacts[1].id).status, "skipped");
+  });
+
+  it("keeps failed campaign history tenant-scoped with per-recipient reasons and no side effects", async () => {
+    const tenant = await prisma.tenant.findFirstOrThrow({ where: { slug: "creolab" } });
+    const other = await prisma.tenant.create({ data: { name: "Other campaign tenant", slug: `campaign-history-${Date.now()}` } });
+    const hidden = await prisma.campaign.create({ data: { tenantId: other.id, title: "Private campaign", status: "failed" } });
+    const failed = await prisma.campaign.create({ data: {
+      tenantId: tenant.id, title: "Two failed recipients", status: "failed",
+      recipients: { create: [
+        { tenantId: tenant.id, phoneRaw: "+77015556677", status: "failed", error: "Провайдер недоступен" },
+        { tenantId: tenant.id, phoneRaw: "+77015556688", status: "skipped", skipReason: "Нет доступного номера" },
+      ] },
+    } });
+    const response = await fetch(`${url}/api/v1/campaigns`, { headers: { cookie } });
+    assert.equal(response.status, 200);
+    const list = await response.json();
+    assert.ok(!list.items.some((item: any) => item.id === hidden.id));
+    assert.equal(list.items.find((item: any) => item.id === failed.id).summary.failed, 1);
+    assert.equal(list.items.find((item: any) => item.id === failed.id).summary.skipped, 1);
+    const detail = await (await fetch(`${url}/api/v1/campaigns/${failed.id}`, { headers: { cookie } })).json();
+    assert.ok(detail.recipients.some((row: any) => row.error === "Провайдер недоступен"));
+    assert.equal((await fetch(`${url}/api/v1/campaigns/${hidden.id}`, { headers: { cookie } })).status, 404);
+    assert.equal((await fetch(`${url}/api/v1/campaigns`)).status, 401);
+    assert.equal((await prisma.campaign.findUniqueOrThrow({ where: { id: failed.id } })).status, "failed");
+  });
+
+  it("does not expose user password hashes in task list or task details", async () => {
+    const listResponse = await fetch(`${url}/api/v1/tasks`, { headers: { cookie } });
+    const text = await listResponse.text();
+    assert.equal(listResponse.status, 200);
+    assert.doesNotMatch(text, /passwordHash/);
+    const task = JSON.parse(text).items.find((row: any) => row.owner);
+    assert.ok(task);
+    const detail = await (await fetch(`${url}/api/v1/tasks/${task.id}`, { headers: { cookie } })).text();
+    assert.doesNotMatch(detail, /passwordHash/);
+  });
+
   it("parse-phones → create → prepare → confirm snapshot", async () => {
     const parse = await fetch(`${url}/api/v1/campaigns/parse-phones`, {
       method: "POST",

@@ -3691,6 +3691,39 @@ html[data-theme="dark"] {
 /* Tasks: compact summaries, with the existing workflow inside each disclosure. */
 .tasks-page { min-width: 0; container: tasks / inline-size; }
 .task-toolbar { display: flex; align-items: center; gap: 12px; margin: 20px 0 12px; }
+.task-categories { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
+.task-category { display: inline-flex; align-items: center; gap: 10px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); color: var(--ink-soft); font: inherit; font-size: 13px; cursor: pointer; }
+.task-category span { color: var(--muted); font-variant-numeric: tabular-nums; }
+.task-category.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.task-category:focus-visible, .task-template:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.task-category-label { color: var(--muted); font-size: 11px; font-weight: 500; }
+.task-card-phone { display: block; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.task-create-head { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
+.task-create-head h3 { margin: 0; }
+.task-create-head p { margin: 6px 0 0; }
+.task-template-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 20px 0; }
+.task-template { text-align: left; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); font: inherit; color: var(--ink); cursor: pointer; display: grid; gap: 5px; align-content: start; }
+.task-template strong { font-size: 13px; }
+.task-template span { font-size: 12px; line-height: 1.5; color: var(--muted); }
+.task-template.active { border-color: var(--accent); background: var(--accent-soft); }
+.task-simple-create .task-create-summary { padding: 12px; border-radius: 10px; background: var(--bg); font-size: 13px; }
+.campaign-history-item { border-top: 1px solid var(--line); margin-top: 14px; }
+.campaign-history-open { display: flex; justify-content: space-between; gap: 20px; padding: 18px 0; width: 100%; border: 0; background: transparent; font: inherit; color: var(--ink); text-align: left; cursor: pointer; }
+.campaign-history-open > span, .campaign-recipient > div { min-width: 0; overflow-wrap: anywhere; }
+.campaign-history-open .muted { display: block; font-size: 12px; margin-top: 5px; }
+.campaign-history-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.campaign-history-detail { padding: 14px; border-radius: 12px; background: var(--bg); }
+.campaign-recipient { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 14px 0; border-top: 1px solid var(--line); font-size: 13px; }
+.campaign-recipient p { margin: 4px 0; }
+@media (max-width: 700px) {
+  .task-categories { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 6px; }
+  .task-category { white-space: nowrap; flex: 0 0 auto; }
+  .task-template-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .task-template { padding: 11px; }
+  .task-create-head .btn { padding: 8px 12px; }
+  .campaign-history .task-create-head, .campaign-history-open { flex-direction: column; gap: 10px; }
+  .campaign-recipient { grid-template-columns: 1fr; gap: 6px; }
+}
 .tasks-page .task-search { display: flex; flex: 1; align-items: center; gap: 10px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 0 14px; }
 .task-search svg { flex-shrink: 0; }
 .tasks-page .task-search input { width: 100%; min-width: 0; min-height: 46px; border: 0; box-shadow: none; background: transparent; padding: 10px 0; }
@@ -3717,7 +3750,7 @@ html[data-theme="dark"] {
 .task-card-icon.is-complete { background: var(--ok-soft); color: var(--ok); }
 .task-card-heading { display: grid; gap: 5px; min-width: 0; }
 .task-card-heading strong { font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
-.task-card-client { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-card-client { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; line-height: 1.5; }
 .task-card-alerts { color: var(--danger); font-size: 12px; display: grid; gap: 4px; }
 .task-card-alerts:empty { display: none; }
 .task-card-status { justify-self: start; font-size: 11px; line-height: 1.5; border-radius: 6px; padding: 4px 8px; background: var(--bg-elevated); color: var(--ink-soft); overflow-wrap: anywhere; }
