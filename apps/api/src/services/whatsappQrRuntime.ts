@@ -258,7 +258,11 @@ export function startWhatsAppQrRuntime(prisma: PrismaClient, socketFactory = mak
             }
             else {
               await prisma.$executeRaw`UPDATE "WhatsAppQrJob" SET state = 'sending' WHERE id = ${job.id}`;
-              await deliverQrMessage(prisma, id, local.socket, decode(job.encryptedPayload).messageId, () => guardLease(prisma, id, owner));
+              const result = await deliverQrMessage(prisma, id, local.socket, decode(job.encryptedPayload).messageId, () => guardLease(prisma, id, owner));
+              if (result === "deferred") {
+                await prisma.$executeRaw`UPDATE "WhatsAppQrJob" SET state = 'queued', "createdAt" = now() WHERE id = ${job.id}`;
+                continue;
+              }
             }
             await prisma.$executeRaw`DELETE FROM "WhatsAppQrJob" WHERE id = ${job.id}`;
           } catch {

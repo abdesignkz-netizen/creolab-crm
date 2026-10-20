@@ -62,17 +62,31 @@ async function deliverMessage(prisma: PrismaClient, integrationId: string, messa
   const validRecipient = socket ? /^\d+@(s\.whatsapp\.net|lid)$/.test(recipient) : /^\d+$/.test(recipient);
   const ai = message.senderKind === "ai";
   const operation = await prisma.outboundOperation.findFirst({ where: { tenantId: row.tenantId, providerRef: message.id } });
+  const { campaignRefFromOperation, reconcileDirectCampaign, campaignDispatchAllowed } = await import("./campaignDelivery.ts");
+  const campaignRef = campaignRefFromOperation(operation?.idempotencyKey);
+  if (campaignRef && await prisma.campaign.count({ where: { id: campaignRef.campaignId, tenantId: row.tenantId, status: "paused" } })) return "deferred";
+  const reconcileCampaign = async () => {
+    if (campaignRef) await reconcileDirectCampaign(prisma, row.tenantId, campaignRef.campaignId)
+      .catch(() => console.error("Campaign delivery reconciliation deferred", campaignRef.campaignId));
+  };
   const summary = conversation.aiHandoffSummaryJson as Record<string, unknown> | null;
   const handoffSource = ai && operation && typeof summary?.sourceMessageId === "string"
     && operation.idempotencyKey === `wa-ai-handoff:${conversation.id}:${summary.sourceMessageId}:${operation.controlVersion}`
     ? summary.sourceMessageId : undefined;
   const expectedMode = handoffSource ? { in: ["human", "paused"] } : ai ? "ai" : "human";
   const cancel = async () => {
-    await prisma.message.updateMany({ where: { id: messageId, operationState: { in: ["queued", "sending"] } }, data: { operationState: "canceled" } });
-    if (operation) await prisma.outboundOperation.updateMany({ where: { id: operation.id }, data: { state: "canceled" } });
+    const partiallySent = campaignRef && await prisma.message.count({ where: { id: messageId,
+      OR: [{ providerMessageId: { not: null } }, { attachments: { some: { sendState: "sent" } } }] } });
+    const state = partiallySent ? "unknown" : "canceled";
+    await prisma.message.updateMany({ where: { id: messageId, operationState: { in: ["queued", "sending"] } }, data: { operationState: state } });
+    if (operation) await prisma.outboundOperation.updateMany({ where: { id: operation.id }, data: { state } });
+    await reconcileCampaign();
   };
   async function dispatchAllowed() {
     if (!operation) return false;
+    if (campaignRef) {
+      if (!await campaignDispatchAllowed(prisma, { ...campaignRef, tenantId: row.tenantId, conversationId: conversation.id, integrationId })) return false;
+    }
     const current = await prisma.outboundOperation.findFirst({ where: { id: operation.id, tenantId: row.tenantId,
       state: { in: ["queued", "sending"] }, conversation: { id: conversation.id, status: "open", mode: expectedMode,
         controlVersion: operation.controlVersion, tenant: { status: "active" },
@@ -135,9 +149,11 @@ async function deliverMessage(prisma: PrismaClient, integrationId: string, messa
       const { enqueueWhatsAppAi } = await import("./whatsappAiService.ts");
       await enqueueWhatsAppAi(tx, row.tenantId, conversation.id);
     });
+    await reconcileCampaign();
   } catch {
     await prisma.message.update({ where: { id: messageId }, data: { operationState: "unknown" } });
     await prisma.outboundOperation.updateMany({ where: { tenantId: row.tenantId, providerRef: messageId }, data: { state: "unknown" } });
+    await reconcileCampaign();
     throw new ApiError(502, "whatsapp_send_unknown", "WhatsApp не подтвердил отправку. Проверьте переписку перед повторной отправкой.");
   }
 }

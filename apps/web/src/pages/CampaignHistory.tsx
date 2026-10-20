@@ -11,6 +11,7 @@ const STATUS: Record<string, string> = {
   partially_completed: "Отправлена частично", failed: "Ошибка отправки", cancelled: "Отменена",
   pending: "Ожидает отправки", queued: "В очереди", sending: "Отправляется",
   sent: "Отправлено", delivered: "Доставлено", read: "Прочитано", replied: "Ответили", skipped: "Пропущен",
+  unknown: "Проверьте отправку",
 };
 
 /** History stays available after the compose panel is closed, including failed attempts. */
@@ -62,7 +63,11 @@ export function CampaignHistory({ onCreate }: { onCreate?: () => void }) {
             <div><strong>{recipient.displayName || t("Без имени")}</strong><div>{recipient.phoneRaw || recipient.phoneNormalized || t("Телефон не указан")}</div>
               {recipient.conversationId ? <Link to={`/conversations/${recipient.conversationId}`}>{t("Открыть диалог")}</Link> : null}</div>
             <div><b>{t(STATUS[recipient.status] || "Статус неизвестен")}</b>
-              {recipient.error || recipient.skipReason ? <p className="error">{uiMessage(recipient.error || recipient.skipReason)}</p> : null}
+              {recipient.error || recipient.skipReason ? <p className="error">{uiMessage(
+                /Green API HTTP 401/.test(recipient.error || "")
+                  ? "Green API отклонил подключение (401). Для новой рассылки выберите подключённый номер WhatsApp."
+                  : recipient.error || recipient.skipReason,
+              )}</p> : null}
               {recipient.sentAt ? <span className="muted">{formatDateTimeRu(recipient.sentAt)}</span> : null}
             </div>
           </div>)}

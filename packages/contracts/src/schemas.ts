@@ -333,6 +333,7 @@ export const parsePhoneListSchema = z.object({
 });
 
 export const createCampaignSchema = z.object({
+  whatsappIntegrationId: z.string().uuid().optional(),
   title: z.string().trim().min(1).max(200).optional(),
   channel: z.enum(["whatsapp"]).default("whatsapp"),
   source: z.enum(["manual", "ai_command", "import", "segment"]).default("manual"),
@@ -349,6 +350,7 @@ export const createCampaignSchema = z.object({
 });
 
 export const updateCampaignSchema = z.object({
+  whatsappIntegrationId: z.string().uuid().optional(),
   title: z.string().trim().min(1).max(200).optional(),
   messageDraft: z.string().max(4000).nullable().optional(),
   messageMode: z.enum(["manual", "ai", "file_only"]).optional(),

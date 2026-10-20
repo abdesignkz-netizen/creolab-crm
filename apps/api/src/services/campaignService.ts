@@ -29,6 +29,8 @@ import { parseAndMatchPhoneList, type PhoneListItem } from "./phoneListService.t
 import { previewContactSegment } from "./segmentService.ts";
 import { resolveSellerBridge, resolveWhatsAppConversation } from "./sellerLink.ts";
 import { getEntitlements } from "./entitlementService.ts";
+import { campaignSenderId, campaignSenders, chooseCampaignSender, queueDirectCampaignRecipient, reconcileDirectCampaign } from "./campaignDelivery.ts";
+import { CONVERSATION_MAX_ATTACHMENTS, assertConversationMime } from "./conversationMedia.ts";
 
 const ALLOWED_MIME = new Set([
   "application/pdf",
@@ -125,11 +127,12 @@ function contentHash(message: string | null, attachments: unknown[], recipientFi
 }
 
 function campaignHashInput(
-  campaign: { messageSnapshot?: string | null; messageDraft?: string | null; personalizeEach?: boolean | null },
+  campaign: { messageSnapshot?: string | null; messageDraft?: string | null; personalizeEach?: boolean | null; parsedCommandJson?: unknown },
   recipients: Array<{ id: string; status: string; messageDraft?: string | null }>,
   attachments: unknown[],
 ) {
-  const fingerprint = campaign.personalizeEach ? recipientDraftsFingerprint(recipients) : "";
+  let fingerprint = campaign.personalizeEach ? recipientDraftsFingerprint(recipients) : "";
+  if (campaignSenderId(campaign)) fingerprint += `\nsender:${campaignSenderId(campaign)}`;
   return contentHash(campaign.messageSnapshot || campaign.messageDraft || null, attachments, fingerprint);
 }
 
@@ -147,7 +150,8 @@ function statsFromRecipients(rows: Array<{ status: string }>) {
     pending: count("pending") + count("queued"),
     sending: count("sending"),
     sent: count("sent") + count("delivered") + count("read") + count("replied"),
-    failed: count("failed"),
+    failed: count("failed") + count("unknown"),
+    unknown: count("unknown"),
     skipped: count("skipped") + count("cancelled"),
     delivered: count("delivered") + count("read") + count("replied"),
     read: count("read") + count("replied"),
@@ -177,11 +181,13 @@ export async function createCampaign(
     phoneListText?: string;
     phones?: string[];
     segment?: Record<string, unknown>;
+    whatsappIntegrationId?: string;
   },
 ) {
   const membership = requireTenant(auth);
   const tid = membership.tenantId;
   await ensureMassCampaignAccess(prisma, tid);
+  const senderId = await chooseCampaignSender(prisma, tid, input.whatsappIntegrationId);
   const recipients: Array<{
     contactId?: string | null;
     phoneRaw?: string | null;
@@ -288,6 +294,7 @@ export async function createCampaign(
       createMissingClients: input.createMissingClients !== false,
       scheduledAt: input.scheduledAt ? new Date(input.scheduledAt) : null,
       rawCommandText: input.rawCommandText || null,
+      parsedCommandJson: senderId ? { whatsappIntegrationId: senderId } : {},
       createdByMembershipId: membership.id,
       segmentSnapshotJson: (input.segment || {}) as Prisma.InputJsonValue,
       statsJson: {
@@ -334,6 +341,10 @@ export async function listCampaigns(prisma: PrismaClient, auth: AuthContext, que
     }),
   ]);
   return { total, page, pageSize: take, items: rows.map(({ recipients, ...row }) => ({ ...row, summary: statsFromRecipients(recipients) })) };
+}
+
+export async function listCampaignSenders(prisma: PrismaClient, auth: AuthContext) {
+  return { items: await campaignSenders(prisma, requireTenant(auth).tenantId) };
 }
 
 export async function getCampaign(prisma: PrismaClient, auth: AuthContext, id: string) {
@@ -391,6 +402,7 @@ export async function updateCampaign(
     personalizeEach?: boolean;
     createMissingClients?: boolean;
     scheduledAt?: string | null;
+    whatsappIntegrationId?: string;
     recipientIdsInclude?: string[];
     recipientIdsExclude?: string[];
     recipientDrafts?: Array<{ id: string; messageDraft: string | null }>;
@@ -401,6 +413,11 @@ export async function updateCampaign(
   if (!campaign) throw new ApiError(404, "not_found", "Рассылка не найдена");
   if (["running", "completed", "cancelled"].includes(campaign.status)) {
     throw new ApiError(409, "locked", "Рассылку в этом статусе нельзя менять");
+  }
+  const senderId = input.whatsappIntegrationId === undefined ? undefined
+    : await chooseCampaignSender(prisma, membership.tenantId, input.whatsappIntegrationId);
+  if (campaign.startedAt && senderId !== undefined && senderId !== campaignSenderId(campaign)) {
+    throw new ApiError(409, "locked", "Номер отправителя нельзя менять после запуска рассылки");
   }
 
   if (input.recipientIdsExclude?.length) {
@@ -439,6 +456,7 @@ export async function updateCampaign(
       personalizeEach: input.personalizeEach ?? undefined,
       createMissingClients: input.createMissingClients ?? undefined,
       scheduledAt: input.scheduledAt === undefined ? undefined : input.scheduledAt ? new Date(input.scheduledAt) : null,
+      parsedCommandJson: senderId === undefined ? undefined : { ...(campaign.parsedCommandJson as Record<string, any>), whatsappIntegrationId: senderId },
       status: campaign.confirmedAt ? "draft" : campaign.status,
       confirmedAt: null,
       confirmedById: null,
@@ -514,6 +532,16 @@ export async function removeCampaignAttachment(prisma: PrismaClient, auth: AuthC
 
 export async function prepareCampaign(prisma: PrismaClient, auth: AuthContext, id: string) {
   const data = await getCampaign(prisma, auth, id);
+  const senderId = campaignSenderId(data);
+  const sender = senderId ? (await campaignSenders(prisma, data.tenantId)).find(row => row.id === senderId) : null;
+  if (senderId && !sender) throw new ApiError(409, "sender_unavailable", "Выбранный WhatsApp не подключён");
+  if (senderId && data.attachments.length > CONVERSATION_MAX_ATTACHMENTS) throw new ApiError(422, "invalid", "Прикрепите не больше 5 файлов к рассылке");
+  if (senderId) {
+    for (const file of data.attachments) assertConversationMime(file.fileName, file.mimeType);
+    if ([data.messageDraft, ...data.recipients.map(row => row.messageDraft)].some(text => (text?.length || 0) > 4096)) {
+      throw new ApiError(422, "invalid", "Сократите сообщение до 4096 символов");
+    }
+  }
   const pendingForText = data.recipients.filter((r) => r.status === "pending");
   const missingOwnDrafts = pendingForText.filter((r) => !String(r.messageDraft || "").trim()).length;
   const hasSharedDraft = Boolean(String(data.messageDraft || "").trim());
@@ -555,6 +583,7 @@ export async function prepareCampaign(prisma: PrismaClient, auth: AuthContext, i
     newContacts: pending.filter((r) => !r.contactId).length,
     excluded: data.recipients.filter((r) => r.status === "skipped").length,
     channel: data.channel,
+    sender: sender?.label || "WhatsApp · Green API",
     message: data.personalizeEach ? null : data.messageDraft,
     personalizeEach: data.personalizeEach,
     attachments: data.attachments.map((a) => ({
@@ -842,7 +871,13 @@ export async function startCampaign(prisma: PrismaClient, auth: AuthContext, id:
   }
   const attachments = await campaignAttachments(prisma, membership.tenantId, id);
   const recipients = await prisma.campaignRecipient.findMany({ where: { campaignId: id, tenantId: membership.tenantId } });
-  const hash = campaignHashInput(campaign, recipients, campaign.attachmentSnapshotsJson as unknown[]);
+  const confirmedRecipientIds = new Set((Array.isArray(campaign.recipientSnapshotJson) ? campaign.recipientSnapshotJson : [])
+    .map(row => (row as { id?: string })?.id).filter(Boolean));
+  // Delivery status must not invalidate the approved personalized content on resume.
+  const hashRecipients = confirmedRecipientIds.size
+    ? recipients.filter(row => confirmedRecipientIds.has(row.id)).map(row => ({ ...row, status: "pending" }))
+    : recipients;
+  const hash = campaignHashInput(campaign, hashRecipients, campaign.attachmentSnapshotsJson as unknown[]);
   if (hash !== campaign.contentHash) {
     throw new ApiError(409, "stale_confirmation", "Параметры рассылки изменились. Проверьте рассылку повторно.");
   }
@@ -893,6 +928,9 @@ export async function retryFailedCampaign(prisma: PrismaClient, auth: AuthContex
   const membership = requireTenant(auth);
   await requireCampaignForTenant(prisma, membership.tenantId, id);
   await ensureMassCampaignAccess(prisma, membership.tenantId);
+  if (!await prisma.campaignRecipient.count({ where: { tenantId: membership.tenantId, campaignId: id, status: "failed" } })) {
+    throw new ApiError(409, "nothing_to_retry", "Нет сообщений для безопасной повторной отправки. Проверьте историю рассылки.");
+  }
 
   await prisma.campaignRecipient.updateMany({
     where: { campaignId: id, tenantId: membership.tenantId, status: "failed" },
@@ -916,8 +954,9 @@ export async function pauseUnavailableCampaigns(prisma: PrismaClient, tenantId: 
 }
 
 export async function processCampaignQueue(prisma: PrismaClient, campaignId: string) {
-  const seed = await prisma.campaign.findFirst({ where: { id: campaignId }, select: { tenantId: true } });
+  const seed = await prisma.campaign.findFirst({ where: { id: campaignId }, select: { tenantId: true, parsedCommandJson: true } });
   if (seed) {
+    if (campaignSenderId(seed)) await reconcileDirectCampaign(prisma, seed.tenantId, campaignId);
     const access = await getEntitlements(prisma, seed.tenantId);
     if (!access.snapshot.grandfathered && !access.entitlements.MASS_CAMPAIGNS) {
       await pauseUnavailableCampaigns(prisma, seed.tenantId);
@@ -934,9 +973,9 @@ export async function processCampaignQueue(prisma: PrismaClient, campaignId: str
     if (campaign.status !== "running") return;
 
     const batch = await prisma.campaignRecipient.findMany({
-      where: { campaignId, status: "queued" },
+      where: { campaignId, status: campaignSenderId(campaign) ? { in: ["queued", "sending"] } : "queued" },
       take: SEND_CHUNK,
-      orderBy: { createdAt: "asc" },
+      orderBy: [{ status: "asc" }, { createdAt: "asc" }],
     });
     if (!batch.length) {
       const left = await prisma.campaignRecipient.count({ where: { campaignId, status: { in: ["queued", "sending"] } } });
@@ -944,16 +983,16 @@ export async function processCampaignQueue(prisma: PrismaClient, campaignId: str
       const all = await prisma.campaignRecipient.findMany({ where: { campaignId } });
       const stats = statsFromRecipients(all);
       const status =
-        stats.failed > 0 && stats.sent > 0
+        (stats.failed > 0 || stats.skipped > 0) && stats.sent > 0
           ? "partially_completed"
           : stats.failed > 0 && stats.sent === 0
             ? "failed"
-            : "completed";
+            : stats.sent === 0 && stats.skipped > 0 ? "cancelled" : "completed";
       await prisma.campaign.update({
         where: { id: campaignId },
         data: { status, completedAt: new Date(), statsJson: stats },
       });
-      await closeCampaignScheduleTask(prisma, campaign.tenantId, campaignId, status === "failed" ? "canceled" : "done", status);
+      await closeCampaignScheduleTask(prisma, campaign.tenantId, campaignId, ["failed", "cancelled"].includes(status) ? "canceled" : "done", status);
       return;
     }
 
@@ -974,6 +1013,9 @@ export async function processCampaignQueue(prisma: PrismaClient, campaignId: str
       await sendOneRecipient(prisma, campaign, recipient, attachments);
       await new Promise((r) => setTimeout(r, SEND_DELAY_MS));
     }
+    // Direct delivery is durable and asynchronous. The next worker tick reconciles
+    // its result; re-entering this loop would spin while QR messages are queued.
+    if (campaignSenderId(campaign)) return;
   }
 }
 
@@ -990,46 +1032,53 @@ async function ensureContactForRecipient(
   const phone = validateClientPhone(phoneInput, defaultRegion);
   if (!phone.ok) throw new Error(phone.message);
 
-  const existing = await prisma.contactMethod.findFirst({
-    where: { tenantId: campaign.tenantId, type: "phone", normalizedValue: phone.normalized },
-  });
-  if (existing) {
-    await prisma.campaignRecipient.update({ where: { id: recipient.id }, data: { contactId: existing.contactId } });
-    return existing.contactId;
-  }
+  return prisma.$transaction(async tx => {
+    // Replaying a queue tick must not create a second contact/conversation for a
+    // recipient imported by phone, even if another worker already loaded it.
+    await tx.$queryRaw`SELECT id FROM "CampaignRecipient" WHERE id = ${recipient.id} AND "tenantId" = ${campaign.tenantId} FOR UPDATE`;
+    const current = await tx.campaignRecipient.findFirstOrThrow({ where: { id: recipient.id, tenantId: campaign.tenantId } });
+    if (current.contactId) return current.contactId;
+    const existing = await tx.contactMethod.findFirst({
+      where: { tenantId: campaign.tenantId, type: { in: ["phone", "whatsapp"] }, normalizedValue: phone.normalized },
+    });
+    if (existing) {
+      await tx.campaignRecipient.update({ where: { id: recipient.id }, data: { contactId: existing.contactId } });
+      return existing.contactId;
+    }
 
-  const created = await prisma.contact.create({
-    data: {
-      tenantId: campaign.tenantId,
-      name: recipient.displayName || `Клиент ${phone.raw}`,
-      language: "ru",
-      lifecycleStatus: "new",
-      ownerMembershipId: campaign.createdByMembershipId,
-      lastContactAt: new Date(),
-      attributionJson: { sourceType: "manual_bulk_import", source: "manual_bulk_import" },
-      methods: {
-        create: {
-          type: "phone",
-          rawValue: phone.raw,
-          normalizedValue: phone.normalized,
-          source: "manual_bulk_import",
-          primary: true,
-          confirmed: false,
+    const created = await tx.contact.create({
+      data: {
+        tenantId: campaign.tenantId,
+        name: recipient.displayName || `Клиент ${phone.raw}`,
+        language: "ru",
+        lifecycleStatus: "new",
+        ownerMembershipId: campaign.createdByMembershipId,
+        lastContactAt: new Date(),
+        attributionJson: { sourceType: "manual_bulk_import", source: "manual_bulk_import" },
+        methods: {
+          create: {
+            type: "phone",
+            rawValue: phone.raw,
+            normalizedValue: phone.normalized,
+            source: "manual_bulk_import",
+            primary: true,
+            confirmed: false,
+          },
         },
       },
-    },
+    });
+    await writeActivity(tx, {
+      tenantId: campaign.tenantId,
+      contactId: created.id,
+      type: "contact.created",
+      title: "Создан клиент",
+      description: "Источник: массовый импорт номеров",
+      actorType: "system",
+      metadata: { source: "manual_bulk_import", campaignId: true },
+    });
+    await tx.campaignRecipient.update({ where: { id: recipient.id }, data: { contactId: created.id } });
+    return created.id;
   });
-  await writeActivity(prisma, {
-    tenantId: campaign.tenantId,
-    contactId: created.id,
-    type: "contact.created",
-    title: "Создан клиент",
-    description: "Источник: массовый импорт номеров",
-    actorType: "system",
-    metadata: { source: "manual_bulk_import", campaignId: true },
-  });
-  await prisma.campaignRecipient.update({ where: { id: recipient.id }, data: { contactId: created.id } });
-  return created.id;
 }
 
 async function sendOneRecipient(
@@ -1042,6 +1091,8 @@ async function sendOneRecipient(
     personalizeEach?: boolean | null;
     createMissingClients: boolean;
     createdByMembershipId: string | null;
+    confirmedById?: string | null;
+    parsedCommandJson?: unknown;
     title: string;
   },
   recipient: {
@@ -1054,32 +1105,15 @@ async function sendOneRecipient(
   },
   attachments: Array<{ id: string; fileName: string; mimeType: string; storageKey: string; documentType: string }>,
 ) {
-  await prisma.campaignRecipient.update({ where: { id: recipient.id }, data: { status: "sending" } });
+  const claimed = await prisma.campaignRecipient.updateMany({
+    where: { id: recipient.id, tenantId: campaign.tenantId, campaignId: campaign.id,
+      status: campaignSenderId(campaign) ? { in: ["queued", "sending"] } : "queued" },
+    data: { status: "sending" },
+  });
+  if (!claimed.count) return;
   try {
     const contactId = await ensureContactForRecipient(prisma, campaign, recipient);
     if (!contactId) throw new Error("Нет клиента для отправки");
-
-    const conversation = await resolveWhatsAppConversation(prisma, {
-      tenantId: campaign.tenantId,
-      contactId,
-      defaultRegion: "KZ",
-      contactName: recipient.displayName,
-      healFromBot: true,
-    });
-    if (!conversation?.sellerLeadId) {
-      throw new Error("Нет WhatsApp-диалога (sellerLead). Сначала синхронизируйте лиды или напишите клиенту через бота.");
-    }
-
-    await prisma.conversation.update({
-      where: { id: conversation.id },
-      data: { mode: "human", needsAttention: false, attentionReason: "taken_by_human" },
-    });
-    try {
-      const resolved = await resolveSellerBridge(prisma, campaign.tenantId);
-      if (resolved.bridge) await resolved.bridge.setMode(conversation.sellerLeadId, "HUMAN");
-    } catch {
-      // send still proceeds; bot may stay on AI until next sync
-    }
 
     const contact = await prisma.contact.findFirst({ where: { id: contactId, tenantId: campaign.tenantId } });
     const inquiry = await prisma.inquiry.findFirst({
@@ -1096,6 +1130,27 @@ async function sendOneRecipient(
       companyName: (!isGenericCompanyName(inquiry?.companyName) && inquiry?.companyName) || contact?.companyName,
       interest: inquiryRequestText(inquiry),
     });
+
+    if (campaignSenderId(campaign)) {
+      await queueDirectCampaignRecipient(prisma, campaign, { ...recipient, contactId }, text, attachments);
+      await reconcileDirectCampaign(prisma, campaign.tenantId, campaign.id);
+      return;
+    }
+
+    const conversation = await resolveWhatsAppConversation(prisma, {
+      tenantId: campaign.tenantId, contactId, defaultRegion: "KZ", contactName: recipient.displayName, healFromBot: true,
+    });
+    if (!conversation?.sellerLeadId) {
+      throw new Error("Нет WhatsApp-диалога (sellerLead). Сначала синхронизируйте лиды или напишите клиенту через бота.");
+    }
+    await prisma.conversation.update({ where: { id: conversation.id },
+      data: { mode: "human", needsAttention: false, attentionReason: "taken_by_human" } });
+    try {
+      const resolved = await resolveSellerBridge(prisma, campaign.tenantId);
+      if (resolved.bridge) await resolved.bridge.setMode(conversation.sellerLeadId, "HUMAN");
+    } catch {
+      // Sending still performs its own provider authorization check.
+    }
 
     if (text) {
       await sendViaProvider(prisma, campaign.tenantId, {
@@ -1161,11 +1216,23 @@ async function sendOneRecipient(
       metadata: { campaignId: campaign.id, recipientId: recipient.id },
     });
   } catch (error) {
+    // A direct transport may have accepted a message before its response was lost.
+    if (campaignSenderId(campaign)) {
+      await reconcileDirectCampaign(prisma, campaign.tenantId, campaign.id);
+      const current = await prisma.campaignRecipient.findUnique({ where: { id: recipient.id } });
+      if (current?.status !== "sending") return;
+      if (current.conversationId && await prisma.outboundOperation.count({ where: {
+        tenantId: campaign.tenantId,
+        idempotencyKey: `whatsapp:${current.conversationId}:campaign:${campaign.id}:recipient:${recipient.id}`,
+      } })) return;
+    }
     await prisma.campaignRecipient.update({
       where: { id: recipient.id },
       data: {
         status: "failed",
-        error: error instanceof Error ? error.message : "Ошибка отправки",
+        error: error instanceof Error && /Green API HTTP 401/.test(error.message)
+          ? "Green API отклонил авторизацию (401). Проверьте подключение WhatsApp или выберите подключённый номер через QR."
+          : error instanceof Error ? error.message : "Ошибка отправки",
       },
     });
   }

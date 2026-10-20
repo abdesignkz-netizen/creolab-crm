@@ -208,6 +208,7 @@ import {
   draftCampaignMessage,
   getCampaign,
   listCampaigns,
+  listCampaignSenders,
   pauseCampaign,
   personalizeCampaignRecipients,
   prepareCampaign,
@@ -2011,6 +2012,10 @@ export function createApp(prisma: PrismaClient) {
 
   app.get("/api/v1/campaigns", async (req, res) => {
     res.json(await listCampaigns(prisma, await requireAuth(req), req.query as Record<string, string>));
+  });
+
+  app.get("/api/v1/campaigns/senders", async (req, res) => {
+    res.json(await listCampaignSenders(prisma, await requireAuth(req)));
   });
 
   app.get("/api/v1/campaigns/:id", async (req, res) => {

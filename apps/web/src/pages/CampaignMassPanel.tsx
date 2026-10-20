@@ -3,6 +3,7 @@ import { uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale } from 
 import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { nameWithPhone } from "../lib/contactDisplay";
 import { api } from "../lib/api";
+import { Link } from "react-router-dom";
 
 type PickerClient = {
   id: string;
@@ -47,6 +48,11 @@ const MAP_FIELDS = [
   ["comment", "Комментарий"],
   ["skip", "Пропустить"],
 ] as const;
+
+const CAMPAIGN_STATUS: Record<string, string> = {
+  running: "Отправляется", completed: "Отправлена", partially_completed: "Отправлена частично",
+  failed: "Ошибка отправки", paused: "Приостановлена", cancelled: "Отменена",
+};
 
 function formatBytes(n: number) {
   if (n < 1024) return `${n} B`;
@@ -170,10 +176,26 @@ export function CampaignMassPanel({
   const [campaignId, setCampaignId] = useState<string | null>(null);
   const [campaign, setCampaign] = useState<any>(null);
   const [prepare, setPrepare] = useState<any>(null);
+  const [senders, setSenders] = useState<Array<{ id: string; provider: string; label: string }>>([]);
+  const [senderId, setSenderId] = useState("");
+  const [sendersLoaded, setSendersLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState<{ title: string; text: string; kind: "prepare" | "scheduled" | "sent" } | null>(null);
   const confirmRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    let current = true;
+    api.request<{ items: Array<{ id: string; provider: string; label: string }> }>("/api/v1/campaigns/senders")
+      .then(data => {
+        if (!current) return;
+        setSenders(data.items);
+        setSendersLoaded(true);
+        const direct = data.items.filter(row => row.provider !== "whatsapp_seller");
+        if (direct.length === 1) setSenderId(direct[0].id);
+        else if (data.items.length === 1) setSenderId(data.items[0].id);
+      }).catch(err => { if (current) setError(err.message); });
+    return () => { current = false; };
+  }, []);
   const [showAll, setShowAll] = useState(false);
   const [attachments, setAttachments] = useState<any[]>([]);
   const [queuedUploads, setQueuedUploads] = useState(initialPendingAttachments);
@@ -331,6 +353,7 @@ export function CampaignMassPanel({
   }
 
   async function createDraft() {
+    if (!senderId) { setError(uiText("Выберите номер WhatsApp для рассылки")); return; }
     const schedule = resolveScheduleIso();
     if (schedule.error) {
       setError(schedule.error);
@@ -339,6 +362,7 @@ export function CampaignMassPanel({
     setBusy(true);
     try {
       const body: any = {
+        whatsappIntegrationId: senderId,
         title: commandText || message.trim().slice(0, 120) || "Массовая отправка",
         source: commandText ? "ai_command" : whoMode === "import" ? "import" : whoMode === "segment" ? "segment" : "manual",
         messageDraft: messageMode === "file_only" ? "" : message,
@@ -391,6 +415,13 @@ export function CampaignMassPanel({
       setWhenMode("schedule");
       setScheduledAt(toDateTimeLocal(new Date((data as any).scheduledAt)));
     }
+  }
+
+  async function queueAction(action: () => Promise<unknown>) {
+    setBusy(true);
+    try { await action(); await refreshCampaign(); setError(""); }
+    catch (error) { setError(error instanceof Error ? error.message : uiText("Не удалось выполнить действие")); }
+    finally { setBusy(false); }
   }
 
   async function onPersonalizeOffers() {
@@ -498,6 +529,7 @@ export function CampaignMassPanel({
 
   async function onPrepare() {
     if (!campaignId) return;
+    if (!senderId) { setError(uiText("Выберите номер WhatsApp для рассылки")); return; }
     const schedule = resolveScheduleIso();
     if (schedule.error) {
       setError(schedule.error);
@@ -506,6 +538,7 @@ export function CampaignMassPanel({
     setBusy(true);
     try {
       await api.updateCampaign(campaignId, {
+        whatsappIntegrationId: senderId,
         messageDraft: messageMode === "file_only" ? "" : message,
         messageMode,
         personalizeEach: personalizeEach && messageMode !== "file_only",
@@ -610,6 +643,17 @@ export function CampaignMassPanel({
       </div>
 
       {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
+      <label>{uiText("С какого номера отправить")}
+        <select value={senderId} disabled={busy || Boolean(campaign?.startedAt) || ["running", "scheduled", "completed", "partially_completed"].includes(campaign?.status)}
+          onChange={event => { setSenderId(event.target.value); setPrepare(null); }}>
+          <option value="">{uiText("Выберите подключённый WhatsApp")}</option>
+          {senders.map(sender => <option key={sender.id} value={sender.id}>{sender.label}</option>)}
+        </select>
+      </label>
+      {sendersLoaded && !senders.length ? <p className="banner warn">
+        {uiText("Для рассылки сначала подключите WhatsApp.")}{" "}
+        <Link to="/integrations">{uiText("Открыть интеграции")}</Link>
+      </p> : null}
       {notice ? (
         <div className={notice.kind === "prepare" ? "banner warn" : "banner"} id="campaign-result" ref={notice.kind === "scheduled" ? confirmRef : undefined}>
           <b>{notice.title}</b>
@@ -1131,7 +1175,7 @@ export function CampaignMassPanel({
             </div>
             <div>
               <span>{uiText("Канал")}</span>
-              <b>{prepare.channel}</b>
+              <b>{prepare.sender || prepare.channel}</b>
             </div>
             <div>
               <span>{uiText("Когда")}</span>
@@ -1191,14 +1235,14 @@ export function CampaignMassPanel({
         </div>
       ) : null}
 
-      {campaign && ["running", "completed", "partially_completed", "failed", "paused", "scheduled"].includes(campaign.status) ? (
+      {campaign && ["running", "completed", "partially_completed", "failed", "paused", "scheduled", "cancelled"].includes(campaign.status) ? (
         <div className="panel soft">
           <b>
             {campaign.status === "scheduled"
               ? campaign.scheduledAt
                 ? uiText("Запланирована на {p0}", {p0: new Date(campaign.scheduledAt).toLocaleString(uiFormatLocale())})
                 : uiText("Запланирована")
-              : uiText("Статус: {p0}", {p0: campaign.status})}
+              : uiText("Статус: {p0}", {p0: uiText(CAMPAIGN_STATUS[campaign.status] || campaign.status)})}
           </b>
           <p>
             {campaign.status === "scheduled"
@@ -1207,24 +1251,31 @@ export function CampaignMassPanel({
             {uiText("Всего")}{" "}{(campaign.summary || campaign.statsJson)?.total ?? "—"} {" "}{uiText("· отправлено")}{" "}
             {(campaign.summary || campaign.statsJson)?.sent ?? 0} {" "}{uiText("· ошибки")}{" "}{(campaign.summary || campaign.statsJson)?.failed ?? 0}
           </p>
+          {(campaign.summary || campaign.statsJson)?.unknown > 0 ? <p className="banner warn">
+            {uiText("Часть отправок не подтверждена. Проверьте диалоги перед повторной отправкой.")}
+          </p> : null}
           <div className="actions">
-            {campaign.status === "running" ? (
+            {campaign.status === "paused" ? <button type="button" className="btn" disabled={busy}
+              onClick={() => campaignId && queueAction(() => api.startCampaign(campaignId))}>{uiText("Продолжить рассылку")}</button> : null}
+            {["running", "paused", "scheduled"].includes(campaign.status) ? (
               <>
-                <button type="button" className="btn secondary" onClick={() => campaignId && api.pauseCampaign(campaignId).then(() => refreshCampaign())}>
-                  {uiText("Приостановить")}</button>
+                {campaign.status === "running" ? <button type="button" className="btn secondary" disabled={busy}
+                  onClick={() => campaignId && queueAction(() => api.pauseCampaign(campaignId))}>
+                  {uiText("Приостановить")}</button> : null}
                 <button
                   type="button"
                   className="btn secondary"
-                  onClick={() => campaignId && api.cancelCampaignRemainder(campaignId).then(() => refreshCampaign())}
+                  disabled={busy}
+                  onClick={() => campaignId && queueAction(() => api.cancelCampaignRemainder(campaignId))}
                 >
                   {uiText("Отменить остаток")}</button>
               </>
             ) : null}
-            {(campaign.summary || campaign.statsJson)?.failed > 0 ? (
-              <button type="button" className="btn" onClick={() => campaignId && api.retryFailedCampaign(campaignId).then(() => refreshCampaign())}>
+            {campaign.recipients?.some((row: { status: string }) => row.status === "failed") ? (
+              <button type="button" className="btn" disabled={busy} onClick={() => campaignId && queueAction(() => api.retryFailedCampaign(campaignId))}>
                 {uiText("Повторить для неуспешных")}</button>
             ) : null}
-            <button type="button" className="btn secondary" onClick={() => refreshCampaign()}>
+            <button type="button" className="btn secondary" disabled={busy} onClick={() => queueAction(async () => {})}>
               {uiText("Обновить")}</button>
           </div>
         </div>
