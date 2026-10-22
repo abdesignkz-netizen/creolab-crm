@@ -1,4 +1,4 @@
-import type { SetupState, SetupUpdate, AiManagerDraft, AiSetupState, AiSetupPreview } from "@creolab/contracts";
+import type { SetupState, SetupUpdate, AiManagerDraft, AiSetupState, AiSetupPreview, AiKnowledgeImportInput, AiKnowledgeImportPreview } from "@creolab/contracts";
 export type TaskDetailResponse = Record<string, unknown> & { id: string; dueAt: string | null };
 export type AnalyticsTrendResponse = {
   granularity: string;
@@ -309,6 +309,7 @@ export function createApiClient(options: ClientOptions) {
     reviewSalesProposal: (id: string, input: { decision: "create" | "link" | "dismiss"; revision: number; dealId?: string; confirmedLatest?: boolean }) => request(`/api/v1/sales/proposals/${id}/review`, { method: "POST", body: JSON.stringify(input) }),
     aiAutomationSettings: () => request("/api/v1/settings/ai-automation"),
     aiManagerSetup: () => request<AiSetupState>("/api/v1/settings/ai-manager"),
+    previewAiKnowledgeImport: (body: AiKnowledgeImportInput, signal?: AbortSignal) => request<AiKnowledgeImportPreview>("/api/v1/settings/ai-manager/knowledge-preview", { method: "POST", body: JSON.stringify(body), signal }),
     saveAiManagerSetup: (body: { revision: number; draft: AiManagerDraft }) => request<AiSetupState>("/api/v1/settings/ai-manager", { method: "PATCH", body: JSON.stringify(body) }),
     publishAiManagerSetup: (body: { revision: number }) => request<AiSetupState>("/api/v1/settings/ai-manager/publish", { method: "POST", body: JSON.stringify(body) }),
     restoreAiManagerSetup: (body: { revision: number; versionId: string }) => request<AiSetupState>("/api/v1/settings/ai-manager/restore", { method: "POST", body: JSON.stringify(body) }),

@@ -990,9 +990,14 @@ export function createApp(prisma: PrismaClient) {
     const { getAiManagerSetup } = await import("./services/aiManagerSetupService.ts");
     res.json(await getAiManagerSetup(prisma, await requireAuth(req)));
   });
-  app.patch("/api/v1/settings/ai-manager", json, async (req, res) => {
+  app.patch("/api/v1/settings/ai-manager", jsonLarge, async (req, res) => {
     const { saveAiManagerSetupDraft } = await import("./services/aiManagerSetupService.ts");
     res.json(await saveAiManagerSetupDraft(prisma, await requireAuth(req), req.body));
+  });
+  app.post("/api/v1/settings/ai-manager/knowledge-preview", jsonLarge, async (req, res) => {
+    const { previewAiKnowledgeImport } = await import("./services/aiKnowledgeImportService.ts");
+    res.setHeader("Cache-Control", "no-store");
+    res.json(await previewAiKnowledgeImport(prisma, await requireAuth(req), req.body));
   });
   app.post("/api/v1/settings/ai-manager/publish", json, async (req, res) => {
     const { publishAiManagerSetup } = await import("./services/aiManagerSetupService.ts");

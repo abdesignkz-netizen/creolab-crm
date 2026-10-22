@@ -1,0 +1,25 @@
+{
+  "recordedAt": "2026-10-22T21:11:35.852Z",
+  "baselineCommit": "b960ca77585c50c6bc423070cdc2c2230f50548e",
+  "environment": "Local macOS ARM, isolated PGlite, synthetic website conversation, fixed 2-second model mock; not a production/provider benchmark",
+  "sampling": "One run per queue implementation; poll phase begins at inbound enqueue; observation resolution about 40 ms",
+  "before": {
+    "mode": "before",
+    "totalMs": 10086,
+    "beforeModelMs": 5099,
+    "modelMs": 2000,
+    "afterModelMs": 2987,
+    "requestHash": "7e63d8746f329ba3f5152e82ddd6a79ca5f22b8f76470c06c8e0489dc7abc1b4"
+  },
+  "after": {
+    "mode": "after",
+    "totalMs": 5065,
+    "beforeModelMs": 2055,
+    "modelMs": 2001,
+    "afterModelMs": 1009,
+    "requestHash": "7e63d8746f329ba3f5152e82ddd6a79ca5f22b8f76470c06c8e0489dc7abc1b4"
+  },
+  "savedMs": 5021,
+  "sameModelRequest": true,
+  "sameReply": true
+}

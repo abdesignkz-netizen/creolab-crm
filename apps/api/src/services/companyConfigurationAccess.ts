@@ -11,7 +11,7 @@ export const CONFIGURATION_HEADER = "x-basqar-configuration-tenant";
 const routes: Array<[string, RegExp]> = [
   ["GET", /^\/api\/v1\/settings\/ai-(manager|automation)$/],
   ["PATCH", /^\/api\/v1\/settings\/ai-(manager|automation)$/],
-  ["POST", /^\/api\/v1\/settings\/ai-manager\/(publish|restore|reload|preview|review)$/],
+  ["POST", /^\/api\/v1\/settings\/ai-manager\/(publish|restore|reload|preview|review|knowledge-preview)$/],
   ["GET", /^\/api\/v1\/integrations\/(catalog|setup|events|whatsapp|website-chat|channels\/ai|meta|google|tiktok|esf|whatsapp-seller\/health)$/],
   ["PUT", /^\/api\/v1\/integrations\/website-chat$/],
   ["POST", /^\/api\/v1\/integrations\/(whatsapp\/(qr|cloud)|(?:telegram|meta|google|instagram|tiktok)\/connect|whatsapp-seller\/(connect|disconnect|sync|rotate-secret)|esf\/(auth-ticket|connect|disconnect))$/],

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AI_KNOWLEDGE_CATEGORIES, aiKnowledgeSourceSchema, knowledgePriceConflicts } from "./aiKnowledgeImport.ts";
 import { aiIntakeSettingsSchema, defaultAiIntakeSettings, compileIntakeInstructions, intakeKindsForRoles } from "./aiBusinessScenarios.ts";
 
 export const AI_MANAGER_ROLES = ["consultation", "sales", "qualification", "booking", "product_order", "food_order", "support"] as const;
@@ -32,7 +33,7 @@ export const aiManagerDraftSchema = z.object({
   terms: z.object({ payment: field(2500), delivery: field(2500), guarantees: field(2500), cancellation: field(2500), discounts: field(2500) }).default({ payment: "", delivery: "", guarantees: "", cancellation: "", discounts: "" }),
   handoff: z.object({ when: field(2000), contact: field(1000) }).default({ when: "", contact: "" }),
   faq: z.array(z.object({ id: itemId, question: field(1000), answer: field(4000) })).max(40).default([]),
-  knowledge: z.array(z.object({ id: itemId, title: field(300), content: field(65000) })).max(40).default([]),
+  knowledge: z.array(z.object({ id: itemId, title: field(300), content: field(65000), category: z.enum(AI_KNOWLEDGE_CATEGORIES).optional(), source: aiKnowledgeSourceSchema.optional() })).max(40).default([]),
   additionalInstructions: field(60000),
 }).strict();
 
@@ -193,6 +194,9 @@ export function compileAiManagerDraft(draft: AiManagerDraft): AiSetupCompiled {
   });
   draft.knowledge.forEach((item, i) => {
     if (!item.title || !item.content) issue("knowledge_details", `knowledge.${i}`, "Заполните название и содержание материала.");
+    if (item.source && !item.source.reviewedAt) issue("knowledge_unreviewed", `knowledge.${i}`, "Проверьте импортированный текст и подтвердите его перед публикацией.");
+    if (draft.knowledge.slice(0, i).some(previous => previous.content.trim() === item.content.trim() && item.content.trim())) issue("duplicate_material", `knowledge.${i}`, "Материал уже есть в базе знаний. Удалите повтор.");
+    if (knowledgePriceConflicts(item.content, draft.knowledge.slice(0, i)).length) issue("knowledge_price_conflict", `knowledge.${i}`, "В материалах найдены похожие строки с разными ценами. Сверьте их и оставьте актуальные условия.", "warning");
   });
   const style = { friendly: "Доброжелательный, спокойный, профессиональный", business: "Деловой, вежливый, точный", concise: "Краткий, конкретный, без лишних вступлений" }[draft.conversation.style];
   const prompt = [
@@ -214,7 +218,9 @@ export function compileAiManagerDraft(draft: AiManagerDraft): AiSetupCompiled {
   draft.offerings.forEach(item => add(`Услуга / товар: ${item.name}`, facts([["Описание", item.description], ["Цена и порядок расчёта", item.price], ["Что входит", item.includes], ["Сроки", item.timing], ["Ограничения", item.restrictions]])));
   add("Условия работы", facts([["Оплата", draft.terms.payment], ["Доставка / оказание услуг", draft.terms.delivery], ["Гарантии", draft.terms.guarantees], ["Отмена и возврат", draft.terms.cancellation], ["Скидки", draft.terms.discounts]]));
   draft.faq.forEach(item => add(`Вопрос: ${item.question}`, item.answer));
-  draft.knowledge.forEach(item => add(item.title, item.content));
+  draft.knowledge.forEach(item => add(item.title, item.source
+    ? `${item.content}\n\nИсточник материала: ${item.source.name}${item.source.url ? `\nСсылка: ${item.source.url}` : ""}\nИмпортирован: ${item.source.importedAt.slice(0, 10)}. Проверен владельцем: ${item.source.reviewedAt?.slice(0, 10) || "нет"}.`
+    : item.content));
   if (prompt.length + knowledge.reduce((n, item) => n + item.title.length + item.content.length + 10, 0) > 65000) issue("context_size", "knowledge", "Материалов слишком много для одного ответа. Сократите повторы и оставьте до 65 000 символов инструкций и знаний.");
   return { prompt, knowledge, issues };
 }

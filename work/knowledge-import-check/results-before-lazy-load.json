@@ -1,0 +1,74 @@
+{
+  "node": "v22.23.2",
+  "arch": "arm64",
+  "date": "2026-10-22T20:14:35.946Z",
+  "environment": "isolated local workers, not production API",
+  "results": [
+    {
+      "file": "text-20-pages.pdf",
+      "bytes": 20915,
+      "elapsedMs": 470,
+      "baselineMiB": 138.8,
+      "peakMiB": 303.3,
+      "mainLoopMaxMs": 11.2,
+      "pages": 20,
+      "ocr": false,
+      "characters": 42345
+    },
+    {
+      "file": "text-10-MiB.pdf",
+      "bytes": 10485760,
+      "elapsedMs": 453,
+      "baselineMiB": 157.1,
+      "peakMiB": 365.3,
+      "mainLoopMaxMs": 11.1,
+      "pages": 20,
+      "ocr": false,
+      "characters": 42345
+    },
+    {
+      "file": "scanned-5-pages.pdf",
+      "bytes": 1080457,
+      "elapsedMs": 6373,
+      "baselineMiB": 143.1,
+      "peakMiB": 499.6,
+      "mainLoopMaxMs": 11.8,
+      "pages": 5,
+      "ocr": true,
+      "characters": 5698
+    },
+    {
+      "file": "scanned-20-pages.pdf",
+      "bytes": 4323295,
+      "elapsedMs": 23585,
+      "baselineMiB": 147.6,
+      "peakMiB": 457.5,
+      "mainLoopMaxMs": 11.9,
+      "pages": 20,
+      "ocr": true,
+      "characters": 22820
+    },
+    {
+      "file": "image-12-megapixels.jpg",
+      "bytes": 526406,
+      "elapsedMs": 3012,
+      "baselineMiB": 138.1,
+      "peakMiB": 569.7,
+      "mainLoopMaxMs": 11.2,
+      "pages": 1,
+      "ocr": true,
+      "characters": 491
+    },
+    {
+      "file": "image-12-megapixels.png",
+      "bytes": 503403,
+      "elapsedMs": 3562,
+      "baselineMiB": 147.8,
+      "peakMiB": 621.6,
+      "mainLoopMaxMs": 11.4,
+      "pages": 1,
+      "ocr": true,
+      "characters": 491
+    }
+  ]
+}

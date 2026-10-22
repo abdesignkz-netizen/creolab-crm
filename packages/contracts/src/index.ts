@@ -12,6 +12,7 @@ export * from "./control.ts";
 export * from "./taskBoard.ts";
 export * from "./onboarding.ts";
 export * from "./aiManagerSetup.ts";
+export * from "./aiKnowledgeImport.ts";
 
 export const PAGE_SIZE_DEFAULT = 30;
 export * from "./controlNotifications.ts";

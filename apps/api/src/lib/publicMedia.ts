@@ -33,7 +33,7 @@ export function publicMediaUrl(raw: string) {
 
 /** Pin the validated DNS answer to the socket; validate every redirect afresh. */
 export async function downloadPublicMedia(raw: string, maxBytes: number, redirects = 0, signal = AbortSignal.timeout(20_000)):
-Promise<{ buffer: Buffer; contentType: string }> {
+Promise<{ buffer: Buffer; contentType: string; url: string }> {
   const url = publicMediaUrl(raw);
   const hostname = url.hostname.replace(/^\[|\]$/g, "");
   const addresses = isIP(hostname) ? [{ address: hostname, family: isIP(hostname) }] : await lookup(hostname, { all: true });
@@ -71,7 +71,7 @@ Promise<{ buffer: Buffer; contentType: string }> {
       });
       response.on("error", reject);
       response.on("end", () => size
-        ? resolve({ buffer: Buffer.concat(chunks), contentType: response.headers["content-type"] || "" })
+        ? resolve({ buffer: Buffer.concat(chunks), contentType: response.headers["content-type"] || "", url: url.href })
         : reject(new Error("empty_media")));
     });
     req.on("error", reject);

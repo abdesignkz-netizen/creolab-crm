@@ -30,7 +30,7 @@ export function wordsToLines(words: PdfWord[]) {
 }
 
 /** Text and OCR stay on the CRM server. Packaged language data avoids runtime downloads. */
-export async function extractPdfPages(bytes: Buffer): Promise<PdfPageText[]> {
+export async function extractPdfPages(bytes: Buffer, temporaryRoot = tmpdir(), beforeOcr?: () => void): Promise<PdfPageText[]> {
   Object.assign(globalThis, { DOMMatrix, ImageData, Path2D });
   const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
   const task = getDocument({ data: new Uint8Array(bytes), useSystemFonts: true });
@@ -64,6 +64,7 @@ export async function extractPdfPages(bytes: Buffer): Promise<PdfPageText[]> {
         let ocrText = "";
         const ocr = words.map(w => w.text).join("").length < 40;
         if (ocr) {
+          if (!worker) beforeOcr?.();
           // One deadline covers both attempts on this page.
           const deadline = Date.now() + 45_000;
           const recognize = async (detailed: boolean, recoverFaintText = false) => {
@@ -85,7 +86,7 @@ export async function extractPdfPages(bytes: Buffer): Promise<PdfPageText[]> {
             await pdf.cleanup();
             if (!worker) {
               if (!languageDir) {
-                languageDir = await mkdtemp(path.join(tmpdir(), "crm-ocr-"));
+                languageDir = await mkdtemp(path.join(temporaryRoot, "crm-ocr-"));
                 await Promise.all(["rus", "eng"].map(async (code) => {
                   const { langPath } = require(`@tesseract.js-data/${code}`);
                   // Match the LSTM-only engine. The default 4.0.0 files also

@@ -265,13 +265,27 @@ describe("Owner AI manager setup", { concurrency: false }, () => {
   });
 
   it("publishes one consistent snapshot, keeps private drafts and restores the legacy baseline", async () => {
-    const state = (await request()).data;
+    let state = (await request()).data;
+    const imported = await request("/knowledge-preview", "POST", { kind: "file", fileName: "delivery.txt", fileBase64: Buffer.from("Доставка печатных материалов: 2 рабочих дня. Получение в офисе бесплатно.").toString("base64") });
+    assert.equal(imported.status, 200, JSON.stringify(imported.data));
+    const material = { id: "delivery-import", title: imported.data.title, content: imported.data.content, category: imported.data.category, source: imported.data.source };
+    const liveBefore = await getPublishedTenantAiContext(prisma, tenantId);
+    const unreviewed = await request("", "PATCH", { revision: state.revision, draft: { ...state.draft, knowledge: [...state.draft.knowledge, material] } });
+    assert.equal(unreviewed.status, 200); state = unreviewed.data;
+    assert.ok(state.generated.issues.some((issue: any) => issue.code === "knowledge_unreviewed"));
+    assert.equal((await request("/publish", "POST", { revision: state.revision })).status, 422);
+    assert.deepEqual(await getPublishedTenantAiContext(prisma, tenantId), liveBefore);
+    material.source = { ...material.source, reviewedAt: new Date().toISOString() };
+    const reviewedDraft = await request("", "PATCH", { revision: state.revision, draft: { ...state.draft, knowledge: state.draft.knowledge.map((item: any) => item.id === material.id ? material : item) } });
+    assert.equal(reviewedDraft.status, 200); state = reviewedDraft.data;
     await approveScenarios(state);
     const published = await request("/publish", "POST", { revision: state.revision });
     assert.equal(published.status, 200, JSON.stringify(published.data));
     assert.equal(published.data.hasDraftChanges, false);
     const live = await getPublishedTenantAiContext(prisma, tenantId);
     assert.equal(live.tenantPrompt, published.data.generated.prompt);
+    assert.match(live.knowledge.find(item => item.title === "delivery")!.content, /Источник материала: delivery.txt/);
+    assert.equal(published.data.draft.knowledge.find((item: any) => item.id === material.id).source.fingerprint, material.source.fingerprint);
     assert.deepEqual(live.knowledge.map(({ title, content }) => ({ title, content })).sort((a, b) => a.title.localeCompare(b.title)), published.data.generated.knowledge.sort((a: any, b: any) => a.title.localeCompare(b.title)));
     assert.equal((await prisma.knowledgeDocument.findFirstOrThrow({ where: { tenantId, title: "Скрытый черновик" } })).status, "draft");
     assert.equal(published.data.versions.length, 2);

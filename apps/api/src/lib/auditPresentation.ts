@@ -1,6 +1,7 @@
 import { CATALOG_BY_CODE, CONTROL_ACTION_META } from "@creolab/contracts";
 
 export const AUDIT_ACTION_LABELS: Record<string, string> = {
+  "AI_KNOWLEDGE_IMPORT_PREVIEWED": "Материал распознан для базы знаний ИИ",
   "sales.deal_created": "Создана сделка по подтверждённому интересу",
   "sales.proposal_reviewed": "Рассмотрено предложение ИИ о сделке",
   "task.created": "Создана задача",

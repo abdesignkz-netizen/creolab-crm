@@ -28,7 +28,10 @@ beforeEach(() => {
   // Exercise the public client and usage classification without a database or
   // external provider. This legacy tenant needs no quota reservation.
   const tx = {
-    tenant: { findUnique: async () => ({ status: "active", settingsJson: {} }) },
+    tenant: {
+      findUnique: async () => ({ status: "active", settingsJson: {} }),
+      findUniqueOrThrow: async () => ({ status: "active", settingsJson: {} }),
+    },
     tenantPlan: { findFirst: async () => null },
     tenantBillingOverride: { findUnique: async () => null },
     tenantUsage: { findUnique: async () => null },

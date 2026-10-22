@@ -161,6 +161,45 @@
 
 .ai-setup-quality .ai-setup-chat-log { scroll-margin-top: 90px; }
 
+.ai-knowledge { margin-bottom: 32px; min-width: 0; }
+.ai-knowledge-heading h4, .ai-knowledge-list-heading h4 { margin: 0; font-size: 18px; }
+.ai-knowledge-heading p { color: var(--muted); font-size: 14px; line-height: 1.65; margin: 10px 0 18px; }
+.ai-knowledge-methods { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.ai-knowledge-methods button { min-width: 0; padding: 16px 12px; text-align: left; border: 1px solid var(--line); border-radius: 12px; background: #f7faff; color: var(--ink); font: inherit; cursor: pointer; }
+.ai-knowledge-methods button:hover:not(:disabled), .ai-knowledge-methods button:focus-visible { border-color: var(--accent); background: #edf5ff; }
+.ai-knowledge-methods b { display: block; font-size: 14px; line-height: 1.5; }
+.ai-knowledge-methods span { display: block; margin-top: 6px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.ai-knowledge button:disabled { opacity: .55; cursor: not-allowed; }
+.ai-knowledge-link-form, .ai-knowledge-preview { padding: 20px; margin-top: 18px; border: 1px solid #bfd8f3; border-radius: 14px; background: #f7faff; }
+.ai-knowledge-preview { display: grid; gap: 16px; scroll-margin-top: 95px; }
+.ai-knowledge-preview h4 { margin: 0; font-size: 18px; }
+.ai-knowledge-preview p, .ai-knowledge-material-body p { margin: 0; line-height: 1.6; }
+.ai-knowledge-source { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.ai-knowledge-warning { padding: 12px 14px; background: #fff7e7; border: 1px solid #eedbb4; border-radius: 10px; font-size: 13px; line-height: 1.6; color: #78521d; overflow-wrap: anywhere; }
+.ai-knowledge-warning p + p { margin-top: 8px; }
+.ai-knowledge-progress { padding: 18px; margin: 16px 0; background: #eef5ff; border-radius: 12px; }
+.ai-knowledge-progress p { margin: 6px 0 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.ai-knowledge-review { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; line-height: 1.6; cursor: pointer; }
+.ai-knowledge-review input { width: 18px; height: 18px; flex: 0 0 18px; margin: 3px 0 0; accent-color: var(--accent); }
+.ai-knowledge-preview pre { max-height: 260px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 13px; padding: 14px; background: #fff; border-radius: 10px; }
+.ai-knowledge-preview summary, .ai-knowledge-pages summary { cursor: pointer; font-size: 13px; font-weight: 600; line-height: 1.6; }
+.ai-knowledge-pages { margin-top: 20px; }
+.ai-knowledge-pages > div { display: grid; gap: 8px; margin-top: 12px; }
+.ai-knowledge-pages .btn { white-space: normal; display: grid; justify-content: start; text-align: left; overflow-wrap: anywhere; }
+.ai-knowledge-pages small { display: block; font-size: 11px; color: var(--muted); font-weight: 400; overflow-wrap: anywhere; }
+.ai-knowledge-list-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 26px 0 14px; }
+.ai-knowledge-list-heading span { color: var(--muted); font-size: 12px; flex-shrink: 0; }
+.ai-knowledge-empty { padding: 20px; border: 1px dashed var(--line); border-radius: 12px; color: var(--muted); line-height: 1.7; font-size: 13px; }
+.ai-knowledge-materials { display: grid; gap: 10px; }
+.ai-knowledge-material { border: 1px solid var(--line); border-radius: 12px; min-width: 0; }
+.ai-knowledge-material > summary { cursor: pointer; padding: 16px; font-size: 14px; overflow-wrap: anywhere; }
+.ai-knowledge-material summary span { display: inline; }
+.ai-knowledge-material summary small { display: block; margin: 6px 0 0 18px; font-size: 12px; color: var(--muted); font-weight: 400; line-height: 1.6; }
+.ai-knowledge-material-body { display: grid; gap: 16px; padding: 0 16px 16px; }
+.ai-knowledge-material .ai-setup-actions { margin-bottom: 0; }
+@media (max-width: 1050px) { .ai-knowledge-methods { grid-template-columns: 1fr; } .ai-knowledge-methods button { padding: 13px 16px; } }
+@media (max-width: 600px) { .ai-knowledge-preview, .ai-knowledge-link-form { padding: 14px; } .ai-knowledge-material-body { padding: 0 12px 12px; } .ai-knowledge-preview textarea { min-height: 240px; } }
+
 .ai-intake-settings { display: grid; gap: 16px; margin: 24px 0; min-width: 0; }
 .ai-intake-settings h3, .ai-intake-settings p { margin: 0; }
 .ai-intake-options { display: grid; gap: 12px; min-width: 0; margin: 0; padding: 18px; border: 1px solid var(--border, #dce5f0); border-radius: 14px; }

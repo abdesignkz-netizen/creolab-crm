@@ -7,23 +7,25 @@ import { claimScheduledAction, recoverInterruptedScheduledActions } from "./sche
 import type { PrismaClient } from "@creolab/db";
 import { createStaffNotification, deliverPendingPush } from "./notificationService.ts";
 import { AGREEMENT_TYPE_LABEL, type AgreementType } from "./conversationContextTypes.ts";
+import { OUTBOX_FAST_POLL_MS, runOutboxLane, type OutboxLane } from "./outboxScheduling.ts";
 
 const TICK_MS = 5000;
 let started = false;
 let salesSweepRunning = false, lastSalesSweep = 0;
 
-export async function processOutbox(prisma: PrismaClient) {
-  const { processCampaignQueue } = await import("./campaignService.ts");
-  const due = await prisma.outboxEvent.findMany({
-    where: { processedAt: null, availableAt: { lte: new Date() } },
-    orderBy: { availableAt: "asc" },
-    take: 20,
-  });
-  let processed = 0;
-  for (const event of due) {
+export async function processOutbox(prisma: PrismaClient, options: { lane?: OutboxLane } = {}): Promise<number> {
+  if (!options.lane) {
+    const results = await Promise.allSettled((["reply", "delivery", "background"] as const).map(lane => processOutbox(prisma, { lane })));
+    const failed = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+    if (failed) throw failed.reason;
+    return results.reduce((total, result) => total + (result.status === "fulfilled" ? result.value : 0), 0);
+  }
+  const lane = options.lane;
+  return runOutboxLane(prisma, lane, async event => {
     const lease = await claimOutboxEvent(prisma, event.id);
-    if (!lease) continue;
-    processed += 1;
+    if (!lease) return false;
+    const startedAt = Date.now();
+    let outcome = "handled";
     try {
       if (event.type === "billing.email") {
         const { sendMail } = await import("../lib/email.ts");
@@ -41,6 +43,7 @@ export async function processOutbox(prisma: PrismaClient) {
         const { deliverChannelMessage } = await import("./channelDeliveryService.ts");
         await deliverChannelMessage(prisma, event.tenantId, event.entityId);
       } else if (event.type === "campaign.run") {
+        const { processCampaignQueue } = await import("./campaignService.ts");
         const payload = (event.payloadJson || {}) as { campaignId?: string };
         if (payload.campaignId) await processCampaignQueue(prisma, payload.campaignId);
       } else if (event.type === "conversation.context") {
@@ -63,16 +66,23 @@ export async function processOutbox(prisma: PrismaClient) {
         await processEsfSentOutbox(prisma, event);
       }
     } catch (error) {
+      outcome = "retry";
       logServerError(error, "background:outbox");
       await lease.finish({
         attempts: { increment: 1 },
         availableAt: new Date(Date.now() + Math.min(300_000, TICK_MS * 2 ** Math.min(event.attempts, 6))),
       });
-      continue;
+      return true;
+    } finally {
+      if (lane !== "background" && process.env.NODE_ENV !== "test") console.info("outbox_timing", {
+        eventId: event.id, tenantId: event.tenantId, type: event.type, lane, outcome,
+        queueWaitMs: Math.max(0, startedAt - event.availableAt.getTime()), processingMs: Date.now() - startedAt,
+        attempt: event.attempts + 1,
+      });
     }
     await lease.finish({ processedAt: new Date(), attempts: { increment: 1 } });
-  }
-  return processed;
+    return true;
+  });
 }
 
 function reminderLabel(offsetMinutes: number, type: string, title: string, extras: string[]) {
@@ -301,7 +311,7 @@ export function startBackgroundJobs(prisma: PrismaClient, options: { keepAlive?:
         .catch(error => logServerError(error, "background:sales"))
         .finally(() => { salesSweepRunning = false; });
     }
-    processOutbox(prisma).catch((error) => logServerError(error, "background:outbox"));
+    processOutbox(prisma, { lane: "background" }).catch((error) => logServerError(error, "background:outbox"));
     import("./esfStatusSyncService.ts")
       .then(({ ensureEsfStatusPolls }) => ensureEsfStatusPolls(prisma))
       .catch((error) => logServerError(error, "background:esf polls"));
@@ -318,11 +328,19 @@ export function startBackgroundJobs(prisma: PrismaClient, options: { keepAlive?:
         .finally(() => { billingRunning = false; });
     }
   };
+  const fastTick = () => {
+    for (const lane of ["reply", "delivery"] as const) {
+      void processOutbox(prisma, { lane }).catch(error => logServerError(error, `background:outbox ${lane}`));
+    }
+  };
+  fastTick();
   tick();
   const timer = setInterval(tick, TICK_MS);
+  const fastTimer = setInterval(fastTick, OUTBOX_FAST_POLL_MS);
   if (!options.keepAlive) timer.unref?.();
+  if (!options.keepAlive) fastTimer.unref?.();
   return () => {
-    clearInterval(timer);
+    clearInterval(timer); clearInterval(fastTimer);
     started = false;
   };
 }
