@@ -1,4 +1,4 @@
-import type { AiManagerDraft, AiSetupState, AiSetupPreview } from "@creolab/contracts";
+import type { SetupState, SetupUpdate, AiManagerDraft, AiSetupState, AiSetupPreview } from "@creolab/contracts";
 export type TaskDetailResponse = Record<string, unknown> & { id: string; dueAt: string | null };
 export type AnalyticsTrendResponse = {
   granularity: string;
@@ -164,6 +164,8 @@ export function createApiClient(options: ClientOptions) {
       request("/api/v1/billing/requests", { method: "POST", body: JSON.stringify(body) }),
     cancelBillingRequest: (id: string) =>
       request(`/api/v1/billing/requests/${id}/cancel`, { method: "POST" }),
+    onboarding: () => request<SetupState>("/api/v1/workspace/onboarding"),
+    updateOnboarding: (body: SetupUpdate) => request<SetupState>("/api/v1/workspace/onboarding", { method: "PATCH", body: JSON.stringify(body) }),
     skipOnboarding: () => request("/api/v1/billing/onboarding/skip", { method: "POST", body: "{}" }),
     completeOnboardingStep: (step: string) =>
       request("/api/v1/billing/onboarding/complete-step", { method: "POST", body: JSON.stringify({ step }) }),
@@ -303,6 +305,8 @@ export function createApiClient(options: ClientOptions) {
     returnInquiryAi: (id: string) => request(`/api/v1/inquiries/${id}/ai/return`, { method: "POST" }),
     retryInquiryAiAnalysis: (id: string) =>
       request(`/api/v1/inquiries/${id}/ai/retry-analysis`, { method: "POST" }),
+    salesControl: () => request("/api/v1/sales/control"),
+    reviewSalesProposal: (id: string, input: { decision: "create" | "link" | "dismiss"; revision: number; dealId?: string; confirmedLatest?: boolean }) => request(`/api/v1/sales/proposals/${id}/review`, { method: "POST", body: JSON.stringify(input) }),
     aiAutomationSettings: () => request("/api/v1/settings/ai-automation"),
     aiManagerSetup: () => request<AiSetupState>("/api/v1/settings/ai-manager"),
     saveAiManagerSetup: (body: { revision: number; draft: AiManagerDraft }) => request<AiSetupState>("/api/v1/settings/ai-manager", { method: "PATCH", body: JSON.stringify(body) }),
@@ -370,6 +374,8 @@ export function createApiClient(options: ClientOptions) {
       return request(`/api/v1/workspace/audit${suffix}`);
     },
     updateControlChat: (identityId: string, body: unknown) => request(`/api/v1/workspace/control/identities/${encodeURIComponent(identityId)}/chat`, { method: "PUT", body: JSON.stringify(body) }),
+    controlChatHistory: () => request("/api/v1/workspace/control/chat"),
+    sendControlChat: (text: string, requestId: string) => request("/api/v1/workspace/control/chat", { method: "POST", body: JSON.stringify({ text, requestId }) }),
     controlSettings: () => request("/api/v1/workspace/control"),
     controlNotifications: () => request("/api/v1/workspace/control/notifications"),
     saveControlNotifications: (body: unknown) => request("/api/v1/workspace/control/notifications", { method: "PUT", body: JSON.stringify(body) }),

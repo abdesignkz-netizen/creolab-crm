@@ -30,6 +30,16 @@ export function presentControlReply(action: ControlAction, result: unknown, lang
     lines.push(...rows.slice(0, 8).map(task));
     if (!rows.length) lines.push(w("Задач нет.", "Тапсырмалар жоқ."));
     lines.push(controlLink("/tasks"));
+  } else if (action === "GET_SALES_CONTROL") {
+    lines.push(`${w("Цель", "Мақсат")}: ${cleanText(data.goalLabel)}`);
+    lines.push(`${w("Активных сделок", "Белсенді мәмілелер")}: ${data.summary?.active || 0}`);
+    const filterLabels: Record<string, string> = { attention: w("Нужно участие", "Қатысу қажет"), ready: w("Близки к покупке", "Сатып алуға жақын"), goal: w("Цель достигнута", "Мақсат орындалды") };
+    if (filterLabels[data.filter]) lines.push(`${filterLabels[data.filter]}: ${items.length}`);
+    if (data.limited) lines.push(w("Подробности по первым 200 сделкам.", "Алғашқы 200 мәміленің деректері."));
+    lines.push(...items.slice(0, 6).map((r: any, i: number) => `${i + 1}. ${cleanText(r.contactName)}${r.phone ? ` · ${cleanText(r.phone)}` : ""} — ${cleanText(r.title)}\n${cleanText(r.stage)}. ${r.goalReached ? w("Цель достигнута", "Мақсат орындалды") : r.closeToSale ? w("Заказ на завершающем этапе", "Тапсырыс аяқталуға жақын") : ""}\n${w("Следующий шаг", "Келесі қадам")}: ${cleanText(r.nextAction || "Не запланирован")}\n${(r.blockers || []).map((b: string) => cleanText(b)).join("; ")}`));
+    if (data.proposals?.length) lines.push(`${w("Предложений создать сделку", "Мәміле құру ұсыныстары")}: ${data.proposals.length}`);
+    if (!items.length) lines.push(data.filter && data.filter !== "all" ? w("Подходящих сделок нет.", "Сәйкес мәмілелер жоқ.") : w("Активных сделок нет.", "Белсенді мәмілелер жоқ."));
+    lines.push(controlLink(`/control?view=sales&filter=${encodeURIComponent(data.filter || "all")}`));
   } else if (action === "GET_SITUATION") {
     const a = record(data.attention);
     for (const [key, ru, kk] of [["needsReply", "Ждут ответа", "Жауап күтіп отыр"], ["needsHuman", "Нужен сотрудник", "Қызметкер керек"], ["overdueTasks", "Просроченные задачи", "Мерзімі өткен тапсырмалар"], ["noNextAction", "Без следующего шага", "Келесі қадам жоқ"], ["stalledDeals", "Застрявшие сделки", "Тоқтап қалған мәмілелер"]]) lines.push(`${w(ru, kk)}: ${a[key] ?? 0}`);

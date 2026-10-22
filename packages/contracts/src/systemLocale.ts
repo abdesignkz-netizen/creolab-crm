@@ -1,5 +1,7 @@
+import { onboardingKk } from "./onboardingLocale.ts";
 /** Reviewed product copy only. Never pass customer content to this function. */
 export const kkSystemMessages: Readonly<Record<string, string>> = {
+  ...onboardingKk,
   "С какого номера отправить": "Қай нөмірден жіберу керек",
   "Выберите подключённый WhatsApp": "Қосылған WhatsApp-ты таңдаңыз",
   "Выберите номер WhatsApp для рассылки": "Таратылым үшін WhatsApp нөмірін таңдаңыз",

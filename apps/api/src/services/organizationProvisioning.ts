@@ -95,7 +95,7 @@ export async function provisionOrganization(tx: DbClient, input: ProvisionOrgani
         contactEmail,
         contactPhone,
         source: input.source,
-        onboarding: preview
+        onboarding: free || preview
           ? { status: "not_started", deferred: false, steps: {} }
           : { status: "completed", deferred: false, steps: {} },
       } as Prisma.InputJsonValue,

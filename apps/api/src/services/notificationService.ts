@@ -1,7 +1,6 @@
 import { queueEmployeeTelegram } from "./employeeTelegramService.ts";
 import { queueControlNotification } from "./controlNotificationService.ts";
 import type { Prisma, PrismaClient } from "@creolab/db";
-import { randomUUID } from "node:crypto";
 
 import { EVENT_CATEGORY, inQuietHours } from "./notificationPolicy.ts";
 
@@ -83,9 +82,12 @@ export async function createStaffNotification(
       where: { notificationId: notification.id, channel },
     });
     if (existing) continue;
-    await prisma.notificationDelivery.create({
-      data: {
-        id: randomUUID(),
+    // Keep legacy deliveries, but give new ones a stable identity across workers.
+    await prisma.notificationDelivery.upsert({
+      where: { id: `${channel}:${notification.id}` },
+      update: {},
+      create: {
+        id: `${channel}:${notification.id}`,
         tenantId: args.tenantId,
         notificationId: notification.id,
         channel,
@@ -175,6 +177,12 @@ export async function deliverPendingPush(
     return { attempted: 0, sent: 0 };
   }
 
+  const claimed = await prisma.notificationDelivery.updateMany({
+    where: { id: pushDelivery.id, state: "created" },
+    data: { state: "sending" },
+  });
+  if (!claimed.count) return { attempted: 0, sent: 0 };
+
   let sent = 0;
   for (const sub of subs) {
     try {
@@ -200,6 +208,7 @@ export async function deliverPendingPush(
           entityType: notification.entityType,
           entityId: notification.entityId,
         }),
+        { timeout: 10_000 },
       );
       sent += 1;
     } catch (error) {

@@ -190,6 +190,7 @@ const SOURCE_OPTIONS = [
   { id: "instagram", label: "Instagram" },
   { id: "telegram", label: "Telegram" },
   { id: "manual", label: "Вручную" },
+  { id: "control", label: "BasQar Control" },
 ];
 
 function isFutureDue(value?: string | Date | null, now = Date.now()) {
@@ -1511,7 +1512,7 @@ export function TasksPage() {
                 <option value="ai">{uiText("От AI")}</option>
                 <option value="managers">{uiText("Команда")}</option>
                 <option value="notes">{uiText("Без клиента")}</option>
-                <option value="manual">{uiText("Вручную")}</option>
+                <option value="manual">{uiText("Вручную")}</option><option value="control">BasQar Control</option>
                 <option value="ai_command">{uiText("Команда AI")}</option>
                 <option value="ai_automation">{uiText("Автоматизация AI")}</option>
                 <option value="context_engine">{uiText("Из WhatsApp")}</option>

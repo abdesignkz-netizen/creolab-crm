@@ -115,6 +115,23 @@ describe("self-service registration and preview entitlements", () => {
     assert.equal(me.data.billing.previewMode, false);
     assert.equal(me.data.user.locale, "kk");
 
+    assert.equal(me.data.billing.onboarding.status, "not_started");
+    const setup = await req(cookie, "/api/v1/workspace/onboarding", { tenantId });
+    assert.equal(setup.status, 200);
+    assert.equal(setup.data.started, false);
+    const savedSetup = await req(cookie, "/api/v1/workspace/onboarding", {
+      method: "PATCH", tenantId, body: { channel: "whatsapp", replyMode: "manual" },
+    });
+    assert.equal(savedSetup.status, 200, JSON.stringify(savedSetup.data));
+    assert.equal(savedSetup.data.steps.length, 3);
+    assert.equal(savedSetup.data.completed, false);
+    const refreshedSetup = await req(cookie, "/api/v1/workspace/onboarding", { tenantId });
+    assert.equal(refreshedSetup.data.channel, "whatsapp");
+    const forgedSetup = await req(cookie, "/api/v1/workspace/onboarding", {
+      method: "PATCH", tenantId, body: { steps: { test: true } },
+    });
+    assert.equal(forgedSetup.status, 422);
+
     const situation = await req(cookie, "/api/v1/situation/overview", { tenantId });
     assert.equal(situation.status, 200);
 

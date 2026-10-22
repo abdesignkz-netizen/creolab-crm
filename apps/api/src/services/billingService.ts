@@ -1,3 +1,4 @@
+import { updateOnboarding, validateLegacyOnboardingStep } from "./onboardingService.ts";
 import { FEATURE_LIST, LIMIT_LIST, LEGACY_CATALOG_CODES } from "@creolab/contracts";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
@@ -148,51 +149,13 @@ export async function quotePublic(prisma: PrismaClient, auth: AuthContext, input
 }
 
 export async function skipOnboarding(prisma: PrismaClient, auth: AuthContext) {
-  const membership = requireTenant(auth);
-  const tenant = await prisma.tenant.findUnique({ where: { id: membership.tenantId } });
-  if (!tenant) throw new ApiError(404, "not_found", "Компания не найдена");
-  const current = tenant.settingsJson && typeof tenant.settingsJson === "object"
-    ? { ...(tenant.settingsJson as Record<string, unknown>) }
-    : {};
-  const onboarding = {
-    ...(typeof current.onboarding === "object" && current.onboarding ? current.onboarding : {}),
-    status: "deferred",
-    deferred: true,
-  };
-  await prisma.tenant.update({
-    where: { id: membership.tenantId },
-    data: { settingsJson: { ...current, onboarding } as Prisma.InputJsonValue },
-  });
-  return getBillingState(prisma, membership.tenantId);
+  await updateOnboarding(prisma, auth, { deferred: true });
+  return getBillingState(prisma, requireTenant(auth).tenantId);
 }
 
 export async function completeOnboardingStep(prisma: PrismaClient, auth: AuthContext, step: string) {
-  const membership = requireTenant(auth);
-  const key = String(step || "").trim();
-  if (!key) throw new ApiError(422, "invalid", "Укажите шаг");
-  const tenant = await prisma.tenant.findUnique({ where: { id: membership.tenantId } });
-  if (!tenant) throw new ApiError(404, "not_found", "Компания не найдена");
-  const current = tenant.settingsJson && typeof tenant.settingsJson === "object"
-    ? { ...(tenant.settingsJson as Record<string, unknown>) }
-    : {};
-  const prev = typeof current.onboarding === "object" && current.onboarding
-    ? (current.onboarding as Record<string, unknown>)
-    : {};
-  const steps = { ...(typeof prev.steps === "object" && prev.steps ? prev.steps : {}), [key]: true };
-  const { entitlements } = await getEntitlements(prisma, membership.tenantId);
-  const needed = ["company", ...(entitlements.AI_MANAGER ? ["ai"] : []), ...(entitlements.WHATSAPP ? ["whatsapp"] : []), ...(entitlements.TEAM ? ["team"] : [])];
-  const done = needed.every(item => Boolean((steps as Record<string, unknown>)[item]));
-  const onboarding = {
-    ...prev,
-    steps,
-    status: done ? "completed" : "in_progress",
-    deferred: false,
-  };
-  await prisma.tenant.update({
-    where: { id: membership.tenantId },
-    data: { settingsJson: { ...current, onboarding } as Prisma.InputJsonValue },
-  });
-  return getBillingState(prisma, membership.tenantId);
+  await validateLegacyOnboardingStep(prisma, auth, step);
+  return getBillingState(prisma, requireTenant(auth).tenantId);
 }
 
 export async function activateTenantSubscription(

@@ -227,6 +227,21 @@ describe("campaign delivery through connected WhatsApp", () => {
     }
   });
 
+  it("reuses a verified LID conversation instead of creating a second phone thread", async () => {
+    const campaign = await createDraft(), recipient = campaign.recipients[0], lid = "12345678901234@lid";
+    const original = await prisma.conversation.create({ data: { tenantId, connectionId, contactId: recipient.contactId, externalThreadId: lid, mode: "human" } });
+    await prisma.externalIdentity.createMany({ data: [lid, `${recipient.phoneNormalized}@s.whatsapp.net`].map(externalId => ({ tenantId, connectionId, integrationId: qrId, contactId: recipient.contactId, type: "whatsapp", externalId })) });
+    assert.equal((await api(`/campaigns/${campaign.id}/confirm`, "POST", {})).status, 200);
+    await prisma.campaign.update({ where: { id: campaign.id }, data: { status: "running" } });
+    await prisma.campaignRecipient.updateMany({ where: { campaignId: campaign.id }, data: { status: "queued" } });
+    await processCampaignQueue(prisma, campaign.id);
+    const queued = await outbound(campaign.id);
+    assert.equal(queued.recipient.conversationId, original.id);
+    assert.equal(await prisma.conversation.count({ where: { tenantId, connectionId, contactId: recipient.contactId } }), 1);
+    await deliverQrMessage(prisma, qrId, socket, queued.operation.providerRef!, async () => {});
+    assert.equal(sentTo.at(-1), lid);
+  });
+
   it("never routes to a different phone on the same contact", async () => {
     const campaign = await createDraft();
     const recipient = campaign.recipients[0];

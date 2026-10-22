@@ -212,7 +212,8 @@ export async function executeTaskBatch(
     throw new ApiError(422, "too_many", "Слишком много получателей для batch. Создайте Campaign (следующая волна).");
   }
 
-  await syncGroupAttachmentsToChildren(prisma, auth, parentId);
+  // Background execution must use exactly the previously confirmed snapshots.
+  if (!options.runScheduled) await syncGroupAttachmentsToChildren(prisma, auth, parentId);
 
   if (!options.runScheduled && taskMarkedForScheduledSend(parent)) {
     for (const child of children) {
@@ -245,11 +246,13 @@ export async function executeTaskBatch(
 
   for (const child of children) {
     try {
-      if (parent.messageDraft && !child.messageDraft) {
-        await updateTaskDraft(prisma, auth, child.id, { messageDraft: parent.messageDraft });
+      if (!options.runScheduled) {
+        if (parent.messageDraft && !child.messageDraft) {
+          await updateTaskDraft(prisma, auth, child.id, { messageDraft: parent.messageDraft });
+        }
+        await prepareTaskExecution(prisma, auth, child.id);
+        await confirmTaskExecution(prisma, auth, child.id);
       }
-      await prepareTaskExecution(prisma, auth, child.id);
-      await confirmTaskExecution(prisma, auth, child.id);
       const exec = await executeTask(prisma, auth, child.id, { runScheduled: options.runScheduled });
       results.push({ taskId: child.id, contactId: child.contactId, success: Boolean(exec.success) });
     } catch (error) {

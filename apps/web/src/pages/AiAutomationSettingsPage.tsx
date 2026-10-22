@@ -1,3 +1,5 @@
+import { SalesProcessSettingsPanel } from "../components/SalesProcessSettings";
+import { parseSalesProcess } from "@creolab/contracts";
 import { WorkspaceSectionNav } from "../components/WorkspaceSectionNav";
 import { InlineFeedback } from "../components/InlineFeedback";
 import { useUiText, localizeUiOptions } from "../lib/uiText";
@@ -10,13 +12,14 @@ import { NavIcon } from "../components/NavIcon";
 import "../ai-manager-settings.css";
 import "../ai-manager-setup.css";
 
-type SettingsSection = "replies" | "requests" | "crm" | "prompt" | "knowledge" | "handoff" | "hours";
+type SettingsSection = "sales" | "replies" | "requests" | "crm" | "prompt" | "knowledge" | "handoff" | "hours";
 
 const SECTION_ITEMS: Array<{ id: SettingsSection; label: string }> = [
   { id: "replies", label: "Кому отвечать" },
   { id: "hours", label: "Когда отвечать" },
   { id: "requests", label: "Писать первым" },
   { id: "handoff", label: "Передача менеджеру" },
+  { id: "sales", label: "От обращения до продажи" },
 ];
 const EXTRA_SECTIONS: Array<{ id: SettingsSection; label: string }> = [
   { id: "crm", label: "CRM по переписке" }, { id: "prompt", label: "Промпт" }, { id: "knowledge", label: "База знаний" },
@@ -137,10 +140,12 @@ export function AiAutomationSettingsPage() {
   const [error, setError] = useState("");
   const [hint, setHint] = useState("");
   const [busy, setBusy] = useState(false);
-  const [section, setSection] = useState<SettingsSection>("replies");
+  const [section, setSection] = useState<SettingsSection>(new URLSearchParams(window.location.search).get("section") === "sales" ? "sales" : "replies");
   const [replyAudience, setReplyAudience] = useState<Audience>({ audience: "all", since: null });
   const [proactive, setProactive] = useState(true);
   const [savedSnapshot, setSavedSnapshot] = useState("");
+  const [salesProcess, setSalesProcess] = useState(parseSalesProcess({}));
+  const [analyzeNewRequests, setAnalyzeNewRequests] = useState(true);
   const [crm, setCrm] = useState<CrmState>(DEFAULT_CRM);
   const [mode, setMode] = useState("CONFIRM");
   const [processRepeat, setProcessRepeat] = useState(true);
@@ -153,6 +158,8 @@ export function AiAutomationSettingsPage() {
   async function load() {
     try {
       const next = (await api.aiAutomationSettings()) as {
+        salesProcess?: unknown;
+        analyzeNewRequests?: boolean;
         replyAudience?: Audience;
         crm?: CrmState;
         defaultMode: string;
@@ -173,6 +180,8 @@ export function AiAutomationSettingsPage() {
       setReplyAudience(next.replyAudience || { audience: "all", since: null });
       setProactive(next.allowProactiveOutbound !== false);
       setCrm({ ...DEFAULT_CRM, ...next.crm });
+      setSalesProcess(parseSalesProcess(next.salesProcess));
+      setAnalyzeNewRequests(next.analyzeNewRequests !== false);
       setData(next);
       setMode(next.defaultMode);
       setProcessRepeat(Boolean(next.processRepeatRequests));
@@ -220,7 +229,7 @@ export function AiAutomationSettingsPage() {
     if (aiManagerAllowed) void load();
   }, [aiManagerAllowed]);
 
-  const draftSnapshot = JSON.stringify({ crm, mode, processRepeat, sla, timezone, handoff, followUp, conversationHours, replyAudience, proactive });
+  const draftSnapshot = JSON.stringify({ salesProcess, analyzeNewRequests, crm, mode, processRepeat, sla, timezone, handoff, followUp, conversationHours, replyAudience, proactive });
   useEffect(() => { if (data) setSavedSnapshot(draftSnapshot); }, [data]);
   const dirty = Boolean(savedSnapshot && savedSnapshot !== draftSnapshot);
   useEffect(() => { if (dirty) setHint(""); }, [dirty]);
@@ -243,7 +252,7 @@ export function AiAutomationSettingsPage() {
     setHint("");
     try {
       const result = (await api.updateAiAutomationSettings({
-        crm,
+        crm, salesProcess, analyzeNewRequests,
         replyAudience,
         allowProactiveOutbound: proactive,
         defaultMode: mode,
@@ -299,6 +308,7 @@ export function AiAutomationSettingsPage() {
       <details className="ai-manager-extra"><summary>{uiText("Дополнительные настройки")}</summary><div className="actions">{EXTRA_SECTIONS.map(item => <button key={item.id} className={`btn ${section === item.id ? "" : "secondary"}`} onClick={() => setSection(item.id)}>{uiText(item.label)}</button>)}</div></details>
 
       <fieldset className="ai-manager-editor" disabled={busy}>
+      {section === "sales" && <SalesProcessSettingsPanel value={salesProcess} onChange={setSalesProcess} members={data.salesMembers || []} href={href} ready={crm.enabled && analyzeNewRequests && !["MANUAL", "ASSIST"].includes(mode)} enableAnalysis={() => { setCrm(v => ({ ...v, enabled: true })); setAnalyzeNewRequests(true); if (["MANUAL", "ASSIST"].includes(mode)) setMode("CONFIRM"); }} />}
       {section === "replies" ? <>
       <div className="panel">
         <b>{text("Как работает ИИ", "ЖИ қалай жұмыс істейді", "How AI works")}</b>

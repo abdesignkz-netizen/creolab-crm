@@ -1,3 +1,5 @@
+import { systemText } from "@creolab/contracts";
+import { SetupProvider, SetupGuide } from "./components/SetupAssistant";
 import { uiText, useUiText, localizeUiOptions, uiMessage, uiNotificationBody } from "./lib/uiText";
 import { lazy, Suspense, useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from "react-router-dom";
@@ -30,6 +32,7 @@ const ClientsPage = lazy(() => import("./pages/ClientsPage").then(m => ({ defaul
 const CompaniesPage = lazy(() => import("./pages/CompaniesPage").then(m => ({ default: m.CompaniesPage })));
 const CompanyPage = lazy(() => import("./pages/CompanyPage").then(m => ({ default: m.CompanyPage })));
 const ContactPage = lazy(() => import("./pages/ContactPage").then(m => ({ default: m.ContactPage })));
+const GettingStartedPage = lazy(() => import("./pages/GettingStartedPage").then(m => ({ default: m.GettingStartedPage })));
 const ControlPage = lazy(() => import("./pages/ControlPage").then(m => ({ default: m.ControlPage })));
 const ConversationsPage = lazy(() => import("./pages/ConversationsPage").then(m => ({ default: m.ConversationsPage })));
 const DealsPage = lazy(() => import("./pages/DealsPage").then(m => ({ default: m.DealsPage })));
@@ -148,7 +151,8 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
     ...(caps.documents ? [["/documents", t(locale, "nav.documents")] as [string, string]] : []),
   ] : [];
   const systemLinks = hasCompany ? [
-    ...(!caps.manager ? [["/control", t(locale, "nav.control")] as [string, string]] : []),
+    ...(caps.companyAdmin ? [["/start", systemText(locale, "Начало работы")]] : []),
+    ["/control", caps.manager ? "BasQar Control" : t(locale, "nav.control")],
     ...(caps.integrations ? [["/integrations", t(locale, "nav.integrations")] as [string, string]] : []),
     ...(caps.analytics ? [["/stats", t(locale, "nav.stats")] as [string, string]] : []),
     ["/billing", t(locale, "nav.billing")],
@@ -179,8 +183,9 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
         ["/settings", t(locale, "nav.settings")],
       ]
     : [
+        ["/start", systemText(locale, "Начало работы"), hasCompany && caps.companyAdmin],
         ["/admin", t(locale, "nav.platform"), platformAdmin],
-        ["/control", t(locale, "nav.control"), hasCompany && !caps.manager],
+        ["/control", caps.manager ? "BasQar Control" : t(locale, "nav.control"), hasCompany],
         ["/contacts", t(locale, "nav.contacts"), hasCompany],
         ["/companies", t(locale, "nav.companies"), hasCompany],
         ["/deals", t(locale, "nav.deals"), hasCompany],
@@ -232,6 +237,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
   const moreBadgeTotal = moreLinks.reduce((sum, [path]) => sum + badgeCount(path), 0);
 
   const titleMap: Record<string, string> = {
+    "/start": systemText(locale, "Начало работы"),
     "/today": t(locale, "nav.home"),
     "/control": t(locale, "nav.control"),
     "/inquiries": t(locale, "nav.inquiries"),
@@ -749,11 +755,11 @@ function Login() {
     if (params.get("reset") === "1") navigate("/forgot-password", { replace: true });
   }, [navigate, params]);
 
-  async function enterSession(result: any, options: { openBilling?: boolean } = {}) {
+  async function enterSession(result: any, options: { firstSetup?: boolean } = {}) {
     const tenantId = result.user?.activeTenant?.tenant?.id || result.user?.memberships?.[0]?.tenant?.id;
     if (tenantId) setTenant(tenantId);
-    const dest = options.openBilling
-      ? "/billing"
+    const dest = options.firstSetup
+      ? "/start"
       : result.user?.user?.platformAdmin && !tenantId
         ? "/admin"
         : "/today";
@@ -923,7 +929,7 @@ function Login() {
               setError("");
               try {
                 const result = (await api.verifyRegistration(email, String(form.get("code")), locale)) as any;
-                await enterSession(result, { openBilling: true });
+                await enterSession(result, { firstSetup: true });
               } catch (err) {
                 setError(authErrorMessage(locale, err, "login.verifyFailed"));
               } finally {
@@ -1183,14 +1189,16 @@ export function App() {
             <Navigate to={location.pathname.startsWith("/admin") ? "/admin/login" : "/login"} replace />
           ) : (
             <SessionContext.Provider value={{ me, caps: me?.capabilities || emptyCaps }}>
-            <Shell me={me}>
+            <SetupProvider key={`${me?.user?.id}:${me?.activeTenant?.tenant?.id}`}><Shell me={me}>
+              <SetupGuide />
               <PageErrorBoundary resetKey={`${me?.activeTenant?.tenant?.id || ""}:${location.pathname}${location.search}`}>
               <Suspense fallback={<div className="state" role="status">{uiText("Загрузка раздела…")}</div>}>
               <Routes>
                 <Route path="/today" element={!me?.activeTenant && me?.user?.platformAdmin ? <Navigate to="/admin" replace /> : <Today />} />
+                <Route path="/start" element={me?.capabilities?.companyAdmin ? <GettingStartedPage /> : <Navigate to="/today" replace />} />
                 <Route path="/billing" element={<BillingPage />} />
                 <Route path="/billing/checkout/:orderId" element={<BillingCheckoutPage />} />
-                <Route path="/control" element={me?.capabilities?.manager ? <Navigate to="/today" replace /> : <ControlPage />} />
+                <Route path="/control" element={<ControlPage canManageOverview={!me?.capabilities?.manager} />} />
                 <Route path="/integrations" element={me?.capabilities?.integrations ? <IntegrationsPage /> : <Navigate to="/today" replace />} />
                 <Route path="/integrations/esf" element={me?.capabilities?.documents && me?.serviceFeatures?.esf === true ? <EsfIntegrationPage /> : <Navigate to="/today" replace />} />
                 <Route path="/inquiries" element={<RequestsPage />} />
@@ -1220,7 +1228,7 @@ export function App() {
               </Routes>
               </Suspense>
               </PageErrorBoundary>
-            </Shell>
+            </Shell></SetupProvider>
             </SessionContext.Provider>
           )
         }

@@ -1,3 +1,4 @@
+import type { AiIntakeExtraction } from "@creolab/contracts";
 /** Structured analysis produced by Conversation Context Engine. AI suggests; backend applies. */
 
 export type WaitingFor = "CLIENT" | "MANAGER" | "AI" | "THIRD_PARTY" | "NONE";
@@ -67,6 +68,7 @@ export type SuggestedTask = {
 };
 
 export type ConversationAnalysis = {
+  intakeRequest?: AiIntakeExtraction | null;
   events?: BusinessEvent[];
   clientIntent: string | null;
   detectedNeed: string | null;

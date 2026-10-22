@@ -1,3 +1,5 @@
+import { applyAiIntake, publishedIntakePolicy } from "./aiIntakeService.ts";
+import { considerSalesOpportunity, ensureSalesNextTask, enqueueSalesReconcile } from "./salesProcessService.ts";
 import { deliveredConversationMessage } from "./conversationMessageState.ts";
 import { randomUUID } from "node:crypto";
 import type { Prisma, PrismaClient } from "@creolab/db";
@@ -25,7 +27,7 @@ const SAFE_INQUIRY_TRANSITIONS: Record<string, string[]> = {
   in_progress: ["waiting_client", "waiting_manager", "qualified"],
 };
 
-const SAFE_DEAL_STAGES = new Set(["need_identified", "proposal_sent", "negotiation", "contract"]);
+const SAFE_DEAL_STAGES = new Set(["need_identified", "proposal_sent", "negotiation"]);
 
 function tenantId(auth: AuthContext) {
   if (!auth.activeMembership) throw new ApiError(403, "no_tenant", "Нет активной компании");
@@ -201,6 +203,7 @@ export async function applyAnalyzedConversation(prisma: PrismaClient, tid: strin
     if (await tx.idempotencyRecord.findUnique({ where: { scope_actorKey_key: key } })) return { applied: null, skipped: "already_applied" };
 
     const contactId = conversation.contactId;
+    const createdSalesDeal = await considerSalesOpportunity(tx, tid, { conversationId, sourceMessageId, messageRevision: result.messageRevision, analysis });
     const deal = await resolveContextDeal(tx, tid, conversationId, contactId, inquiry?.dealId);
     const evidenceIds = new Set(evidenceMessages.map(m => m.id));
     const grounded = (ids: string[]) => ids.includes(sourceMessageId) && ids.every(id => evidenceIds.has(id));
@@ -233,7 +236,7 @@ export async function applyAnalyzedConversation(prisma: PrismaClient, tid: strin
       await tx.contact.update({ where: { id: contactId, tenantId: tid, summary: conversation.contact?.summary }, data: { summary: analysis.summaryUpdate, version: { increment: 1 } } });
       addChange("contact", contactId, { summary: conversation.contact?.summary }, { summary: analysis.summaryUpdate }, "NEED_IDENTIFIED");
     }
-    if (settings.crm.updateInquiry && reliable && inquiry && inquiry.id === result.snapshot.inquiry?.id && inquiry.status === result.snapshot.inquiry.status && inquiry.nextStep === result.snapshot.inquiry.nextStep && inquiry.aiSummary === result.snapshot.inquiry.aiSummary && inquiry.needsReply === result.snapshot.inquiry.needsReply && !await manuallyChanged("inquiry", inquiry.id)) {
+    if (!createdSalesDeal && settings.crm.updateInquiry && reliable && inquiry && inquiry.id === result.snapshot.inquiry?.id && inquiry.status === result.snapshot.inquiry.status && inquiry.nextStep === result.snapshot.inquiry.nextStep && inquiry.aiSummary === result.snapshot.inquiry.aiSummary && inquiry.needsReply === result.snapshot.inquiry.needsReply && !await manuallyChanged("inquiry", inquiry.id)) {
       const status = analysis.suggestedRequestStatus && (SAFE_INQUIRY_TRANSITIONS[inquiry.status] || []).includes(analysis.suggestedRequestStatus)
         ? analysis.suggestedRequestStatus : inquiry.status;
       const data = { status, aiSummary: analysis.summaryUpdate, nextStep: analysis.suggestedNextAction, needsReply: analysis.needsReply };
@@ -252,9 +255,9 @@ export async function applyAnalyzedConversation(prisma: PrismaClient, tid: strin
     const lastAiData = asObject(lastAiDealChange?.changesJson);
     const onlyPriorAiChanged = deal && asObject(lastAiData.after).version === deal.version &&
       typeof lastAiData.sourceMessageAt === "string" && new Date(lastAiData.sourceMessageAt) <= sourceMessageAt;
-    const dealWritable = deal && result.snapshot.deal?.id === deal.id && result.snapshot.deal.version === deal.version &&
+    const dealWritable = deal && (createdSalesDeal?.id === deal.id || (result.snapshot.deal?.id === deal.id && result.snapshot.deal.version === deal.version &&
       result.snapshot.deal.updatedAt.getTime() === deal.updatedAt.getTime() &&
-      (deal.updatedAt <= sourceMessageAt || onlyPriorAiChanged) && !await manuallyChanged("deal", deal.id);
+      (deal.updatedAt <= sourceMessageAt || onlyPriorAiChanged) && !await manuallyChanged("deal", deal.id)));
     const dealData: Prisma.DealUncheckedUpdateInput = {};
     const accepted = (analysis.events || []).filter(e => e.type === "PRICE_ACCEPTED" && e.confidence === "HIGH" && grounded(e.evidenceMessageIds));
     if (dealWritable && evidenceMessages.some(m => m.id === sourceMessageId && (m.direction === "inbound" || m.senderKind === "client")) && settings.crm.updateDealAmount && accepted.length === 1 && !(analysis.events || []).some(e => e.type === "PRICE_REJECTED")) {
@@ -278,7 +281,11 @@ export async function applyAnalyzedConversation(prisma: PrismaClient, tid: strin
     }
     const ownerCandidate = conversation.assigneeMembershipId || deal?.assigneeMembershipId || inquiry?.assigneeMembershipId || conversation.contact?.ownerMembershipId;
     const owner = ownerCandidate ? await tx.membership.findFirst({ where: { id: ownerCandidate, tenantId: tid, active: true } }) : null;
-    const scheduled = analysis.agreements.filter(a => a.confidence === "HIGH" && grounded(a.evidenceMessageIds));
+    const intakePolicy = await publishedIntakePolicy(tx, tid);
+    const staffSource = evidenceMessages.some(m => m.id === sourceMessageId && m.direction === "outbound" && m.senderKind === "staff");
+    const scheduled = analysis.agreements.filter(a => a.confidence === "HIGH" && grounded(a.evidenceMessageIds)
+      // Neither customer preferences nor the AI's own words confirm a reservation.
+      && !(!staffSource && intakePolicy?.roles.includes("booking") && ["CALL", "OFFLINE_MEETING", "ONLINE_MEETING"].includes(a.type)));
     if (dealWritable && settings.crm.updateNextAction && reliable && analysis.suggestedNextAction) {
       dealData.nextAction = analysis.suggestedNextAction;
       const dated = scheduled.find(a => a.scheduledAt && ["CONFIRMED", "SCHEDULED", "RESCHEDULED"].includes(a.status));
@@ -288,6 +295,13 @@ export async function applyAnalyzedConversation(prisma: PrismaClient, tid: strin
       await tx.deal.update({ where: { id: deal.id, tenantId: tid, version: deal.version, updatedAt: deal.updatedAt }, data: { ...dealData, version: { increment: 1 } } });
       addChange("deal", deal.id, { offerAmountMinor: deal.offerAmountMinor, stageId: deal.stageId, probability: deal.probability,
         nextAction: deal.nextAction, nextActionAt: deal.nextActionAt, version: deal.version }, { ...dealData, version: deal.version + 1 }, applied.dealAmount != null ? "PRICE_ACCEPTED" : "DEAL_UPDATED", "HIGH");
+    }
+    if (deal && reliable) {
+      const outbound = evidenceMessages.find(m => m.id === sourceMessageId)?.direction === "outbound";
+      const evidenceType = applied.dealAmount != null ? "sales.order_agreed" : outbound && (analysis.events || []).some(e => e.type === "COMMERCIAL_OFFER_SENT" && e.confidence === "HIGH" && grounded(e.evidenceMessageIds)) ? "sales.proposal_sent" : null;
+      if (evidenceType) await writeActivity(tx, { tenantId: tid, contactId: deal.contactId, dealId: deal.id, type: evidenceType,
+        title: evidenceType === "sales.order_agreed" ? "Клиент согласовал стоимость" : "Предложение отправлено", actorType: "ai",
+        metadata: { sourceMessageId, reason: analysis.summaryUpdate, evidenceMessageIds: analysis.evidenceMessageIds } });
     }
     if (settings.crm.detectAgreements) for (const suggestion of scheduled) {
       let at = suggestion.scheduledAt ? new Date(suggestion.scheduledAt) : null;
@@ -372,8 +386,12 @@ export async function applyAnalyzedConversation(prisma: PrismaClient, tid: strin
         type: "conversation.crm_updated", title: "AI обновил CRM по переписке", description: analysis.summaryUpdate,
         actorType: "ai", metadata: json(metadata) as Record<string, unknown> });
     }
+    if (settings.crm.updateInquiry && reliable) await applyAiIntake(tx, tid, { policy: intakePolicy,
+      extraction: analysis.intakeRequest, inquiryId: inquiry?.id, conversationId, sourceMessageId, evidence: evidenceMessages,
+      createTasks: settings.crm.createTasks, ownerMembershipId: owner?.id });
     await tx.idempotencyRecord.create({ data: { ...key, requestHash: sourceMessageId,
       resultJson: json({ events: analysis.events || [], applied }), expiresAt: new Date("9999-12-31T00:00:00Z") } });
+    if (deal) { await ensureSalesNextTask(tx, tid, deal.id, conversationId, Boolean(dealWritable && (dealData.nextAction || dealData.nextActionAt))); await enqueueSalesReconcile(tx, tid, deal.id); }
     return { applied, skipped: null };
   }, { timeout: 15000 });
   // Tenant OAuth calendar polling synchronizes persisted agreements independently.

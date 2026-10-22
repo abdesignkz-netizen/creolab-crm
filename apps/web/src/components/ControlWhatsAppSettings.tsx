@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CONTROL_ACTION_META, type ControlAction, type ControlChatSettings } from "@creolab/contracts";
+import { CONTROL_ACTION_META, CONTROL_SOURCES, type ControlAction, type ControlChatSettings } from "@creolab/contracts";
 import { api } from "../lib/api";
 import { InlineFeedback } from "./InlineFeedback";
 import { notifySaved } from "./SaveNotice";
@@ -7,7 +7,7 @@ import "./ControlWhatsAppSettings.css";
 
 type Sender = { id: string; name: string; phone: string; ready: boolean; type: string };
 type Identity = { id: string; provider: string; phoneNormalized: string; enabled: boolean; verified: boolean; chat: ControlChatSettings | null };
-type Member = { userId: string; name: string; email: string; enabled: boolean; canReadFinancialData: boolean; canReadTeamData: boolean; canCreateTasks: boolean; canModifyDeals: boolean; canPerformBulkActions: boolean; identities: Identity[] };
+type Member = { allowedSources: string[]; userId: string; name: string; email: string; enabled: boolean; canReadFinancialData: boolean; canReadTeamData: boolean; canCreateTasks: boolean; canModifyDeals: boolean; canPerformBulkActions: boolean; identities: Identity[] };
 type Settings = { enabled: boolean; timezone: string; senders: Sender[]; users: Member[]; deliveries: Array<{ id: string; identityId: string; state: string; kind: string; error: string | null; createdAt: string }> };
 const states: Record<string, string> = { queued: "В очереди", processing: "Обработка", ready: "Готов к отправке", sending: "Отправляется", accepted: "Принято WhatsApp", failed: "Не выполнено", uncertain: "Доставка не подтверждена", skipped: "Пропущено", merged: "Объединено со сводкой" };
 const displayPhone = (phone: string) => phone ? `+${phone.replace(/\D/g, "")}` : "Номер не указан";
@@ -75,6 +75,12 @@ export function ControlWhatsAppSettings({ onDirtyChange }: { onDirtyChange: (dir
     catch (e) { setError(e instanceof Error ? e.message : "Не удалось сохранить настройки"); }
     finally { setBusy(false); }
   }
+  async function toggleWebAccess(user: Member, enabled: boolean) {
+    const sources = user.allowedSources.length ? user.allowedSources : [...CONTROL_SOURCES];
+    const next = enabled ? [...new Set([...sources, "CRM_CHAT"])] : sources.filter(source => source !== "CRM_CHAT");
+    if (!next.length) { setError("Это единственный канал сотрудника. Чтобы закрыть его, нажмите «Отключить доступ»."); return; }
+    await run(() => api.upsertControlAccess(user.userId, { allowedSources: next }));
+  }
   async function link(user: Member) {
     const senderId = senderIds[user.userId] || data?.senders.find(s => s.ready)?.id || "";
     if (!senderId || !phone[user.userId]) { setError("Выберите WhatsApp компании и укажите личный номер сотрудника"); return; }
@@ -87,16 +93,17 @@ export function ControlWhatsAppSettings({ onDirtyChange }: { onDirtyChange: (dir
   }
   if (!data) return <div className="panel">{error ? <InlineFeedback kind="error">{error}</InlineFeedback> : "Загружаем BasQar Control…"}</div>;
   return <div className="control-wa-settings">
-    <section className="panel control-wa-intro"><div className="control-wa-heading"><div><span className="control-wa-eyebrow">BASQAR CONTROL</span><h2>Управляйте компанией из WhatsApp</h2><p className="muted">Пишите с личного номера на WhatsApp компании: узнавайте результаты, находите клиентов и ставьте задачи.</p></div>
+    <section className="panel control-wa-intro"><div className="control-wa-heading"><div><span className="control-wa-eyebrow">BASQAR CONTROL</span><h2>Управляйте компанией через Control</h2><p className="muted">Узнавайте результаты, находите клиентов и ставьте задачи в окне платформы или с личного номера WhatsApp.</p></div>
       <button className={`btn ${data.enabled ? "secondary" : ""}`} disabled={busy} onClick={() => { void run(() => api.updateControlSettings({ enabled: !data.enabled })); }}>{data.enabled ? "Выключить Control" : "Включить Control"}</button></div>
-      <div className="control-wa-steps"><div><b>1. Доступ</b><span>Выберите сотрудника и разрешения</span></div><div><b>2. Личный номер</b><span>Подтвердите его кодом в WhatsApp</span></div><div><b>3. Запрос или меню</b><span>Напишите «Меню» на номер компании</span></div></div>
+      <div className="control-wa-steps"><div><b>1. Доступ</b><span>Выберите сотрудника и разрешения</span></div><div><b>2. Личный номер</b><span>Подтвердите его кодом в WhatsApp</span></div><div><b>3. Запрос или меню</b><span>Напишите обычный запрос — меню необязательно</span></div></div>
       {!data.enabled && <p className="control-wa-hint">Control выключен для компании. Настройки можно подготовить заранее.</p>}
-      {!data.senders.some(s => s.ready) && <p className="control-wa-hint">Сначала <a href="/integrations">подключите WhatsApp компании</a> через QR или Cloud API.</p>}
-      <p className="muted">Сведения доступны в пределах прав сотрудника. Любое изменение из WhatsApp требует отдельного подтверждения. Сообщения сотрудника не попадают в клиентские диалоги.</p>
+      {!data.senders.some(s => s.ready) && <p className="control-wa-hint">Для команд из WhatsApp <a href="/integrations">подключите номер компании</a> через QR или Cloud API. Окно платформы работает без WhatsApp.</p>}
+      <p className="muted">Сведения доступны в пределах прав сотрудника. Любое изменение через Control требует отдельного подтверждения. Сообщения сотрудника не попадают в клиентские диалоги.</p>
     </section>
     {error && <InlineFeedback kind="error">{error}</InlineFeedback>}
     {data.users.map(user => <section className="panel" key={user.userId}>
       <div className="control-wa-heading"><div><h3>{user.name}</h3><p className="muted">{user.email}</p></div><button className="btn secondary" disabled={busy} onClick={() => { void run(() => api.upsertControlAccess(user.userId, { enabled: !user.enabled })); }}>{user.enabled ? "Отключить доступ" : "Разрешить доступ"}</button></div>
+      <label className="control-wa-check"><input type="checkbox" disabled={busy} checked={!user.allowedSources.length || user.allowedSources.includes("CRM_CHAT")} onChange={e => { void toggleWebAccess(user, e.target.checked); }} />Control в платформе · <a href="/control">Открыть окно</a></label>
       <fieldset className="control-wa-permissions" disabled={busy}><legend>Что разрешено сотруднику</legend>{([
         ["canReadFinancialData", "Финансы"], ["canReadTeamData", "Данные команды"], ["canCreateTasks", "Изменение задач"], ["canModifyDeals", "Изменение сделок"],
       ] as const).map(([key,label]) => <label key={key}><input type="checkbox" checked={user[key]} onChange={e => { void run(() => api.upsertControlAccess(user.userId, { [key]: e.target.checked })); }} />{label}</label>)}</fieldset>
@@ -116,7 +123,7 @@ export function ControlWhatsAppSettings({ onDirtyChange }: { onDirtyChange: (dir
     <section className="panel"><h3>Что можно написать</h3><div className="control-wa-examples">{["Меню", "Задачи на сегодня", "Найди клиента Айбек", "Создай задачу подготовить КП завтра к 15:00", "Что требует внимания", "Продажи за неделю"].map(text => <span key={text}>{text}</span>)}</div><p className="muted">В меню WhatsApp отвечайте номером пункта. Если найдено несколько клиентов, Control попросит выбрать запись. Удаление, рассылки и массовые изменения выполняются в кабинете.</p></section>
     <details className="panel"><summary>История команд и доставки</summary><p className="muted">«Принято WhatsApp» означает, что сервис принял сообщение. Это не подтверждение прочтения. При неопределённой доставке повторной отправки нет.</p>
       {data.deliveries.map(item => <div key={item.id} className="control-wa-log"><span>{new Date(item.createdAt).toLocaleString("ru-RU", { timeZone: data.timezone })}</span><b>{item.kind === "briefing" ? "Плановая сводка" : "Запрос из WhatsApp"}</b><span>{states[item.state] || "Обрабатывается"}</span></div>)}
-      {history.map(item => <div key={item.id} className="control-wa-log"><span>{new Date(item.createdAt).toLocaleString("ru-RU", { timeZone: data.timezone })}</span><b>{item.actor?.name || "Сотрудник"}</b><span>{CONTROL_ACTION_META[item.action as ControlAction]?.label || "Настройки Control"} · {item.status ? ({ OK: "Выполнено", CONFIRMATION_REQUIRED: "Ожидает подтверждения" } as Record<string,string>)[item.status] || "Не выполнено" : "Сохранено"}</span></div>)}
+      {history.map(item => <div key={item.id} className="control-wa-log"><span>{new Date(item.createdAt).toLocaleString("ru-RU", { timeZone: data.timezone })}</span><b>{item.actor?.name || "Сотрудник"}</b><span>{CONTROL_ACTION_META[item.action as ControlAction]?.label || "Настройки Control"} · {item.status ? ({ OK: "Выполнено", CONFIRMATION_REQUIRED: "Ожидает подтверждения" } as Record<string,string>)[item.status] || "Не выполнено" : "Сохранено"}{item.title ? ` · ${item.title}` : ""}</span></div>)}
       {!history.length && !data.deliveries.length && <p className="muted">Здесь появятся запросы сотрудников и результаты доставки.</p>}
     </details>
   </div>;

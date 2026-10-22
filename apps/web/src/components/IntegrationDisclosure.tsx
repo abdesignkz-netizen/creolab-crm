@@ -1,4 +1,5 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useLocation } from "react-router-dom";
 import { ChannelIcon } from "./ChannelIcon";
 import { useUiText } from "../lib/uiText";
 
@@ -18,9 +19,12 @@ export function IntegrationDisclosure({ id, title, description, status, tone = "
   icon: string; children: ReactNode;
 }) {
   const uiText = useUiText();
-  const initiallyOpen = typeof window !== "undefined" && window.location.hash === `#integration-${id}`;
+  const { hash } = useLocation();
+  const initiallyOpen = hash === `#integration-${id}`;
   const [visited, setVisited] = useState(initiallyOpen);
-  return <details open={initiallyOpen || undefined} className="integration-tile" id={`integration-${id}`} onToggle={event => {
+  const ref = useRef<HTMLDetailsElement>(null);
+  useEffect(() => { if (hash === `#integration-${id}` && ref.current) { ref.current.open = true; setVisited(true); } }, [hash, id]);
+  return <details ref={ref} className="integration-tile" id={`integration-${id}`} onToggle={event => {
     if (event.currentTarget.open) setVisited(true);
   }}>
     <summary>

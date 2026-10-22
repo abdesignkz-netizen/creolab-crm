@@ -7,6 +7,7 @@ import { requireNotManager } from "../lib/access.ts";
 import { authForUserInTenant } from "./authService.ts";
 import { sendDirectWhatsApp, deliverCloudMessage } from "./whatsappSendService.ts";
 import { getEntitlements } from "./entitlementService.ts";
+import { whatsappLid, whatsappPhoneJid } from "./whatsappContactIdentity.ts";
 
 export function campaignSenderId(campaign: { parsedCommandJson?: unknown }) {
   const value = campaign.parsedCommandJson as Record<string, unknown> | null;
@@ -111,8 +112,16 @@ export async function queueDirectCampaignRecipient(
         id: current.conversationId, tenantId: campaign.tenantId, connectionId: connection.id, contactId: recipient.contactId,
       } });
     }
+    const aliases = [thread];
+    if (connection.integration.type === "whatsapp_qr") {
+      const identities = await tx.externalIdentity.findMany({ where: { tenantId: campaign.tenantId, connectionId: connection.id, contactId: recipient.contactId, type: "whatsapp" }, select: { externalId: true } });
+      const phones = [...new Set(identities.map(i => whatsappPhoneJid(i.externalId)).filter(Boolean))];
+      // A LID is an address, not a phone. Reuse it only with an unambiguous,
+      // provider-supplied phone mapping on this exact connection and contact.
+      if (phones.length === 1 && phones[0] === thread) aliases.push(...identities.map(i => whatsappLid(i.externalId)).filter((id): id is string => Boolean(id)));
+    }
     let row = await tx.conversation.findFirst({
-      where: { tenantId: campaign.tenantId, connectionId: connection.id, contactId: recipient.contactId, externalThreadId: thread, status: "open" },
+      where: { tenantId: campaign.tenantId, connectionId: connection.id, contactId: recipient.contactId, externalThreadId: { in: aliases }, status: "open" },
       orderBy: { updatedAt: "desc" },
     });
     if (!row) row = await tx.conversation.create({ data: {

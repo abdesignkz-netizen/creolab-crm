@@ -1,3 +1,4 @@
+import { enqueueSalesReconcile } from "./salesProcessService.ts";
 import { randomUUID } from "node:crypto";
 import { queueControlNotification } from "./controlNotificationService.ts";
 import { systemText } from "@creolab/contracts";
@@ -35,6 +36,8 @@ import {
 import { sendViaProvider } from "./messagingProvider.ts";
 import { resolveUploadPath } from "../lib/storage.ts";
 import { createStaffNotification } from "./notificationService.ts";
+import { writeActivity } from "./contactService.ts";
+import { writeAudit } from "../lib/audit.ts";
 
 function tenantId(auth: AuthContext) {
   if (!auth.activeMembership) throw new ApiError(403, "no_tenant", "Нет активной компании");
@@ -77,6 +80,9 @@ export async function addPayment(
     throw new ApiError(422, "invalid", "Сумма оплаты должна быть больше 0");
   }
   return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Deal" WHERE id = ${dealId} AND "tenantId" = ${tid} FOR UPDATE`;
+    const deal = await tx.deal.findFirstOrThrow({ where: { id: dealId, tenantId: tid } });
+    assertDealVisible(auth, deal);
     const payment = await tx.paymentRecord.create({
       data: {
         tenantId: tid,
@@ -88,7 +94,7 @@ export async function addPayment(
       },
     });
     const payments = await tx.paymentRecord.findMany({
-      where: { tenantId: tid, dealId },
+      where: { tenantId: tid, dealId, status: "confirmed", currency: deal.currency },
       select: { amountMinor: true },
     });
     const paid = payments.reduce((sum, row) => sum + Number(row.amountMinor || 0), 0);
@@ -96,7 +102,7 @@ export async function addPayment(
     let paymentStatus = deal.paymentStatus;
     if (deal.paymentStatus !== "NOT_REQUIRED" && deal.paymentStatus !== "CANCELLED") {
       if (dealAmount != null && dealAmount > 0) {
-        paymentStatus = paid >= dealAmount ? "PAID" : "PARTIALLY_PAID";
+        paymentStatus = paid >= dealAmount ? "PAID" : paid > 0 ? "PARTIALLY_PAID" : deal.paymentStatus;
       } else if (paid > 0) {
         paymentStatus = "PAID";
       }
@@ -114,6 +120,7 @@ export async function addPayment(
         changesJson: { amountMinor: input.amountMinor, paymentStatus },
       },
     });
+    await enqueueSalesReconcile(tx, tid, dealId);
     return { ...payment, paymentStatus };
   });
 }
@@ -695,6 +702,8 @@ export async function getTask(prisma: PrismaClient, auth: AuthContext, id: strin
       basisLabel:
         item.source === "context_engine"
           ? "Создано автоматически из договорённости в WhatsApp"
+          : item.source === "control"
+            ? "Создано через BasQar Control по подтверждённой команде сотрудника"
           : item.source === "ai_command"
             ? "Создано из описания задачи"
             : null,
@@ -720,6 +729,7 @@ export async function createTask(
     ownerMembershipId?: string;
     executorKind?: "user" | "ai";
     createdByKind?: "user" | "ai" | "system";
+    source?: "control";
     targetType?: "client" | "group" | "none";
     clientIds?: string[];
     segmentSnapshot?: Record<string, unknown>;
@@ -857,28 +867,38 @@ export async function createTask(
     }
   }
 
-  return prisma.task.create({
-    data: {
-      tenantId: tid,
-      type: input.type,
-      title: input.title,
-      description: input.description,
-      messageDraft: input.messageDraft,
-      inquiryId,
-      conversationId,
-      contactId,
-      dealId,
-      companyId,
-      dueAt,
-      priority: input.priority || "normal",
-      ownerMembershipId,
-      source: "manual",
-      targetType: targetType === "client" ? "client" : "none",
-      segmentSnapshotJson: (input.segmentSnapshot || {}) as object,
-      contextSnapshotJson,
-      dedupeKey: input.type === "process_inquiry" && inquiryId ? `inquiry-process:${inquiryId}` : null,
-    },
-    include: { contact: true, inquiry: true, deal: true },
+  return prisma.$transaction(async tx => {
+    const task = await tx.task.create({
+      data: {
+        tenantId: tid,
+        type: input.type,
+        title: input.title,
+        description: input.description,
+        messageDraft: input.messageDraft,
+        inquiryId,
+        conversationId,
+        contactId,
+        dealId,
+        companyId,
+        dueAt,
+        priority: input.priority || "normal",
+        ownerMembershipId,
+        source: input.source || "manual",
+        targetType: targetType === "client" ? "client" : "none",
+        segmentSnapshotJson: (input.segmentSnapshot || {}) as object,
+        contextSnapshotJson,
+        dedupeKey: input.type === "process_inquiry" && inquiryId ? `inquiry-process:${inquiryId}` : null,
+      },
+      include: { contact: true, inquiry: true, deal: true },
+    });
+    if (input.source === "control") {
+      await writeAudit(tx, { tenantId: tid, actorUserId: auth.user.id, action: "task.created", entityType: "task", entityId: task.id,
+        changes: { source: "control", title: task.title, dueAt: task.dueAt?.toISOString() || null, ownerMembershipId, contactId } });
+      if (task.contactId) await writeActivity(tx, { tenantId: tid, contactId: task.contactId, companyId: task.companyId, inquiryId: task.inquiryId, dealId: task.dealId,
+        type: "task.created", title: "Создана задача через BasQar Control", description: task.title, actorType: "user", actorId: auth.user.id,
+        metadata: { taskId: task.id, source: "control", dueAt: task.dueAt?.toISOString() || null } });
+    }
+    return task;
   });
 }
 

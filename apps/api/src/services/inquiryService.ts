@@ -1,3 +1,5 @@
+import { readAiIntakeRecords } from "@creolab/contracts";
+import { ensureSalesNextTask, enqueueSalesReconcile } from "./salesProcessService.ts";
 import { queueControlNotification } from "./controlNotificationService.ts";
 import { publicFormKeyAliases } from "@creolab/contracts";
 import { canUseFeature } from "./entitlementService.ts";
@@ -986,6 +988,13 @@ export async function completeIntake(
 export async function convertInquiryToDeal(prisma: PrismaClient, auth: AuthContext, inquiryId: string, title?: string) {
   const membership = requireTenant(auth);
   return prisma.$transaction(async (tx) => {
+    const initial = await tx.inquiry.findFirst({ where: { id: inquiryId, tenantId: membership.tenantId } });
+    if (!initial) throw new ApiError(404, "not_found", "Заявка не найдена");
+    assertInquiryVisible(auth, initial);
+    // Same lock order as the conversation worker: thread, contact, inquiry.
+    if (initial.conversationId) await tx.$queryRaw`SELECT id FROM "Conversation" WHERE id = ${initial.conversationId} AND "tenantId" = ${membership.tenantId} FOR UPDATE`;
+    await tx.$queryRaw`SELECT id FROM "Contact" WHERE id = ${initial.contactId} AND "tenantId" = ${membership.tenantId} FOR UPDATE`;
+    await tx.$queryRaw`SELECT id FROM "Inquiry" WHERE id = ${inquiryId} AND "tenantId" = ${membership.tenantId} FOR UPDATE`;
     const inquiry = await tx.inquiry.findFirst({
       where: { id: inquiryId, tenantId: membership.tenantId },
       include: { contact: { include: { methods: true } } },
@@ -1096,6 +1105,10 @@ export async function convertInquiryToDeal(prisma: PrismaClient, auth: AuthConte
         changesJson: { inquiryId },
       },
     });
+    if (inquiry.conversationId) await tx.dealConversation.upsert({ where: { tenantId_dealId_conversationId: { tenantId: membership.tenantId, dealId: deal.id, conversationId: inquiry.conversationId } }, update: {}, create: { tenantId: membership.tenantId, dealId: deal.id, conversationId: inquiry.conversationId } });
+    await tx.task.updateMany({ where: { tenantId: membership.tenantId, inquiryId, dealId: null, status: { in: ["open", "in_progress", "waiting"] } }, data: { dealId: deal.id } });
+    await ensureSalesNextTask(tx, membership.tenantId, deal.id, inquiry.conversationId || undefined);
+    await enqueueSalesReconcile(tx, membership.tenantId, deal.id);
     return tx.deal.findFirstOrThrow({
       where: { id: deal.id, tenantId: membership.tenantId },
       include: { stage: true },
@@ -1515,6 +1528,7 @@ export async function getInquiry(prisma: PrismaClient, auth: AuthContext, inquir
   const { mapInquiryDetail } = await import("./inquiryPresentation.ts");
   const services = await loadTenantServices(prisma, membership.tenantId);
   return { ...mapInquiryDetail({ ...inquiry, tasks: visibleTasks, activities }, membership.tenant.timezone),
+    intakeRequests: readAiIntakeRecords(inquiry.normalizedJson),
     serviceOptions: services, serviceLabel: services.find((row) => row.code === inquiry.serviceCategory)?.name || "Не определено" };
 
 }

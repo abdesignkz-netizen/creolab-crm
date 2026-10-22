@@ -1,3 +1,5 @@
+import { readAiIntakeRecords } from "@creolab/contracts";
+import { publishedIntakePolicy } from "./aiIntakeService.ts";
 import { deliveredConversationMessage } from "./conversationMessageState.ts";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { inferClientInterest } from "./contactInterestService.ts";
@@ -770,7 +772,9 @@ export async function analyzeConversationContext(
   analysis.events = extractPriceEvents(messages, deal?.currency || tenant.currency);
   let llmUsed = false;
   if (options.useLlm !== false) {
+    const intakePolicy = await publishedIntakePolicy(prisma, tid);
     const llm = await refineConversationContextWithLlm({
+      intakeKinds: intakePolicy?.roles || [],
       messages: messages.slice(-20).map((m) => ({
         role: m.senderKind === "client" || m.direction === "inbound" ? "client" : m.senderKind === "ai" ? "ai" : "staff",
         text: [m.text, ...(m.attachments || []).map((file) => `[файл: ${file.originalFileName || file.fileName}]`)]
@@ -786,6 +790,7 @@ export async function analyzeConversationContext(
       inquiryStatus: inquiry?.status || null,
       dealStage: deal?.stage?.systemKey || null,
       openTaskTitles: activeTasks.map((t) => t.title),
+      existingIntake: readAiIntakeRecords(inquiry?.normalizedJson),
       existingAgreements: existingAgreements.map((a) => ({
         id: a.id,
         type: a.type,

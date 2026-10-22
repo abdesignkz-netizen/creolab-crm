@@ -5,6 +5,8 @@ import { createApp } from "./app.ts";
 import { getEffectiveLlmConfig, invalidateRuntimeConfig } from "./services/runtimeSettings.ts";
 import { getPublishedTenantAiContext } from "./services/tenantAiConfigService.ts";
 import { saveTenantAiSettings } from "./services/platformIntegrationService.ts";
+import { authForUserInTenant } from "./services/authService.ts";
+import { previewAiManagerSetup, reviewAiManagerSetup } from "./services/aiManagerSetupService.ts";
 import { AI_MANAGER_ROLES, aiManagerDraftSchema, compileAiManagerDraft, emptyAiManagerDraft, type AiManagerDraft } from "@creolab/contracts";
 
 function completeDraft(): AiManagerDraft {
@@ -401,4 +403,50 @@ describe("Owner AI manager setup", { concurrency: false }, () => {
     assert.deepEqual(results.map(result => result.status).sort(), [200, 409]);
     assert.equal((await request()).data.revision, before.revision + 1);
   });
+  it("blocks automatic booking or fulfillment even if requested through the API", async () => {
+    const state = (await request()).data;
+    const draft = completeDraft(); draft.primaryRole = "product_order"; draft.intake.confirmation = "automatic";
+    const saved = await request("", "PATCH", { revision: state.revision, draft });
+    assert.equal(saved.status, 200);
+    const snapshot = await liveSnapshot();
+    const publish = await request("/publish", "POST", { revision: saved.data.revision });
+    assert.equal(publish.status, 422); assert.equal(publish.data.code, "ai_setup_incomplete");
+    assert.deepEqual(await liveSnapshot(), snapshot);
+  });
+  it("retains required reviews when combined roles add more than eight quality checks", async () => {
+    const state = (await request()).data;
+    const draft = completeDraft(); draft.primaryRole = "sales"; draft.additionalRoles = ["booking", "product_order", "food_order"];
+    const saved = await request("", "PATCH", { revision: state.revision, draft }); assert.equal(saved.status, 200);
+    // Exercise retention directly: the preceding HTTP tests intentionally share a
+    // user and already consume most of the per-minute preview allowance.
+    const user = await prisma.user.findUniqueOrThrow({ where: { email: "owner@creolab.example" } });
+    const auth = await authForUserInTenant(prisma, user.id, tenantId);
+    assert.equal(saved.data.quality.requiredScenarioIds.length, 8);
+    for (const scenarioId of saved.data.quality.requiredScenarioIds) {
+      const preview = await previewAiManagerSetup(prisma, auth, { revision: saved.data.revision, scenarioId, messages: [{ role: "user", content: "Здравствуйте" }] });
+      await reviewAiManagerSetup(prisma, auth, { revision: saved.data.revision, runId: preview.runId, accurate: true, onGoal: true, appropriate: true });
+    }
+    await previewAiManagerSetup(prisma, auth, { revision: saved.data.revision, scenarioId: "handoff", messages: [{ role: "user", content: "Хочу поговорить с сотрудником" }] });
+    const current = (await request()).data;
+    assert.equal(current.quality.runs.length, 9); assert.equal(current.quality.ready, true);
+  });
+
+  it("reports actual intake automation settings without changing them when saving a draft", async () => {
+    const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
+    const original = tenant.settingsJson as any;
+    try {
+      for (const enabled of [false, true]) {
+        const settings = { ...original, aiAutomation: { ...original?.aiAutomation, defaultMode: "AUTO", analyzeNewRequests: true, crm: { enabled, updateInquiry: true, createTasks: false } } };
+        await prisma.tenant.update({ where: { id: tenantId }, data: { settingsJson: settings } });
+        const state = (await request()).data;
+        assert.deepEqual(state.intakeAutomation, { saveRequests: enabled, createTasks: false, requiresModeChange: false });
+        const saved = await request("", "PATCH", { revision: state.revision, draft: completeDraft() });
+        assert.equal(saved.status, 200);
+        assert.deepEqual((await prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } })).settingsJson, settings);
+      }
+      await prisma.tenant.update({ where: { id: tenantId }, data: { settingsJson: { ...original, aiAutomation: { defaultMode: "ASSIST", crm: { enabled: true, updateInquiry: false, createTasks: true } } } } });
+      assert.deepEqual((await request()).data.intakeAutomation, { saveRequests: false, createTasks: false, requiresModeChange: true });
+    } finally { await prisma.tenant.update({ where: { id: tenantId }, data: { settingsJson: original } }); }
+  });
+
 });

@@ -1,6 +1,10 @@
 import { CATALOG_BY_CODE, CONTROL_ACTION_META } from "@creolab/contracts";
 
 export const AUDIT_ACTION_LABELS: Record<string, string> = {
+  "sales.deal_created": "Создана сделка по подтверждённому интересу",
+  "sales.proposal_reviewed": "Рассмотрено предложение ИИ о сделке",
+  "task.created": "Создана задача",
+  "control.chat": "Запрос в BasQar Control",
   "platform.configuration_requested": "Администратор сервиса начал изменение настроек компании",
   "ai.automation_updated": "Обновлены правила работы ИИ-менеджера",
   "billing.invoice.signing_completed": "Дополнена подпись в счёте за подписку",

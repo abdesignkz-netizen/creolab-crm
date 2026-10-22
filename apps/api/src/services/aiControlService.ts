@@ -109,7 +109,7 @@ function defaultAccessFlags(role: string) {
     canModifyDeals: lead,
     canPerformBulkActions: false,
     requiresConfirmationForWrites: true,
-    allowedSources: ["WHATSAPP"] as ControlSource[],
+    allowedSources: ["WHATSAPP", "CRM_CHAT"] as ControlSource[],
     allowedActions: [] as ControlAction[],
   };
 }
@@ -770,7 +770,7 @@ export async function listControlHistory(
   const take = Math.min(100, Math.max(10, Number(query.limit || 40)));
   const where: Prisma.AuditEventWhereInput = {
     tenantId: membership.tenantId,
-    action: query.action ? `control.${String(query.action).toLowerCase()}` : { startsWith: "control." },
+    action: query.action ? `control.${String(query.action).toLowerCase()}` : { startsWith: "control.", not: "control.chat" },
   };
   if (query.userId) where.actorUserId = query.userId;
   if (query.from || query.to) {
@@ -811,6 +811,7 @@ export async function listControlHistory(
         action: String(item.action).replace(/^control\./, "").toUpperCase(),
         status: changes.status || null,
         source: changes.source || null,
+        title: asString(asRecord(changes.params).title).slice(0, 300) || null,
         requestId: changes.requestId || item.correlationId,
         createdAt: item.createdAt,
         actor: item.actorUserId ? actorMap.get(item.actorUserId) || null : null,
@@ -940,6 +941,12 @@ async function dispatchAction(action: ControlAction, ctx: DispatchCtx): Promise<
         planPercent: dash.sales?.planPercent ?? null,
         currency,
       };
+    }
+    case "GET_SALES_CONTROL": {
+      const { getSalesControl } = await import("./salesControlService.ts");
+      const report = await getSalesControl(prisma, auth);
+      const filter = ["attention", "ready", "goal"].includes(String(params.filter)) ? String(params.filter) : "all";
+      return { ...report, filter, items: report.items.filter(item => filter === "all" || filter === "attention" && item.blockers.length || filter === "ready" && item.closeToSale || filter === "goal" && item.goalReached) };
     }
     case "GET_PIPELINE_SUMMARY": {
       const sit = await situation(ctx);
@@ -1077,7 +1084,8 @@ async function dispatchAction(action: ControlAction, ctx: DispatchCtx): Promise<
         inquiryId: asString(params.inquiryId) || undefined,
         dueAt: asString(params.dueAt) || undefined,
         ownerMembershipId: asString(params.ownerMembershipId || params.assigneeMembershipId) || undefined,
-        createdByKind: "ai",
+        createdByKind: "user",
+        source: "control",
       });
       return { id: created.id, title: created.title, status: created.status };
     }
@@ -1561,7 +1569,7 @@ export async function confirmAiControlCommand(
 }
 
 async function confirmControlForIntegration(prisma: PrismaClient,
-  integration: Awaited<ReturnType<typeof resolveControlIntegration>>,
+  integration: Pick<Awaited<ReturnType<typeof resolveControlIntegration>>, "tenantId" | "tenant">,
   parsed: { confirmationId: string; source: ControlSource; externalIdentity: string; tenantId?: string },
 ) {
   void parsed.tenantId;
@@ -1725,7 +1733,7 @@ export async function authorizeNativeControl(prisma: PrismaClient, integrationId
   if (!access || !access.enabled || access.status !== "active" || asStringList(access.allowedSources).length && !asStringList(access.allowedSources).includes("WHATSAPP")) throw new ApiError(403, "control_disabled", "Доступ сотрудника к WhatsApp Control отключён.");
   if (action) assertControlPermission(access, action, "WHATSAPP");
   const auth = await authForUserInTenant(prisma, identity.userId, integration.tenantId, `control-whatsapp:${identity.id}`);
-  return { integration, identity, access, auth };
+  return { integration, identity, access, auth, tenant: integration.tenant };
 }
 
 export async function executeNativeControl(prisma: PrismaClient, integrationId: string, identityId: string,
@@ -1747,4 +1755,27 @@ export async function confirmNativeControl(prisma: PrismaClient, integrationId: 
 export function controlAuthorizationVersion(ctx: Awaited<ReturnType<typeof authorizeNativeControl>>) {
   const { lastActivityAt: _last, updatedAt: _updated, createdAt: _created, ...permissions } = ctx.access;
   return sha256(JSON.stringify({ permissions, membership: ctx.auth.activeMembership, userId: ctx.identity.userId }));
+}
+
+/** Browser requests use the logged-in member, never a submitted phone or user ID. */
+export async function authorizeWebControl(prisma: PrismaClient, auth: AuthContext, action?: ControlAction) {
+  const member = requireTenant(auth);
+  const current = await authForUserInTenant(prisma, auth.user.id, member.tenantId, "control-web");
+  const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: member.tenantId } });
+  if (!controlCompanyEnabled(tenant.settingsJson) || tenant.status !== "active") throw new ApiError(403, "control_disabled", "BasQar Control выключен для компании. Включите его в настройках Control.");
+  await requireBillingFeature(prisma, current, "AI_CONTROL");
+  const access = await prisma.controlAccess.findUnique({ where: { tenantId_userId: { tenantId: member.tenantId, userId: auth.user.id } } });
+  if (!access?.enabled || access.status !== "active" || asStringList(access.allowedSources).length && !asStringList(access.allowedSources).includes("CRM_CHAT")) throw new ApiError(403, "control_disabled", "Разрешите доступ «Control в платформе» в настройках сотрудника.");
+  if (action) assertControlPermission(access, action, "CRM_CHAT");
+  return { access, auth: current, tenant };
+}
+export async function executeWebControl(prisma: PrismaClient, auth: AuthContext, identityId: string, action: ControlAction, params: Record<string, unknown>, requestId: string) {
+  const ctx = await authorizeWebControl(prisma, auth, action);
+  const identity = await prisma.controlIdentity.findFirst({ where: { id: identityId, tenantId: ctx.tenant.id, userId: auth.user.id, provider: "CRM_CHAT", enabled: true, verifiedAt: { not: null } } });
+  if (!identity) throw new ApiError(403, "forbidden", "Нет доступа к истории Control");
+  return executeResolved({ prisma, auth: ctx.auth, access: ctx.access, identityId, source: "CRM_CHAT", action, params, requestId, confirm: CONTROL_ACTION_META[action].riskLevel !== "READ" });
+}
+export async function confirmWebControl(prisma: PrismaClient, auth: AuthContext, confirmationId: string) {
+  const ctx = await authorizeWebControl(prisma, auth);
+  return confirmControlForIntegration(prisma, { tenantId: ctx.tenant.id, tenant: ctx.tenant }, { confirmationId, source: "CRM_CHAT", externalIdentity: auth.user.id });
 }

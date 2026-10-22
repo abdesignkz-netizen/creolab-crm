@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { aiIntakeExtractionSchema } from "@creolab/contracts";
 import { AGREEMENT_TYPE_LABEL, AGREEMENT_STATUS_LABEL, BUSINESS_EVENT_TYPES, type ConversationAnalysis } from "./conversationContextTypes.ts";
 
 const text = z.string().max(4000).nullable().optional();
@@ -53,5 +54,6 @@ export function validateConversationRefinement(raw: unknown, messageIds: string[
     value.confidence = "LOW";
     value.evidenceMessageIds = [];
   }
-  return value;
+  const intake = aiIntakeExtractionSchema.safeParse(raw && typeof raw === "object" ? (raw as Record<string, unknown>).intakeRequest : null);
+  return { ...value, intakeRequest: intake.success && grounded(intake.data.evidenceMessageIds) ? intake.data : null };
 }

@@ -723,7 +723,7 @@ describe("AI task commands", () => {
     assert.equal(updated.state, "scheduled");
   });
 
-  it("застрявшая running-отправка с наступившим сроком снова ставится в очередь", async () => {
+  it("прерванная running-отправка требует сверки и не отправляется повторно вслепую", async () => {
     const task = await prisma.task.create({
       data: {
         tenantId,
@@ -746,8 +746,11 @@ describe("AI task commands", () => {
       },
     });
     const { recoverDueScheduledTaskSends } = await import("./services/scheduledTaskRunner.ts");
+    const { recoverInterruptedScheduledActions } = await import("./services/scheduledActionLease.ts");
+    await recoverInterruptedScheduledActions(prisma);
     await recoverDueScheduledTaskSends(prisma);
     const updated = await prisma.scheduledAction.findUniqueOrThrow({ where: { id: action.id } });
-    assert.equal(updated.state, "scheduled");
+    assert.equal(updated.state, "failed");
+    assert.match(updated.cancelReason!, /Проверьте результат/);
   });
 });

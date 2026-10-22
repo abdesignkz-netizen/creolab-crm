@@ -1,3 +1,4 @@
+import { ensureSalesNextTask, enqueueSalesReconcile } from "./salesProcessService.ts";
 import { queueControlNotification } from "./controlNotificationService.ts";
 import { taskTitlePresentation } from "@creolab/contracts";
 import { randomUUID } from "node:crypto";
@@ -787,6 +788,8 @@ export async function updateDeal(
         version: { increment: 1 },
       },
     });
+    await ensureSalesNextTask(tx, tid, dealId);
+    await enqueueSalesReconcile(tx, tid, dealId);
     await writeAudit(tx, {
       tenantId: tid,
       actorUserId: auth.user.id,
@@ -897,6 +900,7 @@ export async function changeDealStage(
         metadataJson: { from: deal.stage.systemKey, to: toStage.systemKey },
       },
     });
+    await ensureSalesNextTask(tx, tid, dealId);
     await queueControlNotification(tx, { tenantId: tid, type: "deal.stage_changed", entityId: dealId, episodeKey: `deal.stage_changed:${dealId}:${deal.version + 1}` });
     await writeAudit(tx, {
       tenantId: tid,
@@ -1108,6 +1112,7 @@ export async function createDeal(
 
   const now = new Date();
   const dealId = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Contact" WHERE id = ${contact.id} AND "tenantId" = ${tid} FOR UPDATE`;
     const deal = await tx.deal.create({
       data: {
         tenantId: tid,
@@ -1166,6 +1171,8 @@ export async function createDeal(
         changesJson: { source: "manual", itemCount: preparedItems.length },
       },
     });
+    await ensureSalesNextTask(tx, tid, deal.id);
+    await enqueueSalesReconcile(tx, tid, deal.id);
     return deal.id;
   });
 

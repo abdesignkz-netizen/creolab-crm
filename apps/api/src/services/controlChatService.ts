@@ -5,9 +5,9 @@ import { ApiError } from "../errors.ts";
 import { safeEqual, sha256 } from "../lib/hash.ts";
 import { writeAudit } from "../lib/audit.ts";
 import { authorizeNativeControl, executeNativeControl, confirmNativeControl, controlAuthorizationVersion } from "./aiControlService.ts";
-import { CHAT_ACTIONS, chatCommandSchema, cleanText, controlChatMenu, quickControlCommand, words, type ChatCommand, type ChatLanguage } from "./controlChatLanguage.ts";
+import { CHAT_ACTIONS, chatCommandSchema, cleanText, controlChatMenu, quickControlCommand, controlSectionHelp, words, type ChatCommand, type ChatLanguage } from "./controlChatLanguage.ts";
 import { chatSettings, record } from "./controlChatSettings.ts";
-import { controlTaskClientLabel, presentControlReply } from "./controlChatPresentation.ts";
+import { controlTaskClientLabel, presentControlReply, controlLink } from "./controlChatPresentation.ts";
 import { parseControlChatWithLlm } from "./llmClient.ts";
 
 const SESSION_MS = 30 * 60000;
@@ -49,9 +49,9 @@ export async function routeControlWhatsApp(prisma: PrismaClient, integrationId: 
   return true;
 }
 
-async function allowedActions(prisma: PrismaClient, job: Job) {
+async function allowedActions(executor: ControlChatExecutor) {
   // Read checks only; action execution always checks again.
-  const ctx = await authorizeNativeControl(prisma, job.integrationId, job.identityId);
+  const ctx = await executor.authorize();
   return CHAT_ACTIONS.filter(action => {
     const access = ctx.access, meta = CONTROL_ACTION_META[action];
     if (Array.isArray(access.allowedActions) && access.allowedActions.length && !access.allowedActions.includes(action)) return false;
@@ -83,24 +83,34 @@ async function verifyPhone(prisma: PrismaClient, job: Job, codeHash: string) {
   await writeAudit(prisma, { tenantId: row.tenantId, actorUserId: row.userId, action: "control.identity_verified", entityType: "control_identity", entityId: row.id, changes: { provider: "WHATSAPP", transport: "direct" } });
 }
 
-async function runRequest(prisma: PrismaClient, job: Job, context: Context, lang: ChatLanguage) {
+export type ControlChatExecutor = {
+  authorize: (action?: ControlAction) => Promise<Pick<Awaited<ReturnType<typeof authorizeNativeControl>>, "auth" | "access" | "tenant">>;
+  execute: (action: ControlAction, params: Record<string, unknown>, requestId: string) => Promise<unknown>;
+  confirm: (confirmationId: string) => Promise<unknown>;
+};
+export async function runControlChatRequest(prisma: PrismaClient, job: Pick<Job, "id" | "tenantId" | "identityId" | "integrationId" | "text" | "kind">, context: Context, lang: ChatLanguage, webExecutor?: ControlChatExecutor) {
+  const executor: ControlChatExecutor = webExecutor || {
+    authorize: action => authorizeNativeControl(prisma, job.integrationId, job.identityId, action),
+    execute: (action, params, requestId) => executeNativeControl(prisma, job.integrationId, job.identityId, action, params, requestId),
+    confirm: id => confirmNativeControl(prisma, job.integrationId, job.identityId, id),
+  };
   const w = (ru: string, kk: string) => words(lang, ru, kk);
   const text = job.text.trim(), lower = text.toLowerCase();
   const actions: ControlAction[] = [];
   const execute = async (action: ControlAction, params: Record<string, unknown> = {}) => {
     actions.push(action);
-    return executeNativeControl(prisma, job.integrationId, job.identityId, action, params, `chat:${job.id}:${action}`);
+    return executor.execute(action, params, `chat:${job.id}:${action}`);
   };
   const reply = (text: string, next: Context = context) => ({ text, context: next, actions });
   const identity = await prisma.controlIdentity.findUniqueOrThrow({ where: { id: job.identityId } });
   if (!identity.verifiedAt) {
     const code = text.match(/^Control #([a-f0-9]{64})$/)?.[1];
     if (!code) return reply(w("Для подтверждения номера отправьте Control и код из настроек BasQar. Код действует 30 минут.", "Нөмірді растау үшін Control және BasQar баптауларындағы кодты жіберіңіз. Код 30 минут жарамды."), {});
-    await verifyPhone(prisma, job, code);
+    await verifyPhone(prisma, job as Job, code);
   }
-  const ctx = await authorizeNativeControl(prisma, job.integrationId, job.identityId);
-  const timeZone = ctx.integration.tenant.timezone || "Asia/Almaty";
-  const allowed = await allowedActions(prisma, job);
+  const ctx = await executor.authorize();
+  const timeZone = ctx.tenant.timezone || "Asia/Almaty";
+  const allowed = await allowedActions(executor);
   if (!identity.verifiedAt || /^(?:меню|мәзір|menu|старт|start|помощь|көмек|0)$/i.test(text)) {
     if (context.pendingId) await prisma.controlConfirmation.updateMany({ where: { id: context.pendingId, identityId: job.identityId, tenantId: job.tenantId, status: "pending" }, data: { status: "canceled" } });
     return reply(controlChatMenu(lang, allowed), { selectedClient: context.selectedClient });
@@ -118,19 +128,30 @@ async function runRequest(prisma: PrismaClient, job: Job, context: Context, lang
     if (context.pendingId) await prisma.controlConfirmation.updateMany({ where: { id: context.pendingId, tenantId: job.tenantId, identityId: job.identityId, status: "pending" }, data: { status: "canceled" } });
     return reply(w("Команда отменена. Напишите «Меню» или новый запрос.", "Команда тоқтатылды. «Мәзір» немесе жаңа сұрау жазыңыз."), { selectedClient: context.selectedClient });
   }
+  // Explicit new commands can interrupt a wizard. Read-only requests leave a
+  // pending write intact; a different write cancels the old preview first.
+  let parsedCommand = quickControlCommand(text, timeZone);
   if (context.pendingId) {
     const pending = await prisma.controlConfirmation.findFirst({ where: { id: context.pendingId, tenantId: job.tenantId, identityId: job.identityId, status: "pending", expiresAt: { gt: new Date() } } });
-    if (!pending) return reply(w("Подтверждение истекло или уже использовано. Напишите команду заново.", "Растаудың мерзімі өткен немесе қолданылған. Команданы қайта жазыңыз."), { selectedClient: context.selectedClient });
-    const token = pending.id.slice(-6).toUpperCase();
-    if (!new RegExp(`^(?:подтвердить|растау|confirm)\\s+${token}$`, "i").test(text)) return reply(`${pending.summary}\n\n${w(`Для выполнения: Подтвердить ${token}. Для отмены: Отмена.`, `Орындау үшін: Растау ${token}. Тоқтату үшін: Болдырмау.`)}`);
-    actions.push(pending.action as ControlAction);
-    const result = await confirmNativeControl(prisma, job.integrationId, job.identityId, pending.id);
-    return reply(presentControlReply(pending.action as ControlAction, result, lang, timeZone), { selectedClient: context.selectedClient });
+    if (!pending) {
+      delete context.pendingId;
+      if (/^(?:подтвердить|растау|confirm)(?:\s|$)/i.test(text)) return reply(w("Подтверждение истекло или уже использовано. Напишите команду заново.", "Растаудың мерзімі өткен немесе қолданылған. Команданы қайта жазыңыз."));
+    }
+    else {
+      const token = pending.id.slice(-6).toUpperCase();
+      if (new RegExp(`^(?:подтвердить|растау|confirm)\\s+${token}$`, "i").test(text)) {
+        actions.push(pending.action as ControlAction);
+        const result = await executor.confirm(pending.id);
+        return reply(presentControlReply(pending.action as ControlAction, result, lang, timeZone), { selectedClient: context.selectedClient });
+      }
+      // A bare "yes" must never execute an unrelated or stale change.
+      if (/^(?:да|нет|ок|yes|no|иә|жоқ)$/i.test(text)) return reply(`${pending.summary}\n\n${w(`Для выполнения: Подтвердить ${token}. Для отмены: Отмена. Можно задать другой вопрос.`, `Орындау үшін: Растау ${token}. Тоқтату үшін: Болдырмау.`)}`);
+    }
   }
   if (/^(?:подтвердить|растау|confirm)(?:\s|$)/i.test(text)) return reply(w("Нет команды для подтверждения. Напишите запрос заново.", "Растайтын команда жоқ. Сұрауды қайта жазыңыз."));
   if (text === "[control:too_long]" || !text || text.startsWith("[WhatsApp:")) return reply(w("Отправьте команду текстом, до 2000 символов.", "Команданы мәтінмен жіберіңіз, 2000 таңбаға дейін."));
   let draft: Draft;
-  if (context.choices) {
+  if (context.choices && /^\d{1,2}$/.test(text)) {
     const index = /^\d{1,2}$/.test(text) ? Number(text) - 1 : -1;
     const choice = context.choices.items[index];
     if (!choice) return reply(w("Выберите номер из последнего списка или напишите «Отмена».", "Соңғы тізімнен нөмірді таңдаңыз немесе «Болдырмау» жазыңыз."));
@@ -139,20 +160,39 @@ async function runRequest(prisma: PrismaClient, job: Job, context: Context, lang
     if (context.choices.field === "clientId") context.selectedClient = choice;
     delete context.choices;
   } else {
-    if (text === "5" || text === "6") await authorizeNativeControl(prisma, job.integrationId, job.identityId, text === "5" ? "FIND_CLIENT" : "CREATE_TASK");
-    if (text === "5") return reply(w("Напишите имя или телефон клиента.", "Клиенттің атын немесе телефонын жазыңыз."), { ...context, awaiting: "client_query" });
-    if (text === "6") return reply(w("Напишите название задачи. Чтобы указать срок или ответственного, отправьте полную команду, например: «Создай задачу подготовить КП завтра к 15:00». Ничего не сохранится до подтверждения.", "Тапсырма атауын жазыңыз. Мерзім немесе жауапты адам үшін толық команда жіберіңіз, мысалы: «Ертең 15:00-ге ұсыныс дайындау тапсырмасын құр». Растағанға дейін ештеңе сақталмайды."), { ...context, awaiting: "task_text" });
-    let command: ChatCommand | null = context.awaiting === "client_query" ? { action: "FIND_CLIENT", query: text } : quickControlCommand(text);
-    if (!command) command = await parseControlChatWithLlm(context.awaiting === "task_text" ? `Создай задачу: ${text}` : text, timeZone, new Date(), { prisma, tenantId: job.tenantId, integrationId: job.integrationId, userId: identity.userId });
-    if (!command) return reply(w("Не удалось однозначно определить команду. Напишите «Меню» или уточните один запрос: что показать или какую задачу создать. Данные не изменены.", "Команданы нақты анықтау мүмкін болмады. «Мәзір» жазыңыз немесе бір сұрауды нақтылаңыз: нені көрсету немесе қандай тапсырма құру керек. Деректер өзгерген жоқ."));
+    if (text === "5" || text === "6") await executor.authorize(text === "5" ? "FIND_CLIENT" : "CREATE_TASK");
+    if (text === "5" || /^(?:найди(?:те)?|найти) клиента$/i.test(text)) return reply(w("Напишите имя или телефон клиента.", "Клиенттің атын немесе телефонын жазыңыз."), { ...context, awaiting: "client_query" });
+    if (text === "6" || /^(?:создай(?:те)?|создать|добавь(?:те)?) задачу$/i.test(text)) return reply(w("Напишите название задачи. Чтобы указать срок или ответственного, отправьте полную команду, например: «Создай задачу подготовить КП завтра к 15:00». Ничего не сохранится до подтверждения.", "Тапсырма атауын жазыңыз. Мерзім немесе жауапты адам үшін толық команда жіберіңіз, мысалы: «Ертең 15:00-ге ұсыныс дайындау тапсырмасын құр». Растағанға дейін ештеңе сақталмайды."), { ...context, awaiting: "task_text" });
+    let command: ChatCommand | null = parsedCommand;
+    const explicitRequest = /^(?:созда|постав|добав|запиш|покажи|расскажи|скажи|подскажи|найди|какие|что|где|кто|кому|когда|как|сколько|почему|измени|заверши|перенеси|назначь|отмени|выключи|включи)(?:\s|[?!:]|$)/i.test(text)
+      || /^(?:создай|создать|поставь|добавь|запиши|рассылки|документы|интеграции|тарифы)/i.test(text)
+      || /^(?:сводка|продажи|выручка|статистика|задачи|сделки|клиенты|заявки|команда|воронка)(?:\s|[?!:]|$)/i.test(text);
+    const taskText = context.awaiting === "task_text" && !explicitRequest ? `Создай задачу: ${text}` : text;
+    if (!command && context.awaiting === "task_text") command = quickControlCommand(taskText, timeZone);
+    if (!command && context.awaiting === "client_query" && !/^(?:созда|покажи|найди|какие|что|где|сколько|измени|заверши|перенеси|назначь|добавь)/i.test(text)) command = { action: "FIND_CLIENT", query: text };
+    if (!command) {
+      try { command = await parseControlChatWithLlm(taskText, timeZone, new Date(), { prisma, tenantId: job.tenantId, integrationId: webExecutor ? undefined : job.integrationId, userId: identity.userId }); }
+      catch { /* Deterministic commands still work; no write is inferred on model failure. */ }
+    }
+
+    if (!command) {
+      const section = controlSectionHelp(text, lang);
+      if (section) return reply(`${section.label}\n${w("Это действие выполняется в соответствующем разделе BasQar. Откройте его по ссылке:", "Бұл әрекетті BasQar бөлімінде орындауға болады:")}\n${controlLink(section.path)}`);
+    }
+    if (!command) return reply(w("Уточните, что сделать. Например: «Какие задачи на сегодня?», «Продажи за неделю», «Найди клиента Айбек» или «Создай задачу встреча 22 октября в 18:00». Можно писать сразу, без меню. Данные не изменены.", "Команданы нақты анықтау мүмкін болмады. «Мәзір» жазыңыз немесе бір сұрауды нақтылаңыз: нені көрсету немесе қандай тапсырма құру керек. Деректер өзгерген жоқ."));
     const checked = chatCommandSchema.safeParse(command);
     if (!checked.success) return reply(w("Уточните запрос. Данные не изменены.", "Сұрауды нақтылаңыз. Деректер өзгерген жоқ."));
     delete context.awaiting;
-    draft = { command: checked.data, params: { period: command.period || "today" }, labels: {} };
+    delete context.choices;
+    if (context.pendingId && CONTROL_ACTION_META[checked.data.action].riskLevel !== "READ") {
+      await prisma.controlConfirmation.updateMany({ where: { id: context.pendingId, tenantId: job.tenantId, identityId: job.identityId, status: "pending" }, data: { status: "canceled" } });
+      delete context.pendingId;
+    }
+    draft = { command: checked.data, params: { period: command.period || "today", ...(checked.data.salesFilter ? { filter: checked.data.salesFilter } : {}) }, labels: {} };
   }
   const c = draft.command, p = draft.params;
   if (c.action === "GET_CLIENT_DETAILS" && c.query && !c.client) c.client = c.query;
-  await authorizeNativeControl(prisma, job.integrationId, job.identityId, c.action);
+  await executor.authorize(c.action);
   const choose = (field: string, candidates: Choice[]) => {
     const choices = candidates.slice(0, 8);
     context.choices = { field, items: choices, draft };
@@ -171,7 +211,7 @@ async function runRequest(prisma: PrismaClient, job: Job, context: Context, lang
     return choose("clientId", found.map((r: any) => ({ id: r.id, label: `${r.name || r.label}${r.phone ? ` · ${r.phone}` : ""}` })));
   }
   if (c.useSelectedClient && !p.clientId) {
-    if (!context.selectedClient) return reply(w("Сначала найдите клиента через пункт 5, затем повторите команду.", "Алдымен 5-тармақ арқылы клиентті табыңыз, содан кейін команданы қайталаңыз."));
+    if (!context.selectedClient) return reply(w("Напишите «Найди клиента» и имя или телефон, затем повторите команду.", "Алдымен 5-тармақ арқылы клиентті табыңыз, содан кейін команданы қайталаңыз."));
     p.clientId = context.selectedClient.id; draft.labels.clientId = context.selectedClient.label;
   }
   if (c.action === "GET_CLIENT_DETAILS" && !p.clientId) return reply(w("Напишите имя или телефон клиента.", "Клиенттің атын немесе телефонын жазыңыз."), { ...context, awaiting: "client_query" });
@@ -254,8 +294,8 @@ export async function processControlChatRequests(prisma: PrismaClient, integrati
       if (identity.verifiedAt) {
         try { accessVersion = controlAuthorizationVersion(await authorizeNativeControl(prisma, job.integrationId, job.identityId)); } catch { /* reply contains only an access error */ }
       }
-      let response: Awaited<ReturnType<typeof runRequest>>;
-      try { response = await runRequest(prisma, job, context, lang); }
+      let response: Awaited<ReturnType<typeof runControlChatRequest>>;
+      try { response = await runControlChatRequest(prisma, job, context, lang); }
       catch (error) {
         const known = error instanceof ApiError;
         const text = words(lang, known ? error.message : "Не удалось обработать запрос. Проверьте историю Control перед повтором изменений. Для справки напишите «Меню».", "Сұрауды өңдеу мүмкін болмады. Өзгерістерді қайталамас бұрын Control тарихын тексеріңіз. Көмек үшін «Мәзір» жазыңыз.");

@@ -66,6 +66,22 @@ describe("Conversations board", () => {
     server?.close();
   });
 
+  it("hides an empty legacy duplicate while retaining direct history and real legacy messages", async () => {
+    const member = await prisma.membership.findFirstOrThrow({ where: { user: { email: "owner@creolab.example" } } }), tenantId = member.tenantId;
+    const contact = await prisma.contact.create({ data: { tenantId, name: "Batyrkhan duplicate regression", methods: { create: { type: "phone", rawValue: "+77082555595", normalizedValue: "77082555595", source: "test" } } } });
+    const integration = await prisma.integration.create({ data: { tenantId, type: "whatsapp_qr", name: "QR duplicate test", status: "active" } });
+    const connection = await prisma.channelConnection.create({ data: { tenantId, integrationId: integration.id, channelType: "whatsapp", status: "active" } });
+    const direct = await prisma.conversation.create({ data: { tenantId, contactId: contact.id, connectionId: connection.id, externalThreadId: "123456789@lid" } });
+    const ghost = await prisma.conversation.create({ data: { tenantId, contactId: contact.id, sellerLeadId: "LEAD-duplicate-test", externalThreadId: "77082555595" } });
+    await prisma.message.create({ data: { tenantId, conversationId: direct.id, direction: "inbound", senderKind: "client", text: "Original direct message" } });
+    const list = async () => (await (await fetch(`${base}/api/v1/conversations?q=Batyrkhan`, { headers: { cookie } })).json()).items;
+    let rows = await list(); assert.ok(rows.some((r: any) => r.id === direct.id)); assert.ok(!rows.some((r: any) => r.id === ghost.id));
+    assert.ok(await prisma.conversation.findUnique({ where: { id: ghost.id } }), "No data is deleted");
+    await prisma.message.create({ data: { tenantId, conversationId: ghost.id, direction: "outbound", senderKind: "staff", text: "Actual separate legacy message" } });
+    rows = await list(); assert.ok(rows.some((r: any) => r.id === ghost.id));
+    assert.equal(rows.find((r: any) => r.id === direct.id).lastMessagePreview, "Original direct message");
+  });
+
   it("список не показывает LEAD как заголовок и отдаёт бизнес-контекст", async () => {
     const response = await fetch(`${base}/api/v1/conversations`, { headers: { cookie } });
     assert.equal(response.status, 200);

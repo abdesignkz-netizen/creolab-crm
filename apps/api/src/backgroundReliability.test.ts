@@ -46,7 +46,7 @@ it("uses the actual CommonJS web-push methods without sending a real notificatio
   const prisma = {
     notification: { findFirst: async () => ({ recipient: { userId: "user" }, title: "Test", body: "Test", deliveries: [{ id: "delivery", channel: "web_push", state: "created" }] }) },
     webPushSubscription: { findMany: async () => [{ endpoint: "https://push.invalid", keysJson: { p256dh: "test", auth: "test" } }] },
-    notificationDelivery: { update: async (input: any) => { updates.push(input); } },
+    notificationDelivery: { updateMany: async () => ({ count: 1 }), update: async (input: any) => { updates.push(input); } },
   } as unknown as PrismaClient;
   try {
     assert.deepEqual(await deliverPendingPush(prisma, "notification"), { attempted: 1, sent: 1 });

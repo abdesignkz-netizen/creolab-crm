@@ -10,6 +10,7 @@ export * from "./roles.ts";
 export * from "./schemas.ts";
 export * from "./control.ts";
 export * from "./taskBoard.ts";
+export * from "./onboarding.ts";
 export * from "./aiManagerSetup.ts";
 
 export const PAGE_SIZE_DEFAULT = 30;
@@ -38,3 +39,7 @@ export * from "./documentSignMeta.ts";
 export { systemText, systemMessage, kkSystemMessages } from "./systemLocale.ts";
 export { publicFormKey, publicFormKeyAliases, BASQAR_SITE_FORM_KEY } from "./publicFormBranding.ts";
 export { taskTitlePresentation, localizedTaskTitle, type TaskTitlePresentation } from "./taskPresentation.ts";
+
+export * from "./salesProcess.ts";
+
+export * from "./aiBusinessScenarios.ts";

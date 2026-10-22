@@ -1,3 +1,4 @@
+import { salesProcessSchema } from "@creolab/contracts";
 import { requireConfigurationTenant as requireTenant } from "../lib/access.ts";
 import { requireFeature } from "./entitlementService.ts";
 import type { Prisma, PrismaClient } from "@creolab/db";
@@ -44,6 +45,7 @@ export async function getAIAutomationSettings(prisma: PrismaClient, auth: AuthCo
     runtimePaused: Boolean((tenant?.settingsJson as any)?.runtime?.aiPaused),
     legacyChannels: legacyChannels.map(channel => ({ id: channel.id, name: channel.name, connected: channel.status !== "disabled" && channel.connectionStatus === "CONNECTED" })),
     channels: channels.map(channel => ({ id: channel.integrationId, name: channel.integration.name, type: channel.integration.type, connected: channel.status === "active", enabled: channel.autoReply })),
+    salesMembers: (await prisma.membership.findMany({ where: { tenantId: membership.tenantId, active: true, user: { status: "active" } }, include: { user: { select: { name: true } } } })).map(m => ({ id: m.id, name: m.user.name })),
     ...settings,
     timezone: tenant?.timezone || "Asia/Almaty",
     modeLabel: MODE_LABEL[settings.defaultMode],
@@ -76,6 +78,10 @@ export async function updateAIAutomationSettings(
     // The server owns the cohort boundary. Ordinary edits never move existing clients into a new cohort.
     next.replyAudience = parseReplyAudience({ audience: input.replyAudience.audience,
       since: previous.replyAudience.since || (input.replyAudience.audience !== "all" ? new Date().toISOString() : null) });
+  }
+  if (input.salesProcess) {
+    next.salesProcess = salesProcessSchema.parse(input.salesProcess);
+    if (next.salesProcess.assigneeMembershipId && !await prisma.membership.count({ where: { id: next.salesProcess.assigneeMembershipId, tenantId: membership.tenantId, active: true, user: { status: "active" } } })) throw new ApiError(422, "invalid", "Выберите действующего сотрудника компании");
   }
   if (input.crm) next.crm = parseCrmAutomation({ ...next.crm, ...input.crm });
   if (input.defaultMode) {
@@ -140,8 +146,11 @@ export async function updateAIAutomationSettings(
       changes: { fields: Object.keys(input), defaultMode: next.defaultMode, audience: next.replyAudience.audience, timezone } });
   });
 
+  const salesChanged = JSON.stringify(previous.salesProcess) !== JSON.stringify(next.salesProcess);
+  const activation = salesChanged ? await (await import("./tenantAiConfigService.ts")).pushAiConfigToWhatsApp(prisma, tenant.id) : null;
   return {
     ...next,
+    ...(activation ? { activation } : {}),
     timezone,
     modeLabel: MODE_LABEL[next.defaultMode],
     message: "Настройки ИИ-менеджера сохранены",

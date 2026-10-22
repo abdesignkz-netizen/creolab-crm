@@ -3,20 +3,14 @@ import { processEmployeeTelegramQueue } from "./employeeTelegramService.ts";
 import { processControlNotifications } from "./controlNotificationService.ts";
 import { logServerError } from "../lib/redact.ts";
 import { claimOutboxEvent } from "./outboxLease.ts";
+import { claimScheduledAction, recoverInterruptedScheduledActions } from "./scheduledActionLease.ts";
 import type { PrismaClient } from "@creolab/db";
 import { createStaffNotification, deliverPendingPush } from "./notificationService.ts";
 import { AGREEMENT_TYPE_LABEL, type AgreementType } from "./conversationContextTypes.ts";
 
 const TICK_MS = 5000;
 let started = false;
-
-async function claimDueAction(prisma: PrismaClient, id: string, version: number) {
-  const claimed = await prisma.scheduledAction.updateMany({
-    where: { id, state: "scheduled", version },
-    data: { state: "running", version: { increment: 1 } },
-  });
-  return claimed.count === 1;
-}
+let salesSweepRunning = false, lastSalesSweep = 0;
 
 export async function processOutbox(prisma: PrismaClient) {
   const { processCampaignQueue } = await import("./campaignService.ts");
@@ -56,9 +50,14 @@ export async function processOutbox(prisma: PrismaClient) {
         const payload = (event.payloadJson || {}) as { inquiryId?: string; tenantId?: string };
         const { processInquiryAutomationJob } = await import("./inquiryAutomationQueue.ts");
         await processInquiryAutomationJob(prisma, payload);
+      } else if (event.type === "sales.reconcile") {
+        const { reconcileSalesDeal } = await import("./salesControlService.ts");
+        await reconcileSalesDeal(prisma, event.tenantId, event.entityId);
       } else if (event.type === "contract.signed") {
         const { processContractSignedEvent } = await import("./invoiceSignedWorkflow.ts");
         await processContractSignedEvent(prisma, event);
+        const dealId = (event.payloadJson as { dealId?: string }).dealId;
+        if (dealId) await (await import("./salesControlService.ts")).reconcileSalesDeal(prisma, event.tenantId, dealId);
       } else if (event.type === "avr.sent" || event.type === "esf.sent") {
         const { processEsfSentOutbox } = await import("./esfStatusSyncService.ts");
         await processEsfSentOutbox(prisma, event);
@@ -167,90 +166,101 @@ async function processAgreementReminder(
 export async function processDueScheduledActions(prisma: PrismaClient) {
   const { processCampaignQueue } = await import("./campaignService.ts");
   const { processScheduledTask, recoverDueScheduledTaskSends } = await import("./scheduledTaskRunner.ts");
+  await recoverInterruptedScheduledActions(prisma);
   await recoverDueScheduledTaskSends(prisma);
   const due = await prisma.scheduledAction.findMany({
     where: { state: "scheduled", dueAt: { lte: new Date() } },
+    orderBy: { dueAt: "asc" },
     take: 20,
   });
   for (const item of due) {
-    if (!(await claimDueAction(prisma, item.id, item.version))) continue;
+    const lease = await claimScheduledAction(prisma, item);
+    if (!lease) continue;
+    try {
 
-    const tenant = await prisma.tenant.findUnique({ where: { id: item.tenantId }, select: { status: true } });
-    if (!tenant || tenant.status !== "active") {
-      await prisma.scheduledAction.update({
-        where: { id: item.id },
-        data: { state: "canceled", cancelReason: "tenant_suspended" },
-      });
-      continue;
-    }
-
-    if (item.type === "client_followup") {
-      const { processClientFollowUp } = await import("./aiConversationPolicyService.ts");
-      await processClientFollowUp(prisma, item).catch(async (error: unknown) => {
-        logServerError(error, "background:client followup");
+      const tenant = await prisma.tenant.findUnique({ where: { id: item.tenantId }, select: { status: true } });
+      if (!tenant || tenant.status !== "active") {
         await prisma.scheduledAction.update({
           where: { id: item.id },
-          data: { state: "failed", cancelReason: error instanceof Error ? error.message : "error" },
-        });
-      });
-      continue;
-    }
-    if (item.type === "task_run" || item.type === "task_batch_run") {
-      await processScheduledTask(prisma, item).catch(async (error: unknown) => {
-        logServerError(error, "background:scheduled task");
-        await prisma.scheduledAction.update({
-          where: { id: item.id },
-          data: { state: "failed", cancelReason: error instanceof Error ? error.message : "error" },
-        });
-      });
-      continue;
-    }
-    if (item.type === "campaign_run") {
-      const campaignId = item.parentId;
-      const started = await prisma.campaign.updateMany({
-        where: { id: campaignId, status: "scheduled" },
-        data: { status: "running", startedAt: new Date() },
-      });
-      if (started.count === 0) {
-        await prisma.scheduledAction.update({
-          where: { id: item.id },
-          data: { state: "canceled", cancelReason: "campaign_not_scheduled" },
+          data: { state: "canceled", cancelReason: "tenant_suspended" },
         });
         continue;
       }
-      await prisma.campaignRecipient.updateMany({
-        where: { campaignId, status: "pending" },
-        data: { status: "queued" },
-      });
-      await processCampaignQueue(prisma, campaignId).catch((error: unknown) => logServerError(error, "background:campaign scheduled"));
-      await prisma.scheduledAction.update({ where: { id: item.id }, data: { state: "done" } });
-      continue;
-    }
-    if (item.type === "esf_status_poll") {
-      const { processEsfStatusPollAction } = await import("./esfStatusSyncService.ts");
-      await processEsfStatusPollAction(prisma, item).catch(async (error: unknown) => {
-        logServerError(error, "background:esf status poll");
-        await prisma.scheduledAction.update({
-          where: { id: item.id },
-          data: { state: "failed", cancelReason: error instanceof Error ? error.message : "error" },
+
+      if (item.type === "client_followup") {
+        const { processClientFollowUp } = await import("./aiConversationPolicyService.ts");
+        await processClientFollowUp(prisma, item).catch(async (error: unknown) => {
+          logServerError(error, "background:client followup");
+          await prisma.scheduledAction.update({
+            where: { id: item.id },
+            data: { state: "failed", cancelReason: error instanceof Error ? error.message : "error" },
+          });
         });
-      });
-      continue;
-    }
-    if (item.type.startsWith("agreement_reminder")) {
-      await processAgreementReminder(prisma, item).catch(async (error) => {
-        logServerError(error, "background:agreement reminder");
-        await prisma.scheduledAction.update({
-          where: { id: item.id },
-          data: { state: "failed", cancelReason: error instanceof Error ? error.message : "error" },
+        continue;
+      }
+      if (item.type === "task_run" || item.type === "task_batch_run") {
+        await processScheduledTask(prisma, item).catch(async (error: unknown) => {
+          logServerError(error, "background:scheduled task");
+          await prisma.scheduledAction.update({
+            where: { id: item.id },
+            data: { state: "failed", cancelReason: error instanceof Error ? error.message : "error" },
+          });
         });
+        continue;
+      }
+      if (item.type === "campaign_run") {
+        const campaignId = item.parentId;
+        const started = await prisma.campaign.updateMany({
+          where: { id: campaignId, status: "scheduled" },
+          data: { status: "running", startedAt: new Date() },
+        });
+        if (started.count === 0) {
+          await prisma.scheduledAction.update({
+            where: { id: item.id },
+            data: { state: "canceled", cancelReason: "campaign_not_scheduled" },
+          });
+          continue;
+        }
+        await prisma.campaignRecipient.updateMany({
+          where: { campaignId, status: "pending" },
+          data: { status: "queued" },
+        });
+        await processCampaignQueue(prisma, campaignId).catch((error: unknown) => logServerError(error, "background:campaign scheduled"));
+        await prisma.scheduledAction.update({ where: { id: item.id }, data: { state: "done" } });
+        continue;
+      }
+      if (item.type === "esf_status_poll") {
+        const { processEsfStatusPollAction } = await import("./esfStatusSyncService.ts");
+        await processEsfStatusPollAction(prisma, item).catch(async (error: unknown) => {
+          logServerError(error, "background:esf status poll");
+          await prisma.scheduledAction.update({
+            where: { id: item.id },
+            data: { state: "failed", cancelReason: error instanceof Error ? error.message : "error" },
+          });
+        });
+        continue;
+      }
+      if (item.type.startsWith("agreement_reminder")) {
+        await processAgreementReminder(prisma, item).catch(async (error) => {
+          logServerError(error, "background:agreement reminder");
+          await prisma.scheduledAction.update({
+            where: { id: item.id },
+            data: { state: "failed", cancelReason: error instanceof Error ? error.message : "error" },
+          });
+        });
+        continue;
+      }
+      await prisma.scheduledAction.update({
+        where: { id: item.id },
+        data: { state: "failed", cancelReason: "Неизвестный тип фонового действия" },
       });
-      continue;
-    }
-    await prisma.scheduledAction.update({
-      where: { id: item.id },
-      data: { state: "done" },
-    });
+    } catch (error) {
+      logServerError(error, "background:scheduled action");
+      await prisma.scheduledAction.updateMany({
+        where: { id: item.id, state: "running", version: item.version + 1 },
+        data: { state: "failed", cancelReason: error instanceof Error ? error.message : "error" },
+      });
+    } finally { await lease.stop(); }
   }
 }
 
@@ -285,6 +295,12 @@ export function startBackgroundJobs(prisma: PrismaClient, options: { keepAlive?:
     }
     import("./billingResourceService.ts").then(({ reconcileBillingUsage }) => reconcileBillingUsage(prisma)).catch(error => logServerError(error, "background:billing usage"));
     void import("./instagramOAuthService.ts").then(({ refreshInstagramConnections }) => refreshInstagramConnections(prisma)).catch(error => logServerError(error, "background:instagram"));
+    if (!salesSweepRunning && Date.now() - lastSalesSweep >= 60_000) {
+      salesSweepRunning = true; lastSalesSweep = Date.now();
+      void import("./salesControlService.ts").then(m => m.sweepSalesProcesses(prisma))
+        .catch(error => logServerError(error, "background:sales"))
+        .finally(() => { salesSweepRunning = false; });
+    }
     processOutbox(prisma).catch((error) => logServerError(error, "background:outbox"));
     import("./esfStatusSyncService.ts")
       .then(({ ensureEsfStatusPolls }) => ensureEsfStatusPolls(prisma))

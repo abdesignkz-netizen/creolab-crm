@@ -1,16 +1,14 @@
 import type { PrismaClient } from "@creolab/db";
 import type { AuthContext } from "../lib/types.ts";
+import { ApiError } from "../errors.ts";
+import { logServerError } from "../lib/redact.ts";
+import { notifyScheduledTaskFailure } from "./scheduledTaskFailure.ts";
 import { executeTaskBatch } from "./aiCommandExecutionService.ts";
 import {
-  confirmTaskExecution,
   executeTask,
-  prepareTaskExecution,
   SCHEDULED_TASK_ACTION_TYPES,
   SENDABLE_TYPES,
 } from "./taskExecutionService.ts";
-
-const STUCK_RUNNING_MS = 90_000;
-const MAX_FAILED_RETRIES = 8;
 
 type ScheduledTaskAction = {
   id: string;
@@ -24,29 +22,17 @@ export async function authForScheduledTask(
   prisma: PrismaClient,
   tenantId: string,
   confirmedById?: string | null,
-  ownerMembershipId?: string | null,
 ): Promise<AuthContext> {
-  let membership =
-    (confirmedById
+  const membership =
+    confirmedById
       ? await prisma.membership.findFirst({
           where: { tenantId, userId: confirmedById, active: true },
           include: { user: true, tenant: true },
         })
-      : null) ||
-    (ownerMembershipId
-      ? await prisma.membership.findFirst({
-          where: { id: ownerMembershipId, tenantId, active: true },
-          include: { user: true, tenant: true },
-        })
-      : null) ||
-    (await prisma.membership.findFirst({
-      where: { tenantId, active: true },
-      include: { user: true, tenant: true },
-      orderBy: { createdAt: "asc" },
-    }));
+      : null;
 
   if (!membership) {
-    throw new Error("Нет сотрудника для запланированной отправки");
+    throw new ApiError(409, "confirmation_required", "Сотрудник, подтвердивший отправку, больше не имеет доступа. Подтвердите отправку заново.");
   }
 
   const permissions = Array.isArray(membership.permissions) ? (membership.permissions as string[]) : [];
@@ -116,47 +102,38 @@ export async function processScheduledTask(prisma: PrismaClient, action: Schedul
     return { skipped: true as const };
   }
 
-  const payload = (action.payloadJson || {}) as { confirmedById?: string; batch?: boolean };
-  const auth = await authForScheduledTask(
-    prisma,
-    action.tenantId,
-    payload.confirmedById,
-    task.ownerMembershipId,
-  );
-
   try {
-    if (action.type === "task_batch_run") {
-      const children = await prisma.task.findMany({
+    const taskIds = action.type === "task_batch_run"
+      ? (await prisma.task.findMany({
         where: { tenantId: action.tenantId, parentTaskId: task.id, status: { in: ["open", "waiting"] } },
         select: { id: true },
-      });
-      for (const child of children) {
-        const childConfirm = await prisma.executionConfirmation.findFirst({
-          where: { tenantId: action.tenantId, taskId: child.id, voidedAt: null },
-        });
-        if (!childConfirm) {
-          await prepareTaskExecution(prisma, auth, child.id);
-          await confirmTaskExecution(prisma, auth, child.id);
-        }
-      }
-    } else {
+      })).map(child => child.id) : [task.id];
+    const payload = (action.payloadJson || {}) as { confirmedById?: string };
+    let confirmedById: string | null | undefined = payload.confirmedById;
+    for (const taskId of taskIds) {
       const confirmation = await prisma.executionConfirmation.findFirst({
-        where: { tenantId: action.tenantId, taskId: task.id, voidedAt: null },
+        where: { tenantId: action.tenantId, taskId, voidedAt: null },
+        orderBy: { confirmedAt: "desc" },
       });
-      if (!confirmation) {
-        await prepareTaskExecution(prisma, auth, task.id);
-        await confirmTaskExecution(prisma, auth, task.id);
+      if (!confirmation || (confirmedById && confirmation.confirmedById !== confirmedById)) {
+        throw new ApiError(409, "confirmation_required", "Подтверждение отправки отсутствует или изменилось. Проверьте получателей и текст, затем подтвердите заново.");
       }
+      confirmedById = confirmation.confirmedById;
     }
+    const auth = await authForScheduledTask(prisma, action.tenantId, confirmedById);
 
     const result =
       action.type === "task_batch_run"
         ? await executeTaskBatch(prisma, auth, task.id, { runScheduled: true })
         : await executeTask(prisma, auth, task.id, { runScheduled: true });
+    const succeeded = "failed" in result ? result.failed === 0 : result.success;
     await prisma.scheduledAction.update({
       where: { id: action.id },
-      data: { state: "done" },
+      data: { state: succeeded ? "done" : "failed",
+        cancelReason: succeeded ? null : "Отправка не завершена. Проверьте результат в задаче перед повтором." },
     });
+    if (!succeeded) await notifyScheduledTaskFailure(prisma, action, task)
+      .catch(error => logServerError(error, "background:task failure notice"));
     return result;
   } catch (error) {
     await prisma.scheduledAction.update({
@@ -167,105 +144,65 @@ export async function processScheduledTask(prisma: PrismaClient, action: Schedul
       where: { id: task.id, tenantId: action.tenantId, status: { in: ["open", "waiting"] } },
       data: { executionStatus: "failed", commandStatus: "failed" },
     });
+    await notifyScheduledTaskFailure(prisma, action, task)
+      .catch(noticeError => logServerError(noticeError, "background:task failure notice"));
     throw error;
   }
 }
 
 export async function recoverDueScheduledTaskSends(prisma: PrismaClient, now = new Date()) {
-  const stuckBefore = new Date(now.getTime() - STUCK_RUNNING_MS);
-  await prisma.scheduledAction.updateMany({
-    where: {
-      state: "running",
-      type: { in: [...SCHEDULED_TASK_ACTION_TYPES] },
-      dueAt: { lte: stuckBefore },
-    },
-    data: { state: "scheduled", cancelReason: null },
-  });
-
-  const failed = await prisma.scheduledAction.findMany({
-    where: {
-      state: "failed",
-      type: { in: [...SCHEDULED_TASK_ACTION_TYPES] },
-      dueAt: { lte: now },
-    },
-    take: 20,
-  });
-  for (const item of failed) {
-    const payload = (item.payloadJson || {}) as { attempts?: number };
-    const attempts = Number(payload.attempts || 0);
-    const task = await prisma.task.findFirst({
-      where: { id: item.parentId, tenantId: item.tenantId, status: { in: ["open", "waiting"] } },
-    });
-    if (!task || task.sentAt || task.executionStatus === "sent") continue;
-    if (attempts >= MAX_FAILED_RETRIES) {
-      if (task.executionStatus === "scheduled" || task.commandStatus === "scheduled") {
-        await prisma.task.update({
-          where: { id: task.id },
-          data: { executionStatus: "failed", commandStatus: "failed" },
-        });
-      }
-      continue;
-    }
-    await prisma.scheduledAction.update({
-      where: { id: item.id },
-      data: {
-        state: "scheduled",
-        cancelReason: null,
-        payloadJson: { ...payload, attempts: attempts + 1 },
-      },
-    });
-  }
-
+  // Repair only a missing queue entry. Failed/interrupted sends are never
+  // blindly retried: the provider may already have accepted the message.
   const dueTasks = await prisma.task.findMany({
     where: {
       status: { in: ["open", "waiting"] },
       dueAt: { lte: now },
       type: { in: [...SENDABLE_TYPES] },
+      parentTaskId: null,
       OR: [{ executionStatus: "scheduled" }, { commandStatus: "scheduled" }],
     },
+    orderBy: { dueAt: "asc" },
     take: 30,
   });
-  for (const task of dueTasks) {
-    const pending = await prisma.scheduledAction.findFirst({
-      where: {
-        tenantId: task.tenantId,
-        parentType: "task",
-        parentId: task.id,
-        state: { in: ["scheduled", "running"] },
-        type: { in: [...SCHEDULED_TASK_ACTION_TYPES] },
-      },
-    });
-    if (pending) continue;
-    const lastFailed = await prisma.scheduledAction.findFirst({
-      where: {
-        tenantId: task.tenantId,
-        parentType: "task",
-        parentId: task.id,
-        type: { in: [...SCHEDULED_TASK_ACTION_TYPES] },
-        state: "failed",
-      },
-      orderBy: { id: "desc" },
-    });
-    const attempts = Number((lastFailed?.payloadJson as { attempts?: number } | undefined)?.attempts || 0);
-    if (lastFailed && attempts >= MAX_FAILED_RETRIES) {
-      if (task.executionStatus === "scheduled" || task.commandStatus === "scheduled") {
-        await prisma.task.update({
-          where: { id: task.id },
-          data: { executionStatus: "failed", commandStatus: "failed" },
-        });
+  for (const candidate of dueTasks) {
+    await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT "id" FROM "Task" WHERE "id" = ${candidate.id} AND "tenantId" = ${candidate.tenantId} FOR UPDATE`;
+      const task = await tx.task.findFirst({ where: { id: candidate.id, status: { in: ["open", "waiting"] },
+        dueAt: { lte: now }, OR: [{ executionStatus: "scheduled" }, { commandStatus: "scheduled" }] } });
+      if (!task) return;
+      const pending = await tx.scheduledAction.findFirst({
+        where: {
+          tenantId: task.tenantId,
+          parentType: "task",
+          parentId: task.id,
+          state: { in: ["scheduled", "running"] },
+          type: { in: [...SCHEDULED_TASK_ACTION_TYPES] },
+        },
+      });
+      if (pending) return;
+      const previous = await tx.scheduledAction.findFirst({
+        where: {
+          tenantId: task.tenantId,
+          parentType: "task",
+          parentId: task.id,
+          type: { in: [...SCHEDULED_TASK_ACTION_TYPES] },
+        },
+      });
+      if (previous) {
+        await tx.task.update({ where: { id: task.id }, data: { executionStatus: "failed", commandStatus: "failed" } });
+        return;
       }
-      continue;
-    }
-    await prisma.scheduledAction.create({
-      data: {
-        tenantId: task.tenantId,
-        type: task.targetType === "group" ? "task_batch_run" : "task_run",
-        parentType: "task",
-        parentId: task.id,
-        dueAt: task.dueAt || now,
-        state: "scheduled",
-        payloadJson: { taskId: task.id, recovered: true, attempts },
-      },
+      await tx.scheduledAction.create({
+        data: {
+          tenantId: task.tenantId,
+          type: task.targetType === "group" ? "task_batch_run" : "task_run",
+          parentType: "task",
+          parentId: task.id,
+          dueAt: task.dueAt || now,
+          state: "scheduled",
+          payloadJson: { taskId: task.id, recovered: true },
+        },
+      });
     });
   }
 }

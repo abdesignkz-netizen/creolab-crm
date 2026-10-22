@@ -44,7 +44,8 @@ export async function recordExternalMessage(prisma: PrismaClient, integrationId:
     if (input.channel === "whatsapp" && input.phone && /^\d{7,15}$/.test(input.phone)) {
       await storeWhatsAppPhone(tx, tenantId, contact.id, input.phone);
     }
-    let conversation = await tx.conversation.findFirst({ where: { tenantId, connectionId: connection.id, ...(input.channel === "whatsapp" ? {} : { externalThreadId: input.threadId }), contactId: contact.id } });
+    await tx.$queryRaw`SELECT id FROM "Contact" WHERE id = ${contact.id} AND "tenantId" = ${tenantId} FOR UPDATE`;
+    let conversation = await tx.conversation.findFirst({ where: { tenantId, connectionId: connection.id, externalThreadId: input.channel === "whatsapp" ? { in: [...new Set([input.threadId, ...externalIds])] } : input.threadId, contactId: contact.id }, orderBy: [{ updatedAt: "desc" }, { id: "asc" }] });
     if (!conversation) conversation = await tx.conversation.create({ data: { tenantId, connectionId: connection.id, externalThreadId: input.threadId, contactId: contact.id,
       mode: aiReady && connection.autoReply && automaticWhatsAppMode(integration.tenant.settingsJson, integration, contact) ? "ai" : "human" } });
     else if (input.channel === "whatsapp" && conversation.externalThreadId !== input.threadId) await tx.conversation.update({ where: { id: conversation.id }, data: { externalThreadId: input.threadId } });

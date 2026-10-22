@@ -1,7 +1,9 @@
+import { SalesControlPanel } from "../components/SalesControlPanel";
+import { ControlChatPanel } from "../components/ControlChatPanel";
 import { InlineFeedback } from "../components/InlineFeedback";
 import { uiText, useUiText, localizeUiOptions, uiMessage , uiDurationLabel } from "../lib/uiText";
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { nameWithPhone, phoneText } from "../lib/contactDisplay";
 import { api } from "../lib/api";
 
@@ -15,8 +17,11 @@ type Filter =
   | "problems";
 
 
-export function ControlPage() {
+export function ControlPage({ canManageOverview = true }: { canManageOverview?: boolean }) {
   const uiText = useUiText();
+  const [params, setParams] = useSearchParams();
+  const view = params.get("view") === "sales" ? "sales" : params.get("view") === "overview" && canManageOverview ? "overview" : "chat";
+  const setView = (view: "chat" | "overview" | "sales") => setParams({ view });
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
@@ -36,10 +41,11 @@ export function ControlPage() {
   }
 
   useEffect(() => {
+    if (view !== "overview" || !canManageOverview) return;
     void load();
     const timer = window.setInterval(() => void load(), 20_000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [view, canManageOverview]);
 
   async function run(key: string, action: () => Promise<any>) {
     setBusyKey(key);
@@ -57,6 +63,10 @@ export function ControlPage() {
       setBusyKey("");
     }
   }
+
+  if (view === "sales") return <section className="management-page"><button className="btn secondary" onClick={() => setView("chat")}>← BasQar Control</button><SalesControlPanel canManageSettings={canManageOverview} /></section>;
+
+  if (view === "chat") return <section className="management-page"><div className="page-head"><div><h2>BasQar Control</h2><p className="muted">Задачи, клиенты и результаты компании — в одном диалоге.</p></div><button className="btn secondary" onClick={() => setView("sales")}>Продажи под контролем</button>{canManageOverview && <button className="btn secondary" onClick={() => setView("overview")}>Контроль работы ИИ</button>}</div><ControlChatPanel canManageAccess={canManageOverview} /></section>;
 
   if (!data && !error) return <div className="state">{uiText("Загрузка…")}</div>;
   if (!data) {
@@ -82,7 +92,7 @@ export function ControlPage() {
     <section className="management-page">
       <div className="page-head">
         <div>
-          <h2>{uiText("Управление")}</h2>
+          <h2>{uiText("Управление")}</h2><button className="btn secondary" onClick={() => setView("chat")}>Открыть BasQar Control</button>
           <p className="muted">{uiText("Где отвечает AI, а где нужен сотрудник.")}</p>
         </div>
       </div>

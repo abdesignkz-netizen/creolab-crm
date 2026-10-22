@@ -160,3 +160,12 @@
 @media (max-width: 600px) { .ai-setup-quality { padding: 14px; } .ai-setup-quality .ai-setup-chat-log { padding: 10px; } .ai-setup-quality .ai-setup-chat-message { max-width: 100%; } .ai-setup-actions { display: grid; } .ai-setup-quality-heading { flex-wrap: wrap; } }
 
 .ai-setup-quality .ai-setup-chat-log { scroll-margin-top: 90px; }
+
+.ai-intake-settings { display: grid; gap: 16px; margin: 24px 0; min-width: 0; }
+.ai-intake-settings h3, .ai-intake-settings p { margin: 0; }
+.ai-intake-options { display: grid; gap: 12px; min-width: 0; margin: 0; padding: 18px; border: 1px solid var(--border, #dce5f0); border-radius: 14px; }
+.ai-intake-options legend { padding: 0 8px; font-weight: 600; }
+.ai-intake-options label:not(.ai-setup-field) { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
+.ai-intake-options input { flex: 0 0 auto; width: 18px; height: 18px; margin: 2px 0 0; }
+.ai-intake-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+@media (max-width: 540px) { .ai-intake-fields { grid-template-columns: 1fr; } .ai-intake-options { padding: 12px; } }

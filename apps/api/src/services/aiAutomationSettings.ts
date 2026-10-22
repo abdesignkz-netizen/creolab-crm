@@ -1,3 +1,4 @@
+import { parseSalesProcess, type SalesProcessSettings } from "@creolab/contracts";
 /** AI Manager automation for new requests — Tenant.settingsJson.aiAutomation */
 
 export type AutomationMode = "MANUAL" | "ASSIST" | "CONFIRM" | "AUTO";
@@ -73,6 +74,7 @@ export function replyAudienceAllows(rule: ReplyAudience, firstSeenAt?: Date | st
 
 export type AIAutomationSettings = {
   replyAudience: ReplyAudience;
+  salesProcess: SalesProcessSettings;
   /** Conversation intelligence permissions, independent of permission to send replies. */
   crm: CrmAutomationSettings;
   defaultMode: AutomationMode;
@@ -214,6 +216,7 @@ export function cloneDayHours(source: Record<number, DayHours> = DEFAULT_DAY_HOU
 export const DEFAULT_AI_AUTOMATION: AIAutomationSettings = {
   replyAudience: { audience: "all", since: null },
   crm: { ...DEFAULT_CRM_AUTOMATION },
+  salesProcess: parseSalesProcess({}),
   defaultMode: "CONFIRM",
   ...MODE_FLAGS.CONFIRM,
   allowProactiveOutbound: true,
@@ -385,6 +388,7 @@ export function parseAIAutomationSettings(raw: unknown): AIAutomationSettings {
     ...DEFAULT_AI_AUTOMATION,
     replyAudience: { audience: "all", since: null },
     crm: { ...DEFAULT_CRM_AUTOMATION },
+  salesProcess: parseSalesProcess({}),
     workingHours: { ...DEFAULT_WORKING_HOURS, days: [...DEFAULT_WORKING_HOURS.days] },
     customSchedule: { ...DEFAULT_CUSTOM_SCHEDULE, days: [...DEFAULT_CUSTOM_SCHEDULE.days] },
     sourceModes: { ...DEFAULT_AI_AUTOMATION.sourceModes },
@@ -428,6 +432,7 @@ export function parseAIAutomationSettings(raw: unknown): AIAutomationSettings {
   base.replyAudience = parseReplyAudience(block.replyAudience);
   base.handoff = parseHandoffSettings(block.handoff);
   base.crm = parseCrmAutomation(block.crm);
+  base.salesProcess = parseSalesProcess(block.salesProcess);
   base.followUp = parseFollowUpSettings(block.followUp);
   base.conversationHours = parseConversationHours(block.conversationHours);
 
@@ -458,6 +463,7 @@ export function mergeAIAutomationIntoSettingsJson(
   base.aiAutomation = {
     replyAudience: next.replyAudience,
     crm: next.crm,
+    salesProcess: next.salesProcess,
     defaultMode: next.defaultMode,
     analyzeNewRequests: next.analyzeNewRequests,
     autoCreateAiTask: next.autoCreateAiTask,

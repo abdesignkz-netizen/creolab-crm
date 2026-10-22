@@ -1,3 +1,4 @@
+import { enqueueSalesReconcile } from "./salesProcessService.ts";
 import { assertFileCapacity } from "./billingResourceService.ts";
 import { documentOrganization } from "./documentOrganization.ts";
 import { createHash, randomUUID } from "node:crypto";
@@ -253,6 +254,7 @@ export async function generateInvoicePdfFile(
           data: { paymentStatus: "INVOICED" },
         });
       }
+      await enqueueSalesReconcile(prisma, tid, deal.id);
       return {
         invoice: serializeInvoice(reused),
         sha256,
@@ -330,6 +332,7 @@ export async function generateInvoicePdfFile(
         changesJson: { number: invoice.number, sha256, reused: false },
       },
     });
+    await enqueueSalesReconcile(tx, tid, deal.id);
     return updated;
   }).catch(async error => { await unlink(abs).catch(() => {}); throw error; });
 

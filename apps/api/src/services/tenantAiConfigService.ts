@@ -1,3 +1,4 @@
+import { salesProcessPrompt } from "@creolab/contracts";
 import { createHash } from "node:crypto";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
@@ -146,7 +147,9 @@ async function describeTenantWhatsAppAiActivation(prisma: PrismaClient, tenantId
   const unavailableReason = aiChannelTypes.includes(input.integration?.type || "")
     ? await (await import("./whatsappAiService.ts")).directAiReadiness(prisma, tenantId)
     : null;
-  return describeWhatsAppAiActivation({ ...input, unavailableReason });
+  const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
+  const salesPrompt = input.prompt.trim() ? salesProcessPrompt(asRecord(asRecord(tenant.settingsJson).aiAutomation).salesProcess) : "";
+  return describeWhatsAppAiActivation({ ...input, prompt: [input.prompt.trim(), salesPrompt].filter(Boolean).join("\n\n"), unavailableReason });
 }
 
 const whatsappAiTypes = ["whatsapp_seller", ...aiChannelTypes]; // Legacy response names remain API-compatible.
@@ -222,7 +225,7 @@ export async function syncTenantAiToWhatsApp(prisma: PrismaClient, auth: AuthCon
 }
 
 export async function getPublishedTenantAiContext(prisma: PrismaClient, tenantId: string) {
-  const { config, knowledge } = await prisma.$transaction(async tx => {
+  const { config, knowledge, salesProcess } = await prisma.$transaction(async tx => {
     // Read both halves of a published setup under the publication lock. A reply
     // must not combine the old prompt with the next version's knowledge.
     await tx.$queryRaw`SELECT id FROM "Tenant" WHERE id = ${tenantId} FOR UPDATE`;
@@ -232,12 +235,14 @@ export async function getPublishedTenantAiContext(prisma: PrismaClient, tenantId
       orderBy: { updatedAt: "desc" },
       select: { id: true, title: true, content: true, sourceType: true, updatedAt: true },
     });
-    return { config, knowledge };
+    const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: tenantId } });
+    const salesProcess = (tenant.settingsJson as any)?.aiAutomation?.salesProcess;
+    return { config, knowledge, salesProcess };
   });
   const publishedPrompt = config?.promptStatus === "published" ? String(config.systemPrompt || "").trim() : "";
   return {
     platformBasePrompt: PLATFORM_BASE_PROMPT,
-    tenantPrompt: publishedPrompt,
+    tenantPrompt: [publishedPrompt, publishedPrompt ? salesProcessPrompt(salesProcess) : ""].filter(Boolean).join("\n\n"),
     model: config?.model || null,
     temperature: config?.temperature ?? null,
     maxOutputTokens: config?.maxOutputTokens ?? null,

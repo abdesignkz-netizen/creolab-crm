@@ -1,3 +1,4 @@
+import { AiIntakeSummary } from "../components/AiIntakeSummary";
 import "../request-workspace.css";
 import { InlineFeedback } from "../components/InlineFeedback";
 import { uiSourceLine, uiTaskStatus, uiTaskTitle, uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale } from "../lib/uiText";
@@ -361,6 +362,7 @@ export function RequestDetailPage() {
             </div>
           ) : null}
 
+          <AiIntakeSummary records={data.intakeRequests} />
           <div className="panel">
             <h3>{uiText("Кратко")}</h3>
             <p>{data.aiSummary || data.description || uiText("Описание пока не заполнено.")}</p>

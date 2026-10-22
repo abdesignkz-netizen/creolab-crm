@@ -261,12 +261,33 @@ export async function listConversationsBoard(
     take: 80,
   });
 
-  const visibleConversations = excludeRematchedLeftovers(conversations);
+  // Old failed seller campaigns could create an empty legacy thread for a
+  // contact already using QR/Cloud. Keep its record, but do not present it as
+  // a second chat or borrow messages from another connection.
+  const emptyLegacy = conversations.filter(row => row.sellerLeadId && !row.messages.length && row.contactId);
+  const directThreads = emptyLegacy.length ? await prisma.conversation.findMany({ where: {
+    tenantId: tid, contactId: { in: emptyLegacy.map(row => row.contactId!) }, status: { not: "archived" },
+    connection: { channelType: "whatsapp", status: "active", integration: { type: { in: ["whatsapp_qr", "whatsapp_cloud"] }, status: "active" } },
+    messages: { some: { internal: false } }, AND: [conversationAccessWhere(auth)],
+  }, select: { contactId: true } }) : [];
+  const directContacts = new Set(directThreads.map(row => row.contactId));
+  const hiddenLegacy = new Set(emptyLegacy.filter(row => directContacts.has(row.contactId)
+    && row.contact?.methods.some(method => method.type === "phone" && method.normalizedValue.replace(/^\+/, "") === row.externalThreadId?.replace(/^\+/, ""))).map(row => row.id));
+  // Internal notes or pending sends must not disappear just because the public
+  // message list is empty.
+  if (hiddenLegacy.size) {
+    const keep = await prisma.conversation.findMany({ where: { tenantId: tid, id: { in: [...hiddenLegacy] }, OR: [
+      { messages: { some: {} } }, { outboundOps: { some: { state: { in: ["queued", "sending", "unknown"] } } } },
+    ] }, select: { id: true } });
+    for (const row of keep) hiddenLegacy.delete(row.id);
+  }
+  const visibleConversations = excludeRematchedLeftovers(conversations).filter(row => !hiddenLegacy.has(row.id));
   const threadMessagesByContact = new Map<string, typeof conversations[number]["messages"]>();
   for (const item of conversations) {
     if (!item.contactId || !item.messages.length) continue;
-    const current = threadMessagesByContact.get(item.contactId) || [];
-    threadMessagesByContact.set(item.contactId, current.concat(item.messages));
+    const key = `${item.contactId}:${item.connectionId || "legacy"}`;
+    const current = threadMessagesByContact.get(key) || [];
+    threadMessagesByContact.set(key, current.concat(item.messages));
   }
   for (const list of threadMessagesByContact.values()) {
     list.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.id.localeCompare(a.id));
@@ -275,7 +296,7 @@ export async function listConversationsBoard(
   const items = visibleConversations
     .map((conversation) => {
       if (!conversation.messages.length && conversation.contactId) {
-        const thread = threadMessagesByContact.get(conversation.contactId);
+        const thread = conversation.sellerLeadId ? threadMessagesByContact.get(`${conversation.contactId}:${conversation.connectionId || "legacy"}`) : null;
         if (thread?.length) conversation.messages = thread;
       }
       const contact = conversation.contact;

@@ -1,0 +1,28 @@
+.control-chat { display: grid; gap: 18px; min-width: 0; }
+.control-chat-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.control-chat-head h3 { margin: 6px 0 8px; font-size: 24px; }
+.control-chat-head p { margin: 0; max-width: 680px; }
+.control-chat-tools { display: flex; flex-wrap: wrap; gap: 8px; }
+.control-chat-eyebrow { color: #0767c5; font-weight: 750; font-size: 12px; letter-spacing: .1em; }
+.control-chat-quick, .control-chat-choices { display: flex; gap: 8px; flex-wrap: wrap; }
+.control-chat-messages { max-height: 470px; overflow-y: auto; overscroll-behavior: contain; display: grid; gap: 20px; padding: 6px; scrollbar-gutter: stable; }
+.control-chat-turn { display: grid; gap: 8px; min-width: 0; }
+.control-chat-turn small { color: #65738b; }
+.control-chat-question, .control-chat-reply { padding: 13px 16px; border-radius: 16px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; max-width: 90%; }
+.control-chat-question { background: #eaf3ff; justify-self: end; }
+.control-chat-reply { background: #f4f6fa; justify-self: start; }
+.control-chat-reply a { display: inline-block; margin-top: 6px; }
+.control-chat-empty { padding: 28px 16px; text-align: center; }
+.control-chat-confirm { background: #fff7e6; border: 1px solid #f2dba8; border-radius: 14px; padding: 16px; }
+.control-chat-confirm p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.control-chat-compose { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; align-items: end; }
+.control-chat-compose label { grid-column: 1 / -1; font-size: 13px; color: #65738b; }
+.control-chat-compose textarea { flex: 1; width: 100%; min-width: 0; resize: vertical; min-height: 62px; max-height: 180px; font-size: 16px; }
+@media (max-width: 640px) {
+  .control-chat-head { display: grid; }
+  .control-chat-messages { max-height: 52dvh; }
+  .control-chat-question, .control-chat-reply { max-width: 100%; }
+  .control-chat-compose { grid-template-columns: minmax(0, 1fr); }
+  .control-chat-compose .btn { width: 100%; }
+  .control-chat-choices .btn { white-space: normal; text-align: left; }
+}

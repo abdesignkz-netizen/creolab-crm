@@ -1,3 +1,4 @@
+import { getOnboarding, updateOnboarding } from "./services/onboardingService.ts";
 import { CONFIGURATION_HEADER, configurationRouteAllowed, scopeCompanyConfiguration, configurationOAuthAuth, configurationReturnPath } from "./services/companyConfigurationAccess.ts";
 import { writeAudit } from "./lib/audit.ts";
 import { isEsfEnabled, isEsfRoute, requireEsfEnabled } from "./services/esfAvailability.ts";
@@ -878,6 +879,13 @@ export function createApp(prisma: PrismaClient) {
     res.json(await cancelSubscriptionRequest(prisma, await requireAuth(req), req.params.id));
   });
 
+  app.get("/api/v1/workspace/onboarding", async (req, res) => {
+    res.json(await getOnboarding(prisma, await requireAuth(req)));
+  });
+  app.patch("/api/v1/workspace/onboarding", json, async (req, res) => {
+    res.json(await updateOnboarding(prisma, await requireAuth(req), req.body || {}));
+  });
+
   app.post("/api/v1/billing/onboarding/skip", json, async (req, res) => {
     res.json(await skipOnboarding(prisma, await requireAuth(req)));
   });
@@ -1010,6 +1018,17 @@ export function createApp(prisma: PrismaClient) {
     res.json(await reviewAiManagerSetup(prisma, await requireAuth(req), req.body));
   });
 
+  app.get("/api/v1/sales/control", async (req, res) => {
+    const auth = await requireAuth(req);
+    const { getSalesControl } = await import("./services/salesControlService.ts");
+    res.json(await getSalesControl(prisma, auth));
+  });
+  app.post("/api/v1/sales/proposals/:id/review", json, async (req, res) => {
+    const auth = await requireAuth(req);
+    const input = z.object({ decision: z.enum(["create", "link", "dismiss"]), dealId: z.string().uuid().optional(), revision: z.number().int().nonnegative(), confirmedLatest: z.boolean().optional() }).strict().parse(req.body);
+    const { reviewSalesProposal } = await import("./services/salesProcessService.ts");
+    res.json(await reviewSalesProposal(prisma, auth, req.params.id, input));
+  });
   app.get("/api/v1/settings/ai-automation", async (req, res) => {
     const { getAIAutomationSettings } = await import("./services/aiAutomationSettingsService.ts");
     res.json(await getAIAutomationSettings(prisma, await requireAuth(req)));
@@ -1340,6 +1359,17 @@ export function createApp(prisma: PrismaClient) {
 
   app.post("/api/v1/workspace/control/identities/:id/disable", async (req, res) => {
     res.json(await disableControlIdentity(prisma, await requireAuth(req), req.params.id));
+  });
+
+  app.get("/api/v1/workspace/control/chat", async (req, res) => {
+    const { controlWebHistory } = await import("./services/controlWebService.ts");
+    res.set("Cache-Control", "no-store").json(await controlWebHistory(prisma, await requireAuth(req)));
+  });
+  app.post("/api/v1/workspace/control/chat", json, async (req, res) => {
+    const auth = await requireAuth(req);
+    rateLimit(`control-web:${auth.user.id}`, 20);
+    const { sendControlWebMessage } = await import("./services/controlWebService.ts");
+    res.set("Cache-Control", "no-store").json(await sendControlWebMessage(prisma, auth, req.body));
   });
 
   app.get("/api/v1/workspace/control/history", async (req, res) => {

@@ -2,7 +2,7 @@ import { directHandoffReason, handoffAcknowledgement } from "./aiHandoffPolicy.t
 import { parseAIAutomationSettings } from "./aiAutomationSettings.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
-import { aiManagerDraftSchema, compileAiManagerDraft, emptyAiManagerDraft, getAiSetupScenarios, type AiSetupQualityRun, type AiSetupQuality, type AiSetupPreview, type AiManagerDraft, type AiSetupState, type AiSetupKnowledge } from "@creolab/contracts";
+import { defaultAiIntakeSettings, aiManagerDraftSchema, compileAiManagerDraft, emptyAiManagerDraft, getAiSetupScenarios, type AiSetupQualityRun, type AiSetupQuality, type AiSetupPreview, type AiManagerDraft, type AiSetupState, type AiSetupKnowledge } from "@creolab/contracts";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import { requireAiSettingsAccess, requireConfigurationTenant as requireTenant } from "../lib/access.ts";
@@ -52,7 +52,7 @@ async function load(tx: Prisma.TransactionClient, tenantId: string) {
     await tx.aIConfiguration.update({ where: { id: config.id }, data: { limitsJson: json({ ...limits, aiSetup: store }) } });
   }
   // Defaults for new questionnaire fields without truncating previously imported content.
-  store = { ...store, draft: { ...store.draft, conversation: { ...store.draft.conversation, goalPreset: store.draft.conversation.goalPreset ?? "custom", successCriteria: store.draft.conversation.successCriteria ?? "" } } };
+  store = { ...store, draft: { ...store.draft, intake: store.draft.intake || defaultAiIntakeSettings(), conversation: { ...store.draft.conversation, goalPreset: store.draft.conversation.goalPreset ?? "custom", successCriteria: store.draft.conversation.successCriteria ?? "" } } };
   const platform = await tx.platformSetting.findUnique({ where: { key: "defaults" } });
   const platformAi = record(record(platform?.valueJson).ai);
   const env = envLlm(String(config.provider || platformAi.provider || ""));
@@ -74,7 +74,10 @@ function quality(data: Loaded): AiSetupQuality {
 }
 function state(data: Loaded): AiSetupState {
   const generated = compileAiManagerDraft(data.store.draft);
+  const automation = parseAIAutomationSettings(data.tenant.settingsJson);
+  const saveRequests = automation.analyzeNewRequests && automation.crm.enabled && automation.crm.updateInquiry;
   return { revision: data.store.revision, draft: data.store.draft, savedAt: data.store.savedAt, publishedAt: data.store.publishedAt,
+    intakeAutomation: { saveRequests, createTasks: saveRequests && automation.crm.createTasks, requiresModeChange: ["MANUAL", "ASSIST"].includes(automation.defaultMode) },
     hasPublished: Boolean(data.prompt), liveChanged: data.liveFingerprint !== data.store.baseFingerprint,
     hasDraftChanges: fingerprint(generated.prompt, generated.knowledge) !== data.liveFingerprint,
     generated, quality: quality(data), versions: data.store.versions.map(({ id, createdAt, label }) => ({ id, createdAt, label, current: id === data.store.currentVersionId && data.liveFingerprint === data.store.baseFingerprint })) };
@@ -184,7 +187,7 @@ export async function previewAiManagerSetup(prisma: PrismaClient, auth: AuthCont
     if (qualityFingerprint(data) !== prepared.fingerprint) throw new ApiError(409, "ai_setup_conflict", "Настройки модели изменились во время теста. Повторите проверку.");
     const run: QualityRun = { id: randomUUID(), scenarioId: body.scenarioId!, revision: body.revision, createdAt: new Date().toISOString(), messages: body.messages, ...result, review: null, contextFingerprint: prepared.fingerprint };
     // Only the latest result of a scenario can qualify this draft for publication.
-    data.store.qualityRuns = [run, ...(data.store.qualityRuns || []).filter(old => old.scenarioId !== run.scenarioId && old.revision === body.revision)].slice(0, 8);
+    data.store.qualityRuns = [run, ...(data.store.qualityRuns || []).filter(old => old.scenarioId !== run.scenarioId && old.revision === body.revision)].slice(0, 24);
     await persist(tx, data, data.store);
     return { ...response, runId: run.id };
   });

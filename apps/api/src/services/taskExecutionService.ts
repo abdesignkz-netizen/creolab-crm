@@ -103,7 +103,7 @@ export function taskMarkedForScheduledSend(
 }
 
 export async function cancelScheduledTaskSends(
-  prisma: PrismaClient,
+  prisma: PrismaClient | Prisma.TransactionClient,
   tenantId: string,
   taskId: string,
   reason: string,
@@ -130,6 +130,7 @@ export async function scheduleConfirmedTaskSend(
   if (!task.dueAt) {
     throw new ApiError(409, "not_scheduled", "Срок не указан");
   }
+  const dueAt = task.dueAt;
   if (!taskMarkedForScheduledSend(task)) {
     throw new ApiError(409, "not_scheduled", "Срок уже наступил — отправьте сейчас");
   }
@@ -155,36 +156,50 @@ export async function scheduleConfirmedTaskSend(
     }
   }
 
-  await cancelScheduledTaskSends(prisma, tid, taskId, "rescheduled");
-  const action = await prisma.scheduledAction.create({
-    data: {
-      tenantId: tid,
-      type: options.batch ? "task_batch_run" : "task_run",
-      parentType: "task",
-      parentId: taskId,
-      dueAt: task.dueAt,
-      state: "scheduled",
-      payloadJson: {
-        taskId,
-        confirmedById: auth.user.id,
-        batch: Boolean(options.batch),
+  const action = await prisma.$transaction(async tx => {
+    // Scheduling and repair share the task lock, including concurrent requests
+    // handled by different API/worker processes.
+    await tx.$queryRaw`SELECT "id" FROM "Task" WHERE "id" = ${taskId} AND "tenantId" = ${tid} FOR UPDATE`;
+    const current = await tx.task.findUniqueOrThrow({ where: { id: taskId } });
+    if (["done", "canceled"].includes(current.status) || !taskMarkedForScheduledSend(current) || current.dueAt?.getTime() !== task.dueAt?.getTime()) {
+      throw new ApiError(409, "stale_confirmation", "Задача изменилась. Откройте её и подтвердите отправку заново.");
+    }
+    if (await tx.scheduledAction.findFirst({ where: { tenantId: tid, parentType: "task", parentId: taskId,
+      type: { in: [...SCHEDULED_TASK_ACTION_TYPES] }, state: "running" } })) {
+      throw new ApiError(409, "sending", "Отправка уже выполняется. Дождитесь результата.");
+    }
+    await cancelScheduledTaskSends(tx, tid, taskId, "rescheduled");
+    const scheduled = await tx.scheduledAction.create({
+      data: {
+        tenantId: tid,
+        type: options.batch ? "task_batch_run" : "task_run",
+        parentType: "task",
+        parentId: taskId,
+        dueAt,
+        state: "scheduled",
+        payloadJson: {
+          taskId,
+          confirmedById: auth.user.id,
+          batch: Boolean(options.batch),
+        },
       },
-    },
-  });
-  await prisma.task.update({
-    where: { id: taskId },
-    data: {
-      executionStatus: "scheduled",
-      commandStatus: "scheduled",
-      status: "open",
-    },
-  });
-  if (options.batch) {
-    await prisma.task.updateMany({
-      where: { parentTaskId: taskId, tenantId: tid, status: { in: ["open", "waiting"] } },
-      data: { executionStatus: "scheduled" },
     });
-  }
+    await tx.task.update({
+      where: { id: taskId },
+      data: {
+        executionStatus: "scheduled",
+        commandStatus: "scheduled",
+        status: "open",
+      },
+    });
+    if (options.batch) {
+      await tx.task.updateMany({
+        where: { parentTaskId: taskId, tenantId: tid, status: { in: ["open", "waiting"] } },
+        data: { executionStatus: "scheduled" },
+      });
+    }
+    return scheduled;
+  });
   return {
     scheduled: true,
     success: false,
@@ -205,7 +220,7 @@ async function invalidateExecution(prisma: PrismaClient, tid: string, taskId: st
   await cancelScheduledTaskSends(prisma, tid, taskId, "content_changed");
   await prisma.task.update({
     where: { id: taskId },
-    data: { executionStatus: "prepared", confirmedAt: null },
+    data: { executionStatus: "prepared", commandStatus: "prepared", confirmedAt: null },
   });
 }
 
