@@ -3203,12 +3203,12 @@ button.linkish {
 .stats-modal.invoice-preview-modal { width: min(920px, 100%); max-height: calc(100dvh - 24px); overflow: auto; display: grid; gap: 12px; }
 .stats-modal.invoice-preview-modal iframe { width: 100%; height: min(68dvh, 720px); border: 1px solid var(--line); border-radius: 12px; background: #fff; }
 .pdf-document-viewer { min-width: 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: #f3f4f6; }
-.pdf-viewer-toolbar { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 8px; background: var(--card); border-bottom: 1px solid var(--line); }
+.pdf-viewer-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px; background: var(--card); border-bottom: 1px solid var(--line); }
+.pdf-viewer-controls, .pdf-viewer-actions { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px; }
 .pdf-viewer-toolbar span { min-width: 64px; text-align: center; font-size: 13px; color: var(--muted); }
 .pdf-viewer-toolbar .btn { min-width: 36px; padding: 6px 10px; }
-.pdf-viewer-page { min-height: min(68dvh, 720px); max-height: min(68dvh, 720px); overflow: auto; padding: 8px; text-align: center; }
+.pdf-viewer-page { min-height: min(68dvh, 720px); max-height: min(68dvh, 720px); overflow: auto; scrollbar-gutter: stable; padding: 8px; text-align: center; }
 .pdf-page-canvas { display: block; width: auto; max-width: none; height: auto; margin: 0 auto; background: #fff; box-shadow: 0 4px 16px rgba(16, 21, 28, 0.12); }
-.pdf-native-fallback { display: block; width: 100%; height: min(68dvh, 720px); border: 0; background: #fff; }
 .pdf-fallback-message { display: grid; place-items: center; gap: 10px; min-height: 240px; padding: 24px; }
 .avr-pdf-preview { display: grid; gap: 10px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
 .login-stage.sign-doc-stage { width: min(960px, 100%); }
@@ -3232,9 +3232,8 @@ button.linkish {
   .invoice-marks-grid { grid-template-columns: 1fr; }
   .stats-modal.invoice-preview-modal iframe { height: 55dvh; }
   .pdf-viewer-page { min-height: 58dvh; max-height: 58dvh; padding: 4px; }
-  .pdf-native-fallback { height: 58dvh; }
   .sign-doc-frame .pdf-viewer-page { min-height: 58dvh; max-height: 58dvh; }
-  .pdf-viewer-toolbar { position: sticky; top: 0; z-index: 1; }
+  .pdf-viewer-toolbar { position: sticky; top: 0; z-index: 1; justify-content: center; }
 }
 .avr-line { display: grid; grid-template-columns: minmax(180px,3fr) minmax(72px,0.7fr) minmax(210px,1.6fr) minmax(90px,1fr) minmax(70px,0.7fr) auto auto; gap: 10px; border: 1px solid var(--border,#ddd); border-radius: 12px; padding: 16px; align-items: end; }
 .avr-line input, .avr-line select, .esf-measure-unit { min-width: 0; width: 100%; }

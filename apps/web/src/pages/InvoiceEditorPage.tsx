@@ -57,7 +57,7 @@ export function InvoiceEditorPage() {
   const [buyer, setBuyer] = useState<Record<string, string>>({});
   const [dirty, setDirty] = useState(false);
   const [preview, setPreview] = useState<{ id: string; stamped: boolean } | null>(null);
-  const [previewUrl, setPreviewUrl] = useState("");
+  const [previewFile, setPreviewFile] = useState<Blob | null>(null);
   const [previewError, setPreviewError] = useState("");
   const flight = useRef(false);
   const version = useRef(0);
@@ -67,27 +67,24 @@ export function InvoiceEditorPage() {
   }, [error, issues]);
   useEffect(() => {
     if (!preview) {
-      setPreviewUrl("");
+      setPreviewFile(null);
       setPreviewError("");
       return;
     }
     let live = true;
-    let objectUrl = "";
-    setPreviewUrl("");
+    setPreviewFile(null);
     setPreviewError("");
     void api
       .downloadInvoicePdf(preview.id, { stamped: preview.stamped })
       .then(({ blob }) => {
         if (!live) return;
-        objectUrl = URL.createObjectURL(blob);
-        setPreviewUrl(objectUrl);
+        setPreviewFile(blob);
       })
       .catch((err: unknown) => {
         if (live) setPreviewError(err instanceof Error ? err.message : uiText("Не удалось открыть счёт"));
       });
     return () => {
       live = false;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [preview]);
   const immutable = Boolean(doc && (doc.importedPdf || !["DRAFT", "ISSUED"].includes(doc.status)));
@@ -633,8 +630,8 @@ export function InvoiceEditorPage() {
                     {uiText(", затем обновите реквизиты на этой странице.")}</p>
                 ) : null}
                 {previewError ? <InlineFeedback kind="error" className="error">{previewError}</InlineFeedback> : null}
-                {previewUrl ? (
-                  <PdfDocumentViewer title={uiText("Просмотр счёта")} src={previewUrl} />
+                {previewFile ? (
+                  <PdfDocumentViewer title={uiText("Просмотр счёта")} file={previewFile} />
                 ) : previewError ? null : (
                   <p className="muted">{uiText("Готовим PDF…")}</p>
                 )}
@@ -642,7 +639,7 @@ export function InvoiceEditorPage() {
                   <button
                     type="button"
                     className="btn secondary"
-                    disabled={busy || !previewUrl}
+                    disabled={busy || !previewFile}
                     onClick={() =>
                       void action(async () => {
                         await downloadInvoicePdf(preview.id, preview.stamped);

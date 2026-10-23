@@ -32,7 +32,7 @@ export function ContractPreviewModal({
   const uiText = useUiText();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [pdfUrl, setPdfUrl] = useState("");
+  const [pdfFile, setPdfFile] = useState<Blob | null>(null);
   const [retry, setRetry] = useState(0);
   const [format, setFormat] = useState<"pdf" | "docx">("pdf");
   const [downloading, setDownloading] = useState(false);
@@ -50,10 +50,9 @@ export function ContractPreviewModal({
 
   useEffect(() => {
     let cancelled = false;
-    let objectUrl = "";
     setLoading(true);
     setError("");
-    setPdfUrl("");
+    setPdfFile(null);
     setDownloadError("");
     void (async () => {
       try {
@@ -66,8 +65,7 @@ export function ContractPreviewModal({
           setLoading(false);
           return;
         }
-        objectUrl = URL.createObjectURL(file.blob);
-        setPdfUrl(objectUrl);
+        setPdfFile(file.blob);
         setLoading(false);
         onViewedRef.current?.();
       } catch (err) {
@@ -82,7 +80,6 @@ export function ContractPreviewModal({
     })();
     return () => {
       cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [contract.id, contract.preview, fileRevision, retry]);
 
@@ -113,10 +110,10 @@ export function ContractPreviewModal({
         {children}
         {error ? <div role="alert"><InlineFeedback kind="error" className="error">{error}</InlineFeedback><button type="button" className="btn secondary" disabled={busy} onClick={() => setRetry(value => value + 1)}>{uiText("Повторить открытие PDF")}</button></div> : null}
         {loading ? <p className="muted">{uiText("Открываем PDF…")}</p> : null}
-        {pdfUrl ? <PdfDocumentViewer title={uiText("Договор {p0}", {p0: contract.number || ""})} src={pdfUrl} /> : null}
+        {pdfFile ? <PdfDocumentViewer title={uiText("Договор {p0}", {p0: contract.number || ""})} file={pdfFile} /> : null}
         {downloadError ? <InlineFeedback kind="error" className="error">{downloadError}</InlineFeedback> : null}
         <div className="actions">
-          {actions?.(!loading && !error && Boolean(pdfUrl))}
+          {actions?.(!loading && !error && Boolean(pdfFile))}
           <div className="actions contract-download-actions">
             <select aria-label={uiText("Формат скачивания договора")} value={format} disabled={busy || downloading} onChange={(event) => setFormat(event.target.value as "pdf" | "docx")}>
               <option value="pdf">PDF</option><option value="docx">Word (.docx)</option>

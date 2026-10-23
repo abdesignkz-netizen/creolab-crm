@@ -8,7 +8,7 @@
     "build": "vite build && node ../../scripts/check-web-bundle.mjs",
     "preview": "vite preview",
     "typecheck": "tsc -b",
-    "test": "node --test ../../scripts/i18n.test.mjs ../../scripts/billing-catalog.test.mjs ../../scripts/billing-checkout-state.test.mjs ../../scripts/system-locale.test.mjs ../../scripts/avr-editor-context.test.mjs ../../scripts/task-organization.test.mjs"
+    "test": "node --test ../../scripts/i18n.test.mjs ../../scripts/billing-catalog.test.mjs ../../scripts/billing-checkout-state.test.mjs ../../scripts/system-locale.test.mjs ../../scripts/avr-editor-context.test.mjs ../../scripts/task-organization.test.mjs ../../scripts/pdf-viewer.test.mjs"
   },
   "dependencies": {
     "@creolab/api-client": "0.1.0",

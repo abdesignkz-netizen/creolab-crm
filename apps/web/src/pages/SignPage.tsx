@@ -32,7 +32,7 @@ export function SignPage({ avr = false }: { avr?: boolean }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState("");
-  const [pdfUrl, setPdfUrl] = useState("");
+  const [pdfFile, setPdfFile] = useState<Blob | null>(null);
   const [pdfError, setPdfError] = useState("");
   const meta = getDocumentSignMeta(avr ? "AVR" : "CONTRACT", data);
   const parties = [publicDocumentText(data?.sellerName), publicDocumentText(data?.buyerName)].filter(Boolean).join(" → ");
@@ -50,14 +50,14 @@ export function SignPage({ avr = false }: { avr?: boolean }) {
 
   useEffect(() => {
     if (!CONTRACT_SIGNING_ENABLED) return;
-    setData(null); setDone(""); setPdfUrl(""); setPdfError("");
+    setData(null); setDone(""); setPdfFile(null); setPdfError("");
     void load();
   }, [token, avr]);
 
   useEffect(() => {
     if (!data) return;
     let cancelled = false;
-    let objectUrl = "";
+    setPdfFile(null);
     setPdfError("");
     void fetch(signApi.pdf(token), { credentials: "include" })
       .then(async response => {
@@ -65,15 +65,13 @@ export function SignPage({ avr = false }: { avr?: boolean }) {
         const blob = await response.blob();
         if (!/^application\/pdf(?:$|;)/i.test(blob.type)) throw new Error(uiText("Сервер вернул документ не в формате PDF"));
         if (cancelled) return;
-        objectUrl = URL.createObjectURL(blob);
-        setPdfUrl(objectUrl);
+        setPdfFile(blob);
       })
       .catch(error => {
         if (!cancelled) setPdfError(error instanceof Error ? error.message : uiText("Не удалось открыть PDF"));
       });
     return () => {
       cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [data, token, avr]);
 
@@ -125,8 +123,8 @@ export function SignPage({ avr = false }: { avr?: boolean }) {
               {data.amount != null && Number.isFinite(Number(data.amount)) ? <p className="muted">
                 {uiText("Сумма:")}{" "}<b>{Number(data.amount || 0).toLocaleString(uiFormatLocale())} {data.currency}</b>
               </p> : null}
-              {pdfUrl ? <PdfDocumentViewer className="sign-doc-frame" title={`${documentName} PDF`} src={pdfUrl} /> : null}
-              {!pdfUrl && !pdfError ? <p className="muted">{uiText("Открываем PDF…")}</p> : null}
+              {pdfFile ? <PdfDocumentViewer className="sign-doc-frame" title={documentName} file={pdfFile} /> : null}
+              {!pdfFile && !pdfError ? <p className="muted">{uiText("Открываем PDF…")}</p> : null}
               {pdfError ? <p className="error">{pdfError}{uiText(". Используйте кнопку скачивания ниже.")}</p> : null}
               <ContractSignatureSummary documentLabel={label} signed={data.contractStatus === "SIGNED"} signers={data.signers || []}
                 verificationUrl={data.verificationUrl} sellerName={data.sellerName} buyerName={data.buyerName} download={format => signApi.download(token, format)} />
