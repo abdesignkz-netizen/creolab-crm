@@ -404,7 +404,7 @@ function fillWorksheet(ws: ExcelJS.Worksheet, input: { localNumber: string; sour
   const words = ws.getCell(`A${layout.wordsRow}`);
   words.value = `Всего без НДС: ${capitalizeRu(amountToKztWords(source.totals.amountWithoutVat))}`;
   words.font = { name: "Arial", size: 9 };
-  words.alignment = { vertical: "middle", wrapText: true };
+  words.alignment = { horizontal: "right", vertical: "middle", wrapText: true };
   ws.getRow(layout.wordsRow).height = 28;
   setValue(ws, `F${layout.signRow}`, source.seller.directorPosition || "Директор");
   setValue(ws, `R${layout.signRow}`, directorShortName(source.seller.directorName));

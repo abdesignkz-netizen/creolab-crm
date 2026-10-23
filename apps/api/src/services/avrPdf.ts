@@ -252,7 +252,7 @@ function fillTotals(
 function drawFooter(page: PDFPage, source: AvrSourceSnapshot, bottom: number, font: PDFFont) {
   const words = capitalizeRu(amountToKztWords(source.totals.amountWithoutVat));
   const wordsSize = Math.min(BODY, 565 / Math.max(font.widthOfTextAtSize(`Всего без НДС: ${words}`, 1), 1));
-  drawLeft(page, `Всего без НДС: ${words}`, 53, bottom - 12, font, wordsSize);
+  drawRight(page, `Всего без НДС: ${words}`, COL.vat.r, bottom - 12, font, wordsSize);
   drawLeft(page, "Сведения об использовании запасов, полученных от заказчика", 53, bottom - 29, font, BODY);
   strokeH(page, bottom - 31, 365, 617.5);
   drawCentered(page, "наименование, количество, стоимость", 490, bottom - 40, font, 5.8);
