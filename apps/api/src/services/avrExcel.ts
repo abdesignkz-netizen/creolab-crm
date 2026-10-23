@@ -158,7 +158,7 @@ export function avrExcelLayout(itemCount: number) {
   const lastItemRow = firstItemRow + items - 1;
   const lastSlotRow = lastItemRow;
   const totalsRow = lastSlotRow + 1;
-  const wordsRow = totalsRow + 1;
+  const wordsRow = totalsRow + 2;
   const captionRow = totalsRow + 3;
   const appendixRow = totalsRow + 4;
   const signRow = totalsRow + 7;
@@ -398,13 +398,11 @@ function fillWorksheet(ws: ExcelJS.Worksheet, input: { localNumber: string; sour
     result: source.totals.vatAmount,
   };
   ws.getCell(`AS${layout.totalsRow}`).numFmt = MONEY_FMT;
-  // The next template row is reserved for the customer's materials, not the act total.
-  setValue(ws, `T${layout.totalsRow + 2}`, null);
-  mergeSafe(ws, `A${layout.wordsRow}:AW${layout.wordsRow}`);
-  const words = ws.getCell(`A${layout.wordsRow}`);
+  setValue(ws, `A${layout.totalsRow + 1}`, null);
+  const words = ws.getCell(`T${layout.wordsRow}`);
   words.value = `Всего без НДС: ${capitalizeRu(amountToKztWords(source.totals.amountWithoutVat))}`;
   words.font = { name: "Arial", size: 9 };
-  words.alignment = { horizontal: "right", vertical: "middle", wrapText: true };
+  words.alignment = { horizontal: "center", vertical: "bottom", wrapText: true };
   ws.getRow(layout.wordsRow).height = 28;
   setValue(ws, `F${layout.signRow}`, source.seller.directorPosition || "Директор");
   setValue(ws, `R${layout.signRow}`, directorShortName(source.seller.directorName));

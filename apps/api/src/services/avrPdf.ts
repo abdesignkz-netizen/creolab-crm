@@ -251,10 +251,13 @@ function fillTotals(
 
 function drawFooter(page: PDFPage, source: AvrSourceSnapshot, bottom: number, font: PDFFont) {
   const words = capitalizeRu(amountToKztWords(source.totals.amountWithoutVat));
-  const wordsSize = Math.min(BODY, 565 / Math.max(font.widthOfTextAtSize(`Всего без НДС: ${words}`, 1), 1));
-  drawRight(page, `Всего без НДС: ${words}`, COL.vat.r, bottom - 12, font, wordsSize);
+  const wordsLeft = 365;
+  const wordsRight = COL.vat.r;
+  const wordsLineY = bottom - 31;
+  const wordsSize = Math.min(BODY, (wordsRight - wordsLeft - 6) / Math.max(font.widthOfTextAtSize(`Всего без НДС: ${words}`, 1), 1));
+  drawCentered(page, `Всего без НДС: ${words}`, (wordsLeft + wordsRight) / 2, wordsLineY + 3, font, wordsSize);
   drawLeft(page, "Сведения об использовании запасов, полученных от заказчика", 53, bottom - 29, font, BODY);
-  strokeH(page, bottom - 31, 365, 617.5);
+  strokeH(page, wordsLineY, wordsLeft, wordsRight);
   drawCentered(page, "наименование, количество, стоимость", 490, bottom - 40, font, 5.8);
   drawLeft(page, "Приложение: перечень документации, в том числе отчётов о научных, маркетинговых, консультационных и прочих услугах", 53, bottom - 54, font, BODY);
   drawLeft(page, "(при их наличии) на ______ страницах", 53, bottom - 65, font, BODY);
