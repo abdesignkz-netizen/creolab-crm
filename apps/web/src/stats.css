@@ -239,3 +239,7 @@
 }
 .stats-page .stats-tabs { background: transparent; border-radius: 0; padding: 0; }
 .stats-page .stats-kpi-featured strong { color: #fff; }
+.stats-coverage { margin: 0 0 20px; padding: 16px 20px; border: 1px solid #e8c784; border-radius: 12px; background: #fff8e8; color: #624617; }
+.stats-coverage p { margin: 8px 0; }
+.stats-coverage summary { cursor: pointer; font-weight: 600; }
+.stats-coverage li { margin: 6px 0; }

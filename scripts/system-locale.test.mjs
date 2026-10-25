@@ -8,9 +8,37 @@ import ts from 'typescript';
 import { build } from 'esbuild';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const file = path.join(root, 'packages/contracts/src/systemLocale.ts');
-const ast = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
-const properties = ast.statements.find(s => ts.isVariableStatement(s)).declarationList.declarations[0].initializer.properties;
-const entries = properties.map(p => [p.name.text, p.initializer.text]);
+// Read literal entries before JavaScript can overwrite duplicate keys, including
+// dictionaries brought in by object spread. Fail on unsupported expressions.
+function dictionaryEntries(file, name, visiting = new Set()) {
+  const key = `${file}:${name}`;
+  assert.ok(!visiting.has(key), `Circular dictionary spread: ${key}`);
+  const next = new Set(visiting).add(key);
+  const ast = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
+  const declaration = ast.statements.filter(ts.isVariableStatement)
+    .flatMap(s => [...s.declarationList.declarations]).find(d => d.name.getText(ast) === name);
+  if (!declaration) {
+    for (const statement of ast.statements.filter(ts.isImportDeclaration)) {
+      const bindings = statement.importClause?.namedBindings;
+      if (!bindings || !ts.isNamedImports(bindings)) continue;
+      const binding = bindings.elements.find(b => b.name.text === name);
+      if (!binding) continue;
+      assert.ok(ts.isStringLiteral(statement.moduleSpecifier) && statement.moduleSpecifier.text.startsWith('./'));
+      return dictionaryEntries(path.resolve(path.dirname(file), statement.moduleSpecifier.text), (binding.propertyName || binding.name).text, next);
+    }
+  }
+  assert.ok(declaration?.initializer && ts.isObjectLiteralExpression(declaration.initializer), `Expected literal dictionary: ${key}`);
+  return declaration.initializer.properties.flatMap(property => {
+    if (ts.isSpreadAssignment(property)) {
+      assert.ok(ts.isIdentifier(property.expression), `Unsupported dictionary spread: ${property.getText(ast)}`);
+      return dictionaryEntries(file, property.expression.text, next);
+    }
+    assert.ok(ts.isPropertyAssignment(property) && (ts.isStringLiteral(property.name) || ts.isIdentifier(property.name))
+      && ts.isStringLiteral(property.initializer), `Expected literal translation: ${property.getText(ast)}`);
+    return [[property.name.text, property.initializer.text]];
+  });
+}
+const entries = dictionaryEntries(file, 'kkSystemMessages');
 const known = new Set(entries.map(([key]) => key));
 
 test('Reviewed Kazakh product copy has unique entries and preserves every parameter', () => {
@@ -50,6 +78,100 @@ async function bundle(contents, plugins = []) {
   new Function('exports', 'module', 'require', result.outputFiles[0].text)(module.exports, module, createRequire(import.meta.url));
   return module.exports;
 }
+
+test('Shared website chat copy preserves Russian, Kazakh and English independently', async () => {
+  const { systemText } = await bundle(`export { systemText } from '@creolab/contracts';`);
+  assert.equal(systemText('ru', 'Чат на сайте'), 'Чат на сайте');
+  assert.equal(systemText('kk', 'Чат на сайте'), 'Сайттағы чат');
+  assert.equal(systemText('en', 'Чат на сайте'), 'Website chat');
+});
+
+test('CRM review exposes before/after and evidence safely, with permissions and translated controls', async () => {
+  const { render } = await bundle(`
+    import {renderToStaticMarkup} from 'react-dom/server';
+    import {CrmReviewCard} from './components/ConversationCrmReview';
+    import {SessionContext,emptyCaps} from './lib/session';
+    export const render=(locale,item)=>renderToStaticMarkup(<SessionContext.Provider value={{me:{user:{locale}},caps:emptyCaps}}><CrmReviewCard item={item} busy={false} onDecision={()=>{}}/></SessionContext.Provider>);
+  `);
+  const item = {id:'review',entityType:'inquiry',entityId:'inquiry',status:'pending',confidence:'MEDIUM',createdAt:'2026-10-26T08:00:00Z',
+    fields:[{key:'nextStep',before:'Прежний ручной шаг',after:'Отправить примеры работ'}],
+    evidence:[{id:'message',text:'<script>bad()</script> Нужна презентация',createdAt:'2026-10-26T08:00:00Z',senderKind:'client',direction:'inbound'}],
+    canAccept:true,canDismiss:true,canUndo:false,blockedReason:null};
+  const ru=render('ru',item), kk=render('kk',item);
+  assert.match(ru,/Применить изменения/); assert.match(kk,/Өзгерістерді қолдану/);
+  for(const html of [ru,kk]) {
+    assert.match(html,/Прежний ручной шаг/); assert.match(html,/Отправить примеры работ/);
+    assert.match(html,/&lt;script&gt;bad\(\)&lt;\/script&gt; Нужна презентация/);
+    assert.doesNotMatch(html,/<script>/); assert.match(html,/<blockquote/);
+  }
+  assert.match(ru,/ИИ не уверен в выводе/); assert.match(kk,/ЖИ қорытындыға сенімді емес/);
+  const blocked=render('ru',{...item,canAccept:false,blockedReason:'changed'});
+  assert.match(blocked,/disabled=""[^>]*>Применить изменения/);
+  assert.match(blocked,/Карточка уже изменена/);
+  const history=render('ru',{...item,status:'automatic',canAccept:false,canDismiss:false,canUndo:true});
+  assert.match(history,/Отменить изменение/); assert.doesNotMatch(history,/Применить изменения/);
+});
+
+test('Commercial review distinguishes budget bounds, prices and refusal notes with exact safe quotes', async () => {
+  const { render, summary, paywall } = await bundle(`
+    import {renderToStaticMarkup} from 'react-dom/server';
+    import {MemoryRouter} from 'react-router-dom';
+    import {CrmReviewCard} from './components/ConversationCrmReview';
+    import {CrmCommercialSummary} from './components/CrmCommercialSummary';
+    import PaywallContent from './components/PaywallContent';
+    import {SessionContext,emptyCaps} from './lib/session';
+    const wrap=(locale,child)=>renderToStaticMarkup(<SessionContext.Provider value={{me:{user:{locale}},caps:emptyCaps}}><MemoryRouter>{child}</MemoryRouter></SessionContext.Provider>);
+    export const render=(locale,item)=>wrap(locale,<CrmReviewCard item={item} busy={false} onDecision={()=>{}}/>);
+    export const summary=(locale,values)=>wrap(locale,<CrmCommercialSummary values={values} conversationId="test-thread"/>);
+    export const paywall=(locale)=>wrap(locale,<PaywallContent open={{feature:'AI_MANAGER'}} onClose={()=>{}}/>);
+  `);
+  const budget={min:null,max:200000,currency:'KZT'}, price={min:150000,max:150000,currency:'USD'};
+  const item={id:'review',entityType:'inquiry',entityId:'inquiry',status:'pending',confidence:'HIGH',createdAt:'2026-10-26T08:00:00Z',
+    fields:[{key:'customerBudget',before:null,after:budget}],evidence:[{id:'source',text:'Наш бюджет до 200000 тенге. <img src=x onerror=bad()>',quote:'Наш бюджет до 200000 тенге.',createdAt:'2026-10-26T08:00:00Z',senderKind:'client',direction:'inbound'}],
+    canAccept:true,canDismiss:true,canUndo:false,blockedReason:null};
+  const ru=render('ru',item), kk=render('kk',item);
+  assert.match(ru,/Бюджет клиента/); assert.match(kk,/Клиент бюджеті/);
+  assert.match(ru,/до 200\s000 KZT/); assert.match(ru,/Наш бюджет до 200000 тенге\./);
+  assert.match(ru,/Сообщение целиком/); assert.match(ru,/&lt;img/); assert.doesNotMatch(ru,/<img/);
+  for(const locale of ['ru','kk']) {
+    const html=summary(locale,{customerBudget:budget,proposedPrice:price,agreedPrice:null,objection:'Дорого <script>bad()</script>',refusalReason:'Выбрали другую компанию'});
+    assert.match(html,/USD/); assert.match(html,/KZT/); assert.match(html,/Дорого &lt;script&gt;/); assert.doesNotMatch(html,/<script>/);
+    assert.match(html,/href="\/conversations\/test-thread"/);
+  }
+  assert.match(summary('ru',{customerBudget:budget,proposedPrice:null,agreedPrice:null,objection:null,refusalReason:null}),/не подтверждает оплату/);
+  assert.match(paywall('ru'),/Подключите подходящий тариф/); assert.match(paywall('kk'),/Сәйкес тарифті/);
+});
+
+test('Incomplete analytics coverage stays visible in CSV, Excel and printable reports', async () => {
+  const exports = await bundle(`export { exportAnalyticsCsv, exportAnalyticsExcel, exportAnalyticsPdf } from './lib/statsExport';`);
+  const data = { period: { label: 'Сегодня' }, sources: [{name:'Source',inquiries:5000}], coverage: {partial:true,totalsComplete:true,
+    sections:[{key:'inquiries',label:'Обращения: подробные разрезы',loaded:5000,atLeast:5001,status:'partial'}]} };
+  const previous = { document: globalThis.document, window: globalThis.window, create: URL.createObjectURL, revoke: URL.revokeObjectURL };
+  const blobs = [];
+  globalThis.document = { createElement: () => ({ click() {} }) };
+  globalThis.window = { open: () => null };
+  URL.createObjectURL = blob => { blobs.push(blob); return 'blob:local-test'; };
+  URL.revokeObjectURL = () => {};
+  try {
+    exports.exportAnalyticsCsv(data, 'sources');
+    exports.exportAnalyticsExcel(data, {sources:true});
+    exports.exportAnalyticsPdf(data, {sources:true});
+    assert.equal(blobs.length, 3);
+    for (const blob of blobs) {
+      const text = await blob.text();
+      assert.match(text, /Часть подробного отчёта неполная/);
+      assert.match(text, /по всем подходящим записям/);
+      assert.match(text, /5000 записей; найдено не менее 5001/);
+      assert.match(text, /Source/);
+    }
+    exports.exportAnalyticsCsv({...data,coverage:{partial:false,sections:[]}}, 'sources');
+    assert.doesNotMatch(await blobs[3].text(), /неполная/);
+  } finally {
+    if (previous.document === undefined) delete globalThis.document; else globalThis.document = previous.document;
+    if (previous.window === undefined) delete globalThis.window; else globalThis.window = previous.window;
+    URL.createObjectURL = previous.create; URL.revokeObjectURL = previous.revoke;
+  }
+});
 
 test('Global ESF switch hides tenant document controls, including stale loaded data and old URLs', async () => {
   const plugin = { name:'esf-visibility-fixture', setup(build) { build.onLoad({filter:/(LegalSettingsPanel|DocumentNumberingPanel|AvrEditorPage)\.tsx$/}, args => {
@@ -177,18 +299,25 @@ test('Entire owner and manager dashboards render translated controls while prese
 });
 
 test('Kazakh billing renders plan cards, comparison, resource warnings and onboarding; Russian and English are preserved', async () => {
+  const setup = { suggested: true, completed: false, deferred: false, steps: [{ id: 'channel', done: false }] };
+  const plugin = { name: 'billing-onboarding-state', setup(build) { build.onLoad({ filter: /SetupAssistant\.tsx$/ }, args => {
+    const source = readFileSync(args.path, 'utf8');
+    assert.ok(source.includes('useState<SetupState | null>(null)'));
+    return { contents: source.replace('useState<SetupState | null>(null)', `useState<SetupState | null>(${JSON.stringify(setup)})`), loader: 'tsx', resolveDir: path.dirname(args.path) };
+  }); } };
   const { render } = await bundle(`
     import { renderToStaticMarkup } from 'react-dom/server';
     import { MemoryRouter } from 'react-router-dom';
     import { BillingPage } from './pages/BillingPage';
     import { BillingCatalog } from './components/BillingCatalog';
+    import { SetupProvider } from './components/SetupAssistant';
     import { CATALOG_BY_CODE } from '@creolab/contracts';
     import { SessionContext, emptyCaps } from './lib/session';
-    export const render = (locale, yearly=false) => renderToStaticMarkup(<SessionContext.Provider value={{me:{user:{locale},billing:{planCode:'BASQAR_FREE',planName:'BasQar Free',subscriptionStatus:'active',entitlements:{AI_MANAGER:true,TEAM:true},usage:[{key:'AI_CREDITS',label:'AI-кредиты · пробный пакет один раз',used:100,cap:100}],warnings:[{code:'AI_CREDITS_exhausted',message:'AI-кредиты: использовано 100 из 100.'}],onboarding:{needed:true,steps:{}}}},caps:emptyCaps}}><MemoryRouter initialEntries={['/billing']}>{yearly ? <BillingCatalog items={Object.values(CATALOG_BY_CODE)} period="YEARLY" selected="" disabled={false} onSelect={()=>{}}/> : <BillingPage/>}</MemoryRouter></SessionContext.Provider>);
-  `);
+    export const render = (locale, yearly=false) => renderToStaticMarkup(<SessionContext.Provider value={{me:{user:{locale},billing:{planCode:'BASQAR_FREE',planName:'BasQar Free',subscriptionStatus:'active',entitlements:{AI_MANAGER:true,TEAM:true},usage:[{key:'AI_CREDITS',label:'AI-кредиты · пробный пакет один раз',used:100,cap:100}],warnings:[{code:'AI_CREDITS_exhausted',message:'AI-кредиты: использовано 100 из 100.'}]}},caps:{...emptyCaps,companyAdmin:true}}}><MemoryRouter initialEntries={['/billing']}><SetupProvider>{yearly ? <BillingCatalog items={Object.values(CATALOG_BY_CODE)} period="YEARLY" selected="" disabled={false} onSelect={()=>{}}/> : <BillingPage/>}</SetupProvider></MemoryRouter></SessionContext.Provider>);
+  `, [plugin]);
   // Plan cards live in their own section now; verify both the overview and the catalog.
   const kk = render('kk') + render('kk', true);
-  for (const text of ['Тарифтер және төлем','ЖИ кредиттері','Пайдаланушылар','Байланыс арналарының қосылымдары','Жұмыс кабинетін баптаңыз','100 лимитінен 100 пайдаланылды','Сынақ режимі · 100 ЖИ кредиті бір рет']) assert.ok(kk.includes(text), text);
+  for (const text of ['Тарифтер және төлем','ЖИ кредиттері','Пайдаланушылар','Байланыс арналарының қосылымдары','Жұмысты бастау','Баптауды жалғастыру','100 лимитінен 100 пайдаланылды','Сынақ режимі · 100 ЖИ кредиті бір рет']) assert.ok(kk.includes(text), text);
   assert.doesNotMatch(kk, /Для ежедневной|Ваш тариф|Настройте|Укажите Instance|Запуски автоматизации|Стоимость услуг|Дополнительный пользователь|Хранилище, ГБ|Черновик|Подробное сравнение|Приглашение команды/);
   assert.match(render('kk', true), /стандартты бағамен салыстырғандағы үнем/);
   assert.match(render('ru'), /Тарифы и оплата/);
@@ -272,7 +401,7 @@ test('Fetched client, document, control and analytics screens show Kazakh system
   const fixtures = {
     ClientsPage: {items:[{id:'c',name:'Клиент по-русски',companyName:'Название компании',lifecycleLabel:'Новый',inquiryStatusLabel:'В работе'}],total:1,offset:0,limit:25},
     ControlPage: {waitingForManager:[{id:'w',contactName:'Имя клиента',waitLabel:'2 дня 3 часа',reasonLabel:'Клиент попросил менеджера'}],ai:{status:'Активен',note:'AI отвечает клиентам как обычно.'},interventions:[{id:'c',contactName:'Клиент по-русски',reasonLabel:'Клиент попросил менеджера',waitLabel:'2 дня 3 часа'}],audit:[{id:'a',text:'Иван забрал диалог у AI'}]},
-    StatsPage: {period:{label:'Бүгін'},overview:{},dataQuality:{},trend:{points:[]}},
+    StatsPage: {period:{label:'Бүгін'},overview:{},dataQuality:{},trend:{points:[]},coverage:{partial:true,totalsComplete:true,sections:[{key:'inquiries',label:'Обращения: подробные разрезы',loaded:5000,atLeast:5001,status:'partial'}]}},
     SignPage: {number:'123',date:'2026-09-28',sellerName:'ТОО Заказчик',buyerName:'ТОО Клиент',amount:100,currency:'KZT',contractStatus:'PENDING_SIGNATURE',signers:[]},
     DocumentsPage: [{id:'d',kind:'AVR',kindLabel:'АВР',number:'123',companyName:'Название компании',dealTitle:'Название сделки',href:'/documents/avr/d',date:'2026-09-28',statusLabel:'Черновик'}],
   };
@@ -287,7 +416,7 @@ test('Fetched client, document, control and analytics screens show Kazakh system
     import {SessionContext,emptyCaps} from './lib/session';
     ${Object.keys(fixtures).map(name=>`import {${name}} from './pages/${name}';`).join('\n')}
     const pages={${Object.keys(fixtures).join(',')}};
-    export const render=(name,locale)=>{const Page=pages[name];return renderToStaticMarkup(<SessionContext.Provider value={{me:{user:{locale}},caps:{...emptyCaps,companyAdmin:true,analytics:true,documents:true}}}><MemoryRouter><Page avr /></MemoryRouter></SessionContext.Provider>)};
+    export const render=(name,locale)=>{const Page=pages[name];return renderToStaticMarkup(<SessionContext.Provider value={{me:{user:{locale}},caps:{...emptyCaps,companyAdmin:true,analytics:true,documents:true}}}><MemoryRouter initialEntries={[name==='ControlPage'?'/control?view=overview':'/']}><Page avr /></MemoryRouter></SessionContext.Provider>)};
   `,[plugin]);
   const before=globalThis.localStorage;let locale='kk';globalThis.localStorage={getItem:key=>key==='basqar.locale'?locale:null};
   try {
@@ -297,6 +426,7 @@ test('Fetched client, document, control and analytics screens show Kazakh system
       if(name==='ClientsPage') assert.match(html,/Клиент по-русски/);
       if(name==='SignPage') {assert.match(html,/123/);assert.match(html,/Орындалған жұмыстар актісі/);assert.doesNotMatch(html,/Акт выполненных работ/);assert.match(html,/ТОО Заказчик/);}
       if(name==='ControlPage') {assert.match(html,/2 күн 3 сағ/);assert.match(html,/Иван диалогты ЖИ-ден алды/);}
+      if(name==='StatsPage') {assert.match(html,/Деректердің қамтылуы/);assert.match(html,/5000 жазба есепке алынды/);assert.match(html,/кемінде 5001/);}
     }
     locale='ru';assert.match(render('SignPage','ru'),/Акт выполненных работ/);
   } finally {if(before)globalThis.localStorage=before;else delete globalThis.localStorage;}

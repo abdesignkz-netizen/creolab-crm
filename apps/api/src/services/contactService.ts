@@ -3,7 +3,7 @@ import type { Prisma, PrismaClient } from "@creolab/db";
 import { validateClientPhone } from "@creolab/contracts";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
-import { isManager, requireCompanyAdmin } from "../lib/access.ts";
+import { conversationAccessWhere, isManager, requireCompanyAdmin } from "../lib/access.ts";
 import {
   INQUIRY_STATUS_LABEL,
   INQUIRY_ACTIVE_STATUSES,
@@ -492,6 +492,27 @@ export async function getContactOverview(prisma: PrismaClient, auth: AuthContext
     contact.conversations = contact.conversations.filter(
       (item) => item.assigneeMembershipId === me || contact.inquiries.some((inquiry) => inquiry.conversationId === item.id),
     );
+    // A proposal can contain another request's before/after values. Its history
+    // must obey the same scope as the review panel, including alias evidence.
+    const reviewActivities = contact.activities.filter(item => item.type.startsWith("conversation.crm_"));
+    const reviewMeta = (item: typeof contact.activities[number]) => {
+      const metadata = item.metadataJson && typeof item.metadataJson === "object" && !Array.isArray(item.metadataJson) ? item.metadataJson as Record<string, unknown> : {};
+      return (metadata.review && typeof metadata.review === "object" ? metadata.review : metadata) as Record<string, unknown>;
+    };
+    const evidenceIds = [...new Set(reviewActivities.flatMap(item => {
+      const ids = reviewMeta(item).evidenceMessageIds;
+      return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : [];
+    }))];
+    const visibleEvidence = new Set((evidenceIds.length ? await prisma.message.findMany({ where: {
+      tenantId: tid, id: { in: evidenceIds }, conversation: { is: conversationAccessWhere(auth) },
+    }, select: { id: true } }) : []).map(m => m.id));
+    contact.activities = contact.activities.filter(item => {
+      if (!item.type.startsWith("conversation.crm_")) return true;
+      const metadata = reviewMeta(item), ids = metadata.evidenceMessageIds;
+      return contact.conversations.some(c => c.id === metadata.conversationId)
+        && (!item.inquiryId || contact.inquiries.some(i => i.id === item.inquiryId))
+        && (!Array.isArray(ids) || ids.every(id => typeof id === "string" && visibleEvidence.has(id)));
+    });
   }
 
   const companyLinks = await prisma.companyContact.findMany({
@@ -906,7 +927,7 @@ export async function updateContact(
   }
 
   const updated = await prisma.$transaction(async (tx) => {
-    const row = await tx.contact.update({ where: { id: contactId }, data });
+    const row = await tx.contact.update({ where: { id: contactId }, data: { ...data, version: { increment: 1 } } });
     if ("ownerMembershipId" in input && String(input.ownerMembershipId || "") !== String(current.ownerMembershipId || "")) {
       await writeActivity(tx, {
         tenantId: tid,

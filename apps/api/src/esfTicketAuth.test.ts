@@ -107,7 +107,7 @@ it("connection service forwards cabinet credentials on the ticket path and never
     esfConnection: { findUnique: async () => stored, create: persist, update: persist },
     auditEvent: { create: async (data: any) => { writes.push(data); } },
   };
-  const auth: any = { user: { id: "synthetic-owner" }, activeMembership: { role: "owner", tenantId: "synthetic-tenant" } };
+  const auth: any = { user: { id: "synthetic-owner" }, activeMembership: { role: "owner", active: true, tenantId: "synthetic-tenant", tenant: { id: "synthetic-tenant", status: "active" } } };
   let requests = 0;
   globalThis.fetch = async (_url, init) => {
     requests++;
@@ -342,7 +342,7 @@ it("connectEsf closes a stored portal session before creating a new one", async 
     esfConnection: { findUnique: async () => stored, create: persist, update: persist },
     auditEvent: { create: async () => ({}) },
   };
-  const auth: any = { user: { id: "synthetic-owner" }, activeMembership: { role: "owner", tenantId: "synthetic-tenant" } };
+  const auth: any = { user: { id: "synthetic-owner" }, activeMembership: { role: "owner", active: true, tenantId: "synthetic-tenant", tenant: { id: "synthetic-tenant", status: "active" } } };
   const operations: string[] = [];
   globalThis.fetch = async (_url, init) => {
     const xml = String(init?.body);

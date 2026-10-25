@@ -1,5 +1,7 @@
 import { loadTenantServices } from "./tenantServiceCatalog.ts";
-import type { PrismaClient } from "@creolab/db";
+import { AnalyticsCoverage } from "./analyticsCoverage.ts";
+import { analyticsTotals } from "./analyticsTotals.ts";
+import type { Prisma, PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { requireAnalyticsAccess } from "../lib/access.ts";
@@ -147,7 +149,12 @@ async function buildFilters(prisma: PrismaClient, query: AnalyticsQuery, tid: st
     select: { id: true, dealId: true },
   });
   const linkage = { OR: [{ inquiryId: { in: linked.map(row => row.id) } }, { id: { in: linked.flatMap(row => row.dealId ? [row.dealId] : []) } }] };
-  dealExtra.AND = [hasAttribution ? linkage : { NOT: linkage }];
+  // NOT (nullable inquiryId IN (...)) yields SQL UNKNOWN for unlinked deals.
+  // Preserve these legitimate deals when excluding test/archived inquiries.
+  dealExtra.AND = hasAttribution ? [linkage] : [
+    { OR: [{ inquiryId: null }, { inquiryId: { notIn: linked.map(row => row.id) } }] },
+    { id: { notIn: linked.flatMap(row => row.dealId ? [row.dealId] : []) } },
+  ];
   return { inquiryExtra, dealExtra };
 }
 
@@ -162,6 +169,23 @@ function contactAnalyticsFilter(tid: string, inquiryExtra: Record<string, unknow
   };
 }
 
+function inquiryLabelFilter(fields: string[], label: string): Prisma.InquiryWhereInput {
+  const empty = (field: string) => ({ OR: [{ [field]: null }, { [field]: "" }] });
+  return { OR: [
+    ...fields.map((field, index) => ({ AND: [...fields.slice(0, index).map(empty), { [field]: label }] })),
+    ...(label === "Не указано" ? [{ AND: fields.map(empty) }] : []),
+  ] };
+}
+
+async function dealsWithInquiryLabel(prisma: PrismaClient, tid: string, fields: string[], label: string): Promise<Prisma.DealWhereInput> {
+  const rows = await prisma.inquiry.findMany({ where: { tenantId: tid, ...inquiryLabelFilter(fields, label) }, select: { id: true, dealId: true } });
+  return { OR: [
+    { inquiryId: { in: rows.map(row => row.id) } },
+    { id: { in: rows.flatMap(row => row.dealId ? [row.dealId] : []) } },
+    ...(label === "Не указано" ? [{ inquiryId: null, inquiry: { is: null } }] : []),
+  ] };
+}
+
 async function metricBundle(
   prisma: PrismaClient,
   tid: string,
@@ -169,13 +193,15 @@ async function metricBundle(
   to: Date | null,
   inquiryExtra: Record<string, unknown>,
   dealExtra: Record<string, unknown>,
+  coverage: AnalyticsCoverage,
+  coveragePrefix: string,
 ) {
   const received = rangeFilter(from, to);
   const closed = rangeFilter(from, to);
 
-  const [inquiries, clients, dealsCreated, wonDeals, lostDeals, contractsReached, openPipeline] =
+  const [inquiries, clients, dealsCreated, wonDeals, lostDeals, contractsReached, totals] =
     await Promise.all([
-      prisma.inquiry.findMany({
+      coverage.read(coveragePrefix + ":inquiries", "Обращения: подробные разрезы", 5000, take => prisma.inquiry.findMany({
         where: { ...inquiryExtra, ...(received ? { receivedAt: received } : {}) } as never,
         select: {
           id: true,
@@ -196,8 +222,8 @@ async function metricBundle(
           assigneeMembershipId: true,
           contact: { select: { name: true, firstName: true, lastName: true } },
         },
-        take: 5000,
-      }),
+        take,
+      })),
       prisma.contact.count({
         where: {
           ...contactAnalyticsFilter(tid, inquiryExtra),
@@ -205,12 +231,12 @@ async function metricBundle(
           ...(inquiryExtra.assigneeMembershipId ? { ownerMembershipId: inquiryExtra.assigneeMembershipId } : {}),
         },
       }),
-      prisma.deal.findMany({
+      coverage.read(coveragePrefix + ":created", "Созданные сделки: подробные разрезы", 5000, take => prisma.deal.findMany({
         where: { ...dealExtra, ...(received ? { createdAt: received } : {}) } as never,
         select: { id: true, inquiryId: true },
-        take: 5000,
-      }),
-      prisma.deal.findMany({
+        take,
+      })),
+      coverage.read(coveragePrefix + ":won", "Продажи: подробные разрезы и медианы", 5000, take => prisma.deal.findMany({
         where: { ...dealExtra, outcome: "won", ...(closed ? { closedAt: closed } : {}) } as never,
         select: {
           id: true,
@@ -226,9 +252,9 @@ async function metricBundle(
           contact: { select: { name: true, firstName: true, lastName: true } },
           inquiryId: true,
         },
-        take: 5000,
-      }),
-      prisma.deal.findMany({
+        take,
+      })),
+      coverage.read(coveragePrefix + ":lost", "Потери: подробные разрезы", 5000, take => prisma.deal.findMany({
         where: { ...dealExtra, outcome: "lost", ...(closed ? { closedAt: closed } : {}) } as never,
         select: {
           id: true,
@@ -243,59 +269,23 @@ async function metricBundle(
           contact: { select: { name: true, firstName: true, lastName: true } },
           inquiryId: true,
         },
-        take: 5000,
-      }),
+        take,
+      })),
       prisma.deal.count({
         where: { ...dealExtra, stageHistory: { some: { toSystemKey: "contract", ...(received ? { enteredAt: received } : {}) } } } as never,
       }),
-      prisma.deal.findMany({
-        where: { ...dealExtra, outcome: "open" } as never,
-        select: { offerAmountMinor: true, probability: true, stage: { select: { defaultProbability: true } } },
-        take: 3000,
-      }),
+      analyticsTotals(prisma, inquiryExtra, dealExtra, received),
     ]);
 
-  let revenue = 0;
-  let revenueKnown = 0;
-  const checks: number[] = [];
-  for (const d of wonDeals) {
-    const n = amountNumber(d.wonAmountMinor ?? d.offerAmountMinor);
-    if (n != null) {
-      revenue += n;
-      revenueKnown += 1;
-      checks.push(n);
-    }
-  }
-
-  let pipeline = 0;
-  let weighted = 0;
-  let pipelineKnown = 0;
-  for (const d of openPipeline) {
-    const n = amountNumber(d.offerAmountMinor);
-    if (n != null) {
-      pipeline += n;
-      pipelineKnown += 1;
-      const p = d.probability ?? d.stage?.defaultProbability ?? 10;
-      weighted += Math.round((n * p) / 100);
-    }
-  }
-
-  let lostAmount = 0;
-  for (const d of lostDeals) {
-    const n = amountNumber(d.offerAmountMinor);
-    if (n != null) lostAmount += n;
-  }
-
-  const inquiryCount = inquiries.length;
-  const won = wonDeals.length;
-  const lost = lostDeals.length;
+  const checks = wonDeals.map(d => amountNumber(d.wonAmountMinor ?? d.offerAmountMinor)).filter((n): n is number => n != null);
+  const { inquiryCount, won, lost, revenue, revenueKnown, pipeline, weighted, pipelineKnown, lostAmount } = totals;
   const conversion = pct(won, inquiryCount);
 
   return {
     inquiries,
     inquiryCount,
     clients,
-    dealsCreated: dealsCreated.length,
+    dealsCreated: totals.dealsCreated,
     dealsCreatedRows: dealsCreated,
     contractsReached,
     won,
@@ -304,9 +294,9 @@ async function metricBundle(
     lostDeals,
     revenue,
     revenueKnown,
-    avgCheck: revenueKnown ? Math.round(revenue / revenueKnown) : null,
+    avgCheck: totals.avgCheck,
     medianCheck: median(checks),
-    maxCheck: checks.length ? Math.max(...checks) : null,
+    maxCheck: totals.maxCheck,
     conversion,
     pipeline,
     weighted,
@@ -359,34 +349,36 @@ async function buildTrend(
   dealExtra: Record<string, unknown>,
   metric: TrendMetric,
   locale = "ru",
+  coverage = new AnalyticsCoverage(),
+  coveragePrefix = "trend",
 ) {
   const granularity = chooseGranularity(preset, from, to);
   const received = rangeFilter(from, to);
   const [inquiries, deals, won, newClients] = await Promise.all([
-    prisma.inquiry.findMany({
+    coverage.read(coveragePrefix + ":inquiries", "График обращений", 8000, take => prisma.inquiry.findMany({
       where: { ...inquiryExtra, ...(received ? { receivedAt: received } : {}) } as never,
       select: { receivedAt: true },
-      take: 8000,
-    }),
-    prisma.deal.findMany({
+      take,
+    })),
+    coverage.read(coveragePrefix + ":created", "График сделок", 8000, take => prisma.deal.findMany({
       where: { ...dealExtra, ...(received ? { createdAt: received } : {}) } as never,
       select: { createdAt: true },
-      take: 8000,
-    }),
-    prisma.deal.findMany({
+      take,
+    })),
+    coverage.read(coveragePrefix + ":won", "График продаж", 8000, take => prisma.deal.findMany({
       where: { ...dealExtra, outcome: "won", ...(received ? { closedAt: received } : {}) } as never,
       select: { closedAt: true, offerAmountMinor: true, wonAmountMinor: true },
-      take: 8000,
-    }),
-    prisma.contact.findMany({
+      take,
+    })),
+    coverage.read(coveragePrefix + ":clients", "График клиентов", 8000, take => prisma.contact.findMany({
       where: {
         ...contactAnalyticsFilter(tid, inquiryExtra),
         ...(received ? { firstSeenAt: received } : {}),
         ...(inquiryExtra.assigneeMembershipId ? { ownerMembershipId: inquiryExtra.assigneeMembershipId } : {}),
       },
       select: { firstSeenAt: true },
-      take: 8000,
-    }),
+      take,
+    })),
   ]);
 
   const map = new Map<string, { inquiries: number; clients: number; deals: number; won: number; revenue: number }>();
@@ -434,7 +426,7 @@ async function buildTrend(
     };
   });
 
-  return { granularity, metric, points };
+  return { granularity, metric, points, coverage: coverage.result() };
 }
 
 async function buildFunnel(
@@ -445,6 +437,7 @@ async function buildFunnel(
   mode: FunnelMode,
   inquiryExtra: Record<string, unknown>,
   dealExtra: Record<string, unknown>,
+  coverage: AnalyticsCoverage,
 ) {
   const received = rangeFilter(from, to);
   const stages = [
@@ -469,13 +462,13 @@ async function buildFunnel(
         } as never,
       }),
       prisma.dealStageHistory.count({
-        where: { tenantId: tid, toSystemKey: "proposal_sent", ...(received ? { enteredAt: received } : {}) },
+        where: { tenantId: tid, deal: { is: dealExtra }, toSystemKey: "proposal_sent", ...(received ? { enteredAt: received } : {}) },
       }),
       prisma.dealStageHistory.count({
-        where: { tenantId: tid, toSystemKey: "negotiation", ...(received ? { enteredAt: received } : {}) },
+        where: { tenantId: tid, deal: { is: dealExtra }, toSystemKey: "negotiation", ...(received ? { enteredAt: received } : {}) },
       }),
       prisma.dealStageHistory.count({
-        where: { tenantId: tid, toSystemKey: "contract", ...(received ? { enteredAt: received } : {}) },
+        where: { tenantId: tid, deal: { is: dealExtra }, toSystemKey: "contract", ...(received ? { enteredAt: received } : {}) },
       }),
       prisma.deal.count({
         where: { ...dealExtra, outcome: "won", ...(received ? { closedAt: received } : {}) } as never,
@@ -501,11 +494,11 @@ async function buildFunnel(
   }
 
   // Cohort: inquiries in period, then how far their deals went
-  const inquiries = await prisma.inquiry.findMany({
+  const inquiries = await coverage.read("buildFunnel:cohort", "Когорта обращений", 5000, take => prisma.inquiry.findMany({
     where: { ...inquiryExtra, ...(received ? { receivedAt: received } : {}) } as never,
     select: { id: true, contactId: true, status: true, dealId: true },
-    take: 5000,
-  });
+    take,
+  }));
   const dealIds = inquiries.map((i) => i.dealId).filter(Boolean) as string[];
   const deals = dealIds.length
     ? await prisma.deal.findMany({
@@ -595,20 +588,23 @@ export async function getAnalyticsDashboard(prisma: PrismaClient, auth: AuthCont
   const range = resolvePeriodRange(timeZone, preset, query.dateFrom, query.dateTo, now);
   const cmp = compareRange(timeZone, compareMode, range.from, range.to, now);
   const { inquiryExtra, dealExtra } = await buildFilters(prisma, query, tid);
+  const coverage = new AnalyticsCoverage();
 
   const [current, previous, funnel, trendInquiries, stageDurations, stage2, tenantRow] = await Promise.all([
-    metricBundle(prisma, tid, range.from, range.to, inquiryExtra, dealExtra),
+    metricBundle(prisma, tid, range.from, range.to, inquiryExtra, dealExtra, coverage, "current"),
     compareMode === "none"
       ? null
-      : metricBundle(prisma, tid, cmp.from, cmp.to, inquiryExtra, dealExtra),
-    buildFunnel(prisma, tid, range.from, range.to, funnelMode, inquiryExtra, dealExtra),
-    buildTrend(prisma, tid, range.from, range.to, preset, timeZone, inquiryExtra, dealExtra, "inquiries", auth.user.locale),
-    buildStageDurations(prisma, tid, range.from, range.to).catch((err) => {
+      : metricBundle(prisma, tid, cmp.from, cmp.to, inquiryExtra, dealExtra, coverage, "previous"),
+    buildFunnel(prisma, tid, range.from, range.to, funnelMode, inquiryExtra, dealExtra, coverage),
+    buildTrend(prisma, tid, range.from, range.to, preset, timeZone, inquiryExtra, dealExtra, "inquiries", auth.user.locale, coverage),
+    buildStageDurations(prisma, tid, range.from, range.to, coverage, dealExtra).catch((err) => {
+      coverage.unavailable("durations", "Длительность этапов");
       console.error("analytics stageDurations", err);
       return [];
     }),
-    buildStage2Analytics(prisma, tid, range.from, range.to, inquiryExtra, dealExtra, currency, query.assignee).catch(
+    buildStage2Analytics(prisma, tid, range.from, range.to, inquiryExtra, dealExtra, currency, coverage, query.assignee).catch(
       (err) => {
+        coverage.unavailable("details", "Подробная статистика");
         console.error("analytics stage2", err);
         return emptyStage2();
       },
@@ -630,6 +626,8 @@ export async function getAnalyticsDashboard(prisma: PrismaClient, auth: AuthCont
           dealExtra,
           "inquiries",
           auth.user.locale,
+          coverage,
+          "trend-previous",
         );
 
   const relatedInquiryIds = [
@@ -795,6 +793,7 @@ export async function getAnalyticsDashboard(prisma: PrismaClient, auth: AuthCont
 
   return {
     asOf: now.toISOString(),
+    coverage: { ...coverage.result(), totalsComplete: true },
     currency,
     period: {
       preset,
@@ -951,6 +950,7 @@ async function buildStage2Analytics(
   inquiryExtra: Record<string, unknown>,
   dealExtra: Record<string, unknown>,
   currency: string,
+  coverage: AnalyticsCoverage,
   filterAssignee?: string,
 ) {
   const received = rangeFilter(from, to);
@@ -965,7 +965,7 @@ async function buildStage2Analytics(
 
   const [inquiries, wonDeals, lostDeals, openDeals, tasks, messages, conversations, campaigns, agreements, contactsSample] =
     await Promise.all([
-      prisma.inquiry.findMany({
+      coverage.read("buildStage2Analytics:inquiries", "Менеджеры: обращения", 5000, take => prisma.inquiry.findMany({
         where: { ...inquiryExtra, ...(received ? { receivedAt: received } : {}) } as never,
         select: {
           id: true,
@@ -975,9 +975,9 @@ async function buildStage2Analytics(
           status: true,
           dealId: true,
         },
-        take: 5000,
-      }),
-      prisma.deal.findMany({
+        take,
+      })),
+      coverage.read("buildStage2Analytics:won", "Менеджеры: продажи", 5000, take => prisma.deal.findMany({
         where: { ...dealExtra, outcome: "won", ...(created ? { closedAt: created } : {}) } as never,
         select: {
           id: true,
@@ -988,19 +988,19 @@ async function buildStage2Analytics(
           closedAt: true,
           nextAction: true,
         },
-        take: 5000,
-      }),
-      prisma.deal.findMany({
+        take,
+      })),
+      coverage.read("buildStage2Analytics:lost", "Менеджеры: потери", 5000, take => prisma.deal.findMany({
         where: { ...dealExtra, outcome: "lost", ...(created ? { closedAt: created } : {}) } as never,
         select: { id: true, assigneeMembershipId: true },
-        take: 5000,
-      }),
-      prisma.deal.findMany({
+        take,
+      })),
+      coverage.read("buildStage2Analytics:open", "Менеджеры: открытые сделки", 3000, take => prisma.deal.findMany({
         where: { ...dealExtra, outcome: "open" } as never,
         select: { id: true, assigneeMembershipId: true, nextAction: true, nextActionAt: true },
-        take: 3000,
-      }),
-      prisma.task.findMany({
+        take,
+      })),
+      coverage.read("buildStage2Analytics:tasks", "Задачи", 8000, take => prisma.task.findMany({
         where: {
           tenantId: tid,
           ...(created ? { createdAt: created } : {}),
@@ -1016,9 +1016,9 @@ async function buildStage2Analytics(
           ownerMembershipId: true,
           source: true,
         },
-        take: 8000,
-      }),
-      prisma.message.findMany({
+        take,
+      })),
+      coverage.read("buildStage2Analytics:messages", "Сообщения", 12000, take => prisma.message.findMany({
         where: {
           tenantId: tid,
           historical: false,
@@ -1032,9 +1032,9 @@ async function buildStage2Analytics(
           createdAt: true,
           conversation: { select: { assigneeMembershipId: true, mode: true, contactId: true } },
         },
-        take: 12000,
-      }),
-      prisma.conversation.findMany({
+        take,
+      })),
+      coverage.read("buildStage2Analytics:conversations", "Диалоги", 5000, take => prisma.conversation.findMany({
         where: {
           tenantId: tid,
           ...(created ? { updatedAt: created } : {}),
@@ -1047,9 +1047,9 @@ async function buildStage2Analytics(
           contactId: true,
           createdAt: true,
         },
-        take: 5000,
-      }),
-      prisma.campaign
+        take,
+      })),
+      coverage.read("buildStage2Analytics:campaigns", "Рассылки", 100, take => prisma.campaign
         .findMany({
           where: {
             tenantId: tid,
@@ -1072,21 +1072,22 @@ async function buildStage2Analytics(
             },
           },
           orderBy: { createdAt: "desc" },
-          take: 100,
-        })
+          take,
+        }))
         .catch((err) => {
+          coverage.unavailable("campaigns", "Рассылки");
           console.error("analytics campaigns", err);
           return [];
         }),
-      prisma.agreement.findMany({
+      coverage.read("buildStage2Analytics:agreements", "Договорённости", 3000, take => prisma.agreement.findMany({
         where: {
           tenantId: tid,
           ...(created ? { createdAt: created } : {}),
         },
         select: { id: true, clarificationNeeded: true, detectedBy: true, status: true, type: true },
-        take: 3000,
-      }),
-      prisma.contact.findMany({
+        take,
+      })),
+      coverage.read("buildStage2Analytics:contacts", "Качество карточек клиентов", 3000, take => prisma.contact.findMany({
         where: { tenantId: tid, archivedAt: null },
         select: {
           id: true,
@@ -1099,8 +1100,8 @@ async function buildStage2Analytics(
             orderBy: { receivedAt: "desc" },
           },
         },
-        take: 3000,
-      }),
+        take,
+      })),
     ]);
 
   type Mgr = {
@@ -1419,13 +1420,13 @@ async function buildStage2Analytics(
   };
 }
 
-async function buildStageDurations(prisma: PrismaClient, tid: string, from: Date | null, to: Date | null) {
+async function buildStageDurations(prisma: PrismaClient, tid: string, from: Date | null, to: Date | null, coverage: AnalyticsCoverage, dealExtra: Record<string, unknown>) {
   const entered = rangeFilter(from, to);
-  const history = await prisma.dealStageHistory.findMany({
-    where: { tenantId: tid, ...(entered ? { enteredAt: entered } : {}) },
+  const history = await coverage.read("buildStageDurations:history", "Длительность этапов", 8000, take => prisma.dealStageHistory.findMany({
+    where: { tenantId: tid, deal: { is: dealExtra }, ...(entered ? { enteredAt: entered } : {}) },
     orderBy: { enteredAt: "asc" },
-    take: 8000,
-  });
+    take,
+  }));
   const byStage = new Map<string, number[]>();
   for (const row of history) {
     if (!row.leftAt) continue;
@@ -1435,11 +1436,11 @@ async function buildStageDurations(prisma: PrismaClient, tid: string, from: Date
     if (!byStage.has(key)) byStage.set(key, []);
     byStage.get(key)!.push(hours);
   }
-  const openStuck = await prisma.deal.findMany({
-    where: { tenantId: tid, outcome: "open" },
+  const openStuck = await coverage.read("buildStageDurations:stalled", "Задержки на этапах", 2000, take => prisma.deal.findMany({
+    where: { ...dealExtra, outcome: "open" },
     select: { stage: { select: { systemKey: true, name: true } }, stageEnteredAt: true },
-    take: 2000,
-  });
+    take,
+  }));
   const stuckMap = new Map<string, number>();
   const now = Date.now();
   for (const d of openStuck) {
@@ -1575,12 +1576,13 @@ export async function getAnalyticsDrilldown(
   };
 
   if (entity === "clients") {
+    const where = {
+      ...contactAnalyticsFilter(tid, inquiryExtra),
+      ...(received ? { firstSeenAt: received } : {}),
+    };
+    const total = await prisma.contact.count({ where });
     const rows = await prisma.contact.findMany({
-      where: {
-        ...contactAnalyticsFilter(tid, inquiryExtra),
-        ...(received ? { firstSeenAt: received } : {}),
-        ...(inquiryExtra.assigneeMembershipId ? { ownerMembershipId: inquiryExtra.assigneeMembershipId } : {}),
-      },
+      where,
       include: {
         methods: true,
         owner: { include: { user: { select: { name: true } } } },
@@ -1592,7 +1594,8 @@ export async function getAnalyticsDrilldown(
       entity,
       key,
       title: titleMap.clients,
-      total: rows.length,
+      total,
+      hasMore: total > rows.length,
       items: rows.map((c) => ({
         kind: "contact" as const,
         id: c.id,
@@ -1610,16 +1613,15 @@ export async function getAnalyticsDrilldown(
   }
 
   if (entity === "inquiries" || entity === "source_inquiries" || entity === "manager_leads") {
+    const where: Prisma.InquiryWhereInput = { AND: [
+      inquiryExtra,
+      ...(received ? [{ receivedAt: received }] : []),
+      ...(entity === "manager_leads" ? [{ assigneeMembershipId: key === "unassigned" ? null : key }] : []),
+      ...(entity === "source_inquiries" ? [inquiryLabelFilter(["utmSource", "sourceChannel", "sourceType"], key)] : []),
+    ] };
+    const total = await prisma.inquiry.count({ where });
     const rows = await prisma.inquiry.findMany({
-      where: {
-        ...inquiryExtra,
-        ...(received ? { receivedAt: received } : {}),
-        ...(entity === "manager_leads"
-          ? key === "unassigned"
-            ? { assigneeMembershipId: null }
-            : { assigneeMembershipId: key }
-          : {}),
-      } as never,
+      where,
       include: {
         contact: { select: { name: true, firstName: true, lastName: true, methods: true } },
         assignee: { include: { user: { select: { name: true } } } },
@@ -1627,16 +1629,13 @@ export async function getAnalyticsDrilldown(
       orderBy: { receivedAt: "desc" },
       take: 500,
     });
-    const filtered =
-      entity === "source_inquiries"
-        ? rows.filter((r) => inquirySourceLabel(r) === key)
-        : rows;
     return {
       entity,
       key,
       title: titleMap[entity] || entity,
-      total: filtered.length,
-      items: filtered.map((r) => ({
+      total,
+      hasMore: total > rows.length,
+      items: rows.map((r) => ({
         kind: "inquiry" as const,
         id: r.id,
         date: r.receivedAt.toISOString(),
@@ -1671,8 +1670,16 @@ export async function getAnalyticsDrilldown(
     dealWhereBase.lossReason = key;
   }
 
+  const extra: Prisma.DealWhereInput[] = [];
+  if (entity === "source_won") extra.push(await dealsWithInquiryLabel(prisma, tid, ["utmSource", "sourceChannel", "sourceType"], key));
+  if (entity === "service_won") extra.push(await dealsWithInquiryLabel(prisma, tid, ["serviceCategory", "service"], key));
+  if (entity === "loss_stage") extra.push({ stage: { name: key } });
+  if (entity === "loss_reason" && key === "Другое") extra.push({ OR: [{ lossReason: null }, { lossReason: "" }, { lossReason: "Другое" }] });
+  const where: Prisma.DealWhereInput = { AND: [dealWhereBase, ...extra] };
+  const total = await prisma.deal.count({ where });
+
   const deals = await prisma.deal.findMany({
-    where: dealWhereBase as never,
+    where,
     include: {
       contact: { select: { name: true, firstName: true, lastName: true, methods: true } },
       stage: { select: { name: true } },
@@ -1692,26 +1699,13 @@ export async function getAnalyticsDrilldown(
     take: 500,
   });
 
-  let filtered = deals;
-  if (entity === "source_won") {
-    filtered = deals.filter((d) => inquirySourceLabel(d.inquiry || {}) === key);
-  }
-  if (entity === "service_won") {
-    filtered = deals.filter((d) => (d.inquiry?.serviceCategory || d.inquiry?.service || "Не указано") === key);
-  }
-  if (entity === "loss_stage") {
-    filtered = deals.filter((d) => (d.stage?.name || "Не указано") === key);
-  }
-  if (entity === "loss_reason" && key === "Другое") {
-    filtered = deals.filter((d) => !d.lossReason || d.lossReason === "Другое");
-  }
-
   return {
     entity,
     key,
     title: titleMap[entity] || entity,
-    total: filtered.length,
-    items: filtered.map((d) => dealRow(d, currency, managerNames)),
+    total,
+    hasMore: total > deals.length,
+    items: deals.map((d) => dealRow(d, currency, managerNames)),
   };
 }
 

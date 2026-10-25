@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { aiIntakeExtractionSchema } from "@creolab/contracts";
+import { aiIntakeExtractionSchema, crmCommercialFactSchema } from "@creolab/contracts";
 import { AGREEMENT_TYPE_LABEL, AGREEMENT_STATUS_LABEL, BUSINESS_EVENT_TYPES, type ConversationAnalysis } from "./conversationContextTypes.ts";
 
 const text = z.string().max(4000).nullable().optional();
@@ -55,5 +55,11 @@ export function validateConversationRefinement(raw: unknown, messageIds: string[
     value.evidenceMessageIds = [];
   }
   const intake = aiIntakeExtractionSchema.safeParse(raw && typeof raw === "object" ? (raw as Record<string, unknown>).intakeRequest : null);
-  return { ...value, intakeRequest: intake.success && grounded(intake.data.evidenceMessageIds) ? intake.data : null };
+  // An invalid optional commercial fact must not discard otherwise valid context.
+  const commercial = raw && typeof raw === "object" ? (raw as Record<string, unknown>).commercialFacts : null;
+  const commercialFacts = Array.isArray(commercial) ? commercial.slice(0, 20).flatMap(f => {
+    const parsed = crmCommercialFactSchema.safeParse(f);
+    return parsed.success && grounded(parsed.data.evidence.map(e => e.messageId)) ? [parsed.data] : [];
+  }) : undefined;
+  return { ...value, commercialFacts, intakeRequest: intake.success && grounded(intake.data.evidenceMessageIds) ? intake.data : null };
 }

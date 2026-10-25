@@ -1,4 +1,5 @@
 import { applyBillingMigration } from "./billingMigration.ts";
+import { applyRequiredSchemaPatches } from "./schemaPatches.ts";
 import { CONTROL_CHAT_SQL } from "./controlChatSchema.ts";
 import { CONTROL_NOTIFICATION_SQL } from "./controlNotificationSchema.ts";
 import { WHATSAPP_SQL } from "./whatsappSchema.ts";
@@ -27,7 +28,7 @@ function isLivePostgresUrl(url: string | undefined): boolean {
   return !/unused|55432|example\.invalid/i.test(url);
 }
 
-async function applyLivePostgresPatches(prisma: PrismaClient) {
+export async function applyLivePostgresPatches(prisma: PrismaClient) {
   const statements = [
     `ALTER TABLE "Conversation" ADD COLUMN IF NOT EXISTS "aiHandoffSummaryJson" JSONB NOT NULL DEFAULT '{}'`,
     ...TENANT_SERVICES_SQL.split(";").map((s) => s.trim()).filter(Boolean),
@@ -56,18 +57,14 @@ async function applyLivePostgresPatches(prisma: PrismaClient) {
       .map((s) => s.trim())
       .filter(Boolean),
   ];
-  for (const sql of statements) {
-    try {
-      await prisma.$executeRawUnsafe(sql);
-    } catch (error) {
-      console.error("[db] additive patch failed", sql, error);
-    }
-  }
-  for (const sql of AVR_SIGNING_SQL.split(";").map(s => s.trim()).filter(Boolean)) await prisma.$executeRawUnsafe(sql);
-  for (const sql of BILLING_QUOTA_SQL) await prisma.$executeRawUnsafe(sql);
-  for (const sql of WHATSAPP_SQL) await prisma.$executeRawUnsafe(sql);
-  for (const sql of CONTROL_NOTIFICATION_SQL) await prisma.$executeRawUnsafe(sql);
-  for (const sql of CONTROL_CHAT_SQL) await prisma.$executeRawUnsafe(sql);
+  await applyRequiredSchemaPatches(prisma, [
+    { name: "core", statements },
+    { name: "avr-signing", statements: AVR_SIGNING_SQL.split(";").map(s => s.trim()).filter(Boolean) },
+    { name: "billing-quota", statements: BILLING_QUOTA_SQL },
+    { name: "whatsapp", statements: WHATSAPP_SQL },
+    { name: "control-notifications", statements: CONTROL_NOTIFICATION_SQL },
+    { name: "control-chat", statements: CONTROL_CHAT_SQL },
+  ]);
 }
 
 async function applyInitSql(pglite: PGlite) {
@@ -1287,8 +1284,13 @@ export async function createPrismaClient(): Promise<PrismaClient> {
     const prisma = new PrismaClient({
       datasourceUrl: databaseUrl,
     });
-    await applyLivePostgresPatches(prisma);
-    await applyBillingMigration(prisma);
+    try {
+      await applyLivePostgresPatches(prisma);
+      await applyBillingMigration(prisma);
+    } catch (error) {
+      await prisma.$disconnect();
+      throw error;
+    }
     globalForPrisma.prisma = prisma;
     return prisma;
   }

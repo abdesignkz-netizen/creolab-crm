@@ -13,6 +13,7 @@ import { convertInquiryToDeal } from "./services/inquiryService.ts";
 import { getPublishedTenantAiContext } from "./services/tenantAiConfigService.ts";
 import { quickControlCommand } from "./services/controlChatLanguage.ts";
 import { getAIAutomationSettings, updateAIAutomationSettings } from "./services/aiAutomationSettingsService.ts";
+import { changeDealStage, markDealWon, markDealLost } from "./services/dealService.ts";
 
 describe("configurable sales process", () => {
   let db: Awaited<ReturnType<typeof createPrismaClient>>;
@@ -134,6 +135,14 @@ describe("configurable sales process", () => {
     await reconcileSalesDeal(db, f.tenant.id, d.id); assert.equal((await f.deal()).stageId, d.stageId); assert.equal((await f.report()).items[0].goalReached, false);
     await db.invoice.update({ where: { id: invoice.id }, data: { status: "ISSUED" } });
     await reconcileSalesDeal(db, f.tenant.id, d.id); assert.equal((await f.deal()).stageId, target.id); assert.equal((await f.report()).items[0].goalReached, false);
+    await reconcileSalesDeal(db, f.tenant.id, d.id);
+    const history = await db.dealStageHistory.findMany({ where: { dealId: d.id } });
+    assert.equal(history.length, 2);
+    assert.equal(history.filter(h => !h.leftAt).length, 1);
+    const current = history.find(h => !h.leftAt)!;
+    assert.equal(current.toStageId, target.id);
+    assert.equal(history.find(h => h.id !== current.id)?.leftAt?.toISOString(), current.enteredAt.toISOString());
+    assert.equal((await f.deal()).stageEnteredAt.toISOString(), current.enteredAt.toISOString());
     await db.deal.update({ where: { id: d.id }, data: { offerAmountMinor: 1000, paymentStatus: "PAID" } });
     assert.equal((await f.report()).items[0].goalReached, false);
     await db.paymentRecord.create({ data: { tenantId: f.tenant.id, dealId: d.id, amountMinor: 1000, currency: "USD" } });
@@ -143,6 +152,44 @@ describe("configurable sales process", () => {
     await reconcileSalesDeal(db, f.tenant.id, d.id); await reconcileSalesDeal(db, f.tenant.id, d.id);
     assert.equal((await f.report()).items[0].goalReached, true); assert.equal((await f.deal()).outcome, "open");
     assert.equal(await db.activity.count({ where: { dealId: d.id, type: "sales.goal_reached" } }), 1);
+  });
+  for (const outcome of ["won", "lost"] as const) it(`manual transitions and ${outcome} close the preceding stage interval`, async () => {
+    const f = await fixture(); await f.run(); const d = await f.deal();
+    await changeDealStage(db, f.auth, d.id, { systemKey: "negotiation" });
+    await changeDealStage(db, f.auth, d.id, { systemKey: "negotiation" });
+    const history = await db.dealStageHistory.findMany({ where: { dealId: d.id } });
+    assert.equal(history.length, 2); assert.equal(history.filter(h => !h.leftAt).length, 1);
+    const current = history.find(h => !h.leftAt)!;
+    assert.equal(history.find(h => h.id !== current.id)?.leftAt?.toISOString(), current.enteredAt.toISOString());
+    if (outcome === "won") await markDealWon(db, f.auth, d.id);
+    else await markDealLost(db, f.auth, d.id, { lossReason: "Клиент выбрал другой вариант" });
+    const closed = await f.deal();
+    assert.equal(await db.dealStageHistory.count({ where: { dealId: d.id, leftAt: null } }), 0);
+    assert.equal((await db.dealStageHistory.findUniqueOrThrow({ where: { id: current.id } })).leftAt?.toISOString(), closed.closedAt?.toISOString());
+  });
+  for (const outcome of ["won", "lost"] as const) it(`a stale ${outcome} request cannot close a newer stage interval`, async () => {
+    const f = await fixture(); await f.run(); const d = await f.deal();
+    let interrupted = false;
+    // Deterministically interleave a real, committed stage change after the
+    // close request reads its snapshot and before its write transaction begins.
+    const racing = new Proxy(db, { get(target, property) {
+      if (property !== "$transaction") return Reflect.get(target, property);
+      return async (run: Parameters<typeof db.$transaction>[0]) => {
+        assert.equal(interrupted, false); interrupted = true;
+        await changeDealStage(db, f.auth, d.id, { systemKey: "negotiation" });
+        return db.$transaction(run);
+      };
+    } });
+    const close = outcome === "won" ? markDealWon(racing, f.auth, d.id)
+      : markDealLost(racing, f.auth, d.id, { lossReason: "Другой вариант" });
+    await assert.rejects(close, { code: "conflict" });
+    const current = await f.deal();
+    assert.equal(current.outcome, "open"); assert.equal(current.closedAt, null);
+    const history = await db.dealStageHistory.findMany({ where: { dealId: d.id } });
+    assert.equal(history.length, 2);
+    assert.equal(history.filter(row => !row.leftAt).length, 1);
+    assert.equal(history.find(row => !row.leftAt)?.toStageId, current.stageId);
+    assert.equal(await db.activity.count({ where: { dealId: d.id, type: `deal.${outcome}` } }), 0);
   });
   it("isolates proposal review and reports by tenant and manager visibility", async () => {
     const f = await fixture({ mode: "suggest" }); await f.run(); const p = (await f.report()).proposals[0]; const other = await fixture();

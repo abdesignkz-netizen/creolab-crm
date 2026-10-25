@@ -1,6 +1,7 @@
 import { CATALOG_BY_CODE, CONTROL_ACTION_META } from "@creolab/contracts";
 
 export const AUDIT_ACTION_LABELS: Record<string, string> = {
+  "situation.snoozed": "Ситуация отложена",
   "AI_KNOWLEDGE_IMPORT_PREVIEWED": "Материал распознан для базы знаний ИИ",
   "sales.deal_created": "Создана сделка по подтверждённому интересу",
   "sales.proposal_reviewed": "Рассмотрено предложение ИИ о сделке",
@@ -11,6 +12,9 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "billing.invoice.signing_completed": "Дополнена подпись в счёте за подписку",
   "conversation.crm_updated": "AI обновил CRM по переписке",
   "conversation.context_analyzed": "Проанализирован контекст диалога",
+  "conversation.crm_proposed": "Предложено обновление CRM",
+  "conversation.crm_reviewed": "Рассмотрено изменение CRM",
+  "conversation.crm_undone": "Отменено изменение ИИ",
   "auth.login": "Вход в аккаунт", "auth.login_failed": "Неудачная попытка входа", "auth.logout": "Выход из аккаунта", "auth.logout_all": "Завершены все сеансы",
   "auth.password_reset_requested": "Запрошено восстановление пароля", "auth.password_reset_verified": "Подтверждено восстановление пароля", "auth.password_reset_completed": "Пароль восстановлен",
   "auth.register_started": "Начата регистрация", "auth.register_completed": "Регистрация завершена",
@@ -42,10 +46,12 @@ for (const [code, label] of Object.entries({ telegram_bot: "Telegram", instagram
   for (const [suffix, verb] of Object.entries({ connected: "Подключение", configured: "Настройка", disconnected: "Отключение" })) AUDIT_ACTION_LABELS[`integration.${code}_${suffix}`] = `${verb}: ${label}`;
 }
 export const AUDIT_ENTITY_LABELS: Record<string, string> = {
+  situation: "Ситуация",
   billing_invoice: "Счёт за подписку",
   PendingRegistration: "Регистрация", ServiceSignupRequest: "Заявка на подключение", agreement: "Договорённость", ai_configuration: "Настройки AI", billing_override: "Индивидуальные условия", billing_payment: "Оплата тарифа", payment: "Оплата", contact: "Клиент", company: "Компания", contract: "Договор", contract_template: "Шаблон договора", control_access: "Доступ к BasQar Control", control_command: "BasQar Control", control_identity: "Аккаунт BasQar Control", conversation: "Диалог", deal: "Сделка", electronic_document: "Электронный документ", esf_connection: "Подключение ИС ЭСФ", inquiry: "Заявка", integration: "Интеграция", invitation: "Приглашение сотрудника", invoice: "Счёт", knowledge_document: "База знаний", membership: "Сотрудник", platform_setting: "Настройки сервиса", service_category: "Услуги и товары", session: "Сеанс", subscription: "Подписка", subscription_request: "Заявка на тариф", support_ticket: "Обращение в поддержку", tenant: "Компания", tenant_legal_profile: "Реквизиты компании", tenant_plan: "Тариф", user: "Пользователь", task: "Задача",
 };
 const VALUES: Record<string, string> = {
+  personal: "Только для себя", company: "Для всей компании",
   owner: "Администратор компании", director: "Директор", sales_lead: "Руководитель продаж", manager: "Менеджер", platform_admin: "Администратор сервиса",
   NEW_SUBSCRIPTION: "Подключение тарифа", UPGRADE: "Переход на старший тариф", DOWNGRADE: "Переход на младший тариф", RENEWAL: "Продление", ADD_ADDON: "Подключение дополнения", REMOVE_ADDON: "Отключение дополнения", ENTERPRISE_REQUEST: "Индивидуальный тариф",
   MONTHLY: "Месяц", YEARLY: "Год", monthly: "Месяц", yearly: "Год",
@@ -58,6 +64,7 @@ const VALUES: Record<string, string> = {
   ai: "AI-менеджер", human: "Менеджер", paused: "На паузе", today: "Сегодня", yesterday: "Вчера", week: "Неделя", month: "Месяц", all: "Всё время", high: "Высокий", normal: "Обычный", low: "Низкий",
 };
 const FIELDS: Record<string, string> = {
+  scope: "Область действия", until: "Отложено до",
   planCode: "Тариф", fromPlanCode: "Предыдущий тариф", role: "Роль", email: "Электронная почта", name: "Имя", title: "Название", jobTitle: "Должность", type: "Тип заявки", billingPeriod: "Период оплаты", amount: "Сумма", amountMinor: "Сумма", offerAmountMinor: "Сумма сделки", wonAmountMinor: "Сумма выигранной сделки", startsAt: "Начало действия", endsAt: "Действует до", expiresAt: "Действует до", nextActionAt: "Срок следующего действия", dueAt: "Срок", wonAt: "Дата выигрыша", lostAt: "Дата закрытия", nextAction: "Следующее действие", probability: "Вероятность", paymentStatus: "Оплата", status: "Состояние", result: "Результат", source: "Источник", mode: "Режим диалога", delivery: "Приглашение", period: "Период", priority: "Приоритет", active: "Доступ включён", existingUser: "Существующий аккаунт", lossReason: "Причина проигрыша", reason: "Причина", from: "Было", to: "Стало", fileName: "Файл", documentNumber: "Номер документа", number: "Номер", count: "Количество", quantity: "Количество",
 };
 const FREE_TEXT = new Set(["name", "title", "jobTitle", "email", "nextAction", "lossReason", "reason", "fileName", "documentNumber", "number", "from", "to"]);
@@ -67,9 +74,9 @@ export function presentAudit(item: { action: string; entityType: string; changes
   const format = (key: string, value: unknown): string | null => {
     if (value == null || value === "" || value === "[REDACTED]") return null;
     if (typeof value === "boolean") return value ? "Да" : "Нет";
-    if (key.endsWith("At") && (typeof value === "string" || value instanceof Date)) {
+    if ((key.endsWith("At") || key === "until") && (typeof value === "string" || value instanceof Date)) {
       const date = new Date(value); if (!Number.isFinite(date.getTime())) return null;
-      return new Intl.DateTimeFormat("ru-RU", { timeZone, day: "2-digit", month: "2-digit", year: "numeric", ...(key === "nextActionAt" || key === "dueAt" ? { hour: "2-digit", minute: "2-digit" } as const : {}) }).format(date);
+      return new Intl.DateTimeFormat("ru-RU", { timeZone, day: "2-digit", month: "2-digit", year: "numeric", ...(key === "nextActionAt" || key === "dueAt" || key === "until" ? { hour: "2-digit", minute: "2-digit" } as const : {}) }).format(date);
     }
     if (["amount", "amountMinor", "offerAmountMinor", "wonAmountMinor"].includes(key)) return Number.isFinite(Number(value)) ? `${Number(value).toLocaleString("ru-RU")} ₸` : null;
     if (key === "planCode" || key === "fromPlanCode") return CATALOG_BY_CODE[String(value)]?.name || "Индивидуальный тариф";

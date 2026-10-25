@@ -11,6 +11,7 @@ import { NavIcon } from "../components/NavIcon";
 import { PERIOD_OPTIONS } from "../lib/period";
 import "../stats.css";
 import { exportAnalyticsCsv, exportAnalyticsExcel, exportAnalyticsPdf } from "../lib/statsExport";
+import { analyticsCoverageLines } from "../lib/analyticsCoverage";
 
 type TabId =
   | "overview"
@@ -445,6 +446,11 @@ export function StatsPage() {
       </nav>
       {loading && !data ? <div className="stats-skeleton" role="status"><span>{uiText("Загрузка статистики…")}</span><div /><div /><div /><div /></div> : null}
       <div className={`stats-content${loading && data ? " is-refreshing" : ""}`} aria-busy={loading} inert={loading || undefined}>
+      {data?.coverage?.partial ? <aside className="stats-coverage" role="status">
+        <strong>{uiText("Охват данных")}</strong>
+        {analyticsCoverageLines(data).slice(0, 2).map(line => <p key={line}>{line}</p>)}
+        <details><summary>{uiText("Какие разделы неполные")}</summary><ul>{analyticsCoverageLines(data).slice(2).map(line => <li key={line}>{line}</li>)}</ul></details>
+      </aside> : null}
       {data?.empty ? (
         <div className="sit-section">
           <h3>{uiText("По выбранным условиям нет данных")}</h3>
@@ -1049,6 +1055,7 @@ export function StatsPage() {
       {drill ? (
         <StatsDialog title={drill.title || uiText("Детализация")} onClose={closeDrill} wide>
             <p className="muted">{drillLoading ? uiText("Загрузка…") : uiText("Всего: {p0}", {p0: drill.total ?? drill.items?.length ?? 0})}</p>
+            {drill.hasMore ? <p className="stats-coverage">{uiText("Показано {shown} из {total}. Сузьте период или фильтры.", {shown: drill.items?.length || 0, total: drill.total})}</p> : null}
             <div className="stats-table-wrap">
               <table className="stats-table">
                 <thead>

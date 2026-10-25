@@ -3,12 +3,13 @@ import { uiTaskTitle, uiText, useUiText, localizeUiOptions, uiMessage, uiFormatL
 import { useSession } from "../lib/session";
 import { ChannelIcon, ConversationAvatar, CONVERSATION_CHANNELS } from "../components/ConversationIdentity";
 import { useUrlState, useRequestVersion } from "../lib/useUrlState";
-import { useEffect, useLayoutEffect, useRef, useState, type DragEvent } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type DragEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { nameWithPhone, channelPhoneText } from "../lib/contactDisplay";
 import { api } from "../lib/api";
 import { tip } from "../lib/tip";
 import { dealOutcomeLabel } from "../lib/labels";
+const ConversationCrmReview = lazy(() => import("../components/ConversationCrmReview"));
 
 const FILTERS = [
   ["all", "Все"],
@@ -723,6 +724,12 @@ export function ConversationsPage() {
         </button>
         {contextNote ? <div className="muted" style={{ marginTop: 8 }}>{contextNote}</div> : null}
       </div>
+
+      <Suspense fallback={null}>
+        <ConversationCrmReview key={workspace.conversation.id} conversationId={workspace.conversation.id}
+          refreshKey={`${workspace.conversation.messageRevision}:${workspace.conversation.lastContextAnalyzedAt || ""}`}
+          onChanged={async () => { await loadWorkspace(workspace.conversation.id); await loadList(); }} />
+      </Suspense>
 
       {(workspace.agreements || []).length ? (
         <div className="panel soft">

@@ -1,4 +1,5 @@
 import type { SetupState, SetupUpdate, AiManagerDraft, AiSetupState, AiSetupPreview, AiKnowledgeImportInput, AiKnowledgeImportPreview } from "@creolab/contracts";
+import type { CrmReviewList, CrmReviewStatus } from "@creolab/contracts";
 export type TaskDetailResponse = Record<string, unknown> & { id: string; dueAt: string | null };
 export type AnalyticsTrendResponse = {
   granularity: string;
@@ -262,7 +263,7 @@ export function createApiClient(options: ClientOptions) {
       const suffix = params.toString() ? `?${params}` : "";
       return request(`/api/v1/situation/overview${suffix}`);
     },
-    snoozeSituation: (body: { itemId: string; until: string; reason?: string }) =>
+    snoozeSituation: (body: { itemId: string; until: string; reason?: string; scope?: "personal" | "company" }) =>
       request("/api/v1/situation/snooze", { method: "POST", body: JSON.stringify(body) }),
     situationAsk: (body: {
       text: string;
@@ -694,6 +695,9 @@ export function createApiClient(options: ClientOptions) {
         body: JSON.stringify(body),
       }),
     conversationAgreements: (id: string) => request(`/api/v1/conversations/${id}/agreements`),
+    conversationCrmReview: (id: string) => request<CrmReviewList>(`/api/v1/conversations/${encodeURIComponent(id)}/crm-review`),
+    reviewConversationCrmChange: (id: string, changeId: string, decision: "accept" | "dismiss" | "undo") =>
+      request<{ status: CrmReviewStatus }>(`/api/v1/conversations/${encodeURIComponent(id)}/crm-review/${encodeURIComponent(changeId)}`, { method: "POST", body: JSON.stringify({ decision }) }),
     takeConversation: (id: string) => request(`/api/v1/conversations/${id}/take`, { method: "POST" }),
     assignConversation: (id: string, membershipId: string) =>
       request(`/api/v1/conversations/${id}/assign`, { method: "POST", body: JSON.stringify({ membershipId }) }),

@@ -1,0 +1,88 @@
+{
+  "date": "2026-10-25",
+  "timezone": "Asia/Almaty",
+  "baseCommit": "8c345bb",
+  "stage": 2,
+  "scope": {
+    "sourceChanged": true,
+    "productionDataChanged": false,
+    "deployed": false,
+    "realMessagesSent": false,
+    "externalProvidersDisabledInTests": true
+  },
+  "findings": {
+    "A01": "Implemented and tested: record permissions, personal/company snooze scopes, audit",
+    "A02": "Implemented and tested: selected-client task linkage and clarification",
+    "A03": "Implemented and tested for new writes; historical production intervals not repaired",
+    "A05": "Exact primary totals; bounded detailed sections disclose partial/unavailable coverage",
+    "A06": "Broken test fixtures and dictionary parser fixed; all checks passing",
+    "A07": "Atomic mandatory patches and fail-fast startup implemented; real PostgreSQL validation pending"
+  },
+  "checks": {
+    "fullServer": {
+      "command": "node scripts/test-api.mjs",
+      "tests": 1313,
+      "pass": 1313,
+      "fail": 0,
+      "skipped": 0,
+      "cancelled": 0,
+      "filesPassed": 157,
+      "files": 157,
+      "phase": "Before final won/lost optimistic concurrency guard"
+    },
+    "finalAffectedServer": {
+      "command": "node scripts/test-api.mjs salesProcess conversationCrmAutomation auditRegression",
+      "tests": 100,
+      "pass": 100,
+      "fail": 0,
+      "skipped": 0,
+      "cancelled": 0,
+      "filesPassed": 3,
+      "files": 3,
+      "phase": "After final guard; includes two new interleaving tests"
+    },
+    "web": {
+      "command": "npm run test --workspace=@creolab/web",
+      "tests": 49,
+      "pass": 49,
+      "fail": 0,
+      "skipped": 0,
+      "cancelled": 0
+    },
+    "typecheck": {
+      "command": "npm run typecheck",
+      "passed": true
+    },
+    "webBuild": {
+      "command": "npm run build --workspace=@creolab/web",
+      "passed": true,
+      "initialJavaScriptBytes": 1094770,
+      "gzipBytes": 278759,
+      "thresholdBytes": 1100000,
+      "thresholdGzipBytes": 285000,
+      "warning": "Vite still reports a large shared chunk"
+    },
+    "diffCheck": {
+      "command": "git diff --check",
+      "passed": true
+    }
+  },
+  "analyticsFixture": {
+    "inquiries": 5001,
+    "won": 5001,
+    "open": 3001,
+    "lost": 2,
+    "dealTotal": 8004,
+    "revenueMinor": 59999,
+    "pipelineMinor": 300100,
+    "weightedPipelineMinor": 150050
+  },
+  "unverified": [
+    "Docker build",
+    "Real PostgreSQL copy and concurrent API/worker startup",
+    "Historical production stage interval repair",
+    "Visual browser acceptance",
+    "Live providers, models, payment, ESF and deployment parity"
+  ],
+  "nextStage": "3: CRM proposals, evidence, objections/refusals, safe undo protecting newer manual edits"
+}

@@ -82,6 +82,12 @@ function quickTaskCommand(text: string, timeZone: string, now: Date): ChatComman
   const match = text.trim().match(/^(?:создай(?:те)?|создать|добавь(?:те)?|поставь(?:те)?|запиши(?:те)?)\s+(?:мне\s+)?(?:задачу|напоминание)\s*:?\s+(.+)$/isu);
   if (!match) return null;
   let title = match[1].trim();
+  const selectedClientRef = /(^|\s)(?:с (?:этим|данным|выбранным) клиентом|(?:этому|данному|выбранному) клиенту|для (?:этого|данного|выбранного) клиента)(?=\s|[,.!?]|$)/iu;
+  const useSelectedClient = selectedClientRef.test(title);
+  if (useSelectedClient) title = title.replace(selectedClientRef, "$1").replace(/\s+/g, " ").trim();
+  // Ambiguous pronouns/deal references need the structured parser or a
+  // clarification, never an unlinked task that only appears to name a client.
+  if (/(?:^|\s)(?:ему|ей|с ним|с ней|по этой сделке)(?=\s|[,.!?]|$)/iu.test(title)) return null;
   if (/(?:ответственн|исполнитель|назначь|для клиента|клиенту|этому клиенту|;|\n)/i.test(title)) return null;
   const months = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
   const datePattern = new RegExp(`(?:\\s+(?:на|до))?\\s+(сегодня|завтра|послезавтра|\\d{1,2}\\s+(?:${months.join("|")})(?:\\s+\\d{4}(?:\\s*г(?:ода|\\.)?)?)?|\\d{1,2}\\.\\d{1,2}(?:\\.\\d{4})?)(?:\\s+(?:в|к)\\s+(\\d{1,2})(?::(\\d{2}))?)?[.!?]*$`, "i");
@@ -104,7 +110,7 @@ function quickTaskCommand(text: string, timeZone: string, now: Date): ChatComman
   }
   // Never turn an unparsed deadline or assignment into a task silently.
   if (!title || /(?:сегодня|завтра|\d{1,2}:\d{2}|\d{1,2}\.\d{1,2}|понедельник|вторник|сред[ау]|четверг|пятниц|суббот|воскресень|через\s+\d|\s(?:в|к)\s+\d|назначить|ответственн)/i.test(title)) return null;
-  return { action: "CREATE_TASK", title, ...(dueAt ? { dueAt } : {}) };
+  return { action: "CREATE_TASK", title, ...(dueAt ? { dueAt } : {}), ...(useSelectedClient ? { useSelectedClient: true } : {}) };
 }
 
 // Requests for areas without a chat tool get a precise route, never a fabricated

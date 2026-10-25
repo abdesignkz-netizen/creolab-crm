@@ -10,9 +10,8 @@ import { BrandLogo } from "./components/BrandLogo";
 import { PageErrorBoundary } from "./components/PageErrorBoundary";
 import { PasswordInput } from "./components/PasswordInput";
 import { AuthLanguagePicker, useAuthLocale } from "./components/AuthLanguagePicker";
-import { SupportCenter, SupportHelpButton } from "./components/SupportCenter";
+import { SupportHelpButton } from "./components/SupportHelpButton";
 import { PaywallDialog } from "./components/PaywallDialog";
-import { OnboardingWizard } from "./components/OnboardingWizard";
 import { tip } from "./lib/tip";
 import { applyAppearance, useLocale, emptyCaps, SessionContext, type Capabilities } from "./lib/session";
 import { normalizeLocale, getPublicLocale, authErrorMessage, t } from "./i18n";
@@ -29,6 +28,8 @@ import {
   startNotificationPolling,
 } from "./lib/browserNotifications";
 const ClientsPage = lazy(() => import("./pages/ClientsPage").then(m => ({ default: m.ClientsPage })));
+const SupportCenter = lazy(() => import("./components/SupportCenter").then(m => ({ default: m.SupportCenter })));
+const OnboardingWizard = lazy(() => import("./components/OnboardingWizard").then(m => ({ default: m.OnboardingWizard })));
 const CompaniesPage = lazy(() => import("./pages/CompaniesPage").then(m => ({ default: m.CompaniesPage })));
 const CompanyPage = lazy(() => import("./pages/CompanyPage").then(m => ({ default: m.CompanyPage })));
 const ContactPage = lazy(() => import("./pages/ContactPage").then(m => ({ default: m.ContactPage })));
@@ -112,9 +113,13 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
   const [moreOpen, setMoreOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [helpLoaded, setHelpLoaded] = useState(false);
   const [helpTicketId, setHelpTicketId] = useState<string | null>(null);
   const [helpUnread, setHelpUnread] = useState(0);
   const moreSheetRef = useRef<HTMLDivElement>(null);
+
+  // Load help only when requested, then retain its draft across close/reopen.
+  useEffect(() => { if (helpOpen) setHelpLoaded(true); }, [helpOpen]);
 
   const caps: Capabilities = me?.capabilities || emptyCaps;
   const locale = normalizeLocale(me?.user?.locale);
@@ -677,7 +682,26 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
         </button>
       </div>
 
-      {inServiceAdmin || !me?.billing?.entitlements?.SUPPORT ? null : (
+      {inServiceAdmin || !me?.billing?.entitlements?.SUPPORT || (!helpOpen && !helpLoaded) ? null : (
+      <PageErrorBoundary resetKey={String(helpOpen)} fallback={helpOpen ? (
+        <div className="support-root">
+          <button type="button" className="support-backdrop" aria-label={uiText("Закрыть поддержку")} onClick={closeHelp} />
+          <aside className="support-drawer panel" role="dialog" aria-modal="true" aria-label={t(locale, "nav.help")}>
+            <p role="alert">{uiText("Не удалось открыть этот раздел")}</p>
+            <button type="button" className="btn secondary" onClick={closeHelp}>{uiText("Закрыть")}</button>
+            <button type="button" className="btn" onClick={() => window.location.reload()}>{uiText("Перезагрузить страницу")}</button>
+          </aside>
+        </div>
+      ) : null}>
+      <Suspense fallback={helpOpen ? (
+        <div className="support-root">
+          <button type="button" className="support-backdrop" aria-label={uiText("Закрыть поддержку")} onClick={closeHelp} />
+          <aside className="support-drawer panel" role="dialog" aria-modal="true" aria-label={t(locale, "nav.help")}>
+            <button type="button" className="btn secondary" onClick={closeHelp}>{uiText("Закрыть")}</button>
+            <p role="status">{t(locale, "common.loading")}</p>
+          </aside>
+        </div>
+      ) : null}>
       <SupportCenter
         open={helpOpen}
         onClose={closeHelp}
@@ -685,6 +709,8 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
         onUnread={setHelpUnread}
         canCreateTicket={hasCompany}
       />
+      </Suspense>
+      </PageErrorBoundary>
       )}
 
       <nav className="mobile-tabbar" aria-label={t(locale, "nav.primary")}>
@@ -1004,7 +1030,7 @@ function Login() {
 function Today() {
   return (
     <>
-      <OnboardingWizard />
+      <Suspense fallback={null}><OnboardingWizard /></Suspense>
       <SituationPage />
     </>
   );

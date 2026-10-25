@@ -1,9 +1,11 @@
 import { applyAiIntake, publishedIntakePolicy } from "./aiIntakeService.ts";
+import { recordDealStageTransition } from "./dealStageHistory.ts";
 import { considerSalesOpportunity, ensureSalesNextTask, enqueueSalesReconcile } from "./salesProcessService.ts";
 import { deliveredConversationMessage } from "./conversationMessageState.ts";
 import { randomUUID } from "node:crypto";
 import type { Prisma, PrismaClient } from "@creolab/db";
-import { taskCreatorSnapshot } from "@creolab/contracts";
+import { taskCreatorSnapshot, readCrmCommercial } from "@creolab/contracts";
+import { crmReviewFingerprint } from "./crmReviewState.ts";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { writeActivity } from "./contactService.ts";
@@ -17,6 +19,7 @@ import { getEffectiveTenantSettings } from "./runtimeSettings.ts";
 import { createStaffNotification } from "./notificationService.ts";
 import { writeAudit } from "../lib/audit.ts";
 import { listThreadConversationIds } from "./conversationThread.ts";
+import { automaticCrmReview, proposeConversationCrmChanges } from "./conversationCrmReviewService.ts";
 
 
 const SAFE_INQUIRY_TRANSITIONS: Record<string, string[]> = {
@@ -179,6 +182,13 @@ export async function applyAnalyzedConversation(prisma: PrismaClient, tid: strin
       return { applied: null, skipped: "automation_disabled" };
     }
     if (conversation.mode === "paused" || policy.mode === "ASSIST" || (conversation.mode === "human" && !settings.crm.inHumanMode)) {
+      await tx.$queryRaw`SELECT id FROM "Conversation" WHERE id = ${conversationId} AND "tenantId" = ${tid} FOR UPDATE`;
+      const fresh = await tx.conversation.findUniqueOrThrow({ where: { id: conversationId } });
+      if (fresh.messageRevision !== result.messageRevision || fresh.controlVersion !== conversation.controlVersion || !evidenceMessages.some(m => m.id === sourceMessageId)) {
+        throw new ApiError(409, "stale_analysis", "Диалог изменился во время анализа; требуется повторный анализ");
+      }
+      await proposeConversationCrmChanges(tx, tid, conversationId, { analysis, sourceMessageId, messageRevision: result.messageRevision,
+        snapshot: result.snapshot.review, updateContact: settings.crm.updateContact, updateInquiry: settings.crm.updateInquiry });
       return { applied: null, skipped: "suggestions_only" };
     }
     if (conversation.messageRevision !== result.messageRevision || !evidenceMessages.some(m => m.id === sourceMessageId)) {
@@ -203,6 +213,12 @@ export async function applyAnalyzedConversation(prisma: PrismaClient, tid: strin
     if (await tx.idempotencyRecord.findUnique({ where: { scope_actorKey_key: key } })) return { applied: null, skipped: "already_applied" };
 
     const contactId = conversation.contactId;
+    let commercialUnchanged = false;
+    if (inquiry && result.snapshot.review?.inquiry?.id === inquiry.id && analysis.commercialFacts?.length) {
+      await tx.$queryRaw`SELECT id FROM "Inquiry" WHERE id = ${inquiry.id} AND "tenantId" = ${tid} FOR UPDATE`;
+      const locked = await tx.inquiry.findUniqueOrThrow({ where: { id: inquiry.id } });
+      commercialUnchanged = crmReviewFingerprint("inquiry", locked) === result.snapshot.review.inquiry.fingerprint;
+    }
     const createdSalesDeal = await considerSalesOpportunity(tx, tid, { conversationId, sourceMessageId, messageRevision: result.messageRevision, analysis });
     const deal = await resolveContextDeal(tx, tid, conversationId, contactId, inquiry?.dealId);
     const evidenceIds = new Set(evidenceMessages.map(m => m.id));
@@ -259,6 +275,7 @@ export async function applyAnalyzedConversation(prisma: PrismaClient, tid: strin
       result.snapshot.deal.updatedAt.getTime() === deal.updatedAt.getTime() &&
       (deal.updatedAt <= sourceMessageAt || onlyPriorAiChanged) && !await manuallyChanged("deal", deal.id)));
     const dealData: Prisma.DealUncheckedUpdateInput = {};
+    let stageTransition: Parameters<typeof recordDealStageTransition>[1] | null = null;
     const accepted = (analysis.events || []).filter(e => e.type === "PRICE_ACCEPTED" && e.confidence === "HIGH" && grounded(e.evidenceMessageIds));
     if (dealWritable && evidenceMessages.some(m => m.id === sourceMessageId && (m.direction === "inbound" || m.senderKind === "client")) && settings.crm.updateDealAmount && accepted.length === 1 && !(analysis.events || []).some(e => e.type === "PRICE_REJECTED")) {
       const price = accepted[0];
@@ -274,8 +291,9 @@ export async function applyAnalyzedConversation(prisma: PrismaClient, tid: strin
       const target = await tx.dealStage.findFirst({ where: { tenantId: tid, systemKey: analysis.suggestedDealStage, isTerminal: false } });
       if (target && target.sortOrder > deal.stage.sortOrder) {
         dealData.stageId = target.id; dealData.stageEnteredAt = new Date(); dealData.probability = target.defaultProbability;
-        await tx.dealStageHistory.create({ data: { tenantId: tid, dealId: deal.id, fromStageId: deal.stageId,
-          fromSystemKey: deal.stage.systemKey, toStageId: target.id, toSystemKey: target.systemKey, changedByType: "context_engine", note: analysis.summaryUpdate } });
+        stageTransition = { tenantId: tid, dealId: deal.id, fromStageId: deal.stageId,
+          fromSystemKey: deal.stage.systemKey, toStageId: target.id, toSystemKey: target.systemKey, enteredAt: dealData.stageEnteredAt as Date,
+          changedByType: "context_engine", note: analysis.summaryUpdate };
         applied.dealStage = target.systemKey;
       }
     }
@@ -293,6 +311,7 @@ export async function applyAnalyzedConversation(prisma: PrismaClient, tid: strin
     }
     if (dealWritable && Object.keys(dealData).length) {
       await tx.deal.update({ where: { id: deal.id, tenantId: tid, version: deal.version, updatedAt: deal.updatedAt }, data: { ...dealData, version: { increment: 1 } } });
+      if (stageTransition) await recordDealStageTransition(tx, stageTransition);
       addChange("deal", deal.id, { offerAmountMinor: deal.offerAmountMinor, stageId: deal.stageId, probability: deal.probability,
         nextAction: deal.nextAction, nextActionAt: deal.nextActionAt, version: deal.version }, { ...dealData, version: deal.version + 1 }, applied.dealAmount != null ? "PRICE_ACCEPTED" : "DEAL_UPDATED", "HIGH");
     }
@@ -379,7 +398,9 @@ export async function applyAnalyzedConversation(prisma: PrismaClient, tid: strin
       applied.agreements.push({ agreementId: agreement.id, taskId: task?.id || null, type: agreement.type, status: agreement.status });
     }
     for (const change of changes) {
-      const metadata = { actor: "ai", conversationId, contactId, dealId: deal?.id || null, sourceMessageId, sourceMessageAt: sourceMessageAt.toISOString(), ...change };
+      const review = contactId ? await automaticCrmReview(tx, tid, { conversationId, contactId, sourceMessageId, messageRevision: result.messageRevision,
+        ...change, evidenceMessageIds: analysis.evidenceMessageIds }) : null;
+      const metadata = { actor: "ai", conversationId, contactId, dealId: deal?.id || null, sourceMessageId, sourceMessageAt: sourceMessageAt.toISOString(), ...change, ...(review ? { review } : {}) };
       await writeAudit(tx, { tenantId: tid, action: "conversation.crm_updated", entityType: change.entityType,
         entityId: change.entityId, correlationId: sourceMessageId, changes: metadata });
       if (contactId) await writeActivity(tx, { tenantId: tid, contactId, inquiryId: inquiry?.id, dealId: deal?.id,
@@ -389,6 +410,11 @@ export async function applyAnalyzedConversation(prisma: PrismaClient, tid: strin
     if (settings.crm.updateInquiry && reliable) await applyAiIntake(tx, tid, { policy: intakePolicy,
       extraction: analysis.intakeRequest, inquiryId: inquiry?.id, conversationId, sourceMessageId, evidence: evidenceMessages,
       createTasks: settings.crm.createTasks, ownerMembershipId: owner?.id });
+    const reviewedInquiry = commercialUnchanged && inquiry ? await tx.inquiry.findUniqueOrThrow({ where: { id: inquiry.id } }) : null;
+    const commercialFingerprint = reviewedInquiry && JSON.stringify(readCrmCommercial(reviewedInquiry)) === JSON.stringify(result.snapshot.review?.inquiry?.commercial)
+      ? crmReviewFingerprint("inquiry", reviewedInquiry) : undefined;
+    await proposeConversationCrmChanges(tx, tid, conversationId, { analysis, sourceMessageId, messageRevision: result.messageRevision,
+      snapshot: result.snapshot.review, commercialFingerprint, updateContact: settings.crm.updateContact, updateInquiry: settings.crm.updateInquiry });
     await tx.idempotencyRecord.create({ data: { ...key, requestHash: sourceMessageId,
       resultJson: json({ events: analysis.events || [], applied }), expiresAt: new Date("9999-12-31T00:00:00Z") } });
     if (deal) { await ensureSalesNextTask(tx, tid, deal.id, conversationId, Boolean(dealWritable && (dealData.nextAction || dealData.nextActionAt))); await enqueueSalesReconcile(tx, tid, deal.id); }

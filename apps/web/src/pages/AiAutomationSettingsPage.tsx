@@ -6,7 +6,7 @@ import { useUiText, localizeUiOptions } from "../lib/uiText";
 import { useLocale } from "../lib/session";
 import { notifySaved } from "../components/SaveNotice";
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useCompanyConfiguration } from "../lib/companyConfiguration";
 import { NavIcon } from "../components/NavIcon";
 import "../ai-manager-settings.css";
@@ -140,7 +140,8 @@ export function AiAutomationSettingsPage() {
   const [error, setError] = useState("");
   const [hint, setHint] = useState("");
   const [busy, setBusy] = useState(false);
-  const [section, setSection] = useState<SettingsSection>(new URLSearchParams(window.location.search).get("section") === "sales" ? "sales" : "replies");
+  const [searchParams] = useSearchParams();
+  const [section, setSection] = useState<SettingsSection>(() => searchParams.get("section") === "sales" ? "sales" : "replies");
   const [replyAudience, setReplyAudience] = useState<Audience>({ audience: "all", since: null });
   const [proactive, setProactive] = useState(true);
   const [savedSnapshot, setSavedSnapshot] = useState("");

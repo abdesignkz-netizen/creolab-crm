@@ -1,0 +1,21 @@
+import type { CrmCommercialField, CrmCommercialValues, CrmMoney } from "./crmCommercial.ts";
+export type CrmReviewEntity = "contact" | "inquiry";
+export type CrmReviewField = "summary" | "aiSummary" | "nextStep" | "status" | "needsReply" | CrmCommercialField;
+export type CrmReviewValue = string | boolean | CrmMoney | null;
+export type CrmReviewStatus = "pending" | "accepted" | "automatic" | "dismissed" | "superseded" | "undone";
+export type CrmReviewBlock = "changed" | "conversation_changed" | "permissions" | "unavailable" | null;
+export type CrmReviewItem = {
+  id: string;
+  entityType: CrmReviewEntity;
+  entityId: string;
+  status: CrmReviewStatus;
+  confidence: "HIGH" | "MEDIUM" | "LOW";
+  createdAt: string;
+  fields: Array<{ key: CrmReviewField; before: CrmReviewValue; after: CrmReviewValue }>;
+  evidence: Array<{ id: string; text: string | null; quote?: string; createdAt: string; senderKind: string; direction: string }>;
+  canAccept: boolean;
+  canDismiss: boolean;
+  canUndo: boolean;
+  blockedReason: CrmReviewBlock;
+};
+export type CrmReviewList = { items: CrmReviewItem[]; hasMore: boolean; commercial?: CrmCommercialValues | null };

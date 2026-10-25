@@ -1,0 +1,32 @@
+Use case: ads-marketing.
+Create a completely redesigned premium BasQar paid-social campaign poster, portrait EXACT 9:16 aspect ratio, ideally 1080x1920. The previous design looked cheap and generic. This must look like an art-directed identity campaign for a premium contemporary software company, with strong intelligent typography, a memorable graphic composition, and concrete product value.
+
+Reference image 1: original BasQar logo ONLY, supporting identity input. Preserve its precise custom black lettering and cyan/blue Q/cursor emblem. This is NOT a style reference for the whole poster. Put original intact logo on the off-white upper margin, at a refined modest size.
+
+Creative idea: turn scattered customer conversations into an organized sales process.
+Primary Russian headline, exact words, large and commanding:
+"Превратите"
+"диалоги"
+"в продажи."
+Set it as a refined oversized modern editorial grotesk, heavy but not cartoonishly swollen, tightly tracked, carefully kerned, crisp straight letters. Dark ink, with "в продажи." in cobalt. Strong left alignment. Use excellent Cyrillic typography. No strokes, bevels, outlines or shadows on lettering.
+
+Visual system and layout:
+- Full-bleed warm porcelain / very pale grey paper-white background, NOT the previous light-blue bubbly background.
+- Swiss editorial grid, ink-black type, a single decisive ultramarine/cobalt colour field behind the product visual, very small cyan accent in the brand emblem.
+- Beautifully balanced asymmetric composition. Each block has a clear purpose. Strong designer spacing, typographic contrast. Premium restrained materials, matte finish.
+- Upper safe area at 170px holds the logo, with small plain descriptor aligned on the right: "ИИ-менеджер + CRM".
+- Headline approximately y=310–690, about 110–125px equivalent at 1080-wide canvas. The headline is the main attraction.
+- Beneath at y=750–1260, make ONE striking graphic product vignette: a sophisticated large flat almost-square ink-black application panel, superimposed over a cobalt rectangular colour field that bleeds to the right edge. NO cartoon speech bubbles. Panel has 12px corners, hairline structural rules, a thin understated shadow only. It feels like beautifully designed professional software rather than a stock illustration. No browser chrome, no phone or laptop. It is an illustrative advertising diagram, not a screenshot.
+  In the panel, show one coherent lead progressing through three rows, connected by a precise fine vertical line with small square nodes, using white typography and restrained cobalt highlights:
+  Row 1 title "Входящее обращение", main text "Нужен сайт для бизнеса".
+  Row 2 title "ИИ-менеджер", main text "Уточняет задачу клиента".
+  Row 3 title "Следующий шаг", main text "Подготовить предложение".
+  Titles smaller but readable, main text 32–38px equivalent. No unnecessary icons. No check marks. No invented metrics or chart. The graphical story is conversation -> qualification -> next action.
+- Supporting statement below visual, exact copy, easy to read, around 36px equivalent:
+"ИИ отвечает клиентам."
+"Заявки, сделки и задачи —"
+"в одной системе."
+- Bottom safe area near y=1610: an elegant slim editorial call to action "Посмотреть BasQar ↗" on the left and "bsqr.kz" on the right, over a fine dividing rule. No giant pill-shaped button. Keep all text above y=1685 so the last 235px remain clean for social overlays.
+- Left and right content margins at least 74px at 1080 wide. All text highly legible on a phone. Do not clutter with tiny text.
+
+Absolute exclusions: no generic 3D inflated icons, no shiny check marks, no floating balloons, no glassmorphism, no blobs, no blue neon fog, no glowing curves, no robot, no handshake photo, no stock business people, no template-style benefit checklist, no gradients except the ORIGINAL logo emblem, no decoration without meaning. Avoid childish rounded font and fake luxury gold. No statistics, pricing, guarantee, free claim or extra copy. Professional bold minimalism with enough concrete information; editorial density, not empty space. Final complete artwork, no mockup presentation border, no watermark. All Russian text must be correct and exactly as supplied.

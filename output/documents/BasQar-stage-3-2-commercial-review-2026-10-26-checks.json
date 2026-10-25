@@ -1,0 +1,84 @@
+{
+  "date": "2026-10-26",
+  "timezone": "Asia/Almaty",
+  "stage": "3.2",
+  "status": "implemented_and_tested_locally",
+  "wholeStage3Complete": false,
+  "deployed": false,
+  "productionDataModified": false,
+  "externalMessagesSent": false,
+  "checks": {
+    "affectedApi": {
+      "tests": 122,
+      "pass": 122,
+      "fail": 0,
+      "skipped": 0,
+      "cancelled": 0,
+      "files": {
+        "pass": 4,
+        "total": 4
+      },
+      "log": "/tmp/basqar-stage3-2-regression-final.log",
+      "database": "isolated PGlite",
+      "externalProviders": "disabled"
+    },
+    "newCommercialTests": {
+      "tests": 46,
+      "pass": 46,
+      "fail": 0,
+      "note": "Included in affectedApi; not additional tests."
+    },
+    "web": {
+      "tests": 51,
+      "pass": 51,
+      "fail": 0,
+      "skipped": 0,
+      "cancelled": 0,
+      "log": "/tmp/basqar-stage3-2-web-final.log",
+      "type": "automated checks including SSR; not visual browser acceptance"
+    },
+    "types": {
+      "status": "passed",
+      "workspaces": [
+        "api",
+        "mobile",
+        "web",
+        "contracts"
+      ],
+      "log": "/tmp/basqar-stage3-2-types-final.log",
+      "finalApiLog": "/tmp/basqar-stage3-2-api-types-final.log"
+    },
+    "build": {
+      "status": "passed",
+      "asset": "apps/web/dist/assets/index-DC7Htt_A.js",
+      "bytes": 1097375,
+      "gzipBytes": 278868,
+      "rawLimit": 1100000,
+      "gzipLimit": 285000,
+      "limitsRaised": false,
+      "log": "/tmp/basqar-stage3-2-build2.log",
+      "warning": "Common chunks exceed Vite 500 kB warning threshold"
+    },
+    "diffCheck": "passed"
+  },
+  "database": {
+    "migrationRequired": false,
+    "newTables": false,
+    "newDependencies": false,
+    "budget": "Existing Inquiry.budgetMin/budgetMax; currency preserved",
+    "reviewedNotes": "Inquiry.normalizedJson.crmCommercial; only the reviewed field is changed; unrelated JSON preserved",
+    "evidenceAndHistory": "Existing Activity/AuditEvent records with per-field evidence quotes"
+  },
+  "notVerified": [
+    "Live model quality and production integrations",
+    "Visual desktop/mobile browser acceptance: browser control disabled at previous check",
+    "PostgreSQL concurrency and Docker build",
+    "A new full-project API regression: current final run covers 4 affected test files; earlier full 1336-pass result belongs to stage 3.1"
+  ],
+  "limits": [
+    "Only explicit supported monetary phrasing; no rounding/currency conversion; unsupported or ambiguous values require ordinary manual entry",
+    "New commercial notes require staff approval even in AUTO; the existing configured deal-amount automation is unchanged",
+    "Objection/refusal stores the last confirmed quotation, not an automatically resolved issue or a deal-closing command",
+    "Full undo of agreements, tasks and deal stages remains for stage 3.3"
+  ]
+}

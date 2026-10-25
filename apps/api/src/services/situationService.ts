@@ -7,7 +7,9 @@ import { ApiError } from "../errors.ts";
 import { decryptSecret } from "../lib/secretBox.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { resolveAiManagerUrl } from "./aiManagerConfig.ts";
-import { conversationAccessWhere, inquiryAccessWhere, isManager, taskAccessWhere } from "../lib/access.ts";
+import { conversationAccessWhere, inquiryAccessWhere, isManager, requireCompanyAdmin, requireTenant, taskAccessWhere } from "../lib/access.ts";
+import { writeAudit } from "../lib/audit.ts";
+import { assertSituationReachable, situationSnoozeKey, visibleSituationSnoozes, type SituationSnoozeScope } from "./situationSnooze.ts";
 import { CONTACT_PHONE_SELECT, digitsOnly, displayName, needsReply, phoneFromContact } from "./contactLabels.ts";
 import { inquiryInterest, loadConversationInterests } from "./contactInterestService.ts";
 import { attentionReasonLabel, STATUS_ONLY_ATTENTION } from "./attentionReasons.ts";
@@ -87,12 +89,6 @@ const CONVERSATION_COMMANDS = new Set<SituationNextAction>([
   "resume_paused",
   "instruct_ai",
 ]);
-
-function requireTenant(auth: AuthContext) {
-  const locale = auth.user.locale || "ru";
-  if (!auth.activeMembership) throw new ApiError(403, "no_tenant", systemText(locale, "Нет активной компании"));
-  return auth.activeMembership;
-}
 
 function ageMinutes(from: Date, now: Date) {
   return Math.max(0, Math.floor((now.getTime() - from.getTime()) / 60000));
@@ -374,7 +370,7 @@ export async function getSituation(
         inquiry: { select: { subject: true, service: true, phoneRaw: true, phoneNormalized: true, contactId: true } },
       },
     }),
-    prisma.situationSnooze.findMany({ where: { tenantId: tid } }),
+    visibleSituationSnoozes(prisma, auth),
     tenantSellerFreshness(prisma, tid, locale),
     prisma.contact.findMany({
       where: { tenantId: tid, archivedAt: null },
@@ -410,7 +406,7 @@ export async function getSituation(
     return inquiryInterest(linked)?.text || (contactId ? conversationInterests.get(contactId)?.text : null) || null;
   };
 
-  const snoozeByItem = new Map(snoozes.map((row) => [row.itemId, row]));
+  const snoozeByItem = snoozes;
   const inquiryIds = new Set(inquiries.map((item) => item.id));
   const intakeIds = new Set(intakes.map((item) => item.id));
   const conversationOnBoard = new Set<string>();
@@ -715,10 +711,12 @@ export function isConversationCommand(item: SituationItem) {
 export async function snoozeSituation(
   prisma: PrismaClient,
   auth: AuthContext,
-  input: { itemId: string; until: string; reason?: string },
+  input: { itemId: string; until: string; reason?: string; scope?: SituationSnoozeScope },
 ) {
   const locale = auth.user.locale || "ru";
   const membership = requireTenant(auth);
+  const scope = input.scope || "personal";
+  if (scope === "company") requireCompanyAdmin(auth);
   const itemId = String(input.itemId || "").trim();
   const until = new Date(input.until);
   if (!itemId || Number.isNaN(until.getTime())) {
@@ -732,16 +730,17 @@ export async function snoozeSituation(
   if (until.getTime() <= Date.now()) {
     throw new ApiError(422, "invalid", systemText(locale, "Срок отложения должен быть в будущем"));
   }
-  const row = await prisma.situationSnooze.upsert({
-    where: { tenantId_itemId: { tenantId: membership.tenantId, itemId } },
-    update: { until, reason: input.reason || null, byUserId: auth.user.id },
-    create: {
-      tenantId: membership.tenantId,
-      itemId,
-      until,
-      byUserId: auth.user.id,
-      reason: input.reason || null,
-    },
+  return prisma.$transaction(async tx => {
+    await assertSituationReachable(tx, auth, itemId);
+    const storageKey = situationSnoozeKey(itemId, auth.user.id, scope);
+    const row = await tx.situationSnooze.upsert({
+      where: { tenantId_itemId: { tenantId: membership.tenantId, itemId: storageKey } },
+      update: { until, reason: input.reason || null, byUserId: auth.user.id },
+      create: { tenantId: membership.tenantId, itemId: storageKey, until, byUserId: auth.user.id, reason: input.reason || null },
+    });
+    await writeAudit(tx, { tenantId: membership.tenantId, actorUserId: auth.user.id,
+      action: "situation.snoozed", entityType: "situation", entityId: itemId,
+      changes: { scope, until: until.toISOString(), reason: input.reason || null } });
+    return { ...row, itemId, scope };
   });
-  return row;
 }

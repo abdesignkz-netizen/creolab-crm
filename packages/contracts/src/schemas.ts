@@ -408,6 +408,7 @@ export const snoozeSituationSchema = z.object({
   itemId: z.string().min(3).max(120),
   until: z.string().datetime(),
   reason: z.string().trim().max(400).optional(),
+  scope: z.enum(["personal", "company"]).default("personal"),
 });
 
 export const askSituationSchema = z.object({

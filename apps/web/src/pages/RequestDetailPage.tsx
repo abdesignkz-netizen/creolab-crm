@@ -1,4 +1,5 @@
 import { AiIntakeSummary } from "../components/AiIntakeSummary";
+import { CrmCommercialSummary } from "../components/CrmCommercialSummary";
 import "../request-workspace.css";
 import { InlineFeedback } from "../components/InlineFeedback";
 import { uiSourceLine, uiTaskStatus, uiTaskTitle, uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale } from "../lib/uiText";
@@ -363,6 +364,7 @@ export function RequestDetailPage() {
           ) : null}
 
           <AiIntakeSummary records={data.intakeRequests} />
+          <CrmCommercialSummary values={data.commercial} conversationId={data.conversationId} />
           <div className="panel">
             <h3>{uiText("Кратко")}</h3>
             <p>{data.aiSummary || data.description || uiText("Описание пока не заполнено.")}</p>

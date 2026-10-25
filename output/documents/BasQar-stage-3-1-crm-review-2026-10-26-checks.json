@@ -1,0 +1,99 @@
+{
+  "date": "2026-10-26",
+  "timezone": "Asia/Almaty",
+  "baseCommit": "8c345bb",
+  "stage": "3.1",
+  "status": "implemented_and_automated_checks_passed_locally",
+  "wholeStage3Complete": false,
+  "deployed": false,
+  "productionDataModified": false,
+  "externalMessagesSent": false,
+  "scope": [
+    "Review proposals for contact summary, inquiry AI summary, and next step",
+    "Evidence and per-field accept/dismiss",
+    "Guarded undo of supported new CRM changes",
+    "Permissions, audit and history; protection against later manual edits"
+  ],
+  "checks": {
+    "fullApi": {
+      "tests": 1336,
+      "pass": 1336,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "files": {
+        "passed": 158,
+        "total": 158
+      },
+      "log": "/tmp/basqar-stage3-api-full.log",
+      "database": "isolated PGlite",
+      "externalProviders": "disabled"
+    },
+    "finalAffectedApi": {
+      "tests": 90,
+      "pass": 90,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "files": {
+        "passed": 3,
+        "total": 3
+      },
+      "log": "/tmp/basqar-stage3-final-regressions.log",
+      "note": "Run after all final backend changes, including contact-history permission filtering and alias-thread source checks."
+    },
+    "newCrmReview": {
+      "tests": 21,
+      "pass": 21,
+      "fail": 0,
+      "note": "Included in finalAffectedApi and fullApi; not additional distinct tests."
+    },
+    "web": {
+      "tests": 50,
+      "pass": 50,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "log": "/tmp/basqar-stage3-web-final.log",
+      "note": "Includes server-rendered CRM review component assertions, not browser visual acceptance."
+    },
+    "typecheck": {
+      "status": "passed",
+      "workspaces": [
+        "api",
+        "mobile",
+        "web",
+        "contracts"
+      ],
+      "log": "/tmp/basqar-stage3-types-verified.log"
+    },
+    "webBuild": {
+      "status": "passed",
+      "log": "/tmp/basqar-stage3-build2.log",
+      "initialBundle": "apps/web/dist/assets/index-sInFim2e.js",
+      "bytes": 1099964,
+      "gzipBytes": 279943,
+      "rawLimit": 1100000,
+      "gzipLimit": 285000,
+      "limitsRaised": false,
+      "warning": "Vite warns about chunks larger than 500 kB. Raw initial-bundle headroom is 36 bytes."
+    },
+    "diffWhitespace": {
+      "status": "passed",
+      "command": "git diff --check"
+    }
+  },
+  "schemaMigrationRequired": false,
+  "newDependencies": false,
+  "notVerified": [
+    "Visual behavior in desktop/mobile browsers: local browser control is disabled in Work settings",
+    "Concurrency against real PostgreSQL",
+    "Complete Docker build",
+    "Live LLM response quality and production provider connections"
+  ],
+  "nextStage": [
+    "Separate client budget, proposed and agreed price with evidence",
+    "Objections and refusal reasons with evidence",
+    "Review and undo of agreements, related tasks and deal-stage changes with their consequences"
+  ]
+}

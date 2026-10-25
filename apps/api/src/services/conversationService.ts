@@ -594,6 +594,8 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
       needsManagerAssign: conversation.mode === "human" && !conversation.assigneeMembershipId,
       topic: topic || "Тема не определена",
       contextSummary: conversation.contextSummary,
+      messageRevision: conversation.messageRevision,
+      lastContextAnalyzedAt: conversation.lastContextAnalyzedAt,
     },
     client: contact
       ? {

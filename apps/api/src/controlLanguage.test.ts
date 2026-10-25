@@ -22,4 +22,18 @@ describe("Control natural language without a model", () => {
     assert.throws(() => quickControlCommand("Создай задачу встреча 31 февраля в 18:00", "Asia/Almaty", now), /Уточните дату/);
     assert.throws(() => quickControlCommand("Создай задачу встреча завтра в 25:00", "Asia/Almaty", now), /Уточните дату/);
   });
+  it("retains explicit selected-client references instead of creating unlinked tasks", () => {
+    for (const text of [
+      "Создай задачу связаться с этим клиентом завтра в 11:00",
+      "Создай задачу написать этому клиенту завтра в 11:00",
+      "Создай задачу подготовить КП для выбранного клиента завтра в 11:00",
+    ]) {
+      const command = quickControlCommand(text, "Asia/Almaty", now);
+      assert.equal(command?.useSelectedClient, true, text);
+      assert.equal(command?.dueAt, "2026-10-22T06:00:00.000Z");
+      assert.doesNotMatch(command!.title!, /этим клиентом|этому клиенту|выбранного клиента/);
+    }
+    assert.equal(quickControlCommand("Создай задачу позвонить ему завтра", "Asia/Almaty", now), null);
+    assert.equal(quickControlCommand("Создай задачу подготовить КП по этой сделке завтра", "Asia/Almaty", now), null);
+  });
 });

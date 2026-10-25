@@ -72,6 +72,31 @@ describe("Control inside the platform", () => {
     assert.equal(audit.items.some(item => item.action === "CHAT"), false);
     await assert.rejects(send("Продажи", requestId), /другой команды/);
   });
+  it("links a natural selected-client task and its timeline after confirmation", async () => {
+    const contact = await prisma.contact.create({ data: { tenantId, name: "Selected client " + randomUUID() } });
+    await send("Найди клиента " + contact.name);
+    await send("1");
+    const preview = await send("Создай задачу связаться с этим клиентом завтра в 11:00");
+    assert.ok(preview.pending);
+    assert.match(preview.items.at(-1)!.reply, new RegExp(contact.name!));
+    const pending = await prisma.controlConfirmation.findUniqueOrThrow({ where: { id: preview.pending.id } });
+    assert.equal((pending.paramsJson as any).clientId, contact.id);
+    assert.equal(await prisma.task.count({ where: { tenantId, contactId: contact.id } }), 0);
+    await send("Подтвердить " + preview.pending.id.slice(-6));
+    const task = await prisma.task.findFirstOrThrow({ where: { tenantId, contactId: contact.id } });
+    assert.equal(task.title, "связаться");
+    assert.equal(task.source, "control");
+    const activity = await prisma.activity.findFirstOrThrow({ where: { tenantId, contactId: contact.id, type: "task.created" } });
+    assert.equal((activity.metadataJson as any).taskId, task.id);
+    assert.equal(activity.actorId, auth.user.id);
+  });
+  it("asks for a client before previewing an explicit contextual task with no selection", async () => {
+    const count = await prisma.task.count({ where: { tenantId } });
+    const history = await send("Создай задачу связаться с этим клиентом завтра в 11:00");
+    assert.equal(history.pending, null);
+    assert.match(history.items.at(-1)!.reply, /Найди клиента/);
+    assert.equal(await prisma.task.count({ where: { tenantId } }), count);
+  });
   it("records linked tasks in the customer timeline, with the actual author", async () => {
     await send("Задачи");
     const identity = await prisma.controlIdentity.findFirstOrThrow({ where: { tenantId, userId: auth.user.id, provider: "CRM_CHAT" } });

@@ -126,6 +126,20 @@ describe("Private WhatsApp Control", () => {
     }
     await deliver(); await deliver(); assert.equal(sent.length, 1);
   });
+  it("keeps a selected WhatsApp customer on a task without calling the model", async () => {
+    const contact = await prisma.contact.create({ data: { tenantId, name: "Context client " + randomUUID() } });
+    await ask("Найди клиента " + contact.name);
+    await ask("1");
+    const reply = await ask("Создай задачу связаться с этим клиентом завтра в 11:00");
+    assert.ok(reply.replyText!.includes(contact.name!));
+    const pending = await prisma.controlConfirmation.findFirstOrThrow({ where: { tenantId, status: "pending", identityId } });
+    assert.equal((pending.paramsJson as any).clientId, contact.id);
+    await ask("Подтвердить " + pending.id.slice(-6));
+    const task = await prisma.task.findFirstOrThrow({ where: { tenantId, contactId: contact.id } });
+    assert.equal(task.title, "связаться");
+    assert.equal(modelCalls, 0);
+    assert.equal(await prisma.activity.count({ where: { tenantId, contactId: contact.id, type: "task.created" } }), 1);
+  });
   it("previews a task and writes once only after its exact confirmation", async () => {
     const title = `Private task ${randomUUID()}`;
     assert.match((await askCreateTask(title)).replyText!, /Подтвердить/); assert.equal(await prisma.task.count({ where: { tenantId, title } }), 0);

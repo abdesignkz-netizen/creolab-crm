@@ -1,4 +1,5 @@
-import { readAiIntakeRecords } from "@creolab/contracts";
+import { readAiIntakeRecords, readCrmCommercial } from "@creolab/contracts";
+import { extractCommercialFacts, groundCommercialFacts } from "./conversationCommercialFacts.ts";
 import { publishedIntakePolicy } from "./aiIntakeService.ts";
 import { deliveredConversationMessage } from "./conversationMessageState.ts";
 import type { Prisma, PrismaClient } from "@creolab/db";
@@ -7,6 +8,7 @@ import { assertConversationReachable } from "../lib/access.ts";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { refineConversationContextWithLlm } from "./llmClient.ts";
+import { crmReviewFingerprint, type CrmReviewSnapshot } from "./crmReviewState.ts";
 import {
   AGREEMENT_TYPE_LABEL,
   type AgreementStatus,
@@ -699,7 +701,7 @@ export async function analyzeConversationContext(
   auth: AuthContext,
   conversationId: string,
   options: { useLlm?: boolean; sourceMessageId?: string } = {},
-): Promise<{ analysis: ConversationAnalysis; conversationId: string; messageCount: number; llmUsed: boolean; sourceMessageId: string | null; sourceMessageAt: Date | null; messageRevision: number; snapshot: { deal: { id: string; version: number; updatedAt: Date } | null; inquiry: { id: string; status: string; nextStep: string | null; aiSummary: string | null; needsReply: boolean } | null; contactSummary: string | null; agreements: Array<{ id: string; updatedAt: Date }> } }> {
+): Promise<{ analysis: ConversationAnalysis; conversationId: string; messageCount: number; llmUsed: boolean; sourceMessageId: string | null; sourceMessageAt: Date | null; messageRevision: number; snapshot: { review?: CrmReviewSnapshot; deal: { id: string; version: number; updatedAt: Date } | null; inquiry: { id: string; status: string; nextStep: string | null; aiSummary: string | null; needsReply: boolean } | null; contactSummary: string | null; agreements: Array<{ id: string; updatedAt: Date }> } }> {
   const tid = tenantId(auth);
   await assertConversationReachable(prisma, auth, conversationId);
   const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: tid } });
@@ -770,6 +772,7 @@ export async function analyzeConversationContext(
   });
 
   analysis.events = extractPriceEvents(messages, deal?.currency || tenant.currency);
+  analysis.commercialFacts = extractCommercialFacts(messages, inquiry?.currency || tenant.currency);
   let llmUsed = false;
   if (options.useLlm !== false) {
     const intakePolicy = await publishedIntakePolicy(prisma, tid);
@@ -807,6 +810,7 @@ export async function analyzeConversationContext(
     }
   }
   analysis.events ??= extractPriceEvents(messages, deal?.currency || tenant.currency);
+  analysis.commercialFacts = groundCommercialFacts(analysis.commercialFacts ?? extractCommercialFacts(messages, inquiry?.currency || tenant.currency), messages, inquiry?.currency || tenant.currency);
   for (const agreement of analysis.agreements) {
     const scheduled = ["CONFIRMED", "SCHEDULED", "RESCHEDULED"].includes(agreement.status) && Boolean(agreement.scheduledAt);
     const type = agreement.type === "CALL" ? scheduled ? "CALL_SCHEDULED" : "CALL_PROPOSED"
@@ -819,6 +823,10 @@ export async function analyzeConversationContext(
   analysis.suggestedDealStage = suggestedStage;
 
   return { analysis, conversationId, messageCount: messages.length, llmUsed, sourceMessageId: messages.at(-1)?.id || null, sourceMessageAt: messages.at(-1)?.createdAt || null, messageRevision: conversation.messageRevision, snapshot: {
+    review: {
+      contact: conversation.contact ? { id: conversation.contact.id, summary: conversation.contact.summary, fingerprint: crmReviewFingerprint("contact", conversation.contact) } : null,
+      inquiry: inquiry?.conversationId === conversationId ? { id: inquiry.id, aiSummary: inquiry.aiSummary, nextStep: inquiry.nextStep, commercial: readCrmCommercial(inquiry), currency: inquiry.currency, fingerprint: crmReviewFingerprint("inquiry", inquiry) } : null,
+    },
     deal: deal ? { id: deal.id, version: deal.version, updatedAt: deal.updatedAt } : null,
     inquiry: inquiry ? { id: inquiry.id, status: inquiry.status, nextStep: inquiry.nextStep, aiSummary: inquiry.aiSummary, needsReply: inquiry.needsReply } : null,
     contactSummary: conversation.contact?.summary || null,

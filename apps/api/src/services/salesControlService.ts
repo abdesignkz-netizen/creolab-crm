@@ -8,6 +8,7 @@ import { createStaffNotification } from "./notificationService.ts";
 import { parseAIAutomationSettings } from "./aiAutomationSettings.ts";
 import { getEffectiveTenantSettings } from "./runtimeSettings.ts";
 import { writeActivity } from "./contactService.ts";
+import { recordDealStageTransition } from "./dealStageHistory.ts";
 
 const include = {
   stage: true, contact: { include: { methods: true } }, assignee: { include: { user: true } },
@@ -99,7 +100,8 @@ export async function reconcileSalesDeal(prisma: PrismaClient, tenantId: string,
     if (settings.syncDocuments && targetKey) {
       const target = await tx.dealStage.findFirst({ where: { tenantId, systemKey: targetKey, isTerminal: false } });
       if (target && target.sortOrder > deal.stage.sortOrder) {
-        await tx.deal.update({ where: { id: deal.id }, data: { stageId: target.id, stageEnteredAt: new Date(), probability: target.defaultProbability, version: { increment: 1 } } });
+        const enteredAt = new Date();
+        await tx.deal.update({ where: { id: deal.id }, data: { stageId: target.id, stageEnteredAt: enteredAt, probability: target.defaultProbability, version: { increment: 1 } } });
         const managed = deal.tasks.find(t => t.dedupeKey === `sales-next:${deal.id}`);
         const prior = salesRecord(managed?.contextSnapshotJson).salesManaged;
         // Only replace a system-managed next step. A human's plan remains authoritative.
@@ -110,7 +112,7 @@ export async function reconcileSalesDeal(prisma: PrismaClient, tenantId: string,
           aiPlanChanged = true;
         }
         const reason = targetKey === "invoiced" ? "В системе выставлен счёт" : "В системе подтверждено подписание договора";
-        await tx.dealStageHistory.create({ data: { tenantId, dealId, fromStageId: deal.stageId, toStageId: target.id, fromSystemKey: deal.stage.systemKey, toSystemKey: targetKey, changedByType: "sales_automation", note: reason } });
+        await recordDealStageTransition(tx, { tenantId, dealId, fromStageId: deal.stageId, toStageId: target.id, fromSystemKey: deal.stage.systemKey, toSystemKey: targetKey, enteredAt, changedByType: "sales_automation", note: reason });
         await writeActivity(tx, { tenantId, contactId: deal.contactId, dealId, type: "sales.document_stage", title: `Этап: ${target.name}`, description: reason, actorType: "system", metadata: { reason, invoiceId: deal.invoices[0]?.id, contractId: deal.contracts[0]?.id } });
       }
     }

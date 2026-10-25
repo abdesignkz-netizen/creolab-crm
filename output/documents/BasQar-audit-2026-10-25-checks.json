@@ -1,0 +1,82 @@
+{
+  "auditDate": "2026-10-25",
+  "timezone": "Asia/Almaty",
+  "commit": "8c345bb",
+  "stage": "audit_only",
+  "scope": {
+    "productionDataChanged": false,
+    "applicationSourceChanged": false,
+    "realMessagesSent": false,
+    "financialOperationsExecuted": false,
+    "externalProvidersDisabledInTests": true
+  },
+  "standardChecks": {
+    "serverAndContracts": {
+      "command": "node scripts/test-api.mjs",
+      "files": 154,
+      "filesPassed": 153,
+      "tests": 1293,
+      "passed": 1291,
+      "failed": 2,
+      "skipped": 0,
+      "failedFile": "apps/api/src/esfTicketAuth.test.ts",
+      "failure": "Outdated AuthContext fixtures rejected as membership_suspended"
+    },
+    "web": {
+      "command": "npm run test --workspace=@creolab/web",
+      "runnerTests": 31,
+      "passed": 30,
+      "failed": 1,
+      "failure": "scripts/system-locale.test.mjs crashes while reading spread elements of the translation dictionary AST; remaining checks in this file do not run"
+    },
+    "typecheck": {
+      "command": "npm run typecheck",
+      "passed": true
+    },
+    "webBuild": {
+      "command": "npm run build --workspace=@creolab/web",
+      "passed": true,
+      "initialJavaScriptKB": 1099.1,
+      "gzipKB": 279.9,
+      "warning": "Large initial JavaScript chunk"
+    }
+  },
+  "isolatedReproductions": {
+    "A01": {
+      "managerCouldSeeOwnerTask": false,
+      "managerCouldSnoozeTaskSituation": true,
+      "ownerSawSituationAfterSnooze": false,
+      "expected": "No unauthorized tenant-wide snooze"
+    },
+    "A02": {
+      "command": "Создай задачу связаться с этим клиентом завтра в 11:00",
+      "clientSelectedBeforeCommand": true,
+      "taskCreated": true,
+      "taskContactId": null,
+      "expected": "Task linked to the selected accessible client"
+    },
+    "A03": {
+      "transition": "new -> negotiation",
+      "openStageHistoryIntervals": 2,
+      "expectedOpenIntervals": 1
+    },
+    "A04": {
+      "requestedStageName": "Мой этап",
+      "requestedProbability": 7,
+      "actualStageNameAfterEnsure": "Новая",
+      "actualProbabilityAfterEnsure": 10,
+      "expected": "Reading/seeding preserves existing configuration"
+    }
+  },
+  "unverified": [
+    "Live model response quality",
+    "Production payment and messaging providers",
+    "Real ESF certificate and portal acceptance",
+    "Visual desktop and mobile browser acceptance",
+    "Docker build",
+    "Multi-process PostgreSQL behavior and load",
+    "Production backup restoration",
+    "Production deployment parity"
+  ],
+  "evidenceNote": "Temporary harness and logs used isolated test data. No customer identifiers or credentials are included in this summary."
+}

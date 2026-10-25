@@ -1,6 +1,7 @@
 import { getOnboarding, updateOnboarding } from "./services/onboardingService.ts";
 import { CONFIGURATION_HEADER, configurationRouteAllowed, scopeCompanyConfiguration, configurationOAuthAuth, configurationReturnPath } from "./services/companyConfigurationAccess.ts";
 import { writeAudit } from "./lib/audit.ts";
+import { listConversationCrmReview, reviewConversationCrmChange } from "./services/conversationCrmReviewService.ts";
 import { isEsfEnabled, isEsfRoute, requireEsfEnabled } from "./services/esfAvailability.ts";
 import { beginEmployeeTelegramLink, employeeTelegramStatus, disconnectEmployeeTelegram, handleEmployeeTelegramWebhook, EMPLOYEE_TELEGRAM_WEBHOOK, testEmployeeTelegram } from "./services/employeeTelegramService.ts";
 import { controlNotificationSettings, saveControlNotificationSettings, pauseControlNotifications, testControlNotification } from "./services/controlNotificationService.ts";
@@ -2196,6 +2197,16 @@ export function createApp(prisma: PrismaClient) {
 
   app.get("/api/v1/conversations/:id/agreements", async (req, res) => {
     res.json({ items: await listAgreementsForConversation(prisma, await requireAuth(req), req.params.id) });
+  });
+
+  app.get("/api/v1/conversations/:id/crm-review", async (req, res) => {
+    res.json(await listConversationCrmReview(prisma, await requireAuth(req), req.params.id));
+  });
+
+  app.post("/api/v1/conversations/:id/crm-review/:changeId", json, async (req, res) => {
+    const auth = await requireAuth(req);
+    const input = z.object({ decision: z.enum(["accept", "dismiss", "undo"]) }).strict().parse(req.body);
+    res.json(await reviewConversationCrmChange(prisma, auth, req.params.id, req.params.changeId, input.decision));
   });
 
   app.post("/api/v1/conversations/:id/take", async (req, res) => {

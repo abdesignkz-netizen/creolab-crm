@@ -1,4 +1,5 @@
 import { ensureSalesNextTask, enqueueSalesReconcile } from "./salesProcessService.ts";
+import { closeDealStageInterval, recordDealStageTransition } from "./dealStageHistory.ts";
 import { queueControlNotification } from "./controlNotificationService.ts";
 import { taskTitlePresentation } from "@creolab/contracts";
 import { randomUUID } from "node:crypto";
@@ -851,27 +852,8 @@ export async function changeDealStage(
 
   const now = new Date();
   await prisma.$transaction(async (tx) => {
-    await tx.dealStageHistory.updateMany({
-      where: { tenantId: tid, dealId, leftAt: null },
-      data: { leftAt: now },
-    });
-    await tx.dealStageHistory.create({
-      data: {
-        id: randomUUID(),
-        tenantId: tid,
-        dealId,
-        fromStageId: deal.stageId,
-        fromSystemKey: deal.stage.systemKey,
-        toStageId: toStage.id,
-        toSystemKey: toStage.systemKey,
-        enteredAt: now,
-        changedByType: "user",
-        changedById: auth.user.id,
-        note: input.note || null,
-      },
-    });
-    await tx.deal.update({
-      where: { id: dealId },
+    const moved = await tx.deal.updateMany({
+      where: { id: dealId, tenantId: tid, version: deal.version, stageId: deal.stageId, outcome: deal.outcome },
       data: {
         stageId: toStage.id,
         stageEnteredAt: now,
@@ -885,6 +867,12 @@ export async function changeDealStage(
           ? { paymentStatus: deal.paymentStatus === "NOT_INVOICED" ? "INVOICED" : deal.paymentStatus }
           : {}),
       },
+    });
+    if (!moved.count) throw new ApiError(409, "conflict", "Сделка изменилась. Обновите страницу и повторите действие.");
+    await recordDealStageTransition(tx, {
+      tenantId: tid, dealId, fromStageId: deal.stageId, fromSystemKey: deal.stage.systemKey,
+      toStageId: toStage.id, toSystemKey: toStage.systemKey, enteredAt: now,
+      changedByType: "user", changedById: auth.user.id, note: input.note || null,
     });
     await tx.activity.create({
       data: {
@@ -930,8 +918,8 @@ export async function markDealWon(
   const wonAmount = input.wonAmountMinor ?? amountNumber(deal.offerAmountMinor);
 
   await prisma.$transaction(async (tx) => {
-    await tx.deal.update({
-      where: { id: dealId },
+    const closed = await tx.deal.updateMany({
+      where: { id: dealId, tenantId: tid, version: deal.version, stageId: deal.stageId, outcome: deal.outcome },
       data: {
         outcome: "won",
         probability: 100,
@@ -943,6 +931,8 @@ export async function markDealWon(
         version: { increment: 1 },
       },
     });
+    if (!closed.count) throw new ApiError(409, "conflict", "Сделка изменилась. Обновите страницу и повторите действие.");
+    await closeDealStageInterval(tx, tid, dealId, now);
     await tx.activity.create({
       data: {
         tenantId: tid,
@@ -991,8 +981,8 @@ export async function markDealLost(
   const now = new Date();
 
   await prisma.$transaction(async (tx) => {
-    await tx.deal.update({
-      where: { id: dealId },
+    const closed = await tx.deal.updateMany({
+      where: { id: dealId, tenantId: tid, version: deal.version, stageId: deal.stageId, outcome: deal.outcome },
       data: {
         outcome: "lost",
         probability: 0,
@@ -1003,6 +993,8 @@ export async function markDealLost(
         version: { increment: 1 },
       },
     });
+    if (!closed.count) throw new ApiError(409, "conflict", "Сделка изменилась. Обновите страницу и повторите действие.");
+    await closeDealStageInterval(tx, tid, dealId, now);
     await tx.activity.create({
       data: {
         tenantId: tid,

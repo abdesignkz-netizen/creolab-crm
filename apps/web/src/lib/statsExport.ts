@@ -1,4 +1,5 @@
 import { uiText, useUiText, localizeUiOptions } from "./uiText";
+import { analyticsCoverageLines } from "./analyticsCoverage";
 type ReportSections = {
   overview: boolean;
   funnel: boolean;
@@ -80,6 +81,8 @@ export function exportAnalyticsCsv(data: any, table: "sources" | "services" | "l
       ]),
     ];
   }
+  const coverage = analyticsCoverageLines(data);
+  if (coverage.length) rows.unshift(...coverage.map(line => [line]), []);
   const body = rows.map((row) => row.map(csvEscape).join(";")).join("\n");
   downloadBlob(`${fileBase(data)}_${table}.csv`, "\uFEFF" + body, "text/csv;charset=utf-8");
 }
@@ -93,6 +96,9 @@ export function exportAnalyticsExcel(data: any, sections: ReportSections) {
       `<Worksheet ss:Name="${esc(name)}"><Table>${head}${body}</Table></Worksheet>`,
     );
   };
+
+  const coverage = analyticsCoverageLines(data);
+  if (coverage.length) pushSheet(uiText("Охват данных"), [uiText("Примечание")], coverage.map(line => [line]));
 
   if (sections.overview) {
     const o = data.overview || {};
@@ -180,6 +186,7 @@ export function exportAnalyticsPdf(data: any, sections: ReportSections) {
   parts.push(`<h1>CREOLAB CRM</h1>`);
   parts.push(uiText("<p class=\"sub\">Отчёт за {p0}</p>", {p0: esc(data.period?.label || "")}));
   if (data.filters?.label) parts.push(uiText("<p class=\"sub\">Фильтры: {p0}</p>", {p0: esc(data.filters.label)}));
+  for (const line of analyticsCoverageLines(data)) parts.push(`<p class="sub">${esc(line)}</p>`);
 
   if (sections.overview) {
     parts.push(uiText("<h2>1. Основные результаты</h2><ul>\n      <li>Обращения: <b>{p0}</b></li>\n      <li>Клиенты: <b>{p1}</b></li>\n      <li>Сделки: <b>{p2}</b></li>\n      <li>Договоры: <b>{p3}</b></li>\n      <li>Продажи: <b>{p4}</b></li>\n      <li>Выручка: <b>{p5}</b></li>\n      <li>Конверсия: <b>{p6}</b></li>\n      <li>Средний чек: <b>{p7}</b></li>\n      <li>Потеряно: <b>{p8}</b></li>\n    </ul>", {p0: esc(o.inquiries), p1: esc(o.clients), p2: esc(o.dealsCreated), p3: esc(o.contracts), p4: esc(o.won), p5: esc(o.revenueLabel || "—"), p6: o.conversion != null ? esc(o.conversion) + "%" : "—", p7: esc(o.avgCheckLabel || "—"), p8: esc(o.lost)}));

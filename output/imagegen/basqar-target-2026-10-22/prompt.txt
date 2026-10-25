@@ -1,0 +1,26 @@
+Use case: ads-marketing.
+Create ONE finished premium Russian-language vertical performance-ad banner for BasQar, a business CRM with an AI customer manager. Exact portrait aspect ratio 9:16; target 1080 x 1920 pixels (or an exact proportional higher resolution). Full-bleed flat final artwork, no surrounding device or poster mockup.
+Input image 1 is the ORIGINAL BasQar logo, a supporting brand identity insert. Preserve its lettering, proportions, distinctive cyan-to-blue Q chat/cursor mark, and black letters. Place the intact logo on a light background near the upper left; do not redesign the logo.
+
+Audience: small business owners who need to respond to enquiries and organize customer work. Tone: modern, premium, instantly understandable, credible and practical. One strong sales idea, concrete benefits, no wordy brochure.
+Art direction: bold editorial Swiss-inspired typography, clean white and very pale ice-blue canvas, very dark navy text, rich electric-blue accent (#0068DD) with controlled cyan/blue gradient. Elegant large rounded chat cards, crisp edges, restrained realistic soft shadows, subtle dimensional blue glass accents, polished advertising design. Strong visual hierarchy, rich purposeful composition, no empty half of the canvas. Not a generic corporate template. NO robots, no people, no stock photos, no fake analytics, no graphs.
+Keep all essential information within a safe central rectangle: 70px horizontal margins and at least 180px at the very top and 230px at the very bottom in the 1080x1920 layout, for Stories/Reels overlay clearance. The background and decoration can bleed outside this area.
+
+Layout and exact Russian copy (all letters must be spelled accurately; use only these texts):
+1. Original BasQar logo at top of safe area, modest size, about 250px wide.
+2. Small clear descriptor below: "ИИ-менеджер для бизнеса".
+3. Huge bold two-line main headline with tight confident typesetting, around 80px equivalent, left aligned:
+"Клиент написал."
+"ИИ уже отвечает."
+Make the second line electric blue. Do not warp letters; no shadows on text.
+4. Central hero: beautifully composed illustrative chat exchange in two readable floating rounded cards, visually connected. This is an advertising illustration, not a claimed screenshot of the actual software. Small sender labels "Клиент" and "BasQar AI". Customer text: "Хочу заказать сайт". AI text: "Здравствуйте! Какой сайт вам нужен?". A small tasteful chat icon or cursor accent echoes the logo. Use strong dark text and generous readable sizing. Cards overlap only at empty margins, never obscure text.
+5. Below the chat, three compact benefit rows with small consistent check icons and readable 31–35px equivalent type:
+"Консультирует по вашей базе знаний"
+"Собирает заявки в CRM"
+"Передаёт сложные вопросы сотруднику"
+First and third can wrap once naturally. These are specific real functions; keep them clear and not in tiny print.
+6. At bottom of safe content area, a prominent solid electric-blue rounded CTA with white bold text:
+"Посмотреть, как работает"
+7. Below CTA, neatly centered dark URL: "bsqr.kz".
+
+Aim for professional paid-social creative with an immediately understood product benefit, excellent mobile readability, premium typography and coherent spacing. No extra text, no invented pricing, no free trial claim, no statistics, no testimonials, no 100% guarantee, no WhatsApp/Instagram logos, no watermark. Opaque background.

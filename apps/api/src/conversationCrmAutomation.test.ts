@@ -163,10 +163,19 @@ describe("CRM conversation integration (real isolated database)", () => {
   });
   it("moves only to an existing forward nonterminal stage when enabled", async () => {
     const f = await fixture({ crm: { updateDealStage: true } }); const analysis = await f.analyze();
+    const previous = await prisma.dealStageHistory.create({ data: { tenantId: f.tenant.id, dealId: f.deal.id,
+      toStageId: f.stage.id, toSystemKey: f.stage.systemKey, enteredAt: f.deal.stageEnteredAt, changedByType: "user" } });
     analysis.analysis.suggestedDealStage = "negotiation";
     await applyAnalyzedConversation(prisma, f.tenant.id, f.conversation.id, analysis);
-    assert.equal((await prisma.deal.findUniqueOrThrow({ where: { id: f.deal.id } })).stageId, f.target.id);
-    assert.equal(await prisma.dealStageHistory.count({ where: { tenantId: f.tenant.id } }), 1);
+    await applyAnalyzedConversation(prisma, f.tenant.id, f.conversation.id, analysis);
+    const deal = await prisma.deal.findUniqueOrThrow({ where: { id: f.deal.id } });
+    assert.equal(deal.stageId, f.target.id);
+    const history = await prisma.dealStageHistory.findMany({ where: { dealId: deal.id } });
+    assert.equal(history.length, 2);
+    assert.equal(history.filter(h => !h.leftAt).length, 1);
+    assert.equal(history.find(h => h.id === previous.id)?.leftAt?.toISOString(), deal.stageEnteredAt.toISOString());
+    assert.equal(history.find(h => !h.leftAt)?.enteredAt.toISOString(), deal.stageEnteredAt.toISOString());
+    assert.equal(history.find(h => !h.leftAt)?.toStageId, f.target.id);
   });
   for (const target of ["won", "lost", "invented", "invoiced"]) it(`blocks critical/arbitrary stage ${target}`, async () => {
     const f = await fixture({ crm: { updateDealStage: true } }); const analysis = await f.analyze(); analysis.analysis.suggestedDealStage = target;

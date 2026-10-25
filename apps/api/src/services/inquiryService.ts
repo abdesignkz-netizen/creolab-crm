@@ -1,4 +1,4 @@
-import { readAiIntakeRecords } from "@creolab/contracts";
+import { readAiIntakeRecords, readCrmCommercial } from "@creolab/contracts";
 import { ensureSalesNextTask, enqueueSalesReconcile } from "./salesProcessService.ts";
 import { queueControlNotification } from "./controlNotificationService.ts";
 import { publicFormKeyAliases } from "@creolab/contracts";
@@ -1529,6 +1529,7 @@ export async function getInquiry(prisma: PrismaClient, auth: AuthContext, inquir
   const services = await loadTenantServices(prisma, membership.tenantId);
   return { ...mapInquiryDetail({ ...inquiry, tasks: visibleTasks, activities }, membership.tenant.timezone),
     intakeRequests: readAiIntakeRecords(inquiry.normalizedJson),
+    commercial: readCrmCommercial(inquiry),
     serviceOptions: services, serviceLabel: services.find((row) => row.code === inquiry.serviceCategory)?.name || "Не определено" };
 
 }
@@ -1670,7 +1671,7 @@ export async function updateInquiry(
         changedById: auth.user.id,
       });
     }
-    await tx.inquiry.update({ where: { id: inquiry.id }, data });
+    await tx.inquiry.update({ where: { id: inquiry.id }, data: { ...data, version: { increment: 1 } } });
     if (data.assigneeMembershipId && data.assigneeMembershipId !== inquiry.assigneeMembershipId) await queueControlNotification(tx, { tenantId: membership.tenantId, type: "inquiry.assigned", entityId: inquiry.id, episodeKey: `inquiry.assigned:${inquiry.id}:${data.assigneeMembershipId}:${randomUUID()}` });
     await writeActivity(tx, {
       tenantId: membership.tenantId,
