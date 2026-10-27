@@ -251,7 +251,7 @@ describe("CRM conversation integration (real isolated database)", () => {
     const f = await fixture();
     await prisma.message.createMany({ data: Array.from({ length: 85 }, (_, index) => ({ tenantId: f.tenant.id, conversationId: f.conversation.id,
       senderKind: "client", direction: "inbound", text: "Здравствуйте", createdAt: new Date(at.getTime() - (index + 1) * 1000) })) });
-    for (const operationState of ["queued", "sending", "failed", "canceled", "unknown"]) {
+    for (const operationState of ["queued", "sending", "failed", "partial", "canceled", "unknown"]) {
       const unsent = await prisma.message.create({ data: { tenantId: f.tenant.id, conversationId: f.conversation.id, senderKind: "ai", direction: "outbound",
         text: "Это не отправлено", operationState, createdAt: new Date(at.getTime() + 1000) } });
       await enqueueConversationContext(prisma, f.tenant.id, f.conversation.id, unsent.id);

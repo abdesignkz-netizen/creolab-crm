@@ -4,6 +4,10 @@ import { processControlNotifications } from "./controlNotificationService.ts";
 import { logServerError } from "../lib/redact.ts";
 import { claimOutboxEvent } from "./outboxLease.ts";
 import { claimScheduledAction, recoverInterruptedScheduledActions } from "./scheduledActionLease.ts";
+import { lockFollowUpConversation, recoverInterruptedFollowUp, recoverAbandonedFollowUps } from "./clientFollowUpDelivery.ts";
+import { recoverTelegramDeliveries } from "./telegramDeliveryState.ts";
+import { recoverDirectWaDeliveries } from "./directWhatsAppDeliveryState.ts";
+import { recoverAiReplyDeliveries } from "./aiReplyDeliveryState.ts";
 import type { PrismaClient } from "@creolab/db";
 import { createStaffNotification, deliverPendingPush } from "./notificationService.ts";
 import { AGREEMENT_TYPE_LABEL, type AgreementType } from "./conversationContextTypes.ts";
@@ -37,11 +41,14 @@ export async function processOutbox(prisma: PrismaClient, options: { lane?: Outb
         await processWhatsAppAiReply(prisma, event);
       } else if (event.type === "whatsapp.cloud_send") {
         const { deliverCloudMessage } = await import("./whatsappSendService.ts");
-        const integrationId = (event.payloadJson as { integrationId?: string }).integrationId;
-        if (integrationId) await deliverCloudMessage(prisma, event.tenantId, integrationId, event.entityId);
+        const { integrationId, deliveryToken } = event.payloadJson as { integrationId?: string; deliveryToken?: string };
+        if (integrationId && await deliverCloudMessage(prisma, event.tenantId, integrationId, event.entityId, deliveryToken) === "deferred") {
+          await lease.finish({ availableAt: new Date(Date.now() + 30_000) });
+          return true;
+        }
       } else if (event.type === "channel.send") {
         const { deliverChannelMessage } = await import("./channelDeliveryService.ts");
-        await deliverChannelMessage(prisma, event.tenantId, event.entityId);
+        await deliverChannelMessage(prisma, event.tenantId, event.entityId, (event.payloadJson as { deliveryToken?: string })?.deliveryToken);
       } else if (event.type === "campaign.run") {
         const { processCampaignQueue } = await import("./campaignService.ts");
         const payload = (event.payloadJson || {}) as { campaignId?: string };
@@ -177,6 +184,10 @@ export async function processDueScheduledActions(prisma: PrismaClient) {
   const { processCampaignQueue } = await import("./campaignService.ts");
   const { processScheduledTask, recoverDueScheduledTaskSends } = await import("./scheduledTaskRunner.ts");
   await recoverInterruptedScheduledActions(prisma);
+  await recoverAbandonedFollowUps(prisma);
+  await recoverTelegramDeliveries(prisma);
+  await recoverDirectWaDeliveries(prisma);
+  await recoverAiReplyDeliveries(prisma);
   await recoverDueScheduledTaskSends(prisma);
   const due = await prisma.scheduledAction.findMany({
     where: { state: "scheduled", dueAt: { lte: new Date() } },
@@ -201,9 +212,11 @@ export async function processDueScheduledActions(prisma: PrismaClient) {
         const { processClientFollowUp } = await import("./aiConversationPolicyService.ts");
         await processClientFollowUp(prisma, item).catch(async (error: unknown) => {
           logServerError(error, "background:client followup");
-          await prisma.scheduledAction.update({
-            where: { id: item.id },
-            data: { state: "failed", cancelReason: error instanceof Error ? error.message : "error" },
+          await prisma.$transaction(async tx => {
+            await lockFollowUpConversation(tx, item.tenantId, item.parentId);
+            await tx.scheduledAction.updateMany({ where: { id: item.id, tenantId: item.tenantId, state: "running" },
+              data: { state: "failed", cancelReason: "Выполнение автоматического сообщения прервалось." } });
+            await recoverInterruptedFollowUp(tx, item);
           });
         });
         continue;

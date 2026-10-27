@@ -1,0 +1,46 @@
+{
+  "stage": "3.3.8",
+  "date": "2026-10-27",
+  "status": "implemented_and_locally_verified_visual_acceptance_pending",
+  "deployed": false,
+  "liveCustomerMessagesSent": false,
+  "databaseSchemaChanged": false,
+  "scope": "Legacy whatsapp_seller manual and campaign messages with durable per-part evidence",
+  "apiTests": [
+    { "suite": "messageDeliveryReview", "passed": 26, "log": "/tmp/basqar-stage-338-final-review-tests.log" },
+    { "suite": "legacyMessageDelivery", "passed": 26, "log": "/tmp/basqar-stage-338-final-delivery-tests.log" },
+    { "suite": "campaign", "passed": 19, "log": "/tmp/basqar-stage-338-regressions.log" },
+    { "suite": "campaignDelivery", "passed": 14, "log": "/tmp/basqar-stage-338-regressions.log" },
+    { "suite": "conversationBoard", "passed": 13, "log": "/tmp/basqar-stage-338-regressions.log" },
+    { "suite": "scheduledReliability", "passed": 15, "log": "/tmp/basqar-stage-338-regressions.log" },
+    { "suite": "taskDelivery", "passed": 28, "log": "/tmp/basqar-stage-338-regressions.log" }
+  ],
+  "apiTestsPassedUnique": 141,
+  "newTestScenarios": 26,
+  "webLogicTests": { "passed": 58, "log": "/tmp/basqar-stage-338-web-tests.log", "browserTests": false },
+  "typecheck": {
+    "api": { "status": "passed", "log": "/tmp/basqar-stage-338-api-types.log" },
+    "web": { "status": "passed", "log": "/tmp/basqar-stage-338-web-types.log" }
+  },
+  "webBuild": { "status": "passed", "budgetUnchanged": true, "log": "/tmp/basqar-stage-338-web-build.log", "existingLargeChunkWarning": true },
+  "diffCheck": "passed",
+  "testEnvironment": "Isolated PGlite databases, mocked WhatsApp bridge, external fetch prohibited. HTTP tests permitted on localhost only.",
+  "initialFailures": ["The initial HTTP run could not listen in the restricted environment; it passed with local-server permission. The listen error callback was updated to preserve the original setup error."],
+  "logNotes": [
+    "Only the latest 26-case messageDeliveryReview run is counted, not its earlier 22-, 24- and 25-case runs.",
+    "Only legacyMessageDelivery is counted from final-delivery-tests; its earlier entry in regressions is not counted twice."
+  ],
+  "notVerified": [
+    "Desktop and mobile visual acceptance: Local browser use is disabled in Work settings",
+    "Live provider delivery",
+    "Concurrent production PostgreSQL processes",
+    "Large-history performance",
+    "Docker build"
+  ],
+  "remainingWork": [
+    "Reconciliation workflow for Telegram and direct WhatsApp QR/Cloud",
+    "Review of unknown AI reply delivery",
+    "Historical attempts without durable evidence",
+    "Audit stage 4: unified process rules"
+  ]
+}

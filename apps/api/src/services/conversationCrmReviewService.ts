@@ -12,6 +12,9 @@ import { deliveredConversationMessage } from "./conversationMessageState.ts";
 import { listThreadConversationIds } from "./conversationThread.ts";
 import { crmReviewFingerprint, type CrmReviewSnapshot } from "./crmReviewState.ts";
 import type { ConversationAnalysis } from "./conversationContextTypes.ts";
+import { loadProcessReviewRecords, processReviewItem, readProcessReview, undoProcessReview } from "./conversationProcessReview.ts";
+import { loadProcessEffects } from "./conversationProcessEffects.ts";
+import { decideProcessProposal, loadProcessProposals, processProposalItem, readProcessProposal } from "./conversationProcessProposal.ts";
 
 type Tx = Prisma.TransactionClient;
 const json = (value: unknown) => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
@@ -203,16 +206,39 @@ export async function listConversationCrmReview(prisma: PrismaClient, auth: Auth
     const rows = await tx.activity.findMany({ where: { tenantId: tid, type: { in: ["conversation.crm_proposed", "conversation.crm_updated"] },
       metadataJson: { path: ["review", "conversationId"], equals: conversationId } }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 51 });
     const reviews = rows.slice(0, 50).map(activity => ({ activity, review: readReview(activity.metadataJson) })).filter(item => item.review !== null);
+    const processes = rows.slice(0, 50).map(activity => ({ activity, review: readProcessReview(activity.metadataJson) })).filter(item => item.review !== null);
+    const processProposals = rows.slice(0, 50).map(activity => ({ activity, review: readProcessProposal(activity.metadataJson) })).filter(item => item.review !== null);
     const [conversation, contacts, inquiries, evidence, latest] = await Promise.all([
       tx.conversation.findFirst({ where: { tenantId: tid, id: conversationId } }),
       tx.contact.findMany({ where: { tenantId: tid, id: { in: reviews.filter(r => r.review!.entityType === "contact" && r.review!.entityId === r.review!.contactId).map(r => r.review!.entityId) }, archivedAt: null } }),
       tx.inquiry.findMany({ where: { AND: [inquiryAccessWhere(auth), { id: { in: reviews.filter(r => r.review!.entityType === "inquiry").map(r => r.review!.entityId) }, conversationId, archived: false }] } }),
-      evidenceFor(tx, tid, conversationId, [...new Set(reviews.flatMap(r => r.review!.evidenceMessageIds))]),
+      evidenceFor(tx, tid, conversationId, [...new Set([...reviews, ...processes].flatMap(r => r.review!.evidenceMessageIds))]),
       evidenceFor(tx, tid, conversationId),
     ]);
     const visible = await tx.conversation.findMany({ where: { AND: [conversationAccessWhere(auth), { id: { in: [...new Set(evidence.map(m => m.conversationId))] } }] }, select: { id: true } });
     const visibleThreads = new Set(visible.map(t => t.id));
     const items: CrmReviewItem[] = [];
+    if (processProposals.length) {
+      const loaded = await loadProcessProposals(tx, auth, processProposals.map(p => p.review!), conversationId);
+      for (const { activity, review } of processProposals) {
+        const item = await processProposalItem(tx, auth, activity, review!, loaded);
+        if (item) items.push(item);
+      }
+    }
+    if (processes.length) {
+      const [records, tenant, effects] = await Promise.all([
+        loadProcessReviewRecords(tx, auth, processes.map(p => p.review!)),
+        tx.tenant.findUniqueOrThrow({ where: { id: tid }, select: { timezone: true } }),
+        loadProcessEffects(tx, tid,
+          [...new Set(processes.flatMap(p => p.review!.records.filter(r => r.kind === "agreement").map(r => r.id)))],
+          [...new Set(processes.flatMap(p => p.review!.outbox.map(e => String(e.id))))]),
+      ]);
+      const loaded = { ...records, conversation, evidence, visibleThreads, latestMessageId: latest[0]?.id, timezone: tenant.timezone, effects };
+      for (const { activity, review } of processes) {
+        const item = await processReviewItem(tx, auth, activity, review!, loaded);
+        if (item) items.push(item);
+      }
+    }
     for (const { activity, review: parsed } of reviews) {
       const review = parsed!;
       const row = review.entityType === "contact" ? contacts.find(c => c.id === review.entityId) : inquiries.find(i => i.id === review.entityId && i.contactId === review.contactId);
@@ -227,6 +253,7 @@ export async function listConversationCrmReview(prisma: PrismaClient, auth: Auth
         blockedReason: actionable ? state.blockedReason : null });
     }
     const currentInquiry = await tx.inquiry.findFirst({ where: { AND: [inquiryAccessWhere(auth), { tenantId: tid, conversationId, contactId: conversation?.contactId || "", archived: false }] }, orderBy: { receivedAt: "desc" } });
+    items.sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
     return { items, hasMore: rows.length > 50, commercial: currentInquiry ? readCrmCommercial(currentInquiry) : null };
   }, { timeout: 15000 });
 }
@@ -269,6 +296,10 @@ export async function reviewConversationCrmChange(prisma: PrismaClient, auth: Au
     // Recheck visibility after the lock: reassignment may have happened while waiting.
     await assertConversationReachable(tx, auth, conversationId);
     const activity = await tx.activity.findFirst({ where: { id, tenantId: tid, type: { in: ["conversation.crm_proposed", "conversation.crm_updated"] } } });
+    const proposal = readProcessProposal(activity?.metadataJson);
+    if (activity && proposal && proposal.conversationId === conversationId) return decideProcessProposal(tx, auth, activity, proposal, decision);
+    const process = readProcessReview(activity?.metadataJson);
+    if (activity && process && process.conversationId === conversationId) return undoProcessReview(tx, auth, activity, process, decision);
     const review = readReview(activity?.metadataJson);
     if (!activity || !review || review.conversationId !== conversationId) throw new ApiError(404, "not_found", "Изменение не найдено");
     if (review.entityType === "contact") await tx.$queryRaw`SELECT id FROM "Contact" WHERE id = ${review.entityId} AND "tenantId" = ${tid} FOR UPDATE`;

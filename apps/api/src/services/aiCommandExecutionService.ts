@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { assertTaskVisible } from "../lib/access.ts";
 import type { PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
@@ -181,11 +183,36 @@ export async function createTaskFromCommand(
   };
 }
 
-export async function executeTaskBatch(
+export async function executeTaskBatch(prisma: PrismaClient, auth: AuthContext, parentId: string, options: { runScheduled?: boolean } = {}) {
+  const tid = tenantId(auth), claim = randomUUID();
+  const key = { scope: "task.batch.delivery", actorKey: tid, key: parentId };
+  await prisma.$transaction(async tx => {
+    await tx.$queryRaw`SELECT id FROM "Task" WHERE id = ${parentId} AND "tenantId" = ${tid} FOR UPDATE`;
+    const parent = await tx.task.findFirst({ where: { id: parentId, tenantId: tid } });
+    if (!parent) throw new ApiError(404, "not_found", "Задача не найдена");
+    assertTaskVisible(auth, parent);
+    if (["done", "canceled"].includes(parent.status)) throw new ApiError(409, "invalid_state", "Закрытую задачу нельзя отправить");
+    const lease = await tx.idempotencyRecord.findUnique({ where: { scope_actorKey_key: key } });
+    if (lease && lease.expiresAt > new Date()) throw new ApiError(409, "task_sending", "Отправка уже выполняется. Дождитесь результата.");
+    const data = { requestHash: claim, resultJson: {}, expiresAt: new Date(Date.now() + 300_000) };
+    await tx.idempotencyRecord.upsert({ where: { scope_actorKey_key: key }, create: { ...key, ...data }, update: data });
+  });
+  const beforeChild = async () => {
+    const parent = await prisma.task.findFirst({ where: { id: parentId, tenantId: tid, status: { notIn: ["done", "canceled"] } } });
+    const renewed = await prisma.idempotencyRecord.updateMany({ where: { ...key, requestHash: claim }, data: { expiresAt: new Date(Date.now() + 300_000) } });
+    if (!parent || !renewed.count) throw new ApiError(409, "task_changed", "Групповая отправка остановлена: состояние задачи изменилось.");
+  };
+  try { return await executeTaskBatchClaimed(prisma, auth, parentId, options, beforeChild, claim); }
+  finally { await prisma.idempotencyRecord.deleteMany({ where: { ...key, requestHash: claim } }); }
+}
+
+async function executeTaskBatchClaimed(
   prisma: PrismaClient,
   auth: AuthContext,
   parentId: string,
-  options: { runScheduled?: boolean } = {},
+  options: { runScheduled?: boolean },
+  beforeChild: () => Promise<void>,
+  claim: string,
 ) {
   const tid = tenantId(auth);
   const parent = await prisma.task.findFirst({
@@ -207,7 +234,7 @@ export async function executeTaskBatch(
   const { ensureMassCampaignAccess } = await import('./campaignService.ts');
   await ensureMassCampaignAccess(prisma, tid);
 
-  const children = parent.childTasks.filter((item) => item.status === "open" || item.status === "waiting");
+  const children = parent.childTasks.filter((item) => ["open", "waiting", "in_progress"].includes(item.status));
   if (children.length > 30) {
     throw new ApiError(422, "too_many", "Слишком много получателей для batch. Создайте Campaign (следующая волна).");
   }
@@ -246,6 +273,7 @@ export async function executeTaskBatch(
 
   for (const child of children) {
     try {
+      await beforeChild();
       if (!options.runScheduled) {
         if (parent.messageDraft && !child.messageDraft) {
           await updateTaskDraft(prisma, auth, child.id, { messageDraft: parent.messageDraft });
@@ -254,7 +282,8 @@ export async function executeTaskBatch(
         await confirmTaskExecution(prisma, auth, child.id);
       }
       const exec = await executeTask(prisma, auth, child.id, { runScheduled: options.runScheduled });
-      results.push({ taskId: child.id, contactId: child.contactId, success: Boolean(exec.success) });
+      results.push({ taskId: child.id, contactId: child.contactId, success: Boolean(exec.success),
+        ...(!exec.success ? { error: exec.note || "Отправка не завершена" } : {}) });
     } catch (error) {
       results.push({
         taskId: child.id,
@@ -270,15 +299,23 @@ export async function executeTaskBatch(
   const status =
     fail === 0 && ok > 0 ? "completed" : ok > 0 && fail > 0 ? "partially_completed" : fail > 0 ? "failed" : "prepared";
 
-  await prisma.task.update({
-    where: { id: parentId },
+  await prisma.$transaction(async tx => {
+    await tx.$queryRaw`SELECT id FROM "Task" WHERE id = ${parentId} AND "tenantId" = ${tid} FOR UPDATE`;
+    if (!(await tx.idempotencyRecord.count({ where: { scope: "task.batch.delivery", actorKey: tid, key: parentId, requestHash: claim } }))) {
+      throw new ApiError(409, "task_changed", "Состояние групповой отправки изменилось. Обновите задачу.");
+    }
+  const incomplete = await tx.task.count({ where: { tenantId: tid, parentTaskId: parentId, status: { not: "done" } } });
+  const complete = incomplete === 0 && parent.childTasks.length > 0;
+  await tx.task.updateMany({
+    where: { id: parentId, tenantId: tid, status: { not: "canceled" } },
     data: {
-      commandStatus: status,
-      executionStatus: fail === 0 && ok > 0 ? "sent" : fail > 0 ? "failed" : parent.executionStatus,
-      status: fail === 0 && ok === children.length ? "done" : "open",
-      completedAt: fail === 0 && ok === children.length ? new Date() : null,
+      commandStatus: complete ? "completed" : status,
+      executionStatus: complete ? "sent" : fail > 0 ? "failed" : parent.executionStatus,
+      status: complete ? "done" : "open",
+      completedAt: complete ? new Date() : null,
       completionSource: "system",
     },
+  });
   });
 
   return {

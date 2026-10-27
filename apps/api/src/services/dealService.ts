@@ -1,7 +1,7 @@
 import { ensureSalesNextTask, enqueueSalesReconcile } from "./salesProcessService.ts";
 import { closeDealStageInterval, recordDealStageTransition } from "./dealStageHistory.ts";
 import { queueControlNotification } from "./controlNotificationService.ts";
-import { taskTitlePresentation } from "@creolab/contracts";
+import { taskTitlePresentation, updateTenantOpsSchema } from "@creolab/contracts";
 import { randomUUID } from "node:crypto";
 import { resolveEsfMeasureUnitCode } from "@creolab/contracts";
 import type { PrismaClient } from "@creolab/db";
@@ -18,7 +18,6 @@ import {
   formatMoney,
   lostReasonCatalog,
   parseOpsSettings,
-  slaStatusForDays,
   stageDurationLabel,
 } from "./dealPipeline.ts";
 import { writeAudit } from "../lib/audit.ts";
@@ -28,6 +27,9 @@ import { serializeDealItem, totalsFromItems } from "./dealItemService.ts";
 import { lineAmounts, sumLines, toMinorTenge } from "./documentMoney.ts";
 import { getTenantDocumentFlags, isDocumentsEnabled, resolveVatRate } from "./legalProfileService.ts";
 import { resolvePeriodRange, periodLabel, type PeriodPreset } from "./periodRange.ts";
+import { flagsForDeal, PROCESS_OPEN_TASK_STATUSES } from "./dealProcessPolicy.ts";
+import { createProcessClock, type ProcessClock } from "./processCalendar.ts";
+export { flagsForDeal } from "./dealProcessPolicy.ts";
 
 type DealTimeMode = "now" | "period";
 type DealPeriodBasis = "created" | "activity" | "closed";
@@ -142,19 +144,11 @@ export async function ensureDealPipelineStages(prisma: PrismaClient, tenantId: s
 
   for (const def of PIPELINE_STAGES) {
     const row = byKey.get(def.systemKey);
-    if (row) {
-      await prisma.dealStage.update({
-        where: { id: row.id },
-        data: {
-          name: def.name,
-          sortOrder: def.sortOrder,
-          defaultProbability: def.defaultProbability,
-          isTerminal: false,
-        },
-      });
-    } else {
-      await prisma.dealStage.create({
-        data: {
+    if (!row) {
+      await prisma.dealStage.upsert({
+        where: { tenantId_systemKey: { tenantId, systemKey: def.systemKey } },
+        update: {},
+        create: {
           tenantId,
           systemKey: def.systemKey,
           name: def.name,
@@ -166,17 +160,7 @@ export async function ensureDealPipelineStages(prisma: PrismaClient, tenantId: s
     }
   }
 
-  const legacy = byKey.get("qualification");
-  const target = await prisma.dealStage.findFirst({
-    where: { tenantId, systemKey: "need_identified" },
-  });
-  if (legacy && target) {
-    await prisma.deal.updateMany({
-      where: { tenantId, stageId: legacy.id, outcome: "open" },
-      data: { stageId: target.id },
-    });
-  }
-
+  // Reading a board must preserve tenant labels and historical stage links.
   return prisma.dealStage.findMany({ where: { tenantId }, orderBy: { sortOrder: "asc" } });
 }
 
@@ -191,78 +175,19 @@ function dealInclude() {
     assignee: { include: { user: { select: { name: true, email: true } } } },
     payments: true,
     tasks: {
-      where: { status: { in: ["open", "waiting"] } },
+      where: { status: { in: PROCESS_OPEN_TASK_STATUSES } },
       orderBy: { dueAt: "asc" as const },
-      take: 5,
     },
     inquiry: { select: { id: true, subject: true, source: true, sourceChannel: true } },
     items: { orderBy: { sortOrder: "asc" as const } },
   };
 }
 
-export function flagsForDeal(
-  deal: {
-    nextAction: string | null;
-    nextActionAt: Date | null;
-    stageEnteredAt: Date;
-    paymentStatus?: string | null;
-    stage: { systemKey: string };
-    tasks: Array<{ dueAt: Date | null; status: string }>;
-    contact?: {
-      lastInboundMessageAt?: Date | null;
-      lastOutboundMessageAt?: Date | null;
-      lastContactAt?: Date | null;
-    } | null;
-  },
-  ops: ReturnType<typeof parseOpsSettings>,
-  now: Date,
-) {
-  const hasOpenTask = deal.tasks.length > 0;
-  const hasFutureTask = deal.tasks.some((t) => t.dueAt && t.dueAt.getTime() >= now.getTime());
-  const overdueTask = deal.tasks.some((t) => t.dueAt && t.dueAt < now);
-  const needsReply = Boolean(
-    deal.contact?.lastInboundMessageAt &&
-      (!deal.contact.lastOutboundMessageAt ||
-        deal.contact.lastInboundMessageAt > deal.contact.lastOutboundMessageAt),
-  );
-  const waitingClient = Boolean(deal.nextAction && /жд[её]м|ожидаем|ожидаю|waiting/i.test(deal.nextAction));
-  const noNextAction = !deal.nextAction && !hasOpenTask;
-  const daysOnStage = (now.getTime() - deal.stageEnteredAt.getTime()) / 86400000;
-  const sla = ops.stageSlaDays[deal.stage.systemKey];
-  const slaStatus = slaStatusForDays(daysOnStage, sla);
-  const overSla = slaStatus === "OVERDUE";
-  const lastTouch = deal.contact?.lastContactAt
-    ? new Date(deal.contact.lastContactAt).getTime()
-    : deal.stageEnteredAt.getTime();
-  const stalledBySilence = now.getTime() - lastTouch > ops.silenceReturnDays * 86400000;
-  const stalledByIdle = daysOnStage > ops.stalledDealDays && !hasFutureTask && !waitingClient;
-  const stalled =
-    (stalledBySilence && !hasFutureTask && !waitingClient) || stalledByIdle || overSla || (noNextAction && daysOnStage > 2);
-  const overdueNextAction = Boolean(
-    deal.nextActionAt && new Date(deal.nextActionAt).getTime() < now.getTime() && !waitingClient,
-  );
-  const paymentOverdue = deal.paymentStatus === "OVERDUE";
-
-  return {
-    proposalWithoutReply: deal.stage.systemKey === "proposal_sent" && daysOnStage > ops.proposalFollowUpThresholdDays,
-    needsReply,
-    overdueTask,
-    noNextAction,
-    waitingClient,
-    stalled,
-    overSla,
-    slaStatus,
-    overdueNextAction,
-    paymentOverdue,
-    daysOnStage: Math.floor(daysOnStage),
-  };
-}
-
-function serializeDeal(deal: any, ops: ReturnType<typeof parseOpsSettings>, currency: string, now = new Date()) {
+function serializeDeal(deal: any, ops: ReturnType<typeof parseOpsSettings>, currency: string, now = new Date(), clock?: ProcessClock) {
   const items = Array.isArray(deal.items) ? deal.items.map(serializeDealItem) : [];
   const itemTotals = items.length ? totalsFromItems(items) : null;
   const amount = itemTotals ? toMinorTenge(itemTotals.totalAmount) : amountNumber(deal.offerAmountMinor);
-  const flags = flagsForDeal({ ...deal, contact: deal.contact }, ops, now);
+  const flags = flagsForDeal({ ...deal, contact: deal.contact }, ops, now, clock);
   const assigneeName = deal.assignee?.user?.name || deal.assignee?.user?.email || null;
   const probability = deal.probability ?? deal.stage?.defaultProbability ?? 10;
   return {
@@ -390,6 +315,7 @@ export async function getDealBoard(
     query.includeClosed === "true" ||
     timeMode === "period";
   const now = new Date();
+  const processClock = createProcessClock(ops.processCalendar, tenant?.timezone || timeZone, now);
 
   const allowed: PeriodPreset[] = [
     "today",
@@ -477,7 +403,7 @@ export async function getDealBoard(
   const contactById = new Map(contacts.map((c) => [c.id, c]));
 
   const serializedAll = deals.map((d) =>
-    serializeDeal({ ...d, offerAmountMinor: d.outcome === "won" ? d.wonAmountMinor ?? d.offerAmountMinor : d.offerAmountMinor, contact: { ...d.contact, ...contactById.get(d.contactId) } }, ops, currency, now),
+    serializeDeal({ ...d, offerAmountMinor: d.outcome === "won" ? d.wonAmountMinor ?? d.offerAmountMinor : d.offerAmountMinor, contact: { ...d.contact, ...contactById.get(d.contactId) } }, ops, currency, now, processClock),
   );
   const documentsAllowed = capabilities(auth).documents && await isDocumentsEnabled(prisma, tid) && await canUseFeature(prisma, tid, "DOCUMENTS");
   const documentSummaries = documentsAllowed
@@ -502,7 +428,7 @@ export async function getDealBoard(
   });
 
   const columns = stages
-    .filter((s) => PIPELINE_STAGES.some((p) => p.systemKey === s.systemKey))
+    .filter((s) => !s.isTerminal || forKanban.some(deal => deal.stageId === s.id))
     .map((stage) => {
       const items = forKanban.filter((d) => d.stageId === stage.id);
       let sum = 0;
@@ -676,7 +602,7 @@ export async function getDealBoard(
     columns,
     onHold:
       timeMode === "now"
-        ? deals.filter((d) => d.outcome === "on_hold").map((d) => serializeDeal(d, ops, currency, now))
+        ? deals.filter((d) => d.outcome === "on_hold").map((d) => serializeDeal(d, ops, currency, now, processClock))
         : [],
     closed:
       timeMode === "period" && basis === "closed"
@@ -684,7 +610,7 @@ export async function getDealBoard(
         : includeClosed && timeMode === "now"
           ? deals
               .filter((d) => d.outcome === "won" || d.outcome === "lost")
-              .map((d) => serializeDeal(d, ops, currency, now))
+              .map((d) => serializeDeal(d, ops, currency, now, processClock))
           : [],
     lostReasons: lostReasonCatalog(ops),
     paymentStatuses: [...PAYMENT_STATUSES],
@@ -694,7 +620,10 @@ export async function getDealBoard(
 export async function getDeal(prisma: PrismaClient, auth: AuthContext, dealId: string) {
   const membership = requireTenant(auth);
   const tid = membership.tenantId;
-  const ops = parseOpsSettings((await prisma.tenant.findUnique({ where: { id: tid } }))?.settingsJson);
+  const tenant = await prisma.tenant.findUnique({ where: { id: tid } });
+  const ops = parseOpsSettings(tenant?.settingsJson);
+  const now = new Date();
+  const processClock = createProcessClock(ops.processCalendar, tenant?.timezone || "Asia/Almaty", now);
   const deal = await prisma.deal.findFirst({
     where: { id: dealId, tenantId: tid },
     include: {
@@ -718,7 +647,7 @@ export async function getDeal(prisma: PrismaClient, auth: AuthContext, dealId: s
     },
   });
   return {
-    deal: serializeDeal({ ...deal, contact }, ops, membership.tenant.currency || "KZT"),
+    deal: serializeDeal({ ...deal, contact }, ops, membership.tenant.currency || "KZT", now, processClock),
     stageHistory: deal.stageHistory,
     payments: deal.payments,
   };
@@ -845,12 +774,15 @@ export async function changeDealStage(
     if (!st) throw new ApiError(404, "not_found", "Стадия не найдена");
     targetKey = st.systemKey;
   }
-  targetKey = LEGACY_STAGE_MAP[targetKey] || targetKey;
-  const toStage = await prisma.dealStage.findFirst({ where: { tenantId: tid, systemKey: targetKey } });
+  // Keep an existing legacy/custom stage. Aliases only resolve missing keys.
+  const toStage = await prisma.dealStage.findFirst({ where: { tenantId: tid, systemKey: targetKey } })
+    || (LEGACY_STAGE_MAP[targetKey] ? await prisma.dealStage.findFirst({ where: { tenantId: tid, systemKey: LEGACY_STAGE_MAP[targetKey] } }) : null);
   if (!toStage) throw new ApiError(404, "not_found", "Стадия не найдена");
   if (toStage.id === deal.stageId) return getDeal(prisma, auth, dealId);
 
   const now = new Date();
+  const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: tid } });
+  const processClock = createProcessClock(parseOpsSettings(tenant.settingsJson).processCalendar, tenant.timezone, now);
   await prisma.$transaction(async (tx) => {
     const moved = await tx.deal.updateMany({
       where: { id: dealId, tenantId: tid, version: deal.version, stageId: deal.stageId, outcome: deal.outcome },
@@ -861,7 +793,7 @@ export async function changeDealStage(
         outcome: "open",
         version: { increment: 1 },
         ...(toStage.systemKey === "proposal_sent" && !deal.nextAction
-          ? { nextAction: "Follow-up по КП", nextActionAt: new Date(now.getTime() + 86400000) }
+          ? { nextAction: "Связаться после предложения", nextActionAt: processClock.afterDays(now, 1) }
           : {}),
         ...(toStage.systemKey === "invoiced"
           ? { paymentStatus: deal.paymentStatus === "NOT_INVOICED" ? "INVOICED" : deal.paymentStatus }
@@ -1176,11 +1108,13 @@ export async function getTenantOps(prisma: PrismaClient, auth: AuthContext) {
   const membership = requireTenant(auth);
   const tenant = await prisma.tenant.findUnique({ where: { id: membership.tenantId } });
   const ops = parseOpsSettings(tenant?.settingsJson);
+  const stages = await ensureDealPipelineStages(prisma, membership.tenantId);
   return {
     ...ops,
+    timeZone: tenant?.timezone || "Asia/Almaty",
     lostReasons: lostReasonCatalog(ops),
     lostReasonsCustom: ops.lostReasons.length > 0,
-    stages: PIPELINE_STAGES.map((stage) => ({
+    stages: stages.filter(stage => !stage.isTerminal).map((stage) => ({
       systemKey: stage.systemKey,
       name: stage.name,
       slaDays: ops.stageSlaDays[stage.systemKey] ?? null,
@@ -1197,40 +1131,51 @@ export async function updateTenantOps(
     silenceReturnDays?: number;
     lostReasons?: string[];
     salesPlanMinor?: number | null;
-    stageSlaDays?: Record<string, number>;
+    stageSlaDays?: Record<string, number | null>;
+    processCalendar?: ReturnType<typeof parseOpsSettings>["processCalendar"];
   },
 ) {
   requireCompanyAdmin(auth);
   const membership = requireTenant(auth);
-  const tenant = await prisma.tenant.findUnique({ where: { id: membership.tenantId } });
-  const current = tenant?.settingsJson && typeof tenant.settingsJson === "object"
-    ? { ...(tenant.settingsJson as Record<string, unknown>) }
-    : {};
-  const ops = parseOpsSettings(current);
-  if (typeof input.stalledDealDays === "number") ops.stalledDealDays = Math.max(1, Math.min(90, input.stalledDealDays));
-  if (typeof input.proposalFollowUpThresholdDays === "number") {
-    ops.proposalFollowUpThresholdDays = Math.max(1, Math.min(90, input.proposalFollowUpThresholdDays));
-  }
-  if (typeof input.silenceReturnDays === "number") ops.silenceReturnDays = Math.max(1, Math.min(180, input.silenceReturnDays));
-  if (input.salesPlanMinor === null) ops.salesPlanMinor = null;
-  if (typeof input.salesPlanMinor === "number") ops.salesPlanMinor = Math.max(0, Math.round(input.salesPlanMinor));
-  if (Array.isArray(input.lostReasons)) {
-    ops.lostReasons = input.lostReasons.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 40);
-  }
-  if (input.stageSlaDays && typeof input.stageSlaDays === "object") {
-    ops.stageSlaDays = { ...ops.stageSlaDays, ...input.stageSlaDays };
-  }
-  await prisma.tenant.update({
-    where: { id: membership.tenantId },
-    data: { settingsJson: { ...current, ops } as never },
-  });
-  await writeAudit(prisma, {
-    tenantId: membership.tenantId,
-    actorUserId: auth.user.id,
-    action: "settings.ops_updated",
-    entityType: "tenant",
-    entityId: membership.tenantId,
-    changes: { ops },
+  const parsed = updateTenantOpsSchema.safeParse(input);
+  if (!parsed.success) throw new ApiError(422, "invalid", "Проверьте сроки и рабочий календарь.");
+  input = parsed.data;
+  await prisma.$transaction(async tx => {
+    await tx.$queryRaw`SELECT id FROM "Tenant" WHERE id = ${membership.tenantId} FOR UPDATE`;
+    const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: membership.tenantId } });
+    const current = tenant?.settingsJson && typeof tenant.settingsJson === "object"
+      ? { ...(tenant.settingsJson as Record<string, unknown>) }
+      : {};
+    const ops = parseOpsSettings(current);
+    if (typeof input.stalledDealDays === "number") ops.stalledDealDays = Math.max(1, Math.min(90, input.stalledDealDays));
+    if (typeof input.proposalFollowUpThresholdDays === "number") {
+      ops.proposalFollowUpThresholdDays = Math.max(1, Math.min(90, input.proposalFollowUpThresholdDays));
+    }
+    if (typeof input.silenceReturnDays === "number") ops.silenceReturnDays = Math.max(1, Math.min(180, input.silenceReturnDays));
+    if (input.salesPlanMinor === null) ops.salesPlanMinor = null;
+    if (typeof input.salesPlanMinor === "number") ops.salesPlanMinor = Math.max(0, Math.round(input.salesPlanMinor));
+    if (Array.isArray(input.lostReasons)) {
+      ops.lostReasons = input.lostReasons.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 40);
+    }
+    if (input.stageSlaDays && typeof input.stageSlaDays === "object") {
+      const stages = await tx.dealStage.findMany({ where: { tenantId: membership.tenantId }, select: { systemKey: true } });
+      const keys = new Set([...stages.map(stage => stage.systemKey), ...PIPELINE_STAGES.map(stage => stage.systemKey)]);
+      if (Object.keys(input.stageSlaDays).some(key => !keys.has(key))) throw new ApiError(422, "invalid", "Неизвестный этап воронки.");
+      ops.stageSlaDays = { ...ops.stageSlaDays, ...input.stageSlaDays };
+    }
+    if (input.processCalendar) ops.processCalendar = input.processCalendar;
+    await tx.tenant.update({
+      where: { id: membership.tenantId },
+      data: { settingsJson: { ...current, ops } as never },
+    });
+    await writeAudit(tx, {
+      tenantId: membership.tenantId,
+      actorUserId: auth.user.id,
+      action: "settings.ops_updated",
+      entityType: "tenant",
+      entityId: membership.tenantId,
+      changes: { ops },
+    });
   });
   return getTenantOps(prisma, auth);
 }

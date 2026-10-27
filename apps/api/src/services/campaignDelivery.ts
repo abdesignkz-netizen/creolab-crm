@@ -46,6 +46,16 @@ export function campaignRefFromOperation(key?: string | null) {
   return match ? { campaignId: match[1], recipientId: match[2] } : null;
 }
 
+/** Existing direct operations must be reviewed/retried per part, never requeued as whole recipients. */
+export async function retryableDirectRecipients(prisma: PrismaClient, tenantId: string, campaignId: string) {
+  const [recipients, operations] = await Promise.all([
+    prisma.campaignRecipient.findMany({ where: { tenantId, campaignId, status: "failed" }, select: { id: true } }),
+    prisma.outboundOperation.findMany({ where: { tenantId, idempotencyKey: { contains: `:campaign:${campaignId}:recipient:` } }, select: { idempotencyKey: true } }),
+  ]);
+  const attempted = new Set(operations.map(op => campaignRefFromOperation(op.idempotencyKey)?.recipientId));
+  return recipients.filter(r => !attempted.has(r.id)).map(r => r.id);
+}
+
 export async function campaignDispatchAllowed(prisma: PrismaClient, input: {
   tenantId: string; campaignId: string; recipientId: string; conversationId: string; integrationId: string;
 }) {
@@ -155,8 +165,9 @@ export async function reconcileDirectCampaign(prisma: PrismaClient, tenantId: st
     const status = accepted ? "sent" : message.operationState === "canceled" ? "cancelled" : message.operationState === "unknown" ? "unknown" : "failed";
     await prisma.campaignRecipient.updateMany({ where: { id: row.id, tenantId, status: "sending" }, data: {
       status, sentAt: accepted ? new Date() : null, providerMessageId: message.providerMessageId,
-      textSendState: message.text ? (accepted ? "sent" : status) : "none",
-      filesSendState: message.attachments.length ? (accepted ? "sent" : status) : "none",
+      textSendState: message.text ? (message.providerMessageId || accepted ? "sent" : status) : "none",
+      filesSendState: message.attachments.length ? (message.attachments.every(file => file.sendState === "sent") ? "sent"
+        : message.attachments.some(file => file.sendState === "sent") ? "partial" : status) : "none",
       error: accepted ? null : status === "unknown"
         ? "WhatsApp не подтвердил отправку. Проверьте переписку перед повторной отправкой."
         : status === "cancelled" ? "Отправка отменена" : "Не удалось отправить через выбранный WhatsApp",

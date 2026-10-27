@@ -9,6 +9,8 @@ import { recordExternalMessage } from "./externalMessageService.ts";
 import { CONVERSATION_MAX_FILE_BYTES } from "./conversationMedia.ts";
 import { qrEnabled, waDigest } from "./whatsappConnectionService.ts";
 import { deliverQrMessage } from "./whatsappSendService.ts";
+import { recoverDirectWaDeliveries, restoreUnstartedDirectWaQrJobs } from "./directWhatsAppDeliveryState.ts";
+import { recoverAiReplyDeliveries, restoreUnstartedAiQrJobs, readAiReply } from "./aiReplyDeliveryState.ts";
 import { deliverControlNotifications } from "./controlNotificationService.ts";
 import { syncWhatsAppContactPhone, whatsappLid, whatsappPhoneJid } from "./whatsappContactIdentity.ts";
 
@@ -128,8 +130,13 @@ export function startWhatsAppQrRuntime(prisma: PrismaClient, socketFactory = mak
     await prisma.integration.update({ where: { id }, data: { connectionStatus: "CONNECTING" } });
     await prisma.channelConnection.updateMany({ where: { integrationId: id }, data: { status: "pending" } });
     // A process crash during an outgoing network call has an uncertain result. Never resend automatically.
-    await prisma.message.updateMany({ where: { conversation: { connection: { integrationId: id } }, operationState: "sending" }, data: { operationState: "unknown" } });
-    await prisma.outboundOperation.updateMany({ where: { conversation: { connection: { integrationId: id } }, state: "sending" }, data: { state: "unknown" } });
+    await recoverDirectWaDeliveries(prisma, { integrationId: id, force: true });
+    await recoverAiReplyDeliveries(prisma, { integrationId: id, force: true });
+    await restoreUnstartedDirectWaQrJobs(prisma, id);
+    await restoreUnstartedAiQrJobs(prisma, id);
+    const tracked = await prisma.message.findMany({ where: { conversation: { connection: { integrationId: id } }, operationState: "sending", connectionScopedId: { startsWith: "wa-out-v2:" } }, select: { id: true } });
+    await prisma.message.updateMany({ where: { conversation: { connection: { integrationId: id } }, operationState: "sending", id: { notIn: tracked.map(m => m.id) } }, data: { operationState: "unknown" } });
+    await prisma.outboundOperation.updateMany({ where: { conversation: { connection: { integrationId: id } }, state: "sending", OR: [{ providerRef: null }, { providerRef: { notIn: tracked.map(m => m.id) } }] }, data: { state: "unknown" } });
     await prisma.$executeRaw`DELETE FROM "WhatsAppQrJob" WHERE "integrationId" = ${id} AND kind = 'outbound' AND state = 'sending'`;
     const auth = await databaseQrAuth(prisma, id, owner);
     await auth.saveCreds();
@@ -258,7 +265,8 @@ export function startWhatsAppQrRuntime(prisma: PrismaClient, socketFactory = mak
             }
             else {
               await prisma.$executeRaw`UPDATE "WhatsAppQrJob" SET state = 'sending' WHERE id = ${job.id}`;
-              const result = await deliverQrMessage(prisma, id, local.socket, decode(job.encryptedPayload).messageId, () => guardLease(prisma, id, owner));
+              const payload = decode(job.encryptedPayload);
+              const result = await deliverQrMessage(prisma, id, local.socket, payload.messageId, () => guardLease(prisma, id, owner), payload.deliveryToken);
               if (result === "deferred") {
                 await prisma.$executeRaw`UPDATE "WhatsAppQrJob" SET state = 'queued', "createdAt" = now() WHERE id = ${job.id}`;
                 continue;
@@ -268,13 +276,13 @@ export function startWhatsAppQrRuntime(prisma: PrismaClient, socketFactory = mak
           } catch {
             if (job.kind === "outbound") {
               const messageId = decode(job.encryptedPayload).messageId;
-              const message = await prisma.message.findUnique({ where: { id: messageId }, select: { operationState: true } });
+              const message = await prisma.message.findUnique({ where: { id: messageId }, select: { operationState: true, connectionScopedId: true, tenantId: true } });
               if (message?.operationState === "queued") {
                 // A failure before network dispatch is safe to retry.
                 await prisma.$executeRaw`UPDATE "WhatsAppQrJob" SET state = 'queued' WHERE id = ${job.id}`;
                 break;
               }
-              if (message?.operationState === "sending") await prisma.message.update({ where: { id: messageId }, data: { operationState: "unknown" } });
+              if (message?.operationState === "sending" && !message.connectionScopedId?.startsWith("wa-out-v2:") && !await readAiReply(prisma, message.tenantId, messageId)) await prisma.message.update({ where: { id: messageId }, data: { operationState: "unknown" } });
               await prisma.$executeRaw`DELETE FROM "WhatsAppQrJob" WHERE id = ${job.id}`;
             }
             else break; // Keep encrypted inbound event durable for retry, including quota failures.

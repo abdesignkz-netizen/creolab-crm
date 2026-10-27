@@ -20,6 +20,7 @@ import { LOCAL_SPEECH_BATCH_MS, SPEECH_CLAIM_TTL_MS } from "./speechLimits.ts";
 
 import { requireIntegrationsAccess, requireConfigurationTenant as requireTenant } from "../lib/access.ts";
 import { aiChannelTypes, aiSourceChannel, enqueueChannelDelivery } from "./channelDeliveryService.ts";
+import { aiReplyGate, aiReplyPolicyHash } from "./aiReplyDeliveryState.ts";
 
 // The legacy exports and event IDs remain compatible with already queued WhatsApp replies.
 type Db = PrismaClient | Prisma.TransactionClient;
@@ -100,6 +101,12 @@ export async function enqueueWhatsAppAi(tx: Db, tenantId: string, conversationId
   const conversation = await tx.conversation.findFirst({ where: { id: conversationId, tenantId, mode: "ai", status: "open" }, include: { connection: { include: { integration: true } } } });
   if (!conversation?.connection?.autoReply || !aiChannelTypes.includes(conversation.connection.integration.type)) return;
   if (conversation.waitingFor === "CLIENT") return;
+  const unresolved = await aiReplyGate(tx, tenantId, conversationId);
+  if (unresolved) {
+    if (unresolved === "unknown") await tx.conversation.updateMany({ where: { id: conversationId, tenantId, mode: "ai", controlVersion: conversation.controlVersion, messageRevision: conversation.messageRevision },
+      data: { needsAttention: true, waitingFor: "MANAGER", attentionReason: "AI_DELIVERY_UNKNOWN" } });
+    return;
+  }
   // Provider timestamps may have only second precision; retain the actual received message.
   const sourceId = sourceMessageId || conversation.lastInboundMessageId;
   const last = await tx.message.findFirst({ where: { tenantId, conversationId, ...(sourceId ? { id: sourceId } : {}), internal: false, operationState: { notIn: ["failed", "canceled"] } }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] });
@@ -127,7 +134,8 @@ async function handoff(prisma: PrismaClient, tenantId: string, conversationId: s
 }
 
 /** Check immediately before dispatch as well as before generation; credits are charged by the LLM, not twice. */
-export async function directAiSendAllowed(prisma: PrismaClient, tenantId: string, conversationId: string, version: number, revision: number, handoffSourceMessageId?: string) {
+export async function directAiSendAllowed(prisma: PrismaClient, tenantId: string, conversationId: string, version: number, revision: number, handoffSourceMessageId?: string, deliveryMessageId?: string) {
+  if (await aiReplyGate(prisma, tenantId, conversationId, deliveryMessageId)) return false;
   const conversation = await prisma.conversation.findFirst({ where: { id: conversationId, tenantId }, include: { tenant: true, contact: true, connection: { include: { integration: true } } } });
   if (!conversation || conversation.status !== "open" || conversation.controlVersion !== version || conversation.messageRevision !== revision) return false;
   if (handoffSourceMessageId) {
@@ -153,6 +161,13 @@ export async function processWhatsAppAiReply(prisma: PrismaClient, event: { id: 
   if (!Number.isInteger(version) || !Number.isInteger(revision) || typeof payload.messageId !== "string") return;
   const conversation = await prisma.conversation.findFirst({ where: { id: conversationId, tenantId }, include: { connection: { include: { integration: true } }, tenant: true } });
   if (!conversation || conversation.mode !== "ai" || conversation.controlVersion !== version || conversation.messageRevision !== revision) return;
+  const unresolved = await aiReplyGate(prisma, tenantId, conversationId);
+  if (unresolved) {
+    if (unresolved === "sending") throw new ApiError(409, "ai_delivery_pending", "Предыдущий ответ ещё отправляется");
+    await prisma.conversation.updateMany({ where: { id: conversationId, tenantId, mode: "ai", controlVersion: version, messageRevision: revision }, data: { needsAttention: true, waitingFor: "MANAGER", attentionReason: "AI_DELIVERY_UNKNOWN" } });
+    return;
+  }
+  const policyHash = await aiReplyPolicyHash(prisma, tenantId);
   const settings = parseAIAutomationSettings(conversation.tenant.settingsJson);
   if (!isWithinAiSchedule(new Date(), conversation.tenant.timezone, settings)) {
     // The durable outbox retries after the configured quiet period, never a socket callback.
@@ -286,6 +301,6 @@ export async function processWhatsAppAiReply(prisma: PrismaClient, event: { id: 
     if (!current || !operation.count) return;
     const message = await tx.message.create({ data: { tenantId, conversationId, direction: "outbound", senderKind: "ai", text: answer!.reply, operationState: "queued", connectionScopedId: event.id } });
     await tx.outboundOperation.update({ where: { id: claim.id }, data: { providerRef: message.id } });
-    await enqueueChannelDelivery(tx, tenantId, conversation.connection!.integration, message.id);
+    await enqueueChannelDelivery(tx, tenantId, conversation.connection!.integration, message.id, policyHash);
   });
 }

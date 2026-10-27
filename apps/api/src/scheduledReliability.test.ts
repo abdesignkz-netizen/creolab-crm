@@ -10,7 +10,7 @@ import { WhatsAppSellerBridge } from "@creolab/integrations";
 import { encryptSecret } from "./lib/secretBox.ts";
 import { createStaffNotification, deliverPendingPush } from "./services/notificationService.ts";
 import webpush from "web-push";
-import { scheduleConfirmedTaskSend } from "./services/taskExecutionService.ts";
+import { confirmTaskExecution, scheduleConfirmedTaskSend } from "./services/taskExecutionService.ts";
 
 let prisma: Awaited<ReturnType<typeof createPrismaClient>>;
 let tenantId = "", userId = "", membershipId = "";
@@ -48,7 +48,7 @@ async function confirm(taskId: string, confirmedById = userId) {
   return prisma.executionConfirmation.create({ data: {
     tenantId, taskId, confirmedById, contactId: contact.id, conversationId: conversation.id,
     channel: "whatsapp", destination: "77000000000", messageSnapshot: text,
-    contentHash: hashExecutionContent({ contactId: contact.id, conversationId: conversation.id, message: text, attachments: [] }),
+    contentHash: hashExecutionContent({ contactId: contact.id, conversationId: conversation.id, sellerLeadId: conversation.sellerLeadId, message: text, attachments: [] }),
   } });
 }
 const getAction = (id: string) => prisma.scheduledAction.findUniqueOrThrow({ where: { id } });
@@ -124,6 +124,13 @@ it("does not manufacture confirmation when a planned message was edited or never
     assert.equal(await prisma.executionConfirmation.count({ where: { taskId: task.id } }), before);
     assert.equal((await getAction(action.id)).state, "failed");
     assert.equal(await prisma.message.count({ where: { conversation: { sellerLeadId: `queue-${task.id}` } } }), 0);
+    const stopped = await prisma.task.findUniqueOrThrow({ where: { id: task.id } });
+    assert.equal(stopped.executionStatus, "prepared"); assert.equal(stopped.commandStatus, "needs_confirmation");
+    if (previouslyConfirmed) {
+      const auth = await authForScheduledTask(prisma, tenantId, userId);
+      await confirmTaskExecution(prisma, auth, task.id);
+      assert.equal(await prisma.executionConfirmation.count({ where: { taskId: task.id, voidedAt: null } }), 1);
+    }
   }
 });
 
@@ -135,6 +142,23 @@ it("does not borrow the owner's authority when the confirming employee has lost 
   await confirm(task.id, "departed-employee");
   await assert.rejects(processScheduledTask(prisma, { ...action, payloadJson: { confirmedById: "departed-employee" } }), /больше не имеет доступа/);
   assert.equal((await getAction(action.id)).state, "failed");
+});
+
+it("allows explicit re-confirmation after a pre-send snapshot rejection, without treating legacy failures as unsent", async () => {
+  const { task, action } = await fixture(); await confirm(task.id);
+  await prisma.task.update({ where: { id: task.id }, data: { messageDraft: "Изменённый текст до отправки" } });
+  await assert.rejects(processScheduledTask(prisma, action), /Необходимо повторное подтверждение/);
+  const stopped = await prisma.task.findUniqueOrThrow({ where: { id: task.id } });
+  assert.equal(stopped.executionStatus, "prepared"); assert.equal(stopped.commandStatus, "needs_confirmation");
+  assert.equal(await prisma.message.count({ where: { conversation: { sellerLeadId: `queue-${task.id}` } } }), 0);
+  const auth = await authForScheduledTask(prisma, tenantId, userId);
+  const approved = await confirmTaskExecution(prisma, auth, task.id);
+  assert.equal(approved.confirmation.messageSnapshot, "Изменённый текст до отправки");
+  const legacy = await fixture({ executionStatus: "failed" }); await confirm(legacy.task.id);
+  await prisma.executionConfirmation.updateMany({ where: { taskId: legacy.task.id }, data: { voidedAt: new Date() } });
+  await assert.rejects(processScheduledTask(prisma, legacy.action), /Подтверждение отправки/);
+  assert.equal((await prisma.task.findUniqueOrThrow({ where: { id: legacy.task.id } })).executionStatus, "failed");
+  await assert.rejects(confirmTaskExecution(prisma, auth, legacy.task.id), /Отправка не подтверждена/);
 });
 
 it("recovers a missing queue entry only once across overlapping workers, excluding batch children", async () => {
@@ -200,7 +224,7 @@ it("overlapping background ticks send a confirmed message once and preserve its 
   const pending = new Promise<void>(resolve => { release = resolve; });
   const started = new Promise<void>(resolve => { entered = resolve; });
   mock.method(WhatsAppSellerBridge.prototype, "setMode", async () => ({}));
-  const send = mock.method(WhatsAppSellerBridge.prototype, "sendText", async () => { entered(); await pending; return {}; });
+  const send = mock.method(WhatsAppSellerBridge.prototype, "sendText", async () => { entered(); await pending; return { ok: true, idMessage: "scheduled-test" }; });
   const first = processDueScheduledActions(prisma);
   try {
     await Promise.race([started, first.then(() => { throw new Error("Provider was not invoked"); })]);

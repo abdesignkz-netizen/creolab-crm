@@ -12,6 +12,8 @@ import { writeAudit } from "../lib/audit.ts";
 import { ownedWhatsApp, requireWhatsAppSlot, waDigest } from "./whatsappConnectionService.ts";
 import { recordExternalMessage } from "./externalMessageService.ts";
 import { CONVERSATION_MAX_FILE_BYTES } from "./conversationMedia.ts";
+import { recordDirectWaReceipt } from "./directWhatsAppReceipts.ts";
+import { applyAiReplyReceipt } from "./aiReplyDelivery.ts";
 
 const metaId = z.string().regex(/^\d{1,30}$/);
 export const whatsappCloudSchema = z.object({ appId: metaId, wabaId: metaId, phoneNumberId: metaId,
@@ -120,8 +122,11 @@ export async function receiveWhatsAppCloud(prisma: PrismaClient, id: string, raw
         name: change.value.contacts?.find(c => c.wa_id === message.from)?.profile?.name || `+${message.from}`, text: text || (attachments.length ? "" : `[WhatsApp: ${message.type}]`), at, attachments, raw: { id: message.id, type: message.type } });
     }
     for (const status of change.value.statuses || []) {
+      await recordDirectWaReceipt(prisma, row.tenantId, id, status.id, status.status);
+      const trackedAiIds = await applyAiReplyReceipt(prisma, row.tenantId, id, status.id);
+      const legacy = { id: { notIn: trackedAiIds }, OR: [{ connectionScopedId: null }, { connectionScopedId: { not: { startsWith: "wa-out-v2:" } } }] };
       if (status.status === "failed") {
-        const messages = await prisma.message.findMany({ where: { tenantId: row.tenantId, providerMessageId: status.id,
+        const messages = await prisma.message.findMany({ where: { ...legacy, tenantId: row.tenantId, providerMessageId: status.id,
           direction: "outbound", conversation: { connection: { integrationId: id } }, receiptState: { in: ["unknown", "sent"] } }, select: { id: true, conversationId: true } });
         for (const message of messages) await prisma.$transaction(async tx => {
           await tx.$queryRaw`SELECT id FROM "Conversation" WHERE id = ${message.conversationId} AND "tenantId" = ${row.tenantId} FOR UPDATE`;
@@ -143,7 +148,7 @@ export async function receiveWhatsAppCloud(prisma: PrismaClient, id: string, raw
         continue;
       }
       const previousStates = status.status === "read" ? ["sent", "delivered", "unknown"] : status.status === "delivered" ? ["sent", "unknown"] : ["unknown"];
-      await prisma.message.updateMany({ where: { tenantId: row.tenantId, providerMessageId: status.id, conversation: { connection: { integrationId: id } }, receiptState: { in: previousStates } }, data: { receiptState: status.status } });
+      await prisma.message.updateMany({ where: { ...legacy, tenantId: row.tenantId, providerMessageId: status.id, conversation: { connection: { integrationId: id } }, receiptState: { in: previousStates } }, data: { receiptState: status.status } });
     }
   }
   return { ok: true };

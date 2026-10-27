@@ -6,7 +6,9 @@ import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { requireAnalyticsAccess } from "../lib/access.ts";
 import { displayName, formatPhoneDisplay } from "./contactLabels.ts";
-import { PIPELINE_STAGES, amountNumber, formatMoney, parseOpsSettings } from "./dealPipeline.ts";
+import { amountNumber, formatMoney, parseOpsSettings, type TenantOpsSettings } from "./dealPipeline.ts";
+import { flagsForDeal, nextStepForDeal, loadProcessDeals, PROCESS_OPEN_TASK_STATUSES } from "./dealProcessPolicy.ts";
+import { createProcessClock, type ProcessClock } from "./processCalendar.ts";
 import {
   addDaysYmd,
   enumerateBucketKeys,
@@ -589,15 +591,18 @@ export async function getAnalyticsDashboard(prisma: PrismaClient, auth: AuthCont
   const cmp = compareRange(timeZone, compareMode, range.from, range.to, now);
   const { inquiryExtra, dealExtra } = await buildFilters(prisma, query, tid);
   const coverage = new AnalyticsCoverage();
+  const tenantRow = await prisma.tenant.findUnique({ where: { id: tid }, select: { settingsJson: true, timezone: true } });
+  const ops = parseOpsSettings(tenantRow?.settingsJson);
+  const processClock = createProcessClock(ops.processCalendar, tenantRow?.timezone || timeZone, now);
 
-  const [current, previous, funnel, trendInquiries, stageDurations, stage2, tenantRow] = await Promise.all([
+  const [current, previous, funnel, trendInquiries, stageDurations, stage2] = await Promise.all([
     metricBundle(prisma, tid, range.from, range.to, inquiryExtra, dealExtra, coverage, "current"),
     compareMode === "none"
       ? null
       : metricBundle(prisma, tid, cmp.from, cmp.to, inquiryExtra, dealExtra, coverage, "previous"),
     buildFunnel(prisma, tid, range.from, range.to, funnelMode, inquiryExtra, dealExtra, coverage),
     buildTrend(prisma, tid, range.from, range.to, preset, timeZone, inquiryExtra, dealExtra, "inquiries", auth.user.locale, coverage),
-    buildStageDurations(prisma, tid, range.from, range.to, coverage, dealExtra).catch((err) => {
+    buildStageDurations(prisma, tid, range.from, range.to, coverage, dealExtra, ops, processClock, now).catch((err) => {
       coverage.unavailable("durations", "Длительность этапов");
       console.error("analytics stageDurations", err);
       return [];
@@ -609,7 +614,6 @@ export async function getAnalyticsDashboard(prisma: PrismaClient, auth: AuthCont
         return emptyStage2();
       },
     ),
-    prisma.tenant.findUnique({ where: { id: tid }, select: { settingsJson: true } }),
   ]);
 
   const trendCompare =
@@ -777,7 +781,6 @@ export async function getAnalyticsDashboard(prisma: PrismaClient, auth: AuthCont
   };
 
   const biggestLoss = funnel.transitions.slice().sort((a, b) => b.lost - a.lost)[0] || null;
-  const ops = parseOpsSettings(tenantRow?.settingsJson);
   const planMinor = ops.salesPlanMinor;
   const planPercent =
     planMinor && planMinor > 0 && current.revenueKnown ? Math.round((current.revenue / planMinor) * 100) : null;
@@ -995,11 +998,8 @@ async function buildStage2Analytics(
         select: { id: true, assigneeMembershipId: true },
         take,
       })),
-      coverage.read("buildStage2Analytics:open", "Менеджеры: открытые сделки", 3000, take => prisma.deal.findMany({
-        where: { ...dealExtra, outcome: "open" } as never,
-        select: { id: true, assigneeMembershipId: true, nextAction: true, nextActionAt: true },
-        take,
-      })),
+      coverage.read("buildStage2Analytics:open", "Менеджеры: открытые сделки", 3000,
+        take => loadProcessDeals(prisma, tid, { ...dealExtra, outcome: "open" }, take)),
       coverage.read("buildStage2Analytics:tasks", "Задачи", 8000, take => prisma.task.findMany({
         where: {
           tenantId: tid,
@@ -1153,10 +1153,10 @@ async function buildStage2Analytics(
   }
   for (const d of lostDeals) touchMgr(d.assigneeMembershipId).lost += 1;
   for (const d of openDeals) {
-    if (!d.nextAction) touchMgr(d.assigneeMembershipId).noNextAction += 1;
+    if (nextStepForDeal(d).issue) touchMgr(d.assigneeMembershipId).noNextAction += 1;
   }
   for (const t of tasks) {
-    if (t.status === "open" && t.dueAt && t.dueAt < now) touchMgr(t.ownerMembershipId).overdueTasks += 1;
+    if (PROCESS_OPEN_TASK_STATUSES.includes(t.status) && t.dueAt && t.dueAt < now) touchMgr(t.ownerMembershipId).overdueTasks += 1;
   }
 
   const managers = [...mgrMap.values()]
@@ -1353,7 +1353,7 @@ async function buildStage2Analytics(
         },
       })
     : 0;
-  const openNoNext = openDeals.filter((d) => !d.nextAction).length;
+  const openNoNext = openDeals.filter((d) => nextStepForDeal(d).issue).length;
   const dealsNoAmount = await prisma.deal.count({
     where: { tenantId: tid, offerAmountMinor: null, ...(created ? { createdAt: created } : {}) },
   });
@@ -1420,7 +1420,8 @@ async function buildStage2Analytics(
   };
 }
 
-async function buildStageDurations(prisma: PrismaClient, tid: string, from: Date | null, to: Date | null, coverage: AnalyticsCoverage, dealExtra: Record<string, unknown>) {
+async function buildStageDurations(prisma: PrismaClient, tid: string, from: Date | null, to: Date | null, coverage: AnalyticsCoverage,
+  dealExtra: Record<string, unknown>, ops: TenantOpsSettings, clock: ProcessClock, now: Date) {
   const entered = rangeFilter(from, to);
   const history = await coverage.read("buildStageDurations:history", "Длительность этапов", 8000, take => prisma.dealStageHistory.findMany({
     where: { tenantId: tid, deal: { is: dealExtra }, ...(entered ? { enteredAt: entered } : {}) },
@@ -1436,19 +1437,15 @@ async function buildStageDurations(prisma: PrismaClient, tid: string, from: Date
     if (!byStage.has(key)) byStage.set(key, []);
     byStage.get(key)!.push(hours);
   }
-  const openStuck = await coverage.read("buildStageDurations:stalled", "Задержки на этапах", 2000, take => prisma.deal.findMany({
-    where: { ...dealExtra, outcome: "open" },
-    select: { stage: { select: { systemKey: true, name: true } }, stageEnteredAt: true },
-    take,
-  }));
+  const openStuck = await coverage.read("buildStageDurations:stalled", "Задержки на этапах", 2000,
+    take => loadProcessDeals(prisma, tid, { ...dealExtra, outcome: "open" }, take));
   const stuckMap = new Map<string, number>();
-  const now = Date.now();
   for (const d of openStuck) {
-    const days = (now - d.stageEnteredAt.getTime()) / 86400000;
-    if (days > 3) stuckMap.set(d.stage.systemKey, (stuckMap.get(d.stage.systemKey) || 0) + 1);
+    if (flagsForDeal(d, ops, now, clock).stalled) stuckMap.set(d.stage.systemKey, (stuckMap.get(d.stage.systemKey) || 0) + 1);
   }
 
-  return PIPELINE_STAGES.map((s) => {
+  const stages = await prisma.dealStage.findMany({ where: { tenantId: tid }, orderBy: { sortOrder: "asc" } });
+  return stages.filter(s => !s.isTerminal || byStage.has(s.systemKey) || openStuck.some(deal => deal.stage.systemKey === s.systemKey)).map((s) => {
     const hours = byStage.get(s.systemKey) || [];
     const avg = hours.length ? hours.reduce((a, b) => a + b, 0) / hours.length : null;
     const med = median(hours);

@@ -1,0 +1,49 @@
+{
+  "stage": "3.3.9",
+  "date": "2026-10-27",
+  "status": "implemented_and_locally_verified_visual_acceptance_pending",
+  "deployed": false,
+  "liveCustomerMessagesSent": false,
+  "databaseSchemaChanged": false,
+  "scope": "New staff Telegram messages with immutable v2 per-part delivery evidence; older records retain conservative recovery and are not made retryable",
+  "apiTests": [
+    { "suite": "telegramDeliveryReview", "passed": 38, "log": "/tmp/basqar-stage-339-final-api-tests.log" },
+    { "suite": "telegramCompany", "passed": 11, "log": "/tmp/basqar-stage-339-final-api-tests.log" },
+    { "suite": "telegramDeliveryRecovery", "passed": 9, "log": "/tmp/basqar-stage-339-final-api-tests.log" },
+    { "suite": "messageDeliveryReview", "passed": 26, "log": "/tmp/basqar-stage-339-final-api-tests.log" },
+    { "suite": "legacyMessageDelivery", "passed": 26, "log": "/tmp/basqar-stage-339-final-api-tests.log" },
+    { "suite": "conversationBoard", "passed": 13, "log": "/tmp/basqar-stage-339-final-api-tests.log" },
+    { "suite": "channelAi", "passed": 11, "log": "/tmp/basqar-stage-339-channel-ai-tests.log" }
+  ],
+  "apiTestsPassedUnique": 134,
+  "newTestScenarios": 38,
+  "webLogicTests": { "passed": 58, "log": "/tmp/basqar-stage-339-web-tests.log", "browserTests": false },
+  "typecheck": {
+    "api": { "status": "passed", "log": "/tmp/basqar-stage-339-api-types.log" },
+    "web": { "status": "passed", "log": "/tmp/basqar-stage-339-web-types.log" }
+  },
+  "webBuild": { "status": "passed", "budgetUnchanged": true, "initialKilobytes": 1099.6, "initialGzipKilobytes": 279.0,
+    "lazyReviewKilobytes": 16.38, "lazyReviewGzipKilobytes": 5.28, "existingLargeChunkWarning": true, "log": "/tmp/basqar-stage-339-web-build.log" },
+  "diffCheck": "passed",
+  "testEnvironment": "Separate PGlite databases and temporary uploads per suite; mock Telegram HTTP responses; actual HTTP requests only to local test server",
+  "initialFailures": [
+    "Local HTTP server initially blocked; rerun with local-server permission passed. Listen setup now rejects on the original server error.",
+    "New test fixture initially omitted credential keyVersion; corrected before final runs.",
+    "Test helper queried a staff message after intentionally changing its sender kind; corrected to call the public service with the original ID."
+  ],
+  "logNotes": ["Only final runs counted; preliminary failed or repeated suites excluded."],
+  "notVerified": [
+    "Desktop/mobile visual acceptance: browser control remains disabled",
+    "Live Telegram provider delivery",
+    "Concurrent independent production PostgreSQL workers",
+    "Full Docker build"
+  ],
+  "remainingWork": [
+    "Direct WhatsApp QR/Cloud delivery reconciliation",
+    "Review of unknown AI reply delivery",
+    "Historical sends without full immutable evidence",
+    "Visual acceptance and release",
+    "Audit stage 4: unified process rules"
+  ],
+  "providerReference": "https://core.telegram.org/bots/api#making-requests"
+}

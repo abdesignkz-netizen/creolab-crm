@@ -1,0 +1,17 @@
+.ops-section { display: flex; flex-direction: column; gap: 20px; }
+.ops-section h2, .ops-section h3 { margin: 0; }
+.ops-section fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+.ops-section > fieldset { display: flex; flex-direction: column; gap: 24px; }
+.ops-block { border-top: 1px solid var(--border, #dce4ef); padding-top: 20px; display: grid; gap: 12px; }
+.ops-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 16px; }
+.ops-section label { display: grid; gap: 7px; margin: 0; min-width: 0; }
+.ops-section input, .ops-section select, .ops-section textarea { max-width: 100%; min-width: 0; box-sizing: border-box; }
+.ops-section .ops-weekdays { display: flex; flex-wrap: wrap; gap: 8px; }
+.ops-weekdays legend { margin-bottom: 8px; }
+.ops-section .ops-weekdays label { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--border, #dce4ef); border-radius: 10px; padding: 9px 12px; }
+.ops-section .ops-weekdays input { width: 18px; height: 18px; margin: 0; flex: 0 0 auto; }
+.ops-note { border-radius: 10px; padding: 12px 14px; background: var(--surface-muted, #f0f5fc); margin: 0; }
+.ops-section details[open] summary { margin-bottom: 14px; }
+.ops-section details label + label { margin-top: 12px; }
+.ops-save { position: sticky; bottom: 12px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; background: var(--surface, white); padding: 12px; border: 1px solid var(--border, #dce4ef); border-radius: 12px; z-index: 2; }
+@media (max-width: 760px) { .ops-save { bottom: calc(88px + env(safe-area-inset-bottom, 0px)); } .ops-save .btn { width: 100%; } }

@@ -15,3 +15,17 @@
 .crm-review-actions .btn { flex: 1 1 140px; min-height: 40px; white-space: normal; }
 .crm-review-warning, .crm-review-confirm { padding: 10px; background: #fff7e7; border-radius: 8px; font-size: 13px; }
 .crm-review-history { margin-top: 10px; }
+.crm-review-process-entry { border-top: 1px solid var(--line, #dce5ef); padding: 8px 0; }
+.crm-review-process-entry summary { cursor: pointer; line-height: 1.5; }
+.crm-review-process-entry summary small { display: block; margin-top: 3px; }
+.crm-review-new-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 0 14px; }
+.crm-review-new-fields .crm-review-field { min-width: 0; margin: 10px 0 0; }
+.crm-review-effects { border-top: 1px solid var(--border, #dce5f1); padding-top: 12px; margin-top: 12px; }
+.crm-review-effects > summary { cursor: pointer; font-weight: 600; }
+.crm-review-effect { display: grid; gap: 4px; padding-block: 12px; overflow-wrap: anywhere; }
+.crm-review-effect + .crm-review-effect { border-top: 1px solid var(--border, #dce5f1); }
+.crm-review-effect p { margin: 4px 0; }
+.crm-review-effect small { color: var(--muted, #71809c); }
+.crm-review-queue { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 4px 0; }
+.crm-review-queue > div { display: flex; gap: 6px; }
+.crm-review-queue dd { margin: 0; font-weight: 600; }

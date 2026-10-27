@@ -1,25 +1,22 @@
-import { applyAiIntake, publishedIntakePolicy } from "./aiIntakeService.ts";
-import { recordDealStageTransition } from "./dealStageHistory.ts";
+import { applyAiIntake } from "./aiIntakeService.ts";
 import { considerSalesOpportunity, ensureSalesNextTask, enqueueSalesReconcile } from "./salesProcessService.ts";
 import { deliveredConversationMessage } from "./conversationMessageState.ts";
-import { randomUUID } from "node:crypto";
 import type { Prisma, PrismaClient } from "@creolab/db";
-import { taskCreatorSnapshot, readCrmCommercial } from "@creolab/contracts";
+import { readCrmCommercial } from "@creolab/contracts";
 import { crmReviewFingerprint } from "./crmReviewState.ts";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { writeActivity } from "./contactService.ts";
 import { analyzeConversationContext, resolveContextDeal } from "./conversationContextService.ts";
-import {
-  agreementTypeToTaskType,
-} from "./conversationContextTypes.ts";
 import { parseAIAutomationSettings } from "./aiAutomationSettings.ts";
 import { decideAutomationPolicy } from "./aiAutomationPolicyService.ts";
 import { getEffectiveTenantSettings } from "./runtimeSettings.ts";
-import { createStaffNotification } from "./notificationService.ts";
 import { writeAudit } from "../lib/audit.ts";
 import { listThreadConversationIds } from "./conversationThread.ts";
 import { automaticCrmReview, proposeConversationCrmChanges } from "./conversationCrmReviewService.ts";
+import { ProcessReviewCapture } from "./conversationProcessReview.ts";
+import { applyContextProcess, prepareContextProcess } from "./conversationProcessChanges.ts";
+import { proposeProcessChanges } from "./conversationProcessProposal.ts";
 
 
 const SAFE_INQUIRY_TRANSITIONS: Record<string, string[]> = {
@@ -30,89 +27,16 @@ const SAFE_INQUIRY_TRANSITIONS: Record<string, string[]> = {
   in_progress: ["waiting_client", "waiting_manager", "qualified"],
 };
 
-const SAFE_DEAL_STAGES = new Set(["need_identified", "proposal_sent", "negotiation"]);
 
 function tenantId(auth: AuthContext) {
   if (!auth.activeMembership) throw new ApiError(403, "no_tenant", "Нет активной компании");
   return auth.activeMembership.tenantId;
 }
 
-function defaultReminders(type: string) {
-  if (type === "OFFLINE_MEETING") {
-    return [
-      { offsetMinutes: 24 * 60, channel: "in_app" },
-      { offsetMinutes: 60, channel: "in_app" },
-      { offsetMinutes: 30, channel: "in_app" },
-    ];
-  }
-  if (type === "ONLINE_MEETING" || type === "CALL") {
-    return [
-      { offsetMinutes: 24 * 60, channel: "in_app" },
-      { offsetMinutes: 60, channel: "in_app" },
-      { offsetMinutes: 30, channel: "in_app" },
-    ];
-  }
-  return [
-    { offsetMinutes: 24 * 60, channel: "in_app" },
-    { offsetMinutes: 60, channel: "in_app" },
-  ];
-}
-
-async function scheduleReminders(
-  prisma: Prisma.TransactionClient,
-  tid: string,
-  parentType: string,
-  parentId: string,
-  scheduledAt: Date | null,
-  type: string,
-) {
-  if (!scheduledAt) return;
-  const now = Date.now();
-  for (const rem of defaultReminders(type)) {
-    const dueAt = new Date(scheduledAt.getTime() - rem.offsetMinutes * 60_000);
-    if (dueAt.getTime() <= now) continue;
-    const actionType = `agreement_reminder_${rem.offsetMinutes}`;
-    const existing = await prisma.scheduledAction.findFirst({
-      where: { tenantId: tid, type: actionType, parentType, parentId, state: "scheduled" },
-    });
-    if (existing) {
-      await prisma.scheduledAction.update({
-        where: { id: existing.id },
-        data: {
-          dueAt,
-          payloadJson: {
-            offsetMinutes: rem.offsetMinutes,
-            channel: rem.channel,
-            agreementId: parentId,
-          } as object,
-        },
-      });
-      continue;
-    }
-    await prisma.scheduledAction.create({
-      data: {
-        id: randomUUID(),
-        tenantId: tid,
-        type: actionType,
-        parentType,
-        parentId,
-        dueAt,
-        state: "scheduled",
-        payloadJson: {
-          offsetMinutes: rem.offsetMinutes,
-          channel: rem.channel,
-          agreementId: parentId,
-        } as object,
-      },
-    });
-  }
-}
-
 type AnalysisResult = Awaited<ReturnType<typeof analyzeConversationContext>>;
 const asObject = (value: unknown): Record<string, unknown> => value && typeof value === "object" ? value as Record<string, unknown> : {};
 const json = (value: unknown) => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
-const taskState = (task: { title: string; dueAt: Date | null; status: string; ownerMembershipId: string | null; description: string | null }) =>
-  ({ title: task.title, dueAt: task.dueAt?.toISOString() || null, status: task.status, ownerMembershipId: task.ownerMembershipId, description: task.description });
+
 
 /** Analysis never performs external actions. All CRM changes and the message checkpoint commit together. */
 export async function applyConversationAnalysis(
@@ -189,13 +113,18 @@ export async function applyAnalyzedConversation(prisma: PrismaClient, tid: strin
       }
       await proposeConversationCrmChanges(tx, tid, conversationId, { analysis, sourceMessageId, messageRevision: result.messageRevision,
         snapshot: result.snapshot.review, updateContact: settings.crm.updateContact, updateInquiry: settings.crm.updateInquiry });
+      await proposeProcessChanges(tx, tid, { result, evidenceMessages }, conversationId);
       return { applied: null, skipped: "suggestions_only" };
     }
     if (conversation.messageRevision !== result.messageRevision || !evidenceMessages.some(m => m.id === sourceMessageId)) {
       throw new ApiError(409, "stale_analysis", "Диалог изменился во время анализа; требуется повторный анализ");
     }
     const key = { scope: "conversation.crm", actorKey: `${tid}:${conversationId}`, key: sourceMessageId };
-    if (await tx.idempotencyRecord.findUnique({ where: { scope_actorKey_key: key } })) return { applied: null, skipped: "already_applied" };
+    if (await tx.idempotencyRecord.findUnique({ where: { scope_actorKey_key: key } })) {
+      await tx.$queryRaw`SELECT id FROM "Conversation" WHERE id = ${conversationId} AND "tenantId" = ${tid} FOR UPDATE`;
+      await proposeProcessChanges(tx, tid, { result, evidenceMessages }, conversationId, { tasksOnly: true });
+      return { applied: null, skipped: "already_applied" };
+    }
     const previousSource = conversation.lastAnalyzedMessageId ? await tx.message.findFirst({
       where: { id: conversation.lastAnalyzedMessageId, tenantId: tid }, select: { id: true, createdAt: true },
     }) : null;
@@ -221,6 +150,7 @@ export async function applyAnalyzedConversation(prisma: PrismaClient, tid: strin
     }
     const createdSalesDeal = await considerSalesOpportunity(tx, tid, { conversationId, sourceMessageId, messageRevision: result.messageRevision, analysis });
     const deal = await resolveContextDeal(tx, tid, conversationId, contactId, inquiry?.dealId);
+    const processReview = new ProcessReviewCapture();
     const evidenceIds = new Set(evidenceMessages.map(m => m.id));
     const grounded = (ids: string[]) => ids.includes(sourceMessageId) && ids.every(id => evidenceIds.has(id));
     const reliable = analysis.confidence === "HIGH" && grounded(analysis.evidenceMessageIds);
@@ -265,137 +195,17 @@ export async function applyAnalyzedConversation(prisma: PrismaClient, tid: strin
       addChange("inquiry", inquiry.id, { status: inquiry.status, aiSummary: inquiry.aiSummary, nextStep: inquiry.nextStep, needsReply: inquiry.needsReply }, data, "INQUIRY_UPDATED");
     }
 
-    // An older message may never overwrite a newer edit, including edits made during AI inference.
-    const lastAiDealChange = deal ? await tx.auditEvent.findFirst({ where: { tenantId: tid, entityType: "deal", entityId: deal.id,
-      action: "conversation.crm_updated", actorUserId: null }, orderBy: { createdAt: "desc" } }) : null;
-    const lastAiData = asObject(lastAiDealChange?.changesJson);
-    const onlyPriorAiChanged = deal && asObject(lastAiData.after).version === deal.version &&
-      typeof lastAiData.sourceMessageAt === "string" && new Date(lastAiData.sourceMessageAt) <= sourceMessageAt;
-    const dealWritable = deal && (createdSalesDeal?.id === deal.id || (result.snapshot.deal?.id === deal.id && result.snapshot.deal.version === deal.version &&
-      result.snapshot.deal.updatedAt.getTime() === deal.updatedAt.getTime() &&
-      (deal.updatedAt <= sourceMessageAt || onlyPriorAiChanged) && !await manuallyChanged("deal", deal.id)));
-    const dealData: Prisma.DealUncheckedUpdateInput = {};
-    let stageTransition: Parameters<typeof recordDealStageTransition>[1] | null = null;
-    const accepted = (analysis.events || []).filter(e => e.type === "PRICE_ACCEPTED" && e.confidence === "HIGH" && grounded(e.evidenceMessageIds));
-    if (dealWritable && evidenceMessages.some(m => m.id === sourceMessageId && (m.direction === "inbound" || m.senderKind === "client")) && settings.crm.updateDealAmount && accepted.length === 1 && !(analysis.events || []).some(e => e.type === "PRICE_REJECTED")) {
-      const price = accepted[0];
-      const amount = price.amount;
-      if (typeof amount === "number" && Number.isSafeInteger(amount) && amount > 0 && price.currency === deal.currency &&
-          !await tx.dealItem.count({ where: { tenantId: tid, dealId: deal.id } })) {
-        dealData.offerAmountMinor = amount;
-        applied.dealAmount = amount;
-      }
-    }
-    if (dealWritable && settings.crm.updateDealStage && reliable && analysis.suggestedDealStage && SAFE_DEAL_STAGES.has(analysis.suggestedDealStage)) {
-      // Use existing semantic keys only. Never seed stages or move backwards/into terminal or financial stages.
-      const target = await tx.dealStage.findFirst({ where: { tenantId: tid, systemKey: analysis.suggestedDealStage, isTerminal: false } });
-      if (target && target.sortOrder > deal.stage.sortOrder) {
-        dealData.stageId = target.id; dealData.stageEnteredAt = new Date(); dealData.probability = target.defaultProbability;
-        stageTransition = { tenantId: tid, dealId: deal.id, fromStageId: deal.stageId,
-          fromSystemKey: deal.stage.systemKey, toStageId: target.id, toSystemKey: target.systemKey, enteredAt: dealData.stageEnteredAt as Date,
-          changedByType: "context_engine", note: analysis.summaryUpdate };
-        applied.dealStage = target.systemKey;
-      }
-    }
-    const ownerCandidate = conversation.assigneeMembershipId || deal?.assigneeMembershipId || inquiry?.assigneeMembershipId || conversation.contact?.ownerMembershipId;
-    const owner = ownerCandidate ? await tx.membership.findFirst({ where: { id: ownerCandidate, tenantId: tid, active: true } }) : null;
-    const intakePolicy = await publishedIntakePolicy(tx, tid);
-    const staffSource = evidenceMessages.some(m => m.id === sourceMessageId && m.direction === "outbound" && m.senderKind === "staff");
-    const scheduled = analysis.agreements.filter(a => a.confidence === "HIGH" && grounded(a.evidenceMessageIds)
-      // Neither customer preferences nor the AI's own words confirm a reservation.
-      && !(!staffSource && intakePolicy?.roles.includes("booking") && ["CALL", "OFFLINE_MEETING", "ONLINE_MEETING"].includes(a.type)));
-    if (dealWritable && settings.crm.updateNextAction && reliable && analysis.suggestedNextAction) {
-      dealData.nextAction = analysis.suggestedNextAction;
-      const dated = scheduled.find(a => a.scheduledAt && ["CONFIRMED", "SCHEDULED", "RESCHEDULED"].includes(a.status));
-      if (dated?.scheduledAt && Number.isFinite(Date.parse(dated.scheduledAt))) dealData.nextActionAt = new Date(dated.scheduledAt);
-    }
-    if (dealWritable && Object.keys(dealData).length) {
-      await tx.deal.update({ where: { id: deal.id, tenantId: tid, version: deal.version, updatedAt: deal.updatedAt }, data: { ...dealData, version: { increment: 1 } } });
-      if (stageTransition) await recordDealStageTransition(tx, stageTransition);
-      addChange("deal", deal.id, { offerAmountMinor: deal.offerAmountMinor, stageId: deal.stageId, probability: deal.probability,
-        nextAction: deal.nextAction, nextActionAt: deal.nextActionAt, version: deal.version }, { ...dealData, version: deal.version + 1 }, applied.dealAmount != null ? "PRICE_ACCEPTED" : "DEAL_UPDATED", "HIGH");
-    }
+    const processPlan = await prepareContextProcess(tx, tid, { result, settings, conversation, inquiry, deal, evidenceMessages, createdSalesDeal });
+    const { owner, intakePolicy, scheduled, dealWritable, dealData } = processPlan;
+    Object.assign(applied, processPlan.applied);
+    await applyContextProcess(tx, tid, processPlan, { capture: processReview, sourceMessageId, summary: analysis.summaryUpdate,
+      onChange: (record, after) => addChange(record.kind, record.id, record.before, after, record.eventType, record.confidence) });
     if (deal && reliable) {
       const outbound = evidenceMessages.find(m => m.id === sourceMessageId)?.direction === "outbound";
       const evidenceType = applied.dealAmount != null ? "sales.order_agreed" : outbound && (analysis.events || []).some(e => e.type === "COMMERCIAL_OFFER_SENT" && e.confidence === "HIGH" && grounded(e.evidenceMessageIds)) ? "sales.proposal_sent" : null;
       if (evidenceType) await writeActivity(tx, { tenantId: tid, contactId: deal.contactId, dealId: deal.id, type: evidenceType,
         title: evidenceType === "sales.order_agreed" ? "Клиент согласовал стоимость" : "Предложение отправлено", actorType: "ai",
         metadata: { sourceMessageId, reason: analysis.summaryUpdate, evidenceMessageIds: analysis.evidenceMessageIds } });
-    }
-    if (settings.crm.detectAgreements) for (const suggestion of scheduled) {
-      let at = suggestion.scheduledAt ? new Date(suggestion.scheduledAt) : null;
-      if (at && !Number.isFinite(at.getTime())) continue;
-      const agreementKey = `agr:${conversationId}:${suggestion.type}:${at?.toISOString() || sourceMessageId}`;
-      const existing = suggestion.existingAgreementId
-        ? await tx.agreement.findFirst({ where: { id: suggestion.existingAgreementId, tenantId: tid, conversationId } })
-        : await tx.agreement.findFirst({ where: { tenantId: tid, dedupeKey: agreementKey } });
-      if (suggestion.existingAgreementId && !existing) continue;
-      const priorAiAgreement = existing ? await tx.auditEvent.findFirst({ where: { tenantId: tid, entityType: "agreement", entityId: existing.id,
-        action: "conversation.crm_updated", actorUserId: null }, orderBy: { createdAt: "desc" } }) : null;
-      const priorAgreementSource = asObject(priorAiAgreement?.changesJson).sourceMessageAt;
-      const onlyPriorAiAgreement = asObject(asObject(priorAiAgreement?.changesJson).after).updatedAt === existing?.updatedAt.toISOString() && typeof priorAgreementSource === "string" && new Date(priorAgreementSource) <= sourceMessageAt;
-      if (existing && (result.snapshot.agreements.find(a => a.id === existing.id)?.updatedAt.getTime() !== existing.updatedAt.getTime() ||
-        (existing.updatedAt > sourceMessageAt && !onlyPriorAiAgreement) || ["COMPLETED", "CANCELLED"].includes(existing.status))) continue;
-      if (suggestion.action !== "create" && !existing) continue;
-      if (!at && existing && ["cancel", "complete"].includes(suggestion.action)) at = existing.scheduledAt;
-      const status = suggestion.action === "cancel" ? "CANCELLED" : suggestion.action === "complete" ? "COMPLETED" : suggestion.status;
-      const data = { contactId, inquiryId: inquiry?.id || null, dealId: deal?.id || null, conversationId,
-        type: suggestion.type, title: suggestion.title, summary: suggestion.summary || null, purpose: suggestion.purpose || null,
-        status, scheduledAt: at, scheduledEndAt: suggestion.scheduledEndAt ? new Date(suggestion.scheduledEndAt) : null,
-        previousScheduledAt: suggestion.action === "reschedule" ? existing?.scheduledAt : existing?.previousScheduledAt,
-        responsibleMembershipId: existing?.responsibleMembershipId || owner?.id || null,
-        locationName: suggestion.locationName === undefined ? existing?.locationName || null : suggestion.locationName, address: suggestion.address === undefined ? existing?.address || null : suggestion.address,
-        phone: suggestion.phone === undefined ? existing?.phone || null : suggestion.phone,
-        meetingId: suggestion.meetingId === undefined ? existing?.meetingId || null : suggestion.meetingId,
-        meetingPassword: suggestion.meetingPassword === undefined ? existing?.meetingPassword || null : suggestion.meetingPassword,
-        meetingProvider: suggestion.meetingProvider === undefined ? existing?.meetingProvider || null : suggestion.meetingProvider, meetingUrl: suggestion.meetingUrl === undefined ? existing?.meetingUrl || null : suggestion.meetingUrl,
-        clarificationNeeded: suggestion.clarificationNeeded || null, confidence: suggestion.confidence,
-        sourceMessageIdsJson: json(suggestion.evidenceMessageIds),
-        contextSnapshotJson: json({ summary: analysis.summaryUpdate, sourceMessageId, events: analysis.events || [] }),
-        remindersJson: json(defaultReminders(suggestion.type)),
-        ...(status === "CANCELLED" ? { cancelledAt: new Date() } : {}),
-        ...(status === "COMPLETED" ? { completedAt: new Date() } : {}),
-      };
-      const agreement = existing
-        ? await tx.agreement.update({ where: { id: existing.id, tenantId: tid, updatedAt: existing.updatedAt }, data })
-        : await tx.agreement.create({ data: { ...data, tenantId: tid, dedupeKey: agreementKey } });
-      addChange("agreement", agreement.id, existing, { ...data, updatedAt: agreement.updatedAt.toISOString() }, suggestion.type, suggestion.confidence);
-      await tx.scheduledAction.updateMany({ where: { tenantId: tid, parentType: "agreement", parentId: agreement.id, state: "scheduled" }, data: { state: "canceled", cancelReason: "agreement_updated" } });
-      if (!["CANCELLED", "COMPLETED"].includes(status)) await scheduleReminders(tx, tid, "agreement", agreement.id, at, suggestion.type);
-      let task = await tx.task.findFirst({ where: { tenantId: tid, agreementId: agreement.id } });
-      if (settings.crm.createTasks) {
-        const oldSnapshot = asObject(task?.contextSnapshotJson);
-        const untouched = !task || (task.source === "context_engine" && Object.entries(taskState(task)).every(([key, value]) => asObject(oldSnapshot.aiTaskState)[key] === value) && oldSnapshot.executorType !== "AI");
-        const meeting = ["CALL", "ONLINE_MEETING", "OFFLINE_MEETING"].includes(suggestion.type);
-        const shouldTask = suggestion.createTask && ["CONFIRMED", "SCHEDULED", "RESCHEDULED"].includes(status) && (!meeting || at != null);
-        if (untouched && (!task || !["done", "canceled"].includes(task.status)) && (shouldTask || (task && ["CANCELLED", "COMPLETED"].includes(status)))) {
-          const hitl = ["SEND_CONTRACT", "SEND_INVOICE", "SEND_PROPOSAL", "SEND_DOCUMENTS"].includes(suggestion.type);
-          const taskData = { type: agreementTypeToTaskType(suggestion.type), title: suggestion.title,
-            description: suggestion.summary || analysis.summaryUpdate, contactId, inquiryId: inquiry?.id || null,
-            dealId: deal?.id || null, conversationId, agreementId: agreement.id, dueAt: at,
-            ownerMembershipId: task?.ownerMembershipId || owner?.id || null,
-            status: status === "CANCELLED" ? "canceled" : status === "COMPLETED" ? "done" : "open",
-            completedAt: ["CANCELLED", "COMPLETED"].includes(status) ? new Date() : null,
-            source: "context_engine", targetType: contactId ? "client" : "none",
-            briefingText: analysis.summaryUpdate, purpose: suggestion.purpose || null,
-            sourceMessageIdsJson: json(suggestion.evidenceMessageIds),
-            executionStatus: hitl ? "prepared" : "none", commandStatus: hitl ? "needs_confirmation" : "none",
-          };
-          const snapshot = json(taskCreatorSnapshot({ existing: { summary: analysis.summaryUpdate, aiTaskState: taskState(taskData), sourceMessageId },
-            createdByKind: "ai", createdByMembershipId: null, executorType: "USER" }));
-          const previous = task;
-          task = task ? await tx.task.update({ where: { id: task.id, tenantId: tid, status: task.status, dueAt: task.dueAt, ownerMembershipId: task.ownerMembershipId, title: task.title, description: task.description, contextSnapshotJson: { equals: json(task.contextSnapshotJson || {}) } }, data: { ...taskData, contextSnapshotJson: snapshot } })
-            : await tx.task.create({ data: { ...taskData, tenantId: tid, dedupeKey: `task-agr:${agreement.id}`, contextSnapshotJson: snapshot } });
-          addChange("task", task.id, previous ? taskState(previous) : null, taskState(task), suggestion.type, suggestion.confidence);
-          if (hitl && task.status === "open") await createStaffNotification(tx, {
-            tenantId: tid, membershipId: task.ownerMembershipId, type: "agreement.needs_confirmation",
-            entityType: "agreement", entityId: agreement.id, title: "Нужно подтверждение перед отправкой",
-            body: `${agreement.title}. Проверьте и подтвердите отправку.`, priority: "high",
-            episodeKey: `agreement-confirmation:${agreement.id}:${sourceMessageId}`, channels: ["in_app", "web_push"],
-          });
-        }
-      }
-      applied.agreements.push({ agreementId: agreement.id, taskId: task?.id || null, type: agreement.type, status: agreement.status });
     }
     for (const change of changes) {
       const review = contactId ? await automaticCrmReview(tx, tid, { conversationId, contactId, sourceMessageId, messageRevision: result.messageRevision,
@@ -417,7 +227,16 @@ export async function applyAnalyzedConversation(prisma: PrismaClient, tid: strin
       snapshot: result.snapshot.review, commercialFingerprint, updateContact: settings.crm.updateContact, updateInquiry: settings.crm.updateInquiry });
     await tx.idempotencyRecord.create({ data: { ...key, requestHash: sourceMessageId,
       resultJson: json({ events: analysis.events || [], applied }), expiresAt: new Date("9999-12-31T00:00:00Z") } });
-    if (deal) { await ensureSalesNextTask(tx, tid, deal.id, conversationId, Boolean(dealWritable && (dealData.nextAction || dealData.nextActionAt))); await enqueueSalesReconcile(tx, tid, deal.id); }
+    if (deal) {
+      const taskChanges = await ensureSalesNextTask(tx, tid, deal.id, conversationId, Boolean(dealWritable && (dealData.nextAction || dealData.nextActionAt)));
+      for (const change of taskChanges || []) processReview.remember("task", change.id, change.before);
+      processReview.rememberOutbox(await enqueueSalesReconcile(tx, tid, deal.id));
+    }
+    await processReview.save(tx, tid, { conversationId, contactId, sourceMessageId, messageRevision: result.messageRevision,
+      evidenceMessageIds: [...new Set([...analysis.evidenceMessageIds, ...scheduled.flatMap(a => a.evidenceMessageIds)])] });
+    // Free-standing recommendations remain reviewable suggestions in AUTO too.
+    // Prepare against final CRM state so tasks already created above are not proposed twice.
+    await proposeProcessChanges(tx, tid, { result, evidenceMessages }, conversationId, { tasksOnly: true });
     return { applied, skipped: null };
   }, { timeout: 15000 });
   // Tenant OAuth calendar polling synchronizes persisted agreements independently.

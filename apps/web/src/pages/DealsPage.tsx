@@ -18,6 +18,9 @@ import { CONTRACT_SIGNING_ENABLED } from "../lib/featureFlags";
 import { dealOutcomeLabel } from "../lib/labels";
 import { DealList } from "../components/DealList";
 import { ContractWorkspaceModal } from "../components/ContractWorkspaceModal";
+import { processRuleText } from "@creolab/contracts";
+
+const processText = (text: string) => processRuleText(uiFormatLocale(), text);
 
 type Scope = "all" | "mine" | "unassigned";
 type TimeMode = "now" | "period";
@@ -102,6 +105,7 @@ function dealAttention(deal: any): { text: string; tone: "ok" | "warn" | "next" 
   if (deal.flags?.proposalWithoutReply) return { text: uiText("КП без ответа"), tone: "warn" };
   if (deal.flags?.slaStatus === "WARNING") return { text: uiText("SLA близко"), tone: "warn" };
   if (deal.flags?.stalled) return { text: uiText("Зависла"), tone: "warn" };
+  if (deal.flags?.noNextAction) return { text: processText(deal.flags.nextActionIssue === "missing_deadline" ? "Не указан срок следующего шага" : "Нет следующего действия"), tone: "warn" };
   if (deal.nextAction) {
     return {
       text: deal.nextActionAt
@@ -881,6 +885,8 @@ export function DealDetailPage() {
         { id: "history", label: uiText("История") },
       ]} />
       <div hidden={detailSection !== "overview"}>
+      {d.flags?.reasons?.length ? <div className="panel"><b>{uiText("Требует внимания")}</b><ul>{d.flags.reasons.map((reason: string) => <li key={reason}>{processText(reason)}</li>)}</ul>
+        <p className="muted">{processText(d.flags.timeBasis === "business" ? "Задержки считаются по рабочему календарю компании." : "Задержки считаются в календарных днях.")}</p></div> : null}
       {!editing ? <div className="panel saved-editor-summary">
         <div><b>{uiText("Следующий шаг")}</b><p>{d.nextAction || uiText("Не запланирован")}</p><p className="muted">{d.nextActionAt ? new Date(d.nextActionAt).toLocaleString(uiFormatLocale()) : uiText("Без срока")}</p>
           {d.contact?.id ? <Link to={`/contacts/${d.contact.id}`}>{uiText("Карточка клиента")}</Link> : null}

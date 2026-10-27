@@ -1,3 +1,4 @@
+import { messageAttempt } from "../lib/messageAttempt";
 import { InlineFeedback } from "../components/InlineFeedback";
 import { uiTaskTitle, uiText, useUiText, localizeUiOptions, uiMessage, uiFormatLocale , uiDurationLabel } from "../lib/uiText";
 import { useSession } from "../lib/session";
@@ -10,6 +11,7 @@ import { api } from "../lib/api";
 import { tip } from "../lib/tip";
 import { dealOutcomeLabel } from "../lib/labels";
 const ConversationCrmReview = lazy(() => import("../components/ConversationCrmReview"));
+const MessageDeliveryReview = lazy(() => import("../components/MessageDeliveryReview"));
 
 const FILTERS = [
   ["all", "Все"],
@@ -89,6 +91,10 @@ function MessageBody({ message }: { message: any }) {
               {file.fileName || uiText("Файл")}
             </a>
           )}
+          {message.direction === "outbound" && ["sent", "accepted", "unknown", "sending", "pending", "failed"].includes(file.sendState) ? <div className="muted tiny">{uiText(
+            ["sent", "accepted"].includes(file.sendState) ? "Отправлено" : file.sendState === "unknown" ? "Неизвестный результат отправки"
+              : file.sendState === "sending" ? "Отправляется" : file.sendState === "pending" && ["queued", "sending"].includes(message.operationState) ? "В очереди" : "Не отправлено"
+          )}</div> : null}
         </div>
       ))}
       {!attachments.length && type !== "text" ? (
@@ -119,9 +125,13 @@ export function ConversationsPage() {
   const [listLoading, setListLoading] = useState(true);
   const [error, setError] = useState("");
   const [workspace, setWorkspace] = useState<any>(null);
+  const [deliveryReview, setDeliveryReview] = useState<{ conversationId: string; messageId: string } | null>(null);
+  useEffect(() => { setDeliveryReview(null); }, [selectedId]);
   const [text, setText] = useState("");
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [busy, setBusy] = useState(false);
+  const sendingRef = useRef(false);
+  const attemptRef = useRef<{ scope: string; hash: string; key: string } | null>(null);
   const [showContext, setShowContext] = useState(false);
   const [contextNote, setContextNote] = useState("");
   const [members, setMembers] = useState<Array<{ id: string; name: string; isMe?: boolean }>>([]);
@@ -533,6 +543,7 @@ export function ConversationsPage() {
             </div>
             <MessageBody message={message} />
             {uiMessage(message.deliveryLabel) ? <div className="muted tiny">{uiMessage(message.deliveryLabel)}</div> : null}
+            {message.deliveryReviewAvailable ? <button type="button" className="btn secondary" onClick={() => setDeliveryReview({ conversationId: message.deliveryConversationId, messageId: message.id })}>{uiText("Результат отправки")}</button> : null}
           </div>
         ))}
       </div>
@@ -544,30 +555,42 @@ export function ConversationsPage() {
         onDrop={onComposerDrop}
         onSubmit={async (event) => {
           event.preventDefault();
-          if (!text.trim() && !pendingFiles.length) return;
+          if (sendingRef.current || busy || (!text.trim() && !pendingFiles.length)) return;
+          sendingRef.current = true;
           setBusy(true);
+          const conversationId = workspace.conversation.id;
           try {
-            await api.sendMessage(
-              workspace.conversation.id,
-              text.trim(),
-              crypto.randomUUID(),
-              pendingFiles.map((file) => ({
-                fileName: file.fileName,
-                mimeType: file.mimeType,
-                contentBase64: file.contentBase64,
-              })),
-            );
-            if (selectedRef.current !== workspace.conversation.id) return;
-            setText("");
-            setPendingFiles((previous) => {
-              previous.forEach((file) => URL.revokeObjectURL(file.previewUrl));
-              return [];
-            });
-            await loadWorkspace(workspace.conversation.id);
+            const files = pendingFiles.map(({ fileName, mimeType, contentBase64 }) => ({ fileName, mimeType, contentBase64 }));
+            const scope = `${me?.user?.id}:${conversationId}`;
+            let storage: Storage | undefined;
+            try { storage = window.sessionStorage; } catch { /* Disabled by the browser. */ }
+            const attempt = await messageAttempt(scope, [text.trim(), files], storage);
+            if (attemptRef.current?.scope === scope && attemptRef.current.hash === attempt.hash) attempt.key = attemptRef.current.key;
+            attemptRef.current = { scope, hash: attempt.hash, key: attempt.key };
+            const sent: any = await api.sendMessage(conversationId, text.trim(), attempt.key, files);
+            const failed = ["failed", "partial"].includes(sent?.operationState);
+            const uncertain = sent?.operationState === "unknown";
+            if (!failed && !uncertain) { attempt.clear(); attemptRef.current = null; }
+            if (selectedRef.current !== conversationId) return;
+            if (!failed) {
+              setText("");
+              setPendingFiles((previous) => {
+                previous.forEach((file) => URL.revokeObjectURL(file.previewUrl));
+                return [];
+              });
+            }
+            await loadWorkspace(conversationId);
             await loadList();
+            if (selectedRef.current === conversationId) setError(failed ? uiText("Не отправилось") : uncertain ? uiText("Неизвестный результат отправки") : "");
           } catch (err) {
-            setError(err instanceof Error ? err.message : uiText("Не отправилось"));
+            if (selectedRef.current === conversationId) {
+              // The server may have sent the message before the response was lost.
+              // Refresh its recorded result, retaining the key for a safe repeat.
+              await loadWorkspace(conversationId);
+              if (selectedRef.current === conversationId) setError(err instanceof Error ? err.message : uiText("Не отправилось"));
+            }
           } finally {
+            sendingRef.current = false;
             setBusy(false);
           }
         }}
@@ -847,6 +870,10 @@ export function ConversationsPage() {
       {listPane}
       {chatPane}
       {contextPane}
+      {deliveryReview ? <Suspense fallback={<p role="status">{uiText("Загрузка…")}</p>}>
+        <MessageDeliveryReview key={`${deliveryReview.conversationId}:${deliveryReview.messageId}`} {...deliveryReview} onClose={() => setDeliveryReview(null)}
+          onChanged={() => { if (selectedRef.current) void loadWorkspace(selectedRef.current); void loadList(); }} />
+      </Suspense> : null}
       {showContext ? <div className="conv-backdrop mobile-only" onClick={() => setShowContext(false)} /> : null}
     </section>
   );

@@ -44,6 +44,9 @@ export { taskTitlePresentation, localizedTaskTitle, type TaskTitlePresentation }
 export * from "./salesProcess.ts";
 
 export * from "./aiBusinessScenarios.ts";
-export type { CrmReviewEntity, CrmReviewField, CrmReviewValue, CrmReviewStatus, CrmReviewBlock, CrmReviewItem, CrmReviewList } from "./crmReview.ts";
+export type { CrmReviewEntity, CrmReviewField, CrmReviewValue, CrmReviewStatus, CrmReviewBlock, CrmReviewItem, CrmReviewList, CrmCalendarEffect, CrmProcessQueue } from "./crmReview.ts";
+export type { MessageDeliveryPart, MessageRetryBlock, MessageDeliveryReview, MessageDeliveryReconciliation } from "./messageDelivery.ts";
 export { crmMoneySchema, crmCommercialFactSchema, CRM_COMMERCIAL_FIELDS, readCrmCommercial } from "./crmCommercial.ts";
 export type { CrmMoney, CrmCommercialField, CrmCommercialFact, CrmCommercialValues } from "./crmCommercial.ts";
+export * from "./processCalendar.ts";
+export * from "./processLocale.ts";

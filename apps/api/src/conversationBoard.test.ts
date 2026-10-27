@@ -612,7 +612,7 @@ describe("Conversations board", () => {
     assert.equal(unreadSelf, 0);
   });
 
-  it("отправляет фото в диалог и отдаёт его в переписке", async () => {
+  it("сохраняет фото и показывает результат, не выдавая отсутствие канала за успешную отправку", async () => {
     const contact = await prisma.contact.findFirst({ where: { name: { contains: "Александр" } } });
     assert.ok(contact);
     const conversation = await prisma.conversation.create({
@@ -624,6 +624,13 @@ describe("Conversations board", () => {
       },
     });
     const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    const absent = await fetch(`${base}/api/v1/conversations/${conversation.id}/messages`, {
+      method: "POST", headers: { "Content-Type": "application/json", cookie }, body: JSON.stringify({ text: "No channel" }),
+    });
+    assert.equal(absent.status, 409);
+    assert.equal((await absent.json()).code, "channel_unavailable");
+    assert.equal(await prisma.message.count({ where: { conversationId: conversation.id } }), 0);
+    await prisma.conversation.update({ where: { id: conversation.id }, data: { sellerLeadId: `media-test-${conversation.id}` } });
     const sent = await fetch(`${base}/api/v1/conversations/${conversation.id}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json", cookie, "Idempotency-Key": "media-send-1" },
@@ -636,6 +643,7 @@ describe("Conversations board", () => {
     assert.equal(sent.status, 201, JSON.stringify(created));
     assert.equal(created.type, "image");
     assert.equal(created.attachments?.length, 1);
+    assert.equal(created.operationState, "failed", "Without a configured bridge the UI must not claim success");
 
     const workspace = await fetch(`${base}/api/v1/conversations/${conversation.id}`, { headers: { cookie } });
     const body = await workspace.json();

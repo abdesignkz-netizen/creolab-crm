@@ -555,6 +555,8 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
   const rawHandoff = (conversation.aiHandoffSummaryJson as Record<string, any> | null);
   const aiHandoffSummary = conversation.mode !== "ai" && rawHandoff?.controlVersion === conversation.controlVersion && typeof rawHandoff.request === "string" && typeof rawHandoff.nextStep === "string" && Array.isArray(rawHandoff.collected)
     ? { request: rawHandoff.request, collected: rawHandoff.collected.filter((item: unknown) => typeof item === "string"), nextStep: rawHandoff.nextStep, sourceMessageId: rawHandoff.sourceMessageId, createdAt: rawHandoff.createdAt } : null;
+  const { trackedAiReplyIds } = await import("./aiReplyDeliveryState.ts");
+  const aiTrackedIds = await trackedAiReplyIds(prisma, conversation.tenantId, messages.filter(m => m.senderKind === "ai").map(m => m.id));
 
   return {
     asOf: now.toISOString(),
@@ -705,7 +707,7 @@ export async function getConversationWorkspace(prisma: PrismaClient, auth: AuthC
     },
     pinnedNotes: contact?.notes?.map((item) => ({ id: item.id, text: item.text })) || [],
     hasEarlierMessages: messages.length === 120,
-    messages: messages.map(message => messageView(message, timeZone, conversation.id)),
+    messages: messages.map(message => messageView(message, timeZone, conversation.id, aiTrackedIds.has(message.id))),
   };
 }
 
@@ -878,7 +880,7 @@ export async function markConversationRead(prisma: PrismaClient, auth: AuthConte
   return { ok: true };
 }
 
-function messageView(message: any, timeZone: string, viewerConversationId = message.conversationId) {
+function messageView(message: any, timeZone: string, viewerConversationId = message.conversationId, aiDeliveryTracked = false) {
   const attachments = (message.attachments || []).map((item: any) => attachmentView(viewerConversationId, item));
   const kind =
     conversationMediaKind(attachments[0]?.mimeType, message.type) !== "text"
@@ -896,6 +898,11 @@ function messageView(message: any, timeZone: string, viewerConversationId = mess
       createdLabel: formatWhen(message.createdAt, timeZone),
       operationState: message.operationState,
       receiptState: message.receiptState,
+      deliveryConversationId: message.conversationId,
+      deliveryReviewAvailable: message.direction === "outbound" && !message.internal && ((message.senderKind === "ai" && aiDeliveryTracked)
+        || (message.senderKind === "staff" && (String(message.connectionScopedId || "").startsWith(`${message.tenantId}:legacy:`)
+          || String(message.connectionScopedId || "").startsWith(`telegram-out-v2:${message.tenantId}:`)
+          || String(message.connectionScopedId || "").startsWith(`wa-out-v2:${message.tenantId}:`)))),
       attachments,
       previewLabel: messagePreviewText({ text: message.text, type: kind }),
       deliveryLabel:
@@ -904,11 +911,12 @@ function messageView(message: any, timeZone: string, viewerConversationId = mess
             ? "Прочитано"
             : message.receiptState === "delivered"
               ? "Доставлено"
-              : message.operationState === "accepted"
-                ? "Отправлено"
+              : ["accepted", "sent"].includes(message.operationState)
+                ? message.receiptState === "reconciled" ? "Сверено сотрудником" : "Отправлено"
                 : message.operationState === "failed"
                   ? "Ошибка"
-                  : message.operationState
+                  : ({ queued: "В очереди", sending: "Отправляется", unknown: "Неизвестный результат отправки",
+                    partial: "Не все вложения отправлены", canceled: "Отменено", stored: "Отправка не отслеживается" } as Record<string, string>)[message.operationState] || "Отправка не отслеживается"
           : null,
     };
 }
@@ -935,7 +943,9 @@ export async function getConversationMessages(prisma: PrismaClient, auth: AuthCo
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: 121,
   });
-  return { hasEarlierMessages: messages.length > 120, messages: messages.slice(0, 120).reverse().map(message => messageView(message, tenant.timezone || "Asia/Almaty", id)) };
+  const { trackedAiReplyIds } = await import("./aiReplyDeliveryState.ts");
+  const aiTrackedIds = await trackedAiReplyIds(prisma, tenantId, messages.filter(m => m.senderKind === "ai").map(m => m.id));
+  return { hasEarlierMessages: messages.length > 120, messages: messages.slice(0, 120).reverse().map(message => messageView(message, tenant.timezone || "Asia/Almaty", id, aiTrackedIds.has(message.id))) };
 }
 
 export async function getConversationAttachment(

@@ -12,6 +12,7 @@ describe("company Telegram integration", () => {
   const nativeFetch = globalThis.fetch;
   const oldApiBase = config.apiBaseUrl;
   let webhookUrl = "", sendCount = 0, failSend = false;
+  let badSendMethod = "", failSendMethod = "", onSend: ((method: string) => Promise<void>) | null = null;
   const providerCalls: string[] = [];
   before(async () => {
     config.apiBaseUrl = "https://crm.example.test";
@@ -30,8 +31,9 @@ describe("company Telegram integration", () => {
       else if (method === "photo.jpg") return new Response(new Uint8Array([255,216,255,217]));
       else if (method === "sendMessage" || method === "sendDocument") {
         sendCount++;
-        if (failSend) throw new Error(`request failed at ${address}`);
-        result = { message_id: 1000 + sendCount };
+        if (failSend || failSendMethod === method) throw new Error(`request failed at ${address}`);
+        await onSend?.(method);
+        result = badSendMethod === method ? {} : { message_id: 1000 + sendCount };
       } else throw new Error(`Unexpected Telegram method: ${method}`);
       return new Response(JSON.stringify({ ok: true, result }), { headers: { "content-type": "application/json" } });
     };
@@ -39,8 +41,10 @@ describe("company Telegram integration", () => {
     prisma = await createPrismaClient();
     const { seedDatabase } = await import("../../../packages/db/src/seed.ts");
     await seedDatabase();
-    server = createApp(prisma).listen(0, "127.0.0.1");
-    await new Promise<void>(resolve => server.once("listening", resolve));
+    await new Promise<void>((resolve, reject) => {
+      server = createApp(prisma).listen(0, "127.0.0.1", error => error ? reject(error) : resolve());
+      server.once("error", reject);
+    });
     const address = server.address(); if (!address || typeof address === "string") throw new Error("no port");
     base = `http://127.0.0.1:${address.port}`;
     const login = await nativeFetch(`${base}/api/v1/auth/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: "owner@creolab.example", password: process.env.SEED_PASSWORD }) });
@@ -101,6 +105,35 @@ describe("company Telegram integration", () => {
     const failed = await post(path, { text: "Ошибка доставки", idempotencyKey: failedKey }); assert.equal(failed.status, 502);
     const errorBody = await failed.text(); assert.ok(!errorBody.includes(token)); failSend = false;
     const retry = await post(path, { text: "Ошибка доставки", idempotencyKey: failedKey }); assert.equal((await retry.json()).operationState, "unknown"); assert.equal(sendCount, sends + 2);
+  });
+  it("does not treat a Telegram reply without a message id as success", async () => {
+    const path = `/api/v1/conversations/${conversationId}/messages`, payload = { text: "Malformed", idempotencyKey: "telegram-malformed" };
+    const before = sendCount; badSendMethod = "sendMessage";
+    try { assert.equal((await post(path, payload)).status, 502); } finally { badSendMethod = ""; }
+    assert.equal((await (await post(path, payload)).json()).operationState, "unknown"); assert.equal(sendCount, before + 1);
+  });
+  it("preserves accepted text and unknown file evidence without resending either", async () => {
+    const path = `/api/v1/conversations/${conversationId}/messages`, payload = { text: "Multipart", idempotencyKey: "telegram-partial",
+      attachments: [1, 2].map(i => ({ fileName: `${i}.pdf`, mimeType: "application/pdf", contentBase64: "dGVzdA==" })) };
+    const before = sendCount; failSendMethod = "sendDocument";
+    try { assert.equal((await post(path, payload)).status, 502); } finally { failSendMethod = ""; }
+    const message = await (await post(path, payload)).json();
+    assert.equal(message.operationState, "unknown"); assert.ok(message.providerMessageId);
+    assert.equal(message.attachments.filter((file: any) => file.sendState === "unknown").length, 1);
+    assert.equal(message.attachments.filter((file: any) => file.sendState === "pending").length, 1);
+    assert.equal(sendCount, before + 2);
+    const operation = await prisma.outboundOperation.findFirstOrThrow({ where: { providerRef: message.id } }); assert.equal(operation.state, "unknown");
+  });
+  it("stops subsequent files when conversation control changes during text delivery", async () => {
+    const before = sendCount;
+    onSend = async method => { if (method === "sendMessage") await prisma.conversation.update({ where: { id: conversationId }, data: { mode: "paused", controlVersion: { increment: 1 } } }); };
+    try {
+      const result = await post(`/api/v1/conversations/${conversationId}/messages`, { text: "Stop after text", idempotencyKey: "telegram-stopped",
+        attachments: [{ fileName: "x.pdf", mimeType: "application/pdf", contentBase64: "dGVzdA==" }] });
+      assert.equal(result.status, 409); assert.equal(sendCount, before + 1);
+      const message = await prisma.message.findFirstOrThrow({ where: { conversationId, text: "Stop after text" }, include: { attachments: true } });
+      assert.equal(message.operationState, "partial"); assert.ok(message.providerMessageId); assert.equal(message.attachments[0].sendState, "pending");
+    } finally { onSend = null; await prisma.conversation.update({ where: { id: conversationId }, data: { mode: "human" } }); }
   });
   it("tenant and permission checks protect connection management", async () => {
     const other = await prisma.tenant.findFirstOrThrow({ where: { integrations: { none: { id: integrationId } } } });

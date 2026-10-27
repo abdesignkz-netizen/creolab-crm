@@ -189,10 +189,12 @@ export async function sendInstagramReply(prisma: PrismaClient, auth: AuthContext
   return prisma.message.findUnique({ where: { id: claimed.message!.id } });
 }
 
-export async function sendInstagramText(prisma: PrismaClient, row: Integration, recipient: string, text: string) {
+export async function sendInstagramText(prisma: PrismaClient, row: Integration, recipient: string, text: string, beforeSend?: () => Promise<void>) {
   if (!/^\d+$/.test(recipient) || !text || text.length > 1000) throw new ApiError(422, "instagram_text_only", "Ответ Instagram должен быть не длиннее 1000 символов");
   const settings = row.schemaJson as MetaSettings;
-  const result = await metaRequest<{ message_id: string }>(await credentials(prisma, row, true), settings.apiVersion, `/${settings.accountId}/messages`, { method: "POST", body: JSON.stringify({ recipient: { id: recipient }, message: { text } }) });
+  const secret = await credentials(prisma, row, true);
+  await beforeSend?.();
+  const result = await metaRequest<{ message_id: string }>(secret, settings.apiVersion, `/${settings.accountId}/messages`, { method: "POST", body: JSON.stringify({ recipient: { id: recipient }, message: { text } }) });
   if (!result.message_id) throw new ApiError(502, "instagram_send_unknown", "Instagram не подтвердил отправку");
   return result.message_id;
 }

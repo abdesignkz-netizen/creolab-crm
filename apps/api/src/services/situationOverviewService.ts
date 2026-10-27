@@ -13,7 +13,10 @@ import {
   countVisibleConversations,
   overdueTasksWhere,
 } from "./attentionCounts.ts";
-import { ensureDealPipelineStages, flagsForDeal } from "./dealService.ts";
+import { ensureDealPipelineStages } from "./dealService.ts";
+import { flagsForDeal, PROCESS_OPEN_TASK_STATUSES } from "./dealProcessPolicy.ts";
+import { createProcessClock } from "./processCalendar.ts";
+import { processRuleText } from "@creolab/contracts";
 import { openIntakeWhere } from "./inquiryAttention.ts";
 import { CONTACT_PHONE_SELECT, displayName, phoneFromContact } from "./contactLabels.ts";
 import { PIPELINE_STAGES, parseOpsSettings } from "./dealPipeline.ts";
@@ -418,6 +421,7 @@ export async function getSituationOverview(
   const now = new Date();
   const tenantRow = await prisma.tenant.findUnique({ where: { id: tid } });
   const ops = parseOpsSettings(tenantRow?.settingsJson);
+  const processClock = createProcessClock(ops.processCalendar, tenantRow?.timezone || timeZone, now);
   await ensureDealPipelineStages(prisma, tid);
 
   const presetRaw = String(query.period || query.periodPreset || "today");
@@ -512,7 +516,7 @@ export async function getSituationOverview(
       include: {
         stage: true,
         contact: { include: { methods: true } },
-        tasks: { where: { status: { in: ["open", "waiting"] } }, select: { id: true, dueAt: true, status: true } },
+        tasks: { where: { status: { in: PROCESS_OPEN_TASK_STATUSES } }, select: { id: true, dueAt: true, status: true } },
       },
       orderBy: { createdAt: "desc" },
       take: 500,
@@ -749,9 +753,8 @@ export async function getSituationOverview(
   }
 
   const stageByKey = new Map(stages.map((s) => [s.systemKey, s]));
-  const pipelineKeys = new Set(PIPELINE_STAGES.map((p) => p.systemKey));
   const pipelineNow = stages
-    .filter((stage) => pipelineKeys.has(stage.systemKey))
+    .filter((stage) => !stage.isTerminal || openDeals.some(deal => deal.stageId === stage.id))
     .map((stage) => ({
       systemKey: stage.systemKey,
       name: stageLabel(stage, locale) || stage.name,
@@ -766,13 +769,10 @@ export async function getSituationOverview(
       ? "negotiation"
       : stages.find((s) => /договор|соглас/i.test(s.name))?.systemKey || "contract";
   const negotiationStageIds = new Set(stages.filter((s) => s.systemKey === "contract").map((s) => s.id));
-  const proposalStageIds = new Set(stages.filter((s) => s.systemKey === "proposal_sent").map((s) => s.id));
 
   let pipelineAmount = 0;
   let pipelineAmountKnown = 0;
   let weightedPipeline = 0;
-  const stalledCutoff = new Date(now.getTime() - ops.stalledDealDays * 86400000);
-  const proposalCutoff = new Date(now.getTime() - ops.proposalFollowUpThresholdDays * 86400000);
 
   const waitingClientDeals: typeof openDeals = [];
   const noNextActionDeals: typeof openDeals = [];
@@ -804,7 +804,7 @@ export async function getSituationOverview(
     const onContract = negotiationStageIds.has(deal.stageId);
     if (onContract) contractDeals.push(deal);
 
-    const flags = flagsForDeal(deal, ops, now);
+    const flags = flagsForDeal(deal, ops, now, processClock);
     if (flags.waitingClient) waitingClientDeals.push(deal);
     if (flags.noNextAction) noNextActionDeals.push(deal);
     if (flags.stalled) stalledDealsList.push(deal);
@@ -812,17 +812,9 @@ export async function getSituationOverview(
     if (flags.overdueNextAction) overdueNextDeals.push(deal);
     if (flags.paymentOverdue) paymentOverdueDeals.push(deal);
 
-    const stageEntered = (deal as { stageEnteredAt?: Date }).stageEnteredAt || deal.createdAt;
-    const onProposalTooLong =
-      proposalStageIds.has(deal.stageId) && stageEntered < proposalCutoff && !flags.waitingClient;
-
     const reasons: string[] = [];
     if (onContract) reasons.push(systemText(locale, "На договоре"));
-    if (onProposalTooLong) reasons.push(systemText(locale, "КП без ответа >{p0} дн.", { p0: ops.proposalFollowUpThresholdDays }));
-    if (flags.stalled) reasons.push(systemText(locale, "Нет активности {p0}+ дн.", { p0: ops.stalledDealDays }));
-    if (flags.overSla) reasons.push(systemText(locale, "Просрочен SLA этапа"));
-    if (flags.noNextAction) reasons.push(systemText(locale, "Нет следующего действия"));
-    if (flags.overdueNextAction) reasons.push(systemText(locale, "Просрочен follow-up"));
+    reasons.push(...flags.reasons.map(reason => processRuleText(locale, reason)));
     if (flags.paymentOverdue) reasons.push(systemText(locale, "Просрочена оплата"));
     if (amount != null && amount >= ops.largeDealAmountMinor) reasons.push(systemText(locale, "Крупная сумма"));
     if (flags.waitingClient) reasons.push(systemText(locale, "Ждём клиента"));
@@ -842,8 +834,7 @@ export async function getSituationOverview(
   }
 
   const proposalWithoutReply = openDeals.filter((deal) => {
-    const stageEntered = (deal as { stageEnteredAt?: Date }).stageEnteredAt || deal.createdAt;
-    return flagsForDeal(deal, ops, now).proposalWithoutReply;
+    return flagsForDeal(deal, ops, now, processClock).proposalWithoutReply;
   }).length;
 
   importantDeals.sort((a, b) => (b.amount || 0) - (a.amount || 0));
@@ -883,7 +874,8 @@ export async function getSituationOverview(
     })),
     ...noNextActionDeals.map(deal => ({
       id: `deal-next:${deal.id}`, kind: "missing_next_action", group: "no_next_action", whyLabel: systemText(locale, ATTENTION_WHY_LABEL.no_next_action), entityId: deal.id,
-      title: deal.title, reason: systemText(locale, "В сделке нет следующего действия"), nextAction: "create_next_action",
+      title: deal.title, reason: processRuleText(locale, flagsForDeal(deal, ops, now, processClock).nextActionIssue === "missing_deadline"
+        ? "Не указан срок следующего шага" : "В сделке нет следующего действия"), nextAction: "create_next_action",
       contactName: deal.contact ? displayName(deal.contact) : null,
       phone: phoneFromContact(deal.contact),
       interest: stageLabel(deal.stage, locale),

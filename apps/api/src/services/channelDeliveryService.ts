@@ -11,7 +11,10 @@ export const aiChannelTypes = ["whatsapp_qr", "whatsapp_cloud", "telegram_bot", 
 export function aiSourceChannel(type: string) {
   return ({ telegram_bot: "telegram", instagram_direct: "instagram", website_chat: "website_ai" } as Record<string, string>)[type] || "whatsapp";
 }
-export async function enqueueChannelDelivery(tx: Prisma.TransactionClient, tenantId: string, integration: { id: string; type: string }, messageId: string) {
+export async function enqueueChannelDelivery(tx: Prisma.TransactionClient, tenantId: string, integration: { id: string; type: string }, messageId: string, policyHash?: string) {
+  const { initializeAiReply, enqueueAiReply } = await import("./aiReplyDeliveryState.ts");
+  const tracked = await initializeAiReply(tx, tenantId, messageId, policyHash);
+  if (tracked) { await enqueueAiReply(tx, tenantId, tracked); return; }
   if (integration.type === "whatsapp_qr") {
     await tx.$executeRaw`INSERT INTO "WhatsAppQrJob" (id, "integrationId", kind, "encryptedPayload") VALUES (${messageId}, ${integration.id}, 'outbound', ${encryptSecret(JSON.stringify({ messageId }))})`;
   } else {
@@ -20,7 +23,8 @@ export async function enqueueChannelDelivery(tx: Prisma.TransactionClient, tenan
 }
 
 /** One durable claim per message. An ambiguous provider response is never retried blindly. */
-export async function deliverChannelMessage(prisma: PrismaClient, tenantId: string, messageId: string) {
+export async function deliverChannelMessage(prisma: PrismaClient, tenantId: string, messageId: string, deliveryToken?: string) {
+  if (await (await import("./aiReplyDeliveryState.ts")).readAiReply(prisma, tenantId, messageId)) return (await import("./aiReplyDelivery.ts")).dispatchAiReply(prisma, tenantId, messageId, { deliveryToken });
   const message = await prisma.message.findFirst({ where: { id: messageId, tenantId, operationState: { in: ["queued", "sending"] } }, include: { conversation: { include: { connection: { include: { integration: true } } } } } });
   if (!message) return;
   const conversation = message.conversation, integration = conversation.connection?.integration;
@@ -78,7 +82,7 @@ export async function deliverChannelMessage(prisma: PrismaClient, tenantId: stri
       tenant: { status: "active" }, connection: { status: "active", integration: { id: integration.id, status: "active" } } } })) return false;
     if (message.senderKind !== "ai") return true;
     const { directAiSendAllowed } = await import("./whatsappAiService.ts");
-    return directAiSendAllowed(prisma, tenantId, conversation.id, operation.controlVersion, Number(operation.requestHash), handoffSource);
+    return directAiSendAllowed(prisma, tenantId, conversation.id, operation.controlVersion, Number(operation.requestHash), handoffSource, messageId);
   };
   try {
     if (!await allowed()) { await cancel(); return; }

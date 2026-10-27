@@ -4,6 +4,7 @@ import { ApiError } from "../errors.ts";
 import { logServerError } from "../lib/redact.ts";
 import { notifyScheduledTaskFailure } from "./scheduledTaskFailure.ts";
 import { executeTaskBatch } from "./aiCommandExecutionService.ts";
+import { readTaskDelivery } from "./taskDeliveryState.ts";
 import {
   executeTask,
   SCHEDULED_TASK_ACTION_TYPES,
@@ -140,9 +141,19 @@ export async function processScheduledTask(prisma: PrismaClient, action: Schedul
       where: { id: action.id },
       data: { state: "failed", cancelReason: error instanceof Error ? error.message : "error" },
     });
-    await prisma.task.updateMany({
-      where: { id: task.id, tenantId: action.tenantId, status: { in: ["open", "waiting"] } },
-      data: { executionStatus: "failed", commandStatus: "failed" },
+    await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM "Task" WHERE id = ${task.id} AND "tenantId" = ${action.tenantId} FOR UPDATE`;
+      const current = await tx.task.findFirst({ where: { id: task.id, tenantId: action.tenantId } });
+      const preflightRejected = error instanceof ApiError && ["confirmation_required", "not_confirmed", "stale_confirmation", "feature_required", "limit_exceeded", "forbidden"].includes(error.code);
+      const definitelyNotStarted = preflightRejected && current && ["none", "prepared", "confirmed", "scheduled"].includes(current.executionStatus)
+        && !(await readTaskDelivery(tx, action.tenantId, task.id));
+      await tx.task.updateMany({
+        where: { id: task.id, tenantId: action.tenantId, status: { in: ["open", "waiting", "in_progress"] }, executionStatus: { notIn: ["sending", "unknown", "partial", "sent"] } },
+        // Rejected before dispatch: ask for a new explicit confirmation. Do not
+        // turn a known unsent draft into an unrecoverable legacy unknown send.
+        data: definitelyNotStarted ? { executionStatus: "prepared", commandStatus: "needs_confirmation" }
+          : { executionStatus: "failed", commandStatus: "failed" },
+      });
     });
     await notifyScheduledTaskFailure(prisma, action, task)
       .catch(noticeError => logServerError(noticeError, "background:task failure notice"));

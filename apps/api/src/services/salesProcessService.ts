@@ -115,6 +115,7 @@ export async function ensureSalesNextTask(tx: Tx, tid: string, dealId: string, c
   if (!deal) return;
   const key = `sales-next:${dealId}`;
   let managed = await tx.task.findFirst({ where: { tenantId: tid, dedupeKey: key } });
+  const changes: Array<{ id: string; before: typeof managed }> = [];
   const other = await tx.task.findFirst({ where: { tenantId: tid, dealId, status: { in: ["open", "in_progress", "waiting"] }, OR: [{ dedupeKey: null }, { dedupeKey: { not: key } }] }, orderBy: { dueAt: "asc" } });
   if (other) return;
   const title = deal.nextAction || "Согласовать следующий шаг с клиентом";
@@ -122,10 +123,12 @@ export async function ensureSalesNextTask(tx: Tx, tid: string, dealId: string, c
   const old = salesRecord(managed?.contextSnapshotJson).salesManaged;
   // A new, explicitly changed step may follow a completed task; never reopen the old one.
   if (managed?.status === "done" && old && deal.nextAction && (deal.nextAction !== old.title || deal.nextActionAt && deal.nextActionAt.toISOString() !== old.dueAt)) {
+    changes.push({ id: managed.id, before: managed });
     await tx.task.update({ where: { id: managed.id }, data: { dedupeKey: `${key}:done:${managed.id}` } });
     managed = null;
   }
   if (managed && (managed.status !== "open" || managed.title !== old?.title || managed.dueAt?.toISOString() !== old?.dueAt || managed.ownerMembershipId !== old?.ownerId)) return;
+  if (managed && salesRecord(managed.contextSnapshotJson).manualEditId) return;
   if (managed && managed.title === title && managed.dueAt?.getTime() === dueAt.getTime() && managed.ownerMembershipId === deal.assigneeMembershipId) return;
   const data = { title, dueAt, ownerMembershipId: deal.assigneeMembershipId,
     contextSnapshotJson: json(taskCreatorSnapshot({ createdByKind: "ai", executorType: "USER", existing: { ...salesRecord(managed?.contextSnapshotJson), salesManaged: { title, dueAt: dueAt.toISOString(), ownerId: deal.assigneeMembershipId, manualPlan: Boolean(old?.manualPlan || old && !aiPlanChanged && (title !== old.title || dueAt.toISOString() !== old.dueAt)) } } })) };
@@ -134,6 +137,8 @@ export async function ensureSalesNextTask(tx: Tx, tid: string, dealId: string, c
   } });
   await writeActivity(tx, { tenantId: tid, contactId: deal.contactId, dealId, type: managed ? "task.updated" : "task.created",
     title: managed ? "Обновлён следующий шаг" : "Создан следующий шаг", description: title, actorType: "ai", metadata: { taskId: task.id, dueAt: dueAt.toISOString(), reason: "Правило сопровождения сделки" } });
+  changes.push({ id: task.id, before: managed });
+  return changes;
 }
 
 export async function reviewSalesProposal(prisma: PrismaClient, auth: AuthContext, id: string, input: { decision: "create" | "link" | "dismiss"; dealId?: string; revision: number; confirmedLatest?: boolean }) {
@@ -179,5 +184,5 @@ export async function reviewSalesProposal(prisma: PrismaClient, auth: AuthContex
 
 export async function enqueueSalesReconcile(tx: Tx | PrismaClient, tid: string, dealId: string) {
   if (tenantSalesSettings((await tx.tenant.findUniqueOrThrow({ where: { id: tid } })).settingsJson).mode === "off") return;
-  await tx.outboxEvent.create({ data: { id: randomUUID(), tenantId: tid, type: "sales.reconcile", entityType: "deal", entityId: dealId, payloadJson: {} } });
+  return tx.outboxEvent.create({ data: { id: randomUUID(), tenantId: tid, type: "sales.reconcile", entityType: "deal", entityId: dealId, payloadJson: {} } });
 }

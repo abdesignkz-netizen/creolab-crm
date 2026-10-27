@@ -665,6 +665,8 @@ export function createApiClient(options: ClientOptions) {
     confirmTaskExecution: (id: string) => request(`/api/v1/tasks/${id}/confirm-execution`, { method: "POST" }),
     executeTask: (id: string, body: { retryFailedFilesOnly?: boolean } = {}) =>
       request(`/api/v1/tasks/${id}/execute`, { method: "POST", body: JSON.stringify(body) }),
+    reconcileTaskDelivery: (id: string, body: { partId: string; outcome: "sent" | "not_sent"; note: string }) =>
+      request(`/api/v1/tasks/${id}/reconcile-delivery`, { method: "POST", body: JSON.stringify(body) }),
     completeTaskResult: (id: string, body: unknown) =>
       request(`/api/v1/tasks/${id}/complete-result`, { method: "POST", body: JSON.stringify(body) }),
     createNextAction: (id: string, body: unknown) =>

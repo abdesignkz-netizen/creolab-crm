@@ -1,0 +1,49 @@
+{
+  "stage": "3.3.7",
+  "date": "2026-10-27",
+  "status": "implemented_and_locally_verified",
+  "deployed": false,
+  "liveCustomerMessagesSent": false,
+  "databaseSchemaChanged": false,
+  "apiTests": [
+    { "suite": "clientFollowUpDelivery", "passed": 19, "log": "/tmp/basqar-stage-337-final-followups.log" },
+    { "suite": "telegramDeliveryRecovery", "passed": 9, "log": "/tmp/basqar-stage-337-regression.log" },
+    { "suite": "aiManagerPolicy", "passed": 15, "log": "/tmp/basqar-stage-337-final-policy.log" },
+    { "suite": "telegramCompany", "passed": 11, "log": "/tmp/basqar-stage-337-http.log" },
+    { "suite": "channelAi", "passed": 11, "log": "/tmp/basqar-stage-337-channel-http.log" },
+    { "suite": "scheduledReliability", "passed": 15, "log": "/tmp/basqar-stage-337-recovery.log" },
+    { "suite": "legacyMessageDelivery", "passed": 26, "log": "/tmp/basqar-stage-337-regression.log" },
+    { "suite": "taskDelivery", "passed": 28, "log": "/tmp/basqar-stage-337-regression.log" },
+    { "suite": "outboxLease", "passed": 6, "log": "/tmp/basqar-stage-337-regression.log" },
+    { "suite": "outboxScheduling", "passed": 5, "log": "/tmp/basqar-stage-337-regression.log" },
+    { "suite": "aiReplyScheduling", "passed": 3, "log": "/tmp/basqar-stage-337-regression.log" }
+  ],
+  "apiTestsPassedUnique": 148,
+  "newTestScenarios": 28,
+  "typecheck": { "api": "passed", "log": "/tmp/basqar-stage-337-final-types.log" },
+  "diffCheck": "passed",
+  "webBuild": "not_run_no_frontend_changes_in_this_stage",
+  "testEnvironment": "Isolated PGlite databases and mocked providers. HTTP tests require permission to listen on a local port.",
+  "initialFailures": [
+    "channelAi was blocked by listen EPERM and passed after rerunning with local-server permission.",
+    "The new dispatch-boundary test used an incompatible mock.method on the Prisma proxy; replaced with a scoped proxy, then all 19 follow-up tests passed."
+  ],
+  "logNotes": [
+    "The combined regression log has initial failures in channelAi and clientFollowUpDelivery; use their later passing logs above. Only the six passing suites are counted from the combined log.",
+    "The recovery log contains an older 15-test follow-up run. Only scheduledReliability is counted from that log.",
+    "The HTTP log contains an earlier aiManagerPolicy run. Only telegramCompany is counted from that log."
+  ],
+  "notVerified": [
+    "Live provider delivery",
+    "Browser and mobile visual acceptance",
+    "Multi-process production PostgreSQL",
+    "Recovery sweep performance on large histories",
+    "Docker build"
+  ],
+  "remainingWork": [
+    "Dedicated reconciliation workflow for unknown manual and campaign deliveries",
+    "Review of historical untracked attempts",
+    "Automatic follow-ups in channels other than the existing whatsapp_seller path are not implemented by this stage",
+    "Audit stage 4: unified process rules"
+  ]
+}

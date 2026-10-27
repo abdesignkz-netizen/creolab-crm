@@ -1,0 +1,106 @@
+{
+  "stage": "3.3.3",
+  "date": "2026-10-26",
+  "status": "completed_locally",
+  "deployed": false,
+  "checks": [
+    {
+      "name": "contextual_tasks_and_process",
+      "files": 4,
+      "tests": 151,
+      "passed": 151,
+      "log": "/tmp/basqar-stage3-3-3-review-final.log",
+      "includes": {
+        "newStandaloneTaskTests": 38
+      }
+    },
+    {
+      "name": "crm_review_and_task_http",
+      "files": 3,
+      "tests": 32,
+      "passed": 32,
+      "log": "/tmp/basqar-stage3-3-3-http-final.log"
+    },
+    {
+      "name": "web",
+      "tests": 53,
+      "passed": 53,
+      "log": "/tmp/basqar-stage3-3-3-web-visual-final.log"
+    },
+    {
+      "name": "types",
+      "workspaces": [
+        "api",
+        "web",
+        "contracts",
+        "mobile"
+      ],
+      "passed": true,
+      "logs": [
+        "/tmp/basqar-stage3-3-3-types-final.log",
+        "/tmp/basqar-stage3-3-3-types-visual-final.log"
+      ]
+    },
+    {
+      "name": "web_build",
+      "passed": true,
+      "log": "/tmp/basqar-stage3-3-3-build-visual-final.log",
+      "bundles": [
+        {
+          "file": "assets/index-BZpOhi7J.js",
+          "bytes": 1099172,
+          "gzipBytes": 278881
+        }
+      ],
+      "limits": {
+        "initialBytes": 1100000,
+        "gzipBytes": 285000
+      }
+    },
+    {
+      "name": "visual",
+      "passed": true,
+      "environment": "Local component preview with synthetic data; real CrmReviewCard and styles; UI actions simulated, persistence tested separately",
+      "viewports": [
+        {
+          "width": 1280,
+          "height": 900
+        },
+        {
+          "width": 390,
+          "height": 844
+        }
+      ],
+      "checks": [
+        "Russian and Kazakh",
+        "No horizontal overflow",
+        "Evidence expansion",
+        "Accept and undo flow",
+        "Stale proposal approval disabled",
+        "No browser console errors"
+      ],
+      "screenshots": [
+        "BasQar-stage-3-3-3-desktop.jpg",
+        "BasQar-stage-3-3-3-mobile.jpg",
+        "BasQar-stage-3-3-3-mobile-kk.jpg"
+      ]
+    },
+    {
+      "name": "diff_check",
+      "passed": true
+    }
+  ],
+  "notes": [
+    "Broad initial run 9/13: three HTTP suites required a local listening port; one new test expected the old proposal after intentionally changing its input. HTTP suites rerun outside the restriction; new test corrected to repeat identical input.",
+    "API tests use separate PGlite databases with external providers disabled. Runs overlap; do not add totals across old and repeated runs."
+  ],
+  "limitations": [
+    "No production deployment or live CRM writes",
+    "No live LLM extraction-quality evaluation",
+    "No real PostgreSQL concurrency or Docker run",
+    "Dedupe uses normalized titles and call/meeting time, not complete semantic equivalence",
+    "Over 200 relevant tasks: independent suggestions skipped conservatively",
+    "Vite large-chunk warning remains; initial bundle has little headroom"
+  ],
+  "next": "Reconciliation of external effects (calendar, queued/sent actions) that cannot be reversed by local record undo"
+}

@@ -1,0 +1,53 @@
+{
+  "stage": "3.3.6",
+  "date": "2026-10-26",
+  "status": "implemented_and_locally_verified",
+  "deployed": false,
+  "liveCustomerMessagesSent": false,
+  "databaseSchemaChanged": false,
+  "apiTests": [
+    { "suite": "legacyMessageDelivery", "passed": 26, "log": "/tmp/basqar-stage-336-final-delivery.log" },
+    { "suite": "campaign", "passed": 19, "log": "/tmp/basqar-stage-336-final-campaign.log" },
+    { "suite": "campaignDelivery", "passed": 14, "log": "/tmp/basqar-stage-336-final-campaign.log" },
+    { "suite": "conversationBoard", "passed": 13, "log": "/tmp/basqar-stage-336-http-recheck.log" },
+    { "suite": "whatsappConnections", "passed": 52, "log": "/tmp/basqar-stage-336-http-tests.log", "note": "Other suites in this earlier log were subsequently fixed and rerun; only this suite is counted from this log." },
+    { "suite": "telegramCompany", "passed": 11, "log": "/tmp/basqar-stage-336-http-recheck.log" },
+    { "suite": "taskDelivery", "passed": 28, "log": "/tmp/basqar-stage-336-regression.log" },
+    { "suite": "scheduledReliability", "passed": 15, "log": "/tmp/basqar-stage-336-regression.log", "note": "HTTP suites initially blocked by local port permissions were rerun separately." },
+    { "suite": "aiHandoffPolicy", "passed": 6, "log": "/tmp/basqar-stage-336-ai-tests.log" },
+    { "suite": "aiManagerPolicy", "passed": 15, "log": "/tmp/basqar-stage-336-ai-http.log" },
+    { "suite": "conversationContext", "passed": 1, "log": "/tmp/basqar-stage-336-ai-tests.log" },
+    { "suite": "conversationCrmAutomation", "passed": 54, "log": "/tmp/basqar-stage-336-ai-tests.log" }
+  ],
+  "apiTestsPassedUnique": 254,
+  "webTestsPassed": 58,
+  "webTestsLog": "/tmp/basqar-stage-336-final-web.log",
+  "typecheck": {
+    "api": "passed",
+    "web": "passed",
+    "logs": ["/tmp/basqar-stage-336-types.log", "/tmp/basqar-stage-336-webtypes.log"]
+  },
+  "webBuild": {
+    "result": "passed",
+    "log": "/tmp/basqar-stage-336-final-build.log",
+    "initialJavaScriptBytes": 1099436,
+    "initialJavaScriptLimitBytes": 1100000,
+    "initialGzipBytes": 278946,
+    "initialGzipLimitBytes": 285000,
+    "largeChunkWarningRemains": true
+  },
+  "diffCheck": "passed",
+  "testEnvironment": "Isolated PGlite databases with mocked providers; local HTTP tests required port permission.",
+  "notVerified": [
+    "Browser and mobile visual acceptance",
+    "Live provider delivery",
+    "Multi-process production PostgreSQL",
+    "Docker build"
+  ],
+  "remainingWork": [
+    "Legacy automatic follow-up error classification",
+    "Telegram crash recovery after sending intent",
+    "Dedicated reconciliation workflow for unknown manual and campaign deliveries",
+    "Review of historical untracked attempts"
+  ]
+}

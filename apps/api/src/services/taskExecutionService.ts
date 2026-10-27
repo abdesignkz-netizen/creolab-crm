@@ -9,13 +9,16 @@ import { ApiError } from "../errors.ts";
 import { resolveUploadPath } from "../lib/storage.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { assertTaskVisible, isManager, requireManageTasks } from "../lib/access.ts";
+import { updateTaskManually } from "./taskManualEdit.ts";
 import { writeActivity } from "./contactService.ts";
 import { displayName, formatWhen } from "./contactLabels.ts";
-import { hashExecutionContent, sendViaProvider } from "./messagingProvider.ts";
+import { hashExecutionContent } from "./messagingProvider.ts";
 import { analyzeTaskResultNextActions, MEETING_RESULTS } from "./taskResultAnalysisService.ts";
-import { syncAgreementToCalendar } from "./calendarAdapter.ts";
 import { parseDateTimeInput } from "./periodRange.ts";
-import { resolveSellerBridge, resolveWhatsAppConversation } from "./sellerLink.ts";
+import { resolveWhatsAppConversation } from "./sellerLink.ts";
+
+import { deliverTask } from "./taskDeliveryService.ts";
+import { assertTaskDeliveryEditable, readTaskDelivery } from "./taskDeliveryState.ts";
 
 export const SENDABLE_TYPES = new Set([
   "proposal",
@@ -67,14 +70,14 @@ async function taskInTenant(prisma: PrismaClient, auth: AuthContext, id: string)
   return { tid, task };
 }
 
-async function listTaskAttachments(prisma: PrismaClient, tid: string, taskId: string) {
+async function listTaskAttachments(prisma: PrismaClient | Prisma.TransactionClient, tid: string, taskId: string) {
   return prisma.attachment.findMany({
     where: { tenantId: tid, parentType: "task", parentId: taskId },
-    orderBy: { createdAt: "asc" },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
   });
 }
 
-async function voidConfirmations(prisma: PrismaClient, tid: string, taskId: string) {
+async function voidConfirmations(prisma: PrismaClient | Prisma.TransactionClient, tid: string, taskId: string) {
   await prisma.executionConfirmation.updateMany({
     where: { tenantId: tid, taskId, voidedAt: null },
     data: { voidedAt: new Date() },
@@ -215,7 +218,7 @@ export async function scheduleConfirmedTaskSend(
   };
 }
 
-async function invalidateExecution(prisma: PrismaClient, tid: string, taskId: string) {
+async function invalidateExecution(prisma: PrismaClient | Prisma.TransactionClient, tid: string, taskId: string) {
   await voidConfirmations(prisma, tid, taskId);
   await cancelScheduledTaskSends(prisma, tid, taskId, "content_changed");
   await prisma.task.update({
@@ -341,9 +344,7 @@ export async function updateTaskDraft(
     throw new ApiError(422, "invalid", "Укажите время в будущем — иначе сообщение уйдёт сразу.");
   }
 
-  const updated = await prisma.task.update({
-    where: { id },
-    data: {
+  const updated = await updateTaskManually(prisma, tid, id, {
       messageDraft: input.messageDraft !== undefined ? input.messageDraft : undefined,
       contactId: input.contactId !== undefined ? input.contactId || null : undefined,
       inquiryId: input.inquiryId !== undefined ? input.inquiryId || null : undefined,
@@ -355,7 +356,6 @@ export async function updateTaskDraft(
       executionStatus: keepScheduled ? "scheduled" : "prepared",
       commandStatus: keepScheduled ? "scheduled" : undefined,
       confirmedAt: null,
-    },
   });
 
   if (task.targetType === "group" && (nextDue !== undefined || input.messageDraft !== undefined)) {
@@ -391,6 +391,19 @@ export async function updateTaskDraft(
   return updated;
 }
 
+async function changeTaskAttachments<T>(prisma: PrismaClient, tid: string, id: string, change: (tx: Prisma.TransactionClient) => Promise<T>) {
+  return prisma.$transaction(async tx => {
+    await tx.$queryRaw`SELECT id FROM "Task" WHERE id = ${id} AND "tenantId" = ${tid} FOR UPDATE`;
+    const task = await tx.task.findFirstOrThrow({ where: { id, tenantId: tid } });
+    if (["done", "canceled"].includes(task.status)) throw new ApiError(409, "invalid_state", "Нельзя менять вложения закрытой задачи");
+    await assertTaskDeliveryEditable(tx, tid, id);
+    const result = await change(tx);
+    await updateTaskManually(tx, tid, id, {});
+    await invalidateExecution(tx, tid, id);
+    return result;
+  });
+}
+
 export async function addTaskAttachment(
   prisma: PrismaClient,
   auth: AuthContext,
@@ -424,7 +437,7 @@ export async function addTaskAttachment(
   await writeFile(abs, buffer);
   const checksum = createHash("sha256").update(buffer).digest("hex");
 
-  const attachment = await prisma.attachment.create({
+  const attachment = await changeTaskAttachments(prisma, tid, id, tx => tx.attachment.create({
     data: {
       id: attachmentId,
       tenantId: tid,
@@ -441,8 +454,7 @@ export async function addTaskAttachment(
       status: "stored",
       sendState: "pending",
     },
-  }).catch(async error => { await unlink(abs).catch(() => {}); throw error; });
-  await invalidateExecution(prisma, tid, id);
+  })).catch(async error => { await unlink(abs).catch(() => {}); throw error; });
   if (task.contactId) {
     await writeActivity(prisma, {
       tenantId: tid,
@@ -513,7 +525,7 @@ async function copyParentAttachmentToChild(
     return { created: false };
   }
 
-  await prisma.attachment.create({
+  await changeTaskAttachments(prisma, tid, childTaskId, tx => tx.attachment.create({
     data: {
       id: attachmentId,
       tenantId: tid,
@@ -530,7 +542,7 @@ async function copyParentAttachmentToChild(
       status: "stored",
       sendState: "pending",
     },
-  }).catch(async error => { await unlink(abs).catch(() => {}); throw error; });
+  })).catch(async error => { await unlink(abs).catch(() => {}); throw error; });
   return { created: true };
 }
 
@@ -561,7 +573,6 @@ export async function syncGroupAttachmentsToChildren(
       const result = await copyParentAttachmentToChild(prisma, tid, auth.user.id, att, child.id);
       if (result.created) copied += 1;
     }
-    await invalidateExecution(prisma, tid, child.id);
   }
   return { copied };
 }
@@ -572,15 +583,16 @@ export async function removeTaskAttachment(prisma: PrismaClient, auth: AuthConte
     where: { id: attachmentId, tenantId: tid, parentType: "task", parentId: taskId },
   });
   if (!attachment) throw new ApiError(404, "not_found", "Файл не найден");
-  await prisma.attachment.delete({ where: { id: attachmentId } });
+  await changeTaskAttachments(prisma, tid, taskId, tx => tx.attachment.delete({ where: { id: attachmentId, tenantId: tid } }));
   const abs = resolveUploadPath(attachment.storageKey);
   await unlink(abs).catch(() => {});
-  await invalidateExecution(prisma, tid, taskId);
   return { ok: true };
 }
 
 export async function prepareTaskExecution(prisma: PrismaClient, auth: AuthContext, id: string) {
   const { tid, task } = await taskInTenant(prisma, auth, id);
+  if (["done", "canceled"].includes(task.status)) throw new ApiError(409, "invalid_state", "Закрытую задачу нельзя отправить");
+  if (["sending", "unknown"].includes(task.executionStatus)) await assertTaskDeliveryEditable(prisma, tid, id, false);
   if (!SENDABLE_TYPES.has(task.type)) {
     throw new ApiError(422, "invalid", "Этот тип задачи не отправляется через канал");
   }
@@ -610,7 +622,7 @@ export async function prepareTaskExecution(prisma: PrismaClient, auth: AuthConte
     (task.conversationId
       ? contact.conversations.find((row) => row.id === task.conversationId && row.sellerLeadId) ||
         (await prisma.conversation.findFirst({
-          where: { id: task.conversationId, tenantId: tid, sellerLeadId: { not: null } },
+          where: { id: task.conversationId, tenantId: tid, contactId: contact.id, sellerLeadId: { not: null } },
         }))
       : null) ||
     contact.conversations.find((row) => row.sellerLeadId) ||
@@ -642,13 +654,22 @@ export async function prepareTaskExecution(prisma: PrismaClient, auth: AuthConte
     ? await prisma.inquiry.findFirst({ where: { id: task.inquiryId, tenantId: tid } })
     : contact.inquiries[0] || null;
 
-  await prisma.task.update({
-    where: { id },
-    data: {
-      executionStatus: taskMarkedForScheduledSend(task) ? "scheduled" : "prepared",
-      conversationId: conversation.id,
-      inquiryId: inquiry?.id || task.inquiryId,
-    },
+  const contentHash = hashExecutionContent({ contactId: contact.id, inquiryId: inquiry?.id || task.inquiryId,
+    conversationId: conversation.id, sellerLeadId: conversation.sellerLeadId, message, attachments });
+  await prisma.$transaction(async tx => {
+    await tx.$queryRaw`SELECT id FROM "Task" WHERE id = ${id} AND "tenantId" = ${tid} FOR UPDATE`;
+    const current = await tx.task.findFirstOrThrow({ where: { id, tenantId: tid } });
+    if (["done", "canceled"].includes(current.status)) throw new ApiError(409, "invalid_state", "Закрытую задачу нельзя отправить");
+    await assertTaskDeliveryEditable(tx, tid, id, false);
+    if (["contactId", "inquiryId", "conversationId", "messageDraft", "description"].some(key => current[key as keyof typeof current] !== task[key as keyof typeof task])) {
+      throw new ApiError(409, "stale_confirmation", "Задача изменена. Откройте подготовку заново.");
+    }
+    const delivery = await readTaskDelivery(tx, tid, id);
+    if (delivery && delivery.contentHash !== contentHash) await assertTaskDeliveryEditable(tx, tid, id);
+    await tx.task.update({ where: { id, tenantId: tid }, data: {
+      executionStatus: delivery ? current.executionStatus : taskMarkedForScheduledSend(current) ? "scheduled" : "prepared",
+      conversationId: conversation!.id, inquiryId: inquiry?.id || task.inquiryId,
+    } });
   });
 
   if (task.contactId) {
@@ -696,6 +717,7 @@ export async function prepareTaskExecution(prisma: PrismaClient, auth: AuthConte
       documentType: item.documentType,
       sendState: item.sendState,
     })),
+    contentHash,
     preparedAtLabel: formatWhen(new Date(), timeZone),
     dueAt: task.dueAt,
     scheduled: taskMarkedForScheduledSend(task),
@@ -708,52 +730,32 @@ export async function prepareTaskExecution(prisma: PrismaClient, auth: AuthConte
 
 export async function confirmTaskExecution(prisma: PrismaClient, auth: AuthContext, id: string) {
   const preview = await prepareTaskExecution(prisma, auth, id);
-  const { tid, task } = await taskInTenant(prisma, auth, id);
-  const attachments = await listTaskAttachments(prisma, tid, id);
-  const contentHash = hashExecutionContent({
-    contactId: preview.client.id,
-    inquiryId: preview.request?.id,
-    conversationId: preview.conversationId,
-    message: preview.message,
-    attachments,
+  const tid = tenantId(auth);
+  const confirmation = await prisma.$transaction(async tx => {
+    await tx.$queryRaw`SELECT id FROM "Task" WHERE id = ${id} AND "tenantId" = ${tid} FOR UPDATE`;
+    const task = await tx.task.findFirstOrThrow({ where: { id, tenantId: tid } });
+    if (["done", "canceled"].includes(task.status)) throw new ApiError(409, "invalid_state", "Закрытую задачу нельзя отправить");
+    await assertTaskDeliveryEditable(tx, tid, id, false);
+    const attachments = await listTaskAttachments(tx, tid, id);
+    const conversation = await tx.conversation.findFirst({ where: { id: preview.conversationId, tenantId: tid } });
+    const contentHash = hashExecutionContent({ contactId: task.contactId, inquiryId: task.inquiryId,
+      conversationId: task.conversationId, sellerLeadId: conversation?.sellerLeadId,
+      message: (task.messageDraft || task.description || "").trim(), attachments });
+    if (contentHash !== preview.contentHash) throw new ApiError(409, "stale_confirmation", "Данные изменились во время подтверждения. Проверьте отправку заново.");
+    const previous = await tx.executionConfirmation.findFirst({ where: { tenantId: tid, taskId: id, voidedAt: null }, orderBy: [{ confirmedAt: "desc" }, { id: "desc" }] });
+    if (previous?.contentHash === contentHash) return previous;
+    await assertTaskDeliveryEditable(tx, tid, id);
+    await tx.executionConfirmation.updateMany({ where: { tenantId: tid, taskId: id, voidedAt: null }, data: { voidedAt: new Date() } });
+    const created = await tx.executionConfirmation.create({ data: { tenantId: tid, taskId: id, contactId: task.contactId,
+      inquiryId: task.inquiryId, dealId: task.dealId, conversationId: task.conversationId, channel: "whatsapp",
+      destination: preview.destination, messageSnapshot: preview.message, attachmentSnapshotsJson: preview.attachments,
+      contentHash, confirmedById: auth.user.id } });
+    await tx.task.update({ where: { id, tenantId: tid }, data: { executionStatus: taskMarkedForScheduledSend(task) ? "scheduled" : "confirmed", confirmedAt: new Date() } });
+    if (task.contactId) await writeActivity(tx, { tenantId: tid, contactId: task.contactId, inquiryId: task.inquiryId,
+      type: "task.confirmed", title: "Отправка подтверждена", actorType: "user", actorId: auth.user.id,
+      metadata: { taskId: id, confirmationId: created.id } });
+    return created;
   });
-
-  await voidConfirmations(prisma, tid, id);
-  const confirmation = await prisma.executionConfirmation.create({
-    data: {
-      tenantId: tid,
-      taskId: id,
-      contactId: preview.client.id,
-      inquiryId: preview.request?.id || null,
-      dealId: task.dealId,
-      conversationId: preview.conversationId,
-      channel: "whatsapp",
-      destination: preview.destination,
-      messageSnapshot: preview.message,
-      attachmentSnapshotsJson: preview.attachments,
-      contentHash,
-      confirmedById: auth.user.id,
-    },
-  });
-
-  await prisma.task.update({
-    where: { id },
-    data: { executionStatus: "confirmed", confirmedAt: new Date() },
-  });
-
-  if (preview.client.id) {
-    await writeActivity(prisma, {
-      tenantId: tid,
-      contactId: preview.client.id,
-      inquiryId: preview.request?.id,
-      type: "task.confirmed",
-      title: "Отправка подтверждена",
-      actorType: "user",
-      actorId: auth.user.id,
-      metadata: { taskId: id, confirmationId: confirmation.id },
-    });
-  }
-
   return { confirmation, preview };
 }
 
@@ -771,241 +773,20 @@ export async function executeTask(
   if (campaignBacked) {
     throw new ApiError(409, "scheduled", "Эту отправку выполнит рассылка в назначенное время. Не отправляйте задачу отдельно.");
   }
-  const confirmation = await prisma.executionConfirmation.findFirst({
-    where: { tenantId: tid, taskId: id, voidedAt: null },
-    orderBy: { confirmedAt: "desc" },
-  });
-  if (!confirmation) {
-    const voided = await prisma.executionConfirmation.findFirst({
-      where: { tenantId: tid, taskId: id, voidedAt: { not: null } },
-      orderBy: { confirmedAt: "desc" },
-    });
-    if (voided) {
-      throw new ApiError(409, "stale_confirmation", "Данные отправки изменились. Необходимо повторное подтверждение.");
-    }
-    throw new ApiError(409, "not_confirmed", "Сначала подтвердите отправку");
-  }
-
-  const attachments = await listTaskAttachments(prisma, tid, id);
-  const contentHash = hashExecutionContent({
-    contactId: confirmation.contactId,
-    inquiryId: confirmation.inquiryId,
-    conversationId: confirmation.conversationId,
-    message: confirmation.messageSnapshot,
-    attachments,
-  });
-  if (contentHash !== confirmation.contentHash) {
-    await invalidateExecution(prisma, tid, id);
-    throw new ApiError(409, "stale_confirmation", "Данные отправки изменились. Необходимо повторное подтверждение.");
-  }
-
+  if (!SENDABLE_TYPES.has(task.type)) throw new ApiError(422, "invalid", "Этот тип задачи не отправляется через канал");
   if (!options.runScheduled && !options.retryFailedFilesOnly && taskMarkedForScheduledSend(task)) {
     return scheduleConfirmedTaskSend(prisma, auth, id, { batch: false });
   }
-
-  let conversation = confirmation.conversationId
-    ? await prisma.conversation.findFirst({ where: { id: confirmation.conversationId, tenantId: tid } })
-    : null;
-  if (!conversation?.sellerLeadId && confirmation.contactId) {
-    conversation = await resolveWhatsAppConversation(prisma, {
-      tenantId: tid,
-      contactId: confirmation.contactId,
-      preferredConversationId: confirmation.conversationId,
-      defaultRegion: auth.activeMembership?.tenant.defaultRegion || "KZ",
-      healFromBot: true,
-    });
-  }
-  if (!conversation?.sellerLeadId) {
-    throw new ApiError(422, "invalid", "Диалог WhatsApp недоступен");
-  }
-
-  if (options.runScheduled && task.source !== 'ai_automation') {
-    await consumeResource(prisma, tid, 'AUTOMATION_RUNS', 1, `task:${task.parentTaskId || task.id}`);
+  if (options.runScheduled && task.source !== "ai_automation") {
+    await consumeResource(prisma, tid, "AUTOMATION_RUNS", 1, `task:${task.parentTaskId || task.id}`);
   }
   if (task.parentTaskId) {
-    const { ensureMassCampaignAccess } = await import('./campaignService.ts');
+    const { ensureMassCampaignAccess } = await import("./campaignService.ts");
     await ensureMassCampaignAccess(prisma, tid);
-    await consumeResource(prisma, tid, 'CAMPAIGN_RECIPIENTS', 1, `batch-recipient:${task.id}`);
+    await consumeResource(prisma, tid, "CAMPAIGN_RECIPIENTS", 1, `batch-recipient:${task.id}`);
   }
-
-  // Staff send must take the dialog from AI on both CRM and the seller bot.
-  let appliedOnSeller = false;
-  let sellerError: string | null = null;
-  await prisma.conversation.update({
-    where: { id: conversation.id },
-    data: {
-      mode: "human",
-      assigneeMembershipId: auth.activeMembership?.id || conversation.assigneeMembershipId,
-      needsAttention: true,
-      attentionReason: "taken_by_human",
-    },
-  });
-  try {
-    const resolved = await resolveSellerBridge(prisma, tid);
-    if (resolved.bridge) {
-      await resolved.bridge.setMode(conversation.sellerLeadId, "HUMAN");
-      appliedOnSeller = true;
-    } else {
-      sellerError = "WhatsApp-бот не подключён — режим HUMAN только в CRM";
-    }
-  } catch (error) {
-    sellerError = error instanceof Error ? error.message : "Не удалось перевести бота в HUMAN";
-  }
-
-  await prisma.task.update({ where: { id }, data: { executionStatus: "sending" } });
-
-  let textOk = options.retryFailedFilesOnly ? true : false;
-  let textError: string | null = null;
-  if (!options.retryFailedFilesOnly) {
-    try {
-      await sendViaProvider(prisma, tid, {
-        sellerLeadId: conversation.sellerLeadId,
-        text: confirmation.messageSnapshot || "",
-        idempotencyKey: `task-text:${id}:${confirmation.id}`,
-      });
-      textOk = true;
-      await prisma.message.create({
-        data: {
-          tenantId: tid,
-          conversationId: conversation.id,
-          senderKind: "staff",
-          senderUserId: auth.user.id,
-          direction: "outbound",
-          text: confirmation.messageSnapshot || "",
-          operationState: "accepted",
-        },
-      });
-    } catch (error) {
-      textError = error instanceof Error ? error.message : "Ошибка отправки текста";
-      textOk = false;
-    }
-  }
-
-  const fileResults: Array<{ id: string; fileName: string; ok: boolean; error?: string }> = [];
-  const filesToSend = options.retryFailedFilesOnly
-    ? attachments.filter((item) => item.sendState !== "sent")
-    : attachments;
-
-  for (const file of filesToSend) {
-    try {
-      const abs = resolveUploadPath(file.storageKey);
-      const result = await sendViaProvider(prisma, tid, {
-        sellerLeadId: conversation.sellerLeadId,
-        file: {
-          fileName: file.originalFileName || file.fileName,
-          mimeType: file.mimeType,
-          filePath: abs,
-          caption: file.documentType === "proposal" ? "Коммерческое предложение" : undefined,
-        },
-        idempotencyKey: `task-file:${id}:${file.id}`,
-      });
-      await prisma.attachment.update({
-        where: { id: file.id },
-        data: { sendState: "sent", sendError: null, providerMessageId: result.providerMessageId },
-      });
-      fileResults.push({ id: file.id, fileName: file.fileName, ok: true });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Ошибка отправки файла";
-      await prisma.attachment.update({
-        where: { id: file.id },
-        data: { sendState: "failed", sendError: message },
-      });
-      fileResults.push({ id: file.id, fileName: file.fileName, ok: false, error: message });
-    }
-  }
-
-  const allFilesSent =
-    attachments.length === 0 ||
-    (await listTaskAttachments(prisma, tid, id)).every((item) => item.sendState === "sent");
-  const success = textOk && allFilesSent;
-  const partial = Boolean(textOk && !allFilesSent);
-
-  if (success) {
-    await prisma.task.update({
-      where: { id },
-      data: {
-        status: "done",
-        executionStatus: "sent",
-        commandStatus: "sent",
-        sentAt: new Date(),
-        completedAt: new Date(),
-        completionSource: "system",
-        resultCode: task.type === "proposal" ? "sent" : "sent",
-      },
-    });
-    if (task.contactId) {
-      await writeActivity(prisma, {
-        tenantId: tid,
-        contactId: task.contactId,
-        inquiryId: task.inquiryId,
-        type: "task.sent",
-        title: "Сообщение отправлено",
-        description: confirmation.messageSnapshot?.slice(0, 280),
-        actorType: "system",
-        actorId: auth.user.id,
-        metadata: { taskId: id, files: fileResults },
-      });
-      await prisma.contact.update({
-        where: { id: task.contactId },
-        data: { lastOutboundMessageAt: new Date(), lastContactAt: new Date(), lastSeenAt: new Date() },
-      });
-    }
-  } else {
-    await prisma.task.update({
-      where: { id },
-      data: {
-        executionStatus: partial ? "partial" : "failed",
-        commandStatus: partial ? "partial" : "failed",
-        status: "open",
-      },
-    });
-    if (task.contactId) {
-      await writeActivity(prisma, {
-        tenantId: tid,
-        contactId: task.contactId,
-        inquiryId: task.inquiryId,
-        type: partial ? "task.send_partial" : "task.send_failed",
-        title: partial ? "Текст ушёл, файл не отправлен" : "Отправка не завершена",
-        description: [
-          textOk ? "Сообщение отправлено ✓" : `Сообщение не отправлено ✕ ${textError || ""}`,
-          ...fileResults.map((f) => (f.ok ? `${f.fileName} ✓` : `${f.fileName} ✕ ${f.error || ""}`)),
-        ].join("\n"),
-        actorType: "system",
-        actorId: auth.user.id,
-        metadata: { taskId: id, textOk, partial, fileResults },
-      });
-    }
-  }
-
-  // Auto-complete parent progress if child
-  if (success && task.parentTaskId) {
-    const openChildren = await prisma.task.count({
-      where: { tenantId: tid, parentTaskId: task.parentTaskId, status: { in: ["open", "waiting"] } },
-    });
-    if (openChildren === 0) {
-      await prisma.task.updateMany({
-        where: { id: task.parentTaskId, tenantId: tid },
-        data: { status: "done", completedAt: new Date(), completionSource: "system" },
-      });
-    }
-  }
-
-  return {
-    success,
-    partial,
-    textOk,
-    textError,
-    files: fileResults,
-    allFilesSent,
-    retryFilesAvailable: !allFilesSent && textOk,
-    nextActions: success ? suggestedNextActions(task.type, "sent") : [],
-    status: success ? "done" : partial ? "partial" : "failed",
-    note: partial
-      ? "Текст в WhatsApp ушёл, файл — нет. Задача остаётся открытой: нажмите «Повторить отправку файла»."
-      : null,
-    appliedOnSeller,
-    sellerError,
-  };
+  const result = await deliverTask(prisma, auth, id, Boolean(options.retryFailedFilesOnly));
+  return { ...result, nextActions: result.success ? suggestedNextActions(task.type, "sent") : [] };
 }
 
 export async function completeTaskWithResult(
@@ -1028,11 +809,7 @@ export async function completeTaskWithResult(
       throw new ApiError(422, "inquiry_open", "Сначала примите или отклоните заявку, затем закройте задачу");
     }
   }
-  await cancelScheduledTaskSends(prisma, tid, id, "task_done");
-
-  const updated = await prisma.task.update({
-    where: { id },
-    data: {
+  const updated = await updateTaskManually(prisma, tid, id, {
       status: "done",
       completedAt: new Date(),
       completionSource: "user",
@@ -1040,16 +817,16 @@ export async function completeTaskWithResult(
       resultText: input.resultText || null,
       completionResult: input.resultCode,
       executionStatus: task.executionStatus === "sent" ? "sent" : task.executionStatus,
-    },
   });
+  await cancelScheduledTaskSends(prisma, tid, id, "task_done");
 
   if (task.agreementId) {
-    await prisma.agreement.update({
-      where: { id: task.agreementId },
+    await prisma.agreement.updateMany({
+      where: { id: task.agreementId, tenantId: tid, status: { not: "CANCELLED" } },
       data: { status: "COMPLETED", completedAt: new Date() },
     });
-    const agr = await prisma.agreement.findFirst({ where: { id: task.agreementId } });
-    if (agr) await syncAgreementToCalendar(agr).catch(() => null);
+    // The company OAuth sync observes updatedAt. Completed meetings remain in
+    // calendar history; completing a task never uses a global calendar token.
   }
 
   if (task.contactId) {

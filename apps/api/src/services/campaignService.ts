@@ -24,12 +24,15 @@ import { extractSpokenMessage } from "./spokenMessage.ts";
 import { inquiryRequestText, isGenericCompanyName, loadConversationInterests, pickUsableInterest } from "./contactInterestService.ts";
 import { writeActivity } from "./contactService.ts";
 import { refineCampaignRecipientDraftsWithLlm } from "./llmClient.ts";
-import { hashExecutionContent, sendViaProvider } from "./messagingProvider.ts";
+import { hashExecutionContent } from "./messagingProvider.ts";
+import { prepareLegacyMessage, deliverLegacyMessage, legacyCampaignKey, recoverLegacyMessage, type LegacyDelivery } from "./legacyMessageDelivery.ts";
+import { claimLegacyRecipient, reconcileLegacyCampaign, retryableLegacyRecipients } from "./legacyCampaignDelivery.ts";
+import { directWaScope, type DirectWaDelivery } from "./directWhatsAppDeliveryState.ts";
 import { parseAndMatchPhoneList, type PhoneListItem } from "./phoneListService.ts";
 import { previewContactSegment } from "./segmentService.ts";
-import { resolveSellerBridge, resolveWhatsAppConversation } from "./sellerLink.ts";
+import { resolveWhatsAppConversation } from "./sellerLink.ts";
 import { getEntitlements } from "./entitlementService.ts";
-import { campaignSenderId, campaignSenders, chooseCampaignSender, queueDirectCampaignRecipient, reconcileDirectCampaign } from "./campaignDelivery.ts";
+import { campaignSenderId, campaignSenders, chooseCampaignSender, queueDirectCampaignRecipient, reconcileDirectCampaign, retryableDirectRecipients } from "./campaignDelivery.ts";
 import { CONVERSATION_MAX_ATTACHMENTS, assertConversationMime } from "./conversationMedia.ts";
 
 const ALLOWED_MIME = new Set([
@@ -157,6 +160,21 @@ function statsFromRecipients(rows: Array<{ status: string }>) {
     read: count("read") + count("replied"),
     replied: count("replied"),
   };
+}
+
+/** Recalculate a settled campaign after an explicit review/retry. Never restart its queue. */
+export async function refreshCampaignAfterDeliveryReview(prisma: PrismaClient, tenantId: string, id: string) {
+  await prisma.$transaction(async tx => {
+    await tx.$queryRaw`SELECT id FROM "Campaign" WHERE id = ${id} AND "tenantId" = ${tenantId} FOR UPDATE`;
+    const campaign = await tx.campaign.findFirst({ where: { id, tenantId }, include: { recipients: { select: { status: true } } } });
+    if (!campaign) return;
+    const stats = statsFromRecipients(campaign.recipients);
+    const settled = !stats.pending && !stats.sending && ["completed", "partially_completed", "failed"].includes(campaign.status);
+    const status = !settled ? campaign.status : (stats.failed || stats.skipped) && stats.sent ? "partially_completed"
+      : stats.failed ? "failed" : stats.skipped && !stats.sent ? "cancelled" : "completed";
+    await tx.campaign.update({ where: { id, tenantId }, data: { status,
+      statsJson: { ...(campaign.statsJson as Record<string, Prisma.InputJsonValue>), ...stats } } });
+  });
 }
 
 export async function previewPhoneList(prisma: PrismaClient, auth: AuthContext, text: string) {
@@ -357,8 +375,23 @@ export async function getCampaign(prisma: PrismaClient, auth: AuthContext, id: s
   const attachments = await campaignAttachments(prisma, membership.tenantId, id);
   const previews = buildPersonalizationPreviews(campaign.messageDraft, campaign.recipients, campaign.personalizeEach);
   const storage = fileStorageStatus();
+  const operations = await prisma.outboundOperation.findMany({ where: { tenantId: membership.tenantId,
+    OR: [{ idempotencyKey: { startsWith: `legacy:campaign:${id}:` } }, { idempotencyKey: { contains: `:campaign:${id}:recipient:` } }], providerRef: { not: null } },
+    select: { id: true, idempotencyKey: true, providerRef: true, conversationId: true } });
+  const records = operations.length ? await prisma.idempotencyRecord.findMany({ where: { scope: { in: ["legacy.message.delivery", directWaScope] },
+    actorKey: membership.tenantId, key: { in: operations.map(op => op.id) } }, select: { key: true, resultJson: true } }) : [];
+  const deliveries = new Map(records.map(row => [row.key, row.resultJson as unknown as LegacyDelivery | DirectWaDelivery]));
+  const byKey = new Map(operations.map(op => [op.idempotencyKey, op]));
   return {
     ...campaign,
+    recipients: campaign.recipients.map(row => {
+      const op = byKey.get(legacyCampaignKey(id, row.id)) || byKey.get(`whatsapp:${row.conversationId}:campaign:${id}:recipient:${row.id}`);
+      const delivery = op && deliveries.get(op.id);
+      return { ...row, ...(op && delivery?.messageId === op.providerRef ? {
+        deliveryMessageId: op.providerRef, deliveryConversationId: op.conversationId,
+        deliveryChecked: delivery.parts.some(part => part.state === "accepted" && Boolean(part.reconciledBy)),
+      } : {}) };
+    }),
     attachments,
     summary: statsFromRecipients(campaign.recipients),
     personalizationPreviews: previews,
@@ -521,8 +554,9 @@ export async function removeCampaignAttachment(prisma: PrismaClient, auth: AuthC
   });
   if (!att) throw new ApiError(404, "not_found", "Файл не найден");
   const abs = resolveUploadPath(att.storageKey);
-  await unlink(abs).catch(() => {});
   await prisma.attachment.delete({ where: { id: attachmentId } });
+  // Per-recipient message history may reference the same immutable file.
+  if (!await prisma.attachment.count({ where: { storageKey: att.storageKey } })) await unlink(abs).catch(() => {});
   await prisma.campaign.update({
     where: { id: campaignId },
     data: { confirmedAt: null, confirmedById: null, contentHash: null, status: "draft" },
@@ -863,6 +897,7 @@ export async function startCampaign(prisma: PrismaClient, auth: AuthContext, id:
   await ensureMassCampaignAccess(prisma, membership.tenantId);
   const campaign = await prisma.campaign.findFirst({ where: { id, tenantId: membership.tenantId } });
   if (!campaign) throw new ApiError(404, "not_found", "Рассылка не найдена");
+  if (["cancelled", "completed"].includes(campaign.status)) throw new ApiError(409, "campaign_stopped", "Рассылка уже завершена или отменена");
   if (!campaign.confirmedAt || !campaign.contentHash) {
     throw new ApiError(409, "needs_confirmation", "Сначала подтвердите рассылку");
   }
@@ -890,13 +925,14 @@ export async function startCampaign(prisma: PrismaClient, auth: AuthContext, id:
     }
   }
 
-  await prisma.campaign.updateMany({
-    where: { id, tenantId: membership.tenantId },
-    data: { status: "running", startedAt: new Date(), pausedAt: null },
-  });
-  await prisma.campaignRecipient.updateMany({
-    where: { campaignId: id, tenantId: membership.tenantId, status: "pending" },
-    data: { status: "queued" },
+  await prisma.$transaction(async tx => {
+    const changed = await tx.campaign.updateMany({
+      where: { id, tenantId: membership.tenantId, status: { notIn: ["cancelled", "completed"] },
+        contentHash: campaign.contentHash, confirmedAt: campaign.confirmedAt },
+      data: { status: "running", startedAt: campaign.startedAt || new Date(), pausedAt: null },
+    });
+    if (!changed.count) throw new ApiError(409, "stale_confirmation", "Рассылка изменилась. Обновите страницу.");
+    await tx.campaignRecipient.updateMany({ where: { campaignId: id, tenantId: membership.tenantId, status: "pending" }, data: { status: "queued" } });
   });
 
   // fire-and-forget processing (also picked up by worker)
@@ -915,28 +951,34 @@ export async function pauseCampaign(prisma: PrismaClient, auth: AuthContext, id:
 export async function cancelCampaignRemainder(prisma: PrismaClient, auth: AuthContext, id: string) {
   const membership = requireTenant(auth);
   await requireCampaignForTenant(prisma, membership.tenantId, id);
-  await prisma.campaignRecipient.updateMany({
-    where: { campaignId: id, tenantId: membership.tenantId, status: { in: ["pending", "queued"] } },
-    data: { status: "cancelled", skipReason: "Отменено пользователем" },
+  await prisma.$transaction(async tx => {
+    await tx.campaign.update({ where: { id, tenantId: membership.tenantId }, data: { status: "cancelled", completedAt: new Date() } });
+    await tx.campaignRecipient.updateMany({
+      where: { campaignId: id, tenantId: membership.tenantId, status: { in: ["pending", "queued"] } },
+      data: { status: "cancelled", skipReason: "Отменено пользователем" },
+    });
   });
-  await updateCampaignForTenant(prisma, membership.tenantId, id, { status: "cancelled", completedAt: new Date() });
   await closeCampaignScheduleTask(prisma, membership.tenantId, id, "canceled");
   return getCampaign(prisma, auth, id);
 }
 
 export async function retryFailedCampaign(prisma: PrismaClient, auth: AuthContext, id: string) {
   const membership = requireTenant(auth);
-  await requireCampaignForTenant(prisma, membership.tenantId, id);
+  const campaign = await requireCampaignForTenant(prisma, membership.tenantId, id);
   await ensureMassCampaignAccess(prisma, membership.tenantId);
-  if (!await prisma.campaignRecipient.count({ where: { tenantId: membership.tenantId, campaignId: id, status: "failed" } })) {
-    throw new ApiError(409, "nothing_to_retry", "Нет сообщений для безопасной повторной отправки. Проверьте историю рассылки.");
-  }
-
-  await prisma.campaignRecipient.updateMany({
-    where: { campaignId: id, tenantId: membership.tenantId, status: "failed" },
-    data: { status: "queued", error: null },
+  if (campaign.status === "cancelled") throw new ApiError(409, "campaign_stopped", "Отменённую рассылку нельзя запустить повторно");
+  const safeIds = campaignSenderId(campaign) ? await retryableDirectRecipients(prisma, membership.tenantId, id) : await retryableLegacyRecipients(prisma, membership.tenantId, id);
+  await prisma.$transaction(async tx => {
+    const changed = await tx.campaign.updateMany({ where: { id, tenantId: membership.tenantId, status: { not: "cancelled" },
+      contentHash: campaign.contentHash, confirmedById: campaign.confirmedById, confirmedAt: campaign.confirmedAt },
+      data: { status: "running", pausedAt: null, completedAt: null } });
+    if (!changed.count) throw new ApiError(409, "campaign_stopped", "Рассылка изменилась или отменена. Обновите страницу.");
+    const retried = await tx.campaignRecipient.updateMany({
+      where: { campaignId: id, tenantId: membership.tenantId, status: "failed", id: { in: safeIds } },
+      data: { status: "queued", error: null },
+    });
+    if (!retried.count) throw new ApiError(409, "nothing_to_retry", "Нет сообщений для безопасной повторной отправки. Проверьте историю рассылки.");
   });
-  await updateCampaignForTenant(prisma, membership.tenantId, id, { status: "running", pausedAt: null, completedAt: null });
   void processCampaignQueue(prisma, id).catch((err) => console.error("campaign retry", id, err));
   return getCampaign(prisma, auth, id);
 }
@@ -957,6 +999,7 @@ export async function processCampaignQueue(prisma: PrismaClient, campaignId: str
   const seed = await prisma.campaign.findFirst({ where: { id: campaignId }, select: { tenantId: true, parsedCommandJson: true } });
   if (seed) {
     if (campaignSenderId(seed)) await reconcileDirectCampaign(prisma, seed.tenantId, campaignId);
+    else await reconcileLegacyCampaign(prisma, seed.tenantId, campaignId);
     const access = await getEntitlements(prisma, seed.tenantId);
     if (!access.snapshot.grandfathered && !access.entitlements.MASS_CAMPAIGNS) {
       await pauseUnavailableCampaigns(prisma, seed.tenantId);
@@ -988,10 +1031,11 @@ export async function processCampaignQueue(prisma: PrismaClient, campaignId: str
           : stats.failed > 0 && stats.sent === 0
             ? "failed"
             : stats.sent === 0 && stats.skipped > 0 ? "cancelled" : "completed";
-      await prisma.campaign.update({
-        where: { id: campaignId },
+      const finished = await prisma.campaign.updateMany({
+        where: { id: campaignId, status: "running" },
         data: { status, completedAt: new Date(), statsJson: stats },
       });
+      if (!finished.count) return;
       await closeCampaignScheduleTask(prisma, campaign.tenantId, campaignId, ["failed", "cancelled"].includes(status) ? "canceled" : "done", status);
       return;
     }
@@ -1105,12 +1149,11 @@ async function sendOneRecipient(
   },
   attachments: Array<{ id: string; fileName: string; mimeType: string; storageKey: string; documentType: string }>,
 ) {
-  const claimed = await prisma.campaignRecipient.updateMany({
-    where: { id: recipient.id, tenantId: campaign.tenantId, campaignId: campaign.id,
-      status: campaignSenderId(campaign) ? { in: ["queued", "sending"] } : "queued" },
-    data: { status: "sending" },
-  });
-  if (!claimed.count) return;
+  const claimed = campaignSenderId(campaign)
+    ? (await prisma.campaignRecipient.updateMany({ where: { id: recipient.id, tenantId: campaign.tenantId,
+      campaignId: campaign.id, status: { in: ["queued", "sending"] }, campaign: { status: "running" } }, data: { status: "sending" } })).count > 0
+    : await claimLegacyRecipient(prisma, campaign.tenantId, campaign.id, recipient.id);
+  if (!claimed) return;
   try {
     const contactId = await ensureContactForRecipient(prisma, campaign, recipient);
     if (!contactId) throw new Error("Нет клиента для отправки");
@@ -1137,84 +1180,21 @@ async function sendOneRecipient(
       return;
     }
 
+    const previous = await prisma.outboundOperation.findUnique({ where: { tenantId_idempotencyKey: {
+      tenantId: campaign.tenantId, idempotencyKey: legacyCampaignKey(campaign.id, recipient.id),
+    } } });
+    // Continue the immutable recipient snapshot, including its approved text.
+    // New contact activity must not silently re-personalize a partial send.
+    if (previous) { await deliverLegacyMessage(prisma, campaign.tenantId, previous.id); return; }
     const conversation = await resolveWhatsAppConversation(prisma, {
-      tenantId: campaign.tenantId, contactId, defaultRegion: "KZ", contactName: recipient.displayName, healFromBot: true,
-    });
-    if (!conversation?.sellerLeadId) {
-      throw new Error("Нет WhatsApp-диалога (sellerLead). Сначала синхронизируйте лиды или напишите клиенту через бота.");
-    }
-    await prisma.conversation.update({ where: { id: conversation.id },
-      data: { mode: "human", needsAttention: false, attentionReason: "taken_by_human" } });
-    try {
-      const resolved = await resolveSellerBridge(prisma, campaign.tenantId);
-      if (resolved.bridge) await resolved.bridge.setMode(conversation.sellerLeadId, "HUMAN");
-    } catch {
-      // Sending still performs its own provider authorization check.
-    }
-
-    if (text) {
-      await sendViaProvider(prisma, campaign.tenantId, {
-        sellerLeadId: conversation.sellerLeadId,
-        text,
-        idempotencyKey: `campaign:${campaign.id}:recipient:${recipient.id}:text`,
+        tenantId: campaign.tenantId, contactId, defaultRegion: "KZ", contactName: recipient.displayName, healFromBot: true,
       });
-      await prisma.campaignRecipient.update({ where: { id: recipient.id }, data: { textSendState: "sent" } });
-    }
-
-    let filesOk = true;
-    for (const file of attachments) {
-      try {
-        const result = await sendViaProvider(prisma, campaign.tenantId, {
-          sellerLeadId: conversation.sellerLeadId,
-          file: {
-            fileName: file.fileName,
-            mimeType: file.mimeType,
-            filePath: resolveUploadPath(file.storageKey),
-            caption: file.documentType === "proposal" ? text || undefined : undefined,
-          },
-          idempotencyKey: `campaign:${campaign.id}:recipient:${recipient.id}:file:${file.id}`,
-        });
-        await prisma.attachment.update({
-          where: { id: file.id },
-          data: { sendState: "sent", providerMessageId: result.providerMessageId },
-        });
-      } catch (err) {
-        filesOk = false;
-        await prisma.attachment.update({
-          where: { id: file.id },
-          data: { sendState: "failed", sendError: err instanceof Error ? err.message : "Ошибка" },
-        });
-      }
-    }
-
-    if (attachments.length && !filesOk) {
-      await prisma.campaignRecipient.update({
-        where: { id: recipient.id },
-        data: { status: "failed", filesSendState: "failed", error: "Не все вложения отправлены", conversationId: conversation.id },
-      });
-      return;
-    }
-
-    await prisma.campaignRecipient.update({
-      where: { id: recipient.id },
-      data: {
-        status: "sent",
-        filesSendState: attachments.length ? "sent" : "none",
-        sentAt: new Date(),
-        conversationId: conversation.id,
-        contactId,
-      },
-    });
-
-    await writeActivity(prisma, {
-      tenantId: campaign.tenantId,
-      contactId,
-      type: "campaign.sent",
-      title: "Получено массовое сообщение",
-      description: `Campaign: «${campaign.title}»`,
-      actorType: "system",
-      metadata: { campaignId: campaign.id, recipientId: recipient.id },
-    });
+    if (!conversation?.sellerLeadId) throw new Error("Нет подключённого WhatsApp-диалога клиента. Проверьте подключение.");
+    if (!campaign.confirmedById) throw new Error("Сначала подтвердите рассылку");
+    const operation = await prepareLegacyMessage(prisma, { tenantId: campaign.tenantId, conversationId: conversation.id,
+      actorUserId: campaign.confirmedById, key: legacyCampaignKey(campaign.id, recipient.id), text,
+      sourceAttachmentIds: attachments.map(file => file.id), campaign: { id: campaign.id, recipientId: recipient.id } });
+    await deliverLegacyMessage(prisma, campaign.tenantId, operation.id);
   } catch (error) {
     // A direct transport may have accepted a message before its response was lost.
     if (campaignSenderId(campaign)) {
@@ -1226,10 +1206,17 @@ async function sendOneRecipient(
         idempotencyKey: `whatsapp:${current.conversationId}:campaign:${campaign.id}:recipient:${recipient.id}`,
       } })) return;
     }
+    if (!campaignSenderId(campaign)) {
+      const operation = await prisma.outboundOperation.findUnique({ where: { tenantId_idempotencyKey: {
+        tenantId: campaign.tenantId, idempotencyKey: legacyCampaignKey(campaign.id, recipient.id),
+      } } });
+      if (operation) { await recoverLegacyMessage(prisma, campaign.tenantId, operation.id); return; }
+    }
     await prisma.campaignRecipient.update({
       where: { id: recipient.id },
       data: {
         status: "failed",
+        ...(!campaignSenderId(campaign) ? { textSendState: "not_sent" } : {}),
         error: error instanceof Error && /Green API HTTP 401/.test(error.message)
           ? "Green API отклонил авторизацию (401). Проверьте подключение WhatsApp или выберите подключённый номер через QR."
           : error instanceof Error ? error.message : "Ошибка отправки",

@@ -1,0 +1,25 @@
+{
+  "stage": "3.3.5",
+  "date": "2026-10-26",
+  "status": "completed_locally",
+  "deployed": false,
+  "scope": "Task text/file delivery via whatsapp_seller, scheduled tasks, grouped tasks, manual reconciliation and task UI",
+  "checks": [
+    {"name": "task_delivery_final", "files": 1, "tests": 28, "passed": 28, "log": "/tmp/basqar-stage335-delivery-final.log"},
+    {"name": "task_delivery_scheduling_board_result", "files": 4, "tests": 49, "passed": 49, "includesTaskDelivery": true, "log": "/tmp/basqar-stage335-send-final.log"},
+    {"name": "process_regression", "files": 3, "tests": 98, "passed": 98, "log": "/tmp/basqar-stage335-process-regression.log"},
+    {"name": "task_http", "files": 2, "tests": 11, "passed": 11, "log": "/tmp/basqar-stage335-http-tests.log"},
+    {"name": "campaign_and_ai_regression", "files": 4, "tests": 54, "passed": 54, "log": "/tmp/basqar-stage335-shared-regression-approved.log"},
+    {"name": "web", "tests": 54, "passed": 54, "log": "/tmp/basqar-stage335-web-tests.log"},
+    {"name": "types_api", "passed": true, "log": "/tmp/basqar-stage335-api-types.log"},
+    {"name": "types_web", "passed": true, "log": "/tmp/basqar-stage335-web-types.log"},
+    {"name": "web_build", "passed": true, "log": "/tmp/basqar-stage335-web-build.log", "initialJsBytes": 1099318, "initialGzipBytes": 278912, "rawLimitBytes": 1100000, "gzipLimitBytes": 285000, "largeChunkWarning": true},
+    {"name": "git_diff_check", "passed": true},
+    {"name": "browser", "status": "not_run", "reason": "Local browser use is disabled in Work settings", "ssrLocalesChecked": ["ru", "kk"]}
+  ],
+  "uniqueServerTests": 212,
+  "uniqueWebTests": 54,
+  "notVerified": ["live WhatsApp/provider delivery", "real PostgreSQL concurrency", "Docker", "visual and interactive browser validation of the new delivery UI", "production deployment", "all remaining legacy campaign and messaging delivery paths"],
+  "rolloutNotes": ["Existing confirmation hashes require explicit re-confirmation; inspect scheduled sends before deployment", "Old untracked attempts remain blocked until administrator reconciliation; no invented delivery evidence", "No live outbound messages or production data mutations were made"],
+  "nextStage": "3.3.6"
+}

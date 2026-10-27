@@ -13,7 +13,7 @@ describe("campaign delivery through connected WhatsApp", () => {
   let counter = 100, sends = 0;
   const sentTo: string[] = [];
   const nativeFetch = globalThis.fetch;
-  const socket = { sendMessage: async (to: string) => {
+  const socket = { user: { id: "77067301301:1@s.whatsapp.net" }, sendMessage: async (to: string) => {
     sends++; sentTo.push(to); return { key: { id: `campaign-test-${sends}` } };
   } } as any;
   async function api(path: string, method = "GET", body?: object) {
@@ -183,7 +183,7 @@ describe("campaign delivery through connected WhatsApp", () => {
     const campaign = await ready();
     const { operation } = await outbound(campaign.id);
     let attempts = 0;
-    const uncertain = { sendMessage: async () => { attempts++; throw new Error("connection lost after sending"); } } as any;
+    const uncertain = { ...socket, sendMessage: async () => { attempts++; throw new Error("connection lost after sending"); } } as any;
     await assert.rejects(() => deliverQrMessage(prisma, qrId, uncertain, operation.providerRef!, async () => {}), /не подтвердил/);
     await processCampaignQueue(prisma, campaign.id);
     await processCampaignQueue(prisma, campaign.id);
@@ -315,7 +315,7 @@ describe("campaign delivery through connected WhatsApp", () => {
     }
   });
 
-  it("marks a partially sent text/file batch as uncertain and never repeats the text", async () => {
+  it("keeps accepted text and unsent file distinct when a campaign is cancelled", async () => {
     const campaign = await createDraft();
     const attachment = await api(`/campaigns/${campaign.id}/attachments`, "POST", {
       fileName: "proposal.txt", mimeType: "text/plain", contentBase64: Buffer.from("Test attachment").toString("base64"),
@@ -327,7 +327,7 @@ describe("campaign delivery through connected WhatsApp", () => {
     await processCampaignQueue(prisma, campaign.id);
     const { operation } = await outbound(campaign.id);
     let calls = 0;
-    const interrupt = { sendMessage: async () => {
+    const interrupt = { ...socket, sendMessage: async () => {
       calls++;
       await api(`/campaigns/${campaign.id}/cancel-remainder`, "POST");
       return { key: { id: "text-sent-before-cancel" } };
@@ -335,6 +335,10 @@ describe("campaign delivery through connected WhatsApp", () => {
     await deliverQrMessage(prisma, qrId, interrupt, operation.providerRef!, async () => {});
     await deliverQrMessage(prisma, qrId, interrupt, operation.providerRef!, async () => {});
     assert.equal(calls, 1);
-    assert.equal((await outbound(campaign.id)).recipient.status, "unknown");
+    assert.equal((await outbound(campaign.id)).recipient.status, "failed");
+    const partial = await prisma.message.findUniqueOrThrow({ where: { id: operation.providerRef! }, include: { attachments: true } });
+    assert.equal(partial.operationState, "partial");
+    assert.equal(partial.providerMessageId, "text-sent-before-cancel");
+    assert.equal(partial.attachments[0].sendState, "pending");
   });
 });

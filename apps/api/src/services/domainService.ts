@@ -1,5 +1,7 @@
 import { enqueueSalesReconcile } from "./salesProcessService.ts";
-import { randomUUID } from "node:crypto";
+import { updateTaskManually } from "./taskManualEdit.ts";
+import { readTaskDelivery, taskDeliveryResult, taskDeliveryBusy, type TaskDelivery } from "./taskDeliveryState.ts";
+import { createHash, randomUUID } from "node:crypto";
 import { queueControlNotification } from "./controlNotificationService.ts";
 import { systemText } from "@creolab/contracts";
 import type { Prisma, PrismaClient } from "@creolab/db";
@@ -29,12 +31,9 @@ import {
   CONVERSATION_MAX_ATTACHMENTS,
   CONVERSATION_MAX_FILE_BYTES,
   assertConversationMime,
-  conversationMediaKind,
   decodeBase64Payload,
-  storeMessageAttachment,
 } from "./conversationMedia.ts";
-import { sendViaProvider } from "./messagingProvider.ts";
-import { resolveUploadPath } from "../lib/storage.ts";
+import { prepareLegacyMessage, deliverLegacyMessage, legacyManualKey } from "./legacyMessageDelivery.ts";
 import { createStaffNotification } from "./notificationService.ts";
 import { writeActivity } from "./contactService.ts";
 import { writeAudit } from "../lib/audit.ts";
@@ -306,6 +305,13 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
     : [];
   const byId = new Map(conversations.map((item) => [item.id, item]));
   const taskIds = items.map((item) => item.id);
+  const deliveryRows = taskIds.length ? await prisma.idempotencyRecord.findMany({ where: {
+    scope: "task.delivery", actorKey: tid, key: { in: taskIds },
+  } }) : [];
+  const deliveries = new Map(deliveryRows.map(row => {
+    const value = row.resultJson as unknown as TaskDelivery;
+    return [row.key, { ...taskDeliveryResult(value), needsCheck: !taskDeliveryBusy(value) && taskDeliveryResult(value).needsCheck }];
+  }));
   const failedAttachments = taskIds.length
     ? await prisma.attachment.findMany({
         where: {
@@ -378,8 +384,10 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
     const overdue =
       Boolean(item.dueAt && item.dueAt < now && item.status !== "done" && item.status !== "canceled" && !sendScheduled);
     const failedFiles = failedByTask.get(item.id) || [];
-    const needsFileRetry =
-      failedFiles.length > 0 || item.executionStatus === "partial";
+    const delivery = deliveries.get(item.id);
+    const needsFileRetry = delivery?.retryFilesAvailable || false;
+    const needsDeliveryCheck = Boolean(delivery?.needsCheck || (!delivery && (["partial", "unknown", "failed"].includes(item.executionStatus)
+      || (item.executionStatus === "sent" && !["done", "canceled"].includes(item.status)))));
     const aboutParts: string[] = [];
     if (item.inquiry) {
       aboutParts.push(
@@ -441,6 +449,7 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
       })),
       isSendable: ["proposal", "message", "send_documents", "prepare_estimate", "follow_up", "process_inquiry"].includes(item.type),
       needsFileRetry,
+      needsDeliveryCheck,
       failedFiles,
       executionStatus: item.executionStatus,
       scheduledSendAt: scheduledSendAtByTask.get(item.id) || null,
@@ -556,6 +565,7 @@ export async function listTasks(prisma: PrismaClient, auth: AuthContext) {
       })),
       isSendable: false,
       needsFileRetry: false,
+      needsDeliveryCheck: false,
       failedFiles: [],
       scheduledSendAt: campaign.scheduledAt,
       sendScheduled: campaignDueLater,
@@ -632,10 +642,16 @@ export async function getTask(prisma: PrismaClient, auth: AuthContext, id: strin
       })
     : null;
   const creatorById = new Map(creatorRow ? [[creatorRow.id, creatorRow]] : []);
+  const delivery = await readTaskDelivery(prisma, tid, id);
 
   return {
     ...item,
     ...taskPeopleFields(item, creatorById),
+    delivery: delivery ? { ...taskDeliveryResult(delivery), sending: taskDeliveryBusy(delivery), canReconcile: true }
+      : (["failed", "partial", "sending", "unknown"].includes(item.executionStatus)
+        || (item.executionStatus === "sent" && !["done", "canceled"].includes(item.status))) && item.targetType !== "group"
+        ? { needsCheck: true, textOk: false, textState: "unknown", retryFilesAvailable: false,
+          files: attachments.map(f => ({ id: f.id, fileName: f.originalFileName || f.fileName, ok: false, state: "unknown" })) } : null,
     scheduledSendAt,
     sendScheduled:
       Boolean(item.dueAt && item.dueAt.getTime() > new Date().getTime()) &&
@@ -919,21 +935,18 @@ export async function completeTask(prisma: PrismaClient, auth: AuthContext, id: 
     }
   }
   if (task.status === "canceled") throw new ApiError(409, "invalid_state", "Отменённую задачу нельзя закрыть");
+  const completedAt = new Date();
+  const updated = await updateTaskManually(prisma, tid, id, { status: "done", completedAt });
   await prisma.scheduledAction.updateMany({
     where: { tenantId: tid, parentType: "task", parentId: id, state: "scheduled" },
     data: { state: "canceled", cancelReason: "task_done" },
   });
-  const completedAt = new Date();
   if (task.targetType === "group" && !task.parentTaskId) {
     await prisma.task.updateMany({
       where: { tenantId: tid, parentTaskId: id, status: { in: OPEN_TASK_STATUSES } },
       data: { status: "done", completedAt },
     });
   }
-  const updated = await prisma.task.update({
-    where: { id },
-    data: { status: "done", completedAt },
-  });
   if (task.parentTaskId) {
     const openChildren = await prisma.task.count({
       where: { tenantId: tid, parentTaskId: task.parentTaskId, status: { in: OPEN_TASK_STATUSES } },
@@ -950,20 +963,20 @@ export async function completeTask(prisma: PrismaClient, auth: AuthContext, id: 
 
 export async function waitTask(prisma: PrismaClient, auth: AuthContext, id: string) {
   requireManageTasks(auth);
-  const { task } = await taskInTenant(prisma, auth, id);
+  const { tid, task } = await taskInTenant(prisma, auth, id);
   if (task.status !== "open" && task.status !== "in_progress") {
     throw new ApiError(409, "invalid_state", "В ожидание можно перевести только открытую задачу");
   }
-  return prisma.task.update({ where: { id }, data: { status: "waiting" } });
+  return updateTaskManually(prisma, tid, id, { status: "waiting" });
 }
 
 export async function reopenTask(prisma: PrismaClient, auth: AuthContext, id: string) {
   requireManageTasks(auth);
-  const { task } = await taskInTenant(prisma, auth, id);
+  const { tid, task } = await taskInTenant(prisma, auth, id);
   if (task.status !== "waiting" && task.status !== "done" && task.status !== "canceled" && task.status !== "in_progress") {
     throw new ApiError(409, "invalid_state", "Вернуть можно только закрытую задачу или задачу в ожидании");
   }
-  return prisma.task.update({ where: { id }, data: { status: "open", completedAt: null } });
+  return updateTaskManually(prisma, tid, id, { status: "open", completedAt: null });
 }
 
 export async function setTaskStatus(
@@ -975,22 +988,20 @@ export async function setTaskStatus(
   requireManageTasks(auth);
   if (status === "done") return completeTask(prisma, auth, id);
   if (status === "canceled") return cancelTask(prisma, auth, id);
-  await taskInTenant(prisma, auth, id);
-  return prisma.task.update({
-    where: { id },
-    data: { status, completedAt: null },
-  });
+  const { tid } = await taskInTenant(prisma, auth, id);
+  return updateTaskManually(prisma, tid, id, { status, completedAt: null });
 }
 
 export async function cancelTask(prisma: PrismaClient, auth: AuthContext, id: string) {
   requireManageTasks(auth);
   const { tid, task } = await taskInTenant(prisma, auth, id);
   if (task.status === "done") throw new ApiError(409, "invalid_state", "Сделанную задачу нельзя отменить");
+  const updated = await updateTaskManually(prisma, tid, id, { status: "canceled", completedAt: new Date() });
   await prisma.scheduledAction.updateMany({
     where: { tenantId: tid, parentType: "task", parentId: id, state: "scheduled" },
     data: { state: "canceled", cancelReason: "task_canceled" },
   });
-  return prisma.task.update({ where: { id }, data: { status: "canceled", completedAt: new Date() } });
+  return updated;
 }
 
 export async function assignTask(
@@ -1017,12 +1028,9 @@ export async function assignTask(
     if (task.targetType !== "client" && !task.contactId) {
       throw new ApiError(422, "ai_capability", "Для AI Manager нужна привязка к клиенту — иначе некуда отправить сообщение.");
     }
-    return prisma.task.update({
-      where: { id },
-      data: {
+    return updateTaskManually(prisma, tid, id, {
         ownerMembershipId: null,
         contextSnapshotJson: mergeTaskContextSnapshot(snap, { executorType: "AI" }) as Prisma.InputJsonValue,
-      },
     });
   }
   const ownerId = input.membershipId || auth.activeMembership?.id;
@@ -1030,7 +1038,7 @@ export async function assignTask(
   const owner = await prisma.membership.findFirst({ where: { id: ownerId, tenantId: tid, active: true } });
   if (!owner) throw new ApiError(422, "invalid", "Сотрудник не найден");
   return prisma.$transaction(async tx => {
-    const updated = await tx.task.update({ where: { id }, data: { ownerMembershipId: owner.id, contextSnapshotJson: mergeTaskContextSnapshot(snap, { executorType: "USER" }) as Prisma.InputJsonValue } });
+    const updated = await updateTaskManually(tx, tid, id, { ownerMembershipId: owner.id, contextSnapshotJson: mergeTaskContextSnapshot(snap, { executorType: "USER" }) as Prisma.InputJsonValue });
     if (task.ownerMembershipId !== owner.id) await queueControlNotification(tx, { tenantId: tid, type: "task.assigned", entityId: id, episodeKey: `task.assigned:${id}:${owner.id}:${randomUUID()}` });
     return updated;
   });
@@ -1221,7 +1229,8 @@ export async function addConversationMessage(
   if (!conversation) throw new ApiError(404, "not_found", "Диалог не найден");
   await assertConversationReachable(prisma, auth, id);
   const text = String(input.text || "").trim();
-  const files = (input.attachments || []).slice(0, CONVERSATION_MAX_ATTACHMENTS);
+  const files = input.attachments || [];
+  if (files.length > CONVERSATION_MAX_ATTACHMENTS) throw new ApiError(422, "too_many_files", "За один раз можно отправить до 5 файлов");
   if (input.internal) {
     if (!text) throw new ApiError(422, "invalid", "Введите текст заметки");
     return prisma.message.create({
@@ -1265,104 +1274,20 @@ export async function addConversationMessage(
   const decoded = files.map((file) => {
     const mimeType = assertConversationMime(file.fileName, file.mimeType);
     const buffer = decodeBase64Payload(file.contentBase64);
+    if (!buffer.length) throw new ApiError(422, "file_empty", "Файл пустой");
     if (buffer.length > CONVERSATION_MAX_FILE_BYTES) throw new ApiError(422, "too_large", "Файл больше 16 МБ");
     return { fileName: file.fileName, mimeType, buffer };
   });
-  const fileFingerprint = decoded
-    .map((file) => `${file.fileName}:${file.buffer.length}`)
-    .join("|");
-  const key = input.idempotencyKey || `msg:${id}:${text}:${auth.user.id}:${fileFingerprint}`;
-  const existing = await prisma.outboundOperation.findFirst({
-    where: { tenantId: tid, idempotencyKey: key },
-  });
-  if (existing) {
-    return prisma.message.findFirst({
-      where: { tenantId: tid, conversationId: id, senderUserId: auth.user.id },
-      include: { attachments: true },
-      orderBy: { createdAt: "desc" },
-    });
-  }
-  const firstKind = decoded[0] ? conversationMediaKind(decoded[0].mimeType) : "text";
-  const message = await prisma.message.create({
-    data: {
-      tenantId: tid,
-      conversationId: id,
-      senderKind: "staff",
-      senderUserId: auth.user.id,
-      direction: "outbound",
-      type: decoded.length ? firstKind : "text",
-      text: text || null,
-      operationState: conversation.sellerLeadId ? "queued" : "stored",
-    },
-  });
-  const storedFiles = [];
-  for (const file of decoded) {
-    storedFiles.push(
-      await storeMessageAttachment(prisma, {
-        tenantId: tid,
-        messageId: message.id,
-        fileName: file.fileName,
-        mimeType: file.mimeType,
-        buffer: file.buffer,
-        uploadedById: auth.user.id,
-        sendState: conversation.sellerLeadId ? "pending" : "stored",
-      }),
-    );
-  }
-  await prisma.outboundOperation.create({
-    data: {
-      tenantId: tid,
-      conversationId: id,
-      idempotencyKey: key,
-      controlVersion: conversation.controlVersion,
-      state: conversation.sellerLeadId ? "queued" : "stored",
-    },
-  });
-  if (conversation.sellerLeadId) {
-    try {
-      if (text) {
-        await sendViaProvider(prisma, tid, {
-          sellerLeadId: conversation.sellerLeadId,
-          text,
-          idempotencyKey: `${key}:text`,
-        });
-      }
-      for (const file of storedFiles) {
-        const result = await sendViaProvider(prisma, tid, {
-          sellerLeadId: conversation.sellerLeadId,
-          file: {
-            fileName: file.fileName,
-            mimeType: file.mimeType,
-            filePath: resolveUploadPath(file.storageKey),
-          },
-          idempotencyKey: `${key}:file:${file.id}`,
-        });
-        await prisma.attachment.update({
-          where: { id: file.id },
-          data: { sendState: "sent", providerMessageId: result.providerMessageId },
-        });
-      }
-      await prisma.message.update({
-        where: { id: message.id },
-        data: { operationState: "accepted" },
-      });
-    } catch (error) {
-      await prisma.message.update({
-        where: { id: message.id },
-        data: { operationState: "unknown", receiptState: "unknown" },
-      });
-      throw new ApiError(503, "sender_unknown", error instanceof Error ? error.message : "Неизвестный результат отправки");
-    }
-  }
-  const { enqueueConversationContext } = await import("./conversationContextQueue.ts");
-  await prisma.$transaction(async tx => {
-    await tx.conversation.update({ where: { id, tenantId: tid }, data: { messageRevision: { increment: 1 } } });
-    await enqueueConversationContext(tx, tid, id, message.id);
-  });
-  return prisma.message.findFirst({
-    where: { id: message.id, tenantId: tid },
-    include: { attachments: true },
-  });
+  const fingerprint = createHash("sha256").update(JSON.stringify([auth.user.id, text,
+    decoded.map(file => [file.fileName, file.mimeType, createHash("sha256").update(file.buffer).digest("hex")])])).digest("hex");
+  const rawKey = input.idempotencyKey || fingerprint;
+  // Attempts made by older versions had no exact message reference or payload hash.
+  // Never replay such an operation by guessing its result from the latest message.
+  const old = await prisma.outboundOperation.findFirst({ where: { tenantId: tid, idempotencyKey: rawKey } });
+  if (old) throw new ApiError(409, "delivery_untracked", "Неизвестный результат отправки");
+  const operation = await prepareLegacyMessage(prisma, { tenantId: tid, conversationId: id,
+    actorUserId: auth.user.id, key: legacyManualKey(id, rawKey), text, files: decoded });
+  return deliverLegacyMessage(prisma, tid, operation.id);
 }
 
 export async function listNotifications(prisma: PrismaClient, auth: AuthContext) {

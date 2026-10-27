@@ -1,3 +1,4 @@
+import TaskDeliveryNotice, { type TaskReconciliation } from "../components/TaskDeliveryNotice";
 import { WorkspaceSectionNav } from "../components/WorkspaceSectionNav";
 import { TASK_CATEGORIES, TASK_TEMPLATES, taskCategory, matchesTaskSearch, type TaskCategory } from "../lib/taskOrganization";
 import { InlineFeedback } from "../components/InlineFeedback";
@@ -349,7 +350,7 @@ function TaskCard({ item, children }: { item: any; children: ReactNode }) {
             {item.targetType !== "group" && category !== "internal" ? <span className="task-card-phone">{phone || uiText("Телефон не указан")}</span> : null}
           </span>
           <span className="task-card-alerts">
-            {item.needsFileRetry ? <span>{uiText("Текст ушёл · файл не отправлен")}</span>
+            {item.needsDeliveryCheck ? <span>{uiText("Проверьте отправку")}</span> : item.needsFileRetry ? <span>{uiText("Текст ушёл · файл не отправлен")}</span>
               : item.executionStatus === "failed" && !isScheduledSend(item) ? <span>{uiText("Отправка не удалась")}</span> : null}
             {item.commandStatus === "needs_confirmation" ? <span>{uiText("Нужно подтверждение перед внешней отправкой")}</span> : null}
           </span>
@@ -1027,6 +1028,14 @@ export function TasksPage() {
     }
   }
 
+  async function onReconcileDelivery(input: TaskReconciliation) {
+    if (!activeTaskId) return;
+    const result = await api.reconcileTaskDelivery(activeTaskId, input);
+    setExecResult(result);
+    setTaskDetail(await api.task(activeTaskId));
+    await load();
+  }
+
   async function onRetryFiles() {
     if (!activeTaskId) return;
     setBusy(true);
@@ -1325,6 +1334,8 @@ export function TasksPage() {
             success: result.success ? 1 : 0,
             failed: result.success ? 0 : 1,
             textOk: result.textOk,
+            textState: result.textState,
+            needsCheck: result.needsCheck,
             textError: result.textError,
             files: result.files || [],
             retryFilesAvailable: Boolean(result.retryFilesAvailable),
@@ -1354,7 +1365,9 @@ export function TasksPage() {
         total: 1,
         success: result.success ? 1 : 0,
         failed: result.success ? 0 : 1,
-        textOk: result.textOk ?? true,
+        textOk: Boolean(result.textOk),
+        textState: result.textState,
+        needsCheck: result.needsCheck,
         textError: result.textError,
         files: result.files || [],
         retryFilesAvailable: Boolean(result.retryFilesAvailable),
@@ -2138,20 +2151,11 @@ export function TasksPage() {
                     <p>{batchResult.message}</p>
                   ) : (
                     <>
-                      <b>{uiText("Выполнено")}</b>
+                      <b>{uiText("Результат")}</b>
                       <p>
                         {uiText("Успешно:")}{" "}{batchResult.success} {" "}{uiText("· Ошибка:")}{" "}{batchResult.failed} {" "}{uiText("· Всего:")}{" "}{batchResult.total}
                       </p>
-                      {batchResult.textOk === false ? (
-                        <p className="error">{uiText("Текст не отправлен:")}{" "}{batchResult.textError || uiText("ошибка")}</p>
-                      ) : batchResult.textOk ? (
-                        <p className="muted">{uiText("Текст отправлен ✓")}</p>
-                      ) : null}
-                      {(batchResult.files || []).map((f: any) => (
-                        <p key={f.id || f.fileName} className={f.ok ? "muted" : "error"}>
-                          {f.fileName}: {f.ok ? "✓" : `✕ ${f.error || uiText("ошибка")}`}
-                        </p>
-                      ))}
+                      {batchResult.textState ? <TaskDeliveryNotice result={batchResult} /> : null}
                       {batchResult.retryFilesAvailable ? (
                         <div className="actions" style={{ marginTop: 8 }}>
                           <button type="button" className="btn" disabled={busy} onClick={onRetryCommandFiles}>
@@ -2602,6 +2606,8 @@ export function TasksPage() {
         <div className="panel task-form">
           <b>{isScheduledSend(taskDetail) ? uiText("Изменить запланированную задачу") : uiText("Подготовка отправки")}</b>
           <div className="muted">{uiTaskTitle(taskDetail)}</div>
+          {taskDetail.delivery ? <TaskDeliveryNotice result={taskDetail.delivery} conversationId={taskDetail.conversationId} onReconcile={caps.manageTasks && taskDetail.delivery.canReconcile ? onReconcileDelivery : undefined} /> : null}
+          {taskDetail.delivery?.retryFilesAvailable ? <button type="button" className="btn" disabled={busy} onClick={onRetryFiles}>{uiText("Повторить отправку файла")}</button> : null}
           {isScheduledSend(taskDetail) ? (
             <p className="muted">
               {uiText("Сохраните правки — задача останется в «Запланировано», сообщение уйдёт в указанное время, не сразу.")}</p>
@@ -2658,6 +2664,7 @@ export function TasksPage() {
               ) : null}
             </div>
           ) : null}
+          <fieldset disabled={busy || Boolean(taskDetail.delivery?.textOk || taskDetail.delivery?.needsCheck || taskDetail.delivery?.sending)} style={{border:0,padding:0,margin:0,minWidth:0,display:"grid",gap:16}}>
           <label>
             {uiText("Сообщение")}<textarea value={messageDraft} onChange={(event) => setMessageDraft(event.target.value)} rows={5} />
           </label>
@@ -2743,6 +2750,7 @@ export function TasksPage() {
               ))}
             </div>
           ) : null}
+          </fieldset>
           <div className="actions">
             <button
               type="button"
@@ -2754,7 +2762,7 @@ export function TasksPage() {
             <button
               type="button"
               className="btn secondary"
-              disabled={busy}
+              disabled={busy || Boolean(taskDetail.delivery?.textOk || taskDetail.delivery?.needsCheck || taskDetail.delivery?.sending)}
               {...tip(uiText("Сохранить текст и срок. Если отправка уже запланирована, она перенесётся на новое время"))}
               onClick={() => void onSaveTaskEdits()}
             >
@@ -2762,7 +2770,7 @@ export function TasksPage() {
             <button
               type="button"
               className="btn"
-              disabled={busy}
+              disabled={busy || Boolean(taskDetail.delivery?.textOk || taskDetail.delivery?.needsCheck || taskDetail.delivery?.sending)}
               {...tip(uiText("Проверить канал и показать подтверждение перед отправкой в WhatsApp"))}
               onClick={onPrepare}
             >
@@ -2799,24 +2807,7 @@ export function TasksPage() {
           ) : (
             <p className="muted">{uiText("Без вложений")}</p>
           )}
-          {execResult && !(execResult as any).success ? (
-            <div className={(execResult as any).partial || (execResult as any).textOk ? "task-partial" : "error"}>
-              {(execResult as any).note ? <div>{uiMessage((execResult as any).note)}</div> : null}
-              <div>
-                {(execResult as any).textOk ? uiText("Сообщение отправлено ✓") : uiText("Сообщение не отправлено ✕")}
-                {(execResult as any).textError ? ` · ${(execResult as any).textError}` : ""}
-              </div>
-              {(execResult as any).files?.map((f: any) => (
-                <div key={f.id}>
-                  {f.fileName}: {f.ok ? "✓" : `✕ ${f.error || ""}`}
-                </div>
-              ))}
-              {(execResult as any).retryFilesAvailable ? (
-                <div className="muted" style={{ marginTop: 6 }}>
-                  {uiText("Задача остаётся открытой, пока файл не уйдёт.")}</div>
-              ) : null}
-            </div>
-          ) : null}
+          {execResult ? <TaskDeliveryNotice result={execResult as any} conversationId={taskDetail?.conversationId || preview.conversationId} onReconcile={caps.manageTasks && taskDetail?.delivery?.canReconcile ? onReconcileDelivery : undefined} /> : null}
           <div className="actions">
             <button
               type="button"
@@ -2830,7 +2821,7 @@ export function TasksPage() {
               <button type="button" className="btn" disabled={busy} onClick={onRetryFiles}>
                 {uiText("Повторить отправку файла")}</button>
             ) : (
-              <button type="button" className="btn" disabled={busy} onClick={onConfirmAndSend}>
+              <button type="button" className="btn" disabled={busy || Boolean((execResult as any)?.success || (execResult as any)?.needsCheck || (execResult as any)?.sending)} onClick={onConfirmAndSend}>
                 {preview.scheduled || isFutureDue(taskDetail?.dueAt)
                   ? uiText("Запланировать отправку")
                   : preview.buttons?.confirm || uiText("Подтвердить и отправить")}
@@ -3150,6 +3141,7 @@ export function TasksPage() {
                   ) : null}
                 </div>
                 <div className="actions">
+                  {item.needsDeliveryCheck ? <span className="task-partial-inline">{uiText("Проверьте отправку")}</span> : null}
                   {item.needsFileRetry ? (
                     <div className="task-partial-inline">
                       <span>{uiText("Текст ушёл · файл не отправлен")}</span>

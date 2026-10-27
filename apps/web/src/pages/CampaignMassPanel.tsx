@@ -1271,7 +1271,7 @@ export function CampaignMassPanel({
                   {uiText("Отменить остаток")}</button>
               </>
             ) : null}
-            {campaign.recipients?.some((row: { status: string }) => row.status === "failed") ? (
+            {campaign.status !== "cancelled" && campaign.recipients?.some((row: { status: string }) => row.status === "failed") ? (
               <button type="button" className="btn" disabled={busy} onClick={() => campaignId && queueAction(() => api.retryFailedCampaign(campaignId))}>
                 {uiText("Повторить для неуспешных")}</button>
             ) : null}

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { processCalendarSchema } from "./processCalendar.ts";
 import { avrEditorSchema } from "./avrEditor.ts";
 import { invoiceEditorSchema } from "./invoiceEditor.ts";
 import { isValidKzTaxId } from "./kzTaxId.ts";
@@ -436,14 +437,15 @@ export const mergeContactsSchema = z.object({
 
 export const importContactsSchema = parseContactImportSchema;
 
-export const updateTenantOpsSchema = z.object({
+export const updateTenantOpsSchema = /* @__PURE__ */ (() => z.object({
   stalledDealDays: z.number().int().min(1).max(90).optional(),
   proposalFollowUpThresholdDays: z.number().int().min(1).max(90).optional(),
   silenceReturnDays: z.number().int().min(1).max(180).optional(),
   salesPlanMinor: z.number().min(0).nullable().optional(),
   lostReasons: z.array(z.string().trim().min(1).max(80)).max(40).optional(),
-  stageSlaDays: z.record(z.string(), z.number().min(1).max(90)).optional(),
-});
+  stageSlaDays: z.record(z.string().min(1).max(80), z.number().min(1).max(90).nullable()).optional(),
+  processCalendar: processCalendarSchema.optional(),
+}))();
 
 export const updateContactSchema = z
   .object({

@@ -202,6 +202,8 @@ import {
 } from "./services/taskExecutionService.ts";
 import { parseTaskCommand } from "./services/aiCommandParserService.ts";
 import { createTaskFromCommand, executeTaskBatch } from "./services/aiCommandExecutionService.ts";
+import { reconcileTaskDelivery } from "./services/taskDeliveryService.ts";
+import { getMessageDeliveryReview, reconcileMessageDelivery, retryMessageDelivery } from "./services/messageDeliveryReview.ts";
 import {
   addCampaignAttachment,
   cancelCampaignRemainder,
@@ -2030,6 +2032,11 @@ export function createApp(prisma: PrismaClient) {
     res.json(await executeTaskBatch(prisma, await requireAuth(req), req.params.id));
   });
 
+  app.post("/api/v1/tasks/:id/reconcile-delivery", json, async (req, res) => {
+    const input = z.object({ partId: z.string().min(1).max(100), outcome: z.enum(["sent", "not_sent"]), note: z.string().trim().min(8).max(1000) }).strict().parse(req.body);
+    res.json(await reconcileTaskDelivery(prisma, await requireAuth(req), req.params.id, input));
+  });
+
   app.post("/api/v1/campaigns/parse-phones", json, async (req, res) => {
     const input = parsePhoneListSchema.parse(req.body);
     res.json(await previewPhoneList(prisma, await requireAuth(req), input.text));
@@ -2160,6 +2167,22 @@ export function createApp(prisma: PrismaClient) {
 
   app.get("/api/v1/conversations/:id/messages", async (req, res) => {
     res.json(await getConversationMessages(prisma, await requireAuth(req), req.params.id, String(req.query.before || "")));
+  });
+
+  app.get("/api/v1/conversations/:id/messages/:messageId/delivery", async (req, res) => {
+    res.setHeader("Cache-Control", "private, no-store");
+    res.json(await getMessageDeliveryReview(prisma, await requireAuth(req), req.params.id, req.params.messageId));
+  });
+
+  app.post("/api/v1/conversations/:id/messages/:messageId/delivery/reconcile", json, async (req, res) => {
+    const input = z.object({ revision: z.string().regex(/^[a-f0-9]{64}$/), partId: z.string().min(1).max(100),
+      outcome: z.enum(["sent", "not_sent"]), note: z.string().trim().min(8).max(1000) }).strict().parse(req.body);
+    res.json(await reconcileMessageDelivery(prisma, await requireAuth(req), req.params.id, req.params.messageId, input));
+  });
+
+  app.post("/api/v1/conversations/:id/messages/:messageId/delivery/retry", json, async (req, res) => {
+    const input = z.object({ revision: z.string().regex(/^[a-f0-9]{64}$/) }).strict().parse(req.body);
+    res.json(await retryMessageDelivery(prisma, await requireAuth(req), req.params.id, req.params.messageId, input.revision));
   });
 
   app.get("/api/v1/conversations/:id/attachments/:attachmentId", async (req, res) => {

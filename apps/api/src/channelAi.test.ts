@@ -94,6 +94,8 @@ describe("AI manager across messaging channels", () => {
     await deliverChannelMessage(prisma, tenantId, pending.id); assert.equal(sends, count + 1); assert.equal((await prisma.message.findUniqueOrThrow({ where: { id: pending.id } })).operationState, "unknown");
   });
   async function simulateInterruptedSend(messageId: string, expiresAt: Date) {
+    // Historical replies have the old channel lease and no immutable delivery snapshot.
+    await prisma.idempotencyRecord.deleteMany({ where: { scope: "ai.reply.delivery", actorKey: tenantId, key: messageId } });
     await prisma.message.update({ where: { id: messageId }, data: { operationState: "sending" } });
     await prisma.outboundOperation.updateMany({ where: { providerRef: messageId, tenantId }, data: { state: "sending" } });
     await prisma.idempotencyRecord.create({ data: { scope: "channel.delivery", actorKey: tenantId, key: messageId, requestHash: "previous-worker", resultJson: {}, expiresAt } });
@@ -113,13 +115,15 @@ describe("AI manager across messaging channels", () => {
       assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id } })).attentionReason, "AI_DELIVERY_UNKNOWN");
     }
     const legacy = await inbound("telegram", "1091"), message = await generate(legacy), count = sends;
+    await prisma.idempotencyRecord.deleteMany({ where: { scope: "ai.reply.delivery", actorKey: tenantId, key: message.id } });
     await prisma.message.update({ where: { id: message.id }, data: { operationState: "sending" } });
     await deliverChannelMessage(prisma, tenantId, message.id);
     assert.equal(sends, count);
     assert.equal((await prisma.message.findUniqueOrThrow({ where: { id: message.id } })).operationState, "unknown");
   });
-  it("an expired worker cannot overwrite the recovery result with a late provider response", async () => {
+  it("an expired legacy worker cannot overwrite recovery with a late provider response", async () => {
     const id = await inbound("telegram", "1092"), message = await generate(id), count = sends;
+    await prisma.idempotencyRecord.deleteMany({ where: { scope: "ai.reply.delivery", actorKey: tenantId, key: message.id } });
     let release!: () => void;
     sendBarrier = new Promise<void>(resolve => { release = resolve; });
     const entered = new Promise<void>(resolve => { onSend = resolve; });

@@ -237,7 +237,11 @@ describe("WhatsApp provider connections", () => {
     assert.equal(llmCalls, 1); const prompt = JSON.stringify(llmInput); assert.match(prompt, /PUBLIC-COMPANY-PROMPT/); assert.match(prompt, /PUBLIC-KNOWLEDGE/); assert.doesNotMatch(prompt, /PRIVATE-DRAFT|PRIVATE-KNOWLEDGE|PRIVATE-INTERNAL-NOTE/);
     const usage = await prisma.aIUsageEvent.findFirstOrThrow({ where: { tenantId, conversationId: cloudConversation, feature: "AI_MANAGER_REPLY" } }); assert.equal(usage.integrationId, cloudId); assert.equal(usage.status, "ok");
     const message = await prisma.message.findUniqueOrThrow({ where: { connectionScopedId: event.id } }); assert.equal(message.senderKind, "ai"); assert.equal(message.senderUserId, null);
-    const beforeSends = sends; await Promise.all([deliverCloudMessage(prisma, tenantId, cloudId, message.id), deliverCloudMessage(prisma, tenantId, cloudId, message.id)]); assert.equal(sends, beforeSends + 1);
+    const beforeSends = sends;
+    const deliveries = await Promise.allSettled([deliverCloudMessage(prisma, tenantId, cloudId, message.id), deliverCloudMessage(prisma, tenantId, cloudId, message.id)]);
+    assert.ok(deliveries.some(result => result.status === "fulfilled"));
+    for (const result of deliveries) if (result.status === "rejected") assert.equal(result.reason.code, "channel_sending");
+    assert.equal(sends, beforeSends + 1);
     await processWhatsAppAiReply(prisma, event); assert.equal(llmCalls, 1);
     sockets[1].ev.emit("messages.upsert", { type: "notify", messages: [{ key: { id: "qr-ai-new", remoteJid: "77017776655@s.whatsapp.net" }, messageTimestamp: Math.floor(Date.now() / 1000), message: { conversation: "Сәлеметсіз бе" } }] });
     await until(async () => (await prisma.$queryRaw<Array<{ n: bigint }>>`SELECT count(*) as n FROM "WhatsAppQrJob" WHERE "integrationId" = ${qrId} AND kind = 'inbound'`)[0].n > 0n); await runtime!.tick();
@@ -356,8 +360,10 @@ describe("WhatsApp provider connections", () => {
     const failed = await prisma.message.findUniqueOrThrow({ where: { id: message.id } });
     assert.equal(failed.operationState, "failed"); assert.equal(failed.receiptState, "failed");
     const conversation = await prisma.conversation.findUniqueOrThrow({ where: { id: cloudConversation } });
-    assert.equal(conversation.needsAttention, true); assert.equal(conversation.mode, "human");
-    await prisma.message.update({ where: { id: message.id }, data: { receiptState: "delivered", operationState: "accepted" } });
+    assert.equal(conversation.needsAttention, true); assert.equal(conversation.mode, "ai");
+    assert.equal(conversation.waitingFor, "MANAGER"); assert.equal(conversation.attentionReason, "AI_DELIVERY_NOT_SENT");
+    // A signed correction is authoritative; an older failure cannot downgrade it.
+    assert.equal((await receipt("delivered")).status, 200);
     await receipt("failed");
     assert.equal((await prisma.message.findUniqueOrThrow({ where: { id: message.id } })).receiptState, "delivered");
   });

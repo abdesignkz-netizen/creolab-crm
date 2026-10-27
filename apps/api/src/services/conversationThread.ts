@@ -38,8 +38,13 @@ export async function adoptSameContactThreadMessages(
     (id) => id !== target.id,
   );
   if (!siblingIds.length) return 0;
+  // Delivery operations retain their original recipient/control binding. Show these
+  // messages through the merged thread instead of moving them away from that history.
+  const tracked = await prisma.outboundOperation.findMany({ where: { tenantId,
+    conversationId: { in: siblingIds }, providerRef: { not: null } }, select: { providerRef: true } });
+  const trackedIds = tracked.flatMap(row => row.providerRef ? [row.providerRef] : []);
   const updated = await prisma.message.updateMany({
-    where: { tenantId, conversationId: { in: siblingIds } },
+    where: { tenantId, conversationId: { in: siblingIds }, ...(trackedIds.length ? { id: { notIn: trackedIds } } : {}) },
     data: { conversationId: target.id },
   });
   if (updated.count) {

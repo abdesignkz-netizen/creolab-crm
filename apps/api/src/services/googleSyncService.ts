@@ -19,6 +19,7 @@ async function runGoogleSync(prisma: PrismaClient, integration: Awaited<ReturnTy
     let result: unknown;
     if (integration.type === "calendar") result = await syncGoogleCalendar(prisma, integration);
     else { const { syncGoogleIntake } = await import("./googleIntakeService.ts"); result = await syncGoogleIntake(prisma, integration); }
+    if (result && typeof result === "object" && "running" in result) return result;
     await prisma.integration.updateMany({ where: { id: integration.id, status: "active", credentialId: integration.credentialId }, data: { healthStatus: "HEALTHY", lastSuccessAt: new Date(), lastError: null, lastErrorCode: null } });
     return result;
   } catch (error) {

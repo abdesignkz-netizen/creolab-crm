@@ -25,6 +25,8 @@ import { writeAudit } from "../lib/audit.ts";
 import { resolvePeriodRange, zonedYmd, type PeriodPreset } from "./periodRange.ts";
 import { inquiryInterest, loadConversationInterests } from "./contactInterestService.ts";
 import { pagination } from "./pagination.ts";
+import { loadProcessReviewRecords, processReviewVisible, readProcessReview } from "./conversationProcessReview.ts";
+import { loadProcessProposals, processProposalVisible, readProcessProposal } from "./conversationProcessProposal.ts";
 
 const ACTIVE_INQUIRY: readonly string[] = INQUIRY_ACTIVE_STATUSES;
 const CLOSED_INQUIRY = ["converted", "closed", "lost"];
@@ -506,8 +508,40 @@ export async function getContactOverview(prisma: PrismaClient, auth: AuthContext
     const visibleEvidence = new Set((evidenceIds.length ? await prisma.message.findMany({ where: {
       tenantId: tid, id: { in: evidenceIds }, conversation: { is: conversationAccessWhere(auth) },
     }, select: { id: true } }) : []).map(m => m.id));
+    const hiddenProcessEvents = new Set<string>();
+    const metadataOf = (item: typeof reviewActivities[number]) => item.metadataJson as Record<string, unknown> | null;
+    const originalIds = reviewActivities.flatMap(item => {
+      const metadata = metadataOf(item);
+      return Array.isArray(metadata?.processRecords) && typeof metadata.proposalId === "string" ? [metadata.proposalId] : [];
+    });
+    const originals = originalIds.length ? await prisma.activity.findMany({ where: { tenantId: tid, contactId, id: { in: originalIds } } }) : [];
+    const processes = new Map(reviewActivities.map(item => [item.id, readProcessReview(item.metadataJson)
+      || readProcessReview(originals.find(original => original.id === metadataOf(item)?.proposalId)?.metadataJson)]));
+    const proposals = new Map(reviewActivities.map(item => [item.id, readProcessProposal(item.metadataJson)
+      || readProcessProposal(originals.find(original => original.id === metadataOf(item)?.proposalId)?.metadataJson)]));
+    const proposalStates = new Map<string, Awaited<ReturnType<typeof loadProcessProposals>>>();
+    const proposed = [...proposals.values()].filter((p): p is NonNullable<typeof p> => p !== null);
+    for (const conversationId of new Set(proposed.map(p => p.conversationId))) proposalStates.set(conversationId,
+      await loadProcessProposals(prisma, auth, proposed.filter(p => p.conversationId === conversationId), conversationId));
+    const reviews = [...processes.values()].filter((review): review is NonNullable<typeof review> => review !== null);
+    const scoped = reviews.length ? await loadProcessReviewRecords(prisma, auth, reviews) : undefined;
+    const agreementIds = reviewActivities.flatMap(item => metadataOf(item)?.entityType === "agreement" ? [String(metadataOf(item)?.entityId)] : []);
+    const visibleAgreements = new Set((agreementIds.length ? await prisma.agreement.findMany({ where: {
+      id: { in: agreementIds }, tenantId: tid, responsibleMembershipId: me,
+    }, select: { id: true } }) : []).map(a => a.id));
+    for (const item of reviewActivities) {
+      const review = processes.get(item.id), metadata = metadataOf(item);
+      if (metadata?.entityType === "task" && !contact.tasks.some(t => t.id === metadata.entityId)) hiddenProcessEvents.add(item.id);
+      if (metadata?.entityType === "deal" && !contact.deals.some(d => d.id === metadata.entityId)) hiddenProcessEvents.add(item.id);
+      if (metadata?.entityType === "agreement" && !visibleAgreements.has(String(metadata.entityId))) hiddenProcessEvents.add(item.id);
+      const proposal = proposals.get(item.id);
+      if (!review && !proposal && Array.isArray(metadata?.processRecords)) hiddenProcessEvents.add(item.id);
+      if (review && !await processReviewVisible(prisma, auth, review, scoped)) hiddenProcessEvents.add(item.id);
+      if (proposal && !await processProposalVisible(prisma, auth, proposal, proposalStates.get(proposal.conversationId))) hiddenProcessEvents.add(item.id);
+    }
     contact.activities = contact.activities.filter(item => {
       if (!item.type.startsWith("conversation.crm_")) return true;
+      if (hiddenProcessEvents.has(item.id)) return false;
       const metadata = reviewMeta(item), ids = metadata.evidenceMessageIds;
       return contact.conversations.some(c => c.id === metadata.conversationId)
         && (!item.inquiryId || contact.inquiries.some(i => i.id === item.inquiryId))

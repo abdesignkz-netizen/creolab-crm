@@ -6,11 +6,12 @@ import { validateClientPhone } from "@creolab/contracts";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import { config } from "../config.ts";
-import { requireIntegrationsAccess, requireConfigurationTenant as requireTenant, assertConversationReachable } from "../lib/access.ts";
+import { requireIntegrationsAccess, requireConfigurationTenant as requireTenant } from "../lib/access.ts";
 import type { AuthContext } from "../lib/types.ts";
-import { encryptSecret, decryptSecret, encryptionKeyVersion } from "../lib/secretBox.ts";
+import { encryptSecret, encryptionKeyVersion } from "../lib/secretBox.ts";
 import { writeAudit } from "../lib/audit.ts";
-import { assertConversationMime, decodeBase64Payload, storeMessageAttachment, CONVERSATION_MAX_FILE_BYTES } from "./conversationMedia.ts";
+import { assertConversationMime, storeMessageAttachment, CONVERSATION_MAX_FILE_BYTES } from "./conversationMedia.ts";
+import { telegramCall, tokenFor } from "./telegramTransport.ts";
 
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 const capabilities = ["receive_messages", "send_text", "send_media"];
@@ -23,29 +24,6 @@ const updateSchema = z.object({ update_id: z.number().int().nonnegative().safe()
   photo: z.array(mediaSchema).max(20).optional(), document: mediaSchema.optional(), voice: mediaSchema.optional(), audio: mediaSchema.optional(), video: mediaSchema.optional(),
   contact: z.object({ phone_number: z.string().max(100), user_id: z.number().int().optional(), first_name: z.string().optional() }).optional(),
 }).optional() });
-
-// Provider errors never include the request URL: Telegram embeds the bot token in it.
-async function telegramCall<T>(token: string, method: string, body: Record<string, unknown> | FormData = {}): Promise<T> {
-  try {
-    const multipart = body instanceof FormData;
-    const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
-      method: "POST", headers: multipart ? undefined : { "Content-Type": "application/json" },
-      body: multipart ? body : JSON.stringify(body), signal: AbortSignal.timeout(20000), redirect: "error",
-    });
-    const result = await response.json() as { ok: boolean; result: T; error_code?: number };
-    if (!response.ok || !result.ok) throw new ApiError(502, "telegram_provider", `Telegram отклонил запрос (${result.error_code || response.status}). Проверьте токен и права бота.`);
-    return result.result;
-  } catch (error) {
-    if (error instanceof ApiError) throw error;
-    throw new ApiError(502, "telegram_unavailable", "Telegram не ответил. Результат отправки может быть неизвестен; проверьте диалог перед повтором.");
-  }
-}
-
-async function tokenFor(prisma: PrismaClient | Prisma.TransactionClient, tenantId: string, credentialId: string | null) {
-  const credential = credentialId ? await prisma.credential.findFirst({ where: { id: credentialId, tenantId, kind: "telegram_bot" } }) : null;
-  if (!credential) throw new ApiError(409, "telegram_disconnected", "Подключите Telegram-бота компании");
-  return decryptSecret(credential.encryptedValue);
-}
 
 export async function connectCompanyTelegram(prisma: PrismaClient, auth: AuthContext, input: z.infer<typeof telegramConnectSchema>) {
   requireIntegrationsAccess(auth);
@@ -222,76 +200,12 @@ export async function receiveCompanyTelegram(prisma: PrismaClient, id: string, s
   });
 }
 
-export async function sendCompanyTelegram(prisma: PrismaClient, auth: AuthContext, conversationId: string, input: { text?: string; idempotencyKey?: string; attachments?: Array<{ fileName: string; mimeType: string; contentBase64: string }> }) {
-  const { tenantId } = requireTenant(auth);
-  await assertConversationReachable(prisma, auth, conversationId);
-  const text = String(input.text || "").trim();
-  if (text.length > 4096) throw new ApiError(422, "telegram_text_limit", "Telegram принимает до 4096 символов в сообщении");
-  if ((input.attachments?.length || 0) > 5) throw new ApiError(422, "too_many_files", "Можно приложить до 5 файлов");
-  const files = (input.attachments || []).map(file => {
-    const mimeType = assertConversationMime(file.fileName, file.mimeType);
-    const buffer = decodeBase64Payload(file.contentBase64);
-    if (buffer.length > CONVERSATION_MAX_FILE_BYTES) throw new ApiError(422, "too_large", "Файл больше 16 МБ");
-    return { ...file, mimeType, buffer };
-  });
-  if (!text && !files.length) throw new ApiError(422, "invalid", "Введите текст или прикрепите файл");
-  const key = `telegram:${conversationId}:${input.idempotencyKey || randomUUID()}`;
-  const scoped = `telegram-out:${tenantId}:${hash(key)}`;
-  const claimed = await prisma.$transaction(async tx => {
-    const conversation = await tx.conversation.update({ where: { tenantId_id: { tenantId, id: conversationId } }, data: { updatedAt: new Date() }, include: { connection: { include: { integration: true } } } });
-    if (conversation.mode !== "human") throw new ApiError(409, "mode_locked", "Сначала возьмите диалог, затем отвечайте");
-    const connection = conversation.connection;
-    if (connection?.channelType !== "telegram" || connection.status !== "active" || connection.integration.status !== "active" || !conversation.externalThreadId) throw new ApiError(409, "telegram_disconnected", "Telegram-бот отключён");
-    const existing = await tx.message.findUnique({ where: { connectionScopedId: scoped }, include: { attachments: true } });
-    if (existing) {
-      const fingerprint = (items: Array<{ fileName: string; mimeType: string; checksum: string | null }>) => JSON.stringify(items.map(item => `${item.fileName}:${item.mimeType}:${item.checksum}`).sort());
-      const incomingFiles = files.map(file => ({ fileName: file.fileName, mimeType: file.mimeType, checksum: hash(file.contentBase64) }));
-      // Compare decoded bytes, since equivalent base64 encodings may differ.
-      for (const [index, file] of files.entries()) incomingFiles[index].checksum = createHash("sha256").update(file.buffer).digest("hex");
-      if (existing.senderUserId !== auth.user.id || (existing.text || "") !== text || fingerprint(existing.attachments.map(file => ({ ...file, fileName: file.originalFileName || file.fileName }))) !== fingerprint(incomingFiles)) throw new ApiError(409, "idempotency_conflict", "Повторный ключ использован для другого сообщения");
-      return { existing };
-    }
-    const message = await tx.message.create({ data: { tenantId, conversationId, senderKind: "staff", senderUserId: auth.user.id, direction: "outbound", text: text || null, operationState: "queued", connectionScopedId: scoped } });
-    const attachmentIds: string[] = [];
-    for (const file of files) {
-      const stored = await storeMessageAttachment(tx, { tenantId, messageId: message.id, fileName: file.fileName, mimeType: file.mimeType, buffer: file.buffer, uploadedById: auth.user.id, sendState: "pending" });
-      attachmentIds.push(stored.id);
-    }
-    const operation = await tx.outboundOperation.create({ data: { tenantId, conversationId, idempotencyKey: key, controlVersion: conversation.controlVersion, state: "sending" } });
-    return { message, operation, messageRevision: conversation.messageRevision, attachmentIds, chatId: conversation.externalThreadId, credentialId: connection.integration.credentialId };
-  });
-  if (claimed.existing) return claimed.existing;
-  const { message, operation } = claimed;
-  try {
-    const token = await tokenFor(prisma, tenantId, claimed.credentialId!);
-    let providerMessageId: string | null = null;
-    if (text) providerMessageId = String((await telegramCall<{ message_id: number }>(token, "sendMessage", { chat_id: claimed.chatId, text })).message_id);
-    for (const [index, file] of files.entries()) {
-      const form = new FormData(); form.set("chat_id", claimed.chatId!); form.set("document", new Blob([new Uint8Array(file.buffer)], { type: file.mimeType }), file.fileName);
-      const sent = await telegramCall<{ message_id: number }>(token, "sendDocument", form);
-      providerMessageId ||= String(sent.message_id);
-      await prisma.attachment.update({ where: { id: claimed.attachmentIds![index] }, data: { sendState: "sent", providerMessageId: String(sent.message_id) } });
-    }
-    await prisma.$transaction(async tx => {
-      await tx.message.update({ where: { id: message!.id }, data: { operationState: "accepted", providerMessageId } });
-      await tx.outboundOperation.update({ where: { id: operation!.id }, data: { state: "accepted", providerRef: providerMessageId } });
-      await tx.conversation.updateMany({ where: { id: conversationId, messageRevision: claimed.messageRevision }, data: { waitingFor: "CLIENT", needsAttention: false, attentionReason: null } });
-      await tx.conversation.update({ where: { id: conversationId }, data: { messageRevision: { increment: 1 } } });
-    });
-  } catch (error) {
-    await prisma.$transaction(async tx => {
-      await tx.message.update({ where: { id: message!.id }, data: { operationState: "unknown" } });
-      await tx.outboundOperation.update({ where: { id: operation!.id }, data: { state: "unknown", error: "Не подтверждён результат отправки Telegram" } });
-    });
-    throw error;
-  }
-  return prisma.message.findUnique({ where: { id: message!.id }, include: { attachments: true } });
-}
+export { sendCompanyTelegram } from "./telegramManualDelivery.ts";
 
 /** Internal transport; the durable dispatcher owns policy checks and idempotency. */
 export async function sendTelegramText(prisma: PrismaClient, row: { tenantId: string; credentialId: string | null }, recipient: string, text: string) {
   if (!/^\d+$/.test(recipient) || !text || text.length > 4096) throw new ApiError(422, "telegram_invalid_message", "Некорректное сообщение Telegram");
   const sent = await telegramCall<{ message_id: number }>(await tokenFor(prisma, row.tenantId, row.credentialId), "sendMessage", { chat_id: recipient, text });
-  if (!Number.isSafeInteger(sent.message_id)) throw new ApiError(502, "telegram_send_unknown", "Telegram не подтвердил отправку");
+  if (!Number.isSafeInteger(sent.message_id) || sent.message_id <= 0) throw new ApiError(502, "telegram_send_unknown", "Telegram не подтвердил отправку");
   return String(sent.message_id);
 }

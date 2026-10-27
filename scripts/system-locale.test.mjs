@@ -79,6 +79,40 @@ async function bundle(contents, plugins = []) {
   return module.exports;
 }
 
+test('Task delivery separates accepted, unknown and unsent parts in Russian and Kazakh', async () => {
+  const { render } = await bundle(`
+    import {renderToStaticMarkup} from 'react-dom/server';
+    import {MemoryRouter} from 'react-router-dom';
+    import TaskDeliveryNotice from './components/TaskDeliveryNotice';
+    import {SessionContext,emptyCaps} from './lib/session';
+    export const render=(locale,result,reconcile=false)=>renderToStaticMarkup(<SessionContext.Provider value={{me:{user:{locale}},caps:emptyCaps}}><MemoryRouter><TaskDeliveryNotice result={result} conversationId="test-conversation" onReconcile={reconcile?async()=>{}:undefined}/></MemoryRouter></SessionContext.Provider>);
+  `);
+  const result = { textOk:true,textState:'accepted',needsCheck:true,partial:true,files:[
+    {id:'file-1',fileName:'<script>bad()</script>.pdf',state:'unknown',ok:false},
+    {id:'file-2',fileName:'Прайс.pdf',state:'pending',ok:false},
+  ] };
+  const ru=render('ru',result), kk=render('kk',result);
+  assert.match(ru,/Нужно проверить/); assert.match(ru,/Ещё не отправлено/);
+  assert.match(ru,/Повтор заблокирован/); assert.match(ru,/не подтверждает доставку или прочтение/);
+  assert.doesNotMatch(ru,/Не отправлено<\/b>/);
+  assert.match(kk,/Тексеру қажет/); assert.match(kk,/Әлі жіберілмеді/);
+  assert.doesNotMatch(kk,/Нужно проверить|Ещё не отправлено|Результат отправки/);
+  for(const html of [ru,kk]) {
+    assert.match(html,/role="status"/); assert.match(html,/href="\/conversations\/test-conversation"/);
+    assert.match(html,/&lt;script&gt;bad\(\)&lt;\/script&gt;/); assert.doesNotMatch(html,/<script>/);
+  }
+  const pending=render('ru',{textState:'sending',sending:true,files:[]});
+  assert.match(pending,/Отправка выполняется/); assert.doesNotMatch(pending,/Повтор заблокирован/);
+  assert.match(pending,/Отправляется/);
+  assert.doesNotMatch(ru,/Записать результат сверки/);
+  assert.match(render('ru',result,true),/Записать результат сверки/);
+  assert.match(render('kk',result,true),/Тексеру нәтижесін жазу/);
+  assert.doesNotMatch(render('ru',{...result,sending:true},true),/Записать результат сверки/);
+  assert.match(render('ru',{textOk:true,textState:'accepted',textReconciled:true,files:[]}),/Сверено сотрудником/);
+  const partial=render('ru',{...result,needsCheck:false,files:[{id:'f',fileName:'КП.pdf',state:'failed',ok:false}]});
+  assert.match(partial,/Повторятся только неотправленные файлы/); assert.match(partial,/Не отправлено/);
+});
+
 test('Shared website chat copy preserves Russian, Kazakh and English independently', async () => {
   const { systemText } = await bundle(`export { systemText } from '@creolab/contracts';`);
   assert.equal(systemText('ru', 'Чат на сайте'), 'Чат на сайте');
@@ -110,6 +144,59 @@ test('CRM review exposes before/after and evidence safely, with permissions and 
   assert.match(blocked,/Карточка уже изменена/);
   const history=render('ru',{...item,status:'automatic',canAccept:false,canDismiss:false,canUndo:true});
   assert.match(history,/Отменить изменение/); assert.doesNotMatch(history,/Применить изменения/);
+});
+
+test('Process review explains coupled undo, blocked side effects and preserves customer text in both locales', async () => {
+  const { render } = await bundle(`
+    import {renderToStaticMarkup} from 'react-dom/server';
+    import {CrmReviewCard} from './components/ConversationCrmReview';
+    import {SessionContext,emptyCaps} from './lib/session';
+    export const render=(locale,item)=>renderToStaticMarkup(<SessionContext.Provider value={{me:{user:{locale}},caps:emptyCaps}}><CrmReviewCard item={item} busy={false} onDecision={()=>{}}/></SessionContext.Provider>);
+  `);
+  const item={id:'process',entityType:'process',entityId:'conversation',status:'automatic',confidence:'HIGH',createdAt:'2026-10-26T08:00:00Z',fields:[],evidence:[],canAccept:false,canDismiss:false,canUndo:true,blockedReason:null,
+    process:{reminders:3,entries:[{entityType:'agreement',entityId:'agreement',title:'<img src=x onerror=bad()>',created:true,fields:[{label:'Описание',before:null,after:'Новая'}, {label:'Статус договорённости',before:null,after:'Запланирована',status:true}]}]}};
+  const ru=render('ru',item), kk=render('kk',item);
+  assert.match(ru,/Связанные изменения отменяются вместе/); assert.match(kk,/Байланысты өзгерістер бірге/);
+  for(const html of [ru,kk]) { assert.match(html,/&lt;img/); assert.doesNotMatch(html,/<img/); assert.match(html,/>Новая</); assert.doesNotMatch(html,/Применить изменения/); }
+  assert.match(kk,/Жоспарланған/); assert.doesNotMatch(ru,/Запись не существовала/); assert.match(ru,/Запланировано напоминаний/);
+  for(const reason of ['effects_started','calendar','related_activity']) {
+    const html=render('ru',{...item,canUndo:false,blockedReason:reason});
+    assert.doesNotMatch(html,/Отменить изменение/); assert.match(html,/crm-review-warning/);
+  }
+  assert.match(render('ru',{...item,canUndo:false,blockedReason:'effects_started'}),/Уже началось выполнение/);
+});
+
+test('ASSIST process preview is expanded, explicit, translated and distinct from applied history', async () => {
+  const {render}=await bundle(`
+    import {renderToStaticMarkup} from 'react-dom/server';
+    import {CrmReviewCard} from './components/ConversationCrmReview';
+    import {SessionContext,emptyCaps} from './lib/session';
+    export const render=(locale,item)=>renderToStaticMarkup(<SessionContext.Provider value={{me:{user:{locale}},caps:emptyCaps}}><CrmReviewCard item={item} busy={false} onDecision={()=>{}}/></SessionContext.Provider>);
+  `);
+  const item={id:'process',entityType:'process',entityId:'conversation',status:'pending',confidence:'HIGH',createdAt:'2026-10-26T08:00:00Z',fields:[],evidence:[],canAccept:true,canDismiss:true,canUndo:false,blockedReason:null,
+    process:{reminders:3,calendarSync:true,entries:[{entityType:'task',entityId:'task',title:'Позвонить <script>bad()</script>',created:true,fields:[{label:'Исполнитель',before:null,after:'Айбек'},{label:'Срок',before:null,after:'29.10.2026, 16:00'}]}]}};
+  const ru=render('ru',item),kk=render('kk',item);
+  assert.match(ru,/записи ещё не изменены/); assert.match(kk,/жазбалар әлі өзгертілген жоқ/);
+  assert.match(ru,/Подтвердить действия/); assert.match(kk,/Әрекеттерді растау/);
+  assert.match(ru,/Действия по переписке/); assert.match(kk,/Хат алмасу бойынша әрекеттер/);
+  assert.match(ru,/Напоминаний после подтверждения/); assert.match(kk,/Растаудан кейінгі еске салулар/);
+  assert.match(ru,/Отправка сообщений и документов подтверждается отдельно/); assert.match(ru,/Подключён календарь/);
+  for(const html of [ru,kk]) { assert.match(html,/class="crm-review-process-entry" open=""/); assert.match(html,/Айбек/); assert.match(html,/29.10.2026, 16:00/); assert.match(html,/&lt;script&gt;/); assert.doesNotMatch(html,/<script>/); }
+  assert.doesNotMatch(ru,/Создано ИИ|Отменить изменение/);
+  for(const reason of ['settings_changed','expired','permissions']) {
+    const blocked=render('ru',{...item,canAccept:false,blockedReason:reason});
+    assert.match(blocked,/disabled=""[^>]*>Подтвердить действия/); assert.match(blocked,/crm-review-warning/);
+  }
+  for(const status of ['dismissed','superseded']) {
+    const closed=render('ru',{...item,status,canAccept:false,canDismiss:false});
+    assert.doesNotMatch(closed,/Создано ИИ|Подтвердить действия|Напоминаний после подтверждения|применятся вместе/); assert.match(closed,/Новая запись/);
+  }
+  const standalone=render('kk',{...item,process:{reminders:0,calendarSync:false,entries:[{entityType:'task',entityId:'standalone',title:'Подготовить расчёт',created:true,fields:[
+    {label:'Срок',status:true,before:null,after:'Без срока'}, {label:'Подготовка',before:null,after:'Уточнить объём <script>bad()</script>'}
+  ]}]}});
+  assert.match(standalone,/Мерзімсіз/); assert.match(standalone,/Дайындық/); assert.match(standalone,/&lt;script&gt;/);
+  assert.doesNotMatch(standalone,/crm-review-before/); assert.match(standalone,/crm-review-new-fields/);
+  assert.doesNotMatch(standalone,/Подключён календарь|Күнтізбе қосылған|<script>|Жоспарланған еске салулар/);
 });
 
 test('Commercial review distinguishes budget bounds, prices and refusal notes with exact safe quotes', async () => {

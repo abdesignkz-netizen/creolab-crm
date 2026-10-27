@@ -1,0 +1,62 @@
+{
+  "date": "2026-10-26",
+  "timezone": "Asia/Almaty",
+  "stage": "3.3.2",
+  "status": "implemented_and_tested_locally",
+  "wholeAuditComplete": false,
+  "wholeStage3Complete": false,
+  "deployed": false,
+  "productionDataModified": false,
+  "externalMessagesSent": false,
+  "checks": {
+    "affectedApi": {
+      "tests": 290, "pass": 290, "fail": 0, "skipped": 0, "cancelled": 0,
+      "files": { "pass": 14, "total": 14 },
+      "log": "/tmp/basqar-stage3-3-2-regression-final.log",
+      "database": "isolated PGlite", "externalProviders": "disabled",
+      "note": "Before the final stale-empty-analysis fix; affected subset rerun below."
+    },
+    "finalAffectedSubset": {
+      "tests": 134, "pass": 134, "fail": 0, "skipped": 0, "cancelled": 0,
+      "files": { "pass": 4, "total": 4 },
+      "log": "/tmp/basqar-stage3-3-2-review-final.log",
+      "note": "Overlaps affectedApi; do not add test counts. Includes 33 final proposal tests."
+    },
+    "newProposalTests": { "tests": 33, "pass": 33, "fail": 0 },
+    "web": {
+      "tests": 53, "pass": 53, "fail": 0, "skipped": 0, "cancelled": 0,
+      "log": "/tmp/basqar-stage3-3-2-web-final.log",
+      "type": "Automated checks including SSR, not visual acceptance"
+    },
+    "types": { "status": "passed", "workspaces": ["api", "web", "mobile", "contracts"],
+      "logs": ["/tmp/basqar-stage3-3-2-types-api-final.log", "/tmp/basqar-stage3-3-2-types-web-final.log", "/tmp/basqar-stage3-3-2-types-mobile-final.log", "/tmp/basqar-stage3-3-2-types-contracts-final.log"] },
+    "build": {
+      "status": "passed", "asset": "apps/web/dist/assets/index-BZuGAWnB.js",
+      "bytes": 1099175, "gzipBytes": 278860,
+      "rawLimit": 1100000, "gzipLimit": 285000, "limitsRaised": false,
+      "log": "/tmp/basqar-stage3-3-2-build-final.log",
+      "warning": "Common chunks exceed Vite 500 kB warning threshold"
+    },
+    "diffCheck": "passed"
+  },
+  "data": {
+    "migrationRequired": false, "newTables": false, "newDependencies": false,
+    "proposalStorage": "Existing Activity metadata schema 3",
+    "acceptedStorage": "Same Activity converted to captured schema 2 process review",
+    "history": "Existing Activity/AuditEvent/DealStageHistory",
+    "api": "Existing conversation crm-review endpoint"
+  },
+  "notVerified": [
+    "Live provider/model behavior",
+    "Desktop and mobile visual acceptance: browser use disabled in Work settings",
+    "Real PostgreSQL concurrency and full Docker build",
+    "A fresh whole-project API regression"
+  ],
+  "limits": [
+    "Task proposals here are tied to recognized agreements; standalone suggestedTasks remain for the next substage",
+    "No new deal creation, price/payment changes or document/message sending by this grouped approval",
+    "Existing calendar-linked agreements and started effects need separate reconciliation",
+    "Local undo cannot recall external events or sent messages",
+    "Initial web bundle has only 825 bytes remaining below the existing limit"
+  ]
+}

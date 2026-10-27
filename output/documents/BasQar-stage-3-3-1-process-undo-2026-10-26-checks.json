@@ -1,0 +1,97 @@
+{
+  "date": "2026-10-26",
+  "timezone": "Asia/Almaty",
+  "stage": "3.3.1",
+  "status": "implemented_and_tested_locally",
+  "wholeStage3Complete": false,
+  "wholeStage3_3Complete": false,
+  "deployed": false,
+  "productionDataModified": false,
+  "externalMessagesSent": false,
+  "checks": {
+    "affectedApi": {
+      "tests": 258,
+      "pass": 258,
+      "fail": 0,
+      "skipped": 0,
+      "cancelled": 0,
+      "files": {
+        "pass": 13,
+        "total": 13
+      },
+      "log": "/tmp/basqar-stage3-3-regression-final.log",
+      "database": "isolated PGlite",
+      "externalProviders": "disabled"
+    },
+    "newProcessTests": {
+      "tests": 26,
+      "pass": 26,
+      "fail": 0,
+      "note": "Included in affectedApi; not additional tests."
+    },
+    "web": {
+      "tests": 52,
+      "pass": 52,
+      "fail": 0,
+      "skipped": 0,
+      "cancelled": 0,
+      "log": "/tmp/basqar-stage3-3-web-final.log",
+      "type": "automated checks including SSR; not visual acceptance"
+    },
+    "types": {
+      "status": "passed",
+      "workspaces": [
+        "api",
+        "web",
+        "mobile",
+        "contracts"
+      ],
+      "logs": [
+        "/tmp/basqar-stage3-3-types-api-final.log",
+        "/tmp/basqar-stage3-3-types-web-final.log",
+        "/tmp/basqar-stage3-3-types-mobile-final.log",
+        "/tmp/basqar-stage3-3-types-final.log"
+      ]
+    },
+    "build": {
+      "status": "passed",
+      "asset": "apps/web/dist/assets/index-BX7BxygQ.js",
+      "bytes": 1097004,
+      "gzipBytes": 278383,
+      "rawLimit": 1100000,
+      "gzipLimit": 285000,
+      "limitsRaised": false,
+      "log": "/tmp/basqar-stage3-3-build2.log",
+      "warning": "Common chunks exceed Vite 500 kB warning threshold"
+    },
+    "historyQueries": {
+      "fixture": "50 stale process groups",
+      "maximumReads": 25,
+      "permissionsRechecked": true,
+      "note": "Query-count guard; not production latency/load measurement"
+    },
+    "diffCheck": "passed"
+  },
+  "data": {
+    "migrationRequired": false,
+    "newTables": false,
+    "newDependencies": false,
+    "review": "Existing Activity metadata schema 2 with bounded snapshots/evidence/reminders/outbox",
+    "manualTaskEdits": "Unique manualEditId in merged contextSnapshotJson",
+    "history": "Existing Activity/AuditEvent/DealStageHistory"
+  },
+  "notVerified": [
+    "Production integrations and real model quality",
+    "Desktop/mobile visual acceptance: CUA reports browser use disabled in Work settings",
+    "Browser interaction with lazily loaded workspace search",
+    "PostgreSQL concurrency and full Docker build",
+    "A new full-project API regression; final run covers 13 affected files"
+  ],
+  "limits": [
+    "ASSIST proposals for agreements/tasks/deal stages remain for the next substage",
+    "Only new fully captured local automatic changes are undoable; old unsupported records stay read-only",
+    "Undo does not delete newly created records, erase history, cancel payments/documents, recall messages or external calendar events",
+    "Calendar connections, execution/notifications and changed dependent work block local undo; separate reconciliation required",
+    "New deal creation itself is not reversed by the process undo"
+  ]
+}

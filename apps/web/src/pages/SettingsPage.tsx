@@ -5,7 +5,8 @@ import { InlineFeedback } from "../components/InlineFeedback";
 import { uiNotificationBody, uiText, useUiText, localizeUiOptions, uiMessage } from "../lib/uiText";
 import { DocumentNumberingPanel } from "./DocumentNumberingPanel";
 import { ServiceCatalogPanel } from "./ServiceCatalogPanel";
-import { useEffect, useState, type FormEvent } from "react";
+import { lazy, Suspense, useEffect, useState, type FormEvent } from "react";
+const OpsSection = lazy(() => import("./OpsSection"));
 import { Link, useSearchParams, useNavigate } from "react-router-dom";
 import { LegalSettingsPanel } from "./LegalSettingsPanel";
 import { api } from "../lib/api";
@@ -57,6 +58,7 @@ function useUnsaved(dirty: boolean) {
 export function SettingsPage() {
   const navigate = useNavigate();
   const [controlNoticesDirty, setControlNoticesDirty] = useState(false);
+  const [opsDirty, setOpsDirty] = useState(false);
   const [pendingControlNavigation, setPendingControlNavigation] = useState<{ section: Section } | { href: string } | null>(null);
   const { me, caps } = useSession();
   const locale = normalizeLocale(me?.user?.locale);
@@ -73,21 +75,24 @@ export function SettingsPage() {
   ];
   const personal: Section[] = ["profile", "security", "notifications", "interface"];
   const section = [...personal, ...allowedCompany].includes(requested) ? requested : "profile";
+  const rulesDirty = section === "ops" && opsDirty;
+  const sectionDirty = rulesDirty || (section === "control" && controlNoticesDirty);
+  useUnsaved(rulesDirty);
   function allowSectionChange(next: Section) {
-    if (next === section || section !== "control" || !controlNoticesDirty) return true;
+    if (next === section || !sectionDirty) return true;
     setPendingControlNavigation({ section: next }); return false;
   }
   useEffect(() => {
-    if (section !== "control" || !controlNoticesDirty) return;
+    if (!sectionDirty) return;
     const leave = (event: MouseEvent) => {
       const link = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>("a[href]") : null;
       if (!link || link.target || link.hasAttribute("download") || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0 || link.href === window.location.href) return;
       event.preventDefault(); event.stopPropagation(); setPendingControlNavigation({ href: link.href });
     };
     document.addEventListener("click", leave, true); return () => document.removeEventListener("click", leave, true);
-  }, [section, controlNoticesDirty]);
+  }, [sectionDirty]);
   function discardControlAndNavigate() {
-    const target = pendingControlNavigation; setPendingControlNavigation(null); setControlNoticesDirty(false);
+    const target = pendingControlNavigation; setPendingControlNavigation(null); setControlNoticesDirty(false); setOpsDirty(false);
     if (!target) return;
     if ("section" in target) {
       const item = items.find(entry => entry.id === target.section);
@@ -125,7 +130,7 @@ export function SettingsPage() {
 
   return (
     <section className="settings-page">
-      {pendingControlNavigation && <ControlNoticeDiscardDialog onStay={() => setPendingControlNavigation(null)} onDiscard={discardControlAndNavigate} />}
+      {pendingControlNavigation && <ControlNoticeDiscardDialog onStay={() => setPendingControlNavigation(null)} onDiscard={discardControlAndNavigate} message={rulesDirty ? (locale === "kk" ? "Жалғастырсаңыз, мәмілелер ережелерінің сақталмаған өзгерістері жоғалады." : "Если продолжить, несохранённые изменения правил сделок будут потеряны.") : undefined} />}
       <h2>{t(locale, "settings.title")}</h2>
       <label className="settings-mobile-nav">{t(locale, "settings.title")}
         <select value={section} onChange={event => {
@@ -181,7 +186,7 @@ export function SettingsPage() {
           {section === "company" && (caps.documents || caps.companyAdmin) ? <><LegalSettingsPanel /><DocumentNumberingPanel /></> : null}
           {section === "members" && caps.members ? <MembersSection locale={locale} /> : null}
           {section === "services" && caps.companyAdmin ? <ServiceCatalogPanel /> : null}
-          {section === "ops" && caps.companyAdmin ? <OpsSection locale={locale} /> : null}
+          {section === "ops" && caps.companyAdmin ? <Suspense fallback={<p className="muted">{t(locale, "common.loading")}</p>}><OpsSection key={me?.activeTenant?.tenant?.id} locale={locale} onDirtyChange={setOpsDirty} /></Suspense> : null}
           {section === "audit" && caps.companyAdmin ? <AuditSection locale={locale} /> : null}
           {section === "control" && caps.companyAdmin ? <ControlSection key={me?.activeTenant?.tenant?.id} locale={locale} onNoticesDirtyChange={setControlNoticesDirty} /> : null}
         </div>
@@ -694,116 +699,6 @@ function MembersSection({ locale }: { locale: Locale }) {
           <div className="member-actions"><button className="btn secondary" disabled={busy || !capacity?.entitled || (new Date(item.expiresAt).getTime() <= Date.now() && !capacity?.canInvite)} onClick={() => void run(async () => showLink(await api.renewCompanyInvitation(item.id)))}>{uiText("Обновить ссылку")}</button><button className="btn secondary" disabled={busy} onClick={() => void run(async () => { await api.revokeCompanyInvitation(item.id); if (link?.email === item.email) setLink(null); })}>{uiText("Отменить приглашение")}</button></div>
         </div>)}
       </section> : null}
-    </div>
-  );
-}
-
-function OpsSection({ locale }: { locale: Locale }) {
-  const uiText = useUiText();
-  const [ops, setOps] = useState<any>(null);
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [lostText, setLostText] = useState("");
-  const [plan, setPlan] = useState("");
-
-  async function load() {
-    const data: any = await api.workspaceOps();
-    setOps(data);
-    setLostText((data.lostReasons || []).join("\n"));
-    setPlan(data.salesPlanMinor != null ? String(data.salesPlanMinor) : "");
-  }
-
-  useEffect(() => {
-    void load().catch((err) => setError(err instanceof Error ? err.message : uiText("Ошибка")));
-  }, []);
-
-  async function save() {
-    setBusy(true);
-    setError("");
-    try {
-      const stageSlaDays: Record<string, number> = {};
-      for (const stage of ops?.stages || []) {
-        const value = Number(stage.slaDays);
-        if (Number.isFinite(value) && value > 0) stageSlaDays[stage.systemKey] = value;
-      }
-      const planNumber = plan.trim() ? Math.round(Number(plan.replace(/\s+/g, "").replace(",", "."))) : null;
-      await api.updateWorkspaceOps({
-        stalledDealDays: Number(ops.stalledDealDays),
-        proposalFollowUpThresholdDays: Number(ops.proposalFollowUpThresholdDays),
-        silenceReturnDays: Number(ops.silenceReturnDays),
-        salesPlanMinor: planNumber,
-        lostReasons: lostText.split("\n").map((line) => line.trim()).filter(Boolean),
-        stageSlaDays,
-      });
-      notifySaved(uiText("Операционные настройки сохранены"));
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : uiText("Не сохранено"));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  if (!ops) return <p className="muted">{t(locale, "common.loading")}</p>;
-
-  return (
-    <div className="panel">
-      <b>{t(locale, "settings.ops")}</b>
-      <p className="muted">{uiText("SLA этапов, причины потери и план продаж. Эти же значения использует «Ситуация».")}</p>
-      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
-      <label>
-        {uiText("Дней без движения, чтобы сделка считалась зависшей")}<input
-          type="number"
-          min={1}
-          max={90}
-          value={ops.stalledDealDays}
-          onChange={(e) => setOps({ ...ops, stalledDealDays: Number(e.target.value) })}
-        />
-      </label>
-      <label>
-        {uiText("Дней после КП без ответа")}<input
-          type="number"
-          min={1}
-          max={90}
-          value={ops.proposalFollowUpThresholdDays}
-          onChange={(e) => setOps({ ...ops, proposalFollowUpThresholdDays: Number(e.target.value) })}
-        />
-      </label>
-      <label>
-        {uiText("Дней тишины по клиенту")}<input
-          type="number"
-          min={1}
-          max={180}
-          value={ops.silenceReturnDays}
-          onChange={(e) => setOps({ ...ops, silenceReturnDays: Number(e.target.value) })}
-        />
-      </label>
-      <label>
-        {uiText("План продаж за период, ₸")}<input value={plan} onChange={(e) => setPlan(e.target.value)} placeholder={uiText("например 10000000")} />
-      </label>
-      <b>{uiText("SLA по этапам, дни")}</b>
-      {(ops.stages || []).map((stage: any, index: number) => (
-        <label key={stage.systemKey}>
-          {stage.name}
-          <input
-            type="number"
-            min={1}
-            max={90}
-            value={stage.slaDays ?? ""}
-            onChange={(e) => {
-              const next = [...(ops.stages || [])];
-              next[index] = { ...stage, slaDays: e.target.value === "" ? null : Number(e.target.value) };
-              setOps({ ...ops, stages: next });
-            }}
-          />
-        </label>
-      ))}
-      <label>
-        {uiText("Причины потери — по одной на строку")}<textarea rows={8} value={lostText} onChange={(e) => setLostText(e.target.value)} />
-      </label>
-      <button type="button" className="btn" disabled={busy} onClick={() => void save()}>
-        {t(locale, "settings.save")}
-      </button>
     </div>
   );
 }

@@ -19,12 +19,12 @@ function draftFrom(data: Data, membershipId: string): Draft {
   return { ...structuredClone(CONTROL_NOTICE_DEFAULTS), membershipId, integrationId: data.senders.find(sender => sender.supported && sender.ready)?.id || "", phone: "" };
 }
 
-export function ControlNoticeDiscardDialog({ onStay, onDiscard }: { onStay: () => void; onDiscard: () => void }) {
+export function ControlNoticeDiscardDialog({ onStay, onDiscard, message }: { onStay: () => void; onDiscard: () => void; message?: string }) {
   const text = useUiText(), dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => { dialog.current?.showModal(); }, []);
   return <dialog ref={dialog} className="control-notices-discard-dialog" aria-labelledby="control-notices-discard-title" onCancel={event => { event.preventDefault(); onStay(); }}>
     <h3 id="control-notices-discard-title">{text("Есть несохранённые изменения")}</h3>
-    <p>{text("Если продолжить, изменения настроек уведомлений будут потеряны.")}</p>
+    <p>{message || text("Если продолжить, изменения настроек уведомлений будут потеряны.")}</p>
     <div className="control-notices-actions"><button type="button" className="btn" autoFocus onClick={onStay}>{text("Продолжить настройку")}</button><button type="button" className="btn secondary" onClick={onDiscard}>{text("Не сохранять и продолжить")}</button></div>
   </dialog>;
 }

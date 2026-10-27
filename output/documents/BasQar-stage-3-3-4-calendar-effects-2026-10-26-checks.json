@@ -1,0 +1,17 @@
+{
+  "stage": "3.3.4",
+  "date": "2026-10-26",
+  "status": "completed_locally",
+  "deployed": false,
+  "checks": [
+    {"name": "process_and_calendar", "files": 4, "tests": 114, "passed": 114, "newCalendarTests": 16, "log": "/tmp/basqar-stage334-process-final.log"},
+    {"name": "crm_google_task_http", "files": 4, "tests": 46, "passed": 46, "log": "/tmp/basqar-stage334-http-tests-approved.log"},
+    {"name": "web", "tests": 53, "passed": 53, "log": "/tmp/basqar-stage334-web-tests.log"},
+    {"name": "types_api_web_contracts", "passed": true, "log": "/tmp/basqar-stage334-types-final.log"},
+    {"name": "web_build", "passed": true, "log": "/tmp/basqar-stage334-build-final.log", "initialJsBytes": 1099172, "initialGzipBytes": 278867, "rawLimitBytes": 1100000, "gzipLimitBytes": 285000, "largeChunkWarning": true},
+    {"name": "git_diff_check", "passed": true},
+    {"name": "browser", "environment": "isolated component preview with fictional data, no provider requests", "viewports": ["1280x900", "390x844"], "locales": ["ru", "kk"], "horizontalOverflow": false, "consoleErrors": 0, "screenshots": ["BasQar-stage-3-3-4-desktop.jpg", "BasQar-stage-3-3-4-mobile.jpg", "BasQar-stage-3-3-4-mobile-kk.jpg"]}
+  ],
+  "notVerified": ["live Google Calendar", "real PostgreSQL concurrency", "Docker", "production deployment", "end-to-end delivery of messages and files"],
+  "nextStage": "3.3.5"
+}

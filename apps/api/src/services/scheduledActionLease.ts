@@ -1,6 +1,7 @@
 import { Prisma, type PrismaClient } from "@creolab/db";
 import { logServerError } from "../lib/redact.ts";
 import { notifyScheduledTaskFailure } from "./scheduledTaskFailure.ts";
+import { lockFollowUpConversation, recoverInterruptedFollowUp } from "./clientFollowUpDelivery.ts";
 
 const LEASE_MS = 90_000;
 type Action = { id: string; version: number; payloadJson: unknown };
@@ -53,12 +54,15 @@ export async function recoverInterruptedScheduledActions(prisma: PrismaClient, n
     // external send needs reconciliation; absence of a result is not a failure to send.
     const repeatable = item.type === "esf_status_poll" || item.type.startsWith("agreement_reminder");
     await prisma.$transaction(async tx => {
+      if (item.type === "client_followup") await lockFollowUpConversation(tx, item.tenantId, item.parentId);
       const changed = await tx.scheduledAction.updateMany({
         where: { id: item.id, state: "running", version: item.version, payloadJson: { equals: item.payloadJson! } },
         data: { state: repeatable ? "scheduled" : "failed", version: { increment: 1 },
           cancelReason: repeatable ? null : "Выполнение прервалось. Проверьте результат отправки перед повтором." },
       });
-      if (!changed.count || repeatable || !["task_run", "task_batch_run"].includes(item.type)) return;
+      if (!changed.count || repeatable) return;
+      if (item.type === "client_followup") { await recoverInterruptedFollowUp(tx, item); return; }
+      if (!["task_run", "task_batch_run"].includes(item.type)) return;
       const tasks = await tx.task.updateMany({
         where: { id: item.parentId, tenantId: item.tenantId, status: { in: ["open", "waiting"] },
           OR: [{ executionStatus: { in: ["scheduled", "sending"] } }, { commandStatus: { in: ["scheduled", "executing"] } }] },

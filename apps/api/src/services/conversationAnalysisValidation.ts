@@ -6,6 +6,12 @@ const text = z.string().max(4000).nullable().optional();
 const confidence = z.enum(["HIGH", "MEDIUM", "LOW"]);
 const ids = z.array(z.string().max(200)).max(80);
 const datetime = z.string().datetime({ offset: true }).nullable().optional();
+export const suggestedTaskSchema = z.object({
+  type: z.enum(["call", "message", "follow_up", "meeting", "proposal", "send_documents", "prepare_estimate", "wait_client", "payment", "other"]),
+  title: z.string().trim().min(3).max(200), dueAt: datetime, purpose: text, briefingText: text,
+  preparationHints: z.array(z.string().trim().min(1).max(500)).max(8).optional(),
+  linkedAgreementIndex: z.number().int().min(0).nullable().optional(), evidenceMessageIds: ids, confidence,
+});
 const agreement = z.object({
   action: z.enum(["create", "update", "reschedule", "cancel", "complete"]),
   existingAgreementId: text,
@@ -22,11 +28,6 @@ const schema = z.object({
   needsReply: z.boolean().optional(), humanRequired: z.boolean().optional(), humanReason: text,
   summaryUpdate: text, suggestedNextAction: text, confidence: confidence.optional(), evidenceMessageIds: ids.optional(),
   agreements: z.array(agreement).max(20).optional(),
-  suggestedTasks: z.array(z.object({
-    type: z.string(), title: z.string(), dueAt: datetime, purpose: text, briefingText: text,
-    preparationHints: z.array(z.string()).max(20).optional(), linkedAgreementIndex: z.number().int().min(0).nullable().optional(),
-    evidenceMessageIds: ids, confidence,
-  })).max(20).optional(),
   facts: z.object({ service: text, budget: text, deadline: text, company: text, meetingDate: text, meetingTime: text,
     proposalSent: z.boolean().optional(), pricesSent: z.boolean().optional(), waitingForManagement: z.boolean().optional(),
   }).optional(),
@@ -49,7 +50,12 @@ export function validateConversationRefinement(raw: unknown, messageIds: string[
   for (const item of value.agreements || []) {
     if (item.status === "NEEDS_CLARIFICATION") { item.scheduledAt = null; item.createTask = false; }
   }
-  value.suggestedTasks = value.suggestedTasks?.filter(item => grounded(item.evidenceMessageIds));
+  // Optional malformed tasks must not discard valid CRM facts or sibling tasks.
+  const taskInput = raw && typeof raw === "object" ? (raw as Record<string, unknown>).suggestedTasks : null;
+  const suggestedTasks = Array.isArray(taskInput) ? taskInput.slice(0, 20).flatMap(task => {
+    const parsed = suggestedTaskSchema.safeParse(task);
+    return parsed.success && grounded(parsed.data.evidenceMessageIds) ? [parsed.data] : [];
+  }) : undefined;
   if (value.evidenceMessageIds && !grounded(value.evidenceMessageIds)) {
     value.confidence = "LOW";
     value.evidenceMessageIds = [];
@@ -61,5 +67,5 @@ export function validateConversationRefinement(raw: unknown, messageIds: string[
     const parsed = crmCommercialFactSchema.safeParse(f);
     return parsed.success && grounded(parsed.data.evidence.map(e => e.messageId)) ? [parsed.data] : [];
   }) : undefined;
-  return { ...value, commercialFacts, intakeRequest: intake.success && grounded(intake.data.evidenceMessageIds) ? intake.data : null };
+  return { ...value, suggestedTasks, commercialFacts, intakeRequest: intake.success && grounded(intake.data.evidenceMessageIds) ? intake.data : null };
 }

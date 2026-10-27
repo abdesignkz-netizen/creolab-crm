@@ -150,6 +150,8 @@ export function attachmentView(
     mimeType: string;
     sizeBytes: number;
     documentType?: string | null;
+    sendState?: string;
+    sendError?: string | null;
   },
 ) {
   const kind = conversationMediaKind(attachment.mimeType, attachment.documentType);
@@ -159,6 +161,7 @@ export function attachmentView(
     mimeType: attachment.mimeType,
     sizeBytes: attachment.sizeBytes,
     kind,
+    sendState: attachment.sendState,
     url: `/api/v1/conversations/${conversationId}/attachments/${attachment.id}`,
   };
 }

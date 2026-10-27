@@ -1,0 +1,58 @@
+{
+  "stage": "3.3.10",
+  "date": "2026-10-27",
+  "status": "implemented_and_locally_verified_visual_acceptance_pending",
+  "deployed": false,
+  "liveCustomerMessagesSent": false,
+  "productionDataChanged": false,
+  "databaseSchemaChanged": false,
+  "scope": "New staff and campaign messages via direct WhatsApp QR/Cloud connections with immutable per-part delivery evidence",
+  "apiTests": [
+    { "suite": "directWhatsAppDeliveryReview", "passed": 59, "log": "/tmp/basqar-stage-3310-final-review.log" },
+    { "suite": "whatsappConnections", "passed": 52, "log": "/tmp/basqar-stage-3310-final-compatibility.log" },
+    { "suite": "legacyMessageDelivery", "passed": 26, "log": "/tmp/basqar-stage-3310-final-compatibility.log" },
+    { "suite": "campaignDelivery", "passed": 14, "log": "/tmp/basqar-stage-3310-final-direct.log" },
+    { "suite": "messageDeliveryReview", "passed": 26, "log": "/tmp/basqar-stage-3310-compatibility-tests.log" },
+    { "suite": "telegramDeliveryReview", "passed": 38, "log": "/tmp/basqar-stage-3310-compatibility-tests.log" },
+    { "suite": "channelAi", "passed": 11, "log": "/tmp/basqar-stage-3310-compatibility-tests.log" },
+    { "suite": "whatsappQrBackground", "passed": 2, "log": "/tmp/basqar-stage-3310-recovery-tests.log" }
+  ],
+  "apiTestsPassedUnique": 228,
+  "newTestScenarios": 59,
+  "webLogicTests": { "passed": 58, "log": "/tmp/basqar-stage-3310-web-tests.log", "browserTests": false },
+  "typecheck": {
+    "api": { "status": "passed", "log": "/tmp/basqar-stage-3310-api-types.log" },
+    "web": { "status": "passed", "log": "/tmp/basqar-stage-3310-web-types.log" }
+  },
+  "webBuild": { "status": "passed", "budgetUnchanged": true, "initialKilobytes": 1099.6, "initialGzipKilobytes": 279.0,
+    "lazyReviewKilobytes": 18.99, "lazyReviewGzipKilobytes": 5.72, "existingLargeChunkWarning": true, "log": "/tmp/basqar-stage-3310-web-build.log" },
+  "diffCheck": "passed",
+  "testEnvironment": "Separate PGlite databases and temporary uploads; mock QR sockets and Cloud HTTP responses; no real customer sends",
+  "preliminaryRunNotes": [
+    "Local HTTP server required the existing test-runner permission; tests were rerun with that permission.",
+    "New fixtures required complete contact fields, QR session rows and a matching mock sender identity. These were corrected before final successful runs.",
+    "Cancellation after accepted text now preserves partial evidence; legacy expectations were updated to the new behavior.",
+    "One voice-reply state assertion failed during concurrent heavy test runners. The complete WhatsApp connections suite subsequently passed 52/52 when run separately; exact cause remains unconfirmed, assertions were not weakened."
+  ],
+  "countingNotes": [
+    "Each suite counted once using its latest successful run; earlier or repeated scenarios are excluded.",
+    "Some referenced multi-suite logs contain earlier failures in other suites. Those failures are superseded by the successful runs listed above.",
+    "The final direct review run includes the last queue-connection, recipient binding and attention-marker changes."
+  ],
+  "notVerified": [
+    "Desktop/mobile visual acceptance: browser control disabled",
+    "Real QR and WhatsApp Cloud provider delivery",
+    "Concurrent independent production PostgreSQL workers",
+    "Full Docker build"
+  ],
+  "remainingWork": [
+    "Review of unknown AI reply delivery",
+    "Historical sends without full immutable per-part evidence",
+    "Visual acceptance and release",
+    "Audit stage 4: unified process rules"
+  ],
+  "referenceUrls": [
+    "https://whatsapp.github.io/WhatsApp-Nodejs-SDK/",
+    "https://whatsapp.github.io/WhatsApp-Nodejs-SDK/receivingMessages/"
+  ]
+}

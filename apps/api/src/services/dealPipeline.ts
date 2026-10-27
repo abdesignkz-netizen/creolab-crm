@@ -1,11 +1,13 @@
 /** Default operational settings stored in Tenant.settingsJson.ops */
+import { DEFAULT_PROCESS_CALENDAR, processCalendarSchema, type ProcessCalendar } from "@creolab/contracts";
 
 export type TenantOpsSettings = {
   stalledDealDays: number;
   proposalFollowUpThresholdDays: number;
   silenceReturnDays: number;
   largeDealAmountMinor: number;
-  stageSlaDays: Record<string, number>;
+  stageSlaDays: Record<string, number | null>;
+  processCalendar: ProcessCalendar;
   lostReasons: string[];
   salesPlanMinor: number | null;
 };
@@ -25,6 +27,7 @@ export const DEFAULT_OPS_SETTINGS: TenantOpsSettings = {
   },
   lostReasons: [],
   salesPlanMinor: null,
+  processCalendar: DEFAULT_PROCESS_CALENDAR,
 };
 
 export const PIPELINE_STAGES: Array<{
@@ -73,23 +76,29 @@ export function parseOpsSettings(raw: unknown): TenantOpsSettings {
     ...DEFAULT_OPS_SETTINGS,
     stageSlaDays: { ...DEFAULT_OPS_SETTINGS.stageSlaDays },
     lostReasons: [],
+    processCalendar: { ...DEFAULT_PROCESS_CALENDAR, days: [...DEFAULT_PROCESS_CALENDAR.days], excludedDates: [] },
   };
   if (!raw || typeof raw !== "object") return base;
   const ops = (raw as { ops?: Record<string, unknown> }).ops;
   if (!ops || typeof ops !== "object") return base;
-  if (typeof ops.stalledDealDays === "number") base.stalledDealDays = ops.stalledDealDays;
-  if (typeof ops.proposalFollowUpThresholdDays === "number") {
-    base.proposalFollowUpThresholdDays = ops.proposalFollowUpThresholdDays;
-  }
-  if (typeof ops.silenceReturnDays === "number") base.silenceReturnDays = ops.silenceReturnDays;
-  if (typeof ops.largeDealAmountMinor === "number") base.largeDealAmountMinor = ops.largeDealAmountMinor;
+  const bounded = (value: unknown, fallback: number, max: number) =>
+    typeof value === "number" && Number.isFinite(value) && value >= 1 ? Math.min(max, value) : fallback;
+  base.stalledDealDays = bounded(ops.stalledDealDays, base.stalledDealDays, 90);
+  base.proposalFollowUpThresholdDays = bounded(ops.proposalFollowUpThresholdDays, base.proposalFollowUpThresholdDays, 90);
+  base.silenceReturnDays = bounded(ops.silenceReturnDays, base.silenceReturnDays, 180);
+  base.largeDealAmountMinor = bounded(ops.largeDealAmountMinor, base.largeDealAmountMinor, Number.MAX_SAFE_INTEGER);
   if (typeof ops.salesPlanMinor === "number" && Number.isFinite(ops.salesPlanMinor)) {
     base.salesPlanMinor = Math.max(0, Math.round(ops.salesPlanMinor));
   }
   if (ops.salesPlanMinor === null) base.salesPlanMinor = null;
   if (ops.stageSlaDays && typeof ops.stageSlaDays === "object") {
-    base.stageSlaDays = { ...base.stageSlaDays, ...(ops.stageSlaDays as Record<string, number>) };
+    for (const [key, value] of Object.entries(ops.stageSlaDays)) {
+      if (value === null) base.stageSlaDays[key] = null;
+      else if (typeof value === "number" && Number.isFinite(value) && value >= 1 && value <= 90) base.stageSlaDays[key] = value;
+    }
   }
+  const calendar = processCalendarSchema.safeParse(ops.processCalendar);
+  if (calendar.success) base.processCalendar = calendar.data;
   if (Array.isArray(ops.lostReasons)) {
     base.lostReasons = ops.lostReasons.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 40);
   }
@@ -100,7 +109,7 @@ export function lostReasonCatalog(ops: TenantOpsSettings) {
   return ops.lostReasons.length ? ops.lostReasons : [...LOST_REASONS];
 }
 
-export function slaStatusForDays(daysOnStage: number, slaDays: number | undefined): SlaStatus {
+export function slaStatusForDays(daysOnStage: number, slaDays: number | null | undefined): SlaStatus {
   if (typeof slaDays !== "number" || slaDays <= 0) return "OK";
   if (daysOnStage > slaDays) return "OVERDUE";
   if (daysOnStage > slaDays * 0.7) return "WARNING";

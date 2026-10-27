@@ -6,6 +6,9 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "sales.deal_created": "Создана сделка по подтверждённому интересу",
   "sales.proposal_reviewed": "Рассмотрено предложение ИИ о сделке",
   "task.created": "Создана задача",
+  "task.delivery_reconciled": "Отправка сверена сотрудником",
+  "message.delivery_reconciled": "Отправка сверена сотрудником",
+  "message.delivery_retry": "Повтор неотправленных частей сообщения",
   "control.chat": "Запрос в BasQar Control",
   "platform.configuration_requested": "Администратор сервиса начал изменение настроек компании",
   "ai.automation_updated": "Обновлены правила работы ИИ-менеджера",
@@ -46,6 +49,7 @@ for (const [code, label] of Object.entries({ telegram_bot: "Telegram", instagram
   for (const [suffix, verb] of Object.entries({ connected: "Подключение", configured: "Настройка", disconnected: "Отключение" })) AUDIT_ACTION_LABELS[`integration.${code}_${suffix}`] = `${verb}: ${label}`;
 }
 export const AUDIT_ENTITY_LABELS: Record<string, string> = {
+  message: "Сообщение",
   situation: "Ситуация",
   billing_invoice: "Счёт за подписку",
   PendingRegistration: "Регистрация", ServiceSignupRequest: "Заявка на подключение", agreement: "Договорённость", ai_configuration: "Настройки AI", billing_override: "Индивидуальные условия", billing_payment: "Оплата тарифа", payment: "Оплата", contact: "Клиент", company: "Компания", contract: "Договор", contract_template: "Шаблон договора", control_access: "Доступ к BasQar Control", control_command: "BasQar Control", control_identity: "Аккаунт BasQar Control", conversation: "Диалог", deal: "Сделка", electronic_document: "Электронный документ", esf_connection: "Подключение ИС ЭСФ", inquiry: "Заявка", integration: "Интеграция", invitation: "Приглашение сотрудника", invoice: "Счёт", knowledge_document: "База знаний", membership: "Сотрудник", platform_setting: "Настройки сервиса", service_category: "Услуги и товары", session: "Сеанс", subscription: "Подписка", subscription_request: "Заявка на тариф", support_ticket: "Обращение в поддержку", tenant: "Компания", tenant_legal_profile: "Реквизиты компании", tenant_plan: "Тариф", user: "Пользователь", task: "Задача",

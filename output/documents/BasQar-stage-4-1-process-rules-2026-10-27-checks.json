@@ -1,0 +1,47 @@
+{
+  "stage": "4.1",
+  "date": "2026-10-27",
+  "status": "implemented_and_automated_checks_passed_visual_acceptance_pending",
+  "deployed": false,
+  "productionWrites": false,
+  "messagesSent": false,
+  "databaseSchemaChanges": false,
+  "api": {
+    "status": "passed",
+    "tests": 243,
+    "files": ["analyticsCompleteness", "auditRegression", "controlWeb", "conversationCrmAutomation", "conversationProcessProposal", "conversationProcessReview", "dealList", "dealProcessPolicy", "dealSaveRegression", "processCalendar", "salesProcess", "situation", "situationPermissions"],
+    "log": "/tmp/basqar-stage4-regression-final.log",
+    "afterActiveTaskStatusFix": {
+      "status": "passed",
+      "tests": 41,
+      "includedInTotalAbove": true,
+      "files": ["analyticsCompleteness", "dealList", "dealProcessPolicy", "processCalendar"],
+      "log": "/tmp/basqar-stage4-active-tasks-final.log"
+    }
+  },
+  "previousDeliveryStageRegression": {
+    "status": "passed", "tests": 149,
+    "files": ["directWhatsAppDeliveryReview", "legacyMessageDelivery", "messageDeliveryReview", "telegramDeliveryReview"],
+    "log": "/tmp/basqar-stage4-delivery-regression.log"
+  },
+  "web": { "status": "passed", "tests": 58, "log": "/tmp/basqar-stage4-web-tests.log", "renamedNavigationLocaleCheck": "/tmp/basqar-stage4-i18n-final.log" },
+  "typecheck": { "status": "passed", "workspaces": ["api", "mobile", "web", "contracts"], "log": "/tmp/basqar-stage4-types-final.log", "afterLastApiEdit": "/tmp/basqar-stage4-api-final.log" },
+  "build": { "status": "passed", "initialJsKB": 1099.6, "initialGzipKB": 279.0, "limitsChanged": false, "warning": "Large chunks; initial JavaScript remains close to the existing limit", "log": "/tmp/basqar-stage4-build.log" },
+  "diffCheck": "passed",
+  "browser": { "status": "blocked", "reason": "Local browser use is disabled in Work settings", "screenshots": [], "notVerified": ["new process settings form", "unsaved changes dialog", "desktop and mobile layout", "remaining delivery retry confirmation from stage 3.3.11"] },
+  "environment": "isolated local PGlite databases; external providers disabled",
+  "correctedDuringChecks": [
+    "Historical Almaty timezone test used UTC+5 instead of UTC+6 for 2016; corrected fixture, algorithm verified",
+    "Integration fixture used retired BUNDLE_FULL plan; changed to supported CRM_START",
+    "Large relation query exceeded PGlite memory; bounded process-fact queries to 200 deals per page",
+    "New localized process copy pushed initial JS over limit; moved it to the relevant lazy screens",
+    "Duplicate local translation key removed",
+    "Tasks in progress were omitted from process next-step and overdue calculations"
+  ],
+  "remaining": [
+    "Visual acceptance once browser access is available",
+    "Full stage editor and remaining automatically scheduled deadlines (stage 4.2)",
+    "Coverage and exact Control totals beyond existing detail limits",
+    "Production PostgreSQL/Docker acceptance and an explicitly authorized release"
+  ]
+}
