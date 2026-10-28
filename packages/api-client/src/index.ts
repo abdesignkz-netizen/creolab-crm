@@ -263,8 +263,11 @@ export function createApiClient(options: ClientOptions) {
       const suffix = params.toString() ? `?${params}` : "";
       return request(`/api/v1/situation/overview${suffix}`);
     },
-    snoozeSituation: (body: { itemId: string; until: string; reason?: string; scope?: "personal" | "company" }) =>
+    snoozeSituation: (body: { itemId: string; version?: number; until: string; reason?: string; scope?: "personal" | "company" }) =>
       request("/api/v1/situation/snooze", { method: "POST", body: JSON.stringify(body) }),
+    situationEpisode: (itemId: string) => request(`/api/v1/situation/episode?${new URLSearchParams({ itemId })}`),
+    situationHistory: () => request("/api/v1/situation/history"),
+    situationEpisodeAction: (body: Record<string, unknown>) => request("/api/v1/situation/episode", { method: "POST", body: JSON.stringify(body) }),
     situationAsk: (body: {
       text: string;
       period?: string;

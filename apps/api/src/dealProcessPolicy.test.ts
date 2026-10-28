@@ -106,10 +106,14 @@ describe("shared process policy across the workspace", () => {
     const f = await fixture(t, at("2026-10-23T16:00"));
     await updateTenantOps(db, f.auth, { processCalendar: { ...business, excludedDates: ["2026-10-26"] } });
     const automatic = await f.deal("Proposal"), manual = await f.deal("Existing plan", { nextAction: "Уточнить решение", nextActionAt: at("2026-10-25T12:00") });
+    const dateOnly = await f.deal("Date without action", { nextAction: "  ", nextActionAt: at("2026-10-25T12:00") });
     await changeDealStage(db, f.auth, automatic.id, { systemKey: "proposal_sent" });
     await changeDealStage(db, f.auth, manual.id, { systemKey: "proposal_sent" });
+    await changeDealStage(db, f.auth, dateOnly.id, { systemKey: "proposal_sent" });
     assert.equal((await db.deal.findUniqueOrThrow({ where: { id: automatic.id } })).nextActionAt!.getTime(), at("2026-10-27T16:00").getTime());
     assert.equal((await db.deal.findUniqueOrThrow({ where: { id: manual.id } })).nextActionAt!.getTime(), manual.nextActionAt!.getTime());
+    const kept = await db.deal.findUniqueOrThrow({ where: { id: dateOnly.id } });
+    assert.equal(kept.nextActionAt!.getTime(), dateOnly.nextActionAt!.getTime()); assert.equal(kept.nextAction, "Связаться после предложения");
   });
 
   it("validates settings, isolates companies, persists disabled SLA and writes the actual author to audit", async t => {

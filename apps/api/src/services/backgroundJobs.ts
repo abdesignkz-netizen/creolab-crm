@@ -300,9 +300,16 @@ export function startBackgroundJobs(prisma: PrismaClient, options: { keepAlive?:
   started = true;
   let telegramRunning = false;
   let controlNoticesRunning = false;
+  let situationSweepRunning = false;
   let billingRunning = false;
   let lastBillingRun = 0;
   const tick = () => {
+    if (!situationSweepRunning) {
+      situationSweepRunning = true;
+      void import("./situationSweepService.ts").then(m => m.sweepSituations(prisma))
+        .catch(error => logServerError(error, "background:situations"))
+        .finally(() => { situationSweepRunning = false; });
+    }
     if (!controlNoticesRunning) {
       controlNoticesRunning = true;
       void Promise.all([

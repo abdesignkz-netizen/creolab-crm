@@ -1,0 +1,54 @@
+{
+  "stage": "4.2",
+  "date": "2026-10-28",
+  "status": "implemented_automated_checks_passed_visual_acceptance_partial",
+  "deployed": false,
+  "productionWrites": false,
+  "messagesSent": false,
+  "databaseSchemaChanges": {
+    "additiveOnly": true,
+    "migration": "packages/db/prisma/migrations/20261028_deal_stage_archive.sql",
+    "change": "DealStage.isArchived BOOLEAN NOT NULL DEFAULT false",
+    "prismaGenerate": "passed",
+    "repeatStartup": "passed_on_isolated_pglite",
+    "postgresDocker": "not_run"
+  },
+  "api": {
+    "status": "passed",
+    "uniqueTests": 243,
+    "fileCount": 13,
+    "targeted": {
+      "tests": 81,
+      "files": { "dealPipelineSettings": 7, "dealProcessPolicy": 4, "processCalendar": 30, "salesProcess": 40 },
+      "log": "/tmp/basqar-stage42-targeted-final.log"
+    },
+    "regression": {
+      "tests": 159,
+      "files": { "analyticsCompleteness": 5, "controlWeb": 11, "conversationCrmAutomation": 54, "conversationProcessProposal": 33, "conversationProcessReview": 27, "dealList": 4, "dealSaveRegression": 3, "situation": 22 },
+      "log": "/tmp/basqar-stage42-regression.log"
+    },
+    "afterLastSalesEdit": {
+      "tests": 60,
+      "includedInRegressionTotal": true,
+      "files": { "conversationProcessProposal": 33, "conversationProcessReview": 27 },
+      "log": "/tmp/basqar-stage42-process-final.log"
+    },
+    "schema": { "tests": 3, "files": ["schemaPatches"], "log": "/tmp/basqar-stage42-schema.log" }
+  },
+  "web": { "status": "passed", "tests": 58, "log": "/tmp/basqar-stage42-web-tests.log" },
+  "typecheck": { "status": "passed", "workspaces": ["api", "mobile", "web", "contracts"], "log": "/tmp/basqar-stage42-types-final.log" },
+  "build": { "status": "passed", "initialJsKB": 1099.6, "initialGzipKB": 279.0, "limitsChanged": false, "warning": "Large chunks; initial JavaScript remains close to the existing limit", "log": "/tmp/basqar-stage42-build-final.log" },
+  "diffCheck": "passed",
+  "browser": {
+    "status": "partial",
+    "environment": "local OpsSection preview with real service functions and isolated PGlite",
+    "verified": ["desktop layout", "stage create/edit/reorder/save", "archive/save/reload/restore", "mobile 390x844 layout without horizontal overflow"],
+    "corrected": "global form.panel max-width 440px overridden for OpsSection",
+    "screenshots": [],
+    "remaining": ["business calendar controls", "Kazakh layout", "stale-save conflict UI", "legacy stage-order repair", "unsaved navigation guard in full settings page", "remaining delivery retry confirmation from stage 3.3.11"],
+    "blocker": "Local browser use disabled again during verification"
+  },
+  "environment": "isolated local PGlite databases; external providers disabled",
+  "nextStage": "5: exact Control commands, context, dates, staff, Russian/Kazakh and coverage of totals",
+  "remaining": ["complete visual acceptance", "PostgreSQL/Docker and external integration acceptance", "explicitly authorized release"]
+}

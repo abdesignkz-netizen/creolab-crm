@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { before, after, describe, it } from "node:test";
 import { randomUUID } from "node:crypto";
 import { createPrismaClient } from "@creolab/db";
-import { parseSalesProcess, salesProcessPrompt, AI_MANAGER_GOALS } from "@creolab/contracts";
+import { parseSalesProcess, salesProcessPrompt, AI_MANAGER_GOALS, DEFAULT_PROCESS_CALENDAR } from "@creolab/contracts";
 import type { AuthContext } from "./lib/types.ts";
 import { analyzeConversationContext } from "./services/conversationContextService.ts";
 import { applyAnalyzedConversation } from "./services/conversationContextApplyService.ts";
@@ -55,6 +55,42 @@ describe("configurable sales process", () => {
     const tasks = await db.task.findMany({ where: { dealId: d.id } }); assert.equal(tasks.length, 1); assert.equal(tasks[0].ownerMembershipId, f.member.id); assert.ok(tasks[0].dueAt);
     assert.equal(await db.auditEvent.count({ where: { tenantId: f.tenant.id, action: "sales.deal_created", correlationId: f.message.id } }), 1);
     assert.equal((await f.report()).items[0].phone, "+77001234567");
+  });
+  it("uses company working hours for automatic deal and task deadlines, keeping existing dates", async t => {
+    t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-23T16:00:00+05:00") });
+    const f = await fixture();
+    await db.dealStage.create({ data: { tenantId: f.tenant.id, systemKey: "new", name: "Новый заказ", sortOrder: 1, defaultProbability: 25 } });
+    await db.tenant.update({ where: { id: f.tenant.id }, data: { settingsJson: {
+      ...f.tenant.settingsJson as object,
+      aiAutomation: { defaultMode: "AUTO", crm: { enabled: true }, salesProcess: { mode: "auto", notifyResponsible: false, nextStepHours: 2 } },
+      ops: { processCalendar: { ...DEFAULT_PROCESS_CALENDAR, mode: "business", end: "17:00", excludedDates: ["2026-10-26"] } },
+    } } });
+    await f.run(); const deal = await f.deal(), due = new Date("2026-10-27T10:00:00+05:00");
+    assert.equal(deal.probability, 25);
+    assert.equal(deal.nextActionAt!.getTime(), due.getTime());
+    const task = await db.task.findFirstOrThrow({ where: { dealId: deal.id } });
+    assert.equal(task.dueAt!.getTime(), due.getTime());
+    await db.tenant.update({ where: { id: f.tenant.id }, data: { settingsJson: { aiAutomation: { salesProcess: { mode: "auto", nextStepHours: 4 } } } } });
+    await db.$transaction(tx => ensureSalesNextTask(tx, f.tenant.id, deal.id));
+    assert.equal((await db.task.findUniqueOrThrow({ where: { id: task.id } })).dueAt!.getTime(), due.getTime());
+    const manual = new Date("2026-10-25T12:00:00+05:00");
+    await db.deal.update({ where: { id: deal.id }, data: { nextActionAt: manual } });
+    await db.$transaction(tx => ensureSalesNextTask(tx, f.tenant.id, deal.id));
+    assert.equal((await db.task.findUniqueOrThrow({ where: { id: task.id } })).dueAt!.getTime(), manual.getTime());
+  });
+  for (const invoiceDue of [null, new Date("2026-10-25T12:00:00+05:00")]) it(`honors the calendar and explicit invoice date during document automation: ${invoiceDue}`, async t => {
+    t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-23T16:00:00+05:00") });
+    const f = await fixture(); await f.run(); const deal = await f.deal();
+    await db.tenant.update({ where: { id: f.tenant.id }, data: { settingsJson: {
+      aiAutomation: { defaultMode: "AUTO", crm: { enabled: true }, salesProcess: { mode: "auto", notifyResponsible: false, nextStepHours: 2 } },
+      ops: { processCalendar: { ...DEFAULT_PROCESS_CALENDAR, mode: "business", end: "17:00", excludedDates: ["2026-10-26"] } },
+    } } });
+    await db.dealStage.create({ data: { tenantId: f.tenant.id, systemKey: "invoiced", name: "Ждём оплату", sortOrder: 7 } });
+    await db.invoice.create({ data: { tenantId: f.tenant.id, dealId: deal.id, number: randomUUID(), status: "ISSUED", dueDate: invoiceDue, amountWithoutVat: 1000, vatAmount: 0, totalAmount: 1000 } });
+    await reconcileSalesDeal(db, f.tenant.id, deal.id);
+    const expected = invoiceDue || new Date("2026-10-27T10:00:00+05:00");
+    assert.equal((await f.deal()).nextActionAt!.getTime(), expected.getTime());
+    assert.equal((await db.task.findFirstOrThrow({ where: { dealId: deal.id, status: "open" } })).dueAt!.getTime(), expected.getTime());
   });
   for (const options of [{ mode: "off" }, { aiMode: "MANUAL" }, { aiMode: "ASSIST" }, { crm: false }, { conversationMode: "paused" }]) it(`respects existing policy ${JSON.stringify(options)}`, async () => {
     const f = await fixture(options); await f.run(); assert.equal(await db.deal.count({ where: { tenantId: f.tenant.id } }), 0);
@@ -127,6 +163,31 @@ describe("configurable sales process", () => {
     await db.deal.update({ where: { id: d.id }, data: { nextAction: "Согласовать договор" } });
     await reconcileSalesDeal(db, f.tenant.id, d.id); assert.equal(await db.task.count({ where: { dealId: d.id } }), 2);
     assert.equal((await db.task.findUniqueOrThrow({ where: { id: task.id } })).status, "done");
+  });
+  it("assigns a fresh working deadline to a new undated step after the previous task is completed", async t => {
+    t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-23T16:00:00+05:00") });
+    const f = await fixture(); await f.run(); const d = await f.deal(), task = await db.task.findFirstOrThrow({ where: { dealId: d.id } });
+    await db.tenant.update({ where: { id: f.tenant.id }, data: { settingsJson: {
+      aiAutomation: { salesProcess: { mode: "auto", notifyResponsible: false, nextStepHours: 2 } },
+      ops: { processCalendar: { ...DEFAULT_PROCESS_CALENDAR, mode: "business", end: "17:00", excludedDates: ["2026-10-26"] } },
+    } } });
+    await db.task.update({ where: { id: task.id }, data: { status: "done", completedAt: new Date() } });
+    await db.deal.update({ where: { id: d.id }, data: { nextAction: "Согласовать договор", nextActionAt: null } });
+    await db.$transaction(tx => ensureSalesNextTask(tx, f.tenant.id, d.id));
+    const next = await db.task.findFirstOrThrow({ where: { dealId: d.id, status: "open" } });
+    assert.equal(next.dueAt!.getTime(), new Date("2026-10-27T10:00:00+05:00").getTime());
+    assert.notEqual(next.dueAt!.getTime(), task.dueAt!.getTime());
+    assert.equal((await db.task.findUniqueOrThrow({ where: { id: task.id } })).status, "done");
+    assert.equal(await db.activity.count({ where: { tenantId: f.tenant.id, dealId: d.id, type: "task.created" } }), 2);
+  });
+  it("does not replace an explicitly scheduled date when document automation fills an empty action", async () => {
+    const f = await fixture(); await f.run(); const d = await f.deal(), dueAt = new Date("2026-12-16T15:00:00+05:00");
+    await db.deal.update({ where: { id: d.id }, data: { nextAction: "  ", nextActionAt: dueAt } });
+    await db.dealStage.create({ data: { tenantId: f.tenant.id, systemKey: "contract", name: "Договор", sortOrder: 6 } });
+    await db.contract.create({ data: { tenantId: f.tenant.id, dealId: d.id, number: randomUUID(), status: "SIGNED", amountWithoutVat: 1000, vatAmount: 0, totalAmount: 1000 } });
+    await reconcileSalesDeal(db, f.tenant.id, d.id);
+    assert.equal((await f.deal()).nextActionAt!.getTime(), dueAt.getTime());
+    assert.equal((await db.task.findFirstOrThrow({ where: { dealId: d.id, status: "open" } })).dueAt!.getTime(), dueAt.getTime());
   });
   it("issued documents move the stage; drafts and payment promises do not", async () => {
     const f = await fixture(); await f.run(); const d = await f.deal(); await goal(f, "payment");

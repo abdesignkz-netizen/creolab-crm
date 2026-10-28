@@ -67,23 +67,31 @@ export function createProcessClock(calendar: ProcessCalendar, timeZone: string, 
     return total;
   }
 
-  function afterDays(from: Date, count: number) {
-    if (!Number.isFinite(count) || count < 0 || count > 365) throw new RangeError("Invalid process duration");
-    if (calendar.mode === "calendar" || count === 0) return new Date(from.getTime() + count * DAY);
+  function advance(from: Date, count: number, unit: "days" | "hours") {
+    if (!Number.isFinite(from.getTime()) || !Number.isFinite(count) || count < 0 || count > (unit === "days" ? 365 : 720)) throw new RangeError("Invalid process duration");
+    const unitMs = unit === "days" ? DAY : 3_600_000;
+    if (calendar.mode === "calendar" || count === 0) return new Date(from.getTime() + count * unitMs);
     let remaining = count;
     const first = dayOf(from);
-    for (let day = first - 1; day < first + 366 * 8; day++) {
+    const shiftMinutes = (endMinute - startMinute + 1440) % 1440;
+    // The bound also covers sparse schedules, short shifts and exclusions.
+    const requiredShifts = unit === "days" ? count : count * 60 / shiftMinutes;
+    const horizon = (Math.ceil(requiredShifts) + excluded.size + 10) * 7;
+    for (let day = first - 1; day < first + horizon; day++) {
       if (!eligible(day)) continue;
       const { start, end } = shift(day), availableFrom = Math.max(start, from.getTime());
       if (end <= availableFrom) continue;
-      const available = (end - availableFrom) / (end - start);
-      if (remaining <= available + 1e-10) return new Date(Math.min(end, availableFrom + remaining * (end - start)));
+      const divisor = unit === "days" ? end - start : 3_600_000;
+      const available = (end - availableFrom) / divisor;
+      if (remaining <= available + 1e-10) return new Date(Math.min(end, availableFrom + remaining * divisor));
       remaining -= available;
     }
     throw new RangeError("No available workday");
   }
 
-  return { mode: calendar.mode, timeZone: zone, elapsedDays, afterDays };
+  return { mode: calendar.mode, timeZone: zone, elapsedDays,
+    afterDays: (from: Date, count: number) => advance(from, count, "days"),
+    afterHours: (from: Date, count: number) => advance(from, count, "hours") };
 }
 
 export type ProcessClock = ReturnType<typeof createProcessClock>;

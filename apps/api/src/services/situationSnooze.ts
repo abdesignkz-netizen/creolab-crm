@@ -2,6 +2,7 @@ import type { Prisma, PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import { conversationAccessWhere, inquiryAccessWhere, isManager, requireTenant, taskAccessWhere } from "../lib/access.ts";
 import type { AuthContext } from "../lib/types.ts";
+import { loadSituationEvidence } from "./situationEvidence.ts";
 
 export type SituationSnoozeScope = "personal" | "company";
 type Database = PrismaClient | Prisma.TransactionClient;
@@ -13,6 +14,10 @@ export function situationSnoozeKey(itemId: string, userId: string, scope: Situat
 }
 
 export async function assertSituationReachable(db: Database, auth: AuthContext, itemId: string) {
+  if (/^(deal-|agreement)/.test(itemId)) {
+    if (!(await loadSituationEvidence(db, auth, [itemId])).has(itemId)) throw new ApiError(404, "not_found", "Ситуация не найдена");
+    return;
+  }
   const membership = requireTenant(auth);
   const match = /^([a-z_]+):([^:]+)$/.exec(itemId);
   const notFound = () => new ApiError(404, "not_found", "Ситуация не найдена");
@@ -56,17 +61,18 @@ export async function assertSituationReachable(db: Database, auth: AuthContext, 
   if (!found) throw notFound();
 }
 
-export async function visibleSituationSnoozes(db: Database, auth: AuthContext) {
+export async function visibleSituationSnoozes(db: Database, auth: AuthContext, options: { now?: Date; includeExpired?: boolean; evidenceKeys?: ReadonlyMap<string, string> } = {}) {
   const membership = requireTenant(auth);
+  const now = options.now || new Date();
   const rows = await db.situationSnooze.findMany({
-    where: { tenantId: membership.tenantId, until: { gt: new Date() },
+    where: { tenantId: membership.tenantId, ...(options.includeExpired ? {} : { until: { gt: now } }),
       OR: [{ byUserId: auth.user.id }, { itemId: { startsWith: "company:" } }] },
   });
   const companyActors = [...new Set(rows.filter(row => row.itemId.startsWith("company:")).map(row => row.byUserId))];
   // Recheck the actor even for legacy rows: the old endpoint accepted arbitrary
   // item IDs, so a stored prefix alone is not proof of company-wide authority.
   const authorized = new Set(companyActors.length ? (await db.membership.findMany({
-    where: { tenantId: membership.tenantId, userId: { in: companyActors }, active: true, role: { in: ["owner", "director"] } },
+    where: { tenantId: membership.tenantId, userId: { in: companyActors }, active: true, role: { in: ["owner", "director"] }, user: { status: "active" } },
     select: { userId: true },
   })).map(row => row.userId) : []);
   const personalPrefix = "personal:" + auth.user.id + ":";
@@ -82,7 +88,12 @@ export async function visibleSituationSnoozes(db: Database, auth: AuthContext) {
       else if (itemId.startsWith("personal:")) continue;
       // Unscoped legacy reminders are personal to their author, never shared.
     }
-    if (!visible.has(itemId) || visible.get(itemId)!.until < row.until) visible.set(itemId, row);
+    const matches = (candidate: typeof row) => !options.evidenceKeys || !candidate.evidenceKey || candidate.evidenceKey === options.evidenceKeys.get(itemId);
+    if (!options.includeExpired && !matches(row)) continue;
+    const previous = visible.get(itemId), active = row.until > now && matches(row), priorActive = previous && previous.until > now && matches(previous);
+    // An old company snooze must not mask a more recent personal snooze that is
+    // still bound to the current facts (and vice versa).
+    if (!previous || active && !priorActive || active === Boolean(priorActive) && previous.until < row.until) visible.set(itemId, row);
   }
   return visible;
 }

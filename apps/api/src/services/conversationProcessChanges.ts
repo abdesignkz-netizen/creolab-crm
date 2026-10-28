@@ -135,7 +135,7 @@ export async function prepareContextProcess(tx: Tx, tid: string, input: ProcessI
     }
     if (dealWritable && settings.crm.updateDealStage && reliable && analysis.suggestedDealStage && SAFE_DEAL_STAGES.has(analysis.suggestedDealStage)) {
       // Use existing semantic keys only. Never seed stages or move backwards/into terminal or financial stages.
-      const target = await tx.dealStage.findFirst({ where: { tenantId: tid, systemKey: analysis.suggestedDealStage, isTerminal: false } });
+      const target = await tx.dealStage.findFirst({ where: { tenantId: tid, systemKey: analysis.suggestedDealStage, isTerminal: false, isArchived: false } });
       if (target && target.sortOrder > deal.stage.sortOrder) {
         dealData.stageId = target.id; dealData.stageEnteredAt = new Date(); dealData.probability = target.defaultProbability;
         applied.dealStage = target.systemKey;

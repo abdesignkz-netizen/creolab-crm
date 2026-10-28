@@ -73,6 +73,8 @@ model Tenant {
   supportTickets       SupportTicket[]
   supportArticleFeedbacks SupportArticleFeedback[]
   situationSnoozes     SituationSnooze[]
+  situationEpisodes   SituationEpisode[]
+  situationSweep      SituationSweepState?
   serviceCategories   TenantServiceCategory[]
   tags                 Tag[]
   contactTags          ContactTag[]
@@ -830,6 +832,7 @@ model DealStage {
   systemKey          String
   defaultProbability Int     @default(10)
   isTerminal         Boolean @default(false)
+  isArchived         Boolean @default(false)
   tenant             Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   deals              Deal[]
 
@@ -1735,11 +1738,61 @@ model SituationSnooze {
   until     DateTime
   byUserId  String
   reason    String?
+  evidenceKey String?
   createdAt DateTime @default(now())
   tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@unique([tenantId, itemId])
   @@index([tenantId, until])
+}
+
+model SituationEpisode {
+  id                   String   @id @default(uuid())
+  tenantId             String
+  itemId               String
+  title                String
+  state                String   @default("open")
+  occurrence           Int      @default(1)
+  version              Int      @default(1)
+  evidenceKey          String
+  assignedMembershipId String?
+  taskId               String?
+  firstSeenAt          DateTime @default(now())
+  checkedAt            DateTime @default(now())
+  updatedAt            DateTime @default(now())
+  resolvedAt           DateTime?
+  tenant               Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  events               SituationEpisodeEvent[]
+  notices              ControlNotificationItem[]
+
+  @@unique([tenantId, itemId])
+  @@unique([tenantId, id])
+  @@index([tenantId, state, checkedAt])
+  @@index([tenantId, updatedAt])
+}
+
+model SituationSweepState {
+  tenantId        String   @id
+  cursorsJson     Json     @default("{}")
+  nextRunAt       DateTime @default(now())
+  lastCompletedAt DateTime?
+  tenant          Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  @@index([nextRunAt])
+}
+
+model SituationEpisodeEvent {
+  id          String   @id @default(uuid())
+  tenantId    String
+  episodeId   String
+  version     Int
+  kind        String
+  actorUserId String?
+  detailsJson Json     @default("{}")
+  createdAt   DateTime @default(now())
+  episode     SituationEpisode @relation(fields: [tenantId, episodeId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([episodeId, version])
+  @@index([tenantId, episodeId, createdAt])
 }
 
 model TenantLegalProfile {
@@ -2364,11 +2417,17 @@ model ControlNotificationItem {
   mode        String
   urgent      Boolean @default(false)
   batchId     String?
+  episodeId   String?
+  episodeOccurrence Int?
+  suppressedAt DateTime?
+  suppressionReason String?
   createdAt   DateTime @default(now())
   rule        ControlNotificationRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
   batch       ControlNotificationBatch? @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  episode     SituationEpisode? @relation(fields: [episodeId], references: [id], onDelete: Cascade)
   @@unique([ruleId, eventKey])
   @@index([ruleId, version, mode, batchId])
+  @@index([episodeId])
 }
 
 model ControlNotificationBatch {

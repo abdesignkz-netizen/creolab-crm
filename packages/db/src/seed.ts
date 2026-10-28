@@ -145,16 +145,8 @@ export async function seedDatabase() {
     ];
     for (const def of pipeline) {
       const row = await prisma.dealStage.findFirst({ where: { tenantId: tenant.id, systemKey: def.systemKey } });
-      if (row) {
-        await prisma.dealStage.update({
-          where: { id: row.id },
-          data: {
-            name: def.name,
-            sortOrder: def.sortOrder,
-            defaultProbability: def.defaultProbability,
-          },
-        });
-      } else {
+      // Re-running setup must not overwrite a company's configured pipeline.
+      if (!row) {
         await prisma.dealStage.create({
           data: {
             tenantId: tenant.id,

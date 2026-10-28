@@ -29,7 +29,14 @@ describe("BasQar Control WhatsApp notices", () => {
     const result = await request(endpoint, "PUT", prefs(patch)); assert.equal(result.status, 200, JSON.stringify(result.data));
     return prisma.controlNotificationRule.findUniqueOrThrow({ where: { id: result.data.id } });
   }
-  async function event(patch: any = {}) { await queueControlNotification(prisma, { tenantId: owner.tenantId, type: "inquiry.created", entityId: randomUUID(), ...patch }); }
+  async function newInquiry() {
+    const contact = await prisma.contact.create({ data: { tenantId: owner.tenantId, name: "Notice test client" } });
+    return prisma.inquiry.create({ data: { tenantId: owner.tenantId, contactId: contact.id, source: "manual", subject: "Notice test inquiry", status: "new" } });
+  }
+  async function event(patch: any = {}) {
+    const entityId = patch.entityId || (!patch.type || patch.type === "inquiry.created" ? (await newInquiry()).id : randomUUID());
+    await queueControlNotification(prisma, { tenantId: owner.tenantId, type: "inquiry.created", ...patch, entityId });
+  }
   const batches = () => prisma.controlNotificationBatch.findMany({ orderBy: { createdAt: "asc" } });
   before(async () => {
     prisma = await createPrismaClient(); await (await import("../../../packages/db/src/seed.ts")).seedDatabase();
@@ -107,10 +114,10 @@ describe("BasQar Control WhatsApp notices", () => {
   it("queues company events once even for several staff recipients with disabled personal preferences", async () => {
     await save();
     await prisma.notificationPreference.create({ data: { tenantId: owner.tenantId, membershipId: owner.id, eventsJson: { new_inquiries: false }, channelsJson: { in_app: false } } });
-    const input = { tenantId: owner.tenantId, type: "inquiry.created", entityType: "inquiry", entityId: randomUUID(), title: "PRIVATE CLIENT", body: "PRIVATE PHONE" };
+    const input = { tenantId: owner.tenantId, type: "inquiry.created", entityType: "inquiry", entityId: (await newInquiry()).id, title: "PRIVATE CLIENT", body: "PRIVATE PHONE" };
     assert.equal(await createStaffNotification(prisma, { ...input, membershipId: owner.id }), null);
     await createStaffNotification(prisma, { ...input, membershipId: manager.id });
-    await createStaffNotification(prisma, { ...input, entityId: randomUUID(), membershipId: null }); // Unassigned is particularly important for a director.
+    await createStaffNotification(prisma, { ...input, entityId: (await newInquiry()).id, membershipId: null }); // Unassigned is particularly important for a director.
     await event({ type: "inquiry.assigned" }); // off
     assert.equal(await prisma.controlNotificationItem.count(), 2);
     await buildControlNotificationBatches(prisma, at()); assert.deepEqual((await batches())[0].countsJson, { new_inquiries: 2 });

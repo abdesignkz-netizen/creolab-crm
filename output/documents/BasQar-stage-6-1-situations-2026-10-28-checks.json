@@ -1,0 +1,32 @@
+{
+  "stage": "6.1",
+  "date": "2026-10-28",
+  "status": "implemented_and_locally_verified",
+  "deployed": false,
+  "productionWrites": false,
+  "realOutboundMessages": false,
+  "uniqueTestsPassed": 110,
+  "suites": {
+    "situationEpisodes": 21,
+    "situationPermissions": 6,
+    "situation": 23,
+    "conversationContext.situation": 4,
+    "dealProcessPolicy": 4,
+    "schemaPatches": 3,
+    "controlNotifications": 22,
+    "controlWeb": 11,
+    "aiControl": 16
+  },
+  "workspaceTypecheck": "passed",
+  "webBuild": "passed",
+  "diffCheck": "passed",
+  "existingBuildWarning": { "initialJsKB": 1099.9, "gzipKB": 279.0 },
+  "browserVerification": "unavailable: Local browser use is disabled in Work settings",
+  "dockerVerification": "not_run: user selected checks without Docker",
+  "nextStage": "6.2: background reconciliation and episode-aware grouped notifications",
+  "limitations": [
+    "Reconciliation currently runs during queue/detail reads, not an independent scheduled worker.",
+    "History UI is limited to accessible records among the latest 100 company episodes and the latest 100 events per episode.",
+    "Legacy snoozes without an evidence key retain their prior behavior."
+  ]
+}

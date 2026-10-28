@@ -7,12 +7,13 @@ import { notifySaved } from "../components/SaveNotice";
 import { t, type Locale } from "../i18n";
 import "./opsSection.css";
 import { opsKk } from "./opsLocale";
+import OpsStageEditor, { type EditableStage } from "./OpsStageEditor";
 
 type Ops = {
   stalledDealDays: number | string; proposalFollowUpThresholdDays: number | string; silenceReturnDays: number | string;
   salesPlanMinor: number | null; lostReasons: string[]; timeZone: string;
   processCalendar: ProcessCalendar;
-  stages: Array<{ systemKey: string; name: string; slaDays: number | null }>;
+  revision: string; stages: EditableStage[];
 };
 const weekdays = [[1, "Понедельник"], [2, "Вторник"], [3, "Среда"], [4, "Четверг"], [5, "Пятница"], [6, "Суббота"], [0, "Воскресенье"]] as const;
 
@@ -26,16 +27,18 @@ export default function OpsSection({ locale, onDirtyChange }: { locale: Locale; 
   const [excluded, setExcluded] = useState("");
   const [plan, setPlan] = useState("");
   const [dirty, setDirty] = useState(false);
+  const [reloadPrompt, setReloadPrompt] = useState(false);
 
   function accept(data: Ops) {
     setOps(data); setLostText((data.lostReasons || []).join("\n"));
     setExcluded(data.processCalendar.excludedDates.join("\n"));
-    setPlan(data.salesPlanMinor != null ? String(data.salesPlanMinor) : ""); setDirty(false);
+    setPlan(data.salesPlanMinor != null ? String(data.salesPlanMinor) : ""); setDirty(false); setReloadPrompt(false);
   }
   async function load() {
-    setError("");
+    setError(""); setBusy(true);
     try { accept(await api.workspaceOps() as Ops); }
     catch (err) { setError(err instanceof Error ? err.message : text("Не удалось загрузить настройки")); }
+    finally { setBusy(false); }
   }
   useEffect(() => { void load(); }, []);
   useEffect(() => { onDirtyChange?.(dirty); return () => onDirtyChange?.(false); }, [dirty, onDirtyChange]);
@@ -57,7 +60,8 @@ export default function OpsSection({ locale, onDirtyChange }: { locale: Locale; 
         silenceReturnDays: Number(ops.silenceReturnDays),
         salesPlanMinor: planNumber === null ? null : Math.round(planNumber),
         lostReasons: lostText.split("\n").map(line => line.trim()).filter(Boolean),
-        stageSlaDays: Object.fromEntries(ops.stages.map(stage => [stage.systemKey, stage.slaDays])),
+        revision: ops.revision,
+        pipeline: ops.stages.map(({ id, systemKey, name, defaultProbability, isArchived, slaDays }) => ({ id, systemKey, name, defaultProbability: Number(defaultProbability), isArchived, slaDays })),
         processCalendar: schedule.data,
       });
       accept(data as Ops); notifySaved(text("Правила работы со сделками сохранены"));
@@ -70,7 +74,10 @@ export default function OpsSection({ locale, onDirtyChange }: { locale: Locale; 
   return <form className="panel ops-section" onSubmit={event => void save(event)}>
     <div><h2>{text("Правила работы со сделками")}</h2>
       <p className="muted">{text("Общие сроки для сделок, главной страницы, статистики и BasQar Control.")}</p></div>
-    {error ? <InlineFeedback kind="error">{error}</InlineFeedback> : null}
+    {error ? <div><InlineFeedback kind="error">{error}</InlineFeedback>
+      {reloadPrompt ? <div className="ops-note"><p>{text("Загрузить сохранённые правила? Несохранённые изменения этой формы будут потеряны.")}</p><button type="button" className="btn secondary" disabled={busy} onClick={() => void load()}>{text("Загрузить сохранённые")}</button> <button type="button" className="btn secondary" onClick={() => setReloadPrompt(false)}>{text("Продолжить редактирование")}</button></div>
+        : <button type="button" className="btn secondary" disabled={busy} onClick={() => setReloadPrompt(true)}>{text("Загрузить актуальные настройки")}</button>}
+    </div> : null}
     <fieldset disabled={busy}>
       <section className="ops-block">
         <h3>{text("Как считать дни")}</h3>
@@ -102,11 +109,7 @@ export default function OpsSection({ locale, onDirtyChange }: { locale: Locale; 
         ] as const).map(([key, label, max]) => <label key={key}>{text(label)}<input type="number" min={1} max={max} required value={ops[key]} onChange={event => change({ [key]: event.target.value })} /></label>)}</div>
         <p className="ops-note">{text("Следующий шаг — действие со сроком или связанная задача со сроком. Ожидание клиента не отменяет просрочку.")}</p>
       </section>
-      <section className="ops-block">
-        <h3>{text("Сроки этапов")}</h3><p className="muted">{text("Пустое поле отключает контроль длительности этого этапа.")}</p>
-        <div className="ops-grid">{ops.stages.map((stage, index) => <label key={stage.systemKey}>{stage.name}<input type="number" min={1} max={90} step="any" value={stage.slaDays ?? ""}
-          onChange={event => change({ stages: ops.stages.map((item, i) => i === index ? { ...item, slaDays: event.target.value === "" ? null : Number(event.target.value) } : item) })} /></label>)}</div>
-      </section>
+      <OpsStageEditor stages={ops.stages} text={text} business={business} onChange={stages => change({ stages })} />
       <details className="ops-block"><summary>{text("План продаж и причины потери")}</summary>
         <label>{text("План продаж за период, ₸")}<input inputMode="decimal" value={plan} onChange={event => { setPlan(event.target.value); setDirty(true); }} /></label>
         <label>{text("Причины потери — по одной на строку")}<textarea rows={6} value={lostText} onChange={event => { setLostText(event.target.value); setDirty(true); }} /></label>

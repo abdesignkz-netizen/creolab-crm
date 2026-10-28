@@ -2,7 +2,7 @@ import type { ControlAction } from "@creolab/contracts";
 import { CONTROL_ACTION_META, validateClientPhone } from "@creolab/contracts";
 import { config } from "../config.ts";
 import { formatPhoneDisplay } from "./contactLabels.ts";
-import { cleanText, words, type ChatLanguage } from "./controlChatLanguage.ts";
+import { cleanText, words, DEAL_READ_ACTIONS, type ChatLanguage } from "./controlChatLanguage.ts";
 import { record } from "./controlChatSettings.ts";
 export const controlLink = (path: string) => `${config.appBaseUrl.replace(/\/$/, "")}${path}`;
 export function controlTaskClientLabel(item: Record<string, unknown>, lang: ChatLanguage) {
@@ -17,18 +17,85 @@ export function controlTaskClientLabel(item: Record<string, unknown>, lang: Chat
 export function presentControlReply(action: ControlAction, result: unknown, lang: ChatLanguage, timeZone: string) {
   const data = record(record(result).data), w = (ru: string, kk: string) => words(lang, ru, kk);
   const time = (v: unknown) => v && Number.isFinite(new Date(String(v)).getTime()) ? new Date(String(v)).toLocaleString(lang === "kk" ? "kk-KZ" : "ru-RU", { timeZone, dateStyle: "short", timeStyle: "short" }) : w("без срока", "мерзімсіз");
-  const task = (item: any, i: number) => `${i + 1}. ${cleanText(item.title, 160)}\n${controlTaskClientLabel(item, lang)}\n${time(item.dueAt)}${item.overdue ? w(" · просрочено", " · мерзімі өткен") : ""}${item.ownerName ? ` · ${cleanText(item.ownerName, 50)}` : ""}`;
+  const task = (item: any, i: number) => `${i + 1}. ${cleanText(item.title, 160)}\n${controlTaskClientLabel(item, lang)}\n${data.taskStatus === "completed" ? `${w("Завершено", "Аяқталды")}: ${item.completedAt ? time(item.completedAt) : w("дата не указана", "күні көрсетілмеген")}` : time(item.dueAt)}${item.overdue ? w(" · просрочено", " · мерзімі өткен") : ""}${item.ownerName ? ` · ${cleanText(item.ownerName, 50)}` : ""}`;
   const items: any[] = Array.isArray(data.items) ? data.items : [];
   const heading = lang === "ru" ? CONTROL_ACTION_META[action].label : ({GET_BUSINESS_SUMMARY:"Бизнес қорытындысы", GET_SITUATION:"Назар аудару керек", GET_TODAY_TASKS:"Бүгінгі тапсырмалар",GET_TASKS:"Тапсырмалар",GET_OVERDUE_TASKS:"Мерзімі өткен тапсырмалар",GET_CLIENT_DETAILS:"Клиент",GET_DEALS_STATS:"Сатылымдар",GET_LEADS_STATS:"Өтінімдер",GET_REVENUE_STATS:"Түсім",GET_TEAM_STATUS:"Команда"} as Record<string,string>)[action] || "BasQar Control";
   const lines: string[] = [heading];
+  const meta = record(record(result).meta);
+  const periodNames: Record<string, [string, string]> = { today: ["Сегодня", "Бүгін"], yesterday: ["Вчера", "Кеше"], this_week: ["Эта неделя · пн–вс", "Осы апта · дс–жс"], last_week: ["Прошлая неделя · пн–вс", "Өткен апта · дс–жс"], last_7: ["Последние 7 дней", "Соңғы 7 күн"], last_30: ["Последние 30 дней", "Соңғы 30 күн"], this_month: ["Текущий месяц", "Осы ай"], last_month: ["Прошлый месяц", "Өткен ай"], this_year: ["Этот год", "Осы жыл"], all: ["Без ограничения периода", "Кезең шектеусіз"], custom: ["Период", "Кезең"] };
+  const periodText = () => {
+    const key = String(meta.period || "today");
+    const name = periodNames[key] ? w(...periodNames[key]) : w("Период не указан", "Кезең көрсетілмеген");
+    const dates = meta.dateFrom && meta.dateTo ? ` · ${cleanText(meta.dateFrom, 10)} — ${cleanText(meta.dateTo, 10)}` : "";
+    return `${name}${dates}${meta.timeZone ? ` (${cleanText(meta.timeZone, 60)})` : ""}`;
+  };
+  const totalLine = (shown: number) => typeof data.total === "number" ? w(`Найдено: ${data.total}. Показано: ${shown}.`, `Табылды: ${data.total}. Көрсетілді: ${shown}.`) : "";
+  if (DEAL_READ_ACTIONS.some(value => value === action)) {
+    const labels: Record<string, string> = {
+      GET_UNCHANGED_DEALS: "Өзгеріссіз мәмілелер", GET_PROPOSALS_WITHOUT_FOLLOWUP: "Ұсыныстан кейінгі байланыс жоспарланбаған",
+      GET_LOST_REASONS: "Мәмілелерді жоғалту себептері", GET_EXPECTED_PAYMENTS: "Күтілетін төлемдер",
+    };
+    if (lang === "kk") lines[0] = labels[action];
+    if (action !== "GET_UNCHANGED_DEALS") lines.push(periodText());
+    lines.push(data.ownerName ? `${w("Ответственный", "Жауапты")}: ${cleanText(data.ownerName, 80)}` : data.scope === "team" ? w("Вся команда компании", "Компанияның бүкіл командасы") : w("В пределах вашего доступа", "Сіздің рұқсатыңыз шегінде"));
+    if (action === "GET_UNCHANGED_DEALS") {
+      lines.push(w(`Без изменений ${data.inactiveDays} дней и более.`, `${data.inactiveDays} күн және одан көп өзгеріссіз.`));
+      lines.push(data.changeBasis === "stage" ? w("Проверяется только смена этапа.", "Тек кезең ауысуы тексеріледі.") : w("Учитываются изменения карточки и связанные сообщения, задачи, документы и договорённости.", "Карточка өзгерістері және байланысты хабарламалар, тапсырмалар, құжаттар мен келісімдер ескеріледі."));
+      lines.push(`${w("С", "Бастап")}: ${time(data.cutoff)}. ${w("Проверено", "Тексерілді")}: ${time(data.checkedAt)} (${cleanText(timeZone, 50)}).`);
+    } else if (action === "GET_PROPOSALS_WITHOUT_FOLLOWUP") {
+      lines.push(w("КП отправлено за указанный период. Следующий контакт со сроком не запланирован или просрочен.", "Ұсыныс көрсетілген кезеңде жіберілген. Келесі байланыс мерзімі жоспарланбаған немесе өтіп кеткен."));
+      lines.push(`${w("Клиентов", "Клиенттер")}: ${data.clientCount ?? 0}. ${w("Сделок", "Мәмілелер")}: ${data.total ?? 0}.`);
+      if (data.uncertainCount) {
+        lines.push(w(`Отдельно требуют проверки: ${data.uncertainCount}. Есть будущий шаг, но из описания неясно, запланирован ли контакт. В итог выше не включены.`, `Бөлек тексеру қажет: ${data.uncertainCount}. Болашақ қадам бар, бірақ сипаттамадан байланыс жоспарланғаны анық емес. Жоғарыдағы санға кірмейді.`));
+        for (const row of (data.uncertainItems || []).slice(0, 2)) lines.push(`${cleanText(row.title, 70)} · ${cleanText(row.nextAction, 100)} · ${time(row.nextActionAt)}\n${controlLink(`/deals/${encodeURIComponent(String(row.id))}`)}`);
+      }
+    } else if (action === "GET_LOST_REASONS") {
+      lines.push(w(`Закрыто с проигрышем: ${data.total ?? 0}. Без причины: ${data.missingReasonCount ?? 0}.`, `Жоғалтумен жабылды: ${data.total ?? 0}. Себепсіз: ${data.missingReasonCount ?? 0}.`));
+      lines.push(w("Период относится к дате закрытия сделки.", "Кезең мәміленің жабылған күніне қатысты."));
+    } else {
+      lines.push(w("По срокам выставленных счетов и подтверждённым обещаниям оплаты. Суммы не складываются: один платёж может относиться к обоим основаниям.", "Ұсынылған шоттардың мерзімдері және расталған төлем уәделері бойынша. Бір төлем екі негізге де қатысты болуы мүмкін, сондықтан сомалар қосылмайды."));
+      if (data.reconciliationCount) lines.push(w(`В ${data.reconciliationCount} сделках нужно сверить уже внесённые платежи.`, `${data.reconciliationCount} мәміледе енгізілген төлемдерді салыстыру керек.`));
+    }
+    const rowText = (r: any, i: number) => {
+      if (action === "GET_LOST_REASONS") return `${i + 1}. ${cleanText(r.reason || w("Причина не указана", "Себеп көрсетілмеген"), 180)}: ${r.count} (${r.share}%)`;
+      const result = [`${i + 1}. ${cleanText(r.title, 120)}`, controlTaskClientLabel(r, lang)];
+      if (action === "GET_UNCHANGED_DEALS") result.push(`${w("Этап", "Кезең")}: ${cleanText(r.stage, 80)} · ${w("с", "бастап")} ${time(r.stageEnteredAt)}`);
+      if (action === "GET_PROPOSALS_WITHOUT_FOLLOWUP") result.push(`${w("КП отправлено", "Ұсыныс жіберілді")}: ${time(r.sentAt)}`);
+      if (action === "GET_EXPECTED_PAYMENTS") {
+        for (const source of r.sources || []) result.push(`${source.type === "invoice" ? w("Счёт", "Шот") : w("Обещание оплаты", "Төлем уәдесі")}: ${cleanText(source.title, 70)} · ${time(source.dueAt)}`);
+        if (r.sourceCount > (r.sources || []).length) result.push(w(`Ещё оснований: ${r.sourceCount - r.sources.length}.`, `Тағы негіздер: ${r.sourceCount - r.sources.length}.`));
+        if (r.needsReconciliation) result.push(w("Остаток требует сверки платежей.", "Қалдық төлемдерді салыстыруды қажет етеді."));
+      }
+      if (r.ownerName) result.push(`${w("Ответственный", "Жауапты")}: ${cleanText(r.ownerName, 50)}`);
+      result.push(controlLink(`/deals/${encodeURIComponent(String(r.id))}`));
+      return result.join("\n");
+    };
+    const footer = controlLink("/deals"), displayed: string[] = [];
+    // Keep counts and navigation intact even when names or evidence descriptions are long.
+    for (const [i, row] of items.slice(0, action === "GET_LOST_REASONS" ? 8 : 6).entries()) {
+      const text = rowText(row, i);
+      if ([...lines, ...displayed, text, footer].join("\n\n").length > 3250) break;
+      displayed.push(text);
+    }
+    const count = action === "GET_LOST_REASONS" ? w(`Причин: ${data.reasonCount ?? 0}. Показано: ${displayed.length}.`, `Себептер: ${data.reasonCount ?? 0}. Көрсетілді: ${displayed.length}.`)
+      : w(`Сделок: ${data.total ?? 0}. Показано: ${displayed.length}.`, `Мәмілелер: ${data.total ?? 0}. Көрсетілді: ${displayed.length}.`);
+    return [...lines, count, ...displayed, ...(!items.length ? [w("Подходящих записей нет.", "Сәйкес жазбалар жоқ.")] : []), footer].filter(Boolean).join("\n\n");
+  }
+  if (["GET_TASKS", "GET_OVERDUE_TASKS", "GET_TODAY_TASKS", "GET_RECENT_LEADS", "GET_RECENT_DEALS"].includes(action)) {
+    lines.push(periodText());
+    lines.push(data.ownerName ? `${w("Ответственный", "Жауапты")}: ${cleanText(data.ownerName)}` : data.scope === "team" ? w("Вся команда компании", "Компанияның бүкіл командасы") : w("В пределах вашего доступа", "Сіздің рұқсатыңыз шегінде"));
+  }
   if (["GET_TASKS", "GET_OVERDUE_TASKS", "GET_TODAY_TASKS"].includes(action)) {
+    if (action === "GET_TASKS") lines.push(data.taskStatus === "completed" ? w("Завершённые задачи", "Аяқталған тапсырмалар") : data.taskStatus === "all" ? w("Все статусы задач", "Барлық күйдегі тапсырмалар") : w("Незавершённые задачи", "Аяқталмаған тапсырмалар"));
     if (action === "GET_TODAY_TASKS") {
       lines.push(`${w("На сегодня осталось", "Бүгін қалғаны")}: ${data.remaining ?? 0}. ${w("Просрочено", "Мерзімі өткен")}: ${data.overdue ?? 0}.`);
-      lines.push(w("Ближайшие задачи:", "Жақын тапсырмалар:"));
+      lines.push(w("Задачи со сроком на сегодня:", "Мерзімі бүгінгі тапсырмалар:"));
     }
     const rows = action === "GET_TODAY_TASKS" ? data.nearest || [] : items;
+    lines.push(totalLine(Math.min(rows.length, 8)));
     lines.push(...rows.slice(0, 8).map(task));
     if (!rows.length) lines.push(w("Задач нет.", "Тапсырмалар жоқ."));
+    if (action !== "GET_TODAY_TASKS") lines.push(data.taskStatus === "completed" ? w("Период относится к дате завершения задачи.", "Кезең тапсырманың аяқталған күніне қатысты.") : w("Период относится к сроку задачи.", "Кезең тапсырма мерзіміне қатысты."));
     lines.push(controlLink("/tasks"));
   } else if (action === "GET_SALES_CONTROL") {
     lines.push(`${w("Цель", "Мақсат")}: ${cleanText(data.goalLabel)}`);
@@ -58,9 +125,8 @@ export function presentControlReply(action: ControlAction, result: unknown, lang
     if (data.revenueLabel) lines.push(`${w("Выручка", "Түсім")}: ${cleanText(data.revenueLabel)}`);
     else if (data.revenue != null && typeof data.revenue === "number") lines.push(`${w("Выручка", "Түсім")}: ${data.revenue.toLocaleString("ru-RU")} ₸`);
     if (action === "GET_REVENUE_STATS" && data.revenue == null && !data.revenueLabel) lines.push(w("Данных о выручке пока нет.", "Түсім туралы деректер әзірге жоқ."));
-    const period = String(record(result).meta?.period || "today");
-    const periods: Record<string, [string,string]> = {today:["Сегодня","Бүгін"],yesterday:["Вчера","Кеше"],last_7:["Последние 7 дней","Соңғы 7 күн"],last_30:["Последние 30 дней","Соңғы 30 күн"],this_month:["Текущий месяц","Осы ай"],last_month:["Прошлый месяц","Өткен ай"]};
-    lines.splice(1, 0, w(...(periods[period] || periods.today)));
+    lines.splice(1, 0, periodText());
+    if (action === "GET_DEALS_STATS") lines.push(w("Продажи — сумма выигранных сделок; это не подтверждённые поступления денег.", "Сатылымдар — сәтті аяқталған мәмілелердің сомасы; бұл расталған ақша түсімі емес."));
     lines.push(controlLink("/stats"));
   } else if (CONTROL_ACTION_META[action].riskLevel !== "READ") {
     lines.push(w("Готово. Изменение сохранено.", "Дайын. Өзгеріс сақталды."));
@@ -71,6 +137,13 @@ export function presentControlReply(action: ControlAction, result: unknown, lang
     lines.push(...team.slice(0, 8).map((r: any) => `${cleanText(r.name)}: ${w("в работе", "жұмыста")} ${r.inWork ?? 0}, ${w("требует внимания", "назар аудару керек")} ${r.attention ?? 0}, ${w("просрочено", "мерзімі өткен")} ${r.overdueTasks ?? 0}`));
     if (!team.length) lines.push(w("Нет доступных данных команды.", "Команданың қолжетімді деректері жоқ."));
     lines.push(controlLink("/today"));
+  } else if (action === "GET_RECENT_LEADS" || action === "GET_RECENT_DEALS") {
+    if (data.leadFilter === "needs_reply") lines.push(w("Получены за указанный период и сейчас ожидают ответа.", "Көрсетілген кезеңде түскен және қазір жауап күтіп отырған өтінімдер."));
+    else lines.push(w("Период относится к дате поступления заявки или создания сделки.", "Кезең өтінім түскен немесе мәміле құрылған күнге қатысты."));
+    lines.push(totalLine(Math.min(items.length, 8)));
+    lines.push(...items.slice(0, 8).map((r: any, i: number) => `${i + 1}. ${cleanText(r.title || r.subject || w("Без темы", "Тақырыпсыз"), 120)}\n${controlTaskClientLabel({ contactName: r.contactName || r.name, phone: r.phone }, lang)}\n${time(r.receivedAt || r.createdAt)}`));
+    if (!items.length) lines.push(w("Подходящих записей нет.", "Сәйкес жазбалар жоқ."));
+    lines.push(controlLink(action === "GET_RECENT_LEADS" ? "/inquiries" : "/deals"));
   } else {
     const rows = items.length ? items : Array.isArray(data.stages) ? data.stages : Array.isArray(data.members) ? data.members : Array.isArray(data.team) ? data.team : [];
     const deal = record(data.deal);

@@ -5,7 +5,7 @@ import { CONTROL_ACTION_META, type ControlAction } from "@creolab/contracts";
 import type { AuthContext } from "../lib/types.ts";
 import { ApiError } from "../errors.ts";
 import { sha256 } from "../lib/hash.ts";
-import { authorizeWebControl, executeWebControl, confirmWebControl } from "./aiControlService.ts";
+import { authorizeWebControl, executeWebControl, confirmWebControl, controlAuthorizationVersion } from "./aiControlService.ts";
 import { runControlChatRequest } from "./controlChatService.ts";
 import { record } from "./controlChatSettings.ts";
 
@@ -31,13 +31,14 @@ export async function controlWebHistory(prisma: PrismaClient, auth: AuthContext)
     prisma.controlChatMessage.findMany({ where: { tenantId, identityId: { in: identities.filter(i => i.provider === "WHATSAPP").map(i => i.id) } }, orderBy: [{ createdAt: "desc" }, { queueOrder: "desc" }], take: 40 }),
   ]);
   const currentVersion = version(ctx);
+  const whatsappVersion = controlAuthorizationVersion({ ...ctx, identity: { userId: auth.user.id } });
   const items = [
     ...web.filter(row => record(row.changesJson).accessVersion === currentVersion).map(row => {
       const data = record(row.changesJson);
       const interrupted = data.state === "processing" && Date.now() - row.createdAt.getTime() > processingTimeout;
       return { id: row.id, text: String(data.text || ""), reply: interrupted ? "Не удалось дождаться результата. Обновите историю и проверьте задачи или журнал действий перед повтором изменения." : String(data.reply || ""), state: interrupted ? "interrupted" : String(data.state || "processing"), source: "CRM_CHAT", createdAt: row.createdAt, actions: data.actions || [] };
     }),
-    ...whatsapp.filter(row => readable(row.actionsJson, ctx.access)).map(row => ({ id: row.id, text: row.kind === "briefing" ? "Плановая сводка" : row.text, reply: row.replyText || "", state: row.state, source: "WHATSAPP", createdAt: row.createdAt, actions: row.actionsJson })),
+    ...whatsapp.filter(row => row.accessVersion === whatsappVersion && readable(row.actionsJson, ctx.access)).map(row => ({ id: row.id, text: row.kind === "briefing" ? "Плановая сводка" : row.text, reply: row.replyText || "", state: row.state, source: "WHATSAPP", createdAt: row.createdAt, actions: row.actionsJson })),
   ].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()).slice(-50);
   const webIdentity = identities.find(row => row.provider === "CRM_CHAT");
   const session = record(record(webIdentity?.metadata).web);

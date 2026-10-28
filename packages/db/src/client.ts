@@ -1,6 +1,8 @@
 import { applyBillingMigration } from "./billingMigration.ts";
 import { applyRequiredSchemaPatches } from "./schemaPatches.ts";
 import { CONTROL_CHAT_SQL } from "./controlChatSchema.ts";
+import { SITUATION_EPISODE_SQL } from "./situationEpisodeSchema.ts";
+import { SITUATION_SWEEP_SQL } from "./situationSweepSchema.ts";
 import { CONTROL_NOTIFICATION_SQL } from "./controlNotificationSchema.ts";
 import { WHATSAPP_SQL } from "./whatsappSchema.ts";
 import { AVR_SIGNING_SQL } from "./avrSigningSchema.ts";
@@ -30,6 +32,7 @@ function isLivePostgresUrl(url: string | undefined): boolean {
 
 export async function applyLivePostgresPatches(prisma: PrismaClient) {
   const statements = [
+    `ALTER TABLE "DealStage" ADD COLUMN IF NOT EXISTS "isArchived" BOOLEAN NOT NULL DEFAULT false`,
     `ALTER TABLE "Conversation" ADD COLUMN IF NOT EXISTS "aiHandoffSummaryJson" JSONB NOT NULL DEFAULT '{}'`,
     ...TENANT_SERVICES_SQL.split(";").map((s) => s.trim()).filter(Boolean),
     ...DEAL_NUMBER_SQL.split(";").map((s) => s.trim()).filter(Boolean),
@@ -64,6 +67,8 @@ export async function applyLivePostgresPatches(prisma: PrismaClient) {
     { name: "whatsapp", statements: WHATSAPP_SQL },
     { name: "control-notifications", statements: CONTROL_NOTIFICATION_SQL },
     { name: "control-chat", statements: CONTROL_CHAT_SQL },
+    { name: "situation-episodes", statements: SITUATION_EPISODE_SQL },
+    { name: "situation-sweep", statements: SITUATION_SWEEP_SQL },
   ]);
 }
 
@@ -314,6 +319,7 @@ async function applyAdditiveSchema(pglite: PGlite) {
 
     ALTER TABLE "DealStage" ADD COLUMN IF NOT EXISTS "defaultProbability" INTEGER DEFAULT 10;
     ALTER TABLE "DealStage" ADD COLUMN IF NOT EXISTS "isTerminal" BOOLEAN DEFAULT false;
+    ALTER TABLE "DealStage" ADD COLUMN IF NOT EXISTS "isArchived" BOOLEAN NOT NULL DEFAULT false;
 
     ALTER TABLE "Deal" ADD COLUMN IF NOT EXISTS "probability" INTEGER DEFAULT 10;
     ALTER TABLE "Deal" ADD COLUMN IF NOT EXISTS "paymentStatus" TEXT DEFAULT 'NOT_INVOICED';
@@ -1332,6 +1338,8 @@ export async function createPrismaClient(): Promise<PrismaClient> {
   for (const sql of WHATSAPP_SQL) await pglite.exec(sql);
   for (const sql of CONTROL_NOTIFICATION_SQL) await pglite.exec(sql);
   for (const sql of CONTROL_CHAT_SQL) await pglite.exec(sql);
+  for (const sql of SITUATION_EPISODE_SQL) await pglite.exec(sql);
+  for (const sql of SITUATION_SWEEP_SQL) await pglite.exec(sql);
   const adapter = new PrismaPGlite(pglite);
   const prisma = new PrismaClient({ adapter } as never);
   await applyBillingMigration(prisma);

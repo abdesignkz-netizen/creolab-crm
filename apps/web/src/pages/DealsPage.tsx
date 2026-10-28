@@ -305,6 +305,7 @@ export function DealsPage() {
 
   async function onDrop(stageId: string) {
     if (!dragId || busy || timeMode !== "now") return;
+    if (data?.columns?.find((column: any) => column.stageId === stageId)?.canReceiveDeals === false) return;
     setBusy(true);
     try {
       await api.changeDealStage(dragId, { stageId });
@@ -512,7 +513,7 @@ export function DealsPage() {
             key={col.stageId}
             className={`deal-column${col.deals.length ? "" : " is-empty"}`}
             onDragOver={(e) => {
-              if (timeMode === "now") e.preventDefault();
+              if (timeMode === "now" && col.canReceiveDeals !== false) e.preventDefault();
             }}
             onDrop={() => void onDrop(col.stageId)}
           >
@@ -943,7 +944,7 @@ export function DealDetailPage() {
       <details className="workspace-disclosure">
         <summary>{uiText("Перевести на стадию")}</summary>
         <div className="deal-stage-actions">
-          {(board?.columns || []).map((col: any) => (
+          {(board?.columns || []).filter((col: any) => col.canReceiveDeals !== false).map((col: any) => (
             <button
               key={col.stageId}
               type="button"

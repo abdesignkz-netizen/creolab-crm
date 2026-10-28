@@ -1,0 +1,51 @@
+{
+  "stage": "5.1",
+  "date": "2026-10-28",
+  "status": "implemented_automated_checks_passed",
+  "fullStage5Complete": false,
+  "deployed": false,
+  "productionWrites": false,
+  "messagesSentToRealRecipients": false,
+  "databaseSchemaChanges": false,
+  "api": {
+    "status": "passed",
+    "uniqueTests": 91,
+    "files": {
+      "controlChat": 44,
+      "controlLanguage": 4,
+      "controlPeriods": 6,
+      "controlReadPrecision": 10,
+      "controlWeb": 11,
+      "aiControl": 16
+    },
+    "logs": [
+      "/tmp/basqar-stage51-final3.log",
+      "/tmp/basqar-stage51-precision-final.log",
+      "/tmp/basqar-stage51-http-final.log",
+      "/tmp/basqar-stage51-validation-final.log"
+    ]
+  },
+  "typecheck": {
+    "status": "passed",
+    "workspaces": ["api", "mobile", "web", "contracts"],
+    "logs": ["/tmp/basqar-stage51-types3-final.log", "/tmp/basqar-stage51-types-last.log"]
+  },
+  "build": {
+    "status": "passed",
+    "log": "/tmp/basqar-stage51-build.log",
+    "initialJsKB": 1099.6,
+    "initialGzipKB": 279.0,
+    "limitsChanged": false,
+    "existingWarning": "Large chunks"
+  },
+  "diffCheck": "passed",
+  "environment": "isolated local PGlite; external providers disabled or stubbed",
+  "liveModelCheck": "not_run",
+  "realWhatsAppDelivery": "not_run",
+  "browserVisualCheck": "not_run_for_this_backend_stage",
+  "postgresDocker": "not_run",
+  "next": {
+    "stage": "5.2",
+    "queries": ["unchanged deals for N days", "proposal sent without next contact", "lost deal reasons", "expected payments for a period"]
+  }
+}

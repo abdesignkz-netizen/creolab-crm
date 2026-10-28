@@ -3,7 +3,7 @@ import { SALES_GOALS } from "@creolab/contracts";
 import type { AuthContext } from "../lib/types.ts";
 import { conversationAccessWhere, dealAccessWhere, requireTenant } from "../lib/access.ts";
 import { phoneFromContact, displayName } from "./contactLabels.ts";
-import { tenantSalesSettings, salesRecord, ensureSalesNextTask } from "./salesProcessService.ts";
+import { tenantSalesSettings, salesRecord, ensureSalesNextTask, salesFollowUpDueAt } from "./salesProcessService.ts";
 import { createStaffNotification } from "./notificationService.ts";
 import { parseAIAutomationSettings } from "./aiAutomationSettings.ts";
 import { getEffectiveTenantSettings } from "./runtimeSettings.ts";
@@ -98,16 +98,16 @@ export async function reconcileSalesDeal(prisma: PrismaClient, tenantId: string,
     let aiPlanChanged = false;
     const targetKey = deal.invoices.length ? "invoiced" : deal.contracts.length ? "contract" : null;
     if (settings.syncDocuments && targetKey) {
-      const target = await tx.dealStage.findFirst({ where: { tenantId, systemKey: targetKey, isTerminal: false } });
+      const target = await tx.dealStage.findFirst({ where: { tenantId, systemKey: targetKey, isTerminal: false, isArchived: false } });
       if (target && target.sortOrder > deal.stage.sortOrder) {
         const enteredAt = new Date();
         await tx.deal.update({ where: { id: deal.id }, data: { stageId: target.id, stageEnteredAt: enteredAt, probability: target.defaultProbability, version: { increment: 1 } } });
         const managed = deal.tasks.find(t => t.dedupeKey === `sales-next:${deal.id}`);
         const prior = salesRecord(managed?.contextSnapshotJson).salesManaged;
         // Only replace a system-managed next step. A human's plan remains authoritative.
-        if (!deal.nextAction || managed?.status === "open" && prior && !prior.manualPlan && managed.title === prior.title && deal.nextAction === prior.title && managed.dueAt?.toISOString() === prior.dueAt && managed.ownerMembershipId === prior.ownerId) {
+        if (!deal.nextAction?.trim() || managed?.status === "open" && prior && !prior.manualPlan && managed.title === prior.title && deal.nextAction === prior.title && managed.dueAt?.toISOString() === prior.dueAt && managed.ownerMembershipId === prior.ownerId) {
           const nextAction = targetKey === "invoiced" ? "Проверить поступление оплаты по счёту" : "Подготовить и согласовать счёт";
-          const nextActionAt = targetKey === "invoiced" && deal.invoices[0]?.dueDate || new Date(Date.now() + settings.nextStepHours * 3600000);
+          const nextActionAt = !deal.nextAction?.trim() && deal.nextActionAt || targetKey === "invoiced" && deal.invoices[0]?.dueDate || salesFollowUpDueAt(tenant, settings.nextStepHours);
           await tx.deal.update({ where: { id: deal.id }, data: { nextAction, nextActionAt } });
           aiPlanChanged = true;
         }

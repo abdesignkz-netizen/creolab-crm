@@ -5,7 +5,7 @@ import { ApiError } from "../errors.ts";
 import { safeEqual, sha256 } from "../lib/hash.ts";
 import { writeAudit } from "../lib/audit.ts";
 import { authorizeNativeControl, executeNativeControl, confirmNativeControl, controlAuthorizationVersion } from "./aiControlService.ts";
-import { CHAT_ACTIONS, chatCommandSchema, cleanText, controlChatMenu, quickControlCommand, controlSectionHelp, words, type ChatCommand, type ChatLanguage } from "./controlChatLanguage.ts";
+import { CHAT_ACTIONS, chatCommandSchema, cleanText, controlChatMenu, quickControlCommand, quickControlPeriodFollowup, controlSectionHelp, words, type ChatCommand, type ChatLanguage } from "./controlChatLanguage.ts";
 import { chatSettings, record } from "./controlChatSettings.ts";
 import { controlTaskClientLabel, presentControlReply, controlLink } from "./controlChatPresentation.ts";
 import { parseControlChatWithLlm } from "./llmClient.ts";
@@ -17,6 +17,7 @@ type Choice = { id: string; label: string };
 type Draft = { command: ChatCommand; params: Record<string, unknown>; labels: Record<string, string> };
 type Context = {
   selectedClient?: Choice;
+  lastRead?: Draft;
   pendingId?: string;
   choices?: { field: string; items: Choice[]; draft: Draft };
   awaiting?: "client_query" | "task_text";
@@ -151,7 +152,15 @@ export async function runControlChatRequest(prisma: PrismaClient, job: Pick<Job,
   if (/^(?:подтвердить|растау|confirm)(?:\s|$)/i.test(text)) return reply(w("Нет команды для подтверждения. Напишите запрос заново.", "Растайтын команда жоқ. Сұрауды қайта жазыңыз."));
   if (text === "[control:too_long]" || !text || text.startsWith("[WhatsApp:")) return reply(w("Отправьте команду текстом, до 2000 символов.", "Команданы мәтінмен жіберіңіз, 2000 таңбаға дейін."));
   let draft: Draft;
-  if (context.choices && /^\d{1,2}$/.test(text)) {
+  const followup = quickControlPeriodFollowup(text);
+  if (followup) {
+    if (!context.lastRead) return reply(w("Для какого списка или отчёта изменить период? Например: «Продажи за эту неделю».", "Қай тізімнің немесе есептің кезеңін өзгерту керек? Мысалы: «Осы аптадағы сатылымдар»."));
+    const previous = context.lastRead;
+    draft = { command: { ...previous.command, ...followup, dateFrom: followup.dateFrom, dateTo: followup.dateTo,
+      action: previous.command.action === "GET_TODAY_TASKS" && followup.period !== "today" ? "GET_TASKS" : previous.command.action },
+      params: { ...previous.params, ...followup, dateFrom: followup.dateFrom, dateTo: followup.dateTo }, labels: { ...previous.labels } };
+    delete context.choices; delete context.awaiting;
+  } else if (context.choices && /^\d{1,2}$/.test(text)) {
     const index = /^\d{1,2}$/.test(text) ? Number(text) - 1 : -1;
     const choice = context.choices.items[index];
     if (!choice) return reply(w("Выберите номер из последнего списка или напишите «Отмена».", "Соңғы тізімнен нөмірді таңдаңыз немесе «Болдырмау» жазыңыз."));
@@ -188,7 +197,15 @@ export async function runControlChatRequest(prisma: PrismaClient, job: Pick<Job,
       await prisma.controlConfirmation.updateMany({ where: { id: context.pendingId, tenantId: job.tenantId, identityId: job.identityId, status: "pending" }, data: { status: "canceled" } });
       delete context.pendingId;
     }
-    draft = { command: checked.data, params: { period: command.period || "today", ...(checked.data.salesFilter ? { filter: checked.data.salesFilter } : {}) }, labels: {} };
+    draft = { command: checked.data, params: {
+      ...(checked.data.period ? { period: checked.data.period } : {}),
+      ...(checked.data.dateFrom ? { dateFrom: checked.data.dateFrom, dateTo: checked.data.dateTo } : {}),
+      ...(checked.data.scope ? { scope: checked.data.scope } : {}),
+      ...(checked.data.inactiveDays ? { inactiveDays: checked.data.inactiveDays, changeBasis: checked.data.changeBasis || "activity" } : {}),
+      ...(checked.data.taskStatus ? { taskStatus: checked.data.taskStatus } : {}),
+      ...(checked.data.leadFilter ? { leadFilter: checked.data.leadFilter } : {}),
+      ...(checked.data.salesFilter ? { filter: checked.data.salesFilter } : {}),
+    }, labels: {} };
   }
   const c = draft.command, p = draft.params;
   if (c.action === "GET_CLIENT_DETAILS" && c.query && !c.client) c.client = c.query;
@@ -224,7 +241,7 @@ export async function runControlChatRequest(prisma: PrismaClient, job: Pick<Job,
   }
   if (["COMPLETE_TASK", "UPDATE_TASK", "ASSIGN_TASK"].includes(c.action) && !p.taskId) {
     if (!c.task) return reply(w("Укажите название существующей задачи.", "Бар тапсырманың атауын көрсетіңіз."));
-    const rows = record(record(await execute("GET_TASKS", { query: c.task })).data).items || [];
+    const rows = record(record(await execute("GET_TASKS", { query: c.task, taskStatus: "all" })).data).items || [];
     const found = rows.filter((r: any) => String(r.title || "").toLowerCase().includes(c.task!.toLowerCase()));
     if (!found.length) return reply(w("Задача не найдена среди доступных. Уточните название или откройте задачи в кабинете.", "Қолжетімді тапсырмалардан табылмады. Атауын нақтылаңыз немесе кабинеттегі тапсырмаларды ашыңыз."));
     return choose("taskId", found.map((r: any) => ({ id: r.id, label: `${cleanText(r.title, 80)} · ${controlTaskClientLabel(r, lang)}${r.ownerName ? ` · ${r.ownerName}` : ""}` })));
@@ -240,7 +257,7 @@ export async function runControlChatRequest(prisma: PrismaClient, job: Pick<Job,
   if (c.action === "MOVE_DEAL_STAGE" && !p.stageId) {
     if (!c.stage) return reply(w("Укажите новый этап сделки.", "Мәміленің жаңа кезеңін көрсетіңіз."));
     await execute("GET_DEAL", { dealId: p.dealId });
-    const stages = await prisma.dealStage.findMany({ where: { tenantId: job.tenantId, name: { contains: c.stage, mode: "insensitive" } }, take: 8 });
+    const stages = await prisma.dealStage.findMany({ where: { tenantId: job.tenantId, isTerminal: false, isArchived: false, name: { contains: c.stage, mode: "insensitive" } }, take: 8 });
     if (!stages.length) return reply(w("Этап не найден в воронке сделки. Уточните название.", "Мәміле воронкасында кезең табылмады. Атауын нақтылаңыз."));
     return choose("stageId", stages.map(r => ({ id: r.id, label: r.name })));
   }
@@ -264,6 +281,7 @@ export async function runControlChatRequest(prisma: PrismaClient, job: Pick<Job,
     const token = String(r.confirmationId).slice(-6).toUpperCase();
     return reply(`${w("Проверьте изменение:", "Өзгерісті тексеріңіз:")}\n${r.summary}\n\n${w(`Для выполнения: Подтвердить ${token}\nДля отмены: Отмена\nПодтверждение действует 10 минут.`, `Орындау үшін: Растау ${token}\nТоқтату үшін: Болдырмау\nРастау 10 минут жарамды.`)}`);
   }
+  context.lastRead = ["GET_PROPOSALS_WITHOUT_FOLLOWUP", "GET_LOST_REASONS", "GET_EXPECTED_PAYMENTS", "GET_TASKS", "GET_TODAY_TASKS", "GET_OVERDUE_TASKS", "GET_RECENT_LEADS", "GET_RECENT_DEALS", "GET_BUSINESS_SUMMARY", "GET_DEALS_STATS", "GET_LEADS_STATS", "GET_REVENUE_STATS"].includes(action) ? draft : undefined;
   return reply(presentControlReply(action, result, lang, timeZone));
 }
 

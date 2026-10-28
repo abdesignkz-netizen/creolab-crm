@@ -47,11 +47,12 @@ import {
   createTask,
   getConversation,
   listDeals,
-  listTasks,
 } from "./domainService.ts";
 import { withIdempotency } from "./idempotency.ts";
 import { createManualInquiry, listInquiries, updateInquiry } from "./inquiryService.ts";
-import { addDaysYmd, pad, zonedYmd, type PeriodPreset } from "./periodRange.ts";
+import { mapControlPeriod } from "./controlPeriods.ts";
+import { controlTasks, controlRecentLeads, controlRecentDeals } from "./controlReadQueries.ts";
+import { controlUnchangedDeals, controlProposalsWithoutFollowup, controlLostReasons, controlExpectedPayments } from "./controlDealQueries.ts";
 import { searchContactsForPicker } from "./segmentService.ts";
 import { getSituationOverview } from "./situationOverviewService.ts";
 import { updateTaskDraft } from "./taskExecutionService.ts";
@@ -114,50 +115,6 @@ function defaultAccessFlags(role: string) {
   };
 }
 
-function mapControlPeriod(params: Record<string, unknown>, timeZone: string, now = new Date()) {
-  const periodVal = params.period ?? params.periodPreset;
-  if (periodVal && typeof periodVal === "object" && !Array.isArray(periodVal)) {
-    const rec = asRecord(periodVal);
-    const dateFrom = asString(rec.from || rec.dateFrom || params.dateFrom) || undefined;
-    const dateTo = asString(rec.to || rec.dateTo || params.dateTo) || undefined;
-    return { period: "custom" as PeriodPreset, dateFrom, dateTo, label: "custom" };
-  }
-  const raw = asString(periodVal || "today").toLowerCase();
-  const dateFrom = asString(params.dateFrom || params.from) || undefined;
-  const dateTo = asString(params.dateTo || params.to) || undefined;
-  if (raw === "this_week") {
-    return { period: "last_7" as PeriodPreset, dateFrom, dateTo, label: "this_week" };
-  }
-  if (raw === "last_7_days") {
-    return { period: "last_7" as PeriodPreset, dateFrom, dateTo, label: "last_7_days" };
-  }
-  if (raw === "last_30_days") {
-    return { period: "last_30" as PeriodPreset, dateFrom, dateTo, label: "last_30_days" };
-  }
-  if (raw === "last_week") {
-    const today = zonedYmd(now, timeZone);
-    const dow = new Date(Date.UTC(today.year, today.month - 1, today.day)).getUTCDay() || 7;
-    const startThisWeek = addDaysYmd(today, -(dow - 1));
-    const startLast = addDaysYmd(startThisWeek, -7);
-    const endLast = addDaysYmd(startThisWeek, -1);
-    const ymd = (d: { year: number; month: number; day: number }) => `${d.year}-${pad(d.month)}-${pad(d.day)}`;
-    return { period: "custom" as PeriodPreset, dateFrom: ymd(startLast), dateTo: ymd(endLast), label: "last_week" };
-  }
-  const allowed: PeriodPreset[] = [
-    "today",
-    "yesterday",
-    "last_7",
-    "last_30",
-    "this_month",
-    "last_month",
-    "this_year",
-    "all",
-    "custom",
-  ];
-  const period = (allowed.includes(raw as PeriodPreset) ? raw : "today") as PeriodPreset;
-  return { period, dateFrom, dateTo, label: raw };
-}
-
 function parseTimestamp(value: string | undefined) {
   const raw = String(value || "").trim();
   if (!raw) return null;
@@ -174,6 +131,7 @@ function periodLabelRu(label: string) {
     case "yesterday":
       return "Вчера";
     case "this_week":
+      return "Эта неделя";
     case "last_7":
     case "last_7_days":
       return "За неделю";
@@ -467,16 +425,6 @@ function compactClient(item: Record<string, unknown>) {
     phone: item.phone || item.phoneRaw || null,
     companyName: item.companyName || null,
     lifecycleStatus: item.lifecycleStatus || null,
-  };
-}
-
-function compactInquiry(item: Record<string, unknown>) {
-  return {
-    id: item.id,
-    name: item.name || item.contactName || null,
-    status: item.status,
-    subject: item.subject || item.service || null,
-    receivedAt: item.receivedAt || item.createdAt || null,
   };
 }
 
@@ -962,21 +910,14 @@ async function dispatchAction(action: ControlAction, ctx: DispatchCtx): Promise<
       const deals = columns.flatMap((col: { deals?: unknown[] }) => col.deals || []).slice(0, 30);
       return { items: deals.map((item) => compactDeal(asRecord(item), financial)), total: deals.length };
     }
-    case "GET_OVERDUE_TASKS": {
-      const tasks = await listTasks(prisma, auth);
-      const items = (tasks as Array<Record<string, unknown>>).filter((item) => item.overdue);
-      return { items: items.slice(0, 30).map(compactTask), total: items.length };
-    }
-    case "GET_TASKS": {
-      const tasks = await listTasks(prisma, auth);
-      const query = asString(params.query).toLowerCase();
-      const matched = (tasks as Array<Record<string, unknown>>).filter(item => !query || String(item.title || "").toLowerCase().includes(query));
-      return { items: matched.slice(0, 50).map(compactTask) };
-    }
-    case "GET_TODAY_TASKS": {
-      const sit = await situation(ctx);
-      return sit.todayTasks;
-    }
+    case "GET_UNCHANGED_DEALS": return controlUnchangedDeals(ctx);
+    case "GET_PROPOSALS_WITHOUT_FOLLOWUP": return controlProposalsWithoutFollowup(ctx);
+    case "GET_LOST_REASONS": return controlLostReasons(ctx);
+    case "GET_EXPECTED_PAYMENTS": return controlExpectedPayments(ctx);
+    case "GET_OVERDUE_TASKS":
+    case "GET_TASKS":
+    case "GET_TODAY_TASKS":
+      return controlTasks(ctx, action);
     case "GET_CLIENTS": {
       const board = await listContactsBoard(prisma, auth, { limit: "30" });
       const items = Array.isArray(board.items) ? board.items : [];
@@ -1021,22 +962,10 @@ async function dispatchAction(action: ControlAction, ctx: DispatchCtx): Promise<
       const sit = await situation(ctx);
       return { team: sit.team || [] };
     }
-    case "GET_RECENT_LEADS": {
-      const listed = await listInquiries(prisma, auth, {
-        period: ctx.period.period,
-        dateFrom: ctx.period.dateFrom,
-        dateTo: ctx.period.dateTo,
-        sort: "newest",
-        limit: "15",
-      });
-      return { items: (listed.items || []).slice(0, 15).map((item: Record<string, unknown>) => compactInquiry(item)) };
-    }
-    case "GET_RECENT_DEALS": {
-      const deals = await listDeals(prisma, auth);
-      return {
-        items: (deals as Array<Record<string, unknown>>).slice(0, 15).map((item) => compactDeal(item, financial)),
-      };
-    }
+    case "GET_RECENT_LEADS":
+      return controlRecentLeads(ctx);
+    case "GET_RECENT_DEALS":
+      return controlRecentDeals(ctx);
     case "GET_CONVERSATION_SUMMARY": {
       const id = asString(params.conversationId || params.id);
       if (!id) throw new ApiError(422, "invalid", "Укажите conversationId");
@@ -1341,7 +1270,10 @@ async function executeResolved(input: {
   const started = Date.now();
   const membership = requireTenant(input.auth);
   if (input.action.startsWith("BULK_")) await requireBillingFeature(input.prisma, input.auth, "CONTROL_BULK");
-  const period = mapControlPeriod(input.params, membership.tenant.timezone || "Asia/Almaty");
+  const period = mapControlPeriod(input.params, membership.tenant.timezone || "Asia/Almaty", new Date(),
+    input.action === "GET_EXPECTED_PAYMENTS" ? "this_week" :
+      ["GET_TASKS", "GET_OVERDUE_TASKS", "GET_UNCHANGED_DEALS", "GET_PROPOSALS_WITHOUT_FOLLOWUP", "GET_LOST_REASONS"].includes(input.action) ? "all" : "today");
+  if (input.action === "GET_TODAY_TASKS" && period.label !== "today") throw new ApiError(422, "invalid_period", "Для другого периода запросите задачи с нужными датами.");
   try {
     if (input.confirm) {
       const existing = await input.prisma.controlConfirmation.findUnique({
@@ -1409,6 +1341,7 @@ async function executeResolved(input: {
     });
     const payload = ok(input.action, data, {
       period: period.label,
+      dateFrom: period.dateFrom ?? null, dateTo: period.dateTo ?? null, timeZone: period.timeZone,
       currency: membership.tenant.currency || "KZT",
       requestId: input.requestId,
     });
@@ -1637,6 +1570,7 @@ async function confirmControlForIntegration(prisma: PrismaClient,
     });
     const payload = ok(action, data, {
       period: period.label,
+      dateFrom: period.dateFrom ?? null, dateTo: period.dateTo ?? null, timeZone: period.timeZone,
       currency: auth.activeMembership?.tenant.currency || "KZT",
       requestId: confirmation.requestId,
       confirmationId: confirmation.id,
@@ -1752,7 +1686,7 @@ export async function confirmNativeControl(prisma: PrismaClient, integrationId: 
 }
 
 
-export function controlAuthorizationVersion(ctx: Awaited<ReturnType<typeof authorizeNativeControl>>) {
+export function controlAuthorizationVersion(ctx: Pick<Awaited<ReturnType<typeof authorizeNativeControl>>, "auth" | "access"> & { identity: { userId: string } }) {
   const { lastActivityAt: _last, updatedAt: _updated, createdAt: _created, ...permissions } = ctx.access;
   return sha256(JSON.stringify({ permissions, membership: ctx.auth.activeMembership, userId: ctx.identity.userId }));
 }

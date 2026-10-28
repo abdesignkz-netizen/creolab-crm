@@ -6,6 +6,8 @@ import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { requireAnalyticsAccess } from "../lib/access.ts";
 import { getSituation, type SituationScope } from "./situationService.ts";
+import { syncSituationEpisodes } from "./situationEpisodeService.ts";
+import { visibleSituationSnoozes } from "./situationSnooze.ts";
 import {
   conversationsAttentionWhere,
   conversationsHumanWhere,
@@ -70,7 +72,7 @@ function mapAgreementSit(a: {
     dealTitle: a.deal?.title || null,
     dealStage: stageLabel(a.deal?.stage, locale),
     taskId: a.task?.id || null,
-    href: a.task?.id ? "/tasks" : a.contact?.id ? `/contacts/${a.contact.id}` : "/today",
+    href: a.task?.id ? `/tasks?open=${a.task.id}` : a.contact?.id ? `/contacts/${a.contact.id}` : "/today",
     attention:
       a.clarificationNeeded ||
       (a.type === "ONLINE_MEETING" && !a.meetingUrl
@@ -754,7 +756,7 @@ export async function getSituationOverview(
 
   const stageByKey = new Map(stages.map((s) => [s.systemKey, s]));
   const pipelineNow = stages
-    .filter((stage) => !stage.isTerminal || openDeals.some(deal => deal.stageId === stage.id))
+    .filter((stage) => !stage.isTerminal && !stage.isArchived || openDeals.some(deal => deal.stageId === stage.id))
     .map((stage) => ({
       systemKey: stage.systemKey,
       name: stageLabel(stage, locale) || stage.name,
@@ -920,7 +922,7 @@ export async function getSituationOverview(
           title: mapped.attention || a.title,
           subtitle: a.title,
           reason: mapped.attention || a.clarificationNeeded || systemText(locale, "Нужно уточнение по договорённости"),
-          nextAction: mapped.taskId ? "complete_task" : "open_contact",
+          nextAction: "open_agreement",
           contactName: mapped.contactName,
           phone: mapped.phone,
           interest: mapped.inquiryTitle,
@@ -943,7 +945,7 @@ export async function getSituationOverview(
           kind: "agreement_overdue",
           title: a.title,
           reason: systemText(locale, "Договорённость просрочена"),
-          nextAction: mapped.taskId ? "complete_task" : "open_contact",
+          nextAction: "open_agreement",
           contactName: mapped.contactName,
           phone: mapped.phone,
           interest: mapped.inquiryTitle,
@@ -957,6 +959,14 @@ export async function getSituationOverview(
         };
       }),
   ];
+
+  const episodes = await syncSituationEpisodes(prisma, auth, attentionItems, false);
+  const attentionSnoozes = await visibleSituationSnoozes(prisma, auth, { evidenceKeys: new Map([...episodes].map(([id, row]) => [id, row.evidenceKey])) });
+  const managedAttentionItems = attentionItems.flatMap(item => {
+    const episode = episodes.get(item.id), snooze = attentionSnoozes.get(item.id);
+    if (episode?.state === "resolved" || snooze && (!snooze.evidenceKey || snooze.evidenceKey === episode?.evidenceKey)) return [];
+    return [{ ...item, episode }];
+  });
 
   const attentionSummary = {
     needsReply: contactsNeedsReply,
@@ -1232,10 +1242,10 @@ export async function getSituationOverview(
         systemText(locale, "Сюда попадает только то, где человек должен что-то сделать сейчас: ответить клиенту, забрать диалог у AI, закрыть просроченное, задать шаг или дописать телефон. Диалог уже у менеджера, если клиент не ждёт ответа, сюда не попадает."),
       summary: {...attentionSummary,documentsToClose},
       items: onlyImportant
-        ? attentionItems.filter((i) =>
+        ? managedAttentionItems.filter((i) =>
             ["needs_reply", "overdue", "no_next_action", "needs_human", "no_contact", "over_sla", "payment_overdue"].includes(i.group),
           )
-        : attentionItems,
+        : managedAttentionItems,
       emptyLabel: systemText(locale, "Критических действий сейчас нет."),
     },
     todayTasks: {

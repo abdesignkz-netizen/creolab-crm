@@ -29,6 +29,22 @@ describe("operational business calendar", () => {
     almost(clock.elapsedDays(at("2026-10-27T09:00")), 0);
     almost(clock.elapsedDays(new Date(NaN)), 0);
   });
+  it("adds actual working hours, including partial shifts, holidays and nights", () => {
+    const clock = createProcessClock({ ...business, excludedDates: ["2026-10-26"] }, "Asia/Almaty");
+    assert.equal(clock.afterHours(at("2026-10-23T16:00"), 2).getTime(), at("2026-10-27T10:00").getTime());
+    assert.equal(clock.afterHours(at("2026-10-24T12:00"), 24).getTime(), at("2026-10-29T17:00").getTime());
+    const night = createProcessClock({ ...business, days: [5], start: "22:00", end: "06:00" }, "Asia/Almaty");
+    assert.equal(night.afterHours(at("2026-10-24T02:00"), 4).getTime(), at("2026-10-24T06:00").getTime());
+    assert.equal(createProcessClock({ ...business, mode: "calendar" }, "Asia/Almaty").afterHours(at("2026-10-23T16:00"), 24).getTime(), at("2026-10-24T16:00").getTime());
+  });
+  it("counts real hours during a DST change and validates duration inputs", () => {
+    const clock = createProcessClock({ ...business, days: [0], start: "00:00", end: "04:00" }, "America/New_York");
+    const from = new Date("2026-03-08T00:00:00-05:00");
+    assert.equal(clock.afterHours(from, 3).getTime(), new Date("2026-03-08T04:00:00-04:00").getTime());
+    for (const hours of [-1, NaN, Infinity, 721]) assert.throws(() => clock.afterHours(from, hours), RangeError);
+    assert.throws(() => clock.afterHours(new Date(NaN), 1), RangeError);
+    assert.equal(clock.afterHours(from, 0).getTime(), from.getTime());
+  });
   it("excludes specific dates using the company's local date", () => {
     const clock = createProcessClock({ ...business, excludedDates: ["2026-10-26"] }, "Asia/Almaty", at("2026-10-27T10:00"));
     almost(clock.elapsedDays(at("2026-10-23T16:00")), 0.25);

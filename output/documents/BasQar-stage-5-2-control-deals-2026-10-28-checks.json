@@ -1,0 +1,76 @@
+{
+  "date": "2026-10-28",
+  "stage": "5.2",
+  "status": "implemented_and_locally_verified",
+  "deployed": false,
+  "production_mutations": false,
+  "live_outbound_messages": false,
+  "unique_tests_passed": 112,
+  "test_suites": [
+    {
+      "suite": "controlDealQueries",
+      "passed": 20,
+      "log": "/tmp/basqar-stage52-deals-final.log"
+    },
+    {
+      "suite": "controlChat",
+      "passed": 45,
+      "log": "/tmp/basqar-stage52-regression.log"
+    },
+    {
+      "suite": "controlLanguage",
+      "passed": 4,
+      "log": "/tmp/basqar-stage52-queries-language.log"
+    },
+    {
+      "suite": "controlPeriods",
+      "passed": 6,
+      "log": "/tmp/basqar-stage52-queries-language.log"
+    },
+    {
+      "suite": "controlReadPrecision",
+      "passed": 10,
+      "log": "/tmp/basqar-stage52-regression.log"
+    },
+    {
+      "suite": "controlWeb",
+      "passed": 11,
+      "log": "/tmp/basqar-stage52-regression.log"
+    },
+    {
+      "suite": "aiControl",
+      "passed": 16,
+      "log": "/tmp/basqar-stage52-http.log"
+    }
+  ],
+  "validation": {
+    "workspace_typecheck": {
+      "status": "passed",
+      "log": "/tmp/basqar-stage52-typecheck.log"
+    },
+    "final_api_typecheck": {
+      "status": "passed",
+      "log": "/tmp/basqar-stage52-types-final.log"
+    },
+    "web_build": {
+      "status": "passed",
+      "log": "/tmp/basqar-stage52-build.log",
+      "warning": "Existing initial JS size: 1099.6 kB; gzip 279 kB"
+    },
+    "diff_check": "passed"
+  },
+  "environment": "Isolated PGlite; external providers disabled; language-model stub for parser cases",
+  "sha256": {
+    "packages/contracts/src/control.ts": "dbaef0a33fe0c93d4bfdc485a8d001fe3935cd3dadf6329fc8b7b0e7b67c4009",
+    "apps/api/src/services/controlDealQueries.ts": "519611bdfaceeee2edd35ce26b62f833f741b5e74a2b9e92b74b11c7dbebfd09",
+    "apps/api/src/services/controlReadQueries.ts": "3e4dbbf6142ee0133ef89438ff582a7b4616532a65f3f59d176724a3d1a0a1a2",
+    "apps/api/src/services/aiControlService.ts": "a13d98a9fa840d1b3a689d0be82e7776784ad546d6c0bff5033ed37983abe0a6",
+    "apps/api/src/services/controlChatLanguage.ts": "f58a2486efe0e659809a1ed2d1ff8a27c30cfffdd48ef14d8b501be8a3a451bc",
+    "apps/api/src/services/controlChatPresentation.ts": "fb6df1b463636b04ecef4904c08fb6fa00fe013c08bb8d02585f9a3963e816ee",
+    "apps/api/src/services/controlChatService.ts": "72b9273c5a11be813d72b358a7ba234ba4594d1f3179baeae058e888f240eace",
+    "apps/api/src/services/llmClient.ts": "f8931d6381b451e50ca902ad1ac74d89c354ca0a6d27def67cdd560ddd136587",
+    "apps/api/src/controlDealQueries.test.ts": "4161cdb03fdd7e93a96b1a1782027617f0a8ada1446caa55b77ca275fe6e3cde",
+    "apps/api/src/controlChat.test.ts": "6ae3c090af514e26dac428b700b03a3ca3c783936372b232e12269c6d0e60a8b"
+  },
+  "next_stage": "6: managed attention episodes"
+}

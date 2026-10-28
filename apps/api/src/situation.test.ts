@@ -101,6 +101,24 @@ describe("Situation API", () => {
     server?.close();
   });
 
+  it("episode routes authenticate, validate actions and retain source truth", async () => {
+    const member = await prisma.membership.findFirstOrThrow({ where: { tenantId, role: "owner" } });
+    const task = await prisma.task.create({ data: { tenantId, title: "HTTP episode", type: "manual", dueAt: new Date(Date.now() - 3600_000), ownerMembershipId: member.id } });
+    const itemId = `task_overdue:${task.id}`;
+    assert.equal((await fetch(`${base}/api/v1/situation/history`)).status, 401);
+    const response = await fetch(`${base}/api/v1/situation/episode?${new URLSearchParams({ itemId })}`, { headers: { cookie } });
+    assert.equal(response.status, 200); const episode = await response.json();
+    const check = await fetch(`${base}/api/v1/situation/episode`, { method: "POST", headers: { cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ itemId, version: episode.version, action: "check" }) });
+    assert.equal(check.status, 200); assert.equal((await check.json()).stillActive, true);
+    const invalid = await fetch(`${base}/api/v1/situation/episode`, { method: "POST", headers: { cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ itemId, version: episode.version, action: "resolve" }) });
+    assert.equal(invalid.status, 422);
+    const history = await fetch(`${base}/api/v1/situation/history`, { headers: { cookie } });
+    assert.equal(history.status, 200); assert.ok((await history.json()).items.some((row: { itemId: string }) => row.itemId === itemId));
+    await prisma.task.delete({ where: { id: task.id } });
+  });
+
   it("заявка создаёт inquiry+task, situation возвращает 1 item", async () => {
     const created = await fetch(`${base}/api/v1/inquiries`, {
       method: "POST",

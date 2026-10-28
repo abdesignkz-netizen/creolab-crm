@@ -2,6 +2,9 @@ import { CATALOG_BY_CODE, CONTROL_ACTION_META } from "@creolab/contracts";
 
 export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "situation.snoozed": "Ситуация отложена",
+  "situation.assigned": "Назначен ответственный за ситуацию",
+  "situation.task_created": "Создана задача для решения ситуации",
+  "situation.task_linked": "К ситуации привязана задача",
   "AI_KNOWLEDGE_IMPORT_PREVIEWED": "Материал распознан для базы знаний ИИ",
   "sales.deal_created": "Создана сделка по подтверждённому интересу",
   "sales.proposal_reviewed": "Рассмотрено предложение ИИ о сделке",

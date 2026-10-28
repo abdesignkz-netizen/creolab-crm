@@ -10,6 +10,7 @@ import { decryptSecret } from "../lib/secretBox.ts";
 import { config } from "../config.ts";
 import { canUseFeature, requireFeature } from "./entitlementService.ts";
 import { EVENT_CATEGORY } from "./notificationPolicy.ts";
+import { queueSituationEvent, retainRelevantSituationNotices } from "./situationNoticeService.ts";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 type Rule = Awaited<ReturnType<PrismaClient["controlNotificationRule"]["findUniqueOrThrow"]>>;
@@ -103,6 +104,7 @@ export async function pauseControlNotifications(prisma: PrismaClient, auth: Auth
 
 /** Company-wide operational events, deduplicated across all original staff recipients. No client text is copied. */
 export async function queueControlNotification(prisma: Db, input: { tenantId: string; type: string; entityId: string; episodeKey?: string; priority?: string }) {
+  if (await queueSituationEvent(prisma, input)) return;
   const category = EVENT_CATEGORY[input.type] as ControlNoticeCategory | undefined;
   if (!category) return;
   const rules = await prisma.controlNotificationRule.findMany({ where: { tenantId: input.tenantId, enabled: true,
@@ -127,6 +129,7 @@ export function controlQuiet(prefs: ControlNoticeInput, now: Date) {
   return start <= end ? time >= start && time < end : time >= start || time < end;
 }
 async function eligible(prisma: Db, rule: Rule) {
+  if (!settings(rule).recipientConfirmed) return false;
   return Boolean(await prisma.membership.findFirst({ where: { id: rule.membershipId, tenantId: rule.tenantId, active: true, role: { in: roles }, tenant: { status: "active" }, user: { status: "active" } }, select: { id: true } }));
 }
 
@@ -146,8 +149,9 @@ export async function buildControlNotificationBatches(prisma: PrismaClient, now 
         if (mode === "instant" && rule.lastInstantAt && now.getTime() - rule.lastInstantAt.getTime() < prefs.minIntervalMinutes * 60000) continue;
         const key = mode === "digest" ? `${rule.version}:digest:${local.day}` : randomUUID();
         if (mode === "digest" && await tx.controlNotificationBatch.findUnique({ where: { ruleId_key: { ruleId: rule.id, key } } })) continue;
-        const items = await tx.controlNotificationItem.findMany({ where: { ruleId: rule.id, version: rule.version, mode, batchId: null,
+        const pendingItems = await tx.controlNotificationItem.findMany({ where: { ruleId: rule.id, version: rule.version, mode, batchId: null, suppressedAt: null,
           ...(mode === "instant" && quiet ? { urgent: true } : {}), createdAt: { lte: now, gte: new Date(now.getTime() - 7 * 86400000) } }, orderBy: { createdAt: "asc" }, take: 5000 });
+        const items = await retainRelevantSituationNotices(tx, rule, pendingItems, now);
         if (!items.length || mode === "instant" && quiet && !prefs.urgentDuringQuiet) continue;
         const counts: Record<string, number> = {};
         for (const item of items) counts[item.category] = (counts[item.category] || 0) + 1;
@@ -182,6 +186,19 @@ export function controlNotificationText(company: string, kind: string, counts: R
 }
 
 type QrDispatch = { integrationId: string; socket: Pick<WASocket, "sendMessage">; checkLease: () => Promise<void> };
+async function refreshSituationBatch(db: Db, rule: Rule, batch: Awaited<ReturnType<PrismaClient["controlNotificationBatch"]["findUniqueOrThrow"]>>, now: Date) {
+  if (batch.kind === "test") return batch;
+  const items = await db.controlNotificationItem.findMany({ where: { ruleId: rule.id, batchId: batch.id } });
+  // Older aggregate batches without item records cannot be reconstructed here.
+  if (!items.length) return batch;
+  const kept = await retainRelevantSituationNotices(db, rule, items, now);
+  const counts: Record<string, number> = {};
+  for (const item of kept) counts[item.category] = (counts[item.category] || 0) + 1;
+  const updated = await db.controlNotificationBatch.update({ where: { id: batch.id }, data: { countsJson: counts,
+    urgent: kept.length > 0 && kept.every(item => item.urgent),
+    ...(!kept.length ? { state: "skipped", error: "no_active_events", finishedAt: now } : {}) } });
+  return kept.length ? updated : null;
+}
 export async function deliverControlNotifications(prisma: PrismaClient, qr?: QrDispatch, now = new Date()) {
   const batches = await prisma.controlNotificationBatch.findMany({ where: { state: "queued", availableAt: { lte: now }, rule: { integration: qr ? { id: qr.integrationId, type: "whatsapp_qr" } : { type: "whatsapp_seller" } } }, include: { rule: { include: { integration: true, membership: { include: { tenant: true } } } } }, orderBy: { createdAt: "asc" }, take: 10 });
   for (const batch of batches) {
@@ -196,7 +213,9 @@ export async function deliverControlNotifications(prisma: PrismaClient, qr?: QrD
     await qr?.checkLease();
     const claimed = await prisma.$transaction(async tx => {
       await tx.$queryRaw`SELECT id FROM "ControlNotificationRule" WHERE id = ${rule.id} FOR UPDATE`;
-      const current = await tx.controlNotificationBatch.findFirst({ where: { id: batch.id, state: "queued", availableAt: { lte: now }, rule: { version: batch.version, ...(batch.kind !== "test" ? { enabled: true } : {}) } } });
+      const pendingBatch = await tx.controlNotificationBatch.findFirst({ where: { id: batch.id, state: "queued", availableAt: { lte: now }, rule: { version: batch.version, ...(batch.kind !== "test" ? { enabled: true } : {}) } } });
+      if (!pendingBatch) return null;
+      const current = await refreshSituationBatch(tx, rule, pendingBatch, now);
       if (!current) return null;
       // A provider's Retry-After must also hold back newer notices for this recipient.
       const delayed = current.kind !== "test" && await tx.controlNotificationBatch.findFirst({ where: { ruleId: rule.id, version: batch.version, state: "queued", error: "rate_limit", availableAt: { gt: now } }, orderBy: { availableAt: "desc" } });
@@ -219,11 +238,17 @@ export async function deliverControlNotifications(prisma: PrismaClient, qr?: QrD
         // Only safe, unsent notices for the SAME recipient/settings can be combined.
         // Unknown results and in-flight sends are never included or retried.
         const quiet = controlQuiet(prefs, now), cutoff = new Date(now.getTime() - 7 * 86400000);
-        const pending = await tx.controlNotificationBatch.findMany({ where: { ruleId: rule.id, version: current.version, id: { not: current.id }, state: "queued", kind: { in: ["instant", "digest", "summary"] }, createdAt: { gte: cutoff, lte: now },
+        const candidates = await tx.controlNotificationBatch.findMany({ where: { ruleId: rule.id, version: current.version, id: { not: current.id }, state: "queued", kind: { in: ["instant", "digest", "summary"] }, createdAt: { gte: cutoff, lte: now },
           OR: [{ availableAt: { lte: now } }, { error: { in: ["sender_offline", "quiet_hours", "send_interval"] } }],
           ...(quiet ? { urgent: true, kind: { in: ["instant", "summary"] } } : {}),
         } });
-        const items = await tx.controlNotificationItem.findMany({ where: { ruleId: rule.id, version: current.version, batchId: null, mode: "instant", createdAt: { gte: cutoff, lte: now }, ...(quiet ? { urgent: true } : {}) } });
+        const pending = [];
+        for (const candidate of candidates) {
+          const relevant = await refreshSituationBatch(tx, rule, candidate, now);
+          if (relevant) pending.push(relevant);
+        }
+        const unbatched = await tx.controlNotificationItem.findMany({ where: { ruleId: rule.id, version: current.version, batchId: null, suppressedAt: null, mode: "instant", createdAt: { gte: cutoff, lte: now }, ...(quiet ? { urgent: true } : {}) } });
+        const items = await retainRelevantSituationNotices(tx, rule, unbatched, now);
         for (const peer of pending) {
           for (const [category, count] of Object.entries(peer.countsJson as Record<string, number>)) counts[category] = (counts[category] || 0) + count;
           urgent = urgent && peer.urgent; attempts = Math.max(attempts, peer.attempts);
@@ -243,13 +268,16 @@ export async function deliverControlNotifications(prisma: PrismaClient, qr?: QrD
     try {
       // Recheck just before dispatch; queued data is never routed through client conversations.
       const current = await prisma.controlNotificationRule.findUniqueOrThrow({ where: { id: rule.id }, include: { integration: true } });
-      if (current.version !== batch.version || !await eligible(prisma, current) || !senderReady(current.integration)) {
+      if (current.version !== batch.version || !current.enabled && claimed.kind !== "test" || !await eligible(prisma, current) || !senderReady(current.integration) || !await canUseFeature(prisma, current.tenantId, FEATURES.AI_CONTROL)) {
         await prisma.controlNotificationBatch.update({ where: { id: batch.id }, data: { state: "skipped", error: "settings_changed", finishedAt: now } }); continue;
       }
-      const text = controlNotificationText(rule.membership.tenant.name, claimed.kind, claimed.countsJson as Record<string, number>, prefs.language);
+      await qr?.checkLease();
+      const relevant = await refreshSituationBatch(prisma, current, claimed, now);
+      if (!relevant) continue;
+      const text = controlNotificationText(rule.membership.tenant.name, relevant.kind, relevant.countsJson as Record<string, number>, prefs.language);
       let providerRef: string | undefined;
       if (qr) {
-        await qr.checkLease(); networkStarted = true;
+        networkStarted = true;
         let timer: ReturnType<typeof setTimeout> | undefined;
         try {
           const result = await Promise.race([qr.socket.sendMessage(`${digits(rule.phone)}@s.whatsapp.net`, { text }), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("timeout")), 20000); })]);

@@ -1,4 +1,5 @@
 import { InlineFeedback } from "../components/InlineFeedback";
+import { SituationHistory, SituationWorkPanel } from "../components/SituationWorkPanel";
 import { uiTaskTitle, uiMessage } from "../lib/uiText";
 import { systemText } from "@creolab/contracts";
 import { useLocale } from "../lib/session";
@@ -14,6 +15,7 @@ import { useCapabilities, useSession } from "../lib/session";
 type Scope = "all" | "mine" | "unassigned";
 
 const ACTION_LABEL: Record<string, string> = {
+  open_agreement: "Открыть договорённость",
   complete_phone: "Дописать контакт",
   accept_inquiry: "Взять в работу",
   open_inquiry: "Открыть заявку",
@@ -347,6 +349,7 @@ export function SituationPage() {
           </div>
         </div>
         {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
+        <SituationHistory onChanged={load} />
         {liveSpotCount(inquiries.length) || liveSpotCount(deals.length) || liveSpotCount(tasks.length) || liveSpotCount(dialogs.length) ? (
           <>
             <p className="dash-block-label">{systemText(locale, "Сейчас важно")}</p>
@@ -374,6 +377,7 @@ export function SituationPage() {
                 <Link className="btn secondary" to={item.href}>
                   {systemText(locale, "Открыть")}</Link>
               ) : null}
+              <SituationWorkPanel itemId={item.id} title={item.title} state={item.episode?.state} onChanged={load} />
             </div>
           ))}
         </div>
@@ -526,6 +530,7 @@ export function SituationPage() {
       </div>
 
       {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
+      <SituationHistory onChanged={load} />
 
       {(data.integrationAlerts || []).length > 0 ? (
         <div className="banner warn dash-alert">
@@ -668,6 +673,7 @@ export function SituationPage() {
                 <Link className="attention-details" to={item.href || "/today"}>
                   {systemText(locale, "Карточка")} <span aria-hidden="true">↗</span></Link>
               </div>
+              <SituationWorkPanel itemId={item.id} title={item.title} state={item.episode?.state} onChanged={load} />
             </div>
           ))
         )}

@@ -12,11 +12,13 @@ import { writeAudit } from "../lib/audit.ts";
 import { assertSituationReachable, situationSnoozeKey, visibleSituationSnoozes, type SituationSnoozeScope } from "./situationSnooze.ts";
 import { CONTACT_PHONE_SELECT, digitsOnly, displayName, needsReply, phoneFromContact } from "./contactLabels.ts";
 import { inquiryInterest, loadConversationInterests } from "./contactInterestService.ts";
-import { attentionReasonLabel, STATUS_ONLY_ATTENTION } from "./attentionReasons.ts";
+import { attentionReasonLabel } from "./attentionReasons.ts";
 import { WHATSAPP_HOME_ATTENTION_CODES } from "./whatsappChannel.ts";
 import { excludeRematchedLeftovers } from "./attentionCounts.ts";
 import { openIntakeWhere } from "./inquiryAttention.ts";
-import { taskMarkedForScheduledSend } from "./taskExecutionService.ts";
+import { attentionTaskKind, conversationNeedsPriorityAction } from "./situationPredicates.ts";
+import { PROCESS_OPEN_TASK_STATUSES } from "./dealProcessPolicy.ts";
+import { syncSituationEpisodes, recordSituationSnooze } from "./situationEpisodeService.ts";
 
 export type SituationKind =
   | "needs_phone"
@@ -76,6 +78,7 @@ export type SituationItem = {
   blocked: boolean;
   snoozedUntil: string | null;
   waitingReply?: boolean;
+  episode?: { id: string; state: string; occurrence: number; version: number; assignedMembershipId: string | null; taskId: string | null };
 };
 
 export type SituationScope = "all" | "mine" | "unassigned";
@@ -92,25 +95,6 @@ const CONVERSATION_COMMANDS = new Set<SituationNextAction>([
 
 function ageMinutes(from: Date, now: Date) {
   return Math.max(0, Math.floor((now.getTime() - from.getTime()) / 60000));
-}
-
-function zonedYmd(date: Date, timeZone: string) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(date);
-  const year = Number(parts.find((part) => part.type === "year")?.value);
-  const month = Number(parts.find((part) => part.type === "month")?.value);
-  const day = Number(parts.find((part) => part.type === "day")?.value);
-  return { year, month, day };
-}
-
-function isSameZonedDay(date: Date, now: Date, timeZone: string) {
-  const a = zonedYmd(date, timeZone);
-  const b = zonedYmd(now, timeZone);
-  return a.year === b.year && a.month === b.month && a.day === b.day;
 }
 
 function itemFreshness(args: {
@@ -166,28 +150,6 @@ function conversationBoardRank(conversation: {
   updatedAt: Date;
 }) {
   return (conversation.sellerLeadId ? 4 : 0) + (conversation.needsAttention ? 2 : 0) + (conversation.mode === "human" ? 1 : 0);
-}
-
-function conversationNeedsPriorityAction(
-  conversation: {
-    mode?: string | null;
-    needsAttention?: boolean | null;
-    attentionReason?: string | null;
-    updatedAt: Date;
-  },
-  waitingReply: boolean,
-  now: Date,
-) {
-  if (conversation.mode === "ai") return Boolean(conversation.needsAttention);
-  if (conversation.mode === "paused") {
-    return ageMinutes(conversation.updatedAt, now) >= PAUSED_SLA_MINUTES;
-  }
-  if (conversation.mode === "human") {
-    if (waitingReply) return true;
-    const reason = conversation.attentionReason || "";
-    return Boolean(conversation.needsAttention && reason && !STATUS_ONLY_ATTENTION.has(reason));
-  }
-  return false;
 }
 
 function conversationPriorityReason(
@@ -319,7 +281,7 @@ export async function getSituation(
   ) as SituationScope;
   const includeSnoozed = query.includeSnoozed === true || query.includeSnoozed === "true";
 
-  const [intakes, inquiries, conversations, tasks, snoozes, seller, contacts] = await Promise.all([
+  const [intakes, inquiries, conversations, tasks, seller, contacts] = await Promise.all([
     prisma.incompleteIntake.findMany({
       where: {
         AND: [
@@ -364,18 +326,18 @@ export async function getSituation(
       },
     }),
     prisma.task.findMany({
-      where: { AND: [taskAccessWhere(auth), { status: { in: ["open", "waiting"] } }] },
+      where: { AND: [taskAccessWhere(auth), { status: { in: PROCESS_OPEN_TASK_STATUSES } }] },
       include: {
         contact: { select: CONTACT_PHONE_SELECT },
         inquiry: { select: { subject: true, service: true, phoneRaw: true, phoneNormalized: true, contactId: true } },
       },
     }),
-    visibleSituationSnoozes(prisma, auth),
     tenantSellerFreshness(prisma, tid, locale),
     prisma.contact.findMany({
-      where: { tenantId: tid, archivedAt: null },
+      where: { tenantId: tid, archivedAt: null, lastInboundMessageAt: { not: null },
+        OR: [{ lastOutboundMessageAt: null }, { lastInboundMessageAt: { gt: prisma.contact.fields.lastOutboundMessageAt } }] },
       include: { methods: { select: { type: true, rawValue: true, normalizedValue: true, primary: true } } },
-      take: 200,
+      orderBy: [{ lastInboundMessageAt: "asc" }, { id: "asc" }],
     }),
   ]);
 
@@ -406,7 +368,6 @@ export async function getSituation(
     return inquiryInterest(linked)?.text || (contactId ? conversationInterests.get(contactId)?.text : null) || null;
   };
 
-  const snoozeByItem = snoozes;
   const inquiryIds = new Set(inquiries.map((item) => item.id));
   const intakeIds = new Set(intakes.map((item) => item.id));
   const conversationOnBoard = new Set<string>();
@@ -475,6 +436,7 @@ export async function getSituation(
       continue;
     }
     if (!["new", "accepted"].includes(inquiry.status)) continue;
+    if (inquiry.status === "accepted" && (inquiry.nextStep?.trim() || tasks.some(task => task.inquiryId === inquiry.id || task.contactId === inquiry.contactId))) continue;
     const task = tasks.find((row) => row.dedupeKey === processInquiryKey(inquiry.id) || (row.type === "process_inquiry" && row.inquiryId === inquiry.id));
     const kind: SituationKind = inquiry.status === "accepted" ? "inquiry_accepted" : "inquiry_new";
     items.push({
@@ -564,15 +526,9 @@ export async function getSituation(
     }
     if (task.conversationId && conversationOnBoard.has(task.conversationId)) continue;
 
-    if (taskMarkedForScheduledSend(task, now)) continue;
-    const overdue = Boolean(task.dueAt && task.dueAt.getTime() < now.getTime());
-    const dueToday = Boolean(task.dueAt && !overdue && isSameZonedDay(task.dueAt, now, timeZone));
-    const waitingQuiet = task.status === "waiting" && !overdue;
-    if (waitingQuiet) continue;
-    const unassignedHot = !task.dueAt && task.priority === "high" && !task.ownerMembershipId && task.status === "open";
-    if (!overdue && !dueToday && !unassignedHot) continue;
-
-    const kind: SituationKind = overdue ? "task_overdue" : dueToday ? "task_due_today" : "task_unassigned_hot";
+    const kind = attentionTaskKind(task, now, timeZone);
+    if (!kind) continue;
+    const overdue = kind === "task_overdue", dueToday = kind === "task_due_today", unassignedHot = kind === "task_unassigned_hot";
     items.push({
       id: `${kind}:${task.id}`,
       kind,
@@ -632,7 +588,7 @@ export async function getSituation(
     const hasTask = tasks.some(
       (task) =>
         (task.inquiryId === inquiry.id || task.contactId === inquiry.contactId) &&
-        (task.status === "open" || task.status === "waiting"),
+        PROCESS_OPEN_TASK_STATUSES.includes(task.status),
     );
     if (hasTask || inquiry.nextStep) continue;
     if (items.some((item) => item.entityId === inquiry.id || item.links.inquiryId === inquiry.id)) continue;
@@ -657,10 +613,15 @@ export async function getSituation(
     });
   }
 
+  const episodes = await syncSituationEpisodes(prisma, auth, items);
+  const snoozeByItem = await visibleSituationSnoozes(prisma, auth, { now, evidenceKeys: new Map([...episodes].map(([id, row]) => [id, row.evidenceKey])) });
   const visible: SituationItem[] = [];
   for (const item of items) {
+    const episode = episodes.get(item.id);
+    if (episode?.state === "resolved") continue;
+    if (episode) item.episode = episode;
     const snooze = snoozeByItem.get(item.id);
-    const active = Boolean(snooze && snooze.until.getTime() > now.getTime());
+    const active = Boolean(snooze && snooze.until.getTime() > now.getTime() && (!snooze.evidenceKey || snooze.evidenceKey === episode?.evidenceKey));
     if (active) {
       item.snoozedUntil = snooze!.until.toISOString();
       if (!includeSnoozed) continue;
@@ -711,7 +672,7 @@ export function isConversationCommand(item: SituationItem) {
 export async function snoozeSituation(
   prisma: PrismaClient,
   auth: AuthContext,
-  input: { itemId: string; until: string; reason?: string; scope?: SituationSnoozeScope },
+  input: { itemId: string; version?: number; until: string; reason?: string; scope?: SituationSnoozeScope },
 ) {
   const locale = auth.user.locale || "ru";
   const membership = requireTenant(auth);
@@ -732,11 +693,12 @@ export async function snoozeSituation(
   }
   return prisma.$transaction(async tx => {
     await assertSituationReachable(tx, auth, itemId);
+    const evidenceKey = await recordSituationSnooze(tx, auth, itemId, until, scope, input.reason, input.version);
     const storageKey = situationSnoozeKey(itemId, auth.user.id, scope);
     const row = await tx.situationSnooze.upsert({
       where: { tenantId_itemId: { tenantId: membership.tenantId, itemId: storageKey } },
-      update: { until, reason: input.reason || null, byUserId: auth.user.id },
-      create: { tenantId: membership.tenantId, itemId: storageKey, until, byUserId: auth.user.id, reason: input.reason || null },
+      update: { until, reason: input.reason || null, byUserId: auth.user.id, evidenceKey },
+      create: { tenantId: membership.tenantId, itemId: storageKey, until, byUserId: auth.user.id, reason: input.reason || null, evidenceKey },
     });
     await writeAudit(tx, { tenantId: membership.tenantId, actorUserId: auth.user.id,
       action: "situation.snoozed", entityType: "situation", entityId: itemId,

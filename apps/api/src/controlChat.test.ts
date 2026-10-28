@@ -17,6 +17,7 @@ import { startWhatsAppQrRuntime } from "./services/whatsappQrRuntime.ts";
 import { receiveWhatsAppCloud } from "./services/whatsappCloudService.ts";
 import { encryptSecret, encryptionKeyVersion } from "./lib/secretBox.ts";
 import { presentControlReply } from "./services/controlChatPresentation.ts";
+import { mapControlPeriod } from "./services/controlPeriods.ts";
 
 describe("Private WhatsApp Control", () => {
   let prisma: Awaited<ReturnType<typeof createPrismaClient>>;
@@ -65,6 +66,20 @@ describe("Private WhatsApp Control", () => {
     await saveControlChatSettings(prisma, auth, identityId, prefs());
   });
   after(() => { globalThis.fetch = nativeFetch; delete process.env.ANYMODEL_API_KEY; delete process.env.ANYMODEL_BASE_URL; invalidateRuntimeConfig(); });
+  it("passes exact deal filters from the model through the shared command service", async () => {
+    modelOutput = { action: "GET_UNCHANGED_DEALS", inactiveDays: 14, changeBasis: "stage", scope: "mine" };
+    const inactive = await ask("Проверь мои сделки: две недели на том же этапе");
+    assert.deepEqual(inactive.actionsJson, ["GET_UNCHANGED_DEALS"]);
+    assert.match(inactive.replyText!, /14 дней|только смена этапа/);
+    assert.match(inactive.replyText!, /Ответственный:/); assert.equal(modelCalls, 1);
+    modelOutput = { action: "GET_EXPECTED_PAYMENTS", period: "last_week", scope: "mine" };
+    const expected = await ask("Какие поступления мы ожидали на предыдущей календарной неделе?");
+    assert.deepEqual(expected.actionsJson, ["GET_EXPECTED_PAYMENTS"]);
+    assert.match(expected.replyText!, /Прошлая неделя/); assert.match(expected.replyText!, /Ответственный:/);
+    modelOutput = { action: "GET_LOST_REASONS", period: "this_month", taskStatus: "all" };
+    const invalid = await ask("Проанализируй причины неудач за месяц с неверным фильтром");
+    assert.deepEqual(invalid.actionsJson, []); assert.match(invalid.replyText!, /Уточните/);
+  });
   it("routes staff before customer CRM records and sends a deterministic menu to the real phone", async () => {
     const counts = async () => Promise.all([prisma.contact.count({ where: { tenantId } }), prisma.conversation.count({ where: { tenantId } }), prisma.message.count({ where: { tenantId } })]);
     const beforeCounts = await counts();
@@ -139,6 +154,32 @@ describe("Private WhatsApp Control", () => {
     assert.equal(task.title, "связаться");
     assert.equal(modelCalls, 0);
     assert.equal(await prisma.activity.count({ where: { tenantId, contactId: contact.id, type: "task.created" } }), 1);
+  });
+  it("retains a selected task owner when a WhatsApp follow-up changes only the period", async () => {
+    const p = mapControlPeriod({ period: "today" }, "Asia/Almaty");
+    const user = await prisma.user.create({ data: { name: `Control colleague ${randomUUID()}`, email: `${randomUUID()}@example.test`, passwordHash: "unused" } });
+    const colleague = await prisma.membership.create({ data: { tenantId, userId: user.id, role: "manager" } });
+    const created = [];
+    try {
+      for (const [title, ownerMembershipId, dueAt] of [
+        ["Selected owner today", colleague.id, p.from!],
+        ["Selected owner yesterday", colleague.id, new Date(p.from!.getTime() - 1)],
+        ["Different owner yesterday", auth.activeMembership!.id, new Date(p.from!.getTime() - 1)],
+      ] as const) created.push(await prisma.task.create({ data: { tenantId, type: "other", title, ownerMembershipId, dueAt } }));
+      modelOutput = { action: "GET_TASKS", assignee: user.name, period: "today" };
+      assert.match((await ask(`Покажи задачи сотрудника ${user.name} за сегодня`)).replyText!, /Уточните выбор/);
+      assert.match((await ask("1")).replyText!, /Selected owner today/);
+      const result = await ask("А за вчера?");
+      assert.match(result.replyText!, /Selected owner yesterday/);
+      assert.doesNotMatch(result.replyText!, /Selected owner today|Different owner yesterday/);
+      assert.match(result.replyText!, new RegExp(user.name));
+      assert.equal(modelCalls, 1, "The period follow-up must retain the resolved employee without another model call");
+      assert.equal(await prisma.controlConfirmation.count({ where: { tenantId, identityId } }), 0);
+    } finally {
+      await prisma.task.deleteMany({ where: { tenantId, id: { in: created.map(row => row.id) } } });
+      await prisma.membership.delete({ where: { id: colleague.id } });
+      await prisma.user.delete({ where: { id: user.id } });
+    }
   });
   it("previews a task and writes once only after its exact confirmation", async () => {
     const title = `Private task ${randomUUID()}`;
@@ -270,6 +311,9 @@ describe("Private WhatsApp Control", () => {
     const tasks = await Promise.all(links.map(link => prisma.task.create({ data: { tenantId, title: "Связаться с клиентом: Заявка из WhatsApp", type: "call", dueAt: new Date("2000-01-01T00:00:00Z"), ownerMembershipId: auth.activeMembership!.id, ...link } })));
     try {
       for (const command of ["Задачи на сегодня", "Задачи", "Просроченные задачи"]) {
+        // Today's list is restricted to today's deadlines; other lists still
+        // exercise overdue tasks from an older day.
+        await prisma.task.updateMany({ where: { tenantId, id: { in: tasks.map(task => task.id) } }, data: { dueAt: command === "Задачи на сегодня" ? new Date() : new Date("2000-01-01T00:00:00Z") } });
         const reply = (await ask(command)).replyText!;
         for (const suffix of ["01", "02", "03", "04", "05"]) assert.ok(reply.includes(`+7 701 555 01 ${suffix}`), `${command}: missing client ${suffix}`);
         for (const name of [direct.name, whatsapp.name, inquiryContact.name, dealContact.name, conversationContact.name]) assert.ok(reply.includes(name));

@@ -1445,7 +1445,7 @@ async function buildStageDurations(prisma: PrismaClient, tid: string, from: Date
   }
 
   const stages = await prisma.dealStage.findMany({ where: { tenantId: tid }, orderBy: { sortOrder: "asc" } });
-  return stages.filter(s => !s.isTerminal || byStage.has(s.systemKey) || openStuck.some(deal => deal.stage.systemKey === s.systemKey)).map((s) => {
+  return stages.filter(s => !s.isTerminal && !s.isArchived || byStage.has(s.systemKey) || openStuck.some(deal => deal.stage.systemKey === s.systemKey)).map((s) => {
     const hours = byStage.get(s.systemKey) || [];
     const avg = hours.length ? hours.reduce((a, b) => a + b, 0) / hours.length : null;
     const med = median(hours);

@@ -2,6 +2,7 @@ import { ensureSalesNextTask, enqueueSalesReconcile } from "./salesProcessServic
 import { closeDealStageInterval, recordDealStageTransition } from "./dealStageHistory.ts";
 import { queueControlNotification } from "./controlNotificationService.ts";
 import { taskTitlePresentation, updateTenantOpsSchema } from "@creolab/contracts";
+import type { z } from "zod";
 import { randomUUID } from "node:crypto";
 import { resolveEsfMeasureUnitCode } from "@creolab/contracts";
 import type { PrismaClient } from "@creolab/db";
@@ -29,6 +30,7 @@ import { getTenantDocumentFlags, isDocumentsEnabled, resolveVatRate } from "./le
 import { resolvePeriodRange, periodLabel, type PeriodPreset } from "./periodRange.ts";
 import { flagsForDeal, PROCESS_OPEN_TASK_STATUSES } from "./dealProcessPolicy.ts";
 import { createProcessClock, type ProcessClock } from "./processCalendar.ts";
+import { isBuiltInStage, processSettingsRevision, savePipeline } from "./dealPipelineSettings.ts";
 export { flagsForDeal } from "./dealProcessPolicy.ts";
 
 type DealTimeMode = "now" | "period";
@@ -161,7 +163,7 @@ export async function ensureDealPipelineStages(prisma: PrismaClient, tenantId: s
   }
 
   // Reading a board must preserve tenant labels and historical stage links.
-  return prisma.dealStage.findMany({ where: { tenantId }, orderBy: { sortOrder: "asc" } });
+  return prisma.dealStage.findMany({ where: { tenantId }, orderBy: [{ sortOrder: "asc" }, { id: "asc" }] });
 }
 
 function dealInclude() {
@@ -428,7 +430,7 @@ export async function getDealBoard(
   });
 
   const columns = stages
-    .filter((s) => !s.isTerminal || forKanban.some(deal => deal.stageId === s.id))
+    .filter((s) => !s.isTerminal && !s.isArchived || forKanban.some(deal => deal.stageId === s.id))
     .map((stage) => {
       const items = forKanban.filter((d) => d.stageId === stage.id);
       let sum = 0;
@@ -445,6 +447,7 @@ export async function getDealBoard(
         stageId: stage.id,
         systemKey: stage.systemKey,
         name: stage.name,
+        canReceiveDeals: !stage.isTerminal && !stage.isArchived,
         sortOrder: stage.sortOrder,
         count: items.length,
         amountSum: known ? sum : null,
@@ -784,16 +787,19 @@ export async function changeDealStage(
   const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: tid } });
   const processClock = createProcessClock(parseOpsSettings(tenant.settingsJson).processCalendar, tenant.timezone, now);
   await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "DealStage" WHERE id = ${toStage.id} AND "tenantId" = ${tid} FOR SHARE`;
+    const currentStage = await tx.dealStage.findUniqueOrThrow({ where: { id: toStage.id } });
+    if (currentStage.isArchived || currentStage.isTerminal) throw new ApiError(422, "stage_unavailable", "Этот этап недоступен для новых переходов. Выберите активный этап.");
     const moved = await tx.deal.updateMany({
       where: { id: dealId, tenantId: tid, version: deal.version, stageId: deal.stageId, outcome: deal.outcome },
       data: {
         stageId: toStage.id,
         stageEnteredAt: now,
-        probability: toStage.defaultProbability,
+        probability: currentStage.defaultProbability,
         outcome: "open",
         version: { increment: 1 },
-        ...(toStage.systemKey === "proposal_sent" && !deal.nextAction
-          ? { nextAction: "Связаться после предложения", nextActionAt: processClock.afterDays(now, 1) }
+        ...(toStage.systemKey === "proposal_sent" && !deal.nextAction?.trim()
+          ? { nextAction: "Связаться после предложения", nextActionAt: deal.nextActionAt || processClock.afterDays(now, 1) }
           : {}),
         ...(toStage.systemKey === "invoiced"
           ? { paymentStatus: deal.paymentStatus === "NOT_INVOICED" ? "INVOICED" : deal.paymentStatus }
@@ -1109,14 +1115,21 @@ export async function getTenantOps(prisma: PrismaClient, auth: AuthContext) {
   const tenant = await prisma.tenant.findUnique({ where: { id: membership.tenantId } });
   const ops = parseOpsSettings(tenant?.settingsJson);
   const stages = await ensureDealPipelineStages(prisma, membership.tenantId);
+  const counts = await prisma.deal.groupBy({ by: ["stageId"], where: { tenantId: membership.tenantId, outcome: { in: ["open", "on_hold"] } }, _count: { _all: true } });
   return {
     ...ops,
     timeZone: tenant?.timezone || "Asia/Almaty",
     lostReasons: lostReasonCatalog(ops),
     lostReasonsCustom: ops.lostReasons.length > 0,
+    revision: processSettingsRevision(tenant?.settingsJson, tenant?.timezone || "Asia/Almaty", stages),
     stages: stages.filter(stage => !stage.isTerminal).map((stage) => ({
+      id: stage.id,
       systemKey: stage.systemKey,
       name: stage.name,
+      defaultProbability: stage.defaultProbability,
+      isArchived: stage.isArchived,
+      isBuiltIn: isBuiltInStage(stage.systemKey),
+      openDealCount: counts.find(row => row.stageId === stage.id)?._count._all || 0,
       slaDays: ops.stageSlaDays[stage.systemKey] ?? null,
     })),
   };
@@ -1125,28 +1138,27 @@ export async function getTenantOps(prisma: PrismaClient, auth: AuthContext) {
 export async function updateTenantOps(
   prisma: PrismaClient,
   auth: AuthContext,
-  input: {
-    stalledDealDays?: number;
-    proposalFollowUpThresholdDays?: number;
-    silenceReturnDays?: number;
-    lostReasons?: string[];
-    salesPlanMinor?: number | null;
-    stageSlaDays?: Record<string, number | null>;
-    processCalendar?: ReturnType<typeof parseOpsSettings>["processCalendar"];
-  },
+  input: z.infer<typeof updateTenantOpsSchema>,
 ) {
   requireCompanyAdmin(auth);
   const membership = requireTenant(auth);
   const parsed = updateTenantOpsSchema.safeParse(input);
   if (!parsed.success) throw new ApiError(422, "invalid", "Проверьте сроки и рабочий календарь.");
   input = parsed.data;
+  if (input.pipeline) await ensureDealPipelineStages(prisma, membership.tenantId);
   await prisma.$transaction(async tx => {
     await tx.$queryRaw`SELECT id FROM "Tenant" WHERE id = ${membership.tenantId} FOR UPDATE`;
     const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: membership.tenantId } });
+    await tx.$queryRaw`SELECT id FROM "DealStage" WHERE "tenantId" = ${membership.tenantId} ORDER BY id FOR UPDATE`;
+    const stages = await tx.dealStage.findMany({ where: { tenantId: membership.tenantId } });
+    if (input.revision && input.revision !== processSettingsRevision(tenant.settingsJson, tenant.timezone, stages)) {
+      throw new ApiError(409, "settings_changed", "Правила уже изменены в другой вкладке. Загрузите актуальные настройки и повторите изменение.");
+    }
     const current = tenant?.settingsJson && typeof tenant.settingsJson === "object"
       ? { ...(tenant.settingsJson as Record<string, unknown>) }
       : {};
     const ops = parseOpsSettings(current);
+    if (input.pipeline) await savePipeline(tx, membership.tenantId, input.pipeline, stages, ops);
     if (typeof input.stalledDealDays === "number") ops.stalledDealDays = Math.max(1, Math.min(90, input.stalledDealDays));
     if (typeof input.proposalFollowUpThresholdDays === "number") {
       ops.proposalFollowUpThresholdDays = Math.max(1, Math.min(90, input.proposalFollowUpThresholdDays));
@@ -1174,7 +1186,7 @@ export async function updateTenantOps(
       action: "settings.ops_updated",
       entityType: "tenant",
       entityId: membership.tenantId,
-      changes: { ops },
+      changes: { ops, ...(input.pipeline ? { pipeline: input.pipeline, previousPipeline: stages.map(({ id, systemKey, name, sortOrder, defaultProbability, isArchived }) => ({ id, systemKey, name, sortOrder, defaultProbability, isArchived })) } : {}) },
     });
   });
   return getTenantOps(prisma, auth);

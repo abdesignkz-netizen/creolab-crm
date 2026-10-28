@@ -92,6 +92,7 @@ import {
   segmentPreviewSchema,
   sendMessageSchema,
   snoozeSituationSchema,
+  situationEpisodeActionSchema,
   askSituationSchema,
   taskAttachmentSchema,
   updateCampaignSchema,
@@ -252,6 +253,7 @@ import {
 import { analyzeAndApplyConversation } from "./services/conversationContextApplyService.ts";
 import { analyzeConversationContext, listAgreementsForConversation } from "./services/conversationContextService.ts";
 import { getSituation, snoozeSituation } from "./services/situationService.ts";
+import { actOnSituationEpisode, situationEpisodeDetails, situationEpisodeHistory } from "./services/situationEpisodeService.ts";
 import { getNavBadges } from "./services/navBadgesService.ts";
 import {
   claimAllAiConversations,
@@ -938,6 +940,16 @@ export function createApp(prisma: PrismaClient) {
   app.post("/api/v1/situation/snooze", json, async (req, res) => {
     const input = snoozeSituationSchema.parse(req.body);
     res.json(await snoozeSituation(prisma, await requireAuth(req), input));
+  });
+
+  app.get("/api/v1/situation/history", async (req, res) => {
+    res.json(await situationEpisodeHistory(prisma, await requireAuth(req)));
+  });
+  app.get("/api/v1/situation/episode", async (req, res) => {
+    res.json(await situationEpisodeDetails(prisma, await requireAuth(req), String(req.query.itemId || "")));
+  });
+  app.post("/api/v1/situation/episode", json, async (req, res) => {
+    res.json(await actOnSituationEpisode(prisma, await requireAuth(req), situationEpisodeActionSchema.parse(req.body)));
   });
 
   app.post("/api/v1/situation/ask", json, async (req, res) => {

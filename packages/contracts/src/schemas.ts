@@ -407,10 +407,20 @@ export const assignConversationSchema = z.object({
 
 export const snoozeSituationSchema = z.object({
   itemId: z.string().min(3).max(120),
+  version: z.number().int().positive().optional(),
   until: z.string().datetime(),
   reason: z.string().trim().max(400).optional(),
   scope: z.enum(["personal", "company"]).default("personal"),
 });
+
+const situationActionBase = { itemId: z.string().min(3).max(120), version: z.number().int().positive() };
+export const situationEpisodeActionSchema = z.discriminatedUnion("action", [
+  z.object({ ...situationActionBase, action: z.literal("check") }),
+  z.object({ ...situationActionBase, action: z.literal("assign"), membershipId: z.string().uuid() }),
+  z.object({ ...situationActionBase, action: z.literal("create_task"), title: z.string().trim().min(3).max(240),
+    dueAt: z.string().datetime(), membershipId: z.string().uuid() }),
+  z.object({ ...situationActionBase, action: z.literal("link_task"), taskId: z.string().uuid() }),
+]);
 
 export const askSituationSchema = z.object({
   text: z.string().trim().min(2).max(500),
@@ -445,7 +455,16 @@ export const updateTenantOpsSchema = /* @__PURE__ */ (() => z.object({
   lostReasons: z.array(z.string().trim().min(1).max(80)).max(40).optional(),
   stageSlaDays: z.record(z.string().min(1).max(80), z.number().min(1).max(90).nullable()).optional(),
   processCalendar: processCalendarSchema.optional(),
-}))();
+  revision: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  pipeline: z.array(z.object({
+    id: z.string().uuid().optional(),
+    systemKey: z.string().min(1).max(64),
+    name: z.string().trim().min(1).max(80),
+    defaultProbability: z.number().int().min(0).max(100),
+    isArchived: z.boolean(),
+    slaDays: z.number().min(1).max(90).nullable(),
+  }).strict()).min(1).max(100).optional(),
+}).refine(value => !value.pipeline || Boolean(value.revision), { message: "Обновите правила перед изменением этапов." }))();
 
 export const updateContactSchema = z
   .object({

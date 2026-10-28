@@ -222,7 +222,7 @@ async function assess(tx: Tx, auth: AuthContext, review: Review, createdAt: Date
     await tx.electronicDocument.count({ where: { tenantId: tid, dealId: { in: dealIds } } }))) blockedReason = "related_activity";
   for (const record of review.records.filter(r => r.kind === "deal")) {
     const stages = await tx.dealStage.findMany({ where: { tenantId: tid, id: { in: [String(record.before!.stageId), String(record.after.stageId)] } } });
-    if (!blockedReason && (stages.length !== new Set([record.before!.stageId, record.after.stageId]).size || stages.some(s => s.isTerminal) || record.after.outcome !== "open")) blockedReason = "related_activity";
+    if (!blockedReason && (stages.length !== new Set([record.before!.stageId, record.after.stageId]).size || stages.some(s => s.isTerminal || s.isArchived) || record.after.outcome !== "open")) blockedReason = "related_activity";
   }
   return { evidence, blockedReason };
 }

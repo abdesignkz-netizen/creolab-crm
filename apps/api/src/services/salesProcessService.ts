@@ -8,11 +8,16 @@ import { ApiError } from "../errors.ts";
 import { writeActivity } from "./contactService.ts";
 import { createStaffNotification } from "./notificationService.ts";
 import type { ConversationAnalysis } from "./conversationContextTypes.ts";
+import { createProcessClock } from "./processCalendar.ts";
+import { parseOpsSettings } from "./dealPipeline.ts";
 
 type Tx = Prisma.TransactionClient;
 export const salesRecord = (raw: unknown): Record<string, any> => raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, any> : {};
 const json = (raw: unknown) => JSON.parse(JSON.stringify(raw)) as Prisma.InputJsonValue;
 export function tenantSalesSettings(raw: unknown) { return parseSalesProcess(salesRecord(salesRecord(raw).aiAutomation).salesProcess); }
+export function salesFollowUpDueAt(tenant: { settingsJson: unknown; timezone: string }, hours: number, from = new Date()) {
+  return createProcessClock(parseOpsSettings(tenant.settingsJson).processCalendar, tenant.timezone, from).afterHours(from, hours);
+}
 type Candidate = { conversationId: string; inquiryId: string | null; contactId: string; sourceMessageId: string;
   messageRevision: number; title: string; nextAction: string; ownerId: string | null; reason: string; evidenceMessageIds: string[] };
 
@@ -72,10 +77,11 @@ async function createSalesDeal(tx: Tx, tid: string, c: Candidate, settings: Sale
     update: {}, create: { tenantId: tid, systemKey: "new", name: "Новая", sortOrder: 1, defaultProbability: 10 } });
   const inquiry = c.inquiryId ? await tx.inquiry.findFirst({ where: { id: c.inquiryId, tenantId: tid, contactId: c.contactId } }) : null;
   const ownerId = await activeOwner(tx, tid, [c.ownerId, settings.assigneeMembershipId]);
-  const dueAt = new Date(Date.now() + settings.nextStepHours * 3600000);
+  const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: tid } });
+  const dueAt = salesFollowUpDueAt(tenant, settings.nextStepHours);
   const deal = await tx.deal.create({ data: { tenantId: tid, contactId: c.contactId, companyId: inquiry?.companyId,
     inquiryId: inquiry?.id, title: c.title, description: c.reason, stageId: stage.id, assigneeMembershipId: ownerId,
-    nextAction: c.nextAction, nextActionAt: dueAt, currency: (await tx.tenant.findUniqueOrThrow({ where: { id: tid } })).currency,
+    nextAction: c.nextAction, nextActionAt: dueAt, currency: tenant.currency, probability: stage.defaultProbability,
   } });
   await linkSalesDeal(tx, tid, c, deal.id);
   await tx.dealStageHistory.create({ data: { tenantId: tid, dealId: deal.id, toStageId: stage.id, toSystemKey: stage.systemKey,
@@ -118,8 +124,7 @@ export async function ensureSalesNextTask(tx: Tx, tid: string, dealId: string, c
   const changes: Array<{ id: string; before: typeof managed }> = [];
   const other = await tx.task.findFirst({ where: { tenantId: tid, dealId, status: { in: ["open", "in_progress", "waiting"] }, OR: [{ dedupeKey: null }, { dedupeKey: { not: key } }] }, orderBy: { dueAt: "asc" } });
   if (other) return;
-  const title = deal.nextAction || "Согласовать следующий шаг с клиентом";
-  const dueAt = deal.nextActionAt || managed?.dueAt || new Date(Date.now() + settings.nextStepHours * 3600000);
+  const title = deal.nextAction?.trim() || "Согласовать следующий шаг с клиентом";
   const old = salesRecord(managed?.contextSnapshotJson).salesManaged;
   // A new, explicitly changed step may follow a completed task; never reopen the old one.
   if (managed?.status === "done" && old && deal.nextAction && (deal.nextAction !== old.title || deal.nextActionAt && deal.nextActionAt.toISOString() !== old.dueAt)) {
@@ -129,6 +134,7 @@ export async function ensureSalesNextTask(tx: Tx, tid: string, dealId: string, c
   }
   if (managed && (managed.status !== "open" || managed.title !== old?.title || managed.dueAt?.toISOString() !== old?.dueAt || managed.ownerMembershipId !== old?.ownerId)) return;
   if (managed && salesRecord(managed.contextSnapshotJson).manualEditId) return;
+  const dueAt = deal.nextActionAt || managed?.dueAt || salesFollowUpDueAt(tenant, settings.nextStepHours);
   if (managed && managed.title === title && managed.dueAt?.getTime() === dueAt.getTime() && managed.ownerMembershipId === deal.assigneeMembershipId) return;
   const data = { title, dueAt, ownerMembershipId: deal.assigneeMembershipId,
     contextSnapshotJson: json(taskCreatorSnapshot({ createdByKind: "ai", executorType: "USER", existing: { ...salesRecord(managed?.contextSnapshotJson), salesManaged: { title, dueAt: dueAt.toISOString(), ownerId: deal.assigneeMembershipId, manualPlan: Boolean(old?.manualPlan || old && !aiPlanChanged && (title !== old.title || dueAt.toISOString() !== old.dueAt)) } } })) };
