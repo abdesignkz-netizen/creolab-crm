@@ -81,7 +81,7 @@ try {
       const initialized = spawnSync(process.execPath, ["node_modules/prisma/build/index.js", "db", "execute", "--schema", "packages/db/prisma/schema.prisma", "--file", "packages/db/prisma/init.sql"], { cwd: root, stdio: "inherit", env });
       if (initialized.status !== 0) throw new Error(`PostgreSQL baseline failed for ${file}`);
     }
-    const result = spawnSync(process.execPath, ["--experimental-strip-types", "--test", file], { cwd: root, stdio: "inherit", env });
+    const result = spawnSync(process.execPath, ["--experimental-strip-types", "--test-reporter=tap", "--test", file], { cwd: root, stdio: "inherit", env });
     if (result.status !== 0) { failures += 1; failedFiles.push(file); }
   }
 } finally {

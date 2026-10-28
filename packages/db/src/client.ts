@@ -31,35 +31,9 @@ function isLivePostgresUrl(url: string | undefined): boolean {
 }
 
 export async function applyLivePostgresPatches(prisma: PrismaClient) {
-  const statements = [
-    `ALTER TABLE "DealStage" ADD COLUMN IF NOT EXISTS "isArchived" BOOLEAN NOT NULL DEFAULT false`,
-    `ALTER TABLE "Conversation" ADD COLUMN IF NOT EXISTS "aiHandoffSummaryJson" JSONB NOT NULL DEFAULT '{}'`,
-    ...TENANT_SERVICES_SQL.split(";").map((s) => s.trim()).filter(Boolean),
-    ...DEAL_NUMBER_SQL.split(";").map((s) => s.trim()).filter(Boolean),
-    `ALTER TABLE "Campaign" ADD COLUMN IF NOT EXISTS "personalizeEach" BOOLEAN DEFAULT false`,
-    `ALTER TABLE "CampaignRecipient" ADD COLUMN IF NOT EXISTS "messageDraft" TEXT`,
-    ...DOCUMENT_DOMAIN_SQL.split(";")
-      .map((s) => s.trim())
-      .filter(Boolean),
-    ...ACCOUNT_DOMAIN_SQL.split(";")
-      .map((s) => s.trim())
-      .filter(Boolean),
-    ...PLATFORM_DOMAIN_SQL.split(";")
-      .map((s) => s.trim())
-      .filter(Boolean),
-    ...AI_DOMAIN_SQL.split(";")
-      .map((s) => s.trim())
-      .filter(Boolean),
-    ...SUPPORT_DOMAIN_SQL.split(";")
-      .map((s) => s.trim())
-      .filter(Boolean),
-    ...CONTROL_DOMAIN_SQL.split(";")
-      .map((s) => s.trim())
-      .filter(Boolean),
-    ...BILLING_DOMAIN_SQL.split(";")
-      .map((s) => s.trim())
-      .filter(Boolean),
-  ];
+  // Both runtimes must upgrade the same baseline in the same order. A partial
+  // live-only manifest previously altered Company before that table existed.
+  const statements = additiveSchemaSql().split(";").map(s => s.trim()).filter(Boolean);
   await applyRequiredSchemaPatches(prisma, [
     { name: "core", statements },
     { name: "avr-signing", statements: AVR_SIGNING_SQL.split(";").map(s => s.trim()).filter(Boolean) },
@@ -86,9 +60,14 @@ async function applyInitSql(pglite: PGlite) {
 }
 
 async function applyAdditiveSchema(pglite: PGlite) {
-  await pglite.exec(`
+  await pglite.exec(additiveSchemaSql());
+}
+
+function additiveSchemaSql() {
+  return `
     ${TENANT_SERVICES_SQL}
     ${DEAL_NUMBER_SQL}
+    ALTER TABLE "DealStage" ADD COLUMN IF NOT EXISTS "isArchived" BOOLEAN NOT NULL DEFAULT false;
     CREATE TABLE IF NOT EXISTS "SituationSnooze" (
       "id" TEXT NOT NULL,
       "tenantId" TEXT NOT NULL,
@@ -546,7 +525,7 @@ async function applyAdditiveSchema(pglite: PGlite) {
     ${SUPPORT_DOMAIN_SQL}
     ${CONTROL_DOMAIN_SQL}
     ${BILLING_DOMAIN_SQL}
-  `);
+  `;
 }
 
 const DOCUMENT_DOMAIN_SQL = `

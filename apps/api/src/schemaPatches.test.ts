@@ -3,12 +3,37 @@ import { after, before, describe, it } from "node:test";
 import { createPrismaClient } from "@creolab/db";
 import { applyRequiredSchemaPatches } from "../../../packages/db/src/schemaPatches.ts";
 import { applyLivePostgresPatches } from "../../../packages/db/src/client.ts";
+import { applyBillingMigration } from "../../../packages/db/src/billingMigration.ts";
+import { readFile } from "node:fs/promises";
+import { PGlite } from "@electric-sql/pglite";
+import { PrismaPGlite } from "pglite-prisma-adapter";
+import { PrismaClient } from "@prisma/client";
 
 describe("required startup schema patches", () => {
   let db: Awaited<ReturnType<typeof createPrismaClient>>;
   before(async () => { db = await createPrismaClient(); });
   after(async () => { await db.$disconnect(); });
   const create = 'CREATE TABLE IF NOT EXISTS "SchemaPatchTest" (id INTEGER PRIMARY KEY)';
+
+  it("upgrades the shipped baseline without relying on PGlite-only initialization", async () => {
+    const pg = new PGlite();
+    const fresh = new PrismaClient({ adapter: new PrismaPGlite(pg) } as never);
+    try {
+      await pg.exec(await readFile(new URL("../../../packages/db/prisma/init.sql", import.meta.url), "utf8"));
+      await applyLivePostgresPatches(fresh);
+      await applyBillingMigration(fresh);
+      await applyLivePostgresPatches(fresh);
+      await applyBillingMigration(fresh);
+      assert.equal(await fresh.company.count(), 0);
+      assert.equal(await fresh.agreement.count(), 0);
+      assert.equal(await fresh.situationEpisode.count(), 0);
+      assert.equal(await fresh.billingOrder.count(), 0);
+      const tenant = await fresh.tenant.create({ data: { name: "Retained", slug: "retained" } });
+      await fresh.company.create({ data: { tenantId: tenant.id, name: "Preserved company" } });
+      await applyLivePostgresPatches(fresh);
+      assert.equal(await fresh.company.count(), 1);
+    } finally { await fresh.$disconnect(); await pg.close(); }
+  });
 
   it("accepts the full live patch manifest on the existing isolated schema, including repeat startup", async () => {
     await applyLivePostgresPatches(db);
