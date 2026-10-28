@@ -93,5 +93,6 @@ try {
   }
 }
 console.log(`\n${files.length - failures}/${files.length} test files passed (isolated ${postgres ? "PostgreSQL" : "PGlite"} databases; external providers disabled).`);
+if (process.env.CI) console.log(`::notice title=Database acceptance results::${files.length - failures}/${files.length} files passed on isolated ${postgres ? "PostgreSQL" : "PGlite"}; external providers disabled.`);
 if (failedFiles.length) console.error(`Failed files:\n${failedFiles.join("\n")}`);
 process.exitCode = failures ? 1 : 0;

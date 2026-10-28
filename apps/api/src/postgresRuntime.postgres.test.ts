@@ -61,7 +61,7 @@ test("real PostgreSQL migration, process contention and backup restoration", asy
   await t.test("four independent workers produce one effect for the same queued event", async () => {
     const tenant = await db.tenant.findUniqueOrThrow({ where: { slug: "pg-acceptance-retained" } });
     await db.$executeRawUnsafe('CREATE TABLE "AcceptanceEffect" ("eventId" TEXT NOT NULL)');
-    const event = await db.outboxEvent.create({ data: { tenantId: tenant.id, type: "acceptance.synthetic", entityType: "tenant", entityId: tenant.id } });
+    const event = await db.outboxEvent.create({ data: { tenantId: tenant.id, type: "acceptance.synthetic", entityType: "tenant", entityId: tenant.id, payloadJson: {} } });
     const results = await workers("claim", event.id);
     assert.equal(results.filter(item => item.claimed).length, 1);
     const effects = await db.$queryRaw<Array<{ count: bigint }>>`SELECT COUNT(*) FROM "AcceptanceEffect" WHERE "eventId" = ${event.id}`;
