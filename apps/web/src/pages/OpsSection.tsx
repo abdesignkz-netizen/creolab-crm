@@ -1,7 +1,8 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { analyticsText } from "../lib/analyticsCopy";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useLocation } from "react-router-dom";
 import { processCalendarSchema, type ProcessCalendar } from "@creolab/contracts";
 import { api } from "../lib/api";
-import { useUiText } from "../lib/uiText";
 import { InlineFeedback } from "../components/InlineFeedback";
 import { notifySaved } from "../components/SaveNotice";
 import { t, type Locale } from "../i18n";
@@ -11,28 +12,35 @@ import OpsStageEditor, { type EditableStage } from "./OpsStageEditor";
 
 type Ops = {
   stalledDealDays: number | string; proposalFollowUpThresholdDays: number | string; silenceReturnDays: number | string;
-  salesPlanMinor: number | null; lostReasons: string[]; timeZone: string;
+  salesPlanMinor: number | null; salesPlans: Array<{ month: string; amount: number | string; currency: string }>; currency: string; lostReasons: string[]; timeZone: string;
   processCalendar: ProcessCalendar;
   revision: string; stages: EditableStage[];
 };
 const weekdays = [[1, "Понедельник"], [2, "Вторник"], [3, "Среда"], [4, "Четверг"], [5, "Пятница"], [6, "Суббота"], [0, "Воскресенье"]] as const;
 
 export default function OpsSection({ locale, onDirtyChange }: { locale: Locale; onDirtyChange?: (dirty: boolean) => void }) {
-  const ui = useUiText();
-  const text = (value: string) => locale === "kk" && opsKk[value] ? opsKk[value] : ui(value);
+  const text = (value: string) => locale === "kk" && opsKk[value] ? opsKk[value] : analyticsText(value, {}, locale);
   const [ops, setOps] = useState<Ops | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [lostText, setLostText] = useState("");
   const [excluded, setExcluded] = useState("");
-  const [plan, setPlan] = useState("");
   const [dirty, setDirty] = useState(false);
   const [reloadPrompt, setReloadPrompt] = useState(false);
+  const { hash } = useLocation();
+  const salesPlanRef = useRef<HTMLDetailsElement>(null);
+  const ready = Boolean(ops);
+  useEffect(() => {
+    if (hash !== "#sales-plan" || !ready || !salesPlanRef.current) return;
+    salesPlanRef.current.open = true;
+    salesPlanRef.current.scrollIntoView({ block: "start" });
+    salesPlanRef.current.focus({ preventScroll: true });
+  }, [hash, ready]);
 
   function accept(data: Ops) {
-    setOps(data); setLostText((data.lostReasons || []).join("\n"));
+    setOps({ ...data, salesPlans: data.salesPlans || [] }); setLostText((data.lostReasons || []).join("\n"));
     setExcluded(data.processCalendar.excludedDates.join("\n"));
-    setPlan(data.salesPlanMinor != null ? String(data.salesPlanMinor) : ""); setDirty(false); setReloadPrompt(false);
+    setDirty(false); setReloadPrompt(false);
   }
   async function load() {
     setError(""); setBusy(true);
@@ -47,8 +55,12 @@ export default function OpsSection({ locale, onDirtyChange }: { locale: Locale; 
 
   async function save(event: FormEvent) {
     event.preventDefault(); if (!ops || busy) return;
-    const planNumber = plan.trim() ? Number(plan.replace(/\s+/g, "").replace(",", ".")) : null;
-    if (planNumber !== null && (!Number.isFinite(planNumber) || planNumber < 0)) { setError(text("Укажите положительную сумму или оставьте поле пустым")); return; }
+    const plans = ops.salesPlans.map(row => ({ ...row, amount: Number(String(row.amount).replace(/\s+/g, "")) }));
+    if (plans.some((row, i) => !/^[1-9]\d{3}-(0[1-9]|1[0-2])$/.test(row.month) || !/^[A-Z]{3}$/.test(row.currency)
+      || String(ops.salesPlans[i].amount).trim() === "" || !Number.isSafeInteger(row.amount) || row.amount < 0)
+      || new Set(plans.map(row => `${row.month}:${row.currency}`)).size !== plans.length) {
+      setError(text("Укажите месяц, валюту и целую неотрицательную сумму. Месяц и валюта не должны повторяться.")); return;
+    }
     if (!ops.processCalendar.days.length) { setError(text("Выберите хотя бы один рабочий день")); return; }
     const schedule = processCalendarSchema.safeParse({ ...ops.processCalendar, excludedDates: [...new Set(excluded.split(/[\n,]+/).map(line => line.trim()).filter(Boolean))] });
     if (!schedule.success) { setError(text("Проверьте рабочее время и даты дополнительных выходных.")); return; }
@@ -58,7 +70,7 @@ export default function OpsSection({ locale, onDirtyChange }: { locale: Locale; 
         stalledDealDays: Number(ops.stalledDealDays),
         proposalFollowUpThresholdDays: Number(ops.proposalFollowUpThresholdDays),
         silenceReturnDays: Number(ops.silenceReturnDays),
-        salesPlanMinor: planNumber === null ? null : Math.round(planNumber),
+        salesPlans: plans,
         lostReasons: lostText.split("\n").map(line => line.trim()).filter(Boolean),
         revision: ops.revision,
         pipeline: ops.stages.map(({ id, systemKey, name, defaultProbability, isArchived, slaDays }) => ({ id, systemKey, name, defaultProbability: Number(defaultProbability), isArchived, slaDays })),
@@ -110,8 +122,19 @@ export default function OpsSection({ locale, onDirtyChange }: { locale: Locale; 
         <p className="ops-note">{text("Следующий шаг — действие со сроком или связанная задача со сроком. Ожидание клиента не отменяет просрочку.")}</p>
       </section>
       <OpsStageEditor stages={ops.stages} text={text} business={business} onChange={stages => change({ stages })} />
-      <details className="ops-block"><summary>{text("План продаж и причины потери")}</summary>
-        <label>{text("План продаж за период, ₸")}<input inputMode="decimal" value={plan} onChange={event => { setPlan(event.target.value); setDirty(true); }} /></label>
+      <details className="ops-block" id="sales-plan" ref={salesPlanRef} tabIndex={-1}><summary>{text("План продаж и причины потери")}</summary>
+        <h3>{text("План продаж по месяцам")}</h3>
+        <p className="muted">{text("План задаётся для всей компании. За часть месяца используется доля календарных дней; разные валюты считаются отдельно.")}</p>
+        {ops.salesPlanMinor != null && !ops.salesPlans.length ? <p className="ops-note">{analyticsText("Прежний план без периода: {amount}. Он сохранён, но не участвует в расчёте. Укажите месяц для нового плана.", { amount: String(ops.salesPlanMinor) }, locale)}</p> : null}
+        <div className="ops-stages">{ops.salesPlans.map((row, index) => <div className="ops-stage" key={index}>
+          <div className="ops-grid">
+            <label>{text("Месяц плана")}<input type="month" required value={row.month} onChange={event => change({ salesPlans: ops.salesPlans.map((item, i) => i === index ? { ...item, month: event.target.value } : item) })} /></label>
+            <label>{text("Сумма плана")}<input inputMode="numeric" required value={row.amount} onChange={event => change({ salesPlans: ops.salesPlans.map((item, i) => i === index ? { ...item, amount: event.target.value } : item) })} /></label>
+            <label>{text("Валюта")}<input required maxLength={3} pattern="[A-Z]{3}" value={row.currency} onChange={event => change({ salesPlans: ops.salesPlans.map((item, i) => i === index ? { ...item, currency: event.target.value.toUpperCase() } : item) })} /></label>
+          </div>
+          <button className="btn secondary ops-add-stage" type="button" onClick={() => change({ salesPlans: ops.salesPlans.filter((_, i) => i !== index) })}>{text("Удалить месяц плана")}</button>
+        </div>)}</div>
+        <button className="btn secondary ops-add-stage" type="button" disabled={ops.salesPlans.length >= 120} onClick={() => change({ salesPlans: [...ops.salesPlans, { month: "", amount: "", currency: ops.currency || "KZT" }] })}>{text("Добавить месяц")}</button>
         <label>{text("Причины потери — по одной на строку")}<textarea rows={6} value={lostText} onChange={event => { setLostText(event.target.value); setDirty(true); }} /></label>
       </details>
       <div className="ops-save"><span className="muted" role="status">{dirty ? text("Есть несохранённые изменения") : text("Настройки сохранены")}</span>

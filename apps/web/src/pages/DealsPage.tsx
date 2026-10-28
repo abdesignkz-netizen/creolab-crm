@@ -1,3 +1,4 @@
+import { FinancialBreakdown } from "../components/FinancialBreakdown";
 import { useEsfEnabled } from "../lib/session";
 import { WorkspaceSectionNav } from "../components/WorkspaceSectionNav";
 import { InlineFeedback } from "../components/InlineFeedback";
@@ -351,6 +352,12 @@ export function DealsPage() {
         <button className="btn secondary" onClick={() => navigate(`/deals?${new URLSearchParams({ timeMode, period, from: dateFrom, to: dateTo, basis, scope })}`)}>{uiText("Снять отбор")}</button>
       </div> : null}
 
+      <aside className="financial-note">
+        <p>{s.mode === "period" ? uiText("Продажи — по дате закрытия сделки. Оплаты — по дате подтверждения платежа. Валюты не суммируются.") : uiText("Ожидаемая оплата — остаток по выставленным счетам открытых сделок после подтверждённых платежей.")}</p>
+        <p>{uiText("Денежные показатели и графики: {currency}.", { currency: data.currency })}</p>
+        <FinancialBreakdown currency={data.currency} sales={s.salesByCurrency} receipts={s.receiptsByCurrency} pipeline={s.pipelineByCurrency} outstanding={s.expectedPaymentsByCurrency} />
+        {data.limitReached && data.focus !== "all" ? <p role="status">{uiText("Фильтр внимания и его суммы проверены по первым 500 сделкам. Сузьте отбор, чтобы увидеть полный результат.")}</p> : null}
+      </aside>
       <div className="sit-kpi-grid deals-summary" style={{ marginTop: 12 }}>
         {s.mode === "period" ? (
           <>
@@ -367,8 +374,12 @@ export function DealsPage() {
               <strong>{s.lostDeals ?? "—"}</strong>
             </div>
             <div className="sit-kpi">
-              <span className="muted">{uiText("Продано")}</span>
+              <span className="muted">{uiText("Сумма продаж")}</span>
               <strong>{s.soldAmountLabel || "—"}</strong>
+            </div>
+            <div className="sit-kpi">
+              <span className="muted">{uiText("Подтверждённые оплаты")}</span>
+              <strong>{s.receiptsLabel || "—"}</strong>
             </div>
           </>
         ) : (
@@ -506,7 +517,7 @@ export function DealsPage() {
           <button type="button" className="btn secondary" onClick={() => navigate(`/deals?view=${view}`)}>{uiText("Сбросить фильтры")}</button>
         </div>
       </details>
-      {data.limitReached ? <p className="warn">{uiText("Показаны первые")}{" "}{data.limit} {" "}{uiText("сделок. Уточните период, этап или ответственного, чтобы сузить список.")}</p> : null}
+      {data.limitReached ? <p className="warn">{uiText("Показаны первые")}{" "}{data.limit} {" "}{uiText("сделок. Уточните период, этап или ответственного, чтобы сузить список.")}{" "}{uiText("Суммы в колонках доски относятся к показанным карточкам.")}</p> : null}
       {view === "list" ? <DealList items={data.items || [...(data.columns || []).flatMap((column: any) => column.deals), ...(data.onHold || [])]} documentsAllowed={caps.documents && data.documentsAllowed !== false} onOpenContract={setSelectedContractId} /> : <div className="deal-kanban">
         {(data.columns || []).map((col: any) => (
           <div
@@ -823,10 +834,8 @@ export function DealDetailPage() {
 
   const d = data.deal;
   const payments = data.payments || [];
-  const paidTotal = payments.reduce((sum: number, p: any) => sum + Number(p.amountMinor || 0), 0);
-  const dealAmount = d.amount != null ? Number(d.amount) : null;
-  const remaining =
-    dealAmount != null && Number.isFinite(dealAmount) ? Math.max(0, dealAmount - paidTotal) : null;
+  const paymentSummary = data.paymentSummary;
+  const remaining = paymentSummary?.remaining?.amount ?? null;
 
   return (
     <section className="deal-detail">
@@ -1251,16 +1260,18 @@ export function DealDetailPage() {
       <div className="panel">
         <b>{uiText("Платежи")}</b>
         <div className="muted" style={{ marginBottom: 8 }}>
-          {uiText("Оплачено:")}{" "}{paidTotal.toLocaleString(uiFormatLocale())} ₸
-          {remaining != null ? uiText(" · остаток: {p0} ₸", {p0: remaining.toLocaleString(uiFormatLocale())}) : ""}
+          {uiText("Подтверждённые оплаты")}: {paymentSummary?.label || "—"}
+          {paymentSummary?.remaining?.label != null ? uiText(" · остаток: {amount}", { amount: paymentSummary.remaining.label }) : ""}
         </div>
+        <FinancialBreakdown currency={d.currency} receipts={paymentSummary?.byCurrency} />
+        {uiText("Остаток учитывает только подтверждённые платежи в валюте сделки.")}
         {payments.length === 0 ? <p className="empty">{uiText("Платежей пока нет")}</p> : null}
         {payments.map((p: any) => (
           <div className="row" key={p.id}>
             <div>
-              <b>{Number(p.amountMinor || 0).toLocaleString(uiFormatLocale())} {p.currency || "KZT"}</b>
+              <b>{p.amountLabel || "—"}</b> <span className="badge">{p.status === "confirmed" ? uiText("Подтверждено") : uiText("Не учтён в оплате")}</span>
               <div className="muted">
-                {p.createdAt ? new Date(p.createdAt).toLocaleString(uiFormatLocale()) : ""}
+                {p.confirmedAt ? new Date(p.confirmedAt).toLocaleString(uiFormatLocale()) : ""}
                 {p.comment ? ` · ${p.comment}` : ""}
               </div>
             </div>
@@ -1268,7 +1279,7 @@ export function DealDetailPage() {
         ))}
         <div className="deal-edit" style={{ marginTop: 12 }}>
           <label>
-            {uiText("Сумма платежа (₸)")}<input
+            {uiText("Сумма платежа ({currency})", { currency: d.currency === "KZT" ? "₸" : d.currency })}<input
               value={payAmount}
               onChange={(e) => setPayAmount(e.target.value)}
               placeholder={remaining != null && remaining > 0 ? String(remaining) : uiText("например 150000")}

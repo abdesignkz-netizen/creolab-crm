@@ -1,0 +1,70 @@
+{
+  "stage": "7.1",
+  "date": "2026-10-28",
+  "status": "implemented_and_automated_checks_passed",
+  "deployed": false,
+  "productionDataChanged": false,
+  "externalMessagesSent": false,
+  "databaseSchemaChanged": false,
+  "tests": {
+    "api": {
+      "financialReporting": 7,
+      "analyticsCompleteness": 5,
+      "controlPeriods": 6,
+      "controlWeb": 11,
+      "dealList": 4,
+      "situationPermissions": 6,
+      "aiControl": 16,
+      "dealSaveRegression": 3,
+      "avrWorkflow": 16
+    },
+    "web": {
+      "systemLocale": 26
+    },
+    "uniquePassed": 100,
+    "failed": 0
+  },
+  "verification": {
+    "typecheck": "passed",
+    "webBuild": "passed",
+    "initialBundleBudget": "passed",
+    "diffCheck": "passed",
+    "browserVisual": "blocked_browser_control_disabled",
+    "docker": "not_run",
+    "realPostgresql": "not_run",
+    "production": "not_run"
+  },
+  "financeRules": {
+    "salesDate": "closedAt",
+    "receiptsDate": "confirmedAt",
+    "paymentStatus": "confirmed",
+    "amountUnits": "whole_currency_units_legacy_convention",
+    "currencyConversion": false,
+    "agreedZeroOverridesOffer": true,
+    "unknownAmountIsNotZero": true,
+    "exactDecimalCalculations": true
+  },
+  "limits": {
+    "paymentDrilldownRows": 500,
+    "boardCards": 500,
+    "detailsMayBePartial": true,
+    "visualAcceptancePending": true
+  },
+  "bulkCheck": {
+    "salesCount": 8001,
+    "paymentCount": 8001,
+    "salesTotal": 16002,
+    "receiptsTotal": 8001,
+    "currency": "KZT"
+  },
+  "logs": [
+    "/tmp/basqar-stage71-finance-final.log",
+    "/tmp/basqar-stage71-regressions.log",
+    "/tmp/basqar-stage71-http-tests.log",
+    "/tmp/basqar-stage71-avr-tests.log",
+    "/tmp/basqar-stage71-locale-tests.log",
+    "/tmp/basqar-stage71-typecheck.log",
+    "/tmp/basqar-stage71-web-build.log"
+  ],
+  "nextStage": "7.2"
+}

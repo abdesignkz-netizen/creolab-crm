@@ -74,7 +74,7 @@ export const CONTROL_ACTION_META: Record<
   GET_SITUATION: { riskLevel: "READ", label: "Ситуация" },
   GET_LEADS_STATS: { riskLevel: "READ", label: "Статистика заявок" },
   GET_DEALS_STATS: { riskLevel: "READ", financial: true, label: "Статистика сделок" },
-  GET_REVENUE_STATS: { riskLevel: "READ", financial: true, label: "Выручка" },
+  GET_REVENUE_STATS: { riskLevel: "READ", financial: true, label: "Продажи и оплаты" },
   GET_PIPELINE_SUMMARY: { riskLevel: "READ", financial: true, label: "Воронка" },
   GET_SALES_CONTROL: { riskLevel: "READ", financial: true, label: "Продажи под контролем" },
   GET_STUCK_DEALS: { riskLevel: "READ", label: "Застрявшие сделки" },

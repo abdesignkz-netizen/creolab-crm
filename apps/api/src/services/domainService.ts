@@ -1,3 +1,4 @@
+import { MoneyDecimal, saleAmount, businessDealWhere, confirmedPaymentTotals } from "./financialMetrics.ts";
 import { enqueueSalesReconcile } from "./salesProcessService.ts";
 import { updateTaskManually } from "./taskManualEdit.ts";
 import { readTaskDelivery, taskDeliveryResult, taskDeliveryBusy, type TaskDelivery } from "./taskDeliveryState.ts";
@@ -26,7 +27,7 @@ import { resolveSellerBridge } from "./sellerLink.ts";
 import { resolveContactLinks } from "./segmentService.ts";
 import { getSituation } from "./situationService.ts";
 import { getConversationWorkspace, listConversationsBoard } from "./conversationService.ts";
-import { parseDateTimeInput } from "./periodRange.ts";
+import { parseDateTimeInput, resolvePeriodRange } from "./periodRange.ts";
 import {
   CONVERSATION_MAX_ATTACHMENTS,
   CONVERSATION_MAX_FILE_BYTES,
@@ -75,8 +76,8 @@ export async function addPayment(
   const deal = await prisma.deal.findFirst({ where: { id: dealId, tenantId: tid } });
   if (!deal) throw new ApiError(404, "not_found", "Сделка не найдена");
   assertDealVisible(auth, deal);
-  if (!Number.isFinite(input.amountMinor) || input.amountMinor <= 0) {
-    throw new ApiError(422, "invalid", "Сумма оплаты должна быть больше 0");
+  if (!Number.isSafeInteger(input.amountMinor) || input.amountMinor <= 0) {
+    throw new ApiError(422, "invalid", "Сумма оплаты должна быть положительным целым числом в допустимом диапазоне");
   }
   return prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM "Deal" WHERE id = ${dealId} AND "tenantId" = ${tid} FOR UPDATE`;
@@ -96,13 +97,14 @@ export async function addPayment(
       where: { tenantId: tid, dealId, status: "confirmed", currency: deal.currency },
       select: { amountMinor: true },
     });
-    const paid = payments.reduce((sum, row) => sum + Number(row.amountMinor || 0), 0);
-    const dealAmount = deal.offerAmountMinor != null ? Number(deal.offerAmountMinor) : null;
+    const paid = payments.reduce((sum, row) => sum.plus(row.amountMinor), new MoneyDecimal(0));
+    const amount = saleAmount(deal);
+    const dealAmount = amount == null ? null : new MoneyDecimal(amount);
     let paymentStatus = deal.paymentStatus;
     if (deal.paymentStatus !== "NOT_REQUIRED" && deal.paymentStatus !== "CANCELLED") {
-      if (dealAmount != null && dealAmount > 0) {
-        paymentStatus = paid >= dealAmount ? "PAID" : paid > 0 ? "PARTIALLY_PAID" : deal.paymentStatus;
-      } else if (paid > 0) {
+      if (dealAmount != null && dealAmount.gt(0)) {
+        paymentStatus = paid.gte(dealAmount) ? "PAID" : paid.gt(0) ? "PARTIALLY_PAID" : deal.paymentStatus;
+      } else if (paid.gt(0)) {
         paymentStatus = "PAID";
       }
     }
@@ -1339,14 +1341,15 @@ export async function markNotificationRead(prisma: PrismaClient, auth: AuthConte
 export async function statsSummary(prisma: PrismaClient, auth: AuthContext) {
   requireNotManager(auth, "Статистика доступна администратору и директору");
   const tid = tenantId(auth);
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
+  const range = resolvePeriodRange(auth.activeMembership!.tenant.timezone || "Asia/Almaty", "today");
+  const period = { gte: range.from!, lt: range.to! };
+  const dealWhere = await businessDealWhere(prisma, tid);
   const [inquiries, won, lost, intakes, payments] = await Promise.all([
-    prisma.inquiry.count({ where: { tenantId: tid, receivedAt: { gte: start }, test: false } }),
-    prisma.deal.count({ where: { tenantId: tid, outcome: "won", closedAt: { gte: start } } }),
-    prisma.deal.count({ where: { tenantId: tid, outcome: "lost", closedAt: { gte: start } } }),
+    prisma.inquiry.count({ where: { tenantId: tid, receivedAt: period, test: false, archived: false } }),
+    prisma.deal.count({ where: { ...dealWhere, outcome: "won", closedAt: period } }),
+    prisma.deal.count({ where: { ...dealWhere, outcome: "lost", closedAt: period } }),
     prisma.incompleteIntake.count({ where: { tenantId: tid, status: "pending" } }),
-    prisma.paymentRecord.findMany({ where: { tenantId: tid, confirmedAt: { gte: start }, status: "confirmed" } }),
+    confirmedPaymentTotals(prisma, tid, dealWhere, period, auth.activeMembership!.tenant.currency || "KZT"),
   ]);
   const closed = won + lost;
   return {
@@ -1356,8 +1359,8 @@ export async function statsSummary(prisma: PrismaClient, auth: AuthContext) {
     lost,
     conversionClosed: closed === 0 ? null : won / closed,
     conversionLabel: closed === 0 ? "Нет закрытых сделок" : "Конверсия закрытых сделок",
-    paymentsByCurrency: payments.reduce<Record<string, string>>((acc, item) => {
-      acc[item.currency] = String(BigInt(acc[item.currency] || "0") + BigInt(item.amountMinor.toString()));
+    paymentsByCurrency: payments.byCurrency.reduce<Record<string, string>>((acc, item) => {
+      acc[item.currency] = item.exact || "0";
       return acc;
     }, {}),
   };

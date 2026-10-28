@@ -28,6 +28,11 @@ describe("period buckets for analytics trend", () => {
   it("builds ISO week keys", () => {
     assert.equal(isoWeekKeyFromYmd({ year: 2026, month: 9, day: 7 }), "2026-W37");
   });
+  it("does not duplicate an hour's aggregate on a daylight saving clock rollback", () => {
+    const keys = enumerateBucketKeys(new Date("2026-10-24T22:00:00Z"), new Date("2026-10-25T23:00:00Z"), "hour", "Europe/Berlin");
+    assert.equal(keys.length, 24); assert.equal(new Set(keys).size, keys.length);
+    assert.equal(keys.filter(key => key === "2026-10-25T02").length, 1);
+  });
 });
 
 it("formats Kazakh trend buckets without changing Russian labels or bucket keys", () => {

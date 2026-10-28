@@ -4,11 +4,12 @@ import { createPrismaClient, type PrismaClient } from "@creolab/db";
 import { claimOutboxEvent } from "./services/outboxLease.ts";
 import { processOutbox } from "./services/backgroundJobs.ts";
 import { enqueueInquiryAutomation } from "./services/inquiryAutomationQueue.ts";
+import { assertTestDatabase } from "./testSupport/testDatabase.ts";
 
 let prisma: Awaited<ReturnType<typeof createPrismaClient>>;
 let tenantId: string;
 before(async () => {
-  assert.equal(process.env.CRM_USE_PGLITE, "1", "Use the isolated test runner");
+  assertTestDatabase();
   prisma = await createPrismaClient();
   await (await import("../../../packages/db/src/seed.ts")).seedDatabase();
   tenantId = (await prisma.tenant.findFirstOrThrow({ where: { slug: "creolab" } })).id;

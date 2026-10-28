@@ -19,7 +19,7 @@ export function presentControlReply(action: ControlAction, result: unknown, lang
   const time = (v: unknown) => v && Number.isFinite(new Date(String(v)).getTime()) ? new Date(String(v)).toLocaleString(lang === "kk" ? "kk-KZ" : "ru-RU", { timeZone, dateStyle: "short", timeStyle: "short" }) : w("без срока", "мерзімсіз");
   const task = (item: any, i: number) => `${i + 1}. ${cleanText(item.title, 160)}\n${controlTaskClientLabel(item, lang)}\n${data.taskStatus === "completed" ? `${w("Завершено", "Аяқталды")}: ${item.completedAt ? time(item.completedAt) : w("дата не указана", "күні көрсетілмеген")}` : time(item.dueAt)}${item.overdue ? w(" · просрочено", " · мерзімі өткен") : ""}${item.ownerName ? ` · ${cleanText(item.ownerName, 50)}` : ""}`;
   const items: any[] = Array.isArray(data.items) ? data.items : [];
-  const heading = lang === "ru" ? CONTROL_ACTION_META[action].label : ({GET_BUSINESS_SUMMARY:"Бизнес қорытындысы", GET_SITUATION:"Назар аудару керек", GET_TODAY_TASKS:"Бүгінгі тапсырмалар",GET_TASKS:"Тапсырмалар",GET_OVERDUE_TASKS:"Мерзімі өткен тапсырмалар",GET_CLIENT_DETAILS:"Клиент",GET_DEALS_STATS:"Сатылымдар",GET_LEADS_STATS:"Өтінімдер",GET_REVENUE_STATS:"Түсім",GET_TEAM_STATUS:"Команда"} as Record<string,string>)[action] || "BasQar Control";
+  const heading = lang === "ru" ? CONTROL_ACTION_META[action].label : ({GET_BUSINESS_SUMMARY:"Бизнес қорытындысы", GET_SITUATION:"Назар аудару керек", GET_TODAY_TASKS:"Бүгінгі тапсырмалар",GET_TASKS:"Тапсырмалар",GET_OVERDUE_TASKS:"Мерзімі өткен тапсырмалар",GET_CLIENT_DETAILS:"Клиент",GET_DEALS_STATS:"Сатылымдар",GET_LEADS_STATS:"Өтінімдер",GET_REVENUE_STATS:"Сатылымдар мен төлемдер",GET_TEAM_STATUS:"Команда"} as Record<string,string>)[action] || "BasQar Control";
   const lines: string[] = [heading];
   const meta = record(record(result).meta);
   const periodNames: Record<string, [string, string]> = { today: ["Сегодня", "Бүгін"], yesterday: ["Вчера", "Кеше"], this_week: ["Эта неделя · пн–вс", "Осы апта · дс–жс"], last_week: ["Прошлая неделя · пн–вс", "Өткен апта · дс–жс"], last_7: ["Последние 7 дней", "Соңғы 7 күн"], last_30: ["Последние 30 дней", "Соңғы 30 күн"], this_month: ["Текущий месяц", "Осы ай"], last_month: ["Прошлый месяц", "Өткен ай"], this_year: ["Этот год", "Осы жыл"], all: ["Без ограничения периода", "Кезең шектеусіз"], custom: ["Период", "Кезең"] };
@@ -122,11 +122,35 @@ export function presentControlReply(action: ControlAction, result: unknown, lang
       : action === "GET_DEALS_STATS" ? [["created","Создано сделок","Құрылған мәмілелер"],["won","Успешных","Сәтті"],["lost","Проигранных","Жоғалған"]]
       : action === "GET_LEADS_STATS" ? [["total","Всего заявок","Барлық өтінімдер"],["new","Новые","Жаңа"],["inProgress","В работе","Жұмыста"],["needsReply","Ждут ответа","Жауап күтуде"]] : [];
     lines.push(...labels.map(([key, ru, kk]) => `${w(ru, kk)}: ${data[key] ?? 0}`));
-    if (data.revenueLabel) lines.push(`${w("Выручка", "Түсім")}: ${cleanText(data.revenueLabel)}`);
-    else if (data.revenue != null && typeof data.revenue === "number") lines.push(`${w("Выручка", "Түсім")}: ${data.revenue.toLocaleString("ru-RU")} ₸`);
-    if (action === "GET_REVENUE_STATS" && data.revenue == null && !data.revenueLabel) lines.push(w("Данных о выручке пока нет.", "Түсім туралы деректер әзірге жоқ."));
+    if (data.conversionBasis === "won_over_closed") lines.push(`${w("Успешность закрытых сделок", "Жабылған мәмілелердің сәттілік үлесі")}: ${data.conversion == null ? "—" : `${data.conversion}%`} (${data.won ?? 0} / ${data.closedDeals ?? 0})`);
+    if (data.plan) {
+      const plan = data.plan;
+      if (plan.status === "ready") {
+        lines.push(`${w("План продаж за выбранный период", "Таңдалған кезеңнің сату жоспары")}: ${cleanText(plan.label)}; ${w("факт", "нақты")}: ${cleanText(plan.actual?.label || "—")}; ${plan.percent == null ? "—" : `${plan.percent}%`}`);
+        if (plan.prorated) lines.push(w("Для неполного месяца план рассчитан по доле календарных дней.", "Толық емес ай үшін жоспар күнтізбелік күндер үлесімен есептелген."));
+        if (plan.missingAmounts) lines.push(w("Процент не рассчитан: есть продажи без суммы.", "Пайыз есептелмеді: сомасы жоқ сатылымдар бар."));
+        else if (plan.exact === "0") lines.push(w("Процент не рассчитан: план равен нулю.", "Пайыз есептелмеді: жоспар нөлге тең."));
+      } else if (plan.status === "filtered") lines.push(w("Общий план компании не сравнивается с отфильтрованной частью продаж.", "Компанияның жалпы жоспары сүзілген сатылымдар бөлігімен салыстырылмайды."));
+      else if (plan.status === "unbounded") lines.push(w("Для плана выберите период с началом и концом.", "Жоспар үшін басы мен соңы бар кезеңді таңдаңыз."));
+      else if (plan.status === "legacy") lines.push(w("Прежний план не привязан к месяцу. Задайте месячные планы в настройках.", "Бұрынғы жоспар айға байланыстырылмаған. Баптауларда айлық жоспарларды енгізіңіз."));
+      else lines.push(w(`План не задан на месяцы: ${(plan.missingMonths || []).slice(0, 12).join(", ")} (${cleanText(plan.currency)}).`, `Мына айларға жоспар берілмеген: ${(plan.missingMonths || []).slice(0, 12).join(", ")} (${cleanText(plan.currency)}).`));
+    }
+    const sales = Array.isArray(data.salesByCurrency) ? data.salesByCurrency : [];
+    const receipts = Array.isArray(data.receiptsByCurrency) ? data.receiptsByCurrency : [];
+    if (sales.length) for (const row of sales) {
+      lines.push(`${w("Сумма продаж", "Сатылым сомасы")}: ${cleanText(row.label || `— ${row.currency}`)}`);
+      if (row.missing) lines.push(`${w("Сделок без суммы", "Сомасы жоқ мәмілелер")}: ${row.missing} (${cleanText(row.currency)})`);
+    }
+    else if (data.revenueLabel) lines.push(`${w("Сумма продаж", "Сатылым сомасы")}: ${cleanText(data.revenueLabel)}`);
+    else if (typeof data.revenue === "number") {
+      const currency = cleanText(data.currency || "KZT");
+      lines.push(`${w("Сумма продаж", "Сатылым сомасы")}: ${data.revenue.toLocaleString("ru-RU")} ${currency === "KZT" ? "₸" : currency}`);
+    }
+    if (receipts.length) for (const row of receipts) lines.push(`${w("Подтверждённые оплаты", "Расталған төлемдер")}: ${cleanText(row.label)}`);
+    else if (data.receiptsLabel) lines.push(`${w("Подтверждённые оплаты", "Расталған төлемдер")}: ${cleanText(data.receiptsLabel)}`);
+    if (action === "GET_REVENUE_STATS" && !sales.length && data.revenue == null && !data.revenueLabel) lines.push(w("Продаж с указанной суммой за период нет.", "Кезеңде сомасы көрсетілген сатылымдар жоқ."));
     lines.splice(1, 0, periodText());
-    if (action === "GET_DEALS_STATS") lines.push(w("Продажи — сумма выигранных сделок; это не подтверждённые поступления денег.", "Сатылымдар — сәтті аяқталған мәмілелердің сомасы; бұл расталған ақша түсімі емес."));
+    if (data.receiptsLabel || data.revenueLabel || sales.length) lines.push(w("Продажи — по дате закрытия сделки. Оплаты — по дате подтверждения платежа. Валюты не суммируются.", "Сатылымдар мәміленің жабылған күнімен, төлемдер расталған күнімен есептеледі. Валюталар қосылмайды."));
     lines.push(controlLink("/stats"));
   } else if (CONTROL_ACTION_META[action].riskLevel !== "READ") {
     lines.push(w("Готово. Изменение сохранено.", "Дайын. Өзгеріс сақталды."));

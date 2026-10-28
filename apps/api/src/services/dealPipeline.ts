@@ -1,5 +1,6 @@
 /** Default operational settings stored in Tenant.settingsJson.ops */
 import { DEFAULT_PROCESS_CALENDAR, processCalendarSchema, type ProcessCalendar } from "@creolab/contracts";
+import type { MonthlySalesPlan } from "./analyticsPeriodPolicy.ts";
 
 export type TenantOpsSettings = {
   stalledDealDays: number;
@@ -10,6 +11,7 @@ export type TenantOpsSettings = {
   processCalendar: ProcessCalendar;
   lostReasons: string[];
   salesPlanMinor: number | null;
+  salesPlans: MonthlySalesPlan[];
 };
 
 export type SlaStatus = "OK" | "WARNING" | "OVERDUE";
@@ -27,6 +29,7 @@ export const DEFAULT_OPS_SETTINGS: TenantOpsSettings = {
   },
   lostReasons: [],
   salesPlanMinor: null,
+  salesPlans: [],
   processCalendar: DEFAULT_PROCESS_CALENDAR,
 };
 
@@ -76,6 +79,7 @@ export function parseOpsSettings(raw: unknown): TenantOpsSettings {
     ...DEFAULT_OPS_SETTINGS,
     stageSlaDays: { ...DEFAULT_OPS_SETTINGS.stageSlaDays },
     lostReasons: [],
+    salesPlans: [],
     processCalendar: { ...DEFAULT_PROCESS_CALENDAR, days: [...DEFAULT_PROCESS_CALENDAR.days], excludedDates: [] },
   };
   if (!raw || typeof raw !== "object") return base;
@@ -91,6 +95,16 @@ export function parseOpsSettings(raw: unknown): TenantOpsSettings {
     base.salesPlanMinor = Math.max(0, Math.round(ops.salesPlanMinor));
   }
   if (ops.salesPlanMinor === null) base.salesPlanMinor = null;
+  if (Array.isArray(ops.salesPlans)) {
+    const seen = new Set<string>();
+    base.salesPlans = ops.salesPlans.filter((row): row is MonthlySalesPlan => {
+      if (!row || typeof row !== "object" || !/^[1-9]\d{3}-(0[1-9]|1[0-2])$/.test(row.month) || !/^[A-Z]{3}$/.test(row.currency)
+        || !Number.isSafeInteger(row.amount) || row.amount < 0) return false;
+      const key = `${row.month}:${row.currency}`;
+      if (seen.has(key)) return false;
+      seen.add(key); return true;
+    }).slice(0, 120);
+  }
   if (ops.stageSlaDays && typeof ops.stageSlaDays === "object") {
     for (const [key, value] of Object.entries(ops.stageSlaDays)) {
       if (value === null) base.stageSlaDays[key] = null;

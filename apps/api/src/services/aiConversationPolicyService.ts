@@ -1,7 +1,7 @@
 import { deliveredConversationMessage } from "./conversationMessageState.ts";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
-import { aiChannelTypes } from "./channelDeliveryService.ts";
+import { aiChannelTypes } from "./aiChannels.ts";
 import { crmModeToSeller } from "@creolab/contracts";
 import {
   isWithinConversationHours,

@@ -291,6 +291,8 @@ describe("Private WhatsApp Control", () => {
   it("formats amounts without scaling and links to the statistics route", () => {
     const reply = presentControlReply("GET_REVENUE_STATS", { data: { revenue: 69990 }, meta: { period: "last_7" } }, "ru", "Asia/Almaty");
     assert.match(reply, /69\s990 ₸/); assert.match(reply, /\/stats$/); assert.match(reply, /Последние 7 дней/);
+    const usd = presentControlReply("GET_REVENUE_STATS", { data: { revenue: 150, currency: "USD" } }, "ru", "Asia/Almaty");
+    assert.match(usd, /150 USD/); assert.doesNotMatch(usd, /₸/);
   });
   it("identifies task clients by contact, inquiry, deal and WhatsApp without leaking another tenant or LIDs", async () => {
     const makeContact = (name: string, phone: string, type = "phone") => prisma.contact.create({ data: {

@@ -1,6 +1,8 @@
+import { analyticsComparison, closedDealConversion } from "./analyticsPeriodPolicy.ts";
 import { taskTitlePresentation } from "@creolab/contracts";
 import { systemText } from "@creolab/contracts";
 import { getEntitlements } from "./entitlementService.ts";
+import { businessDealWhere, wonSalesTotals, confirmedPaymentTotals, openPipelineTotals, moneyValue } from "./financialMetrics.ts";
 import type { PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
@@ -150,12 +152,14 @@ function formatMoneyKzt(amount: number | null, currency: string) {
   return `${Math.round(amount).toLocaleString("ru-RU")} ${currency === "KZT" ? "₸" : currency}`;
 }
 
-function delta(current: number, previous: number | null) {
+function delta(current: number | null, previous: number | null) {
+  if (current == null) return null;
   if (previous == null) return null;
   return current - previous;
 }
 
-function deltaPercent(current: number, previous: number | null) {
+function deltaPercent(current: number | null, previous: number | null) {
+  if (current == null) return null;
   if (previous == null || previous === 0) return null;
   return Math.round(((current - previous) / previous) * 100);
 }
@@ -240,6 +244,7 @@ function buildInsights(input: {
   prevInquiries: number | null;
   conversionRate: number | null;
   prevConversionRate: number | null;
+  closed: number; prevClosed: number | null;
   biggestDrop: { fromName: string; toName: string; lost: number; fromCount: number; toCount: number } | null;
   topManager: { name: string; attention: number; average: number } | null;
   bestSource: { label: string; rate: number; inquiries: number } | null;
@@ -304,8 +309,8 @@ function buildInsights(input: {
     input.conversionRate != null &&
     input.prevConversionRate != null &&
     input.prevInquiries != null &&
-    input.prevInquiries >= 5 &&
-    input.inquiries >= 5 &&
+    (input.prevClosed || 0) >= 5 &&
+    input.closed >= 5 &&
     input.prevConversionRate - input.conversionRate >= 10
   ) {
     insights.push({
@@ -443,7 +448,10 @@ export async function getSituationOverview(
   const onlyImportant = query.onlyImportant === "1" || query.onlyImportant === "true";
 
   const range = resolvePeriodRange(timeZone, preset, query.dateFrom || query.from, query.dateTo || query.to, now);
-  const { from, to, previousFrom, previousTo } = range;
+  const { from, to } = range;
+  // Use the same previous-period basis as Statistics: equal local calendar days,
+  // including when the current month or year is not yet complete.
+  const { from: previousFrom, to: previousTo } = analyticsComparison(timeZone, "previous", from, to);
 
   const assigneeDeal =
     scope === "mine"
@@ -470,6 +478,10 @@ export async function getSituationOverview(
         ? { ownerMembershipId: null }
         : {};
 
+  const financeWhere = { ...(await businessDealWhere(prisma, tid)), ...assigneeDeal };
+  const financePeriod = from || to ? { ...(from ? { gte: from } : {}), ...(to ? { lt: to } : {}) } : undefined;
+  const previousFinancePeriod = previousFrom && previousTo ? { gte: previousFrom, lt: previousTo } : undefined;
+
   const periodReceived =
     from || to ? { receivedAt: { ...(from ? { gte: from } : {}), ...(to ? { lt: to } : {}) } } : {};
   const periodCreated =
@@ -478,8 +490,6 @@ export async function getSituationOverview(
     from || to ? { closedAt: { ...(from ? { gte: from } : {}), ...(to ? { lt: to } : {}) } } : {};
   const periodFirstSeen =
     from || to ? { firstSeenAt: { ...(from ? { gte: from } : {}), ...(to ? { lt: to } : {}) } } : {};
-  const periodConfirmed =
-    from || to ? { confirmedAt: { ...(from ? { gte: from } : {}), ...(to ? { lt: to } : {}) } } : {};
   const periodActivity =
     from || to ? { createdAt: { ...(from ? { gte: from } : {}), ...(to ? { lt: to } : {}) } } : {};
 
@@ -499,7 +509,7 @@ export async function getSituationOverview(
     dealsCreated,
     prevDealsCreated,
     wonDeals,
-    prevWonDeals,
+    prevWonSales,
     lostDeals,
     intakesPending,
     openTasks,
@@ -510,11 +520,12 @@ export async function getSituationOverview(
     paymentsPrev,
     waitingClientInquiries,
     allTimeCounts,
+    wonSales, currentPipeline, lostCount, prevLostCount,
   ] = await Promise.all([
     getSituation(prisma, auth, { scope, includeSnoozed: false }),
     prisma.dealStage.findMany({ where: { tenantId: tid }, orderBy: { sortOrder: "asc" } }),
     prisma.deal.findMany({
-      where: { tenantId: tid, outcome: "open", ...assigneeDeal },
+      where: { ...financeWhere, outcome: "open" },
       include: {
         stage: true,
         contact: { include: { methods: true } },
@@ -570,18 +581,19 @@ export async function getSituationOverview(
         })
       : Promise.resolve(null as number | null),
     prisma.deal.count({
-      where: { tenantId: tid, ...assigneeDeal, ...periodCreated },
+      where: { ...financeWhere, ...periodCreated },
     }),
     previousFrom && previousTo
       ? prisma.deal.count({
-          where: { tenantId: tid, ...assigneeDeal, createdAt: { gte: previousFrom, lt: previousTo } },
+          where: { ...financeWhere, createdAt: { gte: previousFrom, lt: previousTo } },
         })
       : Promise.resolve(null as number | null),
     prisma.deal.findMany({
-      where: { tenantId: tid, outcome: "won", ...assigneeDeal, ...periodClosed },
+      where: { ...financeWhere, outcome: "won", ...periodClosed },
       select: {
         id: true,
         offerAmountMinor: true,
+        wonAmountMinor: true,
         title: true,
         closedAt: true,
         currency: true,
@@ -590,19 +602,9 @@ export async function getSituationOverview(
       orderBy: { closedAt: "desc" },
       take: 500,
     }),
-    previousFrom && previousTo
-      ? prisma.deal.findMany({
-          where: {
-            tenantId: tid,
-            outcome: "won",
-            ...assigneeDeal,
-            closedAt: { gte: previousFrom, lt: previousTo },
-          },
-          select: { offerAmountMinor: true },
-        })
-      : Promise.resolve([] as { offerAmountMinor: { toString(): string } | null }[]),
+    previousFinancePeriod ? wonSalesTotals(prisma, financeWhere, previousFinancePeriod, currency) : null,
     prisma.deal.findMany({
-      where: { tenantId: tid, outcome: "lost", ...assigneeDeal, ...periodClosed },
+      where: { ...financeWhere, outcome: "lost", ...periodClosed },
       select: { id: true, lossReason: true },
       take: 500,
     }),
@@ -641,21 +643,8 @@ export async function getSituationOverview(
       orderBy: { receivedAt: "desc" },
       take: 8,
     }),
-    prisma.paymentRecord.findMany({
-      where: { tenantId: tid, status: "confirmed", ...periodConfirmed },
-      select: { amountMinor: true, currency: true },
-      take: 2000,
-    }),
-    previousFrom && previousTo
-      ? prisma.paymentRecord.findMany({
-          where: {
-            tenantId: tid,
-            status: "confirmed",
-            confirmedAt: { gte: previousFrom, lt: previousTo },
-          },
-          select: { amountMinor: true },
-        })
-      : Promise.resolve([] as { amountMinor: { toString(): string } }[]),
+    confirmedPaymentTotals(prisma, tid, financeWhere, financePeriod, currency),
+    previousFinancePeriod ? confirmedPaymentTotals(prisma, tid, financeWhere, previousFinancePeriod, currency) : null,
     prisma.inquiry.count({
       where: {
         tenantId: tid,
@@ -669,8 +658,12 @@ export async function getSituationOverview(
       prisma.inquiry.count({ where: { tenantId: tid, test: false, archived: false } }),
       prisma.contact.count({ where: { tenantId: tid, archivedAt: null } }),
       prisma.deal.count({ where: { tenantId: tid } }),
-      prisma.deal.count({ where: { tenantId: tid, outcome: "won" } }),
+      prisma.deal.count({ where: { ...financeWhere, outcome: "won" } }),
     ]),
+    wonSalesTotals(prisma, financeWhere, financePeriod, currency),
+    openPipelineTotals(prisma, financeWhere, currency),
+    prisma.deal.count({ where: { ...financeWhere, outcome: "lost", ...periodClosed } }),
+    previousFinancePeriod ? prisma.deal.count({ where: { ...financeWhere, outcome: "lost", closedAt: previousFinancePeriod } }) : null,
   ]);
 
   const taskConversationIds = [...new Set(openTasks.flatMap(task => task.conversationId ? [task.conversationId] : []))];
@@ -733,20 +726,8 @@ export async function getSituationOverview(
 
   const inquiriesCount = periodInquiries.length;
 
-  let wonAmount = 0;
-  let wonAmountKnown = 0;
-  for (const deal of wonDeals) {
-    const amount = amountNumber(deal.offerAmountMinor);
-    if (amount != null) {
-      wonAmount += amount;
-      wonAmountKnown += 1;
-    }
-  }
-  let prevWonAmount = 0;
-  for (const deal of prevWonDeals) {
-    const amount = amountNumber(deal.offerAmountMinor);
-    if (amount != null) prevWonAmount += amount;
-  }
+  const wonAmount = wonSales.total.amount, wonAmountKnown = wonSales.total.known;
+  const prevWonAmount = prevWonSales?.total.amount ?? null;
 
   const lostReasonMap = new Map<string, number>();
   for (const deal of lostDeals) {
@@ -772,10 +753,6 @@ export async function getSituationOverview(
       : stages.find((s) => /договор|соглас/i.test(s.name))?.systemKey || "contract";
   const negotiationStageIds = new Set(stages.filter((s) => s.systemKey === "contract").map((s) => s.id));
 
-  let pipelineAmount = 0;
-  let pipelineAmountKnown = 0;
-  let weightedPipeline = 0;
-
   const waitingClientDeals: typeof openDeals = [];
   const noNextActionDeals: typeof openDeals = [];
   const stalledDealsList: typeof openDeals = [];
@@ -797,12 +774,6 @@ export async function getSituationOverview(
 
   for (const deal of openDeals) {
     const amount = amountNumber(deal.offerAmountMinor);
-    const probability = (deal as { probability?: number }).probability ?? deal.stage?.defaultProbability ?? 10;
-    if (amount != null) {
-      pipelineAmount += amount;
-      pipelineAmountKnown += 1;
-      weightedPipeline += Math.round((amount * probability) / 100);
-    }
     const onContract = negotiationStageIds.has(deal.stageId);
     if (onContract) contractDeals.push(deal);
 
@@ -985,35 +956,27 @@ export async function getSituationOverview(
     proposalWithoutReply,
   };
 
-  let paidAmount = 0;
-  for (const p of paymentsPeriod) {
-    const n = amountNumber(p.amountMinor);
-    if (n != null) paidAmount += n;
-  }
-  let prevPaid = 0;
-  for (const p of paymentsPrev) {
-    const n = amountNumber(p.amountMinor);
-    if (n != null) prevPaid += n;
-  }
-  const showPayments = paymentsPeriod.length > 0 || paymentsPrev.length > 0;
+  const paidAmount = paymentsPeriod.total.amount, prevPaid = paymentsPrev?.total.amount ?? null;
+  const showPayments = paymentsPeriod.count > 0 || (paymentsPrev?.count || 0) > 0;
 
   const label = periodLabel(preset, from, to, timeZone, locale);
-  const wonAmountLabel = formatMoneyKzt(wonAmountKnown ? wonAmount : null, currency);
-  const pipelineAmountLabel = formatMoneyKzt(pipelineAmountKnown ? pipelineAmount : null, currency);
+  const wonAmountLabel = wonSales.total.label;
+  const pipelineAmountLabel = currentPipeline.total.label;
 
-  const conversionRate =
-    inquiriesCount >= 3 ? Math.round((wonDeals.length / inquiriesCount) * 1000) / 10 : null;
-  const prevConversionRate =
-    prevInquiriesCount != null && prevInquiriesCount >= 3
-      ? Math.round((prevWonDeals.length / prevInquiriesCount) * 1000) / 10
-      : null;
+  const conversionRate = closedDealConversion(wonSales.count, lostCount);
+  const prevConversionRate = prevWonSales && prevLostCount != null ? closedDealConversion(prevWonSales.count, prevLostCount) : null;
 
   const sourceMap = new Map<string, { inquiries: number; deals: number }>();
+  const cohortDeals = periodInquiries.length ? await prisma.deal.findMany({ where: { AND: [financeWhere, { OR: [
+    { inquiryId: { in: periodInquiries.map(row => row.id) } },
+    { id: { in: periodInquiries.flatMap(row => row.dealId ? [row.dealId] : []) } },
+  ] }] }, select: { id: true, inquiryId: true } }) : [];
+  const linkedDealIds = new Set(cohortDeals.map(row => row.id)), linkedInquiryIds = new Set(cohortDeals.map(row => row.inquiryId));
   for (const inq of periodInquiries) {
     const key = normalizeSourceKey(inq.sourceChannel || inq.source);
     const row = sourceMap.get(key) || { inquiries: 0, deals: 0 };
     row.inquiries += 1;
-    if (inq.dealId || inq.status === "converted") row.deals += 1;
+    if (inq.dealId && linkedDealIds.has(inq.dealId) || linkedInquiryIds.has(inq.id)) row.deals += 1;
     sourceMap.set(key, row);
   }
   const sources = [...sourceMap.entries()]
@@ -1103,6 +1066,7 @@ export async function getSituationOverview(
     prevInquiries: prevInquiriesCount,
     conversionRate,
     prevConversionRate,
+    closed: wonSales.count + lostCount, prevClosed: prevWonSales && prevLostCount != null ? prevWonSales.count + prevLostCount : null,
     biggestDrop: pipelineView.biggestDrop,
     topManager,
     bestSource: bestSource
@@ -1122,13 +1086,15 @@ export async function getSituationOverview(
     requests: inquiriesCount,
     dealsCreated,
     contractsReached: contractDeals.filter((d) => (!from && !to) || (d.createdAt >= (from || d.createdAt) && d.createdAt < (to || new Date(8.64e15)))).length,
-    wonDeals: wonDeals.length,
-    lostDeals: lostDeals.length,
+    wonDeals: wonSales.count,
+    lostDeals: lostCount,
     wonAmount: wonAmountKnown ? wonAmount : null,
     wonAmountLabel,
     wonAmountKnownCount: wonAmountKnown,
-    wonAmountTotalDeals: wonDeals.length,
+    wonAmountTotalDeals: wonSales.total.count,
+    salesByCurrency: wonSales.byCurrency,
     conversionRate,
+    conversionBasis: "won_over_closed", closedDeals: wonSales.count + lostCount,
     conversionLabel: conversionRate != null ? `${conversionRate}%` : null,
     lostReasons: [...lostReasonMap.entries()]
       .map(([reason, count]) => ({ reason, count }))
@@ -1138,12 +1104,12 @@ export async function getSituationOverview(
       inquiries: delta(inquiriesCount, prevInquiriesCount),
       newClients: delta(newClients, prevNewClients),
       dealsCreated: delta(dealsCreated, prevDealsCreated),
-      wonDeals: delta(wonDeals.length, prevWonDeals.length),
+      wonDeals: delta(wonSales.count, (prevWonSales?.count || 0)),
       wonAmount: previousFrom ? delta(wonAmount, prevWonAmount) : null,
       inquiriesPct: deltaPercent(inquiriesCount, prevInquiriesCount),
       newClientsPct: deltaPercent(newClients, prevNewClients),
       dealsCreatedPct: deltaPercent(dealsCreated, prevDealsCreated),
-      wonDealsPct: deltaPercent(wonDeals.length, prevWonDeals.length),
+      wonDealsPct: deltaPercent(wonSales.count, (prevWonSales?.count || 0)),
       wonAmountPct: previousFrom ? deltaPercent(wonAmount, prevWonAmount) : null,
       conversionPct:
         conversionRate != null && prevConversionRate != null
@@ -1160,13 +1126,14 @@ export async function getSituationOverview(
   };
 
   const current = {
-    activeDeals: openDeals.length,
-    activePipelineAmount: pipelineAmountKnown ? pipelineAmount : null,
+    activeDeals: currentPipeline.count,
+    activePipelineAmount: currentPipeline.total.amount,
     activePipelineAmountLabel: pipelineAmountLabel,
-    weightedPipeline: pipelineAmountKnown ? weightedPipeline : null,
-    weightedPipelineLabel: formatMoneyKzt(pipelineAmountKnown ? weightedPipeline : null, currency),
-    amountKnownCount: pipelineAmountKnown,
-    amountKnownOf: openDeals.length,
+    weightedPipeline: currentPipeline.total.weighted.amount,
+    weightedPipelineLabel: currentPipeline.total.weighted.label,
+    amountKnownCount: currentPipeline.total.known,
+    amountKnownOf: currentPipeline.total.count,
+    pipelineByCurrency: currentPipeline.byCurrency,
     contractStage: contractDeals.length,
     waitingClient: waitingClientDeals.length + waitingClientInquiries,
     waitingClientDeals: waitingClientDeals.length,
@@ -1209,7 +1176,7 @@ export async function getSituationOverview(
     title: d.title,
     contactName: d.contact ? displayName(d.contact) : null,
     phone: phoneFromContact(d.contact),
-    amountLabel: formatMoneyKzt(amountNumber(d.offerAmountMinor), d.currency || currency),
+    amountLabel: moneyValue(d.wonAmountMinor ?? d.offerAmountMinor, d.currency || currency).label,
     at: d.closedAt?.toISOString() || null,
     href: "/deals",
   }));
@@ -1223,6 +1190,11 @@ export async function getSituationOverview(
       label,
       from: from?.toISOString() || null,
       to: to?.toISOString() || null,
+    },
+    compare: {
+      from: previousFrom?.toISOString() || null,
+      to: previousTo?.toISOString() || null,
+      label: previousFrom && previousTo ? periodLabel("custom", previousFrom, previousTo, timeZone, locale) : null,
     },
     scope,
     onlyImportant,
@@ -1311,9 +1283,11 @@ export async function getSituationOverview(
     payments: showPayments
       ? {
           paidInPeriod: paidAmount,
-          paidInPeriodLabel: formatMoneyKzt(paidAmount, currency),
+          paidInPeriodLabel: paymentsPeriod.total.label,
+          paidInPeriodExact: paymentsPeriod.total.exact,
+          byCurrency: paymentsPeriod.byCurrency,
           paidDelta: previousFrom ? delta(paidAmount, prevPaid) : null,
-          count: paymentsPeriod.length,
+          count: paymentsPeriod.total.count,
         }
       : null,
     allTime:

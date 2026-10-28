@@ -7,10 +7,7 @@ import { randomUUID } from "node:crypto";
 // Longer than the bounded credential refresh and provider request together.
 const DELIVERY_LEASE_MS = 120_000;
 
-export const aiChannelTypes = ["whatsapp_qr", "whatsapp_cloud", "telegram_bot", "instagram_direct", "website_chat"];
-export function aiSourceChannel(type: string) {
-  return ({ telegram_bot: "telegram", instagram_direct: "instagram", website_chat: "website_ai" } as Record<string, string>)[type] || "whatsapp";
-}
+export { aiChannelTypes, aiSourceChannel } from "./aiChannels.ts";
 export async function enqueueChannelDelivery(tx: Prisma.TransactionClient, tenantId: string, integration: { id: string; type: string }, messageId: string, policyHash?: string) {
   const { initializeAiReply, enqueueAiReply } = await import("./aiReplyDeliveryState.ts");
   const tracked = await initializeAiReply(tx, tenantId, messageId, policyHash);

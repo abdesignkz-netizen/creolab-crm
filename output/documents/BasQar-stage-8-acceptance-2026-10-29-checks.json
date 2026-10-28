@@ -1,0 +1,93 @@
+{
+  "stage": "8",
+  "date": "2026-10-29",
+  "status": "local_acceptance_complete_target_environment_acceptance_pending",
+  "deployed": false,
+  "productionDataChanged": false,
+  "externalMessagesSent": false,
+  "databaseSchemaChanged": false,
+  "fixes": [
+    "independent_ai_channel_catalogue_removes_follow_up_import_cycle",
+    "control_legacy_numeric_amount_uses_tenge_symbol_for_KZT",
+    "statistics_link_opens_and_focuses_monthly_sales_plan",
+    "viewport_notifications_moved_above_bottom_save_actions"
+  ],
+  "tests": {
+    "apiAndContracts": {
+      "command": "node scripts/test-api.mjs",
+      "files": 183,
+      "filesPassed": 183,
+      "tests": 1938,
+      "passed": 1938,
+      "failed": 0,
+      "skipped": 0,
+      "cancelled": 0,
+      "exitCode": 0,
+      "database": "isolated_PGlite_per_file",
+      "externalProviders": "disabled"
+    },
+    "web": {
+      "command": "npm run test --workspace=@creolab/web",
+      "tests": 65,
+      "passed": 65,
+      "failed": 0,
+      "skipped": 0,
+      "exitCode": 0
+    },
+    "finalPassedTotal": 2003,
+    "counting": "Final API and web runs only; targeted reruns are not added. Node runner counts include parent test results.",
+    "newHttpAcceptance": {
+      "file": "apps/api/src/workspaceAcceptance.test.ts",
+      "steps": 6,
+      "nodeTestResults": 7,
+      "includedInApiTotal": true,
+      "businessMutationsViaHttp": true,
+      "outsideHttpRequestsRejected": true,
+      "registration": "passed",
+      "memberInvitationAndPermissions": "passed",
+      "adminProvisionedFormAndSubmissionIdempotency": "passed",
+      "inquiryDealTaskAndHistory": "passed",
+      "invoiceAndPdf": "passed",
+      "partialAndFullPaymentAuditAndAnalytics": "passed",
+      "crossTenantIsolation": "passed",
+      "paymentProviderTransaction": "not_tested"
+    }
+  },
+  "verification": {
+    "typecheckAllWorkspaces": "passed",
+    "webProductionBuild": "passed",
+    "bundleBudget": "passed_with_limited_headroom",
+    "diffCheck": "passed",
+    "initialJavascriptKb": 1099.6,
+    "initialJavascriptGzipKb": 278.8,
+    "browser": {
+      "environment": "local_component_preview_with_real_services_and_separate_PGlite",
+      "desktopStatistics": "checked_before_final_notification_css_change",
+      "planLinkAndSave": "passed",
+      "mobileStatistics": "initial_view_only",
+      "finalNotificationPlacement": "not_visually_retested",
+      "stopReason": "user_requested_finish_without_browser_recheck"
+    },
+    "dockerLinuxBuild": "not_run_no_container_engine",
+    "realPostgreSql": "not_run",
+    "liveExternalProviders": "not_run",
+    "productionSmoke": "not_run",
+    "backupRestore": "not_run"
+  },
+  "remaining": [
+    "target_environment_Linux_and_PostgreSQL_acceptance",
+    "final_whole_app_desktop_and_mobile_visual_acceptance",
+    "new_owner_self_service_website_form_creation_requires_follow_up",
+    "live_provider_verification_and_post_release_checks",
+    "large_initial_javascript_bundle"
+  ],
+  "logs": [
+    "/tmp/basqar-stage8-full-api-final.log",
+    "/tmp/basqar-stage8-web-final.log",
+    "/tmp/basqar-stage8-types-final.log",
+    "/tmp/basqar-stage8-build-final.log",
+    "/tmp/basqar-stage8-regressions.log",
+    "/tmp/basqar-stage8-cycle.log"
+  ],
+  "report": "output/documents/BasQar-stage-8-acceptance-2026-10-29.md"
+}

@@ -60,7 +60,22 @@ export async function getAvrEditorContext(prisma:PrismaClient,auth:AuthContext,d
 
 export async function countDocumentClosing(prisma:PrismaClient,tenantId:string,scope:Prisma.DealWhereInput={}) {
   if(!await (await import("./legalProfileService.ts")).isDocumentsEnabled(prisma,tenantId))return 0;
-  const deals=await prisma.deal.findMany({where:{...scope,tenantId,outcome:{not:"lost"}},select:{paymentStatus:true,electronicDocuments:{orderBy:{createdAt:"desc"},select:{type:true,status:true,externalId:true,externalSystem:true,externalStatus:true,errorCode:true}}}});
   const esfEnabled = await isEsfEnabled(prisma);
-  return deals.filter(d=>{const state=documentWorkflowState(d.electronicDocuments, esfEnabled);return !state.closed&&(state.error||(d.paymentStatus==="PAID"&&!d.electronicDocuments.some(r=>r.type==="AVR"))||(esfEnabled&&d.electronicDocuments.some(r=>r.type==="AVR")&&!d.electronicDocuments.some(r=>r.type==="ESF")));}).length;
+  const select = { id: true, paymentStatus: true, electronicDocuments: { orderBy: { createdAt: "desc" }, select: { type: true, status: true, externalId: true, externalSystem: true, externalStatus: true, errorCode: true } } } satisfies Prisma.DealSelect;
+  let total = 0, cursor: string | undefined;
+  // Page the parent records: one large relation fetch can exhaust the local
+  // database stack and also makes the home page grow with the entire company.
+  for (;;) {
+    const deals: Prisma.DealGetPayload<{ select: typeof select }>[] = await prisma.deal.findMany({
+      where: { AND: [scope, { tenantId, outcome: { not: "lost" } }, ...(cursor ? [{ id: { gt: cursor } }] : [])] },
+      select, orderBy: { id: "asc" }, take: 500,
+    });
+    total += deals.filter(d => {
+      const state = documentWorkflowState(d.electronicDocuments, esfEnabled);
+      return !state.closed && (state.error || (d.paymentStatus === "PAID" && !d.electronicDocuments.some(r => r.type === "AVR")) || (esfEnabled && d.electronicDocuments.some(r => r.type === "AVR") && !d.electronicDocuments.some(r => r.type === "ESF")));
+    }).length;
+    if (deals.length < 500) break;
+    cursor = deals[deals.length - 1].id;
+  }
+  return total;
 }

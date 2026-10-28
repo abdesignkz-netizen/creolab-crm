@@ -629,7 +629,7 @@ select:disabled { cursor: not-allowed; opacity: .65; }
 }
 
 /* Action feedback stays in the viewport, independent of any page scroll container. */
-.feedback-region { position: fixed; right: max(24px, env(safe-area-inset-right)); bottom: max(24px, env(safe-area-inset-bottom)); z-index: 11000; display: flex; flex-direction: column; gap: 10px; width: min(460px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); overflow-y: auto; pointer-events: none; }
+.feedback-region { position: fixed; right: max(24px, env(safe-area-inset-right)); top: calc(88px + env(safe-area-inset-top, 0px)); z-index: 11000; display: flex; flex-direction: column; gap: 10px; width: min(460px, calc(100vw - 32px)); max-height: min(40dvh, 400px); overflow-y: auto; pointer-events: none; }
 .feedback-card { display: flex; align-items: flex-start; gap: 12px; padding: 16px; border: 1px solid #b7cef0; border-radius: 16px; background: #f5f9ff; color: #18385e; box-shadow: 0 8px 32px #172b4d26; pointer-events: auto; }
 .feedback-card--error { color: #922b25; background: #fff6f5; border-color: #efb9b3; }
 .feedback-card--success { color: #14532d; background: #f0fdf4; border-color: #86cfa0; }
@@ -639,7 +639,7 @@ select:disabled { cursor: not-allowed; opacity: .65; }
 .feedback-card button:hover { background: #00000009; }
 .feedback-card button:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
 @media (max-width: 760px) {
-  .feedback-region { right: 12px; left: 12px; bottom: calc(96px + env(safe-area-inset-bottom, 0px)); width: auto; max-height: min(45dvh, 400px); }
+  .feedback-region { right: 12px; left: 12px; width: auto; }
   .feedback-card { padding: 12px; gap: 8px; }
   .feedback-card button { flex-basis: 44px; min-height: 44px; margin: -6px; }
 }

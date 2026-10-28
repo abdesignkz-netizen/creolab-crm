@@ -451,7 +451,12 @@ export const updateTenantOpsSchema = /* @__PURE__ */ (() => z.object({
   stalledDealDays: z.number().int().min(1).max(90).optional(),
   proposalFollowUpThresholdDays: z.number().int().min(1).max(90).optional(),
   silenceReturnDays: z.number().int().min(1).max(180).optional(),
-  salesPlanMinor: z.number().min(0).nullable().optional(),
+  salesPlanMinor: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).nullable().optional(),
+  salesPlans: z.array(z.object({
+    month: z.string().regex(/^[1-9]\d{3}-(0[1-9]|1[0-2])$/),
+    amount: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+    currency: z.string().regex(/^[A-Z]{3}$/),
+  }).strict()).max(120).refine(rows => new Set(rows.map(row => `${row.month}:${row.currency}`)).size === rows.length).optional(),
   lostReasons: z.array(z.string().trim().min(1).max(80)).max(40).optional(),
   stageSlaDays: z.record(z.string().min(1).max(80), z.number().min(1).max(90).nullable()).optional(),
   processCalendar: processCalendarSchema.optional(),
@@ -464,7 +469,7 @@ export const updateTenantOpsSchema = /* @__PURE__ */ (() => z.object({
     isArchived: z.boolean(),
     slaDays: z.number().min(1).max(90).nullable(),
   }).strict()).min(1).max(100).optional(),
-}).refine(value => !value.pipeline || Boolean(value.revision), { message: "Обновите правила перед изменением этапов." }))();
+}).refine(value => !(value.pipeline || value.salesPlans) || Boolean(value.revision), { message: "Обновите правила перед изменением этапов." }))();
 
 export const updateContactSchema = z
   .object({

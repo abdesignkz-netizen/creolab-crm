@@ -1,0 +1,73 @@
+{
+  "stage": "7.2",
+  "date": "2026-10-28",
+  "status": "implemented_and_automated_checks_passed",
+  "deployed": false,
+  "productionDataChanged": false,
+  "externalMessagesSent": false,
+  "databaseSchemaChanged": false,
+  "tests": {
+    "api": {
+      "analyticsPeriods": 15,
+      "analyticsCompleteness": 5,
+      "auditRegression": 11,
+      "financialReporting": 7,
+      "controlPeriods": 6,
+      "controlWeb": 11,
+      "aiControl": 16,
+      "dealProcessPolicy": 4,
+      "dealPipelineSettings": 7,
+      "periodRange": 4,
+      "situationPermissions": 6
+    },
+    "web": { "systemLocale": 31 },
+    "uniquePassed": 123,
+    "failed": 0,
+    "httpRetry": "initial_sandbox_port_restriction_then_16_passed"
+  },
+  "verification": {
+    "typecheck": "passed",
+    "webBuild": "passed",
+    "initialBundleBudget": "passed",
+    "diffCheck": "passed",
+    "browserVisual": "blocked_browser_control_disabled",
+    "excelApplication": "not_run",
+    "docker": "not_run",
+    "realPostgresql": "not_run",
+    "production": "not_run"
+  },
+  "rules": {
+    "conversion": "won_over_won_plus_lost_closed_in_period",
+    "emptyDenominator": null,
+    "cohort": "received_in_period_observed_today",
+    "repeatedStageEntries": "deduplicated",
+    "skippedStagesAreLosses": false,
+    "previousPeriod": "equal_number_of_local_calendar_days",
+    "homeAndStatisticsComparisonMatch": true,
+    "plan": "company_month_currency",
+    "partialMonthPlan": "calendar_day_share_round_aggregate_once",
+    "filteredCompanyPlan": "unavailable",
+    "missingMonthPlan": "unavailable",
+    "undatedLegacyPlan": "preserved_but_not_used",
+    "currencyConversion": false,
+    "optimisticRevisionRequiredForPlans": true,
+    "unknownActualIsNotZero": true
+  },
+  "limits": {
+    "monthlyPlanRows": 120,
+    "cohortPageSize": 500,
+    "cohortTotalCap": null,
+    "longHistoryUsesAnnualBuckets": true,
+    "detailsMayBePartial": true,
+    "visualAcceptancePending": true
+  },
+  "logs": [
+    "/tmp/basqar-stage72-api-final.log",
+    "/tmp/basqar-stage72-control-http.log",
+    "/tmp/basqar-stage72-comparison-final.log",
+    "/tmp/basqar-stage72-web-final.log",
+    "/tmp/basqar-stage72-typecheck-final.log",
+    "/tmp/basqar-stage72-build-final.log"
+  ],
+  "nextStep": "cross_flow_and_target_environment_acceptance_before_release"
+}

@@ -170,6 +170,7 @@ function presentControlData(action: ControlAction, data: Record<string, unknown>
       deals: next.dealsCreated,
       needAttention: asRecord(next.attention).count ?? next.attention ?? null,
       revenue: next.revenueLabel || next.revenue,
+      receipts: next.receiptsLabel,
     };
   }
   if (action === "GET_DEALS_STATS") {
@@ -177,10 +178,11 @@ function presentControlData(action: ControlAction, data: Record<string, unknown>
       deals: next.created,
       closed: Number(next.won || 0) + Number(next.lost || 0),
       revenue: next.revenueLabel || next.revenue,
+      receipts: next.receiptsLabel,
     };
   }
   if (action === "GET_REVENUE_STATS") {
-    next.stats = { revenue: next.revenueLabel || next.revenue };
+    next.stats = { revenue: next.revenueLabel || next.revenue, receipts: next.receiptsLabel };
   }
   if (action === "GET_STUCK_DEALS") {
     next.stats = { stuckDeals: next.total ?? (Array.isArray(next.items) ? next.items.length : 0) };
@@ -824,6 +826,12 @@ async function dispatchAction(action: ControlAction, ctx: DispatchCtx): Promise<
   const { prisma, auth, access, params } = ctx;
   const currency = auth.activeMembership?.tenant.currency || "KZT";
   const financial = access.canReadFinancialData;
+  const moneyReport = (dash: Awaited<ReturnType<typeof analytics>>) => ({
+    revenue: dash.overview.revenue, revenueLabel: dash.overview.revenueLabel,
+    receipts: dash.overview.receipts, receiptsLabel: dash.overview.receiptsLabel,
+    salesByCurrency: dash.financial.sales.byCurrency, receiptsByCurrency: dash.financial.receipts.byCurrency,
+    currency, salesDateBasis: "closedAt", receiptsDateBasis: "confirmedAt",
+  });
 
   switch (action) {
     case "GET_BUSINESS_SUMMARY": {
@@ -834,9 +842,10 @@ async function dispatchAction(action: ControlAction, ctx: DispatchCtx): Promise<
         dealsCreated: dash.overview?.dealsCreated ?? 0,
         won: dash.overview?.won ?? 0,
         lost: dash.overview?.lost ?? 0,
+        conversion: dash.overview.conversion, closedDeals: dash.overview.closedDeals, conversionBasis: dash.overview.conversionBasis,
         attention: asRecord(sit.attention).summary || null,
         ...(financial
-          ? { revenue: dash.overview?.revenue ?? null, revenueLabel: dash.overview?.revenueLabel ?? null }
+          ? moneyReport(dash)
           : {}),
       };
     }
@@ -849,6 +858,7 @@ async function dispatchAction(action: ControlAction, ctx: DispatchCtx): Promise<
           : { activeDeals: sit.current.activeDeals, needsReply: sit.current.needsReply, overdueTasks: sit.current.overdueTasks },
         attention: asRecord(sit.attention).summary || null,
         todayTasks: sit.todayTasks,
+        ...(financial ? { payments: sit.payments } : {}),
       };
     }
     case "GET_LEADS_STATS": {
@@ -874,17 +884,18 @@ async function dispatchAction(action: ControlAction, ctx: DispatchCtx): Promise<
         created: dash.overview?.dealsCreated ?? 0,
         won: dash.overview?.won ?? 0,
         lost: dash.overview?.lost ?? 0,
+        conversion: dash.overview.conversion, closedDeals: dash.overview.closedDeals, conversionBasis: dash.overview.conversionBasis,
         ...(financial
-          ? { revenue: dash.sales?.revenue ?? null, pipeline: dash.sales?.pipeline ?? null }
+          ? { ...moneyReport(dash), pipeline: dash.sales?.pipeline ?? null }
           : {}),
       };
     }
     case "GET_REVENUE_STATS": {
       const dash = await analytics(ctx);
       return {
-        revenue: dash.sales?.revenue ?? null,
-        revenueLabel: dash.sales?.revenueLabel ?? null,
+        ...moneyReport(dash),
         avgCheck: dash.sales?.avgCheck ?? null,
+        plan: dash.sales.plan,
         planMinor: dash.sales?.planMinor ?? null,
         planPercent: dash.sales?.planPercent ?? null,
         currency,

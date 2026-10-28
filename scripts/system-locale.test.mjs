@@ -260,6 +260,49 @@ test('Incomplete analytics coverage stays visible in CSV, Excel and printable re
   }
 });
 
+test('Financial exports distinguish sales from payments and retain exact currency amounts', async () => {
+  const exports = await bundle(`export { exportAnalyticsCsv, exportAnalyticsExcel, exportAnalyticsPdf } from './lib/statsExport';`);
+  const data = { currency: 'KZT', period: { label: '24.10.2029' }, sources: [{ name: '<Source>', revenueExact: '18014398509481987' }],
+    overview: { revenueLabel: '1 160 ₸', receiptsLabel: '545 ₸' }, sales: { revenueLabel: '1 160 ₸', receiptsLabel: '545 ₸' },
+    financial: { sales: { byCurrency: [{currency:'KZT',label:'1 160 ₸',missing:1},{currency:'USD',label:'30 USD'}] },
+      receipts: { byCurrency: [{currency:'KZT',label:'545 ₸'},{currency:'USD',label:'10 USD'}] } } };
+  const previous = { document: globalThis.document, window: globalThis.window, create: URL.createObjectURL, revoke: URL.revokeObjectURL };
+  const blobs = [];
+  globalThis.document = { createElement: () => ({ click() {} }) };
+  globalThis.window = { open: () => null };
+  URL.createObjectURL = blob => { blobs.push(blob); return 'blob:finance-test'; }; URL.revokeObjectURL = () => {};
+  try {
+    exports.exportAnalyticsCsv(data, 'sources');
+    exports.exportAnalyticsExcel(data, {overview:true,sources:true,sales:true});
+    exports.exportAnalyticsPdf(data, {overview:true,sources:true,sales:true});
+    for (const blob of blobs) {
+      const text = await blob.text();
+      assert.match(text, /Сумма продаж/); assert.match(text, /Подтверждённые оплаты/);
+      assert.match(text, /545 ₸/); assert.match(text, /30 USD/); assert.match(text, /10 USD/);
+      assert.match(text, /дате подтверждения/); assert.match(text, /Валюты не суммируются/);
+      assert.match(text, /Сделок без суммы: 1/); assert.doesNotMatch(text, /Выручка/);
+    }
+    assert.match(await blobs[0].text(), /18014398509481987/);
+    assert.match(await blobs[2].text(), /&lt;Source&gt;/);
+  } finally {
+    if (previous.document === undefined) delete globalThis.document; else globalThis.document = previous.document;
+    if (previous.window === undefined) delete globalThis.window; else globalThis.window = previous.window;
+    URL.createObjectURL = previous.create; URL.revokeObjectURL = previous.revoke;
+  }
+});
+
+test('Currency breakdown explains missing prices, preserves zero and translates into Kazakh', async () => {
+  const { render } = await bundle(`import React from 'react';import {renderToStaticMarkup} from 'react-dom/server';
+    import {SessionContext,emptyCaps} from './lib/session';import {FinancialBreakdown} from './components/FinancialBreakdown';
+    export const render=(locale,rows)=>renderToStaticMarkup(<SessionContext.Provider value={{me:{user:{locale}},caps:emptyCaps}}><FinancialBreakdown currency="KZT" sales={rows} receipts={[{currency:'USD',label:'10 USD'}]}/></SessionContext.Provider>);`);
+  for (const locale of ['ru','kk']) {
+    const html = render(locale, [{currency:'KZT',label:'0 ₸',missing:1},{currency:'USD',label:'30 USD'}]);
+    assert.match(html, /<summary>/); assert.match(html, /0 ₸/); assert.match(html, /30 USD/); assert.match(html, /10 USD/);
+    if (locale === 'ru') assert.match(html, /Сделок без суммы: 1/);
+    else { assert.match(html, /Сомасы жоқ мәмілелер: 1/); assert.doesNotMatch(html, /Сумма продаж|Подтверждённые оплаты/); }
+  }
+});
+
 test('Global ESF switch hides tenant document controls, including stale loaded data and old URLs', async () => {
   const plugin = { name:'esf-visibility-fixture', setup(build) { build.onLoad({filter:/(LegalSettingsPanel|DocumentNumberingPanel|AvrEditorPage)\.tsx$/}, args => {
     let source = readFileSync(args.path, 'utf8');
@@ -717,4 +760,72 @@ test('Paused conversations offer both AI resume and human takeover without bypas
   assert.ok(!buttonLabels(render('ru','paused',false)).includes('Вернуть AI'));
   assert.ok(!buttonLabels(render('ru','paused',true,'email')).includes('Вернуть AI'));
   const kk = render('kk'); assert.match(kk, /ЖИ кідіртілген/); assert.doesNotMatch(kk, /AI на паузе|Вернуть AI|Передать менеджеру/);
+});
+
+
+test('Period report translations and monthly plan explanations preserve meaning in both languages', async () => {
+  const entries = dictionaryEntries(path.join(root,'apps/web/src/lib/analyticsCopy.ts'),'analyticsKk');
+  assert.equal(new Set(entries.map(([key])=>key)).size,entries.length);
+  const params=value=>[...value.matchAll(/\{([a-zA-Z]\w*)\}/g)].map(m=>m[1]).sort();
+  for(const [ru,kk] of entries) {assert.ok(kk.trim());assert.deepEqual(params(ru),params(kk),ru);}
+  const {analyticsText,planExplanation}=await bundle(`export {analyticsText,planExplanation} from './lib/analyticsCopy';`);
+  for(const locale of ['ru','kk']) {
+    const text=(value,params={})=>analyticsText(value,params,locale);
+    assert.match(text('{won} успешных из {closed} закрытых',{won:3,closed:4}),/3/);
+    const ready=planExplanation({status:'ready',prorated:true,missingAmounts:1},text);
+    assert.match(ready,/календарных|күнтізбелік/);assert.match(ready,/без суммы|сомасы жоқ/);
+    assert.match(planExplanation({status:'missing',missingMonths:['2029-11'],currency:'USD'},text),/2029-11 \(USD\)/);
+    assert.match(planExplanation({status:'filtered'},text),/фильтр|сүзгі/i);
+    assert.match(planExplanation({status:'legacy'},text),/месяц|айға/);
+  }
+});
+
+test('Comparison chart retains the longer period and missing conversion is not drawn as zero', async () => {
+  const plugin={name:'chart-export',setup(build){build.onLoad({filter:/StatsPage\.tsx$/},args=>({contents:readFileSync(args.path,'utf8')+'\nexport {LineChart,BarChart};',loader:'tsx',resolveDir:path.dirname(args.path)}));}};
+  const {render}=await bundle(`import {renderToStaticMarkup} from 'react-dom/server';import {LineChart} from './pages/StatsPage';
+    import {SessionContext,emptyCaps} from './lib/session';export const render=()=>renderToStaticMarkup(<SessionContext.Provider value={{me:{user:{locale:'ru'}},caps:emptyCaps}}><LineChart points={[{label:'15 октября',value:null}]} comparePoints={[{label:'1 сентября',value:10},{label:'2 сентября',value:20},{label:'30 сентября',value:75}]} metric="conversion" label="Comparison"/></SessionContext.Provider>);`,[plugin]);
+  const html=render(); assert.match(html,/30 сентября/);assert.match(html,/75%/);
+  assert.match(html,/нет закрытых сделок/);assert.match(html,/даты обоих периодов/);
+  assert.doesNotMatch(html,/NaN|Infinity/);
+});
+
+test('Plan/fact and real cohort stages survive CSV, SpreadsheetML and printable exports', async () => {
+  const exports=await bundle(`export {exportAnalyticsCsv,exportAnalyticsExcel,exportAnalyticsPdf} from './lib/statsExport';`);
+  const data={currency:'KZT',period:{label:'Октябрь 2029'},financial:{sales:{byCurrency:[]},receipts:{byCurrency:[]}},
+    sales:{plan:{status:'ready',label:'3 100 ₸',actual:{label:'1 550 ₸'},percent:50,prorated:true}},
+    funnel:{mode:'cohort',steps:[{name:'КП отправлено',count:1,fromStartPct:25},{name:'Продано',count:2,fromStartPct:50}]}};
+  const previous={document:globalThis.document,window:globalThis.window,create:URL.createObjectURL,revoke:URL.revokeObjectURL},blobs=[];
+  globalThis.document={createElement:()=>({click(){}})};globalThis.window={open:()=>null};
+  URL.createObjectURL=blob=>{blobs.push(blob);return 'blob:plan-test';};URL.revokeObjectURL=()=>{};
+  try {
+    exports.exportAnalyticsCsv(data,'funnel');exports.exportAnalyticsExcel(data,{funnel:true,sales:true});exports.exportAnalyticsPdf(data,{funnel:true,sales:true});
+    for(const blob of blobs) {
+      const text=await blob.text();assert.match(text,/1 550 ₸/);assert.match(text,/50%/);assert.match(text,/КП отправлено/);
+      assert.match(text,/поздние продажи тоже входят/);assert.match(text,/не считаются потерей/);
+    }
+    const excel=await blobs[1].text();assert.match(excel,/<Row><Cell><Data ss:Type="String">/);assert.doesNotMatch(excel,/<tr>|<td>|<th>/);
+    exports.exportAnalyticsExcel({...data,sales:{plan:{status:'filtered'}}},{sales:true});
+    const filtered=await blobs[3].text();assert.match(filtered,/Снимите фильтры/);assert.doesNotMatch(filtered,/50%/);
+  } finally {
+    if(previous.document===undefined)delete globalThis.document;else globalThis.document=previous.document;
+    if(previous.window===undefined)delete globalThis.window;else globalThis.window=previous.window;
+    URL.createObjectURL=previous.create;URL.revokeObjectURL=previous.revoke;
+  }
+});
+
+
+test('Conversion bars retain a genuine zero and exclude an unknown denominator', async () => {
+ const plugin={name:'bar-export',setup(build){build.onLoad({filter:/StatsPage\.tsx$/},args=>({contents:readFileSync(args.path,'utf8')+'\nexport {BarChart};',loader:'tsx',resolveDir:path.dirname(args.path)}));}};
+ const {render}=await bundle(`import {renderToStaticMarkup} from 'react-dom/server';import {BarChart} from './pages/StatsPage';export const render=()=>renderToStaticMarkup(<BarChart items={[{name:'All lost',conversion:0},{name:'Open only',conversion:null}]} valueKey="conversion"/>);`,[plugin]);
+ const html=render();assert.match(html,/All lost/);assert.match(html,/0%/);assert.doesNotMatch(html,/Open only|Нет данных/);
+});
+
+
+test('Monthly plan editor renders accessible month, currency and amount fields in both languages', async () => {
+ const fixture={stalledDealDays:7,proposalFollowUpThresholdDays:3,silenceReturnDays:14,salesPlanMinor:500,currency:'KZT',salesPlans:[{month:'2029-10',amount:3100,currency:'KZT'}],lostReasons:[],timeZone:'Asia/Almaty',revision:'a'.repeat(64),stages:[],processCalendar:{mode:'calendar',days:[1,2,3,4,5],start:'09:00',end:'18:00',excludedDates:[]}};
+ const plugin={name:'loaded-ops',setup(build){build.onLoad({filter:/OpsSection\.tsx$/},args=>({contents:readFileSync(args.path,'utf8').replace('useState<Ops | null>(null)',`useState<Ops | null>(${JSON.stringify(fixture)})`),loader:'tsx',resolveDir:path.dirname(args.path)}));}};
+ const {render}=await bundle(`import {renderToStaticMarkup} from 'react-dom/server';import {MemoryRouter} from 'react-router-dom';import OpsSection from './pages/OpsSection';export const render=locale=>renderToStaticMarkup(<MemoryRouter initialEntries={['/settings?section=ops#sales-plan']}><OpsSection locale={locale}/></MemoryRouter>);`,[plugin]);
+ const ru=render('ru'),kk=render('kk');
+ for(const html of [ru,kk]) {assert.match(html,/type="month"[^>]*value="2029-10"/);assert.match(html,/value="3100"/);assert.match(html,/value="KZT"/);assert.match(html,/inputMode="numeric"/);assert.doesNotMatch(html,/undefined|NaN/);}
+ assert.match(ru,/Добавить месяц/);assert.match(kk,/Ай қосу/);assert.match(ru,/доля календарных дней/);assert.match(kk,/күнтізбелік күндер/);
 });

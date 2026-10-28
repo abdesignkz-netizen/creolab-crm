@@ -1,0 +1,40 @@
+{
+  "stage": "6.2",
+  "date": "2026-10-28",
+  "status": "implemented_and_automatically_verified",
+  "deploymentPerformedThisStage": false,
+  "productionWrites": false,
+  "realOutboundMessages": false,
+  "uniqueTestsPassed": 109,
+  "suites": {
+    "backgroundReliability": 2,
+    "schemaPatches": 3,
+    "situationEpisodes": 21,
+    "situationPermissions": 6,
+    "situationSweep": 20,
+    "situationSweepMigration": 1,
+    "controlNotifications": 22,
+    "conversationContext.situation": 4,
+    "inquiryAutomation": 7,
+    "situation": 23
+  },
+  "workspaceTypecheck": "passed",
+  "webBuild": "passed",
+  "diffCheck": "passed",
+  "existingBuildWarning": { "initialJsKB": 1099.9, "gzipKB": 279.0 },
+  "browserVerification": "not_completed: localhost:4514 unavailable; browser tool subsequently reported local use disabled in Work settings",
+  "dockerVerification": "not_run: user selected checks without Docker",
+  "logs": [
+    "/tmp/basqar-stage62-local-final.log",
+    "/tmp/basqar-stage62-compat-final.log",
+    "/tmp/basqar-stage62-types-final.log",
+    "/tmp/basqar-stage62-build-final.log"
+  ],
+  "migration": "packages/db/prisma/migrations/20261028_situation_sweep.sql",
+  "limitations": [
+    "A bounded cursor-based sweep does not guarantee every record is checked every minute.",
+    "Some informational events, including sales.attention, retain their existing notification path.",
+    "Visual QA, target-environment migration/startup and live-provider delivery remain unverified."
+  ],
+  "nextStep": "Restore local visual QA, then verify migration and worker startup in the target environment before release."
+}

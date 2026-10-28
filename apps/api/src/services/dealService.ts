@@ -5,6 +5,7 @@ import { taskTitlePresentation, updateTenantOpsSchema } from "@creolab/contracts
 import type { z } from "zod";
 import { randomUUID } from "node:crypto";
 import { resolveEsfMeasureUnitCode } from "@creolab/contracts";
+import { businessDealWhere, wonSalesTotals, confirmedPaymentTotals, openPipelineTotals, outstandingPaymentTotals, saleAmount, moneyValue, MoneyDecimal } from "./financialMetrics.ts";
 import type { PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
@@ -188,7 +189,9 @@ function dealInclude() {
 function serializeDeal(deal: any, ops: ReturnType<typeof parseOpsSettings>, currency: string, now = new Date(), clock?: ProcessClock) {
   const items = Array.isArray(deal.items) ? deal.items.map(serializeDealItem) : [];
   const itemTotals = items.length ? totalsFromItems(items) : null;
-  const amount = itemTotals ? toMinorTenge(itemTotals.totalAmount) : amountNumber(deal.offerAmountMinor);
+  const amountValue = deal.outcome === "won" ? saleAmount(deal) : deal.offerAmountMinor;
+  const money = moneyValue(amountValue, deal.currency || currency);
+  const amount = money.amount;
   const flags = flagsForDeal({ ...deal, contact: deal.contact }, ops, now, clock);
   const assigneeName = deal.assignee?.user?.name || deal.assignee?.user?.email || null;
   const probability = deal.probability ?? deal.stage?.defaultProbability ?? 10;
@@ -209,7 +212,8 @@ function serializeDeal(deal: any, ops: ReturnType<typeof parseOpsSettings>, curr
         }
       : null,
     amount,
-    amountLabel: formatMoney(amount, deal.currency || currency),
+    amountLabel: money.label,
+    amountExact: money.exact,
     currency: deal.currency || currency,
     probability,
     weightedAmount: amount != null ? Math.round((amount * probability) / 100) : null,
@@ -225,7 +229,8 @@ function serializeDeal(deal: any, ops: ReturnType<typeof parseOpsSettings>, curr
     wonAt: deal.wonAt?.toISOString?.() || null,
     lostAt: deal.lostAt?.toISOString?.() || null,
     lossReason: deal.lossReason,
-    wonAmountMinor: amountNumber(deal.wonAmountMinor),
+    wonAmountMinor: moneyValue(deal.wonAmountMinor, deal.currency || currency).amount,
+    wonAmountExact: moneyValue(deal.wonAmountMinor, deal.currency || currency).exact,
     contact: deal.contact
       ? {
           id: deal.contact.id,
@@ -351,6 +356,7 @@ export async function getDealBoard(
         ? { assigneeMembershipId: null }
         : {};
 
+  const financeWhere = { ...(await businessDealWhere(prisma, tid)), ...assigneeWhere, ...(query.stage ? { stage: { systemKey: query.stage } } : {}) };
   const createdRange = dateRangeFilter(from, to);
   let idFilter: string[] | null = null;
 
@@ -359,8 +365,7 @@ export async function getDealBoard(
   }
 
   const where: Record<string, unknown> = {
-    tenantId: tid,
-    ...assigneeWhere,
+    ...financeWhere,
   };
 
   if (timeMode === "now") {
@@ -433,14 +438,14 @@ export async function getDealBoard(
     .filter((s) => !s.isTerminal && !s.isArchived || forKanban.some(deal => deal.stageId === s.id))
     .map((stage) => {
       const items = forKanban.filter((d) => d.stageId === stage.id);
-      let sum = 0;
+      let sum = new MoneyDecimal(0);
       let known = 0;
-      let weighted = 0;
+      let weighted = new MoneyDecimal(0);
       for (const item of items) {
-        if (item.amount != null) {
-          sum += item.amount;
+        if (item.amountExact != null && item.currency === currency) {
+          sum = sum.plus(item.amountExact);
           known += 1;
-          weighted += item.weightedAmount || 0;
+          weighted = weighted.plus(new MoneyDecimal(item.amountExact).mul(item.probability).div(100));
         }
       }
       return {
@@ -450,108 +455,37 @@ export async function getDealBoard(
         canReceiveDeals: !stage.isTerminal && !stage.isArchived,
         sortOrder: stage.sortOrder,
         count: items.length,
-        amountSum: known ? sum : null,
-        amountLabel: formatMoney(known ? sum : null, currency),
-        weightedSum: known ? weighted : null,
-        weightedLabel: formatMoney(known ? weighted : null, currency),
+        amountSum: moneyValue(known ? sum : null, currency).amount,
+        amountLabel: moneyValue(known ? sum : null, currency).label,
+        weightedSum: moneyValue(known ? weighted : null, currency).amount,
+        weightedLabel: moneyValue(known ? weighted : null, currency).label,
         amountKnownCount: known,
         deals: items,
       };
     });
 
   const openSerialized = forKanban.filter((d) => d.outcome === "open");
-  let pipelineSum = 0;
+  let pipelineSum = new MoneyDecimal(0);
   let pipelineKnown = 0;
-  let weightedSum = 0;
+  let weightedSum = new MoneyDecimal(0);
   for (const d of openSerialized) {
-    if (d.amount != null) {
-      pipelineSum += d.amount;
+    if (d.amountExact != null && d.currency === currency) {
+      pipelineSum = pipelineSum.plus(d.amountExact);
       pipelineKnown += 1;
-      weightedSum += d.weightedAmount || 0;
+      weightedSum = weightedSum.plus(new MoneyDecimal(d.amountExact).mul(d.probability).div(100));
     }
   }
 
-  const expectedList = openSerialized.filter((d) =>
-    ["INVOICED", "PARTIALLY_PAID", "OVERDUE"].includes(d.paymentStatus),
-  );
-  const expectedPayments = expectedList.reduce((acc, d) => acc + (d.amount || 0), 0);
-
-  const wonInView = serializedAll.filter((d) => d.outcome === "won");
-  const lostInView = serializedAll.filter((d) => d.outcome === "lost");
-  let soldSum = 0;
-  let soldKnown = 0;
-  for (const d of wonInView) {
-    if (d.amount != null) {
-      soldSum += d.amount;
-      soldKnown += 1;
-    }
-  }
-
-  const createdInPeriod =
-    timeMode === "period" && basis === "created"
-      ? serializedAll.length
-      : timeMode === "period"
-        ? (
-            await prisma.deal.count({
-              where: {
-                tenantId: tid,
-                ...assigneeWhere,
-                ...(createdRange ? { createdAt: createdRange } : {}),
-              },
-            })
-          )
-        : null;
-
-  const closedWonCount =
-    timeMode === "period"
-      ? basis === "closed"
-        ? wonInView.length
-        : await prisma.deal.count({
-            where: {
-              tenantId: tid,
-              ...assigneeWhere,
-              outcome: "won",
-              ...(createdRange ? { closedAt: createdRange } : {}),
-            },
-          })
-      : null;
-  const closedLostCount =
-    timeMode === "period"
-      ? basis === "closed"
-        ? lostInView.length
-        : await prisma.deal.count({
-            where: {
-              tenantId: tid,
-              ...assigneeWhere,
-              outcome: "lost",
-              ...(createdRange ? { closedAt: createdRange } : {}),
-            },
-          })
-      : null;
-
-  let periodSold = soldSum;
-  let periodSoldKnown = soldKnown;
-  if (timeMode === "period" && basis !== "closed") {
-    const wonDeals = await prisma.deal.findMany({
-      where: {
-        tenantId: tid,
-        ...assigneeWhere,
-        outcome: "won",
-        ...(createdRange ? { closedAt: createdRange } : {}),
-      },
-      select: { offerAmountMinor: true, wonAmountMinor: true },
-      take: 2000,
-    });
-    periodSold = 0;
-    periodSoldKnown = 0;
-    for (const d of wonDeals) {
-      const n = amountNumber(d.wonAmountMinor ?? d.offerAmountMinor);
-      if (n != null) {
-        periodSold += n;
-        periodSoldKnown += 1;
-      }
-    }
-  }
+  // Period totals are based on creation/closure dates, independently of the
+  // 500 cards currently rendered and of the chosen card date basis.
+  const [createdInPeriod, wonTotals, closedLostCount, fullPipeline, periodPayments, outstanding] = await Promise.all([
+    timeMode === "period" ? prisma.deal.count({ where: { ...financeWhere, ...(createdRange ? { createdAt: createdRange } : {}) } }) : null,
+    timeMode === "period" ? wonSalesTotals(prisma, financeWhere, createdRange, currency) : null,
+    timeMode === "period" ? prisma.deal.count({ where: { ...financeWhere, outcome: "lost", ...(createdRange ? { closedAt: createdRange } : {}) } }) : null,
+    timeMode === "now" && focus === "all" ? openPipelineTotals(prisma, financeWhere, currency) : null,
+    timeMode === "period" ? confirmedPaymentTotals(prisma, tid, financeWhere, createdRange, currency) : null,
+    timeMode === "now" ? outstandingPaymentTotals(prisma, { AND: [financeWhere, ...(focus === "all" ? [] : [{ id: { in: openSerialized.map(d => d.id) } }])] }, currency) : null,
+  ]);
 
   return {
     asOf: now.toISOString(),
@@ -578,15 +512,18 @@ export async function getDealBoard(
       timeMode === "now"
         ? {
             mode: "now" as const,
-            activeDeals: openSerialized.length,
-            pipelineAmount: pipelineKnown ? pipelineSum : null,
-            pipelineAmountLabel: formatMoney(pipelineKnown ? pipelineSum : null, currency),
-            weightedPipeline: pipelineKnown ? weightedSum : null,
-            weightedPipelineLabel: formatMoney(pipelineKnown ? weightedSum : null, currency),
-            amountKnownCount: pipelineKnown,
-            amountKnownOf: openSerialized.length,
-            expectedPayments: expectedList.length ? expectedPayments : null,
-            expectedPaymentsLabel: formatMoney(expectedList.length ? expectedPayments : null, currency),
+            activeDeals: fullPipeline?.count ?? openSerialized.length,
+            pipelineAmount: fullPipeline ? fullPipeline.total.amount : moneyValue(pipelineKnown ? pipelineSum : null, currency).amount,
+            pipelineAmountLabel: fullPipeline ? fullPipeline.total.label : moneyValue(pipelineKnown ? pipelineSum : null, currency).label,
+            weightedPipeline: fullPipeline ? fullPipeline.total.weighted.amount : moneyValue(pipelineKnown ? weightedSum : null, currency).amount,
+            weightedPipelineLabel: fullPipeline ? fullPipeline.total.weighted.label : moneyValue(pipelineKnown ? weightedSum : null, currency).label,
+            amountKnownCount: fullPipeline?.total.known ?? pipelineKnown,
+            amountKnownOf: fullPipeline?.total.count ?? openSerialized.length,
+            pipelineByCurrency: fullPipeline?.byCurrency || [],
+            attentionSummaryPartial: deals.length === 500,
+            expectedPayments: outstanding!.total.amount,
+            expectedPaymentsLabel: outstanding!.total.label,
+            expectedPaymentsByCurrency: outstanding!.byCurrency,
             stalledCount: openSerialized.filter((d) => d.flags.stalled).length,
             noNextActionCount: openSerialized.filter((d) => d.flags.noNextAction).length,
             overSlaCount: openSerialized.filter((d) => d.flags.overSla).length,
@@ -595,10 +532,14 @@ export async function getDealBoard(
         : {
             mode: "period" as const,
             createdDeals: createdInPeriod,
-            wonDeals: closedWonCount,
+            wonDeals: wonTotals!.count,
             lostDeals: closedLostCount,
-            soldAmount: periodSoldKnown ? periodSold : null,
-            soldAmountLabel: formatMoney(periodSoldKnown ? periodSold : null, currency),
+            soldAmount: wonTotals!.total.amount,
+            soldAmountLabel: wonTotals!.total.label,
+            salesByCurrency: wonTotals!.byCurrency,
+            receipts: periodPayments!.total.amount,
+            receiptsLabel: periodPayments!.total.label,
+            receiptsByCurrency: periodPayments!.byCurrency,
             dealsInView: forKanban.length,
             activityDeals: basis === "activity" ? forKanban.length : null,
           },
@@ -649,10 +590,14 @@ export async function getDeal(prisma: PrismaClient, auth: AuthContext, dealId: s
       methods: true,
     },
   });
+  const receipts = await confirmedPaymentTotals(prisma, tid, { tenantId: tid, id: deal.id }, undefined, deal.currency);
+  const agreed = saleAmount(deal);
+  const remaining = agreed == null ? null : MoneyDecimal.max(0, new MoneyDecimal(agreed).minus(receipts.total.exact || 0));
   return {
     deal: serializeDeal({ ...deal, contact }, ops, membership.tenant.currency || "KZT", now, processClock),
     stageHistory: deal.stageHistory,
-    payments: deal.payments,
+    payments: deal.payments.map(row => ({ ...row, amountLabel: moneyValue(row.amountMinor, row.currency).label })),
+    paymentSummary: { ...receipts.total, byCurrency: receipts.byCurrency, remaining: moneyValue(remaining, deal.currency) },
   };
 }
 
@@ -1119,6 +1064,7 @@ export async function getTenantOps(prisma: PrismaClient, auth: AuthContext) {
   return {
     ...ops,
     timeZone: tenant?.timezone || "Asia/Almaty",
+    currency: tenant?.currency || "KZT",
     lostReasons: lostReasonCatalog(ops),
     lostReasonsCustom: ops.lostReasons.length > 0,
     revision: processSettingsRevision(tenant?.settingsJson, tenant?.timezone || "Asia/Almaty", stages),
@@ -1143,7 +1089,7 @@ export async function updateTenantOps(
   requireCompanyAdmin(auth);
   const membership = requireTenant(auth);
   const parsed = updateTenantOpsSchema.safeParse(input);
-  if (!parsed.success) throw new ApiError(422, "invalid", "Проверьте сроки и рабочий календарь.");
+  if (!parsed.success) throw new ApiError(422, "invalid", input?.salesPlans ? "Проверьте месяц, валюту и сумму плана. Обновите настройки перед сохранением." : "Проверьте сроки и рабочий календарь.");
   input = parsed.data;
   if (input.pipeline) await ensureDealPipelineStages(prisma, membership.tenantId);
   await prisma.$transaction(async tx => {
@@ -1166,6 +1112,7 @@ export async function updateTenantOps(
     if (typeof input.silenceReturnDays === "number") ops.silenceReturnDays = Math.max(1, Math.min(180, input.silenceReturnDays));
     if (input.salesPlanMinor === null) ops.salesPlanMinor = null;
     if (typeof input.salesPlanMinor === "number") ops.salesPlanMinor = Math.max(0, Math.round(input.salesPlanMinor));
+    if (input.salesPlans) ops.salesPlans = [...input.salesPlans].sort((a, b) => a.month.localeCompare(b.month) || a.currency.localeCompare(b.currency));
     if (Array.isArray(input.lostReasons)) {
       ops.lostReasons = input.lostReasons.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 40);
     }

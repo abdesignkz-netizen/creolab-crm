@@ -146,7 +146,9 @@ describe("Control exact read queries on isolated data", () => {
     assert.equal(result.meta.dateFrom, p.dateFrom); assert.equal(result.meta.dateTo, p.dateTo);
     const reply = await f.send("Подготовь отчёт по продажам за текущий месяц");
     assert.deepEqual(reply.actions, ["GET_DEALS_STATS"]); assert.match(reply.reply, /17\s500/);
-    assert.match(reply.reply, /не подтверждённые поступления/);
+    assert.match(reply.reply, /Подтверждённые оплаты: 0 ₸/);
+    assert.match(reply.reply, /Продажи — по дате закрытия сделки/);
+    assert.match(reply.reply, /Оплаты — по дате подтверждения платежа/);
     const previous = await f.send("А за прошлый месяц?");
     assert.match(previous.reply, /900 ₸/); assert.doesNotMatch(previous.reply, /17\s500/);
   });

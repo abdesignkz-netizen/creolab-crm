@@ -8,7 +8,7 @@ import type { AuthContext } from "../lib/types.ts";
 import { getEffectiveTenantSettings, getEffectiveLlmConfig, invalidateRuntimeConfig } from "./runtimeSettings.ts";
 import type { WhatsAppSellerSchema } from "./aiManagerConfig.ts";
 import { AI_LANGUAGE_POLICY } from "./aiLanguagePolicy.ts";
-import { aiChannelTypes } from "./channelDeliveryService.ts";
+import { aiChannelTypes } from "./aiChannels.ts";
 
 const PLATFORM_BASE_PROMPT = `Базовые правила BasQar:
 - ${AI_LANGUAGE_POLICY}

@@ -1,3 +1,5 @@
+import { analyticsText } from "../lib/analyticsCopy";
+import { FinancialBreakdown } from "../components/FinancialBreakdown";
 import { InlineFeedback } from "../components/InlineFeedback";
 import { SituationHistory, SituationWorkPanel } from "../components/SituationWorkPanel";
 import { uiTaskTitle, uiMessage } from "../lib/uiText";
@@ -125,6 +127,7 @@ function Kpi({
   hint,
   delta,
   deltaPercent,
+  deltaPoints,
   to,
   emphasize,
   tone,
@@ -135,12 +138,15 @@ function Kpi({
   hint?: string;
   delta?: number | null;
   deltaPercent?: number | null;
+  deltaPoints?: number | null;
   to?: string;
   emphasize?: boolean;
   tone?: DashTone;
   icon?: string;
 }) {
-  const change = deltaText(delta, deltaPercent);
+  const locale = useLocale();
+  const change = deltaPoints == null ? deltaText(delta, deltaPercent)
+    : systemText(locale, "{p0} {p1} п.п.", { p0: deltaPoints > 0 ? "+" : "", p1: deltaPoints });
   const inner = (
     <>
       <span className="dash-kpi-top">
@@ -789,6 +795,7 @@ export function SituationPage() {
           <h3>{systemText(locale, "За {period}", { period: data.period.label })}</h3>
           <span className="muted">{systemText(locale, "Результат выбранного периода")}</span>
         </div>
+        {data.compare?.label ? <p className="muted">{analyticsText("Изменения относительно {period}.", { period: data.compare.label }, locale)}</p> : null}
         <div className="sit-kpi-grid">
           <Kpi label={systemText(locale, "Обращения")} value={r.inquiries} delta={r.deltas?.inquiries} deltaPercent={r.deltas?.inquiriesPct} to={path("/inquiries", { test: "false" }, true)} tone="sky" icon={ICONS.inquiries} />
           <Kpi label={systemText(locale, "Новые клиенты")} value={r.newClients} delta={r.deltas?.newClients} deltaPercent={r.deltas?.newClientsPct} to={path("/contacts", { owner: scope === "mine" ? "me" : scope === "unassigned" ? "unassigned" : "" }, true)} tone="sky" icon={ICONS.contacts} />
@@ -821,10 +828,10 @@ export function SituationPage() {
           />
           {r.conversionRate != null ? (
             <Kpi
-              label={systemText(locale, "Конверсия")}
+              label={analyticsText("Успешность закрытых сделок", {}, locale)}
               value={r.conversionLabel}
-              hint={systemText(locale, "{won} продаж из {inquiries} обращений", { won: r.wonDeals, inquiries: r.inquiries })}
-              deltaPercent={r.deltas?.conversionPct}
+              hint={analyticsText("{won} успешных из {closed} закрытых", { won: r.wonDeals, closed: r.closedDeals }, locale)}
+              deltaPoints={r.deltas?.conversionPct}
               to={path("/deals", { timeMode: "period", basis: "closed", outcome: "won" }, true)}
               tone="violet"
               icon={ICONS.conversion}
@@ -837,6 +844,8 @@ export function SituationPage() {
             {data.payments.count ? systemText(locale, " · {count} платежей", { count: data.payments.count }) : ""}
           </p>
         ) : null}
+        <p className="muted">{systemText(locale, "Продажи — по дате закрытия сделки. Оплаты — по дате подтверждения платежа. Валюты не суммируются.")}</p>
+        <FinancialBreakdown currency={data.currency || "KZT"} sales={r.salesByCurrency} receipts={data.payments?.byCurrency} pipeline={c.pipelineByCurrency} />
         {data.allTime ? (
           <p className="muted">
             {systemText(locale, "Всего: {inquiries} обращений · {clients} клиентов · {deals} сделок · {won} продаж", data.allTime)}
@@ -958,7 +967,7 @@ export function SituationPage() {
                   <th>{systemText(locale, "Источник")}</th>
                   <th>{systemText(locale, "Заявки")}</th>
                   <th>{systemText(locale, "Сделки")}</th>
-                  <th>{systemText(locale, "Конверсия")}</th>
+                  <th>{analyticsText("Обращения → сделки", {}, locale)}</th>
                 </tr>
               </thead>
               <tbody>

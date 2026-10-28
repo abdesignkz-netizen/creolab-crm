@@ -101,11 +101,12 @@ function preciseRead(text: string): ChatCommand | null {
     const period = unanswered[1] ? controlPeriodPhrase(unanswered[1]) : { period: "all" as const };
     return period ? { action: "GET_RECENT_LEADS", leadFilter: "needs_reply", ...period } : null;
   }
-  const report = text.match(/^(?:сводка|итоги|продажи|сделки|выручка|заявки|статистика заявок|отчет по продажам|последние заявки|последние сделки) (.+)$/);
+  const reportText = text.replace(/^(?:подтвержденные оплаты|продажи и оплаты|оплаты)(?= |$)/, "выручка");
+  const report = reportText.match(/^(?:сводка|итоги|продажи|сделки|выручка|заявки|статистика заявок|отчет по продажам|последние заявки|последние сделки) (.+)$/);
   if (report) {
     const period = controlPeriodPhrase(report[1].replace(/^(?:за |на )/, ""));
     if (!period) return null;
-    const action = /^(?:отчет по продажам|продажи|сделки) /.test(text) ? "GET_DEALS_STATS" : /^выручка /.test(text) ? "GET_REVENUE_STATS"
+    const action = /^(?:отчет по продажам|продажи|сделки) /.test(reportText) ? "GET_DEALS_STATS" : /^выручка /.test(reportText) ? "GET_REVENUE_STATS"
       : /^последние заявки /.test(text) ? "GET_RECENT_LEADS" : /^последние сделки /.test(text) ? "GET_RECENT_DEALS"
       : /^(?:заявки|статистика заявок) /.test(text) ? "GET_LEADS_STATS" : "GET_BUSINESS_SUMMARY";
     return { action, ...period };
@@ -182,7 +183,8 @@ export function quickControlCommand(text: string, timeZone = "Asia/Almaty", now 
   if (/^(?:мои |все |у нас )?задачи(?: есть)?(?: у нас| у меня)?(?: на сегодня| сегодня)?$/.test(read)) return { action: read.includes("сегодня") ? "GET_TODAY_TASKS" : "GET_TASKS", ...(/мои|у меня/.test(read) ? { scope: "mine" as const } : {}) };
   if (/^(?:какие )?(?:просроченные задачи|задачи просрочены)$/.test(read)) return { action: "GET_OVERDUE_TASKS" };
   if (/^(?:кто|какие клиенты|клиенты которые) (?:ждет|ждут) (?:ответа|менеджера|сотрудника)$/.test(read)) return { action: "GET_SITUATION" };
-  const periodMatch = read.match(/^(сводка|итоги|продажи|сделки|выручка|заявки|статистика заявок)(?: (?:за |на )?(сегодня|вчера|неделю|7 дней|30 дней|месяц|этот месяц|прошлый месяц))?$/);
+  const financeRead = read.replace(/^(?:подтвержденные оплаты|продажи и оплаты|оплаты)(?= |$)/, "выручка");
+  const periodMatch = financeRead.match(/^(сводка|итоги|продажи|сделки|выручка|заявки|статистика заявок)(?: (?:за |на )?(сегодня|вчера|неделю|7 дней|30 дней|месяц|этот месяц|прошлый месяц))?$/);
   if (periodMatch) return { action: ({ сводка: "GET_BUSINESS_SUMMARY", итоги: "GET_BUSINESS_SUMMARY", продажи: "GET_DEALS_STATS", сделки: "GET_DEALS_STATS", выручка: "GET_REVENUE_STATS", заявки: "GET_LEADS_STATS", "статистика заявок": "GET_LEADS_STATS" } as const)[periodMatch[1] as "сводка"], period: ({ вчера: "yesterday", неделю: "last_7", "7 дней": "last_7", "30 дней": "last_30", месяц: "this_month", "этот месяц": "this_month", "прошлый месяц": "last_month" } as Record<string, ChatCommand["period"]>)[periodMatch[2]] || "today" };
   const reads: Record<string, ChatCommand["action"]> = { "воронка": "GET_PIPELINE_SUMMARY", "застрявшие сделки": "GET_STUCK_DEALS", "последние сделки": "GET_RECENT_DEALS", "последние заявки": "GET_RECENT_LEADS", "новые заявки": "GET_RECENT_LEADS", "команда": "GET_TEAM_STATUS", "клиенты": "GET_CLIENTS" };
   if (exact[read]) return { action: exact[read] };

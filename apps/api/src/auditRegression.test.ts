@@ -48,10 +48,11 @@ describe("CRM audit regressions", () => {
     assert.equal(clients.total, 1);
   });
 
-  it("conversion without inquiries is missing data, not zero percent", async () => {
+  it("conversion uses closed deals, including sales from earlier inquiries", async () => {
     const trend = await getAnalyticsTrend(prisma, auth, { period: "custom", dateFrom: "2026-09-01", dateTo: "2026-09-07", source: "audit-source-a", metric: "conversion" });
-    assert.ok(trend.points.some(point => point.inquiries === 0 && point.value === null));
-    assert.ok(trend.points.some(point => point.inquiries === 1 && point.value === 0));
+    assert.ok(trend.points.some(point => point.closed === 0 && point.value === null));
+    assert.ok(trend.points.some(point => point.inquiries === 1 && point.value === null));
+    assert.ok(trend.points.some(point => point.inquiries === 0 && point.won === 1 && point.value === 100));
   });
 
   it("dashboard contains every chart metric for instant switching, including comparison and missing conversion", async () => {

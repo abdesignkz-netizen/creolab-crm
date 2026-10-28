@@ -81,7 +81,7 @@ export function addDaysYmd(ymd: { year: number; month: number; day: number }, da
   return { year: utc.getUTCFullYear(), month: utc.getUTCMonth() + 1, day: utc.getUTCDate() };
 }
 
-export type TrendGranularity = "hour" | "day" | "week" | "month";
+export type TrendGranularity = "hour" | "day" | "week" | "month" | "year";
 
 export function compareYmd(
   a: { year: number; month: number; day: number },
@@ -140,6 +140,10 @@ export function enumerateBucketKeys(
     return fillKeysBetween(existingKeys, granularity);
   }
   const last = zonedYmd(new Date(to.getTime() - 1), timeZone);
+  if (granularity === "year") {
+    const first = zonedYmd(from, timeZone).year;
+    return Array.from({ length: Math.max(0, last.year - first + 1) }, (_, i) => String(first + i));
+  }
   if (granularity === "hour") {
     const keys: string[] = [];
     let cursor = from.getTime();
@@ -159,7 +163,7 @@ export function enumerateBucketKeys(
       cursor += 3600_000;
       if (keys.length > 72) break;
     }
-    return keys;
+    return [...new Set(keys)];
   }
   if (granularity === "month") {
     const keys: string[] = [];
@@ -199,6 +203,7 @@ export function enumerateBucketKeys(
 function fillKeysBetween(existingKeys: string[], granularity: TrendGranularity) {
   const sorted = [...new Set(existingKeys)].sort();
   if (sorted.length < 2) return sorted;
+  if (granularity === "year") return Array.from({ length: Number(sorted.at(-1)) - Number(sorted[0]) + 1 }, (_, i) => String(Number(sorted[0]) + i));
   if (granularity === "day" && /^\d{4}-\d{2}-\d{2}$/.test(sorted[0])) {
     const [sy, sm, sd] = sorted[0].split("-").map(Number);
     const [ey, em, ed] = sorted[sorted.length - 1].split("-").map(Number);
@@ -247,7 +252,7 @@ export function periodLabel(preset: PeriodPreset, from: Date | null, to: Date | 
   };
   if (preset === "custom" && from && to) {
     const end = new Date(to.getTime() - 1);
-    const opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short", timeZone };
+    const opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short", year: "numeric", timeZone };
     return `${from.toLocaleDateString(locale === "kk" ? "kk-KZ" : "ru-RU", opts)} — ${end.toLocaleDateString(locale === "kk" ? "kk-KZ" : "ru-RU", opts)}`;
   }
   return systemText(locale, labels[preset]);
@@ -287,8 +292,9 @@ export function resolvePeriodRange(
     const from = zonedLocalToUtc(timeZone, fy, fm, fd);
     const next = addDaysYmd({ year: ty, month: tm, day: td }, 1);
     const to = zonedLocalToUtc(timeZone, next.year, next.month, next.day);
-    const ms = to.getTime() - from.getTime();
-    return { from, to, previousFrom: new Date(from.getTime() - ms), previousTo: from };
+    const days = Math.round((Date.UTC(ty, tm - 1, td) - Date.UTC(fy, fm - 1, fd)) / 86400000) + 1;
+    const previous = addDaysYmd({ year: fy, month: fm, day: fd }, -days);
+    return { from, to, previousFrom: zonedLocalToUtc(timeZone, previous.year, previous.month, previous.day), previousTo: from };
   }
 
   if (preset === "today") {

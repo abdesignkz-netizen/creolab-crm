@@ -1,6 +1,9 @@
 import { loadTenantServices } from "./tenantServiceCatalog.ts";
 import { AnalyticsCoverage } from "./analyticsCoverage.ts";
 import { analyticsTotals } from "./analyticsTotals.ts";
+import { analyticsComparison, closedDealConversion, periodSalesPlan } from "./analyticsPeriodPolicy.ts";
+import { buildAnalyticsFunnel } from "./analyticsFunnel.ts";
+import { businessDealWhere, confirmedPaymentsWhere, MoneyDecimal, moneyValue } from "./financialMetrics.ts";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
@@ -10,14 +13,13 @@ import { amountNumber, formatMoney, parseOpsSettings, type TenantOpsSettings } f
 import { flagsForDeal, nextStepForDeal, loadProcessDeals, PROCESS_OPEN_TASK_STATUSES } from "./dealProcessPolicy.ts";
 import { createProcessClock, type ProcessClock } from "./processCalendar.ts";
 import {
-  addDaysYmd,
   enumerateBucketKeys,
   formatBucketLabel,
   isoWeekKeyFromYmd,
   periodLabel,
   resolvePeriodRange,
   type PeriodPreset,
-  zonedLocalToUtc,
+  type TrendGranularity,
   zonedYmd,
 } from "./periodRange.ts";
 
@@ -31,7 +33,7 @@ function inquirySourceLabel(row: {
 
 export type AnalyticsCompareMode = "previous" | "last_month" | "last_year" | "none";
 export type FunnelMode = "cohort" | "events";
-export type TrendMetric = "inquiries" | "clients" | "deals" | "won" | "revenue" | "conversion";
+export type TrendMetric = "inquiries" | "clients" | "deals" | "won" | "revenue" | "receipts" | "conversion";
 
 function requireTenant(auth: AuthContext) {
   if (!auth.activeMembership) throw new ApiError(403, "no_tenant", "Нет активной компании");
@@ -43,7 +45,8 @@ function pct(part: number, total: number) {
   return Math.round((part / total) * 1000) / 10;
 }
 
-function deltaPct(current: number, previous: number | null) {
+function deltaPct(current: number | null, previous: number | null) {
+  if (current == null) return null;
   if (previous == null || previous === 0) return current === 0 ? 0 : null;
   return Math.round(((current - previous) / previous) * 1000) / 10;
 }
@@ -94,36 +97,6 @@ function parsePreset(raw?: string): PeriodPreset {
   return allowed.includes(raw as PeriodPreset) ? (raw as PeriodPreset) : "this_month";
 }
 
-function compareRange(
-  timeZone: string,
-  mode: AnalyticsCompareMode,
-  from: Date | null,
-  to: Date | null,
-  now: Date,
-) {
-  if (mode === "none" || !from || !to) return { from: null as Date | null, to: null as Date | null };
-  if (mode === "previous") {
-    const ms = to.getTime() - from.getTime();
-    return { from: new Date(from.getTime() - ms), to: from };
-  }
-  if (mode === "last_month") {
-    const ymd = zonedYmd(from, timeZone);
-    const prev =
-      ymd.month === 1 ? { year: ymd.year - 1, month: 12 } : { year: ymd.year, month: ymd.month - 1 };
-    const cFrom = zonedLocalToUtc(timeZone, prev.year, prev.month, 1);
-    const cTo = zonedLocalToUtc(timeZone, ymd.year, ymd.month, 1);
-    return { from: cFrom, to: cTo };
-  }
-  // last_year
-  const ymd = zonedYmd(from, timeZone);
-  const endYmd = zonedYmd(new Date(to.getTime() - 1), timeZone);
-  const next = addDaysYmd({ year: endYmd.year - 1, month: endYmd.month, day: endYmd.day }, 1);
-  return {
-    from: zonedLocalToUtc(timeZone, ymd.year - 1, ymd.month, ymd.day),
-    to: zonedLocalToUtc(timeZone, next.year, next.month, next.day),
-  };
-}
-
 async function buildFilters(prisma: PrismaClient, query: AnalyticsQuery, tid: string) {
   const inquiryExtra: Record<string, unknown> = { tenantId: tid, test: false, archived: false };
   const dealExtra: Record<string, unknown> = { tenantId: tid };
@@ -146,17 +119,13 @@ async function buildFilters(prisma: PrismaClient, query: AnalyticsQuery, tid: st
   const { assigneeMembershipId, ...attribution } = inquiryExtra;
   const hasAttribution = Object.keys(attribution).some(key => !["tenantId", "test", "archived"].includes(key));
   // Legacy rows may have only Deal.inquiryId or only Inquiry.dealId populated.
-  const linked = await prisma.inquiry.findMany({
-    where: (hasAttribution ? attribution : { tenantId: tid, OR: [{ test: true }, { archived: true }] }) as never,
-    select: { id: true, dealId: true },
-  });
+  const linked = hasAttribution ? await prisma.inquiry.findMany({
+    where: attribution as never, select: { id: true, dealId: true },
+  }) : [];
   const linkage = { OR: [{ inquiryId: { in: linked.map(row => row.id) } }, { id: { in: linked.flatMap(row => row.dealId ? [row.dealId] : []) } }] };
   // NOT (nullable inquiryId IN (...)) yields SQL UNKNOWN for unlinked deals.
   // Preserve these legitimate deals when excluding test/archived inquiries.
-  dealExtra.AND = hasAttribution ? [linkage] : [
-    { OR: [{ inquiryId: null }, { inquiryId: { notIn: linked.map(row => row.id) } }] },
-    { id: { notIn: linked.flatMap(row => row.dealId ? [row.dealId] : []) } },
-  ];
+  dealExtra.AND = hasAttribution ? [linkage] : (await businessDealWhere(prisma, tid)).AND;
   return { inquiryExtra, dealExtra };
 }
 
@@ -197,6 +166,7 @@ async function metricBundle(
   dealExtra: Record<string, unknown>,
   coverage: AnalyticsCoverage,
   coveragePrefix: string,
+  currency: string,
 ) {
   const received = rangeFilter(from, to);
   const closed = rangeFilter(from, to);
@@ -245,6 +215,7 @@ async function metricBundle(
           title: true,
           offerAmountMinor: true,
           wonAmountMinor: true,
+          currency: true,
           closedAt: true,
           createdAt: true,
           lossReason: true,
@@ -265,6 +236,7 @@ async function metricBundle(
           closedAt: true,
           createdAt: true,
           lossReason: true,
+          currency: true,
           stageId: true,
           assigneeMembershipId: true,
           stage: { select: { name: true, systemKey: true } },
@@ -276,12 +248,15 @@ async function metricBundle(
       prisma.deal.count({
         where: { ...dealExtra, stageHistory: { some: { toSystemKey: "contract", ...(received ? { enteredAt: received } : {}) } } } as never,
       }),
-      analyticsTotals(prisma, inquiryExtra, dealExtra, received),
+      analyticsTotals(prisma, inquiryExtra, dealExtra, received, tid, currency),
     ]);
 
-  const checks = wonDeals.map(d => amountNumber(d.wonAmountMinor ?? d.offerAmountMinor)).filter((n): n is number => n != null);
+  const checks = wonDeals.filter(d => d.currency === currency).map(d => d.wonAmountMinor ?? d.offerAmountMinor)
+    .filter((n): n is Prisma.Decimal => n != null).map(n => new MoneyDecimal(n)).sort((a, b) => a.cmp(b));
+  const middle = Math.floor(checks.length / 2);
+  const medianMoney = moneyValue(checks.length ? checks.length % 2 ? checks[middle] : checks[middle - 1].plus(checks[middle]).div(2) : null, currency);
   const { inquiryCount, won, lost, revenue, revenueKnown, pipeline, weighted, pipelineKnown, lostAmount } = totals;
-  const conversion = pct(won, inquiryCount);
+  const conversion = closedDealConversion(won, lost);
 
   return {
     inquiries,
@@ -297,17 +272,20 @@ async function metricBundle(
     revenue,
     revenueKnown,
     avgCheck: totals.avgCheck,
-    medianCheck: median(checks),
+    medianCheck: medianMoney.amount,
+    medianCheckLabel: medianMoney.label,
     maxCheck: totals.maxCheck,
     conversion,
     pipeline,
     weighted,
     pipelineKnown,
     lostAmount,
+    lostAmountLabel: totals.lostAmountLabel,
+    financial: totals.financial,
   };
 }
 
-function bucketKey(date: Date, granularity: "hour" | "day" | "week" | "month", timeZone: string) {
+function bucketKey(date: Date, granularity: TrendGranularity, timeZone: string) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone,
     year: "numeric",
@@ -324,10 +302,12 @@ function bucketKey(date: Date, granularity: "hour" | "day" | "week" | "month", t
   if (granularity === "hour") return `${y}-${m}-${d}T${h}`;
   if (granularity === "day") return `${y}-${m}-${d}`;
   if (granularity === "month") return `${y}-${m}`;
+  if (granularity === "year") return y;
   return isoWeekKeyFromYmd({ year: Number(y), month: Number(m), day: Number(d) });
 }
 
-function chooseGranularity(preset: PeriodPreset, from: Date | null, to: Date | null): "hour" | "day" | "week" | "month" {
+function chooseGranularity(preset: PeriodPreset, from: Date | null, to: Date | null): TrendGranularity {
+  if (from && to && (to.getTime() - from.getTime()) / 86400000 > 3650) return "year";
   if (preset === "today" || preset === "yesterday") return "hour";
   if (preset === "this_year" || preset === "all") return "month";
   if (from && to) {
@@ -353,10 +333,12 @@ async function buildTrend(
   locale = "ru",
   coverage = new AnalyticsCoverage(),
   coveragePrefix = "trend",
+  currency = "KZT",
+  forcedGranularity?: TrendGranularity,
 ) {
-  const granularity = chooseGranularity(preset, from, to);
+  let granularity = forcedGranularity || chooseGranularity(preset, from, to);
   const received = rangeFilter(from, to);
-  const [inquiries, deals, won, newClients] = await Promise.all([
+  const [inquiries, deals, newClients] = await Promise.all([
     coverage.read(coveragePrefix + ":inquiries", "График обращений", 8000, take => prisma.inquiry.findMany({
       where: { ...inquiryExtra, ...(received ? { receivedAt: received } : {}) } as never,
       select: { receivedAt: true },
@@ -365,11 +347,6 @@ async function buildTrend(
     coverage.read(coveragePrefix + ":created", "График сделок", 8000, take => prisma.deal.findMany({
       where: { ...dealExtra, ...(received ? { createdAt: received } : {}) } as never,
       select: { createdAt: true },
-      take,
-    })),
-    coverage.read(coveragePrefix + ":won", "График продаж", 8000, take => prisma.deal.findMany({
-      where: { ...dealExtra, outcome: "won", ...(received ? { closedAt: received } : {}) } as never,
-      select: { closedAt: true, offerAmountMinor: true, wonAmountMinor: true },
       take,
     })),
     coverage.read(coveragePrefix + ":clients", "График клиентов", 8000, take => prisma.contact.findMany({
@@ -383,27 +360,67 @@ async function buildTrend(
     })),
   ]);
 
-  const map = new Map<string, { inquiries: number; clients: number; deals: number; won: number; revenue: number }>();
+  const map = new Map<string, { inquiries: number; clients: number; deals: number; won: number; lost: number; revenue: number | null; receipts: number | null; revenueExact: string; receiptsExact: string }>();
   const touch = (key: string) => {
-    if (!map.has(key)) map.set(key, { inquiries: 0, clients: 0, deals: 0, won: 0, revenue: 0 });
+    if (!map.has(key)) map.set(key, { inquiries: 0, clients: 0, deals: 0, won: 0, lost: 0, revenue: 0, receipts: 0, revenueExact: "0", receiptsExact: "0" });
     return map.get(key)!;
   };
 
   for (const row of inquiries) touch(bucketKey(row.receivedAt, granularity, timeZone)).inquiries += 1;
   for (const row of newClients) touch(bucketKey(row.firstSeenAt, granularity, timeZone)).clients += 1;
   for (const row of deals) touch(bucketKey(row.createdAt, granularity, timeZone)).deals += 1;
-  for (const row of won) {
-    if (!row.closedAt) continue;
-    const b = touch(bucketKey(row.closedAt, granularity, timeZone));
-    b.won += 1;
-    const n = amountNumber(row.wonAmountMinor ?? row.offerAmountMinor);
-    if (n != null) b.revenue += n;
+  // Money charts must reconcile with full totals, even beyond the former 8000-row cap.
+  let cursor: string | undefined;
+  for (;;) {
+    const rows = await prisma.deal.findMany({ where: { AND: [dealExtra as Prisma.DealWhereInput,
+      { outcome: { in: ["won", "lost"] }, ...(received ? { closedAt: received } : {}), ...(cursor ? { id: { gt: cursor } } : {}) }] },
+      orderBy: { id: "asc" }, take: 500, select: { id: true, outcome: true, closedAt: true, wonAmountMinor: true, offerAmountMinor: true, currency: true } });
+    for (const row of rows) {
+      if (!row.closedAt) continue;
+      const b = touch(bucketKey(row.closedAt, granularity, timeZone));
+      if (row.outcome === "lost") { b.lost++; continue; }
+      b.won++;
+      if (row.currency === currency) {
+        const amount = moneyValue(new MoneyDecimal(b.revenueExact).plus(row.wonAmountMinor ?? row.offerAmountMinor ?? 0), currency);
+        b.revenue = amount.amount; b.revenueExact = amount.exact!;
+      }
+    }
+    if (rows.length < 500) break; cursor = rows[rows.length - 1].id;
+  }
+  cursor = undefined;
+  for (;;) {
+    const rows: Array<{ id: string; confirmedAt: Date; amountMinor: Prisma.Decimal }> = await prisma.paymentRecord.findMany({ where: { ...confirmedPaymentsWhere(tid, dealExtra as Prisma.DealWhereInput, received), currency,
+      ...(cursor ? { id: { gt: cursor } } : {}) }, orderBy: { id: "asc" }, take: 500, select: { id: true, confirmedAt: true, amountMinor: true } });
+    for (const row of rows) {
+      const b = touch(bucketKey(row.confirmedAt, granularity, timeZone));
+      const amount = moneyValue(new MoneyDecimal(b.receiptsExact).plus(row.amountMinor), currency);
+      b.receipts = amount.amount; b.receiptsExact = amount.exact!;
+    }
+    if (rows.length < 500) break; cursor = rows[rows.length - 1].id;
   }
 
+  // All-time reports have no explicit bounds. Coarsen a long monthly history
+  // instead of dropping sales/payments after the old 120-month bucket limit.
+  const monthlyKeys = granularity === "month" ? [...map.keys()].sort() : [];
+  if (!from && monthlyKeys.length) {
+    const monthIndex = (key: string) => Number(key.slice(0, 4)) * 12 + Number(key.slice(5, 7));
+    if (monthIndex(monthlyKeys.at(-1)!) - monthIndex(monthlyKeys[0]) >= 120) {
+      const rows = [...map.entries()]; map.clear(); granularity = "year";
+      for (const [key, row] of rows) {
+        const total = touch(key.slice(0, 4));
+        for (const field of ["inquiries", "clients", "deals", "won", "lost"] as const) total[field] += row[field];
+        for (const field of ["revenue", "receipts"] as const) {
+          const exactField = `${field}Exact` as const;
+          const amount = moneyValue(new MoneyDecimal(total[exactField]).plus(row[exactField]), currency);
+          total[field] = amount.amount; total[exactField] = amount.exact!;
+        }
+      }
+    }
+  }
   const keys = enumerateBucketKeys(from, to, granularity, timeZone, [...map.keys()]);
   const points = keys.map((key) => {
-    const v = map.get(key) || { inquiries: 0, clients: 0, deals: 0, won: 0, revenue: 0 };
-    const conversion = pct(v.won, v.inquiries);
+    const v = map.get(key) || { inquiries: 0, clients: 0, deals: 0, won: 0, lost: 0, revenue: 0, receipts: 0, revenueExact: "0", receiptsExact: "0" };
+    const conversion = closedDealConversion(v.won, v.lost);
     return {
       key,
       label: formatBucketLabel(key, granularity, locale),
@@ -411,7 +428,12 @@ async function buildTrend(
       clients: v.clients,
       deals: v.deals,
       won: v.won,
+      lost: v.lost,
+      closed: v.won + v.lost,
       revenue: v.revenue,
+      revenueExact: v.revenueExact,
+      receipts: v.receipts,
+      receiptsExact: v.receiptsExact,
       conversion,
       value:
         metric === "inquiries"
@@ -424,145 +446,11 @@ async function buildTrend(
                 ? v.won
                 : metric === "revenue"
                   ? v.revenue
-                  : conversion,
+                  : metric === "receipts" ? v.receipts : conversion,
     };
   });
 
   return { granularity, metric, points, coverage: coverage.result() };
-}
-
-async function buildFunnel(
-  prisma: PrismaClient,
-  tid: string,
-  from: Date | null,
-  to: Date | null,
-  mode: FunnelMode,
-  inquiryExtra: Record<string, unknown>,
-  dealExtra: Record<string, unknown>,
-  coverage: AnalyticsCoverage,
-) {
-  const received = rangeFilter(from, to);
-  const stages = [
-    { key: "inquiries", name: "Обращения" },
-    { key: "qualified", name: "Квалифицировано" },
-    { key: "proposal", name: "КП отправлено" },
-    { key: "negotiation", name: "Переговоры" },
-    { key: "contract", name: "Договор" },
-    { key: "won", name: "Продано" },
-  ];
-
-  if (mode === "events") {
-    const [inq, qualified, proposal, negotiation, contract, won] = await Promise.all([
-      prisma.inquiry.count({
-        where: { ...inquiryExtra, ...(received ? { receivedAt: received } : {}) } as never,
-      }),
-      prisma.inquiry.count({
-        where: {
-          ...inquiryExtra,
-          status: { in: ["qualified", "accepted", "in_progress", "waiting_client", "waiting_manager", "proposal", "converted"] },
-          ...(received ? { receivedAt: received } : {}),
-        } as never,
-      }),
-      prisma.dealStageHistory.count({
-        where: { tenantId: tid, deal: { is: dealExtra }, toSystemKey: "proposal_sent", ...(received ? { enteredAt: received } : {}) },
-      }),
-      prisma.dealStageHistory.count({
-        where: { tenantId: tid, deal: { is: dealExtra }, toSystemKey: "negotiation", ...(received ? { enteredAt: received } : {}) },
-      }),
-      prisma.dealStageHistory.count({
-        where: { tenantId: tid, deal: { is: dealExtra }, toSystemKey: "contract", ...(received ? { enteredAt: received } : {}) },
-      }),
-      prisma.deal.count({
-        where: { ...dealExtra, outcome: "won", ...(received ? { closedAt: received } : {}) } as never,
-      }),
-    ]);
-    const counts = [inq, qualified, proposal, negotiation, contract, won];
-    const steps = stages.map((s, i) => ({
-      ...s,
-      count: counts[i],
-      fromStartPct: pct(counts[i], counts[0] || 0),
-      fromPrevPct: i === 0 ? 100 : pct(counts[i], counts[i - 1] || 0),
-      lost: i === 0 ? 0 : Math.max(0, counts[i - 1] - counts[i]),
-    }));
-    const transitions = steps.slice(1).map((s, i) => ({
-      from: steps[i].name,
-      to: s.name,
-      was: steps[i].count,
-      passed: s.count,
-      lost: s.lost,
-      conversion: s.fromPrevPct,
-    }));
-    return { mode, steps, transitions };
-  }
-
-  // Cohort: inquiries in period, then how far their deals went
-  const inquiries = await coverage.read("buildFunnel:cohort", "Когорта обращений", 5000, take => prisma.inquiry.findMany({
-    where: { ...inquiryExtra, ...(received ? { receivedAt: received } : {}) } as never,
-    select: { id: true, contactId: true, status: true, dealId: true },
-    take,
-  }));
-  const dealIds = inquiries.map((i) => i.dealId).filter(Boolean) as string[];
-  const deals = dealIds.length
-    ? await prisma.deal.findMany({
-        where: { tenantId: tid, id: { in: dealIds } },
-        include: { stage: true, stageHistory: { select: { toSystemKey: true } } },
-      })
-    : [];
-  const byId = new Map(deals.map((d) => [d.id, d]));
-
-  const reached = {
-    inquiries: inquiries.length,
-    qualified: 0,
-    proposal: 0,
-    negotiation: 0,
-    contract: 0,
-    won: 0,
-  };
-
-  for (const inq of inquiries) {
-    if (["qualified", "accepted", "in_progress", "waiting_client", "waiting_manager", "proposal", "converted"].includes(inq.status)) {
-      reached.qualified += 1;
-    }
-    const deal = inq.dealId ? byId.get(inq.dealId) : null;
-    if (!deal) continue;
-    const keys = new Set(deal.stageHistory.map((h) => h.toSystemKey));
-    keys.add(deal.stage.systemKey);
-    if (keys.has("proposal_sent") || keys.has("negotiation") || keys.has("contract") || keys.has("invoiced") || deal.outcome === "won") {
-      reached.proposal += 1;
-    }
-    if (keys.has("negotiation") || keys.has("contract") || keys.has("invoiced") || deal.outcome === "won") {
-      reached.negotiation += 1;
-    }
-    if (keys.has("contract") || keys.has("invoiced") || deal.outcome === "won") {
-      reached.contract += 1;
-    }
-    if (deal.outcome === "won") reached.won += 1;
-  }
-
-  const counts = [
-    reached.inquiries,
-    reached.qualified,
-    reached.proposal,
-    reached.negotiation,
-    reached.contract,
-    reached.won,
-  ];
-  const steps = stages.map((s, i) => ({
-    ...s,
-    count: counts[i],
-    fromStartPct: pct(counts[i], counts[0] || 0),
-    fromPrevPct: i === 0 ? 100 : pct(counts[i], counts[i - 1] || 0),
-    lost: i === 0 ? 0 : Math.max(0, counts[i - 1] - counts[i]),
-  }));
-  const transitions = steps.slice(1).map((s, i) => ({
-    from: steps[i].name,
-    to: s.name,
-    was: steps[i].count,
-    passed: s.count,
-    lost: s.lost,
-    conversion: s.fromPrevPct,
-  }));
-  return { mode, steps, transitions, note: "Когорта по обращениям выбранного периода" };
 }
 
 function groupCount<T>(rows: T[], keyFn: (row: T) => string) {
@@ -582,13 +470,19 @@ export async function getAnalyticsDashboard(prisma: PrismaClient, auth: AuthCont
   const currency = membership.tenant.currency || "KZT";
   const now = new Date();
   const preset = parsePreset(query.period);
-  const compareMode = (["previous", "last_month", "last_year", "none"].includes(String(query.compare))
+  let compareMode = (["previous", "last_month", "last_year", "none"].includes(String(query.compare))
     ? query.compare
     : "previous") as AnalyticsCompareMode;
-  const funnelMode: FunnelMode = query.funnelMode === "cohort" ? "cohort" : "events";
+  const funnelMode: FunnelMode = query.funnelMode === "events" ? "events" : "cohort";
 
   const range = resolvePeriodRange(timeZone, preset, query.dateFrom, query.dateTo, now);
-  const cmp = compareRange(timeZone, compareMode, range.from, range.to, now);
+  if (!range.from || !range.to) compareMode = "none";
+  const cmp = analyticsComparison(timeZone, compareMode, range.from, range.to);
+  // Use the coarser interval for both periods. A single day's hourly chart
+  // compared to a whole month must not silently stop after the first 72 hours.
+  const intervals = ["hour", "day", "week", "month", "year"] as const;
+  const granularity = intervals[Math.max(intervals.indexOf(chooseGranularity(preset, range.from, range.to)),
+    compareMode === "none" ? 0 : intervals.indexOf(chooseGranularity("custom", cmp.from, cmp.to)))];
   const { inquiryExtra, dealExtra } = await buildFilters(prisma, query, tid);
   const coverage = new AnalyticsCoverage();
   const tenantRow = await prisma.tenant.findUnique({ where: { id: tid }, select: { settingsJson: true, timezone: true } });
@@ -596,12 +490,12 @@ export async function getAnalyticsDashboard(prisma: PrismaClient, auth: AuthCont
   const processClock = createProcessClock(ops.processCalendar, tenantRow?.timezone || timeZone, now);
 
   const [current, previous, funnel, trendInquiries, stageDurations, stage2] = await Promise.all([
-    metricBundle(prisma, tid, range.from, range.to, inquiryExtra, dealExtra, coverage, "current"),
+    metricBundle(prisma, tid, range.from, range.to, inquiryExtra, dealExtra, coverage, "current", currency),
     compareMode === "none"
       ? null
-      : metricBundle(prisma, tid, cmp.from, cmp.to, inquiryExtra, dealExtra, coverage, "previous"),
-    buildFunnel(prisma, tid, range.from, range.to, funnelMode, inquiryExtra, dealExtra, coverage),
-    buildTrend(prisma, tid, range.from, range.to, preset, timeZone, inquiryExtra, dealExtra, "inquiries", auth.user.locale, coverage),
+      : metricBundle(prisma, tid, cmp.from, cmp.to, inquiryExtra, dealExtra, coverage, "previous", currency),
+    buildAnalyticsFunnel(prisma, tid, range.from, range.to, funnelMode, inquiryExtra as Prisma.InquiryWhereInput, dealExtra as Prisma.DealWhereInput),
+    buildTrend(prisma, tid, range.from, range.to, preset, timeZone, inquiryExtra, dealExtra, "inquiries", auth.user.locale, coverage, "trend", currency, granularity),
     buildStageDurations(prisma, tid, range.from, range.to, coverage, dealExtra, ops, processClock, now).catch((err) => {
       coverage.unavailable("durations", "Длительность этапов");
       console.error("analytics stageDurations", err);
@@ -632,18 +526,22 @@ export async function getAnalyticsDashboard(prisma: PrismaClient, auth: AuthCont
           auth.user.locale,
           coverage,
           "trend-previous",
+          currency,
+          trendInquiries.granularity,
         );
 
   const relatedInquiryIds = [
     ...current.dealsCreatedRows.map((d) => d.inquiryId).filter(Boolean),
     ...current.wonDeals.map((d) => d.inquiryId).filter(Boolean),
+    ...current.lostDeals.map((d) => d.inquiryId).filter(Boolean),
   ] as string[];
   const missingIds = [...new Set(relatedInquiryIds)].filter(
     (id) => !current.inquiries.some((i) => i.id === id),
   );
-  const extraInquiries = missingIds.length
+  const relatedDealIds = [...current.wonDeals, ...current.lostDeals, ...current.dealsCreatedRows].map(row => row.id);
+  const extraInquiries = missingIds.length || relatedDealIds.length
     ? await prisma.inquiry.findMany({
-        where: { tenantId: tid, id: { in: missingIds } },
+        where: { tenantId: tid, OR: [{ id: { in: missingIds } }, { dealId: { in: relatedDealIds } }] },
         select: {
           id: true,
           dealId: true,
@@ -670,48 +568,56 @@ export async function getAnalyticsDashboard(prisma: PrismaClient, auth: AuthCont
 
   const sourceMap = new Map<
     string,
-    { inquiries: number; deals: number; won: number; revenue: number }
+    { inquiries: number; deals: number; won: number; lost: number; revenue: Prisma.Decimal; revenueKnown: number }
   >();
   for (const inq of current.inquiries) {
     const src = inquirySourceLabel(inq);
-    if (!sourceMap.has(src)) sourceMap.set(src, { inquiries: 0, deals: 0, won: 0, revenue: 0 });
+    if (!sourceMap.has(src)) sourceMap.set(src, { inquiries: 0, deals: 0, won: 0, lost: 0, revenue: new MoneyDecimal(0), revenueKnown: 0 });
     sourceMap.get(src)!.inquiries += 1;
   }
   for (const d of current.dealsCreatedRows) {
     const inq = resolveInquiry(d.id, d.inquiryId);
     const src = inq ? inquirySourceLabel(inq) : "Не указано";
-    if (!sourceMap.has(src)) sourceMap.set(src, { inquiries: 0, deals: 0, won: 0, revenue: 0 });
+    if (!sourceMap.has(src)) sourceMap.set(src, { inquiries: 0, deals: 0, won: 0, lost: 0, revenue: new MoneyDecimal(0), revenueKnown: 0 });
     sourceMap.get(src)!.deals += 1;
   }
   for (const d of current.wonDeals) {
     const inq = resolveInquiry(d.id, d.inquiryId);
     const src = inq ? inquirySourceLabel(inq) : "Не указано";
-    if (!sourceMap.has(src)) sourceMap.set(src, { inquiries: 0, deals: 0, won: 0, revenue: 0 });
+    if (!sourceMap.has(src)) sourceMap.set(src, { inquiries: 0, deals: 0, won: 0, lost: 0, revenue: new MoneyDecimal(0), revenueKnown: 0 });
     const bucket = sourceMap.get(src)!;
     bucket.won += 1;
-    const n = amountNumber(d.wonAmountMinor ?? d.offerAmountMinor);
-    if (n != null) bucket.revenue += n;
+    const n = d.wonAmountMinor ?? d.offerAmountMinor;
+    if (n != null && d.currency === currency) { bucket.revenue = bucket.revenue.plus(n); bucket.revenueKnown++; }
   }
 
+  for (const d of current.lostDeals) {
+    const inq = resolveInquiry(d.id, d.inquiryId), src = inq ? inquirySourceLabel(inq) : "Не указано";
+    if (!sourceMap.has(src)) sourceMap.set(src, { inquiries: 0, deals: 0, won: 0, lost: 0, revenue: new MoneyDecimal(0), revenueKnown: 0 });
+    sourceMap.get(src)!.lost++;
+  }
   const sources = [...sourceMap.entries()]
     .map(([name, v]) => ({
       name,
       inquiries: v.inquiries,
       deals: v.deals,
       won: v.won,
-      conversion: pct(v.won, v.inquiries),
-      revenue: v.revenue,
-      revenueLabel: formatMoney(v.revenue || null, currency),
-      avgCheck: v.won ? Math.round(v.revenue / v.won) : null,
-      avgCheckLabel: formatMoney(v.won ? Math.round(v.revenue / v.won) : null, currency),
+      conversion: closedDealConversion(v.won, v.lost),
+      closed: v.won + v.lost,
+      revenue: moneyValue(v.revenueKnown ? v.revenue : null, currency).amount,
+      revenueExact: moneyValue(v.revenueKnown ? v.revenue : null, currency).exact,
+      revenueLabel: moneyValue(v.revenueKnown ? v.revenue : null, currency).label,
+      revenueKnown: v.revenueKnown,
+      avgCheck: moneyValue(v.revenueKnown ? v.revenue.div(v.revenueKnown) : null, currency).amount,
+      avgCheckLabel: moneyValue(v.revenueKnown ? v.revenue.div(v.revenueKnown) : null, currency).label,
     }))
     .sort((a, b) => b.inquiries - a.inquiries);
 
   const serviceNames = new Map((await loadTenantServices(prisma, tid)).map((row) => [row.code, row.name]));
-  const serviceMap = new Map<string, { inquiries: number; won: number; revenue: number; sub: Map<string, number> }>();
+  const serviceMap = new Map<string, { inquiries: number; won: number; lost: number; revenue: Prisma.Decimal; revenueKnown: number; sub: Map<string, number> }>();
   for (const inq of current.inquiries) {
     const cat = inq.serviceCategory || inq.service || "Не указано";
-    if (!serviceMap.has(cat)) serviceMap.set(cat, { inquiries: 0, won: 0, revenue: 0, sub: new Map() });
+    if (!serviceMap.has(cat)) serviceMap.set(cat, { inquiries: 0, won: 0, lost: 0, revenue: new MoneyDecimal(0), revenueKnown: 0, sub: new Map() });
     const row = serviceMap.get(cat)!;
     row.inquiries += 1;
     if (inq.serviceSubcategory) row.sub.set(inq.serviceSubcategory, (row.sub.get(inq.serviceSubcategory) || 0) + 1);
@@ -719,11 +625,16 @@ export async function getAnalyticsDashboard(prisma: PrismaClient, auth: AuthCont
   for (const d of current.wonDeals) {
     const inq = resolveInquiry(d.id, d.inquiryId);
     const cat = inq?.serviceCategory || inq?.service || "Не указано";
-    if (!serviceMap.has(cat)) serviceMap.set(cat, { inquiries: 0, won: 0, revenue: 0, sub: new Map() });
+    if (!serviceMap.has(cat)) serviceMap.set(cat, { inquiries: 0, won: 0, lost: 0, revenue: new MoneyDecimal(0), revenueKnown: 0, sub: new Map() });
     const row = serviceMap.get(cat)!;
     row.won += 1;
-    const n = amountNumber(d.wonAmountMinor ?? d.offerAmountMinor);
-    if (n != null) row.revenue += n;
+    const n = d.wonAmountMinor ?? d.offerAmountMinor;
+    if (n != null && d.currency === currency) { row.revenue = row.revenue.plus(n); row.revenueKnown++; }
+  }
+  for (const d of current.lostDeals) {
+    const inq = resolveInquiry(d.id, d.inquiryId), cat = inq?.serviceCategory || inq?.service || "Не указано";
+    if (!serviceMap.has(cat)) serviceMap.set(cat, { inquiries: 0, won: 0, lost: 0, revenue: new MoneyDecimal(0), revenueKnown: 0, sub: new Map() });
+    serviceMap.get(cat)!.lost++;
   }
   const services = [...serviceMap.entries()]
     .map(([name, v]) => ({
@@ -731,14 +642,17 @@ export async function getAnalyticsDashboard(prisma: PrismaClient, auth: AuthCont
       label: serviceNames.get(name) || name,
       inquiries: v.inquiries,
       won: v.won,
-      conversion: pct(v.won, v.inquiries),
-      revenue: v.revenue,
-      revenueLabel: formatMoney(v.revenue || null, currency),
-      avgCheck: v.won ? Math.round(v.revenue / v.won) : null,
-      avgCheckLabel: formatMoney(v.won ? Math.round(v.revenue / v.won) : null, currency),
+      conversion: closedDealConversion(v.won, v.lost),
+      closed: v.won + v.lost,
+      revenue: moneyValue(v.revenueKnown ? v.revenue : null, currency).amount,
+      revenueExact: moneyValue(v.revenueKnown ? v.revenue : null, currency).exact,
+      revenueLabel: moneyValue(v.revenueKnown ? v.revenue : null, currency).label,
+      revenueKnown: v.revenueKnown,
+      avgCheck: moneyValue(v.revenueKnown ? v.revenue.div(v.revenueKnown) : null, currency).amount,
+      avgCheckLabel: moneyValue(v.revenueKnown ? v.revenue.div(v.revenueKnown) : null, currency).label,
       subcategories: [...v.sub.entries()].map(([sub, count]) => ({ name: sub, count })),
     }))
-    .sort((a, b) => b.revenue - a.revenue || b.inquiries - a.inquiries);
+    .sort((a, b) => (b.revenue ?? 0) - (a.revenue ?? 0) || b.inquiries - a.inquiries);
 
   const lossReasons = [...groupCount(current.lostDeals, (d) => d.lossReason || "Другое").entries()]
     .map(([reason, count]) => ({ reason, count }))
@@ -746,10 +660,9 @@ export async function getAnalyticsDashboard(prisma: PrismaClient, auth: AuthCont
 
   const lossByStage = [...groupCount(current.lostDeals, (d) => d.stage?.name || "Не указано").entries()]
     .map(([stage, count]) => {
-      const amount = current.lostDeals
-        .filter((d) => (d.stage?.name || "Не указано") === stage)
-        .reduce((acc, d) => acc + (amountNumber(d.offerAmountMinor) || 0), 0);
-      return { stage, count, amount, amountLabel: formatMoney(amount || null, currency) };
+      const priced = current.lostDeals.filter(d => (d.stage?.name || "Не указано") === stage && d.currency === currency && d.offerAmountMinor != null);
+      const money = moneyValue(priced.length ? priced.reduce((sum, d) => sum.plus(d.offerAmountMinor!), new MoneyDecimal(0)) : null, currency);
+      return { stage, count, amount: money.amount, amountExact: money.exact, amountLabel: money.label };
     })
     .sort((a, b) => b.count - a.count);
 
@@ -766,24 +679,30 @@ export async function getAnalyticsDashboard(prisma: PrismaClient, auth: AuthCont
     won: current.won,
     lost: current.lost,
     revenue: current.revenueKnown ? current.revenue : null,
-    revenueLabel: formatMoney(current.revenueKnown ? current.revenue : null, currency),
+    revenueLabel: current.financial.sales.total.label,
+    receipts: current.financial.receipts.total.amount,
+    receiptsLabel: current.financial.receipts.total.label,
+    receiptCount: current.financial.receipts.total.count,
     conversion: current.conversion,
+    conversionBasis: "won_over_closed",
+    closedDeals: current.won + current.lost,
     avgCheck: current.avgCheck,
-    avgCheckLabel: formatMoney(current.avgCheck, currency),
+    avgCheckLabel: current.financial.sales.total.avg.label,
     deltas: previous
       ? {
           inquiries: deltaPct(current.inquiryCount, previous.inquiryCount),
           won: deltaPct(current.won, previous.won),
           revenue: deltaPct(current.revenue, previous.revenue),
+          receipts: deltaPct(current.financial.receipts.total.amount, previous.financial.receipts.total.amount),
           conversionPp: deltaPp(current.conversion, previous.conversion),
         }
       : null,
   };
 
   const biggestLoss = funnel.transitions.slice().sort((a, b) => b.lost - a.lost)[0] || null;
-  const planMinor = ops.salesPlanMinor;
-  const planPercent =
-    planMinor && planMinor > 0 && current.revenueKnown ? Math.round((current.revenue / planMinor) * 100) : null;
+  const plan = periodSalesPlan({ plans: ops.salesPlans, legacyAmount: ops.salesPlanMinor, currency, timeZone,
+    from: range.from, to: range.to, filtered: [query.assignee, query.serviceCategory, query.source, query.channel, query.city, query.campaign].some(Boolean),
+    actual: current.financial.sales.total.exact, missingAmounts: current.financial.sales.total.missing });
 
   const filterLabels = [
     query.serviceCategory,
@@ -793,6 +712,10 @@ export async function getAnalyticsDashboard(prisma: PrismaClient, auth: AuthCont
     query.campaign,
     query.assignee ? "Менеджер выбран" : null,
   ].filter(Boolean);
+  const localDate = (date: Date) => {
+    const d = zonedYmd(date, timeZone);
+    return `${d.year}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")}`;
+  };
 
   return {
     asOf: now.toISOString(),
@@ -803,6 +726,8 @@ export async function getAnalyticsDashboard(prisma: PrismaClient, auth: AuthCont
       label: periodLabel(preset, range.from, range.to, timeZone, auth.user.locale),
       from: range.from?.toISOString() || null,
       to: range.to?.toISOString() || null,
+      dateFrom: range.from ? localDate(range.from) : null,
+      dateTo: range.to ? localDate(new Date(range.to.getTime() - 1)) : null,
     },
     compare: {
       mode: compareMode,
@@ -811,7 +736,7 @@ export async function getAnalyticsDashboard(prisma: PrismaClient, auth: AuthCont
       label:
         compareMode === "none"
           ? null
-          : periodLabel("custom", cmp.from, cmp.to, timeZone, auth.user.locale),
+          : [cmp.from!, new Date(cmp.to!.getTime() - 1)].map(date => date.toLocaleDateString(auth.user.locale === "kk" ? "kk-KZ" : "ru-RU", { day: "numeric", month: "short", year: "numeric", timeZone })).join(" — "),
     },
     filters: {
       assignee: query.assignee || null,
@@ -823,23 +748,28 @@ export async function getAnalyticsDashboard(prisma: PrismaClient, auth: AuthCont
       label: filterLabels.length ? filterLabels.join(" · ") : null,
     },
     overview,
+    financial: current.financial,
     sales: {
       won: current.won,
       revenue: current.revenueKnown ? current.revenue : null,
-      revenueLabel: formatMoney(current.revenueKnown ? current.revenue : null, currency),
+      revenueLabel: current.financial.sales.total.label,
+      receipts: current.financial.receipts.total.amount,
+      receiptsLabel: current.financial.receipts.total.label,
+      receiptCount: current.financial.receipts.total.count,
       avgCheck: current.avgCheck,
-      avgCheckLabel: formatMoney(current.avgCheck, currency),
+      avgCheckLabel: current.financial.sales.total.avg.label,
       medianCheck: current.medianCheck,
-      medianCheckLabel: formatMoney(current.medianCheck, currency),
+      medianCheckLabel: current.medianCheckLabel,
       maxCheck: current.maxCheck,
-      maxCheckLabel: formatMoney(current.maxCheck, currency),
+      maxCheckLabel: current.financial.sales.total.max.label,
       pipeline: current.pipelineKnown ? current.pipeline : null,
-      pipelineLabel: formatMoney(current.pipelineKnown ? current.pipeline : null, currency),
+      pipelineLabel: current.financial.pipeline.total.label,
       weightedPipeline: current.pipelineKnown ? current.weighted : null,
-      weightedPipelineLabel: formatMoney(current.pipelineKnown ? current.weighted : null, currency),
-      planMinor,
-      planLabel: formatMoney(planMinor, currency),
-      planPercent,
+      weightedPipelineLabel: current.financial.pipeline.total.weighted.label,
+      plan,
+      planMinor: plan.amount,
+      planLabel: plan.label,
+      planPercent: plan.percent,
       cycle: {
         avgDays: cycleDays.length ? Math.round((cycleDays.reduce((a, b) => a + b, 0) / cycleDays.length) * 10) / 10 : null,
         medianDays: median(cycleDays) != null ? Math.round(median(cycleDays)! * 10) / 10 : null,
@@ -856,8 +786,8 @@ export async function getAnalyticsDashboard(prisma: PrismaClient, auth: AuthCont
     services,
     losses: {
       lost: current.lost,
-      lostAmount: current.lostAmount || null,
-      lostAmountLabel: formatMoney(current.lostAmount || null, currency),
+      lostAmount: current.lostAmount,
+      lostAmountLabel: current.lostAmountLabel,
       reasons: lossReasons,
       byStage: lossByStage,
     },
@@ -867,7 +797,7 @@ export async function getAnalyticsDashboard(prisma: PrismaClient, auth: AuthCont
     aiManager: stage2.aiManager,
     campaigns: stage2.campaigns,
     dataQuality: stage2.dataQuality,
-    empty: current.inquiryCount === 0 && current.clients === 0 && current.dealsCreated === 0 && current.won === 0,
+    empty: current.inquiryCount === 0 && current.clients === 0 && current.dealsCreated === 0 && current.won === 0 && current.financial.receipts.count === 0,
   };
 }
 
@@ -987,6 +917,7 @@ async function buildStage2Analytics(
           assigneeMembershipId: true,
           offerAmountMinor: true,
           wonAmountMinor: true,
+          currency: true,
           createdAt: true,
           closedAt: true,
           nextAction: true,
@@ -1110,7 +1041,8 @@ async function buildStage2Analytics(
     leads: number;
     won: number;
     lost: number;
-    revenue: number;
+    revenue: Prisma.Decimal;
+    revenueKnown: number;
     responseMinutes: number[];
     overdueTasks: number;
     noNextAction: number;
@@ -1126,7 +1058,8 @@ async function buildStage2Analytics(
         leads: 0,
         won: 0,
         lost: 0,
-        revenue: 0,
+        revenue: new MoneyDecimal(0),
+        revenueKnown: 0,
         responseMinutes: [],
         overdueTasks: 0,
         noNextAction: 0,
@@ -1147,8 +1080,8 @@ async function buildStage2Analytics(
   for (const d of wonDeals) {
     const m = touchMgr(d.assigneeMembershipId);
     m.won += 1;
-    const n = amountNumber(d.wonAmountMinor ?? d.offerAmountMinor);
-    if (n != null) m.revenue += n;
+    const n = d.wonAmountMinor ?? d.offerAmountMinor;
+    if (n != null && d.currency === currency) { m.revenue = m.revenue.plus(n); m.revenueKnown++; }
     if (d.closedAt && d.createdAt) m.cycles.push((d.closedAt.getTime() - d.createdAt.getTime()) / 86400000);
   }
   for (const d of lostDeals) touchMgr(d.assigneeMembershipId).lost += 1;
@@ -1167,11 +1100,14 @@ async function buildStage2Analytics(
       leads: m.leads,
       won: m.won,
       lost: m.lost,
-      conversion: pct(m.won, m.leads),
-      revenue: m.revenue,
-      revenueLabel: formatMoney(m.revenue || null, currency),
-      avgCheck: m.won ? Math.round(m.revenue / m.won) : null,
-      avgCheckLabel: formatMoney(m.won ? Math.round(m.revenue / m.won) : null, currency),
+      conversion: closedDealConversion(m.won, m.lost),
+      closed: m.won + m.lost,
+      revenue: moneyValue(m.revenueKnown ? m.revenue : null, currency).amount,
+      revenueExact: moneyValue(m.revenueKnown ? m.revenue : null, currency).exact,
+      revenueLabel: moneyValue(m.revenueKnown ? m.revenue : null, currency).label,
+      revenueKnown: m.revenueKnown,
+      avgCheck: moneyValue(m.revenueKnown ? m.revenue.div(m.revenueKnown) : null, currency).amount,
+      avgCheckLabel: moneyValue(m.revenueKnown ? m.revenue.div(m.revenueKnown) : null, currency).label,
       avgFirstResponseMin:
         m.responseMinutes.length
           ? Math.round(m.responseMinutes.reduce((a, b) => a + b, 0) / m.responseMinutes.length)
@@ -1472,14 +1408,15 @@ export async function getAnalyticsTrend(
   const preset = parsePreset(query.period);
   const range = resolvePeriodRange(timeZone, preset, query.dateFrom, query.dateTo);
   const { inquiryExtra, dealExtra } = await buildFilters(prisma, query, tid);
-  const metric = (["inquiries", "clients", "deals", "won", "revenue", "conversion"].includes(String(query.metric))
+  const metric = (["inquiries", "clients", "deals", "won", "revenue", "receipts", "conversion"].includes(String(query.metric))
     ? query.metric
     : "inquiries") as TrendMetric;
-  return buildTrend(prisma, tid, range.from, range.to, preset, timeZone, inquiryExtra, dealExtra, metric, auth.user.locale);
+  return buildTrend(prisma, tid, range.from, range.to, preset, timeZone, inquiryExtra, dealExtra, metric, auth.user.locale, new AnalyticsCoverage(), "trend", membership.tenant.currency || "KZT");
 }
 
 export type DrillEntity =
   | "inquiries"
+  | "payments"
   | "clients"
   | "deals"
   | "won"
@@ -1500,6 +1437,7 @@ function dealRow(
     closedAt?: Date | null;
     createdAt: Date;
     outcome?: string;
+    currency?: string;
     offerAmountMinor?: { toString(): string } | null;
     wonAmountMinor?: { toString(): string } | null;
     lossReason?: string | null;
@@ -1516,7 +1454,7 @@ function dealRow(
   currency: string,
   managerNames: Map<string, string>,
 ) {
-  const amount = amountNumber(d.wonAmountMinor ?? d.offerAmountMinor);
+  const money = moneyValue((d.outcome === "won" ? d.wonAmountMinor ?? d.offerAmountMinor : d.offerAmountMinor)?.toString(), d.currency || currency);
   return {
     kind: "deal" as const,
     id: d.id,
@@ -1524,8 +1462,9 @@ function dealRow(
     client: contactName(d.contact),
     phone: contactPhone(d.contact, d.inquiry),
     title: d.title,
-    amount,
-    amountLabel: formatMoney(amount, currency),
+    amount: money.amount,
+    amountExact: money.exact,
+    amountLabel: money.label,
     status: d.outcome || d.stage?.name || "—",
     lossReason: d.lossReason || null,
     manager: d.assigneeMembershipId ? managerNames.get(d.assigneeMembershipId) || "—" : "—",
@@ -1557,6 +1496,7 @@ export async function getAnalyticsDrilldown(
   const managerNames = new Map(members.map((m) => [m.id, m.user.name || "Менеджер"]));
 
   const titleMap: Record<string, string> = {
+    payments: "Подтверждённые оплаты",
     inquiries: "Обращения",
     clients: "Уникальные клиенты",
     deals: "Созданные сделки",
@@ -1571,6 +1511,23 @@ export async function getAnalyticsDrilldown(
     manager_lost: `Менеджер → потери`,
     manager_leads: `Менеджер → обращения`,
   };
+
+  if (entity === "payments") {
+    const where = { ...confirmedPaymentsWhere(tid, dealExtra as Prisma.DealWhereInput, received), currency };
+    const [total, rows] = await Promise.all([
+      prisma.paymentRecord.count({ where }),
+      prisma.paymentRecord.findMany({ where, orderBy: [{ confirmedAt: "desc" }, { id: "desc" }], take: 500,
+        include: { deal: { include: { contact: { include: { methods: true } }, inquiry: true } } } }),
+    ]);
+    return { entity, key, title: titleMap.payments, total, hasMore: total > rows.length,
+      items: rows.map(row => {
+        const money = moneyValue(row.amountMinor, row.currency);
+        return { kind: "payment" as const, id: row.id, date: row.confirmedAt.toISOString(),
+          client: contactName(row.deal.contact), phone: contactPhone(row.deal.contact, row.deal.inquiry),
+          title: row.deal.title, amount: money.amount, amountExact: money.exact, amountLabel: money.label,
+          status: "confirmed", manager: managerNames.get(row.deal.assigneeMembershipId || "") || "—", href: `/deals/${row.dealId}` };
+      }) };
+  }
 
   if (entity === "clients") {
     const where = {

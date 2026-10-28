@@ -1,3 +1,4 @@
+import { analyticsText, planExplanation } from "./analyticsCopy";
 import { uiText, useUiText, localizeUiOptions } from "./uiText";
 import { analyticsCoverageLines } from "./analyticsCoverage";
 type ReportSections = {
@@ -17,6 +18,26 @@ function esc(value: unknown) {
     .replace(/"/g, "&quot;");
 }
 
+function financialReportLines(data: any): string[] {
+  if (!data.financial) return [];
+  const lines = [uiText("Продажи — по дате закрытия сделки. Оплаты — по дате подтверждения платежа. Валюты не суммируются."),
+    uiText("Денежные показатели и графики: {currency}.", { currency: data.currency })];
+  for (const [name, values] of [[uiText("Сумма продаж"), data.financial.sales?.byCurrency], [uiText("Подтверждённые оплаты"), data.financial.receipts?.byCurrency]] as const) {
+    for (const row of values || []) {
+      lines.push(`${name}: ${row.label || `— ${row.currency}`}`);
+      if (row.missing) lines.push(uiText("Сделок без суммы: {count}", { count: row.missing }) + ` (${row.currency})`);
+    }
+  }
+  lines.push(analyticsText("Успешные / все закрытые сделки за период. Открытые сделки не входят."));
+  if (data.funnel) lines.push(analyticsText(data.funnel.mode === "cohort" ? "Обращения выбранного периода и результат на сегодня. Каждое обращение учитывается один раз на этапе; поздние продажи тоже входят." : "События периода: каждый этап считается отдельно. Повторный вход одной сделки в этап не увеличивает счётчик."), analyticsText("Пропущенный этап и незавершённая работа не считаются потерей клиента."));
+  if (data.sales?.plan) {
+    const plan = data.sales.plan;
+    lines.push(planExplanation(plan));
+    if (plan.status === "ready") lines.push(`${analyticsText("План / факт за выбранный период")}: ${plan.label} / ${plan.actual?.label || "—"} (${plan.percent == null ? "—" : `${plan.percent}%`})`);
+  }
+  return lines;
+}
+
 function csvEscape(value: unknown) {
   const s = String(value ?? "");
   if (/[",\n;]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
@@ -34,8 +55,8 @@ function downloadBlob(filename: string, content: string, mime: string) {
 }
 
 function fileBase(data: any) {
-  const from = (data.period?.from || "").slice(0, 10) || "all";
-  const to = (data.period?.to || "").slice(0, 10) || "now";
+  const from = data.period?.dateFrom || (data.period?.from || "").slice(0, 10) || "all";
+  const to = data.period?.dateTo || (data.period?.to || "").slice(0, 10) || "now";
   return `CREOLAB_CRM_Report_${from}_${to}`;
 }
 
@@ -43,25 +64,25 @@ export function exportAnalyticsCsv(data: any, table: "sources" | "services" | "l
   let rows: string[][] = [];
   if (table === "sources") {
     rows = [
-      [uiText("Источник"), uiText("Обращения"), uiText("Сделки"), uiText("Продажи"), uiText("Конверсия"), uiText("Выручка")],
+      [uiText("Источник"), uiText("Обращения"), uiText("Сделки"), uiText("Продажи"), analyticsText("Успешность закрытых сделок"), uiText("Сумма продаж")],
       ...(data.sources || []).map((r: any) => [
         r.name,
         r.inquiries,
         r.deals,
         r.won,
         r.conversion ?? "",
-        r.revenue ?? "",
+        r.revenueExact ?? r.revenue ?? "",
       ]),
     ];
   } else if (table === "services") {
     rows = [
-      [uiText("Услуга"), uiText("Обращения"), uiText("Продажи"), uiText("Конверсия"), uiText("Выручка")],
+      [uiText("Услуга"), uiText("Обращения"), uiText("Продажи"), analyticsText("Успешность закрытых сделок"), uiText("Сумма продаж")],
       ...(data.services || []).map((r: any) => [
         r.name,
         r.inquiries,
         r.won,
         r.conversion ?? "",
-        r.revenue ?? "",
+        r.revenueExact ?? r.revenue ?? "",
       ]),
     ];
   } else if (table === "losses") {
@@ -71,17 +92,11 @@ export function exportAnalyticsCsv(data: any, table: "sources" | "services" | "l
     ];
   } else {
     rows = [
-      [uiText("Переход"), uiText("Было"), uiText("Перешло"), uiText("Потеря"), uiText("Конверсия")],
-      ...(data.funnel?.transitions || []).map((r: any) => [
-        `${r.from} → ${r.to}`,
-        r.was,
-        r.passed,
-        r.lost,
-        r.conversion ?? "",
-      ]),
+      [uiText("Этап"), uiText("Количество"), uiText("От начала %")],
+      ...(data.funnel?.steps || []).map((r: any) => [r.name, r.count, r.fromStartPct ?? ""]),
     ];
   }
-  const coverage = analyticsCoverageLines(data);
+  const coverage = [...analyticsCoverageLines(data), ...financialReportLines(data)];
   if (coverage.length) rows.unshift(...coverage.map(line => [line]), []);
   const body = rows.map((row) => row.map(csvEscape).join(";")).join("\n");
   downloadBlob(`${fileBase(data)}_${table}.csv`, "\uFEFF" + body, "text/csv;charset=utf-8");
@@ -90,14 +105,15 @@ export function exportAnalyticsCsv(data: any, table: "sources" | "services" | "l
 export function exportAnalyticsExcel(data: any, sections: ReportSections) {
   const sheets: string[] = [];
   const pushSheet = (name: string, headers: string[], rows: unknown[][]) => {
-    const head = `<tr>${headers.map((h) => `<th>${esc(h)}</th>`).join("")}</tr>`;
-    const body = rows.map((row) => `<tr>${row.map((c) => `<td>${esc(c)}</td>`).join("")}</tr>`).join("");
+    const cells = (row: unknown[]) => `<Row>${row.map(value => `<Cell><Data ss:Type="String">${esc(value)}</Data></Cell>`).join("")}</Row>`;
+    const head = cells(headers);
+    const body = rows.map(cells).join("");
     sheets.push(
       `<Worksheet ss:Name="${esc(name)}"><Table>${head}${body}</Table></Worksheet>`,
     );
   };
 
-  const coverage = analyticsCoverageLines(data);
+  const coverage = [...analyticsCoverageLines(data), ...financialReportLines(data)];
   if (coverage.length) pushSheet(uiText("Охват данных"), [uiText("Примечание")], coverage.map(line => [line]));
 
   if (sections.overview) {
@@ -114,8 +130,9 @@ export function exportAnalyticsExcel(data: any, sections: ReportSections) {
         [uiText("Договоры"), o.contracts],
         [uiText("Продажи"), o.won],
         [uiText("Потери"), o.lost],
-        [uiText("Выручка"), o.revenueLabel],
-        [uiText("Конверсия"), o.conversion != null ? `${o.conversion}%` : "—"],
+        [uiText("Сумма продаж"), o.revenueLabel],
+        [uiText("Подтверждённые оплаты"), o.receiptsLabel],
+        [analyticsText("Успешность закрытых сделок"), o.conversion != null ? `${o.conversion}%` : "—"],
         [uiText("Средний чек"), o.avgCheckLabel],
       ],
     );
@@ -123,21 +140,21 @@ export function exportAnalyticsExcel(data: any, sections: ReportSections) {
   if (sections.funnel) {
     pushSheet(
       uiText("Этапы"),
-      [uiText("Этап"), uiText("Количество"), uiText("От начала %"), uiText("От предыдущего %")],
-      (data.funnel?.steps || []).map((s: any) => [s.name, s.count, s.fromStartPct, s.fromPrevPct]),
+      [uiText("Этап"), uiText("Количество"), uiText("От начала %")],
+      (data.funnel?.steps || []).map((s: any) => [s.name, s.count, s.fromStartPct]),
     );
   }
   if (sections.sources) {
     pushSheet(
       uiText("Источники"),
-      [uiText("Источник"), uiText("Обращения"), uiText("Сделки"), uiText("Продажи"), uiText("Конверсия"), uiText("Выручка")],
+      [uiText("Источник"), uiText("Обращения"), uiText("Сделки"), uiText("Продажи"), analyticsText("Успешность закрытых сделок"), uiText("Сумма продаж")],
       (data.sources || []).map((r: any) => [r.name, r.inquiries, r.deals, r.won, r.conversion, r.revenueLabel]),
     );
   }
   if (sections.services) {
     pushSheet(
       uiText("Услуги"),
-      [uiText("Услуга"), uiText("Обращения"), uiText("Продажи"), uiText("Конверсия"), uiText("Выручка")],
+      [uiText("Услуга"), uiText("Обращения"), uiText("Продажи"), analyticsText("Успешность закрытых сделок"), uiText("Сумма продаж")],
       (data.services || []).map((r: any) => [r.name, r.inquiries, r.won, r.conversion, r.revenueLabel]),
     );
   }
@@ -148,7 +165,8 @@ export function exportAnalyticsExcel(data: any, sections: ReportSections) {
       [uiText("Показатель"), uiText("Значение")],
       [
         [uiText("Продажи"), s.won],
-        [uiText("Продано"), s.revenueLabel],
+        [uiText("Сумма продаж"), s.revenueLabel],
+        [uiText("Подтверждённые оплаты"), s.receiptsLabel],
         [uiText("Средний чек"), s.avgCheckLabel],
         [uiText("Медианный чек"), s.medianCheckLabel],
         [uiText("Макс. сделка"), s.maxCheckLabel],
@@ -184,64 +202,41 @@ export function exportAnalyticsPdf(data: any, sections: ReportSections) {
   const o = data.overview || {};
   const parts: string[] = [];
   parts.push(`<h1>CREOLAB CRM</h1>`);
-  parts.push(uiText("<p class=\"sub\">Отчёт за {p0}</p>", {p0: esc(data.period?.label || "")}));
-  if (data.filters?.label) parts.push(uiText("<p class=\"sub\">Фильтры: {p0}</p>", {p0: esc(data.filters.label)}));
-  for (const line of analyticsCoverageLines(data)) parts.push(`<p class="sub">${esc(line)}</p>`);
+  parts.push(`<p class="sub">${esc(uiText("Период"))}: ${esc(data.period?.label || "")}</p>`);
+  if (data.filters?.label) parts.push(`<p class="sub">${esc(uiText("Фильтры"))}: ${esc(data.filters.label)}</p>`);
+  for (const line of [...analyticsCoverageLines(data), ...financialReportLines(data)]) parts.push(`<p class="sub">${esc(line)}</p>`);
 
-  if (sections.overview) {
-    parts.push(uiText("<h2>1. Основные результаты</h2><ul>\n      <li>Обращения: <b>{p0}</b></li>\n      <li>Клиенты: <b>{p1}</b></li>\n      <li>Сделки: <b>{p2}</b></li>\n      <li>Договоры: <b>{p3}</b></li>\n      <li>Продажи: <b>{p4}</b></li>\n      <li>Выручка: <b>{p5}</b></li>\n      <li>Конверсия: <b>{p6}</b></li>\n      <li>Средний чек: <b>{p7}</b></li>\n      <li>Потеряно: <b>{p8}</b></li>\n    </ul>", {p0: esc(o.inquiries), p1: esc(o.clients), p2: esc(o.dealsCreated), p3: esc(o.contracts), p4: esc(o.won), p5: esc(o.revenueLabel || "—"), p6: o.conversion != null ? esc(o.conversion) + "%" : "—", p7: esc(o.avgCheckLabel || "—"), p8: esc(o.lost)}));
-  }
+  const metrics = (title: string, rows: Array<[string, unknown]>) => parts.push(`<h2>${esc(title)}</h2><ul>${rows.map(([label, value]) => `<li>${esc(label)}: <b>${esc(value ?? "—")}</b></li>`).join("")}</ul>`);
+  const table = (title: string, headers: string[]) => parts.push(`<h2>${esc(title)}</h2><table><thead><tr>${headers.map(h => `<th>${esc(h)}</th>`).join("")}</tr></thead><tbody>`);
+  if (sections.overview) metrics(uiText("Обзор"), [
+    [uiText("Обращения"), o.inquiries], [uiText("Клиенты"), o.clients], [uiText("Сделки"), o.dealsCreated],
+    [uiText("Договоры"), o.contracts], [uiText("Продажи"), o.won], [uiText("Сумма продаж"), o.revenueLabel],
+    [uiText("Подтверждённые оплаты"), o.receiptsLabel], [analyticsText("Успешность закрытых сделок"), o.conversion != null ? `${o.conversion}%` : "—"],
+    [uiText("Средний чек"), o.avgCheckLabel], [uiText("Потеряно"), o.lost],
+  ]);
   if (sections.funnel) {
-    parts.push(uiText("<h2>2. Этапы</h2><table><thead><tr><th>Этап</th><th>Кол-во</th><th>От начала</th></tr></thead><tbody>"));
-    for (const s of data.funnel?.steps || []) {
-      parts.push(
-        `<tr><td>${esc(s.name)}</td><td>${esc(s.count)}</td><td>${s.fromStartPct != null ? esc(s.fromStartPct) + "%" : "—"}</td></tr>`,
-      );
-    }
-    parts.push(`</tbody></table>`);
-    if (data.biggestLoss) {
-      parts.push(
-        uiText("<p><b>Наибольшая потеря:</b> {p0} → {p1} ({p2})</p>", {p0: esc(data.biggestLoss.from), p1: esc(data.biggestLoss.to), p2: esc(data.biggestLoss.lost)}),
-      );
-    }
-  }
-  if (sections.sources) {
-    parts.push(uiText("<h2>3. Источники</h2><table><thead><tr><th>Источник</th><th>Обращения</th><th>Продажи</th><th>Конверсия</th><th>Выручка</th></tr></thead><tbody>"));
-    for (const r of data.sources || []) {
-      parts.push(
-        `<tr><td>${esc(r.name)}</td><td>${esc(r.inquiries)}</td><td>${esc(r.won)}</td><td>${r.conversion != null ? esc(r.conversion) + "%" : "—"}</td><td>${esc(r.revenueLabel)}</td></tr>`,
-      );
-    }
+    table(uiText("Этапы"), [uiText("Этап"), uiText("Количество"), uiText("От начала %")]);
+    for (const step of data.funnel?.steps || []) parts.push(`<tr><td>${esc(step.name)}</td><td>${esc(step.count)}</td><td>${step.fromStartPct != null ? esc(step.fromStartPct) + "%" : "—"}</td></tr>`);
     parts.push(`</tbody></table>`);
   }
-  if (sections.services) {
-    parts.push(uiText("<h2>4. Услуги</h2><table><thead><tr><th>Услуга</th><th>Обращения</th><th>Продажи</th><th>Конверсия</th><th>Выручка</th></tr></thead><tbody>"));
-    for (const r of data.services || []) {
-      parts.push(
-        `<tr><td>${esc(r.name)}</td><td>${esc(r.inquiries)}</td><td>${esc(r.won)}</td><td>${r.conversion != null ? esc(r.conversion) + "%" : "—"}</td><td>${esc(r.revenueLabel)}</td></tr>`,
-      );
-    }
+  for (const section of ["sources", "services"] as const) {
+    if (!sections[section]) continue;
+    table(section === "sources" ? uiText("Источники") : uiText("Услуги"), [section === "sources" ? uiText("Источник") : uiText("Услуга"), uiText("Обращения"), uiText("Продажи"), analyticsText("Успешность закрытых сделок"), uiText("Сумма продаж")]);
+    for (const row of data[section] || []) parts.push(`<tr><td>${esc(row.name)}</td><td>${esc(row.inquiries)}</td><td>${esc(row.won)}</td><td>${row.conversion != null ? esc(row.conversion) + "%" : "—"}</td><td>${esc(row.revenueLabel)}</td></tr>`);
     parts.push(`</tbody></table>`);
   }
   if (sections.sales) {
-    const s = data.sales || {};
-    parts.push(uiText("<h2>5. Продажи</h2><ul>\n      <li>Продажи: {p0}</li>\n      <li>Выручка: {p1}</li>\n      <li>Средний / медианный чек: {p2} / {p3}</li>\n      <li>Цикл продажи: ср. {p4} дн., мед. {p5} дн.</li>\n    </ul>", {p0: esc(s.won), p1: esc(s.revenueLabel || "—"), p2: esc(s.avgCheckLabel || "—"), p3: esc(s.medianCheckLabel || "—"), p4: esc(s.cycle?.avgDays ?? "—"), p5: esc(s.cycle?.medianDays ?? "—")}));
+    const sale = data.sales || {};
+    metrics(uiText("Продажи"), [[uiText("Продажи"), sale.won], [uiText("Сумма продаж"), sale.revenueLabel], [uiText("Подтверждённые оплаты"), sale.receiptsLabel],
+      [uiText("Средний чек"), sale.avgCheckLabel], [uiText("Медианный чек"), sale.medianCheckLabel],
+      [uiText("Средний цикл, дн."), sale.cycle?.avgDays], [uiText("Медианный цикл, дн."), sale.cycle?.medianDays]]);
   }
   if (sections.losses) {
-    parts.push(uiText("<h2>6. Причины потерь</h2><table><thead><tr><th>Причина</th><th>Кол-во</th></tr></thead><tbody>"));
-    for (const r of data.losses?.reasons || []) {
-      parts.push(`<tr><td>${esc(r.reason)}</td><td>${esc(r.count)}</td></tr>`);
-    }
+    table(uiText("Потери"), [uiText("Причина"), uiText("Количество")]);
+    for (const row of data.losses?.reasons || []) parts.push(`<tr><td>${esc(row.reason)}</td><td>${esc(row.count)}</td></tr>`);
     parts.push(`</tbody></table>`);
   }
-  parts.push(uiText("<h2>Основные выводы</h2>"));
-  if (data.biggestLoss) {
-    parts.push(
-      uiText("<p>Наибольшая потеря наблюдается между «{p0}» и «{p1}» ({p2}).</p>", {p0: esc(data.biggestLoss.from), p1: esc(data.biggestLoss.to), p2: esc(data.biggestLoss.lost)}),
-    );
-  } else {
-    parts.push(uiText("<p>Недостаточно данных для автоматических выводов.</p>"));
-  }
+  if (data.biggestLoss) metrics(uiText("Потери"), [[`${data.biggestLoss.from} → ${data.biggestLoss.to}`, data.biggestLoss.lost]]);
 
   const html = `<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"/><title>${esc(fileBase(data))}</title>
 <style>

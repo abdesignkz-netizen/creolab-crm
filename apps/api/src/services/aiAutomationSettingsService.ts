@@ -6,7 +6,7 @@ import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { requireAiSettingsAccess } from "../lib/access.ts";
 import { writeAudit } from "../lib/audit.ts";
-import { aiChannelTypes } from "./channelDeliveryService.ts";
+import { aiChannelTypes } from "./aiChannels.ts";
 import {
   applyModeToSettings,
   mergeAIAutomationIntoSettingsJson,

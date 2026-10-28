@@ -61,6 +61,9 @@ describe("complete analytics totals with bounded details", () => {
     assert.equal(data.overview.dealsCreated, 8004);
     assert.equal(data.overview.won, 5001);
     assert.equal(data.overview.lost, 2);
+    assert.equal(data.funnel.cohort?.inquiries, 5001);
+    assert.equal(data.funnel.cohort?.won, 1);
+    assert.equal(data.funnel.complete, true);
     assert.equal(data.overview.revenue, 59999);
     assert.equal(data.overview.avgCheck, 12);
     assert.equal(data.sales.maxCheck, 9999);

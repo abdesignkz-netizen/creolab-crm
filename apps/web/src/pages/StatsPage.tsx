@@ -1,3 +1,5 @@
+import { analyticsText as copy, planExplanation } from "../lib/analyticsCopy";
+import { FinancialBreakdown } from "../components/FinancialBreakdown";
 import { InlineFeedback } from "../components/InlineFeedback";
 import { uiMessage, uiText, useUiText, localizeUiOptions, uiFormatLocale } from "../lib/uiText";
 import { useSession, useLocale } from "../lib/session";
@@ -26,7 +28,7 @@ type TabId =
   | "ai"
   | "campaigns";
 type CompareMode = "previous" | "last_month" | "last_year" | "none";
-type TrendMetric = "inquiries" | "clients" | "deals" | "won" | "revenue" | "conversion";
+type TrendMetric = "inquiries" | "clients" | "deals" | "won" | "revenue" | "receipts" | "conversion";
 type BarMetric = "inquiries" | "won" | "revenue" | "conversion";
 
 const TABS: { id: TabId; label: string }[] = [
@@ -48,8 +50,9 @@ const TREND_METRICS: { id: TrendMetric; label: string }[] = [
   { id: "clients", label: "Клиенты" },
   { id: "deals", label: "Сделки" },
   { id: "won", label: "Продажи" },
-  { id: "revenue", label: "Выручка" },
-  { id: "conversion", label: "Конверсия" },
+  { id: "revenue", label: "Сумма продаж" },
+  { id: "receipts", label: "Подтверждённые оплаты" },
+  { id: "conversion", label: "Успешность закрытых сделок" },
 ];
 
 const METRIC_HINTS: Record<TrendMetric, string> = {
@@ -58,19 +61,20 @@ const METRIC_HINTS: Record<TrendMetric, string> = {
   deals: "Количество созданных сделок по датам выбранного периода",
   won: "Сколько продаж закрыто в эти дни",
   revenue: "Сумма продаж по дням закрытия",
-  conversion: "Доля продаж от обращений за день. Если обращений не было — показатель не считается",
+  receipts: "Оплаты по дням подтверждения платежей",
+  conversion: "Успешные / все закрытые сделки за период. Открытые сделки не входят.",
 };
 
 const RECORD_STATUSES: Record<string, string> = {
   new: "Новая", qualification: "Квалификация", qualified: "Квалифицирована",
   in_progress: "В работе", waiting_client: "Ждём клиента", proposal: "КП отправлено",
-  open: "В работе", won: "Продано", lost: "Потеряно",
+  open: "В работе", won: "Продано", lost: "Потеряно", confirmed: "Подтверждено",
 };
 
 function formatChartValue(value: number | null, metric: TrendMetric, currency?: string) {
   if (value == null) return "—";
   if (metric === "conversion") return `${value}%`;
-  if (metric === "revenue") return `${value.toLocaleString(uiFormatLocale())}${currency ? ` ${currency === "KZT" ? "₸" : currency}` : ""}`;
+  if ((metric === "revenue" || metric === "receipts")) return `${value.toLocaleString(uiFormatLocale())}${currency ? ` ${currency === "KZT" ? "₸" : currency}` : ""}`;
   return String(value);
 }
 
@@ -127,8 +131,8 @@ function StatsDialog({ title, onClose, children, wide = false }: { title: string
 }
 
 function LineChart({ points, comparePoints, label, metric, currency }: {
-  points: { label: string; value: number | null }[];
-  comparePoints?: { value: number | null }[] | null;
+  points: { label: string; value: number | null; displayValue?: string | null }[];
+  comparePoints?: { label?: string; value: number | null; displayValue?: string | null }[] | null;
   label: string;
   metric: TrendMetric;
   currency?: string;
@@ -146,16 +150,19 @@ function LineChart({ points, comparePoints, label, metric, currency }: {
     return () => observer.disconnect();
   }, [points.length]);
   if (!points.length) return <p className="empty">{uiText("Пока недостаточно данных для графика.")}</p>;
-  const w = width, h = 260, padL = metric === "revenue" ? 66 : 48, padR = 14, padT = 20, padB = 35;
-  const values = [...points, ...(comparePoints || []).slice(0, points.length)].map(p => p.value).filter((v): v is number => v != null);
-  const ticks = yAxisTicks(Math.max(...values, 1));
-  const scaleMax = ticks.at(-1) || 1;
+  const w = width, h = 260, padL = (metric === "revenue" || metric === "receipts") ? 66 : 48, padR = 14, padT = 20, padB = 35;
+  const length = Math.max(points.length, comparePoints?.length || 0);
+  const values = [...points, ...(comparePoints || [])].map(p => p.value).filter((v): v is number => v != null);
+  const positiveTicks = yAxisTicks(Math.max(...values, 1));
+  const negativeTicks = Math.min(...values, 0) < 0 ? yAxisTicks(-Math.min(...values)).slice(1).reverse().map(n => -n) : [];
+  const ticks = [...negativeTicks, ...positiveTicks];
+  const scaleMin = ticks[0], scaleMax = ticks.at(-1) || 1;
   const innerW = w - padL - padR, innerH = h - padT - padB;
-  const toX = (i: number) => padL + (points.length > 1 ? i * innerW / (points.length - 1) : innerW / 2);
-  const toY = (v: number | null) => padT + innerH - ((v ?? 0) / scaleMax) * innerH;
+  const toX = (i: number) => padL + (length > 1 ? i * innerW / (length - 1) : innerW / 2);
+  const toY = (v: number | null) => padT + innerH - (((v ?? 0) - scaleMin) / (scaleMax - scaleMin)) * innerH;
   const hitStart = (i: number) => i === 0 ? padL : (toX(i - 1) + toX(i)) / 2;
-  const hitEnd = (i: number) => i === points.length - 1 ? w - padR : (toX(i) + toX(i + 1)) / 2;
-  const makePath = (rows: {value: number | null}[]) => rows.slice(0, points.length).map((p, i) => p.value == null ? "" : `${i === 0 || rows[i - 1].value == null ? "M" : "L"} ${toX(i)} ${toY(p.value)}`).join(" ");
+  const hitEnd = (i: number) => i === length - 1 ? w - padR : (toX(i) + toX(i + 1)) / 2;
+  const makePath = (rows: {value: number | null}[]) => rows.map((p, i) => p.value == null ? "" : `${i === 0 || rows[i - 1].value == null ? "M" : "L"} ${toX(i)} ${toY(p.value)}`).join(" ");
   const path = makePath(points);
   const area = points.some(p => p.value == null) ? "" : `${path} L ${toX(points.length - 1)} ${toY(0)} L ${toX(0)} ${toY(0)} Z`;
   const comparePath = comparePoints?.length ? makePath(comparePoints) : null;
@@ -166,7 +173,7 @@ function LineChart({ points, comparePoints, label, metric, currency }: {
     <div className="stats-chart-legend">
       <span><i />{uiText("Текущий период")}</span>
       {comparePath ? <span><i className="is-compare" />{uiText("Сравнение")}</span> : null}
-      <output className="stats-chart-reading">{active != null ? `${points[active].label} · ${formatChartValue(points[active].value, metric, currency)}` : uiText("Выберите точку на графике")}</output>
+      <output className="stats-chart-reading">{active != null ? `${points[active].label} · ${(points[active].displayValue || formatChartValue(points[active].value, metric, currency))}` : uiText("Выберите точку на графике")}</output>
     </div>
     <svg viewBox={`0 0 ${w} ${h}`} className="stats-line-chart" role="img" aria-label={label}>
       <defs><linearGradient id={gradient} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#2475ee" stopOpacity=".2" /><stop offset="100%" stopColor="#2475ee" stopOpacity=".015" /></linearGradient></defs>
@@ -178,11 +185,12 @@ function LineChart({ points, comparePoints, label, metric, currency }: {
       {points.map((p, i) => <g key={`${p.label}-${i}`}>
         {p.value != null ? <circle cx={toX(i)} cy={toY(p.value)} r={active === i ? 5 : points.length <= 16 ? 3 : 0} className="stats-dot" /> : null}
         {i === 0 || i === points.length-1 || (i % labelEvery === 0 && points.length-1-i >= labelEvery) ? <text x={toX(i)} y={h-10} textAnchor={i === 0 ? "start" : i === points.length-1 ? "end" : "middle"} className="stats-tick">{p.label}</text> : null}
-        <rect x={hitStart(i)} y={padT} width={hitEnd(i) - hitStart(i)} height={innerH} fill="transparent" onPointerEnter={() => setHover(i)} onPointerDown={() => setHover(i)}><title>{p.label}: {formatChartValue(p.value, metric, currency)}</title></rect>
+        <rect x={hitStart(i)} y={padT} width={hitEnd(i) - hitStart(i)} height={innerH} fill="transparent" onPointerEnter={() => setHover(i)} onPointerDown={() => setHover(i)}><title>{`${p.label}: ${formatChartValue(p.value, metric, currency)}`}</title></rect>
       </g>)}
     </svg>
-    {metric === "conversion" && points.some(p => p.value == null) ? <p className="stats-chart-note">{uiText("«—» — нет обращений для расчёта. Продажи могут относиться к обращениям прошлых дат.")}</p> : null}
-    <details className="stats-chart-data"><summary>{uiText("Данные таблицей")}</summary><div className="stats-table-wrap"><table className="stats-table"><thead><tr><th>{uiText("Дата")}</th><th>{uiText("Текущий период")}</th>{comparePath ? <th>{uiText("Сравнение")}</th> : null}</tr></thead><tbody>{points.map((p,i) => <tr key={`${p.label}-${i}`}><td>{p.label}</td><td>{formatChartValue(p.value,metric,currency)}</td>{comparePath ? <td>{formatChartValue(comparePoints?.[i]?.value ?? null,metric,currency)}</td> : null}</tr>)}</tbody></table></div></details>
+    {metric === "conversion" && points.some(p => p.value == null) ? <p className="stats-chart-note">{copy("«—» — в этот интервал нет закрытых сделок.")}</p> : null}
+    {comparePath ? <p className="stats-chart-note">{copy("Сравнение по порядку интервалов; даты обоих периодов приведены в таблице.")}</p> : null}
+    <details className="stats-chart-data"><summary>{uiText("Данные таблицей")}</summary><div className="stats-table-wrap"><table className="stats-table"><thead><tr><th>{uiText("Дата")}</th><th>{uiText("Текущий период")}</th>{comparePath ? <th>{uiText("Сравнение")}</th> : null}</tr></thead><tbody>{Array.from({ length }, (_, i) => <tr key={i}><td>{points[i]?.label || "—"}</td><td>{points[i]?.displayValue || formatChartValue(points[i]?.value ?? null,metric,currency)}</td>{comparePath ? <td>{comparePoints?.[i]?.label || "—"} · {comparePoints?.[i]?.displayValue || formatChartValue(comparePoints?.[i]?.value ?? null,metric,currency)}</td> : null}</tr>)}</tbody></table></div></details>
   </div>;
 }
 
@@ -206,9 +214,9 @@ function BarChart({
             ? item.won || 0
             : valueKey === "revenue"
               ? item.revenue || 0
-              : item.conversion || 0,
+              : item.conversion ?? null,
     }))
-    .filter((r) => r.value > 0)
+    .filter((r): r is { name: string; value: number } => r.value != null && (r.value > 0 || valueKey === "conversion"))
     .sort((a, b) => b.value - a.value)
     .slice(0, 12);
   if (!rows.length) return <p className="empty">{uiText("Нет данных для диаграммы.")}</p>;
@@ -249,7 +257,7 @@ function KpiCard({ label, value, delta, deltaUnit = "%", onClick, icon, featured
 export function StatsPage() {
   const locale = useLocale();
   const uiText = useUiText();
-  const { me } = useSession();
+  const { me, caps } = useSession();
   const exportAllowed = Boolean(me?.billing?.entitlements?.EXPORT);
   const requestVersion = useRequestVersion();
   const [tab, setTab] = useUrlState<TabId>("tab", "overview", localizeUiOptions(TABS, uiText).map(t => t.id));
@@ -257,7 +265,7 @@ export function StatsPage() {
   const [dateFrom, setDateFrom] = useUrlState<string>("from", "");
   const [dateTo, setDateTo] = useUrlState<string>("to", "");
   const [compare, setCompare] = useState<CompareMode>("previous");
-  const [funnelMode, setFunnelMode] = useState<"events" | "cohort">("events");
+  const [funnelMode, setFunnelMode] = useState<"events" | "cohort">("cohort");
   const [trendMetric, setTrendMetric] = useState<TrendMetric>("inquiries");
   const [sourceBar, setSourceBar] = useState<BarMetric>("inquiries");
   const [serviceBar, setServiceBar] = useState<BarMetric>("revenue");
@@ -362,9 +370,14 @@ export function StatsPage() {
     void load();
   }, [query, locale]);
 
-  const chartMetric = tab === "sales" && !["won", "revenue"].includes(trendMetric) ? "revenue" : trendMetric;
-  const trendPoints = (data?.trend?.points || []).map((p: any) => ({ label: p.label, value: p[chartMetric] == null ? null : Number(p[chartMetric]) }));
-  const comparePoints = compare !== "none" ? data?.trendCompare?.points?.map((p: any) => ({ value: p[chartMetric] == null ? null : Number(p[chartMetric]) })) : null;
+  const chartMetric = tab === "sales" && !["won", "revenue", "receipts"].includes(trendMetric) ? "revenue" : trendMetric;
+  const chartPoint = (p: any) => {
+    const exact = chartMetric === "revenue" ? p.revenueExact : chartMetric === "receipts" ? p.receiptsExact : null;
+    return { label: p.label, value: p[chartMetric] == null ? null : Number(p[chartMetric]),
+      displayValue: exact != null ? `${BigInt(exact).toLocaleString(uiFormatLocale())} ${data.currency === "KZT" ? "₸" : data.currency}` : null };
+  };
+  const trendPoints = (data?.trend?.points || []).map(chartPoint);
+  const comparePoints = compare !== "none" ? data?.trendCompare?.points?.map(chartPoint) : null;
   const appliedFilters = [
     { label: uiText("Ответственный"), value: assignee, text: members.find(m => m.id === assignee)?.name || assignee, clear: () => setAssignee("") },
     { label: uiText("Услуга / товар"), value: serviceCategory, text: serviceCategory, clear: () => setServiceCategory("") },
@@ -451,6 +464,11 @@ export function StatsPage() {
         {analyticsCoverageLines(data).slice(0, 2).map(line => <p key={line}>{line}</p>)}
         <details><summary>{uiText("Какие разделы неполные")}</summary><ul>{analyticsCoverageLines(data).slice(2).map(line => <li key={line}>{line}</li>)}</ul></details>
       </aside> : null}
+      {data?.financial ? <aside className="financial-note">
+        <p>{uiText("Продажи — по дате закрытия сделки. Оплаты — по дате подтверждения платежа. Валюты не суммируются.")}</p>
+        <p>{uiText("Денежные показатели и графики: {currency}.", { currency: data.currency })}</p>
+        <FinancialBreakdown currency={data.currency} sales={data.financial.sales?.byCurrency} receipts={data.financial.receipts?.byCurrency} pipeline={data.financial.pipeline?.byCurrency} />
+      </aside> : null}
       {data?.empty ? (
         <div className="sit-section">
           <h3>{uiText("По выбранным условиям нет данных")}</h3>
@@ -463,12 +481,13 @@ export function StatsPage() {
         <>
           <div className="stats-period-caption"><h2>{uiMessage(data.period?.label)}</h2>{data.compare?.label ? <span>{uiText("Сравнение")}: {data.compare.label}</span> : null}</div>
           <div className="stats-primary-kpis">
-            <KpiCard label={uiText("Выручка")} value={o.revenueLabel || "—"} delta={o.deltas?.revenue} onClick={() => void openDrill("won")} icon="/billing" featured description={uiText("Закрытые продажи")} />
+            <KpiCard label={uiText("Сумма продаж")} value={o.revenueLabel || "—"} delta={o.deltas?.revenue} onClick={() => void openDrill("won")} icon="/billing" featured description={uiText("Закрытые продажи")} />
             <KpiCard label={uiText("Обращения")} value={o.inquiries} delta={o.deltas?.inquiries} onClick={() => void openDrill("inquiries")} icon="/conversations" description={uiText("За выбранный период")} />
             <KpiCard label={uiText("Продажи")} value={o.won} delta={o.deltas?.won} onClick={() => void openDrill("won")} icon="/deals" description={uiText("Успешные сделки")} />
-            <KpiCard label={uiText("Конверсия")} value={o.conversion != null ? `${o.conversion}%` : "—"} delta={o.deltas?.conversionPp} deltaUnit="pp" icon="/stats" description={uiText("Продажи / обращения")} />
+            <KpiCard label={uiText("Подтверждённые оплаты")} value={o.receiptsLabel || "—"} delta={o.deltas?.receipts} onClick={() => void openDrill("payments")} icon="/billing" description={uiText("По дате подтверждения платежа")} />
           </div>
           <div className="stats-secondary-kpis">
+            <KpiCard label={copy("Успешность закрытых сделок")} value={o.conversion != null ? `${o.conversion}%` : "—"} delta={o.deltas?.conversionPp} deltaUnit="pp" icon="/stats" description={copy("Успешные / все закрытые сделки за период. Открытые сделки не входят.")} />
             <KpiCard label={uiText("Новые клиенты")} value={o.clients} onClick={() => void openDrill("clients")} />
             <KpiCard label={uiText("Создано сделок")} value={o.dealsCreated} onClick={() => void openDrill("deals")} />
             <KpiCard label={uiText("Договоры")} value={o.contracts} />
@@ -477,9 +496,9 @@ export function StatsPage() {
           </div>
           <div className="stats-analysis-grid">
             <div className="sit-section stats-trend-card">
-              <div className="sit-section-head"><div><span className="stats-eyebrow">{uiText("Результат во времени")}</span><h3>{uiText("Динамика")}</h3></div><select className="stats-metric-select" aria-label={uiText("Показатель графика")} value={trendMetric} onChange={e => setTrendMetric(e.target.value as TrendMetric)}>{localizeUiOptions(TREND_METRICS,uiText).map(m => <option key={m.id} value={m.id}>{m.label}</option>)}</select></div>
+              <div className="sit-section-head"><div><span className="stats-eyebrow">{uiText("Результат во времени")}</span><h3>{uiText("Динамика")}</h3></div><select className="stats-metric-select" aria-label={uiText("Показатель графика")} value={trendMetric} onChange={e => setTrendMetric(e.target.value as TrendMetric)}>{localizeUiOptions(TREND_METRICS,copy).map(m => <option key={m.id} value={m.id}>{m.label}</option>)}</select></div>
               <p className="stats-chart-note">{localizeUiOptions(METRIC_HINTS,uiText)[chartMetric]}</p>
-              <LineChart currency={data.currency} points={trendPoints} comparePoints={comparePoints} metric={chartMetric} label={uiText("Динамика: {p0}", {p0:localizeUiOptions(TREND_METRICS,uiText).find(m => m.id === chartMetric)?.label})} />
+              <LineChart currency={data.currency} points={trendPoints} comparePoints={comparePoints} metric={chartMetric} label={uiText("Динамика: {p0}", {p0:localizeUiOptions(TREND_METRICS,copy).find(m => m.id === chartMetric)?.label})} />
             </div>
             <aside className="sit-section stats-insights">
               <div><span className="stats-eyebrow">{uiText("Фокус руководителя")}</span><h3>{uiText("На что обратить внимание")}</h3></div>
@@ -489,9 +508,9 @@ export function StatsPage() {
             </aside>
           </div>
           <div className="stats-overview-split">
-            <div className="sit-section"><div className="sit-section-head"><h3>{uiText("Путь к продаже")}</h3><button type="button" className="stats-text-button" onClick={() => setTab("funnel")}>{uiText("Подробнее")}<StatsIcon kind="arrow" /></button></div><div className="stats-funnel-visual">{(data.funnel?.steps || []).map((step:any,i:number) => <div key={step.key}><div><span><small>{String(i+1).padStart(2,"0")}</small>{step.name}</span><b>{step.count}</b></div><div className="stats-funnel-track"><span style={{width:`${Math.max(0,Math.min(100,step.count / Math.max(1,...data.funnel.steps.map((s:any)=>s.count)) * 100))}%`,opacity:1-i*.1}} /></div></div>)}</div><p className="stats-chart-note">{funnelMode === "cohort" ? uiText("Кто пришёл за период") : uiText("События выбранного периода. Сделки могут быть из более ранних обращений.")}</p></div>
+            <div className="sit-section"><div className="sit-section-head"><h3>{uiText("Путь к продаже")}</h3><button type="button" className="stats-text-button" onClick={() => setTab("funnel")}>{uiText("Подробнее")}<StatsIcon kind="arrow" /></button></div><div className="stats-funnel-visual">{(data.funnel?.steps || []).map((step:any,i:number) => <div key={step.key}><div><span><small>{String(i+1).padStart(2,"0")}</small>{step.name}</span><b>{step.count}</b></div><div className="stats-funnel-track"><span style={{width:`${Math.max(0,Math.min(100,step.count / Math.max(1,...data.funnel.steps.map((s:any)=>s.count)) * 100))}%`,opacity:1-i*.1}} /></div></div>)}</div><p className="stats-chart-note">{copy(funnelMode === "cohort" ? "Обращения выбранного периода и результат на сегодня. Каждое обращение учитывается один раз на этапе; поздние продажи тоже входят." : "События периода: каждый этап считается отдельно. Повторный вход одной сделки в этап не увеличивает счётчик.")}</p></div>
             <div className="sit-section"><div className="sit-section-head"><h3>{uiText("Откуда приходят клиенты")}</h3><button type="button" className="stats-text-button" onClick={() => setTab("sources")}>{uiText("Подробнее")}<StatsIcon kind="arrow" /></button></div><p className="stats-chart-note">{uiText("Источники по количеству обращений")}</p><BarChart currency={data.currency} items={data.sources || []} valueKey="inquiries" /></div>
-            <div className="sit-section"><div className="sit-section-head"><h3>{uiText("Что приносит выручку")}</h3><button type="button" className="stats-text-button" onClick={() => setTab("services")}>{uiText("Подробнее")}<StatsIcon kind="arrow" /></button></div><p className="stats-chart-note">{uiText("Услуги и товары по сумме продаж")}</p><BarChart currency={data.currency} items={(data.services || []).map((r:any)=>({...r,name:r.label || r.name}))} valueKey="revenue" /></div>
+            <div className="sit-section"><div className="sit-section-head"><h3>{uiText("Что продаётся")}</h3><button type="button" className="stats-text-button" onClick={() => setTab("services")}>{uiText("Подробнее")}<StatsIcon kind="arrow" /></button></div><p className="stats-chart-note">{uiText("Услуги и товары по сумме продаж")}</p><BarChart currency={data.currency} items={(data.services || []).map((r:any)=>({...r,name:r.label || r.name}))} valueKey="revenue" /></div>
           </div>
           {data.dataQuality ? <details className="stats-quality"><summary><NavIcon to="/documents" /><span>{uiText("Качество данных")}<small>{uiText("Полные карточки делают отчёт точнее")}</small></span></summary><div className="stats-quality-grid">{[[uiText("Без телефона"),data.dataQuality.noPhone],[uiText("Без источника"),data.dataQuality.noSource],[uiText("Без ответственного"),data.dataQuality.noOwner],[uiText("Без причины отказа"),data.dataQuality.lostNoReason],[uiText("Без следующего шага"),data.dataQuality.openNoNextAction]].map(([label,count])=><div key={label}><span>{label}</span><b>{count}</b></div>)}</div></details> : null}
         </>
@@ -531,33 +550,10 @@ export function StatsPage() {
             ))}
           </div>
 
-          <h4>{uiText("Потери между этапами")}</h4>
-          <div className="stats-table-wrap">
-            <table className="stats-table">
-              <thead>
-                <tr>
-                  <th>{uiText("Переход")}</th>
-                  <th>{uiText("Было")}</th>
-                  <th>{uiText("Перешло")}</th>
-                  <th>{uiText("Потеря")}</th>
-                  <th>{uiText("Конверсия")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(data.funnel?.transitions || []).map((t: any) => (
-                  <tr key={`${t.from}-${t.to}`}>
-                    <td>
-                      {t.from} → {t.to}
-                    </td>
-                    <td>{t.was}</td>
-                    <td>{t.passed}</td>
-                    <td>{t.lost}</td>
-                    <td>{t.conversion != null ? `${t.conversion}%` : "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <p className="stats-chart-note">{copy(funnelMode === "cohort" ? "Обращения выбранного периода и результат на сегодня. Каждое обращение учитывается один раз на этапе; поздние продажи тоже входят." : "События периода: каждый этап считается отдельно. Повторный вход одной сделки в этап не увеличивает счётчик.")}</p>
+          <p className="stats-chart-note">{copy("Пропущенный этап и незавершённая работа не считаются потерей клиента.")}</p>
+          {data.funnel?.cohort ? <p><b>{data.funnel.cohort.conversion == null ? copy("Нет обращений для расчёта.") : copy("В продажу перешло {won} из {total} обращений ({percent}%).", { won: data.funnel.cohort.won, total: data.funnel.cohort.inquiries, percent: data.funnel.cohort.conversion })}</b></p> : null}
+          {data.funnel?.cohort?.unlinkedConverted ? <p className="stats-coverage">{copy("Обращений без доступной связанной сделки: {count}.", { count: data.funnel.cohort.unlinkedConverted })}</p> : null}
 
           <h4>{uiText("Время прохождения")}</h4>
           <div className="stats-table-wrap">
@@ -599,14 +595,16 @@ export function StatsPage() {
           </div>
           <div className="sit-kpi-grid stats-kpi-grid">
             <KpiCard label={uiText("Продажи")} value={sales.won} onClick={() => void openDrill("won")} />
-            <KpiCard label={uiText("Продано")} value={sales.revenueLabel || "—"} onClick={() => void openDrill("won")} />
+            <KpiCard label={uiText("Сумма продаж")} value={sales.revenueLabel || "—"} onClick={() => void openDrill("won")} />
+            <KpiCard label={uiText("Подтверждённые оплаты")} value={sales.receiptsLabel || "—"} onClick={() => void openDrill("payments")} />
             <KpiCard label={uiText("Средний чек")} value={sales.avgCheckLabel || "—"} />
             <KpiCard label={uiText("Медианный чек")} value={sales.medianCheckLabel || "—"} />
             <KpiCard label={uiText("Максимальная сделка")} value={sales.maxCheckLabel || "—"} />
             <KpiCard label={uiText("В работе")} value={sales.pipelineLabel || "—"} />
             <KpiCard
-              label={uiText("Прогноз")}
+              label={uiText("Взвешенная воронка")}
               value={sales.weightedPipelineLabel || "—"}
+              description={uiText("Сумма открытых сделок с учётом вероятности. Оплатой не является.")}
             />
             <KpiCard label={uiText("План")} value={sales.planLabel || uiText("не задан")} />
             <KpiCard
@@ -614,16 +612,23 @@ export function StatsPage() {
               value={sales.planPercent != null ? `${sales.planPercent}%` : "—"}
             />
           </div>
+          <div className="stats-coverage">
+            <strong>{copy("План / факт за выбранный период")}</strong>
+            <p>{planExplanation(sales.plan)}</p>
+            {sales.plan?.status === "ready" ? <p>{copy("Факт продаж")}: <b>{sales.plan.actual?.label || "—"}</b></p> : null}
+            {sales.plan?.months?.length ? <details><summary>{uiText("Подробнее")}</summary><div className="stats-table-wrap"><table className="stats-table"><thead><tr><th>{copy("Месяц плана")}</th><th>{copy("Дней в периоде / в месяце")}</th><th>{copy("План на месяц")}</th></tr></thead><tbody>{sales.plan.months.map((row: any) => <tr key={row.month}><td>{row.month}</td><td>{row.coveredDays} / {row.days}</td><td>{row.plan.toLocaleString(uiFormatLocale())} {sales.plan.currency}</td></tr>)}</tbody></table></div></details> : null}
+            {caps.companyAdmin ? <Link to="/settings?section=ops#sales-plan">{copy("Настроить план")}</Link> : null}
+          </div>
           <div className="stats-metric-switch">
-            {(["won", "revenue"] as TrendMetric[]).map((m) => (
+            {(["won", "revenue", "receipts"] as TrendMetric[]).map((m) => (
               <button
                 key={m}
                 type="button"
                 className={chartMetric === m ? "btn sit-chip" : "btn secondary sit-chip"}
-                {...tip(localizeUiOptions(METRIC_HINTS, uiText)[m])}
+                {...tip(localizeUiOptions(METRIC_HINTS, copy)[m])}
                 onClick={() => setTrendMetric(m)}
               >
-                {m === "won" ? uiText("Количество продаж") : uiText("Сумма продаж")}
+                {m === "won" ? uiText("Количество продаж") : m === "receipts" ? uiText("Подтверждённые оплаты") : uiText("Сумма продаж")}
               </button>
             ))}
           </div>
@@ -640,7 +645,7 @@ export function StatsPage() {
                 [
                   ["inquiries", uiText("По обращениям")],
                   ["won", uiText("По продажам")],
-                  ["revenue", uiText("По выручке")],
+                  ["revenue", uiText("По сумме продаж")],
                   ["conversion", uiText("По конверсии")],
                 ] as [BarMetric, string][]
               ).map(([id, label]) => (
@@ -648,7 +653,7 @@ export function StatsPage() {
                   key={id}
                   type="button"
                   className={sourceBar === id ? "btn sit-chip" : "btn secondary sit-chip"}
-                  {...tip(localizeUiOptions(METRIC_HINTS, uiText)[id])}
+                  {...tip(localizeUiOptions(METRIC_HINTS, copy)[id])}
                   onClick={() => setSourceBar(id)}
                 >
                   {label}
@@ -665,8 +670,8 @@ export function StatsPage() {
                   <th>{uiText("Обращения")}</th>
                   <th>{uiText("Сделки")}</th>
                   <th>{uiText("Продажи")}</th>
-                  <th>{uiText("Конверсия")}</th>
-                  <th>{uiText("Выручка")}</th>
+                  <th>{copy("Успешность закрытых сделок")}</th>
+                  <th>{uiText("Сумма продаж")}</th>
                   <th>{uiText("Средний чек")}</th>
                 </tr>
               </thead>
@@ -705,17 +710,17 @@ export function StatsPage() {
             <div className="stats-metric-switch">
               {(
                 [
-                  ["revenue", uiText("Выручка")],
+                  ["revenue", uiText("Сумма продаж")],
                   ["won", uiText("Продажи")],
                   ["inquiries", uiText("Обращения")],
-                  ["conversion", uiText("Конверсия")],
+                  ["conversion", copy("Успешность закрытых сделок")],
                 ] as [BarMetric, string][]
               ).map(([id, label]) => (
                 <button
                   key={id}
                   type="button"
                   className={serviceBar === id ? "btn sit-chip" : "btn secondary sit-chip"}
-                  {...tip(localizeUiOptions(METRIC_HINTS, uiText)[id])}
+                  {...tip(localizeUiOptions(METRIC_HINTS, copy)[id])}
                   onClick={() => setServiceBar(id)}
                 >
                   {label}
@@ -731,8 +736,8 @@ export function StatsPage() {
                   <th>{uiText("Услуга / товар")}</th>
                   <th>{uiText("Обращения")}</th>
                   <th>{uiText("Продажи")}</th>
-                  <th>{uiText("Конверсия")}</th>
-                  <th>{uiText("Выручка")}</th>
+                  <th>{copy("Успешность закрытых сделок")}</th>
+                  <th>{uiText("Сумма продаж")}</th>
                   <th>{uiText("Средний чек")}</th>
                 </tr>
               </thead>
@@ -845,8 +850,8 @@ export function StatsPage() {
                   <th>{uiText("Заявки")}</th>
                   <th>{uiText("Продажи")}</th>
                   <th>{uiText("Потери")}</th>
-                  <th>{uiText("Конверсия")}</th>
-                  <th>{uiText("Выручка")}</th>
+                  <th>{copy("Успешность закрытых сделок")}</th>
+                  <th>{uiText("Сумма продаж")}</th>
                   <th>{uiText("Ср. ответ")}</th>
                   <th>{uiText("Просрочки")}</th>
                   <th>{uiText("Без шага")}</th>
