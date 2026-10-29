@@ -412,9 +412,12 @@ export function createApp(prisma: PrismaClient) {
 
   app.get("/health", (_req, res) => {
     const storage = fileStorageStatus();
+    const revision = String(process.env.RENDER_GIT_COMMIT || "").trim();
+    res.setHeader("Cache-Control", "no-store");
     res.json({
       status: "ok",
       service: "creolab-ai-crm",
+      revision: /^[a-f0-9]{40}$/i.test(revision) ? revision.toLowerCase() : null,
       whatsappRequired: false,
       storage: {
         storePathKind: storage.storePathKind,
@@ -424,6 +427,7 @@ export function createApp(prisma: PrismaClient) {
     });
   });
   app.get("/ready", async (_req, res) => {
+    res.setHeader("Cache-Control", "no-store");
     await prisma.$queryRaw`SELECT 1`;
     res.json({ status: "ready" });
   });

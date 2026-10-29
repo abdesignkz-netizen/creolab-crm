@@ -58,6 +58,28 @@ describe("CRM HTTP domain", () => {
     server?.close();
   });
 
+  it("health identifies the deployed commit without exposing arbitrary environment data or caching readiness", async () => {
+    const previous = process.env.RENDER_GIT_COMMIT;
+    try {
+      for (const [configured, expected] of [["A".repeat(40), "a".repeat(40)], ["", null], ["not-a-commit-sensitive-value", null]]) {
+        process.env.RENDER_GIT_COMMIT = configured as string;
+        const response = await fetch(`${base}/health`);
+        assert.equal(response.status, 200);
+        assert.equal(response.headers.get("cache-control"), "no-store");
+        const body = await response.json();
+        assert.equal(body.revision, expected);
+        assert.doesNotMatch(JSON.stringify(body), /not-a-commit-sensitive-value/);
+      }
+      const ready = await fetch(`${base}/ready`);
+      assert.equal(ready.status, 200);
+      assert.equal(ready.headers.get("cache-control"), "no-store");
+      assert.equal((await ready.json()).status, "ready");
+    } finally {
+      if (previous === undefined) delete process.env.RENDER_GIT_COMMIT;
+      else process.env.RENDER_GIT_COMMIT = previous;
+    }
+  });
+
   it("A01: пользователь без телефона входит в кабинет", async () => {
     const me = await fetch(`${base}/api/v1/me`, { headers: { cookie } });
     assert.equal(me.status, 200);

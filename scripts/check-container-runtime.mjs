@@ -14,6 +14,7 @@ const envFile = join(folder, "runtime.env"), containers = [];
 const id = randomBytes(5).toString("hex");
 const env = {
   NODE_ENV: "production", DATABASE_URL: url.href, CRM_USE_PGLITE: "0", API_PORT: "4100",
+  RENDER_GIT_COMMIT: process.env.GITHUB_SHA || "a".repeat(40),
   APP_BASE_URL: "https://acceptance.invalid", API_BASE_URL: "https://acceptance.invalid", ALLOWED_ORIGINS: "https://acceptance.invalid",
   STORAGE_DIR: "/tmp/basqar-acceptance-files", STORAGE_PERSISTENT: "1", WHATSAPP_QR_ENABLED: "0", CRM_INLINE_AUTOMATION: "0",
   ESF_PROVIDER: "mock", ESF_ENV: "off", ESF_ALLOW_LIVE_SEND: "0", BILLING_PROVIDER: "none",
@@ -45,6 +46,7 @@ try {
   }
   assert.ok(ready, "API never became ready against real PostgreSQL");
   const health = await (await fetch("http://127.0.0.1:4100/health")).json(); assert.equal(health.status, "ok");
+  assert.equal(health.revision, env.RENDER_GIT_COMMIT.toLowerCase());
   const page = await fetch("http://127.0.0.1:4100/login"); assert.equal(page.status, 200);
   assert.match(await page.text(), /\/assets\/[^"']+\.js/);
   await delay(5000);
