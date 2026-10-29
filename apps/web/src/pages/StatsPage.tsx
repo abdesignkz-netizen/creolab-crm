@@ -1,5 +1,6 @@
 import { analyticsText as copy, planExplanation } from "../lib/analyticsCopy";
 import { FinancialBreakdown } from "../components/FinancialBreakdown";
+import { SalesForecastCard } from "../components/SalesForecastCard";
 import { InlineFeedback } from "../components/InlineFeedback";
 import { uiMessage, uiText, useUiText, localizeUiOptions, uiFormatLocale } from "../lib/uiText";
 import { useSession, useLocale } from "../lib/session";
@@ -619,6 +620,7 @@ export function StatsPage() {
             {sales.plan?.months?.length ? <details><summary>{uiText("Подробнее")}</summary><div className="stats-table-wrap"><table className="stats-table"><thead><tr><th>{copy("Месяц плана")}</th><th>{copy("Дней в периоде / в месяце")}</th><th>{copy("План на месяц")}</th></tr></thead><tbody>{sales.plan.months.map((row: any) => <tr key={row.month}><td>{row.month}</td><td>{row.coveredDays} / {row.days}</td><td>{row.plan.toLocaleString(uiFormatLocale())} {sales.plan.currency}</td></tr>)}</tbody></table></div></details> : null}
             {caps.companyAdmin ? <Link to="/settings?section=ops#sales-plan">{copy("Настроить план")}</Link> : null}
           </div>
+          <SalesForecastCard forecast={sales.forecast} canSetPlan={Boolean(caps.companyAdmin)} onCurrentMonth={() => setPeriod("this_month")} onRefresh={() => void load()} />
           <div className="stats-metric-switch">
             {(["won", "revenue", "receipts"] as TrendMetric[]).map((m) => (
               <button

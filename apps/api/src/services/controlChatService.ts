@@ -175,7 +175,7 @@ export async function runControlChatRequest(prisma: PrismaClient, job: Pick<Job,
     let command: ChatCommand | null = parsedCommand;
     const explicitRequest = /^(?:созда|постав|добав|запиш|покажи|расскажи|скажи|подскажи|найди|какие|что|где|кто|кому|когда|как|сколько|почему|измени|заверши|перенеси|назначь|отмени|выключи|включи)(?:\s|[?!:]|$)/i.test(text)
       || /^(?:создай|создать|поставь|добавь|запиши|рассылки|документы|интеграции|тарифы)/i.test(text)
-      || /^(?:сводка|продажи|выручка|статистика|задачи|сделки|клиенты|заявки|команда|воронка)(?:\s|[?!:]|$)/i.test(text);
+      || /^(?:сводка|продажи|прогноз|выручка|статистика|задачи|сделки|клиенты|заявки|команда|воронка)(?:\s|[?!:]|$)/i.test(text);
     const taskText = context.awaiting === "task_text" && !explicitRequest ? `Создай задачу: ${text}` : text;
     if (!command && context.awaiting === "task_text") command = quickControlCommand(taskText, timeZone);
     if (!command && context.awaiting === "client_query" && !/^(?:созда|покажи|найди|какие|что|где|сколько|измени|заверши|перенеси|назначь|добавь)/i.test(text)) command = { action: "FIND_CLIENT", query: text };
@@ -281,7 +281,7 @@ export async function runControlChatRequest(prisma: PrismaClient, job: Pick<Job,
     const token = String(r.confirmationId).slice(-6).toUpperCase();
     return reply(`${w("Проверьте изменение:", "Өзгерісті тексеріңіз:")}\n${r.summary}\n\n${w(`Для выполнения: Подтвердить ${token}\nДля отмены: Отмена\nПодтверждение действует 10 минут.`, `Орындау үшін: Растау ${token}\nТоқтату үшін: Болдырмау\nРастау 10 минут жарамды.`)}`);
   }
-  context.lastRead = ["GET_PROPOSALS_WITHOUT_FOLLOWUP", "GET_LOST_REASONS", "GET_EXPECTED_PAYMENTS", "GET_TASKS", "GET_TODAY_TASKS", "GET_OVERDUE_TASKS", "GET_RECENT_LEADS", "GET_RECENT_DEALS", "GET_BUSINESS_SUMMARY", "GET_DEALS_STATS", "GET_LEADS_STATS", "GET_REVENUE_STATS"].includes(action) ? draft : undefined;
+  context.lastRead = ["GET_PROPOSALS_WITHOUT_FOLLOWUP", "GET_LOST_REASONS", "GET_EXPECTED_PAYMENTS", "GET_TASKS", "GET_TODAY_TASKS", "GET_OVERDUE_TASKS", "GET_RECENT_LEADS", "GET_RECENT_DEALS", "GET_BUSINESS_SUMMARY", "GET_DEALS_STATS", "GET_LEADS_STATS", "GET_REVENUE_STATS", "GET_SALES_FORECAST"].includes(action) ? draft : undefined;
   return reply(presentControlReply(action, result, lang, timeZone));
 }
 

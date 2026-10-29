@@ -901,6 +901,15 @@ async function dispatchAction(action: ControlAction, ctx: DispatchCtx): Promise<
         currency,
       };
     }
+    case "GET_SALES_FORECAST": {
+      // This estimate covers the current company month only. Never silently
+      // discard an owner/client filter or substitute a different horizon.
+      if (ctx.period.label !== "this_month" || Object.keys(params).some(key => key !== "period")) {
+        throw new ApiError(422, "forecast_period", "Прогноз доступен только на текущий месяц по компании. Напишите «Прогноз продаж на этот месяц». Фильтры можно выбрать в статистике.");
+      }
+      const { getCompanySalesForecast } = await import("./salesForecastService.ts");
+      return { forecast: await getCompanySalesForecast(prisma, auth, ctx.period.now) };
+    }
     case "GET_SALES_CONTROL": {
       const { getSalesControl } = await import("./salesControlService.ts");
       const report = await getSalesControl(prisma, auth);
@@ -1282,7 +1291,7 @@ async function executeResolved(input: {
   const membership = requireTenant(input.auth);
   if (input.action.startsWith("BULK_")) await requireBillingFeature(input.prisma, input.auth, "CONTROL_BULK");
   const period = mapControlPeriod(input.params, membership.tenant.timezone || "Asia/Almaty", new Date(),
-    input.action === "GET_EXPECTED_PAYMENTS" ? "this_week" :
+    input.action === "GET_SALES_FORECAST" ? "this_month" : input.action === "GET_EXPECTED_PAYMENTS" ? "this_week" :
       ["GET_TASKS", "GET_OVERDUE_TASKS", "GET_UNCHANGED_DEALS", "GET_PROPOSALS_WITHOUT_FOLLOWUP", "GET_LOST_REASONS"].includes(input.action) ? "all" : "today");
   if (input.action === "GET_TODAY_TASKS" && period.label !== "today") throw new ApiError(422, "invalid_period", "Для другого периода запросите задачи с нужными датами.");
   try {

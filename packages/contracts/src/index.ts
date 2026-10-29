@@ -11,6 +11,7 @@ export * from "./schemas.ts";
 export * from "./control.ts";
 export * from "./taskBoard.ts";
 export * from "./onboarding.ts";
+export type { WebsiteFormInput, WebsiteFormItem, WebsiteFormsState } from "./websiteForms.ts";
 export * from "./aiManagerSetup.ts";
 export * from "./aiKnowledgeImport.ts";
 
@@ -50,3 +51,4 @@ export { crmMoneySchema, crmCommercialFactSchema, CRM_COMMERCIAL_FIELDS, readCrm
 export type { CrmMoney, CrmCommercialField, CrmCommercialFact, CrmCommercialValues } from "./crmCommercial.ts";
 export * from "./processCalendar.ts";
 export * from "./processLocale.ts";
+export type { ForecastMoney, SalesForecast, SalesForecastMonth } from "./salesForecast.ts";

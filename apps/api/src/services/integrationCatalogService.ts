@@ -99,7 +99,7 @@ export async function listIntegrationCatalog(prisma: PrismaClient, auth: AuthCon
   const tid = membership.tenantId;
   const apiBase = config.apiBaseUrl;
 
-  const [rows, eventCounts, recentEvents, form] = await Promise.all([
+  const [rows, eventCounts, recentEvents] = await Promise.all([
     prisma.integration.findMany({
       where: { tenantId: tid },
       include: {
@@ -119,7 +119,6 @@ export async function listIntegrationCatalog(prisma: PrismaClient, auth: AuthCon
       take: 30,
       include: { integration: { select: { id: true, name: true, type: true } } },
     }),
-    prisma.formDefinition.findFirst({ where: { tenantId: tid, active: true } }),
   ]);
 
   const countsByIntegration = new Map<string, Record<string, number>>();
@@ -133,23 +132,19 @@ export async function listIntegrationCatalog(prisma: PrismaClient, auth: AuthCon
   for (const meta of Object.values(INTEGRATION_TYPE_META).filter((m) => m.group === "leads")) {
     const typeKey = Object.entries(INTEGRATION_TYPE_META).find(([, v]) => v.catalogType === meta.catalogType)?.[0];
     const matches = rows.filter(r => r.type === typeKey);
-    const row = matches.find(r => r.status === "active") || matches[0];
+    const row = matches.find(r => r.status === "active" && (typeKey !== "form" || r.forms.length > 0)) || matches[0];
     if (meta.catalogType === "WEBSITE_FORM") {
-      const health = row ? deriveHealthStatus(row) : "UNKNOWN";
+      const form = row?.status === "active" ? row.forms[0] : null;
+      const pending = row?.connectionStatus === "PENDING" || row?.status === "pending";
+      const health = form && row ? deriveHealthStatus(row) : "UNKNOWN";
       leadCards.push({
         catalogType: meta.catalogType,
         title: meta.title,
         stage: meta.stage,
-        connected: Boolean(row && (row.connectionStatus === "CONNECTED" || row.status === "active") && (row.connectionStatus !== "PENDING")),
-        connectionStatus:
-          row?.connectionStatus ||
-          (row?.status === "active" ? "CONNECTED" : row ? "PENDING" : "DISCONNECTED"),
+        connected: Boolean(form && row?.status === "active"),
+        connectionStatus: form ? "CONNECTED" : pending ? "PENDING" : "DISCONNECTED",
         healthStatus: health,
-        healthLabel: row
-          ? row.connectionStatus === "PENDING" || row.status === "pending"
-            ? "Ожидает подтверждения"
-            : healthLabel(health)
-          : "Не подключено",
+        healthLabel: form ? healthLabel(health) : pending ? "Ожидает подтверждения" : "Не подключено",
         inquiryCount: row?._count.inquiries || 0,
         eventCount: row?._count.inboundEvents || 0,
         automationMode: row?.automationMode || "inherit",

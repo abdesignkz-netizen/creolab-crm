@@ -836,6 +836,11 @@ export function createApiClient(options: ClientOptions) {
       request(`/api/v1/deals/${dealId}/contacts`, { method: "POST", body: JSON.stringify(body) }),
     integrations: () => request("/api/v1/integrations"),
     integrationCatalog: () => request("/api/v1/integrations/catalog"),
+    websiteForms: () => request("/api/v1/integrations/website-forms"),
+    createWebsiteForm: (body: import("@creolab/contracts").WebsiteFormInput & { requestId: string }) =>
+      request("/api/v1/integrations/website-forms", { method: "POST", body: JSON.stringify(body) }),
+    updateWebsiteForm: (id: string, body: Partial<import("@creolab/contracts").WebsiteFormInput> & { enabled?: boolean }) =>
+      request(`/api/v1/integrations/website-forms/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(body) }),
     integrationEvents: () => request("/api/v1/integrations/events"),
     integrationHealthCheck: (id: string) =>
       request(`/api/v1/integrations/${id}/health-check`, { method: "POST" }),

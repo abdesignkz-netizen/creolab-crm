@@ -9,6 +9,7 @@ type History = {
   pending: { id: string; summary: string; expiresAt: string } | null;
   choices: Array<{ text: string; label: string }>;
   timezone: string;
+  forecastAvailable?: boolean;
 };
 // Only service-local links returned by Control become clickable; user text stays text.
 function Reply({ text }: { text: string }) {
@@ -58,7 +59,7 @@ export function ControlChatPanel({ canManageAccess = true }: { canManageAccess?:
       setError(e instanceof Error ? e.message : "Не удалось отправить запрос");
     } finally { sending.current = false; setBusy(false); }
   }
-  const quick = ["Какие задачи на сегодня?", "Что требует внимания", "Продажи под контролем", "Продажи за неделю", "Найди клиента", "Создай задачу"];
+  const quick = ["Какие задачи на сегодня?", "Что требует внимания", "Продажи под контролем", ...(history?.forecastAvailable ? ["Прогноз продаж на месяц"] : []), "Продажи за неделю", "Найди клиента", "Создай задачу"];
   return <section className="panel control-chat" aria-label="BasQar Control">
     <header className="control-chat-head"><div><span className="control-chat-eyebrow">BASQAR CONTROL</span><h3>Что нужно сделать?</h3><p className="muted">Напишите своими словами. Меню вызывать не нужно. Изменения — после вашего подтверждения.</p></div><div className="control-chat-tools">{canManageAccess && <Link to="/settings?section=control" className="btn secondary">Настройки доступа</Link>}<button type="button" className="btn secondary" disabled={busy || loading} onClick={() => void load()}>Обновить историю</button></div></header>
     {loading ? <p role="status">Загружаем историю…</p> : <>

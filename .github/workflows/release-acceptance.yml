@@ -2,7 +2,7 @@ name: Release acceptance
 
 on:
   push:
-    branches: [main, codex/stage8-release]
+    branches: [main, codex/stage8-release, codex/stage9-release]
   workflow_dispatch:
 
 permissions:
@@ -46,7 +46,7 @@ jobs:
           BASQAR_TEST_POSTGRES_URL: postgresql://basqar:basqar_ci_only@127.0.0.1:5432/postgres
         run: |
           set -o pipefail
-          node scripts/test-api.mjs --postgres workspaceAcceptance outboxLease schemaPatches financialReporting analyticsPeriods situationSweepMigration postgresRuntime.postgres http 2>&1 | tee /tmp/basqar-postgres-checks.log
+          node scripts/test-api.mjs --postgres controlForecast salesForecast websiteForms workspaceAcceptance outboxLease schemaPatches financialReporting analyticsPeriods situationSweepMigration postgresRuntime.postgres http 2>&1 | tee /tmp/basqar-postgres-checks.log
       - name: Report failing test details
         if: failure()
         run: node scripts/ci-error-annotation.mjs /tmp/basqar-postgres-checks.log

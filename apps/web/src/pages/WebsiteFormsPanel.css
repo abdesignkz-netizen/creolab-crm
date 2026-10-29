@@ -1,0 +1,32 @@
+.website-forms { display: grid; gap: 22px; min-width: 0; }
+.website-forms h3, .website-forms h4, .website-forms p { margin: 0; }
+.website-forms h3 { font-size: 21px; }
+.website-forms h4 { font-size: 17px; }
+.website-forms p, .website-forms small { line-height: 1.6; }
+.website-form-heading, .website-form-summary { display: flex; justify-content: space-between; align-items: start; gap: 18px; flex-wrap: wrap; }
+.website-form-heading > div { flex: 1 1 300px; }
+.website-form-heading p { max-width: 720px; margin-top: 7px; }
+.website-form-progress { display: grid; grid-template-columns: repeat(3, 1fr); list-style: none; padding: 0; margin: 0; gap: 12px; }
+.website-form-progress li { display: flex; align-items: center; gap: 9px; font-size: 14px; padding: 12px; border-radius: 12px; background: #f2f5fa; color: #5a6b85; }
+.website-form-progress li > span { display: grid; place-items: center; width: 28px; height: 28px; flex-shrink: 0; border-radius: 50%; background: white; font-weight: 700; }
+.website-form-progress .current { color: #005cc7; background: #e8f2ff; }
+.website-form-progress .done { color: #26764d; background: #ecf8f1; }
+.website-form-editor, .website-form-install, .website-form-check { display: grid; gap: 14px; padding: 22px; border: 1px solid #dce5f0; border-radius: 16px; min-width: 0; }
+.website-form-check { background: #f5f9ff; }
+.website-form-editor fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 16px; min-width: 0; }
+.website-forms label { display: grid; gap: 7px; font-weight: 600; font-size: 14px; }
+.website-forms label small { font-weight: 400; color: #65758e; }
+.website-form-editor fieldset > label { max-width: 760px; }
+.website-forms .actions { margin: 0; justify-content: flex-start; flex-wrap: wrap; gap: 8px; }
+.website-forms .btn { width: auto; max-width: 100%; white-space: normal; min-height: 44px; }
+.website-form-summary { padding: 16px 0; }
+.website-form-summary p { overflow-wrap: anywhere; color: #65758e; margin: 5px 0 10px; }
+.website-forms .website-form-code { min-width: 0; width: 100%; font: 12px/1.6 ui-monospace, monospace; background: #f5f7fb; resize: vertical; white-space: pre; overflow: auto; }
+.website-form-warning { padding: 14px 16px; color: #82541c; background: #fff7e6; border-radius: 12px; }
+@media (max-width: 640px) {
+  .website-form-progress { grid-template-columns: 1fr; gap: 6px; }
+  .website-form-progress li { padding: 9px 12px; }
+  .website-form-editor, .website-form-install, .website-form-check { padding: 16px; }
+  .website-forms .actions > .btn { flex: 1 1 160px; }
+  .website-form-heading > .btn { width: 100%; }
+}

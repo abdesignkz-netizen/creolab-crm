@@ -89,13 +89,15 @@ test("new owner → employee → inquiry → task → invoice → payment → re
     await request(employee, "/api/v1/workspace/audit", "GET", undefined, 403);
   });
 
-  await step("подключённая администратором форма передаёт одну заявку нужному сотруднику", async () => {
-    const connection = await request(platform, `/api/v1/admin/tenants/${tenantId}/integrations`, "POST", {
-      type: "form", name: "Форма приёмки", assigneeMembershipId: employeeId, automationMode: "MANUAL",
+  await step("владелец сам создаёт форму и получает одну заявку у нужного сотрудника", async () => {
+    const connection = await request(owner, "/api/v1/integrations/website-forms", "POST", {
+      requestId: crypto.randomUUID(), name: "Форма приёмки", allowedDomains: ["acceptance.example"], assigneeMembershipId: employeeId,
     }, 201);
-    formKey = connection.data.forms[0].publicKey;
+    const forms = (await request(owner, "/api/v1/integrations/website-forms")).data;
+    formKey = forms.items.find((form: { id: string }) => form.id === connection.data.id).publicKey;
+    assert.equal((await request(owner, "/api/v1/workspace/onboarding")).data.completed, false);
     const payload = { name: "Клиент приёмки", phone: "+77015550991", message: "Нужна консультация и настройка сервиса" };
-    const headers = { "x-submission-id": "workspace-acceptance" };
+    const headers = { "x-submission-id": "workspace-acceptance", origin: "https://acceptance.example" };
     const first = await request("", `/public/forms/${formKey}/submissions`, "POST", payload, 202, headers);
     const second = await request("", `/public/forms/${formKey}/submissions`, "POST", payload, 200, headers);
     assert.equal(first.data.receipt, second.data.receipt);

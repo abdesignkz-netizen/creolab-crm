@@ -1434,7 +1434,7 @@ export async function integrationSetup(prisma: PrismaClient, auth: AuthContext) 
   const membership = requireTenant(auth);
   const [form, seller] = await Promise.all([
     prisma.formDefinition.findFirst({
-      where: { tenantId: membership.tenantId, active: true },
+      where: { tenantId: membership.tenantId, active: true, integration: { status: "active" } },
       include: { integration: true },
     }),
     sellerHealthFor(prisma, auth),

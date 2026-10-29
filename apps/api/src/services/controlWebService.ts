@@ -4,6 +4,7 @@ import type { PrismaClient, Prisma } from "@creolab/db";
 import { CONTROL_ACTION_META, type ControlAction } from "@creolab/contracts";
 import type { AuthContext } from "../lib/types.ts";
 import { ApiError } from "../errors.ts";
+import { isManager } from "../lib/access.ts";
 import { sha256 } from "../lib/hash.ts";
 import { authorizeWebControl, executeWebControl, confirmWebControl, controlAuthorizationVersion } from "./aiControlService.ts";
 import { runControlChatRequest } from "./controlChatService.ts";
@@ -44,7 +45,8 @@ export async function controlWebHistory(prisma: PrismaClient, auth: AuthContext)
   const session = record(record(webIdentity?.metadata).web);
   const context = session.accessVersion === currentVersion && Number(session.expiresAt) > Date.now() ? record(session.context) : {};
   const pending = context.pendingId ? await prisma.controlConfirmation.findFirst({ where: { id: String(context.pendingId), tenantId, userId: auth.user.id, identityId: webIdentity!.id, source: "CRM_CHAT", status: "pending", expiresAt: { gt: new Date() } }, select: { id: true, summary: true, expiresAt: true } }) : null;
-  return { items, pending, choices: Array.isArray(context.choices?.items) ? context.choices.items.map((item: any, i: number) => ({ text: String(i + 1), label: String(item.label) })) : [], timezone: ctx.tenant.timezone || "Asia/Almaty" };
+  return { items, pending, forecastAvailable: !isManager(auth) && readable(["GET_SALES_FORECAST"], ctx.access),
+    choices: Array.isArray(context.choices?.items) ? context.choices.items.map((item: any, i: number) => ({ text: String(i + 1), label: String(item.label) })) : [], timezone: ctx.tenant.timezone || "Asia/Almaty" };
 }
 
 export async function sendControlWebMessage(prisma: PrismaClient, auth: AuthContext, input: unknown) {

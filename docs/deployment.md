@@ -37,7 +37,7 @@ npx prisma db execute --schema packages/db/prisma/schema.prisma --file packages/
 
 ## Приёмка Linux и PostgreSQL перед релизом
 
-Workflow `.github/workflows/release-acceptance.yml` проверяет ветки `codex/stage8-release` и `main` на Ubuntu 24.04:
+Workflow `.github/workflows/release-acceptance.yml` проверяет ветки `codex/stage8-release`, `codex/stage9-release` и `main` на Ubuntu 24.04:
 
 - PostgreSQL 16: отдельная новая база для каждого сценария, базовая схема и настоящие миграции при запуске. Проверяются регистрация → заявка → сделка → счёт → оплаты → отчёт, изоляция компаний и права сотрудников.
 - Четыре независимых процесса одновременно запускают миграции и захватывают одно событие очереди. Резервная копия тестовой базы восстанавливается через `pg_dump`/`psql` в другую пустую базу.
@@ -47,7 +47,7 @@ Workflow `.github/workflows/release-acceptance.yml` проверяет ветк�
 
 ```bash
 # BASQAR_TEST_POSTGRES_URL: loopback-сервер, база /postgres, тестовые учётные данные.
-node scripts/test-api.mjs --postgres workspaceAcceptance outboxLease schemaPatches financialReporting analyticsPeriods situationSweepMigration postgresRuntime.postgres
+node scripts/test-api.mjs --postgres controlForecast salesForecast websiteForms workspaceAcceptance outboxLease schemaPatches financialReporting analyticsPeriods situationSweepMigration postgresRuntime.postgres http
 ```
 
 Runner не берёт рабочий `DATABASE_URL` для подключения: требует отдельный `BASQAR_TEST_POSTGRES_URL`, создаёт базы `basqar_test_<случайный_id>_<номер>` и удаляет только созданные им базы. Внешние провайдеры отключены. Обычный `node scripts/test-api.mjs` по-прежнему использует изолированные PGlite-базы. Успех CI не заменяет проверку рабочего сайта после деплоя и восстановление его реальных файлов из резервной копии.

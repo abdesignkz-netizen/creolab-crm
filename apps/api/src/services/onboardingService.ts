@@ -5,6 +5,7 @@ import type { AuthContext } from "../lib/types.ts";
 import { requireCompanyAdmin, requireTenant } from "../lib/access.ts";
 import { ApiError } from "../errors.ts";
 import { getEntitlements } from "./entitlementService.ts";
+import { getEffectiveTenantSettings } from "./runtimeSettings.ts";
 
 const record = (v: unknown): Record<string, any> => v && typeof v === "object" && !Array.isArray(v) ? v as Record<string, any> : {};
 const channels: Record<SetupChannel, string[]> = {
@@ -24,7 +25,7 @@ export async function getOnboarding(prisma: PrismaClient, auth: AuthContext): Pr
   const started = Boolean(channel && store.startedAt);
   const replyMode = channel === "form" || store.replyMode === "manual" ? "manual" : "ai";
   const since = new Date(store.startedAt || tenant.createdAt);
-  const [access, integrations, ai, knowledge, rules] = await Promise.all([
+  const [access, integrations, ai, knowledge, rules, settings] = await Promise.all([
     getEntitlements(prisma, tenantId),
     prisma.integration.findMany({ where: { tenantId, type: { in: channel ? channels[channel] : [] } },
       select: { id: true, status: true, connectionStatus: true,
@@ -33,9 +34,10 @@ export async function getOnboarding(prisma: PrismaClient, auth: AuthContext): Pr
     prisma.aIConfiguration.findFirst({ where: { tenantId, scope: "company" }, select: { promptStatus: true, systemPrompt: true } }),
     prisma.knowledgeDocument.findFirst({ where: { tenantId, status: "published", content: { not: "" } }, select: { id: true } }),
     prisma.auditEvent.findFirst({ where: { tenantId, action: "ai.automation_updated" }, select: { id: true } }),
+    getEffectiveTenantSettings(prisma, tenantId),
   ]);
   const connected = integrations.filter(i => i.status === "active" && (channel === "form"
-    ? i.forms.length > 0
+    ? i.forms.length > 0 && access.entitlements.CHANNELS && settings.features.forms.value
     : i.channelConnections.length > 0 && ["CONNECTED", "connected", "authorized"].includes(i.connectionStatus)));
   const connectionIds = connected.flatMap(i => i.channelConnections.map(c => c.id));
   const inbound = started ? await prisma.message.findFirst({ where: { tenantId, direction: "inbound", historical: false, internal: false,
@@ -70,7 +72,7 @@ export async function getOnboarding(prisma: PrismaClient, auth: AuthContext): Pr
     suggested: Boolean(store.startedAt || ["not_started", "in_progress", "deferred"].includes(store.status)),
     completed: steps.every(s => s.done), steps,
     available: { whatsapp: Boolean(e.WHATSAPP), telegram: Boolean(e.TELEGRAM), instagram: Boolean(e.INSTAGRAM),
-      "website-chat": Boolean(e.CHANNELS), form: Boolean(e.CRM_CORE || e.CRM_LITE), ai: Boolean(e.AI_MANAGER) },
+      "website-chat": Boolean(e.CHANNELS), form: Boolean(e.CHANNELS && settings.features.forms.value), ai: Boolean(e.AI_MANAGER) },
     evidence: { inbound: Boolean(inbound || inquiry), reply: Boolean(reply), conversationId: reply?.conversationId || inbound?.conversationId || null, inquiryId: inquiry?.id || null } };
 }
 

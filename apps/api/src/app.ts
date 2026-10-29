@@ -377,6 +377,12 @@ export function createApp(prisma: PrismaClient) {
   app.use(securityHeaders);
   app.use(createLegacyDomainRedirect(config));
   app.use("/public/chat", websiteChatRouter(prisma));
+  // Embedded forms run on customer websites. Handle their credential-free
+  // preflight before the private API's CORS middleware consumes OPTIONS.
+  app.options("/public/forms/:publicKey/submissions", (req, res) => {
+    publicFormCors(req, res);
+    res.status(204).end();
+  });
   app.use(
     cors({
       origin: config.allowedOrigins,
@@ -574,11 +580,6 @@ export function createApp(prisma: PrismaClient) {
       receipt: result.receipt,
       duplicate: result.duplicate,
     });
-  });
-
-  app.options("/public/forms/:publicKey/submissions", (req, res) => {
-    publicFormCors(req, res);
-    res.status(204).end();
   });
 
   async function authenticate(req: express.Request): Promise<AuthContext> {
@@ -2653,6 +2654,19 @@ export function createApp(prisma: PrismaClient) {
   app.get("/api/v1/integrations/catalog", async (req, res) => {
     const { listIntegrationCatalog } = await import("./services/integrationCatalogService.ts");
     res.json(await listIntegrationCatalog(prisma, await requireAuth(req)));
+  });
+
+  app.get("/api/v1/integrations/website-forms", async (req, res) => {
+    const { listWebsiteForms } = await import("./services/websiteFormService.ts");
+    res.json(await listWebsiteForms(prisma, await requireAuth(req)));
+  });
+  app.post("/api/v1/integrations/website-forms", json, async (req, res) => {
+    const { createWebsiteForm } = await import("./services/websiteFormService.ts");
+    res.status(201).json(await createWebsiteForm(prisma, await requireAuth(req), req.body));
+  });
+  app.patch("/api/v1/integrations/website-forms/:id", json, async (req, res) => {
+    const { updateWebsiteForm } = await import("./services/websiteFormService.ts");
+    res.json(await updateWebsiteForm(prisma, await requireAuth(req), req.params.id, req.body));
   });
 
   app.get("/api/v1/integrations/events", async (req, res) => {

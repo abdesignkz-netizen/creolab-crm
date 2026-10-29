@@ -1,6 +1,7 @@
 import { analyticsText, planExplanation } from "./analyticsCopy";
 import { uiText, useUiText, localizeUiOptions } from "./uiText";
 import { analyticsCoverageLines } from "./analyticsCoverage";
+import { forecastReportLines } from "./salesForecastPresentation";
 type ReportSections = {
   overview: boolean;
   funnel: boolean;
@@ -35,6 +36,7 @@ function financialReportLines(data: any): string[] {
     lines.push(planExplanation(plan));
     if (plan.status === "ready") lines.push(`${analyticsText("План / факт за выбранный период")}: ${plan.label} / ${plan.actual?.label || "—"} (${plan.percent == null ? "—" : `${plan.percent}%`})`);
   }
+  lines.push(...forecastReportLines(data.sales?.forecast));
   return lines;
 }
 

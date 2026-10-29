@@ -598,6 +598,8 @@ export async function submitPublicForm(
     throw new ApiError(404, "not_found", "Форма недоступна");
   }
   if (!(await canUseFeature(prisma, form.tenantId, "CHANNELS"))) throw new ApiError(403, "feature_required", "Приём заявок из подключённых каналов недоступен по тарифу");
+  const { getEffectiveTenantSettings } = await import("./runtimeSettings.ts");
+  if (!(await getEffectiveTenantSettings(prisma, form.tenantId)).features.forms.value) throw new ApiError(403, "feature_disabled", "Формы сайта отключены для этой компании");
   if (!originAllowed(form.allowedDomains, meta.origin)) {
     throw new ApiError(403, "origin_not_allowed", "Домен не разрешён для этой формы");
   }

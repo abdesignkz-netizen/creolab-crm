@@ -3,6 +3,7 @@ import { AnalyticsCoverage } from "./analyticsCoverage.ts";
 import { analyticsTotals } from "./analyticsTotals.ts";
 import { analyticsComparison, closedDealConversion, periodSalesPlan } from "./analyticsPeriodPolicy.ts";
 import { buildAnalyticsFunnel } from "./analyticsFunnel.ts";
+import { getSalesForecast } from "./salesForecastService.ts";
 import { businessDealWhere, confirmedPaymentsWhere, MoneyDecimal, moneyValue } from "./financialMetrics.ts";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
@@ -489,7 +490,7 @@ export async function getAnalyticsDashboard(prisma: PrismaClient, auth: AuthCont
   const ops = parseOpsSettings(tenantRow?.settingsJson);
   const processClock = createProcessClock(ops.processCalendar, tenantRow?.timezone || timeZone, now);
 
-  const [current, previous, funnel, trendInquiries, stageDurations, stage2] = await Promise.all([
+  const [current, previous, funnel, trendInquiries, stageDurations, stage2, forecast] = await Promise.all([
     metricBundle(prisma, tid, range.from, range.to, inquiryExtra, dealExtra, coverage, "current", currency),
     compareMode === "none"
       ? null
@@ -508,6 +509,11 @@ export async function getAnalyticsDashboard(prisma: PrismaClient, auth: AuthCont
         return emptyStage2();
       },
     ),
+    getSalesForecast(prisma, {
+      tenantId: tid, dealWhere: dealExtra as Prisma.DealWhereInput, timeZone, currency, now, period: preset,
+      filtered: [query.assignee, query.serviceCategory, query.source, query.channel, query.city, query.campaign].some(Boolean),
+      monthlyPlan: ops.salesPlans.find(row => row.month === `${zonedYmd(now, timeZone).year}-${String(zonedYmd(now, timeZone).month).padStart(2, "0")}` && row.currency === currency)?.amount ?? null,
+    }),
   ]);
 
   const trendCompare =
@@ -767,6 +773,7 @@ export async function getAnalyticsDashboard(prisma: PrismaClient, auth: AuthCont
       weightedPipeline: current.pipelineKnown ? current.weighted : null,
       weightedPipelineLabel: current.financial.pipeline.total.weighted.label,
       plan,
+      forecast,
       planMinor: plan.amount,
       planLabel: plan.label,
       planPercent: plan.percent,

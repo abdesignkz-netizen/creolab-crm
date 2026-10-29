@@ -1,4 +1,5 @@
-import type { ControlAction } from "@creolab/contracts";
+import type { ControlAction, SalesForecast } from "@creolab/contracts";
+import { presentControlForecast } from "./controlForecastPresentation.ts";
 import { CONTROL_ACTION_META, validateClientPhone } from "@creolab/contracts";
 import { config } from "../config.ts";
 import { formatPhoneDisplay } from "./contactLabels.ts";
@@ -16,6 +17,7 @@ export function controlTaskClientLabel(item: Record<string, unknown>, lang: Chat
 }
 export function presentControlReply(action: ControlAction, result: unknown, lang: ChatLanguage, timeZone: string) {
   const data = record(record(result).data), w = (ru: string, kk: string) => words(lang, ru, kk);
+  if (action === "GET_SALES_FORECAST") return presentControlForecast(data.forecast as SalesForecast | undefined, lang, controlLink("/stats?tab=sales&period=this_month"));
   const time = (v: unknown) => v && Number.isFinite(new Date(String(v)).getTime()) ? new Date(String(v)).toLocaleString(lang === "kk" ? "kk-KZ" : "ru-RU", { timeZone, dateStyle: "short", timeStyle: "short" }) : w("без срока", "мерзімсіз");
   const task = (item: any, i: number) => `${i + 1}. ${cleanText(item.title, 160)}\n${controlTaskClientLabel(item, lang)}\n${data.taskStatus === "completed" ? `${w("Завершено", "Аяқталды")}: ${item.completedAt ? time(item.completedAt) : w("дата не указана", "күні көрсетілмеген")}` : time(item.dueAt)}${item.overdue ? w(" · просрочено", " · мерзімі өткен") : ""}${item.ownerName ? ` · ${cleanText(item.ownerName, 50)}` : ""}`;
   const items: any[] = Array.isArray(data.items) ? data.items : [];

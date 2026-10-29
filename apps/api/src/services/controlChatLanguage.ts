@@ -6,7 +6,7 @@ import { CONTROL_PERIODS } from "./controlPeriods.ts";
 
 export const DEAL_READ_ACTIONS = ["GET_UNCHANGED_DEALS", "GET_PROPOSALS_WITHOUT_FOLLOWUP", "GET_LOST_REASONS", "GET_EXPECTED_PAYMENTS"] as const;
 
-export const CHAT_ACTIONS = ["GET_SALES_CONTROL", "GET_BUSINESS_SUMMARY", "GET_SITUATION", "GET_LEADS_STATS", "GET_DEALS_STATS", "GET_REVENUE_STATS", "GET_PIPELINE_SUMMARY", "GET_STUCK_DEALS", ...DEAL_READ_ACTIONS, "GET_OVERDUE_TASKS", "GET_TASKS", "GET_TODAY_TASKS", "GET_CLIENTS", "FIND_CLIENT", "GET_CLIENT_DETAILS", "GET_DEAL", "FIND_DEAL", "GET_TEAM_STATUS", "GET_RECENT_LEADS", "GET_RECENT_DEALS", "CREATE_TASK", "CREATE_FOLLOW_UP", "COMPLETE_TASK", "UPDATE_TASK", "ADD_DEAL_NOTE", "MOVE_DEAL_STAGE", "ASSIGN_DEAL", "ASSIGN_TASK"] as const satisfies readonly ControlAction[];
+export const CHAT_ACTIONS = ["GET_SALES_FORECAST", "GET_SALES_CONTROL", "GET_BUSINESS_SUMMARY", "GET_SITUATION", "GET_LEADS_STATS", "GET_DEALS_STATS", "GET_REVENUE_STATS", "GET_PIPELINE_SUMMARY", "GET_STUCK_DEALS", ...DEAL_READ_ACTIONS, "GET_OVERDUE_TASKS", "GET_TASKS", "GET_TODAY_TASKS", "GET_CLIENTS", "FIND_CLIENT", "GET_CLIENT_DETAILS", "GET_DEAL", "FIND_DEAL", "GET_TEAM_STATUS", "GET_RECENT_LEADS", "GET_RECENT_DEALS", "CREATE_TASK", "CREATE_FOLLOW_UP", "COMPLETE_TASK", "UPDATE_TASK", "ADD_DEAL_NOTE", "MOVE_DEAL_STAGE", "ASSIGN_DEAL", "ASSIGN_TASK"] as const satisfies readonly ControlAction[];
 // The model can name entities, but cannot select arbitrary database IDs or invent tools.
 export const chatCommandSchema = z.object({
   action: z.enum(CHAT_ACTIONS),
@@ -45,7 +45,7 @@ export const chatCommandSchema = z.object({
   if (command.assignee && ![...scopedReads, "CREATE_TASK", "CREATE_FOLLOW_UP", "ASSIGN_TASK", "ASSIGN_DEAL"].includes(command.action)) reject("У этой команды нет фильтра или назначения сотрудника.");
   if ((command.client || command.useSelectedClient) && !["GET_CLIENT_DETAILS", "CREATE_TASK", "CREATE_FOLLOW_UP", "GET_TASKS", "GET_TODAY_TASKS", "GET_OVERDUE_TASKS", ...DEAL_READ_ACTIONS].includes(command.action)) reject("У этой команды нет фильтра клиента.");
   if (command.salesFilter && command.action !== "GET_SALES_CONTROL") reject("Фильтр относится к контролю продаж.");
-  if (command.period && ![...scopedReads, "GET_BUSINESS_SUMMARY", "GET_LEADS_STATS", "GET_DEALS_STATS", "GET_REVENUE_STATS"].includes(command.action)) reject("У этой команды нет фильтра периода.");
+  if (command.period && ![...scopedReads, "GET_BUSINESS_SUMMARY", "GET_LEADS_STATS", "GET_DEALS_STATS", "GET_REVENUE_STATS", "GET_SALES_FORECAST"].includes(command.action)) reject("У этой команды нет фильтра периода.");
   if (command.taskStatus && command.action !== "GET_TASKS") reject("Уточните запрос задач и их статус.");
   if (command.leadFilter && command.action !== "GET_RECENT_LEADS") reject("Фильтр относится к списку заявок.");
   if (command.action === "GET_TODAY_TASKS" && command.period && command.period !== "today") reject("Для другого периода используйте список задач.");
@@ -61,6 +61,7 @@ export const menuItems = [
   ["GET_DEALS_STATS", "Продажи за сегодня", "Бүгінгі сатылымдар"],
   ["FIND_CLIENT", "Найти клиента", "Клиентті табу"],
   ["CREATE_TASK", "Создать задачу", "Тапсырма құру"],
+  ["GET_SALES_FORECAST", "Прогноз продаж на месяц", "Айлық сату болжамы"],
 ] as const;
 export function controlChatMenu(lang: ChatLanguage, allowed: readonly string[]) {
   return ["BasQar Control", ...menuItems.flatMap(([action, ru, kk], i) => allowed.includes(action) ? [`${i + 1}. ${words(lang, ru, kk)}`] : []), words(lang,
@@ -84,7 +85,19 @@ export function quickControlPeriodFollowup(text: string) {
   const match = text.trim().replace(/[?!.]+$/g, "").match(/^(?:а (?:за |на )?|ал )(.+)$/i);
   return match ? controlPeriodPhrase(match[1]) : null;
 }
+function forecastRead(text: string): ChatCommand | null {
+  const ru = text.replace(/^какой (?:у нас )?/, "").match(/^(?:прогноз(?: продаж| выполнения плана(?: продаж)?)?|риск невыполнения плана(?: продаж)?|выполним ли (?:мы )?план(?: продаж)?|будет ли выполнен план(?: продаж)?)(?: (?:на |за )?(.+))?$/);
+  if (ru) {
+    const period = !ru[1] || /^(?:в этом|в текущем) месяце$/.test(ru[1]) ? { period: "this_month" as const } : controlPeriodPhrase(ru[1]);
+    return period ? { action: "GET_SALES_FORECAST", ...period } : null;
+  }
+  if (/^(?:(?:осы айдың|осы айдағы|айлық) )?(?:сату болжамы|сатылым болжамы|сатылымдар болжамы)(?:н көрсет)?$/.test(text)
+    || /^(?:осы айдың )?жоспары орындала ма$/.test(text)) return { action: "GET_SALES_FORECAST", period: "this_month" };
+  return null;
+}
 function preciseRead(text: string): ChatCommand | null {
+  const forecast = forecastRead(text);
+  if (forecast) return forecast;
   const dealRead = preciseDealRead(text);
   if (dealRead) return dealRead;
   const task = text.match(/^(?:(мои|моей команды) )?(просроченные задачи|завершенные задачи|все задачи|задачи)(?: (мои|у меня|моей команды|всей команды))?(?: (?:на |за )?(.+))?$/);
@@ -153,7 +166,7 @@ function preciseDealRead(raw: string): ChatCommand | null {
 }
 export function quickControlCommand(text: string, timeZone = "Asia/Almaty", now = new Date()): ChatCommand | null {
   const t = text.trim().toLowerCase().replace(/ё/g, "е").replace(/[?!.]+$/g, "").replace(/\s+/g, " ");
-  const index = /^[1-6]$/.test(t) ? Number(t) - 1 : -1;
+  const index = /^[1-7]$/.test(t) ? Number(t) - 1 : -1;
   if (index >= 0 && ![4, 5].includes(index)) return { action: menuItems[index][0] };
   // Keep "mine" when removing a conversational prefix.
   const readText = t.replace(/^(?:покажи(?:те)?|выведи(?:те)?|подготовь(?:те)?)\s+(?:мне\s+)?/, "")
@@ -179,6 +192,8 @@ export function quickControlCommand(text: string, timeZone = "Asia/Almaty", now 
   // Common reads must remain available when the language model is unavailable.
   // Match the whole request, never a keyword inside a write or a compound request.
   const read = t.replace(/^(?:(?:покажи(?:те)?|расскажи(?:те)?|скажи(?:те)?|подскажи(?:те)?|выведи(?:те)?|дай(?:те)?)\s+(?:мне\s+)?|какие\s+(?:у нас\s+|у меня\s+)?(?:есть\s+)?|что\s+у нас\s+по\s+)/, "").replace(/,?\s*пожалуйста$/, "");
+  const forecast = forecastRead(read);
+  if (forecast) return forecast;
   if (salesFilters[read]) return { action: "GET_SALES_CONTROL", salesFilter: salesFilters[read] };
   if (/^(?:мои |все |у нас )?задачи(?: есть)?(?: у нас| у меня)?(?: на сегодня| сегодня)?$/.test(read)) return { action: read.includes("сегодня") ? "GET_TODAY_TASKS" : "GET_TASKS", ...(/мои|у меня/.test(read) ? { scope: "mine" as const } : {}) };
   if (/^(?:какие )?(?:просроченные задачи|задачи просрочены)$/.test(read)) return { action: "GET_OVERDUE_TASKS" };

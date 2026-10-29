@@ -10,13 +10,13 @@ import { TikTokConnectionsPanel } from "./TikTokConnectionsPanel";
 import { MetaConnectionsPanel } from "./MetaConnectionsPanel";
 import { GoogleConnectionsPanel } from "./GoogleConnectionsPanel";
 import { notifySaved } from "../components/SaveNotice";
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useCompanyConfiguration } from "../lib/companyConfiguration";
 import { statusBadgeClass } from "../lib/statusBadge";
 import { IntegrationHelp } from "../components/IntegrationHelp";
 
-type ConnectMethod = "html" | "existing" | "js" | "tilda";
+const WebsiteFormsPanel = lazy(() => import("./WebsiteFormsPanel"));
 
 function whatsappStatusNote(wa: any) {
   if (!wa?.configured) return uiText("Укажите Instance ID и API Token из личного кабинета Green API.");
@@ -54,7 +54,6 @@ export function IntegrationsPage() {
   function setNote(message: string, kind: "success" | "info" = "success") {
     setNotice(message ? { message, kind } : null);
   }
-  const [formMethod, setFormMethod] = useState<ConnectMethod>("html");
   const [botToken, setBotToken] = useState("");
   const [savingBot, setSavingBot] = useState(false);
   const [summaries, setSummaries] = useState<Record<string, any>>({});
@@ -114,8 +113,6 @@ export function IntegrationsPage() {
     );
   }
 
-  const formCard = catalog?.leads?.find((i: any) => i.catalogType === "WEBSITE_FORM");
-  const submitUrl = formCard?.submitUrl || setup?.form?.submitUrl;
   const leadCards = (catalog?.leads || []).filter(
     (card: any) => card.catalogType === "WEBSITE_FORM" || card.catalogType === "WEBHOOK_API" || card.connected,
   );
@@ -358,98 +355,7 @@ export function IntegrationsPage() {
         </IntegrationDisclosure>
         <IntegrationDisclosure id="website-chat" icon="form" title={uiText("Чат на сайте")} description={uiText("ИИ-консультант и сотрудники прямо на вашем сайте")} {...catalogSummary("WEBSITE_CHAT")}><WebsiteChatPanel onChange={refresh} /></IntegrationDisclosure>
         <IntegrationDisclosure id="website" icon="form" title={uiText("Форма сайта")} description={uiText("Заявки с вашего сайта в одном месте")} {...catalogSummary("WEBSITE_FORM")}>
-          {managed ? <Link className="btn" to={href("/integrations/forms")}>{uiText("Настроить подключение")}</Link> : <>
-          {leadDetails("WEBSITE_FORM")}
-      {setup?.form?.connected && submitUrl ? (
-        <div className="panel">
-          <h3>{uiText("Форма сайта — подключение")}</h3>
-          <IntegrationHelp kind="website_form" />
-          <p className="muted integration-endpoint">{uiText("Адрес для заявок:")}{" "}{submitUrl}</p>
-          <div className="actions" style={{ marginBottom: 12 }}>
-            {(
-              [
-                ["html", uiText("Готовая HTML-форма")],
-                ["existing", uiText("Существующая форма")],
-                ["js", "JavaScript / React"],
-                ["tilda", uiText("Tilda / конструктор")],
-              ] as Array<[ConnectMethod, string]>
-            ).map(([key, label]) => (
-              <button
-                key={key}
-                type="button"
-                className={`btn ${formMethod === key ? "" : "secondary"}`}
-                onClick={() => setFormMethod(key)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          {formMethod === "html" ? (
-            <>
-              <p className="muted">{uiText("Готовый HTML. Дополнительных ключей не нужно.")}</p>
-              <pre className="code">{uiText("<form method=\"POST\" action=\"{p0}\">\n  <input name=\"name\" required />\n  <input name=\"phone\" required />\n  <input name=\"company\" />\n  <textarea name=\"message\"></textarea>\n  <input name=\"utm_source\" type=\"hidden\" />\n  <input name=\"pageUrl\" type=\"hidden\" />\n  <input name=\"website\" style=\"display:none\" tabindex=\"-1\" autocomplete=\"off\" />\n  <button type=\"submit\">Отправить</button>\n</form>", {p0: submitUrl})}</pre>
-            </>
-          ) : null}
-          {formMethod === "js" ? (
-            <>
-              <p className="muted">{uiText("Отправка заявки из кода сайта.")}</p>
-              <pre className="code">{uiText("await fetch(\"{p0}\", {\n  method: \"POST\",\n  headers: {\n    \"Content-Type\": \"application/json\",\n    \"X-Submission-Id\": crypto.randomUUID(),\n  },\n  body: JSON.stringify({\n    name: \"Имя\",\n    phone: \"+7701...\",\n    message: \"Текст\",\n    pageUrl: location.href,\n    utm_source: new URLSearchParams(location.search).get(\"utm_source\"),\n  }),\n});", {p0: submitUrl})}</pre>
-            </>
-          ) : null}
-          {formMethod === "existing" ? (
-            <p className="muted">
-              {uiText("В action формы укажите адрес выше. Поля: name, phone, message, company. Скрытое поле website оставьте пустым — оно отсекает спам.")}</p>
-          ) : null}
-          {formMethod === "tilda" ? (
-            <p className="muted">
-              {uiText("В Tilda: Настройки сайта → Формы → Webhook. Укажите адрес выше и поля name, phone, message.")}</p>
-          ) : null}
-          <p className="muted">
-            {uiText("Режим заявок:")}{" "}
-            {formCard?.testMode || setup?.form?.testMode ? (
-              <b>{uiText("тестовый")}</b>
-            ) : (
-              <b>{uiText("обычный")}</b>
-            )}
-            {uiText(". Телефон обязателен.")}</p>
-          {(formCard?.integrationId || setup?.form?.integrationId) && (formCard?.testMode || setup?.form?.testMode) ? (
-            <button
-              type="button"
-              className="btn"
-              onClick={async () => {
-                try {
-                  const id = formCard?.integrationId || setup?.form?.integrationId;
-                  const result = (await api.setIntegrationTestMode(id, false)) as any;
-                  setNote(result.note || uiText("Заявки теперь обычные"));
-                  await load();
-                } catch (err) {
-                  setError(err instanceof Error ? err.message : uiText("Не удалось сменить режим"));
-                }
-              }}
-            >
-              {uiText("Сделать заявки обычными")}</button>
-          ) : null}
-          {(formCard?.integrationId || setup?.form?.integrationId) && !(formCard?.testMode || setup?.form?.testMode) ? (
-            <button
-              type="button"
-              className="btn secondary"
-              onClick={async () => {
-                try {
-                  const id = formCard?.integrationId || setup?.form?.integrationId;
-                  const result = (await api.setIntegrationTestMode(id, true)) as any;
-                  setNote(result.note || uiText("Включён тестовый режим"));
-                  await load();
-                } catch (err) {
-                  setError(err instanceof Error ? err.message : uiText("Не удалось сменить режим"));
-                }
-              }}
-            >
-              {uiText("Включить тестовый режим")}</button>
-          ) : null}
-        </div>
-      ) : null}
-
-          </>}
+          {managed ? <Link className="btn" to={href("/integrations/forms")}>{uiText("Настроить подключение")}</Link> : <Suspense fallback={<p>{uiText("Загрузка…")}</p>}><WebsiteFormsPanel onChange={refresh} /></Suspense>}
         </IntegrationDisclosure>
         {esfEnabled ? <IntegrationDisclosure id="esf" icon="esf" title={uiText("ИС ЭСФ")} description={uiText("Электронные счета-фактуры и ЭЦП")} {...esfSummary}>
       <h3 className="integ-section-title">{uiText("Документы и ИС ЭСФ")}</h3>
