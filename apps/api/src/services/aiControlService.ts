@@ -1,3 +1,4 @@
+import type { DomainDb } from "../lib/transaction.ts";
 import { chatSettings } from "./controlChatSettings.ts";
 import { randomInt } from "node:crypto";
 import { requireFeature as requireBillingFeature } from "./entitlementService.ts";
@@ -912,9 +913,8 @@ async function dispatchAction(action: ControlAction, ctx: DispatchCtx): Promise<
     }
     case "GET_SALES_CONTROL": {
       const { getSalesControl } = await import("./salesControlService.ts");
-      const report = await getSalesControl(prisma, auth);
       const filter = ["attention", "ready", "goal"].includes(String(params.filter)) ? String(params.filter) : "all";
-      return { ...report, filter, items: report.items.filter(item => filter === "all" || filter === "attention" && item.blockers.length || filter === "ready" && item.closeToSale || filter === "goal" && item.goalReached) };
+      return getSalesControl(prisma, auth, { filter, limit: 6 });
     }
     case "GET_PIPELINE_SUMMARY": {
       const sit = await situation(ctx);
@@ -1712,7 +1712,7 @@ export function controlAuthorizationVersion(ctx: Pick<Awaited<ReturnType<typeof 
 }
 
 /** Browser requests use the logged-in member, never a submitted phone or user ID. */
-export async function authorizeWebControl(prisma: PrismaClient, auth: AuthContext, action?: ControlAction) {
+export async function authorizeWebControl(prisma: DomainDb, auth: AuthContext, action?: ControlAction) {
   const member = requireTenant(auth);
   const current = await authForUserInTenant(prisma, auth.user.id, member.tenantId, "control-web");
   const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: member.tenantId } });

@@ -31,8 +31,9 @@ export async function processConversationContextJob(prisma: PrismaClient, tenant
   if (await prisma.idempotencyRecord.findUnique({ where: { scope_actorKey_key: {
     scope: "conversation.crm", actorKey: `${tenantId}:${conversationId}`, key: last.id,
   } } })) return { skipped: "already_applied" };
-  // A failed older event must retry before a newer reply advances the context checkpoint.
-  const pending = await prisma.outboxEvent.findMany({ where: { tenantId, type: "conversation.context", entityId: conversationId, processedAt: null },
+  // A retrying older event runs first; quarantined poison events must not block
+  // every newer message indefinitely. The failed event stays in diagnostics.
+  const pending = await prisma.outboxEvent.findMany({ where: { tenantId, type: "conversation.context", entityId: conversationId, processedAt: null, failedAt: null },
     select: { payloadJson: true } });
   const pendingIds = pending.map(event => (event.payloadJson as { messageId?: unknown })?.messageId).filter((id): id is string => typeof id === "string");
   const earlier = pendingIds.length ? await prisma.message.findMany({ where: { tenantId, conversationId, id: { in: pendingIds }, ...deliveredConversationMessage,

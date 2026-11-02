@@ -1,0 +1,124 @@
+{
+  "stage": "A4",
+  "date": "2026-11-02",
+  "timezone": "Asia/Almaty",
+  "status": "implemented_and_verified_locally",
+  "deployed": false,
+  "head": "85ca15135f64ce2f7d54b129da8c3703001cae7d",
+  "branch": "codex/stage9-release",
+  "apiUniqueScenarios": 138,
+  "webScenarios": 93,
+  "database": "isolated PGlite",
+  "externalProviders": "disabled",
+  "browser": {
+    "mobileWidth": 445,
+    "desktopWidth": 1366,
+    "horizontalOverflow": false,
+    "temporaryViewportReset": true,
+    "verified": [
+      "load",
+      "state and rule filters",
+      "acknowledgement",
+      "dismissal",
+      "inline history",
+      "focus restoration",
+      "task deep link",
+      "task deadline save",
+      "stale evidence hidden",
+      "single insight refresh",
+      "resolution history",
+      "source explanation"
+    ]
+  },
+  "unverified": [
+    "Linux/PostgreSQL CI acceptance",
+    "full Docker build",
+    "production state"
+  ],
+  "limitations": [
+    "A4 fixed copy is Russian-only",
+    "company-wide analytics restricted to owner/director/sales_lead",
+    "partial source scans do not establish absence of all business risks",
+    "Vite large chunk warning; small remaining initial bundle budget"
+  ],
+  "initialJavascript": {
+    "bytes": 1099966,
+    "budgetBytes": 1100000
+  },
+  "commands": [
+    "npm run db:generate",
+    "node scripts/test-api.mjs businessInsight salesForecast controlForecast financialReporting analyticsPeriods dealRisk processCalendar schemaPatches backgroundReliability http",
+    "node scripts/test-api.mjs businessInsight taskExecution",
+    "npm run test --workspace=@creolab/web",
+    "npm run typecheck",
+    "npm run build --workspace=@creolab/web",
+    "git diff --check"
+  ],
+  "files": {
+    "packages/contracts/src/businessInsight.ts": "0b2ff054c65d864cad73d56300c176bd3dd27477922aaf377dde9685d9965f1b",
+    "packages/contracts/src/index.ts": "2214e7281fb8978544e0d1ae3ee04b0162017666ef1bc555bdea6432f5c5377b",
+    "packages/contracts/src/systemLocale.ts": "55f3f4d81189c512a19742a53057f4cea81156bdd5ee9191cf8fe87eb00a8c3d",
+    "packages/db/prisma/schema.prisma": "300b9d70ab1c0c2b3b3a48d7358d7277aa8bcd40f32ab6d1aca2c4632dae7711",
+    "packages/db/src/businessInsightSchema.ts": "ce3180fd3fa3997949edfc58ab4f01a9de1a7dc6b269ba239b22a4d962051cdb",
+    "packages/db/src/client.ts": "9222c4367a873da255a9a5e3f9e6e209a2dc3b88d54b1b60a272c6e131197b52",
+    "packages/api-client/src/businessInsights.ts": "81c7da8d66cb4599ffe6ab00d0c1373a829ffb1c0147215360395e02c20f27ae",
+    "packages/api-client/package.json": "576c58fd521d21083b661f576f37032bdb60d9400413be36aeb4fc5097f0cb2d",
+    "apps/api/src/services/businessInsightService.ts": "271358b9731f6f6de36ab169f4e86404065964ada24b8f6f79190fb5f211dc2b",
+    "apps/api/src/services/businessMetricRegistry.ts": "cf8dae177e4069763206ccb67d75016f53522d6262c7cabb851b7b827492c705",
+    "apps/api/src/services/financialMetrics.ts": "434f6018f20525731c7e085c4f5eac9a3ca9bbf070f39d44744dfb1a27f0b98d",
+    "apps/api/src/services/salesForecastService.ts": "4cd6479a773f024a0a59c15e2160615f28cd57dd01651b43aaf5c1e3c72ff20b",
+    "apps/api/src/services/backgroundJobs.ts": "aa9026717ccae97e609a35e0fa480788f862fba41534c777534c9b60df9c32c5",
+    "apps/api/src/app.ts": "7bc7285684ff72c0edf37c6501ff1ed33d98d99f03716a914a8955c4b891337b",
+    "apps/api/src/lib/auditPresentation.ts": "b60d6fbc08fdb7d98f48be6284ffc4c1283000e1dcfb951dc15ceb1e7c2f3523",
+    "apps/api/src/businessInsight.test.ts": "612c784547914c512e755f99a3bdd36b1d40d4a7b5996054f78609aaa498a1c4",
+    "apps/api/src/schemaPatches.test.ts": "5061c7a0a91c6edd274a1d6eed7d4bd0d3e2f41baa2e65780e3c8242bc2b0e98",
+    "apps/api/openapi.yaml": "c2da53fbb1573d4a383d53145c1393b4c5d26953009ed1547adc783ca5751075",
+    "apps/web/src/components/BusinessInsightCard.tsx": "b3f97484570227716f287608ec6ee335dae1e32acf0b481dabe9b569591105fb",
+    "apps/web/src/components/BusinessInsightsPanel.tsx": "4061ad71b2d4f8f694dce78933102d4506ae412d122472ec2bc6dfb34cc3509d",
+    "apps/web/src/components/business-insights.css": "eda681031ffffd47e622af6e2b24f21c748d85e39e07e46d03a51159d6062307",
+    "apps/web/src/pages/ControlPage.tsx": "ef7d516470327d8baedb43a613937d1ce770285b0d73ed5492013aa2ed04cdf8",
+    "apps/web/src/pages/TasksPage.tsx": "949e6e87b393cfd504951991b4f537a639460498348402cb31670d8878d96e6c",
+    "apps/web/package.json": "19197cac3a2fabc8c3e78188e5f81e980e7a87482a2ea4de36e3c30ff80897ba",
+    "scripts/business-insights.test.mjs": "432443256c6188b7523997d9ce6dc564648959b126f46ec4cb503c53e478b93f",
+    ".github/workflows/release-acceptance.yml": "8c1e41b5ee8446ec30d1be0240351f71aa0636f49309dffaf3ed27a0c2512e0b",
+    "BASQAR_AI_OS_AUDIT.md": "066f0dfe4db42a55ee50fd8644c33024ac0a65430714b0fc67de6f7195366f18",
+    "output/documents/BasQar-A4-acceptance-2026-11-02.md": "402bf208492558c8400a28f2d910bf24345e187f8b65d5c0f299abe6672fdee2",
+    "output/screenshots/a4/history-mobile.jpg": "35a5496a6be87fcb9ca6fa0c9ac93f2b2efd30fe57cf5e5a25e7ab8e150e703b",
+    "output/screenshots/a4/resolved-desktop.jpg": "6096d754c4b69d695cec20fe016c6147705608db542c1952167d900aec8b9bca"
+  },
+  "logs": {
+    "api_regression": {
+      "path": "/tmp/basqar-a4-verified-api.log",
+      "sha256": "6d4d8f13fc754a5d2c4727443f1a4dccb8919f85a3fc5d8620b1d0e59d605a79",
+      "tests": 133,
+      "passed": 133,
+      "failed": 0,
+      "cancelled": 0
+    },
+    "api_final_task_regression": {
+      "path": "/tmp/basqar-a4-task-regression.log",
+      "sha256": "7cb01430bfbda332381c950e424674e3c8a0afc86b003eb9d4825a3f18ffb823",
+      "tests": 25,
+      "passed": 25,
+      "failed": 0,
+      "cancelled": 0
+    },
+    "web": {
+      "path": "/tmp/basqar-a4-final-web-tests.log",
+      "sha256": "a2ea307165448d3449f27592af4f2d341de8a1936709a5d0be4297da04fb8eec",
+      "tests": 93,
+      "passed": 93,
+      "failed": 0,
+      "cancelled": 0
+    },
+    "types": {
+      "path": "/tmp/basqar-a4-final-types.log",
+      "sha256": "fc1610b9081f206e480555f9bc32f27b71d5c62deee39ced1d9a23b0d2cf29ba"
+    },
+    "build": {
+      "path": "/tmp/basqar-a4-final-build.log",
+      "sha256": "0cb1e41ca708ca154118a59315c8fe560f1177f205a0d46f40439942ad53d878"
+    }
+  },
+  "nextStage": "A5"
+}

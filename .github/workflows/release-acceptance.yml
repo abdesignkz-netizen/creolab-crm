@@ -2,7 +2,7 @@ name: Release acceptance
 
 on:
   push:
-    branches: [main, codex/stage8-release, codex/stage9-release]
+    branches: [main, codex/stage8-release, codex/stage9-release, 'codex/a12-*']
   workflow_dispatch:
 
 permissions:
@@ -13,10 +13,36 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  regression:
+    name: Isolated regression and runtime lifecycle
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install tested workspace graph
+        run: npm ci --include=dev --include-workspace-root=true --workspace=@creolab/api --workspace=@creolab/web --workspace=@creolab/worker --workspace=@creolab/db --workspace=@creolab/contracts --workspace=@creolab/integrations
+      - name: Check API, worker, contracts and web types
+        run: npm run typecheck --workspace=@creolab/api --workspace=@creolab/worker --workspace=@creolab/contracts --workspace=@creolab/web
+      - name: Full isolated server regression
+        run: |
+          set -o pipefail
+          node scripts/test-api.mjs 2>&1 | tee /tmp/basqar-regression-checks.log
+      - name: Web and deployment supervisor regression
+        run: |
+          npm run test --workspace=@creolab/web
+          node --test scripts/start-api-with-kalkan.test.mjs
+      - name: Report failing test details
+        if: failure()
+        run: node scripts/ci-error-annotation.mjs /tmp/basqar-regression-checks.log
+
   postgres:
     name: PostgreSQL migration and full business flow
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 35
     services:
       postgres:
         image: postgres:16-alpine
@@ -40,19 +66,19 @@ jobs:
           sudo apt-get install -y postgresql-client-16
           echo /usr/lib/postgresql/16/bin >> "$GITHUB_PATH"
       - name: Install server workspace graph
-        run: npm ci --include=dev --include-workspace-root=false --workspace=@creolab/api --workspace=@creolab/web --workspace=@creolab/worker --workspace=@creolab/db --workspace=@creolab/contracts --workspace=@creolab/integrations
+        run: npm ci --include=dev --include-workspace-root=true --workspace=@creolab/api --workspace=@creolab/web --workspace=@creolab/worker --workspace=@creolab/db --workspace=@creolab/contracts --workspace=@creolab/integrations
       - name: Real PostgreSQL checks
         env:
           BASQAR_TEST_POSTGRES_URL: postgresql://basqar:basqar_ci_only@127.0.0.1:5432/postgres
         run: |
           set -o pipefail
-          node scripts/test-api.mjs --postgres controlForecast salesForecast websiteForms workspaceAcceptance outboxLease schemaPatches financialReporting analyticsPeriods situationSweepMigration postgresRuntime.postgres http 2>&1 | tee /tmp/basqar-postgres-checks.log
+          node scripts/test-api.mjs --postgres dealRisk controlForecast salesForecast websiteForms workspaceAcceptance outboxLease outboxReliability outboxScheduling schemaPatches financialReporting analyticsPeriods situationSweepMigration postgresRuntime.postgres backgroundLifecycle runtimeWorkload http businessInsight businessOpportunity businessGoal businessMemory businessExperiment businessHome aiAction aiArchitect aiArchitectApply autopilot controlPlan aiManagerSetup aiAutomation onboarding dealPipelineSettings 2>&1 | tee /tmp/basqar-postgres-checks.log
       - name: Report failing test details
         if: failure()
         run: node scripts/ci-error-annotation.mjs /tmp/basqar-postgres-checks.log
 
   container:
-    name: Full Docker image and API/worker startup
+    name: Full Docker image, durable worker and restart
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     services:

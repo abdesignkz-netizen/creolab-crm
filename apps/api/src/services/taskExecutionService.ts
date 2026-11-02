@@ -19,6 +19,7 @@ import { resolveWhatsAppConversation } from "./sellerLink.ts";
 
 import { deliverTask } from "./taskDeliveryService.ts";
 import { assertTaskDeliveryEditable, readTaskDelivery } from "./taskDeliveryState.ts";
+import { inTransaction, type DomainDb } from "../lib/transaction.ts";
 
 export const SENDABLE_TYPES = new Set([
   "proposal",
@@ -54,7 +55,7 @@ function tenantId(auth: AuthContext) {
   return auth.activeMembership.tenantId;
 }
 
-async function taskInTenant(prisma: PrismaClient, auth: AuthContext, id: string) {
+async function taskInTenant(prisma: DomainDb, auth: AuthContext, id: string) {
   const tid = tenantId(auth);
   const task = await prisma.task.findFirst({
     where: { id, tenantId: tid },
@@ -293,6 +294,26 @@ function availableNextActions<T extends { type: string; title: string }>(items: 
 }
 function suggestedNextActions(taskType: string, resultCode?: string | null) {
   return availableNextActions(rawSuggestedNextActions(taskType, resultCode));
+}
+
+/** Save a reviewed draft only. Never confirm, schedule or resume a send. */
+export async function saveTaskDraftOnly(db: DomainDb, auth: AuthContext, id: string, messageDraft: string) {
+  requireManageTasks(auth);
+  return inTransaction(db, async tx => {
+    const tid = auth.activeMembership!.tenantId;
+    await tx.$queryRaw`SELECT id FROM "Task" WHERE id = ${id} AND "tenantId" = ${tid} FOR UPDATE`;
+    const { task } = await taskInTenant(tx, auth, id);
+    if (task.status !== "open" || task.targetType === "group" || task.parentTaskId
+      || task.confirmedAt || task.sentAt || !["none", "prepared"].includes(task.executionStatus)
+      || !["none", "draft", "prepared"].includes(task.commandStatus)) {
+      throw new ApiError(409, "action_task_state", "Задача уже закрыта, подтверждена или выполняется. Откройте её и проверьте состояние.");
+    }
+    const scheduled = await tx.scheduledAction.count({ where: { tenantId: tid, parentType: "task", parentId: id, state: { in: ["scheduled", "running", "processing"] } } });
+    if (scheduled) throw new ApiError(409, "action_task_state", "Для задачи уже запланировано выполнение. Сначала проверьте его в карточке задачи.");
+    const updated = await updateTaskManually(tx, tid, id, { messageDraft, executionStatus: "prepared", confirmedAt: null });
+    await voidConfirmations(tx, tid, id);
+    return updated;
+  });
 }
 
 export async function updateTaskDraft(

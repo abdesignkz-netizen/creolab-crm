@@ -1,0 +1,133 @@
+{
+  "stage": "A6",
+  "date": "2026-11-02",
+  "timezone": "Asia/Almaty",
+  "status": "implemented_and_automatically_verified_locally",
+  "deployed": false,
+  "branch": "codex/stage9-release",
+  "head": "85ca15135f64ce2f7d54b129da8c3703001cae7d",
+  "apiScenarios": 114,
+  "apiFiles": 9,
+  "newGoalScenarios": 21,
+  "webScenarios": 105,
+  "newGoalWebScenarios": 7,
+  "database": "isolated PGlite",
+  "externalProviders": "disabled",
+  "browser": {
+    "verified": false,
+    "reason": "Local browser use is disabled in Work settings; no repeated access request",
+    "priorScreenshotsAreNotA6Evidence": true
+  },
+  "unverified": [
+    "A6 desktop/mobile visual acceptance",
+    "Linux/PostgreSQL CI acceptance",
+    "full Docker build",
+    "production state"
+  ],
+  "limitations": [
+    "Russian-only fixed UI copy",
+    "company-wide goals restricted to owner/director/sales_lead",
+    "only owner/director can mutate goals; goal owner must be an active leader",
+    "first response metric uses calendar message timestamps and excludes nonaccepted sends; unanswered dialogs prevent reached status",
+    "completed overdue periods retain pre-deadline snapshots without reconstructing historical task state",
+    "task completion does not prove impact on sales",
+    "large Vite chunks; initial JavaScript has very small remaining budget"
+  ],
+  "initialJavascript": {
+    "bytes": 1099966,
+    "budgetBytes": 1100000
+  },
+  "verificationResolution": {
+    "regression": "8 of 9 files passed; single A6 test scheduling assertion was affected by earlier test backlog",
+    "fix": "isolated earlier fixture queue before daily checkpoint assertion; no runtime change",
+    "rerun": "all 21 A6 scenarios passed",
+    "uniquePassingApiScenarios": 114,
+    "allNineFilesWereNotRerunAfterTestOnlyFix": true
+  },
+  "commands": [
+    "npm run db:generate",
+    "node scripts/test-api.mjs businessGoal schemaPatches dealPipelineSettings salesForecast businessOpportunity businessInsight aiAction backgroundReliability http",
+    "node scripts/test-api.mjs businessGoal",
+    "npm run test --workspace=@creolab/web",
+    "npm run typecheck",
+    "npm run build --workspace=@creolab/web",
+    "git diff --check"
+  ],
+  "logs": {
+    "api_regression": {
+      "path": "/tmp/basqar-a6-final-api.log",
+      "sha256": "92553ceba77a7e7cdec63afdae4c68649ac111e1391551d7c8f60aa9609534f0",
+      "exitCode": 1,
+      "tests": 114,
+      "pass": 113,
+      "fail": 1,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "api_goal_rerun": {
+      "path": "/tmp/basqar-a6-goals-verified-api.log",
+      "sha256": "8626a514730c9345b341b358ca38bc05be513ee52083c15e0b6c611c9a233402",
+      "exitCode": 0,
+      "tests": 21,
+      "pass": 21,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "web": {
+      "path": "/tmp/basqar-a6-verified-web.log",
+      "sha256": "7912963d5283ee80bd6dbbca6f46cc21b61a7bd861e3f50005b3b36e00bab1a8",
+      "exitCode": 0,
+      "tests": 105,
+      "pass": 105,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "types": {
+      "path": "/tmp/basqar-a6-verified-types.log",
+      "sha256": "fc1610b9081f206e480555f9bc32f27b71d5c62deee39ced1d9a23b0d2cf29ba",
+      "exitCode": 0
+    },
+    "build": {
+      "path": "/tmp/basqar-a6-verified-build.log",
+      "sha256": "7a6418496ea22ce0aeac0dcfa15619bfc7a17a7a2fa80eee46b6e25606a0ca4e",
+      "exitCode": 0
+    },
+    "db_generate": {
+      "path": "/tmp/basqar-a6-db-generate.log",
+      "sha256": "254eabddc54cea5530557b9991925f6185cf80e211ef42031f63c9036d9be830",
+      "exitCode": 0
+    }
+  },
+  "files": {
+    "packages/contracts/src/businessGoal.ts": "21df0e4bcfcc47bd2f23c5103d03529f0a89cbcfa6806d27531165077811b692",
+    "packages/contracts/src/index.ts": "52d78f9e2ab3990a0226e5196ccdd553ef66bb8e015b18a730e7f398b8a5f22f",
+    "packages/db/src/businessGoalSchema.ts": "b6b0cd0b5e698797740a87cfc752b3a935bf761adb4395a1f69d46c637ae0fdc",
+    "packages/db/src/client.ts": "6df98300e76261061f3b97321fadca8e4a1531c1db8615efaa70381dd3f3f3b6",
+    "packages/db/prisma/schema.prisma": "a01ef629e725fd41a0aec9bed03d8befee0327973c735555a4568f4d92fe9bab",
+    "packages/api-client/src/businessGoals.ts": "f64b3df1d62b36f1928bdafae657b927645fbbe88f33cc3c5c1fc8c885c5598c",
+    "packages/api-client/package.json": "ea7ec615ff2dae26c67d8dd9e6b7aa618805bd2d87cf920ebd6f953ec6c6c46d",
+    "apps/api/src/services/businessGoalMetrics.ts": "6345571e7575bd4681c9b5fb4604e5f8c0862147785fb6960640bcdf6e06d8b8",
+    "apps/api/src/services/businessGoalService.ts": "08b9cf4c1230d8f83d7575e5d2404e4c17d4d3bba341f95bc3e3f1ec0ee3d729",
+    "apps/api/src/services/dealService.ts": "2e8c232b6fe33551258e2adfa7835669a6e7df6f9783f6f23b0670fb7604d0a8",
+    "apps/api/src/services/backgroundJobs.ts": "39a812af06deec2b039c8004c7bf2eac4b8f285f6c4bbf620247ba0969615417",
+    "apps/api/src/app.ts": "aa440c989d67ce8d39bd48a187a40b1215cf1eac9d132f48fe778518d7431691",
+    "apps/api/src/lib/auditPresentation.ts": "48404603ca9f87249d9e3f730fdae9edfc97a09f6cd6c25f3a31405d39f63d86",
+    "apps/api/src/businessGoal.test.ts": "55ad413df8b7bc08cd23339d2e53d9cc1c40345e0348a54a8a6aa68a93f9e7a4",
+    "apps/api/src/schemaPatches.test.ts": "9f7d1fe20acb706c5f8ed78ccd86e3de012bcbff2b89378c8688bc5f0a666549",
+    "apps/api/openapi.yaml": "e1e44cfc6741db40321a5481a18cce6780bcff198a6463f2055d0036daac1e43",
+    "apps/web/src/pages/ControlPage.tsx": "7928ddf3cd5e832ddab5316e6fc448f1d54371b1e98b56be88bc14e4ca145f70",
+    "apps/web/src/components/BusinessGoalCard.tsx": "aa7482611672d23743737baf7cd246b4565cbbd4219a0e1323d4d9ea22e96d62",
+    "apps/web/src/components/BusinessGoalForm.tsx": "161e453be07ce08b87489593e193dccd415f52f593ffe862a6280a02fcd7da1c",
+    "apps/web/src/components/BusinessGoalHistory.tsx": "05cf83672f40a0257fd8d696e0f088bb16f58578b13075ed1c1dfa2966a4b6d3",
+    "apps/web/src/components/BusinessGoalsPanel.tsx": "928bc073413d0229c985deaa4ad50a915921837a180d4e4880c1d31908f3e897",
+    "apps/web/src/components/business-goals.css": "b110f7a92cf19abe753d231c33bc246ba66133eb4bdbcaafa2dbdf4db7496e3e",
+    "apps/web/package.json": "bef0be262875e51d1d88a43d56e07d084f5d75bd1974e7c6e901aee9da0b5509",
+    "scripts/business-goals.test.mjs": "a7199e2df5945a9373c0aa160c9f8ac7dce3f3bb026e9fa885deb8269a73bd31",
+    ".github/workflows/release-acceptance.yml": "15be5143da9b406a4565201d01245bc80aadee5881bf8a10b2b9a5fbfa8df1c2",
+    "BASQAR_AI_OS_AUDIT.md": "84a1e33b77bb56d0c4005aa9bac0a650cdfb344a292f92243c661b19235e49de",
+    "output/documents/BasQar-A6-acceptance-2026-11-02.md": "afc95c12e87b1d88f10a2adbe1d992f3bfd8a0525dddc47b84a47d1cf9e93b47"
+  },
+  "nextStage": "A7"
+}

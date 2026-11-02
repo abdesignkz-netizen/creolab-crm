@@ -281,6 +281,21 @@ describe("Private WhatsApp Control", () => {
     assert.match((await ask("Создай этому клиенту задачу")).replyText!, /Найди клиента/);
     assert.equal(await prisma.controlConfirmation.count({ where: { tenantId } }), 0);
   });
+  it("quiet hours skip a scheduled briefing without holding up the following personal command", async () => {
+    const { CONTROL_NOTICE_DEFAULTS } = await import("@creolab/contracts");
+    const clock = controlScheduleClock(new Date(), "Asia/Almaty"), time = `${String(Math.floor(clock.minutes / 60)).padStart(2, "0")}:${String(clock.minutes % 60).padStart(2, "0")}`;
+    const endMinutes = (clock.minutes + 60) % 1440, end = `${String(Math.floor(endMinutes / 60)).padStart(2, "0")}:${String(endMinutes % 60).padStart(2, "0")}`;
+    await saveControlChatSettings(prisma, auth, identityId, { ...prefs(), morningEnabled: true, morningTime: time, weekdaysOnly: false });
+    const rule = await prisma.controlNotificationRule.create({ data: { tenantId, membershipId: auth.activeMembership!.id, integrationId, phone, enabled: true,
+      settingsJson: { ...CONTROL_NOTICE_DEFAULTS, enabled: true, recipientConfirmed: true, membershipId: auth.activeMembership!.id, integrationId, phone,
+        quietHours: { enabled: true, start: time, end } } } });
+    try {
+      await buildControlBriefings(prisma); await processControlChatRequests(prisma, integrationId); await deliver();
+      assert.equal(sent.length, 0);
+      assert.equal((await prisma.controlChatMessage.findFirstOrThrow({ where: { tenantId, kind: "briefing" } })).error, "quiet_hours");
+      await ask("Задачи на сегодня"); await deliver(); assert.equal(sent.length, 1); assert.match(sent[0].text, /Задачи на сегодня/);
+    } finally { await prisma.controlNotificationRule.delete({ where: { id: rule.id } }); }
+  });
   it("sends a combined scheduled summary in one message", async () => {
     const now = new Date(), clock = controlScheduleClock(now, "Asia/Almaty"), time = `${String(Math.floor(clock.minutes / 60)).padStart(2,"0")}:${String(clock.minutes % 60).padStart(2,"0")}`;
     await saveControlChatSettings(prisma, auth, identityId, { ...prefs(), weekdaysOnly: false, morningEnabled: true, eveningEnabled: true, morningTime: time, eveningTime: time });

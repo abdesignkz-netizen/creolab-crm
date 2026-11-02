@@ -2,14 +2,17 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import { InlineFeedback } from "./InlineFeedback";
+import type { ControlAnalysis } from "@creolab/contracts";
+import { ControlAnalysisCard } from "./ControlAnalysisCard";
 import "./ControlChatPanel.css";
 
 type History = {
-  items: Array<{ id: string; text: string; reply: string; state: string; source: string; createdAt: string }>;
+  items: Array<{ id: string; text: string; reply: string; state: string; source: string; createdAt: string; analysis?: ControlAnalysis }>;
   pending: { id: string; summary: string; expiresAt: string } | null;
   choices: Array<{ text: string; label: string }>;
   timezone: string;
   forecastAvailable?: boolean;
+  analysisProfiles?: Array<{ id: string; label: string; command: string }>;
 };
 // Only service-local links returned by Control become clickable; user text stays text.
 function Reply({ text }: { text: string }) {
@@ -40,7 +43,7 @@ export function ControlChatPanel({ canManageAccess = true }: { canManageAccess?:
     list.current?.scrollTo({ top: list.current.scrollHeight });
   }, [history]);
   useEffect(() => {
-    if (!history?.items.some(item => item.state === "processing" || item.state === "queued")) return;
+    if (!history?.items.some(item => item.state === "processing" || item.state === "queued" || ["queued", "running"].includes(item.analysis?.plan?.status || ""))) return;
     const timer = window.setInterval(() => void load(), 4000);
     return () => window.clearInterval(timer);
   }, [history]);
@@ -64,10 +67,11 @@ export function ControlChatPanel({ canManageAccess = true }: { canManageAccess?:
     <header className="control-chat-head"><div><span className="control-chat-eyebrow">BASQAR CONTROL</span><h3>Что нужно сделать?</h3><p className="muted">Напишите своими словами. Меню вызывать не нужно. Изменения — после вашего подтверждения.</p></div><div className="control-chat-tools">{canManageAccess && <Link to="/settings?section=control" className="btn secondary">Настройки доступа</Link>}<button type="button" className="btn secondary" disabled={busy || loading} onClick={() => void load()}>Обновить историю</button></div></header>
     {loading ? <p role="status">Загружаем историю…</p> : <>
       {history && <>
+        {!!history.analysisProfiles?.length && <div className="control-chat-analysis-tools"><b>Разобрать ситуацию</b><p className="muted">Факты, цели и следующий шаг. Выберите направление или напишите свой запрос.</p><div className="control-chat-quick">{history.analysisProfiles.map(profile => <button type="button" className="chip" key={profile.id} disabled={busy} onClick={() => void send(profile.command)}>{profile.label}</button>)}</div></div>}
         <div className="control-chat-quick" aria-label="Быстрые запросы">{quick.map(command => <button type="button" className="chip" key={command} disabled={busy} onClick={() => void send(command)}>{command}</button>)}</div>
         <div className="control-chat-messages" ref={list} role="log" aria-label="История Control" aria-relevant="additions text">
           {!history.items.length && <div className="control-chat-empty"><b>Управляйте без поиска по разделам</b><p>«Создай задачу встреча с клиентом завтра в 18:00»</p><p className="muted">Здесь сохраняются ваши запросы из платформы и WhatsApp. Ответы содержат только данные, доступные вам.</p></div>}
-          {history.items.map(item => <article key={item.id} className="control-chat-turn"><small>{item.source === "WHATSAPP" ? "WhatsApp" : "В платформе"} · {new Date(item.createdAt).toLocaleString("ru-RU", { timeZone: history.timezone, dateStyle: "short", timeStyle: "short" })}</small><div className="control-chat-question">{item.text}</div><div className="control-chat-reply">{item.reply ? <Reply text={item.reply} /> : item.state === "processing" || item.state === "queued" ? "Запрос обрабатывается…" : "Ответ недоступен. Проверьте историю действий перед повтором изменения."}</div></article>)}
+          {history.items.map(item => <article key={item.id} className="control-chat-turn"><small>{item.source === "WHATSAPP" ? "WhatsApp" : "В платформе"} · {new Date(item.createdAt).toLocaleString("ru-RU", { timeZone: history.timezone, dateStyle: "short", timeStyle: "short" })}</small><div className="control-chat-question">{item.text}</div>{item.analysis ? <ControlAnalysisCard analysis={item.analysis} busy={busy} onPrepare={command => void send(command)} /> : <div className="control-chat-reply">{item.reply ? <Reply text={item.reply} /> : item.state === "processing" || item.state === "queued" ? "Запрос обрабатывается…" : "Ответ недоступен. Проверьте историю действий перед повтором изменения."}</div>}</article>)}
         </div>
         {history.pending && <div className="control-chat-confirm"><b>Подтвердите изменение</b><p>{history.pending.summary}</p><div className="actions"><button className="btn" disabled={busy} onClick={() => void send(`Подтвердить ${history.pending!.id.slice(-6)}`)}>Подтвердить</button><button className="btn secondary" disabled={busy} onClick={() => void send("Отмена")}>Отменить</button></div></div>}
         {!!history.choices.length && <div className="control-chat-choices">{history.choices.map(choice => <button className="btn secondary" key={choice.text} disabled={busy} onClick={() => void send(choice.text)}>{choice.label}</button>)}</div>}

@@ -143,7 +143,9 @@ it("never redirects a bound conversation to a different seller integration or an
   for (const type of ["whatsapp_seller", "whatsapp_qr"]) {
     const integration = await db.integration.create({ data: { tenantId: tid, type, name: "Other test channel", status: "active", automationMode: "AUTO" } });
     const connection = await db.channelConnection.create({ data: { tenantId: tid, integrationId: integration.id, channelType: "whatsapp", status: "active" } });
-    const f = await fixture(connection.id);
+    const f = await fixture();
+    // A job queued before rebinding must not be sent through the new connector.
+    await db.conversation.update({ where: { id: f.conversation.id }, data: { connectionId: connection.id } });
     assert.equal((await f.run()).skipped, type === "whatsapp_seller" ? "bridge_changed" : "no_channel");
     assert.equal(sends, 0); assert.equal(generations, 0);
   }

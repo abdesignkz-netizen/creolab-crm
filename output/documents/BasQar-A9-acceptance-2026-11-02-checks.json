@@ -1,0 +1,155 @@
+{
+  "stage": "A9",
+  "date": "2026-11-02",
+  "timezone": "Asia/Almaty",
+  "status": "bounded_v1_implemented_and_automatically_verified_locally",
+  "deployed": false,
+  "branch": "codex/stage9-release",
+  "head": "85ca15135f64ce2f7d54b129da8c3703001cae7d",
+  "apiFiles": 12,
+  "apiScenariosUnique": 215,
+  "regressionScenarios": 210,
+  "finalA9Scenarios": 27,
+  "webScenarios": 124,
+  "newWebScenarios": 6,
+  "database": "isolated PGlite",
+  "externalProviders": "disabled; WhatsApp delivery mocked",
+  "limits": {
+    "sourceCalls": 5,
+    "cards": 7,
+    "readTimeMs": 30000,
+    "modelCalls": 0,
+    "planSteps": 1,
+    "decisionEntries": 1
+  },
+  "browser": {
+    "verified": "partial",
+    "browser": "Chrome",
+    "testUrl": "http://127.0.0.1:4582/control",
+    "isolatedData": true,
+    "completed": [
+      "Local login",
+      "Five profile buttons",
+      "Service analysis with sources",
+      "A1 draft review with 0/1 effects",
+      "Explicit confirmation",
+      "A1 result 1/1 and task link"
+    ],
+    "incomplete": [
+      "Mobile viewport",
+      "Final screenshot",
+      "Visual refresh of chat after completed plan",
+      "Final metric scope copy"
+    ],
+    "reason": "Browser use disabled in Work settings after plan completion; no further UI actions attempted"
+  },
+  "initialJavascript": {
+    "bytes": 1099941,
+    "gzipBytes": 278960,
+    "budgetBytes": 1100000,
+    "gzipBudgetBytes": 285000,
+    "marginBytes": 59
+  },
+  "limitations": [
+    "Deterministic bounded profiles; no generative multi-step business planning",
+    "One generic internal checklist task for the requesting leader, after A1 confirmation",
+    "No causal explanation of a sales decline or new comparison of periods",
+    "Context is a limited selection, not an exhaustive company search",
+    "Restricted Control omits company context to preserve financial and team boundaries",
+    "WhatsApp requires existing CRM_CHAT access for plan preparation and web review",
+    "The 30-second read budget does not include all authorization, history and A1 transaction time",
+    "New explanatory copy is primarily Russian; no separate native app screen",
+    "Large Vite chunk warning and only 59 bytes of initial JS headroom"
+  ],
+  "unverified": [
+    "Full desktop/mobile visual acceptance",
+    "Linux/PostgreSQL and independent API/worker processes",
+    "Full Docker build",
+    "Production state and real provider delivery"
+  ],
+  "commands": [
+    "node scripts/test-api.mjs controlPlan controlWeb controlChat controlLanguage controlPeriods controlReadPrecision controlDealQueries controlForecast aiAction businessMemory businessGoal businessInsight",
+    "node scripts/test-api.mjs controlPlan controlWeb",
+    "node scripts/test-api.mjs controlPlan",
+    "npm run test --workspace=@creolab/web",
+    "npm run typecheck",
+    "npm run typecheck --workspace=@creolab/api",
+    "npm run build --workspace=@creolab/web",
+    "git diff --check"
+  ],
+  "logs": {
+    "apiRegression": {
+      "path": "/tmp/basqar-a9-api-regression.log",
+      "sha256": "9390990f6837c8cf1b33db160194b22d802694557c7268c70c13b8f0ae5db473",
+      "exitCode": 0,
+      "tests": 210,
+      "pass": 210,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "apiFinal": {
+      "path": "/tmp/basqar-a9-api-final.log",
+      "sha256": "8b6c30764486baa57e51c0851af1226fc285d47e6ea637b548c9ccbc373cf4bd",
+      "exitCode": 0,
+      "tests": 38,
+      "pass": 38,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "apiFinalCopy": {
+      "path": "/tmp/basqar-a9-api-copy-final.log",
+      "sha256": "13c46a9e42dea013e25a7827e94f1114ae4ac803ad9902b6d0ffc692c3c1e032",
+      "exitCode": 0,
+      "tests": 27,
+      "pass": 27,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "web": {
+      "path": "/tmp/basqar-a9-web-tests.log",
+      "sha256": "76a71f30f2de62779f8e57a70af15c5c5063a7fb6a22e4dc247c9ddff0e6ef98",
+      "exitCode": 0,
+      "tests": 124,
+      "pass": 124,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "types": {
+      "path": "/tmp/basqar-a9-types-final.log",
+      "sha256": "fc1610b9081f206e480555f9bc32f27b71d5c62deee39ced1d9a23b0d2cf29ba",
+      "exitCode": 0
+    },
+    "apiTypesFinal": {
+      "path": "/tmp/basqar-a9-api-types-copy-final.log",
+      "sha256": "2318315bf8689539d7799613ed6b4cce7f0e58e7efa14023d5153fbd2a18bbf2",
+      "exitCode": 0
+    },
+    "build": {
+      "path": "/tmp/basqar-a9-build.log",
+      "sha256": "0461773e364841c8104c28bb0fd858a2f7522a03c638273fd01db8fabb96ad02",
+      "exitCode": 0
+    }
+  },
+  "sourceSha256": {
+    "packages/contracts/src/controlAnalysis.ts": "d41ecffbfd19b6e8f7ec1f797ef63c6ddfb60b04c66e8598bbe5e76077398e4e",
+    "packages/contracts/src/index.ts": "8af8a22bc3e18fcfb95a06431934e686019c006bcee55134896212180747d353",
+    "apps/api/src/services/agentProfiles.ts": "b4697fcf408636590b4f219eeec9c5aa433c500cb31c88edf9b4e4f1e46d3d61",
+    "apps/api/src/services/controlPlanLanguage.ts": "ccc4b7fa719afcce636bb848521966374c9d33a695b20ac2eb2ffe21f0a2f86c",
+    "apps/api/src/services/controlPlanService.ts": "b9c5750aa53bf4a0658758648bd65a9b6f8bfc14d18b1e4cfcafb8a238a6df97",
+    "apps/api/src/services/controlChatService.ts": "89dd080bc0e8b3b5380de762bb471b430f9f9843f656b41529ccc1c176e5a744",
+    "apps/api/src/services/controlWebService.ts": "ac0d5a60c3da315e9c0649a50de13ae82a1ee82d6907073bd22e0c060e39c3ba",
+    "apps/api/src/controlPlan.test.ts": "7dd441d65b12ba84845bf2dc7fb1674342f025595442f79b60c17dad9774db35",
+    "apps/api/openapi.yaml": "a32bb89d89b797212712c6a96d9ca5fbf7b12b6d0aa9d783847acf31ae8d13a5",
+    "apps/web/src/components/ControlAnalysisCard.tsx": "5fa1563a6c453e8817587bd122bd954757b3a40596e7cccc96b42893fff45697",
+    "apps/web/src/components/ControlChatPanel.tsx": "7c94641ae7f4e0a674f6c65e48f9befb0fb55c76ac3e31e0469b9c3b5c58096b",
+    "apps/web/src/components/ControlChatPanel.css": "73480c4acc3cba9f5a945d47b507f4f0d5431b05cf9f2d88b0c7b669aad8a7de",
+    "apps/web/src/pages/ControlPage.tsx": "b1120944dfb79b6ed3f3322f9c218c647d0c0b8d1965fc5e3aad73dc6f45b170",
+    "apps/web/package.json": "dd5a6286dd9fb3fb72bd1c520cda8d5d9a4b87411959c310127a4ce32d90efe6",
+    "scripts/control-analysis.test.mjs": "a21db88cee643b437c505134f772a31775c4677d288edf1a2252bbe66da83c91"
+  },
+  "nextStage": "A10: compact home dashboard and existing-channel briefings"
+}

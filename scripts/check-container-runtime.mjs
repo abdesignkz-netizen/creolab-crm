@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -27,6 +27,17 @@ function docker(args) {
   assert.equal(result.status, 0, result.stderr || String(result.error));
   return result.stdout.trim();
 }
+function sql(input) {
+  const result = spawnSync("psql", ["-X", "-A", "-t", "-v", "ON_ERROR_STOP=1"], { input, encoding: "utf8", timeout: 15000,
+    env: { ...process.env, PGHOST: url.hostname, PGPORT: url.port || "5432", PGUSER: decodeURIComponent(url.username),
+      PGPASSWORD: decodeURIComponent(url.password), PGDATABASE: url.pathname.slice(1) } });
+  assert.equal(result.status, 0, result.stderr || String(result.error));
+  return result.stdout.trim();
+}
+function stopContainer(name) {
+  docker(["stop", "--time", "30", name]);
+  assert.equal(docker(["inspect", "--format", "{{.State.ExitCode}}", name]), "0", `${name} failed to drain cleanly`);
+}
 try {
   for (const role of ["api", "worker"]) {
     const name = `basqar-acceptance-${id}-${role}`;
@@ -52,7 +63,28 @@ try {
   await delay(5000);
   for (const name of containers) assert.equal(docker(["inspect", "--format", "{{.State.Running}}", name]), "true");
   assert.match(docker(["logs", containers[1]]), /CRM worker started/);
-  console.log("Production image: API health, PostgreSQL readiness, built web assets and concurrent worker startup passed.");
+  // Stop the API so its inline polling cannot pass a broken worker's check.
+  stopContainer(containers[0]); stopContainer(containers[1]);
+  const tenantId = randomUUID(), eventId = randomUUID();
+  sql(`INSERT INTO "Tenant" ("id", "name", "slug", "updatedAt") VALUES ('${tenantId}', 'Container acceptance', '${tenantId}', NOW());
+    INSERT INTO "OutboxEvent" ("id", "tenantId", "type", "entityType", "entityId", "payloadJson")
+    VALUES ('${eventId}', '${tenantId}', 'acceptance.invalid', 'tenant', '${tenantId}', '{}');`);
+  docker(["start", containers[1]]);
+  let handled = false;
+  for (let n = 0; n < 60; n++) {
+    assert.equal(docker(["inspect", "--format", "{{.State.Running}}", containers[1]]), "true");
+    const state = sql(`SELECT "failureKind" || ':' || "errorCode" FROM "OutboxEvent" WHERE "id" = '${eventId}' AND "failedAt" IS NOT NULL;`);
+    if (state === "permanent:unknown_event_type") { handled = true; break; }
+    await delay(1000);
+  }
+  assert.ok(handled, "The standalone production worker did not process a durable queued event");
+  assert.equal(sql(`SELECT "attempts" FROM "OutboxEvent" WHERE "id" = '${eventId}';`), "1");
+  assert.equal(sql(`SELECT COUNT(*) FROM "Message" WHERE "tenantId" = '${tenantId}';`), "0");
+  stopContainer(containers[1]); docker(["start", containers[1]]);
+  await delay(6000);
+  assert.equal(sql(`SELECT "attempts" FROM "OutboxEvent" WHERE "id" = '${eventId}';`), "1", "terminal job replayed after restart");
+  stopContainer(containers[1]);
+  console.log("Production image: exact revision, DB readiness, web assets, graceful API/worker stop, standalone durable queue and restart passed; no external delivery.");
 } catch (error) {
   for (const name of containers) {
     const result = spawnSync("docker", ["logs", "--tail", "80", name], { encoding: "utf8" });

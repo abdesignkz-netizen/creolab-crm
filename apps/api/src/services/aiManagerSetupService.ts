@@ -4,6 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { defaultAiIntakeSettings, aiManagerDraftSchema, compileAiManagerDraft, emptyAiManagerDraft, getAiSetupScenarios, type AiSetupQualityRun, type AiSetupQuality, type AiSetupPreview, type AiManagerDraft, type AiSetupState, type AiSetupKnowledge } from "@creolab/contracts";
 import type { Prisma, PrismaClient } from "@creolab/db";
+import type { DomainDb } from "../lib/transaction.ts";
 import { ApiError } from "../errors.ts";
 import { requireAiSettingsAccess, requireConfigurationTenant as requireTenant } from "../lib/access.ts";
 import type { AuthContext } from "../lib/types.ts";
@@ -28,16 +29,17 @@ function access(auth: AuthContext) { requireAiSettingsAccess(auth); return requi
 function checkRevision(store: Store, revision: number) {
   if (store.revision !== revision) throw new ApiError(409, "ai_setup_conflict", "Настройки изменились в другой вкладке. Обновите страницу перед сохранением.");
 }
-async function locked<T>(prisma: PrismaClient, tenantId: string, fn: (tx: Prisma.TransactionClient) => Promise<T>) {
-  return prisma.$transaction(async tx => {
+async function locked<T>(prisma: DomainDb, tenantId: string, fn: (tx: Prisma.TransactionClient) => Promise<T>) {
+  const work = async (tx: Prisma.TransactionClient) => {
     const rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "Tenant" WHERE id = ${tenantId} FOR UPDATE`;
     if (!rows.length) throw new ApiError(404, "not_found", "Компания не найдена");
     return fn(tx);
-  }, { timeout: 15000 });
+  };
+  return "$transaction" in prisma ? prisma.$transaction(work, { timeout: 15000 }) : work(prisma);
 }
 async function load(tx: Prisma.TransactionClient, tenantId: string) {
   const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: tenantId } });
-  let config = await tx.aIConfiguration.findFirst({ where: { tenantId } });
+  let config = await tx.aIConfiguration.findFirst({ where: { tenantId, scope: "company" } });
   if (!config) config = await tx.aIConfiguration.create({ data: { tenantId, promptStatus: "draft", enabled: false } });
   const docs = await tx.knowledgeDocument.findMany({ where: { tenantId, status: "published" }, orderBy: { id: "asc" } });
   const prompt = config.promptStatus === "published" ? config.systemPrompt || "" : "";
@@ -90,7 +92,7 @@ export async function getAiManagerSetup(prisma: PrismaClient, auth: AuthContext)
   const result = await locked(prisma, tenantId, async tx => state(await load(tx, tenantId)));
   return { ...result, activation: await readActivation(prisma, tenantId) };
 }
-export async function saveAiManagerSetupDraft(prisma: PrismaClient, auth: AuthContext, input: unknown) {
+export async function saveAiManagerSetupDraft(prisma: DomainDb, auth: AuthContext, input: unknown) {
   const tenantId = access(auth);
   const body = parse(z.object({ revision: z.number().int().nonnegative(), draft: aiManagerDraftSchema }).strict(), input);
   return locked(prisma, tenantId, async tx => {

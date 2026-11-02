@@ -2,7 +2,7 @@ export const TASK_BOARD_LANES = ["ai", "managers", "notes"] as const;
 export type TaskBoardLane = (typeof TASK_BOARD_LANES)[number];
 
 export const AI_TASK_SOURCES = new Set(["ai_command", "ai_automation", "context_engine", "system"]);
-export const SYSTEM_TASK_SOURCES = new Set(["rule", "campaign"]);
+export const SYSTEM_TASK_SOURCES = new Set(["rule", "campaign", "autopilot"]);
 
 export const AI_ASSIGNABLE_TASK_TYPES = [
   "proposal",

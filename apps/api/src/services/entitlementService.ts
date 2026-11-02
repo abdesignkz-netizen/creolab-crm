@@ -1,3 +1,4 @@
+import type { DomainDb } from "../lib/transaction.ts";
 import type { PrismaClient } from "@creolab/db";
 import {
   FEATURE_LABEL,
@@ -130,7 +131,7 @@ export function isLegacyPlan(plan: { code?: string | null; kind?: string | null 
   return !kind || kind === "legacy" || code === "starter";
 }
 
-export async function loadCurrentTenantPlan(prisma: PrismaClient, tenantId: string): Promise<TenantPlanRow | null> {
+export async function loadCurrentTenantPlan(prisma: DomainDb, tenantId: string): Promise<TenantPlanRow | null> {
   return prisma.tenantPlan.findFirst({
     where: { tenantId },
     orderBy: { startsAt: "desc" },
@@ -190,7 +191,7 @@ export function snapshotFromPlan(
   };
 }
 
-export async function getSubscriptionSnapshot(prisma: PrismaClient, tenantId: string): Promise<SubscriptionSnapshot> {
+export async function getSubscriptionSnapshot(prisma: DomainDb, tenantId: string): Promise<SubscriptionSnapshot> {
   const tenant = await prisma.tenant.findUnique({
     where: { id: tenantId },
     select: { status: true },
@@ -232,7 +233,7 @@ function planAllowsFeature(row: TenantPlanRow | null, feature: Feature, entitled
   return false;
 }
 
-export async function loadBillingOverride(prisma: PrismaClient, tenantId: string) {
+export async function loadBillingOverride(prisma: DomainDb, tenantId: string) {
   return prisma.tenantBillingOverride.findUnique({ where: { tenantId } }).catch(() => null);
 }
 
@@ -328,7 +329,7 @@ function applyLimitOverride(base: Record<string, number>, override?: { limitsJso
   return base;
 }
 
-export async function getEntitlements(prisma: PrismaClient, tenantId: string) {
+export async function getEntitlements(prisma: DomainDb, tenantId: string) {
   const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { status: true } });
   const organizationStatus = tenant?.status || "active";
   const [row, override] = await Promise.all([
@@ -345,21 +346,21 @@ export async function getEntitlements(prisma: PrismaClient, tenantId: string) {
   };
 }
 
-export async function canUseFeature(prisma: PrismaClient, tenantId: string, feature: Feature) {
+export async function canUseFeature(prisma: DomainDb, tenantId: string, feature: Feature) {
   const resolved = await getEntitlements(prisma, tenantId);
   return Boolean(resolved.entitlements[feature]);
 }
 
-export async function hasFeature(prisma: PrismaClient, tenantId: string, feature: Feature) {
+export async function hasFeature(prisma: DomainDb, tenantId: string, feature: Feature) {
   return canUseFeature(prisma, tenantId, feature);
 }
 
-export async function getLimit(prisma: PrismaClient, tenantId: string, limit: LimitKey | string) {
+export async function getLimit(prisma: DomainDb, tenantId: string, limit: LimitKey | string) {
   const resolved = await getEntitlements(prisma, tenantId);
   return Number(resolved.limits[limit] || 0);
 }
 
-export async function requireFeature(prisma: PrismaClient, auth: AuthContext, feature: Feature) {
+export async function requireFeature(prisma: DomainDb, auth: AuthContext, feature: Feature) {
   const membership = requireTenant(auth);
   const allowed = await canUseFeature(prisma, membership.tenantId, feature);
   if (allowed) return membership;
@@ -372,7 +373,7 @@ export async function requireFeature(prisma: PrismaClient, auth: AuthContext, fe
   );
 }
 
-export async function requireAnyFeature(prisma: PrismaClient, auth: AuthContext, features: Feature[]) {
+export async function requireAnyFeature(prisma: DomainDb, auth: AuthContext, features: Feature[]) {
   const membership = requireTenant(auth);
   const access = await getEntitlements(prisma, membership.tenantId);
   if (features.some(feature => access.entitlements[feature])) return membership;
@@ -386,7 +387,7 @@ export function matchAlternativeFeatures(method: string, path: string): Feature[
 }
 
 export async function requireLimitAvailable(
-  prisma: PrismaClient,
+  prisma: DomainDb,
   tenantId: string,
   limit: LimitKey,
   used: number,

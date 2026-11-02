@@ -35,7 +35,7 @@ export async function runOutboxLane(prisma: PrismaClient, lane: OutboxLane, hand
   const state = stateFor(prisma, lane);
   if (state.workers >= capacity[lane]) return 0;
   const due = await prisma.outboxEvent.findMany({
-    where: { processedAt: null, availableAt: { lte: new Date() }, type: lane === "background" ? { notIn: fastTypes } : { in: lane === "reply" ? replyTypes : deliveryTypes } },
+    where: { processedAt: null, failedAt: null, availableAt: { lte: new Date() }, type: lane === "background" ? { notIn: fastTypes } : { in: lane === "reply" ? replyTypes : deliveryTypes } },
     orderBy: [{ availableAt: "asc" }, { id: "asc" }], take: 20,
   });
   let cursor = 0, processed = 0;

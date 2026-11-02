@@ -52,7 +52,7 @@ export async function recoverInterruptedScheduledActions(prisma: PrismaClient, n
   for (const item of running) {
     // Status reads and deduplicated reminders can be repeated. An interrupted
     // external send needs reconciliation; absence of a result is not a failure to send.
-    const repeatable = item.type === "esf_status_poll" || item.type.startsWith("agreement_reminder");
+    const repeatable = item.type === "autopilot_check" || item.type === "esf_status_poll" || item.type.startsWith("agreement_reminder");
     await prisma.$transaction(async tx => {
       if (item.type === "client_followup") await lockFollowUpConversation(tx, item.tenantId, item.parentId);
       const changed = await tx.scheduledAction.updateMany({

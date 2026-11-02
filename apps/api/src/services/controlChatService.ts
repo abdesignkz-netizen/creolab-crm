@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { PrismaClient, Prisma } from "@creolab/db";
-import { CONTROL_ACTION_META, validateClientPhone, type ControlAction } from "@creolab/contracts";
+import { CONTROL_ACTION_META, validateClientPhone, type ControlAction, type ControlAnalysis } from "@creolab/contracts";
 import { ApiError } from "../errors.ts";
 import { safeEqual, sha256 } from "../lib/hash.ts";
 import { writeAudit } from "../lib/audit.ts";
@@ -9,6 +9,8 @@ import { CHAT_ACTIONS, chatCommandSchema, cleanText, controlChatMenu, quickContr
 import { chatSettings, record } from "./controlChatSettings.ts";
 import { controlTaskClientLabel, presentControlReply, controlLink } from "./controlChatPresentation.ts";
 import { parseControlChatWithLlm } from "./llmClient.ts";
+import { controlPlanIntent } from "./controlPlanLanguage.ts";
+import { prepareControlAnalysis } from "./controlPlanService.ts";
 
 const SESSION_MS = 30 * 60000;
 const REQUEST_MS = 15 * 60000;
@@ -102,7 +104,7 @@ export async function runControlChatRequest(prisma: PrismaClient, job: Pick<Job,
     actions.push(action);
     return executor.execute(action, params, `chat:${job.id}:${action}`);
   };
-  const reply = (text: string, next: Context = context) => ({ text, context: next, actions });
+  const reply = (text: string, next: Context = context) => ({ text, context: next, actions, analysis: undefined as ControlAnalysis | undefined });
   const identity = await prisma.controlIdentity.findUniqueOrThrow({ where: { id: job.identityId } });
   if (!identity.verifiedAt) {
     const code = text.match(/^Control #([a-f0-9]{64})$/)?.[1];
@@ -117,13 +119,8 @@ export async function runControlChatRequest(prisma: PrismaClient, job: Pick<Job,
     return reply(controlChatMenu(lang, allowed), { selectedClient: context.selectedClient });
   }
   if (job.kind === "briefing") {
-    const kinds = text.split(","); const blocks: string[] = [];
-    // One message, including when morning and evening schedules coincide.
-    for (const action of [...new Set<ControlAction>(kinds.flatMap(kind => kind === "morning" ? ["GET_TODAY_TASKS", "GET_SITUATION"] : ["GET_BUSINESS_SUMMARY", "GET_SITUATION"]))]) {
-      if (!allowed.includes(action as typeof CHAT_ACTIONS[number])) continue;
-      blocks.push(presentControlReply(action, await execute(action), lang, timeZone));
-    }
-    return reply(blocks.length ? blocks.join("\n\n") : w("Нет разрешённых данных для сводки. Проверьте доступ Control.", "Қорытынды үшін рұқсат етілген деректер жоқ. Control рұқсатын тексеріңіз."));
+    const { prepareControlBriefing } = await import("./controlBriefingService.ts");
+    return reply(await prepareControlBriefing(prisma, { kinds: text.split(","), executor, allowed, language: lang, execute }));
   }
   if (/^(?:отмена|отменить|cancel|болдырмау)$/i.test(text)) {
     if (context.pendingId) await prisma.controlConfirmation.updateMany({ where: { id: context.pendingId, tenantId: job.tenantId, identityId: job.identityId, status: "pending" }, data: { status: "canceled" } });
@@ -151,6 +148,19 @@ export async function runControlChatRequest(prisma: PrismaClient, job: Pick<Job,
   }
   if (/^(?:подтвердить|растау|confirm)(?:\s|$)/i.test(text)) return reply(w("Нет команды для подтверждения. Напишите запрос заново.", "Растайтын команда жоқ. Сұрауды қайта жазыңыз."));
   if (text === "[control:too_long]" || !text || text.startsWith("[WhatsApp:")) return reply(w("Отправьте команду текстом, до 2000 символов.", "Команданы мәтінмен жіберіңіз, 2000 таңбаға дейін."));
+  const intent = controlPlanIntent(text, timeZone);
+  if (intent) {
+    if ("clarification" in intent) return reply(intent.clarification);
+    const result = await prepareControlAnalysis(prisma, intent, { jobId: job.id, tenantId: job.tenantId, executor, language: lang });
+    delete context.lastRead; delete context.awaiting; delete context.choices;
+    // A1 plans are reviewed in their own existing panel; never use the short legacy
+    // confirmation token for a different action that happened to precede this plan.
+    if (result.analysis.plan && context.pendingId) {
+      await prisma.controlConfirmation.updateMany({ where: { id: context.pendingId, tenantId: job.tenantId, identityId: job.identityId, status: "pending" }, data: { status: "canceled" } });
+      delete context.pendingId;
+    }
+    return { ...result, context };
+  }
   let draft: Draft;
   const followup = quickControlPeriodFollowup(text);
   if (followup) {
@@ -317,7 +327,7 @@ export async function processControlChatRequests(prisma: PrismaClient, integrati
       catch (error) {
         const known = error instanceof ApiError;
         const text = words(lang, known ? error.message : "Не удалось обработать запрос. Проверьте историю Control перед повтором изменений. Для справки напишите «Меню».", "Сұрауды өңдеу мүмкін болмады. Өзгерістерді қайталамас бұрын Control тарихын тексеріңіз. Көмек үшін «Мәзір» жазыңыз.");
-        response = { text, context: {}, actions: [] };
+        response = { text, context: {}, actions: [], analysis: undefined };
       }
       const fresh = await prisma.controlIdentity.findUniqueOrThrow({ where: { id: job.identityId } });
       if (!fresh.enabled || record(fresh.metadata).chatRevision !== record(identity.metadata).chatRevision || !chatSettings(fresh.metadata)?.enabled) {

@@ -1,3 +1,4 @@
+import { autopilotFacts } from "./autopilotFacts.ts";
 import { createHash } from "node:crypto";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import type { AuthContext } from "../lib/types.ts";
@@ -19,7 +20,7 @@ export type SituationEvidence = {
   links: { contactId?: string | null; inquiryId?: string | null; conversationId?: string | null;
     dealId?: string | null; taskId?: string | null; incompleteIntakeId?: string | null };
 };
-const kinds = new Set(["needs_phone", "inquiry_new", "inquiry_accepted", "inquiry_ai_blocked", "missing_next_action",
+const kinds = new Set(["autopilot_reply", "needs_phone", "inquiry_new", "inquiry_accepted", "inquiry_ai_blocked", "missing_next_action",
   "conversation_human", "conversation_paused", "conversation_attention", "task_overdue", "task_due_today",
   "task_unassigned_hot", "contact_needs_reply", "deal-next", "deal-sla", "deal-followup", "deal-pay", "agreement", "agreement-overdue"]);
 export function parseSituationId(itemId: string) {
@@ -33,7 +34,7 @@ export async function loadSituationEvidence(db: SituationDatabase, auth: AuthCon
   const membership = requireTenant(auth), tenantId = membership.tenantId;
   const entries = itemIds.flatMap(itemId => { const parsed = parseSituationId(itemId); return parsed ? [{ itemId, ...parsed }] : []; });
   const ids = (test: (kind: string) => boolean) => entries.filter(e => test(e.kind)).map(e => e.id);
-  const tasksIds = ids(k => k.startsWith("task_")), inquiryIds = ids(k => k.startsWith("inquiry_") || k === "missing_next_action");
+  const tasksIds = ids(k => k.startsWith("task_")), inquiryIds = ids(k => k.startsWith("inquiry_") || k === "missing_next_action" || k === "autopilot_reply");
   const conversationIds = ids(k => k.startsWith("conversation_")), contactIds = ids(k => k === "contact_needs_reply");
   const intakeIds = ids(k => k === "needs_phone"), dealIds = ids(k => k.startsWith("deal-")), agreementIds = ids(k => k.startsWith("agreement"));
   const assignee = isManager(auth) ? { OR: [{ assigneeMembershipId: null }, { assigneeMembershipId: membership.id }] } : {};
@@ -68,7 +69,16 @@ export async function loadSituationEvidence(db: SituationDatabase, auth: AuthCon
       evidenceKey: createHash("sha256").update(JSON.stringify(basis)).digest("hex") });
   };
   for (const { itemId, kind, id } of entries) {
-    if (kind.startsWith("task_")) {
+    if (kind === "autopilot_reply") {
+      const row = inquiryMap.get(id); if (!row?.conversationId) continue;
+      if (!await db.conversation.findFirst({ where: { AND: [conversationAccessWhere(auth), { id: row.conversationId }] }, select: { id: true } })) continue;
+      const tracked = await db.autopilotCase.findUnique({ where: { tenantId_inquiryId: { tenantId, inquiryId: id } } });
+      if (!tracked) continue;
+      const fact = await autopilotFacts(db, tenantId, id, now, { inboundId: tracked.inboundId }); if (!fact) continue;
+      put(itemId, fact.open && !fact.replyId, "Новая заявка без ответа", row.assigneeMembershipId,
+        { inquiryId: id, contactId: row.contactId, conversationId: row.conversationId, taskId: tracked.taskId },
+        [fact.open, tracked.inboundId, fact.replyId]);
+    } else if (kind.startsWith("task_")) {
       const row = taskMap.get(id); if (!row) continue;
       put(itemId, attentionTaskKind(row, now, zone) === kind, row.title, row.ownerMembershipId,
         { taskId: id, contactId: row.contactId, inquiryId: row.inquiryId, dealId: row.dealId, conversationId: row.conversationId },

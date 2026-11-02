@@ -242,6 +242,27 @@ describe("Coupled CRM process review and guarded local undo", () => {
     await db.outboxEvent.update({ where: { id: event.id }, data: { processedAt: new Date() } });
     assert.equal((await other.review()).process?.queues?.find(q => q.kind === "actions")?.processed, 1);
   });
+  it("keeps pre-A0 review snapshots reversible, but blocks undo once a job was claimed or quarantined", async () => {
+    for (const state of ["untouched", "claimed", "quarantined"] as const) {
+      const f = await fixture({ sales: true, agreement: false }); await f.run(); const item = await f.review();
+      const activity = await db.activity.findUniqueOrThrow({ where: { id: item.id } });
+      const metadata = activity.metadataJson as any;
+      assert.equal(metadata.review.outbox.length, 1);
+      for (const event of metadata.review.outbox) {
+        for (const field of ["failedAt", "failureKind", "errorCode", "retryAttempts"]) delete event[field];
+      }
+      await db.activity.update({ where: { id: item.id }, data: { metadataJson: metadata } });
+      if (state !== "untouched") {
+        await db.outboxEvent.update({ where: { id: metadata.review.outbox[0].id }, data: state === "claimed" ? { retryAttempts: 1 } : { failedAt: new Date(), failureKind: "permanent" } });
+        assert.equal((await f.review()).blockedReason, "effects_started");
+        if (state === "quarantined") assert.equal((await f.review()).process?.queues?.find(q => q.kind === "actions")?.needsCheck, 1);
+        await assert.rejects(f.undo(item.id), { code: "crm_review_changed" });
+      } else {
+        assert.equal((await f.review()).canUndo, true); await f.undo(item.id);
+        assert.equal((await f.review()).status, "undone");
+      }
+    }
+  });
   it("loads a full process history with a bounded query count and fresh permission checks", async () => {
     const f = await fixture(); await f.run(); const item = await f.review();
     const activity = await db.activity.findUniqueOrThrow({ where: { id: item.id } });

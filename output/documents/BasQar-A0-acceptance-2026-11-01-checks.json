@@ -1,0 +1,112 @@
+{
+  "stage": "A0",
+  "date": "2026-11-01",
+  "timezone": "Asia/Almaty",
+  "status": "implemented_locally_validated_not_deployed",
+  "base_commit": "85ca15135f64ce2f7d54b129da8c3703001cae7d",
+  "prior_working_tree_changes_preserved": true,
+  "tests": {
+    "initial_full_api": {
+      "log_path": "/tmp/basqar-a0-api-full.log",
+      "sha256": "543331017a75f00ad56b6f4c9a922908c4c0de537f7ab63b97e735de052c6069",
+      "tests": 2003,
+      "pass": 2002,
+      "fail": 1,
+      "skipped": 0,
+      "cancelled": 0,
+      "file_summaries": 189,
+      "exit_code": 1
+    },
+    "final_changed_api": {
+      "log_path": "/tmp/basqar-a0-acceptance-tests.log",
+      "sha256": "7657bdd78a6c962ce075f8ec37cfa735f7eb7db42ba69059072d914c68ac324b",
+      "tests": 197,
+      "pass": 197,
+      "fail": 0,
+      "skipped": 0,
+      "cancelled": 0,
+      "file_summaries": 14,
+      "exit_code": 0
+    },
+    "final_web": {
+      "log_path": "/tmp/basqar-a0-acceptance-web.log",
+      "sha256": "9f961ae066c9dde90243087a4d96ab2a15cae6467354ae296379a79525111fe9",
+      "tests": 81,
+      "pass": 81,
+      "fail": 0,
+      "skipped": 0,
+      "cancelled": 0,
+      "file_summaries": 1,
+      "exit_code": 0
+    },
+    "final_types": {
+      "log_path": "/tmp/basqar-a0-acceptance-types.log",
+      "sha256": "fc1610b9081f206e480555f9bc32f27b71d5c62deee39ced1d9a23b0d2cf29ba",
+      "exit_code": 0
+    },
+    "web_build": {
+      "log_path": "/tmp/basqar-a0-web-build.log",
+      "sha256": "6be62958dc65af564f8a55183f0a19f3599375aabfacf26135a09b04f004536d",
+      "exit_code": 0
+    }
+  },
+  "initial_failure": "backgroundReliability.test.ts: outdated mock for the claimed-event read; corrected and passed in final_changed_api",
+  "final_api_files": [
+    "a0ClientContracts",
+    "outboxReliability",
+    "backgroundReliability",
+    "outboxLease",
+    "outboxScheduling",
+    "conversationCrmAutomation",
+    "conversationProcessReview",
+    "aiManagerPolicy",
+    "clientFollowUpDelivery",
+    "aiControl",
+    "dealRisk",
+    "schemaPatches",
+    "aiUsageCaching",
+    "http"
+  ],
+  "verification_note": "Full API run preceded the last changes. The final run rechecked 14 affected files; it is not a second full run.",
+  "sources_sha256": {
+    "apps/api/src/services/backgroundJobs.ts": "ab610b41072cdec2fdd8ab28140fdead694a913af2f4cf2b1a31e386f9766fbb",
+    "apps/api/src/services/outboxFailurePolicy.ts": "21f38d81600efdb68baaf20eef84c9a098049aee606c37f70a28fc74d2e6cef7",
+    "apps/api/src/services/outboxDiagnosticsService.ts": "89593bb919507bdb7e53347113d28ada4e87f4a33430f8a6bd19b82c6cbd8b20",
+    "apps/api/src/services/outboxLease.ts": "a5416f6c90dffc2d3b043cbf3dd3e33fc48e3e7e3c11f1f0bbed11c310a231ad",
+    "apps/api/src/services/outboxScheduling.ts": "53bc8801b73fa220871141206ac2aeea741e7cb55acce3c90472ae9ae3f09135",
+    "apps/api/src/services/inquiryAutomationQueue.ts": "7be3a6c295afcd323cce517cdefa6ae9055514010fc035949c0616db640b64ef",
+    "apps/api/src/services/conversationContextQueue.ts": "cf9e840f797160f54fb44c4f9e9bbf3ba1f30c13e73367bc0ca9c650e178b169",
+    "apps/api/src/services/conversationProcessReview.ts": "d86ad29abc7d1b863cdb1b42fd166d61c16d8cfccc156db2245c2d6b3bbb267d",
+    "apps/api/src/services/conversationProcessEffects.ts": "33a36a61240f6cfb34a7131d7acf45c3a68a525d990205a1619ddcc25e8575fb",
+    "apps/api/src/services/salesControlService.ts": "205ef71e068287b8b6d2b24563fe06227e210b1e12ae6bf84524dd24956c5d7f",
+    "apps/api/src/services/controlSalesRiskPresentation.ts": "4944bcef7aee45a0d63a547eed17d83b5e026cfca1c99bea3db7e8d9f53c7b82",
+    "apps/api/src/services/aiControlService.ts": "01b8b16f75614f9a6e3e1dbf3a3161f766d3bcc88518e392c24873e3171566c4",
+    "apps/api/src/services/aiUsageService.ts": "ac59443f64f0dddf354ddb9ec824ceb2a42b51f589739b41d1e88ff4b9ca602d",
+    "apps/api/src/services/domainService.ts": "169af2bfb56959d3f048c82937e175f885e8dec1dae816dee71a147f68e7c27b",
+    "apps/api/src/services/aiChannels.ts": "7d81f0120a735b8114f1e19aa37ece6ce3bc40376de4e3db984a2b0f87026f23",
+    "apps/api/src/services/aiAutomationSettingsService.ts": "7af794533d54e5d5cd95d74efecec147b1d33780effc9e02211fe9c1de7f5569",
+    "apps/api/src/services/aiConversationPolicyService.ts": "55f9ecdaaf7973dbf40df3e209cccd8dd2d8f8e2ac10436a4e11af6779a1f71c",
+    "apps/api/src/lib/email.ts": "4ce8179b96adc62a2fc6bb2826e19e94a9be1f38a2d53e16b8e9f1f4abf7611b",
+    "apps/api/src/app.ts": "5c5f3b4075f4712ec573bdcec6aa967b6495f19f4363e341cb1289e99ae4f9c5",
+    "apps/api/openapi.yaml": "c083724bb920bc222f986c1b1c7377ecd38f570f21b6e5dc0530d7896981af3d",
+    "apps/web/src/components/OutboxDiagnostics.tsx": "e566df6f40ec6bac789039c574994a03df7a8316d843cce41c861fb5c1fb772e",
+    "apps/web/src/components/SalesControlPanel.tsx": "df2f21007f113e2a8d5412812c8ed267f506e20663ec60007b1b53f0e555e7a0",
+    "apps/web/src/pages/ControlPage.tsx": "e871fa880956f98c0b5bfac12098555df1735ebaaaab696f9ca0023849d6eb6b",
+    "apps/web/src/pages/AiAutomationSettingsPage.tsx": "04d9a7302bf5ae4320d437c6429540d298d190895fb200e5c70865b978815ced",
+    "packages/api-client/src/index.ts": "0557954fbf647d631f113b4e86ca917bf2a18beb65013e3f75ec155938fcb00e",
+    "packages/db/src/outboxFailureSchema.ts": "ae62c13c00438826dcb4b1e37f7ad69ae943a3fbca657d97c0ceadfafb660169",
+    "packages/db/src/client.ts": "e7b84cd91677e9248a971c3574a249fca7f496caac36a8921528f9de29d23455",
+    "packages/db/prisma/schema.prisma": "6377f559f834799e8891f697ae308df0ebbaec8535ec234344f58eccec583286"
+  },
+  "web_initial_js_kb": 1099.7,
+  "web_initial_gzip_kb": 278.9,
+  "web_initial_limit_kb": 1100,
+  "external_sends": false,
+  "production_changes": false,
+  "pending": [
+    "Browser visual QA (tool disabled)",
+    "Linux/container build and real PostgreSQL verification",
+    "Deployment and production smoke check"
+  ],
+  "next_stage": "A1 (not started)"
+}

@@ -896,6 +896,31 @@ export function createApp(prisma: PrismaClient) {
     res.json(await updateOnboarding(prisma, await requireAuth(req), req.body || {}));
   });
 
+  app.get("/api/v1/workspace/onboarding/architect", async (req, res) => {
+    const { getArchitectState } = await import("./services/aiArchitectService.ts");
+    res.set("Cache-Control", "no-store").json(await getArchitectState(prisma, await requireAuth(req)));
+  });
+  app.post("/api/v1/workspace/onboarding/architect/preview", json, async (req, res) => {
+    const { previewArchitect } = await import("./services/aiArchitectService.ts");
+    const auth = await requireAuth(req); rateLimit(`architect-preview:${auth.user.id}`, 10);
+    res.set("Cache-Control", "no-store").json(await previewArchitect(prisma, auth, req.body));
+  });
+  app.put("/api/v1/workspace/onboarding/architect/draft", json, async (req, res) => {
+    const { saveArchitectDraft } = await import("./services/aiArchitectService.ts");
+    const auth = await requireAuth(req); rateLimit(`architect-save:${auth.user.id}`, 10);
+    res.set("Cache-Control", "no-store").json(await saveArchitectDraft(prisma, auth, req.body));
+  });
+  app.post("/api/v1/workspace/onboarding/architect/:id/apply-preview", json, async (req, res) => {
+    const { reviewArchitectApplication } = await import("./services/aiArchitectApplyService.ts");
+    const auth = await requireAuth(req); rateLimit(`architect-review:${auth.user.id}`, 60);
+    res.set("Cache-Control", "no-store").json(await reviewArchitectApplication(prisma, auth, String(req.params.id), req.body));
+  });
+  app.post("/api/v1/workspace/onboarding/architect/:id/apply", json, async (req, res) => {
+    const { applyArchitect } = await import("./services/aiArchitectApplyService.ts");
+    const auth = await requireAuth(req); rateLimit(`architect-apply:${auth.user.id}`, 10);
+    res.set("Cache-Control", "no-store").json(await applyArchitect(prisma, auth, String(req.params.id), req.body));
+  });
+
   app.post("/api/v1/billing/onboarding/skip", json, async (req, res) => {
     res.json(await skipOnboarding(prisma, await requireAuth(req)));
   });
@@ -936,6 +961,12 @@ export function createApp(prisma: PrismaClient) {
 
   app.get("/api/v1/situation/overview", async (req, res) => {
     res.json(await getSituationOverview(prisma, await requireAuth(req), req.query as Record<string, string>));
+  });
+
+  app.get("/api/v1/workspace/home", async (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    const { getBusinessHomeFocus } = await import("./services/businessHomeService.ts");
+    res.json(await getBusinessHomeFocus(prisma, await requireAuth(req)));
   });
 
   app.get("/api/v1/nav-badges", async (req, res) => {
@@ -1046,7 +1077,11 @@ export function createApp(prisma: PrismaClient) {
   app.get("/api/v1/sales/control", async (req, res) => {
     const auth = await requireAuth(req);
     const { getSalesControl } = await import("./services/salesControlService.ts");
-    res.json(await getSalesControl(prisma, auth));
+    res.set("Cache-Control", "no-store").json(await getSalesControl(prisma, auth, req.query));
+  });
+  app.post("/api/v1/sales/deals/:id/risk-task", json, async (req, res) => {
+    const { acceptDealRiskTask } = await import("./services/dealRiskService.ts");
+    res.json(await acceptDealRiskTask(prisma, await requireAuth(req), req.params.id, req.body));
   });
   app.post("/api/v1/sales/proposals/:id/review", json, async (req, res) => {
     const auth = await requireAuth(req);
@@ -1054,6 +1089,27 @@ export function createApp(prisma: PrismaClient) {
     const { reviewSalesProposal } = await import("./services/salesProcessService.ts");
     res.json(await reviewSalesProposal(prisma, auth, req.params.id, input));
   });
+  app.get("/api/v1/settings/autopilot", async (req, res) => {
+    const m = await import("./services/autopilotPolicyService.ts");
+    res.set("Cache-Control", "no-store").json(await m.getAutopilot(prisma, await requireAuth(req), req.query.cursor));
+  });
+  app.post("/api/v1/settings/autopilot/preview", json, async (req, res) => {
+    const m = await import("./services/autopilotPolicyService.ts");
+    res.set("Cache-Control", "no-store").json(await m.previewAutopilot(prisma, await requireAuth(req), req.body));
+  });
+  app.put("/api/v1/settings/autopilot", json, async (req, res) => {
+    const m = await import("./services/autopilotPolicyService.ts");
+    res.set("Cache-Control", "no-store").json(await m.saveAutopilot(prisma, await requireAuth(req), req.body));
+  });
+  for (const operation of ["enable", "pause"] as const) app.post(`/api/v1/settings/autopilot/${operation}`, json, async (req, res) => {
+    const m = await import("./services/autopilotPolicyService.ts");
+    res.set("Cache-Control", "no-store").json(await m.operateAutopilot(prisma, await requireAuth(req), operation, req.body));
+  });
+  for (const operation of ["start", "stop"] as const) app.post(`/api/v1/settings/autopilot/cases/:id/${operation}`, json, async (req, res) => {
+    const m = await import("./services/autopilotService.ts");
+    res.set("Cache-Control", "no-store").json(await m.operateAutopilotCase(prisma, await requireAuth(req), String(req.params.id), operation, req.body));
+  });
+
   app.get("/api/v1/settings/ai-automation", async (req, res) => {
     const { getAIAutomationSettings } = await import("./services/aiAutomationSettingsService.ts");
     res.json(await getAIAutomationSettings(prisma, await requireAuth(req)));
@@ -1335,6 +1391,182 @@ export function createApp(prisma: PrismaClient) {
 
   app.get("/api/v1/workspace/ops", async (req, res) => {
     res.json(await getTenantOps(prisma, await requireAuth(req)));
+  });
+
+  app.get("/api/v1/workspace/decisions", async (req, res) => {
+    const m = await import("./services/businessMemoryService.ts"), auth = await requireAuth(req);
+    rateLimit(`decisions-read:${auth.user.id}`, 60);
+    res.set("Cache-Control", "no-store").json(await m.listBusinessDecisions(prisma, auth, req.query));
+  });
+  app.get("/api/v1/workspace/decisions/options", async (req, res) => {
+    const m = await import("./services/businessMemoryService.ts"), auth = await requireAuth(req);
+    rateLimit(`decisions-read:${auth.user.id}`, 60);
+    res.set("Cache-Control", "no-store").json(await m.businessDecisionOptions(prisma, auth, String(req.query.kind || "manual"), String(req.query.q || "")));
+  });
+  app.get("/api/v1/workspace/decisions/context", async (req, res) => {
+    const m = await import("./services/businessMemoryService.ts"), auth = await requireAuth(req);
+    rateLimit(`decisions-read:${auth.user.id}`, 60);
+    res.set("Cache-Control", "no-store").json(await m.businessMemoryContext(prisma, auth, req.query));
+  });
+  app.get("/api/v1/workspace/decisions/:id", async (req, res) => {
+    const m = await import("./services/businessMemoryService.ts"), auth = await requireAuth(req);
+    rateLimit(`decisions-read:${auth.user.id}`, 60);
+    res.set("Cache-Control", "no-store").json(await m.getBusinessDecision(prisma, auth, req.params.id));
+  });
+  app.post("/api/v1/workspace/decisions", json, async (req, res) => {
+    const m = await import("./services/businessMemoryService.ts"), auth = await requireAuth(req);
+    rateLimit(`decisions-write:${auth.user.id}`, 20);
+    res.set("Cache-Control", "no-store").status(201).json(await m.saveBusinessDecision(prisma, auth, null, req.body));
+  });
+  app.patch("/api/v1/workspace/decisions/:id", json, async (req, res) => {
+    const m = await import("./services/businessMemoryService.ts"), auth = await requireAuth(req);
+    rateLimit(`decisions-write:${auth.user.id}`, 20);
+    res.set("Cache-Control", "no-store").json(await m.saveBusinessDecision(prisma, auth, req.params.id, req.body));
+  });
+  app.post("/api/v1/workspace/decisions/:id/approve", json, async (req, res) => {
+    const m = await import("./services/businessMemoryService.ts"), auth = await requireAuth(req);
+    rateLimit(`decisions-write:${auth.user.id}`, 20);
+    res.set("Cache-Control", "no-store").json(await m.approveBusinessDecision(prisma, auth, req.params.id, req.body));
+  });
+  for (const operation of ["revoke", "erase"] as const) app.post(`/api/v1/workspace/decisions/:id/${operation}`, json, async (req, res) => {
+    const m = await import("./services/businessMemoryService.ts"), auth = await requireAuth(req);
+    rateLimit(`decisions-write:${auth.user.id}`, 20);
+    res.set("Cache-Control", "no-store").json(await m.operateBusinessDecision(prisma, auth, req.params.id, operation, req.body));
+  });
+
+  app.get("/api/v1/workspace/experiments", async (req, res) => {
+    const m = await import("./services/businessExperimentService.ts"), auth = await requireAuth(req);
+    rateLimit(`experiments-read:${auth.user.id}`, 60);
+    res.set("Cache-Control", "no-store").json(await m.listExperiments(prisma, auth, req.query));
+  });
+  app.get("/api/v1/workspace/experiments/options", async (req, res) => {
+    const m = await import("./services/businessExperimentService.ts"), auth = await requireAuth(req);
+    rateLimit(`experiments-read:${auth.user.id}`, 60);
+    res.set("Cache-Control", "no-store").json(await m.experimentOptions(prisma, auth));
+  });
+  app.get("/api/v1/workspace/experiments/tasks", async (req, res) => {
+    const m = await import("./services/businessExperimentService.ts"), auth = await requireAuth(req);
+    rateLimit(`experiments-read:${auth.user.id}`, 60);
+    res.set("Cache-Control", "no-store").json(await m.experimentTaskChoices(prisma, auth, String(req.query.q || "")));
+  });
+  app.post("/api/v1/workspace/experiments", json, async (req, res) => {
+    const m = await import("./services/businessExperimentService.ts"), auth = await requireAuth(req);
+    rateLimit(`experiments-write:${auth.user.id}`, 20);
+    res.set("Cache-Control", "no-store").status(201).json(await m.saveExperiment(prisma, auth, null, req.body));
+  });
+  app.get("/api/v1/workspace/experiments/:id", async (req, res) => {
+    const m = await import("./services/businessExperimentService.ts"), auth = await requireAuth(req);
+    rateLimit(`experiments-read:${auth.user.id}`, 60);
+    res.set("Cache-Control", "no-store").json(await m.getExperiment(prisma, auth, req.params.id));
+  });
+  app.patch("/api/v1/workspace/experiments/:id", json, async (req, res) => {
+    const m = await import("./services/businessExperimentService.ts"), auth = await requireAuth(req);
+    rateLimit(`experiments-write:${auth.user.id}`, 20);
+    res.set("Cache-Control", "no-store").json(await m.saveExperiment(prisma, auth, req.params.id, req.body));
+  });
+  for (const operation of ["approve", "stop", "result", "note"] as const) app.post(`/api/v1/workspace/experiments/:id/${operation}`, json, async (req, res) => {
+    const m = await import("./services/businessExperimentService.ts"), auth = await requireAuth(req);
+    rateLimit(`experiments-write:${auth.user.id}`, 20);
+    res.set("Cache-Control", "no-store").json(await m.operateExperiment(prisma, auth, req.params.id, operation, req.body));
+  });
+
+  app.get("/api/v1/workspace/goals", async (req, res) => {
+    const { listBusinessGoals } = await import("./services/businessGoalService.ts");
+    const auth = await requireAuth(req); rateLimit(`goals-read:${auth.user.id}`, 60);
+    res.set("Cache-Control", "no-store").json(await listBusinessGoals(prisma, auth, req.query));
+  });
+  app.get("/api/v1/workspace/goals/options", async (req, res) => {
+    const { businessGoalOptions } = await import("./services/businessGoalService.ts");
+    res.set("Cache-Control", "no-store").json(await businessGoalOptions(prisma, await requireAuth(req)));
+  });
+  app.get("/api/v1/workspace/goals/tasks", async (req, res) => {
+    const { goalTaskChoices } = await import("./services/businessGoalService.ts");
+    res.set("Cache-Control", "no-store").json(await goalTaskChoices(prisma, await requireAuth(req), String(req.query.q || "")));
+  });
+  app.post("/api/v1/workspace/goals", json, async (req, res) => {
+    const { createBusinessGoal } = await import("./services/businessGoalService.ts");
+    const auth = await requireAuth(req); rateLimit(`goals-write:${auth.user.id}`, 20);
+    res.set("Cache-Control", "no-store").status(201).json(await createBusinessGoal(prisma, auth, req.body));
+  });
+  app.get("/api/v1/workspace/goals/:id", async (req, res) => {
+    const { getBusinessGoal } = await import("./services/businessGoalService.ts");
+    const auth = await requireAuth(req); rateLimit(`goals-read:${auth.user.id}`, 60);
+    res.set("Cache-Control", "no-store").json(await getBusinessGoal(prisma, auth, req.params.id));
+  });
+  app.patch("/api/v1/workspace/goals/:id", json, async (req, res) => {
+    const { updateBusinessGoal } = await import("./services/businessGoalService.ts");
+    const auth = await requireAuth(req); rateLimit(`goals-write:${auth.user.id}`, 20);
+    res.set("Cache-Control", "no-store").json(await updateBusinessGoal(prisma, auth, req.params.id, req.body));
+  });
+  app.post("/api/v1/workspace/goals/:id/refresh", json, async (req, res) => {
+    const { refreshBusinessGoal } = await import("./services/businessGoalService.ts");
+    const auth = await requireAuth(req); rateLimit(`goals-refresh:${auth.user.id}`, 10);
+    res.set("Cache-Control", "no-store").json(await refreshBusinessGoal(prisma, auth, req.params.id, req.body));
+  });
+  app.post("/api/v1/workspace/goals/:id/initiatives", json, async (req, res) => {
+    const { linkGoalTask } = await import("./services/businessGoalService.ts");
+    const auth = await requireAuth(req); rateLimit(`goals-write:${auth.user.id}`, 20);
+    res.set("Cache-Control", "no-store").json(await linkGoalTask(prisma, auth, req.params.id, req.body));
+  });
+
+  app.get("/api/v1/workspace/intelligence", async (req, res) => {
+    const { listBusinessInsights } = await import("./services/businessInsightService.ts");
+    const auth = await requireAuth(req); rateLimit(`insights-read:${auth.user.id}`, 60);
+    res.set("Cache-Control", "no-store").json(await listBusinessInsights(prisma, auth, req.query));
+  });
+  app.post("/api/v1/workspace/intelligence/refresh", json, async (req, res) => {
+    const { refreshBusinessInsights } = await import("./services/businessInsightService.ts");
+    const auth = await requireAuth(req); rateLimit(`insights-refresh:${auth.user.id}`, 10);
+    res.set("Cache-Control", "no-store").json(await refreshBusinessInsights(prisma, auth, req.body));
+  });
+  app.get("/api/v1/workspace/intelligence/:id", async (req, res) => {
+    const { getBusinessInsight } = await import("./services/businessInsightService.ts");
+    const auth = await requireAuth(req); rateLimit(`insights-read:${auth.user.id}`, 60);
+    res.set("Cache-Control", "no-store").json(await getBusinessInsight(prisma, auth, req.params.id));
+  });
+  for (const decision of ["acknowledge", "dismiss"] as const) app.post(`/api/v1/workspace/intelligence/:id/${decision}`, json, async (req, res) => {
+    const { decideBusinessInsight } = await import("./services/businessInsightService.ts");
+    const auth = await requireAuth(req); rateLimit(`insights-decision:${auth.user.id}`, 20);
+    res.set("Cache-Control", "no-store").json(await decideBusinessInsight(prisma, auth, req.params.id, decision, req.body));
+  });
+
+  app.get("/api/v1/workspace/ai-actions", async (req, res) => {
+    const { listActionRuns } = await import("./services/aiActionService.ts");
+    res.set("Cache-Control", "no-store").json(await listActionRuns(prisma, await requireAuth(req), req.query));
+  });
+  app.post("/api/v1/workspace/ai-actions", json, async (req, res) => {
+    const { previewActionPlan } = await import("./services/aiActionService.ts");
+    const auth = await requireAuth(req); rateLimit(`action-preview:${auth.user.id}`, 20);
+    res.set("Cache-Control", "no-store").status(201).json(await previewActionPlan(prisma, auth, req.body));
+  });
+  app.get("/api/v1/workspace/ai-actions/options", async (req, res) => {
+    const { actionPlanOptions } = await import("./services/aiActionService.ts");
+    res.set("Cache-Control", "no-store").json(await actionPlanOptions(prisma, await requireAuth(req), req.query));
+  });
+  app.get("/api/v1/workspace/ai-actions/:id", async (req, res) => {
+    const { getActionRun } = await import("./services/aiActionService.ts");
+    res.set("Cache-Control", "no-store").json(await getActionRun(prisma, await requireAuth(req), req.params.id));
+  });
+  app.post("/api/v1/workspace/ai-actions/:id/confirm", json, async (req, res) => {
+    const { confirmActionRun } = await import("./services/aiActionService.ts");
+    const auth = await requireAuth(req); rateLimit(`action-confirm:${auth.user.id}`, 20);
+    res.set("Cache-Control", "no-store").json(await confirmActionRun(prisma, auth, req.params.id, req.body));
+  });
+  app.post("/api/v1/workspace/ai-actions/:id/cancel", json, async (req, res) => {
+    const { cancelActionRun } = await import("./services/aiActionService.ts");
+    const auth = await requireAuth(req); rateLimit(`action-cancel:${auth.user.id}`, 20);
+    res.set("Cache-Control", "no-store").json(await cancelActionRun(prisma, auth, req.params.id, req.body));
+  });
+
+  app.get("/api/v1/workspace/outbox/failures", async (req, res) => {
+    const { listOutboxFailures } = await import("./services/outboxDiagnosticsService.ts");
+    res.set("Cache-Control", "no-store").json(await listOutboxFailures(prisma, await requireAuth(req), req.query));
+  });
+  app.post("/api/v1/workspace/outbox/:id/retry", json, async (req, res) => {
+    const { retryOutboxFailure } = await import("./services/outboxDiagnosticsService.ts");
+    const auth = await requireAuth(req);
+    rateLimit(`outbox-retry:${auth.user.id}`, 10);
+    res.json(await retryOutboxFailure(prisma, auth, req.params.id, req.body));
   });
 
   app.patch("/api/v1/workspace/ops", json, async (req, res) => {
@@ -2445,7 +2677,8 @@ export function createApp(prisma: PrismaClient) {
     res.json({ items: await listIntegrations(prisma, await requireAuth(req)) });
   });
 
-  app.get("/api/v1/workspace/control", async (req, res) => {
+  app.get("/api/v1/workspace/control/board", async (req, res) => {
+    res.set("Cache-Control", "no-store");
     res.json(await controlBoard(prisma, await requireAuth(req)));
   });
 

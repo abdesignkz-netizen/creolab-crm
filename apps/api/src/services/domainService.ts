@@ -1,3 +1,4 @@
+import { inTransaction, type DomainDb } from "../lib/transaction.ts";
 import { MoneyDecimal, saleAmount, businessDealWhere, confirmedPaymentTotals } from "./financialMetrics.ts";
 import { enqueueSalesReconcile } from "./salesProcessService.ts";
 import { updateTaskManually } from "./taskManualEdit.ts";
@@ -730,7 +731,7 @@ export async function getTask(prisma: PrismaClient, auth: AuthContext, id: strin
 }
 
 export async function createTask(
-  prisma: PrismaClient,
+  prisma: DomainDb,
   auth: AuthContext,
   input: {
     type: string;
@@ -803,7 +804,7 @@ export async function createTask(
     if (!clientIds.length) throw new ApiError(422, "invalid", "Выберите хотя бы одного клиента");
     if (clientIds.length > 200) throw new ApiError(422, "invalid", "Слишком много клиентов для одной задачи");
 
-    return prisma.$transaction(async (tx) => {
+    return inTransaction(prisma, async (tx) => {
       const parent = await tx.task.create({
         data: {
           tenantId: tid,
@@ -885,7 +886,7 @@ export async function createTask(
     }
   }
 
-  return prisma.$transaction(async tx => {
+  return inTransaction(prisma, async tx => {
     const task = await tx.task.create({
       data: {
         tenantId: tid,
@@ -920,7 +921,7 @@ export async function createTask(
   });
 }
 
-async function taskInTenant(prisma: PrismaClient, auth: AuthContext, id: string) {
+async function taskInTenant(prisma: DomainDb, auth: AuthContext, id: string) {
   const tid = tenantId(auth);
   const task = await prisma.task.findFirst({ where: { id, tenantId: tid } });
   if (!task) throw new ApiError(404, "not_found", "Задача не найдена");
@@ -1007,10 +1008,11 @@ export async function cancelTask(prisma: PrismaClient, auth: AuthContext, id: st
 }
 
 export async function assignTask(
-  prisma: PrismaClient,
+  prisma: DomainDb,
   auth: AuthContext,
   id: string,
   input: { membershipId?: string; executorKind?: "user" | "ai" } = {},
+  options: { internalOnly?: boolean } = {},
 ) {
   requireManageTasks(auth);
   const { tid, task } = await taskInTenant(prisma, auth, id);
@@ -1039,9 +1041,9 @@ export async function assignTask(
   if (!ownerId) throw new ApiError(422, "invalid", "Нет сотрудника для назначения");
   const owner = await prisma.membership.findFirst({ where: { id: ownerId, tenantId: tid, active: true } });
   if (!owner) throw new ApiError(422, "invalid", "Сотрудник не найден");
-  return prisma.$transaction(async tx => {
+  return inTransaction(prisma, async tx => {
     const updated = await updateTaskManually(tx, tid, id, { ownerMembershipId: owner.id, contextSnapshotJson: mergeTaskContextSnapshot(snap, { executorType: "USER" }) as Prisma.InputJsonValue });
-    if (task.ownerMembershipId !== owner.id) await queueControlNotification(tx, { tenantId: tid, type: "task.assigned", entityId: id, episodeKey: `task.assigned:${id}:${owner.id}:${randomUUID()}` });
+    if (!options.internalOnly && task.ownerMembershipId !== owner.id) await queueControlNotification(tx, { tenantId: tid, type: "task.assigned", entityId: id, episodeKey: `task.assigned:${id}:${owner.id}:${randomUUID()}` });
     return updated;
   });
 }
@@ -1390,16 +1392,19 @@ export async function aiSandbox(prisma: PrismaClient, auth: AuthContext, message
       tenantId: tid,
       sourceType: "sandbox",
       sourceId: auth.user.id,
-      status: "completed",
+      status: "simulated",
       sandbox: true,
-      model: process.env.ANYMODEL_MODEL || process.env.OPENAI_MODEL || "not-configured",
+      model: null,
     },
   });
   return {
     sandbox: true,
+    mode: "demonstration",
+    usedLlm: false,
     executionId: execution.id,
-    reply_text: `Песочница CRM. Сообщение не отправлено в WhatsApp. Вход: ${message.slice(0, 180)}`,
-    note: "Текущий продавец остаётся в процессе бота. Провайдер не менялся.",
+    reply_text: `Демонстрация интерфейса без вызова ИИ. Вход: ${message.slice(0, 180)}`,
+    note: "Это техническая заглушка, а не ответ модели. Для проверки реальных ответов откройте «ИИ-менеджер» → «Проверка».",
+    previewPath: "/settings/ai-manager",
   };
 }
 

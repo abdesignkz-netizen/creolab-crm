@@ -18,6 +18,19 @@
 .control-chat-compose { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; align-items: end; }
 .control-chat-compose label { grid-column: 1 / -1; font-size: 13px; color: #65738b; }
 .control-chat-compose textarea { flex: 1; width: 100%; min-width: 0; resize: vertical; min-height: 62px; max-height: 180px; font-size: 16px; }
+.control-chat-analysis-tools { border-bottom: 1px solid var(--border, #e0e7f0); padding-bottom: 16px; }
+.control-chat-analysis-tools p { margin: 6px 0 12px; }
+.control-analysis { min-width: 0; border: 1px solid var(--border, #e0e7f0); border-radius: 16px; padding: 18px; display: grid; gap: 16px; overflow-wrap: anywhere; }
+.control-analysis h4 { margin: 0 0 8px; font-size: 17px; }
+.control-analysis p { margin: 8px 0; white-space: pre-wrap; line-height: 1.55; }
+.control-analysis small { display: block; margin-top: 8px; }
+.control-analysis summary { cursor: pointer; line-height: 1.6; font-weight: 600; }
+.control-analysis summary span { font-weight: 400; color: var(--muted, #65738b); margin-right: 8px; }
+.control-analysis-evidence { display: grid; gap: 10px; }
+.control-analysis-evidence details { background: var(--bg, #f4f6fa); padding: 12px 14px; border-radius: 10px; }
+.control-analysis li { margin: 8px 0; line-height: 1.5; }
+.control-analysis-next, .control-analysis-plan { border-top: 1px solid var(--border, #e0e7f0); padding-top: 16px; }
+.control-analysis-next .btn { display: block; margin-top: 14px; white-space: normal; }
 @media (max-width: 640px) {
   .control-chat-head { display: grid; }
   .control-chat-messages { max-height: 52dvh; }

@@ -194,6 +194,8 @@ describe("BasQar Control", () => {
     const result = await execute("GET_REVENUE_STATS", { period: "this_month" }, { externalIdentity: "+77013333333" });
     assert.equal(result.status, 403);
     assert.ok(["forbidden", "control_disabled"].includes(result.body.code));
+    const risks = await execute("GET_SALES_CONTROL", { filter: "attention" }, { externalIdentity: "+77013333333" });
+    assert.equal(risks.status, 403); assert.ok(["forbidden", "control_disabled"].includes(risks.body.code));
   });
 
   it("CREATE_TASK выполняется один раз и duplicate requestId не создаёт второй объект", async () => {

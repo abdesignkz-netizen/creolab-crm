@@ -1,3 +1,5 @@
+import { BUSINESS_EXPERIMENT_SQL } from "./businessExperimentSchema.ts";
+import { AUTOPILOT_SQL } from "./autopilotSchema.ts";
 import { applyBillingMigration } from "./billingMigration.ts";
 import { applyRequiredSchemaPatches } from "./schemaPatches.ts";
 import { CONTROL_CHAT_SQL } from "./controlChatSchema.ts";
@@ -7,6 +9,12 @@ import { CONTROL_NOTIFICATION_SQL } from "./controlNotificationSchema.ts";
 import { WHATSAPP_SQL } from "./whatsappSchema.ts";
 import { AVR_SIGNING_SQL } from "./avrSigningSchema.ts";
 import { BILLING_QUOTA_SQL } from "./billingQuotaSchema.ts";
+import { AI_ACTION_SQL } from "./aiActionSchema.ts";
+import { AI_ARCHITECT_SQL } from "./aiArchitectSchema.ts";
+import { BUSINESS_INSIGHT_SQL } from "./businessInsightSchema.ts";
+import { BUSINESS_GOAL_SQL } from "./businessGoalSchema.ts";
+import { BUSINESS_DECISION_SQL } from "./businessDecisionSchema.ts";
+import { OUTBOX_FAILURE_SQL } from "./outboxFailureSchema.ts";
 import { existsSync, mkdirSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import { PrismaClient } from "@prisma/client";
@@ -43,6 +51,14 @@ export async function applyLivePostgresPatches(prisma: PrismaClient) {
     { name: "control-chat", statements: CONTROL_CHAT_SQL },
     { name: "situation-episodes", statements: SITUATION_EPISODE_SQL },
     { name: "situation-sweep", statements: SITUATION_SWEEP_SQL },
+    { name: "outbox-failures", statements: OUTBOX_FAILURE_SQL },
+    { name: "ai-actions", statements: AI_ACTION_SQL },
+    { name: "ai-architect", statements: AI_ARCHITECT_SQL },
+    { name: "business-insights", statements: BUSINESS_INSIGHT_SQL },
+    { name: "business-goals", statements: BUSINESS_GOAL_SQL },
+    { name: "business-decisions", statements: BUSINESS_DECISION_SQL },
+    { name: "business-experiments", statements: BUSINESS_EXPERIMENT_SQL },
+    { name: "autopilot", statements: AUTOPILOT_SQL },
   ]);
 }
 
@@ -1259,7 +1275,9 @@ const BILLING_DOMAIN_SQL = `
     CREATE UNIQUE INDEX IF NOT EXISTS "TenantBillingOverride_tenantId_key" ON "TenantBillingOverride"("tenantId");
 `;
 
-export async function createPrismaClient(): Promise<PrismaClient> {
+// API/worker coordinate their own drain before closing DB resources. Small CLI
+// utilities retain the default signal handling for embedded PGlite.
+export async function createPrismaClient(options: { registerSignalHandlers?: boolean } = {}): Promise<PrismaClient> {
   if (globalForPrisma.prisma) {
     return globalForPrisma.prisma;
   }
@@ -1319,34 +1337,40 @@ export async function createPrismaClient(): Promise<PrismaClient> {
   for (const sql of CONTROL_CHAT_SQL) await pglite.exec(sql);
   for (const sql of SITUATION_EPISODE_SQL) await pglite.exec(sql);
   for (const sql of SITUATION_SWEEP_SQL) await pglite.exec(sql);
+  for (const sql of OUTBOX_FAILURE_SQL) await pglite.exec(sql);
+  for (const sql of AI_ACTION_SQL) await pglite.exec(sql);
+  for (const sql of AI_ARCHITECT_SQL) await pglite.exec(sql);
+  for (const sql of BUSINESS_INSIGHT_SQL) await pglite.exec(sql);
+  for (const sql of BUSINESS_GOAL_SQL) await pglite.exec(sql);
+  for (const sql of BUSINESS_DECISION_SQL) await pglite.exec(sql);
+  for (const sql of BUSINESS_EXPERIMENT_SQL) await pglite.exec(sql);
+  for (const sql of AUTOPILOT_SQL) await pglite.exec(sql);
   const adapter = new PrismaPGlite(pglite);
   const prisma = new PrismaClient({ adapter } as never);
   await applyBillingMigration(prisma);
   globalForPrisma.prisma = prisma;
-  if (!globalForPrisma.crmDbShutdown) {
+  if (options.registerSignalHandlers !== false && !globalForPrisma.crmDbShutdown) {
     globalForPrisma.crmDbShutdown = true;
-    const close = async () => {
-      try {
-        await prisma.$disconnect();
-      } catch {
-        /* already closed */
-      }
-      try {
-        await pglite.close();
-      } catch {
-        /* already closed */
-      }
-      globalForPrisma.prisma = undefined;
-      globalForPrisma.pglite = undefined;
-    };
     process.once("SIGTERM", () => {
-      void close().finally(() => process.exit(0));
+      void disconnectPrismaClient().then(() => process.exit(0), () => process.exit(1));
     });
     process.once("SIGINT", () => {
-      void close().finally(() => process.exit(0));
+      void disconnectPrismaClient().then(() => process.exit(0), () => process.exit(1));
     });
   }
   return prisma;
+}
+
+export async function disconnectPrismaClient() {
+  const prisma = globalForPrisma.prisma, pglite = globalForPrisma.pglite;
+  try { await prisma?.$disconnect(); }
+  finally {
+    try { await pglite?.close(); }
+    finally {
+      globalForPrisma.prisma = undefined;
+      globalForPrisma.pglite = undefined;
+    }
+  }
 }
 
 export type { PrismaClient };

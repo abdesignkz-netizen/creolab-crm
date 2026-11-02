@@ -6,7 +6,7 @@ import type { z } from "zod";
 import { randomUUID } from "node:crypto";
 import { resolveEsfMeasureUnitCode } from "@creolab/contracts";
 import { businessDealWhere, wonSalesTotals, confirmedPaymentTotals, openPipelineTotals, outstandingPaymentTotals, saleAmount, moneyValue, MoneyDecimal } from "./financialMetrics.ts";
-import type { PrismaClient } from "@creolab/db";
+import type { Prisma, PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { assertDealVisible, capabilities, isManager, managerDealWriteFields, requireCompanyAdmin, seesAllCompanyRecords } from "../lib/access.ts";
@@ -141,7 +141,7 @@ function requireTenant(auth: AuthContext) {
   return auth.activeMembership;
 }
 
-export async function ensureDealPipelineStages(prisma: PrismaClient, tenantId: string) {
+export async function ensureDealPipelineStages(prisma: PrismaClient | Prisma.TransactionClient, tenantId: string) {
   const existing = await prisma.dealStage.findMany({ where: { tenantId } });
   const byKey = new Map(existing.map((s) => [s.systemKey, s]));
 
@@ -1127,6 +1127,10 @@ export async function updateTenantOps(
       where: { id: membership.tenantId },
       data: { settingsJson: { ...current, ops } as never },
     });
+    if (input.salesPlans) {
+      const { recordSalesGoalPlanChanges } = await import("./businessGoalService.ts");
+      await recordSalesGoalPlanChanges(tx, membership.tenantId, current, { ...current, ops }, auth.user.id);
+    }
     await writeAudit(tx, {
       tenantId: membership.tenantId,
       actorUserId: auth.user.id,

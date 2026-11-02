@@ -14,9 +14,10 @@ export function fromAddress() {
 
 async function sendViaResend(message: MailMessage) {
   const key = process.env.RESEND_API_KEY || "";
-  if (!key) return false;
+  if (!key) return { delivered: false as const, failureKind: "permanent" as const, errorCode: "mail_not_configured" };
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
+    signal: AbortSignal.timeout(30_000),
     headers: {
       Authorization: `Bearer ${key}`,
       "content-type": "application/json",
@@ -31,24 +32,26 @@ async function sendViaResend(message: MailMessage) {
     }),
   });
   if (!response.ok) {
-    const body = await response.text().catch(() => "");
-    console.error("[mail] resend failed", response.status, body);
-    return false;
+    console.error("[mail] resend failed", response.status);
+    return { delivered: false as const, failureKind: response.status === 429 ? "retryable" as const : response.status >= 500 || response.status === 408 ? "uncertain" as const : "permanent" as const,
+      errorCode: response.status === 429 ? "mail_rate_limited" : response.status >= 500 || response.status === 408 ? "mail_result_unknown" : "mail_rejected" };
   }
-  return true;
+  return { delivered: true as const, channel: "resend" as const };
 }
 
 /** Minimal mail abstraction. Logs in environments without a provider. Never throws to callers. */
 export async function sendMail(message: MailMessage) {
   try {
-    if (await sendViaResend(message)) return { delivered: true as const, channel: "resend" as const };
+    const result = await sendViaResend(message);
+    if (result.delivered) return result;
+    return { ...result, channel: "log" as const };
   } catch (error) {
     console.error("[mail] send failed", error);
   }
   if (config.nodeEnv !== "production") {
     console.info("[mail:log]", message.to, message.subject);
   }
-  return { delivered: false as const, channel: "log" as const };
+  return { delivered: false as const, channel: "log" as const, failureKind: "uncertain" as const, errorCode: "mail_result_unknown" };
 }
 
 export function verificationEmail(to: string, code: string) {

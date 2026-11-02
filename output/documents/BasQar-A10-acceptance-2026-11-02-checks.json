@@ -1,0 +1,172 @@
+{
+  "stage": "A10",
+  "date": "2026-11-02",
+  "timezone": "Asia/Almaty",
+  "status": "implemented_and_automatically_verified_locally_visual_and_operational_acceptance_open",
+  "deployed": false,
+  "branch": "codex/stage9-release",
+  "head": "85ca15135f64ce2f7d54b129da8c3703001cae7d",
+  "workingTreeHasUncommittedChanges": true,
+  "apiFiles": 9,
+  "apiScenariosUnique": 199,
+  "apiScenariosByFile": {
+    "aiAction": 15,
+    "businessHome": 17,
+    "controlChat": 46,
+    "controlNotifications": 22,
+    "controlPlan": 27,
+    "situation": 23,
+    "situationPermissions": 6,
+    "businessGoal": 22,
+    "businessInsight": 21
+  },
+  "newApiScenarios": 18,
+  "webScenarios": 131,
+  "newWebScenarios": 7,
+  "repeatedTestsNote": "controlChat 45 in apiRegression is superseded by 46 in apiFinalDelivery; repeated businessHome and web tests are not counted twice",
+  "database": "isolated PGlite",
+  "externalProviders": "disabled; WhatsApp delivery mocked",
+  "migrationsAdded": 0,
+  "limits": {
+    "insightsChecked": 8,
+    "insightsShown": 2,
+    "goalsShown": 3,
+    "pendingOwnRuns": 2,
+    "recentOwnRuns": 2,
+    "resultLookbackDays": 7,
+    "newModelCallsForHomeAndBriefings": 0
+  },
+  "initialJavascript": {
+    "bytes": 1099941,
+    "gzipBytes": 278964,
+    "budgetBytes": 1100000,
+    "gzipBudgetBytes": 285000,
+    "marginBytes": 59
+  },
+  "browser": {
+    "verified": false,
+    "reason": "Computer-use inventory reports local browser use disabled in Work settings",
+    "automaticCoverage": "SSR output, localization, link targets, role-aware rendering and source review of responsive styles; no live browser rendering or keyboard interaction verified"
+  },
+  "limitations": [
+    "Only a bounded selection of recently generated insights and recently changed active goals; not a full company audit",
+    "Company context excluded for staff and for restricted Control financial/team/action access",
+    "Action results represent completed steps, not proof of a business outcome",
+    "Scheduled briefings still require WhatsApp QR; Cloud API automatic templates are outside this change",
+    "Quiet hours are shared only with the enabled notification rule matching this personal number and integration; skipped slots are not replayed",
+    "Event notification/digest content was not changed",
+    "Initial JS budget passes with 59 bytes of margin; existing large-chunk warning remains"
+  ],
+  "unverified": [
+    "Desktop/mobile 360-430 px and keyboard/focus acceptance",
+    "Linux/PostgreSQL and independent API/worker processes",
+    "Full Docker build",
+    "Production state and real provider delivery"
+  ],
+  "commands": [
+    "node scripts/test-api.mjs businessHome aiAction controlPlan controlChat controlNotifications situationPermissions situation",
+    "node scripts/test-api.mjs businessGoal businessInsight",
+    "node scripts/test-api.mjs controlChat businessHome",
+    "npm run test --workspace @creolab/web",
+    "node --test scripts/system-locale.test.mjs scripts/business-home.test.mjs",
+    "npm run typecheck",
+    "npm run typecheck --workspace @creolab/web",
+    "npm run build --workspace @creolab/web",
+    "git diff --check"
+  ],
+  "logs": {
+    "apiRegression": {
+      "path": "/tmp/basqar-a10-final-api.log",
+      "sha256": "d6005aeff4098a053373ca82942525973d3c0ee826b1931ae83e7aff723783ec",
+      "exitCode": 0,
+      "tests": 155,
+      "pass": 155,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "apiGoalsAndInsights": {
+      "path": "/tmp/basqar-a10-regression-http.log",
+      "sha256": "f44806e309d968cc941b163713dd38952541a70b7db0bcef4f81017e8e038150",
+      "exitCode": 0,
+      "tests": 43,
+      "pass": 43,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "apiFinalDelivery": {
+      "path": "/tmp/basqar-a10-delivery-tests.log",
+      "sha256": "aa5b2682489d9ac7ff117e4ab48e18e63e57d93c6c6c99666cff22d4c2536260",
+      "exitCode": 0,
+      "tests": 63,
+      "pass": 63,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "web": {
+      "path": "/tmp/basqar-a10-web-tests.log",
+      "sha256": "88df3d1f605a44d7e2f1f74a449072f2d574a7ef308f2dd84a9e8a8f3526e280",
+      "exitCode": 0,
+      "tests": 131,
+      "pass": 131,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "webFinal": {
+      "path": "/tmp/basqar-a10-web-final.log",
+      "sha256": "375cfe3f6ae05f9f6a4302803f295cf382391cc38bd71acbb6edce1d98d653c7",
+      "exitCode": 0,
+      "tests": 38,
+      "pass": 38,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "allTypes": {
+      "path": "/tmp/basqar-a10-types-final.log",
+      "sha256": "fc1610b9081f206e480555f9bc32f27b71d5c62deee39ced1d9a23b0d2cf29ba",
+      "exitCode": 0
+    },
+    "webTypesFinal": {
+      "path": "/tmp/basqar-a10-web-types-final.log",
+      "sha256": "00ad9a518c3d2264da5723e86e4ab983471a67188dd3176801338607805fafc8",
+      "exitCode": 0
+    },
+    "build": {
+      "path": "/tmp/basqar-a10-build.log",
+      "sha256": "918a754c007faaf0989cc216eef0e54db0263b85afbe9b6fe6539658477b9b6a",
+      "exitCode": 0
+    },
+    "diff": {
+      "path": "/tmp/basqar-a10-diff-check.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "exitCode": 0
+    }
+  },
+  "sourceSha256": {
+    "packages/contracts/src/businessHome.ts": "28340ab4b90a6260c6d899ee60c0ae493d7033732f4f0e74a365abb16f047811",
+    "packages/contracts/src/index.ts": "a036b9b08e18d680f158cce4e443ce8bedabb11a215a80821e6362df09a550da",
+    "apps/api/src/services/businessHomeService.ts": "f84dc29d60362261db3b25c6b60e36091dde4672efe5030e62f4cb2b532d5209",
+    "apps/api/src/services/controlBriefingService.ts": "1936473ed234b815920cf3bef463aa7609c9ffea592dfd9fff2e7391e7b78f2e",
+    "apps/api/src/services/aiActionService.ts": "e8305371d144f206237c1559de63db5a76e4fc155ed10181e5614858de774ff8",
+    "apps/api/src/services/businessGoalService.ts": "2b1102493a82f663505594e19a9f5c082d4f80b39a16e5e1afa34b5d1a63cc93",
+    "apps/api/src/services/businessInsightService.ts": "df7d5b9349eda5c511ddc027cfe4f6ae399ae950f3a147b16b7bc9c54f06cc84",
+    "apps/api/src/services/controlChatService.ts": "83baa127f6a9df6db4db5722dd224550f27c8e4897b8861013ea1ede5018c098",
+    "apps/api/src/services/controlChatDelivery.ts": "c0719f85472bca64d2b5698059a98903c676da9a13636136f349448c15c9b06a",
+    "apps/api/src/app.ts": "92a27a5c06c1159f542d5a3277be8df044bffc121256821215fb7de5a39d0fb6",
+    "apps/api/openapi.yaml": "da945d16af0190fd0c5c285a24fe5a81dbd34c81de3fa1e0eaf6ecb163e8b37b",
+    "apps/api/src/businessHome.test.ts": "635177c7a22ab858cf634880c1cbc63ea8863cfcb3a6af97d1fcb1ec1d168cb4",
+    "apps/api/src/controlChat.test.ts": "cc86a7c764e04f60f746bbd13ee1114b5ea92a24b9e98e543bbbdede6073d02f",
+    "apps/web/src/components/BusinessHomePanel.tsx": "63208d2b4d14b0471a5acbfbfa362bf6a1267c72dc4e2fb3be77dfb4d2f20ad0",
+    "apps/web/src/components/business-home.css": "eb76b533cd863fcbc3cb269a2ad86b31a971d2b69a3c1040602b9841c801d90a",
+    "apps/web/src/pages/SituationPage.tsx": "0f93a423069c1ce0d0f0a7298c8f0581e7c18455576ad632684587d622c80f00",
+    "apps/web/src/components/ControlWhatsAppSettings.tsx": "b3cd07d5064a7c8943a928a44a215884794335cb43edb62444ec5f678c347452",
+    "apps/web/package.json": "16788058dfa4e8403a1dd33d54dc7a09fdff0102323ea9d95e30dd23bc7d8c3d",
+    "scripts/business-home.test.mjs": "3e80f65a9b19225265d0972d44d10e7eb51479db5e7b4a4934bb6b956f16710b",
+    "scripts/system-locale.test.mjs": "f967f769b7d1fc4bcba3a20ca0d876d1649f69e50c4810f035608562f88a7ab4"
+  },
+  "nextStage": "A11: approved bounded initiatives and measured outcomes without unsupported causal claims; A12 release acceptance remains open"
+}

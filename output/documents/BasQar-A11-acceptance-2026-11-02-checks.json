@@ -1,0 +1,135 @@
+{
+  "stage": "A11",
+  "date": "2026-11-02",
+  "status": "implemented_locally_release_acceptance_pending",
+  "branch": "codex/stage9-release",
+  "baseHead": "85ca15135f64ce2f7d54b129da8c3703001cae7d",
+  "published": false,
+  "productionDataChanged": false,
+  "externalDeliveryUsed": false,
+  "scope": "Prospective before/after calendar time to first recorded proposal preparation; no causal or revenue claims; no automatic configuration changes.",
+  "tests": {
+    "uniqueApiScenarios": 135,
+    "apiFiles": [
+      "aiAction",
+      "businessExperiment",
+      "businessGoal",
+      "businessHome",
+      "businessMemory",
+      "schemaPatches",
+      "taskDelivery"
+    ],
+    "webScenarios": 140,
+    "a11ApiScenarios": 22,
+    "a11WebScenarios": 9,
+    "database": "isolated PGlite; providers disabled"
+  },
+  "checks": {
+    "apiRegression": {
+      "path": "/tmp/basqar-a11-regression.log",
+      "sha256": "f30796558545bd5069725cee561eb849471377e532e93325c63a730d52b92eb9",
+      "exitCode": 0,
+      "tests": 135,
+      "pass": 135,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "apiFinal": {
+      "path": "/tmp/basqar-a11-api-final.log",
+      "sha256": "3c1b351919c1b9e824e1011510c2ce6f6ab3060d452bead8a4fe7e18590700a4",
+      "exitCode": 0,
+      "tests": 22,
+      "pass": 22,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "web": {
+      "path": "/tmp/basqar-a11-web-all.log",
+      "sha256": "5a1a51afe0a12d16aadaf5bf9ef5e8c56360ea24d52a03c5bd4512d95841fa4a",
+      "exitCode": 0,
+      "tests": 140,
+      "pass": 140,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "allTypes": {
+      "path": "/tmp/basqar-a11-types-final.log",
+      "sha256": "fc1610b9081f206e480555f9bc32f27b71d5c62deee39ced1d9a23b0d2cf29ba",
+      "exitCode": 0
+    },
+    "build": {
+      "path": "/tmp/basqar-a11-build-final.log",
+      "sha256": "3ade3dbba2ea8e30b5a123def77416eb1f84419f84f04536c1ed93a32df2e5fc",
+      "exitCode": 0
+    },
+    "yaml": {
+      "path": "/tmp/basqar-a11-yaml.log",
+      "sha256": "ec660a5479c80473b894ca692813cbb24625dadd6db105c33da66813e8b31afc",
+      "exitCode": 0
+    },
+    "diff": {
+      "path": "/tmp/basqar-a11-diff-final.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "exitCode": 0
+    }
+  },
+  "bundle": {
+    "initialBytes": 1099941,
+    "initialGzipBytes": 278966,
+    "budgetBytes": 1100000,
+    "budgetGzipBytes": 285000,
+    "files": [
+      "assets/index-DIsKZwNE.js"
+    ],
+    "experimentLazyChunk": "assets/BusinessExperimentsPanel-BjO0vrOv.js"
+  },
+  "sourceSha256": {
+    ".github/workflows/release-acceptance.yml": "0b2e2848720c9e9ee04e9f2256a27842beb0ad38b1f0752877c51dc0a283e5b9",
+    "apps/api/openapi.yaml": "e38f5e15ed51135ba1ec381e50db04da71c9b11c72a50970dd222383c31fae65",
+    "apps/api/src/app.ts": "67053dd465529affd4e673615c487b826f6834a0d50c47472cdd2bd5052235f5",
+    "apps/api/src/lib/auditPresentation.ts": "daa4fab78d205dccc9f02d300b7dbd0b2832f1e10e84cf75f6866c379335e584",
+    "apps/api/src/services/businessExperimentService.ts": "7174cde169e57b94f2bee18c0e2fe7fb48f750d98a54ca1eec3ebef34d558015",
+    "apps/api/src/services/businessExperimentMetrics.ts": "6abf2e15d4d351d4681d9eb70e884bb0d6069499de975d44a3427c5ba06e1465",
+    "apps/api/src/businessExperiment.test.ts": "5cc7a70ecc2f403072c3e16d5c867d9ad7f016441e4b73cb71ee541df0a0925d",
+    "apps/api/src/schemaPatches.test.ts": "2400ecf931a99ad1d1e34c2cdc8c921b26e2055f3a859c012e693a3978dc5415",
+    "apps/web/src/pages/ControlPage.tsx": "0abf1db7f53a33bc6f000537f0dd41324a8f83c524965c7588986f236b9802e7",
+    "apps/web/src/components/BusinessExperimentsPanel.tsx": "533dee6593a552e3062957fe34c98e36bdd67862351e1ffb129d07c103d1db07",
+    "apps/web/src/components/BusinessExperimentForm.tsx": "d78bd16de36ac9f9903e47ef7bb8aacb6ec0d6e6cd90bbf7c9b8394e28e01d70",
+    "apps/web/src/components/BusinessExperimentResult.tsx": "b54797d90ea4848f04eeb267808aa5ff9a3504aa989151b21d2ab88e57540bc5",
+    "apps/web/src/components/business-experiments.css": "a1681dd197ae519e2017e67b567af6055e8899a613aefebf102bea2c3ec7d537",
+    "apps/web/package.json": "18967244f9a5883a8c614e745c1167229373f74b743970f0227d2612df772375",
+    "packages/api-client/package.json": "ffe081216cd8dad2f7b3103171e1cec4bf4c87037cf8598373714a642e76fe48",
+    "packages/api-client/src/businessExperiments.ts": "681306fdaad94690cb9842302564b9719ed0c1963bc1ad4851474fccd9cccf21",
+    "packages/contracts/src/businessExperiment.ts": "c8197993e68a048ca03d5bd62093586edf9fa4f70a1fe6fa333a39ecd1677f24",
+    "packages/contracts/src/index.ts": "0764d94f21f6c69d868717fd2b66886a11c517ca929481f5231fcb9e66829dfc",
+    "packages/db/prisma/schema.prisma": "cb2c5fd94c4f811246058f3d48c03e6757ee41d0c1b8bc70379427fd5393f563",
+    "packages/db/src/businessExperimentSchema.ts": "738473013d5628d6b204f61bd4f1d8291f8187c24ec168419db01252a6e84616",
+    "packages/db/src/client.ts": "09b52ee475e9ba6e73cd93f24bae1ea8cace737fc1771a3e28d7c1d1f4a875e0",
+    "scripts/business-experiments.test.mjs": "68ed5051fc6ee843da8140714ef1324fdf89de3524564dae691d8b786781845d"
+  },
+  "openAcceptance": [
+    "Desktop/mobile/keyboard browser validation (tool returned browser disabled)",
+    "Real PostgreSQL/Linux/container execution",
+    "Multi-process API/worker and load acceptance",
+    "Backup/restore and release verification",
+    "Observed business effect on agreed pilot cohort"
+  ],
+  "limits": {
+    "activeExperimentsPerTenant": 25,
+    "membersPerExperiment": 20,
+    "sourceTaskCap": 2000,
+    "minimumPreparedPerPeriod": 10,
+    "maximumConfiguredMinimum": 500,
+    "periodDays": [
+      7,
+      14,
+      28
+    ],
+    "manualMeasurement": true,
+    "causal": false
+  },
+  "nextStage": "A12 operational acceptance and gradual release; no commit, push or deploy performed"
+}

@@ -1,0 +1,96 @@
+{
+  "stage": "A1",
+  "date": "2026-11-01",
+  "status": "implemented_and_tested_locally",
+  "deployed": false,
+  "branch": "codex/stage9-release",
+  "base_head": "85ca15135f64ce2f7d54b129da8c3703001cae7d",
+  "pre_a1_diff": "/tmp/basqar-pre-a1-2026-11-01.diff",
+  "checks": [
+    {
+      "name": "server_regression",
+      "command": "node scripts/test-api.mjs aiAction aiControl taskExecution taskDelivery taskTargeting taskBoard taskResult controlNotifications outboxReliability backgroundReliability schemaPatches http",
+      "result": "passed",
+      "log": "/tmp/basqar-a1-acceptance-tests.log",
+      "sha256": "f7a074fb86ecbd1f62bc5a72d40ec56f4f71429ddafa8a0fd1599d26960ec5f0",
+      "tests": 126,
+      "failed": 0,
+      "files_summary": "12/12 test files passed (isolated PGlite databases; external providers disabled)."
+    },
+    {
+      "name": "final_single_task_contract",
+      "command": "node scripts/test-api.mjs aiAction",
+      "result": "passed",
+      "log": "/tmp/basqar-a1-contract-final.log",
+      "sha256": "748927099ffaed49ad07712260febfc885162bd5dd5f92f447463bd6cf5b49b9",
+      "tests": 15,
+      "failed": 0,
+      "files_summary": "1/1 test files passed (isolated PGlite databases; external providers disabled)."
+    },
+    {
+      "name": "types",
+      "command": "npm run typecheck",
+      "result": "passed",
+      "log": "/tmp/basqar-a1-acceptance-types.log",
+      "sha256": "fc1610b9081f206e480555f9bc32f27b71d5c62deee39ced1d9a23b0d2cf29ba"
+    },
+    {
+      "name": "web_tests",
+      "command": "npm run test --workspace=@creolab/web",
+      "result": "passed",
+      "log": "/tmp/basqar-a1-web-tests.log",
+      "sha256": "8c8cf0c7766d38f13232901557bf1599ea2c568b8a5f0513659a74df4c02c4ed",
+      "tests": 81,
+      "failed": 0
+    },
+    {
+      "name": "web_build",
+      "command": "npm run build --workspace=@creolab/web",
+      "result": "passed",
+      "log": "/tmp/basqar-a1-acceptance-build.log",
+      "sha256": "a53751805521bf9dc5506d9968e7a08c9cb1cae18897ccea52dab5de1f058fb5",
+      "bundle": "Initial JavaScript: 1099.7 kB; gzip 278.9 kB (1 files)"
+    }
+  ],
+  "source_sha256": {
+    "packages/contracts/src/aiAction.ts": "3ed19080d3137eb03d93c0c26d99ffc58844144d8f67d9dc39e5082bd0496f9f",
+    "packages/contracts/src/index.ts": "9fedbf8ff42660fea08a3556bef108fc0169b45bc8e9f9e2cd3ea31a46e92089",
+    "packages/db/prisma/schema.prisma": "e5a33a8da5a5ed03fc2a212e34d4d03729f404f82a9ce34f9ac51c4bb3efed9a",
+    "packages/db/src/aiActionSchema.ts": "f55f0f789bdf75859677b404596208bbe3128a64930ee0ca59e00cc2d83d3f0f",
+    "packages/db/src/client.ts": "dec638826f6d0b744d40a0dc4b1ddcc31df8fd8849785950361cf393feab183f",
+    "apps/api/src/lib/transaction.ts": "631ddb3a802b23fb98e3491ba18f53740c7204104a01fe975693028561d831a5",
+    "apps/api/src/lib/auditPresentation.ts": "7f19d3d85d715b92b690d7ba0c24d21fdcd133110b8469a6b3a8cb27ee74ccc8",
+    "apps/api/src/services/aiActionRegistry.ts": "cab8420f99a59edc52d86143491a3be9915757585d549b6c8b8b037acd7cd351",
+    "apps/api/src/services/aiActionService.ts": "2bb4da5c89df1c2dd10f466b781247a6a2df91805d4aec9f5007aec340243b46",
+    "apps/api/src/services/aiControlService.ts": "f9e6e467075d99079665512eeaeb690b5337f471827909a37ea8e619707401a3",
+    "apps/api/src/services/authService.ts": "fa525fa3dbceea9190d2f4e1fe4ba807e084ad9159aeda6d39340e19c119eef3",
+    "apps/api/src/services/entitlementService.ts": "1786a4f8a80b61a3956e8f3b4e3c7f9b74503ad09f05e6e620ff519f9522921d",
+    "apps/api/src/services/domainService.ts": "b1a2cb3bb37997f18b12a61e96f130010bb40f23d3c10d7edae0c84c346db0e7",
+    "apps/api/src/services/taskExecutionService.ts": "f6f6596f710ec6f351feecb6ccf6e3d4a57fd9689a56dbdfcded60227d3c4724",
+    "apps/api/src/services/notificationService.ts": "6bdc2ee327e89d15def7496f2bcb77882a3b3be6770728e42f760e67ac875d8e",
+    "apps/api/src/services/notificationPolicy.ts": "b65f851737cd29c55d5fc939bbaf9d49c5be5b746493ddcd15edf385b119ff6b",
+    "apps/api/src/services/backgroundJobs.ts": "606e90056dc7738051136c02bf0040be53f07ec71d1370422a829ab6de08c9e0",
+    "apps/api/src/services/outboxFailurePolicy.ts": "26de774b83a454dfe5c77abc46e7ce225f5d80bf66b1c6847caf694e3d2827bc",
+    "apps/api/src/services/outboxDiagnosticsService.ts": "09df465aaf6c52278a807019ec40ce06b8ed403b1ba2378087338da43914ac65",
+    "apps/api/src/app.ts": "410c17b9fafe64e3893d9f5fe90defc050f26cf0c1573f86b276c0ad8d71b726",
+    "apps/api/openapi.yaml": "ff8c7ed7bfc1d92c73fab5271ba745caf43e77db48fedf77edc0064c25aaa889",
+    "apps/api/src/aiAction.test.ts": "dbde53638a594f7923804c4430cb636b7451957531407544716f37dc17216a00",
+    "apps/api/src/schemaPatches.test.ts": "0f3be335cb332cabbab9ce9e96cbd65d6649762c085325430e44a37277d2e4db",
+    "apps/web/src/pages/ControlPage.tsx": "5d88ac116f2d59f86cf6bb7193dda4aaa1f5ddf9e7c51493b924cb1d7ab7453e",
+    "apps/web/src/components/ActionPlansPanel.tsx": "aca8cbf5b9449ffac81b7b11a90e088582407724492df90be94c762fe9c9194f",
+    "apps/web/src/components/action-plans.css": "cb013891d55884e94f3bbe07cbddbc4f8004766c116b1717ef4d4271f8651796",
+    "apps/web/src/lib/aiActions.ts": "ff154ac790ab61436ea21d153207b719ad6780dad28e0c3a7bbd98c0db9b311b"
+  },
+  "not_verified": [
+    "visual_desktop_mobile_browser_disabled",
+    "real_postgresql_cross_process_concurrency",
+    "linux_docker_build",
+    "production_deploy"
+  ],
+  "notes": [
+    "Separate test databases; external providers disabled.",
+    "12-file regression: 126 tests. Last single-task contract change rechecked with all 15 aiAction tests.",
+    "81 existing web tests do not replace visual QA.",
+    "Existing A0 and earlier changes retained; no publication or deployment."
+  ]
+}

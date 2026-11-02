@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createHmac, createHash } from "node:crypto";
+import { createHmac, createHash, randomUUID } from "node:crypto";
 import { after, before, describe, it } from "node:test";
 import { createPrismaClient } from "@creolab/db";
 import { createApp } from "./app.ts";
@@ -86,6 +86,58 @@ describe("CRM HTTP domain", () => {
     const data = await me.json();
     assert.equal(data.user.email, "owner@creolab.example");
     assert.equal(data.user.phone, undefined);
+  });
+
+  it("Control settings and legacy board have distinct authenticated response contracts", async () => {
+    for (const path of ["/api/v1/workspace/control", "/api/v1/workspace/control/board", "/api/v1/workspace/outbox/failures"]) {
+      assert.equal((await fetch(`${base}${path}`)).status, 401);
+    }
+    const settings = await fetch(`${base}/api/v1/workspace/control`, { headers: { cookie } });
+    assert.equal(settings.status, 200); const config = await settings.json();
+    assert.equal(typeof config.enabled, "boolean"); assert.ok(Array.isArray(config.catalog)); assert.ok(Array.isArray(config.users));
+    assert.equal(config.metrics, undefined);
+    const board = await fetch(`${base}/api/v1/workspace/control/board`, { headers: { cookie } });
+    assert.equal(board.status, 200); const state = await board.json();
+    assert.ok(Array.isArray(state.items)); assert.ok(state.metrics); assert.equal(state.catalog, undefined);
+    const diagnostics = await fetch(`${base}/api/v1/workspace/outbox/failures`, { headers: { cookie } });
+    assert.equal(diagnostics.status, 200); assert.equal(diagnostics.headers.get("cache-control"), "no-store");
+    assert.ok(Array.isArray((await diagnostics.json()).items));
+  });
+
+  it("legacy sandbox explicitly returns a simulation without a model or usage charge", async () => {
+    const before = await prisma.aIUsageEvent.count();
+    const response = await fetch(`${base}/api/v1/ai/sandbox`, { method: "POST", headers: { cookie, "Content-Type": "application/json" }, body: JSON.stringify({ message: "Проверка" }) });
+    assert.equal(response.status, 200); const result = await response.json();
+    assert.equal(result.usedLlm, false); assert.equal(result.mode, "demonstration");
+    const execution = await prisma.aIExecution.findUniqueOrThrow({ where: { id: result.executionId } });
+    assert.equal(execution.model, null); assert.equal(execution.status, "simulated");
+    assert.equal(await prisma.aIUsageEvent.count(), before);
+  });
+
+  it("deal risk task endpoint authenticates, requires confirmation and safely returns the same task on retry", async () => {
+    const member = await prisma.membership.findFirstOrThrow({ where: { user: { email: "owner@creolab.example" } } });
+    const tenantId = member.tenantId;
+    const stage = await prisma.dealStage.findFirstOrThrow({ where: { tenantId, isTerminal: false } });
+    const contact = await prisma.contact.create({ data: { tenantId, name: `Risk HTTP ${randomUUID()}` } });
+    const deal = await prisma.deal.create({ data: { tenantId, stageId: stage.id, contactId: contact.id, title: "HTTP confirmed step", assigneeMembershipId: member.id } });
+    const report = await fetch(`${base}/api/v1/sales/control`, { headers: { cookie } });
+    assert.equal(report.status, 200);
+    const risk = (await report.json()).items.find((d: any) => d.id === deal.id).risk;
+    assert.equal(risk.recommendation.kind, "create_task");
+    const input = { confirmed: true, fingerprint: risk.fingerprint, title: risk.recommendation.title,
+      dueAt: risk.recommendation.dueAt, ownerMembershipId: member.id };
+    const post = (body: unknown, session = cookie) => fetch(`${base}/api/v1/sales/deals/${deal.id}/risk-task`, {
+      method: "POST", headers: { "Content-Type": "application/json", cookie: session }, body: JSON.stringify(body),
+    });
+    assert.equal((await post(input, "")).status, 401);
+    assert.equal((await post(input, otherCookie)).status, 404);
+    assert.equal((await post({ ...input, confirmed: false })).status, 422);
+    assert.equal(await prisma.task.count({ where: { dealId: deal.id } }), 0);
+    const created = await post(input); assert.equal(created.status, 200); const result = await created.json();
+    const retry = await post(input); assert.equal(retry.status, 200);
+    assert.deepEqual(await retry.json(), { id: result.id, reused: true });
+    assert.equal(await prisma.task.count({ where: { dealId: deal.id } }), 1);
+    assert.equal(await prisma.activity.count({ where: { dealId: deal.id, type: "task.created" } }), 1);
   });
 
   it("A02: форма с телефоном создаёт заявку без WhatsApp", async () => {

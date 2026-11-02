@@ -150,6 +150,14 @@ describe("AI manager policy runtime", { concurrency: false }, () => {
       assert.ok(body.legacyChannels.some((row: { id: string }) => row.id === legacy.id));
       assert.ok(!body.channels.some((row: { id: string }) => row.id === legacy.id));
       assert.equal(body.channels.find((row: { id: string }) => row.id === direct.id)?.enabled, true);
+      assert.deepEqual(body.channelCapabilities.find((row: { type: string }) => row.type === "whatsapp_seller"), { type: "whatsapp_seller", inboundReplies: true, automatedFollowUp: true });
+      for (const type of ["whatsapp_qr", "whatsapp_cloud", "telegram_bot", "instagram_direct", "website_chat"]) {
+        assert.deepEqual(body.channelCapabilities.find((row: { type: string }) => row.type === type), { type, inboundReplies: true, automatedFollowUp: false });
+      }
+      assert.equal(body.channels.find((row: { id: string }) => row.id === direct.id)?.capabilities.automatedFollowUp, false);
+      assert.equal(body.legacyChannels.find((row: { id: string }) => row.id === legacy.id)?.capabilities.automatedFollowUp, true);
+      await prisma.integration.update({ where: { id: direct.id }, data: { status: "disabled" } });
+      assert.equal((await json("/api/v1/settings/ai-automation")).body.channels.find((row: { id: string }) => row.id === direct.id)?.connected, false);
       const other = await json("/api/v1/settings/ai-automation", {}, otherCookie);
       assert.ok(![...other.body.channels, ...other.body.legacyChannels].some((row: { id: string }) => row.id === legacy.id || row.id === direct.id));
     } finally {
@@ -306,8 +314,10 @@ describe("AI manager policy runtime", { concurrency: false }, () => {
       data: { settingsJson: mergeAIAutomationIntoSettingsJson(tenant.settingsJson, current) as never },
     });
     const contact = await prisma.contact.create({ data: { tenantId, name: "Клиент Followup" } });
+    const integration = await prisma.integration.create({ data: { tenantId, type: "whatsapp_seller", name: "Follow-up reply fixture", status: "active", automationMode: "AUTO" } });
+    const channel = await prisma.channelConnection.create({ data: { tenantId, integrationId: integration.id, channelType: "whatsapp", status: "active" } });
     const conversation = await prisma.conversation.create({
-      data: { tenantId, contactId: contact.id, mode: "ai", status: "open" },
+      data: { tenantId, contactId: contact.id, mode: "ai", status: "open", sellerLeadId: "followup-client-replied", connectionId: channel.id },
     });
     await prisma.message.create({
       data: {
@@ -446,6 +456,29 @@ describe("AI manager policy runtime", { concurrency: false }, () => {
     assert.ok(["canceled", "done", "failed", "running"].includes(updated.state));
   });
 
+  it("does not schedule or send unsupported native-channel follow-ups even when the company switch is on", async () => {
+    const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
+    const current = parseAIAutomationSettings(tenant.settingsJson);
+    current.defaultMode = "AUTO"; current.analyzeNewRequests = true; current.followUp.enabled = true; current.replyAudience.audience = "all";
+    await prisma.tenant.update({ where: { id: tenantId }, data: { settingsJson: mergeAIAutomationIntoSettingsJson(tenant.settingsJson, current) as never } });
+    try {
+      for (const type of ["whatsapp_qr", "whatsapp_cloud", "telegram_bot", "instagram_direct", "website_chat"]) {
+        const integration = await prisma.integration.create({ data: { tenantId, type, name: "Capability fixture", status: "active" } });
+        const channel = await prisma.channelConnection.create({ data: { tenantId, integrationId: integration.id, channelType: type, status: "active", autoReply: true } });
+        const conversation = await prisma.conversation.create({ data: { tenantId, connectionId: channel.id, mode: "ai", status: "open", sellerLeadId: `legacy-alias-${channel.id}` } });
+        const anchor = await prisma.message.create({ data: { tenantId, conversationId: conversation.id, senderKind: "ai", direction: "outbound", text: "Уточните, пожалуйста, запрос" } });
+        await refreshConversationFollowUp(prisma, tenantId, conversation.id);
+        assert.equal(await prisma.scheduledAction.count({ where: { tenantId, parentId: conversation.id } }), 0, type);
+        const old = await prisma.scheduledAction.create({ data: { tenantId, type: "client_followup", parentType: "conversation", parentId: conversation.id, dueAt: new Date(0), payloadJson: { attempt: 1, lastOutboundMessageId: anchor.id } } });
+        assert.equal((await processClientFollowUp(prisma, old)).skipped, "no_channel", type);
+        assert.equal((await prisma.scheduledAction.findUniqueOrThrow({ where: { id: old.id } })).state, "canceled");
+        assert.equal(await prisma.outboundOperation.count({ where: { tenantId, conversationId: conversation.id } }), 0);
+        assert.equal(await prisma.message.count({ where: { tenantId, conversationId: conversation.id } }), 1);
+      }
+    } finally {
+      await prisma.tenant.update({ where: { id: tenantId }, data: { settingsJson: tenant.settingsJson as never } });
+    }
+  });
   it("does not leak company A settings into company B JSON", async () => {
     const b = await prisma.tenant.findUniqueOrThrow({ where: { id: otherTenantId } });
     const bSettings = parseAIAutomationSettings(b.settingsJson);

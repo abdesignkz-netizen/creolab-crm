@@ -10,13 +10,14 @@ it("failed outbox work remains pending and does not block the next event", async
   const updates: any[] = [];
   let fail = true;
   const events = [
-    { id: "retry", tenantId: "tenant", type: "inquiry.automation", attempts: 0, payloadJson: { tenantId: "tenant", inquiryId: "inquiry" } },
-    { id: "next", tenantId: "tenant", type: "inquiry.automation", attempts: 0, payloadJson: {} },
+    { id: "retry", tenantId: "tenant", entityId: "inquiry", type: "inquiry.automation", attempts: 0, retryAttempts: 1, availableAt: new Date(0), payloadJson: { tenantId: "tenant", inquiryId: "inquiry" } },
+    { id: "next", tenantId: "tenant", entityId: "missing", type: "inquiry.automation", attempts: 0, retryAttempts: 1, availableAt: new Date(0), payloadJson: { tenantId: "tenant", inquiryId: "missing" } },
   ];
   const prisma = {
-    inquiry: { findFirst: async () => { if (fail) throw new Error("transient DB failure"); return null; } },
+    inquiry: { findFirst: async ({ where }: any) => { if (fail && where.id === "inquiry") throw new Error("transient DB failure"); return null; } },
     outboxEvent: {
       findMany: async () => events,
+      findFirst: async ({ where }: any) => events.find(row => row.id === where.id),
       updateMany: async (input: any) => {
         if (input.data.attempts) updates.push(input);
         return { count: 1 };

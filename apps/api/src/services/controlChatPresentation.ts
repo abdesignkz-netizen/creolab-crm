@@ -1,5 +1,6 @@
 import type { ControlAction, SalesForecast } from "@creolab/contracts";
 import { presentControlForecast } from "./controlForecastPresentation.ts";
+import { presentSalesControl } from "./controlSalesRiskPresentation.ts";
 import { CONTROL_ACTION_META, validateClientPhone } from "@creolab/contracts";
 import { config } from "../config.ts";
 import { formatPhoneDisplay } from "./contactLabels.ts";
@@ -18,6 +19,7 @@ export function controlTaskClientLabel(item: Record<string, unknown>, lang: Chat
 export function presentControlReply(action: ControlAction, result: unknown, lang: ChatLanguage, timeZone: string) {
   const data = record(record(result).data), w = (ru: string, kk: string) => words(lang, ru, kk);
   if (action === "GET_SALES_FORECAST") return presentControlForecast(data.forecast as SalesForecast | undefined, lang, controlLink("/stats?tab=sales&period=this_month"));
+  if (action === "GET_SALES_CONTROL") return presentSalesControl(data, lang, timeZone, controlLink);
   const time = (v: unknown) => v && Number.isFinite(new Date(String(v)).getTime()) ? new Date(String(v)).toLocaleString(lang === "kk" ? "kk-KZ" : "ru-RU", { timeZone, dateStyle: "short", timeStyle: "short" }) : w("без срока", "мерзімсіз");
   const task = (item: any, i: number) => `${i + 1}. ${cleanText(item.title, 160)}\n${controlTaskClientLabel(item, lang)}\n${data.taskStatus === "completed" ? `${w("Завершено", "Аяқталды")}: ${item.completedAt ? time(item.completedAt) : w("дата не указана", "күні көрсетілмеген")}` : time(item.dueAt)}${item.overdue ? w(" · просрочено", " · мерзімі өткен") : ""}${item.ownerName ? ` · ${cleanText(item.ownerName, 50)}` : ""}`;
   const items: any[] = Array.isArray(data.items) ? data.items : [];
@@ -99,16 +101,6 @@ export function presentControlReply(action: ControlAction, result: unknown, lang
     if (!rows.length) lines.push(w("Задач нет.", "Тапсырмалар жоқ."));
     if (action !== "GET_TODAY_TASKS") lines.push(data.taskStatus === "completed" ? w("Период относится к дате завершения задачи.", "Кезең тапсырманың аяқталған күніне қатысты.") : w("Период относится к сроку задачи.", "Кезең тапсырма мерзіміне қатысты."));
     lines.push(controlLink("/tasks"));
-  } else if (action === "GET_SALES_CONTROL") {
-    lines.push(`${w("Цель", "Мақсат")}: ${cleanText(data.goalLabel)}`);
-    lines.push(`${w("Активных сделок", "Белсенді мәмілелер")}: ${data.summary?.active || 0}`);
-    const filterLabels: Record<string, string> = { attention: w("Нужно участие", "Қатысу қажет"), ready: w("Близки к покупке", "Сатып алуға жақын"), goal: w("Цель достигнута", "Мақсат орындалды") };
-    if (filterLabels[data.filter]) lines.push(`${filterLabels[data.filter]}: ${items.length}`);
-    if (data.limited) lines.push(w("Подробности по первым 200 сделкам.", "Алғашқы 200 мәміленің деректері."));
-    lines.push(...items.slice(0, 6).map((r: any, i: number) => `${i + 1}. ${cleanText(r.contactName)}${r.phone ? ` · ${cleanText(r.phone)}` : ""} — ${cleanText(r.title)}\n${cleanText(r.stage)}. ${r.goalReached ? w("Цель достигнута", "Мақсат орындалды") : r.closeToSale ? w("Заказ на завершающем этапе", "Тапсырыс аяқталуға жақын") : ""}\n${w("Следующий шаг", "Келесі қадам")}: ${cleanText(r.nextAction || "Не запланирован")}\n${(r.blockers || []).map((b: string) => cleanText(b)).join("; ")}`));
-    if (data.proposals?.length) lines.push(`${w("Предложений создать сделку", "Мәміле құру ұсыныстары")}: ${data.proposals.length}`);
-    if (!items.length) lines.push(data.filter && data.filter !== "all" ? w("Подходящих сделок нет.", "Сәйкес мәмілелер жоқ.") : w("Активных сделок нет.", "Белсенді мәмілелер жоқ."));
-    lines.push(controlLink(`/control?view=sales&filter=${encodeURIComponent(data.filter || "all")}`));
   } else if (action === "GET_SITUATION") {
     const a = record(data.attention);
     for (const [key, ru, kk] of [["needsReply", "Ждут ответа", "Жауап күтіп отыр"], ["needsHuman", "Нужен сотрудник", "Қызметкер керек"], ["overdueTasks", "Просроченные задачи", "Мерзімі өткен тапсырмалар"], ["noNextAction", "Без следующего шага", "Келесі қадам жоқ"], ["stalledDeals", "Застрявшие сделки", "Тоқтап қалған мәмілелер"]]) lines.push(`${w(ru, kk)}: ${a[key] ?? 0}`);

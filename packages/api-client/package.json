@@ -4,6 +4,11 @@
   "type": "module",
   "main": "./src/index.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./business-insights": "./src/businessInsights.ts",
+    "./business-goals": "./src/businessGoals.ts",
+    "./business-memory": "./src/businessMemory.ts",
+    "./autopilot": "./src/autopilot.ts",
+    "./business-experiments": "./src/businessExperiments.ts"
   }
 }

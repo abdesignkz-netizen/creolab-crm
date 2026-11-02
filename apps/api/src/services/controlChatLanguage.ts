@@ -176,6 +176,8 @@ export function quickControlCommand(text: string, timeZone = "Asia/Almaty", now 
   const salesFilters: Record<string, ChatCommand["salesFilter"]> = {
     "какие клиенты близки к покупке": "ready", "клиенты близкие к покупке": "ready", "клиенты близки к покупке": "ready", "клиентов близких к покупке": "ready",
     "что мешает завершить сделки": "attention", "где нужно мое участие в продажах": "attention", "по каким сделкам цель достигнута": "goal",
+    "риски сделок": "attention", "сделки под риском": "attention", "какие сделки под риском": "attention", "что делать по сделкам": "attention",
+    "мәміле тәуекелдері": "attention", "тәуекелдегі мәмілелер": "attention", "қай мәмілелерге назар аудару керек": "attention",
   };
   if (salesFilters[t]) return { action: "GET_SALES_CONTROL", salesFilter: salesFilters[t] };
   const exact: Record<string, ChatCommand["action"]> = {

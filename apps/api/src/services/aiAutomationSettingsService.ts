@@ -6,7 +6,7 @@ import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { requireAiSettingsAccess } from "../lib/access.ts";
 import { writeAudit } from "../lib/audit.ts";
-import { aiChannelTypes } from "./aiChannels.ts";
+import { aiChannelCapabilities, aiChannelTypes } from "./aiChannels.ts";
 import {
   applyModeToSettings,
   mergeAIAutomationIntoSettingsJson,
@@ -38,13 +38,14 @@ export async function getAIAutomationSettings(prisma: PrismaClient, auth: AuthCo
   // Legacy seller connections do not use channel.autoReply; their runtime is
   // separate. Listing that placeholder flag would falsely show AI as disabled.
   const channels = await prisma.channelConnection.findMany({ where: { tenantId: membership.tenantId, integration: { type: { in: aiChannelTypes } } },
-    select: { integrationId: true, status: true, autoReply: true, integration: { select: { name: true, type: true } } } });
+    select: { integrationId: true, status: true, autoReply: true, integration: { select: { name: true, type: true, status: true } } } });
   const legacyChannels = await prisma.integration.findMany({ where: { tenantId: membership.tenantId, type: "whatsapp_seller" },
     select: { id: true, name: true, status: true, connectionStatus: true } });
   return {
     runtimePaused: Boolean((tenant?.settingsJson as any)?.runtime?.aiPaused),
-    legacyChannels: legacyChannels.map(channel => ({ id: channel.id, name: channel.name, connected: channel.status !== "disabled" && channel.connectionStatus === "CONNECTED" })),
-    channels: channels.map(channel => ({ id: channel.integrationId, name: channel.integration.name, type: channel.integration.type, connected: channel.status === "active", enabled: channel.autoReply })),
+    channelCapabilities: [...aiChannelTypes, "whatsapp_seller"].map(type => ({ type, ...aiChannelCapabilities(type) })),
+    legacyChannels: legacyChannels.map(channel => ({ id: channel.id, name: channel.name, connected: channel.status !== "disabled" && channel.connectionStatus === "CONNECTED", capabilities: aiChannelCapabilities("whatsapp_seller") })),
+    channels: channels.map(channel => ({ id: channel.integrationId, name: channel.integration.name, type: channel.integration.type, connected: channel.status === "active" && channel.integration.status === "active", enabled: channel.autoReply, capabilities: aiChannelCapabilities(channel.integration.type) })),
     salesMembers: (await prisma.membership.findMany({ where: { tenantId: membership.tenantId, active: true, user: { status: "active" } }, include: { user: { select: { name: true } } } })).map(m => ({ id: m.id, name: m.user.name })),
     ...settings,
     timezone: tenant?.timezone || "Asia/Almaty",
@@ -56,13 +57,19 @@ export async function getAIAutomationSettings(prisma: PrismaClient, auth: AuthCo
   };
 }
 
-export async function updateAIAutomationSettings(
-  prisma: PrismaClient,
+/** Joins an existing configuration transaction. External sync belongs after commit. */
+export async function saveAIAutomationSettingsInTransaction(
+  prisma: Prisma.TransactionClient,
   auth: AuthContext,
   input: Partial<AIAutomationSettings> & { defaultMode?: AutomationMode; timezone?: string },
+  options: { preferencesOnly?: boolean } = {},
 ) {
+  if (options.preferencesOnly && Object.keys(input).some(key => !["replyAudience", "conversationHours", "firstContactSlaMinutes", "scheduleMode", "workingHours"].includes(key))) {
+    throw new ApiError(422, "invalid", "Проект может изменить только аудиторию, расписание и срок ответа.");
+  }
   requireAiSettingsAccess(auth);
   const membership = requireTenant(auth);
+  await prisma.$queryRaw`SELECT id FROM "Tenant" WHERE id = ${membership.tenantId} FOR UPDATE`;
   const tenant = await prisma.tenant.findUnique({ where: { id: membership.tenantId } });
   if (!tenant) throw new ApiError(404, "not_found", "Компания не найдена");
 
@@ -130,24 +137,34 @@ export async function updateAIAutomationSettings(
   }
   next.sourceModes = applyModeToSettings(next, next.defaultMode).sourceModes;
 
-  const settingsJson = mergeAIAutomationIntoSettingsJson(tenant.settingsJson, next);
+  const rawSettings = tenant.settingsJson as Record<string, Prisma.InputJsonValue>;
+  const rawAutomation = (rawSettings?.aiAutomation || {}) as Record<string, Prisma.InputJsonValue>;
+  const settingsJson = options.preferencesOnly
+    ? { ...rawSettings, aiAutomation: { ...rawAutomation, ...Object.fromEntries(Object.keys(input).map(key => [key, next[key as keyof AIAutomationSettings]])) } }
+    : mergeAIAutomationIntoSettingsJson(tenant.settingsJson, next);
   const workingHoursJson = next.workingHours as unknown as Prisma.InputJsonValue;
   const timezone = normalizeCompanyTimezone(
     typeof input.timezone === "string" ? input.timezone : tenant.timezone,
     tenant.timezone || "Asia/Almaty",
   );
-  await prisma.$transaction(async tx => {
-    await tx.tenant.update({
+  await prisma.tenant.update({
       where: { id: tenant.id },
-      data: { settingsJson: settingsJson as Prisma.InputJsonObject, workingHoursJson, timezone },
+      data: { settingsJson: settingsJson as Prisma.InputJsonObject,
+        ...(!options.preferencesOnly || input.workingHours ? { workingHoursJson } : {}), ...(!options.preferencesOnly ? { timezone } : {}) },
     });
-    await writeAudit(tx, { tenantId: tenant.id, actorUserId: auth.user.id,
+    await writeAudit(prisma, { tenantId: tenant.id, actorUserId: auth.user.id,
       action: "ai.automation_updated", entityType: "tenant", entityId: tenant.id,
       changes: { fields: Object.keys(input), defaultMode: next.defaultMode, audience: next.replyAudience.audience, timezone } });
-  });
-
   const salesChanged = JSON.stringify(previous.salesProcess) !== JSON.stringify(next.salesProcess);
-  const activation = salesChanged ? await (await import("./tenantAiConfigService.ts")).pushAiConfigToWhatsApp(prisma, tenant.id) : null;
+  return { next, timezone, tenantId: tenant.id, salesChanged };
+}
+
+export async function updateAIAutomationSettings(
+  prisma: PrismaClient, auth: AuthContext,
+  input: Partial<AIAutomationSettings> & { defaultMode?: AutomationMode; timezone?: string },
+) {
+  const { next, timezone, tenantId, salesChanged } = await prisma.$transaction(tx => saveAIAutomationSettingsInTransaction(tx, auth, input));
+  const activation = salesChanged ? await (await import("./tenantAiConfigService.ts")).pushAiConfigToWhatsApp(prisma, tenantId) : null;
   return {
     ...next,
     ...(activation ? { activation } : {}),

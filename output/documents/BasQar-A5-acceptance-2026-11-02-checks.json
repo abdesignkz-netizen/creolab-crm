@@ -1,0 +1,113 @@
+{
+  "stage": "A5",
+  "date": "2026-11-02",
+  "timezone": "Asia/Almaty",
+  "status": "implemented_and_automatically_verified_locally",
+  "deployed": false,
+  "head": "85ca15135f64ce2f7d54b129da8c3703001cae7d",
+  "branch": "codex/stage9-release",
+  "apiScenarios": 113,
+  "apiFiles": 9,
+  "newOpportunityScenarios": 16,
+  "webScenarios": 98,
+  "database": "isolated PGlite",
+  "externalProviders": "disabled",
+  "browser": {
+    "verified": false,
+    "reason": "browser control unavailable; no repeated access request",
+    "priorA4ScreenshotsAreNotA5Evidence": true
+  },
+  "unverified": [
+    "A5 desktop/mobile visual acceptance",
+    "Linux/PostgreSQL CI acceptance",
+    "full Docker build",
+    "production state"
+  ],
+  "limitations": [
+    "Russian-only fixed copy",
+    "company-wide opportunities restricted to owner/director/sales_lead",
+    "only three initial opportunity reasons; no dormant/repeat-purchase rules",
+    "no monetary potential or revenue attribution",
+    "Vite large chunk warning; small remaining initial bundle budget"
+  ],
+  "initialJavascript": {
+    "bytes": 1099966,
+    "budgetBytes": 1100000
+  },
+  "commands": [
+    "npm run db:generate",
+    "node scripts/test-api.mjs businessOpportunity businessInsight aiAction aiArchitectApply schemaPatches dealRisk taskExecution backgroundReliability http",
+    "npm run test --workspace=@creolab/web",
+    "npm run typecheck",
+    "npm run build --workspace=@creolab/web",
+    "git diff --check"
+  ],
+  "initialApiAttempt": {
+    "path": "/tmp/basqar-a5-final-api.log",
+    "sha256": "ffc3e13320ee9fcf276158c86b265bc662b69f077241f8aa58f31a1d00163e7c",
+    "status": "local-port-denied; superseded by successful full rerun"
+  },
+  "files": {
+    "packages/contracts/src/businessInsight.ts": "2e4ecb486c69304644551f22b9c321ee511f89c39736101a7cb7c6966688eb2e",
+    "packages/contracts/src/aiAction.ts": "607f26c78469ec92b168830688526c308e7780ce97f73d2b814b08c2c6d02c00",
+    "packages/db/prisma/schema.prisma": "e83747aaded98609afa523020d1c1b70bf6f80112c6c6a68cef4a7f1a1b8a5f3",
+    "packages/db/src/businessInsightSchema.ts": "db43bbe9e4511adedd734be3dbf5c2437c12e3999533cdbbe43ffae40c91853b",
+    "packages/api-client/src/businessInsights.ts": "e6a4351d7177c487ad6b6b739197db9fa17df82413c47cc1058ff3f730ceb19c",
+    "apps/api/src/services/businessInsightService.ts": "4884670e3613bb528176b5a77f8f77b83aeafc21c7cb86d252369fd905fa4c80",
+    "apps/api/src/services/businessMetricRegistry.ts": "2480d1f780dc93245b9f8b3c257e10507bade46ea9f1958f1d8d7be11de9139a",
+    "apps/api/src/services/opportunityRules.ts": "bafb5c6d7014e4ea8a2cdc1363eb5ee2aa11c47b23b06df88325c772784b3f68",
+    "apps/api/src/services/opportunityAction.ts": "27f372b7b9299627a687e1c9277d9374e02f2727dbfdffe3db7c79aa049b0625",
+    "apps/api/src/services/aiActionRegistry.ts": "dd2fd4eb7e0f02d2c95deea5194421d2921b18257357c065261434129e8f49ac",
+    "apps/api/src/services/aiActionService.ts": "e10ceb37f46c6f602190ecd064699d6f0391703c52b89b08376664f30678aef7",
+    "apps/api/src/businessOpportunity.test.ts": "67b7c9901b60e51390eca6c9c0ce0f0f77cd9697b985c59381a2a9c79f0e8eef",
+    "apps/api/src/schemaPatches.test.ts": "49ae48dddd03a0993d3382dd8ff60beb21e834f35da13199ae80e29332b974b7",
+    "apps/api/openapi.yaml": "e957595eeb3778be1c11ff7f7109aa4341b27ed5cbbb4df19d54b35807e299ae",
+    "apps/web/src/components/BusinessInsightCard.tsx": "399491b47320b2d8fa543486ac59e3f483450a6c4ae80aa00936c56a80113b4a",
+    "apps/web/src/components/BusinessInsightsPanel.tsx": "7481154e4825ab30ff69b7dc19e47c7c4ecbe88843a6ee76c5431a1ab89c4bfb",
+    "apps/web/src/components/OpportunityTaskReview.tsx": "c2558685fdaa9e779735b42fa76f4d032f3a467ab9fa75bfae9e8d24ce82e5f1",
+    "apps/web/src/components/ActionPlansPanel.tsx": "925bf77bbdda24ff230bc5ce733b6e6bc3f2ea5a1359cc373cfd567d4584b34d",
+    "apps/web/src/components/business-insights.css": "05e43132da83f150f734bb5c301d5d209682ef4ae5ccc8559edfb0328652aacd",
+    "scripts/business-insights.test.mjs": "b1a9a08937fc29393d1b2455ad51979ac0a0fb18ec670c5b9aaa540e0f009a89",
+    ".github/workflows/release-acceptance.yml": "529c840af6f5989ddfdb6fe2980026c7c8a3b70deeae0b7c07e14102d34634d0",
+    "BASQAR_AI_OS_AUDIT.md": "63f4fcabc34bea37240b48a3380e1cd998c185991c886c6ca8703d11b755ff66",
+    "output/documents/BasQar-A5-acceptance-2026-11-02.md": "c8ce33e7154933f92df5cb8ae27032946fea465bd0e11026e1d8d0209b5de243"
+  },
+  "logs": {
+    "api": {
+      "path": "/tmp/basqar-a5-verified-api.log",
+      "sha256": "c52e6ea718b9449b819a8201d97956d12e27a76f0cacc6fcfaf9ff5b3733f7a6",
+      "exitCode": 0,
+      "tests": 113,
+      "pass": 113,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "web": {
+      "path": "/tmp/basqar-a5-final-web.log",
+      "sha256": "c8c85cb02ac9fbffe788ff21f808d0d443e980cd8fc111e9921a8bd3f625d79e",
+      "exitCode": 0,
+      "tests": 98,
+      "pass": 98,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "types": {
+      "path": "/tmp/basqar-a5-final-types.log",
+      "sha256": "fc1610b9081f206e480555f9bc32f27b71d5c62deee39ced1d9a23b0d2cf29ba",
+      "exitCode": 0
+    },
+    "build": {
+      "path": "/tmp/basqar-a5-final-build.log",
+      "sha256": "56e3a5e555dc8f333b2939b9b74ff6172a8d09ebee939b4307ae1fdb032993b3",
+      "exitCode": 0
+    },
+    "db_generate": {
+      "path": "/tmp/basqar-a5-final-db-generate.log",
+      "sha256": "4e66272c90d46af8329bde545b94d6fe471f68e7c60d1840bcb1cd9334e5a2c3",
+      "exitCode": 0
+    }
+  },
+  "nextStage": "A6"
+}

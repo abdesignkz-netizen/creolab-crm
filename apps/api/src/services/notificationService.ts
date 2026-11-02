@@ -17,11 +17,12 @@ export async function createStaffNotification(
     body: string;
     priority?: string;
     episodeKey?: string;
+    internalOnly?: boolean;
     channels?: Array<"in_app" | "web_push" | "email" | "telegram">;
   },
 ) {
   // Company alerts also include unassigned work, even when there is no personal recipient.
-  await queueControlNotification(prisma, args);
+  if (!args.internalOnly) await queueControlNotification(prisma, args);
   if (!args.membershipId) return null;
   const membership = await prisma.membership.findFirst({
     where: { id: args.membershipId, tenantId: args.tenantId, active: true },
@@ -63,17 +64,17 @@ export async function createStaffNotification(
     },
   });
 
-  if (channelsPref.telegram === true) await queueEmployeeTelegram(prisma, notification, membership.userId);
+  if (!args.internalOnly && channelsPref.telegram === true) await queueEmployeeTelegram(prisma, notification, membership.userId);
 
   const quietHours = inQuietHours(quiet, membership.user.timezone);
-  const requested = args.channels || ["in_app"];
+  const requested = args.internalOnly ? ["in_app"] : args.channels || ["in_app"];
   const channels = requested.filter((channel) => {
     if (channel === "in_app") return channelsPref.in_app !== false;
     if (channel === "web_push") return channelsPref.web_push !== false && !quietHours;
     if (channel === "email") return false;
     return false;
   });
-  if (!channels.length && channelsPref.in_app === false) return channelsPref.telegram === true ? notification : null;
+  if (!channels.length && channelsPref.in_app === false) return !args.internalOnly && channelsPref.telegram === true ? notification : null;
   const effectiveChannels = channels.length ? channels : channelsPref.in_app === false ? [] : ["in_app"];
   if (!effectiveChannels.length) return null;
 

@@ -1,11 +1,19 @@
-import { SalesControlPanel } from "../components/SalesControlPanel";
-import { ControlChatPanel } from "../components/ControlChatPanel";
+import { useCapabilities } from "../lib/session";
 import { InlineFeedback } from "../components/InlineFeedback";
 import { uiText, useUiText, localizeUiOptions, uiMessage , uiDurationLabel } from "../lib/uiText";
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { nameWithPhone, phoneText } from "../lib/contactDisplay";
 import { api } from "../lib/api";
+
+const ControlChatPanel = lazy(() => import("../components/ControlChatPanel").then(module => ({ default: module.ControlChatPanel })));
+const SalesControlPanel = lazy(() => import("../components/SalesControlPanel").then(module => ({ default: module.SalesControlPanel })));
+const ActionPlansPanel = lazy(() => import("../components/ActionPlansPanel"));
+const BusinessInsightsPanel = lazy(() => import("../components/BusinessInsightsPanel"));
+const BusinessGoalsPanel = lazy(() => import("../components/BusinessGoalsPanel"));
+const BusinessExperimentsPanel = lazy(() => import("../components/BusinessExperimentsPanel"));
+const BusinessMemoryPanel = lazy(() => import("../components/BusinessMemoryPanel"));
+const OutboxDiagnostics = lazy(() => import("../components/OutboxDiagnostics").then(module => ({ default: module.OutboxDiagnostics })));
 
 type Filter =
   | "all"
@@ -19,9 +27,10 @@ type Filter =
 
 export function ControlPage({ canManageOverview = true }: { canManageOverview?: boolean }) {
   const uiText = useUiText();
+  const caps = useCapabilities();
   const [params, setParams] = useSearchParams();
-  const view = params.get("view") === "sales" ? "sales" : params.get("view") === "overview" && canManageOverview ? "overview" : "chat";
-  const setView = (view: "chat" | "overview" | "sales") => setParams({ view });
+  const view = params.get("view") === "experiments" && caps.analytics ? "experiments" : params.get("view") === "memory" && caps.analytics ? "memory" : params.get("view") === "goals" && caps.analytics ? "goals" : params.get("view") === "insights" && caps.analytics ? "insights" : params.get("view") === "plans" && caps.manageTasks ? "plans" : params.get("view") === "sales" ? "sales" : params.get("view") === "overview" && canManageOverview ? "overview" : "chat";
+  const setView = (view: "chat" | "overview" | "sales" | "plans" | "insights" | "goals" | "memory" | "experiments") => setParams({ view });
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
@@ -64,9 +73,15 @@ export function ControlPage({ canManageOverview = true }: { canManageOverview?: 
     }
   }
 
-  if (view === "sales") return <section className="management-page"><button className="btn secondary" onClick={() => setView("chat")}>← BasQar Control</button><SalesControlPanel canManageSettings={canManageOverview} /></section>;
+  if (view === "experiments") return <section className="management-page"><button className="btn secondary" onClick={() => setView("chat")}>← BasQar Control</button><Suspense fallback={<p role="status">Загружаем проверки…</p>}><BusinessExperimentsPanel /></Suspense></section>;
+  if (view === "memory") return <section className="management-page"><button className="btn secondary" onClick={() => setView("chat")}>← BasQar Control</button><Suspense fallback={<p role="status">Загружаем решения…</p>}><BusinessMemoryPanel /></Suspense></section>;
+  if (view === "insights") return <section className="management-page"><button className="btn secondary" onClick={() => setView("chat")}>← BasQar Control</button><Suspense fallback={<p role="status">Загружаем выводы…</p>}><BusinessInsightsPanel /></Suspense></section>;
+  if (view === "goals") return <section className="management-page"><button className="btn secondary" onClick={() => setView("chat")}>← BasQar Control</button><Suspense fallback={<p role="status">Загружаем цели…</p>}><BusinessGoalsPanel /></Suspense></section>;
+  if (view === "plans") return <section className="management-page"><button className="btn secondary" onClick={() => setView("chat")}>← BasQar Control</button><Suspense fallback={<p role="status">Загружаем планы…</p>}><ActionPlansPanel /></Suspense></section>;
 
-  if (view === "chat") return <section className="management-page"><div className="page-head"><div><h2>BasQar Control</h2><p className="muted">Задачи, клиенты и результаты компании — в одном диалоге.</p></div><button className="btn secondary" onClick={() => setView("sales")}>Продажи под контролем</button>{canManageOverview && <button className="btn secondary" onClick={() => setView("overview")}>Контроль работы ИИ</button>}</div><ControlChatPanel canManageAccess={canManageOverview} /></section>;
+  if (view === "sales") return <section className="management-page"><button className="btn secondary" onClick={() => setView("chat")}>← BasQar Control</button><Suspense fallback={<p role="status">Загружаем продажи…</p>}><SalesControlPanel canManageSettings={canManageOverview} /></Suspense></section>;
+
+  if (view === "chat") return <section className="management-page"><div className="page-head"><div><h2>BasQar Control</h2><p className="muted">Задачи, клиенты и результаты компании — в одном диалоге.</p></div><button className="btn secondary" onClick={() => setView("sales")}>Продажи под контролем</button>{canManageOverview && <button className="btn secondary" onClick={() => setView("overview")}>Контроль работы ИИ</button>}</div>{caps.manageTasks && <p><button type="button" className="btn secondary" onClick={() => setView("plans")}>Планы действий</button></p>}{caps.analytics && <p><button type="button" className="btn secondary" onClick={() => setView("insights")}>Бизнес-выводы</button> <button type="button" className="btn secondary" onClick={() => setView("goals")}>Цели компании</button> <button type="button" className="btn secondary" onClick={() => setView("memory")}>Решения компании</button> <button type="button" className="btn secondary" onClick={() => setView("experiments")}>Проверки улучшений</button></p>}<Suspense fallback={<p role="status">Загружаем Control…</p>}><ControlChatPanel canManageAccess={canManageOverview} /></Suspense></section>;
 
   if (!data && !error) return <div className="state">{uiText("Загрузка…")}</div>;
   if (!data) {
@@ -98,6 +113,7 @@ export function ControlPage({ canManageOverview = true }: { canManageOverview?: 
       </div>
       {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
       {note ? <InlineFeedback kind="success" className="ok">{note}</InlineFeedback> : null}
+      {caps.companyAdmin && <Suspense fallback={<p role="status">Проверяем фоновую обработку…</p>}><OutboxDiagnostics /></Suspense>}
 
       <div className="panel management-ai-status">
         <div className="management-ai-status-head">

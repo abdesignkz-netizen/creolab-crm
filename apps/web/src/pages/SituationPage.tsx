@@ -7,12 +7,14 @@ import { systemText } from "@creolab/contracts";
 import { useLocale } from "../lib/session";
 import { notifySaved } from "../components/SaveNotice";
 import { useUrlState, useRequestVersion } from "../lib/useUrlState";
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { PeriodSelector, type PeriodPreset } from "../components/PeriodSelector";
 import { nameWithPhone } from "../lib/contactDisplay";
 import { api } from "../lib/api";
 import { useCapabilities, useSession } from "../lib/session";
+
+const BusinessHomePanel = lazy(() => import("../components/BusinessHomePanel"));
 
 type Scope = "all" | "mine" | "unassigned";
 
@@ -47,16 +49,6 @@ function deltaText(value: number | null | undefined, percent?: number | null) {
   if (value != null && value !== 0) parts.push(value > 0 ? `↑ ${value}` : `↓ ${Math.abs(value)}`);
   return parts.length ? parts.join(" · ") : null;
 }
-
-const ASK_PRESETS = [
-  "Что сегодня требует моего внимания?",
-  "Какие сделки зависли?",
-  "Какие заявки не обработаны?",
-  "Что изменилось сегодня?",
-  "У кого высокая нагрузка?",
-  "Где теряются клиенты?",
-  "Сравни с прошлой неделей.",
-];
 
 function timeShort(locale: string, iso: string | null | undefined, month: "short" | "2-digit" = "short") {
   if (!iso) return "";
@@ -217,23 +209,24 @@ export function SituationPage() {
   const [dateFrom, setDateFrom] = useUrlState<string>("from", "");
   const [dateTo, setDateTo] = useUrlState<string>("to", "");
   const [attentionFilter, setAttentionFilter] = useUrlState<string>("attention", "");
+  const location = useLocation();
+  const [detailsOpen, setDetailsOpen] = useState(Boolean(location.hash || attentionFilter));
+  useEffect(() => { if (location.hash || attentionFilter) setDetailsOpen(true); }, [location.key, attentionFilter]);
+  function showDetails() {
+    setDetailsOpen(true);
+    requestAnimationFrame(() => document.getElementById("attention")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }
   const [onlyImportant, setOnlyImportant] = useState(false);
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState("");
   const [meMissing, setMeMissing] = useState(false);
   const [badgeHint, setBadgeHint] = useState("");
-  const [askText, setAskText] = useState("");
-  const [askBusy, setAskBusy] = useState(false);
-  const [askAnswer, setAskAnswer] = useState<{
-    question: string;
-    headline: string;
-    bullets: Array<{ text: string; href?: string }>;
-    links: Array<{ label: string; href: string }>;
-    usedLlm?: boolean;
-    command?: boolean;
-  } | null>(null);
-
+  useEffect(() => {
+    if (!data || !detailsOpen || !location.hash) return;
+    const frame = requestAnimationFrame(() => document.getElementById(location.hash.slice(1))?.scrollIntoView({ block: "start" }));
+    return () => cancelAnimationFrame(frame);
+  }, [location.key, detailsOpen, Boolean(data)]);
   async function load() {
     const request = ++requestVersion.current;
     try {
@@ -268,6 +261,7 @@ export function SituationPage() {
       setError("");
     } catch (err) {
       if (request !== requestVersion.current) return;
+      if ([401, 403].includes(Number((err as { status?: number })?.status))) setData(null);
       setError(locale !== "kk" && err instanceof Error ? err.message : systemText(locale, "Ошибка"));
     }
   }
@@ -355,6 +349,7 @@ export function SituationPage() {
           </div>
         </div>
         {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
+        <Suspense fallback={<p role="status">{systemText(locale, "Загрузка…")}</p>}><BusinessHomePanel overview={data} personal /></Suspense>
         <SituationHistory onChanged={load} />
         {liveSpotCount(inquiries.length) || liveSpotCount(deals.length) || liveSpotCount(tasks.length) || liveSpotCount(dialogs.length) ? (
           <>
@@ -425,62 +420,6 @@ export function SituationPage() {
   const team = Array.isArray(data.team) ? data.team : [];
   const ai = data.aiManager || {};
 
-  async function goAsk(question: string) {
-    const text = question.trim();
-    if (!text) return;
-    setAskText(text);
-    setAskBusy(true);
-    setError("");
-    try {
-      const answer = (await api.situationAsk({
-        text,
-        period,
-        scope,
-        onlyImportant,
-        dateFrom: period === "custom" ? dateFrom : undefined,
-        dateTo: period === "custom" ? dateTo : undefined,
-      })) as {
-        question: string;
-        headline: string;
-        bullets?: Array<{ text: string; href?: string }>;
-        links?: Array<{ label: string; href: string }>;
-        usedLlm?: boolean;
-        command?: boolean;
-        documentCommand?: boolean;
-        suggestedPeriod?: PeriodPreset | null;
-      };
-      if (answer.command) {
-        navigate(
-          answer.documentCommand
-            ? `/documents?command=${encodeURIComponent(text)}`
-            : `/tasks?command=${encodeURIComponent(text)}`,
-        );
-        return;
-      }
-      if (answer.suggestedPeriod && answer.suggestedPeriod !== period) {
-        setPeriod(answer.suggestedPeriod);
-      }
-      setAskAnswer({
-        question: answer.question || text,
-        headline: answer.headline,
-        bullets: answer.bullets || [],
-        links: answer.links || [],
-        usedLlm: answer.usedLlm,
-      });
-      requestAnimationFrame(() => document.getElementById("ask-ai")?.scrollIntoView({ behavior: "smooth", block: "start" }));
-    } catch (err) {
-      setError(locale !== "kk" && err instanceof Error ? err.message : systemText(locale, "Не удалось ответить"));
-    } finally {
-      setAskBusy(false);
-    }
-  }
-
-  function onAsk(event: FormEvent) {
-    event.preventDefault();
-    void goAsk(askText);
-  }
-
-
   return (
     <section className="situation-page dash-home">
       <div className="page-head sit-head">
@@ -500,6 +439,24 @@ export function SituationPage() {
           <span className="muted">{systemText(locale, "Обновлено {date}", { date: timeShort(locale, data.asOf) })}</span>
         </div>
       </div>
+      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
+      {(data.integrationAlerts || []).length > 0 ? (
+        <div className="banner warn dash-alert">
+          <div>
+            {(data.integrationAlerts as any[]).map((a) => (
+              <div key={a.id}>
+                <b>{a.title}</b>
+                <div className="muted">{a.detail}</div>
+              </div>
+            ))}
+          </div>
+          <Link className="btn secondary" to="/integrations">
+            {systemText(locale, "Интеграции")}</Link>
+        </div>
+      ) : null}
+      <Suspense fallback={<p role="status">{systemText(locale, "Загрузка…")}</p>}><BusinessHomePanel overview={data} onDetails={showDetails} onAccessLost={() => { setData(null); setError(locale === "kk" ? "Қол жеткізу құқықтары өзгерді. Бетті жаңартыңыз." : "Права доступа изменились. Обновите страницу."); }} links={{ inquiries: path("/inquiries", { test: "false" }, true), sales: path("/deals", { timeMode: "period", basis: "closed", outcome: "won" }, true), payments: path("/today", {}, true) + "#sit-result", tasks: path("/tasks", { filter: "overdue" }) }} /></Suspense>
+      <details className="home-details" open={detailsOpen} onToggle={e => setDetailsOpen(e.currentTarget.open)}>
+        <summary>{locale === "kk" ? "Кезек және толық көрсеткіштер" : "Очередь и подробные показатели"} · {data.period?.label}</summary>
       {me?.billing?.previewMode && me?.billing?.preview?.situation ? (
         <div className="panel preview-demo">
           <p className="muted">{systemText(locale, "Пример показателей — так выглядит живой кабинет. После подключения тарифа здесь останутся только ваши данные.")}</p>
@@ -535,23 +492,9 @@ export function SituationPage() {
         </p>
       </div>
 
-      {error ? <InlineFeedback kind="error" className="error">{error}</InlineFeedback> : null}
       <SituationHistory onChanged={load} />
 
-      {(data.integrationAlerts || []).length > 0 ? (
-        <div className="banner warn dash-alert">
-          <div>
-            {(data.integrationAlerts as any[]).map((a) => (
-              <div key={a.id}>
-                <b>{a.title}</b>
-                <div className="muted">{a.detail}</div>
-              </div>
-            ))}
-          </div>
-          <Link className="btn secondary" to="/integrations">
-            {systemText(locale, "Интеграции")}</Link>
-        </div>
-      ) : null}
+
 
       {hasAttentionSpots ? (
         <>
@@ -686,75 +629,6 @@ export function SituationPage() {
       </div>
 
       <div className="dash-side">
-      <form className="sit-section sit-ask dash-panel dash-ask" id="ask-ai" onSubmit={onAsk}>
-        <div className="sit-section-head">
-          <h3>{systemText(locale, "Спросите о бизнесе")}</h3>
-        </div>
-        <div className="sit-ask-row">
-          <input
-            className="sit-ask-input"
-            value={askText}
-            onChange={(event) => setAskText(event.target.value)}
-            placeholder={systemText(locale, "Что сегодня требует моего внимания?")}
-            aria-label={systemText(locale, "Вопрос CreoLab AI")}
-          />
-          <button type="submit" className="btn" disabled={askBusy}>
-            {askBusy ? systemText(locale, "Думаю…") : systemText(locale, "Спросить")}
-          </button>
-        </div>
-        <div className="sit-ask-presets">
-          {ASK_PRESETS.map((preset) => (
-            <button
-              key={preset}
-              type="button"
-              className="sit-ask-chip"
-              disabled={askBusy}
-              onClick={() => void goAsk(systemText(locale, preset))}
-            >
-              {systemText(locale, preset)}
-            </button>
-          ))}
-        </div>
-        {askAnswer ? (
-          <div className="sit-ask-answer">
-            <div className="muted sit-ask-question">{askAnswer.question}</div>
-            <p>{askAnswer.headline}</p>
-            {askAnswer.bullets.length ? (
-              <ul className="sit-insights">
-                {askAnswer.bullets.map((item) => (
-                  <li key={item.text}>
-                    {item.href?.startsWith("#") ? (
-                      <a href={item.href}>{item.text}</a>
-                    ) : item.href ? (
-                      <Link to={item.href}>{item.text}</Link>
-                    ) : (
-                      <span>{item.text}</span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-            {askAnswer.links.length ? (
-              <div className="sit-ask-links">
-                {askAnswer.links.map((link) =>
-                  link.href.startsWith("#") ? (
-                    <a key={link.href} className="btn secondary" href={link.href}>
-                      {link.label}
-                    </a>
-                  ) : (
-                    <Link key={link.href} className="btn secondary" to={link.href}>
-                      {link.label}
-                    </Link>
-                  ),
-                )}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-        <p className="muted sit-ask-note">
-          {systemText(locale, "AI смотрит заявки, сделки, задачи и диалоги. Команды вроде «напиши» открывают постановку задачи.")}</p>
-      </form>
-
       <div className="sit-brief dash-brief" id="insights">
         <b>{systemText(locale, "AI-сводка")}</b>
         {insights.length ? (
@@ -1126,6 +1000,7 @@ export function SituationPage() {
           ) : null}
         </div>
       </div>
+      </details>
     </section>
   );
 }

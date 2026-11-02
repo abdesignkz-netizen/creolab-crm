@@ -1,0 +1,158 @@
+{
+  "stage": "A8",
+  "date": "2026-11-02",
+  "timezone": "Asia/Almaty",
+  "status": "implemented_and_automatically_verified_locally",
+  "deployed": false,
+  "branch": "codex/stage9-release",
+  "head": "85ca15135f64ce2f7d54b129da8c3703001cae7d",
+  "apiFiles": 14,
+  "apiScenariosUnique": 251,
+  "regressionScenarios": 249,
+  "autopilotScenariosFinal": 36,
+  "webScenarios": 118,
+  "newWebScenarios": 6,
+  "database": "isolated PGlite",
+  "externalProviders": "disabled",
+  "browser": {
+    "verified": false,
+    "reason": "Local browser use is disabled in Work settings; native service startup failed"
+  },
+  "unverified": [
+    "A8 desktop/mobile visual acceptance",
+    "Linux/PostgreSQL CI and independent worker processes",
+    "Full Docker build",
+    "Production state"
+  ],
+  "initialJavascript": {
+    "bytes": 1099978,
+    "gzipBytes": 278983,
+    "budgetBytes": 1100000,
+    "gzipBudgetBytes": 285000
+  },
+  "limits": {
+    "activeCasesPerTenant": 100,
+    "candidatesPerRule": 8,
+    "hourlyEffectLimitDefault": 10,
+    "hourlyEffectLimitMax": 50,
+    "escalationsPerCase": 1,
+    "proposalExpiryDays": 7,
+    "discoveryBatch": 20,
+    "discoveryTenantsPerCycle": 3,
+    "lateMessageOverlapMinutes": 10,
+    "consecutiveErrorLimit": 3
+  },
+  "limitations": [
+    "Single internal first-reply template, not arbitrary workflows",
+    "Only new inquiries with real inbound linked conversation after enabling",
+    "No customer sends or external staff notifications",
+    "Late association outside bounded overlap is not guaranteed",
+    "Manual or other automation changes stop remaining stages",
+    "Load counts open tasks without effort weighting",
+    "Case verification is bounded; attention state at deadline requires manual review",
+    "New fixed UI copy is Russian; no separate native screen",
+    "Large Vite chunk warning and very limited initial JS margin"
+  ],
+  "verificationResolution": {
+    "initial": "26/28 new tests passed; missing linked episode source and incorrect test session helper corrected",
+    "second": "A8, calendar and migration checks passed",
+    "regression": "249 scenarios in 14 files passed",
+    "final": "Two additional duplicate/manual intervention checks added; all 36 A8 scenarios rerun after the final stale-proposal UI predicate change, passed"
+  },
+  "commands": [
+    "npm run db:generate",
+    "node scripts/test-api.mjs autopilot schemaPatches processCalendar situationSweep situationEpisodes situationPermissions aiAction aiArchitectApply businessMemory businessGoal businessInsight businessOpportunity backgroundReliability http",
+    "node scripts/test-api.mjs autopilot",
+    "npm run test --workspace=@creolab/web",
+    "npm run typecheck",
+    "npm run typecheck --workspace=@creolab/api",
+    "npm run build --workspace=@creolab/web",
+    "git diff --check"
+  ],
+  "logs": {
+    "apiRegression": {
+      "path": "/tmp/basqar-a8-regression-api.log",
+      "sha256": "257df5707c19d2a54aeed642c89767ce5cdb41e5090a9efd553622858f31d3cf",
+      "exitCode": 0,
+      "tests": 249,
+      "pass": 249,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "autopilotFinal": {
+      "path": "/tmp/basqar-a8-verified-autopilot.log",
+      "sha256": "97887693443b7d48077485bb8e1195dc9a439869ccbb144bc95c1b28d96e3f03",
+      "exitCode": 0,
+      "tests": 36,
+      "pass": 36,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "web": {
+      "path": "/tmp/basqar-a8-web-tests.log",
+      "sha256": "94960074846b79a51a93f07fca650db097ecd21e172b1d16668cb7dd6e6096ec",
+      "exitCode": 0,
+      "tests": 118,
+      "pass": 118,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "types": {
+      "path": "/tmp/basqar-a8-final-types.log",
+      "sha256": "fc1610b9081f206e480555f9bc32f27b71d5c62deee39ced1d9a23b0d2cf29ba",
+      "exitCode": 0
+    },
+    "apiTypesAfterFinalChanges": {
+      "path": "/tmp/basqar-a8-api-types-final.log",
+      "sha256": "2318315bf8689539d7799613ed6b4cce7f0e58e7efa14023d5153fbd2a18bbf2",
+      "exitCode": 0
+    },
+    "build": {
+      "path": "/tmp/basqar-a8-final-build.log",
+      "sha256": "47786add1bd8e2b45f1fa9abdb94fc99fa84e4cbf0d455f51b7b4840840b8363",
+      "exitCode": 0
+    },
+    "generate": {
+      "path": "/tmp/basqar-a8-generate.log",
+      "sha256": "243bfdce6b95829d5fde9c1eb517f826bf8cbba4179a2395efac827e7fbdc953",
+      "exitCode": 0
+    }
+  },
+  "sourceSha256": {
+    "packages/contracts/src/autopilot.ts": "12735812cbae151a332fb5019e082623ee2d878bd745dced6fab8beb6e52ccf9",
+    "packages/contracts/src/aiAction.ts": "76d5ab1f0972bf95ad75eb22809458da00b751f0dd7364977f3f7af1dca50aaa",
+    "packages/contracts/src/taskBoard.ts": "dbca328a97d415c57e1159620303b5f5f9d6fa5c042d2970d31f0ef5ef61f7d1",
+    "packages/contracts/src/index.ts": "cfd6a931d8d83fed46f9299de307a0f37e0fa54fa81c4baa60664b71609f1a82",
+    "packages/db/src/autopilotSchema.ts": "42bd83bab32d983923b8febca0577f30d3a4b2cb5e989a62779a3ead6d7cf3a3",
+    "packages/db/src/client.ts": "7dd8f9859222ce5dbabf717e1fb2027702d76c57bf33b28af01c7d793202286d",
+    "packages/db/prisma/schema.prisma": "2c52ec9526c9da157391e26098e1a58847187a4ca3df3dbdf52a11d7f0698dfd",
+    "packages/api-client/src/autopilot.ts": "0d17ff5ebe2bbbba9ee95dcd6685c1bada7f83bd3f133ea07bec293ef3c77172",
+    "packages/api-client/package.json": "2689f7dac49c3bf14234fb232e95b3fc10dbb6ff81fcd5b8950f93c1486263aa",
+    "apps/api/src/services/autopilotSupport.ts": "8091a0228998cc8dd44f8ba97b3f72389b76eddb8c6a3755a1806419a1e2574f",
+    "apps/api/src/services/autopilotPolicyService.ts": "1351721e72c39148b0f12a5f17a4bc9ea1b63755320886e445f8c0ca7b27bb49",
+    "apps/api/src/services/autopilotService.ts": "a838348e1efe13869be558a1023f0ec22ff4669a2d6a72858ef0f8d82738b4ce",
+    "apps/api/src/services/autopilotFacts.ts": "d5bc620defe3430078f5826cfbc013c72d051005a15f8e01d51601eea040d82e",
+    "apps/api/src/services/routingRuleService.ts": "9509de7743fe2ac1d77e8fa0b43603f14fd3b76f9fa19aac458aa594d32c5c16",
+    "apps/api/src/services/processCalendar.ts": "fa9b2d26d106cd820cd9dcad1708557589118794b65da43624390fd8b659cc8a",
+    "apps/api/src/services/backgroundJobs.ts": "abfc4c55074bc7f0813adbf982a3bc758cf28280ef3bc67905c5fb630f91ada7",
+    "apps/api/src/services/scheduledActionLease.ts": "fb6821ed7fb627a7be119e855bb80e16b0a16aff111bab943a0210fa5d492920",
+    "apps/api/src/services/situationEvidence.ts": "a6065b9505751af231a154ed82b6d1d2bc9a47287820a96cb8439e944620c42a",
+    "apps/api/src/services/aiActionService.ts": "5777e09f9ac25806d1ae0bbd4d894e5736e8b55285215c3089dd692e4687b7eb",
+    "apps/api/src/app.ts": "0ff9c32e5471f03408915e168726008525906993b62e1b8001ff9fc8c47df069",
+    "apps/api/openapi.yaml": "a4445970a1af7fe9093bf3a8e9b05e42d6fa8c7c007e653b091d58aac47fa336",
+    "apps/api/src/lib/auditPresentation.ts": "28aa35aeca4360e158acf14b3fedc74cd387ba6e72ef1c6cabf7aeb11da9c2a2",
+    "apps/api/src/autopilot.test.ts": "4a328d3c99ecb1bb92af156bcf3ec8895e56a8fab20a00b09c96fdb6b3b2c605",
+    "apps/api/src/schemaPatches.test.ts": "51d7bce32aa136540527546a7e6160a36013a8183374d61fcdc845f30f286624",
+    "apps/web/src/components/AutopilotPanel.tsx": "c1e3f5611655d047537121329d9f83bb1805d281d4019bc41729bf56b77d78ff",
+    "apps/web/src/components/AutopilotCaseCard.tsx": "0e000a96ac3ae052285c54e00e6848a2d6a4814d99fdfbf2cb4d171c3df06f79",
+    "apps/web/src/components/autopilot.css": "d7e5a10f6b5f252446bf4d9413e9a6bf29eacc57bb072be8fe5d76125e5c565e",
+    "apps/web/src/lib/autopilotDates.ts": "b52620f66f2c4b3e04aff6f4e2b6d44b87267d7a24487e50c4b763064c17bdb6",
+    "apps/web/src/pages/AiAutomationSettingsPage.tsx": "aca4310f7d99545fde3239b5c1471f1f21a4a22f203a9bbf0ccd3612a46f73a5",
+    "apps/web/src/components/ActionPlansPanel.tsx": "48f0c463d51aafe1b3403ce9267e388ba8798858dbe1ddbb9e5c9cd5d8d9302a",
+    "apps/web/package.json": "909bf2b5d5aaa13dc76e1da3034c1ff9d9a10adb30197844c52c361a1b6be7e2",
+    "scripts/autopilot.test.mjs": "fd73767aa650c9555863e508371beadf5fa4605fb6f5f27ade248ed7e89c8056"
+  }
+}

@@ -32,6 +32,8 @@ model Tenant {
   channelConnections   ChannelConnection[]
   forms                FormDefinition[]
   routingRules         RoutingRule[]
+  autopilotPolicy      AutopilotPolicy?
+  autopilotEvents      AutopilotEvent[]
   contacts             Contact[]
   contactMethods       ContactMethod[]
   externalIdentities   ExternalIdentity[]
@@ -61,6 +63,13 @@ model Tenant {
   knowledgeDocuments   KnowledgeDocument[]
   inboundEvents        InboundEvent[]
   outboxEvents         OutboxEvent[]
+  actionRuns           ActionRun[]
+  architectDraft       ArchitectDraft?
+  businessInsights     BusinessInsight[]
+  businessInsightScan  BusinessInsightScan?
+  businessGoals        BusinessGoal[]
+  businessExperiments  BusinessExperiment[]
+  businessDecisions    BusinessDecision[]
   outboundOperations   OutboundOperation[]
   notifications        Notification[]
   notificationDeliveries NotificationDelivery[]
@@ -456,6 +465,9 @@ model FormDefinition {
 }
 
 model RoutingRule {
+  version            Int @default(1)
+  cursor             Int @default(0)
+  autopilotPolicies  AutopilotPolicy[]
   id           String  @id @default(uuid())
   tenantId     String
   integrationId String?
@@ -466,6 +478,7 @@ model RoutingRule {
   tenant       Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, priority])
+  @@unique([tenantId, id])
 }
 
 model Contact {
@@ -651,6 +664,7 @@ model Inquiry {
   tasks              Task[]
   incompleteFrom     IncompleteIntake?
   statusHistory      InquiryStatusHistory[]
+  autopilotCases     AutopilotCase[]
   agreements         Agreement[]
 
   @@unique([tenantId, id])
@@ -945,6 +959,236 @@ model PaymentRecord {
   @@index([tenantId, dealId, confirmedAt])
 }
 
+model BusinessInsight {
+  id             String @id @default(uuid())
+  tenantId       String
+  rule           String
+  entityKind     String
+  entityId       String
+  occurrence     Int @default(1)
+  isCurrent      Boolean @default(true)
+  state          String @default("open")
+  version        Int @default(1)
+  schemaVersion  Int @default(1)
+  formulaVersion String
+  fingerprint    String
+  contentJson    Json
+  generatedAt    DateTime
+  checkedAt      DateTime
+  validUntil     DateTime
+  actionRunId    String?
+  outcomeEventId String?
+  tenant         Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  events         BusinessInsightEvent[]
+  @@unique([tenantId, id])
+  @@unique([tenantId, rule, entityId, occurrence])
+  @@index([tenantId, isCurrent, state, id], map: "BusinessInsight_list_idx")
+  @@index([tenantId, isCurrent, checkedAt, id], map: "BusinessInsight_recheck_idx")
+  // Partial unique index BusinessInsight_current_key is in the runtime migration.
+}
+
+model BusinessInsightEvent {
+  id          String @id @default(uuid())
+  tenantId    String
+  insightId   String
+  type        String
+  version     Int
+  userId      String?
+  requestId   String?
+  requestHash String?
+  createdAt   DateTime @default(now())
+  insight     BusinessInsight @relation(fields: [tenantId, insightId], references: [tenantId, id], onDelete: Cascade)
+  @@unique([tenantId, userId, requestId])
+  @@index([tenantId, insightId, createdAt], map: "BusinessInsightEvent_history_idx")
+}
+
+model BusinessInsightScan {
+  tenantId     String @id
+  cursorsJson  Json @default("{}")
+  coverageJson Json @default("{}")
+  lastRunAt    DateTime?
+  nextRunAt    DateTime @default(now())
+  tenant       Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  @@index([nextRunAt], map: "BusinessInsightScan_due_idx")
+}
+
+model BusinessDecision {
+  id String @id @default(uuid())
+  tenantId String
+  version Int @default(1)
+  kind String
+  state String @default("draft")
+  topic String
+  topicKey String
+  title String
+  body String
+  rationale String
+  sourceKind String
+  sourceId String?
+  sourceFingerprint String?
+  privateUserId String?
+  authorUserId String
+  approvedByUserId String?
+  approvedAt DateTime?
+  validFrom DateTime
+  validUntil DateTime
+  retentionUntil DateTime
+  supersededById String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  events BusinessDecisionEvent[]
+  @@unique([tenantId, id])
+  @@index([tenantId, state, id], map: "BusinessDecision_list_idx")
+  @@index([tenantId, topicKey, state], map: "BusinessDecision_topic_idx")
+  @@index([retentionUntil, state], map: "BusinessDecision_retention_idx")
+}
+
+model BusinessDecisionEvent {
+  id String @id @default(uuid())
+  tenantId String
+  decisionId String
+  type String
+  version Int
+  userId String?
+  requestId String?
+  requestHash String?
+  fieldsJson Json @default("[]")
+  createdAt DateTime @default(now())
+  decision BusinessDecision @relation(fields: [tenantId, decisionId], references: [tenantId, id], onDelete: Cascade)
+  @@unique([tenantId, userId, requestId])
+  @@index([tenantId, decisionId, createdAt], map: "BusinessDecisionEvent_history_idx")
+}
+
+model BusinessExperiment {
+  id String @id @default(uuid())
+  tenantId String
+  title String
+  hypothesis String
+  change String
+  state String @default("draft")
+  version Int @default(1)
+  methodVersion String
+  methodJson Json
+  timezone String
+  periodStart DateTime
+  periodEnd DateTime
+  authorUserId String
+  baselineJson Json?
+  environmentHash String?
+  approvedAt DateTime?
+  approvedByUserId String?
+  stopReason String?
+  finishedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  measurements ExperimentMeasurement[]
+  events BusinessExperimentEvent[]
+  @@unique([tenantId, id])
+  @@index([tenantId, state, id], map: "BusinessExperiment_list_idx")
+}
+
+model ExperimentMeasurement {
+  id String @id @default(uuid())
+  tenantId String
+  experimentId String
+  revision Int
+  measuredAt DateTime
+  fingerprint String
+  resultJson Json
+  experiment BusinessExperiment @relation(fields: [tenantId, experimentId], references: [tenantId, id], onDelete: Cascade)
+  @@unique([tenantId, experimentId, fingerprint])
+  @@index([tenantId, experimentId, measuredAt], map: "ExperimentMeasurement_history_idx")
+}
+
+model BusinessExperimentEvent {
+  id String @id @default(uuid())
+  tenantId String
+  experimentId String
+  type String
+  version Int
+  userId String
+  requestId String
+  requestHash String
+  note String?
+  createdAt DateTime @default(now())
+  experiment BusinessExperiment @relation(fields: [tenantId, experimentId], references: [tenantId, id], onDelete: Cascade)
+  @@unique([tenantId, userId, requestId])
+  @@index([tenantId, experimentId, createdAt], map: "BusinessExperimentEvent_history_idx")
+}
+
+model BusinessGoal {
+  id String @id @default(uuid())
+  tenantId String
+  title String
+  metric String
+  state String @default("active")
+  version Int @default(1)
+  ownerMembershipId String
+  periodStart DateTime
+  periodEnd DateTime
+  timezone String
+  currency String?
+  salesMonth String?
+  bindingKey String?
+  target Decimal? @db.Decimal(24, 4)
+  baselineJson Json?
+  lastMeasuredAt DateTime?
+  nextCheckAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  measurements GoalMeasurement[]
+  events BusinessGoalEvent[]
+  initiatives GoalInitiative[]
+  @@unique([tenantId, id])
+  @@unique([tenantId, bindingKey])
+  @@index([state, nextCheckAt], map: "BusinessGoal_due_idx")
+  @@index([tenantId, state, id], map: "BusinessGoal_list_idx")
+}
+
+model GoalMeasurement {
+  id String @id @default(uuid())
+  tenantId String
+  goalId String
+  version Int
+  measuredAt DateTime
+  asOf DateTime
+  fingerprint String
+  resultJson Json
+  goal BusinessGoal @relation(fields: [tenantId, goalId], references: [tenantId, id], onDelete: Cascade)
+  @@unique([tenantId, goalId, version, fingerprint])
+  @@index([tenantId, goalId, measuredAt], map: "GoalMeasurement_history_idx")
+}
+
+model BusinessGoalEvent {
+  id String @id @default(uuid())
+  tenantId String
+  goalId String
+  type String
+  version Int
+  userId String?
+  requestId String?
+  requestHash String?
+  changesJson Json @default("{}")
+  createdAt DateTime @default(now())
+  goal BusinessGoal @relation(fields: [tenantId, goalId], references: [tenantId, id], onDelete: Cascade)
+  @@unique([tenantId, userId, requestId])
+  @@index([tenantId, goalId, createdAt], map: "BusinessGoalEvent_history_idx")
+}
+
+model GoalInitiative {
+  id String @id @default(uuid())
+  tenantId String
+  goalId String
+  taskId String
+  actionRunId String?
+  createdAt DateTime @default(now())
+  goal BusinessGoal @relation(fields: [tenantId, goalId], references: [tenantId, id], onDelete: Cascade)
+  @@unique([tenantId, goalId, taskId])
+}
+
 model Task {
   id                 String    @id @default(uuid())
   tenantId           String
@@ -1004,6 +1248,9 @@ model Task {
   @@index([tenantId, targetType, status])
   @@index([tenantId, executionStatus])
   @@index([tenantId, companyId])
+  @@index([tenantId, type, createdAt], map: "Task_proposal_experiment_idx")
+  @@index([tenantId, dealId, status, dueAt, id], map: "Task_deal_opportunity_idx")
+  @@index([tenantId, inquiryId, status, dueAt, id], map: "Task_inquiry_opportunity_idx")
 }
 
 model Agreement {
@@ -1053,6 +1300,7 @@ model Agreement {
   @@index([tenantId, conversationId, status])
   @@index([tenantId, contactId, status])
   @@index([tenantId, type, status])
+  @@index([tenantId, dealId, type, status], map: "Agreement_deal_opportunity_idx")
 }
 
 model ExecutionConfirmation {
@@ -1506,11 +1754,16 @@ model OutboxEvent {
   entityId    String
   payloadJson Json
   attempts    Int       @default(0)
+  retryAttempts Int    @default(0)
+  failedAt    DateTime?
+  failureKind String?
+  errorCode   String?
   availableAt DateTime  @default(now())
   processedAt DateTime?
   tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([processedAt, availableAt])
+  @@index([tenantId, failedAt])
   @@index([tenantId, type])
 }
 
@@ -1769,6 +2022,7 @@ model SituationEpisode {
   @@unique([tenantId, id])
   @@index([tenantId, state, checkedAt])
   @@index([tenantId, updatedAt])
+  autopilotCases AutopilotCase[]
 }
 
 model SituationSweepState {
@@ -2490,4 +2744,149 @@ model ControlChatMessage {
   @@unique([integrationId, eventKey])
   @@index([state, createdAt])
   @@index([identityId, integrationId, createdAt])
+}
+
+// A reviewed, immutable plan. Historical task/confirmation/outbox IDs are retained
+// as references even if the underlying operational record is later removed.
+// One bounded shared project per company; saving never applies live settings.
+model ArchitectDraft {
+  id               String   @id @default(uuid())
+  tenantId         String   @unique
+  schemaVersion    Int      @default(1)
+  revision         Int      @default(1)
+  savedByUserId    String
+  requestId        String
+  requestHash      String
+  baseRevision     String
+  answersJson      Json
+  previewJson      Json
+  applicationRunId String?
+  appliedRevision  Int?
+  appliedAt        DateTime?
+  expiresAt        DateTime
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model ActionRun {
+  id                    String @id @default(uuid())
+  tenantId              String
+  userId                String
+  initiatorMembershipId String
+  requestId             String
+  requestHash           String
+  title                 String
+  status                String @default("draft")
+  snapshotJson          Json
+  confirmationId        String? @unique
+  outboxId              String? @unique
+  expiresAt             DateTime
+  confirmedAt           DateTime?
+  finishedAt            DateTime?
+  errorCode             String?
+  errorText             String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  tenant                Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  steps                 ActionStep[]
+  @@unique([tenantId, id])
+  @@unique([tenantId, userId, requestId])
+  @@index([tenantId, userId, createdAt])
+  @@index([status, expiresAt])
+}
+
+model ActionStep {
+  id          String @id @default(uuid())
+  tenantId    String
+  runId       String
+  position    Int
+  key         String
+  kind        String
+  label       String
+  detail      String
+  inputJson   Json
+  snapshotJson Json
+  status      String @default("pending")
+  taskId      String?
+  resultJson  Json?
+  errorCode   String?
+  errorText   String?
+  finishedAt  DateTime?
+  run         ActionRun @relation(fields: [tenantId, runId], references: [tenantId, id], onDelete: Cascade)
+  @@unique([tenantId, runId, key])
+  @@unique([runId, position])
+}
+
+
+model AutopilotPolicy {
+  id String @id @default(uuid())
+  tenantId String @unique
+  version Int @default(1)
+  state String @default("paused")
+  configJson Json
+  routingRuleId String
+  calendarHash String
+  actorUserId String?
+  actorMembershipId String?
+  enabledAt DateTime?
+  cursorAt DateTime?
+  cursorId String?
+  nextScanAt DateTime @default(now())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  routingRule RoutingRule @relation(fields: [tenantId, routingRuleId], references: [tenantId, id])
+  cases AutopilotCase[]
+  @@unique([tenantId, id])
+  @@index([state, nextScanAt], map: "AutopilotPolicy_due_idx")
+}
+
+model AutopilotCase {
+  id String @id @default(uuid())
+  tenantId String
+  policyId String
+  policyVersion Int
+  version Int @default(1)
+  inquiryId String
+  episodeId String
+  inboundId String
+  inboundAt DateTime
+  state String
+  expectedJson Json
+  taskId String?
+  assignedMembershipId String?
+  dueAt DateTime?
+  explanation String @default("")
+  authorizedAt DateTime?
+  authorizedByUserId String?
+  lastRunId String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  policy AutopilotPolicy @relation(fields: [tenantId, policyId], references: [tenantId, id], onDelete: Cascade)
+  inquiry Inquiry @relation(fields: [tenantId, inquiryId], references: [tenantId, id], onDelete: Cascade)
+  episode SituationEpisode @relation(fields: [tenantId, episodeId], references: [tenantId, id], onDelete: Cascade)
+  events AutopilotEvent[]
+  @@unique([tenantId, id])
+  @@unique([tenantId, inquiryId])
+  @@index([tenantId, state, createdAt, id], map: "AutopilotCase_list_idx")
+  @@index([tenantId, createdAt, id], map: "AutopilotCase_history_idx")
+}
+
+model AutopilotEvent {
+  id String @id @default(uuid())
+  tenantId String
+  caseId String?
+  type String
+  policyVersion Int
+  userId String?
+  requestId String?
+  requestHash String?
+  detailsJson Json @default("{}")
+  createdAt DateTime @default(now())
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  case AutopilotCase? @relation(fields: [tenantId, caseId], references: [tenantId, id], onDelete: Cascade)
+  @@unique([tenantId, userId, requestId])
+  @@index([tenantId, caseId, createdAt], map: "AutopilotEvent_history_idx")
+  @@index([tenantId, type, createdAt], map: "AutopilotEvent_limit_idx")
 }

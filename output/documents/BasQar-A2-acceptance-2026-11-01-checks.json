@@ -1,0 +1,62 @@
+{
+  "stage": "A2",
+  "date": "2026-11-01",
+  "status": "verified_locally_not_deployed",
+  "generator": "validated_templates_v1",
+  "apply": false,
+  "browser": "unavailable_disabled_in_work_settings",
+  "postgres_linux_docker": "not_run",
+  "commands": [
+    "node scripts/test-api.mjs aiArchitect onboarding aiManagerSetup aiAction schemaPatches http",
+    "npm run test --workspace=@creolab/web",
+    "npm run typecheck",
+    "npm run build --workspace=@creolab/web",
+    "git diff --check"
+  ],
+  "files": {
+    "packages/contracts/src/aiArchitect.ts": "0c327672b30a3840bb505015c7350e0fdd18b53b258a41b03518879339649f35",
+    "packages/contracts/src/index.ts": "0653cbb916db36e18626b34d25a6b55c51e48e380f9da833c89f8a1ab6f215db",
+    "packages/db/prisma/schema.prisma": "cdc6c848b295130343ecf560dfad26dd7523d686a5246ef208100d9c4a284532",
+    "packages/db/src/aiArchitectSchema.ts": "91e306e7077064e58bae6fa10b8ed80305583c72251fa8d2beac45020bff7772",
+    "packages/db/src/client.ts": "1de8cf8403f20f508d47f2e09559950fbf9262c5f876938664403d7b1ad1fcbc",
+    "apps/api/src/services/aiArchitectService.ts": "ebab68812952b1fcc1a36bcb7552ae889aaaa98ea8852cb06bae700edb02784d",
+    "apps/api/src/aiArchitect.test.ts": "8aa614f3d46f7ce03ea3c1264b41384f8d2d3ed029dbe8dcf8c71b9a3288a46f",
+    "apps/api/src/app.ts": "11a3d390ebad6b6fbcba127c810e70dd6facdc409e95af0cd21a1acd64b51552",
+    "apps/api/src/lib/auditPresentation.ts": "e7aa56ac464246b0323a664eabb34d17062ac9b6b9151570512ca1b3081bc14a",
+    "apps/api/src/schemaPatches.test.ts": "163b963ae31f82f72d4cb821b32bc61e43616eeec7d0961f6c2f773535ab23f0",
+    "apps/api/openapi.yaml": "db3ca9ed421bebcf497fce203d24c5f118de2ae2b222bd32bad878bb9412f086",
+    "apps/web/src/components/ArchitectPanel.tsx": "9650cef05782c765efe78027ee948af61244a33c5311bb47ad87e6c3d82e1950",
+    "apps/web/src/components/ArchitectReview.tsx": "3ac96fe1681bacb00482fec8842383aae1cf02ef319ad4308fa863f400f9daf4",
+    "apps/web/src/components/architect.css": "a226aac3b2d27269611d1dccb544148349012a312c91901fd0037e0ec9be79a9",
+    "apps/web/src/lib/aiArchitect.ts": "21e7a6dfd7d503f1f06d1a679bad5ec109cb5bc0b33c15ed704167ba842c6d73",
+    "apps/web/src/pages/GettingStartedPage.tsx": "5366e1d9c123088a0cad71f44fa06d9fd4cb9576f6fbc3db63e78eec5c082c64",
+    "apps/web/package.json": "77302ea4d5ba9776b55733e406a6a5e16ae6048515ea8bdabd49b1a48d279b30",
+    "scripts/architect-review.test.mjs": "3c82c86d5ec282d783c0c4600b903f9cf434e569192384ebc4b9540c5dc84c19",
+    "BASQAR_AI_OS_AUDIT.md": "047042623297fa9b08e7ba1f31121cff59ecf00cb8312404c0e142026057968c",
+    "output/documents/BasQar-A2-acceptance-2026-11-01.md": "87a5843ce79fc91782be334a8536fea70d2ac5ceb166bc945bffcc47bdde817d"
+  },
+  "logs": {
+    "api": {
+      "path": "/tmp/basqar-a2-acceptance-tests.log",
+      "sha256": "068c6f38caf749ee80e1ceaad9d933b9eb289e5e0eb812066ac19d004b975837",
+      "tests": 77,
+      "passed": 77,
+      "failed": 0
+    },
+    "web": {
+      "path": "/tmp/basqar-a2-web-tests.log",
+      "sha256": "617c4eb765faec2d3e22cd2ed81c137fdd0fedc576d9fc366c0dd12950a24e92",
+      "tests": 85,
+      "passed": 85,
+      "failed": 0
+    },
+    "types": {
+      "path": "/tmp/basqar-a2-final-types.log",
+      "sha256": "fc1610b9081f206e480555f9bc32f27b71d5c62deee39ced1d9a23b0d2cf29ba"
+    },
+    "build": {
+      "path": "/tmp/basqar-a2-final-build.log",
+      "sha256": "276b6cbd4e9318f9a22b7eb9aa3a10704f0c2c0170a73277c2410e7ff42f1f34"
+    }
+  }
+}

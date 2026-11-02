@@ -1,0 +1,180 @@
+{
+  "stage": "A12",
+  "date": "2026-11-02",
+  "status": "local_acceptance_passed_linux_postgres_container_and_live_pending",
+  "branch": "codex/stage9-release",
+  "baseHead": "85ca15135f64ce2f7d54b129da8c3703001cae7d",
+  "published": false,
+  "productionDataChanged": false,
+  "externalDeliveryUsed": false,
+  "scope": "Bounded shutdown of API/worker and verifier; local regression; expanded unexecuted Linux/PostgreSQL/container checks. No live model or provider acceptance.",
+  "tests": {
+    "apiFiles": 203,
+    "apiScenarios": 2251,
+    "webScenarios": 140,
+    "supervisorScenarios": 5,
+    "database": "isolated PGlite; external providers disabled"
+  },
+  "checks": {
+    "apiFinal": {
+      "path": "/tmp/basqar-a12-final-api-authorized.log",
+      "sha256": "59183ee1864f1e70f1bac550f7df826ec5a9a155b2895f367ea57fca26022c9e",
+      "exitCode": 0,
+      "tests": 2251,
+      "pass": 2251,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "web": {
+      "path": "/tmp/basqar-a12-web-tests.log",
+      "sha256": "285fa68efa23422f983b843d5b7530b3b518a95712926ea1b81856cc1180a79e",
+      "exitCode": 0,
+      "tests": 140,
+      "pass": 140,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "supervisor": {
+      "path": "/tmp/basqar-a12-supervisor-final.log",
+      "sha256": "e9365c9a30614fb2520e018f1b631fe574024362ce8c02149a620d4c59a6a02e",
+      "exitCode": 0,
+      "tests": 5,
+      "pass": 5,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "types": {
+      "path": "/tmp/basqar-a12-typecheck.log",
+      "sha256": "7cea1e601053f6ff9f25c9839c88f6095efe3dd8fd6cc78e46080914a77dbd27",
+      "exitCode": 0
+    },
+    "build": {
+      "path": "/tmp/basqar-a12-web-build.log",
+      "sha256": "d1e4a72fb5b94407a6f8d56a375f8baf862982b78ef2842e59487ef77af75b3d",
+      "exitCode": 0
+    },
+    "workload": {
+      "path": "/tmp/basqar-a12-workload.log",
+      "sha256": "257ef5a90bdb8ae2c37c5bfa0850902c1b61b4d887028ca5cb2f076b59f839aa",
+      "exitCode": 0,
+      "tests": 2,
+      "pass": 2,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "workflow": {
+      "path": "/tmp/basqar-a12-workflow.log",
+      "sha256": "a0819e3a9c793885fbed569c25ffb28770bd1b1ad2c80a5347efee5bd0612d32",
+      "exitCode": 0
+    },
+    "diff": {
+      "path": "/tmp/basqar-a12-diff.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "exitCode": 0
+    }
+  },
+  "workload": {
+    "database": "PGlite",
+    "kind": "DB-only home read; not model or production latency",
+    "profiles": [
+      {
+        "records": 11,
+        "reads": 10,
+        "p50Ms": 16,
+        "p95Ms": 21
+      },
+      {
+        "records": 2001,
+        "reads": 10,
+        "p50Ms": 17,
+        "p95Ms": 19
+      }
+    ],
+    "queue": {
+      "events": 80,
+      "tenants": 2,
+      "replyConcurrencyLimit": 2,
+      "noExternalDelivery": true
+    }
+  },
+  "bundle": {
+    "initialBytes": 1099941,
+    "initialGzipBytes": 278966,
+    "budgetBytes": 1100000,
+    "budgetGzipBytes": 285000,
+    "files": [
+      "assets/index-DIsKZwNE.js"
+    ]
+  },
+  "sourceSha256": {
+    ".github/workflows/release-acceptance.yml": "d4d930dfae60303abbeaedabceb361ac8fe05b04dc9f84dee469f662c0acaf70",
+    "apps/api/src/index.ts": "177c2d1e1f7c5bab727f79db802d961238c3d7b42545fa2a653eb9d035be29f4",
+    "apps/api/src/services/backgroundJobs.ts": "0307f68e8ec5f17aafa680d55e08bb0418d5b47a20bd58988d890d8d8fe6bbcb",
+    "apps/api/src/services/backgroundTaskGroup.ts": "18cf9189d7da07b6503cf495e8a4394986b796b70806be45a946d0fb672fc463",
+    "apps/api/src/lib/shutdown.ts": "fd87d0db5a08cbc54c5d6c5bf219e7f156beeb28615da27441e2bb5539b64a1c",
+    "apps/api/src/backgroundLifecycle.test.ts": "055c892cb04abda778170d943b20078a85cc6fd05e060c089c019a27fa0e74b1",
+    "apps/api/src/runtimeWorkload.test.ts": "d7598f7d9d43ddd2c1a5dce315f58d669428616f53db418b0802ec75b6bd5a40",
+    "apps/api/src/workerRuntime.test.ts": "413684aa8084449f3d15e04164474e4620b3e7ece6bc869787ca7ac9d4721006",
+    "apps/api/src/postgresRuntime.postgres.test.ts": "2248ea526639864f80f37326f0b0a644e30ea9455427edd1df83887f9be9bb91",
+    "apps/worker/src/index.ts": "4fc1f757901057207c0c82e55752575277bdbc535a9826833642d0dd40c73263",
+    "apps/worker/package.json": "403a0649386e0074d8b90a96bb85a7ba3147f244adc125c9f5822e9096582dc3",
+    "apps/worker/tsconfig.json": "91ae0186742ad16039fb4ffd36761ceabcb3001d015d3f973064bca3d63c040b",
+    "packages/db/src/client.ts": "7d4253bcd6d85d3604f6af9fc18c3a33fffca062f6e5566b95d590fb1bd0951c",
+    "packages/db/src/index.ts": "8e9400712727b7dea651c6252caa75c95964a8f6ed54c0d32b6267a88c24c31e",
+    "scripts/check-background-shutdown.ts": "4fefdc9adbfc0c3b1949b4139cec3fad996695d5d61c95fa5fd5b4412f072155",
+    "scripts/check-postgres-worker.ts": "b217b4ac0a19ee156d45c5ef0019522c1040a379bb171c94d182c97502d0c807",
+    "scripts/check-container-runtime.mjs": "7af9e70e1f6b880bf559b4e220c4fa35943486f0685961d573317749ded04fec",
+    "scripts/start-api-with-kalkan.mjs": "287aede118ea71f82ce3a1bd0faae05de7aa4509b698762eaa37f575da1fdc14",
+    "scripts/start-api-with-kalkan.test.mjs": "cfdb06f02c9c1bbc1adb0db5f37eff9a58dace605968e7d6a764648c4db3f446"
+  },
+  "sourceFingerprint": {
+    "algorithm": "sha256 of sorted path + NUL + sourceSha256 lines joined with newline; source/config extensions under apps/packages/scripts/.github plus root package/config/Dockerfile, excluding node_modules/dist/data/uploads/build",
+    "fileCount": 942,
+    "sha256": "5105759c66ab5f4f11e73607b764d563f91f277ac445541d0d3afcd0f8665f4a"
+  },
+  "runtimeChecks": {
+    "localWorkerRestart": "passed; one persisted task, two completed steps, draft unsent",
+    "localInFlightShutdown": "passed, including repeated signals and cleanup failure",
+    "supervisorGraceAndVerifier": "passed against local stubs",
+    "linuxFullRegression": "prepared_not_run",
+    "realPostgres": {
+      "status": "prepared_not_run",
+      "selectedTestFiles": 31,
+      "cases": [
+        "four-process baseline migration",
+        "SIGKILL after committed action step; lease fencing and four-process resume",
+        "pg_dump/restore/restart; stop flag, revocation and tenant isolation"
+      ]
+    },
+    "fullDocker": "prepared_not_run",
+    "browser": "not_rechecked_in_this_runtime_stage",
+    "realModelQualityAndCost": "not_run",
+    "productionBackup": "not_verified",
+    "deployedRevision": "not_verified"
+  },
+  "intermediateFailures": [
+    {
+      "kind": "regression_reproduced_and_fixed",
+      "description": "Embedded DB signal handler closed the process before background drain; first lifecycle run failed, final six cases pass."
+    },
+    {
+      "kind": "test_harness_fixed",
+      "description": "A JavaScript test accidentally contained a TypeScript type annotation; corrected before final supervisor run."
+    },
+    {
+      "kind": "environment",
+      "description": "An intermediate full run was interrupted due to listen EPERM. The authorized final full run passed; results are not combined."
+    }
+  ],
+  "remaining": [
+    "Linux/PostgreSQL/Docker checks on the exact candidate",
+    "desktop/mobile/keyboard visual acceptance of A0-A11",
+    "real-model pilot: grounded answers, latency, usage/cost",
+    "production backup/restore and rollback compatibility",
+    "deployed revision and gradual opt-in pilot"
+  ]
+}

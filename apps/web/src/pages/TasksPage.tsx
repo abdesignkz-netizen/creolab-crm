@@ -944,9 +944,7 @@ export function TasksPage() {
   }
 
   async function taskEditPayload() {
-    const payload: { messageDraft: string; dueAt?: string } = { messageDraft };
-    if (editDueAt) payload.dueAt = editDueAt;
-    return payload;
+    return { ...(SENDABLE.has(taskDetail?.type) ? { messageDraft } : {}), dueAt: editDueAt || null };
   }
 
   async function onSaveTaskEdits() {
@@ -2604,8 +2602,9 @@ export function TasksPage() {
 
       {activeTaskId && taskDetail && !preview ? (
         <div className="panel task-form">
-          <b>{isScheduledSend(taskDetail) ? uiText("Изменить запланированную задачу") : uiText("Подготовка отправки")}</b>
+          <b>{isScheduledSend(taskDetail) ? uiText("Изменить запланированную задачу") : SENDABLE.has(taskDetail.type) ? uiText("Подготовка отправки") : uiText("Карточка задачи")}</b>
           <div className="muted">{uiTaskTitle(taskDetail)}</div>
+          {!SENDABLE.has(taskDetail.type) ? <><p>{uiText("Статус")}: {statusText(taskDetail)}</p>{taskDetail.description ? <p>{taskDetail.description}</p> : null}</> : null}
           {taskDetail.delivery ? <TaskDeliveryNotice result={taskDetail.delivery} conversationId={taskDetail.conversationId} onReconcile={caps.manageTasks && taskDetail.delivery.canReconcile ? onReconcileDelivery : undefined} /> : null}
           {taskDetail.delivery?.retryFilesAvailable ? <button type="button" className="btn" disabled={busy} onClick={onRetryFiles}>{uiText("Повторить отправку файла")}</button> : null}
           {isScheduledSend(taskDetail) ? (
@@ -2665,9 +2664,9 @@ export function TasksPage() {
             </div>
           ) : null}
           <fieldset disabled={busy || Boolean(taskDetail.delivery?.textOk || taskDetail.delivery?.needsCheck || taskDetail.delivery?.sending)} style={{border:0,padding:0,margin:0,minWidth:0,display:"grid",gap:16}}>
-          <label>
+          {SENDABLE.has(taskDetail.type) ? <label>
             {uiText("Сообщение")}<textarea value={messageDraft} onChange={(event) => setMessageDraft(event.target.value)} rows={5} />
-          </label>
+          </label> : null}
           <label>
             {uiText("Когда выполнить")}<input type="datetime-local" value={editDueAt} onChange={(event) => setEditDueAt(event.target.value)} disabled={!caps.manageTasks} />
           </label>
@@ -2706,7 +2705,7 @@ export function TasksPage() {
               </div>
             </div>
           )}
-          <label>
+          {SENDABLE.has(taskDetail.type) ? <><label>
             {uiText("Тип файла")}<select value={docType} onChange={(event) => setDocType(event.target.value)}>
               <option value="proposal">{uiText("Коммерческое предложение")}</option>
               <option value="presentation">{uiText("Презентация")}</option>
@@ -2726,7 +2725,7 @@ export function TasksPage() {
                 event.target.value = "";
               }}
             />
-          </label>
+          </label></> : null}
           {(taskDetail.attachments || []).length ? (
             <div className="picker-list">
               {taskDetail.attachments.map((file: any) => (
@@ -2755,7 +2754,7 @@ export function TasksPage() {
             <button
               type="button"
               className="btn secondary"
-              {...tip(uiText("Закрыть панель без отправки"))}
+              {...tip(uiText("Закрыть панель без сохранения правок"))}
               onClick={() => { setActiveTaskId(null); setTaskDetail(null); setEditDueAt(""); }}
             >
               {uiText("Закрыть")}</button>
@@ -2763,21 +2762,21 @@ export function TasksPage() {
               type="button"
               className="btn secondary"
               disabled={busy || Boolean(taskDetail.delivery?.textOk || taskDetail.delivery?.needsCheck || taskDetail.delivery?.sending)}
-              {...tip(uiText("Сохранить текст и срок. Если отправка уже запланирована, она перенесётся на новое время"))}
+              {...tip(SENDABLE.has(taskDetail.type) ? uiText("Сохранить текст и срок. Если отправка уже запланирована, она перенесётся на новое время") : uiText("Сохранить срок и исполнителя задачи"))}
               onClick={() => void onSaveTaskEdits()}
             >
               {uiText("Сохранить правки")}</button>
-            <button
+            {SENDABLE.has(taskDetail.type) ? <button
               type="button"
               className="btn"
               disabled={busy || Boolean(taskDetail.delivery?.textOk || taskDetail.delivery?.needsCheck || taskDetail.delivery?.sending)}
               {...tip(uiText("Проверить канал и показать подтверждение перед отправкой в WhatsApp"))}
               onClick={onPrepare}
             >
-              {uiText("Подготовить отправку")}</button>
+              {uiText("Подготовить отправку")}</button> : null}
           </div>
-          <p className="muted" style={{ marginTop: 8 }}>
-            {uiText("Отправка идёт через WhatsApp-диалог клиента (sellerLead). Если диалога нет — сначала синхронизируйте бота в Интеграциях или используйте «Массовая отправка» по номеру.")}</p>
+          {SENDABLE.has(taskDetail.type) ? <p className="muted" style={{ marginTop: 8 }}>
+            {uiText("Отправка идёт через WhatsApp-диалог клиента. Если диалога нет — сначала подключите WhatsApp в Интеграциях или используйте «Массовая отправка» по номеру.")}</p> : null}
         </div>
       ) : null}
 

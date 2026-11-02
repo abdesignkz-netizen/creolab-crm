@@ -202,7 +202,10 @@ async function assess(tx: Tx, auth: AuthContext, review: Review, createdAt: Date
   }
   for (const event of review.outbox) {
     const current = await tx.outboxEvent.findFirst({ where: { tenantId: tid, id: String(event.id) } });
-    if (!blockedReason && (!current || hash(json(current)) !== hash(event) || current.processedAt || current.attempts)) blockedReason = "effects_started";
+    // Pre-A0 snapshots do not contain the additive failure fields. Defaults do
+    // not mean an effect ran, but any claim/failure must still prevent undo.
+    const previous = { failedAt: null, failureKind: null, errorCode: null, retryAttempts: 0, ...event };
+    if (!blockedReason && (!current || hash(json(current)) !== hash(previous) || current.processedAt || current.attempts || current.retryAttempts || current.failedAt)) blockedReason = "effects_started";
   }
   if (!blockedReason && agreementIds.length && (review.calendarLinked || await hasCalendarConnection(tx, tid) || await hasCalendarHistory(tx, tid, agreementIds))) blockedReason = "calendar";
   // Already queued/sent notices require a separate, explicit reconciliation;

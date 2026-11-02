@@ -1,3 +1,4 @@
+import type { DomainDb } from "../lib/transaction.ts";
 import { SignJWT, jwtVerify } from "jose";
 import type { PrismaClient } from "@creolab/db";
 import { loginSchema, ROLE_LABELS, type Role } from "@creolab/contracts";
@@ -119,7 +120,7 @@ function toAuth(
   };
 }
 
-async function loadUser(prisma: PrismaClient, userId: string) {
+async function loadUser(prisma: DomainDb, userId: string) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     include: {
@@ -169,7 +170,7 @@ async function loadUser(prisma: PrismaClient, userId: string) {
 }
 
 export async function authForUserInTenant(
-  prisma: PrismaClient,
+  prisma: DomainDb,
   userId: string,
   tenantId: string,
   sessionId = "control",

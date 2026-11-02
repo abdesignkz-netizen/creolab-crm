@@ -1,0 +1,38 @@
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import type { BusinessExperimentDetail, ExperimentOptions, ExperimentSave } from "@creolab/contracts";
+import { createBusinessExperimentsApi } from "@creolab/api-client/business-experiments";
+import { api } from "../lib/api";
+const requests = createBusinessExperimentsApi(api.request);
+const plusDays = (date: string, days: number) => { const d = new Date(`${date}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + days); return d.toISOString().slice(0, 10); };
+export function BusinessExperimentForm({ options, item, busy, onSave, onCancel }: { options: ExperimentOptions; item?: BusinessExperimentDetail | null; busy: boolean; onSave: (v: Omit<ExperimentSave, "requestId">) => void; onCancel: () => void }) {
+  const [title, setTitle] = useState(item?.title || "Подготавливать КП быстрее"), [hypothesis, setHypothesis] = useState(item?.hypothesis || "Единая заготовка КП сократит время подготовки предложения клиенту."), [change, setChange] = useState(item?.change || "");
+  const [baselineFrom, setBaselineFrom] = useState(item?.method.baselineFrom || plusDays(options.today, -7)), [baselineTo, setBaselineTo] = useState(item?.method.baselineTo || plusDays(options.today, -1));
+  const [from, setFrom] = useState(item?.method.from || plusDays(options.today, 1)), [to, setTo] = useState(item?.method.to || plusDays(options.today, 7));
+  const [members, setMembers] = useState(item?.method.memberIds || []), [minimum, setMinimum] = useState(String(item?.method.minimumSample || 10)), [target, setTarget] = useState(String(item?.method.targetReductionPercent || 20));
+  const [taskId, setTaskId] = useState(item?.method.initiativeTaskId || ""), [q, setQ] = useState(""), [tasks, setTasks] = useState<Array<{ id: string; title: string }>>([]), [taskError, setTaskError] = useState(""), [searching, setSearching] = useState(false);
+  const [goal, setGoal] = useState(item?.method.goal?.id || ""), [decision, setDecision] = useState(item?.method.decision?.id || "");
+  useEffect(() => { let active = true; setSearching(true); setTaskError(""); const timer = setTimeout(() => {
+    requests.tasks(q).then(r => { if (active) setTasks(r.items); }).catch(e => { if (active) { setTasks([]); setTaskError(e.message || "Не удалось найти задачи."); } }).finally(() => { if (active) setSearching(false); });
+  }, 250); return () => { active = false; clearTimeout(timer); }; }, [q]);
+  const choices = item?.initiative && !tasks.some(t => t.id === item.initiative!.id) ? [{ id: item.initiative.id, title: item.initiative.title }, ...tasks] : tasks;
+  const goalRef = options.goals.find(g => g.id === goal), decisionRef = options.decisions.find(d => d.id === decision);
+  return <form className="panel experiment-form" onSubmit={e => { e.preventDefault(); onSave({ title, hypothesis, change, ...(item ? { version: item.version } : {}), method: { metric: "proposal_preparation_minutes", baselineFrom, baselineTo, from, to, memberIds: members,
+    minimumSample: Number(minimum), targetReductionPercent: Number(target), initiativeTaskId: taskId, ...(goalRef ? { goal: { id: goalRef.id, version: goalRef.version } } : {}), ...(decisionRef ? { decision: { id: decisionRef.id, version: decisionRef.version } } : {}) } }); }}>
+    <fieldset disabled={busy}><legend>1. Улучшение и его внедрение</legend><label>Название<input required maxLength={160} value={title} onChange={e => setTitle(e.target.value)} /></label>
+      <label>Почему это должно помочь<textarea required minLength={10} maxLength={1200} value={hypothesis} onChange={e => setHypothesis(e.target.value)} /></label>
+      <label>Что конкретно меняем<textarea required minLength={10} maxLength={1200} value={change} placeholder="Например: согласуем структуру КП и используем её в выбранной группе" onChange={e => setChange(e.target.value)} /></label>
+      <label>Найти задачу внедрения<input value={q} onChange={e => { setQ(e.target.value); setTaskId(""); }} placeholder="Название задачи" /></label><label>Связанная задача<select required value={taskId} disabled={searching} onChange={e => setTaskId(e.target.value)}><option value="">{searching ? "Ищем…" : "Выберите задачу"}</option>{choices.map(t => <option key={t.id} value={t.id}>{t.title}</option>)}</select></label>
+      {taskError && <p role="alert" className="error">{taskError}</p>}<small>Показаны первые 20 найденных задач (кроме отменённых). <Link to="/tasks">Создать задачу в CRM</Link> или <Link to="/control?view=plans">подготовить план в Control</Link>. Внедрение нужно завершить после исходного периода и до начала проверки.</small>
+    </fieldset>
+    <fieldset disabled={busy}><legend>2. Группа и периоды</legend><p className="muted">Выберите одинаковые периоды по 7, 14 или 28 дней. Исходный период уже завершён, проверка начинается в будущем. Часовой пояс: {options.timezone}.</p>
+      <div className="actions" role="group" aria-label="Быстрый выбор двух периодов">{[7, 14, 28].map(days => <button type="button" className="btn secondary" key={days} onClick={() => { setBaselineFrom(plusDays(options.today, -days)); setBaselineTo(plusDays(options.today, -1)); setFrom(plusDays(options.today, 1)); setTo(plusDays(options.today, days)); }}>По {days} дней</button>)}</div>
+      <div className="experiment-dates"><label>Исходный период: с<input type="date" required value={baselineFrom} onChange={e => setBaselineFrom(e.target.value)} /></label><label>По<input type="date" required value={baselineTo} onChange={e => setBaselineTo(e.target.value)} /></label><label>Проверка: с<input type="date" required value={from} onChange={e => setFrom(e.target.value)} /></label><label>По<input type="date" required value={to} onChange={e => setTo(e.target.value)} /></label></div>
+      <fieldset className="experiment-members"><legend>Чьи задачи с КП учитываем · выбрано {members.length} из 20</legend>{options.members.map(m => <label key={m.id}><input type="checkbox" checked={members.includes(m.id)} disabled={!members.includes(m.id) && members.length >= 20} onChange={e => setMembers(v => e.target.checked ? [...v, m.id] : v.filter(id => id !== m.id))} />{m.name}</label>)}</fieldset>
+    </fieldset>
+    <fieldset disabled={busy}><legend>3. Критерий результата</legend><div className="experiment-dates"><label>Сократить медианное время минимум на, %<input required type="number" min={1} max={90} step="any" value={target} onChange={e => setTarget(e.target.value)} /></label><label>Минимум подготовленных КП в каждом периоде<input required type="number" min={10} max={500} step={1} value={minimum} onChange={e => setMinimum(e.target.value)} /></label></div>
+      <details><summary>Связать с целью или решением компании</summary><label>Цель<select value={goal} onChange={e => setGoal(e.target.value)}><option value="">Без связи</option>{options.goals.map(g => <option key={g.id} value={g.id}>{g.title}</option>)}</select></label><label>Утверждённое общее решение<select value={decision} onChange={e => setDecision(e.target.value)}><option value="">Без связи</option>{options.decisions.map(d => <option key={d.id} value={d.id}>{d.title}</option>)}</select></label></details>
+    </fieldset><p>Сначала сохраним черновик и покажем исходные данные. Методика фиксируется отдельным подтверждением; настройки компании автоматически не меняются.</p>
+    <div className="actions"><button className="btn" disabled={busy || !members.length || members.length > 20 || searching || !taskId}>Сохранить и проверить условия</button><button className="btn secondary" type="button" disabled={busy} onClick={onCancel}>Отмена</button></div>
+  </form>;
+}

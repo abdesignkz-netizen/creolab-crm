@@ -1,7 +1,7 @@
 import { deliveredConversationMessage } from "./conversationMessageState.ts";
 import type { Prisma, PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
-import { aiChannelTypes } from "./aiChannels.ts";
+import { aiChannelCapabilities, aiChannelTypes } from "./aiChannels.ts";
 import { crmModeToSeller } from "@creolab/contracts";
 import {
   isWithinConversationHours,
@@ -217,6 +217,9 @@ async function conversationGuards(
   if (settings.followUp.skipIfRefused && (refused || inquiryClosed)) return { ok: false as const, reason: "client_refused", conversation, last };
   if (settings.followUp.skipIfDealClosed && dealClosed) return { ok: false as const, reason: "deal_closed", conversation, last };
   if (conversation.mode !== "ai") return { ok: false as const, reason: "not_ai_mode", conversation, last };
+  if (!aiChannelCapabilities(integration?.type || (conversation.sellerLeadId ? "whatsapp_seller" : "")).automatedFollowUp) {
+    return { ok: false as const, reason: "no_channel", conversation, last };
+  }
   return { ok: true as const, conversation, last, clientReplied };
 }
 
@@ -333,7 +336,7 @@ export async function processClientFollowUp(
     || guards.last.id !== payload.lastOutboundMessageId) return stop("conversation_changed");
   const conversation = guards.conversation;
   if (!conversation.sellerLeadId || (conversation.connectionId &&
-    (conversation.connection?.integration.type !== "whatsapp_seller" || conversation.connection.status !== "active"))) return stop("no_channel");
+    (!aiChannelCapabilities(conversation.connection?.integration.type || "").automatedFollowUp || conversation.connection?.status !== "active"))) return stop("no_channel");
   if (settings.followUp.respectWorkingHours) {
     const when = nextWorkingInstant(new Date(), timeZone, settings.conversationHours);
     if (when.getTime() > Date.now() + 30_000) return stop("outside_hours", "scheduled", when);

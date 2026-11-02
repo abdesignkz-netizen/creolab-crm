@@ -1,0 +1,33 @@
+.business-experiments, .experiment-detail { display: grid; gap: 18px; min-width: 0; }
+.business-experiments .panel { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.experiment-state { display: inline-block; padding: 5px 10px; border-radius: 20px; background: var(--surface-soft, #eef3fb); color: var(--muted, #536780); font-size: .85rem; }
+.experiment-list, .experiment-comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.experiment-form, .experiment-form fieldset, .experiment-confirm { display: grid; gap: 16px; min-width: 0; }
+.experiment-form fieldset { border: 1px solid var(--border, #dce4ef); border-radius: 14px; padding: 18px; }
+.experiment-form legend { padding: 0 6px; font-weight: 650; }
+.experiment-form label, .experiment-confirm label { display: grid; gap: 8px; }
+.experiment-form :is(input, select, textarea), .experiment-confirm textarea { width: 100%; min-width: 0; box-sizing: border-box; }
+.experiment-form textarea, .experiment-confirm textarea { min-height: 100px; resize: vertical; }
+.experiment-dates { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.experiment-members { max-height: 260px; overflow-y: auto; }
+.experiment-members label { display: flex; align-items: center; gap: 10px; min-height: 36px; }
+.experiment-members input[type=checkbox] { width: 20px; height: 20px; flex: 0 0 20px; }
+.experiment-sample { background: var(--surface-soft, #f3f6fb); border-radius: 14px; padding: 18px; min-width: 0; }
+.experiment-sample h4 { margin-top: 0; }
+.experiment-sample strong { font-size: 1.65rem; }
+.experiment-sample p { margin-bottom: 6px; }
+.experiment-method dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.experiment-method dt { color: var(--muted, #536780); font-size: .9rem; }
+.experiment-method dd { margin: 4px 0 0; }
+.experiment-confirm { margin-top: 18px; padding: 18px; border-radius: 14px; border: 1px solid var(--border, #dce4ef); background: var(--surface-soft, #f3f6fb); }
+.experiment-warning { border-left: 3px solid #bb7916; padding-left: 12px; }
+.experiment-history { padding-left: 22px; }
+.experiment-history > li { padding: 10px 0; border-bottom: 1px solid var(--border, #dce4ef); }
+.experiment-history small { display: block; margin-top: 6px; color: var(--muted, #536780); }
+.business-experiments summary { cursor: pointer; padding: 6px 0; }
+.business-experiments .actions { flex-wrap: wrap; }
+@media (max-width: 700px) {
+  .experiment-list, .experiment-comparison, .experiment-dates, .experiment-method dl { grid-template-columns: minmax(0, 1fr); }
+  .experiment-form fieldset, .experiment-confirm { padding: 12px; }
+  .business-experiments .actions .btn { flex: 1 1 auto; white-space: normal; min-height: 44px; }
+}

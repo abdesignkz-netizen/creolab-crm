@@ -1,0 +1,18 @@
+.autopilot-panel { min-width: 0; }
+.autopilot-panel h3 { margin: 0; }
+.autopilot-panel p { margin: .45rem 0; }
+.autopilot-fields { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 1.2rem; }
+.autopilot-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 1rem; }
+.autopilot-grid label, .autopilot-fields details label { display: grid; gap: .45rem; min-width: 0; }
+.autopilot-fields select, .autopilot-fields input { max-width: 100%; min-width: 0; }
+.autopilot-members { display: flex; flex-wrap: wrap; gap: .6rem 1.3rem; }
+.autopilot-case { padding: 1rem; border: 1px solid var(--border,#dce5f0); border-radius: 14px; }
+.autopilot-case-head { display: flex; justify-content: space-between; gap: 1rem; align-items: flex-start; }
+.autopilot-case-head > div { min-width: 0; overflow-wrap: anywhere; }
+.autopilot-case .actions { margin: .75rem 0; }
+.autopilot-case details { margin-top: .6rem; }
+.autopilot-history, .autopilot-review ol { padding-left: 1.5rem; }
+.autopilot-history li, .autopilot-review li { margin: .65rem 0; overflow-wrap: anywhere; }
+.autopilot-review { border: 2px solid var(--primary,#0069cc); }
+.autopilot-panel summary { cursor: pointer; padding: .6rem 0; font-weight: 600; }
+@media(max-width:700px) { .autopilot-grid { grid-template-columns: minmax(0,1fr); } .autopilot-case-head { flex-direction: column; gap: .5rem; } .autopilot-panel .actions > .btn { flex: 1 1 180px; } }

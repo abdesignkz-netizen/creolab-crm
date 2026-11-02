@@ -1,7 +1,8 @@
 import type { PrismaClient, Prisma } from "@creolab/db";
-import { SALES_GOALS } from "@creolab/contracts";
+import { z } from "zod";
+import { SALES_GOALS, dealRiskLabel } from "@creolab/contracts";
 import type { AuthContext } from "../lib/types.ts";
-import { conversationAccessWhere, dealAccessWhere, requireTenant } from "../lib/access.ts";
+import { conversationAccessWhere, dealAccessWhere, isManager, requireTenant } from "../lib/access.ts";
 import { phoneFromContact, displayName } from "./contactLabels.ts";
 import { tenantSalesSettings, salesRecord, ensureSalesNextTask, salesFollowUpDueAt } from "./salesProcessService.ts";
 import { createStaffNotification } from "./notificationService.ts";
@@ -9,22 +10,23 @@ import { parseAIAutomationSettings } from "./aiAutomationSettings.ts";
 import { getEffectiveTenantSettings } from "./runtimeSettings.ts";
 import { writeActivity } from "./contactService.ts";
 import { recordDealStageTransition } from "./dealStageHistory.ts";
+import { parseOpsSettings } from "./dealPipeline.ts";
+import { assessDealRisk } from "./dealRiskPolicy.ts";
+import { dealRiskInclude, riskReadContext, riskReplyEvidence } from "./dealRiskService.ts";
+import { businessDealWhere, MoneyDecimal } from "./financialMetrics.ts";
 
-const include = {
-  stage: true, contact: { include: { methods: true } }, assignee: { include: { user: true } },
-  tasks: { where: { status: { in: ["open", "in_progress", "waiting"] } }, orderBy: { dueAt: "asc" as const } },
-  invoices: { where: { status: { in: ["ISSUED", "SENT", "PAID", "PARTIALLY_PAID", "OVERDUE"] } } },
+const salesInclude = (now: Date) => ({
+  ...dealRiskInclude(now),
   contracts: { where: { status: "SIGNED" } }, payments: { where: { status: "confirmed" } },
   agreements: { where: { status: { in: ["CONFIRMED", "SCHEDULED", "RESCHEDULED", "COMPLETED"] } } },
-  conversations: { include: { conversation: { select: { id: true, waitingFor: true, needsAttention: true, attentionReason: true } } } },
   activities: { where: { type: { in: ["deal.created", "sales.qualified", "sales.proposal_sent", "sales.order_agreed", "sales.document_stage", "sales.goal_reached", "task.created", "task.updated", "task.completed"] } }, orderBy: { createdAt: "desc" as const } },
-} satisfies Prisma.DealInclude;
-type SalesDeal = Prisma.DealGetPayload<{ include: typeof include }>;
+} satisfies Prisma.DealInclude);
+type SalesDeal = Prisma.DealGetPayload<{ include: ReturnType<typeof salesInclude> }>;
 
 function salesFacts(deal: SalesDeal, goal: keyof typeof SALES_GOALS) {
-  const amount = Number(deal.offerAmountMinor || 0);
-  const paid = deal.payments.filter(p => p.currency === deal.currency).reduce((sum, p) => sum + Number(p.amountMinor), 0);
-  const hasPayment = amount > 0 && paid >= amount;
+  const amount = new MoneyDecimal(deal.offerAmountMinor || 0);
+  const paid = deal.payments.filter(p => p.currency === deal.currency).reduce((sum, p) => sum.plus(p.amountMinor), new MoneyDecimal(0));
+  const hasPayment = amount.gt(0) && paid.gte(amount);
   const meeting = deal.agreements.some(a => ["CALL", "ONLINE_MEETING", "OFFLINE_MEETING"].includes(a.type) && a.scheduledAt);
   // Only actual delivery records or completed sending tasks are a sent proposal.
   const proposal = deal.activities.some(a => a.type === "sales.proposal_sent");
@@ -32,28 +34,32 @@ function salesFacts(deal: SalesDeal, goal: keyof typeof SALES_GOALS) {
   const qualified = deal.activities.some(a => a.type === "sales.qualified" || a.type === "deal.created" && Boolean(salesRecord(a.metadataJson).sourceMessageId) && Array.isArray(salesRecord(a.metadataJson).evidenceMessageIds) && salesRecord(a.metadataJson).evidenceMessageIds.length > 0)
     || ["need_identified", "proposal_sent", "negotiation", "contract", "invoiced"].includes(deal.stage.systemKey);
   const reached = ({ qualified, meeting, proposal, order, payment: hasPayment })[goal];
-  const blockers: string[] = [];
-  if (!deal.assigneeMembershipId || !deal.assignee?.active || deal.assignee.user.status !== "active") blockers.push("Не назначен действующий ответственный");
-  if (!deal.tasks.length && !hasPayment) blockers.push(deal.nextAction ? "Проверьте следующий шаг: открытых задач нет" : "Не запланирован следующий шаг");
-  if (deal.tasks.some(t => t.dueAt && t.dueAt < new Date()) || deal.nextActionAt && deal.nextActionAt < new Date()) blockers.push("Просрочен следующий шаг");
-  if (deal.tasks.some(t => ["failed", "unknown"].includes(t.executionStatus))) blockers.push("Не подтверждено выполнение задачи");
-  if (deal.conversations.some(c => c.conversation.waitingFor === "MANAGER")) blockers.push("Клиент ждёт сотрудника");
-  if (deal.invoices.some(i => i.dueDate && i.dueDate < new Date()) && !hasPayment) blockers.push("Нужно проверить оплату счёта");
-  if (deal.outcome === "on_hold") blockers.push("Сделка на паузе");
-  return { reached, blockers, hasPayment, closeToSale: !hasPayment && (order || deal.invoices.length > 0), paid, amount };
+  return { reached, hasPayment, closeToSale: !hasPayment && (order || deal.invoices.some(i => i.status !== "PAID")) };
 }
 
-/** Shared data for the page and WhatsApp. Never includes other staff's restricted deals. */
-export async function getSalesControl(prisma: PrismaClient, auth: AuthContext) {
+const salesPageSchema = z.object({
+  filter: z.enum(["all", "urgent", "attention", "ready", "goal"]).default("all"),
+  offset: z.coerce.number().int().min(0).max(1_000_000).default(0),
+  limit: z.coerce.number().int().min(1).max(200).default(200),
+});
+/** One database snapshot for counts, evidence and page details. A timeout fails
+ * the request; it must never silently return a partial company's risk summary. */
+export async function getSalesControl(prisma: PrismaClient, auth: AuthContext, query: unknown = {}) {
+  requireTenant(auth);
+  const page = salesPageSchema.parse(query);
+  return prisma.$transaction(tx => readSalesControl(tx, auth, page), { isolationLevel: "RepeatableRead", timeout: 30_000 });
+}
+
+async function readSalesControl(prisma: Prisma.TransactionClient, auth: AuthContext, page: z.infer<typeof salesPageSchema>) {
   const { tenantId } = requireTenant(auth);
+  const now = new Date();
   const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
   const settings = tenantSalesSettings(tenant.settingsJson);
-  const where = { AND: [dealAccessWhere(auth), { outcome: { in: ["open", "on_hold"] } }] };
-  const [deals, count, proposals] = await Promise.all([
-    prisma.deal.findMany({ where, include, orderBy: [{ nextActionAt: "asc" }, { id: "asc" }], take: 200 }),
-    prisma.deal.count({ where }),
+  const where = { AND: [dealAccessWhere(auth), await businessDealWhere(prisma, tenantId), { outcome: { in: ["open", "on_hold"] } }] };
+  const [proposals, members] = await Promise.all([
     prisma.activity.findMany({ where: { tenantId, type: "sales.deal_proposed", metadataJson: { path: ["status"], equals: "pending" },
       contact: { conversations: { some: conversationAccessWhere(auth) } } }, include: { contact: { include: { methods: true } } }, orderBy: { createdAt: "desc" }, take: 200 }),
+    prisma.membership.findMany({ where: { tenantId, active: true, user: { status: "active" } }, select: { id: true, user: { select: { name: true } } }, orderBy: { createdAt: "asc" } }),
   ]);
   const proposalConversationIds = proposals.map(p => salesRecord(p.metadataJson).conversationId).filter((id): id is string => typeof id === "string");
   const conversations = await prisma.conversation.findMany({ where: { AND: [conversationAccessWhere(auth), { id: { in: proposalConversationIds } }] },
@@ -62,20 +68,63 @@ export async function getSalesControl(prisma: PrismaClient, auth: AuthContext) {
   const allowed = new Set(conversations.map(c => c.id));
   const proposalContacts = proposals.filter(p => allowed.has(salesRecord(p.metadataJson).conversationId)).map(p => p.contactId);
   const alternatives = proposalContacts.length ? await prisma.deal.findMany({ where: { AND: [dealAccessWhere(auth), { contactId: { in: proposalContacts }, outcome: { in: ["open", "on_hold"] } }] }, select: { id: true, title: true, contactId: true }, take: 500 }) : [];
-  const items = deals.map(deal => {
+  const ops = parseOpsSettings(tenant.settingsJson);
+  async function describeDeals(deals: SalesDeal[]) {
+    const historyTaskIds = deals.flatMap(d => d.activities.map(a => salesRecord(a.metadataJson).taskId)).filter((id): id is string => typeof id === "string");
+    const riskContext = await riskReadContext(prisma, auth, deals, now, historyTaskIds);
+    return deals.map(deal => {
     const facts = salesFacts(deal, settings.goal);
+    const risk = assessDealRisk(riskContext.withMessages(deal), ops, tenant.timezone, settings.nextStepHours, now, riskContext.access);
+    const task = deal.tasks.find(t => ["open", "in_progress", "waiting"].includes(t.status) && riskContext.access.taskIds.has(t.id));
     return { id: deal.id, title: deal.title, stage: deal.stage.name, outcome: deal.outcome, contactName: displayName(deal.contact), phone: phoneFromContact(deal.contact),
-      ownerName: deal.assignee?.user.name || null, goalReached: facts.reached, closeToSale: facts.closeToSale, blockers: facts.blockers,
-      nextAction: deal.nextAction || deal.tasks[0]?.title || null, nextActionAt: deal.nextActionAt || deal.tasks[0]?.dueAt || null,
-      conversationId: deal.conversations[0]?.conversationId || null,
-      history: deal.activities.filter(a => a.actorType === "ai" || a.type.startsWith("sales.") || a.actorType === "system" && a.type === "task.completed").slice(0, 4).map(a => ({ title: a.title, description: a.description,
-        createdAt: a.createdAt, reason: salesRecord(a.metadataJson).reason || null, sourceMessageId: salesRecord(a.metadataJson).sourceMessageId || null })),
+      ownerName: deal.assignee?.user.name || null, goalReached: facts.reached, closeToSale: facts.closeToSale, blockers: risk.signals.map(s => dealRiskLabel(s.code)), risk,
+      nextAction: deal.nextAction || task?.title || null, nextActionAt: deal.nextActionAt || task?.dueAt || null,
+      conversationId: deal.conversations.find(c => riskContext.access.conversationIds.has(c.conversationId))?.conversationId || null,
+      history: deal.activities.filter(a => {
+        const meta = salesRecord(a.metadataJson);
+        if (a.type.startsWith("task.") && meta.taskId && !riskContext.access.taskIds.has(meta.taskId)) return false;
+        return a.actorType === "ai" || a.type.startsWith("sales.") || a.actorType === "system" && a.type === "task.completed"
+          || a.type === "task.created" && Boolean(meta.fingerprint);
+      }).slice(0, 4).map(a => ({ title: a.title, description: a.description,
+        createdAt: a.createdAt, reason: salesRecord(a.metadataJson).fingerprint ? dealRiskLabel(salesRecord(a.metadataJson).reason) : salesRecord(a.metadataJson).reason || null,
+        sourceMessageId: salesRecord(a.metadataJson).sourceMessageId || null })),
     };
-  });
+    });
+  }
+  const summary = { active: 0, urgent: 0, needsAttention: 0, closeToSale: 0, goalReached: 0 };
+  const ranked: Array<{ id: string; priority: number; at: number }> = [];
+  const priority = { urgent: 0, attention: 1, on_hold: 2, clear: 3 };
+  let after: string | undefined;
+  // Full coverage in bounded batches, retaining only ranking keys between them.
+  // No 200-row cutoff in aggregates or in filtered pagination.
+  for (;;) {
+    const deals = await prisma.deal.findMany({ where: { AND: [where, ...(after ? [{ id: { gt: after } }] : [])] },
+      include: salesInclude(now), orderBy: { id: "asc" }, take: 200 });
+    for (const item of await describeDeals(deals)) {
+      summary.active++;
+      if (item.risk.priority === "urgent") summary.urgent++;
+      if (item.blockers.length) summary.needsAttention++;
+      if (item.closeToSale) summary.closeToSale++;
+      if (item.goalReached) summary.goalReached++;
+      if (page.filter === "all" || page.filter === "urgent" && item.risk.priority === "urgent"
+        || page.filter === "attention" && item.blockers.length || page.filter === "ready" && item.closeToSale || page.filter === "goal" && item.goalReached) {
+        ranked.push({ id: item.id, priority: priority[item.risk.priority], at: Math.min(...item.risk.signals.flatMap(s => s.at ? [Date.parse(s.at)] : [])) });
+      }
+    }
+    if (deals.length < 200) break;
+    after = deals.at(-1)!.id;
+  }
+  ranked.sort((a, b) => a.priority - b.priority || a.at - b.at || a.id.localeCompare(b.id));
+  const ids = ranked.slice(page.offset, page.offset + page.limit).map(row => row.id);
+  const details = ids.length ? await describeDeals(await prisma.deal.findMany({ where: { AND: [where, { id: { in: ids } }] }, include: salesInclude(now) })) : [];
+  const byId = new Map(details.map(item => [item.id, item]));
+  const items = ids.map(id => byId.get(id)!);
   const automation = parseAIAutomationSettings(tenant.settingsJson);
   return { settings, timezone: tenant.timezone, goalLabel: SALES_GOALS[settings.goal], automationReady: Boolean(!salesRecord(salesRecord(tenant.settingsJson).runtime).aiPaused && automation.crm?.enabled && automation.analyzeNewRequests !== false && !["MANUAL", "ASSIST"].includes(automation.defaultMode)),
-    total: count, proposalsLimited: proposals.length === 200, limited: count > items.length, items,
-    summary: { active: count, needsAttention: items.filter(i => i.blockers.length).length, closeToSale: items.filter(i => i.closeToSale).length, goalReached: items.filter(i => i.goalReached).length },
+    checkedAt: now.toISOString(), riskAssignees: !isManager(auth) ? members.map(m => ({ id: m.id, name: m.user.name })) : [],
+    total: summary.active, proposalsLimited: proposals.length === 200, limited: ranked.length > items.length, items, summary, filter: page.filter,
+    coverage: { total: summary.active, checked: summary.active, complete: true, checkedAt: now.toISOString() },
+    pagination: { offset: page.offset, limit: page.limit, total: ranked.length, hasMore: page.offset + items.length < ranked.length },
     proposals: proposals.filter(p => allowed.has(salesRecord(p.metadataJson).conversationId)).map(p => { const c = salesRecord(p.metadataJson);
       const thread = conversations.find(v => v.id === c.conversationId)!;
       return { id: p.id, title: c.title, reason: c.reason, nextAction: c.nextAction, contactName: displayName(p.contact), phone: phoneFromContact(p.contact),
@@ -92,9 +141,9 @@ export async function reconcileSalesDeal(prisma: PrismaClient, tenantId: string,
     const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: tenantId } });
     const settings = tenantSalesSettings(tenant.settingsJson);
     if (settings.mode === "off" || tenant.status !== "active" || salesRecord(salesRecord(tenant.settingsJson).runtime).aiPaused) return;
-    const deal = await tx.deal.findFirst({ where: { id: dealId, tenantId, outcome: "open" }, include });
+    const deal = await tx.deal.findFirst({ where: { id: dealId, tenantId, outcome: "open" }, include: salesInclude(new Date()) });
     if (!deal) return;
-    let facts = salesFacts(deal, settings.goal);
+    const facts = salesFacts(deal, settings.goal);
     let aiPlanChanged = false;
     const targetKey = deal.invoices.length ? "invoiced" : deal.contracts.length ? "contract" : null;
     if (settings.syncDocuments && targetKey) {
@@ -131,9 +180,14 @@ export async function reconcileSalesDeal(prisma: PrismaClient, tenantId: string,
         await writeActivity(tx, { tenantId, contactId: deal.contactId, dealId, type: "task.completed", title: "Оплата проверена", actorType: "system", metadata: { taskId: task.id, reason: "Подтверждённые поступления покрывают сумму сделки" } });
       }
     } else await ensureSalesNextTask(tx, tenantId, dealId, undefined, aiPlanChanged);
-    facts = salesFacts(await tx.deal.findUniqueOrThrow({ where: { id: dealId }, include }), settings.goal);
-    if (settings.notifyResponsible && facts.blockers.length) await createStaffNotification(tx, { tenantId, membershipId: deal.assigneeMembershipId, type: "sales.attention", entityType: "deal", entityId: dealId,
-      title: "Сделке нужно внимание", body: `${displayName(deal.contact)} ${phoneFromContact(deal.contact) || ""} — ${deal.title}: ${facts.blockers.join("; ")}`, episodeKey: `sales-attention:${dealId}:${deal.nextActionAt?.toISOString() || "none"}:${deal.assigneeMembershipId || "none"}:${facts.blockers.join("|")}` });
+    if (settings.notifyResponsible) {
+      const now = new Date(), fresh = await tx.deal.findUniqueOrThrow({ where: { id: dealId }, include: salesInclude(now) });
+      const withMessages = await riskReplyEvidence(tx, tenantId, [fresh], now);
+      const risk = assessDealRisk(withMessages(fresh), parseOpsSettings(tenant.settingsJson), tenant.timezone, settings.nextStepHours, now);
+      const blockers = risk.signals.map(s => dealRiskLabel(s.code));
+      if (blockers.length) await createStaffNotification(tx, { tenantId, membershipId: fresh.assigneeMembershipId, type: "sales.attention", entityType: "deal", entityId: dealId,
+        title: "Сделке нужно внимание", body: `${displayName(fresh.contact)} ${phoneFromContact(fresh.contact) || ""} — ${fresh.title}: ${blockers.join("; ")}`, episodeKey: `sales-attention:${dealId}:${fresh.nextActionAt?.toISOString() || "none"}:${fresh.assigneeMembershipId || "none"}:${blockers.join("|")}` });
+    }
   });
 }
 

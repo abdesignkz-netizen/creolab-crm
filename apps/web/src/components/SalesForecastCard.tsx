@@ -59,7 +59,7 @@ export function SalesForecastCard({ forecast: f, canSetPlan, onCurrentMonth, onR
         <p>{t("Для расчёта нужны минимум {months} полных месяца и {sales} успешных сделок за эти месяцы.", { months: f.evidence.requiredMonths, sales: f.evidence.requiredSales })}</p>
         <div className="stats-forecast-progress"><span>{t("Полных месяцев: {count} (минимум {required})", { count: f.evidence.months, required: f.evidence.requiredMonths })}</span><span>{t("Продаж в истории: {count} (минимум {required})", { count: f.evidence.sales, required: f.evidence.requiredSales })}</span></div>
       </div>}
-      {actionable ? <div className="stats-forecast-actions"><Link className="btn secondary" to="/deals">{t("Открыть сделки")}</Link><Link className="btn secondary" to="/tasks">{t("Открыть задачи")}</Link></div> : null}
+      {actionable ? <div className="stats-forecast-actions"><Link className="btn secondary" to="/control?view=sales&filter=attention">{locale === "kk" ? "Мәмілелердің тәуекелдерін тексеру" : "Проверить риски сделок"}</Link><Link className="btn secondary" to="/tasks">{t("Открыть задачи")}</Link></div> : null}
       {f.filtered ? <p className="stats-forecast-note">{t("Расчёт использует те же фильтры, что и отчёт.")}</p> : null}
       {f.evidence.otherCurrencySales ? <p className="stats-forecast-note">{t("Продажи в других валютах исключены: {count}. Конвертации валют нет.", { count: f.evidence.otherCurrencySales })}</p> : null}
       <details className="stats-forecast-details"><summary>{t("Как посчитано")}</summary>

@@ -29,6 +29,14 @@ export async function businessDealWhere(db: Db, tenantId: string): Promise<Prism
   ] };
 }
 
+/** SQL counterpart for aggregate reads. Fixed Deal alias `d`; no exclusion-ID
+ * array is materialized for the company forecast or background read models. */
+export function businessDealSql(tenantId: string) {
+  return Prisma.sql`d."tenantId" = ${tenantId} AND NOT EXISTS (
+    SELECT 1 FROM "Inquiry" i WHERE i."tenantId" = d."tenantId"
+      AND (i.id = d."inquiryId" OR i."dealId" = d.id) AND (i.test OR i.archived))`;
+}
+
 export async function wonSalesTotals(db: Db, where: Prisma.DealWhereInput, period: Prisma.DateTimeFilter | undefined, currency: string) {
   const wonWhere: Prisma.DealWhereInput = { AND: [where, { outcome: "won", ...(period ? { closedAt: period } : {}) }] };
   const [groups, fallback] = await Promise.all([

@@ -8,7 +8,7 @@
     "build": "vite build && node ../../scripts/check-web-bundle.mjs",
     "preview": "vite preview",
     "typecheck": "tsc -b",
-    "test": "node --test ../../scripts/i18n.test.mjs ../../scripts/billing-catalog.test.mjs ../../scripts/billing-checkout-state.test.mjs ../../scripts/system-locale.test.mjs ../../scripts/avr-editor-context.test.mjs ../../scripts/task-organization.test.mjs ../../scripts/pdf-viewer.test.mjs ../../scripts/message-attempt.test.mjs ../../scripts/website-form.test.mjs ../../scripts/sales-forecast.test.mjs"
+    "test": "node --test ../../scripts/i18n.test.mjs ../../scripts/billing-catalog.test.mjs ../../scripts/billing-checkout-state.test.mjs ../../scripts/system-locale.test.mjs ../../scripts/avr-editor-context.test.mjs ../../scripts/task-organization.test.mjs ../../scripts/pdf-viewer.test.mjs ../../scripts/message-attempt.test.mjs ../../scripts/website-form.test.mjs ../../scripts/sales-forecast.test.mjs ../../scripts/deal-risk.test.mjs ../../scripts/architect-review.test.mjs ../../scripts/architect-application.test.mjs ../../scripts/business-insights.test.mjs ../../scripts/business-goals.test.mjs ../../scripts/business-memory.test.mjs ../../scripts/autopilot.test.mjs ../../scripts/control-analysis.test.mjs ../../scripts/business-home.test.mjs ../../scripts/business-experiments.test.mjs"
   },
   "dependencies": {
     "@creolab/api-client": "0.1.0",

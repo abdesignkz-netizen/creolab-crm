@@ -2,6 +2,7 @@ import { z } from "zod";
 import { Prisma, type PrismaClient } from "@creolab/db";
 import type { SetupState, SetupChannel } from "@creolab/contracts";
 import type { AuthContext } from "../lib/types.ts";
+import { inTransaction, type DomainDb } from "../lib/transaction.ts";
 import { requireCompanyAdmin, requireTenant } from "../lib/access.ts";
 import { ApiError } from "../errors.ts";
 import { getEntitlements } from "./entitlementService.ts";
@@ -16,7 +17,7 @@ const inputSchema = z.object({ channel: z.enum(["whatsapp", "telegram", "instagr
   replyMode: z.enum(["ai", "manual"]).optional(), deferred: z.boolean().optional(), finish: z.literal(true).optional() }).strict()
   .refine(v => !v.finish || Object.keys(v).length === 1, "Завершение не может одновременно менять маршрут");
 
-export async function getOnboarding(prisma: PrismaClient, auth: AuthContext): Promise<SetupState> {
+export async function getOnboarding(prisma: DomainDb, auth: AuthContext): Promise<SetupState> {
   requireCompanyAdmin(auth);
   const tenantId = requireTenant(auth).tenantId;
   const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
@@ -76,12 +77,12 @@ export async function getOnboarding(prisma: PrismaClient, auth: AuthContext): Pr
     evidence: { inbound: Boolean(inbound || inquiry), reply: Boolean(reply), conversationId: reply?.conversationId || inbound?.conversationId || null, inquiryId: inquiry?.id || null } };
 }
 
-export async function updateOnboarding(prisma: PrismaClient, auth: AuthContext, input: unknown) {
+export async function updateOnboarding(prisma: DomainDb, auth: AuthContext, input: unknown) {
   requireCompanyAdmin(auth);
   const tenantId = requireTenant(auth).tenantId, { finish, ...data } = inputSchema.parse(input);
   const verified = finish ? await getOnboarding(prisma, auth) : null;
   if (finish && !verified?.completed) throw new ApiError(409, "setup_incomplete", "Сначала выполните шаги и проверьте первое обращение");
-  await prisma.$transaction(async tx => {
+  await inTransaction(prisma, async tx => {
     await tx.$queryRaw`SELECT id FROM "Tenant" WHERE id = ${tenantId} FOR UPDATE`;
     const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: tenantId } });
     const settings = record(tenant.settingsJson), previous = record(settings.onboarding);

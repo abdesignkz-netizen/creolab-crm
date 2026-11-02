@@ -286,6 +286,21 @@ describe("CRM conversation integration (real isolated database)", () => {
     assert.equal(Number((await prisma.deal.findUniqueOrThrow({ where: { id: f.deal.id } })).offerAmountMinor), 450000);
     assert.equal(await prisma.task.count({ where: { tenantId: f.tenant.id } }), 1);
   });
+  it("advances past a quarantined message and never applies that stale message over newer context", async () => {
+    const f = await fixture();
+    const later = await prisma.message.create({ data: { tenantId: f.tenant.id, conversationId: f.conversation.id,
+      senderKind: "client", direction: "inbound", text: "Нет, созвон отменяется", createdAt: new Date(at.getTime() + 1000) } });
+    await prisma.conversation.update({ where: { id: f.conversation.id }, data: { messageRevision: { increment: 1 } } });
+    await enqueueConversationContext(prisma, f.tenant.id, f.conversation.id, f.message.id);
+    await enqueueConversationContext(prisma, f.tenant.id, f.conversation.id, later.id);
+    await prisma.outboxEvent.update({ where: { id: `context:${f.message.id}` }, data: { failedAt: new Date(), failureKind: "exhausted", retryAttempts: 8 } });
+    await processConversationContextJob(prisma, f.tenant.id, f.conversation.id, { useLlm: false, sourceMessageId: later.id });
+    assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id: f.conversation.id } })).lastAnalyzedMessageId, later.id);
+    const retry = await processConversationContextJob(prisma, f.tenant.id, f.conversation.id, { useLlm: false, sourceMessageId: f.message.id });
+    assert.equal(retry.skipped, "superseded");
+    assert.equal(await prisma.task.count({ where: { tenantId: f.tenant.id } }), 0);
+    assert.equal((await prisma.outboxEvent.findUniqueOrThrow({ where: { id: `context:${f.message.id}` } })).processedAt, null);
+  });
   it("waits for seller ingestion to link the inquiry before applying CRM facts", async () => {
     const f = await fixture();
     await prisma.conversation.update({ where: { id: f.conversation.id }, data: { sellerLeadId: "pending-ingestion" } });

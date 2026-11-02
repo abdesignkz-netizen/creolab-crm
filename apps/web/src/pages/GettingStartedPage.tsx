@@ -1,21 +1,26 @@
-import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { lazy, Suspense, useEffect, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { systemText, type SetupChannel } from "@creolab/contracts";
 import { useLocale } from "../lib/session";
 import { setupChannels, setupStepInfo, useSetup } from "../components/SetupAssistant";
 
+const ArchitectPanel = lazy(() => import("../components/ArchitectPanel"));
+
 export function GettingStartedPage() {
   const { state, error, busy, refresh, update } = useSetup(), locale = useLocale(), navigate = useNavigate();
   const t = (s: string) => systemText(locale, s);
+  const [params, setParams] = useSearchParams();
   const [channel, setChannel] = useState<SetupChannel>("whatsapp"), [mode, setMode] = useState<"ai" | "manual">("ai"), [editing, setEditing] = useState(false);
   useEffect(() => { if (state) { setChannel(state.channel || "whatsapp"); setMode(state.started ? state.replyMode : state.available.ai ? "ai" : "manual"); } }, [state?.channel, state?.replyMode, state?.available.ai, state?.started]);
   if (!state) return <section className="setup-page"><h1>{t("Начало работы")}</h1><p role={error ? "alert" : "status"}>{error || t("Проверяем настройки компании…")}</p>{error && <button className="btn" onClick={() => void refresh()} disabled={busy}>{t("Повторить")}</button>}</section>;
   const done = state.steps.filter(s => s.done).length, next = state.steps.find(s => !s.done), choose = !state.started || editing;
   const needsPlan = !state.available[channel] || (mode === "ai" && channel !== "form" && !state.available.ai);
   const editRoute = () => { setChannel(state.channel || "whatsapp"); setMode(state.replyMode); setEditing(true); };
+  if (params.get("view") === "project") return <section className="setup-page"><div><button className="btn secondary" onClick={() => setParams({})}>← {t("Начало работы")}</button></div><Suspense fallback={<p role="status">{t("Загрузка…")}</p>}><ArchitectPanel /></Suspense></section>;
   return <section className="setup-page">
     <header className="setup-header"><div><span className="setup-kicker">BASQAR · {t("ПЕРВЫЙ ЗАПУСК")}</span><h1>{t(state.completed ? "Первое обращение уже в BasQar" : "От первого подключения до первого клиента")}</h1><p>{t("Двигайтесь по шагам. Результат каждого шага проверяем по сохранённым настройкам и сообщениям.")}</p></div>
       {!state.completed && <button type="button" className="btn secondary" disabled={busy} onClick={async () => { if (await update({ deferred: true })) navigate("/today"); }}>{t("Продолжу позже")}</button>}</header>
+    <div className="setup-guide setup-entry"><div><b>{locale === "kk" ? "Баптауларды таңдауға көмек керек пе?" : "Нужна помощь с выбором настроек?"}</b><p>{locale === "kk" ? "Бизнесіңізді сипаттаңыз — түсіндірмелері бар жобаны дайындаймыз. Жұмыс баптаулары өзгермейді." : "Расскажите о бизнесе — подготовим проект с объяснениями. Рабочие настройки останутся прежними."}</p></div><button className="btn" type="button" onClick={() => setParams({ view: "project" })}>{locale === "kk" ? "Жоба дайындау" : "Подготовить проект"}</button></div>
     <div className="setup-progress"><span>{t("Выполнено шагов")}: {done} / {state.steps.length}</span><progress value={done} max={state.steps.length} aria-label={t("Прогресс настройки")} /></div>
     {error && <div className="setup-error" role="alert">{error}<button className="btn secondary" onClick={() => void refresh()} disabled={busy}>{t("Повторить проверку")}</button></div>}
     {choose && <form className="setup-choices panel" onSubmit={async e => { e.preventDefault(); if (await update({ channel, replyMode: channel === "form" ? "manual" : mode })) setEditing(false); }}>

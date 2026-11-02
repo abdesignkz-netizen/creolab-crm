@@ -1,0 +1,9 @@
+.deal-risk{border:1px solid var(--line);border-radius:14px;padding:16px;margin:16px 0;background:var(--bg-elevated);color:var(--ink);min-width:0}
+.sales-control .sales-metrics{grid-template-columns:repeat(auto-fit,minmax(140px,1fr))}
+.deal-risk.is-urgent{border-color:var(--danger);background:var(--danger-soft)}.deal-risk.is-attention{border-color:var(--warn);background:var(--warn-soft)}
+.deal-risk.is-clear{background:var(--ok-soft)}.deal-risk-heading{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+.deal-risk-heading h4{margin:0!important}.deal-risk small{display:block;color:var(--muted);line-height:1.5}
+.deal-risk ul{padding-left:20px;margin:12px 0}.deal-risk li{margin:9px 0}.deal-risk li strong{font-weight:550}
+.deal-risk-next{border-top:1px solid var(--line);margin-top:14px;padding-top:14px}.deal-risk-next .actions{margin:12px 0 8px}
+.deal-risk-dialog{max-width:560px;max-height:calc(100dvh - 32px);overflow-y:auto}.deal-risk-dialog label{display:grid;gap:7px;margin:16px 0}.deal-risk-dialog input,.deal-risk-dialog select{width:100%;box-sizing:border-box;min-width:0}
+@media(max-width:600px){.deal-risk{padding:12px}.deal-risk-heading{align-items:flex-start;flex-direction:column;gap:6px}.deal-risk .actions>*{width:100%}.deal-risk-dialog{width:100%;padding:18px;box-sizing:border-box}}

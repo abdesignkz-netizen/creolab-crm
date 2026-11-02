@@ -5,14 +5,15 @@ import { InlineFeedback } from "../components/InlineFeedback";
 import { useUiText, localizeUiOptions } from "../lib/uiText";
 import { useLocale } from "../lib/session";
 import { notifySaved } from "../components/SaveNotice";
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
+const AutopilotPanel = lazy(() => import("../components/AutopilotPanel"));
 import { Link, useSearchParams } from "react-router-dom";
 import { useCompanyConfiguration } from "../lib/companyConfiguration";
 import { NavIcon } from "../components/NavIcon";
 import "../ai-manager-settings.css";
 import "../ai-manager-setup.css";
 
-type SettingsSection = "sales" | "replies" | "requests" | "crm" | "prompt" | "knowledge" | "handoff" | "hours";
+type SettingsSection = "autopilot" | "sales" | "replies" | "requests" | "crm" | "prompt" | "knowledge" | "handoff" | "hours";
 
 const SECTION_ITEMS: Array<{ id: SettingsSection; label: string }> = [
   { id: "replies", label: "Кому отвечать" },
@@ -20,6 +21,7 @@ const SECTION_ITEMS: Array<{ id: SettingsSection; label: string }> = [
   { id: "requests", label: "Писать первым" },
   { id: "handoff", label: "Передача менеджеру" },
   { id: "sales", label: "От обращения до продажи" },
+  { id: "autopilot", label: "Контроль первого ответа" },
 ];
 const EXTRA_SECTIONS: Array<{ id: SettingsSection; label: string }> = [
   { id: "crm", label: "CRM по переписке" }, { id: "prompt", label: "Промпт" }, { id: "knowledge", label: "База знаний" },
@@ -129,7 +131,7 @@ function delayMinutes(value: number, unit: "hours" | "days") {
 }
 
 export function AiAutomationSettingsPage() {
-  const { api, href, me: configurationMe } = useCompanyConfiguration();
+  const { api, href, managed, me: configurationMe } = useCompanyConfiguration();
   const uiText = useUiText();
   const me = configurationMe;
   const locale = useLocale();
@@ -141,7 +143,13 @@ export function AiAutomationSettingsPage() {
   const [hint, setHint] = useState("");
   const [busy, setBusy] = useState(false);
   const [searchParams] = useSearchParams();
-  const [section, setSection] = useState<SettingsSection>(() => searchParams.get("section") === "sales" ? "sales" : "replies");
+  const [section, setSectionValue] = useState<SettingsSection>(() => searchParams.get("section") === "autopilot" && !managed ? "autopilot" : searchParams.get("section") === "sales" ? "sales" : "replies");
+  const [autopilotDirty, setAutopilotDirty] = useState(false);
+  function setSection(next: SettingsSection) {
+    if (autopilotDirty && next !== "autopilot") { setError("Сохраните или отмените изменения контроля первого ответа."); return; }
+    if (dirty && next === "autopilot") { setError("Сначала сохраните или отмените текущие настройки ИИ."); return; }
+    setError(""); setSectionValue(next);
+  }
   const [replyAudience, setReplyAudience] = useState<Audience>({ audience: "all", since: null });
   const [proactive, setProactive] = useState(true);
   const [savedSnapshot, setSavedSnapshot] = useState("");
@@ -235,7 +243,7 @@ export function AiAutomationSettingsPage() {
   const dirty = Boolean(savedSnapshot && savedSnapshot !== draftSnapshot);
   useEffect(() => { if (dirty) setHint(""); }, [dirty]);
   useEffect(() => {
-    if (!dirty) return;
+    if (!dirty && !autopilotDirty) return;
     const preventLoss = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
     const leave = (event: MouseEvent) => {
       const link = (event.target as Element).closest?.("a[href]");
@@ -244,7 +252,7 @@ export function AiAutomationSettingsPage() {
     window.addEventListener("beforeunload", preventLoss);
     document.addEventListener("click", leave, true);
     return () => { window.removeEventListener("beforeunload", preventLoss); document.removeEventListener("click", leave, true); };
-  }, [dirty, locale]);
+  }, [dirty, autopilotDirty, locale]);
 
   async function save() {
     if (busy) return;
@@ -305,9 +313,10 @@ export function AiAutomationSettingsPage() {
           <button type="button" onClick={() => setSection("requests")}><small>{text("Первый контакт", "Алғашқы байланыс", "First contact")}</small><b>{proactive && mode === "AUTO" ? text("По входящим заявкам", "Кіріс өтінімдер бойынша", "For incoming requests") : text("Без сообщений первым", "Бірінші болып жазбайды", "No first messages")}</b></button>
         </div>
       </div>
-      <WorkspaceSectionNav label={uiText("Настройки AI")} value={section} options={[...SECTION_ITEMS, ...(EXTRA_SECTIONS.some(item => item.id === section) ? EXTRA_SECTIONS : [])].map(item => ({ ...item, label: item.id === "replies" ? text("Кому отвечать", "Кімге жауап беру", "Who to reply to") : item.id === "hours" ? text("Когда отвечать", "Қашан жауап беру", "When to reply") : item.id === "requests" ? text("Писать первым", "Бірінші болып жазу", "First contact") : uiText(item.label) }))} onChange={setSection} />
+      <WorkspaceSectionNav label={uiText("Настройки AI")} value={section} options={[...SECTION_ITEMS.filter(item => !managed || item.id !== "autopilot"), ...(EXTRA_SECTIONS.some(item => item.id === section) ? EXTRA_SECTIONS : [])].map(item => ({ ...item, label: item.id === "replies" ? text("Кому отвечать", "Кімге жауап беру", "Who to reply to") : item.id === "hours" ? text("Когда отвечать", "Қашан жауап беру", "When to reply") : item.id === "requests" ? text("Писать первым", "Бірінші болып жазу", "First contact") : uiText(item.label) }))} onChange={setSection} />
       <details className="ai-manager-extra"><summary>{uiText("Дополнительные настройки")}</summary><div className="actions">{EXTRA_SECTIONS.map(item => <button key={item.id} className={`btn ${section === item.id ? "" : "secondary"}`} onClick={() => setSection(item.id)}>{uiText(item.label)}</button>)}</div></details>
 
+      {section === "autopilot" && !managed ? <Suspense fallback={<p role="status">Загрузка контроля заявок…</p>}><AutopilotPanel onDirtyChange={setAutopilotDirty} /></Suspense> : (
       <fieldset className="ai-manager-editor" disabled={busy}>
       {section === "sales" && <SalesProcessSettingsPanel value={salesProcess} onChange={setSalesProcess} members={data.salesMembers || []} href={href} ready={crm.enabled && analyzeNewRequests && !["MANUAL", "ASSIST"].includes(mode)} enableAnalysis={() => { setCrm(v => ({ ...v, enabled: true })); setAnalyzeNewRequests(true); if (["MANUAL", "ASSIST"].includes(mode)) setMode("CONFIRM"); }} />}
       {section === "replies" ? <>
@@ -440,7 +449,7 @@ export function AiAutomationSettingsPage() {
       {section === "requests" ? (
         <div className="panel">
           <b>{uiText("Повторный контакт")}</b>
-          <p className="ai-manager-note">{text("Автоматические напоминания доступны через отдельную интеграцию AI-продавца. Для WhatsApp через QR и Cloud API эта функция пока не поддерживается.", "Автоматты еске салулар жеке ЖИ-сатушы интеграциясында қолжетімді. QR және Cloud API арқылы WhatsApp-та бұл функция әзірге жоқ.", "Automatic follow-ups require the standalone AI seller integration. WhatsApp QR and Cloud API do not support them yet.")}</p>
+          <p className="ai-manager-note">{text("Автоматический повторный контакт доступен только через отдельную интеграцию AI-продавца. Он пока не поддерживается в WhatsApp QR, WhatsApp Cloud API, Telegram, Instagram и чате сайта. Ответы на входящие сообщения настраиваются отдельно.", "Автоматты қайталама байланыс тек жеке ЖИ-сатушы интеграциясында қолжетімді. WhatsApp QR, WhatsApp Cloud API, Telegram, Instagram және сайт чатында әзірге қолдау жоқ. Кіріс хабарламаларға жауаптар бөлек бапталады.", "Automatic follow-ups are available only through the standalone AI seller integration. They are not yet supported for WhatsApp QR, WhatsApp Cloud API, Telegram, Instagram or website chat. Incoming replies are configured separately.")}</p>
           <p className="muted">{uiText("AI может повторно написать клиенту, если клиент перестал отвечать. Текст берётся из последнего разговора, не из шаблона.")}</p>
           <label className="check-row">
             <input
@@ -665,6 +674,7 @@ export function AiAutomationSettingsPage() {
         {dirty && <button type="button" className="btn secondary" disabled={busy} onClick={async () => { setBusy(true); await load(); setBusy(false); }}>{text("Отменить изменения", "Өзгерістерді болдырмау", "Discard changes")}</button>}
       </div>
       </fieldset>
+      )}
     </section>
   );
 }

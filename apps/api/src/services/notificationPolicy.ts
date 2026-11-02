@@ -1,4 +1,5 @@
 export const EVENT_CATEGORY: Record<string, string> = {
+  "action.task_notice": "tasks",
   "inquiry.created": "new_inquiries",
   "inquiry.available": "new_inquiries",
   needs_phone: "new_inquiries",

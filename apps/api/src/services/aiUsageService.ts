@@ -29,6 +29,7 @@ export type RecordAiUsageInput = {
   model: string;
   feature: string;
   providerRequestId?: string | null;
+  /** Total input, including cachedInputTokens (a subset, not extra tokens). */
   inputTokens?: number | null;
   outputTokens?: number | null;
   cachedInputTokens?: number | null;
@@ -60,6 +61,10 @@ function money(value: number) {
 function num(value: unknown) {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
+}
+
+function tokenCount(value: number | null | undefined) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 2_147_483_647 ? value : null;
 }
 
 export async function ensureDefaultModelPricing(prisma: PrismaClient) {
@@ -105,12 +110,15 @@ export async function recordAiUsage(prisma: PrismaClient | null | undefined, inp
   if (!prisma) return null;
   try {
     const pricing = input.status === "ok" ? await resolveModelPricing(prisma, input.provider, input.model, input.at || new Date()) : null;
-    const inputTokens = input.inputTokens ?? null;
-    const outputTokens = input.outputTokens ?? null;
-    const cachedInputTokens = input.cachedInputTokens ?? null;
+    const inputTokens = tokenCount(input.inputTokens);
+    const outputTokens = tokenCount(input.outputTokens);
+    const cached = tokenCount(input.cachedInputTokens);
+    // Unknown input cannot be priced from a cached subset alone. Invalid provider
+    // counters must never produce negative input cost or count tokens twice.
+    const cachedInputTokens = inputTokens != null && cached != null ? Math.min(inputTokens, cached) : null;
     const totalTokens =
-      input.totalTokens ??
-      (inputTokens != null || outputTokens != null ? (inputTokens || 0) + (outputTokens || 0) + (cachedInputTokens || 0) : null);
+      tokenCount(input.totalTokens) ??
+      (inputTokens != null || outputTokens != null ? tokenCount((inputTokens || 0) + (outputTokens || 0)) : null);
     let inputCost: string | null = null;
     let outputCost: string | null = null;
     let cachedInputCost: string | null = null;
@@ -120,7 +128,7 @@ export async function recordAiUsage(prisma: PrismaClient | null | undefined, inp
       const inPrice = num(pricing.inputPerMillion);
       const outPrice = num(pricing.outputPerMillion);
       const cachedPrice = pricing.cachedInputPerMillion != null ? num(pricing.cachedInputPerMillion) : inPrice;
-      inputCost = money(((inputTokens || 0) / 1_000_000) * inPrice);
+      inputCost = money((((inputTokens || 0) - (cachedInputTokens || 0)) / 1_000_000) * inPrice);
       outputCost = money(((outputTokens || 0) / 1_000_000) * outPrice);
       cachedInputCost = money(((cachedInputTokens || 0) / 1_000_000) * cachedPrice);
       totalCost = money(num(inputCost) + num(outputCost) + num(cachedInputCost));
@@ -146,11 +154,11 @@ export async function recordAiUsage(prisma: PrismaClient | null | undefined, inp
           inputTokens,
           outputTokens,
           cachedInputTokens,
-          reasoningTokens: input.reasoningTokens ?? null,
+          reasoningTokens: tokenCount(input.reasoningTokens),
           totalTokens,
           inputUnitPrice: pricing ? pricing.inputPerMillion : null,
           outputUnitPrice: pricing ? pricing.outputPerMillion : null,
-          cachedInputUnitPrice: pricing?.cachedInputPerMillion ?? null,
+          cachedInputUnitPrice: pricing ? pricing.cachedInputPerMillion ?? pricing.inputPerMillion : null,
           inputCost,
           outputCost,
           cachedInputCost,

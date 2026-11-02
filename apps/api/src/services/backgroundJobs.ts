@@ -3,6 +3,7 @@ import { processEmployeeTelegramQueue } from "./employeeTelegramService.ts";
 import { processControlNotifications } from "./controlNotificationService.ts";
 import { logServerError } from "../lib/redact.ts";
 import { claimOutboxEvent } from "./outboxLease.ts";
+import { OUTBOX_MAX_ATTEMPTS, OutboxFailure, outboxFailureUpdate, validateOutboxEvent } from "./outboxFailurePolicy.ts";
 import { claimScheduledAction, recoverInterruptedScheduledActions } from "./scheduledActionLease.ts";
 import { lockFollowUpConversation, recoverInterruptedFollowUp, recoverAbandonedFollowUps } from "./clientFollowUpDelivery.ts";
 import { recoverTelegramDeliveries } from "./telegramDeliveryState.ts";
@@ -12,10 +13,10 @@ import type { PrismaClient } from "@creolab/db";
 import { createStaffNotification, deliverPendingPush } from "./notificationService.ts";
 import { AGREEMENT_TYPE_LABEL, type AgreementType } from "./conversationContextTypes.ts";
 import { OUTBOX_FAST_POLL_MS, runOutboxLane, type OutboxLane } from "./outboxScheduling.ts";
+import { createBackgroundTaskGroup } from "./backgroundTaskGroup.ts";
 
 const TICK_MS = 5000;
 let started = false;
-let salesSweepRunning = false, lastSalesSweep = 0;
 
 export async function processOutbox(prisma: PrismaClient, options: { lane?: OutboxLane } = {}): Promise<number> {
   if (!options.lane) {
@@ -25,17 +26,20 @@ export async function processOutbox(prisma: PrismaClient, options: { lane?: Outb
     return results.reduce((total, result) => total + (result.status === "fulfilled" ? result.value : 0), 0);
   }
   const lane = options.lane;
-  return runOutboxLane(prisma, lane, async event => {
-    const lease = await claimOutboxEvent(prisma, event.id);
+  return runOutboxLane(prisma, lane, async candidate => {
+    const lease = await claimOutboxEvent(prisma, candidate.id);
     if (!lease) return false;
+    const event = lease.event;
     const startedAt = Date.now();
     let outcome = "handled";
     try {
+      validateOutboxEvent(event);
+      if (event.retryAttempts > OUTBOX_MAX_ATTEMPTS) throw new OutboxFailure("retryable", "retry_limit");
       if (event.type === "billing.email") {
         const { sendMail } = await import("../lib/email.ts");
         const payload = event.payloadJson as {to:string;subject:string;text:string};
         const result = await sendMail({...payload, idempotencyKey:`billing/${event.id}`});
-        if (!result.delivered) throw new Error("Billing email not delivered");
+        if (!result.delivered) throw new OutboxFailure(result.failureKind, result.errorCode);
       } else if (["whatsapp.ai_reply", "channel.ai_reply"].includes(event.type)) {
         const { processWhatsAppAiReply } = await import("./whatsappAiService.ts");
         await processWhatsAppAiReply(prisma, event);
@@ -43,7 +47,8 @@ export async function processOutbox(prisma: PrismaClient, options: { lane?: Outb
         const { deliverCloudMessage } = await import("./whatsappSendService.ts");
         const { integrationId, deliveryToken } = event.payloadJson as { integrationId?: string; deliveryToken?: string };
         if (integrationId && await deliverCloudMessage(prisma, event.tenantId, integrationId, event.entityId, deliveryToken) === "deferred") {
-          await lease.finish({ availableAt: new Date(Date.now() + 30_000) });
+          outcome = "deferred";
+          await lease.finish({ availableAt: new Date(Date.now() + 30_000), retryAttempts: { decrement: 1 } });
           return true;
         }
       } else if (event.type === "channel.send") {
@@ -60,6 +65,9 @@ export async function processOutbox(prisma: PrismaClient, options: { lane?: Outb
         const payload = (event.payloadJson || {}) as { inquiryId?: string; tenantId?: string };
         const { processInquiryAutomationJob } = await import("./inquiryAutomationQueue.ts");
         await processInquiryAutomationJob(prisma, payload);
+      } else if (event.type === "ai.action_run") {
+        const { processActionRun } = await import("./aiActionService.ts");
+        await processActionRun(prisma, event.tenantId, event.entityId);
       } else if (event.type === "sales.reconcile") {
         const { reconcileSalesDeal } = await import("./salesControlService.ts");
         await reconcileSalesDeal(prisma, event.tenantId, event.entityId);
@@ -71,23 +79,25 @@ export async function processOutbox(prisma: PrismaClient, options: { lane?: Outb
       } else if (event.type === "avr.sent" || event.type === "esf.sent") {
         const { processEsfSentOutbox } = await import("./esfStatusSyncService.ts");
         await processEsfSentOutbox(prisma, event);
-      }
+      } else throw new OutboxFailure("permanent", "unknown_event_type");
     } catch (error) {
-      outcome = "retry";
+      const update = outboxFailureUpdate(event, error);
+      outcome = String(update.failureKind);
+      if (event.type === "ai.action_run" && update.failedAt) {
+        const { failActionRunQueue } = await import("./aiActionService.ts");
+        await failActionRunQueue(prisma, event.tenantId, event.entityId);
+      }
       logServerError(error, "background:outbox");
-      await lease.finish({
-        attempts: { increment: 1 },
-        availableAt: new Date(Date.now() + Math.min(300_000, TICK_MS * 2 ** Math.min(event.attempts, 6))),
-      });
+      await lease.finish(update);
       return true;
     } finally {
       if (lane !== "background" && process.env.NODE_ENV !== "test") console.info("outbox_timing", {
         eventId: event.id, tenantId: event.tenantId, type: event.type, lane, outcome,
-        queueWaitMs: Math.max(0, startedAt - event.availableAt.getTime()), processingMs: Date.now() - startedAt,
+        queueWaitMs: Math.max(0, startedAt - candidate.availableAt.getTime()), processingMs: Date.now() - startedAt,
         attempt: event.attempts + 1,
       });
     }
-    await lease.finish({ processedAt: new Date(), attempts: { increment: 1 } });
+    await lease.finish({ processedAt: new Date(), attempts: { increment: 1 }, failureKind: null, errorCode: null });
     return true;
   });
 }
@@ -208,6 +218,14 @@ export async function processDueScheduledActions(prisma: PrismaClient) {
         continue;
       }
 
+      if (item.type === "autopilot_check") {
+        const { processAutopilotCheck, failAutopilotCheck } = await import("./autopilotService.ts");
+        await processAutopilotCheck(prisma, item).catch(async error => {
+          logServerError(error, "background:autopilot");
+          await failAutopilotCheck(prisma, item);
+        });
+        continue;
+      }
       if (item.type === "client_followup") {
         const { processClientFollowUp } = await import("./aiConversationPolicyService.ts");
         await processClientFollowUp(prisma, item).catch(async (error: unknown) => {
@@ -290,67 +308,38 @@ export async function processDueScheduledActions(prisma: PrismaClient) {
 export async function resumeRunningCampaigns(prisma: PrismaClient) {
   const { processCampaignQueue } = await import("./campaignService.ts");
   const running = await prisma.campaign.findMany({ where: { status: "running" }, take: 5 });
-  for (const campaign of running) {
-    void processCampaignQueue(prisma, campaign.id).catch((error: unknown) => logServerError(error, "background:campaign resume"));
-  }
+  await Promise.all(running.map(campaign => processCampaignQueue(prisma, campaign.id)
+    .catch((error: unknown) => logServerError(error, "background:campaign resume"))));
 }
 
 export function startBackgroundJobs(prisma: PrismaClient, options: { keepAlive?: boolean } = {}) {
-  if (started || process.env.NODE_ENV === "test") return () => undefined;
+  if (started || process.env.NODE_ENV === "test") return async () => undefined;
   started = true;
-  let telegramRunning = false;
-  let controlNoticesRunning = false;
-  let situationSweepRunning = false;
-  let billingRunning = false;
-  let lastBillingRun = 0;
+  const jobs = createBackgroundTaskGroup((error, name) => logServerError(error, `background:${name}`));
+  let lastBillingRun = 0, lastSalesSweep = 0;
   const tick = () => {
-    if (!situationSweepRunning) {
-      situationSweepRunning = true;
-      void import("./situationSweepService.ts").then(m => m.sweepSituations(prisma))
-        .catch(error => logServerError(error, "background:situations"))
-        .finally(() => { situationSweepRunning = false; });
-    }
-    if (!controlNoticesRunning) {
-      controlNoticesRunning = true;
-      void Promise.all([
-        processControlNotifications(prisma).catch(error => logServerError(error, "background:control notifications")),
-        processControlChat(prisma).catch(error => logServerError(error, "background:control chat")),
-      ])
-        .finally(() => { controlNoticesRunning = false; });
-    }
-    if (!telegramRunning) {
-      telegramRunning = true;
-      void processEmployeeTelegramQueue(prisma).catch(error => logServerError(error, "background:employee telegram"))
-        .finally(() => { telegramRunning = false; });
-    }
-    import("./billingResourceService.ts").then(({ reconcileBillingUsage }) => reconcileBillingUsage(prisma)).catch(error => logServerError(error, "background:billing usage"));
-    void import("./instagramOAuthService.ts").then(({ refreshInstagramConnections }) => refreshInstagramConnections(prisma)).catch(error => logServerError(error, "background:instagram"));
-    if (!salesSweepRunning && Date.now() - lastSalesSweep >= 60_000) {
-      salesSweepRunning = true; lastSalesSweep = Date.now();
-      void import("./salesControlService.ts").then(m => m.sweepSalesProcesses(prisma))
-        .catch(error => logServerError(error, "background:sales"))
-        .finally(() => { salesSweepRunning = false; });
-    }
-    processOutbox(prisma, { lane: "background" }).catch((error) => logServerError(error, "background:outbox"));
-    import("./esfStatusSyncService.ts")
-      .then(({ ensureEsfStatusPolls }) => ensureEsfStatusPolls(prisma))
-      .catch((error) => logServerError(error, "background:esf polls"));
-    import("./googleSyncService.ts")
-      .then(({ pollGoogleConnections }) => pollGoogleConnections(prisma))
-      .catch(() => undefined);
-    processDueScheduledActions(prisma).catch((error) => logServerError(error, "background:scheduled"));
-    resumeRunningCampaigns(prisma).catch((error) => logServerError(error, "background:campaign resume"));
-    if (!billingRunning && Date.now() - lastBillingRun >= 60_000) {
-      billingRunning = true; lastBillingRun = Date.now();
-      import("./subscriptionActivationService.ts")
-        .then(({ expireDueSubscriptions }) => expireDueSubscriptions(prisma))
-        .catch((error) => logServerError(error, "background:billing expire"))
-        .finally(() => { billingRunning = false; });
-    }
+    jobs.run("autopilot discovery", () => import("./autopilotService.ts").then(m => m.sweepAutopilot(prisma)));
+    jobs.run("business memory retention", () => import("./businessMemoryService.ts").then(m => m.sweepBusinessMemory(prisma)));
+    jobs.run("business goals", () => import("./businessGoalService.ts").then(m => m.sweepBusinessGoals(prisma)));
+    jobs.run("business insights", () => import("./businessInsightService.ts").then(m => m.sweepBusinessInsights(prisma)));
+    jobs.run("situations", () => import("./situationSweepService.ts").then(m => m.sweepSituations(prisma)));
+    jobs.run("control notifications", () => processControlNotifications(prisma));
+    jobs.run("control chat", () => processControlChat(prisma));
+    jobs.run("employee telegram", () => processEmployeeTelegramQueue(prisma));
+    jobs.run("billing usage", () => import("./billingResourceService.ts").then(m => m.reconcileBillingUsage(prisma)));
+    jobs.run("instagram", () => import("./instagramOAuthService.ts").then(m => m.refreshInstagramConnections(prisma)));
+    if (Date.now() - lastSalesSweep >= 60_000 && jobs.run("sales", () => import("./salesControlService.ts").then(m => m.sweepSalesProcesses(prisma)))) lastSalesSweep = Date.now();
+    jobs.run("outbox", () => processOutbox(prisma, { lane: "background" }));
+    jobs.run("esf polls", () => import("./esfStatusSyncService.ts").then(m => m.ensureEsfStatusPolls(prisma)));
+    jobs.run("google", () => import("./googleSyncService.ts").then(m => m.pollGoogleConnections(prisma)));
+    jobs.run("scheduled", () => processDueScheduledActions(prisma));
+    jobs.run("campaign resume", () => resumeRunningCampaigns(prisma));
+    if (Date.now() - lastBillingRun >= 60_000 && jobs.run("billing expire", () => import("./subscriptionActivationService.ts").then(m => m.expireDueSubscriptions(prisma)))) lastBillingRun = Date.now();
   };
   const fastTick = () => {
     for (const lane of ["reply", "delivery"] as const) {
-      void processOutbox(prisma, { lane }).catch(error => logServerError(error, `background:outbox ${lane}`));
+      // Allow a second poll to fill spare lane capacity while one reply is slow.
+      jobs.run(`outbox ${lane}`, () => processOutbox(prisma, { lane }), 2);
     }
   };
   fastTick();
@@ -359,8 +348,9 @@ export function startBackgroundJobs(prisma: PrismaClient, options: { keepAlive?:
   const fastTimer = setInterval(fastTick, OUTBOX_FAST_POLL_MS);
   if (!options.keepAlive) timer.unref?.();
   if (!options.keepAlive) fastTimer.unref?.();
-  return () => {
+  return async () => {
     clearInterval(timer); clearInterval(fastTimer);
+    await jobs.drain();
     started = false;
   };
 }

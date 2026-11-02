@@ -48,7 +48,7 @@ test('Forecast card exposes the method, data period, uncertainty, risk and valid
   const ru = render('ru', fixture()), kk = render('kk', fixture());
   for (const html of [ru, kk]) {
     assert.match(html, /2250 ₸/); assert.match(html, /700 ₸ — 3800 ₸/); assert.match(html, /72\.6%/);
-    assert.match(html, /<details/); assert.match(html, /Asia\/Almaty/); assert.match(html, /href="\/deals"/);
+    assert.match(html, /<details/); assert.match(html, /Asia\/Almaty/); assert.match(html, /href="\/control\?view=sales&amp;filter=attention"/);
     assert.match(html, /href="\/tasks"/); assert.match(html, /scope="col"/); assert.doesNotMatch(html, /NaN|undefined/);
   }
   assert.match(ru, /не вероятность результата/); assert.match(ru, /не точность сегодняшнего прогноза/);

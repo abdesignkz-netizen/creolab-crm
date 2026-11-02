@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { PrismaClient, Prisma } from "@creolab/db";
-import { CONTROL_ACTION_META, type ControlAction } from "@creolab/contracts";
+import { CONTROL_ACTION_META, type ControlAction, type ControlAnalysis, type ControlProfile } from "@creolab/contracts";
 import type { AuthContext } from "../lib/types.ts";
 import { ApiError } from "../errors.ts";
 import { isManager } from "../lib/access.ts";
@@ -9,6 +9,7 @@ import { sha256 } from "../lib/hash.ts";
 import { authorizeWebControl, executeWebControl, confirmWebControl, controlAuthorizationVersion } from "./aiControlService.ts";
 import { runControlChatRequest } from "./controlChatService.ts";
 import { record } from "./controlChatSettings.ts";
+import { CONTROL_PROFILES } from "./agentProfiles.ts";
 
 const inputSchema = z.object({ text: z.string().trim().min(1).max(2000), requestId: z.string().uuid() }).strict();
 const json = (value: unknown) => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
@@ -37,15 +38,31 @@ export async function controlWebHistory(prisma: PrismaClient, auth: AuthContext)
     ...web.filter(row => record(row.changesJson).accessVersion === currentVersion).map(row => {
       const data = record(row.changesJson);
       const interrupted = data.state === "processing" && Date.now() - row.createdAt.getTime() > processingTimeout;
-      return { id: row.id, text: String(data.text || ""), reply: interrupted ? "Не удалось дождаться результата. Обновите историю и проверьте задачи или журнал действий перед повтором изменения." : String(data.reply || ""), state: interrupted ? "interrupted" : String(data.state || "processing"), source: "CRM_CHAT", createdAt: row.createdAt, actions: data.actions || [] };
+      return { id: row.id, text: String(data.text || ""), reply: interrupted ? "Не удалось дождаться результата. Обновите историю и проверьте задачи или журнал действий перед повтором изменения." : String(data.reply || ""), state: interrupted ? "interrupted" : String(data.state || "processing"), source: "CRM_CHAT", createdAt: row.createdAt, actions: data.actions || [], analysis: data.analysis as ControlAnalysis | undefined };
     }),
-    ...whatsapp.filter(row => row.accessVersion === whatsappVersion && readable(row.actionsJson, ctx.access)).map(row => ({ id: row.id, text: row.kind === "briefing" ? "Плановая сводка" : row.text, reply: row.replyText || "", state: row.state, source: "WHATSAPP", createdAt: row.createdAt, actions: row.actionsJson })),
+    ...whatsapp.filter(row => row.accessVersion === whatsappVersion && readable(row.actionsJson, ctx.access)).map(row => ({ id: row.id, text: row.kind === "briefing" ? "Плановая сводка" : row.text, reply: row.replyText || "", state: row.state, source: "WHATSAPP", createdAt: row.createdAt, actions: row.actionsJson, analysis: undefined as ControlAnalysis | undefined })),
   ].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()).slice(-50);
+  const runIds = items.flatMap(i => i.analysis?.plan ? [i.analysis.plan.id] : []);
+  if (runIds.length) {
+    const runs = await prisma.actionRun.findMany({ where: { id: { in: runIds }, tenantId, userId: auth.user.id }, select: { id: true, status: true, expiresAt: true, steps: { select: { status: true } } } });
+    for (const item of items) if (item.analysis?.plan) {
+      const run = runs.find(r => r.id === item.analysis!.plan!.id);
+      item.analysis.plan = run ? { ...item.analysis.plan, status: run.status === "draft" && run.expiresAt <= new Date() ? "expired" : run.status, completed: run.steps.filter(s => s.status === "succeeded").length, stepCount: run.steps.length } : null;
+      if (item.analysis.plan && item.analysis.plan.status !== "draft") item.analysis.summary = ({
+        queued: "План подтверждён и ожидает выполнения.", running: "Выполняются подтверждённые шаги плана.",
+        succeeded: "Внутренние шаги выполнены. Проверьте задачу: бизнес-результат ещё требует оценки.",
+        failed: "Выполнение остановлено. Откройте план, чтобы проверить причину и выполненные шаги.",
+        cancelled: "План отменён. Проверьте сохранённые результаты уже выполненных шагов.",
+        expired: "Срок подтверждения истёк. Для нового плана нужен актуальный разбор.",
+      } as Record<string, string>)[item.analysis.plan.status] || "Откройте план, чтобы проверить текущее состояние.";
+    }
+  }
   const webIdentity = identities.find(row => row.provider === "CRM_CHAT");
   const session = record(record(webIdentity?.metadata).web);
   const context = session.accessVersion === currentVersion && Number(session.expiresAt) > Date.now() ? record(session.context) : {};
   const pending = context.pendingId ? await prisma.controlConfirmation.findFirst({ where: { id: String(context.pendingId), tenantId, userId: auth.user.id, identityId: webIdentity!.id, source: "CRM_CHAT", status: "pending", expiresAt: { gt: new Date() } }, select: { id: true, summary: true, expiresAt: true } }) : null;
   return { items, pending, forecastAvailable: !isManager(auth) && readable(["GET_SALES_FORECAST"], ctx.access),
+    analysisProfiles: ["owner", "director", "sales_lead"].includes(ctx.auth.activeMembership!.role) ? (Object.entries(CONTROL_PROFILES) as Array<[ControlProfile, typeof CONTROL_PROFILES[ControlProfile]]>).filter(([, p]) => readable(p.reads.map(r => r.action), ctx.access)).map(([id, p]) => ({ id, label: p.title, command: `Анализ ${({ business: "бизнеса", sales: "продаж", finance: "оплат", team: "команды", service: "обращений" })[id]}` })) : [],
     choices: Array.isArray(context.choices?.items) ? context.choices.items.map((item: any, i: number) => ({ text: String(i + 1), label: String(item.label) })) : [], timezone: ctx.tenant.timezone || "Asia/Almaty" };
 }
 
@@ -81,7 +98,7 @@ export async function sendControlWebMessage(prisma: PrismaClient, auth: AuthCont
         confirm: id => confirmWebControl(prisma, auth, id),
       });
     } catch (error) {
-      response = { text: error instanceof ApiError ? error.message : "Не удалось обработать запрос. Проверьте историю перед повтором изменения.", context: claim.context, actions: [] };
+      response = { text: error instanceof ApiError ? error.message : "Не удалось обработать запрос. Проверьте историю перед повтором изменения.", context: claim.context, actions: [], analysis: undefined };
     }
     const after = await authorizeWebControl(prisma, auth);
     if (version(after) !== accessVersion) throw new ApiError(403, "access_changed", "Права доступа изменились. Обновите Control.");
@@ -90,7 +107,7 @@ export async function sendControlWebMessage(prisma: PrismaClient, auth: AuthCont
       const fresh = await tx.controlIdentity.findUniqueOrThrow({ where: { id: identity.id } }), metadata = record(fresh.metadata);
       if (record(metadata.web).leaseOwner !== owner) throw new ApiError(409, "control_busy", "Обработка прервана. Проверьте историю.");
       await tx.controlIdentity.update({ where: { id: identity.id }, data: { metadata: json({ ...metadata, web: { context: response.context, expiresAt: Date.now() + 1800000, accessVersion } }) } });
-      await tx.auditEvent.update({ where: { id: claim.entry.id }, data: { changesJson: json({ source: "CRM_CHAT", text: data.text, reply: response.text, state: "done", actions: response.actions, accessVersion }) } });
+      await tx.auditEvent.update({ where: { id: claim.entry.id }, data: { changesJson: json({ source: "CRM_CHAT", text: data.text, reply: response.text, state: "done", actions: response.actions, ...(response.analysis ? { analysis: response.analysis } : {}), accessVersion }) } });
     });
   } finally {
     await prisma.$transaction(async tx => {

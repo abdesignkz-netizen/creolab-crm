@@ -5,6 +5,8 @@ import { randomUUID } from "node:crypto";
 import { authorizeNativeControl, controlAuthorizationVersion } from "./aiControlService.ts";
 import { chatSettings, record } from "./controlChatSettings.ts";
 import { processControlChatRequests } from "./controlChatService.ts";
+import { controlNoticeSchema } from "@creolab/contracts";
+import { controlQuiet } from "./controlNotificationService.ts";
 
 type QrDispatch = { integrationId: string; socket: Pick<WASocket, "sendMessage">; checkLease: () => Promise<void> };
 export function controlScheduleClock(now: Date, timeZone: string) {
@@ -81,6 +83,16 @@ export async function deliverControlChatReplies(prisma: PrismaClient, qr?: QrDis
           const ctx = await authorizeNativeControl(prisma, row.integrationId, row.identityId);
           if (row.accessVersion !== controlAuthorizationVersion(ctx)) { await skip("access_changed"); continue; }
           for (const action of (Array.isArray(row.actionsJson) ? row.actionsJson : []) as ControlAction[]) await authorizeNativeControl(prisma, row.integrationId, row.identityId, action);
+          if (row.kind === "briefing") {
+            const rule = await prisma.controlNotificationRule.findFirst({ where: { tenantId: row.tenantId, membershipId: ctx.auth.activeMembership!.id,
+              integrationId: row.integrationId, enabled: true } });
+            if (rule && rule.phone.replace(/\D/g, "") === identity.phoneNormalized?.replace(/\D/g, "")) {
+              const notice = controlNoticeSchema.safeParse(rule.settingsJson);
+              // Scheduled summaries are not urgent. Skip this slot rather than block
+              // a person's following command or replay an old briefing in the morning.
+              if (!notice.success || controlQuiet(notice.data, now)) { await skip(notice.success ? "quiet_hours" : "invalid_notice_settings"); continue; }
+            }
+          }
         } else if (Array.isArray(row.actionsJson) && row.actionsJson.length) { await skip("not_verified"); continue; }
       } catch { await skip("access_revoked"); continue; }
       await qr?.checkLease();

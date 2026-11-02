@@ -8,6 +8,12 @@ export type AnalyticsTrendResponse = {
 };
 export type AnalyticsDashboardResponse = Record<string, unknown> & { trend: AnalyticsTrendResponse };
 
+function querySuffix(query: Record<string, string | number | undefined>) {
+  const params = new URLSearchParams();
+  Object.entries(query).forEach(([key, value]) => { if (value != null && value !== "") params.set(key, String(value)); });
+  return params.size ? `?${params}` : "";
+}
+
 export type ClientOptions = {
   baseUrl: string;
   configurationTenantId?: string;
@@ -309,7 +315,7 @@ export function createApiClient(options: ClientOptions) {
     returnInquiryAi: (id: string) => request(`/api/v1/inquiries/${id}/ai/return`, { method: "POST" }),
     retryInquiryAiAnalysis: (id: string) =>
       request(`/api/v1/inquiries/${id}/ai/retry-analysis`, { method: "POST" }),
-    salesControl: () => request("/api/v1/sales/control"),
+    salesControl: (query: { filter?: string; offset?: number; limit?: number } = {}) => request(`/api/v1/sales/control${querySuffix(query)}`),
     reviewSalesProposal: (id: string, input: { decision: "create" | "link" | "dismiss"; revision: number; dealId?: string; confirmedLatest?: boolean }) => request(`/api/v1/sales/proposals/${id}/review`, { method: "POST", body: JSON.stringify(input) }),
     aiAutomationSettings: () => request("/api/v1/settings/ai-automation"),
     aiManagerSetup: () => request<AiSetupState>("/api/v1/settings/ai-manager"),
@@ -370,18 +376,13 @@ export function createApiClient(options: ClientOptions) {
     workspaceOps: () => request("/api/v1/workspace/ops"),
     updateWorkspaceOps: (body: unknown) =>
       request("/api/v1/workspace/ops", { method: "PATCH", body: JSON.stringify(body) }),
-    workspaceAudit: (query: Record<string, string | number | undefined> = {}) => {
-      const params = new URLSearchParams();
-      Object.entries(query).forEach(([key, value]) => {
-        if (value != null && value !== "") params.set(key, String(value));
-      });
-      const suffix = params.toString() ? `?${params}` : "";
-      return request(`/api/v1/workspace/audit${suffix}`);
-    },
+    workspaceAudit: (query: Record<string, string | number | undefined> = {}) => request(`/api/v1/workspace/audit${querySuffix(query)}`),
     updateControlChat: (identityId: string, body: unknown) => request(`/api/v1/workspace/control/identities/${encodeURIComponent(identityId)}/chat`, { method: "PUT", body: JSON.stringify(body) }),
     controlChatHistory: () => request("/api/v1/workspace/control/chat"),
     sendControlChat: (text: string, requestId: string) => request("/api/v1/workspace/control/chat", { method: "POST", body: JSON.stringify({ text, requestId }) }),
     controlSettings: () => request("/api/v1/workspace/control"),
+    outboxFailures: (offset = 0) => request(`/api/v1/workspace/outbox/failures?offset=${offset}`),
+    retryOutboxFailure: (id: string, body: { requestId: string; confirmed: true; failedAt: string }) => request(`/api/v1/workspace/outbox/${encodeURIComponent(id)}/retry`, { method: "POST", body: JSON.stringify(body) }),
     controlNotifications: () => request("/api/v1/workspace/control/notifications"),
     saveControlNotifications: (body: unknown) => request("/api/v1/workspace/control/notifications", { method: "PUT", body: JSON.stringify(body) }),
     pauseControlNotifications: (id: string) => request(`/api/v1/workspace/control/notifications/${id}/pause`, { method: "POST" }),
@@ -396,14 +397,7 @@ export function createApiClient(options: ClientOptions) {
       request(`/api/v1/workspace/control/identities/${id}/verify`, { method: "POST" }),
     disableControlIdentity: (id: string) =>
       request(`/api/v1/workspace/control/identities/${id}/disable`, { method: "POST" }),
-    controlHistory: (query: Record<string, string | number | undefined> = {}) => {
-      const params = new URLSearchParams();
-      Object.entries(query).forEach(([key, value]) => {
-        if (value != null && value !== "") params.set(key, String(value));
-      });
-      const suffix = params.toString() ? `?${params}` : "";
-      return request(`/api/v1/workspace/control/history${suffix}`);
-    },
+    controlHistory: (query: Record<string, string | number | undefined> = {}) => request(`/api/v1/workspace/control/history${querySuffix(query)}`),
     segmentPreview: (body: unknown) =>
       request("/api/v1/contacts/segment-preview", { method: "POST", body: JSON.stringify(body) }),
     workspaceMembers: () => request("/api/v1/workspace/members"),
@@ -710,7 +704,7 @@ export function createApiClient(options: ClientOptions) {
     pauseConversation: (id: string) => request(`/api/v1/conversations/${id}/pause`, { method: "POST", body: "{}" }),
     addInstruction: (id: string, text: string) =>
       request(`/api/v1/conversations/${id}/instruction`, { method: "POST", body: JSON.stringify({ text }) }),
-    controlBoard: () => request("/api/v1/workspace/control"),
+    controlBoard: () => request("/api/v1/workspace/control/board"),
     managementOverview: () => request("/api/v1/management/overview"),
     setAiManagerPause: (paused: boolean) =>
       request("/api/v1/management/ai-pause", { method: "POST", body: JSON.stringify({ paused }) }),
@@ -772,22 +766,8 @@ export function createApiClient(options: ClientOptions) {
     notifications: () => request("/api/v1/notifications"),
     markNotificationRead: (id: string) => request(`/api/v1/notifications/${id}/read`, { method: "POST" }),
     stats: () => request("/api/v1/stats/summary"),
-    analyticsDashboard: (query: Record<string, string | undefined> = {}) => {
-      const params = new URLSearchParams();
-      Object.entries(query).forEach(([key, value]) => {
-        if (value != null && value !== "") params.set(key, value);
-      });
-      const qs = params.toString();
-      return request<AnalyticsDashboardResponse>(`/api/v1/analytics/dashboard${qs ? `?${qs}` : ""}`);
-    },
-    analyticsTrend: (query: Record<string, string | undefined> = {}) => {
-      const params = new URLSearchParams();
-      Object.entries(query).forEach(([key, value]) => {
-        if (value != null && value !== "") params.set(key, value);
-      });
-      const qs = params.toString();
-      return request<AnalyticsTrendResponse>(`/api/v1/analytics/trend${qs ? `?${qs}` : ""}`);
-    },
+    analyticsDashboard: (query: Record<string, string | undefined> = {}) => request<AnalyticsDashboardResponse>(`/api/v1/analytics/dashboard${querySuffix(query)}`),
+    analyticsTrend: (query: Record<string, string | undefined> = {}) => request<AnalyticsTrendResponse>(`/api/v1/analytics/trend${querySuffix(query)}`),
     analyticsDrilldown: (query: Record<string, string | undefined> = {}) => {
       const params = new URLSearchParams();
       Object.entries(query).forEach(([key, value]) => {

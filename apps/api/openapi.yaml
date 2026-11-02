@@ -5,6 +5,17 @@ info:
 servers:
   - url: http://localhost:4100
 paths:
+  /api/v1/workspace/home:
+    get:
+      summary: Компактный обзор актуальных выводов, личных планов и целей компании
+      description: Только текущая компания, свежая проверка роли перед ответом, Cache-Control no-store. Руководителям возвращается ограниченная выборка существующих A1/A4/A6; сотрудникам — personal без данных компании. Недоступные разделы помечаются unavailable, устаревшие измерения не считаются текущим прогрессом.
+      responses:
+        "200":
+          description: asOf, scope company/personal; insights, actions, goals со статусом ready/unavailable/hidden
+        "401":
+          description: Требуется вход
+        "403":
+          description: Нет доступа к компании или права изменились
   /health:
     get:
       summary: Liveness
@@ -33,4 +44,540 @@ paths:
       summary: Взять диалог, синхронизировать режим с ботом
   /api/v1/ai/sandbox:
     post:
-      summary: Песочница, без отправки в WhatsApp
+      summary: Legacy-демонстрация интерфейса без вызова модели
+      description: >-
+        Возвращает sandbox=true, mode=demonstration, usedLlm=false. Ответ не проверяет
+        качество ИИ и не расходует AI-кредиты. Реальная проверка — в /settings/ai-manager.
+  /api/v1/workspace/control:
+    get:
+      summary: Настройки, пользователи и каталог команд Control
+      description: Сохранён совместимый контракт настроек; рабочая доска находится в /workspace/control/board.
+    patch:
+      summary: Изменить настройки Control
+  /api/v1/workspace/control/board:
+    get:
+      summary: Рабочая доска Control с задачами и показателями
+      description: Tenant-scoped ответ; Cache-Control no-store. Не возвращает форму настроек Control.
+  /api/v1/workspace/control/chat:
+    get:
+      summary: Личная история Control из платформы и WhatsApp
+      description: >-
+        Сохраняет items, pending, choices, timezone и forecastAvailable. analysisProfiles —
+        разрешённые направления анализа. У сообщений платформы необязательный analysis содержит
+        profile, summary, cards (facts/insight/goal/decision с источником и датой), limitations,
+        suggestion, plan и budget. Факты — снимок; статус связанного собственного ActionRun
+        обновляется при чтении истории. При смене прав старые сообщения скрываются.
+    post:
+      summary: Выполнить команду или подготовить разбор и план в существующем Control
+      description: >-
+        Тело text (1–2000 символов), requestId (UUID). Профили business/sales/finance/team/service
+        выбирают разрешённые инструменты чтения. До 5 чтений и 30 секунд на анализ; без вызова
+        языковой модели. Неоднозначные цели уточняются. Частичный или недоступный анализ не
+        создаёт план. По отдельному запросу готовится ActionRun с одной внутренней задачей;
+        выполнение подтверждается через существующий A1, не через короткий токен старой команды.
+        Доступ, актуальность решений и пауза ИИ проверяются снова при подтверждении и выполнении.
+        Повтор requestId возвращает историю, не повторяет действие. В WhatsApp тот же разбор
+        возвращается текстом, проверка и подтверждение плана — по ссылке в платформу.
+  /api/v1/sales/control:
+    get:
+      summary: Продажи и риски по всем доступным активным сделкам компании
+      description: >-
+        filter=all|urgent|attention|ready|goal, offset>=0, limit=1..200 (по умолчанию 200).
+        summary и coverage относятся ко всем доступным активным сделкам; pagination.total —
+        ко всем совпадениям фильтра. items — одна страница. checkedAt фиксирует момент оценки.
+        При ошибке полного расчёта возвращается ошибка, а не частичные показатели под видом полных.
+        Предложения создать сделку имеют отдельный лимит и proposalsLimited.
+  /api/v1/workspace/outbox/failures:
+    get:
+      summary: Остановленные фоновые задания своей компании
+      description: >-
+        Только владелец/директор. offset>=0, limit=1..100 (по умолчанию 25).
+        items содержат объяснение, failedAt, attempts, retryAttempts, failureKind и canRetry;
+        payload, адресаты и исходные ошибки провайдеров не выдаются. retrying — число заданий,
+        ожидающих автоматического повтора. Cache-Control no-store.
+  /api/v1/workspace/outbox/{id}/retry:
+    post:
+      summary: Подтверждённый повтор остановленного внутреннего задания
+      description: >-
+        Только владелец/директор своей компании; актуальные права проверяются повторно.
+        Тело — requestId (UUID), confirmed=true, failedAt (точная дата из диагностики).
+        Повтор разрешён только exhausted-заданиям внутренних обработчиков из списка допуска.
+        Неопределённые внешние отправки не повторяются. Одинаковый requestId идемпотентен,
+        устаревшее подтверждение даёт 409. Действие сохраняется в аудите.
+  /api/v1/workspace/onboarding/architect:
+    get:
+      summary: Проект настройки и доступные варианты своей компании
+      description: >-
+        Только действующий владелец или директор своей компании. Возвращает companyName,
+        timezone, members без секретов, channels с реальным подключением и доступностью,
+        defaults и один общий сохранённый draft с revision, stale, expired.
+        Читает текущие настройки без создания AIConfiguration или других рабочих объектов.
+        Сохранённый проект действителен 7 дней; Cache-Control no-store.
+  /api/v1/workspace/onboarding/architect/preview:
+    post:
+      summary: Предложить настройки по ограниченной анкете, без применения
+      description: >-
+        Строгий body {answers} по architectAnswersSchema: businessKind, description (до 3000),
+        offerings (1500), audience (600), goal, channels (до 5), replyMode, replyAudience,
+        languages, hours, responsibleMembershipId, firstResponseMinutes, otherRequirements (1000), locale ru|kk.
+        Возвращает config, items (propose|keep|review|connect|unavailable), questions,
+        limitations, baseRevision, previewHash. generator=validated_templates_v1, canApply=false.
+        Текст — исходные данные, не системные инструкции. LLM, сети, очередей и записей в БД нет.
+        Неполная анкета даёт уточнения; секреты, неизвестные поля и чужой сотрудник — 422.
+        Лимит 10 запросов в минуту на пользователя. Cache-Control no-store.
+  /api/v1/workspace/onboarding/architect/draft:
+    put:
+      summary: Сохранить проверенный проект без изменения рабочего режима
+      description: >-
+        Строгий body {answers,revision,requestId,baseRevision,previewHash}; requestId UUID.
+        Сервер заново строит проект. Сохраняет только ArchitectDraft и событие аудита без текста анкеты.
+        Один проект на компанию; повтор последнего requestId инициатора идемпотентен.
+        Конфликт revision, baseRevision, requestId или previewHash — 409, неверные поля — 422.
+        Возвращает сохранённый draft с новой revision; срок 7 дней. Лимит 10 запросов в минуту.
+        Пока предыдущая версия выполняется, сохранение новой запрещено (409).
+        Сохранение не запускает применение. Cache-Control no-store.
+  /api/v1/workspace/onboarding/architect/{id}/apply-preview:
+    post:
+      summary: Точный список изменений и результат применения проекта компании
+      description: >-
+        Только действующий владелец или директор своей компании. Строгий body {revision}.
+        Возвращает changes с before/after, pending с отдельными подключениями, blockers,
+        canApply, applicationHash, expiresAt и run с результатами, если применение уже начато.
+        Проверяет текущую конфигурацию, тариф, права и срок проекта. Чтение без изменений.
+        Другой администратор своей компании видит результат, но не отменяет чужое подтверждение.
+        Лимит 60 запросов в минуту; Cache-Control no-store.
+  /api/v1/workspace/onboarding/architect/{id}/apply:
+    post:
+      summary: Подтвердить применение конкретной версии проекта
+      description: >-
+        Строгий body {revision,requestId,confirmed:true,applicationHash}; requestId UUID.
+        Повторно проверяет diff и доступ, сохраняет подтверждённый ActionRun (source=architect)
+        и одну outbox-задачу ai.action_run. Подтверждение действует не более 30 минут.
+        Worker ещё раз проверяет права и исходные настройки и атомарно сохраняет локальные изменения:
+        начальные этапы только для пустой воронки, новый черновик мастера только без своих инструкций,
+        аудиторию/часы/SLA ответов и невыбранный маршрут первого запуска.
+        Действующие сделки, промпты, включение ИИ, роли, каналы и уведомления не изменяются автоматически.
+        База знаний сохраняется; внешних вызовов и публикации нет. Ошибка отменяет всю транзакцию.
+        Повтор одной версии не создаёт второй run; изменившиеся условия дают 409 или failed без записи настроек.
+        Отмена до применения через ai-actions/{runId}/cancel; после успеха повтор не откатывает результат.
+        Лимит 10 запросов в минуту; Cache-Control no-store. Неверные поля — 422, нет доступа — 403/404.
+  /api/v1/workspace/intelligence:
+    get:
+      summary: Бизнес-выводы с проверяемыми основаниями
+      description: >-
+        Действующий владелец, директор или руководитель продаж своей компании.
+        Права перепроверяются; контекст настройки чужой компании недоступен.
+        Фильтры state=open|acknowledged|dismissed|resolved|unavailable|all,
+        kind=insight (по умолчанию) или opportunity; rule=inquiry_unhandled|task_overdue|deal_next_step|proposal_delayed|payment_delayed|sales_plan_risk|opportunity_deal|opportunity_inquiry,
+        cursor UUID. До 20 items, nextCursor, coverage без ложного общего total.
+        Каждый item содержит occurrence, version, fingerprint, schemaVersion, formulaVersion,
+        generatedAt, checkedAt, validUntil и content с формулой, фактами, источниками, периодом и следующим действием.
+        Источники проверяются при чтении; изменённые, истёкшие или недоступные данные дают stale=true и content=null.
+        Прогноз использует выигранные сделки в одной валюте, а не поступления денег. Cache-Control no-store.
+        Возможности объединяют причины по сделке, включая связанную заявку; два заказа клиента остаются отдельными.
+        Запрос предложения требует подтверждённой договорённости HIGH с входящим сообщением связанного диалога.
+        Денежный потенциал не вычисляется. content.opportunity содержит reasons, taskTitle и existingTask.
+        action содержит фактическое событие создания задачи (outcomeEventId, at, taskId, taskStatus); runId только для инициатора.
+  /api/v1/workspace/intelligence/refresh:
+    post:
+      summary: Обновить ограниченную порцию выводов
+      description: >-
+        Тело {} или insightId (UUID). Компания проверяется не чаще одного раза в минуту;
+        конкретный вывод можно перепроверить отдельно. До 30 исходных записей каждого типа
+        и 30 ранее обнаруженных случаев; курсоры продолжают обход. Прогноз фоново раз в 5 минут.
+        Возвращает advanced, items, nextCursor и coverage. Нет изменения CRM или внешних отправок.
+  /api/v1/workspace/intelligence/{id}:
+    get:
+      summary: Основание и история бизнес-вывода
+      description: Вывод своей компании и до 30 последних событий данного случая без копий старых текстов источника. Недоступный ID даёт 404; Cache-Control no-store.
+  /api/v1/workspace/intelligence/{id}/acknowledge:
+    post:
+      summary: Принять вывод к сведению
+      description: >-
+        Тело version (положительное целое), fingerprint (SHA-256), requestId (UUID).
+        Повтор с тем же телом идемпотентен; изменённое основание или истёкший вывод дают 409.
+        Записываются событие и аудит. Задача, сделка, платёж и отправки не изменяются.
+  /api/v1/workspace/intelligence/{id}/dismiss:
+    post:
+      summary: Скрыть вывод до изменения основания
+      description: >-
+        Тело и проверки как у acknowledge. Состояние dismissed доступно через фильтр.
+        Неизменный повторный расчёт сохраняет отметку; изменение основания возвращает open.
+        Исчезновение источника означает unavailable, а не успешное выполнение.
+  /api/v1/settings/autopilot:
+    get:
+      summary: Правило контроля первого ответа и история сценариев
+      description: >-
+        Владелец, директор или руководитель продаж своей компании; недоступно в режиме настройки чужой компании.
+        Права проверяются заново. cursor UUID; до 20 сценариев, nextCursor, актуальные блокирующие условия,
+        рабочий календарь, участники, версия и состояние правила. Cache-Control no-store.
+    put:
+      summary: Сохранить правило на паузе
+      description: >-
+        Владелец или директор. Тело requestId UUID, version (0 при создании), config.
+        config: mode suggest|auto, remindMinutes 5..1440, escalateMinutes и verifyMinutes 5..4320,
+        hourlyLimit 1..50, routing fixed|round_robin|least_load, members (1..8 уникальных UUID;
+        при fixed только один), escalationMemberId UUID руководителя, unavailable (membershipId, until ISO).
+        Сохранение отменяет старые активные сценарии и ожидающие задания; уже созданные задачи сохраняются.
+        Идемпотентный requestId, проверка версии, 409 при конфликте, неизвестные поля дают 422.
+        Все сроки считаются по рабочему календарю компании; запрет внешних сообщений сохраняется.
+  /api/v1/settings/autopilot/preview:
+    post:
+      summary: Показать последовательность и условия правила без запуска
+      description: Тело config как при сохранении. Возвращает summary, blockers и calendarHash; без записи CRM.
+  /api/v1/settings/autopilot/enable:
+    post:
+      summary: Разрешить правило для новых заявок
+      description: >-
+        Тело requestId UUID, version, confirmed true. Auto включает только владелец;
+        suggest может включить владелец или директор. Требуется режим business рабочего календаря,
+        доступный тариф TASKS и отсутствие общей паузы. Старые заявки не запускаются.
+        Повторное включение начинает новый период, остановленные сценарии не восстанавливаются.
+        Максимум 100 активных сценариев и один переход к руководителю; действия выполняются транзакционно.
+  /api/v1/settings/autopilot/pause:
+    post:
+      summary: Немедленно остановить оставшиеся этапы правила
+      description: Владелец или директор; requestId UUID, version, confirmed true. Созданные задачи не удаляются.
+  /api/v1/settings/autopilot/cases/{id}/start:
+    post:
+      summary: Подтвердить предложенный сценарий для одной заявки
+      description: >-
+        Владелец или директор; requestId UUID, version сценария, confirmed true. Подтверждается вся ограниченная
+        последовательность, перед каждым шагом проверяются права, фактический ответ, ручные изменения,
+        рабочее время, доступность и доступ сотрудника, часовой лимит. Предложение истекает через 7 дней.
+  /api/v1/settings/autopilot/cases/{id}/stop:
+    post:
+      summary: Остановить оставшиеся этапы одной заявки
+      description: >-
+        Владелец или директор; requestId UUID, version сценария, confirmed true. История, задача и фактически
+        выполненные этапы сохраняются. Создание задачи, назначение или ручное закрытие не считаются ответом клиенту.
+  /api/v1/workspace/decisions:
+    get:
+      summary: Решения, предпочтения и гипотезы своей компании
+      description: >-
+        Только действующие owner/director/sales_lead; чужой административный контекст запрещён.
+        state=all|draft|approved|revoked|superseded|deleted, q до 80 символов, cursor UUID.
+        До 20 items и nextCursor, canEdit. Источник проверяется заново; content скрывается,
+        если источник недоступен или срок хранения истёк. Личные ActionRun-основания
+        доступны только инициатору. Cache-Control no-store. Другой tenant в теле/запросе не принимается.
+    post:
+      summary: Сохранить черновик управленческого решения
+      description: >-
+        Только owner/director. Строгое тело requestId UUID, version=0, content.
+        content содержит kind=decision|preference|hypothesis, topic 2..80, title 1..160,
+        body 1..1200, rationale 1..800; sourceKind=manual|goal|insight|action_run,
+        sourceId UUID обязателен для связанной записи, manual требует null.
+        validFrom/validUntil/retentionUntil — ISO datetime с часовым поясом.
+        Конец действия в будущем, до года; хранение до двух лет и не короче действия.
+        До 200 неудалённых записей. Распространённые форматы ключей/паролей отклоняются;
+        это не полная автоматическая проверка персональных данных.
+        Автор и состояние назначаются сервером; сообщения клиентов источником не принимаются.
+        Атомарное сохранение и аудит, повтор requestId с тем же телом идемпотентен.
+        Возвращает 201 BusinessDecisionDetail; никаких действий или отправок не запускает.
+  /api/v1/workspace/decisions/options:
+    get:
+      summary: Доступные основания решения
+      description: >-
+        kind=manual|goal|insight|action_run, q до 80 символов для целей/планов.
+        sources до 20 записей, timezone, canEdit. Выводы сверяются с текущими фактами;
+        выполненные планы — только свои. Cache-Control no-store.
+  /api/v1/workspace/decisions/context:
+    get:
+      summary: Ограниченный контекст утверждённых решений
+      description: >-
+        Необязательная topic (до 80 символов), точное совпадение после нормализации регистра и пробелов.
+        Только active, approved, decision/preference с неизменным доступным источником.
+        Из первых 20 кандидатов выбираются до 6 entries; весь JSON до 4500 символов.
+        entries содержат id, version, title, body, kind, validUntil и href; также asOf, limited, boundary.
+        Текст является данными, не даёт прав и не меняет инструкции/настройки ИИ.
+        Гипотезы, черновики, отозванные, заменённые и истёкшие записи исключаются. Cache-Control no-store.
+  /api/v1/workspace/decisions/{id}:
+    get:
+      summary: Решение, основание и история
+      description: >-
+        BusinessDecisionDetail включает content, effective, source, author/approver,
+        approvedAt, version, supersededById, canEdit; до 30 событий history и видимые conflicts.
+        История хранит тип, дату, автора, версию и названия изменённых полей без прежнего текста.
+        Чужая или личная недоступная запись — 404. Cache-Control no-store.
+    patch:
+      summary: Изменить только актуальный черновик
+      description: >-
+        Только owner/director, requestId UUID, текущая version и полный content как при создании.
+        Источник проверяется заново и его отпечаток обновляется; version увеличивается.
+        Для изменения утверждённого решения нужен новый черновик. Конфликт версии — 409.
+  /api/v1/workspace/decisions/{id}/approve:
+    post:
+      summary: Явно утвердить проверенный черновик
+      description: >-
+        Только owner/director. requestId UUID, version, confirmed=true; необязательный replacesId UUID.
+        Гипотеза не утверждается; устаревшее основание требует повторного сохранения черновика.
+        Одновременно действующие записи с одной нормализованной темой требуют явной замены.
+        При замене прежняя запись атомарно становится superseded и получает supersededById.
+        Разная видимость личного/общего основания и будущая замена до начала действия запрещены.
+        Семантический конфликт разных тем автоматически не определяется. Нет запуска действий.
+  /api/v1/workspace/decisions/{id}/revoke:
+    post:
+      summary: Отозвать решение
+      description: >-
+        Только owner/director, requestId UUID, version, confirmed=true.
+        Черновик или утверждённое решение становится revoked; версия увеличивается.
+        Новые планы отклоняются, ещё не выполненные шаги связанных планов останавливаются
+        при повторной проверке. Выполненная работа сохраняется. Повторы идемпотентны.
+  /api/v1/workspace/decisions/{id}/erase:
+    post:
+      summary: Удалить содержимое решения с сохранением факта операции
+      description: >-
+        Только owner/director, requestId UUID, version, confirmed=true.
+        Удаляются title, body, rationale, topic и связь/отпечаток источника. Остаются метаданные и аудит.
+        Истёкший срок хранения скрывает content сразу; фоновая очистка удаляет до 20 записей за проход.
+        Сам исходный Goal/Insight/ActionRun не удаляется. Cache-Control no-store.
+  /api/v1/workspace/experiments:
+    get:
+      summary: Проверки улучшений своей компании
+      description: >-
+        Только действующие owner/director/sales_lead. Права проверяются заново;
+        platform configuration запрещён. state=active|finished|all, cursor UUID;
+        до 20 items, nextCursor, canEdit. active включает draft/running,
+        finished — completed/stopped. Cache-Control no-store.
+    post:
+      summary: Сохранить черновик ограниченной проверки
+      description: >-
+        Только owner/director. Строгое тело requestId UUID, title (3..160),
+        hypothesis и change (10..1200), method. method содержит metric=proposal_preparation_minutes,
+        baselineFrom/baselineTo/from/to YYYY-MM-DD с включительными датами окончания,
+        memberIds (1..20 разных действующих сотрудников своей компании), minimumSample
+        (целое 10..500), targetReductionPercent (1..90), initiativeTaskId UUID.
+        Необязательные goal/decision — id UUID и version; только действующая цель
+        и актуальное утверждённое общее решение компании. Личные решения не допускаются.
+        Оба периода одинаковые, 7/14/28 календарных дней в часовом поясе компании,
+        не пересекаются; исходный завершён, история не старше 180 дней; начало проверки
+        в будущем не далее 31 дня. До 25 черновиков/действующих проверок компании.
+        requestId уникален для компании и автора; изменённый повтор — 409.
+        Ответ 201 BusinessExperimentDetail, данные для обзора и reviewHash.
+        Сохранение не запускает проверку и не меняет задачи, промпты или отправки.
+  /api/v1/workspace/experiments/options:
+    get:
+      summary: Участники и доступные основания проверки
+      description: >-
+        canEdit, timezone, today компании; до 200 действующих сотрудников,
+        50 активных целей и 6 текущих общих решений из ограниченного контекста памяти.
+        Связь с целью/решением необязательна. Те же права чтения, no-store.
+  /api/v1/workspace/experiments/tasks:
+    get:
+      summary: Найти задачу внедрения
+      description: >-
+        q — подстрока названия, до 120 символов; до 20 задач своей компании,
+        open/in_progress/waiting/done, без дочерних и групповых задач,
+        тестовых и архивных клиентских записей. Те же права чтения, no-store.
+  /api/v1/workspace/experiments/{id}:
+    get:
+      summary: Условия, исходные данные, результат и история проверки
+      description: >-
+        BusinessExperimentDetail содержит title/hypothesis/change, state/version,
+        method/methodVersion/timezone, members, initiative, baseline, reviewHash,
+        result, approvedAt/stopReason, до 30 measurements и history, limitations.
+        В черновике baseline/reviewHash пересчитываются; после подтверждения исходные
+        данные неизменны. Связанный ActionRun доступен только его инициатору.
+        Чужая или отсутствующая проверка — 404, Cache-Control no-store.
+    patch:
+      summary: Изменить только неподтверждённый черновик
+      description: >-
+        Полное тело как при создании плюс текущая version. Только owner/director.
+        После утверждения, завершения или остановки изменение запрещено (409).
+        Версия и событие истории сохраняются атомарно; повтор requestId идемпотентен.
+  /api/v1/workspace/experiments/{id}/approve:
+    post:
+      summary: Подтвердить прочитанные условия и исходную выборку
+      description: >-
+        requestId UUID, version, reviewHash из свежего обзора. Только owner/director.
+        Фиксируются baseline, методика и отпечаток настроек/состава команды/задачи
+        внедрения. Секреты и настройки в историю не копируются. Устаревший обзор,
+        прошедшая дата старта или пересечение периода другой running-проверки с
+        общими участниками блокируют запуск. Работа с проверками сериализована
+        по компании. Повтор ключа не запускает её дважды. Автоматических внешних действий нет.
+  /api/v1/workspace/experiments/{id}/result:
+    post:
+      summary: Сохранить промежуточное измерение или завершить период
+      description: >-
+        requestId UUID, version; только owner/director, running. Ручная проверка;
+        фонового вычисления нет. До окончания — in_progress, после окончания — completed.
+        Источник — Task.type=proposal и первая Activity.type=task.prepared того же
+        клиента и taskId внутри периода. Когорты по createdAt задачи и выбранным
+        ответственным, календарные минуты, медиана и среднее; отменённые задачи
+        без подготовки остаются в pending. Пропущенная подготовка, малая выборка,
+        исходная медиана 0 или больше 2000 задач исключают положительный вывод.
+        Проверяются сохранённый baseline, версия формулы, изменения настроек,
+        участников, инициативы, связанных цели/решения и записи об изменениях условий.
+        Выполнение инициативы должно быть записано между периодами; сдвиг состава
+        задач более 20 процентных пунктов или разрыв периодов более 14 дней
+        ограничивает сравнимость. Итоги insufficient_data, conditions_changed,
+        improvement_observed или no_improvement, всегда causal=false.
+        Это не рабочие часы, качество КП, факт отправки, выручка или доказательство
+        причинного эффекта. Результат, версия, аудит и событие атомарны и идемпотентны.
+  /api/v1/workspace/experiments/{id}/note:
+    post:
+      summary: Зафиксировать изменение условий действующей проверки
+      description: >-
+        Только owner/director, running; requestId UUID, version, note (5..800).
+        Следующее измерение учитывает несопоставимость условий; исходная методика
+        не переписывается. Сохраняются версия, аудит и событие.
+  /api/v1/workspace/experiments/{id}/stop:
+    post:
+      summary: Остановить черновик или действующую проверку с причиной
+      description: >-
+        Только owner/director; requestId UUID, version, note (5..800).
+        История и измерения сохраняются; дальнейшие изменения и расчёты блокируются.
+        Это не отменяет связанную задачу внедрения. Для новых условий нужна новая проверка.
+        Все ответы операций no-store; лимит записи 20 запросов в минуту на пользователя.
+  /api/v1/workspace/goals:
+    get:
+      summary: Измеримые цели своей компании
+      description: >-
+        Действующие owner/director/sales_lead; права проверяются повторно, контекст
+        настройки чужой компании запрещён. state=active|archived|all, cursor UUID.
+        До 20 items и nextCursor, canEdit. Карточка содержит baseline, current,
+        target, owner, период с исключающей правой границей и timezone, stale,
+        targetChanged и nextCheckAt. Метрики sales_won, overdue_tasks,
+        first_response_minutes. Прогресс детерминированный; нет данных — null.
+        Cache-Control no-store. Чужая компания не принимается в параметрах запроса.
+    post:
+      summary: Создать цель с первым измерением
+      description: >-
+        Только owner/director. Строгое тело requestId UUID, title (1..160), metric,
+        ownerMembershipId действующего руководителя своей компании.
+        Для sales_won — salesMonth YYYY-MM и currency из существующего положительного
+        salesPlans; target/from/to запрещены. Один месячный план связан с одной целью,
+        включая архив, сумма редактируется только через действующий редактор ops.
+        Для остальных — from/to YYYY-MM-DD (to включительно) и target (до двух знаков):
+        overdue_tasks целое 0..1000000; first_response_minutes 0.01..10080 минут.
+        Период до года, с незавершённым концом; начало не позже следующего года.
+        До 50 активных целей компании. Повтор requestId с тем же телом идемпотентен;
+        изменённое тело с тем же ключом — 409. Создание, измерение и аудит атомарны.
+        Ответ 201 BusinessGoalDetail; неверные параметры — 422. Внешних действий нет.
+  /api/v1/workspace/goals/options:
+    get:
+      summary: Доступные руководители, часовой пояс и существующие планы продаж
+      description: >-
+        Те же права чтения целей. Возвращает canEdit, timezone, selfId, members
+        (до 200 действующих руководителей) и salesPlans. Cache-Control no-store.
+  /api/v1/workspace/goals/tasks:
+    get:
+      summary: Поиск существующей задачи для связи с целью
+      description: >-
+        q — подстрока названия, до 120 символов; до 20 открытых, выполняемых или
+        ожидающих задач своей компании. Тестовые и архивные клиентские записи,
+        включая старые односторонние связи со сделкой, исключены. Cache-Control no-store.
+  /api/v1/workspace/goals/{id}:
+    get:
+      summary: Цель, измерения, изменения и связанные задачи
+      description: >-
+        BusinessGoalDetail содержит карточку, до 30 последних measurements/history
+        и до 30 initiatives. Задачи проверяются заново; runId доступен лишь инициатору
+        связанного ActionRun. Чужая или отсутствующая цель — 404. Cache-Control no-store.
+    patch:
+      summary: Изменить цель или перенести её в архив
+      description: >-
+        Только owner/director. requestId UUID, version и хотя бы одно поле
+        title/ownerMembershipId/target/state (active|archived). Период, timezone,
+        metric и currency неизменяемы. target sales_won задаётся только в ops.
+        После окончания периода нельзя менять target или возобновлять цель.
+        Изменения журналируются, старые измерения и baseline сохраняются.
+        Архив останавливает проверки и сохраняет последний результат.
+        Несовпадение version — 409, повтор requestId идемпотентен. Cache-Control no-store.
+  /api/v1/workspace/goals/{id}/refresh:
+    post:
+      summary: Повторно измерить показатель цели
+      description: >-
+        requestId UUID; право чтения целей. Не чаще раза в минуту на цель (429),
+        архив — 409. Фоновые проверки выполняются раз в сутки, до пяти целей за проход.
+        Неизменный повтор в тот же день не дублирует измерение, возврат к предыдущему
+        значению после изменения сохраняется отдельно. История не переписывается.
+        sales_won считает выигранные сделки по дате закрытия и валюте, а не поступления;
+        отсутствующая сумма/дата даёт incomplete, удалённый план — plan_missing.
+        overdue_tasks — полный текущий агрегат, после срока только прежний снимок
+        ended_snapshot без утверждения о достижении. first_response_minutes — календарные
+        минуты первого ответа за период, без внутренних/импортированных/неуспешных сообщений;
+        диалоги без ответа перечислены счётчиком unanswered и исключают достигнутую цель.
+        Изменение timezone компании требует новой цели, статус config_changed.
+        Cache-Control no-store; нет вызова модели, отправок или правок задач.
+  /api/v1/workspace/goals/{id}/initiatives:
+    post:
+      summary: Связать существующую задачу с целью или убрать связь
+      description: >-
+        Только owner/director. requestId UUID, version, taskId UUID, remove (по умолчанию false).
+        Только действующая незавершённая цель; новая связь — с доступной открытой задачей
+        своей компании. Связь с успешным ActionRun инициатора определяется сервером.
+        Повтор не создаёт дубль, удаление связи не удаляет задачу. До 30 связей на цель.
+        Изменение сохраняется в истории; завершение задачи не объявляется причиной
+        изменения продаж. Cache-Control no-store.
+  /api/v1/workspace/ai-actions:
+    get:
+      summary: Личные планы действий текущего сотрудника
+      description: >-
+        История с результатом каждого шага, offset>=0, 20 записей на страницу.
+        Доступ только текущему инициатору с правом управления задачами в своей компании.
+        Cache-Control no-store. Текст черновика доступен только в этом же контексте.
+    post:
+      summary: Подготовить неизменяемый план для подтверждения
+      description: >-
+        requestId UUID, title, steps (1..5). Необязательный decisions — до трёх разных
+        утверждённых оснований {id UUID, version}. Они проверяются при подготовке,
+        подтверждении и перед каждым шагом; отзыв/смена версии/источника/срока останавливает план.
+        Снимок плана хранит только ID и версии решений, не их текст. Права действий не расширяются.
+        Ключи шагов уникальны. v1 допускает
+        task.create (не больше одной задачи), task.assign, task.draft и staff.notify.
+        A5 также допускает отдельный одиночный шаг opportunity.task с insightId, version, fingerprint,
+        ownerMembershipId и будущим dueAt (до года). Только аналитические роли компании.
+        Проверка источника, срока и отсутствия открытой задачи при preview, confirm и выполнении.
+        Создаётся внутренняя задача note с точной привязкой к заявке/сделке через общий ActionRun;
+        записываются Activity и BusinessInsight.actionRunId/outcomeEventId в одной транзакции.
+        Одновременные планы по одной возможности не создают дубликаты; внешних отправок нет.
+        Все шаги относятся к одной задаче: массовые операции не поддерживаются.
+        Ссылка target — taskId или fromStep предыдущего task.create. Создание допускает
+        только сотрудника-исполнителя. Уведомление исключительно внутри BasQar;
+        черновик не отправляется и не планируется к отправке. Доступ CRM_CHAT в Control,
+        AI_CONTROL и TASKS проверяется заново. Лимит — 20 активных планов на инициатора.
+        Срок подтверждения 30 минут. Повтор requestId возвращает тот же план;
+        другой состав с тем же requestId — 409. Ответ 201 ActionRun с planHash и steps.
+  /api/v1/workspace/ai-actions/options:
+    get:
+      summary: Разрешённые действия, сотрудники и поиск задач/клиентов для плана
+      description: >-
+        Без kind возвращает allowed, blockedReason, members, selfId, timezone.
+        kind=task|contact и q — до 30 совпадений. Подготовка плана повторно проверяет
+        доступность выбранной записи. История остаётся доступна при паузе Control.
+  /api/v1/workspace/ai-actions/{id}:
+    get:
+      summary: План и результаты каждого шага
+      description: >-
+        status — draft, queued, running, succeeded, failed, cancelled, expired.
+        steps.status — pending, succeeded, failed, skipped. completed считает только
+        сохранённые действия; taskId ведёт к созданной/изменённой задаче.
+        Чужая компания или другой инициатор — 404.
+  /api/v1/workspace/ai-actions/{id}/confirm:
+    post:
+      summary: Подтвердить показанный план и поставить в очередь
+      description: >-
+        Тело requestId UUID, confirmed=true, planHash из preview. Подтверждение и
+        событие очереди атомарны. Повтор не создаёт новое выполнение. Перед каждым
+        шагом заново проверяются права, пауза, тариф, ревизия задачи и сотрудника.
+        Статус failed может быть возвращён с 200 при устаревших данных — клиент
+        обязан показывать status/error. Изменения и результат шага атомарны.
+        После 30 минут с подтверждения выполнение прекращается.
+  /api/v1/workspace/ai-actions/{id}/cancel:
+    post:
+      summary: Отменить ещё не выполненные шаги
+      description: >-
+        Тело requestId UUID. Идемпотентно. Текущий атомарный шаг может завершиться
+        перед отменой; уже выполненные действия сохраняются. Отмена доступна
+        инициатору с правом управления задачами даже при выключенном Control.
+        Для восстановления после сбоя нужен новый просмотр только оставшихся
+        действий — прямого повтора внешних отправок или всего плана нет.
+  /api/v1/settings/ai-automation:
+    get:
+      summary: Настройки ИИ и фактическая поддержка каналов
+      description: >-
+        channelCapabilities описывает поддержку входящих ответов и автоматического follow-up
+        отдельно от состояния подключения и пользовательских переключателей. Входящие ответы
+        поддерживают WhatsApp QR/Cloud, Telegram, Instagram, чат сайта и отдельный WhatsApp-продавец.
+        Автоматический follow-up реализован только для отдельного WhatsApp-продавца (whatsapp_seller).

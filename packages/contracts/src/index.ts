@@ -52,3 +52,15 @@ export type { CrmMoney, CrmCommercialField, CrmCommercialFact, CrmCommercialValu
 export * from "./processCalendar.ts";
 export * from "./processLocale.ts";
 export type { ForecastMoney, SalesForecast, SalesForecastMonth } from "./salesForecast.ts";
+export * from "./dealRisk.ts";
+
+export * from "./aiAction.ts";
+export * from "./aiArchitect.ts";
+export * from "./businessInsight.ts";
+export * from "./businessGoal.ts";
+export * from "./businessExperiment.ts";
+export * from "./businessDecision.ts";
+
+export * from "./autopilot.ts";
+export type { ControlProfile, ControlAnalysisCard, ControlAnalysis } from "./controlAnalysis.ts";
+export type { BusinessHomeFocus, HomeModule, HomeInsight, HomeGoal, HomeAction } from "./businessHome.ts";

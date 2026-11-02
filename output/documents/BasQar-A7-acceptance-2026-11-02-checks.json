@@ -1,0 +1,128 @@
+{
+  "stage": "A7",
+  "date": "2026-11-02",
+  "timezone": "Asia/Almaty",
+  "status": "implemented_and_automatically_verified_locally",
+  "deployed": false,
+  "branch": "codex/stage9-release",
+  "head": "85ca15135f64ce2f7d54b129da8c3703001cae7d",
+  "apiScenarios": 138,
+  "apiFiles": 9,
+  "newMemoryScenarios": 26,
+  "goalScenariosIncludingRevisionFix": 22,
+  "webScenarios": 112,
+  "newMemoryWebScenarios": 7,
+  "database": "isolated PGlite",
+  "externalProviders": "disabled",
+  "browser": {
+    "verified": false,
+    "reason": "Local browser use is disabled in Work settings; native service startup failed"
+  },
+  "unverified": [
+    "A7 desktop/mobile visual acceptance",
+    "Linux/PostgreSQL CI acceptance",
+    "full Docker build",
+    "production state"
+  ],
+  "limitations": [
+    "No automatic LLM advice/memory retrieval in Control; A9 orchestrator remains pending",
+    "Text decisions never expand permissions or change customer AI settings",
+    "Exact normalized topic conflicts only; no semantic conflict detection",
+    "Live goal basis uses latest recorded measurement with scheduled freshness, not continuous CRM recomputation",
+    "Decision private to successful ActionRun initiator; shared/private replacement prohibited",
+    "Secret-format detection is limited, not exhaustive personal data classification",
+    "Russian-only fixed new UI copy; no new native screen",
+    "Vite large chunk warning; minimal initial JavaScript budget remaining"
+  ],
+  "initialJavascript": {
+    "bytes": 1099966,
+    "budgetBytes": 1100000
+  },
+  "verificationResolution": {
+    "initial": "HTTP test required permission to bind a local test server",
+    "finding": "Added source freshness check exposed equal-timestamp goal measurements being ordered by random ID",
+    "fix": "Prioritize latest goal version; deterministic regression test added",
+    "final": "All 9 selected API files rerun after the fix: 138 passed, no failures/skips"
+  },
+  "commands": [
+    "npm run db:generate",
+    "node scripts/test-api.mjs businessMemory schemaPatches aiAction aiArchitectApply businessGoal businessInsight businessOpportunity backgroundReliability http",
+    "npm run test --workspace=@creolab/web",
+    "npm run typecheck",
+    "npm run build --workspace=@creolab/web",
+    "git diff --check"
+  ],
+  "logs": {
+    "api": {
+      "path": "/tmp/basqar-a7-verified-api.log",
+      "sha256": "dda5e9feeeed3de9cf40cf97bfc8e89a15b07ab61e7345de9e706bc24c68c523",
+      "exitCode": 0,
+      "tests": 138,
+      "pass": 138,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "web": {
+      "path": "/tmp/basqar-a7-final-web.log",
+      "sha256": "e718acc616458aa48f13b78a36861d5c919b1ca0e88754ea98ffdb3b640462f4",
+      "exitCode": 0,
+      "tests": 112,
+      "pass": 112,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "types": {
+      "path": "/tmp/basqar-a7-verified-types.log",
+      "sha256": "fc1610b9081f206e480555f9bc32f27b71d5c62deee39ced1d9a23b0d2cf29ba",
+      "exitCode": 0
+    },
+    "build": {
+      "path": "/tmp/basqar-a7-final-build.log",
+      "sha256": "e7401179ea78900dcf266d7c32d3b9d354e2954806d4d444ee7da72904bcb25d",
+      "exitCode": 0
+    },
+    "db_generate": {
+      "path": "/tmp/basqar-a7-db-generate.log",
+      "sha256": "3841342202549e9cc863542a6cd8e14dc80e391547b761f17dba82d45cfc7151",
+      "exitCode": 0
+    },
+    "diff_check": {
+      "path": "/tmp/basqar-a7-diff-check.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "exitCode": 0
+    }
+  },
+  "sourceSha256": {
+    "packages/contracts/src/businessDecision.ts": "74a9532b16aee0237b293548da283e5c4255e7a49cf29dea28d9a4756dfad448",
+    "packages/contracts/src/aiAction.ts": "07bdffb52b84c134aa0c40ba5362b9043cb9064637b37c125377d59077ff7f31",
+    "packages/contracts/src/index.ts": "65394f2d45a65a3f49bbe0adb6f1851a03f6badb24ae94e4b34a2e3767fc798b",
+    "packages/db/src/businessDecisionSchema.ts": "6182f6291b2efa651a8efc6e799133ccdc8f5085ffc3952f150df0bfa27f7d54",
+    "packages/db/prisma/schema.prisma": "481534c0d833521534b5c4d0832d0da0408eea36153a73f62ceeed8e30da0ca3",
+    "packages/db/src/client.ts": "9f01923fd8739a8e86bab956bb0e4f44656e905a81af7c1abe802dfff5288f75",
+    "packages/api-client/src/businessMemory.ts": "2ef0401a45275b116791615b40a20f6a969c4ad38c8357114cf6f716b4ee2e78",
+    "packages/api-client/package.json": "7982d9ddf6a52ac5a53c4c4157d2b76c1cacba80db1d7cb0baae34076555644f",
+    "apps/api/src/services/businessMemoryService.ts": "11d93c6f5251ea8bd876799ccd0eb96c8cb7aba6792ba92686d42bfce443ec41",
+    "apps/api/src/services/businessDecisionSource.ts": "cd21e2b9c287c804dda50c397cec56785306c919184d7169722dbea6a92ec3e2",
+    "apps/api/src/services/aiActionService.ts": "9abdf43b546f943b81265aa2581633a5166dcda6494ffb72b681eb64af8227f4",
+    "apps/api/src/services/businessGoalService.ts": "e2fa888cc665d14aca5e60b6bfd026458caf1204db279b54a7d1017e7a292138",
+    "apps/api/src/services/backgroundJobs.ts": "3f9d74140e73681904a25ef2eea77fb649bc611ab2a0e9c7c3a95803adb64bb7",
+    "apps/api/src/app.ts": "7558793e3b81df24afc404df58aa123d7c8e144ba726ca61b8ec5673eede27e0",
+    "apps/api/src/lib/auditPresentation.ts": "3690a4bab9b3f09a78c749313fe7ce325dc265165ea87a8e16eda5c5ff62272c",
+    "apps/api/openapi.yaml": "7701d7dcc10b1b9a493a4d1a33e58d7917879c044e170c81c4c0dc4006c70680",
+    "apps/api/src/businessMemory.test.ts": "5da07f3417a0c3edd871222d015a7e1730ecefa61628c23c6fcc74d220fadda1",
+    "apps/api/src/businessGoal.test.ts": "ec50f0039e520072b1c79bb188aa1d392b0416f7f1de173914b3c36c03ad0bcb",
+    "apps/api/src/schemaPatches.test.ts": "9c89718edf9ad290dbd5329ea9946454cce8fc7aaf17227379da914447aa2de7",
+    "apps/web/src/components/BusinessMemoryPanel.tsx": "2a28a110b1f9272cba41f4fa721238be9bdaa81bdcd26047e3e2b652bc45a11e",
+    "apps/web/src/components/BusinessDecisionCard.tsx": "34dee425570c95468355e3f6b08425add557d7f589a32c8fdbc90aed2bb53852",
+    "apps/web/src/components/BusinessDecisionForm.tsx": "24695d3a733e109279a084b3fa0bab9fb5aef6044192cec6315c3087da7e731e",
+    "apps/web/src/components/business-memory.css": "5cc3d8c4390c10f83b80b002aa5ac2eb8d456e7b13bde87125176fd13f84bf02",
+    "apps/web/src/components/ActionPlansPanel.tsx": "7748efdb496ccd04fb374c4a36e018ddb3b2df10270aa277558a6de2f90d6925",
+    "apps/web/src/components/BusinessInsightsPanel.tsx": "f53bf6b69c0a59e304c38c41fc1c9878eef867e4007d5e25afe1562563cfd3e1",
+    "apps/web/src/pages/ControlPage.tsx": "2a5ceefb09ccea536a86c2656d28f67d95f1a26e137e1727818f08d33a843fd3",
+    "apps/web/package.json": "f5bc0ef46053c09400135f33fc7d2ef258c61a98d687d8f1e0842b76cea73c47",
+    "scripts/business-memory.test.mjs": "07d8a48e0d95d0045a1c088f2c10ed6165dc94fb600040fd05a850ea97a504ab",
+    ".github/workflows/release-acceptance.yml": "a3145cf8b8439ee4d463ea8d4b12ef14bc0c14f918f432bcb75a8c2c637ad24b"
+  }
+}

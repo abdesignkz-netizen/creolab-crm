@@ -89,7 +89,18 @@ export function createProcessClock(calendar: ProcessCalendar, timeZone: string, 
     throw new RangeError("No available workday");
   }
 
-  return { mode: calendar.mode, timeZone: zone, elapsedDays,
+  function nextWorkingTime(from: Date) {
+    if (calendar.mode === "calendar") return new Date(from);
+    const first = dayOf(from);
+    for (let day = first - 1; day <= first + (excluded.size + 2) * 7; day++) {
+      if (!eligible(day)) continue;
+      const { start, end } = shift(day);
+      if (end > from.getTime()) return new Date(Math.max(start, from.getTime()));
+    }
+    throw new RangeError("No available workday");
+  }
+  return { mode: calendar.mode, timeZone: zone, elapsedDays, nextWorkingTime,
+    isWorkingTime: (at = now) => nextWorkingTime(at).getTime() === at.getTime(),
     afterDays: (from: Date, count: number) => advance(from, count, "days"),
     afterHours: (from: Date, count: number) => advance(from, count, "hours") };
 }

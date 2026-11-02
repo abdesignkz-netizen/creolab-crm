@@ -32,6 +32,7 @@ export async function startApi({ env = process.env, apiCommand = process.execPat
   javaCommand = "java", classesDir = resolve(root, "apps/api/kalkan-verify/build") } = {}) {
   const runtime = await kalkanRuntime(env);
   const children = new Set();
+  let apiChild;
   let stopping = false;
   let forceTimer;
   let exitCode = 0;
@@ -41,17 +42,26 @@ export async function startApi({ env = process.env, apiCommand = process.execPat
     if (stopping) return;
     stopping = true;
     exitCode = code;
-    for (const child of children) child.kill("SIGTERM");
-    forceTimer = setTimeout(() => { for (const child of children) child.kill("SIGKILL"); }, 5000);
+    // Keep the verifier available while the API finishes accepted signing work.
+    if (apiChild && children.has(apiChild)) apiChild.kill("SIGTERM");
+    else for (const child of children) child.kill("SIGTERM");
+    // The API has a 25s drain deadline; do not kill it after just 5 seconds.
+    forceTimer = setTimeout(() => {
+      exitCode = 1;
+      for (const child of children) child.kill("SIGKILL");
+    }, 28_000);
     forceTimer.unref();
     if (!children.size) finish(exitCode);
   };
-  const start = (command, args, cwd) => {
+  const start = (command, args, cwd, role = "sidecar") => {
     const child = spawn(command, args, { cwd, env: runtime.env, stdio: "inherit" });
+    if (role === "api") apiChild = child;
     children.add(child);
     child.on("error", () => { console.error("[runtime] Child process could not start"); stop(1); });
-    child.on("close", () => {
+    child.on("close", (code, signal) => {
       children.delete(child);
+      if (stopping && role === "api" && (code !== 0 || signal)) exitCode = 1;
+      if (stopping && role === "api") for (const remaining of children) remaining.kill("SIGTERM");
       if (!stopping) { console.error("[runtime] Required child process stopped"); stop(1); }
       if (!children.size) finish(exitCode);
     });
@@ -75,7 +85,7 @@ export async function startApi({ env = process.env, apiCommand = process.execPat
       if (!ready) { console.error("[kalkan] Startup failed: check SDK jars, CA certificates, port and KALKAN_OCSP"); stop(1); }
       else console.log("[kalkan] SDK ready; certificate revocation checks enabled");
     }
-    if (!stopping) start(apiCommand, apiArgs, resolve(root, "apps/api"));
+    if (!stopping) start(apiCommand, apiArgs, resolve(root, "apps/api"), "api");
     return await done;
   } finally {
     clearTimeout(forceTimer);

@@ -8,10 +8,12 @@ const LEASE_MS = 60_000;
 export async function claimOutboxEvent(prisma: PrismaClient, id: string) {
   let until = new Date(Date.now() + LEASE_MS);
   const claim = await prisma.outboxEvent.updateMany({
-    where: { id, processedAt: null, availableAt: { lte: new Date() } },
-    data: { availableAt: until },
+    where: { id, processedAt: null, failedAt: null, availableAt: { lte: new Date() } },
+    data: { availableAt: until, retryAttempts: { increment: 1 } },
   });
   if (!claim.count) return null;
+  const event = await prisma.outboxEvent.findFirst({ where: { id, processedAt: null, failedAt: null, availableAt: until } });
+  if (!event) return null;
   let stopped = false;
   let renewal: Promise<void> | null = null;
   const timer = setInterval(() => {
@@ -19,7 +21,7 @@ export async function claimOutboxEvent(prisma: PrismaClient, id: string) {
     renewal = (async () => {
       const next = new Date(Date.now() + LEASE_MS);
       const result = await prisma.outboxEvent.updateMany({
-        where: { id, processedAt: null, availableAt: until }, data: { availableAt: next },
+        where: { id, processedAt: null, failedAt: null, availableAt: until }, data: { availableAt: next },
       });
       if (result.count) until = next;
       else { stopped = true; clearInterval(timer); }
@@ -27,11 +29,12 @@ export async function claimOutboxEvent(prisma: PrismaClient, id: string) {
   }, LEASE_MS / 3);
   timer.unref?.();
   return {
+    event,
     async finish(data: Prisma.OutboxEventUpdateManyMutationInput) {
       stopped = true; clearInterval(timer);
       await renewal;
       // An expired/reclaimed event must never be completed by its previous owner.
-      return prisma.outboxEvent.updateMany({ where: { id, processedAt: null, availableAt: until }, data });
+      return prisma.outboxEvent.updateMany({ where: { id, processedAt: null, failedAt: null, availableAt: until }, data });
     },
   };
 }
