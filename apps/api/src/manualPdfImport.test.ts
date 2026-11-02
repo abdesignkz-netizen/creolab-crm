@@ -10,12 +10,13 @@ import type { PdfImportDraft } from "@creolab/contracts";
 import { createApp } from "./app.ts";
 import { parsePdfDocument } from "./services/pdfDocumentParser.ts";
 import { extractPdfPages } from "./services/pdfTextExtraction.ts";
+import { testCanvasFont } from "./testSupport/canvasFont.ts";
 
 async function makePdf(scan=false) {
   const pdf = new PDFDocument({ size:"A4" });const chunks:Buffer[]=[];
   const done = new Promise<Buffer>((resolve,reject)=>{pdf.on("data",c=>chunks.push(c));pdf.on("end",()=>resolve(Buffer.concat(chunks)));pdf.on("error",reject);});
   if (scan) {
-    const canvas=createCanvas(1400,900);const c=canvas.getContext("2d");c.fillStyle="white";c.fillRect(0,0,1400,900);c.fillStyle="black";c.font="42px Arial";c.fillText("Contract No 2026-TEST-42",70,150);c.fillText("Total: 400000 KZT",70,260);pdf.image(canvas.toBuffer("image/png"),40,40,{width:510});
+    const canvas=createCanvas(1400,900);const c=canvas.getContext("2d");c.fillStyle="white";c.fillRect(0,0,1400,900);c.fillStyle="black";c.font=`42px "${testCanvasFont}"`;c.fillText("Contract No 2026-TEST-42",70,150);c.fillText("Total: 400000 KZT",70,260);pdf.image(canvas.toBuffer("image/png"),40,40,{width:510});
   } else pdf.fontSize(16).text("Contract PDF ORIGINAL 2026-42").text("Total: 400000 KZT");
   pdf.end();return done;
 }

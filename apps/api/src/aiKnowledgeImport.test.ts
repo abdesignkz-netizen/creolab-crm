@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { testCanvasFont } from "./testSupport/canvasFont.ts";
 import { after, before, describe, it } from "node:test";
 import JSZip from "jszip";
 import * as XLSX from "xlsx";
@@ -128,7 +129,7 @@ describe("knowledge extraction and review", { concurrency: false }, () => {
   });
   it("recognizes a real PNG scan and rejects decompression-bomb dimensions", async () => {
     const canvas = createCanvas(1200, 320), ctx = canvas.getContext("2d");
-    ctx.fillStyle = "white"; ctx.fillRect(0, 0, 1200, 320); ctx.fillStyle = "black"; ctx.font = "44px Arial";
+    ctx.fillStyle = "white"; ctx.fillRect(0, 0, 1200, 320); ctx.fillStyle = "black"; ctx.font = `44px "${testCanvasFont}"`;
     ctx.fillText("ASpan Studio — Website design", 40, 90); ctx.fillText("Website price: 50000 KZT", 40, 160); ctx.fillText("Delivery: 3 working days", 40, 230);
     const png = canvas.toBuffer("image/png");
     assert.deepEqual(knowledgeImageDimensions(png, "png"), { width: 1200, height: 320 });

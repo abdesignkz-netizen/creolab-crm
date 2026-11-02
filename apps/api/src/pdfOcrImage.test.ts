@@ -6,6 +6,7 @@ import type { Page } from "tesseract.js";
 import { grayscaleImage, needsDetailedOcr, ocrScale, preferDetailedOcr } from "./services/pdfOcrImage.ts";
 import { extractPdfPages } from "./services/pdfTextExtraction.ts";
 import { parsePdfDocument } from "./services/pdfDocumentParser.ts";
+import { testCanvasFont } from "./testSupport/canvasFont.ts";
 
 function result(text: string, confidence: number, words: Array<{text: string; confidence: number}> = []) {
   return { text, confidence, blocks: [{ paragraphs: [{ lines: [{ words }] }] }] } as Page;
@@ -120,7 +121,7 @@ describe("Memory-bounded OCR images", () => {
     try {
       const ctx = canvas.getContext("2d");
       ctx.fillStyle = "white"; ctx.fillRect(0, 0, 1400, 900);
-      ctx.font = "42px Arial";
+      ctx.font = `42px "${testCanvasFont}"`;
       ctx.fillStyle = "rgb(195,195,195)"; ctx.fillText("Contract No 2026-TEST-42", 70, 150);
       ctx.fillStyle = "#315596"; ctx.fillText("Total: 400000 KZT", 70, 260);
       pdf.image(canvas.toBuffer("image/png"), 40, 40, { width: 510 });

@@ -37,7 +37,7 @@ jobs:
         run: |
           set -o pipefail
           node --experimental-strip-types scripts/check-word-runtime.mjs
-          node scripts/test-api.mjs contractTemplateLayout manualPdfImport workerRuntime 2>&1 | tee /tmp/basqar-regression-checks.log
+          node scripts/test-api.mjs contractTemplateLayout manualPdfImport pdfOcrImage aiKnowledgeImport workerRuntime 2>&1 | tee /tmp/basqar-regression-checks.log
       - name: Verify AI reply idempotency and delivery races
         run: |
           set -o pipefail
