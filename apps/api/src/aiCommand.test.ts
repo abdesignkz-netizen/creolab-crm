@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import { createPrismaClient } from "@creolab/db";
 import { createApp } from "./app.ts";
+import { addDaysYmd, zonedLocalToUtc, zonedYmd } from "./services/periodRange.ts";
 
 describe("AI task commands", () => {
   let prisma: Awaited<ReturnType<typeof createPrismaClient>>;
@@ -48,9 +49,10 @@ describe("AI task commands", () => {
   });
 
   it("парсит «Отправь КП вчерашним клиентам по презентациям» и делает реальный segment preview", async () => {
-    const yesterday = new Date();
-    yesterday.setHours(12, 0, 0, 0);
-    yesterday.setDate(yesterday.getDate() - 1);
+    const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
+    const timeZone = tenant.timezone || "Asia/Almaty";
+    const day = addDaysYmd(zonedYmd(new Date(), timeZone), -1);
+    const yesterday = zonedLocalToUtc(timeZone, day.year, day.month, day.day, 12);
 
     const contact = await prisma.contact.create({
       data: {

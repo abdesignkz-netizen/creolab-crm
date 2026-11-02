@@ -2,6 +2,7 @@ import type { Prisma, PrismaClient } from "@creolab/db";
 import { ApiError } from "../errors.ts";
 import type { AuthContext } from "../lib/types.ts";
 import { isManager } from "../lib/access.ts";
+import { addDaysYmd, zonedLocalToUtc, zonedYmd } from "./periodRange.ts";
 import {
   INQUIRY_STATUS_LABEL,
   SOURCE_LABEL,
@@ -49,64 +50,21 @@ function requireTenant(auth: AuthContext) {
   return auth.activeMembership;
 }
 
-function startOfDay(date: Date, timeZone: string) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(date);
-  const y = parts.find((p) => p.type === "year")?.value;
-  const m = parts.find((p) => p.type === "month")?.value;
-  const d = parts.find((p) => p.type === "day")?.value;
-  return new Date(`${y}-${m}-${d}T00:00:00+05:00`);
-}
-
-function dateRange(preset: string | undefined, from?: string, to?: string, timeZone = "Asia/Almaty") {
-  const now = new Date();
-  const todayStart = startOfDay(now, timeZone);
-  if (preset === "custom") {
-    return {
-      from: from ? new Date(from) : undefined,
-      to: to ? new Date(to) : undefined,
-    };
-  }
-  if (preset === "today") return { from: todayStart, to: now };
-  if (preset === "yesterday") {
-    const y = new Date(todayStart);
-    y.setDate(y.getDate() - 1);
-    return { from: y, to: todayStart };
-  }
-  if (preset === "last_3_days") {
-    const fromDate = new Date(todayStart);
-    fromDate.setDate(fromDate.getDate() - 2);
-    return { from: fromDate, to: now };
-  }
-  if (preset === "last_7_days") {
-    const fromDate = new Date(todayStart);
-    fromDate.setDate(fromDate.getDate() - 6);
-    return { from: fromDate, to: now };
-  }
-  if (preset === "last_30_days") {
-    const fromDate = new Date(todayStart);
-    fromDate.setDate(fromDate.getDate() - 29);
-    return { from: fromDate, to: now };
-  }
-  if (preset === "this_month") {
-    const parts = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit" }).formatToParts(now);
-    const y = parts.find((p) => p.type === "year")?.value;
-    const m = parts.find((p) => p.type === "month")?.value;
-    return { from: new Date(`${y}-${m}-01T00:00:00+05:00`), to: now };
-  }
+export function segmentDateRange(preset: string | undefined, from?: string, to?: string, timeZone = "Asia/Almaty", now = new Date()) {
+  if (preset === "custom") return { from: from ? new Date(from) : undefined, to: to ? new Date(to) : undefined };
+  const today = zonedYmd(now, timeZone);
+  const midnight = (date: typeof today) => zonedLocalToUtc(timeZone, date.year, date.month, date.day);
+  if (preset === "today") return { from: midnight(today), to: now };
+  // Segment filters use an inclusive upper bound. Do not include the next day's
+  // midnight in yesterday/last month, and never use the server's local calendar.
+  if (preset === "yesterday") return { from: midnight(addDaysYmd(today, -1)), to: new Date(midnight(today).getTime() - 1) };
+  const lookback = preset === "last_3_days" ? 2 : preset === "last_7_days" ? 6 : preset === "last_30_days" ? 29 : undefined;
+  if (lookback !== undefined) return { from: midnight(addDaysYmd(today, -lookback)), to: now };
+  const monthStart = { ...today, day: 1 };
+  if (preset === "this_month") return { from: midnight(monthStart), to: now };
   if (preset === "last_month") {
-    const parts = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit" }).formatToParts(now);
-    const y = Number(parts.find((p) => p.type === "year")?.value);
-    const m = Number(parts.find((p) => p.type === "month")?.value);
-    const prevM = m === 1 ? 12 : m - 1;
-    const prevY = m === 1 ? y - 1 : y;
-    const from = new Date(`${prevY}-${String(prevM).padStart(2, "0")}-01T00:00:00+05:00`);
-    const to = new Date(`${y}-${String(m).padStart(2, "0")}-01T00:00:00+05:00`);
-    return { from, to };
+    const previous = addDaysYmd(monthStart, -1);
+    return { from: midnight({ ...previous, day: 1 }), to: new Date(midnight(monthStart).getTime() - 1) };
   }
   return { from: undefined, to: undefined };
 }
@@ -226,7 +184,7 @@ export async function previewContactSegment(prisma: PrismaClient, auth: AuthCont
     take: 300,
   });
 
-  const range = dateRange(input.datePreset, input.dateFrom, input.dateTo, timeZone);
+  const range = segmentDateRange(input.datePreset, input.dateFrom, input.dateTo, timeZone, now);
   const dateField = input.dateField || "lastContact";
   const serviceCategories = input.serviceCategories || [];
   const statuses = input.statuses || [];
