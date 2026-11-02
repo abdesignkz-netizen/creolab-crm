@@ -38,6 +38,10 @@ jobs:
           set -o pipefail
           node --experimental-strip-types scripts/check-word-runtime.mjs
           node scripts/test-api.mjs contractTemplateLayout manualPdfImport workerRuntime 2>&1 | tee /tmp/basqar-regression-checks.log
+      - name: Verify AI reply idempotency and delivery races
+        run: |
+          set -o pipefail
+          node scripts/test-api.mjs aiReplyDeliveryReview whatsappConnections aiReplyScheduling 2>&1 | tee /tmp/basqar-regression-checks.log
       - name: Full isolated server regression
         run: |
           set -o pipefail
@@ -83,7 +87,7 @@ jobs:
           BASQAR_TEST_POSTGRES_URL: postgresql://basqar:basqar_ci_only@127.0.0.1:5432/postgres
         run: |
           set -o pipefail
-          node scripts/test-api.mjs --postgres dealRisk controlForecast salesForecast websiteForms workspaceAcceptance outboxLease outboxReliability outboxScheduling schemaPatches financialReporting analyticsPeriods situationSweepMigration postgresRuntime.postgres backgroundLifecycle runtimeWorkload http businessInsight businessOpportunity businessGoal businessMemory businessExperiment businessHome aiAction aiArchitect aiArchitectApply autopilot controlPlan aiManagerSetup aiAutomation onboarding dealPipelineSettings 2>&1 | tee /tmp/basqar-postgres-checks.log
+          node scripts/test-api.mjs --postgres dealRisk controlForecast salesForecast websiteForms workspaceAcceptance outboxLease outboxReliability outboxScheduling schemaPatches financialReporting analyticsPeriods situationSweepMigration postgresRuntime.postgres backgroundLifecycle runtimeWorkload http businessInsight businessOpportunity businessGoal businessMemory businessExperiment businessHome aiAction aiArchitect aiArchitectApply autopilot controlPlan aiManagerSetup aiAutomation onboarding dealPipelineSettings aiReplyDeliveryReview 2>&1 | tee /tmp/basqar-postgres-checks.log
       - name: Report failing test details
         if: failure()
         run: node scripts/ci-error-annotation.mjs /tmp/basqar-postgres-checks.log

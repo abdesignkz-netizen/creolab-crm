@@ -416,7 +416,8 @@ describe("WhatsApp provider connections", () => {
         await processWhatsAppAiReply(prisma, event, generate);
         await processWhatsAppAiReply(prisma, event, generate);
         assert.equal(generated, 1);
-        assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id: event.entityId } })).mode, "ai");
+        const afterGeneration = await prisma.conversation.findUniqueOrThrow({ where: { id: event.entityId } });
+        assert.equal(afterGeneration.mode, "ai", `${integrationId === qrId ? "QR" : "Cloud"}: ${afterGeneration.attentionReason}`);
         const reply = await prisma.message.findUniqueOrThrow({ where: { connectionScopedId: event.id } });
         assert.equal(reply.senderKind, "ai");
         assert.equal(reply.text, "Здравствуйте! Какая тема и объём презентации?");

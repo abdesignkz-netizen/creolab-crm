@@ -50,6 +50,15 @@ export function whatsAppAiFailureReason(code: string | null | undefined) {
 const record = (value: unknown) => value && typeof value === "object" ? value as Record<string, any> : {};
 const REPLY_ATTEMPTS = 2;
 const RETRY_DELAY_MS = 2000;
+const generationClaimTtl = () => Math.max(SPEECH_CLAIM_TTL_MS, LOCAL_SPEECH_BATCH_MS + REPLY_ATTEMPTS * getWhatsAppReplyTimeoutMs() + 60000);
+async function replyAlreadyHandled(prisma: PrismaClient, tenantId: string, eventId: string) {
+  const operation = await prisma.outboundOperation.findUnique({ where: { tenantId_idempotencyKey: { tenantId, idempotencyKey: eventId } } });
+  if (!operation) return false;
+  if (operation.state !== "generating") return true;
+  if (Date.now() - operation.createdAt.getTime() < generationClaimTtl()) throw new ApiError(409, "ai_generating", "ИИ готовит ответ");
+  // An expired claim is reconciled below under the conversation lock.
+  return false;
+}
 const retryableModelErrors = new Set(["llm_timeout", "llm_network_error", "http_408", "http_429", "http_500", "http_502", "http_503", "http_504"]);
 const clientAiMode = (value: unknown) => { const setting = record(value).aiAutomation; return typeof setting === "string" ? setting : record(setting).mode; };
 export function automaticWhatsAppMode(settingsJson: unknown, integration: { id: string; type: string; automationMode?: string | null }, contact: { doNotContact?: boolean; attributionJson?: unknown; firstSeenAt?: Date }) {
@@ -162,6 +171,9 @@ export async function processWhatsAppAiReply(prisma: PrismaClient, event: { id: 
   if (!Number.isInteger(version) || !Number.isInteger(revision) || typeof payload.messageId !== "string") return;
   const conversation = await prisma.conversation.findFirst({ where: { id: conversationId, tenantId }, include: { connection: { include: { integration: true } }, tenant: true } });
   if (!conversation || conversation.mode !== "ai" || conversation.controlVersion !== version || conversation.messageRevision !== revision) return;
+  // Delivery owns a saved reply. A repeated generation event must not reinterpret
+  // its in-flight send as a channel restriction or change the conversation mode.
+  if (await replyAlreadyHandled(prisma, tenantId, event.id)) return;
   const unresolved = await aiReplyGate(prisma, tenantId, conversationId);
   if (unresolved) {
     if (unresolved === "sending") throw new ApiError(409, "ai_delivery_pending", "Предыдущий ответ ещё отправляется");
@@ -176,7 +188,12 @@ export async function processWhatsAppAiReply(prisma: PrismaClient, event: { id: 
   }
   const readiness = await directAiReadiness(prisma, tenantId);
   if (readiness) { await handoff(prisma, tenantId, conversationId, version, revision, whatsAppAiFailureReason(readiness)); return; }
-  if (!await directAiSendAllowed(prisma, tenantId, conversationId, version, revision)) { await handoff(prisma, tenantId, conversationId, version, revision, "AI_CHANNEL_RESTRICTED"); return; }
+  if (!await directAiSendAllowed(prisma, tenantId, conversationId, version, revision)) {
+    // Another worker may have generated/started delivery since the first read.
+    if (await replyAlreadyHandled(prisma, tenantId, event.id)) return;
+    if (await aiReplyGate(prisma, tenantId, conversationId)) throw new ApiError(409, "ai_delivery_pending", "Предыдущий ответ ещё отправляется или требует сверки");
+    await handoff(prisma, tenantId, conversationId, version, revision, "AI_CHANNEL_RESTRICTED"); return;
+  }
   const history = await prisma.message.findMany({ where: { tenantId, conversationId, internal: false, operationState: { notIn: ["queued", "sending", "failed", "canceled", "unknown"] } }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 30, include: { attachments: { select: { id: true, mimeType: true, fileName: true, transcriptionJson: true } } } });
   const latest = history.find(message => message.id === payload.messageId);
   if (!latest || latest.direction !== "inbound") return;
@@ -195,8 +212,7 @@ export async function processWhatsAppAiReply(prisma: PrismaClient, event: { id: 
     const existing = await tx.outboundOperation.findUnique({ where: { tenantId_idempotencyKey: { tenantId, idempotencyKey: event.id } } });
     if (existing) {
       if (existing.state === "generating") {
-        const claimTtl = Math.max(SPEECH_CLAIM_TTL_MS, LOCAL_SPEECH_BATCH_MS + REPLY_ATTEMPTS * getWhatsAppReplyTimeoutMs() + 60000);
-        if (Date.now() - existing.createdAt.getTime() < claimTtl) throw new ApiError(409, "ai_generating", "ИИ готовит ответ");
+        if (Date.now() - existing.createdAt.getTime() < generationClaimTtl()) throw new ApiError(409, "ai_generating", "ИИ готовит ответ");
         await tx.outboundOperation.update({ where: { id: existing.id }, data: { state: "failed", error: "generation_interrupted" } });
         await tx.conversation.update({ where: { id: conversationId }, data: { mode: "human", controlVersion: { increment: 1 }, needsAttention: true, attentionReason: "AI_ERROR" } });
       }

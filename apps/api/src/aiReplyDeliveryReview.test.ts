@@ -24,7 +24,7 @@ const fail = async () => { throw new Error("Synthetic lost acknowledgement"); };
 const errorCode = (code: string) => (e: unknown) => e instanceof ApiError && e.code === code;
 const barrier = () => { let resolve!: () => void; const promise = new Promise<void>(r => { resolve = r; }); return { promise, resolve }; };
 before(async () => {
-  assert.equal(process.env.CRM_USE_PGLITE, "1"); process.env.OPENAI_API_KEY = "synthetic-ai-delivery-test";
+  assert.ok(process.env.CRM_USE_PGLITE === "1" || process.env.CRM_TEST_POSTGRES === "1", "Use an isolated test database"); process.env.OPENAI_API_KEY = "synthetic-ai-delivery-test";
   db = await createPrismaClient(); await (await import("../../../packages/db/src/seed.ts")).seedDatabase();
   const member = await db.membership.findFirstOrThrow({ where: { role: "owner", tenant: { slug: "creolab" } }, include: { user: true, tenant: true } }); tenantId = member.tenantId;
   owner = { user: member.user, activeMembership: member, memberships: [member] } as AuthContext;
@@ -82,7 +82,10 @@ async function fixture(channel: AiReplyDelivery["channel"], handoff = false, whi
 }
 for (const channel of aiReplyChannels) {
   it(`${channel}: saved reply is visible for review and is sent once`, async () => {
-    const f = await fixture(channel), before = generated; await f.dispatch(); await f.dispatch();
+    const f = await fixture(channel), before = generated;
+    await processWhatsAppAiReply(db, f.event, async () => { generated++; return { reply: "Duplicate answer", handoff: false }; });
+    assert.equal((await db.conversation.findUniqueOrThrow({ where: { id: f.conv.id } })).mode, "ai");
+    await f.dispatch(); await f.dispatch();
     assert.equal(calls.length, 1); assert.equal(calls[0].text, f.message.text); assert.equal((await f.read()).operationState, "accepted"); assert.equal(generated, before);
     const view = await f.view(); assert.equal(view.aiReply, true); assert.equal(view.retryBlock, "complete"); assert.ok(view.parts[0].providerMessageId);
     assert.ok(!JSON.stringify(view).includes("synthetic-token"));
@@ -153,6 +156,38 @@ it("uncertain reply blocks re-generation and automatic queueing", async () => {
   await processWhatsAppAiReply(db, f.event, async () => { generated++; return { reply: "Не должен генерироваться", handoff: false }; });
   await db.$transaction(tx => enqueueWhatsAppAi(tx, tenantId, f.conv.id)); assert.equal(generated, before);
   assert.equal(await db.outboxEvent.count({ where: { entityId: f.conv.id, type: "channel.ai_reply" } }), 0);
+});
+it("a repeated generation job cannot hand off a reply that starts sending between checks", { timeout: 15000 }, async () => {
+  const f = await fixture("whatsapp_qr"), entered = barrier(), release = barrier(), before = generated;
+  provider = async () => { entered.resolve(); await release.promise; return good(); };
+  let pending: Promise<unknown> | undefined;
+  let gateRead = false;
+  const consumer = new Proxy(db, { get(client, key) {
+    if (key !== "message") return Reflect.get(client, key);
+    return new Proxy(client.message, { get(model, method) {
+      if (method !== "findMany") return Reflect.get(model, method);
+      return async (args: any) => {
+        const rows = await model.findMany(args);
+        if (!gateRead && args.where?.operationState?.in?.includes("sending")) {
+          gateRead = true;
+          pending = f.dispatch();
+          await Promise.race([entered.promise, pending.then(() => assert.fail("Provider not reached"))]);
+        }
+        return rows;
+      };
+    } });
+  } });
+  try {
+    await processWhatsAppAiReply(consumer, f.event, async () => { generated++; return { reply: "Duplicate answer", handoff: false }; });
+    const conv = await db.conversation.findUniqueOrThrow({ where: { id: f.conv.id } });
+    assert.equal(conv.mode, "ai", `Repeated job changed the mode: ${conv.attentionReason}`);
+    assert.equal(conv.controlVersion, f.conv.controlVersion);
+    assert.equal(generated, before);
+  } finally { release.resolve(); await pending; }
+  // A duplicate may return before the first delivery-state read altogether.
+  if (!pending) await f.dispatch();
+  assert.equal((await f.read()).operationState, "accepted");
+  assert.equal(calls.length, 1);
 });
 it("new incoming question surfaces the unresolved delivery instead of silently stalling", async () => {
   const f = await fixture("telegram_bot"); await f.unknown();
