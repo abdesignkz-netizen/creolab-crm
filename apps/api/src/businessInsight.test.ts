@@ -179,13 +179,19 @@ it("proposal evidence uses linked conversation timestamps, never another order's
 });
 
 it("payment signals use only unpaid overdue invoices, do not sum currencies and do not claim bank-confirmed debt", async () => {
-  const d = await deal({ nextAction: "Связаться", nextActionAt: future });
+  const d = await deal({ id: "20000000-2000-4000-8000-200000000000", nextAction: "Связаться", nextActionAt: future });
   const make = (number: string, status: string, dueDate = past, currency = "KZT") => db.invoice.create({ data: { tenantId: tid, dealId: d.id, number, status, dueDate, currency, amountWithoutVat: 100, vatAmount: 0, totalAmount: 100 } });
   await make("paid", "PAID"); await make("draft", "DRAFT"); await make("future", "SENT", future); await scan();
   assert.equal((await all()).items.length, 0);
   const invoice = await make("USD overdue", "PARTIALLY_PAID", past, "USD"); await scan(later());
   const item = (await all(later())).items[0]; assert.equal(item.rule, "payment_delayed"); assert.equal(item.content?.period.currency, null);
-  assert.match(item.content!.limitation, /не подтверждает долг/); assert.doesNotMatch(JSON.stringify(item.content), /100 KZT|100 ₸|200/);
+  assert.match(item.content!.limitation, /не подтверждает долг/);
+  const content = item.content!;
+  const claims = [content.title, content.subject, content.explanation, content.formula, content.limitation,
+    ...content.facts.flatMap(f => [f.label, f.value]), ...content.sources.map(s => s.label), content.next.label];
+  // A source link may contain "200" in its UUID; only the actual claims must
+  // avoid a fabricated sum or a different currency.
+  for (const claim of claims) assert.doesNotMatch(claim, /100 KZT|100 ₸|\b200\b/);
   await db.invoice.update({ where: { id: invoice.id }, data: { status: "PAID" } }); await scan(later(2));
   assert.equal((await all(later(2))).items[0].state, "resolved");
 });
