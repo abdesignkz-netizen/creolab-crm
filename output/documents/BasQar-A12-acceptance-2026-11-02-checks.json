@@ -1,13 +1,13 @@
 {
   "stage": "A12",
   "date": "2026-11-02",
-  "status": "local_acceptance_passed_linux_postgres_container_and_live_pending",
-  "branch": "codex/stage9-release",
+  "status": "technical_local_linux_postgres_container_acceptance_passed_live_pilot_pending",
+  "branch": "codex/a12-release-acceptance",
   "baseHead": "85ca15135f64ce2f7d54b129da8c3703001cae7d",
-  "published": false,
+  "published": true,
   "productionDataChanged": false,
   "externalDeliveryUsed": false,
-  "scope": "Bounded shutdown of API/worker and verifier; local regression; expanded unexecuted Linux/PostgreSQL/container checks. No live model or provider acceptance.",
+  "scope": "Local acceptance and focused fixes passed. Previous real PostgreSQL/full Docker passed; final exact-SHA Linux/PostgreSQL/Docker rerun in progress. No live-provider acceptance or deployment.",
   "tests": {
     "apiFiles": 203,
     "apiScenarios": 2251,
@@ -75,6 +75,122 @@
       "path": "/tmp/basqar-a12-diff.log",
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "exitCode": 0
+    },
+    "linuxFixesLocal": {
+      "path": "/tmp/basqar-a12-ci-fixes-tests.log",
+      "sha256": "34e234dbc6254d2db7313b754b0bad50f508ac6679a89e3d968dcbf9faaec534",
+      "exitCode": 0,
+      "files": 3,
+      "tests": 29,
+      "pass": 29,
+      "fail": 0,
+      "note": "Focused scenarios only; do not add to the original full-run count."
+    },
+    "linuxFixesTypes": {
+      "path": "/tmp/basqar-a12-ci-fixes-types.log",
+      "sha256": "2318315bf8689539d7799613ed6b4cce7f0e58e7efa14023d5153fbd2a18bbf2",
+      "exitCode": 0
+    },
+    "aiRaceReproduced": {
+      "path": "/tmp/basqar-a12-ai-race-before.log",
+      "sha256": "5e3915160cab9a3cbd3533c646f866eb24e981b91fdf8ed220fe4d85a0d5aff5",
+      "exitCode": 1,
+      "files": 1,
+      "tests": 77,
+      "passed": 76,
+      "failed": 1,
+      "expectedFailure": "AI_CHANNEL_RESTRICTED; human mode during repeated generation event"
+    },
+    "aiRaceFocused": {
+      "path": "/tmp/basqar-a12-ai-race-after.log",
+      "sha256": "20d9aee5a9019864812266c5ed0b33fbaca19e7497cfa59dd7c0f1fcc3b4166b",
+      "exitCode": 0,
+      "files": 3,
+      "tests": 132,
+      "passed": 132,
+      "failed": 0,
+      "note": "Focused regression only; not added to original full run count."
+    },
+    "aiRaceFinal": {
+      "path": "/tmp/basqar-a12-ai-race-final.log",
+      "sha256": "46ad9dc1400bd6f2c7373c306a023319557ca7f7335bf9238801851814b0cae6",
+      "exitCode": 0,
+      "files": 1,
+      "tests": 77,
+      "passed": 77,
+      "failed": 0,
+      "note": "Final fixture also validates repeat-generation on all four external AI channel types; permits isolated PostgreSQL."
+    },
+    "aiRaceTypes": {
+      "path": "/tmp/basqar-a12-ai-race-types.log",
+      "sha256": "2318315bf8689539d7799613ed6b4cce7f0e58e7efa14023d5153fbd2a18bbf2",
+      "exitCode": 0
+    },
+    "segmentDatesUTC": {
+      "path": "/tmp/basqar-a12-segment-timezone-utc.log",
+      "sha256": "874e219454a0e1a99d83f72411925e7800e45a2e7d2a9ec8ab1f1130959a8b40",
+      "exitCode": 0,
+      "tests": 32,
+      "passed": 32,
+      "failed": 0,
+      "note": "Focused evidence; not added to original full-run count."
+    },
+    "segmentDatesNewYork": {
+      "path": "/tmp/basqar-a12-segment-timezone-new-york.log",
+      "sha256": "b0dd43b961e047ae8b7a9d22dd6e3afba59d28b4342bc0c624cceb4415d5f7bd",
+      "exitCode": 0,
+      "tests": 35,
+      "passed": 35,
+      "failed": 0,
+      "note": "Focused evidence; not added to original full-run count."
+    },
+    "segmentDatesFinal": {
+      "path": "/tmp/basqar-a12-segment-dates-final.log",
+      "sha256": "b36cebf747d45310e5f0779215d270ff1ad85643cbfdf4773091ee770142141f",
+      "exitCode": 0,
+      "tests": 7,
+      "passed": 7,
+      "failed": 0,
+      "note": "Focused evidence; not added to original full-run count."
+    },
+    "segmentTypes": {
+      "path": "/tmp/basqar-a12-segment-types.log",
+      "sha256": "2318315bf8689539d7799613ed6b4cce7f0e58e7efa14023d5153fbd2a18bbf2",
+      "exitCode": 0,
+      "note": "Focused evidence; not added to original full-run count."
+    },
+    "scanFixtures": {
+      "path": "/tmp/basqar-a12-scan-fixtures.log",
+      "sha256": "0913f99d873a4076727311206252c22812b10bb6d6ed2a199ee8c82a3b21154a",
+      "exitCode": 0,
+      "tests": 47,
+      "passed": 47,
+      "failed": 0,
+      "note": "Focused evidence; not added to original full-run count."
+    },
+    "scanTypes": {
+      "path": "/tmp/basqar-a12-scan-types.log",
+      "sha256": "2318315bf8689539d7799613ed6b4cce7f0e58e7efa14023d5153fbd2a18bbf2",
+      "exitCode": 0,
+      "note": "Focused evidence; not added to original full-run count."
+    },
+    "opportunityClaims": {
+      "path": "/tmp/basqar-a12-opportunity-claims.log",
+      "sha256": "cd93e84861deb518d79ae2704738cc53dd5a3c1be86b2b29c0b848a1a0a0601e",
+      "exitCode": 0,
+      "tests": 16,
+      "passed": 16,
+      "failed": 0,
+      "note": "Focused evidence; not added to original full-run count."
+    },
+    "financialClaims": {
+      "path": "/tmp/basqar-a12-insight-claims.log",
+      "sha256": "1aa74449d71206b4ed24ff4c3012f7e7b14590172e90892c2f9b633c4e2249cb",
+      "exitCode": 0,
+      "tests": 21,
+      "passed": 21,
+      "failed": 0,
+      "note": "Focused evidence; not added to original full-run count."
     }
   },
   "workload": {
@@ -140,17 +256,19 @@
     "localWorkerRestart": "passed; one persisted task, two completed steps, draft unsent",
     "localInFlightShutdown": "passed, including repeated signals and cleanup failure",
     "supervisorGraceAndVerifier": "passed against local stubs",
-    "linuxFullRegression": "prepared_not_run",
+    "linuxFullRegression": "passed on d009917: 204/204 files, web/supervisor and types passed",
     "realPostgres": {
-      "status": "prepared_not_run",
-      "selectedTestFiles": 31,
+      "status": "passed on d009917",
+      "selectedTestFiles": 32,
       "cases": [
-        "four-process baseline migration",
-        "SIGKILL after committed action step; lease fencing and four-process resume",
-        "pg_dump/restore/restart; stop flag, revocation and tenant isolation"
-      ]
+        "real baseline migration and concurrency",
+        "SIGKILL, lease fencing and action resumption",
+        "pg_dump/restore/restart and tenant isolation",
+        "saved AI-reply idempotency and delivery race"
+      ],
+      "passedTestFiles": 32
     },
-    "fullDocker": "prepared_not_run",
+    "fullDocker": "passed on d009917: full build, exact version, API/worker readiness and graceful stop, durable queue processing and terminal state preserved after restart",
     "browser": "not_rechecked_in_this_runtime_stage",
     "realModelQualityAndCost": "not_run",
     "productionBackup": "not_verified",
@@ -171,10 +289,748 @@
     }
   ],
   "remaining": [
-    "Linux/PostgreSQL/Docker checks on the exact candidate",
     "desktop/mobile/keyboard visual acceptance of A0-A11",
     "real-model pilot: grounded answers, latency, usage/cost",
     "production backup/restore and rollback compatibility",
     "deployed revision and gradual opt-in pilot"
-  ]
+  ],
+  "deployed": false,
+  "remoteAcceptance": {
+    "provider": "GitHub Actions",
+    "rawJobLogs": "Unauthenticated download returned HTTP 403 on earlier attempts. Evidence comes from exact-SHA job/step statuses and test-runner annotations.",
+    "productionDataChanged": false,
+    "externalDeliveryUsed": false,
+    "deployed": false,
+    "warnings": [
+      "Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@11d5960a326750d5838078e36cf38b85af677262, actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/",
+      "Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@11d5960a326750d5838078e36cf38b85af677262, actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/",
+      "Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@11d5960a326750d5838078e36cf38b85af677262, actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020, docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8, docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/"
+    ],
+    "runId": 41523551897,
+    "url": "https://github.com/abdesignkz-netizen/creolab-crm/actions/runs/41523551897",
+    "candidateSha": "d00991799a4210c4e9a7cbf6e170fb646d82c0cf",
+    "candidateTreeSha": "bfd24b2e90542022f0df679922ad992fc486abbd",
+    "status": "completed",
+    "conclusion": "success",
+    "jobs": [
+      {
+        "id": 125546121339,
+        "run_id": 41523551897,
+        "workflow_name": "Release acceptance",
+        "head_branch": "codex/a12-release-acceptance",
+        "run_url": "https://api.github.com/repos/abdesignkz-netizen/creolab-crm/actions/runs/41523551897",
+        "run_attempt": 1,
+        "node_id": "CR_kwDOUPrIRM8AAAAdOyHIew",
+        "head_sha": "d00991799a4210c4e9a7cbf6e170fb646d82c0cf",
+        "url": "https://api.github.com/repos/abdesignkz-netizen/creolab-crm/actions/jobs/125546121339",
+        "html_url": "https://github.com/abdesignkz-netizen/creolab-crm/actions/runs/41523551897/job/125546121339",
+        "status": "completed",
+        "conclusion": "success",
+        "created_at": "2026-11-02T20:56:27Z",
+        "started_at": "2026-11-02T20:56:31Z",
+        "completed_at": "2026-11-02T21:03:53Z",
+        "name": "Full Docker image, durable worker and restart",
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1,
+            "started_at": "2026-11-02T20:56:32Z",
+            "completed_at": "2026-11-02T20:56:33Z"
+          },
+          {
+            "name": "Initialize containers",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2,
+            "started_at": "2026-11-02T20:56:33Z",
+            "completed_at": "2026-11-02T20:56:45Z"
+          },
+          {
+            "name": "Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 3,
+            "started_at": "2026-11-02T20:56:45Z",
+            "completed_at": "2026-11-02T20:56:53Z"
+          },
+          {
+            "name": "Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 4,
+            "started_at": "2026-11-02T20:56:53Z",
+            "completed_at": "2026-11-02T20:56:54Z"
+          },
+          {
+            "name": "Run docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 5,
+            "started_at": "2026-11-02T20:56:54Z",
+            "completed_at": "2026-11-02T20:57:00Z"
+          },
+          {
+            "name": "Build the complete deployment image",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 6,
+            "started_at": "2026-11-02T20:57:00Z",
+            "completed_at": "2026-11-02T21:03:22Z"
+          },
+          {
+            "name": "Initialize disposable container database",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 7,
+            "started_at": "2026-11-02T21:03:22Z",
+            "completed_at": "2026-11-02T21:03:23Z"
+          },
+          {
+            "name": "Start production API and worker from the image",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 8,
+            "started_at": "2026-11-02T21:03:23Z",
+            "completed_at": "2026-11-02T21:03:41Z"
+          },
+          {
+            "name": "Report startup failures",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 9,
+            "started_at": "2026-11-02T21:03:41Z",
+            "completed_at": "2026-11-02T21:03:41Z"
+          },
+          {
+            "name": "Post Build the complete deployment image",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 14,
+            "started_at": "2026-11-02T21:03:41Z",
+            "completed_at": "2026-11-02T21:03:43Z"
+          },
+          {
+            "name": "Post Run docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 15,
+            "started_at": "2026-11-02T21:03:43Z",
+            "completed_at": "2026-11-02T21:03:49Z"
+          },
+          {
+            "name": "Post Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 16,
+            "started_at": "2026-11-02T21:03:49Z",
+            "completed_at": "2026-11-02T21:03:49Z"
+          },
+          {
+            "name": "Post Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 17,
+            "started_at": "2026-11-02T21:03:49Z",
+            "completed_at": "2026-11-02T21:03:49Z"
+          },
+          {
+            "name": "Stop containers",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 18,
+            "started_at": "2026-11-02T21:03:49Z",
+            "completed_at": "2026-11-02T21:03:49Z"
+          },
+          {
+            "name": "Complete job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 19,
+            "started_at": "2026-11-02T21:03:49Z",
+            "completed_at": "2026-11-02T21:03:49Z"
+          }
+        ],
+        "check_run_url": "https://api.github.com/repos/abdesignkz-netizen/creolab-crm/check-runs/125546121339",
+        "labels": [
+          "ubuntu-24.04"
+        ],
+        "runner_id": 1000000033,
+        "runner_name": "GitHub Actions 1000000033",
+        "runner_group_id": 0,
+        "runner_group_name": "GitHub Actions"
+      },
+      {
+        "id": 125546121874,
+        "run_id": 41523551897,
+        "workflow_name": "Release acceptance",
+        "head_branch": "codex/a12-release-acceptance",
+        "run_url": "https://api.github.com/repos/abdesignkz-netizen/creolab-crm/actions/runs/41523551897",
+        "run_attempt": 1,
+        "node_id": "CR_kwDOUPrIRM8AAAAdOyHKkg",
+        "head_sha": "d00991799a4210c4e9a7cbf6e170fb646d82c0cf",
+        "url": "https://api.github.com/repos/abdesignkz-netizen/creolab-crm/actions/jobs/125546121874",
+        "html_url": "https://github.com/abdesignkz-netizen/creolab-crm/actions/runs/41523551897/job/125546121874",
+        "status": "completed",
+        "conclusion": "success",
+        "created_at": "2026-11-02T20:56:27Z",
+        "started_at": "2026-11-02T20:56:36Z",
+        "completed_at": "2026-11-02T21:00:51Z",
+        "name": "PostgreSQL migration and full business flow",
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1,
+            "started_at": "2026-11-02T20:56:37Z",
+            "completed_at": "2026-11-02T20:56:38Z"
+          },
+          {
+            "name": "Initialize containers",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2,
+            "started_at": "2026-11-02T20:56:38Z",
+            "completed_at": "2026-11-02T20:56:50Z"
+          },
+          {
+            "name": "Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 3,
+            "started_at": "2026-11-02T20:56:50Z",
+            "completed_at": "2026-11-02T20:56:56Z"
+          },
+          {
+            "name": "Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 4,
+            "started_at": "2026-11-02T20:56:56Z",
+            "completed_at": "2026-11-02T20:57:00Z"
+          },
+          {
+            "name": "PostgreSQL backup tools",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 5,
+            "started_at": "2026-11-02T20:57:00Z",
+            "completed_at": "2026-11-02T20:57:05Z"
+          },
+          {
+            "name": "Install server workspace graph",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 6,
+            "started_at": "2026-11-02T20:57:05Z",
+            "completed_at": "2026-11-02T20:57:16Z"
+          },
+          {
+            "name": "Real PostgreSQL checks",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 7,
+            "started_at": "2026-11-02T20:57:16Z",
+            "completed_at": "2026-11-02T21:00:47Z"
+          },
+          {
+            "name": "Report failing test details",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 8,
+            "started_at": "2026-11-02T21:00:47Z",
+            "completed_at": "2026-11-02T21:00:47Z"
+          },
+          {
+            "name": "Post Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 14,
+            "started_at": "2026-11-02T21:00:47Z",
+            "completed_at": "2026-11-02T21:00:47Z"
+          },
+          {
+            "name": "Post Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 15,
+            "started_at": "2026-11-02T21:00:47Z",
+            "completed_at": "2026-11-02T21:00:47Z"
+          },
+          {
+            "name": "Stop containers",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 16,
+            "started_at": "2026-11-02T21:00:47Z",
+            "completed_at": "2026-11-02T21:00:47Z"
+          },
+          {
+            "name": "Complete job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 17,
+            "started_at": "2026-11-02T21:00:47Z",
+            "completed_at": "2026-11-02T21:00:47Z"
+          }
+        ],
+        "check_run_url": "https://api.github.com/repos/abdesignkz-netizen/creolab-crm/check-runs/125546121874",
+        "labels": [
+          "ubuntu-24.04"
+        ],
+        "runner_id": 1000000034,
+        "runner_name": "GitHub Actions 1000000034",
+        "runner_group_id": 0,
+        "runner_group_name": "GitHub Actions"
+      },
+      {
+        "id": 125546121985,
+        "run_id": 41523551897,
+        "workflow_name": "Release acceptance",
+        "head_branch": "codex/a12-release-acceptance",
+        "run_url": "https://api.github.com/repos/abdesignkz-netizen/creolab-crm/actions/runs/41523551897",
+        "run_attempt": 1,
+        "node_id": "CR_kwDOUPrIRM8AAAAdOyHLAQ",
+        "head_sha": "d00991799a4210c4e9a7cbf6e170fb646d82c0cf",
+        "url": "https://api.github.com/repos/abdesignkz-netizen/creolab-crm/actions/jobs/125546121985",
+        "html_url": "https://github.com/abdesignkz-netizen/creolab-crm/actions/runs/41523551897/job/125546121985",
+        "status": "completed",
+        "conclusion": "success",
+        "created_at": "2026-11-02T20:56:27Z",
+        "started_at": "2026-11-02T20:56:29Z",
+        "completed_at": "2026-11-02T21:21:38Z",
+        "name": "Isolated regression and runtime lifecycle",
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1,
+            "started_at": "2026-11-02T20:56:29Z",
+            "completed_at": "2026-11-02T20:56:30Z"
+          },
+          {
+            "name": "Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2,
+            "started_at": "2026-11-02T20:56:30Z",
+            "completed_at": "2026-11-02T20:56:36Z"
+          },
+          {
+            "name": "Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 3,
+            "started_at": "2026-11-02T20:56:36Z",
+            "completed_at": "2026-11-02T20:56:38Z"
+          },
+          {
+            "name": "Install document conversion runtime",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 4,
+            "started_at": "2026-11-02T20:56:38Z",
+            "completed_at": "2026-11-02T20:57:01Z"
+          },
+          {
+            "name": "Install tested workspace graph",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 5,
+            "started_at": "2026-11-02T20:57:01Z",
+            "completed_at": "2026-11-02T20:57:14Z"
+          },
+          {
+            "name": "Check API, worker, contracts and web types",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 6,
+            "started_at": "2026-11-02T20:57:14Z",
+            "completed_at": "2026-11-02T20:58:13Z"
+          },
+          {
+            "name": "Check failure diagnostics",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 7,
+            "started_at": "2026-11-02T20:58:13Z",
+            "completed_at": "2026-11-02T20:58:13Z"
+          },
+          {
+            "name": "Verify document conversion and production worker prerequisites",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 8,
+            "started_at": "2026-11-02T20:58:13Z",
+            "completed_at": "2026-11-02T20:58:56Z"
+          },
+          {
+            "name": "Verify AI reply idempotency and delivery races",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 9,
+            "started_at": "2026-11-02T20:58:56Z",
+            "completed_at": "2026-11-02T21:00:31Z"
+          },
+          {
+            "name": "Verify company dates on a UTC server",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 10,
+            "started_at": "2026-11-02T21:00:31Z",
+            "completed_at": "2026-11-02T21:00:43Z"
+          },
+          {
+            "name": "Full isolated server regression",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 11,
+            "started_at": "2026-11-02T21:00:43Z",
+            "completed_at": "2026-11-02T21:21:05Z"
+          },
+          {
+            "name": "Web and deployment supervisor regression",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 12,
+            "started_at": "2026-11-02T21:21:05Z",
+            "completed_at": "2026-11-02T21:21:30Z"
+          },
+          {
+            "name": "Report failing test details",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 13,
+            "started_at": "2026-11-02T21:21:30Z",
+            "completed_at": "2026-11-02T21:21:30Z"
+          },
+          {
+            "name": "Post Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 25,
+            "started_at": "2026-11-02T21:21:30Z",
+            "completed_at": "2026-11-02T21:21:30Z"
+          },
+          {
+            "name": "Post Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 26,
+            "started_at": "2026-11-02T21:21:30Z",
+            "completed_at": "2026-11-02T21:21:30Z"
+          },
+          {
+            "name": "Complete job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 27,
+            "started_at": "2026-11-02T21:21:30Z",
+            "completed_at": "2026-11-02T21:21:30Z"
+          }
+        ],
+        "check_run_url": "https://api.github.com/repos/abdesignkz-netizen/creolab-crm/check-runs/125546121985",
+        "labels": [
+          "ubuntu-24.04"
+        ],
+        "runner_id": 1000000035,
+        "runner_name": "GitHub Actions 1000000035",
+        "runner_group_id": 0,
+        "runner_group_name": "GitHub Actions"
+      }
+    ],
+    "sourceSha256": {
+      ".github/workflows/release-acceptance.yml": "02b30c705fef54ffe30854bd47c301f13e9b37516f5e40ae1897c2e354d4a0e4",
+      "apps/api/src/aiCommand.test.ts": "a8bb5e1c5f322fb064895e339b669aab14acdcc320853f688dfee4e60fcb158f",
+      "apps/api/src/aiKnowledgeImport.test.ts": "1de8e8ad30243a7eb95b791c26dca1b102903951bb295f95981968328ccc732c",
+      "apps/api/src/aiReplyDeliveryReview.test.ts": "0425f4284828b33ac2526dc1055f05c07bc2901c90f3b9d87abf723464b220eb",
+      "apps/api/src/backgroundLifecycle.test.ts": "055c892cb04abda778170d943b20078a85cc6fd05e060c089c019a27fa0e74b1",
+      "apps/api/src/businessInsight.test.ts": "55c66dffdadc73602c353e65928a079ed425e9f320c3197d0fe60329146581b6",
+      "apps/api/src/businessOpportunity.test.ts": "8d27ff3d72067356b2a7758842aa341b7ddd60cefd4c17ccdea97f51f221fd99",
+      "apps/api/src/index.ts": "177c2d1e1f7c5bab727f79db802d961238c3d7b42545fa2a653eb9d035be29f4",
+      "apps/api/src/lib/shutdown.ts": "fd87d0db5a08cbc54c5d6c5bf219e7f156beeb28615da27441e2bb5539b64a1c",
+      "apps/api/src/manualPdfImport.test.ts": "421706320f0d26a90145d5f460202c3d47dc924f9a8f9abe5e16753d91b0b2f2",
+      "apps/api/src/pdfOcrImage.test.ts": "c031563aaaf0da7b944d5da6f69bdfea98fe6110ec5be16394bac2246e467e4d",
+      "apps/api/src/postgresRuntime.postgres.test.ts": "2248ea526639864f80f37326f0b0a644e30ea9455427edd1df83887f9be9bb91",
+      "apps/api/src/runtimeWorkload.test.ts": "d7598f7d9d43ddd2c1a5dce315f58d669428616f53db418b0802ec75b6bd5a40",
+      "apps/api/src/segmentDates.test.ts": "67886943311a397e98528ac7b6a45207941a05c0d94d18f83ab509ae49434b11",
+      "apps/api/src/services/backgroundJobs.ts": "0307f68e8ec5f17aafa680d55e08bb0418d5b47a20bd58988d890d8d8fe6bbcb",
+      "apps/api/src/services/backgroundTaskGroup.ts": "18cf9189d7da07b6503cf495e8a4394986b796b70806be45a946d0fb672fc463",
+      "apps/api/src/services/segmentService.ts": "5403e37b622404ec2665f0dd63149df110f784bdade901a8d82ad106cd144ff6",
+      "apps/api/src/services/whatsappAiService.ts": "5ca579192528ce50c0880178302c92851a62c470ab924eb5529d1343c2198834",
+      "apps/api/src/testSupport/canvasFont.ts": "63e839bf07377dfa26cdbe1369dedaff670d5f8670f5392f42b0e672203524fd",
+      "apps/api/src/whatsappConnections.test.ts": "a449ae25e724497f7826640e0660a958802e46b40a8dd8f50b1971691ef546ac",
+      "apps/api/src/workerRuntime.test.ts": "545b309a20f91c8c38d8fbdcef06c8ad55819249c8e9788e7d339da5bd5c0cc6",
+      "apps/worker/package.json": "403a0649386e0074d8b90a96bb85a7ba3147f244adc125c9f5822e9096582dc3",
+      "apps/worker/src/index.ts": "4fc1f757901057207c0c82e55752575277bdbc535a9826833642d0dd40c73263",
+      "apps/worker/tsconfig.json": "91ae0186742ad16039fb4ffd36761ceabcb3001d015d3f973064bca3d63c040b",
+      "packages/db/src/client.ts": "7d4253bcd6d85d3604f6af9fc18c3a33fffca062f6e5566b95d590fb1bd0951c",
+      "packages/db/src/index.ts": "8e9400712727b7dea651c6252caa75c95964a8f6ed54c0d32b6267a88c24c31e",
+      "scripts/check-background-shutdown.ts": "4fefdc9adbfc0c3b1949b4139cec3fad996695d5d61c95fa5fd5b4412f072155",
+      "scripts/check-container-runtime.mjs": "7af9e70e1f6b880bf559b4e220c4fa35943486f0685961d573317749ded04fec",
+      "scripts/check-postgres-worker.ts": "b217b4ac0a19ee156d45c5ef0019522c1040a379bb171c94d182c97502d0c807",
+      "scripts/ci-error-annotation.mjs": "b5b781087ddcd2d7ce73eefe62883b36992161630765c6102e9d000afe41fc0a",
+      "scripts/ci-error-annotation.test.mjs": "c8610d3d20a3197a5259c5de0c82fa44d1485ea8f60ba937a9eb8baefb17f0fd",
+      "scripts/start-api-with-kalkan.mjs": "287aede118ea71f82ce3a1bd0faae05de7aa4509b698762eaa37f575da1fdc14",
+      "scripts/start-api-with-kalkan.test.mjs": "cfdb06f02c9c1bbc1adb0db5f37eff9a58dace605968e7d6a764648c4db3f446",
+      "scripts/test-api.mjs": "55c074e9960df11ef3656438dbcd853092936e78f1bf16c135352ef8225f2b1e"
+    },
+    "sourceTreeFingerprint": {
+      "algorithm": "sha256 of sorted git ls-tree records joined with NUL; apps/, packages/, scripts/, .github/ and tracked root files except Markdown",
+      "fileCount": 2261,
+      "sha256": "b2b6c537deb1fe0985f848e4cdb45b314d1cdd8198498a5aad982bc927e9a088"
+    },
+    "capturedAt": "2026-11-02T21:59:20+00:00",
+    "completedAt": "2026-11-02T21:21:38Z",
+    "annotations": {
+      "regression": [
+        {
+          "path": ".github",
+          "blob_href": "https://github.com/abdesignkz-netizen/creolab-crm/blob/d00991799a4210c4e9a7cbf6e170fb646d82c0cf/.github",
+          "start_line": 2,
+          "start_column": null,
+          "end_line": 2,
+          "end_column": null,
+          "annotation_level": "warning",
+          "title": "",
+          "message": "Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@11d5960a326750d5838078e36cf38b85af677262, actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/",
+          "raw_details": ""
+        },
+        {
+          "path": ".github",
+          "blob_href": "https://github.com/abdesignkz-netizen/creolab-crm/blob/d00991799a4210c4e9a7cbf6e170fb646d82c0cf/.github",
+          "start_line": 17753,
+          "start_column": null,
+          "end_line": 17753,
+          "end_column": null,
+          "annotation_level": "notice",
+          "title": "Database acceptance results",
+          "message": "204/204 files passed on isolated PGlite; external providers disabled.",
+          "raw_details": ""
+        },
+        {
+          "path": ".github",
+          "blob_href": "https://github.com/abdesignkz-netizen/creolab-crm/blob/d00991799a4210c4e9a7cbf6e170fb646d82c0cf/.github",
+          "start_line": 285,
+          "start_column": null,
+          "end_line": 285,
+          "end_column": null,
+          "annotation_level": "notice",
+          "title": "Database acceptance results",
+          "message": "3/3 files passed on isolated PGlite; external providers disabled.",
+          "raw_details": ""
+        },
+        {
+          "path": ".github",
+          "blob_href": "https://github.com/abdesignkz-netizen/creolab-crm/blob/d00991799a4210c4e9a7cbf6e170fb646d82c0cf/.github",
+          "start_line": 858,
+          "start_column": null,
+          "end_line": 858,
+          "end_column": null,
+          "annotation_level": "notice",
+          "title": "Database acceptance results",
+          "message": "3/3 files passed on isolated PGlite; external providers disabled.",
+          "raw_details": ""
+        },
+        {
+          "path": ".github",
+          "blob_href": "https://github.com/abdesignkz-netizen/creolab-crm/blob/d00991799a4210c4e9a7cbf6e170fb646d82c0cf/.github",
+          "start_line": 440,
+          "start_column": null,
+          "end_line": 440,
+          "end_column": null,
+          "annotation_level": "notice",
+          "title": "Database acceptance results",
+          "message": "5/5 files passed on isolated PGlite; external providers disabled.",
+          "raw_details": ""
+        }
+      ],
+      "postgres": [
+        {
+          "path": ".github",
+          "blob_href": "https://github.com/abdesignkz-netizen/creolab-crm/blob/d00991799a4210c4e9a7cbf6e170fb646d82c0cf/.github",
+          "start_line": 2,
+          "start_column": null,
+          "end_line": 2,
+          "end_column": null,
+          "annotation_level": "warning",
+          "title": "",
+          "message": "Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@11d5960a326750d5838078e36cf38b85af677262, actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/",
+          "raw_details": ""
+        },
+        {
+          "path": ".github",
+          "blob_href": "https://github.com/abdesignkz-netizen/creolab-crm/blob/d00991799a4210c4e9a7cbf6e170fb646d82c0cf/.github",
+          "start_line": 3663,
+          "start_column": null,
+          "end_line": 3663,
+          "end_column": null,
+          "annotation_level": "notice",
+          "title": "Database acceptance results",
+          "message": "32/32 files passed on isolated PostgreSQL; external providers disabled.",
+          "raw_details": ""
+        }
+      ],
+      "container": [
+        {
+          "path": ".github",
+          "blob_href": "https://github.com/abdesignkz-netizen/creolab-crm/blob/d00991799a4210c4e9a7cbf6e170fb646d82c0cf/.github",
+          "start_line": 2,
+          "start_column": null,
+          "end_line": 2,
+          "end_column": null,
+          "annotation_level": "warning",
+          "title": "",
+          "message": "Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@11d5960a326750d5838078e36cf38b85af677262, actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020, docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8, docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/",
+          "raw_details": ""
+        }
+      ]
+    },
+    "results": {
+      "linuxIsolatedServerFiles": {
+        "passed": 204,
+        "total": 204
+      },
+      "postgresFiles": {
+        "passed": 32,
+        "total": 32
+      },
+      "webAndSupervisor": "passed; exact-SHA job step confirmed, individual test counts not re-extracted from remote raw logs",
+      "types": "API, worker, contracts and web passed",
+      "targetedPrerequisites": "documents/OCR/worker 5/5; AI-reply delivery 3/3; company dates 3/3; all separate from the 204-file full run",
+      "container": "full image built; exact revision, API/worker readiness, web assets, graceful stop, isolated durable queue processing and no terminal replay after restart"
+    },
+    "evidenceFiles": {
+      "/tmp/basqar-a12-attempt8-run.json": {
+        "sha256": "b397940c60eb961a42bd5fc78842fa9e6ac5e4e7e292df0324052597025f8533"
+      },
+      "/tmp/basqar-a12-attempt8-jobs.json": {
+        "sha256": "ac15b0ba4c0fd6ed443757397221914dec863693767539094c4269ff7ffd5b21"
+      },
+      "/tmp/basqar-a12-attempt8-regression-annotations.json": {
+        "sha256": "648bc946fe3670d9ec36ed9f3b647070b04b6268b5dbe5822738eeeff970fe76"
+      },
+      "/tmp/basqar-a12-attempt8-postgres-annotations.json": {
+        "sha256": "bd180cfffbd2fa03659cf10b9aaaef7563597e5befa653ebed221c9e76b3f5ff"
+      },
+      "/tmp/basqar-a12-attempt8-container-annotations.json": {
+        "sha256": "4d3138faf3bfb5d2356b6c34e626b08770fea3aa2bb063c6c40f0870646c0822"
+      }
+    }
+  },
+  "localCandidateSha": "e7bab9ff6861e0c83b9e6b6e94ffc7b9171daaad",
+  "localEvidenceNote": "Original sourceSha256/sourceFingerprint and 2251/140/5 counts describe candidate e7bab9f. Later runtime fixes (AI delivery race and company calendar) and CI/test fixes have separate focused evidence. Final remoteAcceptance proves 204/204 Linux files, 32/32 PostgreSQL files, web/supervisor/types and Docker on exact d009917; no summing of repeated runs.",
+  "remoteAttempts": [
+    {
+      "runId": 41473495816,
+      "url": "https://github.com/abdesignkz-netizen/creolab-crm/actions/runs/41473495816",
+      "candidateSha": "e7bab9ff6861e0c83b9e6b6e94ffc7b9171daaad",
+      "conclusion": "failure",
+      "results": {
+        "regression": "200/203 files passed",
+        "postgres": "31/31 files passed",
+        "container": "success"
+      },
+      "diagnosticIssue": "Expected Error from a passing negative test hid actual TAP failures in the first summary."
+    },
+    {
+      "runId": 41477955314,
+      "url": "https://github.com/abdesignkz-netizen/creolab-crm/actions/runs/41477955314",
+      "candidateSha": "b0e7f0eb97a582e5e5227973fc21288480c2828e",
+      "conclusion": "failure",
+      "results": {
+        "regression": "200/203 files passed",
+        "postgres": "success",
+        "container": "success"
+      },
+      "failures": [
+        {
+          "file": "apps/api/src/contractTemplateLayout.test.ts",
+          "cause": "word_conversion_unavailable: LibreOffice absent from regression runner; already present in Docker."
+        },
+        {
+          "file": "apps/api/src/manualPdfImport.test.ts",
+          "cause": "Word conversion absent; an ambiguity fixture depended on earlier successful Word import."
+        },
+        {
+          "file": "apps/api/src/workerRuntime.test.ts",
+          "cause": "Child production process lacked explicit ALLOWED_ORIGINS; local .env masked omission."
+        }
+      ]
+    },
+    {
+      "runId": 41492227200,
+      "url": "https://github.com/abdesignkz-netizen/creolab-crm/actions/runs/41492227200",
+      "candidateSha": "22aef79acc504c37703a65ce788f803cbf2baf9f",
+      "conclusion": "failure",
+      "results": {
+        "regression": "202/203 files passed; previous three failures fixed",
+        "postgres": "31/31 files passed",
+        "container": "success"
+      },
+      "failures": [
+        {
+          "file": "apps/api/src/whatsappConnections.test.ts",
+          "cause": "Duplicate generation job raced with the delivery worker: aiReplyGate changed between reads and in-flight send was classified as AI_CHANNEL_RESTRICTED, handing conversation to a human. Reproduced deterministically locally before fixing."
+        }
+      ]
+    },
+    {
+      "runId": 41518452057,
+      "url": "https://github.com/abdesignkz-netizen/creolab-crm/actions/runs/41518452057",
+      "candidateSha": "bb0b05e6b3d6f68afe087ed941a8e94a919bc2a1",
+      "conclusion": "failure",
+      "results": {
+        "regression": "202/203 files passed; AI delivery fix and all targeted prerequisites passed",
+        "postgres": "32/32 files passed",
+        "container": "success"
+      },
+      "failures": [
+        {
+          "file": "apps/api/src/aiCommand.test.ts",
+          "cause": "Yesterday fixture used the host calendar while the company date had already advanced to the next day (UTC vs Asia/Almaty). Fixed fixture and uncovered segment date calculations that hard-coded UTC+5/host Date.setDate."
+        }
+      ]
+    },
+    {
+      "runId": 41522328176,
+      "url": "https://github.com/abdesignkz-netizen/creolab-crm/actions/runs/41522328176",
+      "candidateSha": "2a1d24358c3bf920c832a8c213f73f964683444f",
+      "conclusion": "cancelled after two failed jobs; replaced by a fixed candidate",
+      "results": {
+        "regression": "2/3 prerequisite files passed; full regression not reached",
+        "postgres": "31/32 files passed",
+        "container": "cancelled"
+      },
+      "failures": [
+        {
+          "file": "apps/api/src/manualPdfImport.test.ts",
+          "cause": "Synthetic raster scan relied on unavailable Arial; Linux fallback glyphs were recognized as zeros. Registered bundled Noto Sans in all three scan fixtures."
+        },
+        {
+          "file": "apps/api/src/businessOpportunity.test.ts",
+          "cause": "Broad regex over the entire response matched digits in random identifiers after the word потенциал. Assertions now check user-facing claims and explicit currency, with a deliberately adversarial fixture UUID."
+        }
+      ]
+    },
+    {
+      "runId": 41523060302,
+      "url": "https://github.com/abdesignkz-netizen/creolab-crm/actions/runs/41523060302",
+      "candidateSha": "5690726d846efa834152e5a1f3ed7b58fc132cad",
+      "conclusion": "cancelled",
+      "note": "Superseded while running by opportunity-claims assertion fix; no acceptance credit."
+    },
+    {
+      "runId": 41523344628,
+      "url": "https://github.com/abdesignkz-netizen/creolab-crm/actions/runs/41523344628",
+      "candidateSha": "64f3695b169701a3b14343e1d944ef0a33bb7003",
+      "conclusion": "cancelled",
+      "note": "Superseded by the same claim-assertion correction in financial signals; no acceptance credit."
+    }
+  ],
+  "updatedAt": "2026-11-02T21:59:20+00:00",
+  "documentationNote": "Final acceptance report/audit is committed separately with [skip ci]. Runtime, tests, dependency files and workflow must remain identical to tested candidate d009917; sourceTreeFingerprint excludes Markdown reports and output/."
 }
