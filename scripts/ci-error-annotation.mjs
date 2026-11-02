@@ -4,14 +4,15 @@ import { fileURLToPath } from "node:url";
 
 const escape = value => value.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
 export function ciFailureAnnotations(log, label = "Release acceptance failed") {
-  const lines = log.split(/\r?\n/);
+  const lines = log.split(/\r?\n/).filter(line => !line.startsWith("::error "));
   // Expected errors from passing negative tests can precede a real TAP failure.
   // Prefer the actual failing assertions and retain more than the first failure.
   const failures = lines.flatMap((line, index) => /^\s*not ok\b/.test(line) ? [index] : []);
   const starts = failures.length ? failures.slice(0, 8) : [Math.max(0, lines.findIndex(line => /Error:|error TS|ERROR:/.test(line)))];
   const annotations = starts.map(start => {
     const next = lines.findIndex((line, index) => index > start && /^\s*(?:(?:not ok|ok)\b|# Subtest:)/.test(line));
-    const end = next >= 0 ? Math.min(next, start + 80) : start + 80;
+    const diagnosticEnd = lines.findIndex((line, index) => index > start && /^\s*\.\.\.\s*$/.test(line));
+    const end = Math.min(next >= 0 ? next : lines.length, diagnosticEnd >= 0 ? diagnosticEnd + 1 : lines.length, start + 80);
     const message = lines.slice(start, end).join("\n").slice(0, 6000);
     return `::error title=${escape(label).replace(/,/g, "%2C").replace(/:/g, "%3A")}::${escape(message)}`;
   });

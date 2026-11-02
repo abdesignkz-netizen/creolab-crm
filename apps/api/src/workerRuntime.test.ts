@@ -38,7 +38,8 @@ it("the production worker resumes a committed plan without duplicating its task 
       JWT_REFRESH_SECRET: randomBytes(32).toString("hex"),
       ENCRYPTION_KEY: randomBytes(32).toString("hex"),
       APP_BASE_URL: "https://basqar.test.invalid", API_BASE_URL: "https://basqar.test.invalid",
-      CRM_INLINE_AUTOMATION: "0",
+      ALLOWED_ORIGINS: "https://basqar.test.invalid",
+      CRM_INLINE_AUTOMATION: "0", WHATSAPP_QR_ENABLED: "0",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });

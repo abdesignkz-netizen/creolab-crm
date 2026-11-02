@@ -23,12 +23,21 @@ jobs:
         with:
           node-version: '24'
           cache: npm
+      - name: Install document conversion runtime
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libreoffice-writer fonts-liberation fonts-dejavu-core openssl
       - name: Install tested workspace graph
         run: npm ci --include=dev --include-workspace-root=true --workspace=@creolab/api --workspace=@creolab/web --workspace=@creolab/worker --workspace=@creolab/db --workspace=@creolab/contracts --workspace=@creolab/integrations
       - name: Check API, worker, contracts and web types
         run: npm run typecheck --workspace=@creolab/api --workspace=@creolab/worker --workspace=@creolab/contracts --workspace=@creolab/web
       - name: Check failure diagnostics
         run: node --test scripts/ci-error-annotation.test.mjs
+      - name: Verify document conversion and production worker prerequisites
+        run: |
+          set -o pipefail
+          node --experimental-strip-types scripts/check-word-runtime.mjs
+          node scripts/test-api.mjs contractTemplateLayout manualPdfImport workerRuntime 2>&1 | tee /tmp/basqar-regression-checks.log
       - name: Full isolated server regression
         run: |
           set -o pipefail

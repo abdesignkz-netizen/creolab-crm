@@ -188,10 +188,13 @@ describe("Manual PDF import",()=>{
  it("matches invoice company by tax ID and contract, without guessing between deals or tenants",async()=>{
   const deal=await prisma.deal.findUniqueOrThrow({where:{id:dealId}});
   const url=`/api/v1/documents/import-pdf/matches?buyerBin=${party.bin}`;
-  const existing=await req(url);assert.equal(existing.companies[0].id,deal.companyId);assert.ok(existing.deals.length>1);assert.equal(existing.suggestedDealId,null);
   const second=await prisma.deal.create({data:{tenantId:deal.tenantId,contactId:deal.contactId,stageId:deal.stageId,companyId:deal.companyId,title:"Вторая сделка"}});
   try {
-    assert.equal((await req(url)).suggestedDealId,null);
+    // The ambiguity must be created by this test, not by an earlier Word import.
+    const existing=await req(url);assert.equal(existing.companies[0].id,deal.companyId);
+    assert.ok(existing.deals.some((item:{id:string})=>item.id===dealId));
+    assert.ok(existing.deals.some((item:{id:string})=>item.id===second.id));
+    assert.equal(existing.suggestedDealId,null);
     assert.equal((await req(`${url}&contractNumber=${encodeURIComponent(draft().number)}`)).suggestedDealId,dealId);
     assert.equal((await req(`${url}&contractNumber=UNKNOWN`)).suggestedDealId,null);
     assert.deepEqual((await req(url,"GET",undefined,200,foreign)).companies,[]);
