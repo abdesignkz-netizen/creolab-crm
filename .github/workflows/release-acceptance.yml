@@ -27,6 +27,8 @@ jobs:
         run: npm ci --include=dev --include-workspace-root=true --workspace=@creolab/api --workspace=@creolab/web --workspace=@creolab/worker --workspace=@creolab/db --workspace=@creolab/contracts --workspace=@creolab/integrations
       - name: Check API, worker, contracts and web types
         run: npm run typecheck --workspace=@creolab/api --workspace=@creolab/worker --workspace=@creolab/contracts --workspace=@creolab/web
+      - name: Check failure diagnostics
+        run: node --test scripts/ci-error-annotation.test.mjs
       - name: Full isolated server regression
         run: |
           set -o pipefail

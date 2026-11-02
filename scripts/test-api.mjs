@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { ciFailureAnnotations } from "./ci-error-annotation.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const postgres = process.argv.includes("--postgres");
@@ -81,8 +82,15 @@ try {
       const initialized = spawnSync(process.execPath, ["node_modules/prisma/build/index.js", "db", "execute", "--schema", "packages/db/prisma/schema.prisma", "--file", "packages/db/prisma/init.sql"], { cwd: root, stdio: "inherit", env });
       if (initialized.status !== 0) throw new Error(`PostgreSQL baseline failed for ${file}`);
     }
-    const result = spawnSync(process.execPath, ["--experimental-strip-types", "--test-reporter=tap", "--test", file], { cwd: root, stdio: "inherit", env });
-    if (result.status !== 0) { failures += 1; failedFiles.push(file); }
+    const result = spawnSync(process.execPath, ["--experimental-strip-types", "--test-reporter=tap", "--test", file], {
+      cwd: root, stdio: process.env.CI ? ["inherit", "pipe", "pipe"] : "inherit", env,
+      encoding: "utf8", maxBuffer: 32 * 1024 * 1024,
+    });
+    if (process.env.CI) { process.stdout.write(result.stdout || ""); process.stderr.write(result.stderr || ""); }
+    if (result.status !== 0) {
+      failures += 1; failedFiles.push(file);
+      if (process.env.CI) for (const annotation of ciFailureAnnotations(`${result.stdout || ""}\n${result.stderr || ""}\n${result.error || ""}`, `Test file failed: ${file}`)) console.log(annotation);
+    }
   }
 } finally {
   rmSync(scratch, { recursive: true, force: true });
