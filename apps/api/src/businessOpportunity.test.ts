@@ -47,7 +47,7 @@ after(async () => db.$disconnect());
 
 it("separates opportunities from risks, deduplicates both inquiry links and keeps separate purchases by one contact", async () => {
   const first = await inquiry(), second = await inquiry(), standalone = await inquiry();
-  const a = await deal({ inquiryId: first.id, offerAmountMinor: 999999, currency: "USD" }), b = await deal();
+  const a = await deal({ id: "99999999-9999-4999-8999-999999999999", inquiryId: first.id, offerAmountMinor: 999999, currency: "USD" }), b = await deal();
   await db.inquiry.update({ where: { id: second.id }, data: { dealId: b.id } });
   await requestProposal(a.id); await scan();
   const rows = (await list()).items; assert.equal(rows.length, 3);
@@ -57,7 +57,16 @@ it("separates opportunities from risks, deduplicates both inquiry links and keep
   assert.ok(rows.some(r => r.content?.sources[0].href.endsWith(b.id)));
   assert.ok((await listBusinessInsights(db, auth, { state: "all" })).items.every(r => !r.rule.startsWith("opportunity")));
   assert.ok(combined.content?.facts.some(f => f.value.includes("77010000001")));
-  assert.doesNotMatch(JSON.stringify(rows), /999999|"USD"|выручка|потенциал.*999/);
+  for (const row of rows) {
+    const content = row.content!;
+    assert.equal(content.period.currency, null);
+    // Check claims visible to the reader, not random IDs, hashes or timestamps.
+    // The fixture ID deliberately contains the same digits as the deal amount.
+    const claims = [content.title, content.subject, content.explanation, content.formula, content.limitation,
+      ...content.facts.flatMap(f => [f.label, f.value]), ...content.sources.map(s => s.label), content.next.label,
+      content.opportunity?.taskTitle, content.opportunity?.existingTask?.title];
+    for (const claim of claims) assert.doesNotMatch(claim || "", /999\s?999|\bUSD\b|выручка|потенциал.*999/i);
+  }
 });
 
 it("requests require an active confirmed agreement and a genuine inbound message linked to that deal", async () => {
