@@ -101,7 +101,7 @@ xcodebuild -workspace BasQar.xcworkspace -scheme BasQar -configuration Release \
 
 В eas.json нет auto-submit. EAS подставляет настоящую signing-конфигурацию после prebuild; локальная неподписанная конфигурация не заменяет credentials EAS. [Механизм подписи EAS](https://docs.expo.dev/build-reference/android-builds/). Версию EAS CLI перед запуском зафиксировать в журнале выпуска.
 
-Workflow `.github/workflows/mobile-acceptance.yml` запускается только вручную. Он собирает APK/AAB с одноразовым тестовым ключом и iOS Release для симулятора, проверяет типы, тесты, web и Hermes. Артефакты CI помечены `CI-ONLY` / `NOT-IPA`; они не являются store-релизами. Workflow подготовлен, но в этой задаче не запускался. Никаких команд отправки в магазины в нём нет.
+Workflow `.github/workflows/mobile-acceptance.yml` запускается вручную или при изменении кода в проверочной ветке `codex/mobile-store-release`. Изменения только документации не запускают повторную сборку. Он собирает APK/AAB с одноразовым тестовым ключом и iOS Release для симулятора, проверяет типы, тесты, web и Hermes. Артефакты CI помечены `CI-ONLY` / `NOT-IPA`; они не являются store-релизами. Состояние последнего облачного прогона фиксируется отдельно в отчёте проверки мобильных сборок. Никаких команд отправки в магазины в нём нет.
 
 ## Авторизация, ссылки и файлы
 

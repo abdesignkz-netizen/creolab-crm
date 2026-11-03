@@ -1,6 +1,9 @@
 name: Mobile acceptance (no store submission)
 
 on:
+  push:
+    branches: [codex/mobile-store-release]
+    paths-ignore: ['docs/**', 'output/**', '**/*.md']
   workflow_dispatch:
 
 permissions:
@@ -22,13 +25,19 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run db:generate
-      - run: npm run typecheck
-      - run: npm run test --workspace @creolab/mobile
-      - run: npm run test --workspace @creolab/web
+      - name: Types and UI regression
+        run: |
+          set -o pipefail
+          npm run typecheck 2>&1 | tee /tmp/basqar-mobile-checks.log
+          npm run test --workspace @creolab/mobile 2>&1 | tee /tmp/basqar-mobile-checks.log
+          npm run test --workspace @creolab/web 2>&1 | tee /tmp/basqar-mobile-checks.log
       - run: node scripts/test-api.mjs mobileApp securityAuth securityTenant instagramOAuth googleConnections scheduledReliability backgroundReliability esfNcaLayerClient
       - run: npm run build --workspace @creolab/web
       - run: npm run export --workspace @creolab/mobile
       - run: npm run check:release --workspace @creolab/mobile
+      - name: Report check failures
+        if: failure()
+        run: node scripts/ci-error-annotation.mjs /tmp/basqar-mobile-checks.log
 
   android:
     needs: checks
@@ -52,7 +61,7 @@ jobs:
         run: >-
           keytool -genkeypair -keystore "$RUNNER_TEMP/basqar-ci.p12" -storetype PKCS12
           -storepass ci-only-not-a-release-key -keypass ci-only-not-a-release-key
-          -alias basqar-ci -keyalg RSA -keysize 2048 -validity 2
+          -alias basqar-ci -keyalg RSA -keysize 2048 -validity 30
           -dname "CN=BasQar CI ONLY"
       - name: Build installable test APK and test AAB
         working-directory: apps/mobile/android
@@ -61,17 +70,28 @@ jobs:
           BASQAR_ANDROID_STORE_PASSWORD: ci-only-not-a-release-key
           BASQAR_ANDROID_KEY_PASSWORD: ci-only-not-a-release-key
           BASQAR_ANDROID_KEY_ALIAS: basqar-ci
-        run: ./gradlew :app:assembleRelease :app:bundleRelease --no-daemon
+        run: |
+          set -o pipefail
+          ./gradlew :app:assembleRelease :app:bundleRelease --no-daemon --max-workers=2 2>&1 | tee /tmp/basqar-android-build.log
       - name: Verify APK signature and 16 KB zip alignment
         run: |
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs apps/mobile/android/app/build/outputs/apk/release/app-release.apk
           "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 -v 4 apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+      - name: Record artifact checksums and revision
+        run: |
+          sha256sum apps/mobile/android/app/build/outputs/apk/release/*.apk apps/mobile/android/app/build/outputs/bundle/release/*.aab > apps/mobile/android/SHA256SUMS.txt
+          echo "$GITHUB_SHA" > apps/mobile/android/SOURCE_REVISION.txt
+      - name: Report native build failures
+        if: failure()
+        run: node scripts/ci-error-annotation.mjs /tmp/basqar-android-build.log
       - uses: actions/upload-artifact@v4
         with:
           name: basqar-android-CI-ONLY-not-for-store
           path: |
             apps/mobile/android/app/build/outputs/apk/release/*.apk
             apps/mobile/android/app/build/outputs/bundle/release/*.aab
+            apps/mobile/android/SHA256SUMS.txt
+            apps/mobile/android/SOURCE_REVISION.txt
           if-no-files-found: error
           retention-days: 7
 
@@ -96,12 +116,18 @@ jobs:
       - run: npm run prebuild --workspace @creolab/mobile -- --platform ios
       - name: Install native dependencies
         working-directory: apps/mobile/ios
-        run: pod install
+        run: |
+          set -o pipefail
+          pod install 2>&1 | tee /tmp/basqar-ios-build.log
       - name: Build a Release simulator app (no distribution credentials)
-        run: >-
-          xcodebuild -workspace apps/mobile/ios/BasQar.xcworkspace -scheme BasQar
-          -configuration Release -sdk iphonesimulator -destination 'generic/platform=iOS Simulator'
-          -derivedDataPath "$RUNNER_TEMP/basqar-ios" CODE_SIGNING_ALLOWED=NO build
+        run: |
+          set -o pipefail
+          xcodebuild -workspace apps/mobile/ios/BasQar.xcworkspace -scheme BasQar \
+            -configuration Release -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/basqar-ios" CODE_SIGNING_ALLOWED=NO build 2>&1 | tee /tmp/basqar-ios-build.log
+      - name: Report native build failures
+        if: failure()
+        run: node scripts/ci-error-annotation.mjs /tmp/basqar-ios-build.log
       - name: Preserve the simulator app bundle
         run: ditto -c -k --sequesterRsrc --keepParent "$RUNNER_TEMP/basqar-ios/Build/Products/Release-iphonesimulator/BasQar.app" "$RUNNER_TEMP/BasQar-simulator.zip"
       - uses: actions/upload-artifact@v4

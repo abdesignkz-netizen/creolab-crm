@@ -31,3 +31,12 @@ test("bounds annotations and escapes workflow control characters", () => {
   assert.ok(annotations.every(value => value.length < 6200 && !value.includes("\n")));
   assert.match(annotations[0], /100%25 failed/);
 });
+
+test("native compiler and CocoaPods errors remain visible without authenticated build logs", () => {
+  for (const failure of ['FAILURE: Build failed with an exception.', 'App.swift:10:5: error: missing module', '[!] Invalid Podfile']) {
+    const [annotation] = ciFailureAnnotations(`Preparing build\n${failure}\nDetailed cause`, 'Native build failed');
+    assert.ok(annotation.includes(failure));
+    assert.match(annotation, /Detailed cause/);
+    assert.doesNotMatch(annotation, /Preparing build/);
+  }
+});

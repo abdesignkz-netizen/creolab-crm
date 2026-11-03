@@ -8,7 +8,7 @@ export function ciFailureAnnotations(log, label = "Release acceptance failed") {
   // Expected errors from passing negative tests can precede a real TAP failure.
   // Prefer the actual failing assertions and retain more than the first failure.
   const failures = lines.flatMap((line, index) => /^\s*not ok\b/.test(line) ? [index] : []);
-  const starts = failures.length ? failures.slice(0, 8) : [Math.max(0, lines.findIndex(line => /Error:|error TS|ERROR:/.test(line)))];
+  const starts = failures.length ? failures.slice(0, 8) : [Math.max(0, lines.findIndex(line => /Error:|error TS|ERROR:|\berror:|FAILURE:|\[!\]/.test(line)))];
   const annotations = starts.map(start => {
     const next = lines.findIndex((line, index) => index > start && /^\s*(?:(?:not ok|ok)\b|# Subtest:)/.test(line));
     const diagnosticEnd = lines.findIndex((line, index) => index > start && /^\s*\.\.\.\s*$/.test(line));
