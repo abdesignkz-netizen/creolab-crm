@@ -1,0 +1,329 @@
+{
+  "date": "2026-11-03",
+  "branch": "codex/mobile-store-release",
+  "source_commit": "79193890a25c30706bf3a92c8a6dd55c4d1ec471",
+  "run_id": 41640572062,
+  "run_url": "https://github.com/abdesignkz-netizen/creolab-crm/actions/runs/41640572062",
+  "status": "completed",
+  "production_changed": false,
+  "store_submission": false,
+  "live_server": {
+    "status": 503,
+    "routing": "suspend",
+    "page_title": "Service Suspended"
+  },
+  "user_direction": "Continue verification without the live server",
+  "physical_devices": "not_tested",
+  "isolated_workspace_and_http": {
+    "files": 2,
+    "tests": 20,
+    "passed": 20,
+    "external_requests": "disabled",
+    "database": "disposable local PGlite"
+  },
+  "jobs": [
+    {
+      "id": 125932745208,
+      "name": "checks",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/abdesignkz-netizen/creolab-crm/actions/runs/41640572062/job/125932745208",
+      "started_at": "2026-11-03T13:00:59Z",
+      "completed_at": "2026-11-03T13:04:16Z",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run npm ci",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run npm run db:generate",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Types and UI regression",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run node scripts/test-api.mjs mobileApp securityAuth securityTenant instagramOAuth googleConnections scheduledReliability backgroundReliability esfNcaLayerClient",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run npm run build --workspace @creolab/web",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run npm run export --workspace @creolab/mobile",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run npm run check:release --workspace @creolab/mobile",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Report check failures",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Post Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 125934378821,
+      "name": "ios",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/abdesignkz-netizen/creolab-crm/actions/runs/41640572062/job/125934378821",
+      "started_at": "2026-11-03T13:04:19Z",
+      "completed_at": "2026-11-03T13:13:50Z",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Select Xcode 26 or newer",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run npm ci",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run npm run prebuild --workspace @creolab/mobile -- --platform ios",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Install native dependencies",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Build a Release simulator app (no distribution credentials)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Report native build failures",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Preserve the simulator app bundle",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run actions/upload-artifact@v4",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 125934378882,
+      "name": "android",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/abdesignkz-netizen/creolab-crm/actions/runs/41640572062/job/125934378882",
+      "started_at": "2026-11-03T13:04:18Z",
+      "completed_at": "2026-11-03T13:11:44Z",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run actions/setup-java@v4",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run npm ci",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Android API 36",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run npm run prebuild --workspace @creolab/mobile -- --platform android",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Create a disposable CI signing key (never for Play)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Build installable test APK and test AAB",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Verify APK signature and 16 KB zip alignment",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Record artifact checksums and revision",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Report native build failures",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Run actions/upload-artifact@v4",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Run actions/setup-java@v4",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    }
+  ],
+  "cloud_checks": "passed",
+  "conclusion": "success",
+  "run_updated_at": "2026-11-03T13:13:51Z",
+  "artifacts": [
+    {
+      "id": 13233138345,
+      "name": "basqar-android-CI-ONLY-not-for-store",
+      "size_in_bytes": 67210284,
+      "expires_at": "2026-11-10T13:11:38Z",
+      "expired": false,
+      "digest": "sha256:b3082957c0cdfd6e6abc7a06403939d4cfe490320c954f8a580352359061e65e",
+      "download_page": "https://github.com/abdesignkz-netizen/creolab-crm/actions/runs/41640572062/artifacts/13233138345"
+    },
+    {
+      "id": 13232184185,
+      "name": "basqar-ios-simulator-NOT-IPA",
+      "size_in_bytes": 13094115,
+      "expires_at": "2026-11-10T13:13:17Z",
+      "expired": false,
+      "digest": "sha256:bdf95585cf41405557728da05dad55b04c710fa6c427f5c02b819b8a42cd5ae8",
+      "download_page": "https://github.com/abdesignkz-netizen/creolab-crm/actions/runs/41640572062/artifacts/13232184185"
+    }
+  ],
+  "artifact_verification": {
+    "uploaded_in_ci": true,
+    "metadata_checked": true,
+    "downloaded_locally": false,
+    "unauthenticated_download_status": 401,
+    "archive_sha256_source": "GitHub artifact API metadata; not independently recomputed",
+    "android_signature": "passed_in_ci",
+    "android_16kb_zip_alignment": "passed_in_ci",
+    "android_elf_and_16kb_device": "not_tested"
+  },
+  "native_outputs": {
+    "android_apk": "built_release_temporary_ci_signature",
+    "android_aab": "built_release_temporary_ci_signature",
+    "ios_simulator_app": "built_release_unsigned_simulator",
+    "ios_ipa": "not_built"
+  },
+  "ci_error_annotations": {
+    "tests": 4,
+    "passed": 4
+  },
+  "device_runtime": "not_tested",
+  "store_ready": false
+}

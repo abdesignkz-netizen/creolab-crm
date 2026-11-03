@@ -1,6 +1,6 @@
 # BasQar: мобильный выпуск
 
-Статус на 03.11.2026: исходный код и генерация проектов подготовлены в ветке `codex/mobile-store-release`. Установочные APK/AAB/IPA ещё не собраны. Магазины и production не изменялись. Список фактически выполненных проверок — `output/documents/BasQar-mobile-release-2026-11-03.md`.
+Статус на 03.11.2026: в ветке `codex/mobile-store-release` успешно собраны тестовые Android APK/AAB и iOS Release для симулятора. [Облачный прогон](https://github.com/abdesignkz-netizen/creolab-crm/actions/runs/41640572062) завершился успешно. IPA для физического iPhone и сборки с подписями магазинов ещё не получены; устройства не проверены. Магазины и production не изменялись. [Отчёт о сборках](../output/documents/BasQar-mobile-cloud-2026-11-03.md), [установка тестовой версии](mobile-test-installation.md), [полный отчёт об изменениях](../output/documents/BasQar-mobile-release-2026-11-03.md).
 
 ## Что используется
 

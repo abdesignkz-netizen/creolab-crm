@@ -2,7 +2,7 @@
   "date": "2026-11-03",
   "branch": "codex/mobile-store-release",
   "baseline": "90869bc5bf663edcf00f03593d1fa71c8ae8327b",
-  "status": "source_prepared_native_binaries_and_device_acceptance_pending",
+  "status": "test_native_binaries_built_store_credentials_and_device_acceptance_pending",
   "server": {
     "isolated_pglite_files": 10,
     "tests": 91,
@@ -34,7 +34,7 @@
       ],
       "failures": [],
       "pending": [
-        "Link a real Expo project (BASQAR_EAS_PROJECT_ID) for cloud builds and push.",
+        "Link a real Expo project (BASQAR_EAS_PROJECT_ID) for EAS builds and push (GitHub Actions builds already passed).",
         "Apple Developer team, signing certificate/provisioning and App Store Connect record.",
         "Firebase Android configuration and FCM v1 credential for push.",
         "Real Android upload key / Play App Signing and Play Console record.",
@@ -56,20 +56,25 @@
     "failed_check": "CocoaPods unavailable on host"
   },
   "native_android": {
-    "apk": "not_built",
-    "aab": "not_built",
-    "reason": "No Java runtime or Android SDK on this Mac"
+    "apk": "built_release_temporary_ci_signature",
+    "aab": "built_release_temporary_ci_signature",
+    "signature_verification": "passed_in_ci",
+    "zip_alignment_16kb": "passed_in_ci",
+    "elf_and_16kb_device": "not_tested",
+    "local_toolchain": "Java runtime and Android SDK unavailable; built on GitHub Actions"
   },
   "native_ios": {
     "ipa": "not_built",
-    "simulator_app": "not_built",
-    "reason": "Full Xcode and CocoaPods unavailable; only CommandLineTools"
+    "simulator_app": "built_release_without_distribution_credentials",
+    "build_environment": "GitHub Actions macos-15; Xcode 26+; Pods installed successfully",
+    "local_toolchain": "Full Xcode and CocoaPods unavailable; only CommandLineTools",
+    "device_credentials": "Apple Team, certificate and provisioning still required"
   },
   "physical_devices": "not_tested",
   "apns_fcm": "not_tested",
   "real_oauth_on_device": "not_tested",
   "domain_links": "disabled_until_real_domain_associations",
-  "ci_workflow": "prepared_and_yaml_validated_not_executed",
+  "ci_workflow": "executed_checks_android_ios_all_success",
   "production": "unchanged",
   "store_submission": "not_performed",
   "dependencies": {
@@ -163,6 +168,14 @@
     "scripts/native-app.test.mjs",
     "scripts/sales-forecast.test.mjs",
     "scripts/system-locale.test.mjs",
-    "scripts/test-api.mjs"
-  ]
+    "scripts/test-api.mjs",
+    "scripts/ci-error-annotation.mjs",
+    "scripts/ci-error-annotation.test.mjs",
+    "docs/mobile-test-installation.md",
+    "output/documents/BasQar-mobile-cloud-2026-11-03.md",
+    "output/documents/BasQar-mobile-cloud-2026-11-03-checks.json"
+  ],
+  "source_commit": "79193890a25c30706bf3a92c8a6dd55c4d1ec471",
+  "cloud_report": "BasQar-mobile-cloud-2026-11-03-checks.json",
+  "cloud_run_url": "https://github.com/abdesignkz-netizen/creolab-crm/actions/runs/41640572062"
 }
