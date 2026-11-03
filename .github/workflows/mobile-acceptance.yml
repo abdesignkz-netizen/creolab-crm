@@ -1,0 +1,112 @@
+name: Mobile acceptance (no store submission)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-acceptance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run db:generate
+      - run: npm run typecheck
+      - run: npm run test --workspace @creolab/mobile
+      - run: npm run test --workspace @creolab/web
+      - run: node scripts/test-api.mjs mobileApp securityAuth securityTenant instagramOAuth googleConnections scheduledReliability backgroundReliability esfNcaLayerClient
+      - run: npm run build --workspace @creolab/web
+      - run: npm run export --workspace @creolab/mobile
+      - run: npm run check:release --workspace @creolab/mobile
+
+  android:
+    needs: checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - run: npm ci
+      - name: Android API 36
+        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0"'
+      - run: npm run prebuild --workspace @creolab/mobile -- --platform android
+      - name: Create a disposable CI signing key (never for Play)
+        run: >-
+          keytool -genkeypair -keystore "$RUNNER_TEMP/basqar-ci.p12" -storetype PKCS12
+          -storepass ci-only-not-a-release-key -keypass ci-only-not-a-release-key
+          -alias basqar-ci -keyalg RSA -keysize 2048 -validity 2
+          -dname "CN=BasQar CI ONLY"
+      - name: Build installable test APK and test AAB
+        working-directory: apps/mobile/android
+        env:
+          BASQAR_ANDROID_KEYSTORE: ${{ runner.temp }}/basqar-ci.p12
+          BASQAR_ANDROID_STORE_PASSWORD: ci-only-not-a-release-key
+          BASQAR_ANDROID_KEY_PASSWORD: ci-only-not-a-release-key
+          BASQAR_ANDROID_KEY_ALIAS: basqar-ci
+        run: ./gradlew :app:assembleRelease :app:bundleRelease --no-daemon
+      - name: Verify APK signature and 16 KB zip alignment
+        run: |
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+          "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 -v 4 apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: basqar-android-CI-ONLY-not-for-store
+          path: |
+            apps/mobile/android/app/build/outputs/apk/release/*.apk
+            apps/mobile/android/app/build/outputs/bundle/release/*.aab
+          if-no-files-found: error
+          retention-days: 7
+
+  ios:
+    needs: checks
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Select Xcode 26 or newer
+        shell: bash
+        run: |
+          selected="$(find /Applications -maxdepth 1 -name 'Xcode_26*.app' | sort | tail -1)"
+          test -n "$selected" || { echo 'Xcode 26 is required on this runner'; exit 1; }
+          sudo xcode-select -s "$selected/Contents/Developer"
+          xcodebuild -version
+      - run: npm ci
+      - run: npm run prebuild --workspace @creolab/mobile -- --platform ios
+      - name: Install native dependencies
+        working-directory: apps/mobile/ios
+        run: pod install
+      - name: Build a Release simulator app (no distribution credentials)
+        run: >-
+          xcodebuild -workspace apps/mobile/ios/BasQar.xcworkspace -scheme BasQar
+          -configuration Release -sdk iphonesimulator -destination 'generic/platform=iOS Simulator'
+          -derivedDataPath "$RUNNER_TEMP/basqar-ios" CODE_SIGNING_ALLOWED=NO build
+      - name: Preserve the simulator app bundle
+        run: ditto -c -k --sequesterRsrc --keepParent "$RUNNER_TEMP/basqar-ios/Build/Products/Release-iphonesimulator/BasQar.app" "$RUNNER_TEMP/BasQar-simulator.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: basqar-ios-simulator-NOT-IPA
+          path: ${{ runner.temp }}/BasQar-simulator.zip
+          if-no-files-found: error
+          retention-days: 7

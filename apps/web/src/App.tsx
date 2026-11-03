@@ -1,3 +1,4 @@
+import { isNativeApp, nativeAccountLabel } from "./lib/nativeApp";
 import { systemText } from "@creolab/contracts";
 import { SetupProvider, SetupGuide } from "./components/SetupAssistant";
 import { uiText, useUiText, localizeUiOptions, uiMessage, uiNotificationBody } from "./lib/uiText";
@@ -51,6 +52,8 @@ const AiAutomationSettingsPage = lazy(() => import("./pages/AiAutomationSettings
 const AiManagerSetupPage = lazy(() => import("./pages/AiManagerSetupPage").then(m => ({ default: m.AiManagerSetupPage })));
 const SituationPage = lazy(() => import("./pages/SituationPage").then(m => ({ default: m.SituationPage })));
 const BillingCheckoutPage = lazy(() => import("./pages/BillingCheckoutPage").then(m => ({ default: m.BillingCheckoutPage })));
+const NativeAccountPage = lazy(() => import("./pages/NativeAccountPage"));
+const AccountDeletionPage = lazy(() => import("./pages/AccountDeletionPage"));
 const BillingPage = lazy(() => import("./pages/BillingPage").then(m => ({ default: m.BillingPage })));
 const StatsPage = lazy(() => import("./pages/StatsPage").then(m => ({ default: m.StatsPage })));
 const TasksPage = lazy(() => import("./pages/TasksPage").then(m => ({ default: m.TasksPage })));
@@ -160,7 +163,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
     ["/control", caps.manager ? "BasQar Control" : t(locale, "nav.control")],
     ...(caps.integrations ? [["/integrations", t(locale, "nav.integrations")] as [string, string]] : []),
     ...(caps.analytics ? [["/stats", t(locale, "nav.stats")] as [string, string]] : []),
-    ["/billing", t(locale, "nav.billing")],
+    ["/billing", (isNativeApp() ? nativeAccountLabel(locale) : t(locale, "nav.billing"))],
     ["/settings", t(locale, "nav.settings")],
   ] : ([["/settings", t(locale, "nav.settings")] as [string, string]]);
   const platformLinks: Array<[string, string]> = platformAdmin ? [
@@ -197,7 +200,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
         ["/documents", t(locale, "nav.documents"), hasCompany && caps.documents],
         ["/integrations", t(locale, "nav.integrations"), hasCompany && caps.integrations],
         ["/stats", t(locale, "nav.stats"), hasCompany && caps.analytics],
-        ["/billing", t(locale, "nav.billing"), hasCompany],
+        ["/billing", (isNativeApp() ? nativeAccountLabel(locale) : t(locale, "nav.billing")), hasCompany],
         ["/settings", t(locale, "nav.settings"), true],
       ].filter((item) => item[2]) as Array<[string, string]>);
 
@@ -256,7 +259,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
     "/integrations": t(locale, "nav.integrations"),
     "/stats": t(locale, "nav.stats"),
     "/settings": t(locale, "nav.settings"),
-    "/billing": t(locale, "nav.billing"),
+    "/billing": (isNativeApp() ? nativeAccountLabel(locale) : t(locale, "nav.billing")),
     "/admin/companies": t(locale, "nav.platformCompanies"),
     "/admin/billing": t(locale, "nav.platformBilling"),
     "/admin/members": t(locale, "nav.platformMembers"),
@@ -408,7 +411,9 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
     const permission = currentBrowserPermission();
     const wantsNotifications = getBrowserNotificationPreference();
     const dismissed = isNotificationBannerDismissed();
-    if (permission === "granted" && wantsNotifications) {
+    if (isNativeApp()) {
+      setNotifyBanner(false);
+    } else if (permission === "granted" && wantsNotifications) {
       setNotifyBanner(false);
     } else if (permission === "default" && !dismissed) {
       setNotifyBanner(true);
@@ -486,7 +491,7 @@ function Shell({ me, children }: { me: any; children: ReactNode }) {
         <div className="preview-banner" role="status">
           <span>{t(locale, "preview.banner")}</span>
           <button type="button" className="btn" onClick={() => navigate("/billing")}>
-            {t(locale, "preview.choosePlan")}
+            {isNativeApp() ? "Доступ компании" : t(locale, "preview.choosePlan")}
           </button>
         </div>
       ) : null}
@@ -784,7 +789,7 @@ function Login() {
   async function enterSession(result: any, options: { firstSetup?: boolean } = {}) {
     const tenantId = result.user?.activeTenant?.tenant?.id || result.user?.memberships?.[0]?.tenant?.id;
     if (tenantId) setTenant(tenantId);
-    const dest = options.firstSetup
+    const dest = params.get("next") === "account-deletion" ? "/account-deletion" : options.firstSetup
       ? "/start"
       : result.user?.user?.platformAdmin && !tenantId
         ? "/admin"
@@ -829,7 +834,7 @@ function Login() {
             <p className="muted login-alt">
               <Link to="/forgot-password">{t(locale, "login.forgot")}</Link>
             </p>
-            <p className="muted login-alt">
+            {!isNativeApp() ? <p className="muted login-alt">
               {t(locale, "login.noAccount")}{" "}
               <button
                 type="button"
@@ -842,7 +847,7 @@ function Login() {
               >
                 {t(locale, "login.register")}
               </button>
-            </p>
+            </p> : null}
           </form>
         ) : null}
         {mode === "signup" ? (
@@ -1162,6 +1167,7 @@ export function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/account-deletion" element={<Suspense fallback={<div className="state">Загрузка…</div>}><AccountDeletionPage /></Suspense>} />
       <Route
         path="/forgot-password"
         element={
@@ -1222,8 +1228,8 @@ export function App() {
               <Routes>
                 <Route path="/today" element={!me?.activeTenant && me?.user?.platformAdmin ? <Navigate to="/admin" replace /> : <Today />} />
                 <Route path="/start" element={me?.capabilities?.companyAdmin ? <GettingStartedPage /> : <Navigate to="/today" replace />} />
-                <Route path="/billing" element={<BillingPage />} />
-                <Route path="/billing/checkout/:orderId" element={<BillingCheckoutPage />} />
+                <Route path="/billing" element={isNativeApp() ? <NativeAccountPage /> : <BillingPage />} />
+                <Route path="/billing/checkout/:orderId" element={isNativeApp() ? <NativeAccountPage /> : <BillingCheckoutPage />} />
                 <Route path="/control" element={<ControlPage canManageOverview={!me?.capabilities?.manager} />} />
                 <Route path="/integrations" element={me?.capabilities?.integrations ? <IntegrationsPage /> : <Navigate to="/today" replace />} />
                 <Route path="/integrations/esf" element={me?.capabilities?.documents && me?.serviceFeatures?.esf === true ? <EsfIntegrationPage /> : <Navigate to="/today" replace />} />

@@ -86,7 +86,7 @@ test('CSV, spreadsheet and printable exports retain the forecast basis and do no
   const exports = await bundle(`export {exportAnalyticsCsv,exportAnalyticsExcel,exportAnalyticsPdf} from './lib/statsExport';`);
   const data = { currency: 'KZT', period: { label: 'Октябрь 2029' }, financial: { sales: { byCurrency: [] }, receipts: { byCurrency: [] } }, sales: { forecast: fixture() }, funnel: { steps: [] } };
   const previous = { document: globalThis.document, window: globalThis.window, create: URL.createObjectURL, revoke: URL.revokeObjectURL }, blobs = [];
-  globalThis.document = { createElement: () => ({ click() {} }) }; globalThis.window = { open: () => null };
+  globalThis.document = { createElement: () => ({ click() {}, remove() {} }), body: { appendChild() {} } }; globalThis.window = { open: () => null };
   URL.createObjectURL = blob => { blobs.push(blob); return 'blob:forecast-test'; }; URL.revokeObjectURL = () => {};
   try {
     exports.exportAnalyticsCsv(data, 'funnel'); exports.exportAnalyticsExcel(data, { sales: true }); exports.exportAnalyticsPdf(data, { sales: true });

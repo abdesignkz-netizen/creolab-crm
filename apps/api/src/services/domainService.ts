@@ -1320,7 +1320,7 @@ export async function listNotifications(prisma: PrismaClient, auth: AuthContext)
   }));
 }
 
-function notificationHref(type: string, entityType: string, entityId: string, conversationId?: string) {
+export function notificationHref(type: string, entityType: string, entityId: string, conversationId?: string) {
   if (type.startsWith("conversation.") || entityType === "conversation") return `/conversations/${entityId}`;
   if (entityType === "support_ticket" || type.startsWith("support.")) return `/today?help=${entityId}`;
   if (type === "inquiry.created" || entityType === "inquiry") {

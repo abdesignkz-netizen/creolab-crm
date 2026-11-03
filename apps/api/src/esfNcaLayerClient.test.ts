@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { EsfNcaLayerClient } from "../../web/src/lib/signing/esfNcaLayerClient.ts";
+import { NCALayerSigningClient } from "../../web/src/lib/signing/ncalayerClient.ts";
 import { ESF_NCALAYER_SERVICE, NCALAYER_ACCESSORY_GET_BUNDLES, NCALAYER_ACCESSORY_GET_SERVICES } from "@creolab/contracts";
 
 const originalWebSocket = globalThis.WebSocket;
@@ -50,6 +51,15 @@ afterEach(() => {
 });
 
 describe("NCALayer single-response transport", () => {
+  it("explains the desktop requirement in the native app without attempting a signature", async () => {
+    (globalThis.window as any).BasQarNative = { version: 1 };
+    for (const client of [new EsfNcaLayerClient(), new NCALayerSigningClient()]) {
+      await assert.rejects(client.connect(), (error: any) => error.code === "NCALAYER_DESKTOP_REQUIRED" && /компьютере/.test(error.message));
+      await assert.rejects(client.isAvailable(), (error: any) => error.code === "NCALAYER_DESKTOP_REQUIRED");
+      client.disconnect();
+    }
+    assert.equal(frames.length, 0);
+  });
   it("reports an unavailable local NCALayer without sending sign requests",async()=>{
     unavailable=true;const client=new EsfNcaLayerClient();
     assert.equal(await client.isAvailable(),false);assert.equal(frames.length,0);client.disconnect();

@@ -25,11 +25,11 @@ async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
     return data;
   } catch { throw new ApiError(502, "instagram_auth_failed", "Instagram не подтвердил доступ. Проверьте разрешения и повторите подключение."); }
 }
-export async function beginInstagramConnection(prisma: PrismaClient, auth: AuthContext) {
+export async function beginInstagramConnection(prisma: PrismaClient, auth: AuthContext, options: { nativeApp?: boolean } = {}) {
   requireIntegrationsAccess(auth); const { tenantId } = requireTenant(auth); configured();
   if (new URL(config.appBaseUrl).protocol !== "https:" || new URL(config.apiBaseUrl).protocol !== "https:") throw new ApiError(422, "https_required", "Для Instagram нужен публичный HTTPS-адрес BasQar");
   const state = randomBytes(32).toString("hex");
-  await prisma.idempotencyRecord.create({ data: { scope: "instagram.oauth", actorKey: auth.sessionId, key: digest(state), requestHash: auth.user.id, resultJson: { tenantId, platformConfiguration: Boolean(auth.configurationTenant), redirectUri: callbackUrl(), appId: process.env.INSTAGRAM_APP_ID! }, expiresAt: new Date(Date.now() + 600000) } });
+  await prisma.idempotencyRecord.create({ data: { scope: "instagram.oauth", actorKey: auth.sessionId, key: digest(state), requestHash: auth.user.id, resultJson: { nativeApp: options.nativeApp === true, tenantId, platformConfiguration: Boolean(auth.configurationTenant), redirectUri: callbackUrl(), appId: process.env.INSTAGRAM_APP_ID! }, expiresAt: new Date(Date.now() + 600000) } });
   const params = new URLSearchParams({ client_id: process.env.INSTAGRAM_APP_ID!, redirect_uri: callbackUrl(), response_type: "code", scope: scopes.join(","), state, enable_fb_login: "0", force_authentication: "1" });
   return { url: `https://www.instagram.com/oauth/authorize?${params}` };
 }

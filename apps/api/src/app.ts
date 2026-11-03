@@ -1,3 +1,4 @@
+import { mobilePushEnabled, registerMobileDevice, unregisterMobileDevice, requestAccountDeletion, mobileOAuthReturn, openMobileNotification } from "./services/mobileAppService.ts";
 import { getOnboarding, updateOnboarding } from "./services/onboardingService.ts";
 import { CONFIGURATION_HEADER, configurationRouteAllowed, scopeCompanyConfiguration, configurationOAuthAuth, configurationReturnPath } from "./services/companyConfigurationAccess.ts";
 import { writeAudit } from "./lib/audit.ts";
@@ -627,6 +628,26 @@ export function createApp(prisma: PrismaClient) {
 
 
 
+  app.get("/api/v1/mobile/config", (_req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ protocolVersion: 1, pushConfigured: mobilePushEnabled(), accountMode: "existing" });
+  });
+  app.get("/api/v1/me/mobile-notifications/:id", async (req, res) => {
+    res.json(await openMobileNotification(prisma, await requireAuth(req), req.params.id));
+  });
+  app.post("/api/v1/me/mobile-devices", json, async (req, res) => {
+    const auth = await requireAuth(req); rateLimit(`mobile-device:${auth.user.id}`, 30);
+    res.json(await registerMobileDevice(prisma, auth, req.body));
+  });
+  app.delete("/api/v1/me/mobile-devices", json, async (req, res) => {
+    const auth = await requireAuth(req);
+    res.json(await unregisterMobileDevice(prisma, auth.user.id, req.body));
+  });
+  app.post("/api/v1/me/account-deletion-request", json, async (req, res) => {
+    const auth = await requireAuth(req); rateLimit(`account-deletion:${auth.user.id}`, 5);
+    res.json(await requestAccountDeletion(prisma, auth, req.body));
+  });
+
   app.post("/api/v1/auth/login", json, async (req, res) => {
     const ip = clientIp(req);
     const email = String(req.body?.email || "").toLowerCase();
@@ -667,6 +688,8 @@ export function createApp(prisma: PrismaClient) {
 
   app.post("/api/v1/auth/logout", json, async (req, res) => {
     const auth = await requireAuth(req);
+    if (req.body?.mobileDeviceToken) await unregisterMobileDevice(prisma, auth.user.id, { token: req.body.mobileDeviceToken });
+    if (req.body?.all) await prisma.deviceInstallation.updateMany({ where: { userId: auth.user.id }, data: { active: false } });
     await logout(prisma, auth.sessionId, Boolean(req.body?.all), auth.user.id);
     res.clearCookie("crm_session", {
       httpOnly: true,
@@ -2767,9 +2790,11 @@ export function createApp(prisma: PrismaClient) {
   app.post("/api/v1/integrations/instagram/connect", async (req, res) => {
     const auth = await requireAuth(req); await requireFeature(prisma, auth, FEATURES.CHANNELS);
     const { beginInstagramConnection } = await import("./services/instagramOAuthService.ts");
-    res.json(await beginInstagramConnection(prisma, auth));
+    res.json(await beginInstagramConnection(prisma, auth, { nativeApp: (req.get("user-agent") || "").includes("BasQarNative/1") }));
   });
   app.get("/api/v1/integrations/instagram/callback", async (req, res) => {
+    const nativeReturn = await mobileOAuthReturn(prisma, "instagram", req.query, req.get("user-agent") || "");
+    if (nativeReturn) { res.set("Cache-Control", "no-store"); res.set("Referrer-Policy", "no-referrer"); res.redirect(nativeReturn); return; }
     const { finishInstagramConnection } = await import("./services/instagramOAuthService.ts");
     let returnPath = "/integrations";
     try {
@@ -2810,9 +2835,11 @@ export function createApp(prisma: PrismaClient) {
   app.post("/api/v1/integrations/google/connect", json, async (req, res) => {
     const auth = await requireAuth(req);
     await requireFeature(prisma, auth, FEATURES.CHANNELS);
-    res.json(await beginGoogleConnection(prisma, auth, googleConnectSchema.parse(req.body)));
+    res.json(await beginGoogleConnection(prisma, auth, googleConnectSchema.parse(req.body), { nativeApp: (req.get("user-agent") || "").includes("BasQarNative/1") }));
   });
   app.get("/api/v1/integrations/google/callback", async (req, res) => {
+    const nativeReturn = await mobileOAuthReturn(prisma, "google", req.query, req.get("user-agent") || "");
+    if (nativeReturn) { res.set("Cache-Control", "no-store"); res.set("Referrer-Policy", "no-referrer"); res.redirect(nativeReturn); return; }
     let returnUrl = `${config.appBaseUrl.replace(/\/$/, "")}/integrations`;
     res.set("Cache-Control", "no-store");
     try {

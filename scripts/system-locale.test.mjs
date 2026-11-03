@@ -235,7 +235,7 @@ test('Incomplete analytics coverage stays visible in CSV, Excel and printable re
     sections:[{key:'inquiries',label:'Обращения: подробные разрезы',loaded:5000,atLeast:5001,status:'partial'}]} };
   const previous = { document: globalThis.document, window: globalThis.window, create: URL.createObjectURL, revoke: URL.revokeObjectURL };
   const blobs = [];
-  globalThis.document = { createElement: () => ({ click() {} }) };
+  globalThis.document = { createElement: () => ({ click() {}, remove() {} }), body: { appendChild() {} } };
   globalThis.window = { open: () => null };
   URL.createObjectURL = blob => { blobs.push(blob); return 'blob:local-test'; };
   URL.revokeObjectURL = () => {};
@@ -268,7 +268,7 @@ test('Financial exports distinguish sales from payments and retain exact currenc
       receipts: { byCurrency: [{currency:'KZT',label:'545 ₸'},{currency:'USD',label:'10 USD'}] } } };
   const previous = { document: globalThis.document, window: globalThis.window, create: URL.createObjectURL, revoke: URL.revokeObjectURL };
   const blobs = [];
-  globalThis.document = { createElement: () => ({ click() {} }) };
+  globalThis.document = { createElement: () => ({ click() {}, remove() {} }), body: { appendChild() {} } };
   globalThis.window = { open: () => null };
   URL.createObjectURL = blob => { blobs.push(blob); return 'blob:finance-test'; }; URL.revokeObjectURL = () => {};
   try {
@@ -791,7 +791,7 @@ test('Plan/fact and real cohort stages survive CSV, SpreadsheetML and printable 
     sales:{plan:{status:'ready',label:'3 100 ₸',actual:{label:'1 550 ₸'},percent:50,prorated:true}},
     funnel:{mode:'cohort',steps:[{name:'КП отправлено',count:1,fromStartPct:25},{name:'Продано',count:2,fromStartPct:50}]}};
   const previous={document:globalThis.document,window:globalThis.window,create:URL.createObjectURL,revoke:URL.revokeObjectURL},blobs=[];
-  globalThis.document={createElement:()=>({click(){}})};globalThis.window={open:()=>null};
+  globalThis.document={createElement:()=>({click(){},remove(){}}),body:{appendChild(){}}};globalThis.window={open:()=>null};
   URL.createObjectURL=blob=>{blobs.push(blob);return 'blob:plan-test';};URL.revokeObjectURL=()=>{};
   try {
     exports.exportAnalyticsCsv(data,'funnel');exports.exportAnalyticsExcel(data,{funnel:true,sales:true});exports.exportAnalyticsPdf(data,{funnel:true,sales:true});

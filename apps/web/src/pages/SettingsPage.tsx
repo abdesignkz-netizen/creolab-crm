@@ -1,3 +1,4 @@
+import { isNativeApp, nativeAccountLabel } from "../lib/nativeApp";
 import { ControlWhatsAppSettings } from "../components/ControlWhatsAppSettings";
 import { ControlNotificationsPanel, ControlNoticeDiscardDialog } from "../components/ControlNotificationsPanel";
 import { EmployeeTelegramPanel } from "../components/EmployeeTelegramPanel";
@@ -125,7 +126,7 @@ export function SettingsPage() {
     ...(caps.integrations || caps.companyAdmin
       ? [{ id: "integrations" as const, group: "company" as const, label: t(locale, "settings.integrations"), to: "/integrations" }]
       : []),
-    { id: "billing" as const, group: "company" as const, label: t(locale, "settings.billing"), to: "/billing" },
+    { id: "billing" as const, group: "company" as const, label: isNativeApp() ? nativeAccountLabel(locale) : t(locale, "settings.billing"), to: "/billing" },
   ];
 
   return (
@@ -656,7 +657,7 @@ function MembersSection({ locale }: { locale: Locale }) {
       {capacity ? <div className="members-capacity">
         <div><b>{capacity.planName}</b><p>{uiText("Сотрудников:")}{" "}<strong>{capacity.active}{capacity.limit === null ? uiText(" · без ограничения") : ` / ${capacity.limit}`}</strong></p></div>
         <div><b>{capacity.remaining === null ? uiText("Места доступны") : uiText("Свободных мест: {p0}", {p0: capacity.remaining})}</b><p className="muted">{uiText("Ожидают приглашения:")}{" "}{capacity.pending}{uiText(". Они также занимают места.")}</p></div>
-        {!capacity.canInvite ? <div className="members-limit"><p>{capacity.entitled ? uiText("Все места заняты. Отмените ненужное приглашение или подключите дополнительные места.") : uiText("Для добавления сотрудников выберите тариф с командной работой.")}</p><Link to="/billing">{uiText("Тарифы и дополнительные места →")}</Link></div> : null}
+        {!capacity.canInvite && !isNativeApp() ? <div className="members-limit"><p>{capacity.entitled ? uiText("Все места заняты. Отмените ненужное приглашение или подключите дополнительные места.") : uiText("Для добавления сотрудников выберите тариф с командной работой.")}</p><Link to="/billing">{uiText("Тарифы и дополнительные места →")}</Link></div> : null}
       </div> : !error ? <p className="muted" role="status">{uiText("Загружаем сотрудников и доступные места…")}</p> : null}
       {adding && capacity?.canInvite ? <form className="member-invite-form" onSubmit={event => {
         event.preventDefault(); const form = new FormData(event.currentTarget);

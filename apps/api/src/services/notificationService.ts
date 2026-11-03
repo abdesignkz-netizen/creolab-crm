@@ -1,3 +1,4 @@
+import { queueNativePush } from "./nativePushService.ts";
 import { queueEmployeeTelegram } from "./employeeTelegramService.ts";
 import { queueControlNotification } from "./controlNotificationService.ts";
 import type { Prisma, PrismaClient } from "@creolab/db";
@@ -63,6 +64,8 @@ export async function createStaffNotification(
       body: args.body,
     },
   });
+
+  if (!args.internalOnly && channelsPref.native_push !== false) await queueNativePush(prisma, notification, membership.userId);
 
   if (!args.internalOnly && channelsPref.telegram === true) await queueEmployeeTelegram(prisma, notification, membership.userId);
 

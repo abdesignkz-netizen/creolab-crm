@@ -1,5 +1,6 @@
 import { uiMessage } from "./uiText";
 import { createApiClient } from "@creolab/api-client";
+import { saveBlob as triggerDownload } from "./download";
 
 export const api = createApiClient({
   baseUrl: "",
@@ -42,15 +43,4 @@ export async function downloadContractFile(contractId: string, format: "pdf" | "
 export async function downloadContractPreview(previewId: string, format: "pdf" | "docx" = "pdf") {
   const { blob, filename } = await api.downloadContractPreview(previewId, format);
   triggerDownload(blob, filename);
-}
-
-function triggerDownload(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
 }

@@ -1,3 +1,4 @@
+import { isNativeApp } from "../lib/nativeApp";
 import { systemText, kkSystemMessages, FEATURE_LABEL, type Feature } from "@creolab/contracts";
 import { useLocale } from "../lib/session";
 import { useNavigate } from "react-router-dom";
@@ -7,6 +8,11 @@ export default function PaywallContent({ open, onClose }: { open: PaywallDetail;
   const locale = useLocale();
   const navigate = useNavigate();
   const label = open.feature ? systemText(locale, FEATURE_LABEL[open.feature as Feature] || "") : "";
+
+  if (isNativeApp()) return <div className="paywall-backdrop" role="dialog" aria-modal="true" aria-labelledby="paywall-title"><div className="panel paywall-card">
+    <h2 id="paywall-title">Функция недоступна</h2><p>Эта возможность не подключена для вашей компании. Уточните доступ у владельца компании.</p>
+    <button className="btn secondary" onClick={onClose}>Понятно</button>
+  </div></div>;
 
   return (
     <div className="paywall-backdrop" role="dialog" aria-modal="true" aria-labelledby="paywall-title">

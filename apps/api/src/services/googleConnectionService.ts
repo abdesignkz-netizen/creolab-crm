@@ -31,12 +31,12 @@ async function tokenRequest(body: Record<string, string>) {
     return { access_token: data.access_token, refresh_token: data.refresh_token, expiresAt: Date.now() + (data.expires_in || 3600) * 1000, scope: data.scope };
   } catch (error) { if (error instanceof ApiError) throw error; throw new ApiError(502, "google_unavailable", "Google не ответил. Повторите подключение позже."); }
 }
-export async function beginGoogleConnection(prisma: PrismaClient, auth: AuthContext, input: z.infer<typeof googleConnectSchema>) {
+export async function beginGoogleConnection(prisma: PrismaClient, auth: AuthContext, input: z.infer<typeof googleConnectSchema>, options: { nativeApp?: boolean } = {}) {
   requireIntegrationsAccess(auth); const { tenantId } = requireTenant(auth); assertConfigured();
   if (input.kind === "google_forms" && !/^[A-Za-z0-9_-]{10,250}$/.test(input.resourceId || "")) throw new ApiError(422, "form_id_required", "Укажите ID формы Google из адреса редактора формы");
   const state = randomBytes(32).toString("hex");
   const redirectUri = callbackUrl();
-  await prisma.idempotencyRecord.create({ data: { scope: "google.oauth", actorKey: auth.sessionId, key: createHash("sha256").update(state).digest("hex"), requestHash: auth.user.id, resultJson: { tenantId, platformConfiguration: Boolean(auth.configurationTenant), kind: input.kind, resourceId: input.resourceId || "primary", redirectUri }, expiresAt: new Date(Date.now() + 600000) } });
+  await prisma.idempotencyRecord.create({ data: { scope: "google.oauth", actorKey: auth.sessionId, key: createHash("sha256").update(state).digest("hex"), requestHash: auth.user.id, resultJson: { nativeApp: options.nativeApp === true, tenantId, platformConfiguration: Boolean(auth.configurationTenant), kind: input.kind, resourceId: input.resourceId || "primary", redirectUri }, expiresAt: new Date(Date.now() + 600000) } });
   const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
   url.search = new URLSearchParams({ client_id: process.env.GOOGLE_CLIENT_ID!, redirect_uri: redirectUri, response_type: "code", scope: scopes[input.kind].join(" "), access_type: "offline", prompt: "consent", state }).toString();
   return { url: url.toString() };

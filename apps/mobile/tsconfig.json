@@ -1,5 +1,18 @@
 {
   "extends": "expo/tsconfig.base",
-  "compilerOptions": { "strict": true, "allowImportingTsExtensions": true },
-  "include": ["app/**/*.tsx", "src/**/*.ts", "src/**/*.tsx"]
+  "compilerOptions": {
+    "strict": true,
+    "allowImportingTsExtensions": true,
+    "lib": [
+      "esnext",
+      "dom"
+    ]
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx"
+  ],
+  "exclude": [
+    "src/**/*.test.ts"
+  ]
 }

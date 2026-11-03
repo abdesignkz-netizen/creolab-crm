@@ -2,6 +2,7 @@ import { InlineFeedback } from "./InlineFeedback";
 import { uiText, useUiText, localizeUiOptions, uiFormatLocale } from "../lib/uiText";
 import { useState } from "react";
 import { signatureCheckLabel } from "../lib/signing/verificationLabels";
+import { saveBlob } from "../lib/download";
 
 type Signer = { role?: string; name?: string | null; signedAt?: string | null; verificationStatus?: string; authorityStatus?: string; cryptoStatus?: string };
 export function ContractSignatureSummary({ signed, signers, verificationUrl, download, sellerName, buyerName, documentLabel = "договора" }: {
@@ -18,10 +19,7 @@ export function ContractSignatureSummary({ signed, signers, verificationUrl, dow
     setBusy(true); setError("");
     try {
       const file = await download(format);
-      const url = URL.createObjectURL(file.blob);
-      const link = document.createElement("a"); link.href = url; link.download = file.filename;
-      document.body.appendChild(link); link.click(); link.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      saveBlob(file.blob, file.filename);
     } catch (err) { setError(err instanceof Error ? err.message : uiText("Не удалось скачать документ")); }
     finally { setBusy(false); }
   }

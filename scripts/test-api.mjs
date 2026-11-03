@@ -62,6 +62,8 @@ try {
         TELEGRAM_BOT_USERNAME: "",
         TELEGRAM_WEBHOOK_SECRET: "",
         TELEGRAM_WEBHOOK_BASE_URL: "",
+        MOBILE_PUSH_ENABLED: "0",
+        EXPO_ACCESS_TOKEN: "",
         VAPID_PUBLIC_KEY: "",
         VAPID_PRIVATE_KEY: "",
         OPENAI_API_KEY: "",

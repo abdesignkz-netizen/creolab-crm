@@ -1,4 +1,5 @@
 import { uiText, useUiText, localizeUiOptions } from "../uiText.ts";
+import { isNativeApp } from "../nativeApp.ts";
 /** Official NCALayer Basics: https://github.com/pkigovkz/sdkinfo/wiki/KNCA-Basics-Module */
 export const NCALAYER_MODULE = "kz.gov.pki.knca.basics";
 export const NCALAYER_SIGN = "sign";
@@ -11,6 +12,7 @@ export const NCALAYER_EKU_SIGN = "1.3.6.1.5.5.7.3.4";
 export const NCALAYER_EKU_AUTH = "1.3.6.1.5.5.7.3.2";
 
 export type NcalayerErrorCode =
+  | "NCALAYER_DESKTOP_REQUIRED"
   | "NCALAYER_NOT_RUNNING"
   | "USER_CANCELLED"
   | "CERTIFICATE_NOT_SELECTED"
@@ -26,6 +28,11 @@ export class NcalayerError extends Error {
     this.code = code;
     this.canceledByUser = code === "USER_CANCELLED";
   }
+}
+
+export function requireDesktopSigning() {
+  if (isNativeApp()) throw new NcalayerError("NCALAYER_DESKTOP_REQUIRED",
+    "Подписание ЭЦП через NCALayer доступно в веб-кабинете на компьютере. Сохраните документ и продолжите на компьютере. На телефоне можно работать с черновиком и просматривать документы.");
 }
 
 export type CertificateInfo = {
@@ -70,6 +77,7 @@ export class NCALayerSigningClient implements SigningClient {
   private lastCms: string | null = null;
 
   async connect() {
+    requireDesktopSigning();
     if (this.socket && this.socket.readyState === WebSocket.OPEN) return;
     try {
       this.socket = await new Promise<WebSocket>((resolve, reject) => {
@@ -108,6 +116,7 @@ export class NCALayerSigningClient implements SigningClient {
   }
 
   async isAvailable() {
+    requireDesktopSigning();
     try {
       await this.connect();
       return true;

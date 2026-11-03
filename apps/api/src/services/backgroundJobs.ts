@@ -1,3 +1,4 @@
+import { processNativePush } from "./nativePushService.ts";
 import { processControlChat } from "./controlChatDelivery.ts";
 import { processEmployeeTelegramQueue } from "./employeeTelegramService.ts";
 import { processControlNotifications } from "./controlNotificationService.ts";
@@ -326,6 +327,7 @@ export function startBackgroundJobs(prisma: PrismaClient, options: { keepAlive?:
     jobs.run("control notifications", () => processControlNotifications(prisma));
     jobs.run("control chat", () => processControlChat(prisma));
     jobs.run("employee telegram", () => processEmployeeTelegramQueue(prisma));
+    jobs.run("native push", () => processNativePush(prisma));
     jobs.run("billing usage", () => import("./billingResourceService.ts").then(m => m.reconcileBillingUsage(prisma)));
     jobs.run("instagram", () => import("./instagramOAuthService.ts").then(m => m.refreshInstagramConnections(prisma)));
     if (Date.now() - lastSalesSweep >= 60_000 && jobs.run("sales", () => import("./salesControlService.ts").then(m => m.sweepSalesProcesses(prisma)))) lastSalesSweep = Date.now();

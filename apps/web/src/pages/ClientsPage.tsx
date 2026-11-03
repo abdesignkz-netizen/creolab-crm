@@ -10,6 +10,7 @@ import { PERIOD_OPTIONS, formatCustomPeriodLabel } from "../lib/period";
 import { tip } from "../lib/tip";
 import { formatWaitSince } from "../lib/duration";
 import { api } from "../lib/api";
+import { saveBlob } from "../lib/download";
 import { statusBadgeClass } from "../lib/statusBadge";
 import { Pagination } from "../components/Pagination";
 import { useCapabilities } from "../lib/session";
@@ -223,12 +224,7 @@ export function ClientsPage() {
             onClick={() => {
               void api.exportContacts().then((result: any) => {
                 const blob = new Blob([result.csv || ""], { type: "text/csv;charset=utf-8" });
-                const url = URL.createObjectURL(blob);
-                const link = document.createElement("a");
-                link.href = url;
-                link.download = result.filename || "clients.csv";
-                link.click();
-                URL.revokeObjectURL(url);
+                saveBlob(blob, result.filename || "clients.csv");
               }).catch((err) => setError(err instanceof Error ? err.message : uiText("Не удалось выгрузить")));
             }}
           >

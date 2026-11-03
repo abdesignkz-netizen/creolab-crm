@@ -15,7 +15,7 @@ import {
   sanitizeUnknownEsfResponse,
   type EsfPlainSignature,
 } from "@creolab/contracts";
-import { NCALAYER_URL, NcalayerError } from "./ncalayerClient.ts";
+import { NCALAYER_URL, NcalayerError, requireDesktopSigning } from "./ncalayerClient.ts";
 
 export { ESF_MODULE_REQUIRED_MESSAGE, ESF_NCALAYER_SERVICE };
 
@@ -39,6 +39,7 @@ export class EsfNcaLayerClient {
   private socket: WebSocket | null = null;
 
   async connect() {
+    requireDesktopSigning();
     if (this.socket && this.socket.readyState === WebSocket.OPEN) return;
     this.socket = await new Promise<WebSocket>((resolve, reject) => {
       const ws = new WebSocket(NCALAYER_URL);
@@ -59,6 +60,7 @@ export class EsfNcaLayerClient {
   }
 
   async isAvailable() {
+    requireDesktopSigning();
     try {
       await this.connect();
       return true;

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { useLocale } from "../lib/session";
 import { api } from "../lib/api";
+import { saveBlob } from "../lib/download";
 import "../billing.css";
 export function useBillingText() {
   const locale = useLocale();
@@ -56,12 +57,7 @@ export function billingDate(s?: string | null) {
 }
 export async function downloadBillingInvoice(id: string, admin = false) {
   const { blob, filename } = await api.billingInvoice(id, admin);
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  saveBlob(blob, filename);
 }
 export function BillingField({
   label,

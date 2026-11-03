@@ -2,6 +2,8 @@ import { analyticsText, planExplanation } from "./analyticsCopy";
 import { uiText, useUiText, localizeUiOptions } from "./uiText";
 import { analyticsCoverageLines } from "./analyticsCoverage";
 import { forecastReportLines } from "./salesForecastPresentation";
+import { saveBlob } from "./download";
+import { printPdfInNativeApp } from "./nativeApp";
 type ReportSections = {
   overview: boolean;
   funnel: boolean;
@@ -47,13 +49,7 @@ function csvEscape(value: unknown) {
 }
 
 function downloadBlob(filename: string, content: string, mime: string) {
-  const blob = new Blob([content], { type: mime });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
+  saveBlob(new Blob([content], { type: mime }), filename);
 }
 
 function fileBase(data: any) {
@@ -249,6 +245,7 @@ export function exportAnalyticsPdf(data: any, sections: ReportSections) {
   ul{padding-left:18px} @media print{body{margin:12mm}}
 </style></head><body>${parts.join("\n")}</body></html>`;
 
+  if (printPdfInNativeApp(html, `${fileBase(data)}.pdf`)) return;
   const w = window.open("", "_blank");
   if (!w) {
     downloadBlob(`${fileBase(data)}.html`, html, "text/html;charset=utf-8");
